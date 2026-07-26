@@ -164,7 +164,12 @@ describe('granting to others', () => {
 
 describe('parseBootstrapIds', () => {
   it('parses a comma-separated list and ignores blanks', () => {
-    expect(parseBootstrapIds(' 123 , 456 ,, ')).toEqual(['123', '456']);
+    // Real snowflake lengths: the validator rejects anything shorter, which is
+    // the point of it.
+    expect(parseBootstrapIds(' 1262447044337864850 , 804027885081591818 ,, ')).toEqual([
+      '1262447044337864850',
+      '804027885081591818',
+    ]);
   });
 
   it('returns an empty list for undefined or empty configuration', () => {
@@ -176,6 +181,7 @@ describe('parseBootstrapIds', () => {
     // A typo that silently becomes "nobody is bootstrapped" is a lockout; one
     // that silently becomes a wildcard would be far worse. Fail loudly.
     expect(() => parseBootstrapIds('not-an-id')).toThrow();
-    expect(() => parseBootstrapIds('123,*')).toThrow();
+    expect(() => parseBootstrapIds('1262447044337864850,*')).toThrow();
+    expect(() => parseBootstrapIds('123')).toThrow(); // too short to be one
   });
 });

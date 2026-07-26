@@ -203,3 +203,44 @@ describe('P0.2 database schema', () => {
     });
   });
 });
+
+describe('seeded roles', () => {
+  /**
+   * The OR of every permission bit declared in ssot/04-contracts/permissions.ts
+   * as of P1.3. Written out here rather than imported so this spec keeps its
+   * only dependency on `pg` — and so a change to the contract has to be
+   * mirrored deliberately rather than tracking silently.
+   *   FORUM 0-6 · OPS 10-13 · FLEET 20-24 · BGS 30-32 · TRADE 40-42
+   *   AI 50-53 · ADMIN 60-63 · TELEMETRY 70
+   */
+  const ALL_PERMISSIONS = [
+    0, 1, 2, 3, 4, 5, 6, 10, 11, 12, 13, 20, 21, 22, 23, 24, 30, 31, 32, 40, 41, 42, 50, 51, 52,
+    53, 60, 61, 62, 63, 70,
+  ].reduce((acc, bit) => acc | (1n << BigInt(bit)), 0n);
+
+  it('webmaster carries exactly ALL_PERMISSIONS, bit for bit @INV-006', async () => {
+    // This test caught a real defect. The migration originally computed the mask
+    // as (2^0 + 2^1 + ... + 2^70). Postgres `^` returns DOUBLE PRECISION, so the
+    // high bits lost precision before the cast to numeric(40,0) and the row was
+    // seeded as 1197902339489250000000 instead of 1197902339489246755967 —
+    // setting bits nobody intended and clearing ones that were, silently, in the
+    // single most powerful role in the system.
+    const r = await rows<{ perm_mask: string; is_hierarchical: boolean }>(
+      `select perm_mask::text, is_hierarchical from roles where key = 'webmaster'`,
+    );
+    expect(r).toHaveLength(1);
+    expect(BigInt(r[0]!.perm_mask)).toBe(ALL_PERMISSIONS);
+    // An orthogonal tag, not a squadron rank.
+    expect(r[0]!.is_hierarchical).toBe(false);
+  });
+
+  it('webmaster is mapped to NO Discord role', async () => {
+    // The whole point of it: a support role that exists independently of the
+    // squadron hierarchy. A mapping would let Discord role sync revoke it.
+    const r = await rows<{ n: string }>(
+      `select count(*)::text as n from role_mappings m
+       join roles r on r.id = m.role_id where r.key = 'webmaster'`,
+    );
+    expect(Number(r[0]!.n)).toBe(0);
+  });
+});

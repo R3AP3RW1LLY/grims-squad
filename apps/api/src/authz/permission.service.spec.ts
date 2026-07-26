@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { Permission, ALL_PERMISSIONS, NO_PERMISSIONS } from '@grims/shared';
 import { PermissionService, PERM_CACHE_TTL_SEC } from './permission.service.js';
 import { InMemoryPermissionStore, FakeCache } from './permission.store.fake.js';
@@ -31,7 +31,8 @@ beforeEach(() => {
   svc = new PermissionService(store, cache);
   store.addRole('member', MEMBER_MASK);
   store.addRole('officer', OFFICER_MASK);
-  store.addRole(WEBMASTER_ROLE_KEY, ALL_PERMISSIONS);
+  // isHierarchical=false: webmaster is an orthogonal tag, not a squadron rank.
+  store.addRole(WEBMASTER_ROLE_KEY, ALL_PERMISSIONS, false);
 });
 
 // ---------------------------------------------------------------------------
@@ -137,6 +138,9 @@ describe('caching', () => {
     store.addUser('u1', 'active');
     store.grant('u1', 'officer');
     await svc.effectiveMask('u1');
+    // The caller changes the status, THEN notifies — the service does not own
+    // the write, it owns the invalidation.
+    store.setStatus('u1', 'banned');
     await svc.onStatusChanged('u1', 'banned');
     expect(cache.entries.has('perm:u1')).toBe(false);
     expect(await svc.effectiveMask('u1')).toBe(NO_PERMISSIONS);
