@@ -8,7 +8,8 @@
 2. `CONVENTIONS.md` — naming, structure, commit format.
 3. `08-plan/tasks.yaml` — the task for this session, its deps and acceptance criteria.
 4. `10-quality/tdd-policy.md` + `10-quality/adversarial-reviews.md` — how work is done and gated.
-5. Whatever the task references.
+5. `GLOSSARY.md` — if any ED or project term is unfamiliar. Read it once; the definitions here are the ones this project uses, which is not always the community's loose usage.
+6. Whatever the task references.
 
 ## Map
 
