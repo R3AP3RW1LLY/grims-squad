@@ -32,6 +32,7 @@ export class PrismaIdentityStore implements IIdentityStore {
           where: { discordId: input.discordUserId },
           data: {
             username: input.username,
+            guildNick: input.guildNick,
             globalName: input.displayName,
             // Replaced wholesale, never merged: a role removed in Discord must
             // disappear here on the very next login (INV-008).
@@ -74,6 +75,7 @@ export class PrismaIdentityStore implements IIdentityStore {
           userId: user.id,
           discordId: input.discordUserId,
           username: input.username,
+          guildNick: input.guildNick,
           globalName: input.displayName,
           guildRoles: [...input.guildRoles],
           guildJoinedAt: input.guildJoinedAt,

@@ -16,6 +16,7 @@ export interface FakeIdentityRow {
   userId: string;
   discordUserId: string;
   username: string;
+  guildNick: string | null;
   avatar: string | null;
   guildRoles: string[];
   guildJoinedAt: Date | null;
@@ -41,6 +42,7 @@ export class InMemoryIdentityStore implements IIdentityStore {
 
     if (existing !== undefined) {
       existing.username = input.username;
+      existing.guildNick = input.guildNick;
       existing.avatar = input.avatar;
       existing.guildRoles = [...input.guildRoles];
       existing.guildJoinedAt = input.guildJoinedAt;
@@ -58,6 +60,7 @@ export class InMemoryIdentityStore implements IIdentityStore {
       userId,
       discordUserId: input.discordUserId,
       username: input.username,
+      guildNick: input.guildNick,
       avatar: input.avatar,
       guildRoles: [...input.guildRoles],
       guildJoinedAt: input.guildJoinedAt,
