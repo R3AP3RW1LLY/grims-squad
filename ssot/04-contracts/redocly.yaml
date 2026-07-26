@@ -1,0 +1,41 @@
+# Redocly lint configuration for openapi.yaml.
+# `ci:contract` runs: redocly lint ssot/04-contracts/openapi.yaml
+# A rule set to `error` here BLOCKS the build (ADR-019).
+
+extends:
+  - recommended
+
+rules:
+  # Structural validity is non-negotiable — a malformed document breaks client generation.
+  struct: error
+
+  # Every operation must declare its permission. This is what makes the API's authorization
+  # surface reviewable as a document and lets ci:contract assert it against the route guard.
+  spec-strict-refs: off
+
+  # Intentional deviations, each with a reason:
+
+  # `.example` is the IANA-reserved documentation TLD. The real domain is decision D1;
+  # until then this placeholder is correct, not sloppy.
+  no-server-example.com: off
+
+  # Tag descriptions add noise for tags whose names are self-explanatory (`auth`, `forum`).
+  tag-description: off
+
+  # Non-commercial project; SPDX identifier carried for tooling only. See 00-charter/constraints.md.
+  info-license-strict: off
+
+  # KNOWN GAP, deliberately a warning rather than off:
+  # Not every operation yet enumerates its 4xx responses. The error taxonomy in errors.md is
+  # authoritative and complete; this document is catching up endpoint by endpoint. Each phase
+  # closes the gap for the endpoints it implements, and this rule is raised to `error` at P9.
+  # Turning it off would hide the gap; leaving it at `error` now would block every phase.
+  operation-4xx-response: warn
+  operation-2xx-response: warn
+
+  # Operation summaries are required — they become the generated client's doc comments.
+  operation-summary: error
+  operation-operationId: error
+  operation-operationId-unique: error
+  no-invalid-media-type-examples: error
+  no-unused-components: warn

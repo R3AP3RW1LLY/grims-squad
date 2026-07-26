@@ -1,0 +1,3378 @@
+openapi: 3.1.0
+
+# =============================================================================
+# GRIM'S SQUAD HUB — API CONTRACT
+#
+# This file is the SOURCE (ADR-020). It generates client types and is asserted
+# against the API's registered routes in both directions by `ci:contract`
+# (ADR-019): a route without an operation here, or an operation without a route,
+# fails the build. Likewise `x-required-permission` must equal the permission the
+# route's guard actually enforces.
+#
+# Conventions:
+#   - Every operation has an operationId, an auth requirement, and
+#     x-required-permission (null where none is needed).
+#   - BigInt values (SystemAddress, MarketId, credits, permission masks) are
+#     DECIMAL STRINGS, never JSON numbers (INV-021, INV-006).
+#   - Every market-derived payload carries dataAgeHours (INV-004).
+#   - Timestamps are UTC ISO-8601 with Z (INV-025).
+#   - A resource the caller may not see returns 404, never 403 (INV-002).
+# =============================================================================
+
+info:
+  title: Grim's Squad Hub API
+  version: 1.0.0
+  description: >
+    Squadron platform API serving the web app, the Discord bot, the EDMC plugin,
+    GSAI, and any member-built tool. Non-commercial; see ssot/00-charter/constraints.md.
+  contact:
+    name: Grim's Squad
+  license:
+    name: Non-commercial squadron project
+    identifier: MIT
+
+servers:
+  - url: https://api.{domain}/v1
+    description: Production
+    variables:
+      domain:
+        default: grimssquad.example
+        description: Real domain pending decision D1
+  - url: http://localhost:3000/v1
+    description: Local development
+
+tags:
+  - name: health
+  - name: auth
+  - name: me
+  - name: forum
+  - name: game-data
+  - name: trade
+  - name: fleet
+  - name: operations
+  - name: bgs
+  - name: members
+  - name: telemetry
+  - name: ai
+  - name: admin
+
+security:
+  - sessionCookie: []
+
+# =============================================================================
+# PATHS
+# =============================================================================
+paths:
+
+  # ---------------------------------------------------------------- health ---
+  /health:
+    get:
+      operationId: getHealth
+      tags: [health]
+      summary: Liveness and dependency status
+      description: >
+        Returns 200 for `ok` and `degraded`, 503 only when Postgres is unreachable.
+        A dependency being down must never produce a 500 — that would make monitoring
+        useless. GSAI offline is `degraded` at worst and never affects site health (INV-030).
+      security: []
+      x-required-permission: null
+      responses:
+        '200':
+          description: Healthy or degraded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }
+        '503':
+          description: Down
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }
+
+  # ------------------------------------------------------------------ auth ---
+  /auth/discord:
+    get:
+      operationId: startDiscordAuth
+      tags: [auth]
+      summary: Begin Discord OAuth2
+      description: Scopes `identify email guilds.members.read`. The last is what returns our guild's role IDs.
+      security: []
+      x-required-permission: null
+      parameters:
+        - name: redirect
+          in: query
+          required: false
+          schema: { type: string }
+          description: Post-login destination. Validated against an allowlist of internal paths.
+      responses:
+        '302': { description: Redirect to Discord authorize }
+
+  /auth/discord/callback:
+    get:
+      operationId: completeDiscordAuth
+      tags: [auth]
+      summary: Discord OAuth2 callback
+      description: >
+        Exchanges the code, fetches /users/@me and /users/@me/guilds/{guildId}/member,
+        upserts users + discord_identities including guildRoles[], maps Discord roles to
+        internal roles, and issues the session cookie pair.
+      security: []
+      x-required-permission: null
+      parameters:
+        - { name: code,  in: query, required: true,  schema: { type: string } }
+        - { name: state, in: query, required: true,  schema: { type: string } }
+      responses:
+        '302': { description: 'Redirect to the intended destination, session cookies set' }
+        '403':
+          description: Authenticated with Discord but not a member of our guild
+          $ref: '#/components/responses/Forbidden'
+        '502': { $ref: '#/components/responses/UpstreamUnavailable' }
+
+  /auth/refresh:
+    post:
+      operationId: refreshSession
+      tags: [auth]
+      summary: Rotate the refresh token
+      description: >
+        Rotating with family tracking. Replaying a spent token revokes the ENTIRE family
+        and every session for that device — this is theft detection, not a convenience.
+      security: []
+      x-required-permission: null
+      responses:
+        '204': { description: New cookie pair set }
+        '401':
+          description: Invalid, expired, or REUSED. Reuse revokes the whole family.
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: End this session
+      x-required-permission: null
+      responses:
+        '204': { description: 'Session revoked, cookies cleared' }
+
+  /auth/frontier:
+    get:
+      operationId: startFrontierVerification
+      tags: [auth]
+      summary: Begin Frontier cAPI verification (OAuth2 + PKCE)
+      description: >
+        Generates code_verifier/code_challenge (S256), stores the verifier in Redis at
+        10-minute TTL. Verification is a periodic ceremony, not a session (ADR-003).
+      x-required-permission: null
+      responses:
+        '302': { description: Redirect to the Frontier authorize endpoint }
+        '503':
+          description: Our cAPI client is not approved yet — offer the fallback path
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /auth/frontier/callback:
+    get:
+      operationId: completeFrontierVerification
+      tags: [auth]
+      summary: Frontier cAPI callback
+      description: >
+        Exchanges code + verifier, calls cAPI /profile for the authoritative CMDR name,
+        writes a trust_tier 3 verification with expiresAt = now + 25 days, and stores the
+        refresh token AES-256-GCM encrypted (INV-012).
+      x-required-permission: null
+      parameters:
+        - { name: code,  in: query, required: true, schema: { type: string } }
+        - { name: state, in: query, required: true, schema: { type: string } }
+      responses:
+        '302': { description: Redirect to the profile with the verification recorded }
+        '409':
+          description: Another active verification already holds this CMDR name (INV-005)
+          $ref: '#/components/responses/Conflict'
+
+  /auth/verify/claim:
+    post:
+      operationId: startClaimVerification
+      tags: [auth]
+      summary: Begin fallback CMDR verification (Inara nonce or officer manual)
+      description: >
+        Issues a nonce such as GRIM-7X2Q for the member to place in their Inara bio.
+        A worker polls for it — this is NOT instant and the UI must say so. Yields
+        trust_tier 2 (inara_nonce) or 1 (officer_manual).
+      x-required-permission: null
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [cmdrName, method]
+              properties:
+                cmdrName: { type: string }
+                method:   { type: string, enum: [inara_nonce, officer_manual] }
+      responses:
+        '201':
+          description: Nonce issued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  nonce:     { type: string, examples: ['GRIM-7X2Q'] }
+                  expiresAt: { type: string, format: date-time }
+                  instructions: { type: string }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  # -------------------------------------------------------------------- me ---
+  /me:
+    get:
+      operationId: getMe
+      tags: [me]
+      summary: Current user, roles and verification state
+      x-required-permission: null
+      responses:
+        '200':
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Me' }
+          description: OK
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    patch:
+      operationId: updateMe
+      tags: [me]
+      summary: Update own profile and privacy settings
+      description: Privacy toggles default conservative; a private field is ABSENT from public responses (INV-027).
+      x-required-permission: null
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateMeRequest' }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Me' }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+
+  /me/permissions:
+    get:
+      operationId: getMyPermissions
+      tags: [me]
+      summary: Effective permission mask, expanded
+      description: mask is a DECIMAL STRING — it exceeds 2^53 and must never be a JSON number (INV-006).
+      x-required-permission: null
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [mask, permissions, roles]
+                properties:
+                  mask:        { type: string, pattern: '^\d+$', examples: ['1180599509716569164815'] }
+                  permissions: { type: array, items: { type: string } }
+                  roles:       { type: array, items: { type: string } }
+
+  /me/device-tokens:
+    get:
+      operationId: listDeviceTokens
+      tags: [me]
+      summary: List EDMC device tokens
+      x-required-permission: TELEMETRY_WRITE
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/DeviceToken' } }
+    post:
+      operationId: createDeviceToken
+      tags: [me]
+      summary: Issue a device token for the EDMC plugin
+      description: The plaintext token is returned ONCE and never again. Scoped telemetry:write.
+      x-required-permission: TELEMETRY_WRITE
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [label]
+              properties:
+                label: { type: string, maxLength: 64 }
+      responses:
+        '201':
+          description: Created — `token` is shown once
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/DeviceToken'
+                  - type: object
+                    required: [token]
+                    properties:
+                      token: { type: string, description: 'Plaintext, returned once only' }
+
+  /me/device-tokens/{id}:
+    delete:
+      operationId: revokeDeviceToken
+      tags: [me]
+      summary: Revoke a device token
+      description: Immediate. Offers a purge of raw telemetry collected under it.
+      x-required-permission: TELEMETRY_WRITE
+      parameters:
+        - { $ref: '#/components/parameters/PathId' }
+        - name: purgeData
+          in: query
+          schema: { type: boolean, default: false }
+      responses:
+        '204': { description: Revoked }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /me/telemetry/summary:
+    get:
+      operationId: getTelemetrySummary
+      tags: [me]
+      summary: What telemetry we hold about me, by category
+      x-required-permission: TELEMETRY_WRITE
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    category:   { type: string }
+                    consented:  { type: boolean }
+                    eventCount: { type: integer }
+                    oldestAt:   { type: [string, 'null'], format: date-time }
+                    newestAt:   { type: [string, 'null'], format: date-time }
+                    feeds:      { type: array, items: { type: string } }
+
+  /me/export:
+    post:
+      operationId: requestDataExport
+      tags: [me]
+      summary: Request a JSON export of everything held about me
+      description: GDPR data-portability. Produced asynchronously; delivered as a signed download link.
+      x-required-permission: null
+      responses:
+        '202':
+          description: Export job accepted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JobAccepted' }
+
+  /me/sessions:
+    get:
+      operationId: listSessions
+      tags: [me]
+      summary: List active devices/sessions
+      x-required-permission: null
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/SessionSummary' } }
+
+  /me/sessions/{id}:
+    delete:
+      operationId: revokeSession
+      tags: [me]
+      summary: Revoke one session (kills its whole refresh family)
+      x-required-permission: null
+      parameters: [{ $ref: '#/components/parameters/PathId' }]
+      responses:
+        '204': { description: Revoked }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ----------------------------------------------------------------- forum ---
+  /forum/categories:
+    get:
+      operationId: listForumCategories
+      tags: [forum]
+      summary: Category tree, ACL-filtered
+      description: >
+        Categories the caller cannot view are absent — not redacted, not counted.
+        A Ring 0 caller must be unable to infer that Ring 1 categories exist (INV-002).
+      security: []
+      x-required-permission: FORUM_VIEW_PUBLIC
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/ForumCategory' } }
+
+  /forum/categories/{slug}/threads:
+    get:
+      operationId: listThreads
+      tags: [forum]
+      summary: Threads in a category
+      security: []
+      x-required-permission: FORUM_VIEW_PUBLIC
+      parameters:
+        - { $ref: '#/components/parameters/PathSlug' }
+        - { $ref: '#/components/parameters/Page' }
+        - { $ref: '#/components/parameters/PageSize' }
+        - name: sort
+          in: query
+          schema: { type: string, enum: [latest, created, replies], default: latest }
+        - name: tag
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Paginated'
+                  - type: object
+                    properties:
+                      items: { type: array, items: { $ref: '#/components/schemas/ForumThread' } }
+        '404':
+          description: Not found, or exists and is invisible to this caller
+          $ref: '#/components/responses/NotFound'
+    post:
+      operationId: createThread
+      tags: [forum]
+      summary: Create a thread
+      x-required-permission: FORUM_POST_PUBLIC
+      parameters:
+        - { $ref: '#/components/parameters/PathSlug' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, bodyMd]
+              properties:
+                title:  { type: string, minLength: 3, maxLength: 200 }
+                bodyMd: { type: string, minLength: 1, maxLength: 65535 }
+                kind:   { type: string, enum: [discussion, question, poll, announcement, ops] }
+                tags:   { type: array, items: { type: string }, maxItems: 5 }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ForumThread' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /forum/threads/{id}:
+    get:
+      operationId: getThread
+      tags: [forum]
+      summary: Thread with a page of posts
+      security: []
+      x-required-permission: FORUM_VIEW_PUBLIC
+      parameters:
+        - { $ref: '#/components/parameters/PathId' }
+        - { $ref: '#/components/parameters/Page' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ForumThreadDetail' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      operationId: updateThread
+      tags: [forum]
+      summary: Edit title, tags, pin, lock, or move
+      x-required-permission: FORUM_MODERATE
+      parameters:
+        - { $ref: '#/components/parameters/PathId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:      { type: string }
+                tags:       { type: array, items: { type: string } }
+                isPinned:   { type: boolean }
+                isLocked:   { type: boolean }
+                categoryId: { type: string, format: uuid, description: Moving re-indexes RAG chunks (INV-003) }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ForumThread' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /forum/threads/{id}/posts:
+    post:
+      operationId: createPost
+      tags: [forum]
+      summary: Reply to a thread
+      x-required-permission: FORUM_POST_PUBLIC
+      parameters:
+        - { $ref: '#/components/parameters/PathId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bodyMd]
+              properties:
+                bodyMd:    { type: string, minLength: 1, maxLength: 65535 }
+                replyToId: { type: string, format: uuid }
+      responses:
+        '201':
+          description: Created — bodyHtml is sanitized server-side before storage (INV-035)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ForumPost' }
+        '403':
+          description: Thread locked, user muted, or insufficient permission
+          $ref: '#/components/responses/Forbidden'
+
+  /forum/threads/{id}/subscribe:
+    post:
+      operationId: subscribeThread
+      tags: [forum]
+      summary: Set watch/track/mute on a thread
+      x-required-permission: FORUM_VIEW_PUBLIC
+      parameters: [{ $ref: '#/components/parameters/PathId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [level]
+              properties:
+                level: { type: string, enum: [watching, tracking, muted] }
+      responses:
+        '204': { description: Set }
+
+  /forum/posts/{id}:
+    patch:
+      operationId: updatePost
+      tags: [forum]
+      summary: Edit a post
+      description: Own post, or any post with FORUM_MODERATE. Every edit creates a PostRevision.
+      x-required-permission: FORUM_POST_PUBLIC
+      parameters:
+        - { $ref: '#/components/parameters/PathId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bodyMd]
+              properties:
+                bodyMd: { type: string, minLength: 1, maxLength: 65535 }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ForumPost' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    delete:
+      operationId: deletePost
+      tags: [forum]
+      summary: Soft-delete a post
+      description: Soft delete only. Leaves a moderator-visible tombstone; remains recoverable (INV-022).
+      x-required-permission: FORUM_POST_PUBLIC
+      parameters: [{ $ref: '#/components/parameters/PathId' }]
+      responses:
+        '204': { description: Soft-deleted }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /forum/posts/{id}/reactions:
+    post:
+      operationId: reactToPost
+      tags: [forum]
+      summary: Add or remove a reaction (toggle)
+      x-required-permission: FORUM_POST_PUBLIC
+      parameters: [{ $ref: '#/components/parameters/PathId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [emoji]
+              properties:
+                emoji: { type: string, maxLength: 16 }
+      responses:
+        '200':
+          description: Current reaction counts
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: { type: integer }
+
+  /forum/posts/{id}/report:
+    post:
+      operationId: reportContent
+      tags: [forum]
+      summary: Report content to the moderation queue
+      x-required-permission: FORUM_VIEW_PUBLIC
+      parameters:
+        - { $ref: '#/components/parameters/PathId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:  { type: string }
+                details: { type: string, maxLength: 2000 }
+      responses:
+        '201': { description: Report filed; the moderation queue is notified in Discord }
+
+  /forum/search:
+    get:
+      operationId: searchForum
+      tags: [forum]
+      summary: ACL-filtered search
+      description: >
+        The ACL filter is applied IN the Meilisearch query, never after retrieval. A Ring 0
+        search for a term appearing only in Ring 2 content returns ZERO hits and zero facet
+        counts — post-filtering leaks existence through counts and pagination (INV-024).
+      security: []
+      x-required-permission: FORUM_VIEW_PUBLIC
+      parameters:
+        - { name: q,        in: query, required: true, schema: { type: string, minLength: 2 } }
+        - { name: category, in: query, schema: { type: string } }
+        - { name: author,   in: query, schema: { type: string } }
+        - { name: tag,      in: query, schema: { type: string } }
+        - { $ref: '#/components/parameters/Page' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SearchResults' }
+
+  /forum/applications:
+    post:
+      operationId: submitApplication
+      tags: [forum]
+      summary: Submit a recruitment application
+      description: Turnstile-protected. Creates an application thread in a Ring 2 category and a Discord embed with Approve/Reject/Interview.
+      security: []
+      x-required-permission: null
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ApplicationRequest' }
+      responses:
+        '201':
+          description: Submitted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  applicationId: { type: string, format: uuid }
+                  state:         { type: string }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+
+  /forum/applications/{id}/decide:
+    post:
+      operationId: decideApplication
+      tags: [forum]
+      summary: Approve, reject or move to interview
+      description: Approval grants the Discord role; the site role follows from role sync. Audited.
+      x-required-permission: MEMBER_MANAGE
+      parameters:
+        - { $ref: '#/components/parameters/PathId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision: { type: string, enum: [approve, reject, interview] }
+                note:     { type: string }
+      responses:
+        '200':
+          description: Decided
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  state:           { type: string }
+                  probationEndsAt: { type: [string, 'null'], format: date-time }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /forum/uploads:
+    post:
+      operationId: uploadAttachment
+      tags: [forum]
+      summary: Upload an image
+      description: >
+        MIME sniffed, size capped, EXIF stripped and the image RE-ENCODED — re-encoding is what
+        neutralises polyglot files. Served from a separate origin.
+      x-required-permission: FORUM_POST_PUBLIC
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '201':
+          description: Stored
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url:    { type: string, format: uri }
+                  width:  { type: integer }
+                  height: { type: integer }
+        '400':
+          description: Rejected — details.reason is mime_mismatch, too_large, reencode_failed or polyglot_detected
+          $ref: '#/components/responses/ValidationFailed'
+
+  # ------------------------------------------------------------- game data ---
+  /systems/search:
+    get:
+      operationId: searchSystems
+      tags: [game-data]
+      summary: Search systems by name
+      description: >
+        Returns CANDIDATES. ~1,300 systems have ambiguous names, so this never resolves to a
+        single system on the caller's behalf — the caller picks an address (INV-018).
+      x-required-permission: null
+      parameters:
+        - { name: q,     in: query, required: true, schema: { type: string, minLength: 2 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 10 } }
+      responses:
+        '200':
+          description: Candidates
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/SystemSummary' } }
+
+  /systems/{address}:
+    get:
+      operationId: getSystem
+      tags: [game-data]
+      summary: System detail by SystemAddress
+      x-required-permission: null
+      parameters: [{ $ref: '#/components/parameters/SystemAddress' }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/System' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /systems/{address}/stations:
+    get:
+      operationId: listSystemStations
+      tags: [game-data]
+      summary: Stations in a system
+      x-required-permission: null
+      parameters:
+        - { $ref: '#/components/parameters/SystemAddress' }
+        - { $ref: '#/components/parameters/IncludeCarriers' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Station' } }
+
+  /systems/{address}/nearby:
+    get:
+      operationId: listNearbySystems
+      tags: [game-data]
+      summary: Systems within a radius
+      description: Backed by the GiST index on cube(ARRAY[x,y,z]) — see ssot/03-data/indexes.md.
+      x-required-permission: null
+      parameters:
+        - { $ref: '#/components/parameters/SystemAddress' }
+        - { name: maxLy, in: query, schema: { type: number, minimum: 1, maximum: 500, default: 50 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/SystemSummary' } }
+
+  /systems/{address}/nearest/{service}:
+    get:
+      operationId: findNearestService
+      tags: [game-data]
+      summary: Nearest station providing a service
+      x-required-permission: null
+      parameters:
+        - { $ref: '#/components/parameters/SystemAddress' }
+        - name: service
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [interstellar-factors, material-trader, technology-broker, black-market,
+                   shipyard, outfitting, universal-cartographics, refuel, repair, rearm]
+        - name: minPad
+          in: query
+          schema: { type: integer, enum: [1, 2, 3], default: 1 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/StationWithDistance' } }
+
+  /commodities:
+    get:
+      operationId: listCommodities
+      tags: [game-data]
+      summary: Commodity catalogue with galactic price ranges
+      description: Display names resolved through FDevIDs. An internal name never reaches a user (INV-020).
+      x-required-permission: null
+      parameters:
+        - { name: category, in: query, schema: { type: string } }
+        - { name: q,        in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Commodity' } }
+
+  /commodities/{name}:
+    get:
+      operationId: getCommodity
+      tags: [game-data]
+      summary: Commodity detail with price statistics
+      x-required-permission: null
+      parameters: [{ $ref: '#/components/parameters/CommodityName' }]
+      responses:
+        '200':
+          description: OK — carries dataAgeHours (INV-004)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CommodityDetail' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /commodities/{name}/imports:
+    get:
+      operationId: findCommodityImporters
+      tags: [game-data]
+      summary: Where to SELL this — importers by price paid
+      x-required-permission: TRADE_QUERY
+      parameters:
+        - { $ref: '#/components/parameters/CommodityName' }
+        - { name: near,      in: query, schema: { type: string, pattern: '^\d+$' }, description: SystemAddress as decimal string }
+        - { name: maxLy,     in: query, schema: { type: number, default: 50 } }
+        - { name: minVolume, in: query, schema: { type: integer, default: 0 } }
+        - { $ref: '#/components/parameters/MaxDataAgeDays' }
+        - { $ref: '#/components/parameters/IncludeCarriers' }
+        - { $ref: '#/components/parameters/MinPad' }
+        - { $ref: '#/components/parameters/MaxStationLs' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/MarketListing' } }
+        '422':
+          description: All candidates older than maxDataAgeDays — returned rather than silently serving stale data
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /commodities/{name}/exports:
+    get:
+      operationId: findCommodityExporters
+      tags: [game-data]
+      summary: Where to BUY this — exporters by price
+      x-required-permission: TRADE_QUERY
+      parameters:
+        - { $ref: '#/components/parameters/CommodityName' }
+        - { name: near,      in: query, schema: { type: string, pattern: '^\d+$' } }
+        - { name: maxLy,     in: query, schema: { type: number, default: 50 } }
+        - { name: minVolume, in: query, schema: { type: integer, default: 0 } }
+        - { $ref: '#/components/parameters/MaxDataAgeDays' }
+        - { $ref: '#/components/parameters/IncludeCarriers' }
+        - { $ref: '#/components/parameters/MinPad' }
+        - { $ref: '#/components/parameters/MaxStationLs' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/MarketListing' } }
+
+  /stations/{marketId}/market:
+    get:
+      operationId: getStationMarket
+      tags: [game-data]
+      summary: Full commodity list for one station
+      x-required-permission: null
+      parameters: [{ $ref: '#/components/parameters/MarketId' }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  marketId:     { type: string, pattern: '^\d+$' }
+                  stationName:  { type: string }
+                  systemName:   { type: string }
+                  dataAgeHours: { type: number }
+                  commodities:  { type: array, items: { $ref: '#/components/schemas/MarketRow' } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /galnet:
+    get:
+      operationId: getGalnet
+      tags: [game-data]
+      summary: Recent GalNet articles
+      security: []
+      x-required-permission: null
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 20, default: 5 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/GalnetArticle' } }
+
+  # ----------------------------------------------------------------- trade ---
+  /trade/routes:
+    post:
+      operationId: findTradeRoutes
+      tags: [trade]
+      summary: Find trade routes against our own market data (synchronous)
+      description: >
+        Runs against our own market_orders, so it can be synchronous and fast (<2 s target).
+        Carriers are EXCLUDED unless explicitly included, and distanceToArrivalLs is always
+        applied — otherwise "profitable" routes appear with a 200,000 Ls supercruise (INV-026).
+      x-required-permission: TRADE_QUERY
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TradeRouteRequest' }
+      responses:
+        '200':
+          description: >
+            Routes, possibly empty. An empty result carries bindingConstraint naming which filter
+            eliminated everything — "no results" without a reason is a dead end for the member.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [routes]
+                properties:
+                  routes:            { type: array, items: { $ref: '#/components/schemas/TradeRoute' } }
+                  bindingConstraint: { type: [string, 'null'] }
+                  caveat:            { type: string, examples: ['Prices are player-reported via EDDN and may be stale.'] }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+
+  /trade/plot:
+    post:
+      operationId: submitRoutePlot
+      tags: [trade]
+      summary: Submit an async route-planning job to Spansh
+      description: >
+        ALWAYS async — submit, poll, WebSocket push. Never blocking (INV-032). Deduped by a
+        hash of the normalised parameters, so two members asking for Sol→Colonia at 60 ly cost
+        one upstream job.
+      x-required-permission: TRADE_QUERY
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RoutePlotRequest' }
+      responses:
+        '202':
+          description: Job accepted — subscribe to trade:jobs:{jobId}
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JobAccepted' }
+
+  /trade/jobs/{id}:
+    get:
+      operationId: getRouteJob
+      tags: [trade]
+      summary: Poll a route job
+      x-required-permission: TRADE_QUERY
+      parameters: [{ $ref: '#/components/parameters/PathId' }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RouteJob' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /trade/saved:
+    get:
+      operationId: listSavedRoutes
+      tags: [trade]
+      summary: List saved routes
+      x-required-permission: TRADE_SAVE_ROUTE
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/SavedRoute' } }
+    post:
+      operationId: saveRoute
+      tags: [trade]
+      summary: Save a route
+      description: A saved route's prices are historical by definition and are labelled as such (INV-004).
+      x-required-permission: TRADE_SAVE_ROUTE
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, payload]
+              properties:
+                name:    { type: string, maxLength: 120 }
+                payload: { type: object, additionalProperties: true }
+      responses:
+        '201':
+          description: Saved
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SavedRoute' }
+
+  /trade/alerts:
+    get:
+      operationId: listTradeAlerts
+      tags: [trade]
+      summary: List price alerts
+      x-required-permission: TRADE_MANAGE_ALERTS
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/TradeAlert' } }
+    post:
+      operationId: createTradeAlert
+      tags: [trade]
+      summary: Create a price alert
+      x-required-permission: TRADE_MANAGE_ALERTS
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TradeAlertRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TradeAlert' }
+
+  /trade/board:
+    get:
+      operationId: listTradeBoard
+      tags: [trade]
+      summary: Squadron supply/demand board
+      x-required-permission: TRADE_QUERY
+      parameters:
+        - { name: commodity, in: query, schema: { type: string } }
+        - { name: isSupply,  in: query, schema: { type: boolean } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/TradeBoardOffer' } }
+    post:
+      operationId: createTradeBoardOffer
+      tags: [trade]
+      summary: Post a supply or demand offer
+      x-required-permission: TRADE_SAVE_ROUTE
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TradeBoardOfferRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TradeBoardOffer' }
+
+  /trade/hauling:
+    get:
+      operationId: listHaulingTargets
+      tags: [trade]
+      summary: Group hauling targets with live progress
+      x-required-permission: TRADE_QUERY
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/HaulingTarget' } }
+    post:
+      operationId: createHaulingTarget
+      tags: [trade]
+      summary: Create a group hauling target
+      x-required-permission: OPS_CREATE
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title, commodity, targetTons]
+              properties:
+                title:           { type: string }
+                commodity:       { type: string }
+                targetTons:      { type: integer, minimum: 1 }
+                carrierCallsign: { type: string }
+                deadline:        { type: string, format: date-time }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/HaulingTarget' }
+
+  # ----------------------------------------------------------------- fleet ---
+  /fleet:
+    get:
+      operationId: listFleet
+      tags: [fleet]
+      summary: Squadron fleet, filterable
+      description: >
+        The query that makes ops planning work — "every Anaconda in the squadron with
+        >60 ly jump range". Respects each member's showFleet privacy setting (INV-027).
+      x-required-permission: FLEET_VIEW
+      parameters:
+        - { name: owner,    in: query, schema: { type: string, format: uuid } }
+        - { name: shipType, in: query, schema: { type: string } }
+        - { name: roleTag,  in: query, schema: { type: string } }
+        - { name: minJumpLy, in: query, schema: { type: number } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/FleetShip' } }
+
+  /fleet/ships:
+    post:
+      operationId: createShip
+      tags: [fleet]
+      summary: Add a ship to your own fleet
+      x-required-permission: FLEET_EDIT_OWN
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [shipType]
+              properties:
+                shipType:  { type: string }
+                shipName:  { type: string }
+                shipIdent: { type: string }
+                roleTag:   { type: string }
+                isPrimary: { type: boolean }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FleetShip' }
+
+  /fleet/import/capi:
+    post:
+      operationId: importFleetFromCapi
+      tags: [fleet]
+      summary: Import the real fleet from Frontier cAPI
+      description: >
+        Explicitly user-initiated and processed asynchronously — no request path may block on
+        cAPI (INV-031). Requires a live trust_tier 3 verification within its ~25-day window.
+      x-required-permission: FLEET_EDIT_OWN
+      responses:
+        '202':
+          description: Import job accepted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JobAccepted' }
+        '403':
+          description: No live cAPI verification — re-verify first
+          $ref: '#/components/responses/Forbidden'
+
+  /loadouts:
+    get:
+      operationId: listLoadouts
+      tags: [fleet]
+      summary: List loadouts, ACL-filtered by visibility
+      x-required-permission: FLEET_VIEW
+      parameters:
+        - { name: role,     in: query, schema: { type: string } }
+        - { name: doctrine, in: query, schema: { type: boolean } }
+        - { name: author,   in: query, schema: { type: string, format: uuid } }
+        - { name: shipType, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/LoadoutSummary' } }
+    post:
+      operationId: createLoadout
+      tags: [fleet]
+      summary: Create a loadout
+      x-required-permission: FLEET_EDIT_OWN
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoadoutRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Loadout' }
+
+  /loadouts/import:
+    post:
+      operationId: importLoadout
+      tags: [fleet]
+      summary: Import a build from any of the four supported formats
+      description: Coriolis URL, EDSY URL, Coriolis JSON, or the game's journal Loadout event.
+      x-required-permission: FLEET_EDIT_OWN
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              oneOf:
+                - { required: [coriolisUrl] }
+                - { required: [edsyUrl] }
+                - { required: [coriolisJson] }
+                - { required: [journalLoadout] }
+              properties:
+                coriolisUrl:    { type: string, format: uri }
+                edsyUrl:        { type: string, format: uri }
+                coriolisJson:   { type: object, additionalProperties: true }
+                journalLoadout: { type: object, additionalProperties: true }
+                name:           { type: string }
+      responses:
+        '201':
+          description: Imported
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Loadout' }
+        '422':
+          description: Unrecognised build format
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /loadouts/{id}:
+    get:
+      operationId: getLoadout
+      tags: [fleet]
+      summary: Loadout detail
+      x-required-permission: FLEET_VIEW
+      parameters: [{ $ref: '#/components/parameters/PathId' }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Loadout' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      operationId: updateLoadout
+      tags: [fleet]
+      summary: Update a loadout, or mark it doctrine
+      description: Setting isDoctrine requires FLEET_APPROVE_DOCTRINE and is audited.
+      x-required-permission: FLEET_EDIT_OWN
+      parameters:
+        - { $ref: '#/components/parameters/PathId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:       { type: string }
+                roleTag:    { type: string }
+                visibility: { type: string, enum: [private, squadron, public] }
+                isDoctrine: { type: boolean }
+                coriolisJson: { type: object, additionalProperties: true }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Loadout' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /loadouts/{id}/analysis:
+    get:
+      operationId: analyseLoadout
+      tags: [fleet]
+      summary: Computed stats and engineering requirements
+      description: Maths ported from Coriolis (MIT, attributed) into packages/ed-domain.
+      x-required-permission: FLEET_VIEW
+      parameters: [{ $ref: '#/components/parameters/PathId' }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoadoutAnalysis' }
+
+  /loadouts/compare:
+    post:
+      operationId: compareLoadouts
+      tags: [fleet]
+      summary: Compare up to four builds with deltas
+      x-required-permission: FLEET_VIEW
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [loadoutIds]
+              properties:
+                loadoutIds:
+                  type: array
+                  minItems: 2
+                  maxItems: 4
+                  items: { type: string, format: uuid }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  loadouts: { type: array, items: { $ref: '#/components/schemas/LoadoutAnalysis' } }
+                  deltas:   { type: object, additionalProperties: true }
+
+  /carriers:
+    get:
+      operationId: listCarriers
+      tags: [fleet]
+      summary: Carrier registry
+      x-required-permission: CARRIER_VIEW
+      responses:
+        '200':
+          description: OK — each entry carries dataAgeHours (INV-004)
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/FleetCarrier' } }
+
+  /carriers/{callsign}:
+    patch:
+      operationId: updateCarrier
+      tags: [fleet]
+      summary: Update carrier details
+      description: >
+        Requires CARRIER_MANAGE, or ownership of this carrier — ownership is a row-level
+        predicate in the data layer, not a separate permission.
+      x-required-permission: CARRIER_VIEW
+      parameters:
+        - name: callsign
+          in: path
+          required: true
+          schema: { type: string, pattern: '^[A-Z0-9]{3}-[A-Z0-9]{3}$' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:           { type: string }
+                dockingAccess:  { type: string }
+                nextJumpSystem: { type: string, pattern: '^\d+$' }
+                nextJumpAt:     { type: string, format: date-time }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FleetCarrier' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  # ------------------------------------------------------------ operations ---
+  /operations:
+    get:
+      operationId: listOperations
+      tags: [operations]
+      summary: List operations
+      description: Times are UTC; the client renders local AND UTC (INV-025).
+      x-required-permission: OPS_VIEW
+      parameters:
+        - { name: from,   in: query, schema: { type: string, format: date-time } }
+        - { name: to,     in: query, schema: { type: string, format: date-time } }
+        - { name: type,   in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Operation' } }
+    post:
+      operationId: createOperation
+      tags: [operations]
+      summary: Create an operation
+      description: Auto-syncs to a Discord Scheduled Event; reminder DMs at T-24h, T-1h, T-10m.
+      x-required-permission: OPS_CREATE
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OperationRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Operation' }
+        '422':
+          description: Semantically invalid, e.g. endsAt before startsAt
+          $ref: '#/components/responses/UnprocessableEntity'
+
+  /operations/{id}:
+    get:
+      operationId: getOperation
+      tags: [operations]
+      summary: Operation detail with signups
+      x-required-permission: OPS_VIEW
+      parameters: [{ $ref: '#/components/parameters/PathId' }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OperationDetail' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      operationId: updateOperation
+      tags: [operations]
+      summary: Update an operation
+      x-required-permission: OPS_CREATE
+      parameters:
+        - { $ref: '#/components/parameters/PathId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OperationRequest' }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Operation' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /operations/{id}/signup:
+    post:
+      operationId: signupForOperation
+      tags: [operations]
+      summary: Sign up, change state, or withdraw
+      description: >
+        The chosen ship must belong to the caller. At capacity the signup becomes `standby`
+        rather than being rejected; promotion is deterministic and ordered by signedUpAt.
+      x-required-permission: OPS_SIGNUP
+      parameters:
+        - { $ref: '#/components/parameters/PathId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [state]
+              properties:
+                state:   { type: string, enum: [yes, maybe, no] }
+                shipId:  { type: string, format: uuid }
+                roleTag: { type: string }
+                note:    { type: string, maxLength: 500 }
+      responses:
+        '200':
+          description: Signup recorded — state may be `standby` if the op is at capacity
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OperationSignup' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /operations/{id}/attendance:
+    post:
+      operationId: markAttendance
+      tags: [operations]
+      summary: Mark post-op attendance and create the AAR thread
+      x-required-permission: OPS_MANAGE
+      parameters:
+        - { $ref: '#/components/parameters/PathId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [attendance]
+              properties:
+                attendance:
+                  type: array
+                  items:
+                    type: object
+                    required: [userId, attended]
+                    properties:
+                      userId:   { type: string, format: uuid }
+                      attended: { type: boolean }
+                createAarThread: { type: boolean, default: true }
+      responses:
+        '200':
+          description: Recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  marked:      { type: integer }
+                  aarThreadId: { type: [string, 'null'], format: uuid }
+
+  /operations/{id}/composition:
+    get:
+      operationId: getOperationComposition
+      tags: [operations]
+      summary: Wing composition check against real fleet data
+      description: >
+        "Needs 2 more shieldless miners; 3 members have a qualifying build." Depends on the
+        Loadout Locker's cached stats and fleet queries.
+      x-required-permission: OPS_VIEW
+      parameters: [{ $ref: '#/components/parameters/PathId' }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OperationComposition' }
+
+  # ------------------------------------------------------------------- bgs ---
+  /bgs/systems:
+    get:
+      operationId: listBgsSystems
+      tags: [bgs]
+      summary: System control board
+      description: Our influence, top competitor, delta since last tick, states, conflicts.
+      x-required-permission: BGS_VIEW
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/BgsSystemStatus' } }
+
+  /bgs/systems/{address}/influence:
+    get:
+      operationId: getInfluenceHistory
+      tags: [bgs]
+      summary: Influence time series with tick markers
+      description: >
+        One point per faction per tick. Inferred ticks carry confidence < 1 and MUST be
+        rendered as provisional — a guessed tick presented as certain poisons every delta.
+      x-required-permission: BGS_VIEW
+      parameters:
+        - { $ref: '#/components/parameters/SystemAddress' }
+        - { name: since, in: query, schema: { type: string, format: date-time } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InfluenceHistory' }
+
+  /bgs/orders:
+    get:
+      operationId: listBgsOrders
+      tags: [bgs]
+      summary: Active orders, prioritised — the dashboard's "what should I do tonight"
+      x-required-permission: BGS_VIEW
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/BgsOrder' } }
+    post:
+      operationId: setBgsOrder
+      tags: [bgs]
+      summary: Set a per-system directive
+      description: Audited. AI invocation of this requires explicit confirmation (INV-014).
+      x-required-permission: BGS_SET_ORDERS
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BgsOrderRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BgsOrder' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /bgs/reports:
+    post:
+      operationId: reportBgsActivity
+      tags: [bgs]
+      summary: Manually report BGS activity
+      description: >
+        The manual fallback. The primary path is automatic ingestion from telemetry, which
+        requires no member action at all.
+      x-required-permission: BGS_REPORT
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BgsReportRequest' }
+      responses:
+        '201':
+          description: Recorded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BgsActivityReport' }
+
+  /bgs/ticks:
+    get:
+      operationId: listBgsTicks
+      tags: [bgs]
+      summary: Detected ticks
+      x-required-permission: BGS_VIEW
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 90, default: 14 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/BgsTick' } }
+
+  /bgs/conflicts:
+    get:
+      operationId: listBgsConflicts
+      tags: [bgs]
+      summary: Active wars and elections with day-by-day win counts
+      x-required-permission: BGS_VIEW
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/BgsConflict' } }
+
+  # --------------------------------------------------------------- members ---
+  /members:
+    get:
+      operationId: listMembers
+      tags: [members]
+      summary: Squadron roster
+      description: Respects each member's showOnPublicRoster and other privacy settings (INV-027).
+      x-required-permission: FORUM_VIEW_MEMBER
+      parameters:
+        - { name: role,     in: query, schema: { type: string } }
+        - { name: active,   in: query, schema: { type: boolean } }
+        - { name: division, in: query, schema: { type: string } }
+        - { $ref: '#/components/parameters/Page' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Paginated'
+                  - type: object
+                    properties:
+                      items: { type: array, items: { $ref: '#/components/schemas/MemberSummary' } }
+
+  /members/{id}:
+    get:
+      operationId: getMember
+      tags: [members]
+      summary: CMDR dossier
+      description: >
+        Fields the member has not opted to share are ABSENT from the response, not null and
+        not merely hidden by the UI (INV-027).
+      x-required-permission: FORUM_VIEW_MEMBER
+      parameters: [{ $ref: '#/components/parameters/PathId' }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MemberProfile' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /members/{id}/roles:
+    patch:
+      operationId: updateMemberRoles
+      tags: [members]
+      summary: Grant or revoke roles
+      description: Audited with before/after. Outbound-mapped roles push back to Discord.
+      x-required-permission: ROLE_MANAGE
+      parameters:
+        - { $ref: '#/components/parameters/PathId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                grant:  { type: array, items: { type: string } }
+                revoke: { type: array, items: { type: string } }
+                reason: { type: string }
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roles: { type: array, items: { type: string } }
+                  mask:  { type: string, pattern: '^\d+$' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /members/{id}/stats:
+    get:
+      operationId: getMemberStats
+      tags: [members]
+      summary: Contribution statistics
+      x-required-permission: FORUM_VIEW_MEMBER
+      parameters: [{ $ref: '#/components/parameters/PathId' }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MemberStats' }
+
+  # ------------------------------------------------------------- telemetry ---
+  /telemetry:
+    post:
+      operationId: ingestTelemetry
+      tags: [telemetry]
+      summary: Ingest a batch of journal events from the EDMC plugin
+      description: >
+        Device-token auth. Per-category consent enforced SERVER-SIDE — a non-consented category
+        is rejected with an explicit error, never silently ignored (INV-013). Unknown event types
+        are accepted and counted as `ignored`, never rejected, so a game update cannot break the
+        plugin for every member. Full contract in ssot/04-contracts/telemetry-contract.md.
+      security:
+        - deviceToken: []
+      x-required-permission: TELEMETRY_WRITE
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TelemetryBatch' }
+      responses:
+        '200':
+          description: Processed — counts are per-event, and a partial batch is normal
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TelemetryResult' }
+        '400':
+          description: Batch too large (>25) or malformed
+          $ref: '#/components/responses/ValidationFailed'
+        '401':
+          description: Device token invalid or revoked
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: No consented category in the batch
+          $ref: '#/components/responses/Forbidden'
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  # -------------------------------------------------------------------- ai ---
+  /ai/status:
+    get:
+      operationId: getAiStatus
+      tags: [ai]
+      summary: GSAI availability
+      description: >
+        ONLINE | DEGRADED | OFFLINE, reported honestly. The gateway heartbeats every 15 s;
+        three missed beats is OFFLINE. GSAI being offline never affects the rest of the
+        site (INV-030).
+      x-required-permission: null
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AiStatus' }
+
+  /ai/tools:
+    get:
+      operationId: listAiTools
+      tags: [ai]
+      summary: Tools this caller may invoke
+      description: >
+        Filtered by the caller's permission mask. This is the same filter applied before the
+        tool list is serialised to the model — the model cannot call what it is never shown
+        (INV-011).
+      x-required-permission: AI_CHAT
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/AiToolDescriptor' } }
+
+  /ai/conversations:
+    get:
+      operationId: listAiConversations
+      tags: [ai]
+      summary: List own conversations
+      x-required-permission: AI_CHAT
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/AiConversation' } }
+    post:
+      operationId: createAiConversation
+      tags: [ai]
+      summary: Start a conversation
+      x-required-permission: AI_CHAT
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title:       { type: string }
+                pageContext: { type: object, additionalProperties: true, description: 'Current page context, e.g. the system being viewed' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AiConversation' }
+
+  /ai/conversations/{id}/messages:
+    post:
+      operationId: sendAiMessage
+      tags: [ai]
+      summary: Send a message; response streams over WebSocket
+      description: >
+        The deterministic fast path handles ~70% of traffic with no LLM at all, in under 200 ms
+        (ADR-012). Otherwise the agent loop runs, routed by the GPU arbiter. Subscribe to
+        ai:{conversationId} for tokens, tool cards and confirmation prompts.
+      x-required-permission: AI_CHAT
+      parameters:
+        - { $ref: '#/components/parameters/PathId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [content]
+              properties:
+                content:     { type: string, minLength: 1, maxLength: 4000 }
+                pageContext: { type: object, additionalProperties: true }
+      responses:
+        '202':
+          description: Accepted — subscribe to ai:{conversationId}
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  messageId: { type: string, format: uuid }
+                  servedBy:  { type: string, enum: [fast_path, interactive, heavy, queued] }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503':
+          description: GSAI offline — the request is queued and delivered by Discord DM on reconnect
+          $ref: '#/components/responses/ServiceUnavailable'
+
+  /ai/confirm:
+    post:
+      operationId: confirmAiAction
+      tags: [ai]
+      summary: Confirm a pending mutating tool invocation
+      description: >
+        No mutating tool executes without this (INV-014). grant_role additionally requires a
+        second confirmation step. Confirmation tokens expire; an expired token forces a re-plan,
+        never an automatic execution.
+      x-required-permission: AI_TOOLS_WRITE
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [invocationId, confirmationToken]
+              properties:
+                invocationId:      { type: string, format: uuid }
+                confirmationToken: { type: string }
+                secondStepToken:   { type: string, description: Required for two-step tools such as grant_role }
+      responses:
+        '200':
+          description: Executed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  outcome: { type: string, enum: [ok, error] }
+                  result:  { type: object, additionalProperties: true }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '410':
+          description: Confirmation expired — re-plan rather than execute
+          $ref: '#/components/responses/Gone'
+
+  # ----------------------------------------------------------------- admin ---
+  /admin/health:
+    get:
+      operationId: getAdminHealth
+      tags: [admin]
+      summary: Detailed operational health
+      description: EDDN lag, adapter latency, queue depth, GSAI status, DB size, disk.
+      x-required-permission: SITE_CONFIG
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AdminHealth' }
+
+  /admin/audit:
+    get:
+      operationId: listAuditLog
+      tags: [admin]
+      summary: Query the audit log
+      description: Read-only. The log is append-only and is never mutated by application code.
+      x-required-permission: AUDIT_VIEW
+      parameters:
+        - { name: actor,  in: query, schema: { type: string, format: uuid } }
+        - { name: action, in: query, schema: { type: string } }
+        - { name: target, in: query, schema: { type: string } }
+        - { name: from,   in: query, schema: { type: string, format: date-time } }
+        - { name: to,     in: query, schema: { type: string, format: date-time } }
+        - { $ref: '#/components/parameters/Page' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Paginated'
+                  - type: object
+                    properties:
+                      items: { type: array, items: { $ref: '#/components/schemas/AuditEntry' } }
+
+  /admin/roles:
+    get:
+      operationId: listRoles
+      tags: [admin]
+      summary: List roles and their masks
+      x-required-permission: ROLE_MANAGE
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Role' } }
+    post:
+      operationId: createRole
+      tags: [admin]
+      summary: Create a role
+      description: Effectively the ability to grant any permission — tier 3 (ADR-021).
+      x-required-permission: ROLE_MANAGE
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RoleRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Role' }
+
+  /admin/roles/{id}:
+    patch:
+      operationId: updateRole
+      tags: [admin]
+      summary: Update a role's mask or metadata
+      description: The admin UI shows a live "who does this affect?" preview before saving.
+      x-required-permission: ROLE_MANAGE
+      parameters:
+        - { $ref: '#/components/parameters/PathId' }
+        - { $ref: '#/components/parameters/IdempotencyKey' }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RoleRequest' }
+      responses:
+        '200':
+          description: Updated — busts every affected permission cache
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Role' }
+
+  /admin/role-mappings:
+    get:
+      operationId: listRoleMappings
+      tags: [admin]
+      summary: List Discord role mappings
+      x-required-permission: ROLE_MANAGE
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/RoleMapping' } }
+    patch:
+      operationId: updateRoleMappings
+      tags: [admin]
+      summary: Replace the Discord role mapping set
+      description: >
+        The only way Discord role IDs enter the system. They are data, never hard-coded
+        in application source (INV-008).
+      x-required-permission: ROLE_MANAGE
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mappings]
+              properties:
+                mappings: { type: array, items: { $ref: '#/components/schemas/RoleMapping' } }
+      responses:
+        '200':
+          description: Replaced
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/RoleMapping' } }
+
+  /admin/config:
+    get:
+      operationId: getSiteConfig
+      tags: [admin]
+      summary: Read site configuration
+      x-required-permission: SITE_CONFIG
+      responses:
+        '200':
+          description: OK — secrets are never returned, only whether they are set
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+    patch:
+      operationId: updateSiteConfig
+      tags: [admin]
+      summary: Update site configuration
+      description: Includes the AI kill switches, which take effect immediately without a deploy.
+      x-required-permission: SITE_CONFIG
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        '200':
+          description: Updated and audited
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+
+  /admin/moderation/queue:
+    get:
+      operationId: listModerationQueue
+      tags: [admin]
+      summary: Open reports and auto-flagged content
+      x-required-permission: FORUM_MODERATE
+      parameters:
+        - { name: resolved, in: query, schema: { type: boolean, default: false } }
+        - { $ref: '#/components/parameters/Page' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/ContentReport' } }
+
+  /admin/moderation/actions:
+    post:
+      operationId: takeModerationAction
+      tags: [admin]
+      summary: Lock, pin, move, delete, warn, mute or ban
+      description: Every action is audited with before/after. A ban carries a reason and an appeal route.
+      x-required-permission: FORUM_MODERATE
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ModerationActionRequest' }
+      responses:
+        '201':
+          description: Action taken
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ModerationAction' }
+
+  /admin/ai/kill-switch:
+    post:
+      operationId: setAiKillSwitch
+      tags: [admin]
+      summary: Disable AI write tools, or GSAI entirely
+      description: Immediate, no deploy required. Two independent switches (INV-014 backstop).
+      x-required-permission: AI_TOOLS_ADMIN
+      parameters: [{ $ref: '#/components/parameters/IdempotencyKey' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                disableWriteTools: { type: boolean }
+                disableAi:         { type: boolean }
+                reason:            { type: string }
+      responses:
+        '200':
+          description: Applied and audited
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  disableWriteTools: { type: boolean }
+                  disableAi:         { type: boolean }
+
+# =============================================================================
+# COMPONENTS
+# =============================================================================
+components:
+
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: __Host-gs_access
+      description: >
+        HttpOnly, Secure, SameSite=Lax, __Host- prefixed. 15-minute access JWT paired with a
+        30-day rotating refresh cookie. State-changing routes additionally require a
+        double-submit CSRF token in the X-CSRF-Token header.
+    deviceToken:
+      type: http
+      scheme: bearer
+      description: EDMC plugin device token, scoped telemetry:write. Individually revocable.
+
+  parameters:
+    PathId:
+      name: id
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    PathSlug:
+      name: slug
+      in: path
+      required: true
+      schema: { type: string, pattern: '^[a-z0-9-]+$' }
+    SystemAddress:
+      name: address
+      in: path
+      required: true
+      description: SystemAddress as a decimal string — BigInt is not JSON-safe (INV-021).
+      schema: { type: string, pattern: '^\d+$' }
+    MarketId:
+      name: marketId
+      in: path
+      required: true
+      description: MarketId as a decimal string.
+      schema: { type: string, pattern: '^\d+$' }
+    CommodityName:
+      name: name
+      in: path
+      required: true
+      description: Display name or FDevIDs internal name; both resolve.
+      schema: { type: string }
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    PageSize:
+      name: pageSize
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: >
+        Replay of the same key with the same body returns the original result without repeating
+        the side effect. Same key with a different body is a 409 (INV-010).
+      schema: { type: string, maxLength: 128 }
+    MaxDataAgeDays:
+      name: maxDataAgeDays
+      in: query
+      description: >
+        Data-freshness filter. Ardent's own default is 30, which does a great deal of work for
+        data quality; we default tighter and expose this as a UI slider.
+      schema: { type: integer, minimum: 1, maximum: 90, default: 7 }
+    IncludeCarriers:
+      name: includeCarriers
+      in: query
+      description: Fleet carriers are EXCLUDED by default — their prices distort results and their availability is not guaranteed (INV-026).
+      schema: { type: boolean, default: false }
+    MinPad:
+      name: minPad
+      in: query
+      description: 1 = small, 2 = medium, 3 = large.
+      schema: { type: integer, enum: [1, 2, 3], default: 1 }
+    MaxStationLs:
+      name: maxStationLs
+      in: query
+      description: Maximum distance to arrival. Ignoring this yields "profitable" routes with a 200,000 Ls supercruise.
+      schema: { type: number, minimum: 0, default: 5000 }
+
+  responses:
+    Unauthorized:
+      description: No valid session
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    Forbidden:
+      description: Authenticated but not permitted, and the caller can already see the resource exists
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    NotFound:
+      description: Not found — or exists and the caller may not know that (INV-002)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    Conflict:
+      description: Conflict
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    Gone:
+      description: Expired nonce, token or confirmation
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    ValidationFailed:
+      description: Zod validation failed — details.issues lists EVERY failing field
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    UnprocessableEntity:
+      description: Well-formed but semantically invalid
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    RateLimited:
+      description: Rate limited — retryAfterSeconds is mandatory
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    ServiceUnavailable:
+      description: A dependency is unavailable
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+    UpstreamUnavailable:
+      description: An upstream third party failed
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
+
+  schemas:
+
+    # ---- envelope & common -------------------------------------------------
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, requestId]
+          properties:
+            code:              { type: string, description: 'Stable forever. Clients branch on this, never on message.' }
+            message:           { type: string, description: 'Safe to display. Never a stack trace, SQL or internal hostname.' }
+            requestId:         { type: string, description: 'Correlates to the log line and the trace. Always present.' }
+            details:           { type: [object, 'null'], additionalProperties: true }
+            retryable:         { type: boolean, default: false }
+            retryAfterSeconds: { type: [integer, 'null'] }
+
+    Paginated:
+      type: object
+      required: [page, pageSize, total, hasMore]
+      properties:
+        page:     { type: integer }
+        pageSize: { type: integer }
+        total:    { type: integer }
+        hasMore:  { type: boolean }
+
+    JobAccepted:
+      type: object
+      required: [jobId, status]
+      properties:
+        jobId:      { type: string, format: uuid }
+        status:     { type: string, enum: [queued, submitted, polling, complete, failed, cancelled] }
+        channel:    { type: string, description: WebSocket channel to subscribe to for completion }
+        deduped:    { type: boolean, description: True if an identical job was already running }
+
+    Freshness:
+      type: object
+      description: >
+        Attached to every market-derived payload. Present or the response is a defect (INV-004).
+      required: [dataAgeHours, source]
+      properties:
+        dataAgeHours: { type: number }
+        source:       { type: string, enum: [own_eddn, ardent, edsm, spansh, capi, inara, manual] }
+        observedAt:   { type: string, format: date-time }
+        band:         { type: string, enum: [fresh, aging, stale], description: 'fresh <24h, aging <7d, stale older' }
+
+    Health:
+      type: object
+      required: [status, version, checks]
+      properties:
+        status:  { type: string, enum: [ok, degraded, down] }
+        version: { type: string }
+        checks:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              status:    { type: string, enum: [ok, degraded, down, offline] }
+              latencyMs: { type: number }
+              error:     { type: string }
+
+    # ---- identity ----------------------------------------------------------
+    Me:
+      type: object
+      required: [id, handle, displayName, roles, permissionMask]
+      properties:
+        id:             { type: string, format: uuid }
+        handle:         { type: string }
+        displayName:    { type: string }
+        avatarUrl:      { type: [string, 'null'] }
+        bio:            { type: [string, 'null'] }
+        timezone:       { type: string }
+        status:         { type: string }
+        roles:          { type: array, items: { type: string } }
+        permissionMask: { type: string, pattern: '^\d+$' }
+        permissions:    { type: array, items: { type: string } }
+        verification:
+          type: [object, 'null']
+          properties:
+            cmdrName:  { type: string }
+            method:    { type: string, enum: [fdev_capi, inara_nonce, officer_manual] }
+            trustTier: { type: integer, enum: [1, 2, 3] }
+            expiresAt: { type: [string, 'null'], format: date-time }
+            isStale:   { type: boolean }
+        privacy: { $ref: '#/components/schemas/PrivacySettings' }
+        telemetryConnected: { type: boolean }
+
+    PrivacySettings:
+      type: object
+      description: Defaults are conservative. A false toggle means the field is ABSENT elsewhere, not null (INV-027).
+      properties:
+        telemetryConsent:   { type: array, items: { type: string, enum: [location, combat, trade, exploration, bgs, carrier, fleet] } }
+        showLocation:       { type: boolean }
+        showCredits:        { type: boolean }
+        showFleet:          { type: boolean }
+        showActivity:       { type: boolean }
+        showOnPublicRoster: { type: boolean }
+        showOnLeaderboard:  { type: boolean }
+
+    UpdateMeRequest:
+      type: object
+      properties:
+        displayName: { type: string, maxLength: 64 }
+        bio:         { type: string, maxLength: 2000 }
+        timezone:    { type: string }
+        privacy:     { $ref: '#/components/schemas/PrivacySettings' }
+
+    DeviceToken:
+      type: object
+      required: [id, label, scopes, createdAt]
+      properties:
+        id:         { type: string, format: uuid }
+        label:      { type: string }
+        scopes:     { type: array, items: { type: string } }
+        lastUsedAt: { type: [string, 'null'], format: date-time }
+        revokedAt:  { type: [string, 'null'], format: date-time }
+        createdAt:  { type: string, format: date-time }
+
+    SessionSummary:
+      type: object
+      properties:
+        id:          { type: string, format: uuid }
+        deviceLabel: { type: [string, 'null'] }
+        userAgent:   { type: [string, 'null'] }
+        lastUsedAt:  { type: string, format: date-time }
+        createdAt:   { type: string, format: date-time }
+        isCurrent:   { type: boolean }
+
+    Role:
+      type: object
+      required: [id, key, name, permMask]
+      properties:
+        id:             { type: string, format: uuid }
+        key:            { type: string }
+        name:           { type: string }
+        colour:         { type: [string, 'null'] }
+        rankOrder:      { type: integer }
+        permMask:       { type: string, pattern: '^\d+$' }
+        permissions:    { type: array, items: { type: string } }
+        isHierarchical: { type: boolean }
+        memberCount:    { type: integer }
+
+    RoleRequest:
+      type: object
+      required: [key, name]
+      properties:
+        key:            { type: string, pattern: '^[a-z_]+$' }
+        name:           { type: string }
+        colour:         { type: string }
+        rankOrder:      { type: integer }
+        permissions:    { type: array, items: { type: string }, description: Permission names; the mask is computed server-side }
+        isHierarchical: { type: boolean }
+
+    RoleMapping:
+      type: object
+      required: [roleKey, discordRoleId, syncDirection]
+      properties:
+        roleKey:       { type: string }
+        discordRoleId: { type: string }
+        syncDirection: { type: string, enum: [inbound, outbound, both] }
+
+    # ---- forum -------------------------------------------------------------
+    ForumCategory:
+      type: object
+      required: [id, slug, name]
+      properties:
+        id:          { type: string, format: uuid }
+        parentId:    { type: [string, 'null'], format: uuid }
+        slug:        { type: string }
+        name:        { type: string }
+        description: { type: [string, 'null'] }
+        icon:        { type: [string, 'null'] }
+        position:    { type: integer }
+        isLocked:    { type: boolean }
+        canPost:     { type: boolean, description: Computed for this caller }
+        threadCount: { type: integer }
+        children:    { type: array, items: { $ref: '#/components/schemas/ForumCategory' } }
+
+    ForumThread:
+      type: object
+      required: [id, slug, title, kind, createdAt]
+      properties:
+        id:         { type: string, format: uuid }
+        categoryId: { type: string, format: uuid }
+        slug:       { type: string }
+        title:      { type: string }
+        kind:       { type: string, enum: [discussion, question, poll, announcement, ops, application] }
+        author:     { $ref: '#/components/schemas/UserRef' }
+        isPinned:   { type: boolean }
+        isLocked:   { type: boolean }
+        tags:       { type: array, items: { type: string } }
+        postCount:  { type: integer }
+        viewCount:  { type: integer }
+        lastPostAt: { type: [string, 'null'], format: date-time }
+        createdAt:  { type: string, format: date-time }
+
+    ForumThreadDetail:
+      allOf:
+        - $ref: '#/components/schemas/ForumThread'
+        - type: object
+          properties:
+            posts:             { type: array, items: { $ref: '#/components/schemas/ForumPost' } }
+            pagination:        { $ref: '#/components/schemas/Paginated' }
+            subscriptionLevel: { type: [string, 'null'], enum: [watching, tracking, muted, null] }
+
+    ForumPost:
+      type: object
+      required: [id, threadId, bodyMd, bodyHtml, createdAt]
+      properties:
+        id:         { type: string, format: uuid }
+        threadId:   { type: string, format: uuid }
+        author:     { $ref: '#/components/schemas/UserRef' }
+        replyToId:  { type: [string, 'null'], format: uuid }
+        bodyMd:     { type: string }
+        bodyHtml:   { type: string, description: Sanitized server-side before storage (INV-035) }
+        editedAt:   { type: [string, 'null'], format: date-time }
+        editCount:  { type: integer }
+        isSolution: { type: boolean }
+        reactions:  { type: object, additionalProperties: { type: integer } }
+        isDeleted:  { type: boolean, description: True for a tombstone visible only to moderators }
+        createdAt:  { type: string, format: date-time }
+
+    UserRef:
+      type: object
+      required: [id, displayName]
+      properties:
+        id:          { type: string, format: uuid }
+        handle:      { type: string }
+        displayName: { type: string }
+        avatarUrl:   { type: [string, 'null'] }
+        cmdrName:    { type: [string, 'null'] }
+        roleBadge:   { type: [string, 'null'] }
+
+    SearchResults:
+      type: object
+      required: [hits, total]
+      properties:
+        hits:
+          type: array
+          items:
+            type: object
+            properties:
+              type:       { type: string, enum: [thread, post] }
+              id:         { type: string, format: uuid }
+              threadId:   { type: string, format: uuid }
+              title:      { type: string }
+              excerpt:    { type: string }
+              categoryName: { type: string }
+              author:     { $ref: '#/components/schemas/UserRef' }
+              createdAt:  { type: string, format: date-time }
+        total:  { type: integer, description: Counts only ACL-visible hits — filtering happens IN the query (INV-024) }
+        facets: { type: object, additionalProperties: true }
+
+    ApplicationRequest:
+      type: object
+      required: [cmdrName, discordHandle, timezone, whyUs, turnstileToken]
+      properties:
+        cmdrName:            { type: string }
+        discordHandle:       { type: string }
+        timezone:            { type: string }
+        hoursPerWeek:        { type: integer, minimum: 0, maximum: 168 }
+        playstyles:          { type: array, items: { type: string } }
+        shipsOwned:          { type: string }
+        engineeringProgress: { type: string }
+        previousSquadrons:   { type: string }
+        whyUs:               { type: string, minLength: 10, maxLength: 4000 }
+        howFound:            { type: string }
+        referral:            { type: string }
+        turnstileToken:      { type: string }
+
+    ContentReport:
+      type: object
+      properties:
+        id:          { type: string, format: uuid }
+        reporter:    { $ref: '#/components/schemas/UserRef' }
+        targetType:  { type: string }
+        targetId:    { type: string }
+        reason:      { type: string }
+        details:     { type: [string, 'null'] }
+        autoFlagged: { type: boolean }
+        resolvedAt:  { type: [string, 'null'], format: date-time }
+        createdAt:   { type: string, format: date-time }
+
+    ModerationActionRequest:
+      type: object
+      required: [action, targetType, reason]
+      properties:
+        action:       { type: string, enum: [lock, unlock, pin, unpin, move, delete, restore, warn, mute, ban, unban] }
+        targetType:   { type: string }
+        targetId:     { type: string }
+        targetUserId: { type: string, format: uuid }
+        reason:       { type: string, minLength: 3 }
+        expiresAt:    { type: [string, 'null'], format: date-time }
+
+    ModerationAction:
+      type: object
+      properties:
+        id:        { type: string, format: uuid }
+        actor:     { $ref: '#/components/schemas/UserRef' }
+        action:    { type: string }
+        reason:    { type: string }
+        expiresAt: { type: [string, 'null'], format: date-time }
+        createdAt: { type: string, format: date-time }
+
+    # ---- game data ---------------------------------------------------------
+    SystemSummary:
+      type: object
+      required: [address, name]
+      properties:
+        address:    { type: string, pattern: '^\d+$', description: SystemAddress as decimal string }
+        name:       { type: string }
+        distanceLy: { type: number, description: Present when the query had an origin }
+        allegiance: { type: [string, 'null'] }
+
+    System:
+      allOf:
+        - $ref: '#/components/schemas/SystemSummary'
+        - type: object
+          properties:
+            coords:
+              type: object
+              properties: { x: { type: number }, y: { type: number }, z: { type: number } }
+            government:         { type: [string, 'null'] }
+            security:           { type: [string, 'null'] }
+            economy:            { type: [string, 'null'] }
+            secondaryEconomy:   { type: [string, 'null'] }
+            population:         { type: [string, 'null'], pattern: '^\d+$' }
+            controllingFaction: { type: [string, 'null'] }
+            power:              { type: [string, 'null'] }
+            powerState:         { type: [string, 'null'] }
+            stationCount:       { type: integer }
+            distanceFromHomeLy: { type: [number, 'null'] }
+            freshness:          { $ref: '#/components/schemas/Freshness' }
+
+    Station:
+      type: object
+      required: [marketId, name]
+      properties:
+        marketId:            { type: string, pattern: '^\d+$' }
+        name:                { type: string }
+        type:                { type: [string, 'null'] }
+        isCarrier:           { type: boolean }
+        distanceToArrivalLs: { type: [number, 'null'] }
+        maxLandingPad:       { type: [integer, 'null'], enum: [1, 2, 3, null] }
+        services:            { type: array, items: { type: string } }
+        controllingFaction:  { type: [string, 'null'] }
+        freshness:           { $ref: '#/components/schemas/Freshness' }
+
+    StationWithDistance:
+      allOf:
+        - $ref: '#/components/schemas/Station'
+        - type: object
+          properties:
+            systemName: { type: string }
+            systemAddress: { type: string, pattern: '^\d+$' }
+            distanceLy: { type: number }
+
+    Commodity:
+      type: object
+      required: [internalName, displayName, category]
+      properties:
+        internalName: { type: string, description: FDevIDs internal name. NEVER rendered to a user (INV-020). }
+        displayName:  { type: string }
+        category:     { type: string }
+        isRare:       { type: boolean }
+        avgPrice:     { type: [integer, 'null'] }
+
+    CommodityDetail:
+      allOf:
+        - $ref: '#/components/schemas/Commodity'
+        - type: object
+          properties:
+            minBuyPrice:  { type: [integer, 'null'] }
+            maxSellPrice: { type: [integer, 'null'] }
+            avgBuyPrice:  { type: [integer, 'null'] }
+            avgSellPrice: { type: [integer, 'null'] }
+            totalStock:   { type: integer }
+            totalDemand:  { type: integer }
+            marketCount:  { type: integer }
+            history:
+              type: array
+              items:
+                type: object
+                properties:
+                  observedAt: { type: string, format: date-time }
+                  avgBuy:     { type: [integer, 'null'] }
+                  avgSell:    { type: [integer, 'null'] }
+            freshness: { $ref: '#/components/schemas/Freshness' }
+
+    MarketRow:
+      type: object
+      properties:
+        internalName: { type: string }
+        displayName:  { type: string }
+        buyPrice:     { type: integer }
+        sellPrice:    { type: integer }
+        stock:        { type: integer }
+        demand:       { type: integer }
+
+    MarketListing:
+      type: object
+      required: [marketId, stationName, systemName, freshness]
+      properties:
+        marketId:            { type: string, pattern: '^\d+$' }
+        stationName:         { type: string }
+        systemName:          { type: string }
+        systemAddress:       { type: string, pattern: '^\d+$' }
+        isCarrier:           { type: boolean }
+        distanceLy:          { type: [number, 'null'] }
+        distanceToArrivalLs: { type: [number, 'null'] }
+        maxLandingPad:       { type: [integer, 'null'] }
+        price:               { type: integer }
+        stock:               { type: integer }
+        demand:              { type: integer }
+        freshness:           { $ref: '#/components/schemas/Freshness' }
+
+    GalnetArticle:
+      type: object
+      properties:
+        id:          { type: string }
+        title:       { type: string }
+        body:        { type: string }
+        publishedAt: { type: string, format: date-time }
+        url:         { type: [string, 'null'], format: uri }
+
+    # ---- trade -------------------------------------------------------------
+    TradeRouteRequest:
+      type: object
+      required: [originSystemAddress, cargoCapacity]
+      properties:
+        originSystemAddress: { type: string, pattern: '^\d+$' }
+        cargoCapacity:       { type: integer, minimum: 1, maximum: 794 }
+        jumpRangeLy:         { type: number, minimum: 1 }
+        maxDistanceLy:       { type: number, minimum: 1, maximum: 500, default: 50 }
+        maxStationLs:        { type: number, minimum: 0, default: 5000 }
+        minLandingPad:       { type: integer, enum: [1, 2, 3], default: 3 }
+        availableCredits:    { type: [string, 'null'], pattern: '^\d+$', description: Credits as decimal string (INV-021) }
+        includeCarriers:     { type: boolean, default: false }
+        maxDataAgeDays:      { type: integer, minimum: 1, maximum: 90, default: 7 }
+        avoidAnarchy:        { type: boolean, default: false }
+        avoidPermitLocked:   { type: boolean, default: true }
+        endAtOurCarrier:     { type: boolean, default: false, description: Carrier-aware routing — what Inara cannot do for us }
+        limit:               { type: integer, minimum: 1, maximum: 50, default: 10 }
+
+    TradeRoute:
+      type: object
+      required: [commodity, buyAt, sellAt, profitPerTonCr, freshness]
+      properties:
+        commodity:      { type: string, description: Display name (INV-020) }
+        buyAt:          { $ref: '#/components/schemas/MarketListing' }
+        sellAt:         { $ref: '#/components/schemas/MarketListing' }
+        profitPerTonCr: { type: integer }
+        profitPerRunCr: { type: string, pattern: '^\d+$', description: May exceed 2^53 for a large hold }
+        unitsAvailable: { type: integer }
+        outboundLy:     { type: number }
+        returnLy:       { type: [number, 'null'] }
+        freshness:      { $ref: '#/components/schemas/Freshness' }
+
+    RoutePlotRequest:
+      type: object
+      required: [kind]
+      properties:
+        kind:            { type: string, enum: [neutron, galaxy, fleet_carrier, road_to_riches, tourist, trade] }
+        fromSystem:      { type: string }
+        toSystem:        { type: string }
+        jumpRangeLy:     { type: number }
+        efficiency:      { type: integer, minimum: 1, maximum: 100 }
+        useSupercharge:  { type: boolean }
+        waypoints:       { type: array, items: { type: string } }
+
+    RouteJob:
+      type: object
+      required: [jobId, kind, status]
+      properties:
+        jobId:       { type: string, format: uuid }
+        kind:        { type: string }
+        status:      { type: string, enum: [queued, submitted, polling, complete, failed, cancelled] }
+        resultUrl:   { type: [string, 'null'], format: uri }
+        error:       { type: [string, 'null'] }
+        createdAt:   { type: string, format: date-time }
+        completedAt: { type: [string, 'null'], format: date-time }
+
+    SavedRoute:
+      type: object
+      properties:
+        id:        { type: string, format: uuid }
+        name:      { type: string }
+        payload:   { type: object, additionalProperties: true }
+        savedAt:   { type: string, format: date-time }
+        freshness: { $ref: '#/components/schemas/Freshness' }
+
+    TradeAlertRequest:
+      type: object
+      required: [commodity]
+      properties:
+        commodity:           { type: string }
+        originSystemAddress: { type: string, pattern: '^\d+$' }
+        maxDistanceLy:       { type: number }
+        minSellPrice:        { type: integer }
+        maxBuyPrice:         { type: integer }
+
+    TradeAlert:
+      allOf:
+        - $ref: '#/components/schemas/TradeAlertRequest'
+        - type: object
+          properties:
+            id:          { type: string, format: uuid }
+            isActive:    { type: boolean }
+            lastFiredAt: { type: [string, 'null'], format: date-time }
+
+    TradeBoardOfferRequest:
+      type: object
+      required: [isSupply, commodity, quantityTons]
+      properties:
+        isSupply:      { type: boolean }
+        commodity:     { type: string }
+        quantityTons:  { type: integer, minimum: 1 }
+        pricePerTonCr: { type: integer }
+        locationNote:  { type: string }
+        systemAddress: { type: string, pattern: '^\d+$' }
+        expiresAt:     { type: string, format: date-time }
+
+    TradeBoardOffer:
+      allOf:
+        - $ref: '#/components/schemas/TradeBoardOfferRequest'
+        - type: object
+          properties:
+            id:        { type: string, format: uuid }
+            postedBy:  { $ref: '#/components/schemas/UserRef' }
+            createdAt: { type: string, format: date-time }
+            closedAt:  { type: [string, 'null'], format: date-time }
+
+    HaulingTarget:
+      type: object
+      properties:
+        id:              { type: string, format: uuid }
+        title:           { type: string }
+        commodity:       { type: string }
+        targetTons:      { type: integer }
+        deliveredTons:   { type: integer }
+        percentComplete: { type: number }
+        carrierCallsign: { type: [string, 'null'] }
+        deadline:        { type: [string, 'null'], format: date-time }
+        contributors:
+          type: array
+          items:
+            type: object
+            properties:
+              user: { $ref: '#/components/schemas/UserRef' }
+              tons: { type: integer }
+
+    # ---- fleet -------------------------------------------------------------
+    FleetShip:
+      type: object
+      required: [id, shipType]
+      properties:
+        id:                { type: string, format: uuid }
+        owner:             { $ref: '#/components/schemas/UserRef' }
+        shipType:          { type: string, description: Display name (INV-020) }
+        shipName:          { type: [string, 'null'] }
+        shipIdent:         { type: [string, 'null'] }
+        roleTag:           { type: [string, 'null'] }
+        currentSystemName: { type: [string, 'null'], description: Absent unless the owner set showLocation (INV-027) }
+        isPrimary:         { type: boolean }
+        source:            { type: string, enum: [manual, capi, edmc] }
+        syncedAt:          { type: [string, 'null'], format: date-time }
+        jumpRangeLy:       { type: [number, 'null'] }
+
+    LoadoutRequest:
+      type: object
+      required: [name, shipType, coriolisJson]
+      properties:
+        name:         { type: string, maxLength: 120 }
+        shipType:     { type: string }
+        roleTag:      { type: string }
+        coriolisJson: { type: object, additionalProperties: true }
+        visibility:   { type: string, enum: [private, squadron, public], default: squadron }
+        shipId:       { type: string, format: uuid }
+
+    LoadoutSummary:
+      type: object
+      properties:
+        id:         { type: string, format: uuid }
+        name:       { type: string }
+        shipType:   { type: string }
+        roleTag:    { type: [string, 'null'] }
+        author:     { $ref: '#/components/schemas/UserRef' }
+        visibility: { type: string }
+        isDoctrine: { type: boolean }
+        version:    { type: integer }
+        stats:      { $ref: '#/components/schemas/LoadoutStats' }
+        updatedAt:  { type: string, format: date-time }
+
+    Loadout:
+      allOf:
+        - $ref: '#/components/schemas/LoadoutSummary'
+        - type: object
+          properties:
+            coriolisJson: { type: object, additionalProperties: true }
+            coriolisUrl:  { type: [string, 'null'], format: uri }
+            edsyUrl:      { type: [string, 'null'], format: uri }
+            approvedBy:   { $ref: '#/components/schemas/UserRef' }
+
+    LoadoutStats:
+      type: object
+      description: Computed by packages/ed-domain, ported from Coriolis (MIT, attributed).
+      properties:
+        jumpRangeLadenLy:   { type: number }
+        jumpRangeUnladenLy: { type: number }
+        jumpRangeMaxLy:     { type: number }
+        dpsByType:          { type: object, additionalProperties: { type: number } }
+        effectiveShieldHp:  { type: number }
+        effectiveArmourHp:  { type: number }
+        thermalLoad:        { type: number }
+        cargoTons:          { type: integer }
+        fuelScoopRate:      { type: number }
+        rebuyCr:            { type: string, pattern: '^\d+$' }
+        totalCostCr:        { type: string, pattern: '^\d+$' }
+
+    LoadoutAnalysis:
+      type: object
+      properties:
+        loadoutId: { type: string, format: uuid }
+        stats:     { $ref: '#/components/schemas/LoadoutStats' }
+        engineering:
+          type: array
+          items:
+            type: object
+            properties:
+              module:      { type: string }
+              blueprint:   { type: string }
+              grade:       { type: integer }
+              engineer:    { type: [string, 'null'] }
+              systemName:  { type: [string, 'null'] }
+              unlocked:    { type: [boolean, 'null'] }
+        materials: { type: array, items: { type: object, additionalProperties: true } }
+        warnings:  { type: array, items: { type: string } }
+
+    FleetCarrier:
+      type: object
+      required: [callsign]
+      properties:
+        callsign:           { type: string }
+        name:               { type: [string, 'null'] }
+        owner:              { $ref: '#/components/schemas/UserRef' }
+        currentSystemName:  { type: [string, 'null'] }
+        currentSystemAddress: { type: [string, 'null'], pattern: '^\d+$' }
+        dockingAccess:      { type: [string, 'null'] }
+        fuelLevel:          { type: [integer, 'null'], description: Tritium tons }
+        jumpsRemaining:     { type: [integer, 'null'] }
+        nextJumpSystemName: { type: [string, 'null'] }
+        nextJumpAt:         { type: [string, 'null'], format: date-time }
+        services:           { type: [object, 'null'], additionalProperties: true }
+        freshness:          { $ref: '#/components/schemas/Freshness' }
+
+    # ---- operations --------------------------------------------------------
+    OperationRequest:
+      type: object
+      required: [title, opType, startsAt]
+      properties:
+        title:             { type: string, maxLength: 200 }
+        descriptionMd:     { type: string }
+        opType:            { type: string, enum: [bgs, combat, mining, trade, exploration, rescue, social, training] }
+        startsAt:          { type: string, format: date-time, description: UTC. Rendered local AND UTC (INV-025). }
+        endsAt:            { type: string, format: date-time }
+        systemAddress:     { type: string, pattern: '^\d+$' }
+        stationMarketId:   { type: string, pattern: '^\d+$' }
+        minRoles:          { type: array, items: { type: string } }
+        requiredShipRoles: { type: array, items: { type: string } }
+        capacity:          { type: integer, minimum: 1 }
+        recurrenceRule:    { type: string, description: RFC 5545 RRULE }
+
+    Operation:
+      allOf:
+        - $ref: '#/components/schemas/OperationRequest'
+        - type: object
+          properties:
+            id:             { type: string, format: uuid }
+            createdBy:      { $ref: '#/components/schemas/UserRef' }
+            status:         { type: string, enum: [draft, scheduled, live, complete, cancelled] }
+            systemName:     { type: [string, 'null'] }
+            stationName:    { type: [string, 'null'] }
+            signupCounts:
+              type: object
+              properties:
+                yes: { type: integer }
+                maybe: { type: integer }
+                no: { type: integer }
+                standby: { type: integer }
+            discordEventId: { type: [string, 'null'] }
+            mySignup:       { $ref: '#/components/schemas/OperationSignup' }
+
+    OperationDetail:
+      allOf:
+        - $ref: '#/components/schemas/Operation'
+        - type: object
+          properties:
+            signups:     { type: array, items: { $ref: '#/components/schemas/OperationSignup' } }
+            composition: { $ref: '#/components/schemas/OperationComposition' }
+
+    OperationSignup:
+      type: object
+      properties:
+        user:       { $ref: '#/components/schemas/UserRef' }
+        state:      { type: string, enum: [yes, maybe, no, standby] }
+        ship:       { $ref: '#/components/schemas/FleetShip' }
+        roleTag:    { type: [string, 'null'] }
+        note:       { type: [string, 'null'] }
+        signedUpAt: { type: string, format: date-time }
+        attended:   { type: [boolean, 'null'] }
+
+    OperationComposition:
+      type: object
+      description: '"Needs 2 more shieldless miners; 3 members have a qualifying build."'
+      properties:
+        satisfied: { type: boolean }
+        required:
+          type: array
+          items:
+            type: object
+            properties:
+              roleTag:  { type: string }
+              needed:   { type: integer }
+              filled:   { type: integer }
+              eligible:
+                type: array
+                description: Members whose actual fleet contains a qualifying build
+                items: { $ref: '#/components/schemas/UserRef' }
+
+    # ---- bgs ---------------------------------------------------------------
+    BgsSystemStatus:
+      type: object
+      properties:
+        systemAddress:      { type: string, pattern: '^\d+$' }
+        systemName:         { type: string }
+        ourFaction:         { type: [string, 'null'] }
+        ourInfluence:       { type: [number, 'null'] }
+        topCompetitor:      { type: [string, 'null'] }
+        competitorInfluence: { type: [number, 'null'] }
+        deltaSinceLastTick: { type: [number, 'null'] }
+        activeStates:       { type: array, items: { type: string } }
+        pendingStates:      { type: array, items: { type: string } }
+        recoveringStates:   { type: array, items: { type: string } }
+        inConflict:         { type: boolean }
+        currentOrder:       { $ref: '#/components/schemas/BgsOrder' }
+        lastTick:           { $ref: '#/components/schemas/BgsTick' }
+
+    InfluenceHistory:
+      type: object
+      properties:
+        systemAddress: { type: string, pattern: '^\d+$' }
+        systemName:    { type: string }
+        ticks:         { type: array, items: { $ref: '#/components/schemas/BgsTick' } }
+        series:
+          type: array
+          items:
+            type: object
+            properties:
+              factionId:   { type: string, format: uuid }
+              factionName: { type: string }
+              isOurs:      { type: boolean }
+              points:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    tickId:     { type: [string, 'null'], format: uuid }
+                    observedAt: { type: string, format: date-time }
+                    influence:  { type: number }
+                    state:      { type: [string, 'null'] }
+
+    BgsTick:
+      type: object
+      properties:
+        id:         { type: string, format: uuid }
+        occurredAt: { type: string, format: date-time }
+        source:     { type: string, enum: [community_detector, inferred, manual] }
+        confidence: { type: number, description: 'Inferred ticks are < 1 and MUST render as provisional' }
+
+    BgsOrderRequest:
+      type: object
+      required: [systemAddress, directive]
+      properties:
+        systemAddress: { type: string, pattern: '^\d+$' }
+        factionId:     { type: string, format: uuid }
+        directive:     { type: string, enum: [push, hold, suppress, ignore] }
+        priority:      { type: integer, minimum: 1, maximum: 5, default: 3 }
+        guidanceMd:    { type: string, description: 'The officer''s actual instruction, e.g. "run massacre missions for us, not bounties"' }
+        activeUntil:   { type: string, format: date-time }
+
+    BgsOrder:
+      allOf:
+        - $ref: '#/components/schemas/BgsOrderRequest'
+        - type: object
+          properties:
+            id:          { type: string, format: uuid }
+            systemName:  { type: string }
+            factionName: { type: [string, 'null'] }
+            setBy:       { $ref: '#/components/schemas/UserRef' }
+            activeFrom:  { type: string, format: date-time }
+
+    BgsReportRequest:
+      type: object
+      required: [systemAddress, activityType]
+      properties:
+        systemAddress: { type: string, pattern: '^\d+$' }
+        factionId:     { type: string, format: uuid }
+        activityType:  { type: string, enum: [missions, bounties, cartographics, trade, bonds, murders, failed_missions, exploration_data, mining_profit] }
+        valueCr:       { type: string, pattern: '^\d+$' }
+        count:         { type: integer }
+
+    BgsActivityReport:
+      allOf:
+        - $ref: '#/components/schemas/BgsReportRequest'
+        - type: object
+          properties:
+            id:         { type: string, format: uuid }
+            user:       { $ref: '#/components/schemas/UserRef' }
+            tickId:     { type: [string, 'null'], format: uuid }
+            source:     { type: string, enum: [manual, edmc, bgstally] }
+            reportedAt: { type: string, format: date-time }
+
+    BgsConflict:
+      type: object
+      properties:
+        systemAddress:    { type: string, pattern: '^\d+$' }
+        systemName:       { type: string }
+        conflictType:     { type: string, enum: [war, civilwar, election] }
+        ourFaction:       { type: string }
+        opponentFaction:  { type: string }
+        ourWins:          { type: integer }
+        opponentWins:     { type: integer }
+        daysRemaining:    { type: [integer, 'null'] }
+        requiredDailyWins: { type: [integer, 'null'] }
+
+    # ---- members -----------------------------------------------------------
+    MemberSummary:
+      allOf:
+        - $ref: '#/components/schemas/UserRef'
+        - type: object
+          properties:
+            roles:      { type: array, items: { type: string } }
+            trustTier:  { type: [integer, 'null'] }
+            timezone:   { type: string }
+            joinedAt:   { type: string, format: date-time }
+            lastSeenAt: { type: [string, 'null'], format: date-time }
+
+    MemberProfile:
+      allOf:
+        - $ref: '#/components/schemas/MemberSummary'
+        - type: object
+          description: Fields the member has not opted to share are ABSENT, not null (INV-027).
+          properties:
+            bio:           { type: [string, 'null'] }
+            ranks:         { type: [object, 'null'], additionalProperties: true }
+            powerplay:     { type: [object, 'null'], additionalProperties: true }
+            division:      { type: [string, 'null'] }
+            playstyleTags: { type: array, items: { type: string } }
+            fleet:         { type: array, items: { $ref: '#/components/schemas/FleetShip' } }
+            achievements:  { type: array, items: { type: object, additionalProperties: true } }
+            inaraUrl:      { type: [string, 'null'], format: uri }
+            edsmUrl:       { type: [string, 'null'], format: uri }
+
+    MemberStats:
+      type: object
+      properties:
+        opsAttended:      { type: integer }
+        bgsReports:       { type: integer }
+        forumPosts:       { type: integer }
+        solutionsAccepted: { type: integer }
+        tonsHauled:       { type: string, pattern: '^\d+$' }
+        activityHeatmap:
+          type: array
+          items:
+            type: object
+            properties:
+              date:  { type: string, format: date }
+              count: { type: integer }
+
+    # ---- telemetry ---------------------------------------------------------
+    TelemetryBatch:
+      type: object
+      required: [events]
+      properties:
+        pluginVersion: { type: string, description: 'Logged, never used to reject a request' }
+        gameVersion:   { type: string }
+        cmdr:          { type: string }
+        events:
+          type: array
+          minItems: 1
+          maxItems: 25
+          items: { $ref: '#/components/schemas/TelemetryEvent' }
+
+    TelemetryEvent:
+      type: object
+      required: [category, eventType, timestamp, payload]
+      properties:
+        category:      { type: string, enum: [location, combat, trade, exploration, bgs, carrier, fleet] }
+        eventType:     { type: string, description: Journal event name }
+        timestamp:     { type: string, format: date-time, description: "The JOURNAL event's timestamp, not the send time" }
+        systemAddress: { type: [string, 'null'], pattern: '^\d+$' }
+        systemName:    { type: [string, 'null'] }
+        marketId:      { type: [string, 'null'], pattern: '^\d+$' }
+        shipType:      { type: [string, 'null'] }
+        shipId:        { type: [integer, 'null'] }
+        payload:       { type: object, additionalProperties: true, description: The verbatim journal event }
+
+    TelemetryResult:
+      type: object
+      required: [accepted, rejected, ignored]
+      properties:
+        accepted: { type: integer }
+        rejected: { type: integer, description: 'Non-consented categories - rejected explicitly, never silently dropped (INV-013)' }
+        ignored:  { type: integer, description: Duplicates and unknown event types. Never an error. }
+        rejectedCategories: { type: array, items: { type: string } }
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              index: { type: integer }
+              code:  { type: string }
+
+    # ---- ai ----------------------------------------------------------------
+    AiStatus:
+      type: object
+      required: [status]
+      properties:
+        status:          { type: string, enum: [online, degraded, offline] }
+        queueDepth:      { type: integer }
+        estimatedSeconds: { type: [integer, 'null'] }
+        instances:
+          type: object
+          properties:
+            interactive: { type: string, enum: [available, busy, down] }
+            heavy:       { type: string, enum: [available, gaming, busy, down], description: '"gaming" means the arbiter has yielded the GPU' }
+        writeToolsEnabled: { type: boolean }
+        lastHeartbeatAt:   { type: [string, 'null'], format: date-time }
+
+    AiToolDescriptor:
+      type: object
+      properties:
+        name:         { type: string }
+        description:  { type: string }
+        permission:   { type: [string, 'null'] }
+        mutating:     { type: boolean }
+        confirmation: { type: [string, 'null'], enum: [required, two_step, null] }
+        fastPath:     { type: boolean }
+
+    AiConversation:
+      type: object
+      properties:
+        id:           { type: string, format: uuid }
+        title:        { type: [string, 'null'] }
+        channel:      { type: string, enum: [web, discord] }
+        messageCount: { type: integer }
+        createdAt:    { type: string, format: date-time }
+        archivedAt:   { type: [string, 'null'], format: date-time }
+
+    # ---- admin -------------------------------------------------------------
+    AdminHealth:
+      allOf:
+        - $ref: '#/components/schemas/Health'
+        - type: object
+          properties:
+            eddn:
+              type: object
+              properties:
+                lagSeconds:        { type: number }
+                messagesPerSecond: { type: number }
+                parseFailureRate:  { type: number }
+                deadLetterCount:   { type: integer }
+            queues:
+              type: object
+              additionalProperties:
+                type: object
+                properties:
+                  waiting: { type: integer }
+                  active:  { type: integer }
+                  failed:  { type: integer }
+            database:
+              type: object
+              properties:
+                sizeMb:      { type: number }
+                connections: { type: integer }
+                slowQueries: { type: integer }
+            disk:
+              type: object
+              properties:
+                usedPct:   { type: number }
+                freeGb:    { type: number }
+            adapters:
+              type: object
+              additionalProperties:
+                type: object
+                properties:
+                  circuitState: { type: string, enum: [closed, open, half_open] }
+                  latencyP95Ms: { type: number }
+
+    AuditEntry:
+      type: object
+      properties:
+        id:         { type: string }
+        actor:      { $ref: '#/components/schemas/UserRef' }
+        actorType:  { type: string, enum: [user, bot, ai, system] }
+        action:     { type: string }
+        targetType: { type: [string, 'null'] }
+        targetId:   { type: [string, 'null'] }
+        before:     { type: [object, 'null'], additionalProperties: true }
+        after:      { type: [object, 'null'], additionalProperties: true }
+        requestId:  { type: [string, 'null'] }
+        createdAt:  { type: string, format: date-time }
