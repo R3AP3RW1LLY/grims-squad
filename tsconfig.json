@@ -1,0 +1,42 @@
+{
+  "extends": "./tsconfig.base.json",
+  "files": [],
+  "references": [
+    {
+      "path": "packages/shared"
+    },
+    {
+      "path": "packages/db"
+    },
+    {
+      "path": "packages/ed-domain"
+    },
+    {
+      "path": "packages/ed-clients"
+    },
+    {
+      "path": "packages/ai-tools"
+    },
+    {
+      "path": "packages/ui"
+    },
+    {
+      "path": "apps/api"
+    },
+    {
+      "path": "apps/bot"
+    },
+    {
+      "path": "apps/worker"
+    },
+    {
+      "path": "apps/eddn-collector"
+    },
+    {
+      "path": "apps/gsai"
+    },
+    {
+      "path": "tools"
+    }
+  ]
+}

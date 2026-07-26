@@ -1,0 +1,7 @@
+node_modules
+dist
+.next
+coverage
+pnpm-lock.yaml
+ssot/03-data/schema.prisma
+packages/db/prisma/schema.prisma

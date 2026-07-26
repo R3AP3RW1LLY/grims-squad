@@ -106,7 +106,7 @@ A task is not done until **all** of these are true:
 ## 6. CODE CONVENTIONS
 
 ```
-Runtime      Node 22 LTS · TypeScript strict
+Runtime      Node 24 LTS · TypeScript strict
 Monorepo     pnpm workspaces + Turborepo
 Backend      NestJS (Fastify adapter)
 Frontend     Next.js 15 App Router · React 19 · Tailwind v4

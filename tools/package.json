@@ -1,0 +1,16 @@
+{
+  "name": "@grims/tools",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Repo tooling: SSOT drift check, contrast check, invariant coverage.",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@grims/config": "workspace:*",
+    "@types/node": "^24.0.0",
+    "typescript": "^5.7.0",
+    "yaml": "^2.6.0"
+  }
+}

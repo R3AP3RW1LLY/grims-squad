@@ -1,0 +1,19 @@
+{
+  "name": "@grims/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Next.js 15 App Router. Public pages and the authed SPA shell.",
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b --noEmit false --emitDeclarationOnly",
+    "test": "vitest run --passWithNoTests",
+    "test:unit": "vitest run --passWithNoTests",
+    "clean": "rm -rf dist .next *.tsbuildinfo"
+  },
+  "devDependencies": {
+    "@grims/config": "workspace:*",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}

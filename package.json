@@ -1,0 +1,45 @@
+{
+  "name": "grims-squad",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Grim's Squad Hub — Elite Dangerous squadron platform",
+  "engines": {
+    "node": ">=24 <25",
+    "pnpm": ">=9"
+  },
+  "packageManager": "pnpm@11.17.0",
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "typecheck": "turbo run typecheck",
+    "lint": "eslint .",
+    "format": "prettier --write \"**/*.{ts,tsx,md,json,yaml,yml}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,md,json,yaml,yml}\"",
+    "test": "turbo run test",
+    "test:unit": "turbo run test:unit",
+    "test:invariants": "vitest run --project invariants",
+    "ssot:check": "tsx tools/ssot-drift-check.ts",
+    "ssot:sync": "tsx tools/ssot-sync.ts",
+    "contrast:check": "tsx tools/contrast-check.ts",
+    "invariants:check": "tsx tools/ssot-drift-check.ts",
+    "ci:local": "pnpm lint && pnpm typecheck && pnpm ssot:check && pnpm contrast:check && pnpm invariants:check && pnpm test",
+    "db:migrate:dev": "pnpm --filter @grims/db migrate:dev",
+    "db:seed": "pnpm --filter @grims/db seed",
+    "db:studio": "pnpm --filter @grims/db studio",
+    "db:reset": "pnpm --filter @grims/db reset",
+    "lint:fix": "eslint . --fix"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "prettier": "^3.4.0",
+    "tsx": "^4.19.0",
+    "turbo": "^2.3.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0",
+    "@eslint/js": "^9.17.0",
+    "eslint": "^9.17.0",
+    "eslint-config-prettier": "^9.1.0",
+    "typescript-eslint": "^8.18.0"
+  }
+}

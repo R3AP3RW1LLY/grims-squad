@@ -1,0 +1,75 @@
+# Local development stack.
+# Production compose is separate (infra/docker/compose.prod.yml, P0.7) — this file
+# is tuned for a laptop, not for the VPS memory budget in ssot/00-charter/constraints.md.
+
+name: grims-squad-dev
+
+services:
+  postgres:
+    # MUST be timescaledb-ha: it bundles BOTH TimescaleDB and pgvector.
+    # pgvector/pgvector has no TimescaleDB; timescale/timescaledb has no pgvector.
+    # Decision D10 — see ssot/03-data/indexes.md.
+    image: timescale/timescaledb-ha:pg16
+    container_name: grims-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: grims
+      POSTGRES_PASSWORD: devpassword
+      POSTGRES_DB: grimssquad
+      # Timescale's tuning tool is unhelpful in a dev container.
+      TIMESCALEDB_TELEMETRY: 'off'
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/home/postgres/pgdata/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U grims -d grimssquad']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    container_name: grims-redis
+    restart: unless-stopped
+    # noeviction, NOT allkeys-lru. Redis holds BullMQ queues; evicting a queued
+    # RAG re-index job under memory pressure silently drops an ACL update
+    # (ARCH-ADV A4, ssot/00-charter/constraints.md).
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 256mb
+      --maxmemory-policy noeviction
+    ports:
+      - '6379:6379'
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.11
+    container_name: grims-meilisearch
+    restart: unless-stopped
+    environment:
+      MEILI_MASTER_KEY: devmasterkey
+      MEILI_ENV: development
+      MEILI_NO_ANALYTICS: 'true'
+    ports:
+      - '7700:7700'
+    volumes:
+      - meilidata:/meili_data
+    healthcheck:
+      test: ['CMD', 'curl', '-fsS', 'http://localhost:7700/health']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:
+  redisdata:
+  meilidata:

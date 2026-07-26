@@ -12,7 +12,7 @@ Six deployable units (`web`, `api`, `bot`, `worker`, `eddn-collector`, `gsai`) s
 
 - `apps/`: `web` (Next.js 15 App Router, React 19), `api` (NestJS 10 on the Fastify adapter), `bot` (discord.js v14), `worker` (BullMQ), `eddn-collector` (zeromq), `gsai` (gateway + agent, deployed to the local box).
 - `packages/`: `db` (Prisma), `shared` (Zod schemas, DTOs, enums, permissions), `ed-clients` (external adapters), `ed-domain` (ship maths, FDevIDs mapping), `ui` (design system), `ai-tools` (tool registry), `config` (eslint/tsconfig/prettier bases).
-- Node 22 LTS. `strict: true`, `noUncheckedIndexedAccess: true`, `exactOptionalPropertyTypes: true`. `any` is banned.
+- Node 24 LTS. `strict: true`, `noUncheckedIndexedAccess: true`, `exactOptionalPropertyTypes: true`. `any` is banned.
 - **`packages/shared` holds the Zod schemas used by both ends.** This is the single largest quality-of-life win in the design and the main justification for the monorepo.
 - Cross-package imports only via `@grims/*` aliases; deep relative imports across package boundaries are a lint error.
 - The one exception to "TypeScript everywhere": the **EDMC plugin is Python**, because EDMC is a Python host. It lives in `plugins/edmc-grimssquad/` and communicates only over the documented HTTP contract in `04-contracts/telemetry-contract.md`.
