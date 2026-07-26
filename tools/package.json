@@ -5,12 +5,15 @@
   "type": "module",
   "description": "Repo tooling: SSOT drift check, contrast check, invariant coverage.",
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:unit": "vitest run"
   },
   "devDependencies": {
     "@grims/config": "workspace:*",
     "@types/node": "^24.0.0",
     "typescript": "^5.7.0",
-    "yaml": "^2.6.0"
+    "yaml": "^2.6.0",
+    "vitest": "^3.0.0"
   }
 }

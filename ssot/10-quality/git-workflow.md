@@ -120,16 +120,19 @@ retained only to explain why the transition cost nothing.
 | Force push to `main` | **blocked** | |
 | Deleting `main` | **blocked** | |
 | Linear history | **required** | Enforces squash-only mechanically. |
-| Required status checks | **none yet** | ⚠ CI does not exist until P0.6. Adding required checks now would block every PR on a check that never runs. **P0.6 must add them** — see below. |
+| Required status checks | **`static`, `test`, `build`, `secret scan`, `dependency audit`** — strict | ✅ Enabled 2026-07-26 when P0.6 landed the pipeline. CI is now a genuine merge precondition, not a convention. |
 | Workflow permissions | write, may approve PRs | So CI can label, comment and auto-close. |
 | Issues | enabled | The route for outside bug reports. |
 | Wiki / Projects | disabled | The SSOT is the documentation. |
 
-### ★ P0.6 must close the status-check gap
+### The status-check gap — closed 2026-07-26
 
-Right now branch protection requires a PR but **checks nothing**, because no CI exists. That is the
-correct state for a repository with no pipeline — but it means protection is currently procedural,
-not mechanical.
+Between repo creation and P0.6, branch protection required a PR but **checked nothing**, because no
+CI existed. That gap was documented rather than glossed over, and it bit exactly once: PR #8 merged
+with a failing `ssot:check` because nothing was enforcing it.
+
+It is now closed. The checks below are required and `strict` (a branch must be up to date with
+`main` before merging).
 
 **When P0.6 lands the pipeline, it must also run:**
 
@@ -142,8 +145,8 @@ gh api -X PATCH repos/R3AP3RW1LLY/grims-squad/branches/main/protection/required_
   -f 'contexts[]=build' -f 'contexts[]=trivy'
 ```
 
-This is an acceptance criterion on P0.6, not a footnote — until it runs, "CI green" is not a
-merge precondition, it is a convention.
+**Required approvals remain 0 and `enforce_admins` remains false**, so autonomous merge still works
+— CI is the gate, not a human clicking approve.
 
 ### Outside pull requests
 
