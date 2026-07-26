@@ -66,3 +66,5 @@ This project is non-commercial and must remain so — the right to use Frontier'
 Ship-fit mathematics is ported from [Coriolis](https://github.com/EDCD/coriolis) (MIT) with attribution.
 
 *Fly safe, CMDR. o7*
+
+<!-- autonomy check: this line is removed by the same PR flow that added it -->
