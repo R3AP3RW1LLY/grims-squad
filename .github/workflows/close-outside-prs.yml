@@ -1,0 +1,81 @@
+name: Close outside pull requests
+
+# This repository is PUBLIC, which means anyone can fork it and open a pull request.
+# GitHub provides no setting that prevents that — it can only be handled after the fact.
+# This workflow closes any PR opened by someone who is not a collaborator.
+#
+# Honest limitation: the PR is publicly visible for the few seconds before this runs.
+# If that matters, the repository has to be private — see decision D21 in ssot/STATUS.md.
+
+on:
+  pull_request_target:
+    types: [opened, reopened]
+
+# pull_request_target runs in the context of the BASE repo, so it has write access.
+# It must therefore NEVER check out or execute code from the PR head — doing so would
+# hand a fork's code our write token. This workflow reads metadata only.
+permissions:
+  pull-requests: write
+
+jobs:
+  close-if-outside:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Close PRs from non-collaborators
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const author = pr.user.login;
+
+            // Bot accounts we accept PRs from.
+            const ALLOWED_BOTS = ['dependabot[bot]', 'renovate[bot]', 'github-actions[bot]'];
+            if (ALLOWED_BOTS.includes(author)) {
+              core.info(`${author} is an allowed bot — leaving open.`);
+              return;
+            }
+
+            let permission = 'none';
+            try {
+              const { data } = await github.rest.repos.getCollaboratorPermissionLevel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                username: author,
+              });
+              permission = data.permission;
+            } catch (err) {
+              // 404 means "not a collaborator at all" — the normal outside-contributor case.
+              if (err.status !== 404) throw err;
+            }
+
+            if (['admin', 'write', 'maintain'].includes(permission)) {
+              core.info(`${author} has ${permission} access — leaving open.`);
+              return;
+            }
+
+            core.warning(`${author} is not a collaborator (permission: ${permission}) — closing.`);
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr.number,
+              body: [
+                "Thanks for the interest — but this repository does not accept outside pull requests.",
+                "",
+                "Grim's Squad Hub is built by the squadron for the squadron, and changes go through",
+                "our own review gates (`ssot/10-quality/adversarial-reviews.md`). This PR has been",
+                "closed automatically.",
+                "",
+                "If you have spotted a genuine bug or a security issue, please open an **issue**",
+                "instead — those are read.",
+                "",
+                "o7",
+              ].join("\n"),
+            });
+
+            await github.rest.pulls.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+              state: 'closed',
+            });

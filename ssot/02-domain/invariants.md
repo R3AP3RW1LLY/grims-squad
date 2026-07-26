@@ -160,6 +160,12 @@ property for but did not make structurally impossible.
 **INV-044** `DATA` `due:P3` · `market_orders` reflects only what a market currently trades. A commodity absent from an EDDN market message is deleted for that market in the same transaction as the upsert.
 *Test:* ingest a market listing Tritium, then the same market without it; assert the Tritium row is gone and does not appear in `best_trades`. *(DATA-INTEGRITY B6 — an upsert-only collector leaves ghost supply inside the freshness window forever.)*
 
+**INV-046** `SEC` `due:P1` · **A tenure or loyalty rank never grants a permission.** `SquadronRank.roleKey` is NULL for every rank of kind `tenure` or `loyalty`, and a member's effective mask is identical whether they are a Sergeant or a Grand Lord General.
+*Test:* compute the effective mask for a member at 1 month and at 14 months holding `GMSD: Legend`; assert the two masks are **equal** and equal to the `member` preset. Assert a `tenure`/`loyalty` rank row with a non-NULL `roleKey` fails a constraint. *(Human decision 2026-07-26 — time served must never confer moderation power.)*
+
+**INV-047** `DATA` `due:P1` · A tenure rank is **computed** from `guildJoinedAt`, never stored per user, so it cannot drift from the truth. A reserved rank has at most one active holder.
+*Test:* move a member's `guildJoinedAt` back by 12 months; assert their displayed rank changes with no write to `rank_awards`. Assert a second active award of `galactic_admiral` is rejected.
+
 **INV-045** `OPS` `due:P3` · A batch write never loses good rows because of one bad row. Market rows whose parent station has not yet arrived are buffered and drained, not dropped, and the buffer depth is a monitored metric.
 *Test:* submit a 500-row batch containing 1 row for an unknown `marketId`; assert 499 rows written, 1 buffered, and `writeFailureRate` non-zero. *(ARCH-ADV A6 — a mandatory FK plus an all-or-nothing statement lost 499 observations per orphan, while `parseFailureRate` stayed at 0.0%.)*
 
@@ -183,3 +189,5 @@ property for but did not make structurally impossible.
 **The table above is the human-readable mirror.** `due:Pn` on each invariant is the machine-readable form CI actually reads; if they disagree, `due:` wins.
 
 Review-panel additions: INV-037, INV-041 (P1) · INV-039 (P2) · INV-042, INV-043, INV-044, INV-045 (P3) · INV-038, INV-040 (P8).
+
+Rank-model additions (human decision 2026-07-26): INV-046, INV-047 (P1).

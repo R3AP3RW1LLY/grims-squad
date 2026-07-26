@@ -27,6 +27,13 @@ Run by `pnpm db:seed`. Idempotent: upsert by natural key, never insert blindly.
 
 **Achievements** — the badge catalogue.
 
+**Squadron ranks** — the full ladder from `02-domain/rings-and-roles.md`: nine tenure ranks with
+their `tenureMonths` thresholds, six loyalty ranks, four leadership ranks and two reserved ranks.
+
+> **`roleKey` MUST be NULL for every `tenure` and `loyalty` row.** The seed asserts this before
+> writing; a rank that quietly acquired a role mapping is exactly the INV-046 violation the
+> distinction exists to prevent, and a seed is the easiest place for it to creep in.
+
 > **Not seeded, deliberately:** `role_mappings`. Discord role IDs are decision D2 and are environment-specific. Seeding guessed IDs would silently grant or withhold access — a security defect. The admin console's mapping editor is the only way they arrive, and P1 exit requires them configured.
 
 ---

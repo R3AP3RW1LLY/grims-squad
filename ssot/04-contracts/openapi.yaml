@@ -36,8 +36,8 @@ servers:
     description: Production
     variables:
       domain:
-        default: grimssquad.example
-        description: Real domain pending decision D1
+        default: grims-squad.com
+        description: Confirmed 2026-07-26 (decision D1, resolved)
   - url: http://localhost:3000/v1
     description: Local development
 

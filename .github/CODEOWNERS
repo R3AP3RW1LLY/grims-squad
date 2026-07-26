@@ -1,0 +1,26 @@
+# CODEOWNERS — Grim's Squad Hub
+#
+# Ownership is declared for clarity and for GitHub's review-request routing.
+# It is deliberately NOT paired with a "required reviewers" branch-protection rule:
+# the build is agent-driven and a required human approval would gate every merge,
+# which is exactly what we are avoiding (ADR-018).
+#
+# The real merge gate is CI plus the adversarial review panels
+# (ssot/10-quality/adversarial-reviews.md), not a GitHub approval click.
+
+# Everything, by default.
+*                       @R3AP3RW1LLY
+
+# The SSOT is the law. Changes here outrank code (AGENTS.md §1).
+/ssot/                  @R3AP3RW1LLY
+
+# Accepted decisions are never edited, only superseded. New proposals go in proposed/.
+/ssot/01-decisions/     @R3AP3RW1LLY
+
+# Security-critical paths. These are tier 3 by definition (ADR-021) and a human
+# merges them regardless of what branch protection permits.
+/ssot/02-domain/invariants.md      @R3AP3RW1LLY
+/ssot/03-data/schema.prisma        @R3AP3RW1LLY
+/ssot/04-contracts/permissions.ts  @R3AP3RW1LLY
+/ssot/06-ai/tools.yaml             @R3AP3RW1LLY
+/.github/                          @R3AP3RW1LLY

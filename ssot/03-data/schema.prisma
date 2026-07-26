@@ -269,6 +269,16 @@ enum DeliveryState {
   suppressed
 }
 
+/// The four rank families. ONLY `leadership` and `reserved` carry permissions — `tenure` and
+/// `loyalty` are progression titles (human decision, 2026-07-26). Time served must never grant
+/// moderation power, so a tenure rank is a BADGE, never an authorisation input (INV-046).
+enum RankKind {
+  tenure /// Auto-conferred by months in the squadron. Cosmetic.
+  loyalty /// Officer-awarded at their discretion. Cosmetic.
+  leadership /// Permission-bearing, via its mapped internal role.
+  reserved /// Permission-bearing. Grim and his second only.
+}
+
 /// FDevIDs reference categories. Internal names are NEVER shown to a user (INV-020).
 enum ReferenceKind {
   commodity
@@ -340,6 +350,8 @@ model User {
   telemetryEvents     TelemetryEvent[]
   achievementAwards   AchievementAward[]    @relation("AchievementHolder")
   achievementsAwarded AchievementAward[]    @relation("AchievementAwarder")
+  rankAwards          RankAward[]           @relation("RankHolder")
+  ranksAwarded        RankAward[]           @relation("RankAwarder")
 
   @@index([status])
   @@index([lastSeenAt])
@@ -1631,6 +1643,52 @@ model FeatureFlag {
   updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   @@map("feature_flags")
+}
+
+/// A rank in the squadron's ladder. Reference data, seeded and editable in the admin console.
+/// Ranks are DISPLAY IDENTITY. Authorisation comes from `roles`/`user_roles` and nothing else
+/// (INV-001) — a rank influences permissions only where `roleKey` maps it to one, which is
+/// permitted for `leadership` and `reserved` and forbidden for `tenure` and `loyalty` (INV-046).
+model SquadronRank {
+  key            String   @id
+  kind           RankKind
+  name           String
+  /// Seniority for display and sorting. Higher is more senior. Confers nothing.
+  order          Int
+  /// For kind=tenure ONLY: months in the squadron at which this rank is conferred, computed
+  /// from `discord_identities.guildJoinedAt`. Tenure ranks are derived, never stored per user.
+  tenureMonths   Int?     @map("tenure_months")
+  /// For kind=leadership/reserved ONLY: the internal role key that actually carries the
+  /// permissions. MUST be NULL for tenure and loyalty ranks — enforced by INV-046.
+  roleKey        String?  @map("role_key")
+  /// Reserved ranks are assignable to at most one member at a time.
+  isSingleHolder Boolean  @default(false) @map("is_single_holder")
+  description    String?
+
+  awards RankAward[]
+
+  @@index([kind, order])
+  @@map("squadron_ranks")
+}
+
+/// An officer-awarded rank held by a member. Used for `loyalty` (awarded at leadership's
+/// discretion) and for `reserved`. Tenure ranks are NEVER stored here — they are computed from
+/// join date, so they cannot drift from the truth.
+model RankAward {
+  userId      String    @map("user_id") @db.Uuid
+  rankKey     String    @map("rank_key")
+  awardedById String?   @map("awarded_by_id") @db.Uuid
+  note        String?
+  awardedAt   DateTime  @default(now()) @map("awarded_at") @db.Timestamptz(6)
+  revokedAt   DateTime? @map("revoked_at") @db.Timestamptz(6)
+
+  user      User         @relation("RankHolder", fields: [userId], references: [id], onDelete: Cascade)
+  awardedBy User?        @relation("RankAwarder", fields: [awardedById], references: [id], onDelete: SetNull)
+  rank      SquadronRank @relation(fields: [rankKey], references: [key], onDelete: Cascade)
+
+  @@id([userId, rankKey])
+  @@index([rankKey])
+  @@map("rank_awards")
 }
 
 /// A squadron badge definition. Cheap to build, disproportionately effective for retention.

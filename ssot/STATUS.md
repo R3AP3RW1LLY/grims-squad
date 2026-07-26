@@ -27,12 +27,12 @@ Status values: `NOT_STARTED | IN_PROGRESS | BLOCKED | REVIEW | DONE`.
 |------|--------|-----------|-------|
 | Frontier cAPI developer access | NOT_REQUESTED | — | BLOCKS P1.8 verification (`trust_tier` 3). Apply day 1 at `user.frontierstore.net`. Discretionary approval, days-to-weeks. Fallback path (P1.8b, Inara nonce + officer manual) ships regardless. |
 | Inara API app whitelisting | NOT_REQUESTED | — | Blocks enrichment only (nightly cross-check). Apply day 1 — PM CMDR Artie with app name, purpose, expected volume, non-commercial status. Unapproved key returns `400 This application has no access allowed.` |
-| Domain registered | NOT_STARTED | — | BLOCKS P0.7. See decision D1. |
+| Domain registered | **CONFIRMED** | 2026-07-26 | **`grims-squad.com`**. Still to do: point DNS at Cloudflare. |
 | VPS provisioned (4 vCPU / 8 GB / 160 GB NVMe) | NOT_STARTED | — | BLOCKS P0.7. Harden on provision: SSH keys only, fail2ban, ufw, unattended-upgrades. |
 | Cloudflare account + DNS delegated | NOT_STARTED | — | BLOCKS P0.7 (TLS, Turnstile, Access, Tunnel). |
-| Discord app + bot created | NOT_STARTED | — | BLOCKS P1.1. **Must enable the SERVER MEMBERS privileged intent** or `guild_roles` is silently empty. |
+| Discord app + bot created | NOT_STARTED | — | BLOCKS P1.1. Guild ID known (`801929816596152320`). **Must enable the SERVER MEMBERS privileged intent** or `guild_roles` is silently empty. Role IDs still needed — see D2. |
 | Object storage bucket | NOT_STARTED | — | BLOCKS P2.3. See decision D5. |
-| Git remote | NOT_STARTED | — | Human will advise location. Until then git is local-only; `10-quality/git-workflow.md` §"Local mode" applies. |
+| Git remote | **CREATED** | 2026-07-26 | `github.com/R3AP3RW1LLY/grims-squad`, **public**. Branch protection configured; outside PRs auto-closed by workflow. Local mode no longer applies. |
 | NVIDIA driver 580+ on the AI box | NOT_STARTED | — | BLOCKS P8.1. Verify both GPUs enumerate before anything else. |
 | Ollama models pulled + benchmarked | NOT_STARTED | — | BLOCKS P8.2. ≥75% tool-call reliability required before building on it. |
 
@@ -56,8 +56,8 @@ _Adapters written from documentation, not yet tested against the live API. Every
 ## Open decisions awaiting human
 | # | Question | Blocking | Asked |
 |---|----------|----------|-------|
-| D1 | What is the real domain name? (spec uses `grimssquad.example` throughout) | P0.7 | 2026-07-25 |
-| D2 | Discord guild ID, and the **actual** role names/IDs in your server, mapped to the seven internal roles in `02-domain/rings-and-roles.md`. The spec lists *typical* names, not yours. | P1.3, P1.4 | 2026-07-25 |
+| ~~D1~~ | ~~Real domain name~~ — **RESOLVED 2026-07-26: `grims-squad.com`.** | ~~P0.7~~ | closed |
+| D2 | **PARTIALLY RESOLVED 2026-07-26.** Guild ID confirmed: `801929816596152320`. **Still needed: the Discord ROLE IDs.** A guild ID alone cannot map roles. Once the bot is in the server I can read them myself — or run `Server Settings → Roles → right-click a role → Copy Role ID` (Developer Mode on) for each of: the four leadership ranks, the two reserved ranks, and whatever role marks a plain member. Tenure and loyalty ranks need **no** Discord mapping, since they grant nothing. | P1.3, P1.4 | 2026-07-25 |
 | D3 | Home system (name + `SystemAddress`) and the list of tracked minor factions, flagged `is_ours`. | P3.4, P4.1 | 2026-07-25 |
 | D4 | EDDN prefilter radius in ly around home. Spec says "within X ly" and never sets X. Recommend 250 ly to start; it is the single biggest lever on disk usage. | P3.4 | 2026-07-25 |
 | D5 | Object storage: Cloudflare R2 or self-hosted MinIO on the VPS? Spec offers both, picks neither. | P2.3 | 2026-07-25 |
@@ -72,6 +72,7 @@ _Adapters written from documentation, not yet tested against the live API. Every
 | D14 | Squadron size today, and expected in 12 months. A1 assumed 20–150 CMDRs; this sets connection-pool, rate-limit and Meilisearch sizing. | P0.2 | 2026-07-25 |
 | D15 | Are there members under 18 in the squadron? Spec §10.4 raises this; the answer changes moderation policy and what telemetry we should collect at all. | P2.6 | 2026-07-25 |
 | D16 | **Embedding dimension conflict in the source spec.** §6.1 declares `embedding VECTOR(1024)` while §8.2.4 pins `nomic-embed-text`, which emits **768** dimensions. The column must equal the model's output width or every insert fails. The schema currently carries 1024 because that is what the spec's DDL states. Resolve before P8.9 — changing it later forces a full re-index of every vector. Recommend either 768 with `nomic-embed-text`, or a 1024-dimension embedder, chosen deliberately since the embedding model is pinned forever (ADR-011). | P8.9 | 2026-07-25 |
+| D20 | **Rank-ladder confirmations — cosmetic, so not worth blocking on.** (a) `Squadron Leader` is placed at the **top** of the leadership tier, above Chief Fleet Commander — it was listed above the numbered ranks and "ascending" was confirmed for the three below it. (b) All three numbered leadership ranks map to `officer`; if Chief Fleet Commander or First Commander should also hold `ROLE_MANAGE`, that is a one-line seed change. (c) The ladder deliberately has no 8, 10 or 11-month rank — it steps 7 → 9 → 12 as specified. | P1.3 | 2026-07-26 |
 | D17 | Prisma major version pin. The spec's schema style (`url = env("DATABASE_URL")` in the datasource block) is Prisma ≤6. Prisma 7 moved connection URLs to `prisma.config.ts` and would require rewriting the datasource block. SSOT schema validates clean on **Prisma 6.19.3**. Confirm we pin `prisma@6` for now, or accept the Prisma 7 migration in P0. | P0.2 | 2026-07-25 |
 | D18 | **Two review findings need a squadron-process answer, not an engineering one.** (a) RED-TEAM R2 splits the recruitment application into an officer-only deliberation thread and an applicant-visible conversation thread — confirm officers are content to deliberate somewhere the applicant provably cannot read, and that a separate applicant-facing thread is wanted at all. (b) ARCH-ADV A7 caps staging at 1 GB and gates its deploy on free memory; confirm you would rather a staging deploy be *skipped* than risk production, since the alternative is a second VPS at ~$8–15/mo. | P2.7, P0.7 | 2026-07-25 |
 

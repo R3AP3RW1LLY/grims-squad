@@ -13,19 +13,105 @@
 | 2 | Officer / leadership | `FORUM_VIEW_OFFICER` |
 | 2+ | Sysadmin | `SITE_CONFIG` |
 
+## ★ Ranks are not roles
+
+This is the most important distinction in the squadron model, and getting it wrong would be a
+security defect rather than a cosmetic one.
+
+| | **Rank** | **Role** |
+|---|---|---|
+| What it is | The member's title in the squadron ladder | A bundle of permissions |
+| Stored in | `squadron_ranks` / `rank_awards`, or computed from join date | `roles` / `user_roles` |
+| Grants permissions? | **Only `leadership` and `reserved` ranks, via their mapped `roleKey`** | Yes, always |
+| Visible as | A badge on the profile, forum posts, roster | Navigation and capability |
+
+**Human decision, 2026-07-26: tenure and loyalty ranks are progression titles and grant nothing.**
+Time served must never confer moderation power — a member of fourteen months is a *Grand Lord
+General* and still cannot lock a thread. This is INV-046 and it is machine-checked.
+
+---
+
+## Rank ladder
+
+### Standard ranks — automatic, by months in the squadron
+Computed from `discord_identities.guildJoinedAt`. **Never stored per user**, so they cannot drift
+from the truth. Cosmetic.
+
+| Months | Rank | `order` |
+|---:|---|---:|
+| 1 | Sergeant | 10 |
+| 2 | Master Sergeant | 20 |
+| 3 | 2nd Lieutenant | 30 |
+| 4 | 1st Lieutenant | 40 |
+| 5 | Commander | 50 |
+| 6 | Master Commander | 60 |
+| 7 | General | 70 |
+| 9 | Lord General | 80 |
+| 12 | Grand Lord General | 90 |
+
+> Note there is deliberately **no 8, 10 or 11-month rank** — the ladder steps 7 → 9 → 12, as
+> specified. A member at 10 months holds *Lord General*.
+
+### Loyalty ranks — officer-awarded
+Granted by leadership at their discretion; **no automatic trigger**. A member holds at most one,
+and awarding a higher one supersedes the lower. Recorded in `rank_awards`, audited, revocable.
+Cosmetic.
+
+| Rank | `order` |
+|---|---:|
+| GMSD: Loyalty I | 110 |
+| GMSD: Loyalty II | 120 |
+| GMSD: Loyalty III | 130 |
+| GMSD: Loyalty IV | 140 |
+| GMSD: Loyalty V | 150 |
+| GMSD: Legend | 160 |
+
+### Squadron leadership ranks — **permission-bearing**
+Ascending: `Sector Overseer` is the entry leadership rank; `Squadron Leader` is the most senior.
+
+| Rank | `order` | Maps to role | Ring |
+|---|---:|---|---|
+| 1st: Sector Overseer | 210 | `officer` | 2 |
+| 2nd: First Commander | 220 | `officer` | 2 |
+| 3rd: Chief Fleet Commander | 230 | `officer` | 2 |
+| Squadron Leader | 240 | `commander` | 2 |
+
+### Reserved ranks — **permission-bearing, single holder each**
+
+| Rank | `order` | Held by | Maps to role | Ring |
+|---|---:|---|---|---|
+| Prime Legate | 900 | Second in command | `sysadmin` | 2+ |
+| Galactic Admiral | 1000 | Grim — Community Leader | `sysadmin` | 2+ |
+
+> **⚠ Two points to confirm — cosmetic if wrong, so not worth blocking on (decision D20).**
+> 1. `Squadron Leader` is placed at the **top** of the leadership tier, above Chief Fleet
+>    Commander. It was listed above the numbered ranks in the source, and "ascending" was
+>    confirmed for the numbered three.
+> 2. The three numbered leadership ranks all map to `officer`. If Chief Fleet Commander or First
+>    Commander should additionally hold `ROLE_MANAGE`, say so — it is a one-line seed change.
+
+---
+
 ## Internal roles
 
-Hierarchical roles. Each is a named bundle of permissions, editable in the admin console. `rankOrder` is display and precedence only — **it confers nothing**.
+The permission bundles. **Ranks map onto these; nothing else does.** Each is editable in the
+admin console. `rankOrder` here is display precedence only — **it confers nothing**.
 
-| Key | Name | Rank | Ring | Purpose |
-|---|---|---|---|---|
-| `guest` | Guest | 0 | 0 | The unauthenticated baseline. Not stored against a user; it is the empty-mask default. |
-| `applicant` | Recruit | 10 | 0.5 | Application in flight. Public forum, own application thread, nothing else. |
-| `member` | Squadron Member | 20 | 1 | The main body. Everything the squadron does day to day. |
-| `wing_lead` | Wing Leader | 30 | 1.5 | Member plus the ability to create and run operations. |
-| `officer` | Officer | 40 | 2 | Moderation, member management, BGS orders, audit visibility. |
-| `commander` | Squadron Leader | 50 | 2 | Officer plus role management. |
-| `sysadmin` | Admin | 60 | 2+ | Site configuration, integration keys, the AI kill switch. |
+| Key | Name | Order | Ring | Held by which rank | Purpose |
+|---|---|---|---|---|---|
+| `guest` | Guest | 0 | 0 | — | Unauthenticated baseline. Never stored against a user. |
+| `applicant` | Recruit | 10 | 0.5 | — | Application in flight. Public forum and their own applicant thread. |
+| `member` | Squadron Member | 20 | 1 | **every tenure and loyalty rank** | The main body. Everything the squadron does day to day. |
+| `wing_lead` | Wing Leader | 30 | 1.5 | *(orthogonal — see below)* | Member plus creating and running operations. |
+| `officer` | Officer | 40 | 2 | Sector Overseer · First Commander · Chief Fleet Commander | Moderation, member management, BGS orders, audit visibility. |
+| `commander` | Command | 50 | 2 | Squadron Leader | Officer plus role management. |
+| `sysadmin` | Admin | 60 | 2+ | Prime Legate · Galactic Admiral | Site configuration, integration keys, the AI kill switch. |
+
+**`wing_lead` is not a rank.** It is an appointment — a member trusted to run ops — and is granted
+independently of the ladder. A *Sergeant* can be a wing lead; a *Grand Lord General* need not be.
+The role's name was `commander` in the original model and is renamed **`command`** in display
+only, because *Commander* is now a five-month tenure rank and the collision would be actively
+confusing on a profile page.
 
 ## Orthogonal tags
 
@@ -122,6 +208,9 @@ Notes on non-obvious placements:
   > ownership predicate. Officers post to whichever they intend; nothing bridges them
   > automatically.
 - **`guest` holds only `FORUM_VIEW_PUBLIC`** and is never persisted as a role row.
+- **No tenure or loyalty rank appears in this table at all**, and that is the point. Every member
+  from *Sergeant* to *Grand Lord General* to *GMSD: Legend* holds exactly the `member` bundle.
+  Their rank changes their badge, their sort order on the roster and nothing else (INV-046).
 
 ## Forum category tree and its permissions
 
