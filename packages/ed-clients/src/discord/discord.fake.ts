@@ -11,6 +11,7 @@ interface FakeMember {
   avatar: string | null;
   roles: string[];
   joinedAt: string;
+  nick: string | null;
   inGuild: boolean;
 }
 
@@ -51,8 +52,15 @@ export class DiscordFake implements IDiscordIdentityProvider {
       avatar: m.avatar ?? existing?.avatar ?? null,
       roles: m.roles ?? existing?.roles ?? [],
       joinedAt: m.joinedAt ?? existing?.joinedAt ?? '2024-01-01T00:00:00.000Z',
+      nick: existing?.nick ?? null,
       inGuild: true,
     });
+  }
+
+  /** Sets or clears the member SERVER PROFILE nickname. */
+  setNick(discordUserId: string, nick: string | null): void {
+    const m = this.#members.get(discordUserId);
+    if (m !== undefined) m.nick = nick;
   }
 
   /** A real Discord user who is simply not in our guild. */
@@ -63,6 +71,7 @@ export class DiscordFake implements IDiscordIdentityProvider {
       avatar: null,
       roles: [],
       joinedAt: '2024-01-01T00:00:00.000Z',
+      nick: null,
       inGuild: false,
     });
   }
@@ -113,6 +122,6 @@ export class DiscordFake implements IDiscordIdentityProvider {
     if (guildId !== this.#guildId) return null;
     const m = this.#members.get(id);
     if (m === undefined || !m.inGuild) return null;
-    return { roles: [...m.roles], nick: null, joinedAt: m.joinedAt };
+    return { roles: [...m.roles], nick: m.nick, joinedAt: m.joinedAt };
   }
 }

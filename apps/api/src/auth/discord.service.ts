@@ -180,7 +180,15 @@ export class DiscordAuthService {
     const result = await this.store.upsertOnLogin({
       discordUserId: user.id,
       username: user.username,
-      displayName: user.globalName ?? user.username,
+      guildNick: member.nick,
+      // Precedence: server nickname > global name > username.
+      //
+      // The squadron asks members to set their server nickname to their CMDR
+      // name, so it is the most accurate identity we can read. Reaching for
+      // globalName first pulls in whatever they use across the whole of Discord
+      // — frequently their REAL NAME — and publishes it on the roster. That is a
+      // privacy regression nobody asked for, and it already happened once here.
+      displayName: member.nick ?? user.globalName ?? user.username,
       avatar: user.avatar,
       guildRoles: member.roles,
       guildJoinedAt: new Date(member.joinedAt),

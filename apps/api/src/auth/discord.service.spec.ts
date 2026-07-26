@@ -297,3 +297,66 @@ describe('offline guarantee', () => {
     expect(discord.networkCalls).toBe(0);
   });
 });
+
+// ---------------------------------------------------------- display identity
+describe('display name', () => {
+  it('prefers the SERVER NICKNAME over the global name', async () => {
+    // Members are asked to set their server nickname to their CMDR name, so it
+    // is the most accurate identity available to us.
+    discord.addMember('7', { username: 'r3ap3r_22545', globalName: 'Shawn Wilson' });
+    discord.setNick('7', 'PEBBLEMERCHANT');
+    const a = svc.beginLogin('/');
+    await svc.completeLogin({ code: 'code-for-7', ...a });
+    expect(store.users[0]?.displayName).toBe('PEBBLEMERCHANT');
+    expect(store.identities[0]?.guildNick).toBe('PEBBLEMERCHANT');
+  });
+
+  it('does NOT publish the global name when a nickname exists', async () => {
+    // A Discord global name is frequently the member REAL NAME. Putting it on a
+    // roster because it happened to be the first field we reached for is a
+    // privacy regression nobody asked for.
+    discord.addMember('7', { username: 'cmdr_x', globalName: 'Jane Q Realname' });
+    discord.setNick('7', 'HELLFIRE');
+    const a = svc.beginLogin('/');
+    await svc.completeLogin({ code: 'code-for-7', ...a });
+    expect(JSON.stringify(store.users)).not.toContain('Realname');
+  });
+
+  it('falls back to global name, then username, when no nickname is set', async () => {
+    discord.addMember('8', { username: 'plain_user', globalName: 'Global Name' });
+    let a = svc.beginLogin('/');
+    await svc.completeLogin({ code: 'code-for-8', ...a });
+    expect(store.users[0]?.displayName).toBe('Global Name');
+
+    discord.addMember('9', { username: 'only_username', globalName: null });
+    a = svc.beginLogin('/');
+    await svc.completeLogin({ code: 'code-for-9', ...a });
+    expect(store.users[1]?.displayName).toBe('only_username');
+  });
+
+  it('updates the display name when the member changes their nickname', async () => {
+    discord.addMember('7', { username: 'u' });
+    discord.setNick('7', 'OLD NAME');
+    let a = svc.beginLogin('/');
+    await svc.completeLogin({ code: 'code-for-7', ...a });
+
+    discord.setNick('7', 'NEW NAME');
+    a = svc.beginLogin('/');
+    await svc.completeLogin({ code: 'code-for-7', ...a });
+    // Discord is the source of truth; a rename there must propagate here.
+    expect(store.users[0]?.displayName).toBe('NEW NAME');
+    expect(store.users).toHaveLength(1);
+  });
+
+  it('reverts to the global name if the nickname is cleared', async () => {
+    discord.addMember('7', { username: 'u', globalName: 'Global' });
+    discord.setNick('7', 'NICK');
+    let a = svc.beginLogin('/');
+    await svc.completeLogin({ code: 'code-for-7', ...a });
+    discord.setNick('7', null);
+    a = svc.beginLogin('/');
+    await svc.completeLogin({ code: 'code-for-7', ...a });
+    expect(store.users[0]?.displayName).toBe('Global');
+    expect(store.identities[0]?.guildNick).toBeNull();
+  });
+});

@@ -9,6 +9,14 @@
 export interface IdentityUpsertInput {
   readonly discordUserId: string;
   readonly username: string;
+  /**
+   * The member's SERVER PROFILE nickname, if they set one. The squadron asks
+   * members to set this to their in-game CMDR name, which makes it both the
+   * most accurate identity available and the safest — a Discord global name
+   * frequently carries a real name, whereas a nickname is chosen for this
+   * server specifically.
+   */
+  readonly guildNick: string | null;
   readonly displayName: string;
   readonly avatar: string | null;
   readonly guildRoles: readonly string[];
