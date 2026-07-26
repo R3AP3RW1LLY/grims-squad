@@ -16,3 +16,9 @@ onlyBuiltDependencies:
   - prisma
   - "@prisma/client"
   - "@prisma/engines"
+
+# Transitive advisory: brace-expansion <=5.0.7 (DoS via unbounded expansion).
+# Reached only through eslint -> minimatch, i.e. dev-time tooling, never runtime.
+# Overridden rather than ignored: a suppressed advisory is one nobody revisits.
+overrides:
+  brace-expansion@<5.0.8: ">=5.0.8"
