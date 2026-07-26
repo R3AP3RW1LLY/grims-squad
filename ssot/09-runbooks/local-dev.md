@@ -24,13 +24,13 @@ pnpm db:seed                    # roles, categories, site config
 pnpm db:seed:reference          # FDevIDs commodity/module/ship names
 pnpm db:seed:dev                # deterministic fixtures — NEVER runs in production
 
-pnpm dev                        # web :3001, api :3000
+pnpm dev                        # web :5000, api :5001
 ```
 
 ## Verify the stack is actually working
 
 ```bash
-curl -s localhost:3000/v1/health | jq
+curl -s localhost:5001/v1/health | jq
 # expect: status "ok", every check "ok"
 
 docker compose -f infra/docker/compose.dev.yml exec postgres \
@@ -106,8 +106,8 @@ If any of those five are missing, the migration is incomplete — see `03-data/i
 
 | Port | Service |
 |---|---|
-| 3000 | api |
-| 3001 | web |
+| 5000 | **web** |
+| 5001 | **api** |
 | 3300 | coriolis (P7) |
 | 5432 | postgres |
 | 6379 | redis |
