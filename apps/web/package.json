@@ -5,15 +5,27 @@
   "type": "module",
   "description": "Next.js 15 App Router. Public pages and the authed SPA shell.",
   "scripts": {
-    "build": "tsc -b",
-    "typecheck": "tsc -b --noEmit false --emitDeclarationOnly",
+    "dev": "next dev -p 5000",
+    "build": "next build",
+    "start": "next start -p 5000",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
     "test:unit": "vitest run --passWithNoTests",
-    "clean": "rm -rf dist .next *.tsbuildinfo"
+    "clean": "rm -rf .next dist"
   },
   "devDependencies": {
     "@grims/config": "workspace:*",
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "postcss": "^8.5.23",
+    "tailwindcss": "^4.3.3",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
+  },
+  "dependencies": {
+    "next": "^15.5.21",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
   }
 }
