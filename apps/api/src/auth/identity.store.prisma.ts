@@ -21,7 +21,7 @@ export class PrismaIdentityStore implements IIdentityStore {
   constructor(private readonly prisma: PrismaClient) {}
 
   async upsertOnLogin(input: IdentityUpsertInput): Promise<IdentityUpsertResult> {
-    return this.prisma.$transaction(async (tx) => {
+    return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const existing = await tx.discordIdentity.findUnique({
         where: { discordId: input.discordUserId },
         select: { userId: true },
