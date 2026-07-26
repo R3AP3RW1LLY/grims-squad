@@ -1,0 +1,49 @@
+# gitleaks configuration
+#
+# The default rule set is inherited in full. Nothing here weakens detection of an
+# actual credential — the only allowlist is for one value that is provably not one.
+
+[extend]
+useDefault = true
+
+[[rules]]
+# Discord BOT TOKENS are real secrets and the default rules must keep catching them.
+# Re-declared explicitly so a future edit to this file cannot quietly drop it.
+id = "discord-bot-token"
+description = "Discord bot token"
+regex = '''[MNO][a-zA-Z0-9_-]{23,25}\.[a-zA-Z0-9_-]{6}\.[a-zA-Z0-9_-]{27,}'''
+keywords = ["discord"]
+
+[allowlist]
+description = """
+The squadron's Discord GUILD ID (server ID) appears in ssot/STATUS.md and in the
+project's own documentation, and it is not a secret:
+
+  - Every member of the server can read it from the Discord client in two clicks.
+  - It grants nothing. Without a bot token it cannot be used to read, write, or
+    join anything.
+  - It is deliberately recorded in the SSOT because P1's role mapping needs it,
+    and burying it in an untracked file would make the SSOT incomplete.
+
+gitleaks' generic `discord-client-id` rule matches any 17-20 digit number, so it
+cannot distinguish a guild ID from a leaked OAuth client ID. This allowlist is
+scoped to that ONE literal value rather than to the rule, so a genuine Discord
+client ID or bot token is still caught.
+
+It also cannot be removed from history for free: it was committed in bffa756 and
+history is distributed. Rewriting published history to scrub a non-secret would
+be disproportionate and would break every existing clone.
+
+If this value ever DOES become sensitive, the correct response is to move the
+server, not to edit this file.
+"""
+
+regexes = [
+  '''801929816596152320''',
+]
+
+paths = [
+  # Documentation of the taxonomy itself, which quotes example patterns.
+  '''ssot/09-runbooks/secrets-rotation\.md''',
+  '''\.gitleaks\.toml''',
+]
