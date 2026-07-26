@@ -1,0 +1,1612 @@
+# =============================================================================
+# TASK GRAPH
+#
+# Every task: id, phase, name, depends_on, estimate_hours, risk_tier, files,
+# acceptance criteria, ssot_updates.
+#
+# ACCEPTANCE CRITERIA ARE TEST NAMES, NOT ASPIRATIONS (ADR-016). Each one maps
+# to a named test written BEFORE the implementation. A task with an untested
+# acceptance criterion is not done.
+#
+# risk_tier drives which review gates apply and whether an agent may merge
+# autonomously (ADR-021). Tier 3 ALWAYS requires a human.
+#
+# A missing task is work that silently doesn't happen. Add rather than assume.
+# =============================================================================
+
+version: 1
+
+# =============================================================================
+phase_P0:
+# =============================================================================
+
+  - id: P0.1
+    phase: P0
+    name: Monorepo skeleton
+    depends_on: []
+    estimate_hours: 5
+    risk_tier: 1
+    files:
+      - package.json
+      - pnpm-workspace.yaml
+      - turbo.json
+      - tsconfig.base.json
+      - packages/config/
+      - .gitignore
+      - .env.example
+    acceptance:
+      - "pnpm install && pnpm -r typecheck passes on an empty tree"
+      - "Every apps/* and packages/* directory from CONVENTIONS.md exists with a package.json"
+      - "Root tsconfig sets strict, noUncheckedIndexedAccess and exactOptionalPropertyTypes"
+      - "ESLint rejects an `any`, a cross-package relative import, and a Discord snowflake literal"
+      - ".env.example contains placeholders only — gitleaks finds no secret"
+    ssot_updates: [STATUS.md]
+
+  - id: P0.2
+    phase: P0
+    name: Database up, schema copied from the SSOT
+    depends_on: [P0.1]
+    estimate_hours: 4
+    risk_tier: 2
+    files:
+      - infra/docker/compose.dev.yml
+      - packages/db/prisma/schema.prisma
+      - packages/db/prisma/migrations/
+      - packages/db/src/client.ts
+    acceptance:
+      - "packages/db/prisma/schema.prisma is BYTE-IDENTICAL to ssot/03-data/schema.prisma"
+      - "pnpm db:migrate:dev creates all 54 tables; psql \\dt lists them"
+      - "Every hand-written index in ssot/03-data/indexes.md exists — asserted by a query against pg_indexes"
+      - "citext, cube, vector and pgcrypto extensions are installed"
+      - "The partial unique index on cmdr_verifications rejects a second active claim (INV-005)"
+      - "The tsvector generated column on forum_posts populates on insert"
+    notes: >
+      COPY the schema, do not rewrite it. Rewriting is immediate SSOT drift and is
+      the single most common P0 failure.
+    ssot_updates: [STATUS.md]
+
+  - id: P0.3
+    phase: P0
+    name: Shared contracts package
+    depends_on: [P0.1]
+    estimate_hours: 6
+    risk_tier: 2
+    files:
+      - packages/shared/src/permissions.ts
+      - packages/shared/src/errors.ts
+      - packages/shared/src/dto/
+      - packages/shared/src/permissions.spec.ts
+    acceptance:
+      - "packages/shared/src/permissions.ts is BYTE-IDENTICAL to ssot/04-contracts/permissions.ts"
+      - "hasPermission round-trips SITE_CONFIG (1n<<63n) through storage and JSON exactly (INV-006)"
+      - "computeEffectiveMask proves deny beats grant for every permission group (INV-007)"
+      - "maskToString never emits a JSON number"
+      - "Error envelope matches ssot/04-contracts/errors.md exactly"
+      - "Zod DTOs exist for every schema referenced by openapi.yaml"
+    ssot_updates: [STATUS.md]
+
+  - id: P0.4
+    phase: P0
+    name: API skeleton with health
+    depends_on: [P0.2, P0.3]
+    estimate_hours: 6
+    risk_tier: 2
+    files:
+      - apps/api/src/main.ts
+      - apps/api/src/health/
+      - apps/api/src/common/exception.filter.ts
+      - apps/api/src/common/zod-validation.pipe.ts
+    acceptance:
+      - "GET /v1/health returns status, version and real connectivity checks for db, redis and meilisearch"
+      - "Killing redis makes /v1/health report degraded with HTTP 200, NOT a 500"
+      - "Killing postgres makes it report down with HTTP 503"
+      - "An unhandled exception produces the error envelope with a requestId and no stack trace"
+      - "Pino logs carry a requestId correlated across the request"
+      - "A Zod validation failure enumerates EVERY failing field, not just the first"
+    ssot_updates: [STATUS.md]
+
+  - id: P0.5
+    phase: P0
+    name: Web skeleton and design tokens
+    depends_on: [P0.1]
+    estimate_hours: 6
+    risk_tier: 1
+    files:
+      - apps/web/app/layout.tsx
+      - apps/web/app/page.tsx
+      - apps/web/tailwind.config.ts
+      - tools/tokens-to-tailwind.ts
+    acceptance:
+      - "The Tailwind theme is generated from ssot/07-design/tokens.json; regenerating produces no diff"
+      - "Landing hero renders; Lighthouse accessibility >= 95"
+      - "prefers-reduced-motion removes all animation, the scanline and the boot sequence"
+      - "prefers-contrast: more switches to the high-contrast theme"
+      - "The Frontier attribution notice is present in the footer (INV-029)"
+      - "No forbidden colour pair from accessibility.md appears in the rendered output"
+    ssot_updates: [STATUS.md]
+
+  - id: P0.6
+    phase: P0
+    name: CI pipeline
+    depends_on: [P0.3, P0.4, P0.5]
+    estimate_hours: 7
+    risk_tier: 2
+    files:
+      - .github/workflows/pr.yml
+      - .github/workflows/main.yml
+      - tools/ssot-drift-check.ts
+      - tools/contrast-check.ts
+    acceptance:
+      - "PR pipeline runs lint, typecheck, unit, integration, invariants, coverage, ssot-drift, contract, secret-scan, audit, Trivy and build"
+      - "A deliberately-failing PR is blocked"
+      - "Editing packages/db/prisma/schema.prisma alone FAILS the ssot-drift check"
+      - "Editing packages/shared/src/permissions.ts alone FAILS the ssot-drift check"
+      - "Changing a token so a contrast pair drops below AA FAILS the contrast check"
+      - "A committed fake secret FAILS gitleaks"
+      - "An invariant with no @INV-nnn tagged test FAILS the invariant job"
+    notes: The SSOT-drift check is the mechanism the whole SSOT model depends on. Test that it actually fails.
+    ssot_updates: [STATUS.md]
+
+  - id: P0.7
+    phase: P0
+    name: Production deploy
+    depends_on: [P0.6]
+    estimate_hours: 6
+    risk_tier: 3
+    files:
+      - infra/docker/compose.prod.yml
+      - infra/caddy/Caddyfile
+      - .github/workflows/deploy.yml
+    acceptance:
+      - "The landing page loads over HTTPS at the real domain"
+      - "/v1/health returns all-green in production"
+      - "Caddy obtains and renews a certificate automatically"
+      - "Production deploy requires the manual gate; staging does not"
+      - "A failed post-deploy health check triggers automatic rollback"
+      - "No secret is present in any image layer — verified by scanning the built image"
+    blocked_by_decisions: [D1, D6]
+    ssot_updates: [STATUS.md]
+
+  - id: P0.8
+    phase: P0
+    name: Quality harness — TDD, invariants and review-gate tooling
+    depends_on: [P0.6]
+    estimate_hours: 5
+    risk_tier: 2
+    files:
+      - vitest.config.ts
+      - tools/invariant-coverage.ts
+      - ssot/10-quality/review-log.md
+      - .github/pull_request_template.md
+    acceptance:
+      - "pnpm test:invariants runs only @INV-nnn tagged tests and reports coverage against invariants.md"
+      - "invariant-coverage fails when an INV number in invariants.md has no tagged test"
+      - "Coverage gates from 10-quality/test-strategy.md are enforced per package"
+      - "The PR template requires the task ID, acceptance-to-test mapping, review-gate table and risk tier"
+      - "A tier-1 claim on a path in the tier-3 floor list is rejected by CI (ADR-021)"
+    ssot_updates: [STATUS.md, 10-quality/review-log.md]
+
+# =============================================================================
+phase_P1:
+# =============================================================================
+
+  - id: P1.1
+    phase: P1
+    name: Discord OAuth
+    depends_on: [P0.4, P0.8]
+    estimate_hours: 7
+    risk_tier: 3
+    files:
+      - apps/api/src/auth/discord.controller.ts
+      - apps/api/src/auth/discord.service.ts
+      - packages/ed-clients/src/discord/discord.adapter.ts
+      - packages/ed-clients/src/discord/discord.fake.ts
+    acceptance:
+      - "A Discord login round-trip creates a users row and a discord_identities row"
+      - "guild_roles is populated from /users/@me/guilds/{id}/member"
+      - "Scopes requested are exactly identify, email and guilds.members.read"
+      - "A user not in our guild is refused with DISCORD_GUILD_MEMBERSHIP_REQUIRED"
+      - "OAuth tokens are stored AES-256-GCM encrypted; the raw column contains no plaintext (INV-012)"
+      - "The redirect parameter is validated against an internal-path allowlist — an external URL is rejected"
+      - "Integration test passes against the fake adapter with no network access"
+    blocked_by_decisions: [D2]
+    ssot_updates: [STATUS.md]
+
+  - id: P1.2
+    phase: P1
+    name: Sessions with rotating refresh and reuse detection
+    depends_on: [P1.1]
+    estimate_hours: 8
+    risk_tier: 3
+    files:
+      - apps/api/src/auth/session.service.ts
+      - apps/api/src/auth/refresh.guard.ts
+      - apps/api/src/common/csrf.middleware.ts
+    acceptance:
+      - "Access JWT is 15 minutes; refresh is 30 days and rotates on every use"
+      - "MANDATORY: replaying an already-used refresh token revokes the ENTIRE family and every session for that device"
+      - "Cookies are HttpOnly, Secure, SameSite=Lax and __Host- prefixed"
+      - "A state-changing request without a valid CSRF double-submit token is rejected"
+      - "Refresh tokens are stored as SHA-256 hashes; the plaintext is never persisted"
+      - "A revoked family's tokens are refused even before natural expiry"
+    ssot_updates: [STATUS.md]
+
+  - id: P1.3
+    phase: P1
+    name: Permission engine with data-layer enforcement
+    depends_on: [P0.3, P1.2]
+    estimate_hours: 8
+    risk_tier: 3
+    files:
+      - apps/api/src/authz/permission.service.ts
+      - apps/api/src/authz/requires-permission.guard.ts
+      - packages/db/src/acl-extension.ts
+    acceptance:
+      - "Effective mask = OR(role masks) AND NOT deny_mask, and nothing else grants (INV-001)"
+      - "MANDATORY: a Ring 0 principal calling the REPOSITORY DIRECTLY, bypassing every controller and guard, cannot retrieve a Ring 1 row (INV-002)"
+      - "Negative tests exist for every ring boundary in both directions"
+      - "Redis cache perm:{userId} has a 5-minute TTL and is busted on every role, mapping, bundle and deny-mask change"
+      - "A model with an ACL that is not registered with the extension FAILS a test that enumerates ACL-bearing models"
+      - "Ownership predicates (own loadout, own carrier, own application thread) are enforced in the same layer"
+    notes: >
+      The single most important task in P1. Controller guards alone are the exact leak
+      INV-002 exists to prevent.
+    ssot_updates: [STATUS.md]
+
+  - id: P1.4
+    phase: P1
+    name: Discord role-sync bot
+    depends_on: [P1.3]
+    estimate_hours: 7
+    risk_tier: 3
+    files:
+      - apps/bot/src/main.ts
+      - apps/bot/src/handlers/guild-member.ts
+      - apps/bot/src/handlers/role-update.ts
+    acceptance:
+      - "A role change in Discord is reflected on the site within 5 seconds"
+      - "guildMemberAdd creates the user and assigns applicant"
+      - "guildMemberUpdate diffs roles, busts perm:{userId} and writes an audit row"
+      - "guildMemberRemove soft-deactivates and revokes sessions but RETAINS content"
+      - "roleUpdate or roleDelete on a MAPPED role alerts admins rather than silently stripping permissions"
+      - "Every role change produces an audit_log row with before/after (INV-009)"
+      - "No Discord snowflake literal appears in application source (INV-008)"
+    blocked_by_decisions: [D2]
+    ssot_updates: [STATUS.md]
+
+  - id: P1.5
+    phase: P1
+    name: Nightly reconciliation
+    depends_on: [P1.4]
+    estimate_hours: 4
+    risk_tier: 2
+    files:
+      - apps/worker/src/jobs/discord-reconcile.ts
+    acceptance:
+      - "A full guild member fetch diffs against the DB and repairs drift"
+      - "Manually corrupting a guild_roles row is repaired by the job and reported"
+      - "manual-sourced role grants SURVIVE reconciliation; discord-sourced ones do not"
+      - "Anomalies are reported to the Discord admin channel with specifics, not a count"
+      - "The job is idempotent — a second run in the same minute changes nothing"
+    ssot_updates: [STATUS.md]
+
+  - id: P1.6
+    phase: P1
+    name: Member profiles and privacy
+    depends_on: [P1.3]
+    estimate_hours: 7
+    risk_tier: 3
+    files:
+      - apps/api/src/members/
+      - apps/web/app/members/[handle]/page.tsx
+      - apps/web/app/settings/privacy/page.tsx
+    acceptance:
+      - "MANDATORY: a privacy toggle set to private makes the field ABSENT from the public API response, not null and not merely hidden by the UI (INV-027)"
+      - "All privacy defaults are conservative — telemetry consent is empty, every show* flag is false"
+      - "The device/session list shows every active family and revokes individually"
+      - "Revoking a session makes the next request 401"
+      - "A member can export everything held about them as JSON"
+    blocked_by_decisions: [D13]
+    ssot_updates: [STATUS.md]
+
+  - id: P1.7
+    phase: P1
+    name: Admin console v1
+    depends_on: [P1.3, P1.6]
+    estimate_hours: 8
+    risk_tier: 3
+    files:
+      - apps/api/src/admin/
+      - apps/web/app/admin/
+    acceptance:
+      - "Every admin action appears in audit_log with before/after diffs (INV-009)"
+      - "The role editor shows a live who-does-this-affect preview listing exactly which members gain or lose which permissions BEFORE saving"
+      - "The Discord mapping editor is the only path by which snowflakes enter the system"
+      - "Saving a role or mapping busts every affected permission cache"
+      - "The audit log viewer filters by actor, action, target and date"
+      - "A non-officer receives 404, not 403, on every admin route"
+    ssot_updates: [STATUS.md]
+
+  - id: P1.8
+    phase: P1
+    name: Frontier cAPI verification
+    depends_on: [P1.6]
+    estimate_hours: 8
+    risk_tier: 3
+    conditional: only if cAPI approval has arrived
+    files:
+      - apps/api/src/auth/frontier.controller.ts
+      - packages/ed-clients/src/frontier/capi.adapter.ts
+      - apps/worker/src/jobs/capi-lifecycle.ts
+    acceptance:
+      - "PKCE S256; the verifier lives in Redis at 10-minute TTL and a code is never accepted without it"
+      - "GET /profile yields the authoritative CMDR name and a trust_tier 3 verification"
+      - "HTTP 422 from cAPI is handled as token-expired, not as a generic client error"
+      - "Refresh and access tokens are encrypted at rest and unreadable as plaintext in the column (INV-012)"
+      - "expiresAt is set to verifiedAt + 25 days"
+      - "The worker DMs at day 20 and downgrades to stale at day 25, RETAINING read access"
+      - "A second active verification for the same CMDR name is rejected (INV-005)"
+      - "No request path performs a synchronous cAPI call (INV-031)"
+    blocked_by_decisions: []
+    external_blockers: [capi_approval]
+    ssot_updates: [STATUS.md]
+
+  - id: P1.8b
+    phase: P1
+    name: Fallback CMDR verification — Inara nonce and officer manual
+    depends_on: [P1.6]
+    estimate_hours: 6
+    risk_tier: 3
+    files:
+      - apps/api/src/auth/claim-verification.controller.ts
+      - packages/ed-clients/src/inara/inara.adapter.ts
+      - apps/worker/src/jobs/inara-nonce-poll.ts
+    acceptance:
+      - "A nonce is issued, has a TTL, and expires to VERIFICATION_NONCE_EXPIRED"
+      - "The worker polls Inara and grants trust_tier 2 when the nonce is found in the profile"
+      - "Nonce-not-found-yet is a NORMAL in-progress state, not an error"
+      - "Officer manual approval grants trust_tier 1 and is audited"
+      - "The Inara adapter dispatches at most 2 requests/minute GLOBALLY through one shared limiter (INV-033)"
+      - "events[0].eventStatus is checked, not merely the HTTP status"
+      - "Inara being unavailable or unapproved degrades this path only — nothing else breaks"
+    notes: >
+      SHIPS REGARDLESS OF WHETHER cAPI APPROVAL ARRIVES. Do not block the phase on
+      a third party's discretion.
+    ssot_updates: [STATUS.md]
+
+  - id: P1.9
+    phase: P1
+    name: Public landing with live stats
+    depends_on: [P1.6, P0.5]
+    estimate_hours: 6
+    risk_tier: 2
+    files:
+      - apps/web/app/(public)/page.tsx
+      - apps/api/src/public/stats.controller.ts
+      - packages/ed-clients/src/galnet/galnet.adapter.ts
+    acceptance:
+      - "Loads in under 1.5 seconds; Lighthouse accessibility >= 95"
+      - "Stats come from our own database, not a third party"
+      - "Only members who opted in appear on the public roster or leaderboard (INV-027)"
+      - "GalNet unavailable omits the section entirely rather than rendering a broken panel"
+      - "Zeroed counters are suppressed rather than displaying '0 COMMANDERS'"
+    blocked_by_decisions: [D12]
+    ssot_updates: [STATUS.md]
+
+# =============================================================================
+phase_P2:
+# =============================================================================
+
+  - id: P2.1
+    phase: P2
+    name: Category and thread CRUD
+    depends_on: [P1.3]
+    estimate_hours: 7
+    risk_tier: 3
+    files:
+      - apps/api/src/forum/category.service.ts
+      - apps/api/src/forum/thread.service.ts
+    acceptance:
+      - "MANDATORY: a Ring 0 user listing categories cannot see, COUNT, or infer the existence of Ring 1 categories"
+      - "A gated thread requested by an unauthorised caller returns 404, never 403"
+      - "All queries go through the P1.3 data-layer filter — no exceptions, asserted by a repository-level test"
+      - "Nested categories inherit correctly and a child cannot be more permissive than its parent"
+      - "Moving a thread between categories enqueues a RAG re-index (INV-003)"
+    ssot_updates: [STATUS.md]
+
+  - id: P2.2
+    phase: P2
+    name: Posts with sanitisation and soft delete
+    depends_on: [P2.1]
+    estimate_hours: 7
+    risk_tier: 3
+    files:
+      - apps/api/src/forum/post.service.ts
+      - apps/api/src/forum/sanitize.ts
+    acceptance:
+      - "MANDATORY XSS SUITE: script tags, event handlers, javascript: URLs, data: URLs, SVG payloads and nested-encoding attacks are all neutralised (INV-035)"
+      - "HTML is sanitized SERVER-SIDE before storage, not at render time"
+      - "CSP headers include a nonce and frame-ancestors 'none'"
+      - "Deleting a post sets deletedAt, retains the row, and shows a tombstone to moderators only (INV-022)"
+      - "Every edit creates a PostRevision"
+      - "Create, edit and delete each enqueue a RAG index job"
+    ssot_updates: [STATUS.md]
+
+  - id: P2.3
+    phase: P2
+    name: Editor and uploads
+    depends_on: [P2.2]
+    estimate_hours: 7
+    risk_tier: 3
+    files:
+      - apps/web/components/editor/
+      - apps/api/src/uploads/upload.service.ts
+    acceptance:
+      - "A JPEG with GPS EXIF is stored with the EXIF stripped — verified by re-reading the stored file"
+      - "A polyglot file is neutralised by re-encoding — verified by asserting the output is not executable as its second format"
+      - "MIME is sniffed from content, never trusted from the declared type"
+      - "Uploads are served from a separate origin"
+      - "An oversized upload is rejected with the specific reason, not a generic failure"
+      - "An orphaned upload with no referencing post after 24h is purged"
+    blocked_by_decisions: [D5]
+    ssot_updates: [STATUS.md]
+
+  - id: P2.4
+    phase: P2
+    name: Reactions, subscriptions and notification fan-out
+    depends_on: [P2.2]
+    estimate_hours: 6
+    risk_tier: 2
+    files:
+      - apps/api/src/forum/reaction.service.ts
+      - apps/api/src/notifications/
+      - apps/worker/src/jobs/notification-fanout.ts
+    acceptance:
+      - "Subscribing then having someone reply delivers an in-app notification and a Discord DM"
+      - "watch, track and mute behave differently and mute genuinely suppresses"
+      - "A blocked DM falls back to in-app without retrying into a rate limit"
+      - "Delivery failure is retried and visible, never silently dropped"
+      - "A user cannot subscribe to a thread they cannot view"
+    blocked_by_decisions: [D11]
+    ssot_updates: [STATUS.md]
+
+  - id: P2.5
+    phase: P2
+    name: ACL-filtered search
+    depends_on: [P2.2]
+    estimate_hours: 7
+    risk_tier: 3
+    files:
+      - apps/api/src/search/meilisearch.service.ts
+      - apps/worker/src/jobs/search-index.ts
+    acceptance:
+      - "MANDATORY: a Ring 0 user searching a term that appears ONLY in a Ring 2 post gets ZERO results — not a redacted result, zero (INV-024)"
+      - "Facet counts and the pagination total also reveal nothing about inaccessible matches"
+      - "The ACL filter is applied IN the query, not after retrieval — asserted by inspecting the dispatched filter expression"
+      - "Moving a thread to a more restrictive category removes it from lower-privileged search results"
+      - "Facets by category, author, tag and date work"
+    ssot_updates: [STATUS.md]
+
+  - id: P2.6
+    phase: P2
+    name: Moderation
+    depends_on: [P2.2, P1.7]
+    estimate_hours: 7
+    risk_tier: 3
+    files:
+      - apps/api/src/moderation/
+      - apps/bot/src/handlers/moderation-alert.ts
+    acceptance:
+      - "Every moderation action writes an audit_log row with before/after (INV-009)"
+      - "Report to queue to Discord notification works end to end"
+      - "Lock, pin, move, delete, restore, warn, mute and ban all function"
+      - "A ban carries a reason and creates an appeal route"
+      - "Auto-flags fire on link spam, new-account posting velocity and banned phrases"
+      - "A muted user cannot post and is told why and until when"
+    blocked_by_decisions: [D15]
+    ssot_updates: [STATUS.md]
+
+  - id: P2.7
+    phase: P2
+    name: Recruitment pipeline
+    depends_on: [P2.1, P1.4]
+    estimate_hours: 8
+    risk_tier: 3
+    files:
+      - apps/api/src/recruitment/
+      - apps/bot/src/handlers/application-buttons.ts
+      - apps/web/app/(public)/apply/page.tsx
+    acceptance:
+      - "Full flow: application to Discord embed to officer approval to Discord role grant to Ring 1 access"
+      - "Turnstile protects the public form"
+      - "Answers are stored as structured JSONB and the funnel is reportable"
+      - "An applicant can reach their OWN thread by ownership predicate but not another applicant's — which returns 404, not 403"
+      - "Approval sets probationEndsAt to decidedAt + 30 days and schedules the review prompt"
+      - "A duplicate application from the same Discord ID is rejected with its current status"
+    ssot_updates: [STATUS.md]
+
+  - id: P2.8
+    phase: P2
+    name: Discord thread bridge
+    depends_on: [P2.1]
+    estimate_hours: 4
+    risk_tier: 2
+    files:
+      - apps/bot/src/handlers/thread-bridge.ts
+      - apps/bot/src/commands/thread.ts
+    acceptance:
+      - "A new thread posts a Discord embed with a working jump link"
+      - "The /thread slash command creates a forum thread from the channel context"
+      - "A thread in a category the Discord channel's audience cannot view is NOT bridged"
+      - "EXPLICITLY NOT message-level mirroring — no code path mirrors individual messages (ADR-006)"
+    ssot_updates: [STATUS.md]
+
+  - id: P2.9
+    phase: P2
+    name: Embed extension point
+    depends_on: [P2.2]
+    estimate_hours: 3
+    risk_tier: 1
+    files:
+      - packages/ui/src/embeds/registry.ts
+    acceptance:
+      - "A renderer interface is defined and a no-op renderer is registered"
+      - "An unregistered embed pattern renders as plain text, never as an error"
+      - "P3 can register a renderer without modifying the post pipeline"
+    ssot_updates: [STATUS.md]
+
+# =============================================================================
+phase_P3:
+# =============================================================================
+
+  - id: P3.1
+    phase: P3
+    name: Adapter interfaces and the fake harness
+    depends_on: [P0.3]
+    estimate_hours: 6
+    risk_tier: 2
+    files:
+      - packages/ed-clients/src/interfaces.ts
+      - packages/ed-clients/src/common/circuit-breaker.ts
+      - packages/ed-clients/src/common/enriched.ts
+    acceptance:
+      - "ISystemDataProvider, ITradeDataProvider, ICmdrProfileProvider, IRoutePlanner, INewsProvider and IReferenceDataProvider are defined"
+      - "A fake adapter swaps in for tests with ZERO application changes — this is the proof the abstraction is real"
+      - "Every adapter has timeout, backoff-with-jitter, circuit breaker and a documented cache TTL"
+      - "Enriched<T> attaches source, fetchedAt and dataAgeHours INSIDE the adapter (INV-004)"
+      - "A lint rule fails the build if application code imports a vendor HTTP client directly (ADR-013)"
+      - "IRoutePlanner exposes NO synchronous method (INV-032)"
+    ssot_updates: [STATUS.md]
+
+  - id: P3.2
+    phase: P3
+    name: Ardent adapter
+    depends_on: [P3.1]
+    estimate_hours: 7
+    risk_tier: 2
+    files:
+      - packages/ed-clients/src/ardent/ardent.adapter.ts
+      - packages/ed-clients/src/ardent/ardent.fake.ts
+    acceptance:
+      - "Every endpoint in ssot/05-integrations/ardent.md is implemented"
+      - "/v2/system/address/ is preferred over /v2/system/name/ wherever an address is known"
+      - "An ambiguous system name returns CANDIDATES and never picks one (INV-018)"
+      - "maxDaysAgo is a REQUIRED adapter parameter — never left to the upstream default of 30"
+      - "Every response carries a computed dataAgeHours (INV-004)"
+      - "fleetCarrier 0/1 is coerced to boolean and carriers are excluded by default"
+      - "systemAddress and marketId are parsed as BigInt (INV-021)"
+      - "LIVE VERIFICATION: real calls against the live API, then marked @verified in STATUS.md"
+    ssot_updates: [STATUS.md]
+
+  - id: P3.3
+    phase: P3
+    name: EDSM, GalNet and FDevIDs adapters
+    depends_on: [P3.1]
+    estimate_hours: 7
+    risk_tier: 2
+    files:
+      - packages/ed-clients/src/edsm/edsm.adapter.ts
+      - packages/ed-clients/src/galnet/galnet.adapter.ts
+      - packages/ed-clients/src/fdevids/fdevids.adapter.ts
+      - apps/worker/src/jobs/reference-refresh.ts
+    acceptance:
+      - "EDSM's HTTP-200-with-empty-body for an unknown system is handled as not-found, not as success"
+      - "id64 is stored as SystemAddress; EDSM's internal id is never mistaken for it"
+      - "MANDATORY: every commodity in the DB resolves to a display name — an internal name never reaches a user (INV-020)"
+      - "EDDN's lowercase commodity symbols match FDevIDs' mixed case, case-insensitively"
+      - "A commodity in market_orders with no reference_names row raises an alert rather than falling back to the internal name"
+      - "The FDevIDs release is pinned and recorded in site_config"
+      - "A symbol removed upstream is RETAINED, never deleted — historical rows reference it"
+    ssot_updates: [STATUS.md]
+
+  - id: P3.4
+    phase: P3
+    name: EDDN collector
+    depends_on: [P3.1, P0.2]
+    estimate_hours: 8
+    risk_tier: 3
+    files:
+      - apps/eddn-collector/src/main.ts
+      - apps/eddn-collector/src/handlers/
+      - apps/eddn-collector/src/batch-writer.ts
+    acceptance:
+      - "Batch writes at 500 rows or 2 seconds, whichever first, as a single upsert statement"
+      - "MANDATORY: a message older than the stored updatedAt is DISCARDED (INV-017)"
+      - "Upserts are idempotent on (marketId, commodity)"
+      - "The radius prefilter runs at PARSE time, before insert"
+      - "Backpressure sheds outfitting and shipyard before commodity and journal, and emits a shed metric"
+      - "Non-Live gameversion messages are filtered out"
+      - "A connected-but-silent socket triggers reconnect via receiveTimeout and alerts after 10 minutes"
+      - "Parse failures go to a dead-letter queue and alert on RATE, not on count"
+      - "Kill mid-batch and restart: no acknowledged message lost, no duplicate row (INV-034)"
+      - "ONE-HOUR SOAK: report messages/sec, rows written, parse-failure rate and disk delta"
+    blocked_by_decisions: [D3, D4, D10]
+    ssot_updates: [STATUS.md]
+
+  - id: P3.5
+    phase: P3
+    name: Seed from galaxy dumps
+    depends_on: [P3.4]
+    estimate_hours: 6
+    risk_tier: 2
+    files:
+      - apps/worker/src/jobs/galaxy-seed.ts
+      - packages/ed-clients/src/spansh/dump-reader.ts
+    acceptance:
+      - "Row counts match the dump for systems inside the prefilter radius"
+      - "Re-running changes nothing — verified by a checksum before and after"
+      - "Interruption and restart resumes from the checkpointed offset"
+      - "The dump is stream-parsed — a memory-usage assertion proves the file is never fully loaded"
+      - "Seeding NEVER overwrites fresher EDDN data (INV-017)"
+      - "The dump date and source are recorded in site_config"
+    ssot_updates: [STATUS.md]
+
+  - id: P3.6
+    phase: P3
+    name: Spansh adapter and job queue
+    depends_on: [P3.1]
+    estimate_hours: 7
+    risk_tier: 2
+    files:
+      - packages/ed-clients/src/spansh/spansh.adapter.ts
+      - apps/worker/src/jobs/route-plot.ts
+      - apps/api/src/trade/plot.controller.ts
+    acceptance:
+      - "Submitting a long route returns 202 immediately; the browser NEVER blocks (INV-032)"
+      - "The WebSocket push arrives on completion"
+      - "Two identical requests produce ONE upstream job — the param hash normalises waypoint order, rounds the jump range and canonicalises system names to addresses"
+      - "Polling uses exponential backoff from 2s capped at 15s, with a 10-minute deadline after which the job is marked failed"
+      - "Results are written to object storage, not a Postgres column"
+      - "A 404 on a previously-working endpoint path alerts loudly"
+      - "Marked @unverified until exercised against the live service"
+    ssot_updates: [STATUS.md]
+
+  - id: P3.7
+    phase: P3
+    name: Telemetry endpoint and device tokens
+    depends_on: [P1.6, P0.4]
+    estimate_hours: 7
+    risk_tier: 3
+    files:
+      - apps/api/src/telemetry/telemetry.controller.ts
+      - apps/api/src/telemetry/device-token.service.ts
+    acceptance:
+      - "MANDATORY: an event in a non-consented category is REJECTED with TELEMETRY_CATEGORY_NOT_CONSENTED, never silently ignored (INV-013)"
+      - "A partially-consented batch accepts the consented events and enumerates the rejected ones"
+      - "An UNKNOWN event type is accepted and counted as ignored — never an error, so a game update cannot break the plugin"
+      - "Duplicate events are counted as ignored via the eventKey unique constraint (INV-017)"
+      - "Device tokens are stored as SHA-256 hashes and the plaintext is shown exactly once"
+      - "Revocation is immediate and offers a data purge"
+      - "Replaying a real journal file produces the expected accepted/rejected/ignored counts"
+      - "p99 response time is under 500ms — a slow endpoint backs up the plugin's queue inside a member's game process"
+    ssot_updates: [STATUS.md]
+
+  - id: P3.8
+    phase: P3
+    name: EDMC plugin
+    depends_on: [P3.7]
+    estimate_hours: 8
+    risk_tier: 3
+    files:
+      - plugins/edmc-grimssquad/load.py
+      - plugins/edmc-grimssquad/settings.py
+      - plugins/edmc-grimssquad/README.md
+    acceptance:
+      - "All I/O is on a background thread; journal_entry returns immediately"
+      - "MEASURED: zero frame impact during a real play session"
+      - "Killing the network mid-session leaves the game completely unaffected"
+      - "Per-category toggles default to OFF"
+      - "The queue is BOUNDED — a long outage drops oldest and records the drop count rather than growing without limit inside the game process"
+      - "429 and 5xx trigger exponential backoff with jitter, never a tight retry loop"
+      - "Optional EDDN forwarding works for members not already contributing"
+      - "The source is public and readable"
+      - "No credential other than the device token is ever transmitted"
+    ssot_updates: [STATUS.md]
+
+  - id: P3.9
+    phase: P3
+    name: System and commodity pages, forum ED embeds
+    depends_on: [P3.2, P3.3, P3.4, P2.9]
+    estimate_hours: 8
+    risk_tier: 2
+    files:
+      - apps/web/app/systems/[address]/page.tsx
+      - apps/web/app/commodities/[name]/page.tsx
+      - packages/ui/src/embeds/ed-embeds.tsx
+    acceptance:
+      - "MANDATORY: every displayed price shows its age with icon, colour AND literal value (INV-004)"
+      - "[[Sol]] renders a hover card that is also reachable by tap and by keyboard"
+      - "A Coriolis or EDSY URL renders a build card"
+      - "A commodity mention renders current best buy/sell with freshness"
+      - "System pages show allegiance, economy, security, stations, services and distance from home"
+      - "Only display names are shown — no internal name reaches the page (INV-020)"
+      - "Every system name has copy-to-clipboard"
+    ssot_updates: [STATUS.md]
+
+# =============================================================================
+phase_P4:
+# =============================================================================
+
+  - id: P4.1
+    phase: P4
+    name: Influence ingestion
+    depends_on: [P3.4]
+    estimate_hours: 7
+    risk_tier: 3
+    files:
+      - apps/eddn-collector/src/handlers/faction-state.ts
+    acceptance:
+      - "MANDATORY: three EDDN reports of the SAME tick for one faction/system produce EXACTLY ONE snapshot — never summed, never averaged (INV-019)"
+      - "The partial unique index covers the NULL-tick case"
+      - "pending and recovering states are stored in separate columns from active state"
+      - "A snapshot whose tick cannot be determined is left UNASSOCIATED rather than guessed"
+    blocked_by_decisions: [D3]
+    ssot_updates: [STATUS.md]
+
+  - id: P4.2
+    phase: P4
+    name: Tick detection
+    depends_on: [P4.1]
+    estimate_hours: 7
+    risk_tier: 3
+    files:
+      - apps/worker/src/jobs/tick-detect.ts
+    acceptance:
+      - "MANDATORY: validated against 7 days of KNOWN ticks before anything is built on it"
+      - "Every snapshot associates to a tickId, or explicitly to none"
+      - "Inferred ticks carry confidence < 1 and are labelled provisional everywhere they surface"
+      - "A missed tick does not retroactively corrupt earlier associations"
+    blocked_by_decisions: [D7]
+    notes: Naive tick inference makes everything downstream wrong. Validate first.
+    ssot_updates: [STATUS.md]
+
+  - id: P4.3
+    phase: P4
+    name: Influence charts
+    depends_on: [P4.2]
+    estimate_hours: 6
+    risk_tier: 2
+    files:
+      - apps/web/app/bgs/[address]/page.tsx
+      - apps/api/src/bgs/influence.controller.ts
+    acceptance:
+      - "Per system, per faction, over time, with tick markers"
+      - "Delta since last tick is prominent and signed"
+      - "An inferred tick marker renders as provisional with its confidence"
+      - "Insufficient history shows what exists with NO extrapolation"
+      - "Deltas carry an arrow icon and a signed number, never colour alone"
+    ssot_updates: [STATUS.md]
+
+  - id: P4.4
+    phase: P4
+    name: System control board
+    depends_on: [P4.3]
+    estimate_hours: 5
+    risk_tier: 2
+    files:
+      - apps/web/app/bgs/page.tsx
+    acceptance:
+      - "Sortable grid: our influence, top competitor, delta, active states, pending states, conflict"
+      - "Sorting is keyboard-operable with aria-sort"
+      - "The table scrolls in its own container; the page body never scrolls horizontally"
+      - "Tabular figures on every number"
+    ssot_updates: [STATUS.md]
+
+  - id: P4.5
+    phase: P4
+    name: Orders board
+    depends_on: [P4.4]
+    estimate_hours: 7
+    risk_tier: 3
+    files:
+      - apps/api/src/bgs/orders.controller.ts
+      - apps/web/app/bgs/orders/page.tsx
+      - apps/web/app/(app)/dashboard/orders-card.tsx
+    acceptance:
+      - "Officers set push/hold/suppress/ignore with priority and written guidance"
+      - "Members see a PRIORITISED tonight list on their dashboard"
+      - "Only BGS_SET_ORDERS can set an order; a member attempting it gets 403 and an audit row"
+      - "Every order change is audited with before/after"
+      - "No active orders renders 'nothing specific needed tonight', not a blank panel"
+    notes: >
+      This single feature converts casual players into effective contributors.
+      Talk to the BGS lead before building it or it will not match how they operate.
+    ssot_updates: [STATUS.md]
+
+  - id: P4.6
+    phase: P4
+    name: Activity reporting
+    depends_on: [P3.7, P4.2]
+    estimate_hours: 7
+    risk_tier: 2
+    files:
+      - apps/worker/src/jobs/telemetry-to-bgs.ts
+      - apps/api/src/bgs/reports.controller.ts
+    acceptance:
+      - "Missions, bounties, bonds, cartographics and trade are auto-captured from telemetry with NO manual entry"
+      - "Ingestion is idempotent per journal event via sourceEventId (INV-017)"
+      - "Negatives — murders and failed missions — are tracked as first-class"
+      - "The manual form works as a fallback"
+      - "BGS-Tally import works"
+      - "Activity attributes to the correct tick"
+    ssot_updates: [STATUS.md]
+
+  - id: P4.7
+    phase: P4
+    name: Conflict tracker
+    depends_on: [P4.2]
+    estimate_hours: 5
+    risk_tier: 2
+    files:
+      - apps/api/src/bgs/conflicts.controller.ts
+    acceptance:
+      - "Wars and elections show day-by-day win counts"
+      - "Required daily wins is computed and displayed"
+      - "A conflict ending is detected and the tracker closes it"
+    ssot_updates: [STATUS.md]
+
+  - id: P4.8
+    phase: P4
+    name: Nightly BGS digest
+    depends_on: [P4.5, P4.6]
+    estimate_hours: 4
+    risk_tier: 2
+    files:
+      - apps/worker/src/jobs/bgs-digest.ts
+    acceptance:
+      - "Posts to Discord after each detected tick"
+      - "States what changed, what it means and what to do about it"
+      - "An inferred tick is labelled provisional in the digest"
+      - "A failed digest alerts rather than failing silently"
+    ssot_updates: [STATUS.md]
+
+# =============================================================================
+phase_P5:
+# =============================================================================
+
+  - id: P5.1
+    phase: P5
+    name: Operations CRUD
+    depends_on: [P1.3]
+    estimate_hours: 6
+    risk_tier: 2
+    files: [apps/api/src/operations/]
+    acceptance:
+      - "MANDATORY: every rendered time shows BOTH local and UTC (INV-025)"
+      - "Times are stored as UTC TIMESTAMPTZ"
+      - "endsAt before startsAt is rejected with 422"
+      - "Recurrence via RFC 5545 RRULE generates instances correctly"
+      - "Only OPS_CREATE can create; a member gets 403 and an audit row"
+    ssot_updates: [STATUS.md]
+
+  - id: P5.2
+    phase: P5
+    name: Signups with standby
+    depends_on: [P5.1, P7.8]
+    estimate_hours: 6
+    risk_tier: 2
+    files: [apps/api/src/operations/signup.service.ts]
+    acceptance:
+      - "Ship selection is restricted to ships owned by the caller — selecting another member's ship is rejected"
+      - "At capacity a signup becomes standby with a position, NEVER a rejection"
+      - "Standby promotion is deterministic, ordered by signedUpAt, and notifies the promoted member"
+      - "A member with no ships sees an actionable prompt, not an empty dropdown"
+      - "Stale fleet data surfaces syncedAt so a member notices"
+    ssot_updates: [STATUS.md]
+
+  - id: P5.3
+    phase: P5
+    name: Discord Events sync and reminders
+    depends_on: [P5.1, P1.4]
+    estimate_hours: 6
+    risk_tier: 2
+    files:
+      - apps/bot/src/handlers/scheduled-events.ts
+      - apps/worker/src/jobs/op-reminders.ts
+    acceptance:
+      - "Creating an op creates a Discord Scheduled Event"
+      - "Editing the op updates the event; cancelling removes it"
+      - "Reminder DMs fire at T-24h, T-1h and T-10m"
+      - "A blocked DM falls back to in-app"
+      - "An event deleted out-of-band in Discord is detected and reconciled"
+    ssot_updates: [STATUS.md]
+
+  - id: P5.4
+    phase: P5
+    name: Wing composition checker
+    depends_on: [P5.2, P7.8]
+    estimate_hours: 6
+    risk_tier: 2
+    files: [apps/api/src/operations/composition.service.ts]
+    acceptance:
+      - "Returns correct matches against real fleet data"
+      - "'Needs 2 more shieldless miners; 3 members have a qualifying build' is produced from cached loadout stats"
+      - "Private loadouts never appear in eligibility results"
+      - "A member with no qualifying build is not listed as eligible"
+    ssot_updates: [STATUS.md]
+
+  - id: P5.5
+    phase: P5
+    name: Carrier registry
+    depends_on: [P3.4]
+    estimate_hours: 6
+    risk_tier: 2
+    files: [apps/api/src/carriers/]
+    acceptance:
+      - "Callsign, owner, location, docking access, services and fuel are tracked"
+      - "Data arrives from EDDN carrier messages and, for owners, from cAPI"
+      - "CARRIER_MANAGE is scoped to owned carriers by a row-level predicate — a non-owner officer path is tested separately"
+      - "Every carrier value carries dataAgeHours (INV-004)"
+    ssot_updates: [STATUS.md]
+
+  - id: P5.6
+    phase: P5
+    name: Jump schedule board
+    depends_on: [P5.5]
+    estimate_hours: 4
+    risk_tier: 1
+    files: [apps/web/app/carriers/schedule/page.tsx]
+    acceptance:
+      - "A shared calendar shows all carrier movements"
+      - "Overlapping departures from the staging system are flagged"
+      - "Times shown in local and UTC"
+    ssot_updates: [STATUS.md]
+
+  - id: P5.7
+    phase: P5
+    name: Tritium tracker with contribution ledger
+    depends_on: [P5.5, P3.7]
+    estimate_hours: 6
+    risk_tier: 2
+    files:
+      - apps/api/src/carriers/fuel.service.ts
+      - apps/api/src/trade/hauling.controller.ts
+    acceptance:
+      - "Carrier fuel is tracked with NO manual entry"
+      - "Burn rate and jumps remaining are computed"
+      - "A shortfall against the next scheduled jump is surfaced on the dashboard"
+      - "Contributions are auto-recorded from telemetry, idempotent per journal event"
+      - "deliveredTons is maintained transactionally so the progress bar cannot drift"
+    ssot_updates: [STATUS.md]
+
+  - id: P5.8
+    phase: P5
+    name: Carrier market mirror
+    depends_on: [P5.5]
+    estimate_hours: 4
+    risk_tier: 1
+    files: [apps/api/src/carriers/market.controller.ts]
+    acceptance:
+      - "Each carrier's buy and sell orders are visible with data age"
+      - "Carrier markets are excluded from general route results by default (INV-026)"
+    ssot_updates: [STATUS.md]
+
+  - id: P5.9
+    phase: P5
+    name: Post-op attendance and AAR
+    depends_on: [P5.2, P2.1]
+    estimate_hours: 4
+    risk_tier: 2
+    files: [apps/api/src/operations/attendance.service.ts]
+    acceptance:
+      - "Attendance marking is restricted to OPS_MANAGE and is audited"
+      - "An AAR thread is auto-created in Squadron Log"
+      - "Contribution stats appear on member profiles"
+    ssot_updates: [STATUS.md]
+
+# =============================================================================
+phase_P6:
+# =============================================================================
+
+  - id: P6.1
+    phase: P6
+    name: Commodity lookup UI
+    depends_on: [P3.9]
+    estimate_hours: 5
+    risk_tier: 2
+    files: [apps/web/app/trade/commodities/page.tsx]
+    acceptance:
+      - "Search, galactic ranges, supply/demand and a history sparkline"
+      - "MANDATORY: a freshness badge on EVERY row (INV-004)"
+      - "The data-age slider is bound to maxDaysAgo and changes results"
+      - "Display names only (INV-020)"
+    ssot_updates: [STATUS.md]
+
+  - id: P6.2
+    phase: P6
+    name: Importer and exporter finder
+    depends_on: [P6.1]
+    estimate_hours: 5
+    risk_tier: 2
+    files: [apps/api/src/trade/listings.controller.ts]
+    acceptance:
+      - "Sorted by price, with minVolume, fleetCarriers, pad size and max-Ls filters"
+      - "Carriers excluded by default (INV-026)"
+      - "All rows stale returns DATA_TOO_STALE with oldestAvailableHours rather than silently serving stale data"
+    ssot_updates: [STATUS.md]
+
+  - id: P6.3
+    phase: P6
+    name: Route optimiser and materialised best_trades
+    depends_on: [P3.4]
+    estimate_hours: 8
+    risk_tier: 3
+    files:
+      - apps/api/src/trade/route.service.ts
+      - packages/db/prisma/migrations/*_best_trades_view.sql
+    acceptance:
+      - "MANDATORY: query returns in under 2 seconds on a populated database"
+      - "EXPLAIN ANALYZE shows the partial indexes are used and no sequential scan on market_orders"
+      - "The spatial query uses the cube GiST index, not an inline sqrt(power(...)) expression"
+      - "distanceToArrivalLs and landing pad are applied — a 200,000 Ls station never appears under default filters (INV-026)"
+      - "Carriers excluded unless explicitly included"
+      - "best_trades refreshes CONCURRENTLY every 15 minutes and never blocks readers"
+      - "Materialised rows carry the underlying observation age, not the refresh age"
+      - "An empty result names the binding constraint"
+    ssot_updates: [STATUS.md]
+
+  - id: P6.4
+    phase: P6
+    name: Route UI
+    depends_on: [P6.3]
+    estimate_hours: 5
+    risk_tier: 2
+    files: [apps/web/app/trade/routes/page.tsx]
+    acceptance:
+      - "Collects origin, jump range, cargo, credits, pad, max Ls, max ly, carriers and data age"
+      - "Per-hop copy-to-clipboard on every system name"
+      - "Empty results explain WHICH filter was binding and suggest a relaxation"
+      - "Mobile: filters collapse to a sheet, results become cards"
+    ssot_updates: [STATUS.md]
+
+  - id: P6.5
+    phase: P6
+    name: Spansh delegation UI
+    depends_on: [P3.6, P6.4]
+    estimate_hours: 4
+    risk_tier: 2
+    files: [apps/web/app/trade/plot/page.tsx]
+    acceptance:
+      - "The UI never blocks; progress is inline"
+      - "The WebSocket push renders waypoints with per-hop copy-to-clipboard"
+      - "Spansh unavailable leaves the job queued with an honest status, and own-DB routes still work"
+    ssot_updates: [STATUS.md]
+
+  - id: P6.6
+    phase: P6
+    name: Carrier-aware routing
+    depends_on: [P6.3, P5.5]
+    estimate_hours: 5
+    risk_tier: 2
+    files: [apps/api/src/trade/carrier-routing.service.ts]
+    acceptance:
+      - "'Best route ending at one of OUR carriers' returns correct results"
+      - "Only carriers the caller may view are considered"
+    notes: This is what Inara cannot do for us.
+    ssot_updates: [STATUS.md]
+
+  - id: P6.7
+    phase: P6
+    name: Squadron trade board
+    depends_on: [P1.3]
+    estimate_hours: 4
+    risk_tier: 1
+    files: [apps/api/src/trade/board.controller.ts]
+    acceptance:
+      - "Members post supply and demand offers"
+      - "Expired and closed offers are filtered out by default"
+    ssot_updates: [STATUS.md]
+
+  - id: P6.8
+    phase: P6
+    name: Group hauling ops
+    depends_on: [P5.7]
+    estimate_hours: 5
+    risk_tier: 2
+    files: [apps/web/app/trade/hauling/page.tsx]
+    acceptance:
+      - "A shared cargo target shows live progress from telemetry"
+      - "Per-member contribution is tracked and idempotent"
+      - "A real group hauling op is tracked to completion"
+    ssot_updates: [STATUS.md]
+
+  - id: P6.9
+    phase: P6
+    name: Price alerts
+    depends_on: [P6.2]
+    estimate_hours: 5
+    risk_tier: 2
+    files: [apps/worker/src/jobs/trade-alerts.ts]
+    acceptance:
+      - "'Tritium within 50 ly of our carrier below 40k/t' fires correctly"
+      - "Alerts deliver to Discord with the data age included"
+      - "An alert does not re-fire continuously for the same condition"
+    ssot_updates: [STATUS.md]
+
+# =============================================================================
+phase_P7:
+# =============================================================================
+
+  - id: P7.1
+    phase: P7
+    name: Coriolis deploy
+    depends_on: [P0.7]
+    estimate_hours: 5
+    risk_tier: 2
+    files:
+      - infra/docker/coriolis.yml
+      - vendor/coriolis (pinned)
+      - vendor/coriolis-data (pinned)
+    acceptance:
+      - "Live at shipyard.<domain> and theme-matched"
+      - "BOTH repositories are pinned to a recorded commit SHA"
+      - "A monthly coriolis-data check is scheduled and documented in a runbook"
+      - "The MIT copyright notices are preserved"
+      - "The Frontier non-commercial attribution is present"
+    ssot_updates: [STATUS.md]
+
+  - id: P7.2
+    phase: P7
+    name: Build import — all four formats
+    depends_on: [P7.3]
+    estimate_hours: 7
+    risk_tier: 2
+    files: [apps/api/src/loadouts/import.service.ts]
+    acceptance:
+      - "Coriolis URL, EDSY URL, Coriolis JSON and journal Loadout ALL import"
+      - "An unrecognised format returns 422 naming which parse was attempted"
+      - "The journal Loadout event imports automatically from EDMC telemetry"
+      - "EDSY and Coriolis use separate parsers — no unified decoder"
+    ssot_updates: [STATUS.md]
+
+  - id: P7.3
+    phase: P7
+    name: Ship maths in ed-domain
+    depends_on: [P3.3]
+    estimate_hours: 8
+    risk_tier: 2
+    files:
+      - packages/ed-domain/src/ship-maths/
+      - packages/ed-domain/src/ship-maths/fixtures/
+    acceptance:
+      - "MANDATORY: matches Coriolis within 1% on 10 reference builds"
+      - "Jump range laden, unladen and max; DPS by damage type; effective shield and armour HP; thermal load; cargo; scoop rate; rebuy; total cost"
+      - "Optimal-mass FSD curves, shield booster diminishing returns and resistance stacking are all implemented"
+      - "The Coriolis attribution appears in the source file header (MIT)"
+      - "Callable directly by the API and by GSAI without touching any UI"
+    ssot_updates: [STATUS.md]
+
+  - id: P7.4
+    phase: P7
+    name: Locker CRUD with versioning
+    depends_on: [P7.2]
+    estimate_hours: 6
+    risk_tier: 2
+    files: [apps/api/src/loadouts/]
+    acceptance:
+      - "Save, version, comment and set visibility all work"
+      - "A private build is ABSENT from another member's listing, not shown-and-locked"
+      - "Cached stats are invalidated and recomputed when coriolisJson changes"
+      - "A pending recompute shows as pending, never as stale numbers"
+    ssot_updates: [STATUS.md]
+
+  - id: P7.5
+    phase: P7
+    name: Build comparison
+    depends_on: [P7.4]
+    estimate_hours: 4
+    risk_tier: 1
+    files: [apps/web/app/shipyard/compare/page.tsx]
+    acceptance:
+      - "Side by side up to four builds with delta highlighting"
+      - "Deltas use icons and signed numbers, not colour alone"
+    ssot_updates: [STATUS.md]
+
+  - id: P7.6
+    phase: P7
+    name: Doctrine builds
+    depends_on: [P7.4]
+    estimate_hours: 3
+    risk_tier: 2
+    files: [apps/api/src/loadouts/doctrine.service.ts]
+    acceptance:
+      - "Only FLEET_APPROVE_DOCTRINE can set isDoctrine"
+      - "Setting doctrine is audited"
+      - "Doctrine builds are badged and visible to all members"
+    ssot_updates: [STATUS.md]
+
+  - id: P7.7
+    phase: P7
+    name: Requirements checker
+    depends_on: [P7.3, P3.3]
+    estimate_hours: 6
+    risk_tier: 2
+    files: [apps/api/src/loadouts/requirements.service.ts]
+    acceptance:
+      - "Lists the engineering needed with blueprint and grade"
+      - "Engineer locations resolve via EDSM and Ardent nearest/technology-broker"
+      - "A materials shopping list is produced"
+    ssot_updates: [STATUS.md]
+
+  - id: P7.8
+    phase: P7
+    name: Fleet queries
+    depends_on: [P7.4]
+    estimate_hours: 4
+    risk_tier: 2
+    files: [apps/api/src/fleet/fleet-query.service.ts]
+    acceptance:
+      - "'Every Anaconda in the squadron with >60 ly jump range' returns correct results"
+      - "Respects each member's showFleet privacy setting (INV-027)"
+      - "Private loadouts are excluded"
+    notes: This is the query that makes the P5.4 wing composition checker work.
+    ssot_updates: [STATUS.md]
+
+  - id: P7.9
+    phase: P7
+    name: cAPI fleet import
+    depends_on: [P1.8, P7.4]
+    estimate_hours: 5
+    risk_tier: 2
+    files: [apps/worker/src/jobs/capi-fleet-import.ts]
+    acceptance:
+      - "The real fleet imports from /profile"
+      - "The import is asynchronous — no request path blocks on cAPI (INV-031)"
+      - "A stale verification past 25 days returns a clear re-verify prompt, not a failure"
+      - "The ships map keyed by string ship ID is parsed correctly"
+      - "Credits are NOT stored unless the member consented"
+    ssot_updates: [STATUS.md]
+
+# =============================================================================
+phase_P8:
+# =============================================================================
+
+  - id: P8.1
+    phase: P8
+    name: Dual Ollama instances
+    depends_on: []
+    estimate_hours: 5
+    risk_tier: 2
+    files:
+      - infra/gsai/ollama-interactive.service
+      - infra/gsai/ollama-heavy.service
+    acceptance:
+      - "Two systemd units, each pinned by GPU UUID — never a numeric index"
+      - "MANDATORY: ollama ps shows size_vram == size on BOTH instances"
+      - "Both point at the same OLLAMA_MODELS directory and a shared model is stored once"
+      - "Instance A has KEEP_ALIVE=-1; instance B has KEEP_ALIVE=5m"
+      - "NVIDIA driver is 580+ and both cards enumerate"
+      - "The 3060 VRAM variant is confirmed and recorded"
+    blocked_by_decisions: [D8]
+    ssot_updates: [STATUS.md]
+
+  - id: P8.2
+    phase: P8
+    name: Tool-call reliability benchmark
+    depends_on: [P8.1]
+    estimate_hours: 4
+    risk_tier: 2
+    files: [tools/gsai-benchmark.ts]
+    acceptance:
+      - "20 identical tool-call requests using OUR REAL schemas from tools.yaml, per instance"
+      - "Measures valid-structured-tool_calls rate, time-to-first-token and total wall time"
+      - "MANDATORY GATE: below 75% reliability, the model or quantisation changes before anything is built on it"
+      - "qwen3:14b and gpt-oss:20b are both benchmarked and decision D9 is settled by measurement"
+      - "Results recorded in STATUS.md"
+    blocked_by_decisions: [D9]
+    ssot_updates: [STATUS.md]
+
+  - id: P8.3
+    phase: P8
+    name: Tunnel security
+    depends_on: []
+    estimate_hours: 8
+    risk_tier: 3
+    files:
+      - infra/tunnel/wireguard/
+      - infra/tunnel/cloudflared/config.yml
+      - apps/gsai/src/security/signing.ts
+    acceptance:
+      - "MANDATORY: from an arbitrary internet host, the gateway is UNREACHABLE"
+      - "MANDATORY: a replayed request is rejected — single-use nonce in Redis plus a 60-second timestamp window"
+      - "mTLS is enforced between the tunnel and the local service"
+      - "The agent container's egress allowlist permits ONLY Ollama localhost, our API and the whitelisted ED APIs — an arbitrary host is refused"
+      - "There is NO route from the container to the home LAN"
+      - "The agent runtime configuration contains no database URL (INV-016)"
+    ssot_updates: [STATUS.md]
+
+  - id: P8.4
+    phase: P8
+    name: Gateway
+    depends_on: [P8.3]
+    estimate_hours: 6
+    risk_tier: 3
+    files: [apps/gsai/src/gateway/]
+    acceptance:
+      - "Signature and nonce verification reject a forged or replayed request"
+      - "The concurrency semaphore bounds in-flight requests per instance"
+      - "Per-user quota is enforced server-side"
+      - "A heartbeat reaches the API every 15 seconds; three missed beats mark OFFLINE"
+    ssot_updates: [STATUS.md]
+
+  - id: P8.5
+    phase: P8
+    name: GPU arbiter
+    depends_on: [P8.1]
+    estimate_hours: 5
+    risk_tier: 2
+    files: [apps/gsai/src/arbiter.ts]
+    acceptance:
+      - "MANDATORY: launching Elite Dangerous stops instance B receiving work immediately, and it releases VRAM within 5 minutes"
+      - "The temperature guard sheds to DEGRADED above 83 C"
+      - "Free-VRAM headroom below 11 GB routes away from instance B"
+      - "Batch and scheduled work DEFERS rather than erroring when B is unavailable"
+      - "Status is exposed on the admin health dashboard as available | gaming | busy"
+    ssot_updates: [STATUS.md]
+
+  - id: P8.6
+    phase: P8
+    name: Deterministic fast path
+    depends_on: [P8.1, P8.7]
+    estimate_hours: 8
+    risk_tier: 2
+    files:
+      - apps/gsai/src/fast-path/classifier.ts
+      - apps/gsai/src/fast-path/templates/
+    acceptance:
+      - "MANDATORY GATE: handles >=60% of real queries with NO LLM invoked"
+      - "Fast-path responses return in under 200ms"
+      - "Only tools with fast_path: true are reachable; NO mutating tool is ever fast-pathed"
+      - "Templated responses carry freshness and provenance identically to generated ones (INV-004)"
+      - "The confidence threshold is configurable and starts conservative"
+      - "Evaluation case E1 passes with the LLM demonstrably not invoked"
+    notes: >
+      BUILD THIS BEFORE THE AGENT LOOP (ADR-012). Reversed, the loop "works" and the
+      fast path never gets built.
+    ssot_updates: [STATUS.md]
+
+  - id: P8.7
+    phase: P8
+    name: Tool registry generation
+    depends_on: [P8.4]
+    estimate_hours: 6
+    risk_tier: 3
+    files:
+      - packages/ai-tools/src/generated/
+      - tools/generate-tool-registry.ts
+    acceptance:
+      - "The registry is GENERATED from ssot/06-ai/tools.yaml; regenerating produces no diff"
+      - "A tool present in the registry but absent from the YAML fails the build"
+      - "Each tool has a Zod schema, a permission binding, a mutating flag and a handler"
+      - "Tools touching squadron data call BACK to the API with the caller's signed context (INV-016)"
+      - "All 30 tools are present — 19 read, 11 write"
+    ssot_updates: [STATUS.md]
+
+  - id: P8.8
+    phase: P8
+    name: Agent loop
+    depends_on: [P8.7, P8.5]
+    estimate_hours: 8
+    risk_tier: 3
+    files: [apps/gsai/src/agent/loop.ts]
+    acceptance:
+      - "MANDATORY: tools are filtered by permission BEFORE serialisation — a Ring 0 caller's outgoing payload contains no set_bgs_order (INV-011)"
+      - "The executor re-checks permission independently; a forged tool name is refused and audited"
+      - "Zod errors are fed back and the model self-corrects"
+      - "Results are truncated to max_result_chars before entering context"
+      - "MAX_STEPS is 6 on the 8b and 8 on the 14b; exhaustion produces an honest partial answer"
+      - "EVERY invocation is audited including denials (INV-009)"
+      - "Only 8-10 tools are sent per turn, not all 30"
+    ssot_updates: [STATUS.md]
+
+  - id: P8.9
+    phase: P8
+    name: RAG pipeline with ACL mirroring
+    depends_on: [P8.7, P2.5]
+    estimate_hours: 8
+    risk_tier: 3
+    files:
+      - apps/worker/src/jobs/rag-index.ts
+      - apps/api/src/rag/retrieval.service.ts
+    acceptance:
+      - "MANDATORY ACL LEAK TEST: a Ring 0 user asking about content that exists only in a Ring 2 thread receives nothing from it AND the retrieval returns ZERO ROWS (INV-003)"
+      - "Moving a thread to a public category makes it retrievable; moving it back makes it unretrievable again"
+      - "A private loadout comment returns zero rows for another member"
+      - "A soft-deleted post returns zero rows"
+      - "The visibility filter is IN the query, evaluated with the ANN scan — asserted by inspecting the SQL"
+      - "Chunking is 600/80 and respects markdown headings"
+      - "Hybrid vector + BM25 merged by RRF; an exact callsign like K7Q-B4X is found"
+      - "A content type without a registered re-index handler FAILS a test that enumerates them"
+      - "A failed re-index after an ACL change alerts immediately and is treated as a potential leak"
+    blocked_by_decisions: [D16]
+    ssot_updates: [STATUS.md]
+
+  - id: P8.10
+    phase: P8
+    name: Web surface
+    depends_on: [P8.6, P8.8]
+    estimate_hours: 7
+    risk_tier: 2
+    files: [apps/web/components/gsai/]
+    acceptance:
+      - "Slide-over opens on Cmd/Ctrl-K from every page with page context injected"
+      - "Tokens stream over WebSocket"
+      - "Tool calls render as collapsible cards; a DENIED call is shown, not hidden"
+      - "Confirmations are inline buttons and never auto-execute"
+      - "A fast-path answer shows NO thinking indicator — it did not think"
+      - "Every message has a feedback control"
+    ssot_updates: [STATUS.md]
+
+  - id: P8.11
+    phase: P8
+    name: Discord surface
+    depends_on: [P8.8]
+    estimate_hours: 5
+    risk_tier: 3
+    files: [apps/bot/src/commands/gsai.ts]
+    acceptance:
+      - "/gsai and @mention both work, thread-aware"
+      - "The permission mask derives from the INVOKER's Discord roles — identical enforcement to the web surface"
+      - "Privacy-sensitive replies are ephemeral"
+      - "Responses stay under 1800 characters, linking to the site when longer"
+    ssot_updates: [STATUS.md]
+
+  - id: P8.12
+    phase: P8
+    name: Write tools with confirmation
+    depends_on: [P8.8]
+    estimate_hours: 6
+    risk_tier: 3
+    files: [packages/ai-tools/src/handlers/write/]
+    acceptance:
+      - "MANDATORY: every mutating tool refuses without a confirmation token for that specific call (INV-014)"
+      - "grant_role requires TWO steps and its preview expands the permission DELTA in plain language"
+      - "create_forum_post and post_announcement previews show the FULLY RENDERED body"
+      - "create_operation previews the time in both UTC and the caller's local zone"
+      - "An expired confirmation token forces a re-plan, never an automatic execution"
+      - "ban is absent from moderate_content's enum and is unreachable by any path"
+      - "send_discord_message can only address channels on the configured allowlist"
+    ssot_updates: [STATUS.md]
+
+  - id: P8.13
+    phase: P8
+    name: Fallback states
+    depends_on: [P8.4, P8.6]
+    estimate_hours: 5
+    risk_tier: 3
+    files: [apps/api/src/ai/status.service.ts]
+    acceptance:
+      - "MANDATORY: with the local box POWERED OFF, every non-AI feature works (INV-030)"
+      - "The UI reports ONLINE, DEGRADED or OFFLINE honestly"
+      - "Offline read queries fall back to templated non-LLM responses"
+      - "Offline chat requests queue and are delivered by Discord DM on reconnect"
+      - "Scheduled AI jobs roll over rather than failing"
+    ssot_updates: [STATUS.md]
+
+  - id: P8.14
+    phase: P8
+    name: Proactive briefings
+    depends_on: [P8.5, P8.8, P4.8]
+    estimate_hours: 5
+    risk_tier: 2
+    files: [apps/worker/src/jobs/ai-briefing.ts]
+    acceptance:
+      - "The daily briefing, BGS tick summary, market alerts and weekly digest all post"
+      - "All run on instance B overnight, arbiter-gated"
+      - "They are opt-in and rate-limited"
+      - "Market-derived content states data ages"
+    ssot_updates: [STATUS.md]
+
+  - id: P8.15
+    phase: P8
+    name: Audit UI and kill switches
+    depends_on: [P8.8, P1.7]
+    estimate_hours: 5
+    risk_tier: 3
+    files:
+      - apps/web/app/admin/ai/page.tsx
+      - apps/api/src/admin/ai-controls.controller.ts
+    acceptance:
+      - "MANDATORY: both kill switches take effect IMMEDIATELY without a deploy"
+      - "ai.writeToolsDisabled makes every mutating tool refuse regardless of permission"
+      - "ai.disabled turns GSAI off entirely and the UI reports OFFLINE"
+      - "Officers with AI_TOOLS_ADMIN can review all conversations; members see only their own"
+      - "The audit UI supports 'show me every denied call'"
+      - "Both switch changes are audited"
+    ssot_updates: [STATUS.md]
+
+# =============================================================================
+phase_P9:  # ongoing; pull by tier, highest value-to-effort first
+# =============================================================================
+
+  - id: P9.1
+    phase: P9
+    name: Tier 1 delight bundle
+    depends_on: [P8.15]
+    estimate_hours: 24
+    risk_tier: 1
+    files: [apps/web/, apps/bot/]
+    acceptance:
+      - "CMDR business cards generate a shareable PNG"
+      - "The 'Am I needed?' widget consolidates BGS priority, ops gaps and carrier shortfall into one line"
+      - "Copy-to-clipboard exists on every system name site-wide"
+      - "Achievements are awardable manually and by automatic trigger"
+      - "The onboarding checklist tracks verify CMDR, install plugin, join a wing, attend an op, post an intro"
+      - "PWA installs and delivers push notifications for ops reminders"
+      - "The command palette navigates and reaches GSAI"
+      - "Milestone bot posts fire on member-count and credit milestones"
+    ssot_updates: [STATUS.md]
+
+  - id: P9.2
+    phase: P9
+    name: Squadron wiki
+    depends_on: [P8.9]
+    estimate_hours: 12
+    risk_tier: 2
+    files: [apps/api/src/wiki/]
+    acceptance:
+      - "Versioned markdown pages with per-page visibility"
+      - "Pages feed the RAG index with their visibility mirrored (INV-003)"
+      - "A visibility change re-indexes"
+    ssot_updates: [STATUS.md]
+
+  - id: P9.3
+    phase: P9
+    name: Tier 2 modules
+    depends_on: [P9.1]
+    estimate_hours: 80
+    risk_tier: 2
+    files: [apps/web/, apps/api/]
+    acceptance:
+      - "Each module in roadmap.yaml tier_2 ships with its own acceptance criteria appended here before work begins"
+      - "No tier-2 module starts before the standing exit criteria are green"
+    notes: Expand into individual tasks when each is scheduled. A placeholder estimate, not a plan.
+    ssot_updates: [STATUS.md, 08-plan/tasks.yaml]
+
+  - id: P9.4
+    phase: P9
+    name: Standing quality obligations
+    depends_on: [P8.15]
+    estimate_hours: 16
+    risk_tier: 2
+    recurring: true
+    files: [ssot/09-runbooks/, .github/workflows/]
+    acceptance:
+      - "The monthly restore test passes and is recorded"
+      - "The a11y audit scores >=95 on all key screens; the high-contrast theme ships"
+      - "A load test establishes the route-query and forum-read ceilings"
+      - "A full security review is completed and findings triaged"
+      - "Every runbook is current — verified by walking one blind"
+      - "operation-4xx-response is raised from warn to error in redocly.yaml"
+      - "Backups verified within the last 30 days"
+    ssot_updates: [STATUS.md]
+
+# =============================================================================
+graph_rules:
+# =============================================================================
+  - Every depends_on must resolve to a task id in this file.
+  - A task may not depend on a task in a later phase, with one deliberate exception: P5.2 and P5.4 depend on P7.8 because the wing composition checker needs fleet queries. If P5 is reached before P7, P7.8 is pulled forward as a standalone task and recorded here.
+  - Tasks are 2-8 hours. A larger estimate means the task is really several and should be split before starting.
+  - "risk_tier 3 ALWAYS requires a human to merge (ADR-021)."
+  - Acceptance criteria are test names. A task with an untested criterion is not done (ADR-016).
+  - Tasks marked MANDATORY in their acceptance criteria are phase-exit gates and cannot be deferred.

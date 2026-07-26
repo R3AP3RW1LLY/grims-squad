@@ -1,0 +1,307 @@
+# =============================================================================
+# ROADMAP — machine-readable phase plan
+#
+# Ordering rationale, which is NOT arbitrary:
+#   - Telemetry (P3) precedes BGS, ops, carriers and trade because all four are
+#     fed by it. Build the pipe before the four taps.
+#   - BGS (P4) precedes ops/trade because this squadron runs a player minor
+#     faction — it is the retention hook.
+#   - GSAI (P8) is LAST and deliberately so. An agent with no forum to search,
+#     no BGS data to report and no ops to book is a chatbot. Built last it has
+#     20 real tools; built first it is a slow chatbot that hallucinates prices
+#     and defines members' first impression of the whole site.
+#
+# Estimates assume ONE competent full-stack developer working part-time.
+# Full vision: 9-11 months. A genuinely useful v1 (P0-P2 + the EDMC plugin) is
+# 8-10 weeks and is the right thing to aim at first.
+# =============================================================================
+
+version: 1
+total_estimate: "9-11 months solo, part-time"
+v1_target: "P0-P2 plus the EDMC plugin — 8-10 weeks"
+
+phases:
+
+  - id: P0
+    name: Foundations
+    goal: A deployed "hello CMDR" page with CI, so every later phase has rails.
+    weeks: "1-2"
+    sessions: "1-2"
+    depends_on: []
+    blocks: [P1, P2, P3, P4, P5, P6, P7, P8, P9]
+    scope_in:
+      - Monorepo scaffold, tooling, strict TypeScript
+      - Docker Compose dev stack, Postgres with migrations
+      - Shared contracts package
+      - API and web skeletons
+      - CI pipeline with the SSOT-drift check
+      - Production deploy behind TLS
+    scope_out:
+      - Auth. Forum. Any game data. Any UI beyond one page.
+      - "ESPECIALLY: no feature work."
+    exit_criteria:
+      - "pnpm install && pnpm build && pnpm test green from a clean clone"
+      - Every SSOT table exists in the dev database
+      - "/v1/health returns all-green in production"
+      - Landing page live over HTTPS
+      - CI blocks a deliberately-failing PR
+      - SSOT-drift check demonstrably fails on an edited copy
+    review_gates: [ARCH-ADV, OPS-ADV]
+    external_blockers: [domain, vps, cloudflare]
+
+  - id: P1
+    name: Identity & shell
+    goal: Members log in with Discord and see role-appropriate navigation.
+    weeks: "3-5"
+    sessions: "3-5"
+    depends_on: [P0]
+    scope_in:
+      - Discord OAuth, rotating sessions with reuse detection
+      - Permission engine with DATA-LAYER enforcement
+      - Role-sync bot and nightly reconciliation
+      - Member profiles, privacy toggles, device management
+      - Admin console v1, audit log
+      - CMDR verification (cAPI if approved; fallback regardless)
+      - Public landing page
+    scope_out:
+      - Forum. Game data. AI.
+    exit_criteria:
+      - Discord login works end to end in production
+      - Role change in Discord reflects on the site within 5s
+      - Negative authorization tests pass at every ring boundary, AT THE DATA LAYER
+      - Refresh-token reuse revokes the entire family (test passes)
+      - Admin can change roles; every change audited with before/after
+      - Landing page live with real stats
+    review_gates: [DESIGN-ADV, ARCH-ADV, RED-TEAM, UX-ADV, OPS-ADV]
+    external_blockers: [discord_app, capi_approval_optional]
+
+  - id: P2
+    name: Forums
+    goal: The community moves in. This is the point of no return.
+    weeks: "6-9"
+    sessions: "4-6"
+    depends_on: [P1]
+    scope_in:
+      - Categories, threads, posts, reactions, subscriptions
+      - Editor, uploads with EXIF strip and re-encode
+      - ACL-filtered Meilisearch
+      - Moderation queue, reports, auto-flags
+      - Recruitment pipeline end to end
+      - Thread-level Discord bridge
+      - Embed extension point (no-op renderer)
+    scope_out:
+      - ED-specific embeds (needs P3 game data — build the extension point only)
+      - AI search. Wiki.
+    exit_criteria:
+      - Ring 0/1/2 categories enforce correctly, INCLUDING in search
+      - XSS suite passes
+      - A real application flows to approval and grants access
+      - Notifications reach Discord
+      - "REAL MEMBERS ARE USING IT — this is the actual exit criterion"
+    review_gates: [DESIGN-ADV, ARCH-ADV, RED-TEAM, UX-ADV, OPS-ADV]
+    external_blockers: [object_storage]
+
+  - id: P3
+    name: Telemetry spine
+    goal: The site knows the galaxy AND what our CMDRs are doing in it.
+    weeks: "10-13"
+    sessions: "5-7"
+    depends_on: [P2]
+    keystone: true
+    note: >
+      THE KEYSTONE PHASE. All four activity profiles were selected, so nothing can
+      be deprioritised by focus. The way out is to build the thing that serves all
+      of them at once.
+    scope_in:
+      - All ED API adapters behind interfaces
+      - EDDN collector with batching, idempotency, backpressure, radius prefilter
+      - Seed from Spansh/Ardent dumps
+      - FDevIDs canonical name mapping
+      - Telemetry endpoint, device tokens, server-side consent
+      - EDMC plugin (public source)
+      - System and commodity pages, forum ED embeds
+    scope_out:
+      - Trade route optimisation (P6). BGS analysis (P4). Loadout tooling (P7).
+    exit_criteria:
+      - EDDN collector stable 24h+, lag <60s, parse-failure rate <0.5%
+      - Systems and stations seeded; commodity display names resolve via FDevIDs
+      - EDMC plugin installed by >=3 real members, telemetry arriving
+      - Spansh jobs complete asynchronously with WebSocket push
+      - Every price in the UI carries a freshness indicator
+      - All adapters marked verified-or-unverified in STATUS.md
+    review_gates: [DESIGN-ADV, ARCH-ADV, RED-TEAM, DATA-INTEGRITY-ADV, UX-ADV, OPS-ADV]
+    external_blockers: [object_storage, disk_headroom]
+
+  - id: P4
+    name: BGS console
+    goal: Members open the site to find out what to do tonight.
+    weeks: "14-18"
+    sessions: "4-6"
+    depends_on: [P3]
+    note: Moved up because this squadron runs a player minor faction.
+    scope_in:
+      - Influence ingestion and tick detection
+      - Influence charts, system control board
+      - Orders board with officer guidance
+      - Activity reporting from telemetry, manual fallback, BGS-Tally import
+      - Conflict tracker, nightly Discord digest
+    scope_out:
+      - "Influence projection/simulation (P9 — the model needs months of data first)"
+      - Powerplay. Colonisation.
+    exit_criteria:
+      - Influence charts match independent sources for the same systems
+      - Ticks correctly identified across 7 consecutive days
+      - Officers set orders; members see them on their dashboard
+      - Activity auto-captured from telemetry without manual entry
+      - Nightly digest posts to Discord
+    review_gates: [DESIGN-ADV, ARCH-ADV, DATA-INTEGRITY-ADV, UX-ADV, OPS-ADV]
+    external_blockers: [tracked_factions_confirmed, tick_source_chosen]
+
+  - id: P5
+    name: Ops & carriers
+    goal: Operations and carrier logistics run through the site.
+    weeks: "19-22"
+    sessions: "3-5"
+    depends_on: [P4]
+    scope_in:
+      - Operations CRUD, signups, standby, Discord Events sync, reminders
+      - Wing composition checker
+      - Carrier registry, jump schedule, tritium tracker, market mirror
+      - Post-op attendance and AAR
+    scope_out:
+      - Squadron ledger/economy (P9). Replay viewer (P9).
+    exit_criteria:
+      - A real op is scheduled, filled, run and AAR'd through the site
+      - Times correct for members in >=3 timezones
+      - Carrier fuel tracked without manual entry
+      - Wing composition checker returns correct matches against real fleet data
+    review_gates: [DESIGN-ADV, ARCH-ADV, UX-ADV, OPS-ADV]
+
+  - id: P6
+    name: Trade terminal
+    goal: '"Where do I make credits tonight" is answered on our site.'
+    weeks: "23-26"
+    sessions: "4-5"
+    depends_on: [P3]
+    scope_in:
+      - Commodity lookup with freshness, importer/exporter finder
+      - Own-DB route optimiser and materialised best_trades
+      - Spansh delegation, async with push
+      - Carrier-aware routing, squadron trade board, group hauling, alerts
+    scope_out:
+      - Mining hotspot registry (P9). Materials exchange (P9).
+    exit_criteria:
+      - Route query on a populated DB returns in <2s
+      - Routes spot-checked in-game and found accurate
+      - Every price shows its age
+      - Spansh jobs never block the UI
+      - A real group hauling op tracked to completion
+    review_gates: [DESIGN-ADV, ARCH-ADV, DATA-INTEGRITY-ADV, UX-ADV, OPS-ADV]
+
+  - id: P7
+    name: Shipyard
+    goal: Ship builds live at home.
+    weeks: "27-29"
+    sessions: "2-4"
+    depends_on: [P3]
+    scope_in:
+      - Self-hosted Coriolis, pinned and themed
+      - Loadout Locker with all four import formats
+      - Ship maths ported from Coriolis into ed-domain
+      - Doctrine builds, requirements checker, fleet queries
+      - cAPI fleet import
+    scope_out:
+      - "Building an outfitting UI from scratch. RUN CORIOLIS."
+    exit_criteria:
+      - Coriolis live and themed
+      - All four import formats work
+      - Ship maths match Coriolis within 1% on 10 test builds
+      - Fleet queries return correct results
+      - Doctrine builds visible to members
+    review_gates: [DESIGN-ADV, ARCH-ADV, UX-ADV, OPS-ADV]
+
+  - id: P8
+    name: Grim's Squad AI
+    goal: GSAI online — and useful, because everything it operates now exists.
+    weeks: "30-36"
+    sessions: "6-10"
+    depends_on: [P2, P3, P4, P5, P6, P7]
+    note: >
+      Moved last deliberately. This is the feature the maintainer is most excited
+      about and the one that depends on everything else existing.
+    scope_in:
+      - Dual Ollama instances, GPU arbiter
+      - Tunnel security — mTLS, HMAC signing, nonce, egress allowlist
+      - "Deterministic fast path FIRST, then the agent loop"
+      - Tool registry generated from tools.yaml
+      - RAG with ACL-mirrored chunks
+      - Web and Discord surfaces
+      - Write tools with confirmation, audit UI, kill switches
+    scope_out:
+      - Voice (P9). Cloud fallback (feature-flagged, off).
+    exit_criteria:
+      - Both instances resident, benchmark >=75% tool-call reliability, recorded
+      - Fast path handles >=60% of real queries without the LLM
+      - "ACL LEAK TEST PASSES — answer empty AND retrieval zero rows"
+      - Prompt-injection via forum content cannot invoke an unpermitted tool
+      - Gateway unreachable from the public internet; replay rejected
+      - Arbiter correctly yields when Elite is running
+      - Every tool call audited, including denials
+      - Both kill switches work without a deploy
+      - Site fully functional with the local box powered off
+    review_gates: [DESIGN-ADV, ARCH-ADV, RED-TEAM, DATA-INTEGRITY-ADV, UX-ADV, OPS-ADV]
+    external_blockers: [gpu_driver_580, gpu_uuids, tunnel_established]
+
+  - id: P9
+    name: Polish & delight
+    goal: The things that make it epic rather than merely functional.
+    weeks: "37+"
+    sessions: ongoing
+    depends_on: [P8]
+    tiers:
+      tier_1:
+        - CMDR business cards
+        - '"Am I needed?" widget'
+        - Copy-to-clipboard everywhere
+        - Achievements and badges
+        - Onboarding checklist
+        - PWA with push for ops reminders
+        - Command palette
+        - Squadron milestone bot posts
+      tier_2:
+        - Mentor pairing
+        - LFG board
+        - Engineering tracker
+        - Materials exchange
+        - Community Goal tracker
+        - Mining hotspot registry
+        - Screenshot gallery with monthly contest
+        - Squadron wiki
+        - AX/Thargoid war board
+        - Powerplay module
+        - Colonisation tracker
+        - Squadron ledger
+      tier_3:
+        - 3D galaxy map
+        - BGS projection engine
+        - Op replay viewer
+        - Voice AI (Whisper + Piper)
+        - Inter-squadron federation
+        - i18n
+    standing_exit_criteria:
+      - Monthly restore test passes
+      - a11y audit >=95 on all key screens, high-contrast theme shipped
+      - All runbooks current
+      - Backups verified within the last 30 days
+      - "operation-4xx-response raised from warn to error in redocly.yaml"
+    review_gates: [UX-ADV, OPS-ADV, RED-TEAM]
+
+# =============================================================================
+# PHASE GATE PROTOCOL
+# =============================================================================
+gate_protocol:
+  - Every phase exit is risk tier 3 and requires a human (ADR-021).
+  - Run the demo script from docs/PROMPT-PHASES.md before declaring exit.
+  - Run the phase's review_gates panel; record outcomes in 10-quality/review-log.md.
+  - Update ssot/STATUS.md — phase status, verified adapters, deferred items, handoff note.
+  - "Ship each phase to real members before starting the next. Feedback beats planning."
