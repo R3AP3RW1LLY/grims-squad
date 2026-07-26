@@ -4,10 +4,12 @@ packages:
   - 'tools'
 
 allowBuilds:
+  '@nestjs/core': true
   '@prisma/client': true
   '@prisma/engines': true
   esbuild: true
   prisma: true
+  sharp: true
 
 # pnpm 10+ requires build scripts to be allow-listed explicitly. esbuild is a
 # vitest dependency and needs its postinstall to produce a usable binary.
@@ -16,9 +18,22 @@ onlyBuiltDependencies:
   - prisma
   - "@prisma/client"
   - "@prisma/engines"
+  - "@nestjs/core"
 
 # Transitive advisory: brace-expansion <=5.0.7 (DoS via unbounded expansion).
 # Reached only through eslint -> minimatch, i.e. dev-time tooling, never runtime.
 # Overridden rather than ignored: a suppressed advisory is one nobody revisits.
 overrides:
   brace-expansion@<5.0.8: ">=5.0.8"
+  # CRITICAL (GHSA-72c6-fx6q-fr5w): @fastify/middie <=9.3.1 allows middleware
+  # authentication bypass in child plugin scopes. Reached transitively via
+  # @nestjs/platform-fastify - i.e. it sits directly under the request path that
+  # P1's auth guards will run in. Not deferrable.
+  "@fastify/middie@<9.3.2": ">=9.3.2"
+  # All transitive, all with patches available, several in the request path.
+  # Overridden rather than ignored - a suppressed advisory is one nobody revisits.
+  "fastify@<5.7.2": ">=5.7.2"                 # Content-Type tab char bypasses body validation
+  "fast-uri@<3.1.1": ">=3.1.1"                # path traversal via percent-encoded dot
+  "find-my-way@<9.6.1": ">=9.6.1"             # HTTP/2 DoS
+  "postcss@<8.5.12": ">=8.5.12"               # arbitrary file read
+  "sharp@<0.35.0": ">=0.35.0"                 # inherited libvips CVEs

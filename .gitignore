@@ -42,6 +42,7 @@
 TODO.local.md
 Thumbs.db
 __pycache__/
+apps/api/.env
 build/
 coverage/
 credentials.json
@@ -49,6 +50,7 @@ data/
 desktop.ini
 dist/
 galaxy*.json*
+next-env.d.ts
 node_modules/
 npm-debug.log*
 out/
