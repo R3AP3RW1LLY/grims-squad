@@ -1,0 +1,194 @@
+# Discord role mappings — GENERATED FROM THE LIVE GUILD, 2026-07-26.
+#
+# Read from the Discord API rather than transcribed by hand, so the names and
+# IDs here are exactly what the server has. IDs are DATA, never hard-coded in
+# application source (INV-008) — renaming a role in Discord changes nothing.
+# Deleting and recreating one mints a NEW id and DOES break the mapping.
+#
+# The bot is READ-ONLY with respect to roles (human decision, 2026-07-26).
+# Leadership assigns every rank by hand in Discord; the site mirrors what it
+# finds. Discord is the source of truth for who holds what.
+#
+# Tenure and loyalty ranks grant NO permissions (INV-046). They are titles.
+# Only reserved and leadership roles map to a permission bundle.
+
+guildId: '801929816596152320'
+guildName: "Grim's Squad Elite Dangerous Edition"
+
+roles:
+  # ---------------------------------------------------------- reserved
+  - id: '804027885081591818'
+    name: "Galactic Admiral (Community Leader)"
+    tier: reserved
+    discordPosition: 38
+    grantsPermissions: true
+
+  - id: '1512912541771235601'
+    name: "Prime Legate"
+    tier: reserved
+    discordPosition: 37
+    grantsPermissions: true
+
+  # ---------------------------------------------------------- leadership
+  - id: '1512912750416760892'
+    name: "Chief Fleet Commander"
+    tier: leadership
+    discordPosition: 36
+    grantsPermissions: true
+
+  - id: '1513748632963387523'
+    name: "First Commander"
+    tier: leadership
+    discordPosition: 35
+    grantsPermissions: true
+
+  - id: '1513749464458723469'
+    name: "Sector Overseer"
+    tier: leadership
+    discordPosition: 34
+    grantsPermissions: true
+
+  - id: '1513669809756311593'
+    name: "Squadron Leader"
+    tier: leadership
+    discordPosition: 12
+    grantsPermissions: true
+
+  # ---------------------------------------------------------- tenure
+  - id: '1528252058380144740'
+    name: "Sergeant"
+    tier: tenure
+    discordPosition: 17
+    tenureMonths: 1
+    grantsPermissions: false
+
+  - id: '1528252671453036634'
+    name: "Master Sergeant"
+    tier: tenure
+    discordPosition: 18
+    tenureMonths: 2
+    grantsPermissions: false
+
+  - id: '1528252377143050361'
+    name: "2nd Lieutenant"
+    tier: tenure
+    discordPosition: 19
+    tenureMonths: 3
+    grantsPermissions: false
+
+  - id: '1528253163755405402'
+    name: "1st Lieutenant"
+    tier: tenure
+    discordPosition: 20
+    tenureMonths: 4
+    grantsPermissions: false
+
+  - id: '1528253388901580881'
+    name: "Commander"
+    tier: tenure
+    discordPosition: 21
+    tenureMonths: 5
+    grantsPermissions: false
+
+  - id: '1528253529532141739'
+    name: "Master Commander"
+    tier: tenure
+    discordPosition: 22
+    tenureMonths: 6
+    grantsPermissions: false
+
+  - id: '1528253849998065834'
+    name: "General"
+    tier: tenure
+    discordPosition: 23
+    tenureMonths: 7
+    grantsPermissions: false
+
+  - id: '1528254061504237700'
+    name: "Lord General"
+    tier: tenure
+    discordPosition: 24
+    tenureMonths: 9
+    grantsPermissions: false
+
+  - id: '1528254279289278534'
+    name: "Grand Master General"
+    tier: tenure
+    discordPosition: 32
+    tenureMonths: 12
+    grantsPermissions: false
+
+  # ---------------------------------------------------------- loyalty
+  - id: '1513158621549297785'
+    name: "GMSD: Loyalty I"
+    tier: loyalty
+    discordPosition: 26
+    loyaltyLevel: 1
+    grantsPermissions: false
+
+  - id: '1513158687898730526'
+    name: "GMSD: Loyalty II"
+    tier: loyalty
+    discordPosition: 27
+    loyaltyLevel: 2
+    grantsPermissions: false
+
+  - id: '1513158735776972891'
+    name: "GMSD: Loyalty III"
+    tier: loyalty
+    discordPosition: 28
+    loyaltyLevel: 3
+    grantsPermissions: false
+
+  - id: '1513158786632646757'
+    name: "GMSD: Loyalty IV"
+    tier: loyalty
+    discordPosition: 29
+    loyaltyLevel: 4
+    grantsPermissions: false
+
+  - id: '1513158830853198025'
+    name: "GMSD: Loyalty V"
+    tier: loyalty
+    discordPosition: 30
+    loyaltyLevel: 5
+    grantsPermissions: false
+
+  - id: '1513158877271691274'
+    name: "GMSD: LEGEND"
+    tier: loyalty
+    discordPosition: 31
+    loyaltyLevel: 6
+    grantsPermissions: false
+
+  # ---------------------------------------------------------- entry
+  - id: '892493916530671657'
+    name: "Allies"
+    tier: entry
+    discordPosition: 14
+    entryKind: allies
+    grantsPermissions: false
+
+  - id: '804027821986807860'
+    name: "Grim’s Squad members"
+    tier: entry
+    discordPosition: 15
+    entryKind: members
+    grantsPermissions: false
+
+  - id: '1528251831531339927'
+    name: "Cadet"
+    tier: entry
+    discordPosition: 16
+    entryKind: cadet
+    grantsPermissions: false
+
+# OPEN DECISION (D24) — Squadron Leader's seniority.
+# Discord places it at position 12: BELOW Chief Fleet Commander (36), First
+# Commander (35) and Sector Overseer (34), and below every tenure and loyalty
+# rank. But the human's rank brief described it as the role that AWARDS loyalty
+# ranks, which implies seniority over them.
+#
+# Those two readings disagree and the difference decides who can do what to
+# whom, so it is recorded as open rather than guessed. Until it is answered no
+# permission bundle is attached to any leadership role.
