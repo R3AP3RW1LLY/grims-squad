@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -8,10 +9,14 @@ const nextConfig = {
   // node_modules. Required by infra/docker/Dockerfile.web.
   output: 'standalone',
   // The monorepo root, so tracing follows workspace symlinks correctly.
-  // path.resolve rather than new URL(...).pathname: on Windows the latter
-  // yields "/D:/..." with a leading slash, which is not a usable filesystem
-  // path and breaks the build on the dev machine but not in the container.
-  outputFileTracingRoot: path.resolve(process.cwd(), '../..'),
+  //
+  // fileURLToPath, NOT new URL(...).pathname: on Windows the latter yields
+  // "/D:/..." with a leading slash, which is not a usable filesystem path and
+  // breaks the build on the dev machine but not in the container — the worst
+  // kind of difference. Resolved from this file rather than process.cwd() so it
+  // does not depend on where the build was invoked from, and so it needs no
+  // `process` global (which eslint rightly flags in a browser-adjacent config).
+  outputFileTracingRoot: path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..'),
   poweredByHeader: false,
   async headers() {
     return [

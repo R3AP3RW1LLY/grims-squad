@@ -99,29 +99,34 @@ Also on this page:
    - `bot`
    - `applications.commands`
 3. Under **Bot Permissions**, tick only:
-   - **Manage Roles** — required, this is how ranks are applied
    - **View Channels**
    - **Send Messages**
    - **Embed Links**
-   - **Read Message History**
 
-   Do **not** grant Administrator. It is convenient and it means a compromised bot token can delete the server.
+   **NOT Manage Roles.** Corrected 2026-07-26: the bot is READ-ONLY with respect
+   to roles. Leadership assigns every rank by hand in Discord and the site simply
+   mirrors what it finds, so the bot never needs to write one. A token that
+   cannot modify roles cannot escalate anyone if it leaks.
+
+   Do **not** grant Administrator either. It is convenient, and it means a
+   compromised bot token can delete the server.
 
 4. Copy the generated URL at the bottom, open it, choose **Grim's Squad**, and authorise.
 
 ---
 
-## Step 7 — Position the bot's role ⚠️
+## Step 7 — Bot role position: leave it alone
 
-**Also easy to miss, and it produces a confusing failure.**
+**No action needed.** Corrected 2026-07-26.
 
-1. Server Settings → **Roles**.
-2. Find the role Discord created for the bot (it will be called `Grim's Squad Hub`).
-3. **Drag it ABOVE every role the bot needs to assign** — above all rank roles.
+Reading roles and members requires no hierarchy position at all, so the bot works
+fine at the very bottom of the list — and that is where it should stay. Moving it
+up would grant authority it has no use for.
 
-Discord will not let a bot assign a role positioned at or above its own, **even with Manage Roles**. The symptom is `Missing Permissions` on role assignment while the bot obviously has the permission, which sends people hunting in the wrong place for a long time.
-
-Rule of thumb: bot role directly under your leadership roles, above everything it manages.
+*(This step previously said to drag the bot above every rank role. That is only
+true for a bot that ASSIGNS roles. Ours does not, and the advice was wrong for
+this design — keeping it here so the reasoning is visible rather than silently
+rewritten.)*
 
 ---
 
@@ -211,7 +216,8 @@ I need every **leadership** and **reserved** role. Tenure and loyalty ranks are 
 |---|---|
 | `invalid_request` at login | Redirect URI mismatch — check Step 3 for exact match, no trailing slash |
 | Everyone appears to have no roles | **SERVER MEMBERS intent off** — Step 4 |
-| `Missing Permissions` assigning a role | Bot role too low — Step 7 |
+| `Missing Permissions` assigning a role | Not applicable — the bot never assigns roles |
+| `Integration requires code grant` on invite | **Requires OAuth2 Code Grant** is ON — turn it OFF (Step 5) |
 | `invalid_client` | Wrong client secret, or it was reset after you copied it |
 | Login works, roles never update | Bot not actually in the server, or it cannot see the member |
 
