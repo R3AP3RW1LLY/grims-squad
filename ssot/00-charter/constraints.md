@@ -39,7 +39,7 @@ Hard boundaries. A design that violates one of these is wrong regardless of its 
 | | RTX 3060 (instance A) | RTX 5070 Ti (instance B) |
 |---|---|---|
 | Architecture / CC | Ampere GA106 / 8.6 | Blackwell GB203 / 12.0 |
-| VRAM | 12 GB (**confirm — decision D8**) | 16 GB |
+| VRAM | 12 GB — confirmed 2026-07-26 | 16 GB |
 | Bandwidth | 360 GB/s | 896 GB/s |
 | TGP | 170 W | 300 W |
 | Role | Interactive, resident 24/7, never contended | Batch/overflow, yields to the game |
@@ -85,7 +85,23 @@ The right to use Frontier's game data and imagery, and Coriolis's bundled data, 
 - **Never publish** a member's credit balance, exact location, or fleet without an explicit per-field opt-in.
 - **Data export** — any member can download everything held about them as JSON.
 - **Deletion on departure** — offer full purge; default to anonymising forum posts rather than deleting them, to preserve thread coherence, unless they ask otherwise.
-- Under-18 members are plausible in an ED squadron (decision D15). Collect no birthdates we don't need; officers must treat DM-based recruitment of minors into voice as a moderation matter.
+### ★ Minors — confirmed present (2026-07-26)
+
+**The squadron includes members under 18.** This is a binding product constraint, not a policy
+footnote, and it outranks convenience in every case below.
+
+| Rule | Why |
+|---|---|
+| **The public activity ticker ships OFF by default** | It broadcasts "CMDR X docked at Y, 4m ago" to the open internet. Opt-in for everyone; for a minor, opt-in *with the consequence spelled out in plain English*. |
+| **Location consent carries extra warning copy** | "This shares which system you are in, publicly, while you play" — not a bare toggle label. |
+| **No birthdate, ever** | We have no lawful basis and no need. Age is not a field anywhere in the schema. |
+| **No public leaderboard entry without explicit per-member opt-in** | Already INV-027; called out here because minors are the reason it matters most. |
+| **DM-based recruitment of minors into voice is a moderation topic** | Written into the officer handbook and the moderation queue's guidance before P2 exit — not left to officers' judgement in the moment. |
+| **Report handling is escalated, not queued** | A report involving a suspected minor goes straight to officers rather than sitting in the normal queue. |
+
+We deliberately **do not** attempt age verification or age-gating. Collecting the data needed to
+do it would create a larger risk than it removes, and it would be trivially defeated. The defence
+is conservative defaults and a moderation culture, which is what actually works at squadron scale.
 
 ## Retention
 

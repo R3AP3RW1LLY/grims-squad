@@ -1505,9 +1505,9 @@ model AiToolInvocation {
 
 /// An embedded fragment of a source document for RAG retrieval.
 model KnowledgeChunk {
-  id           String                       @id @default(uuid()) @db.Uuid
-  sourceType   KnowledgeSourceType          @map("source_type")
-  sourceId     String?                      @map("source_id") @db.Uuid
+  id           String                      @id @default(uuid()) @db.Uuid
+  sourceType   KnowledgeSourceType         @map("source_type")
+  sourceId     String?                     @map("source_id") @db.Uuid
   /// ★ SECURITY CONTROL, NOT METADATA ★
   /// Always equals the visibility of its source record at time of query (INV-003). The vector
   /// query filters on this BEFORE nearest-neighbour returns — never after. An ACL change on the
@@ -1525,18 +1525,18 @@ model KnowledgeChunk {
   /// addition to the visibility filter. NULL means "no mask beyond the visibility tier".
   /// Fails CLOSED: an unresolvable source ACL sets visibility=officer and this to the
   /// most restrictive mask, never public/NULL (INV-003, RED-TEAM R1).
-  viewPermMask Decimal?                     @map("view_perm_mask") @db.Decimal(40, 0)
+  viewPermMask Decimal?                    @map("view_perm_mask") @db.Decimal(40, 0)
   title        String?
   content      String
   /// pgvector embedding. Prisma has no native vector type, so queries use $queryRaw.
-  /// ⚠ DIMENSION CONFLICT — see decision D16 in STATUS.md. The source spec's DDL says
-  /// vector(1024) while pinning `nomic-embed-text`, which emits 768 dimensions. The column
-  /// MUST equal the model's output width. 1024 is carried here because that is what the spec
-  /// states; this must be resolved before P8.9 — either value forces a full re-index if changed
-  /// later, so resolve it early.
-  embedding    Unsupported("vector(1024)")?
+  /// ★ 768 DIMENSIONS, MATCHING `nomic-embed-text`. ★ Resolved 2026-07-26 (was D16).
+  /// The source spec's DDL said vector(1024) while pinning a 768-dimension model — every insert
+  /// would have failed. The column MUST equal the embedding model's output width.
+  /// THE EMBEDDING MODEL IS PINNED FOREVER: changing it invalidates every vector in this table
+  /// and forces a full re-index, so this dimension is effectively immutable too (ADR-011).
+  embedding    Unsupported("vector(768)")?
   metadata     Json?
-  indexedAt    DateTime                     @default(now()) @map("indexed_at") @db.Timestamptz(6)
+  indexedAt    DateTime                    @default(now()) @map("indexed_at") @db.Timestamptz(6)
 
   /// The HNSW index (`USING hnsw (embedding vector_cosine_ops)`) is added by hand in the
   /// migration — Prisma cannot express it. See `indexes.md`.
