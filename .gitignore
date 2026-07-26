@@ -1,68 +1,63 @@
-# ---- Personal / never commit -------------------------------------------------
-# Your own working notes. Safe to put IDs, keys and half-finished thoughts in.
-TODO.local.md
-*.local.md
-.notes/
 
-# ---- Secrets -----------------------------------------------------------------
-# Production secrets live in a root-owned 0600 .env ON THE SERVER, never here
-# (decision D6, ssot/09-runbooks/secrets-rotation.md).
-.env
-.env.*
 !.env.example
-*.pem
-*.key
-*.p12
-*.pfx
-credentials.json
-*-credentials.json
-.cloudflared/
-wg*.conf
-
+!.vscode/extensions.json
+# (decision D6, ssot/09-runbooks/secrets-rotation.md).
+# ---- Data / dumps ------------------------------------------------------------
 # ---- Node / pnpm -------------------------------------------------------------
-node_modules/
-.pnpm-store/
-*.tsbuildinfo
-.turbo/
-dist/
-build/
-out/
-.next/
-coverage/
-*.log
-npm-debug.log*
-pnpm-debug.log*
-
+# ---- OS / editor -------------------------------------------------------------
+# ---- Personal / never commit -------------------------------------------------
 # ---- Prisma ------------------------------------------------------------------
-# Generated client only. Migrations ARE committed.
-packages/db/generated/
-prisma/generated/
-
+# ---- Python (EDMC plugin) ----------------------------------------------------
+# ---- Secrets -----------------------------------------------------------------
 # ---- Vendored upstream -------------------------------------------------------
 # Cloned and pinned at build time, not committed (ssot/05-integrations/coriolis.md).
-vendor/coriolis/
-vendor/coriolis-data/
-
-# ---- Data / dumps ------------------------------------------------------------
 # Galaxy dumps are multi-GB. Never commit one.
+# Generated client only. Migrations ARE committed.
+# Production secrets live in a root-owned 0600 .env ON THE SERVER, never here
+# Your own working notes. Safe to put IDs, keys and half-finished thoughts in.
+*-credentials.json
 *.dump
-*.sql.gz
-galaxy*.json*
-data/
-uploads/
-
-# ---- Python (EDMC plugin) ----------------------------------------------------
-__pycache__/
+*.key
+*.local.md
+*.log
+*.p12
+*.pem
+*.pfx
 *.py[cod]
-.venv/
-venv/
-
-# ---- OS / editor -------------------------------------------------------------
-.DS_Store
-Thumbs.db
-desktop.ini
-.idea/
-.vscode/*
-!.vscode/extensions.json
+*.sql.gz
 *.swp
+*.tsbuildinfo
 *~
+.DS_Store
+.cloudflared/
+.env
+.env.*
+.idea/
+.next/
+.notes/
+.pnpm-store/
+.turbo/
+.venv/
+.vscode/*
+TODO.local.md
+Thumbs.db
+__pycache__/
+build/
+coverage/
+credentials.json
+data/
+desktop.ini
+dist/
+galaxy*.json*
+node_modules/
+npm-debug.log*
+out/
+packages/db/.env
+packages/db/generated/
+pnpm-debug.log*
+prisma/generated/
+uploads/
+vendor/coriolis-data/
+vendor/coriolis/
+venv/
+wg*.conf

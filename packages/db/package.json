@@ -15,12 +15,23 @@
   "scripts": {
     "build": "tsc -b",
     "typecheck": "tsc -b --noEmit false --emitDeclarationOnly",
-    "test": "vitest run --passWithNoTests",
-    "test:unit": "vitest run --passWithNoTests",
+    "generate": "prisma generate",
+    "migrate:dev": "prisma migrate dev",
+    "migrate:deploy": "prisma migrate deploy",
+    "studio": "prisma studio",
+    "reset": "prisma migrate reset --force",
+    "test": "vitest run",
+    "test:unit": "vitest run --exclude \"**/*.int.spec.ts\" --passWithNoTests",
     "clean": "rm -rf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.0"
   },
   "devDependencies": {
     "@grims/config": "workspace:*",
+    "@types/pg": "^8.20.0",
+    "pg": "^8.22.0",
+    "prisma": "^6.19.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
   }
