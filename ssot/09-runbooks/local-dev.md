@@ -3,7 +3,7 @@
 ## Prerequisites
 | Tool | Version | Check |
 |---|---|---|
-| Node | 22 LTS | `node --version` |
+| Node | 24 LTS | `node --version` |
 | pnpm | 9+ | `pnpm --version` |
 | Docker + Compose | current | `docker compose version` |
 | Prisma CLI | **pinned to 6.x** (decision D17) | `npx prisma --version` |
