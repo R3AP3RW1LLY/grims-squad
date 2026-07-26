@@ -16,11 +16,12 @@ Every adversarial review gate records its outcome here (ADR-017). In **local mod
 
 ---
 
-## 2026-07-25 — SSOT bootstrap review
+## 2026-07-25 — SSOT bootstrap, part 1: authoring self-review
 
 **Subject:** the `ssot/` directory itself, before any code exists.
 **Rationale:** a specification is a design, and designs are what DESIGN-ADV and ARCH-ADV exist to attack. Finding these in P4 would cost weeks.
-**Gates run:** ARCH-ADV, RED-TEAM, DATA-INTEGRITY-ADV.
+
+> **Provenance, stated honestly:** these findings came from the authoring agent's own adversarial pass while transforming the spec — **not** from an independent panel. Under ADR-017 that does not satisfy a gate ("no self-approval"), so it is recorded as *self-review* and the independent panel is logged separately in part 2 below. The findings are real and the resolutions are in the SSOT; the process caveat is that the same party found and fixed them.
 
 ### Findings
 
