@@ -214,12 +214,20 @@ phase_P1:
     acceptance:
       - "A Discord login round-trip creates a users row and a discord_identities row"
       - "guild_roles is populated from /users/@me/guilds/{id}/member"
-      - "Scopes requested are exactly identify, email and guilds.members.read"
+      - "Scopes requested are exactly identify and guilds.members.read"
+      - "The `email` scope is NOT requested and no email address is ever read or stored"
       - "A user not in our guild is refused with DISCORD_GUILD_MEMBERSHIP_REQUIRED"
       - "OAuth tokens are stored AES-256-GCM encrypted; the raw column contains no plaintext (INV-012)"
       - "The redirect parameter is validated against an internal-path allowlist — an external URL is rejected"
       - "Integration test passes against the fake adapter with no network access"
     blocked_by_decisions: [D2]
+    notes: >
+      The `email` scope was REMOVED from this task on 2026-07-26. Decision D11 built
+      no email channel at all, so an address obtained here could never be used for
+      anything — it would be PII collected for no purpose, stored, backed up and
+      breached for no benefit. Data minimisation is cheaper than data protection.
+      Dropping it also narrows the consent screen, which raises signup conversion.
+      If an email channel is ever revived, this scope and INV-027 come back together.
     ssot_updates: [STATUS.md]
 
   - id: P1.2
