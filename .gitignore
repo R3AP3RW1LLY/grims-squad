@@ -61,3 +61,4 @@ vendor/coriolis-data/
 vendor/coriolis/
 venv/
 wg*.conf
+apps/api/.env
