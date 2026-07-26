@@ -386,6 +386,72 @@ body {
 }
 
 /* ========================================================================== */
+/*  LEGAL PROSE                                                               */
+/* ========================================================================== */
+
+/*
+ * Set for READING, not for the instrument aesthetic the rest of the site uses.
+ * These pages are what someone reads while deciding whether to hand over their
+ * Discord identity; cramming them into dense mono styling would be a way of
+ * technically publishing a policy while discouraging anyone from finishing it.
+ */
+.legal-prose {
+  color: var(--color-text-secondary);
+  line-height: 1.75;
+}
+
+.legal-prose p { max-width: 72ch; }
+
+.legal-prose strong {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.legal-prose em { color: var(--color-text-primary); }
+
+.legal-prose ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-width: 72ch;
+}
+
+.legal-prose li {
+  position: relative;
+  padding-left: 1.4rem;
+}
+
+/* A chevron rather than a bullet — quietly on-theme without costing legibility. */
+.legal-prose li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.65em;
+  width: 6px;
+  height: 6px;
+  border-top: 1.5px solid var(--color-brand-orange);
+  border-right: 1.5px solid var(--color-brand-orange);
+  transform: rotate(45deg);
+}
+
+.legal-prose a {
+  color: var(--color-brand-cyan-bright);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.legal-prose code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  color: var(--color-brand-orange-bright);
+  background: var(--color-surface-panel-sunken);
+  padding: 0.1em 0.4em;
+}
+
+/* ========================================================================== */
 /*  ACCESSIBILITY — shipped, not optional                                     */
 /* ========================================================================== */
 
