@@ -103,10 +103,9 @@ Also on this page:
    - **Send Messages**
    - **Embed Links**
 
-   **NOT Manage Roles.** Corrected 2026-07-26: the bot is READ-ONLY with respect
-   to roles. Leadership assigns every rank by hand in Discord and the site simply
-   mirrors what it finds, so the bot never needs to write one. A token that
-   cannot modify roles cannot escalate anyone if it leaks.
+   - **Manage Roles** — the bot assigns SOME roles automatically (tenure, and
+     whatever else leadership delegates). It does not assign all of them:
+     leadership, reserved and loyalty ranks stay manual.
 
    Do **not** grant Administrator either. It is convenient, and it means a
    compromised bot token can delete the server.
@@ -115,18 +114,23 @@ Also on this page:
 
 ---
 
-## Step 7 — Bot role position: leave it alone
+## Step 7 — Position the bot's role ⚠️
 
-**No action needed.** Corrected 2026-07-26.
+Reading roles needs no hierarchy position, so login and display work with the bot
+anywhere in the list. **Assigning** a role is different: Discord refuses to let a
+bot touch a role at or above its own position, even with Manage Roles. The symptom
+is `Missing Permissions` while the permission is plainly granted.
 
-Reading roles and members requires no hierarchy position at all, so the bot works
-fine at the very bottom of the list — and that is where it should stay. Moving it
-up would grant authority it has no use for.
+The bot currently sits at **position 1 — the bottom — so it can assign nothing.**
 
-*(This step previously said to drag the bot above every rank role. That is only
-true for a bot that ASSIGNS roles. Ours does not, and the advice was wrong for
-this design — keeping it here so the reasoning is visible rather than silently
-rewritten.)*
+Once we know which roles it should manage (open decision **D24**), drag
+`Grim's Squad HQ Bot` to sit **directly above the highest role it assigns and
+below everything it must not touch**. That boundary is a security control, not
+housekeeping: roles above the bot cannot be granted by a leaked bot token.
+
+Recommended when tenure automation lands: place it directly below
+`Sector Overseer` (position 34). That covers every tenure rank while leaving all
+leadership and both reserved ranks beyond its reach.
 
 ---
 
