@@ -80,13 +80,39 @@ The right to use Frontier's game data and imagery, and Coriolis's bundled data, 
 |---|---|---|
 | Audit log | 1 year | scheduled purge job |
 | AI conversations | 90 days default, user-deletable earlier | scheduled purge job |
-| Raw telemetry events | 30 days | scheduled purge job |
+| Raw telemetry events | 30 days, **and only once processed** | scheduled purge job |
 | Telemetry aggregates | indefinite | — |
 | `market_orders` | current state only | upsert-in-place |
 | `market_history` | 90 days | retention job or Timescale compression (decision D10) |
 | Backups | 30 days, restore-tested monthly | backup job + `09-runbooks/backup-restore.md` |
 
 Full detail in `03-data/retention.md`.
+
+## Memory budget — 8 GB, and staging shares it
+
+Nothing else in this project allocates the box's RAM, and an unallocated 8 GB shared between two
+full stacks is decided by the OOM killer, which selects by RSS — and the largest RSS on the box is
+**production Postgres** (ARCH-ADV A7).
+
+| Service | Limit | Note |
+|---|---|---|
+| postgres (prod) | 2.5 GB (`shared_buffers` 1 GB) | Must keep the cube GiST, two partial market indexes, the forum GIN and (P8) the HNSW index hot |
+| redis (prod) | 512 MB, `maxmemory-policy noeviction` | **Not `allkeys-lru`** — evicting a BullMQ queue silently drops re-index jobs (ARCH-ADV A4) |
+| meilisearch (prod) | 1 GB | |
+| api + web + worker + bot + eddn (prod) | 2 GB total | |
+| coriolis | 256 MB | |
+| **staging, all services** | **1 GB total, hard cap** | |
+| headroom | ~750 MB | |
+
+**Every container carries an explicit `mem_limit`.** A container without one can consume the box.
+
+**Staging is deploy-gated on production memory headroom.** A merge to `main` deploys staging
+*automatically* — the one deploy path with no human gate, and the path ADR-018 lets an agent
+trigger alone. Booting a second Postgres running 54 migrations plus a second Meilisearch while
+production is mid-`REFRESH MATERIALIZED VIEW` is how an autonomous staging deploy kills the
+production database, after which the pipeline's auto-rollback reverts an application version that
+was never the cause. The deploy step therefore **checks free memory first and refuses below
+1.5 GB**, and staging's stack is the minimum needed for smoke tests, not a full mirror.
 
 ## Operating constraints
 

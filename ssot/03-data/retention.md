@@ -9,7 +9,7 @@ What is kept, for how long, and what deletes it. Every row here is enforced by a
 | `audit_log` | **1 year** | `retention:audit` nightly | Long enough to investigate a dispute or a breach; short enough to bound growth. Append-only — application code never updates or deletes a row. |
 | `ai_conversations`, `ai_messages` | **90 days**, user-deletable sooner | `retention:ai` nightly | Members are entitled to a short memory of their own chats. Officers may review within the window. Encrypted at rest throughout. |
 | `ai_tool_invocations` | **1 year** | `retention:audit` nightly | Kept longer than conversations because it is an audit trail, including denials (INV-009). Arguments are retained; results are not. |
-| `telemetry_events` (raw) | **30 days** | `retention:telemetry` nightly | Raw journal events are the most privacy-sensitive data we hold. Aggregates survive; the raw stream does not. |
+| `telemetry_events` (raw) | **30 days, AND only once `processed_at` is set** | `retention:telemetry` nightly | Raw journal events are the most privacy-sensitive data we hold. Aggregates survive; the raw stream does not. **The `processed_at` condition is a data-loss control** — see below. |
 | Telemetry-derived aggregates (`bgs_activity_reports`, `hauling_contributions`, ship/loadout state) | **indefinite** | — | These are squadron records, not surveillance. They contain no location trail. |
 | `market_orders` | **current state only** | upsert-in-place | Superseded rows are overwritten, never accumulated. |
 | `market_history` | **90 days** | `retention:market` nightly, or a Timescale retention policy (decision D10) | Sparklines need three months. Full-galaxy market history grows without limit. |
@@ -27,6 +27,67 @@ What is kept, for how long, and what deletes it. Every row here is enforced by a
 | Backups | **30 days** | backup rotation | Restore-tested monthly (`09-runbooks/backup-restore.md`). |
 | Application logs (Loki) | **30 days** | Loki retention | |
 | Metrics (Prometheus) | **90 days** | Prometheus retention | |
+
+### The telemetry purge must not outrun the derivation worker
+
+An earlier revision purged raw telemetry unconditionally at 30 days. If the derivation worker
+stalls — a poison payload crash-loop, or a game update adding an event type it has no handler for
+(which the endpoint correctly accepts and stores) — the rows sit with `processed_at IS NULL`, and
+on night 31 the purge deletes them. The job then reports **success**, because deleting rows is its
+success signal and the only tuned alert points the other way ("a job that deletes zero rows for a
+week is broken"). A month of members' BGS and hauling contributions is gone irrecoverably, and the
+gap is discoverable only months later by someone noticing an activity type with no rows for a date
+range (DATA-INTEGRITY B7).
+
+```sql
+DELETE FROM telemetry_events
+WHERE received_at < now() - INTERVAL '30 days'
+  AND processed_at IS NOT NULL;          -- never purge unprocessed
+```
+
+**Alert — this one matters more than the purge:** any `telemetry_events` row with
+`processed_at IS NULL` older than 7 days. That is a stalled worker, and it is the last warning
+before the data would have been silently destroyed.
+
+### The un-track sweep for `systems`
+
+The prefilter's third clause is "anything a member queried in the last 30 days". Without an
+expiry the tracked set only ever grows: every member browsing systems, every AI briefing, every
+far-origin trade query permanently widens ingestion, and the >95% saving decays to zero on a
+160 GB disk (ARCH-ADV A3).
+
+```sql
+UPDATE systems SET is_tracked = false
+WHERE is_tracked = true
+  AND last_queried_at IS NOT NULL
+  AND last_queried_at < now() - INTERVAL '30 days'
+  AND address NOT IN (SELECT home_system FROM tracked_factions WHERE home_system IS NOT NULL)
+  AND address NOT IN (SELECT system_address FROM bgs_orders WHERE active_until IS NULL
+                                                              OR active_until > now());
+```
+
+Systems inside the home radius and tracked BGS systems are never un-tracked — only the
+query-driven third clause expires. `market_orders` for un-tracked systems are then eligible for
+deletion by the same job.
+
+### `market_orders` — delisted commodities are not "current state"
+
+`market_orders` is documented as current state only, but an upsert-only collector can never remove
+a row for a commodity a market has **stopped carrying**. EDDN `commodity/3` messages carry the
+market's *full* list; a commodity that disappears from the list is simply not upserted, so the old
+row survives with its old `updated_at` — inside every freshness filter, rendered amber, INV-004
+fully satisfied because the age shown is truthful (DATA-INTEGRITY B6).
+
+**On every commodity message, delete rows for that `market_id` absent from the message**, in the
+same transaction as the upsert:
+
+```sql
+DELETE FROM market_orders
+WHERE market_id = $marketId AND commodity <> ALL($commoditiesInMessage);
+```
+
+Without it, members are routed to markets that no longer trade the commodity, and the ghost rows
+are counted against the disk budget as "current state".
 
 ## Member-initiated data rights
 

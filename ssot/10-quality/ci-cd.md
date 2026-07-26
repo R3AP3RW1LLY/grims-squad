@@ -8,13 +8,22 @@ Authority: ADR-019, `AGENTS.md` §11.
 
 ```
 lint ──────────────────┐
-typecheck (strict) ────┤
-secret scan ───────────┼──▶ unit ──▶ integration ──▶ invariants ──▶ coverage ──▶ build
-dependency audit ──────┤            (ephemeral PG,     (@INV-nnn)      (gates)
-ssot-drift ────────────┤             Redis, Meili)
-contract ──────────────┤
-Trivy image scan ──────┘
+typecheck (strict) ────┤                                                   ┌─▶ Trivy image scan
+secret scan ───────────┼──▶ unit ──┬──▶ integration ─┬──▶ coverage ──▶ build
+dependency audit ──────┤           │ (ephemeral PG,  │      (gates)
+ssot-drift ────────────┤           └──▶ invariants ──┘
+contract ──────────────┤             (share one DB spin-up, run in parallel)
+contrast ──────────────┘
 ```
+
+**Trivy runs *after* `build`** — there is no image to scan before it. Drawn earlier, the stage
+either scanned a stale image from a previous run (silently passing a PR whose new dependency
+introduced the CVE) or scanned nothing (ARCH-ADV A9).
+
+**`integration` and `invariants` share one database spin-up.** Run serially with separate
+spin-ups, the per-stage times above already exceeded the 10-minute target before any runner
+queue or image pull — at which point this file's own rule bites: *a slower pipeline gets routed
+around, and a routed-around pipeline enforces nothing.*
 
 | Stage | Fails when | Typical |
 |---|---|---|
@@ -22,7 +31,7 @@ Trivy image scan ──────┘
 | `typecheck` | Any type error under `strict` + `noUncheckedIndexedAccess` + `exactOptionalPropertyTypes` | 60s |
 | `unit` | Any unit test fails | 60s |
 | `integration` | Any integration test fails against ephemeral Postgres/Redis/Meilisearch | 4m |
-| **`invariants`** | **Any `@INV-nnn` test fails, OR any invariant in `invariants.md` has no tagged test** | 90s |
+| **`invariants`** | **Any `@INV-nnn` test fails, OR any invariant DUE BY THE CURRENT PHASE has no tagged test** — see the phasing note | 90s |
 | `coverage` | Any package below its floor (`test-strategy.md`) | — |
 | **`ssot-drift`** | **Any generated artefact differs from its SSOT source** | 20s |
 | `contract` | OpenAPI ↔ route mismatch either way; `x-required-permission` ≠ the guard's actual permission; `tools.yaml` ↔ registry mismatch; redocly `struct` error | 40s |
@@ -53,6 +62,35 @@ assert every INV-nnn in invariants.md has a passing tagged test
 Byte-identical comparison is deliberately strict: `prisma format` is run on the SSOT copy so both sides are canonical and the check is unambiguous. Whitespace tolerance would let a real change hide behind a formatting excuse.
 
 **P0.6 explicitly tests that this check fails** when a copy is edited alone. A drift check that has never been observed failing is not known to work.
+
+### Invariant phasing — why the gate is not "all 36 from day one"
+
+An earlier revision demanded a tagged test for **every** invariant on **every** PR. That is
+unsatisfiable from P0 until P8: at P0 exit there is no forum, no EDDN, no RAG and no agent, so
+34 of 36 invariants have nothing to test against. A test for INV-003 ("move a thread to an
+officer category, assert zero retrieval rows") cannot be written before either exists.
+
+The predictable outcome is the one that matters: **the first agent to hit red CI on P0.1 adds an
+exemption list to unblock the build, and the single mechanism that turns invariants from prose
+into enforcement is neutered in week one** — silently, with every later phase inheriting a check
+that reports green while proving nothing (ARCH-ADV A1).
+
+**The fix:** every invariant declares its due phase in `invariants.md`:
+
+```markdown
+**INV-003** `SEC` `due:P8` · knowledge_chunks.visibility always equals …
+```
+
+`tools/invariant-coverage.ts` reads `due:Pn`, compares it against the current phase in
+`STATUS.md`, and requires a tagged test **only for invariants due by that phase**. It fails if:
+
+- an invariant has no `due:` marker at all — so a new one cannot slip past the system;
+- an invariant is **past due** and still untested;
+- the phase in `STATUS.md` advanced but the newly-due invariants have no tests.
+
+**Not-yet-due invariants are reported as a count, never as a pass.** Every run prints
+`28 due / 28 covered · 8 not yet due (P4, P6, P8)`, so the gap stays visible instead of hiding
+behind an exemption file.
 
 ## `main` pipeline
 

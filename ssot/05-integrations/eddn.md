@@ -109,6 +109,46 @@ export interface EddnStats {
 }
 ```
 
+## Three implementation traps that the rules above do not by themselves prevent
+
+### 1. `JSON.parse` destroys 64-bit IDs before your BigInt cast ever runs
+Both this file and `ardent.md` mandate "parse as BigInt" — but by the time application code sees
+the value, `JSON.parse` has already coerced it to an IEEE-754 double and `BigInt()` faithfully
+preserves the *already-rounded* number. The telemetry contract avoids this by mandating decimal
+strings on the wire; the two ingest paths that carry the actual firehose cannot, because the
+vendor chooses the encoding (DATA-INTEGRITY B5).
+
+**Use a BigInt-aware parser at the boundary** — `JSON.parse` with a reviver is insufficient
+because the precision is lost before the reviver is called. Parse with a lossless library
+(`json-bigint` / `lossless-json`) configured to emit `BigInt` for integers beyond 2^53, applied
+between `zlib.inflate` and Zod. `System.address` is the primary key: a rounded address creates a
+row keyed to a system that does not exist in the game, with stations FK-attached to it, and the
+wrong-address row is indistinguishable from a real one.
+
+### 2. A 500-row batch upsert is all-or-nothing, and `commodity/3` has no parent
+`MarketOrder.marketId` is a required FK to `stations`, and `Station.systemAddress` is a required FK
+to `systems`. But a `commodity/3` message carries `systemName`, `stationName` and `marketId` —
+**no `systemAddress`** — and station rows arrive on the separate `journal/1` stream, unordered.
+Resolving the name to an address to synthesise the parent is forbidden by INV-018.
+
+So for every new station, every newly-commissioned fleet carrier, and the whole window before
+seeding completes, market rows arrive with no parent. Postgres aborts the **entire statement** on
+the first FK violation — `ON CONFLICT` does not help, because this is a referential failure, not a
+uniqueness one. The collector then either retries the poisoned batch forever or drops all 500 rows,
+losing 499 good observations per bad one, **while `parseFailureRate` stays at 0.0%** because the
+loss is in the write path, not the parse path (ARCH-ADV A6).
+
+**Buffer, do not drop.** Orphan rows go to a `pending_market_orders` staging table keyed by
+`market_id`; a drain job promotes them once the parent station appears. `EddnStats` gains
+`orphanBufferDepth` and `writeFailureRate`, and a buffer older than 24 hours alerts — a market
+whose station never arrives is a real signal, not noise.
+
+### 3. Observation time is not write time
+`systems.observed_at` and `stations.observed_at` — **not** `updated_at` — are what INV-017's
+discard rule compares against. `updated_at` is a write timestamp; a galaxy seed run today writing
+month-old dump data would otherwise stamp it as fresh and cause every subsequent EDDN update
+observed before the seed to be discarded as "stale" (DATA-INTEGRITY B4).
+
 ## Gotchas
 - **Messages are zlib-compressed.** Forgetting to inflate yields "invalid JSON" and a confusing half-hour.
 - **A connected socket with no traffic is a real failure mode**, and it looks exactly like a quiet period. `receiveTimeout` plus a messages/sec alert is the only way to tell them apart.

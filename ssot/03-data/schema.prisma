@@ -392,6 +392,14 @@ model CmdrVerification {
   fdevExpiresAt  DateTime?          @map("fdev_expires_at") @db.Timestamptz(6)
   /// Nonce issued for the inara_nonce path, e.g. "GRIM-7X2Q".
   claimNonce     String?            @map("claim_nonce")
+  /// Without this there was no field from which VERIFICATION_NONCE_EXPIRED could be computed,
+  /// so a pending claim never expired (RED-TEAM R7).
+  nonceExpiresAt DateTime?          @map("nonce_expires_at") @db.Timestamptz(6)
+  /// THE UNIQUENESS LOCK APPLIES ONLY WHEN THIS IS `true`. Previously the partial unique
+  /// index keyed on `revokedAt IS NULL`, so merely STARTING a claim locked a CMDR name forever
+  /// - any member could permanently deny any CMDR name, including every officer's, by opening
+  /// a claim and never completing it (RED-TEAM R7). See `indexes.md`.
+  isVerified     Boolean            @default(false) @map("is_verified")
   revokedAt      DateTime?          @map("revoked_at") @db.Timestamptz(6)
   createdAt      DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
 
@@ -758,8 +766,8 @@ model Application {
 /// A star system. Keyed by SystemAddress because ~1,300 systems have ambiguous NAMES (INV-018).
 model System {
   /// SystemAddress. BigInt end-to-end; never a JS number (INV-021).
-  address            BigInt   @id
-  name               String   @db.Citext
+  address            BigInt    @id
+  name               String    @db.Citext
   x                  Float
   y                  Float
   z                  Float
@@ -767,15 +775,25 @@ model System {
   government         String?
   security           String?
   economy            String?
-  secondaryEconomy   String?  @map("secondary_economy")
+  secondaryEconomy   String?   @map("secondary_economy")
   population         BigInt?
-  controllingFaction String?  @map("controlling_faction")
+  controllingFaction String?   @map("controlling_faction")
   power              String?
-  powerState         String?  @map("power_state")
+  powerState         String?   @map("power_state")
   /// True if this system is inside the EDDN prefilter radius or is a tracked BGS system.
   /// The prefilter is what keeps disk usage inside the VPS budget (ADR-007, decision D4).
-  isTracked          Boolean  @default(false) @map("is_tracked")
-  updatedAt          DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+  isTracked          Boolean   @default(false) @map("is_tracked")
+  /// Prefilter clause 3 has a column now. Set whenever a member or a GSAI tool touches this
+  /// system. The un-track job expires rows not queried for 30 days; without this the tracked set
+  /// is MONOTONIC and the >95% prefilter saving decays to zero (ARCH-ADV A3).
+  lastQueriedAt      DateTime? @map("last_queried_at") @db.Timestamptz(6)
+  /// OBSERVATION time - when the data was true in-game. NOT the write time.
+  /// INV-017's discard rule compares against THIS, never `updatedAt`. A dump seed sets it from
+  /// the dump's generation date, so a month-old dump cannot mask fresher EDDN data
+  /// (DATA-INTEGRITY B4).
+  observedAt         DateTime  @map("observed_at") @db.Timestamptz(6)
+  /// Write time only. Never used for staleness comparison.
+  updatedAt          DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   stations            Station[]
   ships               Ship[]
@@ -809,7 +827,10 @@ model Station {
   services            String[] @default([])
   economies           Json?
   controllingFaction  String?  @map("controlling_faction")
-  updatedAt           DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+  /// OBSERVATION time, not write time - same contract as System.observedAt (DATA-INTEGRITY B4).
+  observedAt          DateTime @map("observed_at") @db.Timestamptz(6)
+  /// Write time only. Never used for staleness comparison.
+  updatedAt           DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   system       System        @relation(fields: [systemAddress], references: [address])
   marketOrders MarketOrder[]
@@ -1101,9 +1122,18 @@ model TrackedFaction {
 /// against 7 days of KNOWN ticks before building on it.
 model BgsTick {
   id         String     @id @default(uuid()) @db.Uuid
-  occurredAt DateTime   @unique @map("occurred_at") @db.Timestamptz(6)
+  /// THE STABLE IDENTITY OF A TICK WINDOW. One row per real tick, created provisionally on
+  /// first evidence and REFINED IN PLACE as better evidence arrives. Previously `occurredAt` was
+  /// unique, which permitted an inferred tick and its later community-detector correction to
+  /// coexist as two rows minutes apart - splitting one real tick in two and computing every
+  /// delta against the wrong baseline (DATA-INTEGRITY B8).
+  /// Format: the UTC date of the window, suffixed `-2` if two ticks genuinely fall in one UTC day.
+  windowKey  String     @unique @map("window_key")
+  /// Best current estimate of the boundary. NOT unique - it is corrected in place as
+  /// `source` is upgraded inferred -> community_detector.
+  occurredAt DateTime   @map("occurred_at") @db.Timestamptz(6)
   source     TickSource
-  /// 0..1. `inferred` ticks carry lower confidence and MUST be labelled as such in the UI.
+  /// 0..1. `inferred` ticks carry lower confidence and MUST be labelled provisional in the UI.
   confidence Float      @default(1)
   createdAt  DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
 
@@ -1122,8 +1152,12 @@ model FactionInfluenceSnapshot {
   id               String     @id @default(uuid()) @db.Uuid
   factionId        String     @map("faction_id") @db.Uuid
   systemAddress    BigInt     @map("system_address")
-  /// NULL only when the tick could not be determined — we leave it unassociated rather than guessing.
-  tickId           String?    @map("tick_id") @db.Uuid
+  /// REQUIRED. Ingest resolves-or-creates the provisional tick for the current window, so
+  /// this is never NULL. It was previously nullable with a partial unique index keyed on
+  /// `observedAt` - which is per-uploader and therefore always distinct, so the index deduped
+  /// NOTHING and three CMDRs reporting one tick produced three rows while INV-019's test still
+  /// passed (DATA-INTEGRITY B3). With tickId required, the plain @@unique below is total.
+  tickId           String     @map("tick_id") @db.Uuid
   observedAt       DateTime   @map("observed_at") @db.Timestamptz(6)
   /// 0.0–1.0.
   influence        Float
@@ -1135,10 +1169,10 @@ model FactionInfluenceSnapshot {
 
   faction TrackedFaction @relation(fields: [factionId], references: [id], onDelete: Cascade)
   system  System         @relation(fields: [systemAddress], references: [address])
-  tick    BgsTick?       @relation(fields: [tickId], references: [id], onDelete: SetNull)
+  tick    BgsTick        @relation(fields: [tickId], references: [id], onDelete: Cascade)
 
-  /// The dedupe guarantee. A partial unique index covering the NULL-tick case is added in the
-  /// migration; see `indexes.md`.
+  /// THE DEDUPE GUARANTEE (INV-019). Total, because tickId is non-null. Multiple EDDN
+  /// reports of one tick collapse to one row; they are never summed or averaged.
   @@unique([factionId, systemAddress, tickId])
   @@index([systemAddress, observedAt])
   @@index([factionId, observedAt])
@@ -1173,18 +1207,25 @@ model BgsOrder {
 /// A member's BGS contribution. Negatives (murders, failed missions) are first-class — ignoring
 /// them makes the picture wrong.
 model BgsActivityReport {
-  id            String          @id @default(uuid()) @db.Uuid
-  userId        String          @map("user_id") @db.Uuid
-  systemAddress BigInt          @map("system_address")
-  factionId     String?         @map("faction_id") @db.Uuid
-  activityType  BgsActivityType @map("activity_type")
-  valueCr       BigInt?         @map("value_cr")
-  count         Int?
-  tickId        String?         @map("tick_id") @db.Uuid
-  reportedAt    DateTime        @default(now()) @map("reported_at") @db.Timestamptz(6)
-  source        DataSource      @default(manual)
+  id             String          @id @default(uuid()) @db.Uuid
+  userId         String          @map("user_id") @db.Uuid
+  systemAddress  BigInt          @map("system_address")
+  factionId      String?         @map("faction_id") @db.Uuid
+  activityType   BgsActivityType @map("activity_type")
+  valueCr        BigInt?         @map("value_cr")
+  count          Int?
+  tickId         String?         @map("tick_id") @db.Uuid
+  reportedAt     DateTime        @default(now()) @map("reported_at") @db.Timestamptz(6)
+  source         DataSource      @default(manual)
   /// Journal event identity for telemetry-sourced reports, making ingestion idempotent (INV-017).
-  sourceEventId String?         @map("source_event_id")
+  /// NULL for manual and bgstally rows - and because Postgres treats NULLs as DISTINCT, the
+  /// unique constraint below enforces nothing on those paths. `importBatchKey` is what dedupes
+  /// them; see `indexes.md` for the two partial unique indexes (DATA-INTEGRITY B2).
+  sourceEventId  String?         @map("source_event_id")
+  /// Dedupe key for the manual and BGS-Tally paths. A deterministic hash of the import
+  /// file (or the submitted form) plus the row's position, so re-running a partially-failed
+  /// import is idempotent instead of doubling every contribution.
+  importBatchKey String?         @map("import_batch_key")
 
   user    User            @relation(fields: [userId], references: [id])
   system  System          @relation(fields: [systemAddress], references: [address])
@@ -1313,14 +1354,18 @@ model HaulingTarget {
 
 /// One member's delivery against a hauling target. Auto-created from telemetry where consented.
 model HaulingContribution {
-  id            String     @id @default(uuid()) @db.Uuid
-  targetId      String     @map("target_id") @db.Uuid
-  userId        String     @map("user_id") @db.Uuid
-  tons          Int
-  source        DataSource @default(manual)
+  id             String     @id @default(uuid()) @db.Uuid
+  targetId       String     @map("target_id") @db.Uuid
+  userId         String     @map("user_id") @db.Uuid
+  tons           Int
+  source         DataSource @default(manual)
   /// Journal event identity, making telemetry ingestion idempotent (INV-017).
-  sourceEventId String?    @map("source_event_id")
-  createdAt     DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  /// NULL on the manual path - see `importBatchKey` and `indexes.md` (DATA-INTEGRITY B2).
+  sourceEventId  String?    @map("source_event_id")
+  /// Dedupe key for the manual path, so a double-submitted form cannot inflate
+  /// `HaulingTarget.deliveredTons` (DATA-INTEGRITY B2).
+  importBatchKey String?    @map("import_batch_key")
+  createdAt      DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
 
   target HaulingTarget @relation(fields: [targetId], references: [id], onDelete: Cascade)
   user   User          @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -1347,7 +1392,14 @@ model TelemetryEvent {
   occurredAt    DateTime          @map("occurred_at") @db.Timestamptz(6)
   receivedAt    DateTime          @default(now()) @map("received_at") @db.Timestamptz(6)
   payload       Json
-  /// Deterministic hash of (deviceTokenId, occurredAt, eventType) — the idempotency key (INV-017).
+  /// The idempotency key (INV-017).
+  /// sha256(deviceTokenId | occurredAt | eventType | canonicalJson(payload)).
+  /// THE PAYLOAD HASH IS LOAD-BEARING: Elite's journal timestamps have WHOLE-SECOND resolution,
+  /// so handing in 18 massacre missions emits 18 MissionCompleted events sharing 3 timestamps.
+  /// Without the payload term, 15 of them collide and are silently swallowed as "duplicates" -
+  /// systematically under-counting exactly the activity the BGS module exists to measure, with
+  /// no anomaly visible in any metric (DATA-INTEGRITY B1).
+  /// A genuine retry has an identical payload and still dedupes correctly.
   eventKey      String            @map("event_key")
   processedAt   DateTime?         @map("processed_at") @db.Timestamptz(6)
 
@@ -1408,17 +1460,27 @@ model AiMessage {
 /// Every tool call, INCLUDING denials. A `denied` row is the evidence that the permission
 /// boundary held — it is not an error to be suppressed (INV-009, INV-011).
 model AiToolInvocation {
-  id                String      @id @default(uuid()) @db.Uuid
-  userId            String      @map("user_id") @db.Uuid
-  conversationId    String?     @map("conversation_id") @db.Uuid
-  toolName          String      @map("tool_name")
-  args              Json
+  id                     String      @id @default(uuid()) @db.Uuid
+  userId                 String      @map("user_id") @db.Uuid
+  conversationId         String?     @map("conversation_id") @db.Uuid
+  toolName               String      @map("tool_name")
+  args                   Json
   /// The permission the executor checked, recorded so an audit can verify the right gate ran.
-  permissionChecked Decimal?    @map("permission_checked") @db.Decimal(40, 0)
-  outcome           ToolOutcome
-  error             String?
-  durationMs        Int?        @map("duration_ms")
-  createdAt         DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  permissionChecked      Decimal?    @map("permission_checked") @db.Decimal(40, 0)
+  outcome                ToolOutcome
+  error                  String?
+  durationMs             Int?        @map("duration_ms")
+  /// SECURITY CONTROL (INV-014). SHA-256 of the confirmation token issued for THIS
+  /// invocation. Previously no column existed, so a token was neither single-use nor bound to
+  /// an argument set - an injection could reuse an unexpired token to execute a DIFFERENT call
+  /// the human never saw (RED-TEAM R5).
+  confirmationTokenHash  String?     @map("confirmation_token_hash")
+  /// SECURITY CONTROL. SHA-256 of the canonicalised arguments the human was shown.
+  /// The executor refuses if the arguments at execution time do not hash to this.
+  confirmedArgsHash      String?     @map("confirmed_args_hash")
+  /// THE SINGLE-USE LEDGER. Set when the token is spent. A second presentation is refused.
+  confirmationConsumedAt DateTime?   @map("confirmation_consumed_at") @db.Timestamptz(6)
+  createdAt              DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
 
   user         User            @relation(fields: [userId], references: [id])
   conversation AiConversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
@@ -1431,26 +1493,38 @@ model AiToolInvocation {
 
 /// An embedded fragment of a source document for RAG retrieval.
 model KnowledgeChunk {
-  id         String                       @id @default(uuid()) @db.Uuid
-  sourceType KnowledgeSourceType          @map("source_type")
-  sourceId   String?                      @map("source_id") @db.Uuid
+  id           String                       @id @default(uuid()) @db.Uuid
+  sourceType   KnowledgeSourceType          @map("source_type")
+  sourceId     String?                      @map("source_id") @db.Uuid
   /// ★ SECURITY CONTROL, NOT METADATA ★
   /// Always equals the visibility of its source record at time of query (INV-003). The vector
   /// query filters on this BEFORE nearest-neighbour returns — never after. An ACL change on the
   /// source re-indexes or deletes these rows. This column is the difference between an assistant
   /// and a data leak; treat any change to it as a tier-3 security change (ADR-015, ADR-021).
-  visibility Visibility                   @default(public)
-  title      String?
-  content    String
+  ///
+  /// ★ NO DEFAULT, DELIBERATELY. ★ It previously defaulted to `public`, which meant a source
+  /// whose ACL did not map cleanly onto this enum FAILED OPEN and indexed as world-readable.
+  /// The indexer must resolve a visibility explicitly or refuse to index (RED-TEAM R1).
+  visibility   Visibility
+  /// ★ SECURITY CONTROL. ★ The source's exact `viewPerm` mask, when it has one.
+  /// `visibility` is only a coarse three-tier bucket; forum categories carry an ARBITRARY
+  /// admin-editable mask (ADR-005), e.g. "Site & Infrastructure" gated on SITE_CONFIG, which
+  /// no enum value can express. Retrieval MUST test this mask against the caller's mask in
+  /// addition to the visibility filter. NULL means "no mask beyond the visibility tier".
+  /// Fails CLOSED: an unresolvable source ACL sets visibility=officer and this to the
+  /// most restrictive mask, never public/NULL (INV-003, RED-TEAM R1).
+  viewPermMask Decimal?                     @map("view_perm_mask") @db.Decimal(40, 0)
+  title        String?
+  content      String
   /// pgvector embedding. Prisma has no native vector type, so queries use $queryRaw.
   /// ⚠ DIMENSION CONFLICT — see decision D16 in STATUS.md. The source spec's DDL says
   /// vector(1024) while pinning `nomic-embed-text`, which emits 768 dimensions. The column
   /// MUST equal the model's output width. 1024 is carried here because that is what the spec
   /// states; this must be resolved before P8.9 — either value forces a full re-index if changed
   /// later, so resolve it early.
-  embedding  Unsupported("vector(1024)")?
-  metadata   Json?
-  indexedAt  DateTime                     @default(now()) @map("indexed_at") @db.Timestamptz(6)
+  embedding    Unsupported("vector(1024)")?
+  metadata     Json?
+  indexedAt    DateTime                     @default(now()) @map("indexed_at") @db.Timestamptz(6)
 
   /// The HNSW index (`USING hnsw (embedding vector_cosine_ops)`) is added by hand in the
   /// migration — Prisma cannot express it. See `indexes.md`.
@@ -1517,8 +1591,14 @@ model Notification {
 /// Idempotency records for mutating endpoints (INV-010). Replay of a key returns the stored
 /// response without repeating the side effect.
 model IdempotencyKey {
-  key          String   @id
-  userId       String?  @map("user_id") @db.Uuid
+  key          String
+  /// ★ PART OF THE PRIMARY KEY, DELIBERATELY. ★ The key namespace was previously global, so a
+  /// caller who guessed or reused another user's key received that user's STORED RESPONSE BODY
+  /// without any permission check executing — the replay path returns BEFORE the guard runs.
+  /// Namespacing by actor and endpoint closes it (RED-TEAM R8).
+  /// Unauthenticated endpoints use the nil UUID `00000000-0000-0000-0000-000000000000`, and
+  /// MUST NOT store a response body — a shared namespace with a stored body is the same leak.
+  userId       String   @map("user_id") @db.Uuid
   endpoint     String
   /// SHA-256 of the request body. A key replayed with a DIFFERENT body is a conflict, not a replay.
   requestHash  String   @map("request_hash")
@@ -1527,6 +1607,7 @@ model IdempotencyKey {
   createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   expiresAt    DateTime @map("expires_at") @db.Timestamptz(6)
 
+  @@id([userId, endpoint, key])
   @@index([expiresAt])
   @@map("idempotency_keys")
 }

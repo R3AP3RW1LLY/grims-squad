@@ -64,6 +64,30 @@ That means the API's existing authorization guards enforce everything, once, in 
 
 The cost is latency on every data-touching tool call. That cost is accepted deliberately: a second enforcement point inside the agent would drift from the first, and a drifted authorization check is how leaks happen.
 
+### The callback credential is NOT the inbound request's nonce
+
+The inbound request carries an HMAC signature with a **single-use nonce and a 60-second window**
+(P8.3). Tool callbacks present *the caller's context* — but they **cannot present the same
+nonce**, and an earlier revision saying "the same signed request" specified two mutually
+exclusive properties (ARCH-ADV A8):
+
+- The gateway **consumes** the nonce on arrival, so the first callback would present one already
+  burned in Redis.
+- A turn runs up to `MAX_STEPS` 6 on an RTX 3060; two steps routinely exceed 60 seconds, and RAG
+  retrieval is itself a callback. The window expires mid-turn.
+
+Both failures land in the agent loop's `catch`, so the model is simply told the tool failed — and
+whoever debugs it at week 34 has only two fixes available, both security regressions: widen the
+window until replay protection is advisory, or make the nonce multi-use.
+
+**The design, stated now rather than under debugging pressure:** on accepting a signed request the
+gateway mints a **turn credential** — short-lived (turn duration + 60 s), single-turn, bound to
+`{userId, permMask, conversationId, turnId}` and signed with the same key. Tool callbacks present
+that. It is **scoped to one turn** (useless afterwards), **distinct from the inbound nonce** (so
+inbound replay protection stays strict and single-use), and **permission-bearing but not
+permission-granting** — the API re-derives the mask from `userId` and uses the credential's copy
+only to detect tampering.
+
 ## The fast path is the front door (ADR-012)
 
 ```
@@ -87,10 +111,19 @@ Two isolated Ollama instances, one per GPU (ADR-011). The arbiter decides whethe
 // apps/gsai/arbiter.ts — the routing decision
 const GAME_PROCESSES = ['EliteDangerous64', 'EliteDangerous32'];
 
-async function heavyAvailable(): Promise<boolean> {
+async function heavyAvailable(targetModel: string): Promise<boolean> {
   if (await gameIsRunning(GAME_PROCESSES)) return false;   // the game always wins
   if (await gpuTempC(HEAVY_GPU_UUID) > 83) return false;   // thermal guard
-  return (await freeVramMb(HEAVY_GPU_UUID)) > 11_000;      // headroom for the 14b
+
+  // The resident check MUST come first. A loaded qwen3:14b at num_ctx 16384 occupies ~10-11 GB
+  // of the 16 GB card, leaving ~5 GB free — so a bare `free > 11_000` test returns FALSE for the
+  // entire 5-minute KEEP_ALIVE window of the model it just loaded. Instance B would serve one
+  // request per unload cycle, pay a cold load every time, and DEFER the overnight briefing and
+  // digest jobs that justify the second GPU at all — while the dashboard reported a healthy
+  // `busy` (ARCH-ADV A5).
+  if (await modelResident(HEAVY_GPU_UUID, targetModel)) return true;
+
+  return (await freeVramMb(HEAVY_GPU_UUID)) > 11_000;      // headroom to LOAD the 14b
 }
 
 export async function pickInstance(req: AiRequest): Promise<Target> {

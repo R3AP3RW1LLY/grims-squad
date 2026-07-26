@@ -143,6 +143,8 @@ phase_P0:
       - "Editing packages/shared/src/permissions.ts alone FAILS the ssot-drift check"
       - "Changing a token so a contrast pair drops below AA FAILS the contrast check"
       - "A committed fake secret FAILS gitleaks"
+      - "Trivy runs AFTER build and scans the image this PR produced, not a cached earlier one"
+      - "integration and invariants share one database spin-up; the full pipeline completes in under 10 minutes"
       - "An invariant with no @INV-nnn tagged test FAILS the invariant job"
     notes: The SSOT-drift check is the mechanism the whole SSOT model depends on. Test that it actually fails.
     ssot_updates: [STATUS.md]
@@ -163,6 +165,9 @@ phase_P0:
       - "Caddy obtains and renews a certificate automatically"
       - "Production deploy requires the manual gate; staging does not"
       - "A failed post-deploy health check triggers automatic rollback"
+      - "Every container carries an explicit mem_limit per 00-charter/constraints.md; a container without one fails the compose lint"
+      - "The staging deploy step checks free memory FIRST and refuses below 1.5 GB — an autonomous staging deploy must not let the OOM killer take production Postgres"
+      - "redis uses maxmemory-policy noeviction; evicting a BullMQ queue silently drops ACL re-index jobs"
       - "No secret is present in any image layer — verified by scanning the built image"
     blocked_by_decisions: [D1, D6]
     ssot_updates: [STATUS.md]
@@ -180,7 +185,9 @@ phase_P0:
       - .github/pull_request_template.md
     acceptance:
       - "pnpm test:invariants runs only @INV-nnn tagged tests and reports coverage against invariants.md"
-      - "invariant-coverage fails when an INV number in invariants.md has no tagged test"
+      - "invariant-coverage reads the `due:Pn` marker on each invariant and requires a tagged test ONLY for invariants due by the phase recorded in STATUS.md"
+      - "invariant-coverage FAILS on an invariant with no `due:` marker, and on one that is past due and untested"
+      - "The job prints `N due / N covered · M not yet due (…)` — a not-yet-due invariant is never reported as a pass"
       - "Coverage gates from 10-quality/test-strategy.md are enforced per package"
       - "The PR template requires the task ID, acceptance-to-test mapping, review-gate table and risk tier"
       - "A tier-1 claim on a path in the tier-3 floor list is rejected by CI (ADR-021)"
@@ -229,6 +236,7 @@ phase_P1:
       - "A state-changing request without a valid CSRF double-submit token is rejected"
       - "Refresh tokens are stored as SHA-256 hashes; the plaintext is never persisted"
       - "A revoked family's tokens are refused even before natural expiry"
+      - "MANDATORY: idempotency keys are namespaced (userId, endpoint, key). A member presenting an officer's key with an identical body does NOT receive the officer's stored response, and the permission guard executes normally (INV-041)"
     ssot_updates: [STATUS.md]
 
   - id: P1.3
@@ -247,7 +255,10 @@ phase_P1:
       - "Negative tests exist for every ring boundary in both directions"
       - "Redis cache perm:{userId} has a 5-minute TTL and is busted on every role, mapping, bundle and deny-mask change"
       - "A model with an ACL that is not registered with the extension FAILS a test that enumerates ACL-bearing models"
-      - "Ownership predicates (own loadout, own carrier, own application thread) are enforced in the same layer"
+      - "MANDATORY: computeEffectiveMask takes account status. A user whose status is left, banned or inactive resolves to NO_PERMISSIONS even with surviving `manual` role grants (INV-037)"
+      - "guildMemberRemove and any users.status change bust perm:{userId} and drop that user's WebSocket channels"
+      - "Ownership predicates (own loadout, own carrier, own applicant thread) are enforced in the same layer"
+      - "The applicant's ownership predicate reaches ONLY their applicantThreadId — never the Ring 2 deliberationThreadId (INV-002)"
     notes: >
       The single most important task in P1. Controller guards alone are the exact leak
       INV-002 exists to prevent.
@@ -365,6 +376,7 @@ phase_P1:
       - "A nonce is issued, has a TTL, and expires to VERIFICATION_NONCE_EXPIRED"
       - "The worker polls Inara and grants trust_tier 2 when the nonce is found in the profile"
       - "Nonce-not-found-yet is a NORMAL in-progress state, not an error"
+      - "MANDATORY: an abandoned pending claim does NOT block the real CMDR owner from verifying. The uniqueness lock applies only to isVerified rows, and pending claims expire by nonceExpiresAt (INV-005, RED-TEAM R7)"
       - "Officer manual approval grants trust_tier 1 and is audited"
       - "The Inara adapter dispatches at most 2 requests/minute GLOBALLY through one shared limiter (INV-033)"
       - "events[0].eventStatus is checked, not merely the HTTP status"
@@ -467,6 +479,7 @@ phase_P2:
       - "A blocked DM falls back to in-app without retrying into a rate limit"
       - "Delivery failure is retried and visible, never silently dropped"
       - "A user cannot subscribe to a thread they cannot view"
+      - "MANDATORY: moving a thread to a more restrictive category PRUNES subscriptions whose holders no longer satisfy the destination viewPerm, AND fan-out re-checks each recipient's current mask at send time. A member subscribed before the move receives no notification, no DM and no WebSocket event (INV-039)"
     blocked_by_decisions: [D11]
     ssot_updates: [STATUS.md]
 
@@ -485,6 +498,9 @@ phase_P2:
       - "The ACL filter is applied IN the query, not after retrieval — asserted by inspecting the dispatched filter expression"
       - "Moving a thread to a more restrictive category removes it from lower-privileged search results"
       - "Facets by category, author, tag and date work"
+      - "A FAILED re-index after an ACL change alerts immediately and is treated as a potential leak — the same treatment the pgvector mirror gets in P8.9"
+      - "A nightly divergence sweep compares each indexed document's ACL against its source and alerts on mismatch"
+      - "A STALE index entry (source moved to a restrictive category, re-index job lost) is caught by the sweep — INV-024's test only exercises freshly-indexed documents"
     ssot_updates: [STATUS.md]
 
   - id: P2.6
@@ -639,7 +655,12 @@ phase_P3:
       - "A connected-but-silent socket triggers reconnect via receiveTimeout and alerts after 10 minutes"
       - "Parse failures go to a dead-letter queue and alert on RATE, not on count"
       - "Kill mid-batch and restart: no acknowledged message lost, no duplicate row (INV-034)"
-      - "ONE-HOUR SOAK: report messages/sec, rows written, parse-failure rate and disk delta"
+      - "BigInt-SAFE PARSING: a lossless JSON parser sits between zlib.inflate and Zod. A SystemAddress above 2^53 round-trips EXACTLY — `JSON.parse` then `BigInt()` is a FAILING case, because the precision is already gone (INV-021, INV-043)"
+      - "systems.observedAt / stations.observedAt carry the OBSERVATION time; the INV-017 discard compares against those, never against updatedAt (INV-043)"
+      - "A commodity absent from a market message is DELETED for that market in the same transaction as the upsert — no ghost supply survives (INV-044)"
+      - "A 500-row batch containing one row whose parent station is unknown writes 499 rows and BUFFERS 1; it neither aborts the statement nor drops the batch (INV-045)"
+      - "EddnStats exposes orphanBufferDepth and writeFailureRate; a buffered row older than 24h alerts"
+      - "ONE-HOUR SOAK: report messages/sec, rows written, parse-failure rate, orphan buffer depth and disk delta"
     blocked_by_decisions: [D3, D4, D10]
     ssot_updates: [STATUS.md]
 
@@ -658,6 +679,7 @@ phase_P3:
       - "Interruption and restart resumes from the checkpointed offset"
       - "The dump is stream-parsed — a memory-usage assertion proves the file is never fully loaded"
       - "Seeding NEVER overwrites fresher EDDN data (INV-017)"
+      - "observedAt is set from the DUMP'S GENERATION DATE, not the seed run time — verified by seeding a month-old dump today and asserting a week-old EDDN message still wins (INV-043)"
       - "The dump date and source are recorded in site_config"
     ssot_updates: [STATUS.md]
 
@@ -695,6 +717,8 @@ phase_P3:
       - "A partially-consented batch accepts the consented events and enumerates the rejected ones"
       - "An UNKNOWN event type is accepted and counted as ignored — never an error, so a game update cannot break the plugin"
       - "Duplicate events are counted as ignored via the eventKey unique constraint (INV-017)"
+      - "MANDATORY: 18 MissionCompleted events whose journal timestamps span only 3 whole seconds produce 18 ROWS. eventKey includes a canonical payload hash — without it 15 collide and are silently swallowed as duplicates (INV-042)"
+      - "A genuine retry of an identical event still dedupes to one row"
       - "Device tokens are stored as SHA-256 hashes and the plaintext is shown exactly once"
       - "Revocation is immediate and offers a data purge"
       - "Replaying a real journal file produces the expected accepted/rejected/ignored counts"
@@ -759,7 +783,8 @@ phase_P4:
       - "MANDATORY: three EDDN reports of the SAME tick for one faction/system produce EXACTLY ONE snapshot — never summed, never averaged (INV-019)"
       - "The partial unique index covers the NULL-tick case"
       - "pending and recovering states are stored in separate columns from active state"
-      - "A snapshot whose tick cannot be determined is left UNASSOCIATED rather than guessed"
+      - "tickId is NEVER NULL: ingest resolves-or-creates the provisional BgsTick for the current window, so the plain unique constraint is total"
+      - "MANDATORY: three CMDRs reporting the same tick for one faction/system at three DIFFERENT observedAt values produce exactly ONE row — the previous partial index keyed on observedAt deduped nothing (INV-019)"
     blocked_by_decisions: [D3]
     ssot_updates: [STATUS.md]
 
@@ -776,6 +801,8 @@ phase_P4:
       - "Every snapshot associates to a tickId, or explicitly to none"
       - "Inferred ticks carry confidence < 1 and are labelled provisional everywhere they surface"
       - "A missed tick does not retroactively corrupt earlier associations"
+      - "MANDATORY: an inferred tick later corrected by the community detector UPDATES THE SAME ROW via windowKey — it never creates a second tick row. Two tick rows minutes apart split one real tick and compute every delta against the wrong baseline"
+      - "Correcting a tick re-associates any snapshot that now belongs to a different window, and the merge is deterministic"
     blocked_by_decisions: [D7]
     notes: Naive tick inference makes everything downstream wrong. Validate first.
     ssot_updates: [STATUS.md]
@@ -848,6 +875,9 @@ phase_P4:
       - "Negatives — murders and failed missions — are tracked as first-class"
       - "The manual form works as a fallback"
       - "BGS-Tally import works"
+      - "MANDATORY: re-running a partially-failed BGS-Tally import inserts NO duplicates — importBatchKey dedupes the path where sourceEventId is NULL and the unique constraint therefore enforces nothing (INV-042)"
+      - "A contribution row with both sourceEventId and importBatchKey NULL is REJECTED at the boundary"
+      - "A double-submitted manual form does not inflate HaulingTarget.deliveredTons"
       - "Activity attributes to the correct tick"
     ssot_updates: [STATUS.md]
 
@@ -1062,6 +1092,8 @@ phase_P6:
       - "Carriers excluded unless explicitly included"
       - "best_trades refreshes CONCURRENTLY every 15 minutes and never blocks readers"
       - "Materialised rows carry the underlying observation age, not the refresh age"
+      - "best_trades is BOUNDED: top 20 per origin system, 100 ly cap, 1000 Cr/t floor. An unbounded market-pair × commodity grain is tens of millions of rows rebuilt every 15 minutes on the same 4 vCPU as the collector"
+      - "MANDATORY: the CONCURRENT refresh completes in under 3 minutes on a populated database, measured — and EDDN lag does not rise during it"
       - "An empty result names the binding constraint"
     ssot_updates: [STATUS.md]
 
@@ -1333,6 +1365,8 @@ phase_P8:
       - "The agent container's egress allowlist permits ONLY Ollama localhost, our API and the whitelisted ED APIs — an arbitrary host is refused"
       - "There is NO route from the container to the home LAN"
       - "The agent runtime configuration contains no database URL (INV-016)"
+      - "MANDATORY: tool callbacks present a TURN CREDENTIAL, not the inbound request's nonce. The inbound nonce stays strictly single-use, and a turn lasting longer than 60s does not break its own tool calls"
+      - "A turn credential presented after its turn ends is refused"
     ssot_updates: [STATUS.md]
 
   - id: P8.4
@@ -1361,6 +1395,7 @@ phase_P8:
       - "The temperature guard sheds to DEGRADED above 83 C"
       - "Free-VRAM headroom below 11 GB routes away from instance B"
       - "Batch and scheduled work DEFERS rather than erroring when B is unavailable"
+      - "MANDATORY: with qwen3:14b ALREADY RESIDENT on instance B, heavyAvailable() returns true. A bare free-VRAM check returns false for the model's whole KEEP_ALIVE window, silently DEFERring every overnight briefing and digest while the dashboard reports a healthy `busy`"
       - "Status is exposed on the admin health dashboard as available | gaming | busy"
     ssot_updates: [STATUS.md]
 
@@ -1437,6 +1472,9 @@ phase_P8:
       - "Chunking is 600/80 and respects markdown headings"
       - "Hybrid vector + BM25 merged by RRF; an exact callsign like K7Q-B4X is found"
       - "A content type without a registered re-index handler FAILS a test that enumerates them"
+      - "MANDATORY: a category gated on a CUSTOM mask (e.g. Site & Infrastructure on SITE_CONFIG) is NOT retrievable by a member. The visibility enum cannot express it; viewPermMask is tested in the query (INV-038)"
+      - "knowledge_chunks.visibility has NO DEFAULT — an unresolvable source ACL fails CLOSED to officer + most-restrictive mask, never open to public"
+      - "MANDATORY: the leak test asserts zero rows from BOTH the pgvector and the Meilisearch legs, independently, before the RRF merge"
       - "A failed re-index after an ACL change alerts immediately and is treated as a potential leak"
     blocked_by_decisions: [D16]
     ssot_updates: [STATUS.md]
@@ -1483,6 +1521,7 @@ phase_P8:
       - "grant_role requires TWO steps and its preview expands the permission DELTA in plain language"
       - "create_forum_post and post_announcement previews show the FULLY RENDERED body"
       - "create_operation previews the time in both UTC and the caller's local zone"
+      - "MANDATORY: a confirmation token is SINGLE-USE and bound to both its invocation and the exact argument hash shown to the human. A spent token, mutated arguments, or a token from another invocation are all refused (INV-040)"
       - "An expired confirmation token forces a re-plan, never an automatic execution"
       - "ban is absent from moderate_content's enum and is unreachable by any path"
       - "send_discord_message can only address channels on the configured allowlist"

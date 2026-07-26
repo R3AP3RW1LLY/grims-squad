@@ -50,16 +50,67 @@ CREATE INDEX market_orders_buy_idx  ON market_orders (commodity, buy_price ASC) 
 
 ```sql
 CREATE UNIQUE INDEX cmdr_verifications_active_name_uniq
-  ON cmdr_verifications (cmdr_name) WHERE revoked_at IS NULL;
+  ON cmdr_verifications (cmdr_name) WHERE revoked_at IS NULL AND is_verified = true;
+
+CREATE INDEX cmdr_verifications_pending_expiry_idx
+  ON cmdr_verifications (nonce_expires_at)
+  WHERE is_verified = false AND revoked_at IS NULL;
 ```
 
+> **`AND is_verified = true` is load-bearing.** Keyed on `revoked_at IS NULL` alone, merely
+> *starting* a claim took the lock — so any member could permanently deny any CMDR name,
+> including every officer's, by opening an `inara_nonce` claim and never completing it.
+> `VERIFICATION_NONCE_NOT_FOUND` is explicitly *not* an error state, so nothing revoked the
+> squatting row (RED-TEAM R7). The second index drives the pending-claim expiry sweep, which
+> previously had no column to sweep on.
+
 ### `faction_influence_snapshots` — the dedupe guarantee
-Prisma's `@@unique([factionId, systemAddress, tickId])` does **not** constrain rows where `tickId IS NULL`, because Postgres treats NULLs as distinct. Unassociated snapshots therefore need their own partial unique index, or the same observation can be inserted repeatedly and INV-019 fails silently.
+`tick_id` is **non-null** (schema), so Prisma's `@@unique([factionId, systemAddress, tickId])` is *total* and no partial index is required.
+
+> **An earlier revision of this file got this wrong, and the failure is worth recording.**
+> It permitted a NULL `tick_id` and added:
+>
+> ```sql
+> -- WRONG. DO NOT REINSTATE.
+> CREATE UNIQUE INDEX faction_influence_untick_uniq
+>   ON faction_influence_snapshots (faction_id, system_address, observed_at)
+>   WHERE tick_id IS NULL;
+> ```
+>
+> `observed_at` is the *uploader's* journal moment, so it differs for every CMDR reporting the
+> same tick. Three CMDRs flying through one system after one tick produced three rows, the
+> index permitted all three, and INV-019's test still passed because it supplied a known
+> `tick_id` and never exercised the NULL path (DATA-INTEGRITY B3).
+>
+> **The fix is structural, not another index:** ingestion resolves-or-creates the provisional
+> `bgs_ticks` row for the current window, so `tick_id` is never NULL and the plain unique
+> constraint covers every case.
+
+### `bgs_activity_reports` and `hauling_contributions` — the NULL-distinctness trap, again
+Prisma's `@@unique([userId, sourceEventId])` enforces **nothing** on the manual and BGS-Tally paths, because those rows leave `source_event_id` NULL. Re-running a partially-failed BGS-Tally import inserted all 240 rows a second time with zero constraint violations, and `hauling_targets.delivered_tons` inherited the doubling (DATA-INTEGRITY B2).
+
+Two partial unique indexes per table — one per ingestion path:
 
 ```sql
-CREATE UNIQUE INDEX faction_influence_untick_uniq
-  ON faction_influence_snapshots (faction_id, system_address, observed_at)
-  WHERE tick_id IS NULL;
+CREATE UNIQUE INDEX bgs_reports_event_uniq
+  ON bgs_activity_reports (user_id, source_event_id) WHERE source_event_id IS NOT NULL;
+CREATE UNIQUE INDEX bgs_reports_import_uniq
+  ON bgs_activity_reports (user_id, import_batch_key) WHERE import_batch_key IS NOT NULL;
+
+CREATE UNIQUE INDEX hauling_event_uniq
+  ON hauling_contributions (user_id, source_event_id) WHERE source_event_id IS NOT NULL;
+CREATE UNIQUE INDEX hauling_import_uniq
+  ON hauling_contributions (user_id, import_batch_key) WHERE import_batch_key IS NOT NULL;
+```
+
+**A row with both keys NULL is rejected at the application boundary**, not silently accepted — an un-dedupable contribution row is indistinguishable from a duplicate forever.
+
+### `systems` — the un-track sweep
+The prefilter's third clause ("anything a member queried in the last 30 days") needs an expiry, or the tracked set is monotonic and the >95% saving decays to zero (ARCH-ADV A3).
+
+```sql
+CREATE INDEX systems_untrack_idx ON systems (last_queried_at)
+  WHERE is_tracked = true AND last_queried_at IS NOT NULL;
 ```
 
 ### `forum_posts` — full-text search column and index
@@ -136,14 +187,43 @@ Already Prisma-expressed; listed for completeness because the sweep job depends 
 
 Not an index, but in the same performance budget. The common trade query ("best routes near me") is expensive enough to precompute.
 
+> **THE GRAIN MUST BE BOUNDED, AND THAT IS NOT OPTIONAL.**
+> An earlier revision specified this view at `(from_market, to_market, commodity)` grain with no
+> cap — *every ordered pair of markets, per commodity*. At ~5,000 markets inside a 250 ly radius
+> and ~380 tradable commodities the honest join is 25M pairs before pruning, rebuilt **in full**
+> every 15 minutes by `REFRESH … CONCURRENTLY` (which re-executes the whole query into a new
+> relation, builds its index, then diffs — needing disk headroom for a second full copy) on the
+> *same 4 vCPU* running the EDDN collector's batch upserts against the same table. The first
+> visible symptom is EDDN lag climbing, which `incident-eddn-stalled.md` would misdiagnose as an
+> upstream problem (ARCH-ADV A2).
+
+**Three bounds, all required:** top 20 routes **per origin system** (not per market pair), a 100 ly
+distance cap, and a 1,000 Cr/t profit floor.
+
 ```sql
 CREATE MATERIALIZED VIEW best_trades AS
-SELECT ...  -- single-hop optimiser over market_orders ⋈ stations ⋈ systems
+WITH ranked AS (
+  SELECT b.system_address AS from_system, b.market_id AS from_market,
+         s.market_id AS to_market, b.commodity,
+         (s.sell_price - b.buy_price) AS profit_per_ton,
+         b.ly AS distance_ly, LEAST(b.updated_at, s.updated_at) AS observed_at,
+         row_number() OVER (PARTITION BY b.system_address
+                            ORDER BY (s.sell_price - b.buy_price) DESC) AS rn
+  FROM buy_candidates b
+  JOIN sell_candidates s
+    ON s.commodity = b.commodity AND s.market_id <> b.market_id
+  WHERE s.sell_price - b.buy_price >= 1000
+    AND b.ly <= 100
+)
+SELECT * FROM ranked WHERE rn <= 20
 WITH DATA;
 
 CREATE UNIQUE INDEX best_trades_pk ON best_trades (from_market, to_market, commodity);
 CREATE INDEX best_trades_profit_idx ON best_trades (profit_per_ton DESC);
 ```
+
+**The refresh cost is measured, not assumed.** P6.3 asserts the refresh completes in under
+3 minutes on a populated database — an unmeasured refresh is how this fails silently.
 
 **Refresh every 15 minutes, `CONCURRENTLY`** — which requires the unique index above. A non-concurrent refresh takes an `ACCESS EXCLUSIVE` lock and blocks every reader for its duration.
 

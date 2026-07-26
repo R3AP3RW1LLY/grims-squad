@@ -19,6 +19,15 @@ Every invocation passes, in order:
 1. **Zod schema validation.** Failures are fed back to the model so it self-corrects rather than failing the turn.
 2. **Permission check** against the caller's mask. Failure → `denied`, audited, fed back as a tool error.
 3. **Confirmation gate** for every mutating tool (INV-014). `grant_role` requires two steps.
+   The token is **single-use and argument-bound**: it is stored hashed on the invocation
+   alongside `confirmedArgsHash`, and `confirmationConsumedAt` is the spend ledger. Previously no
+   such column existed, so a token was neither single-use nor tied to an argument set — an
+   injection could reuse an unexpired token, within its own conversation, to execute a *different*
+   call the human never saw. That needed no new permission, so the "injection cannot escalate"
+   property held while being irrelevant (RED-TEAM R5). At execution the executor re-hashes the
+   arguments and refuses on mismatch, refuses a spent token, and refuses one bound to another
+   invocation. **Two-step (`grant_role`) means two independently-issued tokens**, the second
+   minted only after the first is consumed and shown the resulting permission delta.
 4. **Kill-switch check.** If write tools are disabled, every mutating tool refuses regardless of permission.
 5. **Timeout.** Per-tool, from `tools.yaml`. The loop reports a timeout; it never hangs.
 6. **Truncation** to `max_result_chars` before the result enters context.

@@ -36,6 +36,11 @@
   data: { channel: 'bgs:updates', code: 'PERMISSION_DENIED',
           requiredPermissions: ['BGS_VIEW'] } }
 
+// For a RESOURCE-SCOPED channel the refusal must NOT distinguish "exists but forbidden" from
+// "does not exist" — that reopens the existence oracle errors.md rule 2 closes on the REST side.
+{ event: 'subscribe_error',
+  data: { channel: 'ops:0193f2a1-...', code: 'NOT_FOUND' } }   // identical either way
+
 { event: 'unsubscribe', data: { channel: 'ops:0193f2a1-...' } }
 { event: 'reauth',      data: { accessToken: '<jwt>' } }
 ```
@@ -43,6 +48,21 @@
 ## Server → client
 
 Every payload carries `v` (schema version), `ts` (UTC ISO-8601 emit time) and `channel`. Payload bodies are Zod schemas in `packages/shared`, shared with the client.
+
+> **Notification fan-out is an ACL path, and it is outside INV-002.** INV-002 governs a query
+> executed *on behalf of a user*; fan-out is issued by the system enumerating subscribers, so the
+> data-layer predicate does not apply to it. A `ForumSubscription` created while a thread was in
+> a member category **survives the thread being moved to an officer category** — nothing in the
+> RAG propagation table touches subscriptions — so the subscriber then receives the thread title
+> and a post excerpt from officer-only content, over a channel they are legitimately authorized
+> for (RED-TEAM R3).
+>
+> **Two controls, both required:**
+> 1. Moving a thread **prunes** subscriptions held by users whose mask no longer satisfies the
+>    destination category's `viewPerm`.
+> 2. Fan-out **re-checks each recipient's current mask against the thread's current category at
+>    send time** — pruning alone is not enough, because a *demotion* changes the mask without
+>    touching the thread.
 
 ### `notification`
 ```json
@@ -123,6 +143,15 @@ The push that makes Spansh delegation non-blocking (INV-032).
 ### `presence.changed`
 `data: { userId, displayName, status: 'online'|'offline'|'in_game', currentSystem?, currentShip? }`
 **`currentSystem` and `currentShip` are present only if that member set `showLocation`/`showFleet`** — absent, not null (INV-027).
+
+> **`status` itself is gated on `showActivity`, and previously was not.** Only the two location
+> fields were gated, so a member who had set *every* privacy toggle to private still had
+> `status: "in_game"` streamed to the whole squadron on a channel any member may subscribe to —
+> precisely the signal `showActivity` exists to suppress. INV-027's test enumerated location,
+> credits and fleet, so it passed (RED-TEAM R6).
+>
+> **A member with `showActivity = false` generates no `presence.changed` event at all.** Not a
+> redacted one — none.
 
 ### `forum.thread_created` / `forum.post_created`
 `data: { threadId, categoryId, title, slug, authorDisplayName, createdAt }` / `data: { postId, threadId, authorDisplayName, excerpt, createdAt }`

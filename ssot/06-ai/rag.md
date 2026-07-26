@@ -62,10 +62,26 @@ A test enumerates every content type against the registered re-index handlers. *
 SELECT id, title, content, source_type, source_id,
        1 - (embedding <=> $queryEmbedding) AS similarity
 FROM knowledge_chunks
-WHERE visibility = ANY($allowedVisibilities)   -- derived from the caller's permission mask
+WHERE visibility = ANY($allowedVisibilities)               -- coarse tier
+  AND (view_perm_mask IS NULL                              -- no mask beyond the tier
+       OR (view_perm_mask & $callerMask) = view_perm_mask) -- exact mask test
 ORDER BY embedding <=> $queryEmbedding
 LIMIT 8;
 ```
+
+> **The second predicate is not optional, and omitting it was a real leak.** An earlier revision
+> showed only the `visibility = ANY(...)` line and relegated the mask test to prose. Forum
+> categories carry an **arbitrary admin-editable `viewPerm`** (ADR-005) — "Site & Infrastructure"
+> is gated on `SITE_CONFIG`, which no value of a four-member enum can express. With `visibility`
+> defaulting to `public`, a sysadmin thread containing integration-key rotation steps indexed as
+> **world-readable** — and the mandatory P8 leak test passed anyway, because it exercises an
+> *officer* category, which does map cleanly (RED-TEAM R1).
+>
+> Two structural consequences, both now in the schema:
+> 1. `knowledge_chunks.visibility` has **no default** — the indexer resolves a visibility
+>    explicitly or refuses to index. It previously failed *open*.
+> 2. `knowledge_chunks.view_perm_mask` carries the source's exact mask. An unresolvable ACL sets
+>    `visibility = officer` **and** the most restrictive mask — it fails *closed*.
 
 ```
 Meilisearch leg: same query, BM25, with the identical ACL filter expression.
@@ -82,6 +98,25 @@ Final: top 8 chunks into context, each wrapped in <retrieved> tags (06-ai/prompt
 | own content | plus `private` rows **owned by that caller**, applied as a row-level ownership predicate — not as a visibility value |
 
 **Category-specific permissions beyond the three tiers** (for example BGS Intelligence gated on `BGS_REPORT`) are handled by storing the category's `viewPerm` on the chunk's `metadata` and adding a mask test to the predicate. **The three-value `visibility` enum is a fast coarse filter, not the whole check** — a design that relied on the enum alone would leak the moment a category used a custom mask.
+
+### The Meilisearch leg needs the same protection, and it is easy to forget
+The BM25 leg reads a **second copy of the ACL** in Meilisearch — a separate mirror, updated by a
+separate BullMQ job whose queue state lives in Redis. A Redis restart, or a Meilisearch OOM on
+the 8 GB box, drops queued re-index jobs.
+
+**The failure is asymmetric:** Postgres says a moved thread is Ring 2 while the Meilisearch
+document still says public. INV-024's test indexes a token and searches immediately, so it
+exercises a *freshly indexed* document and passes. The P8 leak test asserts "retrieval returned
+zero rows … asserted by inspecting the SQL" — **Meilisearch is not SQL, so that assertion cannot
+cover it** (ARCH-ADV A4).
+
+Therefore:
+- The Meilisearch re-index job gets **the same treatment as the pgvector one**: a failure after
+  an ACL change alerts immediately and is treated as a potential leak.
+- A **nightly divergence sweep** compares each indexed document's ACL against its source and
+  alerts on any mismatch — both mirrors, not just Postgres.
+- The mandatory leak test asserts **zero rows from both legs**, checked independently before the
+  RRF merge.
 
 ### Optional rerank
 A small cross-encoder rerank pass after the merge, if retrieval quality proves insufficient. **Only ever applied to the already-ACL-filtered set** — reranking is a relevance step and must never widen the candidate pool.

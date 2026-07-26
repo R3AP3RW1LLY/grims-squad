@@ -73,14 +73,23 @@ _Adapters written from documentation, not yet tested against the live API. Every
 | D15 | Are there members under 18 in the squadron? Spec §10.4 raises this; the answer changes moderation policy and what telemetry we should collect at all. | P2.6 | 2026-07-25 |
 | D16 | **Embedding dimension conflict in the source spec.** §6.1 declares `embedding VECTOR(1024)` while §8.2.4 pins `nomic-embed-text`, which emits **768** dimensions. The column must equal the model's output width or every insert fails. The schema currently carries 1024 because that is what the spec's DDL states. Resolve before P8.9 — changing it later forces a full re-index of every vector. Recommend either 768 with `nomic-embed-text`, or a 1024-dimension embedder, chosen deliberately since the embedding model is pinned forever (ADR-011). | P8.9 | 2026-07-25 |
 | D17 | Prisma major version pin. The spec's schema style (`url = env("DATABASE_URL")` in the datasource block) is Prisma ≤6. Prisma 7 moved connection URLs to `prisma.config.ts` and would require rewriting the datasource block. SSOT schema validates clean on **Prisma 6.19.3**. Confirm we pin `prisma@6` for now, or accept the Prisma 7 migration in P0. | P0.2 | 2026-07-25 |
+| D18 | **Two review findings need a squadron-process answer, not an engineering one.** (a) RED-TEAM R2 splits the recruitment application into an officer-only deliberation thread and an applicant-visible conversation thread — confirm officers are content to deliberate somewhere the applicant provably cannot read, and that a separate applicant-facing thread is wanted at all. (b) ARCH-ADV A7 caps staging at 1 GB and gates its deploy on free memory; confirm you would rather a staging deploy be *skipped* than risk production, since the alternative is a second VPS at ~$8–15/mo. | P2.7, P0.7 | 2026-07-25 |
 
 ## Adversarial review log
 See `10-quality/review-log.md`. Summary:
 
 | Phase | DESIGN-ADV | ARCH-ADV | RED-TEAM | DATA-INTEGRITY-ADV | UX-ADV | OPS-ADV |
 |---|---|---|---|---|---|---|
-| SSOT bootstrap | — | PASSED w/ fixes | PASSED w/ fixes | PASSED w/ fixes | — | — |
+| SSOT bootstrap — self-review | — | 2 findings | 3 findings | 2 findings | — | — |
+| **SSOT bootstrap — independent panel** | — | **9 (3 BLOCKER)** | **8 (4 BLOCKER)** | **8 (3 BLOCKER)** | — | — |
 | P0 | pending | pending | n/a | n/a | pending | pending |
+
+**Independent panel, 2026-07-25: 25 findings — 10 BLOCKER, 12 MAJOR, 3 MINOR. All confirmed, all
+resolved in the SSOT, 0 unresolved.** Three independent agents, run in parallel, none of them the
+authoring agent. Full detail in `10-quality/review-log.md`. The headline defects were an ACL leak
+through custom permission masks in the RAG index, a departed officer retaining their permission
+mask indefinitely, a telemetry idempotency key that silently swallowed BGS activity, and an
+invariant gate that would have been switched off in week one.
 
 ## Deferred / known debt
 | Item | Phase deferred from | Why |
@@ -97,4 +106,4 @@ See `10-quality/review-log.md`. Summary:
 ## Session handoff notes
 _Newest first. One line per session that changed state._
 
-- **2026-07-25 · agent** — SSOT bootstrapped from `docs/grims-squad-build-spec.md`. 21 ADRs written, schema validated, contracts and task graph produced. Adversarial review round run against the SSOT itself; findings resolved (see `10-quality/review-log.md`). Nothing built. P0 not started — awaiting human review and the D-series answers marked `BLOCKS P0`.
+- **2026-07-25 · agent** — SSOT bootstrapped from `docs/grims-squad-build-spec.md`. 21 ADRs, 45 invariants, validated schema, contracts and a 90-task graph. **Then subjected to an independent three-panel adversarial review (ARCH-ADV, RED-TEAM, DATA-INTEGRITY-ADV): 25 findings, 10 of them blockers, all confirmed and all resolved** — see `10-quality/review-log.md`. Schema, permissions and invariants changed materially as a result; re-validated after. Nothing built. P0 not started — awaiting human review and the D-series answers marked `BLOCKS P0`.

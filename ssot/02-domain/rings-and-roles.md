@@ -106,7 +106,21 @@ Authoritative form is `ROLE_PRESETS` in `04-contracts/permissions.ts`. This tabl
 Notes on non-obvious placements:
 - **`AI_TOOLS_WRITE` is a member permission.** It gates *whether the AI may attempt* a mutating tool at all; the tool's own permission (e.g. `BGS_SET_ORDERS`) still gates the action, and confirmation is still required (INV-014). A member can therefore have the AI sign them up for an op but not set a BGS order.
 - **`FORUM_POST_OFFICER` and `FLEET_APPROVE_DOCTRINE` and `TRADE_MANAGE_ALERTS` are additions to the spec's list**, needed because the spec describes officer-only posting, doctrine approval and per-member alerts as behaviours without naming permissions for them. Recorded here so the addition is visible rather than silent.
-- **`applicant` gets no `FORUM_VIEW_MEMBER`.** Recruits see the public forum and their own application thread. That thread is reachable through a row-level ownership predicate, not a permission.
+- **`applicant` gets no `FORUM_VIEW_MEMBER`.** Recruits see the public forum and *their own application conversation*.
+
+  > **That conversation is a SEPARATE thread in a separate category, and the distinction is a
+  > security control.** An earlier revision gave the applicant an ownership-predicate hole
+  > through the Ring 2 *Applications* category — which is exactly where officers conduct candid
+  > deliberation, at thread granularity with no post-level scoping. The applicant would have read
+  > the officers' assessment of their own application, and INV-002's "physically incapable"
+  > guarantee would have acquired an unbounded carve-out that a second and third feature would
+  > copy (RED-TEAM R2).
+  >
+  > **The model instead:** `Application` links **two** threads. `deliberationThreadId` lives in
+  > Ring 2 Applications and the applicant can never see it. `applicantThreadId` lives in a
+  > dedicated public-tier *Application Conversation* category whose rows are scoped by an
+  > ownership predicate. Officers post to whichever they intend; nothing bridges them
+  > automatically.
 - **`guest` holds only `FORUM_VIEW_PUBLIC`** and is never persisted as a role row.
 
 ## Forum category tree and its permissions

@@ -278,14 +278,33 @@ export function hasAnyPermission(mask: PermissionMask, anyOf: PermissionMask): b
 }
 
 /**
+ * Account states. Only `active` may hold permissions.
+ * Mirrors `UserStatus` in the Prisma schema; kept here so the mask computation cannot be
+ * called without one.
+ */
+export type AccountStatus = 'active' | 'inactive' | 'banned' | 'left';
+
+/**
  * The authoritative effective-mask computation (INV-001).
  * OR of all granted role masks, AND NOT the user's deny mask. Deny always wins (INV-007).
  * This is the ONLY function that may produce an effective mask.
+ *
+ * ★ `status` IS REQUIRED, AND THAT IS A SECURITY FIX. ★
+ * This function previously took only roles and a deny mask. Because `manual` role grants
+ * deliberately survive the nightly Discord reconciliation, and because `guildMemberRemove`
+ * was not a cache-bust trigger, a departed or banned officer's mask was recomputed identically
+ * forever — retaining FORUM_VIEW_OFFICER, AUDIT_VIEW, MEMBER_MANAGE and BGS_SET_ORDERS with no
+ * revocation path short of a human hand-editing `denyMask` (RED-TEAM R4).
+ *
+ * Any status other than `active` collapses to NO_PERMISSIONS. A banned user is not a user with
+ * fewer permissions; they are a user with none.
  */
 export function computeEffectiveMask(
   roleMasks: readonly PermissionMask[],
   denyMask: PermissionMask = 0n,
+  status: AccountStatus = 'active',
 ): PermissionMask {
+  if (status !== 'active') return NO_PERMISSIONS;
   const granted = roleMasks.reduce<PermissionMask>((acc, m) => acc | m, 0n);
   return granted & ~denyMask;
 }
