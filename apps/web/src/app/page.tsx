@@ -1,180 +1,285 @@
+import { DIVISIONS } from '../components/site-chrome';
+
 /**
- * P0.5 — the public landing page. Static, no data.
+ * The public landing page.
  *
- * The live stat ticker, GalNet feed and division CTAs land in P1.9 once there is
- * a database to read and an API to read it from. Deliberately NOT stubbed with
- * invented numbers: a fake "47 COMMANDERS" is exactly the kind of placeholder
- * that survives to production (AGENTS.md §4).
+ * Still no invented data. There is no "47 COMMANDERS ONLINE" ticker here,
+ * because a fake number is exactly the kind of placeholder that survives to
+ * production and quietly becomes a lie the site tells every visitor. The live
+ * stat band, GalNet feed and influence chart land in P1.9 against real data.
  *
- * Colour usage here is constrained by ssot/07-design/accessibility.md and
- * verified by `pnpm contrast:check`. In particular `brand.orange` is used for
- * LARGE text only, and body copy uses `orangeBright` or `text.secondary`.
+ * Everything stated below is TRUE today: the home system, the seven divisions,
+ * and what the hub is being built to do.
+ *
+ * Colour usage is constrained by ssot/07-design/accessibility.md and verified by
+ * `pnpm contrast:check`. `brand.orange` is used for LARGE text only; body copy
+ * uses `orangeBright` or `text.secondary`.
  */
 
-const DIVISIONS = [
-  { name: 'Iron Legion', role: 'Combat · Conflict Zones · Bounty Hunting' },
-  { name: 'Xeno Interdiction Corps', role: 'Anti-Xeno Operations' },
-  { name: 'Sable Directorate', role: 'Background Simulation · Influence' },
-  { name: 'Vanguard Survey', role: 'Exploration · Exobiology' },
-  { name: 'Void Logistics', role: 'Trade · Hauling · Community Goals' },
-  { name: 'Deepcore Prospectors', role: 'Mining' },
-  { name: 'Carrier Command', role: 'Fleet Carrier Operations' },
+const CAPABILITIES = [
+  {
+    title: 'Situation Board',
+    accent: 'var(--color-brand-cyan-bright)',
+    body: 'Live influence tracking with tick markers, and officer orders telling you what actually needs doing tonight — not a wall of numbers you have to interpret yourself.',
+  },
+  {
+    title: 'Commodities Market',
+    accent: 'var(--color-brand-cyan-bright)',
+    body: 'Route finding against our own market mirror. Every price carries its age, because we would rather show you stale data honestly than pretend it is fresh.',
+  },
+  {
+    title: 'Shipyard',
+    accent: 'var(--color-brand-cyan-bright)',
+    body: 'Self-hosted outfitting, a squadron build locker, and doctrine loadouts approved for each role so you know what to fly before you undock.',
+  },
 ] as const;
-
-function CornerPanel({
-  children,
-  className = '',
-}: {
-  children: React.ReactNode;
-  className?: string;
-}) {
-  return <div className={`panel draw-in p-6 ${className}`}>{children}</div>;
-}
 
 export default function HomePage() {
   return (
-    <>
-      <header className="border-b border-[var(--color-border-hairline)]">
-        <nav
-          aria-label="Primary"
-          className="mx-auto flex max-w-[1440px] items-center justify-between px-6 py-4"
-        >
-          <span
-            className="text-lg tracking-[0.2em] text-[var(--color-brand-orange-bright)]"
-            style={{ fontFamily: 'var(--font-display)' }}
-          >
-            GRIM&rsquo;S SQUAD
-          </span>
-          <span className="text-sm text-[var(--color-text-secondary)]">
-            Hyades Sector AV-W b2-4
-          </span>
-        </nav>
-      </header>
+    <main id="main">
+      {/* ============================================================= hero */}
+      <section
+        className="relative overflow-hidden border-b border-[var(--color-border-hairline)]"
+        aria-labelledby="hero-heading"
+      >
+        <div className="ecliptic" aria-hidden="true" />
+        <OrbitOrnament />
 
-      <main id="main" className="mx-auto max-w-[1440px] px-6">
-        {/* ---------------------------------------------------------- hero */}
-        <section className="py-20 sm:py-28" aria-labelledby="hero-heading">
-          <p className="mb-4 text-sm uppercase tracking-[0.35em] text-[var(--color-brand-cyan-bright)]">
-            Elite Dangerous Squadron
-          </p>
+        <div className="relative mx-auto max-w-[1440px] px-6 py-24 sm:py-32">
+          <div className="max-w-[46rem]">
+            <p className="mb-5 flex items-center gap-3 font-mono text-[11px] uppercase tracking-[0.35em] text-[var(--color-brand-cyan-bright)]">
+              <span className="inline-block h-px w-8 bg-[var(--color-brand-cyan)]" aria-hidden="true" />
+              Elite Dangerous Squadron
+            </p>
 
-          {/* Large text, so pure brand.orange is compliant here (7.31:1 on void). */}
-          <h1
-            id="hero-heading"
-            className="text-5xl leading-tight text-[var(--color-brand-orange)] sm:text-7xl"
-            style={{ fontFamily: 'var(--font-display)' }}
-          >
-            No Quarter
-            <br />
-            in the Void
-          </h1>
-
-          <p className="mt-8 max-w-[60ch] text-lg text-[var(--color-text-primary)]">
-            We run a player minor faction, operate fleet carriers, and fly everything from
-            conflict zones to the black. Combat and AX, trade, mining, exploration &mdash; and
-            the background simulation that decides who actually holds a system.
-          </p>
-
-          <div className="mt-10 flex flex-wrap gap-4">
-            <a
-              href="/apply"
-              className="bg-[var(--color-brand-orange)] px-6 py-3 text-[var(--color-text-on-accent)] transition-opacity hover:opacity-90"
+            {/* Large text, so pure brand.orange is compliant here (7.31:1 on void). */}
+            <h1
+              id="hero-heading"
+              className="text-[clamp(2.75rem,8vw,5.5rem)] leading-[0.95] text-[var(--color-brand-orange)]"
               style={{ fontFamily: 'var(--font-display)' }}
             >
-              APPLY TO JOIN
-            </a>
-            <a
-              href="/forum"
-              className="border border-[var(--color-border-active)] px-6 py-3 text-[var(--color-brand-orange-bright)] transition-colors hover:bg-[var(--color-surface-panel-hover)]"
-              style={{ fontFamily: 'var(--font-display)' }}
-            >
-              OPEN COMMS
-            </a>
+              NO QUARTER
+              <br />
+              IN THE VOID
+            </h1>
+
+            <p className="mt-8 max-w-[58ch] text-lg leading-relaxed text-[var(--color-text-primary)]">
+              We run a player minor faction, operate fleet carriers, and fly everything from
+              conflict zones to the black. Combat and AX, trade, mining, exploration &mdash; and the
+              background simulation that decides who actually holds a system.
+            </p>
+
+            <div className="mt-10 flex flex-wrap gap-4">
+              <a
+                href="/apply"
+                className="bg-[var(--color-brand-orange)] px-7 py-3.5 text-[var(--color-text-on-accent)] shadow-[var(--glow-orange)] transition-opacity hover:opacity-90"
+                style={{ fontFamily: 'var(--font-display)' }}
+              >
+                APPLY TO JOIN
+              </a>
+              <a
+                href="/forum"
+                className="border border-[var(--color-border-active)] px-7 py-3.5 text-[var(--color-brand-orange-bright)] transition-colors hover:bg-[var(--color-surface-panel-hover)]"
+                style={{ fontFamily: 'var(--font-display)' }}
+              >
+                OPEN COMMS
+              </a>
+            </div>
           </div>
-        </section>
 
-        {/* ----------------------------------------------------- divisions */}
-        <section className="pb-20" aria-labelledby="divisions-heading">
-          <h2
-            id="divisions-heading"
-            className="mb-2 text-3xl text-[var(--color-brand-orange)]"
-            style={{ fontFamily: 'var(--font-display)' }}
-          >
-            DIVISIONS
-          </h2>
-          <p className="mb-8 max-w-[60ch] text-[var(--color-text-secondary)]">
-            Seven divisions covering every loop we fly. Join one, or several.
-          </p>
-
-          <ul className="grid list-none grid-cols-1 gap-4 p-0 sm:grid-cols-2 lg:grid-cols-3">
-            {DIVISIONS.map((d) => (
-              <li key={d.name}>
-                <CornerPanel className="h-full">
-                  <h3
-                    className="text-lg text-[var(--color-brand-orange-bright)]"
-                    style={{ fontFamily: 'var(--font-display)' }}
-                  >
-                    {d.name}
-                  </h3>
-                  <p className="mt-2 text-sm text-[var(--color-text-secondary)]">{d.role}</p>
-                </CornerPanel>
-              </li>
+          {/* Instrument strip — real, static facts only. */}
+          <dl className="mt-20 grid max-w-3xl grid-cols-2 gap-px border border-[var(--color-border-hairline)] bg-[var(--color-border-hairline)] sm:grid-cols-4">
+            {[
+              ['HOME SYSTEM', 'Hyades Sector AV-W b2-4'],
+              ['DIVISIONS', 'Seven'],
+              ['ALLEGIANCE', 'Player Minor Faction'],
+              ['PLATFORM', 'PC · Odyssey'],
+            ].map(([label, value]) => (
+              <div key={label} className="bg-[var(--color-surface-panel-sunken)] px-4 py-4">
+                <dt className="font-mono text-[10px] tracking-[0.24em] text-[var(--color-text-secondary)]">
+                  {label}
+                </dt>
+                <dd
+                  className="mt-2 text-sm text-[var(--color-brand-orange-bright)]"
+                  style={{ fontFamily: 'var(--font-display)' }}
+                >
+                  {value}
+                </dd>
+              </div>
             ))}
-          </ul>
-        </section>
+          </dl>
+        </div>
+      </section>
 
-        {/* --------------------------------------------------- what we run */}
-        <section className="pb-20" aria-labelledby="capability-heading">
+      {/* ======================================================== divisions */}
+      <section className="mx-auto max-w-[1440px] px-6 py-24" aria-labelledby="divisions-heading">
+        <SectionHeading
+          id="divisions-heading"
+          eyebrow="Structure"
+          title="DIVISIONS"
+          lede="Seven divisions covering every loop we fly. Join one, or several — nobody is locked into a single career."
+        />
+
+        <ul className="mt-12 grid list-none grid-cols-1 gap-5 p-0 md:grid-cols-2 xl:grid-cols-3">
+          {DIVISIONS.map((d, i) => (
+            <li key={d.name}>
+              <article
+                className="hud panel panel-interactive draw-in h-full p-6"
+                style={{ animationDelay: `${i * 60}ms` }}
+              >
+                <div className="flex items-start gap-4">
+                  <span
+                    className="mt-0.5 shrink-0 border border-[var(--color-border-hairline)] p-2"
+                    aria-hidden="true"
+                  >
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                      <path
+                        d={d.glyph}
+                        stroke="var(--color-brand-orange)"
+                        strokeWidth="1.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </span>
+                  <div>
+                    <h3
+                      className="text-lg leading-tight text-[var(--color-brand-orange-bright)]"
+                      style={{ fontFamily: 'var(--font-display)' }}
+                    >
+                      {d.name}
+                    </h3>
+                    <p className="mt-1 font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--color-brand-cyan-bright)]">
+                      {d.role}
+                    </p>
+                  </div>
+                </div>
+                <p className="mt-4 text-sm leading-relaxed text-[var(--color-text-secondary)]">
+                  {d.blurb}
+                </p>
+              </article>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      {/* ============================================================== hub */}
+      <section
+        className="relative border-y border-[var(--color-border-hairline)] bg-[color-mix(in_srgb,var(--color-surface-panel-sunken)_60%,transparent)]"
+        aria-labelledby="hub-heading"
+      >
+        <div className="mx-auto max-w-[1440px] px-6 py-24">
+          <SectionHeading
+            id="hub-heading"
+            eyebrow="The Platform"
+            title="THE HUB"
+            lede="One place for everything the squadron needs, built so the answer to “what should I do tonight?” takes ten seconds rather than ten minutes of cross-referencing."
+          />
+
+          <div className="mt-12 grid grid-cols-1 gap-5 md:grid-cols-3">
+            {CAPABILITIES.map((c, i) => (
+              <article
+                key={c.title}
+                className="hud panel draw-in p-7"
+                style={{ animationDelay: `${i * 80}ms` }}
+              >
+                <span className="font-mono text-[10px] tracking-[0.24em] text-[var(--color-text-secondary)]">
+                  {String(i + 1).padStart(2, '0')}
+                </span>
+                <h3
+                  className="mt-3 text-xl"
+                  style={{ fontFamily: 'var(--font-display)', color: c.accent }}
+                >
+                  {c.title}
+                </h3>
+                <div className="rule-glow mt-4" aria-hidden="true" />
+                <p className="mt-4 text-sm leading-relaxed text-[var(--color-text-secondary)]">
+                  {c.body}
+                </p>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ============================================================== cta */}
+      <section className="mx-auto max-w-[1440px] px-6 py-28" aria-labelledby="cta-heading">
+        <div className="hud panel sweep relative overflow-hidden p-10 text-center sm:p-16">
           <h2
-            id="capability-heading"
-            className="mb-8 text-3xl text-[var(--color-brand-orange)]"
+            id="cta-heading"
+            className="text-[clamp(1.75rem,4vw,3rem)] leading-tight text-[var(--color-brand-orange)]"
             style={{ fontFamily: 'var(--font-display)' }}
           >
-            THE HUB
+            THE BUBBLE IS CONTESTED
           </h2>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-            <CornerPanel>
-              <h3 className="text-[var(--color-brand-cyan-bright)]">Situation Board</h3>
-              <p className="mt-2 text-sm text-[var(--color-text-secondary)]">
-                Live influence tracking with tick markers, and officer orders telling you what
-                actually needs doing tonight.
-              </p>
-            </CornerPanel>
-            <CornerPanel>
-              <h3 className="text-[var(--color-brand-cyan-bright)]">Commodities Market</h3>
-              <p className="mt-2 text-sm text-[var(--color-text-secondary)]">
-                Route finding against our own market mirror. Every price carries its age &mdash;
-                we would rather show you stale data honestly than pretend it is fresh.
-              </p>
-            </CornerPanel>
-            <CornerPanel>
-              <h3 className="text-[var(--color-brand-cyan-bright)]">Shipyard</h3>
-              <p className="mt-2 text-sm text-[var(--color-text-secondary)]">
-                Self-hosted outfitting, a squadron build locker, and doctrine loadouts approved
-                for each role.
-              </p>
-            </CornerPanel>
-          </div>
-        </section>
-      </main>
-
-      {/* ------------------------------------------------------------ footer */}
-      <footer className="border-t border-[var(--color-border-hairline)]">
-        <div className="mx-auto max-w-[1440px] px-6 py-10">
-          <p className="max-w-[70ch] text-sm text-[var(--color-text-secondary)]">
-            Created using assets and imagery from Elite: Dangerous, with the permission of
-            Frontier Developments plc, for non-commercial purposes. Not endorsed by Frontier
-            Developments; no Frontier Developments employee was involved in the making of this
-            site.
+          <p className="mx-auto mt-5 max-w-[52ch] text-[var(--color-text-primary)]">
+            Bring your ship and your time zone. We will find you a wing, a role and something worth
+            flying for.
           </p>
-          <p className="mt-4 text-sm text-[var(--color-text-secondary)]">
-            Ship-fit mathematics ported from Coriolis (MIT) with attribution.
-          </p>
-          <p className="mt-6 text-sm text-[var(--color-brand-orange-bright)]">
-            Fly safe, CMDR. o7
+          <a
+            href="/apply"
+            className="mt-9 inline-block bg-[var(--color-brand-orange)] px-9 py-4 text-[var(--color-text-on-accent)] shadow-[var(--glow-orange)] transition-opacity hover:opacity-90"
+            style={{ fontFamily: 'var(--font-display)' }}
+          >
+            APPLY TO JOIN
+          </a>
+          <p className="mt-5 font-mono text-[11px] tracking-[0.2em] text-[var(--color-text-secondary)]">
+            DISCORD MEMBERSHIP REQUIRED
           </p>
         </div>
-      </footer>
-    </>
+      </section>
+    </main>
+  );
+}
+
+/* ------------------------------------------------------------- primitives */
+
+function SectionHeading({
+  id,
+  eyebrow,
+  title,
+  lede,
+}: {
+  id: string;
+  eyebrow: string;
+  title: string;
+  lede: string;
+}) {
+  return (
+    <div className="max-w-[62ch]">
+      <p className="font-mono text-[11px] uppercase tracking-[0.32em] text-[var(--color-brand-cyan-bright)]">
+        {eyebrow}
+      </p>
+      <h2
+        id={id}
+        className="mt-3 text-[clamp(1.75rem,4vw,2.75rem)] leading-tight text-[var(--color-brand-orange)]"
+        style={{ fontFamily: 'var(--font-display)' }}
+      >
+        {title}
+      </h2>
+      <div className="rule-glow mt-5 max-w-sm" aria-hidden="true" />
+      <p className="mt-5 text-[var(--color-text-secondary)]">{lede}</p>
+    </div>
+  );
+}
+
+/**
+ * The hero ornament: a star with three orbital tracks.
+ *
+ * Sized in vw and clipped by the section, so it never introduces a horizontal
+ * scrollbar on a narrow viewport — an ornament that breaks the layout on a
+ * phone is a bug wearing a costume.
+ */
+function OrbitOrnament() {
+  return (
+    <div
+      aria-hidden="true"
+      className="pointer-events-none absolute right-[-18vw] top-1/2 hidden h-[46vw] w-[46vw] -translate-y-1/2 lg:block"
+    >
+      <div className="stellar-core absolute left-1/2 top-1/2 h-[9vw] w-[9vw] -translate-x-1/2 -translate-y-1/2" />
+      <div className="orbit-ring orbit-spin-slow inset-[6%]" />
+      <div className="orbit-ring orbit-spin-mid inset-[20%]" />
+      <div className="orbit-ring orbit-spin-fast inset-[34%]" />
+    </div>
   );
 }
