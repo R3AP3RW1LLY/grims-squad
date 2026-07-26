@@ -1,4 +1,5 @@
 import { DIVISIONS } from '../components/site-chrome';
+import { GalaxyMap } from '../components/galaxy-map';
 
 /**
  * The public landing page.
@@ -42,8 +43,9 @@ export default function HomePage() {
         className="relative overflow-hidden border-b border-[var(--color-border-hairline)]"
         aria-labelledby="hero-heading"
       >
-        <div className="ecliptic" aria-hidden="true" />
-        <OrbitOrnament />
+        {/* The in-game galaxy map, with traffic. Replaces the earlier orbital
+            ornament: this is the view every CMDR already knows. */}
+        <GalaxyMap />
 
         <div className="relative mx-auto max-w-[1440px] px-6 py-24 sm:py-32">
           <div className="max-w-[46rem]">
@@ -259,27 +261,6 @@ function SectionHeading({
       </h2>
       <div className="rule-glow mt-5 max-w-sm" aria-hidden="true" />
       <p className="mt-5 text-[var(--color-text-secondary)]">{lede}</p>
-    </div>
-  );
-}
-
-/**
- * The hero ornament: a star with three orbital tracks.
- *
- * Sized in vw and clipped by the section, so it never introduces a horizontal
- * scrollbar on a narrow viewport — an ornament that breaks the layout on a
- * phone is a bug wearing a costume.
- */
-function OrbitOrnament() {
-  return (
-    <div
-      aria-hidden="true"
-      className="pointer-events-none absolute right-[-18vw] top-1/2 hidden h-[46vw] w-[46vw] -translate-y-1/2 lg:block"
-    >
-      <div className="stellar-core absolute left-1/2 top-1/2 h-[9vw] w-[9vw] -translate-x-1/2 -translate-y-1/2" />
-      <div className="orbit-ring orbit-spin-slow inset-[6%]" />
-      <div className="orbit-ring orbit-spin-mid inset-[20%]" />
-      <div className="orbit-ring orbit-spin-fast inset-[34%]" />
     </div>
   );
 }
