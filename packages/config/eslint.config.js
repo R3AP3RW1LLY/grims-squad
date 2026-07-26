@@ -1,0 +1,62 @@
+import js from '@eslint/js';
+import tseslint from 'typescript-eslint';
+import prettier from 'eslint-config-prettier';
+
+/**
+ * Shared ESLint flat config.
+ *
+ * The three project-specific rules below are not style preferences — each one
+ * enforces a rule from ssot/CONVENTIONS.md or a security invariant, and each has
+ * bitten a real project before.
+ */
+export default tseslint.config(
+  { ignores: ['**/dist/**', '**/.next/**', '**/node_modules/**', '**/coverage/**'] },
+  js.configs.recommended,
+  ...tseslint.configs.recommended,
+  prettier,
+  {
+    rules: {
+      // CONVENTIONS.md: `any` is banned. Use `unknown` + a Zod parse at the boundary.
+      '@typescript-eslint/no-explicit-any': 'error',
+      // CONVENTIONS.md: non-null assertion banned outside tests.
+      '@typescript-eslint/no-non-null-assertion': 'error',
+      // AGENTS.md 4: no bare catch that swallows.
+      'no-empty': ['error', { allowEmptyCatch: false }],
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
+      ],
+      // CONVENTIONS.md: cross-package relative imports are a lint error.
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['../../packages/*', '../../../packages/*', '../../apps/*', '../../../apps/*'],
+              message:
+                'Cross-package relative import. Use the @grims/* alias instead (ssot/CONVENTIONS.md).',
+            },
+          ],
+        },
+      ],
+      // INV-008: no Discord snowflake may be hard-coded. They live in role_mappings
+      // as DATA. A literal here is how a test guild's IDs reach production.
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector: 'Literal[value=/^[0-9]{17,20}$/]',
+          message:
+            'Looks like a hard-coded Discord snowflake. Role/guild IDs are data in role_mappings, never source (INV-008).',
+        },
+      ],
+    },
+  },
+  {
+    // Tests may assert on fixture IDs and use non-null assertions.
+    files: ['**/*.spec.ts', '**/*.spec.tsx', '**/fixtures/**', '**/*.fixture.ts'],
+    rules: {
+      'no-restricted-syntax': 'off',
+      '@typescript-eslint/no-non-null-assertion': 'off',
+    },
+  },
+);

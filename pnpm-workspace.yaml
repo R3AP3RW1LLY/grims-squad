@@ -1,0 +1,12 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+  - 'tools'
+
+allowBuilds:
+  esbuild: true
+
+# pnpm 10+ requires build scripts to be allow-listed explicitly. esbuild is a
+# vitest dependency and needs its postinstall to produce a usable binary.
+onlyBuiltDependencies:
+  - esbuild
