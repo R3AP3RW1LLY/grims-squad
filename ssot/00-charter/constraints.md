@@ -14,7 +14,20 @@ Hard boundaries. A design that violates one of these is wrong regardless of its 
 | Sentry / Grafana Cloud | $0 | Free tiers |
 | Transactional email, low volume | $0–10 | Decision D11 |
 | **AI inference** | **$0** | Local hardware, by design |
-| **Ceiling** | **~$30/mo** | A design that requires more needs human sign-off before implementation |
+| **Ceiling** | **~$30/mo — SUPERSEDED, awaiting a new figure (D22)** | See below |
+
+> ⚠ **This table is out of date as of 2026-07-26 and must not be treated as current.**
+> Three human decisions invalidated it together:
+> 1. **Hosting moved to Vultr**, which costs materially more than the Hetzner CX32 class assumed.
+> 2. **Prefilter radius set to 500 ly** — ~60–110 GB of game data before indexes, against a
+>    160 GB disk.
+> 3. **Squadron size is 150–400**, above the 20–150 the spec assumed — Postgres's working set,
+>    Meilisearch's index and the AI concurrency ceiling all scale with it.
+>
+> Individually each is survivable; together they mean **the 4 vCPU / 8 GB / 160 GB box is
+> under-spec on both RAM and disk.** The correct tier and its cost are settled at P0.7 under
+> decision **D22**, before anything is provisioned. Object storage is Vultr's S3-compatible
+> service, so uploads at least do not compete for the VPS disk.
 
 **Consequences that bind design:**
 - No managed Postgres, no managed Redis, no managed search. Self-hosted on the VPS in Compose.

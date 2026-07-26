@@ -21,7 +21,20 @@ Run by `pnpm db:seed`. Idempotent: upsert by natural key, never insert blindly.
 
 **Forum categories** — the tree from `02-domain/rings-and-roles.md`, with `viewPerm` / `postPerm` masks likewise imported.
 
-**Site config defaults** — home system (decision D3), squadron display identity (D12), EDDN prefilter radius (D4), AI kill switches (both off, i.e. AI enabled), data-freshness thresholds (green <24 h, amber <7 d, red older).
+**Site config defaults** — confirmed values, seeded:
+
+| Key | Value |
+|---|---|
+| `squadron.name` | `Grim's Squad` |
+| `squadron.tagline` | `No Quarter in the Void` |
+| `squadron.homeSystemAddress` | `9467852891473` |
+| `squadron.homeSystemName` | `Hyades Sector AV-W b2-4` |
+| `eddn.prefilterRadiusLy` | `500` |
+| `freshness.freshHours` / `agingDays` | `24` / `7` |
+| `ai.disabled` / `ai.writeToolsDisabled` | `false` / `false` |
+
+`tracked_factions` is **not** seeded — which faction is ours is still open (D3), and a guessed
+`is_ours` would poison every BGS figure the site produces.
 
 **Feature flags** — one per module, all `false` except those the current phase has shipped. Lets a phase's work land dark.
 
