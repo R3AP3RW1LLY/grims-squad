@@ -12,6 +12,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { generateTheme } from './generate-theme.js';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -46,6 +47,25 @@ for (const { source, copy } of COPIES) {
   writeFileSync(dst, content, 'utf8');
   console.log(`${green('  synced   ')} ${copy}  ${dim(`<- ${source}`)}`);
   changed += 1;
+}
+
+// ------------------------------------------------- generated, not copied ----
+// The Tailwind theme is DERIVED from tokens.json rather than copied from it,
+// so it needs a generator rather than a byte-for-byte mirror.
+{
+  const dst = resolve(REPO, 'apps/web/src/app/theme.generated.css');
+  const content = generateTheme(REPO);
+  const current = existsSync(dst) ? readFileSync(dst, 'utf8') : null;
+  if (current === content) {
+    console.log(dim('  unchanged  apps/web/src/app/theme.generated.css'));
+  } else {
+    mkdirSync(dirname(dst), { recursive: true });
+    writeFileSync(dst, content, 'utf8');
+    console.log(
+      `${green('  generated')} apps/web/src/app/theme.generated.css  ${dim('<- ssot/07-design/tokens.json')}`,
+    );
+    changed += 1;
+  }
 }
 
 console.log('');

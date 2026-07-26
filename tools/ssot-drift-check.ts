@@ -101,6 +101,27 @@ for (const { source, copy, why } of COPIES) {
   );
 }
 
+// ------------------------------------------------ generated theme matches ----
+{
+  const { generateTheme } = await import('./generate-theme.js');
+  const dst = resolve(REPO, 'apps/web/src/app/theme.generated.css');
+  const expected = generateTheme(REPO);
+  const actual = existsSync(dst) ? readFileSync(dst, 'utf8') : '';
+  if (actual !== expected) {
+    fail(
+      'apps/web/src/app/theme.generated.css is stale',
+      [
+        'The Tailwind theme is derived from ssot/07-design/tokens.json.',
+        'A hand-edited colour here would silently diverge from the token file',
+        'that accessibility.md and contrast:check both reason about.',
+        'Fix: pnpm ssot:sync',
+      ].join('\n'),
+    );
+  } else {
+    ok('apps/web/src/app/theme.generated.css matches ssot/07-design/tokens.json');
+  }
+}
+
 // ------------------------------------------------- invariants have tests ----
 /**
  * Every invariant due by the CURRENT phase must have a passing `@INV-nnn` test.
@@ -194,7 +215,11 @@ if (declared.length === 0) {
   // Collect every @INV-nnn tag present in the test suite.
   const tagged = new Set<string>();
   const { globSync } = await import('node:fs');
-  const specs = globSync('{apps,packages,tools}/**/*.spec.ts', { cwd: REPO }) as string[];
+  // .tsx as well as .ts: a component test proving an invariant is still a test,
+  // and a glob that silently omits them makes the gate under-report coverage —
+  // which is the failure mode that matters, since it hides real gaps as easily
+  // as it hides real work.
+  const specs = globSync('{apps,packages,tools}/**/*.spec.{ts,tsx}', { cwd: REPO }) as string[];
   for (const f of specs) {
     const body = readFileSync(resolve(REPO, f), 'utf8');
     for (const m of body.matchAll(/@(INV-\d{3})/g)) {
