@@ -1,0 +1,624 @@
+# =============================================================================
+# GSAI TOOL REGISTRY
+#
+# THIS FILE IS THE SOURCE (ADR-020). `packages/ai-tools` is GENERATED from it;
+# CI regenerates and diffs, and fails on any delta (ADR-019). A tool that exists
+# in the registry but not here fails the build.
+#
+# This matters more than an ordinary code-generation contract: the tool list IS
+# the AI's capability boundary (ADR-015). Adding a tool here grants a capability.
+# Treat any change to a `permission`, `mutating` or `confirmation` field as a
+# tier-3 security change requiring a human (ADR-021).
+#
+# FIELD MEANINGS
+#   permission        Permission constant required. Checked in the EXECUTOR, never in
+#                     the prompt (INV-015). Tools are filtered by the caller's mask
+#                     BEFORE serialisation — the model cannot call what it never
+#                     sees (INV-011).
+#   mutating          Changes state. ALWAYS requires explicit confirmation of the
+#                     specific call (INV-014), regardless of permission.
+#   confirmation      required | two_step | null. `two_step` demands a second, distinct
+#                     confirmation — used where a mistake is expensive to undo.
+#   ring              Lowest ring that can hold the permission. Documentation only.
+#   backend           own_db | ardent | spansh | edsm | inara | internal | api
+#                     `api` means it calls BACK through the tunnel to our API with the
+#                     caller's signed context, so the API's guards enforce it once (INV-016).
+#   fast_path         Can the deterministic classifier route here with NO LLM (ADR-012)?
+#                     NEVER true for a mutating tool.
+#   timeout_ms        Hard timeout. The agent loop reports a timeout; it never hangs.
+#   max_result_chars  Truncation before the result enters the model's context.
+#   returns_freshness MUST be true for anything market-derived (INV-004). The handler
+#                     attaches dataAgeHours and the system prompt requires relaying it.
+# =============================================================================
+
+version: 1
+
+defaults:
+  timeout_ms: 30000
+  max_result_chars: 2500
+  returns_freshness: false
+  fast_path: false
+  mutating: false
+  confirmation: null
+
+# =============================================================================
+# READ TOOLS
+# =============================================================================
+tools:
+
+  # ---- knowledge ------------------------------------------------------------
+  - name: search_forums
+    description: >
+      Search squadron forum threads and posts by meaning and keyword. Use when a CMDR asks
+      what was decided, what someone said, or where something was discussed. Returns thread
+      titles, excerpts and links.
+    permission: FORUM_VIEW_PUBLIC
+    ring: 0
+    backend: api
+    fast_path: true
+    timeout_ms: 10000
+    max_result_chars: 3000
+    parameters:
+      query:      { type: string,  required: true, min_length: 2 }
+      category:   { type: string,  required: false }
+      author:     { type: string,  required: false }
+      limit:      { type: integer, required: false, default: 5, min: 1, max: 10 }
+    notes: >
+      Hybrid vector + BM25 merged by RRF. The ACL filter is applied IN the query, before
+      nearest-neighbour returns (INV-024). A Ring 0 caller searching a Ring 2 term gets zero
+      rows, not a redacted result.
+
+  - name: search_wiki
+    description: >
+      Search squadron documentation: SOPs, doctrine, engineering guides, the new-member
+      handbook. Use for "how do we do X" and "what is our policy on Y".
+    permission: FORUM_VIEW_MEMBER
+    ring: 1
+    backend: api
+    fast_path: true
+    timeout_ms: 10000
+    max_result_chars: 3000
+    parameters:
+      query: { type: string,  required: true, min_length: 2 }
+      limit: { type: integer, required: false, default: 5, min: 1, max: 10 }
+
+  - name: get_galnet
+    description: >
+      Recent in-universe GalNet news articles. Use when a CMDR asks what is happening in the
+      galaxy, or about recent lore events.
+    permission: FORUM_VIEW_PUBLIC
+    ring: 0
+    backend: api
+    fast_path: true
+    timeout_ms: 8000
+    parameters:
+      limit: { type: integer, required: false, default: 3, min: 1, max: 10 }
+
+  # ---- galaxy ---------------------------------------------------------------
+  - name: get_system_info
+    description: >
+      Look up a star system: allegiance, government, economy, security, population,
+      controlling faction, stations and services, distance from our home system. Use whenever
+      a CMDR asks about a system.
+    permission: null
+    ring: 0
+    backend: api
+    fast_path: true
+    timeout_ms: 10000
+    returns_freshness: true
+    parameters:
+      system_name:    { type: string,  required: false, description: 'Resolved to a SystemAddress. AMBIGUOUS NAMES RETURN CANDIDATES, never a guess (INV-018).' }
+      system_address: { type: string,  required: false, pattern: '^\d+$', description: 'Preferred when known — unambiguous.' }
+    notes: >
+      Exactly one of system_name / system_address must be supplied. If the name is ambiguous
+      the tool returns candidates and the model MUST ask which one — never pick. A wrong
+      system name costs a member a 40-minute round trip.
+
+  - name: find_nearest_service
+    description: >
+      Find the nearest station providing a service — interstellar factors, material trader,
+      technology broker, black market, shipyard, outfitting, universal cartographics, repair,
+      rearm, refuel.
+    permission: null
+    ring: 0
+    backend: api
+    fast_path: true
+    timeout_ms: 15000
+    returns_freshness: true
+    parameters:
+      origin_system:  { type: string,  required: true }
+      service:        { type: string,  required: true, enum: [interstellar-factors, material-trader, technology-broker, black-market, shipyard, outfitting, universal-cartographics, refuel, repair, rearm] }
+      min_landing_pad: { type: string, required: false, default: small, enum: [small, medium, large] }
+      limit:          { type: integer, required: false, default: 3, min: 1, max: 10 }
+
+  - name: get_engineer_info
+    description: >
+      Engineer location, unlock requirements and available blueprints. Use when a CMDR asks
+      how to unlock an engineer or where to get a specific modification.
+    permission: null
+    ring: 0
+    backend: api
+    fast_path: true
+    timeout_ms: 10000
+    parameters:
+      engineer_name: { type: string, required: false }
+      blueprint:     { type: string, required: false, description: 'e.g. "Dirty Drive Tuning"' }
+
+  # ---- market & trade -------------------------------------------------------
+  - name: find_commodity_prices
+    description: >
+      Galactic price statistics for a commodity — minimum, maximum and average buy and sell,
+      total stock and demand across known markets. Use for "what is X worth".
+    permission: TRADE_QUERY
+    ring: 1
+    backend: own_db
+    fast_path: true
+    timeout_ms: 10000
+    returns_freshness: true
+    parameters:
+      commodity: { type: string, required: true, description: 'Display name or FDevIDs internal name; both resolve.' }
+
+  - name: find_best_sell
+    description: >
+      Where to SELL a commodity — importers sorted by price paid, near a system. Use for
+      "where can I sell this", "who is buying X", "best price for my cargo".
+    permission: TRADE_QUERY
+    ring: 1
+    backend: own_db
+    fast_path: true
+    timeout_ms: 15000
+    returns_freshness: true
+    parameters:
+      commodity:         { type: string,  required: true }
+      near_system:       { type: string,  required: true }
+      max_distance_ly:   { type: number,  required: false, default: 50, min: 1, max: 500 }
+      min_demand:        { type: integer, required: false, default: 0 }
+      min_landing_pad:   { type: string,  required: false, default: large, enum: [small, medium, large] }
+      max_station_ls:    { type: number,  required: false, default: 5000 }
+      include_carriers:  { type: boolean, required: false, default: false }
+      max_data_age_days: { type: integer, required: false, default: 7, min: 1, max: 90 }
+      limit:             { type: integer, required: false, default: 5, min: 1, max: 15 }
+
+  - name: find_best_buy
+    description: >
+      Where to BUY a commodity — exporters sorted by price, near a system. Use for
+      "where can I buy X", "cheapest source of Y".
+    permission: TRADE_QUERY
+    ring: 1
+    backend: own_db
+    fast_path: true
+    timeout_ms: 15000
+    returns_freshness: true
+    parameters:
+      commodity:         { type: string,  required: true }
+      near_system:       { type: string,  required: true }
+      max_distance_ly:   { type: number,  required: false, default: 50, min: 1, max: 500 }
+      min_stock:         { type: integer, required: false, default: 0 }
+      min_landing_pad:   { type: string,  required: false, default: large, enum: [small, medium, large] }
+      max_station_ls:    { type: number,  required: false, default: 5000 }
+      include_carriers:  { type: boolean, required: false, default: false }
+      max_data_age_days: { type: integer, required: false, default: 7, min: 1, max: 90 }
+      limit:             { type: integer, required: false, default: 5, min: 1, max: 15 }
+
+  - name: find_trade_route
+    description: >
+      Find profitable trade routes from a starting system. Returns commodity, buy station,
+      sell station, profit per ton and per full hold. Use when a CMDR asks where to trade,
+      what to haul, or how to make credits hauling.
+    permission: TRADE_QUERY
+    ring: 1
+    backend: own_db
+    fast_path: true
+    timeout_ms: 30000
+    max_result_chars: 3000
+    returns_freshness: true
+    parameters:
+      origin_system:     { type: string,  required: true, description: 'Starting system, e.g. "Shinrarta Dezhra"' }
+      cargo_capacity:    { type: integer, required: true, min: 1, max: 794 }
+      max_distance_ly:   { type: number,  required: false, default: 50, min: 1, max: 500 }
+      max_station_ls:    { type: number,  required: false, default: 5000, min: 0 }
+      min_landing_pad:   { type: string,  required: false, default: large, enum: [small, medium, large] }
+      max_price_cr:      { type: integer, required: false, description: 'Credits available for cargo' }
+      include_carriers:  { type: boolean, required: false, default: false }
+      max_data_age_days: { type: integer, required: false, default: 7, min: 1, max: 90 }
+      end_at_our_carrier: { type: boolean, required: false, default: false, description: 'Carrier-aware routing — what Inara cannot do for us' }
+      limit:             { type: integer, required: false, default: 5, min: 1, max: 20 }
+    notes: >
+      Carriers are EXCLUDED by default and distance_to_arrival is always applied (INV-026).
+      An empty result returns the binding constraint — "no results" without a reason is a dead
+      end for a member.
+
+  - name: plot_route
+    description: >
+      Submit a long-range route-planning job — neutron highway, galaxy plotter with refuelling,
+      fleet carrier route, Road to Riches, or a multi-stop tourist route. Returns a job that
+      completes asynchronously; tell the CMDR it is running and that they will be notified.
+    permission: TRADE_QUERY
+    ring: 1
+    backend: spansh
+    fast_path: false
+    timeout_ms: 15000
+    parameters:
+      kind:         { type: string, required: true, enum: [neutron, galaxy, fleet_carrier, road_to_riches, tourist, trade] }
+      from_system:  { type: string, required: true }
+      to_system:    { type: string, required: false }
+      jump_range_ly: { type: number, required: false }
+      efficiency:   { type: integer, required: false, min: 1, max: 100 }
+      waypoints:    { type: array, items: string, required: false }
+    notes: >
+      SUBMITS ONLY — it never waits for the result (INV-032). Long routes legitimately take
+      tens of seconds. The model must say the job is running, not invent waypoints.
+
+  # ---- squadron -------------------------------------------------------------
+  - name: get_squadron_stats
+    description: >
+      Squadron-level statistics: membership counts, activity, territory, carrier count,
+      recent milestones. Use for "how are we doing" and landing-page style questions.
+    permission: FORUM_VIEW_PUBLIC
+    ring: 0
+    backend: api
+    fast_path: true
+    timeout_ms: 8000
+
+  - name: get_member_profile
+    description: >
+      A member's public dossier — CMDR name, ranks, roles, division, ops attended, join date.
+      Use when asked about a specific CMDR in the squadron.
+    permission: FORUM_VIEW_MEMBER
+    ring: 1
+    backend: api
+    fast_path: true
+    timeout_ms: 8000
+    parameters:
+      member: { type: string, required: true, description: 'Handle, display name or CMDR name' }
+    notes: >
+      RESPECTS THAT MEMBER'S PRIVACY SETTINGS. Location, credits and fleet are ABSENT unless
+      that member opted in per field (INV-027). The model must not speculate about missing fields.
+
+  - name: list_operations
+    description: >
+      Upcoming and recent squadron operations with times, types, locations and signup counts.
+      Use for "what is on", "when is the next op", "am I signed up".
+    permission: OPS_VIEW
+    ring: 1
+    backend: api
+    fast_path: true
+    timeout_ms: 8000
+    parameters:
+      from:      { type: string,  required: false, description: 'ISO-8601. Defaults to now.' }
+      to:        { type: string,  required: false }
+      op_type:   { type: string,  required: false, enum: [bgs, combat, mining, trade, exploration, rescue, social, training] }
+      mine_only: { type: boolean, required: false, default: false }
+    notes: Times are returned in UTC and the caller's local zone. Both are relayed (INV-025).
+
+  - name: get_bgs_status
+    description: >
+      Current BGS picture — influence, states, conflicts and the active officer orders for our
+      systems. Use for "what should I do tonight", "how is the BGS", "what is happening in X".
+    permission: BGS_VIEW
+    ring: 1
+    backend: api
+    fast_path: true
+    timeout_ms: 12000
+    returns_freshness: true
+    parameters:
+      system:      { type: string,  required: false, description: 'Omit for the whole sphere of influence' }
+      include_orders: { type: boolean, required: false, default: true }
+    notes: >
+      Inferred ticks carry confidence < 1 and MUST be relayed as provisional. A guessed tick
+      presented as certain poisons every delta the member reads.
+
+  - name: get_carrier_status
+    description: >
+      Fleet carrier location, fuel level, jumps remaining, docking access, services and next
+      scheduled jump. Use for "where is the carrier", "does it need tritium".
+    permission: CARRIER_VIEW
+    ring: 1
+    backend: api
+    fast_path: true
+    timeout_ms: 8000
+    returns_freshness: true
+    parameters:
+      callsign: { type: string, required: false, description: 'e.g. "K7Q-B4X". Omit for all squadron carriers.' }
+
+  # ---- ships ----------------------------------------------------------------
+  - name: search_loadouts
+    description: >
+      Search saved squadron ship builds, including officer-approved doctrine builds. Use for
+      "what is our standard mining Python", "show me a BGS combat build".
+    permission: FLEET_VIEW
+    ring: 1
+    backend: api
+    fast_path: true
+    timeout_ms: 10000
+    parameters:
+      ship_type:     { type: string,  required: false }
+      role:          { type: string,  required: false, enum: [combat, mining, trade, explore, rescue, bgs, ax, passenger] }
+      doctrine_only: { type: boolean, required: false, default: false }
+      min_jump_ly:   { type: number,  required: false }
+      limit:         { type: integer, required: false, default: 5, min: 1, max: 15 }
+    notes: Respects per-loadout visibility. A private build never appears (INV-002).
+
+  - name: analyse_loadout
+    description: >
+      Compute a build's statistics — jump range, DPS by damage type, effective shield and
+      armour HP, thermal load, cargo, rebuy, cost — and identify weaknesses and engineering
+      requirements. Use when asked to review or improve a build.
+    permission: FLEET_VIEW
+    ring: 1
+    backend: internal
+    fast_path: false
+    timeout_ms: 15000
+    max_result_chars: 3000
+    parameters:
+      loadout_id:   { type: string, required: false, description: 'A stored build' }
+      coriolis_url: { type: string, required: false }
+      edsy_url:     { type: string, required: false }
+    notes: >
+      Maths from packages/ed-domain, ported from Coriolis (MIT, attributed). Exactly one
+      parameter must be supplied.
+
+  - name: calculate_jump_range
+    description: >
+      Compute laden, unladen and maximum jump range for a ship configuration. Use for
+      "how far can this jump", "will this reach Colonia".
+    permission: null
+    ring: 0
+    backend: internal
+    fast_path: true
+    timeout_ms: 5000
+    parameters:
+      ship_type:       { type: string, required: true }
+      fsd_class:       { type: string, required: false, description: 'e.g. "5A"' }
+      fuel_tank_tons:  { type: number, required: false }
+      cargo_tons:      { type: number, required: false, default: 0 }
+      mass_tons:       { type: number, required: false, description: 'Total unladen mass if known' }
+      has_guardian_booster: { type: boolean, required: false, default: false }
+
+# =============================================================================
+# WRITE TOOLS
+#
+# EVERY tool below is mutating and EVERY one requires explicit confirmation of the
+# specific call before it executes (INV-014). There is no exception for convenience,
+# for a high permission level, or for an "obviously safe" argument set.
+# NONE may ever appear on the fast path (ADR-012).
+# =============================================================================
+
+  - name: signup_for_operation
+    description: >
+      Sign the calling CMDR up for an operation, or change their signup state. Use when a CMDR
+      says they will attend, cannot attend, or wants to change their ship.
+    permission: OPS_SIGNUP
+    ring: 1
+    backend: api
+    mutating: true
+    confirmation: required
+    fast_path: false
+    timeout_ms: 10000
+    parameters:
+      operation_id: { type: string, required: true }
+      state:        { type: string, required: true, enum: [yes, maybe, no] }
+      ship_id:      { type: string, required: false, description: 'Must belong to the caller' }
+      role_tag:     { type: string, required: false }
+      note:         { type: string, required: false, max_length: 500 }
+    notes: >
+      Trivially reversible, so confirmation is a lightweight inline yes/no rather than a
+      preview — but it is still required. INV-014 admits no exceptions.
+
+  - name: save_loadout
+    description: Save a ship build to the caller's own Loadout Locker.
+    permission: FLEET_EDIT_OWN
+    ring: 1
+    backend: api
+    mutating: true
+    confirmation: required
+    fast_path: false
+    timeout_ms: 15000
+    parameters:
+      name:         { type: string, required: true, max_length: 120 }
+      coriolis_url: { type: string, required: false }
+      edsy_url:     { type: string, required: false }
+      role_tag:     { type: string, required: false }
+      visibility:   { type: string, required: false, default: squadron, enum: [private, squadron, public] }
+
+  - name: save_trade_route
+    description: Save a trade route the CMDR wants to keep.
+    permission: TRADE_SAVE_ROUTE
+    ring: 1
+    backend: api
+    mutating: true
+    confirmation: required
+    fast_path: false
+    timeout_ms: 10000
+    parameters:
+      name:     { type: string, required: true, max_length: 120 }
+      route_id: { type: string, required: true, description: 'From a previous find_trade_route result' }
+    notes: >
+      The saved prices are historical from the moment they are saved and are labelled as such
+      (INV-004).
+
+  - name: report_bgs_activity
+    description: >
+      Record a BGS contribution — missions, bounties, bonds, cartographic data, trade profit,
+      or negatives such as failed missions.
+    permission: BGS_REPORT
+    ring: 1
+    backend: api
+    mutating: true
+    confirmation: required
+    fast_path: false
+    timeout_ms: 10000
+    parameters:
+      system:        { type: string,  required: true }
+      faction:       { type: string,  required: false }
+      activity_type: { type: string,  required: true, enum: [missions, bounties, cartographics, trade, bonds, murders, failed_missions, exploration_data, mining_profit] }
+      value_cr:      { type: integer, required: false }
+      count:         { type: integer, required: false }
+    notes: >
+      The manual fallback. The primary path is automatic ingestion from the EDMC plugin, which
+      requires no member action — prefer telling the CMDR about the plugin over repeated manual entry.
+
+  - name: create_forum_post
+    description: Create a forum thread or reply on the caller's behalf.
+    permission: FORUM_POST_MEMBER
+    ring: 1
+    backend: api
+    mutating: true
+    confirmation: required
+    fast_path: false
+    timeout_ms: 15000
+    parameters:
+      category_slug: { type: string, required: false, description: 'Required for a new thread' }
+      thread_id:     { type: string, required: false, description: 'Required for a reply' }
+      title:         { type: string, required: false, max_length: 200 }
+      body_md:       { type: string, required: true, max_length: 20000 }
+    notes: >
+      Confirmation MUST show the rendered preview. Posting under a member's name without them
+      seeing the text first is unacceptable regardless of permission.
+
+  - name: create_operation
+    description: Schedule a squadron operation.
+    permission: OPS_CREATE
+    ring: 1.5
+    backend: api
+    mutating: true
+    confirmation: required
+    fast_path: false
+    timeout_ms: 15000
+    parameters:
+      title:         { type: string,  required: true, max_length: 200 }
+      op_type:       { type: string,  required: true, enum: [bgs, combat, mining, trade, exploration, rescue, social, training] }
+      starts_at:     { type: string,  required: true, description: 'ISO-8601 UTC' }
+      ends_at:       { type: string,  required: false }
+      system:        { type: string,  required: false }
+      capacity:      { type: integer, required: false }
+      description_md: { type: string, required: false, max_length: 10000 }
+    notes: >
+      Creates a Discord Scheduled Event and notifies the squadron. Confirmation must state the
+      time in BOTH UTC and the caller's local zone — a timezone mistake here wastes everyone's evening.
+
+  - name: set_bgs_order
+    description: >
+      Set the officer directive for a system — push, hold, suppress or ignore — with priority
+      and written guidance.
+    permission: BGS_SET_ORDERS
+    ring: 2
+    backend: api
+    mutating: true
+    confirmation: required
+    fast_path: false
+    timeout_ms: 10000
+    parameters:
+      system:      { type: string,  required: true }
+      faction:     { type: string,  required: false }
+      directive:   { type: string,  required: true, enum: [push, hold, suppress, ignore] }
+      priority:    { type: integer, required: false, default: 3, min: 1, max: 5 }
+      guidance_md: { type: string,  required: false, max_length: 4000 }
+      active_until: { type: string, required: false }
+    notes: >
+      HIGH BLAST RADIUS — this steers the whole squadron's evening. Confirmation shows the full
+      effect, including which system it replaces an existing order for.
+
+  - name: post_announcement
+    description: Post a squadron-wide announcement, pinned and broadcast to Discord.
+    permission: FORUM_MODERATE
+    ring: 2
+    backend: api
+    mutating: true
+    confirmation: required
+    fast_path: false
+    timeout_ms: 15000
+    parameters:
+      title:   { type: string, required: true, max_length: 200 }
+      body_md: { type: string, required: true, max_length: 20000 }
+      broadcast_to_discord: { type: boolean, required: false, default: true }
+    notes: Confirmation MUST show the rendered preview. This reaches every member.
+
+  - name: send_discord_message
+    description: Send a message to a squadron Discord channel.
+    permission: OPS_MANAGE
+    ring: 2
+    backend: api
+    mutating: true
+    confirmation: required
+    fast_path: false
+    timeout_ms: 10000
+    parameters:
+      channel: { type: string, required: true, description: 'Channel name or ID from the allowlist' }
+      message: { type: string, required: true, max_length: 2000 }
+    notes: >
+      Channels come from a configured ALLOWLIST — the model cannot address an arbitrary channel.
+      Mass messaging is never autonomous, regardless of permission.
+
+  - name: moderate_content
+    description: Lock, pin, move, delete or restore forum content, or warn, mute or ban a member.
+    permission: FORUM_MODERATE
+    ring: 2
+    backend: api
+    mutating: true
+    confirmation: required
+    fast_path: false
+    timeout_ms: 10000
+    parameters:
+      action:      { type: string, required: true, enum: [lock, unlock, pin, unpin, move, delete, restore, warn, mute] }
+      target_type: { type: string, required: true, enum: [thread, post, user] }
+      target_id:   { type: string, required: true }
+      reason:      { type: string, required: true, min_length: 3 }
+      expires_at:  { type: string, required: false }
+    notes: >
+      `ban` is deliberately ABSENT from the enum. Banning a member is never an AI action, at any
+      permission level — "no unattended destructive operations". Deletion is soft only (INV-022).
+
+  - name: grant_role
+    description: Grant or revoke a squadron role for a member.
+    permission: ROLE_MANAGE
+    ring: 2
+    backend: api
+    mutating: true
+    confirmation: two_step
+    fast_path: false
+    timeout_ms: 10000
+    parameters:
+      member: { type: string, required: true }
+      grant:  { type: array, items: string, required: false }
+      revoke: { type: array, items: string, required: false }
+      reason: { type: string, required: true, min_length: 3 }
+    notes: >
+      TWO-STEP CONFIRMATION. This is effectively the ability to grant any other permission, so a
+      mistake is a security incident rather than an inconvenience. The confirmation must expand
+      the resulting permission DELTA in plain language, not just name the role.
+
+# =============================================================================
+# REGISTRY-WIDE RULES — enforced in code, asserted by tests
+# =============================================================================
+rules:
+  - id: R1
+    rule: Tools are filtered by the caller's permission mask BEFORE serialisation to the model.
+    invariant: INV-011
+  - id: R2
+    rule: The executor re-checks permission independently before execution, even for a tool the model was shown.
+    invariant: INV-011
+  - id: R3
+    rule: Every mutating tool requires explicit confirmation of the specific call. No exceptions.
+    invariant: INV-014
+  - id: R4
+    rule: No mutating tool is ever routed by the deterministic fast path.
+    adr: ADR-012
+  - id: R5
+    rule: Every invocation is audited — ok, denied, error, cancelled and needs_confirmation alike. A denied row is the evidence the boundary held.
+    invariant: INV-009
+  - id: R6
+    rule: Tools that touch squadron data call BACK through the tunnel to the API with the caller's signed context. The agent has no database connection and no local replica.
+    invariant: INV-016
+  - id: R7
+    rule: Results are truncated to max_result_chars before entering context, and summarised server-side rather than clipped mid-structure.
+    adr: ADR-012
+  - id: R8
+    rule: Any tool with returns_freshness must attach dataAgeHours, and the system prompt requires the model to relay it.
+    invariant: INV-004
+  - id: R9
+    rule: Only the 8-10 most plausible tools are sent per turn, not all 30 — this saves ~1200 tokens and measurably improves selection accuracy on 8B-class models.
+    adr: ADR-012
+  - id: R10
+    rule: Adding a tool, or changing any permission/mutating/confirmation field, is a tier-3 change requiring a human.
+    adr: ADR-021
