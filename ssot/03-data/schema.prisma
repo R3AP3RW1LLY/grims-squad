@@ -1,0 +1,1585 @@
+// ============================================================================
+// GRIM'S SQUAD HUB — AUTHORITATIVE DATA MODEL
+//
+// This file is the SOURCE. `packages/db/prisma/schema.prisma` is a byte-identical
+// COPY of it (ADR-020). CI fails on any difference (ADR-019). To change the model:
+// edit THIS file, run `prisma format`, then re-copy. Never edit the copy.
+//
+// Some constructs Postgres supports and Prisma cannot express are applied by hand
+// in the initial migration and are listed exhaustively in `ssot/03-data/indexes.md`:
+//   - partial indexes (`WHERE ...`)
+//   - partial UNIQUE indexes
+//   - expression/GIST indexes (cube(ARRAY[x,y,z]))
+//   - generated tsvector columns
+//   - HNSW indexes on pgvector columns
+// Those are not optional. A migration missing them is an incomplete migration.
+// ============================================================================
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [citext, cube, vector, pgcrypto]
+}
+
+// ============================================================================
+// ENUMS
+// ============================================================================
+
+/// Lifecycle of a member account. Leaving Discord soft-deactivates; it never deletes.
+enum UserStatus {
+  active
+  inactive
+  banned
+  left
+}
+
+/// How a CMDR claim was proven. Determines `CmdrVerification.trustTier`.
+enum VerificationMethod {
+  fdev_capi /// Frontier cAPI OAuth2+PKCE. Cryptographic. Tier 3.
+  inara_nonce /// Member placed our nonce in their Inara bio. Tier 2.
+  officer_manual /// An officer approved a screenshot. Tier 1.
+}
+
+/// Which side is authoritative for a Discord role mapping.
+enum SyncDirection {
+  inbound /// Discord is authoritative; site changes do not push back.
+  outbound /// Site is authoritative; changes push to Discord.
+  both /// Either surface may grant; the bot reconciles.
+}
+
+/// Where a role grant came from. `manual` grants survive nightly Discord reconciliation; `discord` grants do not.
+enum RoleGrantSource {
+  discord
+  manual
+  system
+}
+
+/// Post kinds that make a thread a domain object rather than just a conversation.
+enum ThreadKind {
+  discussion
+  question /// Supports an accepted answer.
+  poll
+  announcement /// Pinned and broadcast to Discord.
+  ops /// Creates an Operation record.
+  application /// Drives the recruitment pipeline.
+}
+
+/// Per-thread/category notification level.
+enum SubscriptionLevel {
+  watching
+  tracking
+  muted
+}
+
+/// Recruitment application state machine.
+enum ApplicationState {
+  submitted
+  interviewing
+  approved
+  rejected
+  withdrawn
+}
+
+/// Moderation actions, all audited.
+enum ModerationActionType {
+  lock
+  unlock
+  pin
+  unpin
+  move
+  delete
+  restore
+  warn
+  mute
+  ban
+  unban
+}
+
+/// Where a piece of member-attributed data came from. Determines how much to trust it and whether staleness matters.
+enum DataSource {
+  manual
+  capi
+  edmc
+  eddn
+  bgstally
+  system
+}
+
+/// Visibility ladder shared by loadouts and knowledge chunks. MUST stay aligned with the forum ACL model.
+enum Visibility {
+  private
+  squadron
+  public
+  officer
+}
+
+/// Operation lifecycle.
+enum OperationStatus {
+  draft
+  scheduled
+  live
+  complete
+  cancelled
+}
+
+/// Operation categories. Drives visual treatment and matchmaking.
+enum OperationType {
+  bgs
+  combat
+  mining
+  trade
+  exploration
+  rescue
+  social
+  training
+}
+
+/// A member's commitment to an operation. `standby` is the capacity-overflow state, never a rejection.
+enum SignupState {
+  yes
+  maybe
+  no
+  standby
+}
+
+/// Ship/loadout role tags. Drives ops matchmaking and doctrine categorisation.
+enum RoleTag {
+  combat
+  mining
+  trade
+  explore
+  rescue
+  bgs
+  ax
+  passenger
+}
+
+/// Officer directive for a system. The single feature that converts casual players into effective BGS contributors.
+enum BgsDirective {
+  push
+  hold
+  suppress
+  ignore
+}
+
+/// BGS activity categories. Negatives are tracked as first-class — ignoring them makes the picture wrong.
+enum BgsActivityType {
+  missions
+  bounties
+  cartographics
+  trade
+  bonds
+  murders
+  failed_missions
+  exploration_data
+  mining_profit
+}
+
+/// How a BGS tick boundary was established. `inferred` is lower confidence and must be labelled as such in the UI.
+enum TickSource {
+  community_detector
+  inferred
+  manual
+}
+
+/// Speaker in an AI conversation.
+enum AiMessageRole {
+  system
+  user
+  assistant
+  tool
+}
+
+/// Result of an AI tool invocation. `denied` rows are the evidence that the permission boundary held (INV-009).
+enum ToolOutcome {
+  ok
+  denied
+  error
+  needs_confirmation
+  cancelled
+}
+
+/// Origin document type for a RAG chunk.
+enum KnowledgeSourceType {
+  forum_post
+  wiki
+  doctrine
+  loadout
+  guide
+  galnet
+  aar
+}
+
+/// Who performed an audited action.
+enum ActorType {
+  user
+  bot
+  ai
+  system
+}
+
+/// Async job lifecycle, used for Spansh route jobs.
+enum JobStatus {
+  queued
+  submitted
+  polling
+  complete
+  failed
+  cancelled
+}
+
+/// Spansh planner variants. `IRoutePlanner` exposes no synchronous method (INV-032).
+enum RoutePlannerKind {
+  neutron
+  galaxy
+  fleet_carrier
+  road_to_riches
+  tourist
+  trade
+}
+
+/// Telemetry consent categories. Each is opt-in, defaults off, and is enforced server-side (INV-013).
+enum TelemetryCategory {
+  location
+  combat
+  trade
+  exploration
+  bgs
+  carrier
+  fleet
+}
+
+/// Delivery channel for a notification fan-out.
+enum NotificationChannel {
+  in_app
+  discord_dm
+  email
+}
+
+/// Notification delivery state. Failure is retried and visible, never silently dropped.
+enum DeliveryState {
+  pending
+  sent
+  failed
+  suppressed
+}
+
+/// FDevIDs reference categories. Internal names are NEVER shown to a user (INV-020).
+enum ReferenceKind {
+  commodity
+  module
+  ship
+  rare_commodity
+}
+
+// ============================================================================
+// IDENTITY
+// ============================================================================
+
+/// A person. Created on first Discord login, never by hand. Deactivated rather than deleted when someone leaves.
+model User {
+  id          String     @id @default(uuid()) @db.Uuid
+  /// Case-insensitive unique handle used in URLs and mentions.
+  handle      String     @unique @db.Citext
+  displayName String     @map("display_name")
+  email       String?    @unique @db.Citext
+  avatarUrl   String?    @map("avatar_url")
+  bio         String?
+  /// IANA zone. Every user-facing time renders in this AND UTC (INV-025).
+  timezone    String     @default("UTC")
+  status      UserStatus @default(active)
+  joinedAt    DateTime   @default(now()) @map("joined_at") @db.Timestamptz(6)
+  lastSeenAt  DateTime?  @map("last_seen_at") @db.Timestamptz(6)
+  /// Explicit per-user permission revocations, subtracted LAST. Deny always beats grant (INV-007).
+  /// NUMERIC(40,0) because the mask exceeds 64 bits — SITE_CONFIG is 1n<<63n (ADR-005).
+  denyMask    Decimal    @default(0) @map("deny_mask") @db.Decimal(40, 0)
+  createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  discordIdentity     DiscordIdentity?
+  privacySettings     PrivacySetting?
+  cmdrVerifications   CmdrVerification[]
+  userRoles           UserRole[]            @relation("UserRoleHolder")
+  rolesGranted        UserRole[]            @relation("UserRoleGrantor")
+  refreshFamilies     RefreshTokenFamily[]
+  deviceTokens        DeviceToken[]
+  threads             ForumThread[]         @relation("ThreadAuthor")
+  lastPostedThreads   ForumThread[]         @relation("ThreadLastPoster")
+  posts               ForumPost[]
+  reactions           ForumReaction[]
+  subscriptions       ForumSubscription[]
+  reportsFiled        ContentReport[]       @relation("ReportReporter")
+  reportsResolved     ContentReport[]       @relation("ReportResolver")
+  moderationActions   ModerationAction[]    @relation("ModerationActor")
+  moderationTargets   ModerationAction[]    @relation("ModerationTarget")
+  application         Application?
+  applicationDecided  Application[]         @relation("ApplicationDecider")
+  ships               Ship[]
+  loadoutsAuthored    Loadout[]             @relation("LoadoutAuthor")
+  loadoutsApproved    Loadout[]             @relation("LoadoutApprover")
+  loadoutComments     LoadoutComment[]
+  carriersOwned       FleetCarrier[]
+  operationsCreated   Operation[]
+  signups             OperationSignup[]
+  bgsOrders           BgsOrder[]
+  bgsReports          BgsActivityReport[]
+  aiConversations     AiConversation[]
+  aiToolInvocations   AiToolInvocation[]
+  auditEntries        AuditLog[]
+  notifications       Notification[]
+  routeJobs           RouteJob[]
+  savedRoutes         SavedRoute[]
+  tradeAlerts         TradeAlert[]
+  tradeOffers         TradeBoardOffer[]
+  haulContributions   HaulingContribution[]
+  telemetryEvents     TelemetryEvent[]
+  achievementAwards   AchievementAward[]    @relation("AchievementHolder")
+  achievementsAwarded AchievementAward[]    @relation("AchievementAwarder")
+
+  @@index([status])
+  @@index([lastSeenAt])
+  @@map("users")
+}
+
+/// 1:1 link to a Discord account. `guildRoles` is the input to the entire authorization model.
+model DiscordIdentity {
+  userId          String    @id @map("user_id") @db.Uuid
+  /// Discord snowflake. Never hard-coded in application source (INV-008).
+  discordId       String    @unique @map("discord_id")
+  username        String
+  globalName      String?   @map("global_name")
+  guildNick       String?   @map("guild_nick")
+  /// Role IDs from /users/@me/guilds/{id}/member. Requires the SERVER MEMBERS privileged intent
+  /// — without it this is silently empty and everyone appears to be a guest.
+  guildRoles      String[]  @default([]) @map("guild_roles")
+  guildJoinedAt   DateTime? @map("guild_joined_at") @db.Timestamptz(6)
+  /// AES-256-GCM ciphertext. Never plaintext, never logged (INV-012).
+  accessTokenEnc  Bytes?    @map("access_token_enc")
+  /// AES-256-GCM ciphertext. Never plaintext, never logged (INV-012).
+  refreshTokenEnc Bytes?    @map("refresh_token_enc")
+  syncedAt        DateTime  @default(now()) @map("synced_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([syncedAt])
+  @@map("discord_identities")
+}
+
+/// A proven claim that a user owns a CMDR. Multiple rows over time; at most one active per CMDR name.
+model CmdrVerification {
+  id             String             @id @default(uuid()) @db.Uuid
+  userId         String             @map("user_id") @db.Uuid
+  /// Case-insensitive. Unique across all rows where revokedAt IS NULL — enforced by a
+  /// PARTIAL UNIQUE INDEX added in the migration, which Prisma cannot express (INV-005).
+  cmdrName       String             @map("cmdr_name") @db.Citext
+  method         VerificationMethod
+  /// 3 = fdev_capi, 2 = inara_nonce, 1 = officer_manual. Recorded, never inferred.
+  trustTier      Int                @map("trust_tier") @db.SmallInt
+  verifiedAt     DateTime           @default(now()) @map("verified_at") @db.Timestamptz(6)
+  /// For cAPI: verifiedAt + 25 days. Frontier refresh tokens have a hard ceiling (ADR-003).
+  expiresAt      DateTime?          @map("expires_at") @db.Timestamptz(6)
+  /// True once past expiresAt. Read access is retained; fleet writes are revoked. Never a hard kick.
+  isStale        Boolean            @default(false) @map("is_stale")
+  /// AES-256-GCM ciphertext (INV-012).
+  fdevRefreshEnc Bytes?             @map("fdev_refresh_enc")
+  /// AES-256-GCM ciphertext (INV-012).
+  fdevAccessEnc  Bytes?             @map("fdev_access_enc")
+  fdevExpiresAt  DateTime?          @map("fdev_expires_at") @db.Timestamptz(6)
+  /// Nonce issued for the inara_nonce path, e.g. "GRIM-7X2Q".
+  claimNonce     String?            @map("claim_nonce")
+  revokedAt      DateTime?          @map("revoked_at") @db.Timestamptz(6)
+  createdAt      DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([cmdrName])
+  @@index([expiresAt])
+  @@map("cmdr_verifications")
+}
+
+/// A named bundle of permissions. Data, not code — editable in the admin console.
+model Role {
+  id             String  @id @default(uuid()) @db.Uuid
+  key            String  @unique
+  name           String
+  colour         String?
+  /// Display and precedence only. Confers nothing.
+  rankOrder      Int     @default(100) @map("rank_order")
+  /// The permission bitmask. NUMERIC(40,0) — exceeds 64 bits, never truncated (INV-006, ADR-005).
+  permMask       Decimal @default(0) @map("perm_mask") @db.Decimal(40, 0)
+  /// false marks an orthogonal tag (bgs_team, carrier_owner, miner...) which confers no rank.
+  isHierarchical Boolean @default(true) @map("is_hierarchical")
+  description    String?
+
+  mappings  RoleMapping[]
+  userRoles UserRole[]
+
+  @@index([rankOrder])
+  @@map("roles")
+}
+
+/// Discord role ID → internal role. The only place a Discord snowflake may live (INV-008).
+model RoleMapping {
+  roleId        String        @map("role_id") @db.Uuid
+  discordRoleId String        @map("discord_role_id")
+  syncDirection SyncDirection @default(inbound) @map("sync_direction")
+
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, discordRoleId])
+  @@index([discordRoleId])
+  @@map("role_mappings")
+}
+
+/// A role grant. `source` matters: manual grants survive nightly Discord reconciliation, discord-sourced grants do not.
+model UserRole {
+  userId    String          @map("user_id") @db.Uuid
+  roleId    String          @map("role_id") @db.Uuid
+  source    RoleGrantSource @default(discord)
+  grantedBy String?         @map("granted_by") @db.Uuid
+  grantedAt DateTime        @default(now()) @map("granted_at") @db.Timestamptz(6)
+
+  user    User  @relation("UserRoleHolder", fields: [userId], references: [id], onDelete: Cascade)
+  role    Role  @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  grantor User? @relation("UserRoleGrantor", fields: [grantedBy], references: [id], onDelete: SetNull)
+
+  @@id([userId, roleId])
+  @@index([roleId])
+  @@map("user_roles")
+}
+
+/// A rotating refresh-token chain. Replaying a spent token revokes the WHOLE family — this is theft detection.
+model RefreshTokenFamily {
+  id           String    @id @default(uuid()) @db.Uuid
+  userId       String    @map("user_id") @db.Uuid
+  /// Set when reuse is detected or the user revokes the device. Every token in the family dies with it.
+  revokedAt    DateTime? @map("revoked_at") @db.Timestamptz(6)
+  revokeReason String?   @map("revoke_reason")
+  /// Human-readable device label for the profile's session list.
+  deviceLabel  String?   @map("device_label")
+  userAgent    String?   @map("user_agent")
+  /// Hashed, never plaintext.
+  ipHash       String?   @map("ip_hash")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  lastUsedAt   DateTime  @default(now()) @map("last_used_at") @db.Timestamptz(6)
+
+  user   User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokens RefreshToken[]
+
+  @@index([userId, revokedAt])
+  @@map("refresh_token_families")
+}
+
+/// One link in a refresh chain. Stored as a hash; presenting a token whose `usedAt` is set kills the family.
+model RefreshToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  familyId  String    @map("family_id") @db.Uuid
+  /// SHA-256 of the token. The token itself is never stored.
+  tokenHash String    @unique @map("token_hash")
+  usedAt    DateTime? @map("used_at") @db.Timestamptz(6)
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz(6)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  family RefreshTokenFamily @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
+  @@index([familyId])
+  @@index([expiresAt])
+  @@map("refresh_tokens")
+}
+
+/// A per-member bearer token for the EDMC plugin, scoped telemetry:write. Never a password (ADR-014).
+model DeviceToken {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  /// Human label chosen by the member ("desktop", "laptop").
+  label      String
+  /// SHA-256 of the token. The token is shown once at issuance and never again.
+  tokenHash  String    @unique @map("token_hash")
+  /// Always ["telemetry:write"] today. Column exists so scope creep is explicit rather than implicit.
+  scopes     String[]  @default(["telemetry:write"])
+  lastUsedAt DateTime? @map("last_used_at") @db.Timestamptz(6)
+  revokedAt  DateTime? @map("revoked_at") @db.Timestamptz(6)
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  telemetryEvents TelemetryEvent[]
+
+  @@index([userId, revokedAt])
+  @@map("device_tokens")
+}
+
+/// Per-member privacy toggles. Defaults are conservative; a private field is ABSENT from public
+/// responses, not null and not merely hidden by the UI (INV-027).
+model PrivacySetting {
+  userId             String              @id @map("user_id") @db.Uuid
+  /// Telemetry categories the member has consented to. Empty by default. Enforced server-side (INV-013).
+  telemetryConsent   TelemetryCategory[] @default([]) @map("telemetry_consent")
+  showLocation       Boolean             @default(false) @map("show_location")
+  showCredits        Boolean             @default(false) @map("show_credits")
+  showFleet          Boolean             @default(false) @map("show_fleet")
+  showActivity       Boolean             @default(false) @map("show_activity")
+  showOnPublicRoster Boolean             @default(false) @map("show_on_public_roster")
+  showOnLeaderboard  Boolean             @default(false) @map("show_on_leaderboard")
+  updatedAt          DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("privacy_settings")
+}
+
+// ============================================================================
+// FORUM
+// ============================================================================
+
+/// A node in the category tree. THE ACL anchor for every thread and post beneath it.
+model ForumCategory {
+  id               String   @id @default(uuid()) @db.Uuid
+  parentId         String?  @map("parent_id") @db.Uuid
+  slug             String   @unique
+  name             String
+  description      String?
+  icon             String?
+  position         Int      @default(0)
+  /// Permission mask required to VIEW. A user failing this must be unable to see, count, or
+  /// infer this category's existence (INV-002, INV-024). NULL means public-viewable.
+  viewPerm         Decimal? @map("view_perm") @db.Decimal(40, 0)
+  /// Permission mask required to POST.
+  postPerm         Decimal? @map("post_perm") @db.Decimal(40, 0)
+  isLocked         Boolean  @default(false) @map("is_locked")
+  /// Optional thread-level Discord bridge target. Message-level mirroring is rejected (ADR-006).
+  discordChannelId String?  @map("discord_channel_id")
+
+  parent      ForumCategory?      @relation("CategoryTree", fields: [parentId], references: [id], onDelete: Cascade, map: "forum_categories_parent_fkey")
+  children    ForumCategory[]     @relation("CategoryTree")
+  threads     ForumThread[]
+  subscribers ForumSubscription[]
+
+  @@index([parentId, position])
+  @@map("forum_categories")
+}
+
+/// A conversation. `kind` makes it a domain object: ops threads create Operations, application threads drive recruitment.
+model ForumThread {
+  id           String     @id @default(uuid()) @db.Uuid
+  categoryId   String     @map("category_id") @db.Uuid
+  authorId     String     @map("author_id") @db.Uuid
+  slug         String
+  title        String
+  kind         ThreadKind @default(discussion)
+  isPinned     Boolean    @default(false) @map("is_pinned")
+  isLocked     Boolean    @default(false) @map("is_locked")
+  /// For kind=question: the post marked as the accepted answer.
+  answerPostId String?    @map("answer_post_id") @db.Uuid
+  tags         String[]   @default([])
+  viewCount    Int        @default(0) @map("view_count")
+  postCount    Int        @default(0) @map("post_count")
+  lastPostAt   DateTime?  @map("last_post_at") @db.Timestamptz(6)
+  lastPostBy   String?    @map("last_post_by") @db.Uuid
+  createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  /// Soft delete only. A deleted thread stays recoverable and leaves a moderator tombstone (INV-022).
+  deletedAt    DateTime?  @map("deleted_at") @db.Timestamptz(6)
+
+  category      ForumCategory       @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  author        User                @relation("ThreadAuthor", fields: [authorId], references: [id])
+  lastPoster    User?               @relation("ThreadLastPoster", fields: [lastPostBy], references: [id], onDelete: SetNull)
+  posts         ForumPost[]
+  subscriptions ForumSubscription[]
+  application   Application?
+  operation     Operation?
+
+  @@unique([categoryId, slug])
+  @@index([authorId])
+  @@index([categoryId, isPinned, lastPostAt])
+  @@map("forum_threads")
+}
+
+/// A message. Stores markdown AND pre-rendered sanitized HTML so sanitisation cannot be skipped at read time.
+model ForumPost {
+  id         String                   @id @default(uuid()) @db.Uuid
+  threadId   String                   @map("thread_id") @db.Uuid
+  authorId   String                   @map("author_id") @db.Uuid
+  replyToId  String?                  @map("reply_to_id") @db.Uuid
+  bodyMd     String                   @map("body_md")
+  /// Sanitized SERVER-SIDE with DOMPurify before storage, served under a strict CSP (INV-035).
+  bodyHtml   String                   @map("body_html")
+  editedAt   DateTime?                @map("edited_at") @db.Timestamptz(6)
+  editCount  Int                      @default(0) @map("edit_count")
+  isSolution Boolean                  @default(false) @map("is_solution")
+  createdAt  DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
+  /// Soft delete only (INV-022).
+  deletedAt  DateTime?                @map("deleted_at") @db.Timestamptz(6)
+  /// GENERATED ALWAYS AS (to_tsvector('english', body_md)) STORED — added in the migration.
+  /// Prisma cannot express generated columns; see `indexes.md`.
+  searchTsv  Unsupported("tsvector")? @map("search_tsv")
+
+  thread    ForumThread     @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  author    User            @relation(fields: [authorId], references: [id])
+  replyTo   ForumPost?      @relation("PostReplies", fields: [replyToId], references: [id], onDelete: SetNull)
+  replies   ForumPost[]     @relation("PostReplies")
+  reactions ForumReaction[]
+  revisions PostRevision[]
+
+  @@index([threadId, createdAt])
+  @@index([authorId, createdAt])
+  @@index([replyToId])
+  @@map("forum_posts")
+}
+
+/// Edit history. Retained so moderation can see what a post said before it was changed.
+model PostRevision {
+  id       String   @id @default(uuid()) @db.Uuid
+  postId   String   @map("post_id") @db.Uuid
+  bodyMd   String   @map("body_md")
+  editedAt DateTime @default(now()) @map("edited_at") @db.Timestamptz(6)
+  editedBy String   @map("edited_by") @db.Uuid
+
+  post ForumPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([postId, editedAt])
+  @@map("post_revisions")
+}
+
+/// Per-post emoji reaction.
+model ForumReaction {
+  postId String @map("post_id") @db.Uuid
+  userId String @map("user_id") @db.Uuid
+  emoji  String
+
+  post ForumPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([postId, userId, emoji])
+  @@index([userId])
+  @@map("forum_reactions")
+}
+
+/// Watch/track/mute, per thread OR per category. Exactly one of threadId/categoryId is set.
+model ForumSubscription {
+  id         String            @id @default(uuid()) @db.Uuid
+  userId     String            @map("user_id") @db.Uuid
+  threadId   String?           @map("thread_id") @db.Uuid
+  categoryId String?           @map("category_id") @db.Uuid
+  level      SubscriptionLevel @default(watching)
+  createdAt  DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user     User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  thread   ForumThread?   @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  category ForumCategory? @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, threadId])
+  @@unique([userId, categoryId])
+  @@index([threadId])
+  @@index([categoryId])
+  @@map("forum_subscriptions")
+}
+
+/// A member-raised report routed to the moderation queue and announced in Discord.
+model ContentReport {
+  id           String    @id @default(uuid()) @db.Uuid
+  reporterId   String    @map("reporter_id") @db.Uuid
+  /// Polymorphic target — 'forum_post' | 'forum_thread' | 'loadout' | 'user'.
+  targetType   String    @map("target_type")
+  targetId     String    @map("target_id")
+  reason       String
+  details      String?
+  /// Set by an automatic flag (link spam, new-account velocity, banned phrase) rather than a human.
+  autoFlagged  Boolean   @default(false) @map("auto_flagged")
+  resolvedAt   DateTime? @map("resolved_at") @db.Timestamptz(6)
+  resolvedById String?   @map("resolved_by_id") @db.Uuid
+  resolution   String?
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  reporter User  @relation("ReportReporter", fields: [reporterId], references: [id])
+  resolver User? @relation("ReportResolver", fields: [resolvedById], references: [id], onDelete: SetNull)
+
+  @@index([resolvedAt, createdAt])
+  @@index([targetType, targetId])
+  @@map("content_reports")
+}
+
+/// An officer moderation action. Always audited; a ban carries a reason and an appeal route.
+model ModerationAction {
+  id             String               @id @default(uuid()) @db.Uuid
+  actorId        String               @map("actor_id") @db.Uuid
+  targetUserId   String?              @map("target_user_id") @db.Uuid
+  targetType     String               @map("target_type")
+  targetId       String?              @map("target_id")
+  action         ModerationActionType
+  reason         String
+  /// NULL means indefinite.
+  expiresAt      DateTime?            @map("expires_at") @db.Timestamptz(6)
+  /// Thread where the member may appeal.
+  appealThreadId String?              @map("appeal_thread_id") @db.Uuid
+  createdAt      DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  actor      User  @relation("ModerationActor", fields: [actorId], references: [id])
+  targetUser User? @relation("ModerationTarget", fields: [targetUserId], references: [id], onDelete: SetNull)
+
+  @@index([targetUserId, createdAt])
+  @@index([createdAt])
+  @@map("moderation_actions")
+}
+
+/// A recruitment application. Answers are structured JSONB so the funnel is reportable.
+model Application {
+  id              String           @id @default(uuid()) @db.Uuid
+  userId          String           @unique @map("user_id") @db.Uuid
+  threadId        String?          @unique @map("thread_id") @db.Uuid
+  state           ApplicationState @default(submitted)
+  /// Structured form answers: cmdrName, timezone, hoursPerWeek, playstyles[], shipsOwned,
+  /// engineeringProgress, previousSquadrons, whyUs, howFound, referral.
+  answers         Json
+  decidedById     String?          @map("decided_by_id") @db.Uuid
+  decidedAt       DateTime?        @map("decided_at") @db.Timestamptz(6)
+  decisionNote    String?          @map("decision_note")
+  /// Set on approval: decidedAt + 30 days. Triggers an automatic officer review prompt.
+  probationEndsAt DateTime?        @map("probation_ends_at") @db.Timestamptz(6)
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  thread    ForumThread? @relation(fields: [threadId], references: [id], onDelete: SetNull)
+  decidedBy User?        @relation("ApplicationDecider", fields: [decidedById], references: [id], onDelete: SetNull)
+
+  @@index([state, createdAt])
+  @@index([probationEndsAt])
+  @@map("applications")
+}
+
+// ============================================================================
+// GAME DATA — our own mirror, fed by EDDN and seeded from dumps
+// ============================================================================
+
+/// A star system. Keyed by SystemAddress because ~1,300 systems have ambiguous NAMES (INV-018).
+model System {
+  /// SystemAddress. BigInt end-to-end; never a JS number (INV-021).
+  address            BigInt   @id
+  name               String   @db.Citext
+  x                  Float
+  y                  Float
+  z                  Float
+  allegiance         String?
+  government         String?
+  security           String?
+  economy            String?
+  secondaryEconomy   String?  @map("secondary_economy")
+  population         BigInt?
+  controllingFaction String?  @map("controlling_faction")
+  power              String?
+  powerState         String?  @map("power_state")
+  /// True if this system is inside the EDDN prefilter radius or is a tracked BGS system.
+  /// The prefilter is what keeps disk usage inside the VPS budget (ADR-007, decision D4).
+  isTracked          Boolean  @default(false) @map("is_tracked")
+  updatedAt          DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  stations            Station[]
+  ships               Ship[]
+  operations          Operation[]
+  carriers            FleetCarrier[]             @relation("CarrierCurrentSystem")
+  carrierDestinations FleetCarrier[]             @relation("CarrierNextJump")
+  factionHomes        TrackedFaction[]
+  influenceSnapshots  FactionInfluenceSnapshot[]
+  bgsOrders           BgsOrder[]
+  bgsReports          BgsActivityReport[]
+
+  /// The GIST index on cube(ARRAY[x,y,z]) — the workhorse for every "nearby" query — is an
+  /// EXPRESSION index and is added by hand in the migration. See `indexes.md`.
+  @@index([name])
+  @@index([isTracked])
+  @@map("systems")
+}
+
+/// A docking location, including fleet carriers. `distanceToArrivalLs` and `maxLandingPad` are
+/// load-bearing for routing: ignoring them produces "profitable" routes with a 200,000 Ls supercruise (INV-026).
+model Station {
+  marketId            BigInt   @id @map("market_id")
+  systemAddress       BigInt   @map("system_address")
+  name                String
+  /// Coriolis | Orbis | Outpost | FleetCarrier | Settlement | ...
+  type                String?
+  isCarrier           Boolean  @default(false) @map("is_carrier")
+  distanceToArrivalLs Float?   @map("distance_to_arrival_ls")
+  /// 1 = small, 2 = medium, 3 = large.
+  maxLandingPad       Int?     @map("max_landing_pad") @db.SmallInt
+  services            String[] @default([])
+  economies           Json?
+  controllingFaction  String?  @map("controlling_faction")
+  updatedAt           DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  system       System        @relation(fields: [systemAddress], references: [address])
+  marketOrders MarketOrder[]
+  operations   Operation[]
+  carrier      FleetCarrier?
+
+  @@index([systemAddress])
+  @@index([isCarrier])
+  @@index([services], type: Gin)
+  @@map("stations")
+}
+
+/// Current buy/sell state for one commodity at one market. CURRENT STATE ONLY — history lives in MarketHistory.
+model MarketOrder {
+  marketId      BigInt   @map("market_id")
+  /// FDevIDs internal name. NEVER displayed to a user (INV-020).
+  commodity     String
+  /// Price the station sells TO you.
+  buyPrice      Int      @default(0) @map("buy_price")
+  /// Price the station buys FROM you.
+  sellPrice     Int      @default(0) @map("sell_price")
+  demand        Int      @default(0)
+  stock         Int      @default(0)
+  stockBracket  Int?     @map("stock_bracket") @db.SmallInt
+  demandBracket Int?     @map("demand_bracket") @db.SmallInt
+  /// The observation time. Every surfaced price carries its age, derived from this (INV-004).
+  /// Upserts DISCARD messages older than the stored value (INV-017).
+  updatedAt     DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  station Station @relation(fields: [marketId], references: [marketId], onDelete: Cascade)
+
+  /// The two hot partial indexes (`WHERE demand > 0` / `WHERE stock > 0`) are added by hand
+  /// in the migration — Prisma cannot express partial indexes. See `indexes.md`.
+  @@id([marketId, commodity])
+  @@index([commodity])
+  @@index([updatedAt])
+  @@map("market_orders")
+}
+
+/// Append-only price time series for sparklines. 90-day retention — unbounded growth is the failure mode.
+model MarketHistory {
+  id         BigInt   @id @default(autoincrement())
+  marketId   BigInt   @map("market_id")
+  commodity  String
+  observedAt DateTime @map("observed_at") @db.Timestamptz(6)
+  buyPrice   Int?     @map("buy_price")
+  sellPrice  Int?     @map("sell_price")
+  demand     Int?
+  stock      Int?
+
+  @@index([marketId, commodity, observedAt])
+  @@index([observedAt])
+  @@map("market_history")
+}
+
+/// FDevIDs internal→display mapping for commodities, modules and ships.
+/// Never hand-map. Never show an internal name to a user (INV-020).
+model ReferenceName {
+  kind         ReferenceKind
+  internalName String        @map("internal_name")
+  displayName  String        @map("display_name")
+  category     String?
+  isRare       Boolean       @default(false) @map("is_rare")
+  /// Galactic average price, for commodities. Sourced from FDevIDs/Ardent, refreshed on a schedule.
+  avgPrice     Int?          @map("avg_price")
+  updatedAt    DateTime      @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@id([kind, internalName])
+  @@index([kind, displayName])
+  @@map("reference_names")
+}
+
+// ============================================================================
+// FLEET, LOADOUTS, CARRIERS
+// ============================================================================
+
+/// A ship instance owned by a member. `source` determines how much to trust it and whether staleness matters.
+model Ship {
+  id            String     @id @default(uuid()) @db.Uuid
+  ownerId       String     @map("owner_id") @db.Uuid
+  /// FDevIDs internal ship name; resolved for display (INV-020).
+  shipType      String     @map("ship_type")
+  shipName      String?    @map("ship_name")
+  shipIdent     String?    @map("ship_ident")
+  roleTag       RoleTag?   @map("role_tag")
+  currentSystem BigInt?    @map("current_system")
+  isPrimary     Boolean    @default(false) @map("is_primary")
+  source        DataSource @default(manual)
+  /// NULL for manual entries. Non-null values make staleness visible in the UI.
+  syncedAt      DateTime?  @map("synced_at") @db.Timestamptz(6)
+  createdAt     DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  owner    User              @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  system   System?           @relation(fields: [currentSystem], references: [address], onDelete: SetNull)
+  loadouts Loadout[]
+  signups  OperationSignup[]
+
+  @@index([ownerId])
+  @@index([shipType])
+  @@index([currentSystem])
+  @@map("ships")
+}
+
+/// A build. Canonical form is the Coriolis/journal `Loadout` JSON; cached stats are what make fleet queries possible.
+model Loadout {
+  id           String     @id @default(uuid()) @db.Uuid
+  shipId       String?    @map("ship_id") @db.Uuid
+  authorId     String     @map("author_id") @db.Uuid
+  name         String
+  shipType     String     @map("ship_type")
+  roleTag      RoleTag?   @map("role_tag")
+  /// Canonical Coriolis/journal Loadout document. The source of truth for the build.
+  coriolisJson Json       @map("coriolis_json")
+  coriolisUrl  String?    @map("coriolis_url")
+  edsyUrl      String?    @map("edsy_url")
+  visibility   Visibility @default(squadron)
+  /// Officer-approved standard build for a role. Settable only with FLEET_APPROVE_DOCTRINE.
+  isDoctrine   Boolean    @default(false) @map("is_doctrine")
+  approvedById String?    @map("approved_by_id") @db.Uuid
+  /// Cached computed stats: jumpRangeLy (laden/unladen/max), dpsByType, effectiveShieldHp,
+  /// effectiveArmourHp, thermalLoad, cargoTons, fuelScoopRate, rebuyCr, totalCostCr.
+  /// Invalidated whenever coriolisJson changes.
+  stats        Json?
+  version      Int        @default(1)
+  createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  ship       Ship?             @relation(fields: [shipId], references: [id], onDelete: SetNull)
+  author     User              @relation("LoadoutAuthor", fields: [authorId], references: [id])
+  approvedBy User?             @relation("LoadoutApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  comments   LoadoutComment[]
+  revisions  LoadoutRevision[]
+
+  @@index([authorId])
+  @@index([shipType, roleTag])
+  @@index([isDoctrine])
+  @@index([visibility])
+  @@map("loadouts")
+}
+
+/// A prior version of a build, so members can diff what changed.
+model LoadoutRevision {
+  id           String   @id @default(uuid()) @db.Uuid
+  loadoutId    String   @map("loadout_id") @db.Uuid
+  version      Int
+  coriolisJson Json     @map("coriolis_json")
+  stats        Json?
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  loadout Loadout @relation(fields: [loadoutId], references: [id], onDelete: Cascade)
+
+  @@unique([loadoutId, version])
+  @@map("loadout_revisions")
+}
+
+/// A comment on a build. Builds are first-class commentable objects.
+model LoadoutComment {
+  id        String    @id @default(uuid()) @db.Uuid
+  loadoutId String    @map("loadout_id") @db.Uuid
+  authorId  String    @map("author_id") @db.Uuid
+  bodyMd    String    @map("body_md")
+  /// Sanitized server-side before storage (INV-035).
+  bodyHtml  String    @map("body_html")
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+
+  loadout Loadout @relation(fields: [loadoutId], references: [id], onDelete: Cascade)
+  author  User    @relation(fields: [authorId], references: [id])
+
+  @@index([loadoutId, createdAt])
+  @@map("loadout_comments")
+}
+
+/// A fleet carrier. CARRIER_MANAGE is scoped to owned carriers by a row-level predicate, not a separate permission.
+model FleetCarrier {
+  /// e.g. "K7Q-B4X".
+  callsign       String     @id
+  marketId       BigInt?    @unique @map("market_id")
+  name           String?
+  ownerUserId    String?    @map("owner_user_id") @db.Uuid
+  currentSystem  BigInt?    @map("current_system")
+  dockingAccess  String?    @map("docking_access")
+  allowNotorious Boolean?   @map("allow_notorious")
+  /// Tritium tons. Drives the fuel tracker and the "we need N tons before Saturday" shortfall.
+  fuelLevel      Int?       @map("fuel_level")
+  services       Json?
+  nextJumpSystem BigInt?    @map("next_jump_system")
+  nextJumpAt     DateTime?  @map("next_jump_at") @db.Timestamptz(6)
+  source         DataSource @default(eddn)
+  updatedAt      DateTime   @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  owner       User?           @relation(fields: [ownerUserId], references: [id], onDelete: SetNull)
+  station     Station?        @relation(fields: [marketId], references: [marketId], onDelete: SetNull)
+  system      System?         @relation("CarrierCurrentSystem", fields: [currentSystem], references: [address], onDelete: SetNull)
+  nextSystem  System?         @relation("CarrierNextJump", fields: [nextJumpSystem], references: [address], onDelete: SetNull)
+  haulTargets HaulingTarget[]
+
+  @@index([ownerUserId])
+  @@index([currentSystem])
+  @@index([nextJumpAt])
+  @@map("fleet_carriers")
+}
+
+// ============================================================================
+// OPERATIONS
+// ============================================================================
+
+/// A scheduled squadron activity. Times are stored UTC and displayed local AND UTC (INV-025).
+model Operation {
+  id                String          @id @default(uuid()) @db.Uuid
+  createdById       String          @map("created_by_id") @db.Uuid
+  threadId          String?         @unique @map("thread_id") @db.Uuid
+  title             String
+  descriptionMd     String?         @map("description_md")
+  opType            OperationType   @map("op_type")
+  startsAt          DateTime        @map("starts_at") @db.Timestamptz(6)
+  endsAt            DateTime?       @map("ends_at") @db.Timestamptz(6)
+  systemAddress     BigInt?         @map("system_address")
+  stationMarketId   BigInt?         @map("station_market_id")
+  /// Internal role keys required to sign up. Empty means any member.
+  minRoles          String[]        @default([]) @map("min_roles")
+  /// Ship role tags this op needs, feeding the wing composition checker.
+  requiredShipRoles RoleTag[]       @default([]) @map("required_ship_roles")
+  /// NULL means uncapped. Overflow becomes standby, never a rejection.
+  capacity          Int?
+  status            OperationStatus @default(scheduled)
+  /// Set when this op recurs, e.g. "Thursday BGS push". RFC 5545 RRULE.
+  recurrenceRule    String?         @map("recurrence_rule")
+  discordEventId    String?         @map("discord_event_id")
+  discordMessageId  String?         @map("discord_message_id")
+  createdAt         DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  createdBy User              @relation(fields: [createdById], references: [id])
+  thread    ForumThread?      @relation(fields: [threadId], references: [id], onDelete: SetNull)
+  system    System?           @relation(fields: [systemAddress], references: [address], onDelete: SetNull)
+  station   Station?          @relation(fields: [stationMarketId], references: [marketId], onDelete: SetNull)
+  signups   OperationSignup[]
+
+  @@index([startsAt, status])
+  @@index([opType])
+  @@index([createdById])
+  @@map("operations")
+}
+
+/// A member's commitment. The selected ship must belong to the member; standby promotion is deterministic and ordered.
+model OperationSignup {
+  operationId String      @map("operation_id") @db.Uuid
+  userId      String      @map("user_id") @db.Uuid
+  shipId      String?     @map("ship_id") @db.Uuid
+  state       SignupState @default(yes)
+  roleTag     RoleTag?    @map("role_tag")
+  note        String?
+  signedUpAt  DateTime    @default(now()) @map("signed_up_at") @db.Timestamptz(6)
+  /// NULL until the op is marked complete.
+  attended    Boolean?
+
+  operation Operation @relation(fields: [operationId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ship      Ship?     @relation(fields: [shipId], references: [id], onDelete: SetNull)
+
+  @@id([operationId, userId])
+  @@index([userId])
+  @@index([operationId, state, signedUpAt])
+  @@map("operation_signups")
+}
+
+// ============================================================================
+// BGS
+// ============================================================================
+
+/// A minor faction we care about. `isOurs` marks the player faction the squadron runs.
+model TrackedFaction {
+  id         String  @id @default(uuid()) @db.Uuid
+  name       String  @unique
+  isOurs     Boolean @default(false) @map("is_ours")
+  homeSystem BigInt? @map("home_system")
+  notesMd    String? @map("notes_md")
+
+  system    System?                    @relation(fields: [homeSystem], references: [address], onDelete: SetNull)
+  snapshots FactionInfluenceSnapshot[]
+  orders    BgsOrder[]
+  reports   BgsActivityReport[]
+
+  @@index([isOurs])
+  @@map("tracked_factions")
+}
+
+/// A detected BGS tick boundary. Everything downstream depends on this being right — validate
+/// against 7 days of KNOWN ticks before building on it.
+model BgsTick {
+  id         String     @id @default(uuid()) @db.Uuid
+  occurredAt DateTime   @unique @map("occurred_at") @db.Timestamptz(6)
+  source     TickSource
+  /// 0..1. `inferred` ticks carry lower confidence and MUST be labelled as such in the UI.
+  confidence Float      @default(1)
+  createdAt  DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  snapshots FactionInfluenceSnapshot[]
+  reports   BgsActivityReport[]
+
+  @@index([occurredAt])
+  @@map("bgs_ticks")
+}
+
+/// Influence and states for one faction, in one system, for one tick.
+/// EXACTLY ONE ROW PER (faction, system, tick). Multiple EDDN reports of the same tick are
+/// deduplicated, never summed or averaged (INV-019). A double-count corrupts the entire history
+/// that every chart, delta and officer decision reads.
+model FactionInfluenceSnapshot {
+  id               String     @id @default(uuid()) @db.Uuid
+  factionId        String     @map("faction_id") @db.Uuid
+  systemAddress    BigInt     @map("system_address")
+  /// NULL only when the tick could not be determined — we leave it unassociated rather than guessing.
+  tickId           String?    @map("tick_id") @db.Uuid
+  observedAt       DateTime   @map("observed_at") @db.Timestamptz(6)
+  /// 0.0–1.0.
+  influence        Float
+  state            String?
+  pendingStates    String[]   @default([]) @map("pending_states")
+  recoveringStates String[]   @default([]) @map("recovering_states")
+  happiness        String?
+  source           DataSource @default(eddn)
+
+  faction TrackedFaction @relation(fields: [factionId], references: [id], onDelete: Cascade)
+  system  System         @relation(fields: [systemAddress], references: [address])
+  tick    BgsTick?       @relation(fields: [tickId], references: [id], onDelete: SetNull)
+
+  /// The dedupe guarantee. A partial unique index covering the NULL-tick case is added in the
+  /// migration; see `indexes.md`.
+  @@unique([factionId, systemAddress, tickId])
+  @@index([systemAddress, observedAt])
+  @@index([factionId, observedAt])
+  @@map("faction_influence_snapshots")
+}
+
+/// An officer directive per system. Members see these as a prioritised "what should I do tonight" list.
+model BgsOrder {
+  id            String       @id @default(uuid()) @db.Uuid
+  systemAddress BigInt       @map("system_address")
+  factionId     String?      @map("faction_id") @db.Uuid
+  directive     BgsDirective
+  /// 1 = highest. Drives dashboard ordering.
+  priority      Int          @default(3) @db.SmallInt
+  /// Free-text officer guidance: "run massacre missions for us, not bounties".
+  guidanceMd    String?      @map("guidance_md")
+  setById       String       @map("set_by_id") @db.Uuid
+  activeFrom    DateTime     @default(now()) @map("active_from") @db.Timestamptz(6)
+  activeUntil   DateTime?    @map("active_until") @db.Timestamptz(6)
+  createdAt     DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  system  System          @relation(fields: [systemAddress], references: [address])
+  faction TrackedFaction? @relation(fields: [factionId], references: [id], onDelete: SetNull)
+  setBy   User            @relation(fields: [setById], references: [id])
+
+  @@index([activeFrom, activeUntil])
+  @@index([systemAddress])
+  @@index([priority])
+  @@map("bgs_orders")
+}
+
+/// A member's BGS contribution. Negatives (murders, failed missions) are first-class — ignoring
+/// them makes the picture wrong.
+model BgsActivityReport {
+  id            String          @id @default(uuid()) @db.Uuid
+  userId        String          @map("user_id") @db.Uuid
+  systemAddress BigInt          @map("system_address")
+  factionId     String?         @map("faction_id") @db.Uuid
+  activityType  BgsActivityType @map("activity_type")
+  valueCr       BigInt?         @map("value_cr")
+  count         Int?
+  tickId        String?         @map("tick_id") @db.Uuid
+  reportedAt    DateTime        @default(now()) @map("reported_at") @db.Timestamptz(6)
+  source        DataSource      @default(manual)
+  /// Journal event identity for telemetry-sourced reports, making ingestion idempotent (INV-017).
+  sourceEventId String?         @map("source_event_id")
+
+  user    User            @relation(fields: [userId], references: [id])
+  system  System          @relation(fields: [systemAddress], references: [address])
+  faction TrackedFaction? @relation(fields: [factionId], references: [id], onDelete: SetNull)
+  tick    BgsTick?        @relation(fields: [tickId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, sourceEventId])
+  @@index([userId, reportedAt])
+  @@index([systemAddress, tickId])
+  @@index([factionId, tickId])
+  @@map("bgs_activity_reports")
+}
+
+// ============================================================================
+// TRADE
+// ============================================================================
+
+/// An async Spansh route job. Deduped by parameter hash so two members asking the same question
+/// cost one upstream job. NEVER awaited in a request path (INV-032).
+model RouteJob {
+  id            String           @id @default(uuid()) @db.Uuid
+  userId        String           @map("user_id") @db.Uuid
+  kind          RoutePlannerKind
+  /// SHA-256 of the normalised parameters. The dedupe key.
+  paramHash     String           @map("param_hash")
+  params        Json
+  status        JobStatus        @default(queued)
+  /// Spansh's own job identifier, once submitted.
+  upstreamJobId String?          @map("upstream_job_id")
+  /// Object-storage key for the result document. Results are large; they do not live in Postgres.
+  resultKey     String?          @map("result_key")
+  error         String?
+  attempts      Int              @default(0)
+  createdAt     DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  completedAt   DateTime?        @map("completed_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([paramHash, status])
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+  @@map("route_jobs")
+}
+
+/// A route a member chose to keep.
+model SavedRoute {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  name      String
+  /// The route document: hops, commodities, prices AND the data age at the time it was saved.
+  /// A saved route's prices are historical by definition and must be labelled as such (INV-004).
+  payload   Json
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@map("saved_routes")
+}
+
+/// A standing price alert, e.g. "Tritium within 50 ly of our carrier below 40,000 Cr/t".
+model TradeAlert {
+  id            String    @id @default(uuid()) @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  commodity     String
+  /// Anchor for the radius search. NULL means galaxy-wide.
+  originSystem  BigInt?   @map("origin_system")
+  maxDistanceLy Float?    @map("max_distance_ly")
+  /// Fire when sell price rises above this.
+  minSellPrice  Int?      @map("min_sell_price")
+  /// Fire when buy price falls below this.
+  maxBuyPrice   Int?      @map("max_buy_price")
+  isActive      Boolean   @default(true) @map("is_active")
+  lastFiredAt   DateTime? @map("last_fired_at") @db.Timestamptz(6)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([isActive, commodity])
+  @@index([userId])
+  @@map("trade_alerts")
+}
+
+/// A member-posted supply or demand offer on the squadron trade board.
+model TradeBoardOffer {
+  id            String    @id @default(uuid()) @db.Uuid
+  userId        String    @map("user_id") @db.Uuid
+  /// true = "I have this to sell", false = "I want to buy this".
+  isSupply      Boolean   @map("is_supply")
+  commodity     String
+  quantityTons  Int       @map("quantity_tons")
+  pricePerTonCr Int?      @map("price_per_ton_cr")
+  locationNote  String?   @map("location_note")
+  systemAddress BigInt?   @map("system_address")
+  expiresAt     DateTime? @map("expires_at") @db.Timestamptz(6)
+  closedAt      DateTime? @map("closed_at") @db.Timestamptz(6)
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([commodity, isSupply, closedAt])
+  @@index([userId])
+  @@map("trade_board_offers")
+}
+
+/// A shared cargo target — a community goal or a carrier fuel drive — with live progress from telemetry.
+model HaulingTarget {
+  id                String    @id @default(uuid()) @db.Uuid
+  title             String
+  commodity         String
+  targetTons        Int       @map("target_tons")
+  /// Denormalised sum of contributions, maintained transactionally so the progress bar is cheap.
+  deliveredTons     Int       @default(0) @map("delivered_tons")
+  carrierCallsign   String?   @map("carrier_callsign")
+  destinationSystem BigInt?   @map("destination_system")
+  deadline          DateTime? @db.Timestamptz(6)
+  closedAt          DateTime? @map("closed_at") @db.Timestamptz(6)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  carrier       FleetCarrier?         @relation(fields: [carrierCallsign], references: [callsign], onDelete: SetNull)
+  contributions HaulingContribution[]
+
+  @@index([closedAt, deadline])
+  @@map("hauling_targets")
+}
+
+/// One member's delivery against a hauling target. Auto-created from telemetry where consented.
+model HaulingContribution {
+  id            String     @id @default(uuid()) @db.Uuid
+  targetId      String     @map("target_id") @db.Uuid
+  userId        String     @map("user_id") @db.Uuid
+  tons          Int
+  source        DataSource @default(manual)
+  /// Journal event identity, making telemetry ingestion idempotent (INV-017).
+  sourceEventId String?    @map("source_event_id")
+  createdAt     DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  target HaulingTarget @relation(fields: [targetId], references: [id], onDelete: Cascade)
+  user   User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, sourceEventId])
+  @@index([targetId, createdAt])
+  @@map("hauling_contributions")
+}
+
+// ============================================================================
+// TELEMETRY
+// ============================================================================
+
+/// A raw journal event accepted from the EDMC plugin. 30-day retention; aggregates are kept indefinitely.
+/// A non-consented category is REJECTED at the endpoint and never reaches this table (INV-013).
+model TelemetryEvent {
+  id            BigInt            @id @default(autoincrement())
+  userId        String            @map("user_id") @db.Uuid
+  deviceTokenId String            @map("device_token_id") @db.Uuid
+  category      TelemetryCategory
+  /// Journal event name, e.g. "FSDJump", "MissionCompleted".
+  eventType     String            @map("event_type")
+  /// The journal event's own timestamp, NOT the receipt time. Ordering and idempotency use this.
+  occurredAt    DateTime          @map("occurred_at") @db.Timestamptz(6)
+  receivedAt    DateTime          @default(now()) @map("received_at") @db.Timestamptz(6)
+  payload       Json
+  /// Deterministic hash of (deviceTokenId, occurredAt, eventType) — the idempotency key (INV-017).
+  eventKey      String            @map("event_key")
+  processedAt   DateTime?         @map("processed_at") @db.Timestamptz(6)
+
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deviceToken DeviceToken @relation(fields: [deviceTokenId], references: [id], onDelete: Cascade)
+
+  @@unique([eventKey])
+  @@index([userId, occurredAt])
+  @@index([category, occurredAt])
+  @@index([processedAt])
+  @@map("telemetry_events")
+}
+
+// ============================================================================
+// AI
+// ============================================================================
+
+/// A GSAI conversation. Encrypted at rest, 90-day retention, user-deletable earlier.
+model AiConversation {
+  id         String    @id @default(uuid()) @db.Uuid
+  userId     String    @map("user_id") @db.Uuid
+  /// 'web' | 'discord'.
+  channel    String    @default("web")
+  title      String?
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  archivedAt DateTime? @map("archived_at") @db.Timestamptz(6)
+
+  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages    AiMessage[]
+  invocations AiToolInvocation[]
+
+  @@index([userId, createdAt])
+  @@map("ai_conversations")
+}
+
+/// One turn in a conversation, including tool calls and their results.
+model AiMessage {
+  id             String        @id @default(uuid()) @db.Uuid
+  conversationId String        @map("conversation_id") @db.Uuid
+  role           AiMessageRole
+  content        String?
+  toolName       String?       @map("tool_name")
+  toolArgs       Json?         @map("tool_args")
+  toolResult     Json?         @map("tool_result")
+  tokensIn       Int?          @map("tokens_in")
+  tokensOut      Int?          @map("tokens_out")
+  latencyMs      Int?          @map("latency_ms")
+  /// Which Ollama instance served this: 'interactive' | 'heavy' | 'fast_path'.
+  servedBy       String?       @map("served_by")
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  conversation AiConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@map("ai_messages")
+}
+
+/// Every tool call, INCLUDING denials. A `denied` row is the evidence that the permission
+/// boundary held — it is not an error to be suppressed (INV-009, INV-011).
+model AiToolInvocation {
+  id                String      @id @default(uuid()) @db.Uuid
+  userId            String      @map("user_id") @db.Uuid
+  conversationId    String?     @map("conversation_id") @db.Uuid
+  toolName          String      @map("tool_name")
+  args              Json
+  /// The permission the executor checked, recorded so an audit can verify the right gate ran.
+  permissionChecked Decimal?    @map("permission_checked") @db.Decimal(40, 0)
+  outcome           ToolOutcome
+  error             String?
+  durationMs        Int?        @map("duration_ms")
+  createdAt         DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user         User            @relation(fields: [userId], references: [id])
+  conversation AiConversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([userId, createdAt])
+  @@index([toolName, outcome])
+  @@map("ai_tool_invocations")
+}
+
+/// An embedded fragment of a source document for RAG retrieval.
+model KnowledgeChunk {
+  id         String                       @id @default(uuid()) @db.Uuid
+  sourceType KnowledgeSourceType          @map("source_type")
+  sourceId   String?                      @map("source_id") @db.Uuid
+  /// ★ SECURITY CONTROL, NOT METADATA ★
+  /// Always equals the visibility of its source record at time of query (INV-003). The vector
+  /// query filters on this BEFORE nearest-neighbour returns — never after. An ACL change on the
+  /// source re-indexes or deletes these rows. This column is the difference between an assistant
+  /// and a data leak; treat any change to it as a tier-3 security change (ADR-015, ADR-021).
+  visibility Visibility                   @default(public)
+  title      String?
+  content    String
+  /// pgvector embedding. Prisma has no native vector type, so queries use $queryRaw.
+  /// ⚠ DIMENSION CONFLICT — see decision D16 in STATUS.md. The source spec's DDL says
+  /// vector(1024) while pinning `nomic-embed-text`, which emits 768 dimensions. The column
+  /// MUST equal the model's output width. 1024 is carried here because that is what the spec
+  /// states; this must be resolved before P8.9 — either value forces a full re-index if changed
+  /// later, so resolve it early.
+  embedding  Unsupported("vector(1024)")?
+  metadata   Json?
+  indexedAt  DateTime                     @default(now()) @map("indexed_at") @db.Timestamptz(6)
+
+  /// The HNSW index (`USING hnsw (embedding vector_cosine_ops)`) is added by hand in the
+  /// migration — Prisma cannot express it. See `indexes.md`.
+  @@index([visibility])
+  @@index([sourceType, sourceId])
+  @@map("knowledge_chunks")
+}
+
+// ============================================================================
+// CROSS-CUTTING
+// ============================================================================
+
+/// Append-only record of every privileged action (INV-009). Never updated or deleted by
+/// application code; purged only by the 1-year retention job.
+model AuditLog {
+  id         BigInt    @id @default(autoincrement())
+  actorId    String?   @map("actor_id") @db.Uuid
+  actorType  ActorType @default(user) @map("actor_type")
+  action     String
+  targetType String?   @map("target_type")
+  targetId   String?   @map("target_id")
+  before     Json?
+  after      Json?
+  /// Hashed, never plaintext (INV-012 spirit — do not store raw IPs).
+  ipHash     String?   @map("ip_hash")
+  userAgent  String?   @map("user_agent")
+  requestId  String?   @map("request_id")
+  createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([actorId, createdAt])
+  @@index([action, createdAt])
+  @@index([targetType, targetId])
+  @@map("audit_log")
+}
+
+/// A fan-out record. Delivery failure is retried and visible, never silently dropped.
+model Notification {
+  id        String              @id @default(uuid()) @db.Uuid
+  userId    String              @map("user_id") @db.Uuid
+  channel   NotificationChannel
+  /// 'forum_reply' | 'op_reminder' | 'bgs_order' | 'trade_alert' | 'moderation' | ...
+  kind      String
+  title     String
+  body      String?
+  /// Deep link into the site.
+  link      String?
+  state     DeliveryState       @default(pending)
+  attempts  Int                 @default(0)
+  readAt    DateTime?           @map("read_at") @db.Timestamptz(6)
+  sentAt    DateTime?           @map("sent_at") @db.Timestamptz(6)
+  error     String?
+  createdAt DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt, createdAt])
+  @@index([state, createdAt])
+  @@map("notifications")
+}
+
+/// Idempotency records for mutating endpoints (INV-010). Replay of a key returns the stored
+/// response without repeating the side effect.
+model IdempotencyKey {
+  key          String   @id
+  userId       String?  @map("user_id") @db.Uuid
+  endpoint     String
+  /// SHA-256 of the request body. A key replayed with a DIFFERENT body is a conflict, not a replay.
+  requestHash  String   @map("request_hash")
+  responseCode Int      @map("response_code")
+  responseBody Json?    @map("response_body")
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  expiresAt    DateTime @map("expires_at") @db.Timestamptz(6)
+
+  @@index([expiresAt])
+  @@map("idempotency_keys")
+}
+
+/// Runtime site configuration, including the AI kill switches. Changes require SITE_CONFIG and
+/// are audited. The AI switches take effect immediately, without a deploy.
+model SiteConfig {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy String?  @map("updated_by") @db.Uuid
+
+  @@map("site_config")
+}
+
+/// Per-module feature flags, so a phase's work can ship dark.
+model FeatureFlag {
+  key         String   @id
+  isEnabled   Boolean  @default(false) @map("is_enabled")
+  description String?
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("feature_flags")
+}
+
+/// A squadron badge definition. Cheap to build, disproportionately effective for retention.
+model Achievement {
+  id          String  @id @default(uuid()) @db.Uuid
+  key         String  @unique
+  name        String
+  description String
+  iconUrl     String? @map("icon_url")
+  /// NULL = officer-awarded only. Otherwise a rule key the telemetry pipeline evaluates.
+  autoRule    String? @map("auto_rule")
+
+  awards AchievementAward[]
+
+  @@map("achievements")
+}
+
+/// An award of a badge to a member.
+model AchievementAward {
+  achievementId String   @map("achievement_id") @db.Uuid
+  userId        String   @map("user_id") @db.Uuid
+  awardedById   String?  @map("awarded_by_id") @db.Uuid
+  note          String?
+  awardedAt     DateTime @default(now()) @map("awarded_at") @db.Timestamptz(6)
+
+  achievement Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+  user        User        @relation("AchievementHolder", fields: [userId], references: [id], onDelete: Cascade)
+  awardedBy   User?       @relation("AchievementAwarder", fields: [awardedById], references: [id], onDelete: SetNull)
+
+  @@id([achievementId, userId])
+  @@index([userId, awardedAt])
+  @@map("achievement_awards")
+}

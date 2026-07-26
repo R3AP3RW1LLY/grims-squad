@@ -71,6 +71,8 @@ _Adapters written from documentation, not yet tested against the live API. Every
 | D13 | Is mandatory TOTP 2FA for `officer`+ in scope for P1, or deferred? Spec §5.6 says "optional TOTP 2FA, mandatory for officer and above" without placing it in a phase. | P1.6 | 2026-07-25 |
 | D14 | Squadron size today, and expected in 12 months. A1 assumed 20–150 CMDRs; this sets connection-pool, rate-limit and Meilisearch sizing. | P0.2 | 2026-07-25 |
 | D15 | Are there members under 18 in the squadron? Spec §10.4 raises this; the answer changes moderation policy and what telemetry we should collect at all. | P2.6 | 2026-07-25 |
+| D16 | **Embedding dimension conflict in the source spec.** §6.1 declares `embedding VECTOR(1024)` while §8.2.4 pins `nomic-embed-text`, which emits **768** dimensions. The column must equal the model's output width or every insert fails. The schema currently carries 1024 because that is what the spec's DDL states. Resolve before P8.9 — changing it later forces a full re-index of every vector. Recommend either 768 with `nomic-embed-text`, or a 1024-dimension embedder, chosen deliberately since the embedding model is pinned forever (ADR-011). | P8.9 | 2026-07-25 |
+| D17 | Prisma major version pin. The spec's schema style (`url = env("DATABASE_URL")` in the datasource block) is Prisma ≤6. Prisma 7 moved connection URLs to `prisma.config.ts` and would require rewriting the datasource block. SSOT schema validates clean on **Prisma 6.19.3**. Confirm we pin `prisma@6` for now, or accept the Prisma 7 migration in P0. | P0.2 | 2026-07-25 |
 
 ## Adversarial review log
 See `10-quality/review-log.md`. Summary:
