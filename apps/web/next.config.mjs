@@ -1,6 +1,17 @@
+import path from 'node:path';
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // Traces exactly the files the server needs into .next/standalone, so the
+  // runtime image carries a few hundred MB instead of the whole monorepo's
+  // node_modules. Required by infra/docker/Dockerfile.web.
+  output: 'standalone',
+  // The monorepo root, so tracing follows workspace symlinks correctly.
+  // path.resolve rather than new URL(...).pathname: on Windows the latter
+  // yields "/D:/..." with a leading slash, which is not a usable filesystem
+  // path and breaks the build on the dev machine but not in the container.
+  outputFileTracingRoot: path.resolve(process.cwd(), '../..'),
   poweredByHeader: false,
   async headers() {
     return [

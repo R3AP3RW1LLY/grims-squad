@@ -1,0 +1,39 @@
+{
+	# Let's Encrypt needs a contact address for expiry warnings.
+	email {$ACME_EMAIL}
+}
+
+# Both hostnames are listed so the move to the real domain needs no config
+# change and no downtime — Caddy obtains a certificate for grims-squad.com the
+# moment its DNS points here, and until then that name simply never resolves.
+#
+# sslip.io is what makes HTTPS possible before we own DNS: it resolves
+# 45-63-35-93.sslip.io to 45.63.35.93, and because it is a real hostname rather
+# than a bare IP, Let's Encrypt will issue for it. A certificate authority
+# cannot issue a normal certificate for an IP address, so the alternative was a
+# self-signed cert and a browser warning on every visit.
+{$SITE_HOSTNAMES} {
+	encode zstd gzip
+
+	# Security headers applied at the edge, so they cover every response
+	# including static assets and error pages that never reach Next.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
+
+	# The API is same-origin under /v1, which means the session cookie needs no
+	# cross-site relaxation: it can stay SameSite=Lax rather than None, and
+	# there is no CORS preflight on every call.
+	handle /v1/* {
+		reverse_proxy api:5001
+	}
+
+	handle {
+		reverse_proxy web:5000
+	}
+}

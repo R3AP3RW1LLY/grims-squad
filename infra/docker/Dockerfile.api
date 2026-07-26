@@ -1,0 +1,32 @@
+# syntax=docker/dockerfile:1
+#
+# API image. Built from the REPO ROOT as context, because pnpm workspaces need
+# the lockfile and every workspace package's manifest to resolve consistently —
+# building from apps/api alone produces a different dependency graph than CI
+# tested, which is the classic "works locally, breaks in prod" source.
+FROM node:24-slim AS base
+RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH
+RUN corepack enable
+
+FROM base AS build
+WORKDIR /app
+COPY . .
+RUN pnpm install --frozen-lockfile
+RUN pnpm --filter @grims/db exec prisma generate
+RUN pnpm --filter @grims/shared build \
+ && pnpm --filter @grims/ed-clients build \
+ && pnpm --filter @grims/db build \
+ && pnpm --filter @grims/api exec tsc -b
+
+FROM base AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=build /app /app
+# Runs as a non-root user: a container escape from a root process is a far
+# shorter path to the host than one from an unprivileged process.
+RUN useradd -r -u 10001 -m grims && chown -R grims:grims /app
+USER grims
+EXPOSE 5001
+CMD ["node", "apps/api/dist/main.js"]

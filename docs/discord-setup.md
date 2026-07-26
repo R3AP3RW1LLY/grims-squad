@@ -154,15 +154,54 @@ Once the bot is in the server, I need the **role IDs** (decision **D2**). Gettin
 Send them as a list, role name to ID:
 
 ```
-Squadron Leader        = 123456789012345678
-1st Sector Overseer    = ...
-Galactic Admiral       = ...
-Prime Legate           = ...
+@everyone 
+
+**This is how the new ranking system works in Grim's Squad**
+
+**Standard Ranks**
+*These are the standard ranks that you can achieve within the Squadron.*
+
+When you first join the Discord: <@&892493916530671657> or <@&804027821986807860> (we need a way to have the member choose this at time of server registration)
+When you officially decide to join: <@&1528251831531339927> - assigned by leadership after onboarding is complete
+
+**Your promotion depends both on the time you have been with the Squadron, and how active you are.**
+1 month: <@&1528252058380144740>
+2 months: <@&1528252671453036634>
+3 months: <@&1528252377143050361>
+4 months: <@&1528253163755405402>
+5 months: <@&1528253388901580881>
+6 months: <@&1528253529532141739>
+7 months: <@&1528253849998065834>
+9 months: <@&1528254061504237700>
+12 months: <@&1528254279289278534>
+
+**Loyalty Ranks** - optional ranks only assigned by leadership
+*These are essentially a badge of honor. They can only be given out by a* <@&1513669809756311593>
+ 
+Loyalty 1: <@&1513158621549297785>
+Loyalty 2: <@&1513158687898730526>
+Loyalty 3: <@&1513158735776972891>
+Loyalty 4: <@&1513158786632646757>
+Loyalty 5: <@&1513158830853198025>
+Loyalty 6: <@&1513158877271691274> (Reserved for truly impactful members)
+
+**Squadron Leadership Ranks** -- Leadership only, assigned by the leadership team only
+*A leading member of the squadron must recommend you for promotion. It is then voted on. It must be unanimous.*
+
+<@&1513669809756311593>
+1st: <@&1513749464458723469>
+2nd: <@&1513748632963387523>
+3rd: <@&1512912750416760892>
+
+**Ranks Reserved For Grim Himself and His 2nd in Command**
+
+Grim: <@&804027885081591818>
+2nd in Command: <@&1512912541771235601>
 ```
 
 I need every **leadership** and **reserved** role. Tenure and loyalty ranks are cosmetic — they grant no permissions (INV-046) — but send them too, since the bot assigns them automatically.
 
-**Role IDs are stored as data, never hard-coded** (INV-008), so renaming a role in Discord later will not break anything. Deleting and recreating one *will*, because that mints a new ID — tell me if that happens.
+**Role IDs are stored as data, never hard-coded** (INV-008), so renaming a role in Discord later will not break anything. Deleting and recreating one *will*, because that mints a new ID — tell me if that happens. the tenure roles are the default member roles, everything else is managed by the leadership team and will assign those as they see fit. 
 
 ---
 

@@ -1,0 +1,117 @@
+name: grims
+
+# Production stack. Run from the repo root on the server:
+#   docker compose --env-file /srv/grims/.env -f infra/docker/compose.prod.yml up -d
+#
+# Note what is NOT published to the host: Postgres, Redis and Meilisearch have
+# no `ports:` mapping at all. They are reachable only from inside the compose
+# network. A database bound to 0.0.0.0 on a public IP is found by scanners in
+# hours, and the Vultr firewall would be the only thing between it and the
+# internet — one accidental rule edit away from a breach.
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp' # HTTP/3
+    volumes:
+      - ../caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data # certificates and ACME account — MUST persist
+      - caddy_config:/config
+    environment:
+      SITE_HOSTNAMES: ${SITE_HOSTNAMES}
+      ACME_EMAIL: ${ACME_EMAIL}
+    depends_on: [web, api]
+
+  postgres:
+    # Bundles BOTH TimescaleDB and pgvector. Using plain postgres here would
+    # break market_history (a hypertable) and the RAG embeddings at once.
+    image: timescale/timescaledb-ha:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/home/postgres/pgdata/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    shm_size: 1gb
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes', '--requirepass', '${REDIS_PASSWORD}']
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', '--no-auth-warning', '-a', '${REDIS_PASSWORD}', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.11
+    restart: unless-stopped
+    environment:
+      MEILI_MASTER_KEY: ${MEILI_MASTER_KEY}
+      MEILI_ENV: production
+    volumes:
+      - meilidata:/meili_data
+    healthcheck:
+      test: ['CMD', 'curl', '-fsS', 'http://localhost:7700/health']
+      interval: 15s
+      timeout: 5s
+      retries: 6
+
+  api:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.api
+    restart: unless-stopped
+    env_file: [/srv/grims/.env]
+    environment:
+      NODE_ENV: production
+      API_PORT: 5001
+      API_HOST: 0.0.0.0
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      meilisearch: { condition: service_started }
+    healthcheck:
+      # Uses the real health endpoint, so an unhealthy dependency is visible in
+      # `docker ps` rather than only in the logs.
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://localhost:5001/v1/health').then(r=>process.exit(r.status<500?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 20s
+      timeout: 8s
+      retries: 5
+      start_period: 30s
+
+  web:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.web
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 5000
+    depends_on: [api]
+
+volumes:
+  pgdata:
+  redisdata:
+  meilidata:
+  caddy_data:
+  caddy_config:
