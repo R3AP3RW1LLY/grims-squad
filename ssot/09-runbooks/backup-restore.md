@@ -10,8 +10,15 @@
 | Object storage (uploads) | provider replication or `rclone sync` | nightly | 30 days |
 | Meilisearch index | **not backed up** | — | rebuilt from Postgres |
 | Redis | **not backed up** | — | cache, queues and sessions; loss forces re-login and re-queues jobs |
-| Secrets | in the secret store, backed up by it | — | per provider |
+| Secrets | **NOT backed up** — a root-owned `0600` `.env` on the VPS (decision D6) | — | — |
 | `ssot/` and code | git | every commit | forever |
+
+> ⚠ **Secrets are NOT backed up, and that is a deliberate gap you must close manually.**
+> Since decision D6 they live only in a root-owned `0600` `/srv/grims/.env` on the VPS. If the box
+> is destroyed, that file is gone with it. **Keep an offline copy somewhere you control** — a
+> password manager entry is fine — and treat "VPS destroyed" as also meaning "re-enter every
+> secret by hand". This is the honest cost of choosing no external secret store; the alternative
+> was a third-party dependency you declined.
 
 **Meilisearch and Redis are deliberately excluded.** Both are derived or ephemeral. Backing them up would create a second source of truth for data Postgres already owns — and a stale search index restored over a fresh database is worse than an empty one.
 
@@ -66,6 +73,11 @@ docker compose exec -T postgres psql -U grims -c \
 docker compose -f compose.prod.yml start api worker bot eddn
 pnpm search:reindex        # Meilisearch, from Postgres
 pnpm rag:reindex           # knowledge_chunks — see the WARNING below
+
+# Verify BOTH extensions survived the restore. A dump restored into an image
+# lacking either one silently loses the hypertable or the vector column type.
+psql -c "select extname from pg_extension where extname in ('timescaledb','vector','cube','citext');"
+psql -c "select hypertable_name from timescaledb_information.hypertables;"   # expect market_history
 ```
 
 **Keep `grimssquad_old` for at least 48 hours.** Renaming is instantaneous and reversible; dropping is neither.
@@ -105,7 +117,7 @@ Verify `recovery_target_time` is **before** the damaging event, in **UTC**. A lo
 2. Restore it into a scratch database on the VPS (or locally).
 3. Point a local API instance at it.
 4. Verify:
-     [ ] Table count is 54
+     [ ] Table count is 56
      [ ] users, forum_posts and audit_log row counts are plausible against production
      [ ] A member profile loads
      [ ] A forum thread with posts loads

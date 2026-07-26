@@ -12,7 +12,7 @@ What is kept, for how long, and what deletes it. Every row here is enforced by a
 | `telemetry_events` (raw) | **30 days, AND only once `processed_at` is set** | `retention:telemetry` nightly | Raw journal events are the most privacy-sensitive data we hold. Aggregates survive; the raw stream does not. **The `processed_at` condition is a data-loss control** — see below. |
 | Telemetry-derived aggregates (`bgs_activity_reports`, `hauling_contributions`, ship/loadout state) | **indefinite** | — | These are squadron records, not surveillance. They contain no location trail. |
 | `market_orders` | **current state only** | upsert-in-place | Superseded rows are overwritten, never accumulated. |
-| `market_history` | **90 days** | `retention:market` nightly, or a Timescale retention policy (decision D10) | Sparklines need three months. Full-galaxy market history grows without limit. |
+| `market_history` | **90 days** | **TimescaleDB `add_retention_policy`** (decision D10) — *not* a nightly job | Sparklines need three months. Timescale drops whole chunks rather than deleting rows, and compresses anything older than 7 days. **Do not also run a `retention:market` job — the two would race.** |
 | `route_jobs` + stored results | **7 days** | `retention:jobs` nightly | Long enough for dedupe to pay off, short enough that object storage stays trivial. |
 | `refresh_tokens` | **until `expiresAt` + 7 days** | `retention:sessions` hourly | The grace window preserves reuse detection after natural expiry. |
 | `refresh_token_families` | **90 days after revocation** | `retention:sessions` nightly | Revoked families are evidence of a possible theft event; keep them briefly. |

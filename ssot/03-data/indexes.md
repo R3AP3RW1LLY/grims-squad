@@ -11,11 +11,37 @@ This file explains *why* the non-obvious ones exist. An index without a reason h
 ## 1 — Required extensions
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS citext;    -- case-insensitive handles, CMDR names, system names
-CREATE EXTENSION IF NOT EXISTS cube;      -- N-dimensional cube type, for the spatial index
-CREATE EXTENSION IF NOT EXISTS vector;    -- pgvector, for knowledge_chunks.embedding
-CREATE EXTENSION IF NOT EXISTS pgcrypto;  -- gen_random_uuid()
+CREATE EXTENSION IF NOT EXISTS citext;      -- case-insensitive handles, CMDR names, system names
+CREATE EXTENSION IF NOT EXISTS cube;        -- N-dimensional cube type, for the spatial index
+CREATE EXTENSION IF NOT EXISTS vector;      -- pgvector, for knowledge_chunks.embedding
+CREATE EXTENSION IF NOT EXISTS pgcrypto;    -- gen_random_uuid()
+CREATE EXTENSION IF NOT EXISTS timescaledb; -- market_history hypertable (decision D10)
 ```
+
+⚠ **The image must provide BOTH TimescaleDB and pgvector.** The stock `pgvector/pgvector:pg16`
+image does not include TimescaleDB, and `timescale/timescaledb:pg16` does not include pgvector.
+Use **`timescale/timescaledb-ha:pg16`**, which bundles both — this is the one operational
+consequence of choosing Timescale and it is easy to discover the hard way at P0.2.
+
+### `market_history` — hypertable, compression and retention
+
+```sql
+SELECT create_hypertable('market_history', 'observed_at', migrate_data => true);
+
+ALTER TABLE market_history SET (
+  timescaledb.compress,
+  timescaledb.compress_segmentby = 'market_id, commodity'
+);
+SELECT add_compression_policy('market_history', INTERVAL '7 days');
+SELECT add_retention_policy('market_history', INTERVAL '90 days');
+```
+
+At a 500 ly prefilter this compression is not a nicety — it is what makes 90 days of history
+affordable. `compress_segmentby` on `(market_id, commodity)` matches how the sparkline query
+reads the data, so compressed chunks stay queryable without decompression.
+
+**The retention policy replaces the `retention:market` job** — do not run both, or they will
+race. `03-data/retention.md` is updated accordingly.
 
 `btree_gist` is **not** required — the spatial index uses `cube` with the default GiST opclass.
 
@@ -162,11 +188,10 @@ CREATE INDEX audit_log_recent_idx ON audit_log (created_at DESC);
 ```
 
 ### `market_history` — retention scan support
-```sql
-CREATE INDEX market_history_retention_idx ON market_history (observed_at)
-  WHERE observed_at < now() - INTERVAL '90 days';
-```
-Rebuilt implicitly as rows age; supports the retention job's delete without a full scan. If TimescaleDB is adopted (decision D10), drop this in favour of a hypertable with a retention policy.
+**Not needed — superseded by the Timescale retention policy above (decision D10).** An earlier
+revision proposed a partial index to support a manual retention job; the hypertable's own
+`add_retention_policy` drops whole chunks instead, which is dramatically cheaper than a
+row-by-row delete and needs no supporting index.
 
 ### `telemetry_events` — retention and processing queue
 ```sql
