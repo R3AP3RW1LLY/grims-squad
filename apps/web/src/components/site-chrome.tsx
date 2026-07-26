@@ -204,6 +204,29 @@ export function SiteFooter() {
           <p className="mt-3 text-xs text-[var(--color-text-secondary)]">
             Ship-fit mathematics ported from Coriolis (MIT) with attribution.
           </p>
+
+          {/* Reachable from every page. A policy nobody can find is a policy
+              nobody consented to. */}
+          <nav aria-label="Legal" className="mt-5">
+            <ul className="flex list-none flex-wrap gap-x-6 gap-y-2 p-0 text-xs">
+              <li>
+                <a
+                  href="/privacy"
+                  className="text-[var(--color-text-secondary)] underline underline-offset-4 transition-colors hover:text-[var(--color-brand-cyan-bright)]"
+                >
+                  Privacy Policy
+                </a>
+              </li>
+              <li>
+                <a
+                  href="/terms"
+                  className="text-[var(--color-text-secondary)] underline underline-offset-4 transition-colors hover:text-[var(--color-brand-cyan-bright)]"
+                >
+                  Terms of Service
+                </a>
+              </li>
+            </ul>
+          </nav>
           <p
             className="mt-6 text-sm text-[var(--color-brand-orange-bright)]"
             style={{ fontFamily: 'var(--font-display)' }}
