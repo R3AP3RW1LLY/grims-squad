@@ -1,0 +1,156 @@
+name: PR
+
+# The enforcement mechanism for AGENTS.md §3, §4, §8 and §9 (ADR-019).
+# Anything the SSOT requires that a machine can check, this checks.
+#
+# NOTE: these checks are not yet REQUIRED by branch protection — that is a
+# P0.6 acceptance criterion and the command is in ssot/10-quality/git-workflow.md.
+# Until it runs, "CI green" is a convention rather than a merge precondition.
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: pr-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '24'
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Fast, no-infrastructure checks. These fan out in parallel.
+  # ---------------------------------------------------------------------------
+  static:
+    name: static
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: lint
+        run: pnpm lint
+
+      - name: typecheck (strict)
+        run: pnpm -r typecheck
+
+      # THE check that keeps ssot/ authoritative. A failure here means someone
+      # edited a generated copy — the fix is to change the SSOT, never the copy.
+      - name: ssot drift
+        run: pnpm ssot:check
+
+      - name: design token contrast
+        run: pnpm contrast:check
+
+  secrets:
+    name: secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # gitleaks needs history to catch a secret introduced in an earlier commit.
+          fetch-depth: 0
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ---------------------------------------------------------------------------
+  # Tests. integration and invariants SHARE one database spin-up — run serially
+  # with separate spin-ups, the pipeline exceeds its 10-minute budget before any
+  # runner queue time (ARCH-ADV A9).
+  # ---------------------------------------------------------------------------
+  test:
+    name: test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        # MUST bundle both TimescaleDB and pgvector (decision D10).
+        image: timescale/timescaledb-ha:pg16
+        env:
+          POSTGRES_USER: grims
+          POSTGRES_PASSWORD: devpassword
+          POSTGRES_DB: grimssquad
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U grims -d grimssquad"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+      meilisearch:
+        image: getmeili/meilisearch:v1.11
+        env:
+          MEILI_MASTER_KEY: devmasterkey
+          MEILI_ENV: development
+        ports: ['7700:7700']
+
+    env:
+      DATABASE_URL: postgresql://grims:devpassword@localhost:5432/grimssquad?schema=public
+      REDIS_URL: redis://localhost:6379
+      MEILI_HOST: http://localhost:7700
+      MEILI_MASTER_KEY: devmasterkey
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # migrate deploy, NOT migrate dev — the latter wants a shadow database and
+      # hangs against timescaledb-ha (found in P0.2).
+      - name: apply migrations
+        run: pnpm --filter @grims/db exec prisma migrate deploy
+
+      - name: generate prisma client
+        run: pnpm --filter @grims/db exec prisma generate
+
+      - name: unit + integration
+        run: pnpm test
+
+      # An invariant without a passing @INV-nnn test is an unbuilt invariant.
+      # Phased by `due:Pn` so the gate is satisfiable from P0 (ARCH-ADV A1).
+      - name: invariant coverage
+        run: pnpm invariants:check
+
+  build:
+    name: build
+    runs-on: ubuntu-latest
+    needs: [static]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @grims/db exec prisma generate
+      - run: pnpm build
+
+  audit:
+    name: dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Fails only on a HIGH/CRITICAL advisory that has a fix available.
+      - run: pnpm audit --audit-level high
