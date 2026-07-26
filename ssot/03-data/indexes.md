@@ -148,7 +148,7 @@ CREATE INDEX knowledge_chunks_embedding_idx
 ```
 **Build this only after the initial bulk index load.** Building HNSW on an empty table then inserting is far slower than the reverse.
 
-⚠ The vector **dimension must equal the embedding model's output width**. See decision D16 in `STATUS.md` — the source spec states `vector(1024)` while pinning `nomic-embed-text`, which emits 768. Resolve before P8.9; changing it later forces a full re-index.
+**Dimension is 768**, matching `nomic-embed-text` (resolved 2026-07-26). The source spec said `vector(1024)` while pinning a 768-dimension model, which would have failed on every insert. Since the embedding model is pinned forever, this dimension is effectively immutable — changing either forces a full re-index of every chunk.
 
 The composite retrieval filter is the security-relevant one — the visibility predicate must be evaluated **with** the ANN scan, not after it:
 ```sql

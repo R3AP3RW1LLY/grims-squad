@@ -97,7 +97,7 @@ Final: top 8 chunks into context, each wrapped in <retrieved> tags (06-ai/prompt
 | `FORUM_VIEW_OFFICER` | `['public', 'squadron', 'officer']` |
 | own content | plus `private` rows **owned by that caller**, applied as a row-level ownership predicate — not as a visibility value |
 
-**Category-specific permissions beyond the three tiers** (for example BGS Intelligence gated on `BGS_REPORT`) are handled by storing the category's `viewPerm` on the chunk's `metadata` and adding a mask test to the predicate. **The three-value `visibility` enum is a fast coarse filter, not the whole check** — a design that relied on the enum alone would leak the moment a category used a custom mask.
+**Category-specific permissions beyond the three tiers** — for example *Site & Infrastructure* gated on `SITE_CONFIG` — are carried in the dedicated `knowledge_chunks.view_perm_mask` column and tested in the query above. **The `Visibility` enum is a fast coarse filter, not the whole check**; a design relying on the enum alone leaks the moment a category uses a custom mask, which is exactly what RED-TEAM R1 found.
 
 ### The Meilisearch leg needs the same protection, and it is easy to forget
 The BM25 leg reads a **second copy of the ACL** in Meilisearch — a separate mirror, updated by a
@@ -143,7 +143,7 @@ Additional cases in the same suite:
 ## Embedding and re-index economics
 
 - **The embedding model is pinned forever.** Changing `nomic-embed-text` invalidates every vector and forces a full re-index (ADR-011).
-- ⚠ **Dimension conflict, decision D16:** the spec declares `vector(1024)` while pinning a 768-dimension model. **Resolve before P8.9.**
+- **Dimension: 768**, matching `nomic-embed-text` (resolved 2026-07-26). Pinned together and effectively immutable.
 - Incremental indexing runs on **instance A's co-resident embedder** — small, frequent, low latency.
 - **Bulk backfill runs on instance B overnight**, arbiter-gated. A full re-index of a mature forum is hours of embedding; it belongs on the free card while nobody is waiting.
 - Re-index jobs are idempotent and keyed by `(sourceType, sourceId)`, so a duplicate enqueue is harmless.

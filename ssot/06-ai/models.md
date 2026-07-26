@@ -7,13 +7,13 @@ Decision and rationale: ADR-011. This file is the operational configuration.
 | | Instance A — RTX 3060 | Instance B — RTX 5070 Ti |
 |---|---|---|
 | Architecture / CC | Ampere GA106 / **8.6** | Blackwell GB203 / **12.0** |
-| VRAM | **12 GB** *(confirm — decision D8)* | 16 GB |
+| VRAM | **12 GB** — confirmed 2026-07-26 | 16 GB |
 | Memory bandwidth | 360 GB/s | 896 GB/s |
 | TGP | 170 W | 300 W |
 | Role | **Interactive, resident 24/7, never contended** | Batch/overflow, **yields to the game** |
 | Port | `127.0.0.1:11434` | `127.0.0.1:11435` |
 
-**Confirm the 3060 variant before anything else** — the 8 GB 3060 and the 3060 Ti both exist and change the model tier:
+The 3060 variant is **confirmed 12 GB**, so the 12 GB column below is operative. Still run this at P8.1 — it is also how the **GPU UUIDs** for pinning are obtained, and numeric indices reorder across reboots:
 ```bash
 nvidia-smi --query-gpu=index,name,memory.total,uuid --format=csv
 ```
@@ -117,7 +117,7 @@ Record the results in `STATUS.md`. This is also how decision D9 (`qwen3:14b` vs 
 
 **Changing `nomic-embed-text` invalidates every vector in `knowledge_chunks` and forces a full re-index.** Treat it as a permanent architectural commitment, not a tunable.
 
-⚠ **Dimension conflict — decision D16.** The source spec's DDL declares `vector(1024)` while pinning `nomic-embed-text`, which emits **768**. The column must equal the model's output width or every insert fails. **Resolve before P8.9** — either value forces a full re-index if changed later. See `STATUS.md`.
+**Dimension: 768**, matching `nomic-embed-text` (resolved 2026-07-26). The source spec declared `vector(1024)` against a 768-dimension model, which would have failed on every insert. `knowledge_chunks.embedding` is `vector(768)` and both are now immutable together. See `STATUS.md`.
 
 ## Rate limits
 
