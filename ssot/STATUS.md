@@ -2,16 +2,18 @@
 _Last updated: 2026-07-25 by agent (SSOT bootstrap)_
 
 ## Current position
-Phase: **P0 — Foundations, IN PROGRESS**
-Done:  P0.1 · P0.2 · P0.3 · P0.6 · P0.8
-Next:  **P0.4** — API skeleton with `/v1/health`
-Then:  P0.5 — web skeleton and design tokens
-Blocked: **P0.7** (production deploy) — needs the Vultr API key and DNS pointed at Cloudflare (D22)
+Phase: **P0 — Foundations, 7 of 8 done**
+Done:  P0.1 · P0.2 · P0.3 · P0.4 · P0.5 · P0.6 · P0.8
+Blocked: **P0.7** (production deploy) — the ONLY remaining task. Needs the Vultr API key and DNS pointed at Cloudflare (D22).
+Next:   P0.7 when the key arrives, then **P1 — Identity & shell**
+
+Local dev: `docker compose -f infra/docker/compose.dev.yml up -d`, then `pnpm dev`.
+**Website: http://localhost:5000** · API: http://localhost:5001/v1/health
 
 ## Phase completion
 | Phase | Name | Status | Completed |
 |-------|------|--------|-----------|
-| P0 | Foundations | **IN_PROGRESS** | 5 of 8 tasks |
+| P0 | Foundations | **IN_PROGRESS** | 7 of 8 tasks — only P0.7 (deploy) remains |
 | P1 | Identity & shell | NOT_STARTED | — |
 | P2 | Forums | NOT_STARTED | — |
 | P3 | Telemetry spine | NOT_STARTED | — |
@@ -110,5 +112,6 @@ invariant gate that would have been switched off in week one.
 ## Session handoff notes
 _Newest first. One line per session that changed state._
 
+- **2026-07-26 · agent** — P0.4 and P0.5 completed. API on :5001 with a health endpoint verified against the real stack in all three states. Website live on :5000, themed from `tokens.json`, accessibility criteria asserted against the rendered HTML. **7 of 8 P0 tasks done; only P0.7 (deploy) remains, blocked on the Vultr key.**
 - **2026-07-26 · agent** — P0 started and 5 of 8 tasks completed (P0.1, P0.2, P0.3, P0.6, P0.8), merged as PR #7 with all 5 CI jobs green. Node pinned to 24 LTS. Database live with 56 tables, TimescaleDB hypertable and every hand-written index. 35 tests passing. The SSOT drift check is proven to fail on an edited copy, not merely assumed to. **P0.4 (API) and P0.5 (web) remain; P0.7 (deploy) is blocked on the Vultr key.**
 - **2026-07-25 · agent** — SSOT bootstrapped from `docs/grims-squad-build-spec.md`. 21 ADRs, 45 invariants, validated schema, contracts and a 90-task graph. **Then subjected to an independent three-panel adversarial review (ARCH-ADV, RED-TEAM, DATA-INTEGRITY-ADV): 25 findings, 10 of them blockers, all confirmed and all resolved** — see `10-quality/review-log.md`. Schema, permissions and invariants changed materially as a result; re-validated after. Nothing built. P0 not started — awaiting human review and the D-series answers marked `BLOCKS P0`.
