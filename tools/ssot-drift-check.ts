@@ -124,6 +124,19 @@ function phaseIndex(p: string): number {
   return PHASE_ORDER.indexOf(p as (typeof PHASE_ORDER)[number]);
 }
 
+/**
+ * Whether STATUS declares the current phase still underway.
+ *
+ * Deliberately fails CLOSED: anything other than an explicit IN_PROGRESS marker
+ * is read as "phase complete", which enforces the phase's invariants. Getting
+ * this backwards would let a typo in STATUS.md silently disable the gate, and a
+ * gate that can be turned off by a typo is not a gate.
+ */
+function phaseInProgress(): boolean {
+  const status = readFileSync(resolve(REPO, 'ssot/STATUS.md'), 'utf8');
+  return /^Phase:\s*\*\*P\d[^*]*IN[_ ]PROGRESS/im.test(status);
+}
+
 const invariantsMd = readFileSync(resolve(REPO, 'ssot/02-domain/invariants.md'), 'utf8');
 interface DeclaredInvariant {
   readonly id: string;
@@ -154,9 +167,29 @@ if (declared.length === 0) {
   fail('No invariants parsed from invariants.md', 'The format may have changed.');
 } else {
   const phase = currentPhase();
-  const due =
-    phase === 'PRE' ? [] : declared.filter((i) => phaseIndex(i.due) <= phaseIndex(phase));
-  const notYet = declared.length - due.length;
+  const inProgress = phaseInProgress();
+
+  /**
+   * An invariant due:Pn must have a test before Pn is EXITED, not before it is
+   * entered. Enforcing on entry is unsatisfiable by construction: the day P1
+   * starts, none of P1's invariants can possibly have tests yet, CI is red for
+   * the whole phase, and the first person to need a green build switches the
+   * gate off. That is A1 all over again, one phase later.
+   *
+   * So while a phase is IN_PROGRESS its own invariants are reported as
+   * OUTSTANDING but do not fail. They become hard failures the moment STATUS
+   * stops saying IN_PROGRESS — which is exactly the phase-exit checkpoint, and
+   * is self-enforcing because advancing to P2 makes every P1 invariant
+   * strictly-before and therefore mandatory. Nobody has to remember to tighten
+   * anything.
+   */
+  const enforcedThrough = inProgress ? phaseIndex(phase) - 1 : phaseIndex(phase);
+  const due = phase === 'PRE' ? [] : declared.filter((i) => phaseIndex(i.due) <= enforcedThrough);
+  const outstanding =
+    phase === 'PRE' || !inProgress
+      ? []
+      : declared.filter((i) => phaseIndex(i.due) === phaseIndex(phase));
+  const notYet = declared.length - due.length - outstanding.length;
 
   // Collect every @INV-nnn tag present in the test suite.
   const tagged = new Set<string>();
@@ -180,14 +213,35 @@ if (declared.length === 0) {
       ].join('\n'),
     );
   } else {
-    ok(
-      `invariants: ${due.length} due by ${phase}, ${due.length} covered` +
-        (notYet > 0 ? dim(` · ${notYet} not yet due`) : ''),
-    );
+    ok(`invariants: ${due.length} enforced, ${due.length} covered`);
   }
+
+  // Current-phase invariants: listed individually and by name, every run. A
+  // count alone ("7 outstanding") is the kind of number that stops being read,
+  // and this list is the phase's actual remaining work.
+  if (outstanding.length > 0) {
+    const covered = outstanding.filter((i) => tagged.has(i.id));
+    const open = outstanding.filter((i) => !tagged.has(i.id));
+    console.log(
+      dim(
+        `        ${phase} in progress — ${covered.length}/${outstanding.length} of its invariants covered.` +
+          ` These become HARD FAILURES at ${phase} exit.`,
+      ),
+    );
+    if (open.length > 0) {
+      console.log(dim(`        Still open: ${open.map((i) => i.id).join(', ')}`));
+    }
+  }
+
   // Not-yet-due invariants are reported as a COUNT, never as a pass.
   if (notYet > 0) {
-    const upcoming = [...new Set(declared.filter((i) => !due.includes(i)).map((i) => i.due))].sort();
+    const upcoming = [
+      ...new Set(
+        declared
+          .filter((i) => !due.includes(i) && !outstanding.includes(i))
+          .map((i) => i.due),
+      ),
+    ].sort();
     console.log(dim(`        ${notYet} invariant(s) not yet due (${upcoming.join(', ')})`));
   }
 }

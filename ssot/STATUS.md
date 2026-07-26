@@ -2,10 +2,14 @@
 _Last updated: 2026-07-25 by agent (SSOT bootstrap)_
 
 ## Current position
-Phase: **P0 — Foundations, 7 of 8 done**
-Done:  P0.1 · P0.2 · P0.3 · P0.4 · P0.5 · P0.6 · P0.8
-Blocked: **P0.7** (production deploy) — the ONLY remaining task. Needs the Vultr API key and DNS pointed at Cloudflare (D22).
-Next:   P0.7 when the key arrives, then **P1 — Identity & shell**
+Phase: **P1 — Identity & shell, IN PROGRESS**
+P0:     7 of 8 done. **P0.7 (deploy) DEFERRED by the human, 2026-07-26** — no infrastructure work for now; development continues locally.
+Next:   P1.2 (sessions) → P1.3 (permission engine)
+Done:   **P1.1 Discord OAuth** — logic complete and green against the fake; the real adapter is `@unverified`.
+
+> **P0 was not formally exited.** Two of its exit criteria ("landing page live over HTTPS", "/v1/health all-green in production") require P0.7 and therefore cannot be met. The human explicitly authorised proceeding without infrastructure. This is recorded rather than glossed over: P0 exit is **conditionally met, pending deploy**, and P0.7 plus those two criteria must be closed before any production claim is made.
+
+**Working locally without Discord/Frontier/Inara credentials.** Every external adapter is built against its fake, is marked `@unverified`, and appears in the table above. A P1 exit still requires live verification — building against a fake proves the abstraction, not the contract (ADR-013).
 
 Local dev: `docker compose -f infra/docker/compose.dev.yml up -d`, then `pnpm dev`.
 **Website: http://localhost:5000** · API: http://localhost:5001/v1/health
@@ -13,8 +17,8 @@ Local dev: `docker compose -f infra/docker/compose.dev.yml up -d`, then `pnpm de
 ## Phase completion
 | Phase | Name | Status | Completed |
 |-------|------|--------|-----------|
-| P0 | Foundations | **IN_PROGRESS** | 7 of 8 tasks — only P0.7 (deploy) remains |
-| P1 | Identity & shell | NOT_STARTED | — |
+| P0 | Foundations | **CONDITIONALLY DONE** | 7 of 8 · P0.7 deferred by the human |
+| P1 | Identity & shell | **IN_PROGRESS** | — |
 | P2 | Forums | NOT_STARTED | — |
 | P3 | Telemetry spine | NOT_STARTED | — |
 | P4 | BGS console | NOT_STARTED | — |
@@ -54,6 +58,8 @@ _Adapters written from documentation, not yet tested against the live API. Every
 | EDDN | `tcp://eddn.edcd.io:9500` | NO | NO | P3.4 |
 | Spansh | job submit + poll, dumps | NO | NO | P3.6 |
 | Frontier cAPI | OAuth2 PKCE + `/profile` | NO | NO | P1.8 |
+| Discord | `oauth2/token`, `/users/@me` | **YES** | NO | P1.1 |
+| Discord | `/users/@me/guilds/{id}/member` | **YES** | NO | P1.1 |
 | Inara | `getCommanderProfile` | NO | NO | P1.8b |
 | Discord | OAuth2 + Gateway + REST | NO | NO | P1.1 |
 
