@@ -247,6 +247,115 @@ body {
 }
 
 /* ========================================================================== */
+/*  GALAXY MAP — the hero backdrop                                            */
+/* ========================================================================== */
+
+.galaxy-map {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  /*
+   * Fades the map out toward the left, where the headline sits. This is a
+   * CONTRAST measure, not a stylistic one: white-on-busy fails WCAG no matter
+   * what the token ratios say, and the h1 must sit on near-solid void.
+   */
+  mask-image: linear-gradient(to right, transparent 0%, black 34%, black 100%);
+  -webkit-mask-image: linear-gradient(to right, transparent 0%, black 34%, black 100%);
+}
+
+/* A second scrim in the other direction so the instrument strip stays legible. */
+.galaxy-map::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    to bottom,
+    transparent 40%,
+    color-mix(in srgb, var(--color-surface-void) 88%, transparent) 100%
+  );
+}
+
+.gm-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  opacity: 0.85;
+}
+
+/* Stars breathe very slightly, at different rates, so the field feels alive
+   without anything actually moving. */
+.gm-star {
+  animation: gm-twinkle 6s ease-in-out infinite;
+}
+.gm-star:nth-of-type(3n) { animation-duration: 8.5s; animation-delay: -2s; }
+.gm-star:nth-of-type(4n) { animation-duration: 5s; animation-delay: -3.5s; }
+
+@keyframes gm-twinkle {
+  0%, 100% { opacity: 0.72; }
+  50%      { opacity: 1; }
+}
+
+/* Lanes flow, like the map's route rendering. */
+.gm-lane {
+  animation: gm-lane-flow 3s linear infinite;
+}
+
+@keyframes gm-lane-flow {
+  to { stroke-dashoffset: -16; }
+}
+
+.gm-reticle {
+  animation: spin 24s linear infinite;
+}
+
+/*
+ * TRAFFIC.
+ *
+ * `offset-path` is gated behind @supports so an unsupporting browser gets a
+ * clean static map rather than a row of ships parked at the origin — a broken
+ * ornament reads as a broken site.
+ */
+.gm-ship,
+.gm-jump {
+  opacity: 0;
+}
+
+@supports (offset-path: path('M0 0 L1 1')) {
+  .gm-ship {
+    offset-path: var(--gm-path);
+    /* Keeps the hull nose-first through every curve. */
+    offset-rotate: auto;
+    animation-name: gm-transit;
+    animation-timing-function: cubic-bezier(0.45, 0, 0.55, 1);
+    animation-iteration-count: infinite;
+  }
+
+  .gm-jump {
+    animation-name: gm-jump-flare;
+    animation-timing-function: ease-out;
+    animation-iteration-count: infinite;
+    transform-box: fill-box;
+    transform-origin: center;
+  }
+}
+
+@keyframes gm-transit {
+  /* Arrives out of witchspace, runs the lane, jumps out at the far end. */
+  0%   { offset-distance: 0%;   opacity: 0; }
+  5%   { opacity: 1; }
+  82%  { opacity: 1; }
+  92%  { offset-distance: 100%; opacity: 0; }
+  100% { offset-distance: 100%; opacity: 0; }
+}
+
+@keyframes gm-jump-flare {
+  0%, 80% { opacity: 0; transform: scale(0.3); }
+  88%     { opacity: 0.9; transform: scale(1); }
+  100%    { opacity: 0; transform: scale(2.6); }
+}
+
+/* ========================================================================== */
 /*  MOTION & ENTRANCE                                                         */
 /* ========================================================================== */
 
@@ -317,6 +426,18 @@ body {
   .scanlines::after { display: none; }
   .deepfield::before,
   .deepfield::after { animation: none; }
+
+  /*
+   * The global rule above collapses durations to 0.01ms, which would leave the
+   * ships snapped to the END of their lanes — visible, wrong, and still moving
+   * every time the iteration restarts. Removing them entirely leaves a clean
+   * static star chart, which is what someone who asked for less motion wants.
+   */
+  .gm-ship,
+  .gm-jump,
+  .gm-reticle,
+  .gm-lane { display: none; }
+  .gm-star { opacity: 0.85; }
 }
 
 /* prefers-contrast: more raises text contrast and drops decorative glow. */
