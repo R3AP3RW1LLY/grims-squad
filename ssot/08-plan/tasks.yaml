@@ -139,6 +139,7 @@ phase_P0:
     acceptance:
       - "PR pipeline runs lint, typecheck, unit, integration, invariants, coverage, ssot-drift, contract, secret-scan, audit, Trivy and build"
       - "A deliberately-failing PR is blocked"
+      - "MANDATORY: branch protection on main is updated to REQUIRE these checks. Until this runs, protection requires a PR but verifies nothing — `CI green` is a convention, not a merge precondition. Command in 10-quality/git-workflow.md"
       - "Editing packages/db/prisma/schema.prisma alone FAILS the ssot-drift check"
       - "Editing packages/shared/src/permissions.ts alone FAILS the ssot-drift check"
       - "Changing a token so a contrast pair drops below AA FAILS the contrast check"
