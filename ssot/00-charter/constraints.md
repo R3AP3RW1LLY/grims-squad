@@ -137,7 +137,7 @@ full stacks is decided by the OOM killer, which selects by RSS — and the large
 
 **Staging is deploy-gated on production memory headroom.** A merge to `main` deploys staging
 *automatically* — the one deploy path with no human gate, and the path ADR-018 lets an agent
-trigger alone. Booting a second Postgres running 54 migrations plus a second Meilisearch while
+trigger alone. Booting a second Postgres running 56 tables of migrations plus a second Meilisearch while
 production is mid-`REFRESH MATERIALIZED VIEW` is how an autonomous staging deploy kills the
 production database, after which the pipeline's auto-rollback reverts an application version that
 was never the cause. The deploy step therefore **checks free memory first and refuses below

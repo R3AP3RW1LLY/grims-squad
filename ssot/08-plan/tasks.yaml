@@ -55,9 +55,11 @@ phase_P0:
       - packages/db/src/client.ts
     acceptance:
       - "packages/db/prisma/schema.prisma is BYTE-IDENTICAL to ssot/03-data/schema.prisma"
-      - "pnpm db:migrate:dev creates all 54 tables; psql \\dt lists them"
+      - "pnpm db:migrate:dev creates all 56 tables; psql \\dt lists them"
       - "Every hand-written index in ssot/03-data/indexes.md exists — asserted by a query against pg_indexes"
-      - "citext, cube, vector and pgcrypto extensions are installed"
+      - "citext, cube, vector, pgcrypto AND timescaledb extensions are installed"
+      - "The image is timescale/timescaledb-ha:pg16 - stock pgvector/pgvector lacks TimescaleDB and stock timescaledb lacks pgvector (decision D10)"
+      - "market_history is a hypertable with a 7-day compression policy and a 90-day retention policy"
       - "The partial unique index on cmdr_verifications rejects a second active claim (INV-005)"
       - "The tsvector generated column on forum_posts populates on insert"
     notes: >
@@ -387,6 +389,31 @@ phase_P1:
       a third party's discretion.
     ssot_updates: [STATUS.md]
 
+  - id: P1.10
+    phase: P1
+    name: Mandatory TOTP 2FA for officers and above
+    depends_on: [P1.2, P1.3]
+    estimate_hours: 6
+    risk_tier: 3
+    files:
+      - apps/api/src/auth/totp.service.ts
+      - apps/api/src/auth/totp.controller.ts
+      - apps/web/app/settings/security/page.tsx
+    acceptance:
+      - "An account holding FORUM_VIEW_OFFICER or above cannot perform a privileged action until TOTP is enrolled - enrolment is forced, not suggested"
+      - "Enrolment issues single-use recovery codes, displayed ONCE and stored hashed"
+      - "MANDATORY: TOTP secrets and recovery codes are encrypted at rest and never appear in logs or API responses (INV-012)"
+      - "A tier-3 action (role grant, site config, AI kill switch) requires a fresh step-up challenge even within a live session"
+      - "TOTP verification is rate-limited and locks out after repeated failure - an unthrottled 6-digit code is brute-forceable"
+      - "Replaying a previously-used TOTP code within its window is REJECTED"
+      - "Losing the device is recoverable by a sysadmin, and that recovery is audited"
+    notes: >
+      Built in P1 rather than deferred (decision D13). Officers can moderate, set BGS orders,
+      manage members and read the audit log - Discord OAuth alone means a compromised Discord
+      account is a compromised officer account. Retrofitting auth is always worse than building
+      it in.
+    ssot_updates: [STATUS.md]
+
   - id: P1.9
     phase: P1
     name: Public landing with live stats
@@ -479,6 +506,7 @@ phase_P2:
       - "watch, track and mute behave differently and mute genuinely suppresses"
       - "A blocked DM falls back to in-app without retrying into a rate limit"
       - "Delivery failure is retried and visible, never silently dropped"
+      - "NO EMAIL CHANNEL is built (decision D11). Channels are in_app and discord_dm only; the enum carries no email value"
       - "A user cannot subscribe to a thread they cannot view"
       - "MANDATORY: moving a thread to a more restrictive category PRUNES subscriptions whose holders no longer satisfy the destination viewPerm, AND fan-out re-checks each recipient's current mask at send time. A member subscribed before the move receives no notification, no DM and no WebSocket event (INV-039)"
     blocked_by_decisions: [D11]

@@ -19,7 +19,7 @@ pnpm install
 cp .env.example .env            # placeholders only — fill in local values
 docker compose -f infra/docker/compose.dev.yml up -d   # postgres, redis, meilisearch
 
-pnpm db:migrate:dev             # creates all 54 tables + hand-written indexes
+pnpm db:migrate:dev             # creates all 56 tables + hand-written indexes
 pnpm db:seed                    # roles, categories, site config
 pnpm db:seed:reference          # FDevIDs commodity/module/ship names
 pnpm db:seed:dev                # deterministic fixtures — NEVER runs in production
@@ -34,7 +34,7 @@ curl -s localhost:3000/v1/health | jq
 # expect: status "ok", every check "ok"
 
 docker compose -f infra/docker/compose.dev.yml exec postgres \
-  psql -U grims -d grimssquad -c '\dt' | wc -l      # expect 54 tables + header
+  psql -U grims -d grimssquad -c '\dt' | wc -l      # expect 56 tables + header
 
 # The hand-written indexes are the easiest thing to forget:
 docker compose -f infra/docker/compose.dev.yml exec postgres \
@@ -94,7 +94,7 @@ If any of those five are missing, the migration is incomplete — see `03-data/i
 | `pnpm install` fails on a workspace protocol | Wrong pnpm major | Install pnpm 9+ |
 | `prisma validate` rejects `url = env(...)` | Prisma 7 installed | Pin to `prisma@6` (D17) |
 | Migration succeeds but a partial index is missing | Prisma cannot express partial indexes | Add the raw SQL from `03-data/indexes.md` to the migration |
-| `type "vector" does not exist` | pgvector extension missing | Use the `pgvector/pgvector:pg16` image, not stock postgres |
+| `type "vector" does not exist` | pgvector extension missing | Use the `timescale/timescaledb-ha:pg16` image (bundles pgvector AND TimescaleDB), not stock postgres |
 | `type "citext" does not exist` | extension missing | `CREATE EXTENSION citext;` — it should be in the first migration |
 | Everyone appears to be a guest | **SERVER MEMBERS intent not enabled** | Enable it on the Discord application. This fails silently. |
 | `guild_roles` empty after login | Wrong OAuth scope | Must be `guilds.members.read`, not `guilds` |

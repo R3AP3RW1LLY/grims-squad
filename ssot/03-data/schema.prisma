@@ -255,10 +255,14 @@ enum TelemetryCategory {
 }
 
 /// Delivery channel for a notification fan-out.
+/// `email` is DELIBERATELY ABSENT (decision D11, 2026-07-26). The squadron lives in Discord and
+/// every notification already reaches members there, so building email would have added a
+/// provider, SPF/DKIM/DMARC records, bounce and complaint handling, and unsubscribe compliance
+/// for a channel nobody asked for. Re-adding an enum value later is a trivial additive
+/// migration; an unused value sitting here invites someone to wire it up.
 enum NotificationChannel {
   in_app
   discord_dm
-  email
 }
 
 /// Notification delivery state. Failure is retried and visible, never silently dropped.
@@ -882,7 +886,14 @@ model MarketOrder {
   @@map("market_orders")
 }
 
-/// Append-only price time series for sparklines. 90-day retention — unbounded growth is the failure mode.
+/// Append-only price time series for sparklines.
+/// ★ THIS IS A TIMESCALEDB HYPERTABLE (decision D10, 2026-07-26). ★ After the table is created,
+/// the migration runs `SELECT create_hypertable('market_history', 'observed_at')` plus a
+/// compression policy and a 90-day retention policy. Prisma cannot express any of that — see
+/// `indexes.md`. At a 500 ly prefilter the compression is what makes 90 days of history
+/// affordable on one disk.
+/// Consequence for operations: the Postgres image must carry **both** TimescaleDB and pgvector,
+/// and both extensions are in the restore path (`09-runbooks/backup-restore.md`).
 model MarketHistory {
   id         BigInt   @id @default(autoincrement())
   marketId   BigInt   @map("market_id")
