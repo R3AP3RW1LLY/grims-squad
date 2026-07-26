@@ -54,8 +54,13 @@ export class DiscordApiError extends Error {
     message: string,
     readonly httpStatus: number,
     readonly retryable: boolean,
+    options?: { cause?: unknown },
   ) {
-    super(message);
+    // The cause is carried for diagnosis (DNS, TLS, connection reset) but the
+    // MESSAGE is always ours. Discord echoes request parameters in some error
+    // bodies, which on the token endpoint can include the authorization code or
+    // the refresh token itself — so an upstream message must never become ours.
+    super(message, options);
     this.name = 'DiscordApiError';
   }
 }

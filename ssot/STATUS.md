@@ -4,7 +4,8 @@ _Last updated: 2026-07-25 by agent (SSOT bootstrap)_
 ## Current position
 Phase: **P1 — Identity & shell, IN PROGRESS**
 P0:     7 of 8 done. **P0.7 (deploy) DEFERRED by the human, 2026-07-26** — no infrastructure work for now; development continues locally.
-Next:   P1.1 → P1.2 → P1.3
+Next:   P1.2 (sessions) → P1.3 (permission engine)
+Done:   **P1.1 Discord OAuth** — logic complete and green against the fake; the real adapter is `@unverified`.
 
 > **P0 was not formally exited.** Two of its exit criteria ("landing page live over HTTPS", "/v1/health all-green in production") require P0.7 and therefore cannot be met. The human explicitly authorised proceeding without infrastructure. This is recorded rather than glossed over: P0 exit is **conditionally met, pending deploy**, and P0.7 plus those two criteria must be closed before any production claim is made.
 
@@ -57,6 +58,8 @@ _Adapters written from documentation, not yet tested against the live API. Every
 | EDDN | `tcp://eddn.edcd.io:9500` | NO | NO | P3.4 |
 | Spansh | job submit + poll, dumps | NO | NO | P3.6 |
 | Frontier cAPI | OAuth2 PKCE + `/profile` | NO | NO | P1.8 |
+| Discord | `oauth2/token`, `/users/@me` | **YES** | NO | P1.1 |
+| Discord | `/users/@me/guilds/{id}/member` | **YES** | NO | P1.1 |
 | Inara | `getCommanderProfile` | NO | NO | P1.8b |
 | Discord | OAuth2 + Gateway + REST | NO | NO | P1.1 |
 

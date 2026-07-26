@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { randomUUID } from 'node:crypto';
+import fastifyCookie from '@fastify/cookie';
 import { AppModule } from './app.module.js';
 import { GlobalExceptionFilter } from './common/exception.filter.js';
 import { logger } from './logging.js';
@@ -23,6 +24,9 @@ async function bootstrap(): Promise<void> {
     logger: false,
   });
 
+  // Needed by the OAuth nonce cookie that binds login state to the browser.
+  await app.register(fastifyCookie);
+
   app.useGlobalFilters(new GlobalExceptionFilter());
 
   // Echo the request ID back so a member can quote it in a bug report.
@@ -36,6 +40,11 @@ async function bootstrap(): Promise<void> {
 }
 
 bootstrap().catch((err: unknown) => {
+  // console.error, NOT the logger. Pino's pretty transport runs in a worker
+  // thread, and `process.exit` tears that thread down before it flushes — so a
+  // startup crash logged only through pino produces a silent exit code 1 with
+  // no message at all. That is precisely the moment you most need the message.
+  console.error('api failed to start:', err);
   logger.error({ err }, 'api failed to start');
   process.exit(1);
 });

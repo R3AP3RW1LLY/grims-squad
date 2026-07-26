@@ -386,11 +386,18 @@ model DiscordIdentity {
   accessTokenEnc  Bytes?    @map("access_token_enc")
   /// AES-256-GCM ciphertext. Never plaintext, never logged (INV-012).
   refreshTokenEnc Bytes?    @map("refresh_token_enc")
+  /// When the ACCESS token lapses (Discord issues ~7 days). Added 2026-07-26: without
+  /// it the refresh worker has no way to know which tokens are about to expire, so it
+  /// would have to refresh every row on every pass or wait for a 401 and refresh on
+  /// failure � the second of which loses role-sync until a member next logs in.
+  tokenExpiresAt  DateTime? @map("token_expires_at") @db.Timestamptz(6)
   syncedAt        DateTime  @default(now()) @map("synced_at") @db.Timestamptz(6)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([syncedAt])
+  /// The refresh worker's access path: "which tokens lapse soon?"
+  @@index([tokenExpiresAt])
   @@map("discord_identities")
 }
 

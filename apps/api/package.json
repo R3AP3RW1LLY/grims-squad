@@ -21,7 +21,9 @@
     "vitest": "^3.0.0"
   },
   "dependencies": {
+    "@fastify/cookie": "^11.1.2",
     "@grims/db": "workspace:*",
+    "@grims/ed-clients": "workspace:*",
     "@grims/shared": "workspace:*",
     "@nestjs/common": "^11.1.28",
     "@nestjs/core": "^11.1.28",

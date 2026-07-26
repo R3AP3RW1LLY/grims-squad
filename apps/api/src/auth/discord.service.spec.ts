@@ -112,9 +112,27 @@ describe('DiscordAuthService state validation', () => {
   });
 
   it('refuses to reuse a state that already completed a login', async () => {
+    discord.addMember('7', {});
     const { state, nonce } = svc.beginLogin('/forum');
-    await svc.completeLogin({ code: 'ok', state, nonce });
-    await expect(svc.completeLogin({ code: 'ok', state, nonce })).rejects.toThrow(/replay|used/i);
+    await svc.completeLogin({ code: 'code-for-7', state, nonce });
+    await expect(svc.completeLogin({ code: 'code-for-7', state, nonce })).rejects.toThrow(
+      /replay|used/i,
+    );
+  });
+
+  it('consumes the state even when the login is REFUSED', async () => {
+    // The state is burned before the exchange, not after a successful one. A
+    // captured callback URL is therefore single-use whatever its outcome —
+    // otherwise an attacker who intercepts one could keep retrying it until a
+    // transient Discord failure or a role change made it succeed.
+    discord.addOutsider('999');
+    const { state, nonce } = svc.beginLogin('/');
+    await expect(svc.completeLogin({ code: 'code-for-999', state, nonce })).rejects.toMatchObject({
+      code: ErrorCode.DISCORD_GUILD_MEMBERSHIP_REQUIRED,
+    });
+    await expect(svc.completeLogin({ code: 'code-for-999', state, nonce })).rejects.toThrow(
+      /replay|used/i,
+    );
   });
 });
 
