@@ -25,6 +25,23 @@ const KEY = 'authz:requires-2fa';
  */
 export const RequiresTwoFactor = () => SetMetadata(KEY, true);
 
+const FRESH_KEY = 'authz:requires-fresh-2fa';
+
+/**
+ * Requires a step-up performed in the last few MINUTES, not the last quarter hour.
+ *
+ * ★ P1.10 ACCEPTANCE CRITERION ★
+ * "A tier-3 action (role grant, site config, AI kill switch) requires a fresh
+ * step-up challenge even within a live session."
+ *
+ * The ordinary console window is fifteen minutes, which is right for reading
+ * dashboards and wrong for handing somebody ROLE_MANAGE. An attacker who gets
+ * to a logged-in, stepped-up machine has a quarter of an hour to grant
+ * themselves everything; narrowing it to two minutes means they need the
+ * authenticator in their hand, which is the entire point of having one.
+ */
+export const RequiresFreshTwoFactor = () => SetMetadata(FRESH_KEY, true);
+
 /**
  * Refuses an admin route unless the caller has TOTP enrolled AND has satisfied
  * it recently in this session.
@@ -85,12 +102,34 @@ export class AdminGateGuard implements CanActivate {
       );
     }
 
+    // Tier-3 routes ask again, on a much shorter window. Checked AFTER the
+    // ordinary gate so the common case gives the ordinary message.
+    const needsFresh = this.reflector.getAllAndOverride<boolean>(FRESH_KEY, [
+      ctx.getHandler(),
+      ctx.getClass(),
+    ]);
+    if (needsFresh === true && !twoFactorFreshInSession(req, new Date(), FRESH_STEP_UP_TTL_MS)) {
+      throw new AppError(
+        ErrorCode.TWO_FACTOR_REQUIRED,
+        'This change needs a fresh authenticator code. Confirm it again to continue.',
+      );
+    }
+
     return true;
   }
 }
 
 /** How long a step-up lasts before the console asks again. */
 export const STEP_UP_TTL_MS = 15 * 60_000;
+
+/**
+ * The window for a TIER-3 action: granting roles, site config, AI kill switches.
+ *
+ * Two minutes. Long enough to preview a permission change and then save it,
+ * short enough that a stepped-up session left unattended is not a standing
+ * authorisation to grant anybody anything.
+ */
+export const FRESH_STEP_UP_TTL_MS = 2 * 60_000;
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -105,7 +144,11 @@ declare module 'fastify' {
  * Fifteen minutes. Long enough to work through the console without being
  * nagged, short enough that a session stolen an hour ago does not open it.
  */
-export function twoFactorFreshInSession(req: FastifyRequest, now: Date = new Date()): boolean {
+export function twoFactorFreshInSession(
+  req: FastifyRequest,
+  now: Date = new Date(),
+  windowMs: number = STEP_UP_TTL_MS,
+): boolean {
   const at = req.twoFactorAt;
   if (at === undefined) return false;
 
@@ -119,5 +162,5 @@ export function twoFactorFreshInSession(req: FastifyRequest, now: Date = new Dat
    * permanent bypass of the gate. Rejecting future timestamps costs nothing:
    * a legitimate one is never ahead of the server's own clock.
    */
-  return age >= 0 && age < STEP_UP_TTL_MS;
+  return age >= 0 && age < windowMs;
 }

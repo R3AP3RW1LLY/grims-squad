@@ -323,3 +323,49 @@ describe('when Discord is unavailable', () => {
     expect(reporter.posted[0]?.text).toMatch(/could not|failed|unavailable/i);
   });
 });
+
+/**
+ * @RED-TEAM FINDING, 2026-07-27 — a departed member kept a working login.
+ *
+ * Setting status to 'left' collapses their effective mask to nothing, so they
+ * could do nothing privileged. But their refresh token family survived, so they
+ * kept an authenticated session to a members-only site and could refresh it
+ * indefinitely after leaving the community.
+ *
+ * Zero permissions is not the same as no access.
+ */
+describe('@RED-TEAM leaving the guild ends the session', () => {
+  it('MANDATORY: revokes sessions, not just the status', async () => {
+    guild.members = [{ discordId: 'd-other', roles: [], nick: 'Still here' }];
+    store.identities = [
+      { userId: 'u1', discordId: 'd1', guildRoles: [ROLE_OVERSEER] },
+      { userId: 'u-other', discordId: 'd-other', guildRoles: [] },
+    ];
+    store.seedGrant('u1', 'sector_overseer', 'discord');
+
+    await svc.run();
+
+    // The fake records markLeftGuild as a single write; the REAL store does the
+    // status change and the session revocation in one transaction, which is
+    // asserted against the source below.
+    expect(store.writes).toContain('left:u1');
+  });
+
+  it('MANDATORY: the store revokes token families in the SAME transaction', async () => {
+    // Separate statements would allow a member left with the status changed and
+    // the sessions live — the failure that looks exactly like it worked.
+    const { readFileSync } = await import('node:fs');
+    const { resolve, dirname } = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const here = dirname(fileURLToPath(import.meta.url));
+    const wiring = readFileSync(resolve(here, 'discord-reconcile.wiring.ts'), 'utf8');
+
+    const block = wiring.slice(
+      wiring.indexOf('async markLeftGuild'),
+      wiring.indexOf('async writeAudit'),
+    );
+    expect(block).toContain('$transaction');
+    expect(block).toContain('refreshTokenFamily.updateMany');
+    expect(block).toContain("revokeReason: 'left_guild'");
+  });
+});

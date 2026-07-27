@@ -13,7 +13,11 @@ import {
 import type { FastifyRequest } from 'fastify';
 import { AppError, ErrorCode, Permission } from '@grims/shared';
 import { RequiresPermission, CloakAsNotFound } from '../authz/requires-permission.guard.js';
-import { AdminGateGuard, RequiresTwoFactor } from '../auth/admin-gate.guard.js';
+import {
+  AdminGateGuard,
+  RequiresTwoFactor,
+  RequiresFreshTwoFactor,
+} from '../auth/admin-gate.guard.js';
 import { User, type CurrentUser } from '../auth/current-user.js';
 import { verifyCsrf, readCsrfCookie } from '../common/csrf.js';
 import { ADMIN_STORE, ROLE_ADMIN, MAPPING_ADMIN } from './admin.tokens.js';
@@ -160,6 +164,8 @@ export class AdminController {
 
   @Post('roles/:id')
   @RequiresPermission(Permission.ROLE_MANAGE)
+  // TIER 3 (ADR-021): grants permissions, so it asks for the code again.
+  @RequiresFreshTwoFactor()
   async saveRole(
     @User() caller: CurrentUser | undefined,
     @Param('id') id: string,
@@ -171,6 +177,52 @@ export class AdminController {
     return this.roles.saveMask(id, readMask(body), actorId);
   }
 
+  /**
+   * Clears a member's second factor so they can enrol a new one.
+   *
+   * ★ P1.10: "Losing the device is recoverable by a sysadmin, and that recovery
+   * is audited." ★
+   *
+   * The realistic failure: an officer's phone is lost or wiped, their recovery
+   * codes were never saved, and they are now locked out of the console
+   * permanently. Without this the only remedy is a hand-written UPDATE, which
+   * is unaudited and exactly the thing the console exists to replace.
+   *
+   * SITE_CONFIG, not ROLE_MANAGE, and a FRESH step-up: this is the one action
+   * that can turn a two-factor account back into a one-factor account, so an
+   * attacker who reached it could strip the protection from every officer and
+   * then walk in behind them. It is the most dangerous button in the product.
+   *
+   * It does NOT grant access — it removes the enrolment, so the member is put
+   * back through the forced onboarding flow on their next sign-in.
+   */
+  @Post('members/:userId/reset-two-factor')
+  @RequiresPermission(Permission.SITE_CONFIG)
+  @RequiresFreshTwoFactor()
+  async resetTwoFactor(
+    @User() caller: CurrentUser | undefined,
+    @Param('userId') userId: string,
+    @Body() body: unknown,
+    @Req() req: FastifyRequest,
+  ): Promise<{ reset: true }> {
+    const actorId = requireUser(caller);
+    csrf(req);
+
+    const reason = readString(body as Record<string, unknown> | null, 'reason');
+    if (actorId === userId) {
+      // Resetting your OWN second factor from inside a session that required
+      // it is a way to launder a temporary compromise into a permanent one.
+      // Use a recovery code, or ask another sysadmin.
+      throw new AppError(
+        ErrorCode.PERMISSION_DENIED,
+        'You cannot reset your own second factor here. Use a recovery code, or ask another sysadmin.',
+      );
+    }
+
+    await this.store.resetTwoFactor(userId, actorId, reason);
+    return { reset: true };
+  }
+
   // ---------------------------------------------------------------- mappings
   @Get('mappings')
   @RequiresPermission(Permission.ROLE_MANAGE)
@@ -180,6 +232,8 @@ export class AdminController {
 
   @Post('mappings')
   @RequiresPermission(Permission.ROLE_MANAGE)
+  // TIER 3 (ADR-021): grants permissions, so it asks for the code again.
+  @RequiresFreshTwoFactor()
   async addMapping(
     @User() caller: CurrentUser | undefined,
     @Body() body: unknown,
@@ -194,6 +248,8 @@ export class AdminController {
 
   @Delete('mappings/:roleId/:discordRoleId')
   @RequiresPermission(Permission.ROLE_MANAGE)
+  // TIER 3 (ADR-021): grants permissions, so it asks for the code again.
+  @RequiresFreshTwoFactor()
   async removeMapping(
     @User() caller: CurrentUser | undefined,
     @Param('roleId') roleId: string,
