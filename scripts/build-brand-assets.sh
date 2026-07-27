@@ -87,9 +87,13 @@ magick -size 1200x630 "xc:#05070a" \
 # Backdrop knocked out, same as the badge. The footer is dark and the supplied
 # lockup carries a light grey gradient, so without this it renders as a pale
 # rectangle on the dark — which reads as a broken asset rather than a choice.
-magick "$SRC" -resize 720x -alpha set -channel RGBA -fuzz 24% -fill none \
-  -draw 'color 0,0 floodfill' -draw 'color 719,0 floodfill' \
-  -strip -define png:compression-level=9 "$OUT/lockup-720.png"
+# Two widths: 720 for the footer, 1200 for the hero where the lockup is the
+# centrepiece and has to stay sharp on a high-density display.
+for wpx in 720 1200; do
+  magick "$SRC" -resize "${wpx}x" -alpha set -channel RGBA -fuzz 24% -fill none \
+    -draw 'color 0,0 floodfill' -draw "color $((wpx - 1)),0 floodfill" \
+    -strip -define png:compression-level=9 "$OUT/lockup-${wpx}.png"
+done
 
 echo ""
 echo "  generated:"

@@ -256,12 +256,16 @@ body {
   overflow: hidden;
   pointer-events: none;
   /*
-   * Fades the map out toward the left, where the headline sits. This is a
-   * CONTRAST measure, not a stylistic one: white-on-busy fails WCAG no matter
-   * what the token ratios say, and the h1 must sit on near-solid void.
+   * The hero content is now CENTRED on the logo, so the old left-edge fade
+   * would have dimmed the map exactly where nothing sits and left it busiest
+   * directly behind the lockup. Faded from the centre outwards instead: the
+   * map is strongest at the edges and quietest behind the artwork.
+   *
+   * This is a CONTRAST measure, not a stylistic one — white-on-busy fails WCAG
+   * whatever the token ratios say.
    */
-  mask-image: linear-gradient(to right, transparent 0%, black 34%, black 100%);
-  -webkit-mask-image: linear-gradient(to right, transparent 0%, black 34%, black 100%);
+  mask-image: radial-gradient(ellipse 62% 68% at 50% 46%, transparent 12%, black 72%);
+  -webkit-mask-image: radial-gradient(ellipse 62% 68% at 50% 46%, transparent 12%, black 72%);
 }
 
 /* A second scrim in the other direction so the instrument strip stays legible. */
@@ -269,11 +273,19 @@ body {
   content: '';
   position: absolute;
   inset: 0;
-  background: linear-gradient(
-    to bottom,
-    transparent 40%,
-    color-mix(in srgb, var(--color-surface-void) 88%, transparent) 100%
-  );
+  /* A central scrim under the lockup, plus the bottom fade that keeps the
+     instrument strip legible. Two stops, one element. */
+  background:
+    radial-gradient(
+      ellipse 46% 52% at 50% 44%,
+      color-mix(in srgb, var(--color-surface-void) 82%, transparent) 0%,
+      transparent 70%
+    ),
+    linear-gradient(
+      to bottom,
+      transparent 40%,
+      color-mix(in srgb, var(--color-surface-void) 88%, transparent) 100%
+    );
 }
 
 .gm-label {
