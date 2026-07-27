@@ -10,3 +10,11 @@ export {
   PrismaReconcileStore,
   WebhookReporter,
 } from './jobs/discord-reconcile.wiring.js';
+export {
+  PromotionEngine,
+  formatReport,
+  type PromotionReport,
+  type LadderRung,
+  type MemberStanding,
+} from './jobs/promotion-run.js';
+export { readLadderFromSsot, PrismaPromotionStore } from './jobs/promotion-run.wiring.js';

@@ -99,7 +99,7 @@ describe('@INV-047 one ladder rank at a time, and every change audited', () => {
   });
 
   it('promotions cannot run before the floor', () => {
-    const floor = read('apps/bot/src/promotion-floor.ts');
+    const floor = read('packages/shared/src/promotion-floor.ts');
     expect(floor).toContain('2026-08-01T00:00:00.000Z');
     expect(floor).toMatch(/assertPromotionsPermitted/);
   });

@@ -4,3 +4,10 @@ export * from './permissions.js';
 export * from './errors.js';
 export * from './dto/common.js';
 export * from './redirect.js';
+
+export {
+  EARLIEST_PROMOTION_AT,
+  PromotionsNotYetPermittedError,
+  assertPromotionsPermitted,
+  promotionsPermitted,
+} from './promotion-floor.js';

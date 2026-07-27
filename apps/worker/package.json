@@ -10,7 +10,8 @@
     "test": "vitest run --passWithNoTests",
     "test:unit": "vitest run --passWithNoTests",
     "clean": "rm -rf dist *.tsbuildinfo",
-    "reconcile": "tsx src/main.ts"
+    "reconcile": "tsx src/main.ts",
+    "promote": "tsx src/promote.ts"
   },
   "devDependencies": {
     "@grims/config": "workspace:*",
