@@ -46,6 +46,25 @@ export interface IDiscordIdentityProvider {
    * two must never collapse together — one refuses a login, the other must not.
    */
   fetchGuildMember(accessToken: string, guildId: string): Promise<DiscordGuildMember | null>;
+
+  /**
+   * Adds a user to the guild WITH roles already applied, using their own
+   * `guilds.join` access token. One atomic call, so there is no window in which
+   * they are a member with no role.
+   *
+   * NOTE: the `roles` array REPLACES the member's roles. Only ever call this for
+   * someone who is not yet in the guild — for an existing member use
+   * `addRoleToMember`, or their existing ranks are silently stripped.
+   */
+  addGuildMember(
+    guildId: string,
+    userId: string,
+    userAccessToken: string,
+    roles: readonly string[],
+  ): Promise<void>;
+
+  /** Adds ONE role, leaving every other role the member holds untouched. */
+  addRoleToMember(guildId: string, userId: string, roleId: string): Promise<void>;
 }
 
 /** Thrown when Discord itself failed — never for a not-a-member result. */

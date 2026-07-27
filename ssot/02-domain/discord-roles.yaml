@@ -192,3 +192,33 @@ roles:
 # Those two readings disagree and the difference decides who can do what to
 # whom, so it is recorded as open rather than guessed. Until it is answered no
 # permission bundle is attached to any leadership role.
+
+# ---------------------------------------------------------------------------
+# ONBOARDING INTENTS (human decision, 2026-07-26)
+#
+# A visitor who is NOT yet in the Discord server picks one of these on the
+# website, and is added to the guild WITH the matching role already applied.
+#
+# ★ THIS LIST IS AN ALLOWLIST AND IS THE ONLY THING THE JOIN FLOW MAY GRANT. ★
+# The intent travels inside the HMAC-signed OAuth state, never as a mutable
+# query parameter, and is resolved to a role id here on the server. If it were
+# taken from the request, editing one parameter would self-assign Galactic
+# Admiral — which is why no other role may ever be added to this map without a
+# deliberate review of that path.
+onboardingIntents:
+  - intent: squadron
+    label: "Join the squadron"
+    description: "I want to fly with Grim's Squad."
+    roleId: '804027821986807860'   # Grim's Squad members (position 15)
+    roleName: "Grim's Squad members"
+
+  - intent: ally
+    label: "Ally or observer"
+    description: "I am from an allied squadron, or I just want to watch."
+    roleId: '892493916530671657'   # Allies (position 14)
+    roleName: 'Allies'
+
+# The bot sits at position 33: above both of these so it can assign them, and
+# below every leadership and reserved role (34-38) so it can never grant one.
+# That gap IS the security boundary — if the bot is ever moved above 34, a
+# leaked token could promote its holder to leadership.

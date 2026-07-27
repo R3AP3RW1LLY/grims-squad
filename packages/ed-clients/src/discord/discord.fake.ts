@@ -36,6 +36,8 @@ export class DiscordFake implements IDiscordIdentityProvider {
   #guildFailure: Error | null = null;
 
   lastIssued: DiscordTokenSet | null = null;
+  readonly addedMembers: Array<{ guildId: string; userId: string; roles: string[] }> = [];
+  #addFailure: Error | null = null;
 
   constructor(opts: { guildId: string }) {
     this.#guildId = opts.guildId;
@@ -74,6 +76,15 @@ export class DiscordFake implements IDiscordIdentityProvider {
       nick: null,
       inGuild: false,
     });
+  }
+
+  /** Simulates the bot lacking CREATE_INSTANT_INVITE. */
+  failAddMember(err: Error | null): void {
+    this.#addFailure = err;
+  }
+
+  rolesOf(discordUserId: string): string[] {
+    return [...(this.#members.get(discordUserId)?.roles ?? [])];
   }
 
   /** Simulates Discord being broken, which must never read as not-a-member. */
@@ -123,5 +134,31 @@ export class DiscordFake implements IDiscordIdentityProvider {
     const m = this.#members.get(id);
     if (m === undefined || !m.inGuild) return null;
     return { roles: [...m.roles], nick: m.nick, joinedAt: m.joinedAt };
+  }
+
+  async addGuildMember(
+    guildId: string,
+    userId: string,
+    _userAccessToken: string,
+    roles: readonly string[],
+  ): Promise<void> {
+    if (this.#addFailure !== null) throw this.#addFailure;
+    this.addedMembers.push({ guildId, userId, roles: [...roles] });
+    const m = this.#members.get(userId);
+    if (m === undefined) {
+      this.addMember(userId, { roles: [...roles] });
+    } else {
+      // Mirrors Discord: this REPLACES roles. The service must not call it for
+      // an existing member, and this fake makes that mistake visible.
+      m.roles = [...roles];
+      m.inGuild = true;
+    }
+  }
+
+  async addRoleToMember(_guildId: string, userId: string, roleId: string): Promise<void> {
+    if (this.#addFailure !== null) throw this.#addFailure;
+    const m = this.#members.get(userId);
+    if (m === undefined) throw new Error('fake: not a member');
+    if (!m.roles.includes(roleId)) m.roles.push(roleId);
   }
 }
