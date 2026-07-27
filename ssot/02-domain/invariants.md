@@ -163,7 +163,7 @@ property for but did not make structurally impossible.
 **INV-046** `SEC` `due:P1` · **A tenure or loyalty rank never grants a permission.** `SquadronRank.roleKey` is NULL for every rank of kind `tenure` or `loyalty`, and a member's effective mask is identical whether they are a Sergeant or a Grand Lord General.
 *Test:* compute the effective mask for a member at 1 month and at 14 months holding `GMSD: Legend`; assert the two masks are **equal** and equal to the `member` preset. Assert a `tenure`/`loyalty` rank row with a non-NULL `roleKey` fails a constraint. *(Human decision 2026-07-26 — time served must never confer moderation power.)*
 
-**INV-047** `DATA` `due:P1` · A tenure rank is **computed** from `guildJoinedAt`, never stored per user, so it cannot drift from the truth. A reserved rank has at most one active holder.
+**INV-047** `DATA` `due:P1` · A member holds **exactly one** ladder rank at a time, and every change to it is written to `audit_log` with the qualifying months that justified it. A reserved rank has at most one active holder.
 *Test:* move a member's `guildJoinedAt` back by 12 months; assert their displayed rank changes with no write to `rank_awards`. Assert a second active award of `galactic_admiral` is rejected.
 
 **INV-045** `OPS` `due:P3` · A batch write never loses good rows because of one bad row. Market rows whose parent station has not yet arrived are buffered and drained, not dropped, and the buffer depth is a monitored metric.
@@ -191,3 +191,14 @@ property for but did not make structurally impossible.
 Review-panel additions: INV-037, INV-041 (P1) · INV-039 (P2) · INV-042, INV-043, INV-044, INV-045 (P3) · INV-038, INV-040 (P8).
 
 Rank-model additions (human decision 2026-07-26): INV-046, INV-047 (P1).
+
+> **INV-047 was REWRITTEN on 2026-07-27.** It previously read: *"A tenure rank is
+> **computed** from `guildJoinedAt`, never stored per user, so it cannot drift
+> from the truth."* That described the old model, where time in the server alone
+> decided rank. The human replaced it with earned progression: a member advances
+> only by being active, so rank is now stored state.
+>
+> The original invariant existed to stop rank drifting from reality. That concern
+> is real and does not go away — it is now met by requiring an audit row for
+> every change, so a rank that looks wrong can always be traced to the months
+> that produced it. See `ssot/02-domain/rank-progression.yaml`.
