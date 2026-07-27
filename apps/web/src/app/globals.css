@@ -96,7 +96,6 @@ body {
     radial-gradient(1px 1px at 85% 15%, rgba(180, 210, 255, 0.5) 50%, transparent 50%),
     radial-gradient(1px 1px at 10% 70%, rgba(232, 238, 245, 0.4) 50%, transparent 50%);
   background-size: 220px 220px;
-  animation: drift-slow 240s linear infinite;
 }
 
 /* Near stars: sparse, brighter, faster — the parallax cue. */
@@ -106,7 +105,6 @@ body {
     radial-gradient(2px 2px at 80% 25%, rgba(255, 220, 180, 0.8) 45%, transparent 50%),
     radial-gradient(1.5px 1.5px at 55% 75%, rgba(180, 220, 255, 0.85) 45%, transparent 50%);
   background-size: 480px 480px;
-  animation: drift-fast 140s linear infinite;
 }
 
 /* Nebulae: two enormous, very soft washes — the only warm light in the scene. */
@@ -115,20 +113,14 @@ body {
   inset: 0;
   z-index: -1;
   pointer-events: none;
+  /* Four washes rather than three, and warmer. With nothing moving, colour and
+     depth carry the scene — a flat field would read as an empty background
+     rather than a deliberate one. */
   background:
-    radial-gradient(60rem 40rem at 12% -10%, rgba(255, 113, 0, 0.13), transparent 60%),
-    radial-gradient(50rem 38rem at 95% 8%, rgba(0, 200, 255, 0.1), transparent 62%),
-    radial-gradient(70rem 50rem at 50% 115%, rgba(120, 60, 200, 0.1), transparent 60%);
-}
-
-@keyframes drift-slow {
-  from { transform: translate3d(0, 0, 0); }
-  to   { transform: translate3d(-220px, -220px, 0); }
-}
-
-@keyframes drift-fast {
-  from { transform: translate3d(0, 0, 0); }
-  to   { transform: translate3d(480px, -480px, 0); }
+    radial-gradient(62rem 42rem at 10% -12%, rgba(255, 113, 0, 0.16), transparent 60%),
+    radial-gradient(52rem 40rem at 96% 6%, rgba(0, 200, 255, 0.12), transparent 62%),
+    radial-gradient(74rem 52rem at 50% 118%, rgba(120, 60, 200, 0.13), transparent 60%),
+    radial-gradient(40rem 34rem at 78% 62%, rgba(255, 60, 90, 0.07), transparent 66%);
 }
 
 /* The ecliptic: a perspective grid receding to the horizon. */
@@ -215,49 +207,6 @@ body {
 }
 
 /* ========================================================================== */
-/*  ORBITAL MECHANICS — the hero ornament                                     */
-/* ========================================================================== */
-
-.orbit-ring {
-  position: absolute;
-  border-radius: 50%;
-  border: 1px solid rgba(255, 113, 0, 0.22);
-}
-
-.orbit-ring::after {
-  /* The body on the track. */
-  content: '';
-  position: absolute;
-  top: -3px;
-  left: 50%;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--color-brand-cyan-bright);
-  box-shadow: var(--glow-cyan);
-}
-
-.orbit-spin-slow { animation: spin 90s linear infinite; }
-.orbit-spin-mid  { animation: spin 55s linear infinite reverse; }
-.orbit-spin-fast { animation: spin 30s linear infinite; }
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-/* The star at the centre of the hero: a slow, breathing corona. */
-.stellar-core {
-  border-radius: 50%;
-  background: radial-gradient(circle, #fff 0%, var(--color-brand-orange) 38%, transparent 72%);
-  animation: pulse-core 8s ease-in-out infinite;
-}
-
-@keyframes pulse-core {
-  0%, 100% { opacity: 0.85; transform: scale(1); }
-  50%      { opacity: 1;    transform: scale(1.06); }
-}
-
-/* ========================================================================== */
 /*  GALAXY MAP — the hero backdrop                                            */
 /* ========================================================================== */
 
@@ -308,75 +257,17 @@ body {
 
 /* Stars breathe very slightly, at different rates, so the field feels alive
    without anything actually moving. */
-.gm-star {
-  animation: gm-twinkle 6s ease-in-out infinite;
-}
-.gm-star:nth-of-type(3n) { animation-duration: 8.5s; animation-delay: -2s; }
-.gm-star:nth-of-type(4n) { animation-duration: 5s; animation-delay: -3.5s; }
-
-@keyframes gm-twinkle {
-  0%, 100% { opacity: 0.72; }
-  50%      { opacity: 1; }
-}
-
-/* Lanes flow, like the map's route rendering. */
-.gm-lane {
-  animation: gm-lane-flow 3s linear infinite;
-}
-
-@keyframes gm-lane-flow {
-  to { stroke-dashoffset: -16; }
-}
-
-.gm-reticle {
-  animation: spin 24s linear infinite;
-}
-
 /*
- * TRAFFIC.
- *
- * `offset-path` is gated behind @supports so an unsupporting browser gets a
- * clean static map rather than a row of ships parked at the origin — a broken
- * ornament reads as a broken site.
+ * STATIC (human decision, 2026-07-27). Stars held a gentle twinkle, lanes
+ * flowed and the reticle rotated. Behind a full-screen hero all of that runs
+ * every frame for the entire time someone reads the page — real battery cost
+ * on a phone, and it competes with the logo it sits behind. Varied opacity
+ * gives the field depth without a single animation.
  */
-.gm-ship,
-.gm-jump {
-  opacity: 0;
-}
-
-@supports (offset-path: path('M0 0 L1 1')) {
-  .gm-ship {
-    offset-path: var(--gm-path);
-    /* Keeps the hull nose-first through every curve. */
-    offset-rotate: auto;
-    animation-name: gm-transit;
-    animation-timing-function: cubic-bezier(0.45, 0, 0.55, 1);
-    animation-iteration-count: infinite;
-  }
-
-  .gm-jump {
-    animation-name: gm-jump-flare;
-    animation-timing-function: ease-out;
-    animation-iteration-count: infinite;
-    transform-box: fill-box;
-    transform-origin: center;
-  }
-}
-
-@keyframes gm-transit {
-  /* Arrives out of witchspace, runs the lane, jumps out at the far end. */
-  0%   { offset-distance: 0%;   opacity: 0; }
-  5%   { opacity: 1; }
-  82%  { opacity: 1; }
-  92%  { offset-distance: 100%; opacity: 0; }
-  100% { offset-distance: 100%; opacity: 0; }
-}
-
-@keyframes gm-jump-flare {
-  0%, 80% { opacity: 0; transform: scale(0.3); }
-  88%     { opacity: 0.9; transform: scale(1); }
-  100%    { opacity: 0; transform: scale(2.6); }
-}
+.gm-star { opacity: 0.82; }
+.gm-star:nth-of-type(3n) { opacity: 0.62; }
+.gm-star:nth-of-type(4n) { opacity: 1; }
+.gm-star:nth-of-type(5n) { opacity: 0.72; }
 
 /* ========================================================================== */
 /*  MOTION & ENTRANCE                                                         */
@@ -389,23 +280,6 @@ body {
 
 .draw-in {
   animation: draw-in 500ms cubic-bezier(0, 0, 0, 1) both;
-}
-
-/* A slow sweep across the hero, like a radar return. */
-@keyframes sweep {
-  0%   { transform: translateX(-100%); opacity: 0; }
-  50%  { opacity: 1; }
-  100% { transform: translateX(200%); opacity: 0; }
-}
-
-.sweep::after {
-  content: '';
-  position: absolute;
-  inset-block: 0;
-  width: 40%;
-  background: linear-gradient(to right, transparent, rgba(0, 200, 255, 0.06), transparent);
-  animation: sweep 9s ease-in-out infinite;
-  pointer-events: none;
 }
 
 /* ========================================================================== */
@@ -500,10 +374,13 @@ body {
 }
 
 /*
- * Honoured automatically, never behind a setting. Note what this kills: the
- * starfield drift, the orbital rotation and the radar sweep. For a
- * vestibular-sensitive reader a page whose entire background is in constant
- * motion is unusable, and "space theme" is not a reason to make it so.
+ * Honoured automatically, never behind a setting.
+ *
+ * Far less to disable than there used to be: the hero background is now static
+ * by design, so this mainly covers the panel entrances and the mobile menu.
+ * The scanline goes too — for a vestibular-sensitive reader a page whose
+ * background is in constant motion is unusable, and "space theme" is not a
+ * reason to make it so.
  */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
@@ -513,8 +390,6 @@ body {
     scroll-behavior: auto !important;
   }
   .scanlines::after { display: none; }
-  .deepfield::before,
-  .deepfield::after { animation: none; }
 
   /*
    * The global rule above collapses durations to 0.01ms, which would leave the

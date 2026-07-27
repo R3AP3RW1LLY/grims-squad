@@ -1,7 +1,5 @@
-import type { CSSProperties } from 'react';
-
 /**
- * The hero backdrop: a stylised galaxy map with traffic moving through it.
+ * The hero backdrop: a stylised galaxy map.
  *
  * Modelled on the in-game map's actual visual grammar rather than a generic
  * star chart. The detail that makes it read as Elite Dangerous is the DROP
@@ -9,11 +7,16 @@ import type { CSSProperties } from 'react';
  * you can see height above and below the reference grid. Remove those and it is
  * just dots; keep them and it is instantly recognisable.
  *
- * Built as SVG with CSS motion paths, so:
+ * DELIBERATELY STATIC (human decision, 2026-07-27). It previously carried
+ * ships flying between systems on CSS motion paths. Removing them costs the
+ * page nothing and gains it several things: no compositing work on every
+ * frame behind a full-screen hero, no battery drain on a phone, and nothing
+ * competing with the logo it sits behind. Star density went up to compensate —
+ * with no motion to hold the eye, detail has to.
+ *
+ * Built as SVG, so:
  *  · it is a SERVER component — no JavaScript ships to the browser for this
  *  · it stays crisp at any zoom, unlike a canvas of the same complexity
- *  · every animation is CSS, so `prefers-reduced-motion` disables it through
- *    the existing global rule rather than needing its own JS listener
  *
  * Every coordinate below is a literal. Nothing is randomised, because a random
  * layout generated during render produces different markup on the server and
@@ -53,6 +56,20 @@ const SYSTEMS: readonly StarSystem[] = [
   { x: 1012, y: 392, r: 2, tone: 'orange' },
   { x: 1064, y: 198, r: 3.5, tone: 'cyan' },
   { x: 1142, y: 286, r: 2, tone: 'blue' },
+  // Added once the map went static: with no motion to hold the eye, density
+  // does the work instead. These cost nothing now that nothing animates.
+  { x: 148, y: 246, r: 1.6, tone: 'white' },
+  { x: 292, y: 336, r: 2, tone: 'cyan' },
+  { x: 430, y: 196, r: 1.6, tone: 'white' },
+  { x: 508, y: 322, r: 2.2, tone: 'blue' },
+  { x: 576, y: 268, r: 1.6, tone: 'white' },
+  { x: 662, y: 216, r: 2, tone: 'white' },
+  { x: 768, y: 344, r: 1.8, tone: 'cyan' },
+  { x: 900, y: 176, r: 2.4, tone: 'blue' },
+  { x: 986, y: 244, r: 1.6, tone: 'white' },
+  { x: 1096, y: 332, r: 2, tone: 'white' },
+  { x: 1180, y: 400, r: 1.6, tone: 'orange' },
+  { x: 62, y: 392, r: 1.8, tone: 'white' },
 ];
 
 const HOME = { x: 604, y: 178 };
@@ -86,9 +103,6 @@ const LANES: readonly Lane[] = [
   { d: 'M330,300 Q432,368 540,398', dur: 15, delay: 6 },
   { d: 'M726,372 Q806,392 884,404', dur: 12, delay: 11 },
 ];
-
-/** Ships travel a subset of the lanes; empty lanes keep the map from feeling staged. */
-const SHIP_LANES = [0, 2, 3, 4, 6, 7] as const;
 
 export function GalaxyMap() {
   return (
@@ -267,72 +281,8 @@ export function GalaxyMap() {
           />
         </g>
 
-        {/* ----------------------------------------------------------- ships */}
-        {/*
-          A ship fades in at the origin (arriving from witchspace), runs the
-          lane, then flares and drops out at the far end — a hyperspace jump.
-          The flare shares the lane's duration and delay, so it fires exactly as
-          the ship reaches the destination without any timing bookkeeping.
-        */}
-        <g className="gm-traffic">
-          {SHIP_LANES.map((i) => {
-            const lane = LANES[i];
-            if (lane === undefined) return null;
-            const style = {
-              '--gm-path': `path("${lane.d}")`,
-              animationDuration: `${lane.dur}s`,
-              animationDelay: `${lane.delay}s`,
-            } as CSSProperties;
-
-            return (
-              <g key={`ship-${i}`}>
-                <g className="gm-ship" style={style}>
-                  {/* Frame-shift trail, drawn behind the hull. */}
-                  <path
-                    d="M-16,0 L-2,-1.6 L-2,1.6 Z"
-                    fill="var(--color-brand-cyan-bright)"
-                    opacity="0.35"
-                  />
-                  <path
-                    d="M9,0 L-4,-4.2 L-1,0 L-4,4.2 Z"
-                    fill="var(--color-brand-cyan-bright)"
-                    filter="url(#gm-bloom)"
-                  />
-                </g>
-                <circle
-                  className="gm-jump"
-                  style={style}
-                  cx={endX(lane.d)}
-                  cy={endY(lane.d)}
-                  r="7"
-                  fill="none"
-                  stroke="var(--color-brand-cyan-bright)"
-                  strokeWidth="1.5"
-                />
-              </g>
-            );
-          })}
-        </g>
       </svg>
     </div>
   );
 }
 
-/**
- * Pulls the final coordinate pair out of a quadratic path.
- *
- * Parsed from the same string the ship travels rather than duplicated as
- * separate props: two hand-maintained copies of the same coordinate drift the
- * first time a lane is nudged, and the symptom — a jump flare firing slightly
- * off the end of the lane — is subtle enough to survive review.
- */
-function endPoint(d: string): readonly [number, number] {
-  const nums = d.match(/-?\d+(?:\.\d+)?/g);
-  if (nums === null || nums.length < 2) return [0, 0];
-  const y = Number(nums[nums.length - 1]);
-  const x = Number(nums[nums.length - 2]);
-  return [x, y];
-}
-
-const endX = (d: string): number => endPoint(d)[0];
-const endY = (d: string): number => endPoint(d)[1];

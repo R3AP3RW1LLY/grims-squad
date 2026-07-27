@@ -149,6 +149,28 @@ export function MobileNav({ links }: { links: readonly NavLink[] }) {
             ))}
           </ul>
         </nav>
+
+        {/*
+          Sign-in repeated here because the outlined button is hidden below
+          `sm` to make room in the header. Without this, a phone user has no
+          way to reach the portal at all — the same gap the nav links had.
+        */}
+        <div className="border-t border-[var(--color-border-hairline)] p-4">
+          <a
+            href="/v1/auth/discord"
+            onClick={() => setOpen(false)}
+            className="flex w-full items-center justify-center gap-2 border border-[var(--color-border-active)] px-4 py-3.5 text-[var(--color-brand-orange-bright)] transition-colors hover:bg-[var(--color-surface-panel-hover)]"
+            style={{
+              fontFamily: 'var(--font-display)',
+              transition: 'opacity 300ms ease-out, transform 300ms ease-out',
+              transitionDelay: open ? `${60 + links.length * 45}ms` : '0ms',
+              opacity: open ? 1 : 0,
+              transform: open ? 'translateX(0)' : 'translateX(-8px)',
+            }}
+          >
+            SQUADRON PORTAL SIGN IN
+          </a>
+        </div>
       </div>
     </>
   );

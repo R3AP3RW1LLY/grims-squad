@@ -15,30 +15,25 @@ describe('GalaxyMap', () => {
     expect(html).toContain('role="presentation"');
   });
 
-  it('fires each jump flare exactly at the end of its own lane', () => {
-    // The subtle bug this guards: the flare coordinate is derived from the same
-    // path string the ship travels. If that ever became a hand-maintained copy,
-    // nudging a lane would leave the flare firing slightly off the end — wrong
-    // in a way that looks almost right and would survive review.
-    // React HTML-escapes the quotes inside path("...") to &quot; in the style
-    // attribute, so the pattern has to match what is actually SERVED, not what
-    // the source looks like.
-    const lanes = [...html.matchAll(/--gm-path:\s*path\(&quot;(.+?)&quot;\)/g)].map(
-      (m) => m[1] ?? '',
-    );
-    const flares = [...html.matchAll(/<circle class="gm-jump"[^>]*?cx="([\d.]+)"[^>]*?cy="([\d.]+)"/g)];
-
-    expect(lanes.length).toBeGreaterThan(0);
-    expect(flares).toHaveLength(lanes.length / 2); // each lane string appears on ship AND flare
-
-    const uniqueLanes = [...new Set(lanes)];
-    for (const [i, flare] of flares.entries()) {
-      const d = uniqueLanes[i] ?? '';
-      const nums = d.match(/-?\d+(?:\.\d+)?/g) ?? [];
-      expect(Number(flare[1])).toBe(Number(nums[nums.length - 2]));
-      expect(Number(flare[2])).toBe(Number(nums[nums.length - 1]));
+  it('renders NO moving parts — the backdrop is static by decision', () => {
+    // The human asked for a static hero background on 2026-07-27. Ships,
+    // flares, lane flow, twinkle and the rotating reticle are all gone. This
+    // test exists because "add a subtle animation" is exactly the kind of
+    // change that creeps back in later without anyone weighing the cost of
+    // running it every frame behind a full-screen hero.
+    for (const cls of ['gm-ship', 'gm-jump', 'gm-transit', 'gm-jump-flare']) {
+      expect(html).not.toContain(cls);
     }
+    expect(html).not.toContain('--gm-path');
+    expect(html).not.toContain('animation');
   });
+
+  it('compensates for the lost motion with density', () => {
+    // With nothing moving, detail has to hold the eye instead.
+    const stars = [...html.matchAll(/class="gm-star"/g)].length;
+    expect(stars).toBeGreaterThanOrEqual(25);
+  });
+
 
   it('names ONLY the home system, and names it correctly', () => {
     // Inventing plausible system names would present fiction in the same visual

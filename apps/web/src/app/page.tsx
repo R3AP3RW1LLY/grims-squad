@@ -51,7 +51,11 @@ export default function HomePage() {
             ornament: this is the view every CMDR already knows. */}
         <GalaxyMap />
 
-        <div className="relative mx-auto w-full max-w-[1440px] px-4 py-10 text-center sm:px-6 sm:py-14">
+        <div className="relative mx-auto flex w-full max-w-[1440px] flex-1 flex-col px-4 py-8 text-center sm:px-6 sm:py-10">
+          {/* The wordmark block takes the space that is going spare and centres
+              itself in it, so the composition holds at any viewport height
+              rather than being pinned to a padding value that only suits one. */}
+          <div className="flex flex-1 flex-col justify-center">
           <p className="mb-8 flex items-center justify-center gap-3 font-mono text-[11px] uppercase tracking-[0.35em] text-[var(--color-brand-cyan-bright)]">
             <span className="inline-block h-px w-8 bg-[var(--color-brand-cyan)]" aria-hidden="true" />
             Elite Dangerous Squadron
@@ -92,25 +96,14 @@ export default function HomePage() {
             simulation that decides who actually holds a system.
           </p>
 
-          <div className="mt-8 flex flex-wrap justify-center gap-3 sm:gap-4">
-            <a
-              href="/apply"
-              className="bg-[var(--color-brand-orange)] px-7 py-3.5 text-[var(--color-text-on-accent)] shadow-[var(--glow-orange)] transition-opacity hover:opacity-90"
-              style={{ fontFamily: 'var(--font-display)' }}
-            >
-              APPLY TO JOIN
-            </a>
-            <a
-              href="/forum"
-              className="border border-[var(--color-border-active)] px-7 py-3.5 text-[var(--color-brand-orange-bright)] transition-colors hover:bg-[var(--color-surface-panel-hover)]"
-              style={{ fontFamily: 'var(--font-display)' }}
-            >
-              OPEN COMMS
-            </a>
+
           </div>
 
-          {/* Instrument strip — real, static facts only. */}
-          <dl className="mx-auto mt-10 grid w-full max-w-3xl grid-cols-2 gap-px border border-[var(--color-border-hairline)] bg-[var(--color-border-hairline)] text-left sm:mt-14 sm:grid-cols-[1.5fr_1fr_1.4fr_1fr]">
+          {/* Anchored to the foot of the hero rather than floated after the
+              copy. It reads as an instrument panel along the bottom of a
+              cockpit view, and it guarantees the four facts are inside the
+              first screen instead of just below it. */}
+          <dl className="mx-auto mt-8 grid w-full max-w-4xl grid-cols-2 gap-px border border-[var(--color-border-hairline)] bg-[var(--color-border-hairline)] text-left shadow-[0_0_40px_rgba(0,0,0,0.45)] sm:mt-10 sm:grid-cols-[1.5fr_1fr_1.4fr_1fr]">
             {[
               // NON-BREAKING HYPHEN in "b2‑4". With an ordinary hyphen the
               // cell broke after "b2-" and left the "4" orphaned on its own
@@ -232,7 +225,7 @@ export default function HomePage() {
 
       {/* ============================================================== cta */}
       <section className="mx-auto max-w-[1440px] px-6 py-28" aria-labelledby="cta-heading">
-        <div className="hud panel sweep relative overflow-hidden p-10 text-center sm:p-16">
+        <div className="hud panel relative overflow-hidden p-10 text-center sm:p-16">
           <h2
             id="cta-heading"
             className="text-[clamp(1.75rem,4vw,3rem)] leading-tight text-[var(--color-brand-orange)]"
@@ -244,15 +237,18 @@ export default function HomePage() {
             Bring your ship and your time zone. We will find you a wing, a role and something worth
             flying for.
           </p>
+          {/* Points at /join, not /apply. There IS no application process —
+              joining happens through Discord, which is what /join does. A
+              button promising a form that does not exist is a dead end. */}
           <a
-            href="/apply"
+            href="/join"
             className="mt-9 inline-block bg-[var(--color-brand-orange)] px-9 py-4 text-[var(--color-text-on-accent)] shadow-[var(--glow-orange)] transition-opacity hover:opacity-90"
             style={{ fontFamily: 'var(--font-display)' }}
           >
-            APPLY TO JOIN
+            JOIN GRIM&rsquo;S SQUAD
           </a>
           <p className="mt-5 font-mono text-[11px] tracking-[0.2em] text-[var(--color-text-secondary)]">
-            DISCORD MEMBERSHIP REQUIRED
+            VIA DISCORD &middot; TAKES A MINUTE
           </p>
         </div>
       </section>
