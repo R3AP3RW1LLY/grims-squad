@@ -103,10 +103,15 @@ services:
     build:
       context: ../..
       dockerfile: infra/docker/Dockerfile.web
+      args:
+        NEXT_PUBLIC_SITE_URL: ${PUBLIC_SITE_URL:-https://45-63-35-93.sslip.io}
     restart: unless-stopped
     environment:
       NODE_ENV: production
       PORT: 5000
+      # Baked into the build: og:image must be an absolute URL a social crawler
+      # can actually reach, and Next resolves it at build time.
+      NEXT_PUBLIC_SITE_URL: ${PUBLIC_SITE_URL:-https://45-63-35-93.sslip.io}
     depends_on: [api]
 
 volumes:

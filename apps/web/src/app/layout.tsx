@@ -28,7 +28,18 @@ const mono = JetBrains_Mono({
   display: 'swap',
 });
 
+/*
+ * Without metadataBase, Next resolves og:image against http://localhost:3000 —
+ * so every Discord, Twitter and Slack unfurl points at a host only the server
+ * itself can reach, and the card renders blank. It fails silently: the tags are
+ * present and well-formed, they just address the wrong machine.
+ *
+ * Read from the environment so the move to grims-squad.com needs no code change.
+ */
+const SITE_URL = process.env['NEXT_PUBLIC_SITE_URL'] ?? 'https://45-63-35-93.sslip.io';
+
 export const metadata: Metadata = {
+  metadataBase: new URL(SITE_URL),
   title: "Grim's Squad — No Quarter in the Void",
   description:
     'Elite Dangerous squadron. Player minor faction, fleet carriers, combat and AX, trade, ' +
