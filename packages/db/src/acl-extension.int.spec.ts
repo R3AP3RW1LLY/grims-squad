@@ -39,10 +39,19 @@ async function principal(mask: bigint, userId: string | null = null) {
   };
 }
 
+/**
+ * Explicit connection string with the same fallback the schema spec uses. CI
+ * does not export DATABASE_URL, so `new PrismaClient()` throws there while
+ * passing locally — the kind of difference that only shows up after a push.
+ */
+const CONNECTION =
+  process.env['DATABASE_URL'] ??
+  'postgresql://grims:devpassword@localhost:5432/grimssquad?schema=public';
+
 let raw: PrismaClient;
 
 beforeAll(async () => {
-  raw = new PrismaClient();
+  raw = new PrismaClient({ datasources: { db: { url: CONNECTION } } });
   await raw.$connect();
   await raw.forumCategory.deleteMany({ where: { slug: { startsWith: 'acltest-' } } });
   await raw.forumCategory.createMany({

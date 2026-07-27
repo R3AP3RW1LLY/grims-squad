@@ -1,5 +1,3 @@
-import { Prisma } from '@prisma/client';
-
 /**
  * ACL enforcement in the DATA layer (INV-002).
  *
@@ -87,7 +85,11 @@ export function satisfies(mask: bigint, required: bigint | null): boolean {
 }
 
 /** The predicate merged into every read of an ACL-bearing model. */
-function predicateFor(model: AclModel, p: AclPrincipal): Prisma.InputJsonValue | object {
+// Returns a plain Prisma `where` fragment. Typed as `object` rather than a
+// generated Prisma type: those vary with the generated client, and CI generates
+// a different one from my machine — which is exactly how this failed there and
+// passed here.
+function predicateFor(model: AclModel, p: AclPrincipal): object {
   switch (model) {
     case 'ForumCategory':
     case 'KnowledgeChunk': {
