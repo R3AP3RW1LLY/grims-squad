@@ -79,7 +79,7 @@ export default function HomePage() {
             ornament: this is the view every CMDR already knows. */}
         <GalaxyMap />
 
-        <div className="relative mx-auto grid w-full max-w-[1440px] items-center gap-10 px-4 py-10 sm:px-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] lg:gap-16 lg:py-12">
+        <div className="relative mx-auto grid w-full max-w-[1440px] items-center gap-y-10 px-4 py-10 sm:px-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] lg:gap-x-16 lg:gap-y-12 lg:py-12">
           {/* ---- left: the mark ---- */}
           {/*
             The lockup IS the h1. `alt` carries the wordmark, so the page's main
@@ -124,13 +124,18 @@ export default function HomePage() {
               background simulation that decides who actually holds a system.
             </p>
 
-            {/*
-              2x2 in the narrower column rather than four across. The info card
-              is now the ONLY place the home system is named — the reticle and
-              label were removed from the map, because saying it twice on one
-              screen made the map look like it was repeating the card.
-            */}
-            <dl className="mt-8 grid w-full max-w-[36rem] grid-cols-2 gap-px border border-[var(--color-border-hairline)] bg-[var(--color-border-hairline)] text-left shadow-[0_0_40px_rgba(0,0,0,0.45)]">
+          </div>
+
+          {/*
+            Spans both columns and centres itself, so it sits over the galaxy
+            map's plane grid rather than off to one side of it. The grid runs
+            across the lower third of the map, so a card anchored to the right
+            column had the grid passing behind only half of it.
+
+            Four across at `sm` and up now that it has the full width back —
+            2x2 was a concession to the narrow column it used to live in.
+          */}
+          <dl className="mx-auto grid w-full max-w-3xl grid-cols-2 gap-px border border-[var(--color-border-hairline)] bg-[var(--color-border-hairline)] text-left shadow-[0_0_40px_rgba(0,0,0,0.5)] backdrop-blur-sm sm:grid-cols-[1.5fr_1fr_1.4fr_1fr] lg:col-span-2">
               {INSTRUMENTS.map((item) => (
                 <div
                   key={item.label}
@@ -174,8 +179,7 @@ export default function HomePage() {
                   </dd>
                 </div>
               ))}
-            </dl>
-          </div>
+          </dl>
         </div>
       </section>
 
