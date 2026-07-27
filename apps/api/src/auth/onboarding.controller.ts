@@ -1,3 +1,4 @@
+import { Public } from './auth.guard.js';
 import { Controller, Get, Query, Req, Res, Inject, Optional } from '@nestjs/common';
 import type { CookieSerializeOptions } from '@fastify/cookie';
 import type { FastifyReply, FastifyRequest } from 'fastify';
@@ -24,6 +25,7 @@ const cookies = (r: FastifyRequest): Record<string, string | undefined> =>
   (r as unknown as { cookies?: Record<string, string | undefined> }).cookies ?? {};
 
 @Controller('v1/auth/discord/join')
+@Public()
 export class OnboardingController {
   constructor(
     @Optional() @Inject(OnboardingService) private readonly svc: OnboardingService | null,

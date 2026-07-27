@@ -1,0 +1,205 @@
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { PrismaClient } from '@prisma/client';
+import {
+  withPrincipal,
+  assertAclModelsRegistered,
+  ACL_MODELS,
+  satisfies,
+  resolveVisibleCategoryIds,
+} from './acl-extension.js';
+
+/**
+ * @INV-002 A query executed on behalf of a user MUST NOT return rows from an
+ * ACL-bearing record whose viewPerm the user's mask does not satisfy —
+ * ENFORCED IN THE DATA LAYER, NOT THE CONTROLLER.
+ *
+ * Every test here goes STRAIGHT AT THE REPOSITORY. No controller, no guard, no
+ * decorator, no HTTP. That is the point: if any of these could be made to pass
+ * by adding a guard somewhere, the guard would be in the wrong place.
+ */
+
+const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
+const FORUM_VIEW_PUBLIC = 1n << 0n;
+const FORUM_VIEW_MEMBER = 1n << 2n;
+const FORUM_VIEW_OFFICER = 1n << 4n;
+
+/**
+ * Builds a principal the way a request would: resolve the visible id set from
+ * the mask FIRST, then bind the client. A caller cannot skip this step and get
+ * a permissive client — omitting `visibleIds` fails CLOSED and matches nothing.
+ */
+async function principal(mask: bigint, userId: string | null = null) {
+  return {
+    userId,
+    mask,
+    visibleIds: { ForumCategory: await resolveVisibleCategoryIds(raw, mask) },
+  };
+}
+
+/**
+ * Explicit connection string with the same fallback the schema spec uses. CI
+ * does not export DATABASE_URL, so `new PrismaClient()` throws there while
+ * passing locally — the kind of difference that only shows up after a push.
+ */
+const CONNECTION =
+  process.env['DATABASE_URL'] ??
+  'postgresql://grims:devpassword@localhost:5432/grimssquad?schema=public';
+
+let raw: PrismaClient;
+
+beforeAll(async () => {
+  raw = new PrismaClient({ datasources: { db: { url: CONNECTION } } });
+  await raw.$connect();
+  await raw.forumCategory.deleteMany({ where: { slug: { startsWith: 'acltest-' } } });
+  await raw.forumCategory.createMany({
+    data: [
+      // viewPerm is a MASK, and NULL means public — the schema says so.
+      { slug: 'acltest-public', name: 'ACL public', viewPerm: null, position: 9001 },
+      { slug: 'acltest-member', name: 'ACL member', viewPerm: FORUM_VIEW_MEMBER.toString(), position: 9002 },
+      { slug: 'acltest-officer', name: 'ACL officer', viewPerm: FORUM_VIEW_OFFICER.toString(), position: 9003 },
+    ],
+  });
+});
+
+afterAll(async () => {
+  await raw.forumCategory.deleteMany({ where: { slug: { startsWith: 'acltest-' } } });
+  await raw.$disconnect();
+});
+
+const slugs = async (client: PrismaClient): Promise<string[]> =>
+  (
+    await client.forumCategory.findMany({
+      where: { slug: { startsWith: 'acltest-' } },
+      select: { slug: true },
+    })
+  )
+    .map((r) => r.slug)
+    .sort();
+
+describe('@INV-002 data-layer ACL', () => {
+  it('MANDATORY: a Ring 0 principal calling the repository DIRECTLY cannot read a Ring 1 row', async () => {
+    // Ring 0 = public only. No controller involved anywhere in this test.
+    const ring0 = withPrincipal(raw, await principal(FORUM_VIEW_PUBLIC));
+    expect(await slugs(ring0)).toEqual(['acltest-public']);
+  });
+
+  it('a Ring 1 principal sees public and member, never officer', async () => {
+    const ring1 = withPrincipal(raw, await principal(FORUM_VIEW_PUBLIC | FORUM_VIEW_MEMBER));
+    expect(await slugs(ring1)).toEqual(['acltest-member', 'acltest-public']);
+  });
+
+  it('a Ring 2 principal sees all three', async () => {
+    const ring2 = withPrincipal(
+      raw,
+      await principal(FORUM_VIEW_PUBLIC | FORUM_VIEW_MEMBER | FORUM_VIEW_OFFICER),
+    );
+    expect(await slugs(ring2)).toEqual(['acltest-member', 'acltest-officer', 'acltest-public']);
+  });
+
+  it('an anonymous principal sees ONLY the public row', async () => {
+    // viewPerm NULL means public, so zero permissions still sees the public
+    // category — and nothing else.
+    expect(await slugs(withPrincipal(raw, await principal(0n)))).toEqual(['acltest-public']);
+  });
+
+  it('MANDATORY: a principal with no resolved id set sees NOTHING — fails closed', async () => {
+    // Skipping the resolve step must not yield a permissive client. Returning
+    // an empty predicate here would match every row, which is the single most
+    // dangerous mistake available in this file.
+    const unresolved = withPrincipal(raw, { userId: null, mask: FORUM_VIEW_OFFICER });
+    expect(await slugs(unresolved)).toEqual([]);
+  });
+
+  it('cannot be widened by a caller-supplied where clause', async () => {
+    // A caller naming the same column must not overwrite the ACL. AND, never
+    // merge — this is the whole reason the predicate is combined rather than
+    // spread.
+    const ring0 = withPrincipal(raw, await principal(FORUM_VIEW_PUBLIC));
+    const rows = await ring0.forumCategory.findMany({
+      where: { viewPerm: FORUM_VIEW_OFFICER.toString(), slug: { startsWith: 'acltest-' } },
+      select: { slug: true },
+    });
+    expect(rows).toEqual([]);
+  });
+
+  it('filters findFirst and findUnique, not just findMany', async () => {
+    const ring0 = withPrincipal(raw, await principal(FORUM_VIEW_PUBLIC));
+    expect(
+      await ring0.forumCategory.findFirst({ where: { slug: 'acltest-officer' } }),
+    ).toBeNull();
+  });
+
+  it('filters COUNT — an unfiltered total leaks how much exists', async () => {
+    const ring0 = withPrincipal(raw, await principal(FORUM_VIEW_PUBLIC));
+    const n = await ring0.forumCategory.count({ where: { slug: { startsWith: 'acltest-' } } });
+    expect(n).toBe(1);
+  });
+
+  it('does NOT filter writes — the ACL governs reads', async () => {
+    // Write authorization is a separate concern with different rules. Silently
+    // filtering an update would make a failed write look like a successful one.
+    const ring0 = withPrincipal(raw, await principal(FORUM_VIEW_PUBLIC));
+    const n = await ring0.forumCategory.updateMany({
+      where: { slug: 'acltest-officer' },
+      data: { position: 9003 },
+    });
+    expect(n.count).toBe(1);
+  });
+
+  it('the raw client is UNFILTERED — proving the extension is what filters', async () => {
+    // If this returned one row the tests above would prove nothing: they would
+    // pass because the data was missing, not because the ACL worked.
+    expect(await slugs(raw)).toHaveLength(3);
+  });
+
+  it('systemBypass returns everything, and is not reachable from a request', async () => {
+    const job = withPrincipal(raw, { userId: null, mask: 0n, systemBypass: true });
+    expect(await slugs(job)).toHaveLength(3);
+  });
+});
+
+describe('registration completeness', () => {
+  it('every ACL-bearing model in the schema is registered', () => {
+    // A model added with an ACL column but not registered is read UNFILTERED.
+    // This fails at review time rather than when someone notices officer data
+    // on a public page.
+    const schema = readFileSync(resolve(REPO, 'ssot/03-data/schema.prisma'), 'utf8');
+    expect(() => assertAclModelsRegistered(schema)).not.toThrow();
+  });
+
+  it('detects a NEW unregistered ACL model', () => {
+    // Proves the check above is not vacuous.
+    const fake = `model Sneaky {\n  id String @id\n  viewPerm String\n}`;
+    expect(() => assertAclModelsRegistered(fake)).toThrow(/Sneaky/);
+  });
+
+  it('registers the three models that carry ACLs today', () => {
+    expect(Object.keys(ACL_MODELS).sort()).toEqual([
+      'ForumCategory',
+      'KnowledgeChunk',
+      'Loadout',
+    ]);
+  });
+});
+
+describe('satisfies()', () => {
+  it('requires EVERY bit the row demands, not any of them', () => {
+    const needsBoth = FORUM_VIEW_MEMBER | FORUM_VIEW_OFFICER;
+    expect(satisfies(FORUM_VIEW_MEMBER, needsBoth)).toBe(false);
+    expect(satisfies(needsBoth, needsBoth)).toBe(true);
+  });
+
+  it('treats NULL as public, not as "requires everything"', () => {
+    // Inverting this would hide every public category from every visitor.
+    expect(satisfies(0n, null)).toBe(true);
+  });
+
+  it('handles bits beyond 2^53, where Number would silently fail', () => {
+    const siteConfig = 1n << 63n;
+    expect(satisfies(siteConfig, siteConfig)).toBe(true);
+    expect(satisfies(0n, siteConfig)).toBe(false);
+  });
+});

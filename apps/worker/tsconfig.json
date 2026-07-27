@@ -11,5 +11,16 @@
     "node_modules",
     "dist",
     "**/*.spec.ts"
+  ],
+  "references": [
+    {
+      "path": "../../packages/db"
+    },
+    {
+      "path": "../../packages/ed-clients"
+    },
+    {
+      "path": "../../packages/shared"
+    }
   ]
 }

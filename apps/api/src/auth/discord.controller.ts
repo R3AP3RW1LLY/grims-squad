@@ -1,8 +1,12 @@
+import { Public } from './auth.guard.js';
 import { Controller, Get, Query, Req, Res, Inject, Optional } from '@nestjs/common';
 import type { CookieSerializeOptions } from '@fastify/cookie';
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import { createHash } from 'node:crypto';
 import { AppError, ErrorCode } from '@grims/shared';
+import { issueCsrfToken } from '../common/csrf.js';
 import { DiscordAuthService } from './discord.service.js';
+import { SessionService } from './session.service.js';
 
 /**
  * P1.1 — the two OAuth endpoints.
@@ -44,9 +48,11 @@ const IS_SECURE = process.env['NODE_ENV'] === 'production';
 export const NONCE_COOKIE = IS_SECURE ? '__Host-gs_oauth_nonce' : 'gs_oauth_nonce';
 
 @Controller('v1/auth/discord')
+@Public()
 export class DiscordAuthController {
   constructor(
     @Optional() @Inject(DiscordAuthService) private readonly svc: DiscordAuthService | null,
+    @Optional() @Inject(SessionService) private readonly sessions: SessionService | null,
   ) {}
 
   #service(): DiscordAuthService {
@@ -99,9 +105,37 @@ export class DiscordAuthController {
     // nothing left to present.
     jar(reply).clearCookie(NONCE_COOKIE, { path: '/' });
 
-    // TODO(P1.2): issue the session cookie pair here. Until then this redirects
-    // an identified-but-not-signed-in user, which is why P1.1 alone does not
-    // close the login loop.
+    // Issue the session. Until this existed, login identified a member and then
+    // did nothing with it — the loop did not close.
+    if (this.sessions !== null) {
+      const session = await this.sessions.issue(result.userId, {
+        userAgent: req.headers['user-agent'] ?? null,
+        // Hashed here, never stored raw (INV-012 spirit).
+        ipHash: hashIp(req.ip),
+      });
+      const c = this.sessions.cookieOptions({ secure: IS_SECURE });
+      // Access token gets the SHORT max-age, not the refresh lifetime: a
+      // 30-day access cookie would outlive its own 15-minute signature and sit
+      // in the browser being sent on every request long after it is useless.
+      jar(reply).setCookie(c.accessName, session.accessToken, { ...c.options, maxAge: 900 });
+      jar(reply).setCookie(c.refreshName, session.refreshToken, c.options);
+      // CSRF token is readable by scripts ON PURPOSE — the double-submit pattern
+      // requires the page to read it and echo it in a header.
+      jar(reply).setCookie(c.csrfName, issueCsrfToken(), { ...c.options, httpOnly: false });
+    }
+
     reply.redirect(result.redirectTo, 302);
   }
+}
+
+/**
+ * Hashes a client IP before it is stored.
+ *
+ * A raw IP is personal data and the privacy policy does not offer to keep one.
+ * The hash is still useful for "was this session resumed from somewhere new",
+ * which is all it is for.
+ */
+function hashIp(ip: string | undefined): string | null {
+  if (ip === undefined || ip === '') return null;
+  return createHash('sha256').update(ip).digest('hex');
 }

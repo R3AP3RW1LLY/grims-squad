@@ -33,6 +33,13 @@ export interface DiscordGuildMember {
   readonly joinedAt: string;
 }
 
+/** One row of the full guild listing. Keyed by snowflake, since there is no OAuth token involved. */
+export interface DiscordGuildMemberSummary {
+  readonly discordId: string;
+  readonly roles: readonly string[];
+  readonly nick: string | null;
+}
+
 export interface IDiscordIdentityProvider {
   exchangeCode(code: string, redirectUri: string): Promise<DiscordTokenSet>;
   refresh(refreshToken: string): Promise<DiscordTokenSet>;

@@ -3,6 +3,8 @@ import { GalnetAdapter } from '@grims/ed-clients';
 import { GalnetTicker } from '../components/galnet-ticker';
 import { DIVISIONS } from '../components/site-chrome';
 import { GalaxyMap } from '../components/galaxy-map';
+import { SquadronStatsBand } from '../components/squadron-stats';
+import { getSquadronStats } from '../lib/api';
 
 /**
  * The public landing page.
@@ -69,7 +71,14 @@ export default async function HomePage() {
   // Fetched on the SERVER and cached for an hour. No key, no client request, and
   // no headline invented if Frontier's CMS is down — the adapter returns an
   // empty list and the ticker renders nothing at all.
-  const galnet = await new GalnetAdapter().latest(12);
+  //
+  // Both fetched concurrently: the stats query is one round trip to our own
+  // database and the GalNet fetch is cached, but serialising them would still
+  // add the slower one's latency to the faster one for nothing.
+  const [galnet, stats] = await Promise.all([
+    new GalnetAdapter().latest(12),
+    getSquadronStats(),
+  ]);
 
   return (
     <main id="main">
@@ -264,6 +273,11 @@ export default async function HomePage() {
           ))}
         </ul>
       </section>
+
+      {/* ============================================================ stats */}
+      {/* Renders NOTHING when the API is unreachable. A row of zeros would be a
+          claim — "nobody was active this month" — made on no evidence. */}
+      <SquadronStatsBand stats={stats} />
 
       {/* ============================================================== hub */}
       <section

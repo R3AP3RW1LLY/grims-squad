@@ -47,16 +47,17 @@ describe('P0.2 database schema', () => {
   // The count is hardcoded ON PURPOSE. Every schema addition has to come and
   // bump it, which is a two-second acknowledgement that a table was added —
   // versus a self-counting assertion that would let one appear unnoticed.
-  // 58 as of 2026-07-27: member_activity_months and bot_checkpoints
-  // (rank progression, phase 1).
+  // 60 as of 2026-07-27: two_factor_credentials and two_factor_recovery_codes
+  // (P1.10, TOTP gating the admin console). Previously 58, when
+  // member_activity_months and bot_checkpoints arrived for rank progression.
   it('creates every table in the SSOT schema', async () => {
     const r = await rows<{ n: string }>(
       `select count(*)::text as n from information_schema.tables
        where table_schema = 'public' and table_type = 'BASE TABLE'
          and table_name not like '\\_prisma%'`,
     );
-    // 56 models in ssot/03-data/schema.prisma.
-    expect(Number(r[0]?.n)).toBe(58);
+    // 58 models in ssot/03-data/schema.prisma.
+    expect(Number(r[0]?.n)).toBe(60);
   });
 
   describe('hand-written DDL that Prisma cannot express', () => {

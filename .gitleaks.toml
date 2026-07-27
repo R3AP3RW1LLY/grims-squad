@@ -67,6 +67,24 @@ regexes = [
   '''1513748632963387523''',  # First Commander
   '''1513749464458723469''',  # Sector Overseer
   '''1513669809756311593''',  # Squadron Leader
+
+  # ---------------------------------------------------------------------------
+  # The RFC 6238 PUBLISHED TEST VECTOR for TOTP, in apps/api/src/auth/
+  # totp.service.spec.ts.
+  #
+  # This is base32 for the ASCII string "12345678901234567890" — it is printed
+  # in the RFC itself, appears in every TOTP implementation's test suite on
+  # earth, and is the whole point: the spec asserts our generator produces
+  # '287082' for it, which is how we know we agree with real authenticator apps
+  # rather than merely with ourselves.
+  #
+  # gitleaks' generic-api-key rule flags it on entropy alone (3.58), which is
+  # correct behaviour for a rule that cannot know what a published constant is.
+  #
+  # A LITERAL again, not a path allowlist. Exempting totp.service.spec.ts as a
+  # file would stop it being scanned for the thing that would actually matter
+  # there — a real secret pasted in while debugging enrolment.
+  '''GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ''',
 ]
 
 paths = [

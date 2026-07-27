@@ -2,6 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { SignJWT, jwtVerify } from 'jose';
 import { AppError, ErrorCode } from '@grims/shared';
 import type { ISessionStore, SessionContext } from './session.store.js';
+import { csrfCookieName } from '../common/csrf.js';
 
 /**
  * P1.2 — sessions with rotating refresh tokens and reuse detection.
@@ -115,6 +116,13 @@ export class SessionService {
     };
   }
 
+  /** Revokes the family a refresh token belongs to. Used by logout. */
+  async revokeByRefreshToken(refreshToken: string, reason: string): Promise<void> {
+    const found = await this.store.findByHash(sha256(refreshToken));
+    if (found === null) return;
+    await this.store.revokeFamily(found.family.id, reason, new Date());
+  }
+
   async revokeFamily(familyId: string, reason: string): Promise<void> {
     await this.store.revokeFamily(familyId, reason, new Date());
   }
@@ -158,7 +166,9 @@ export class SessionService {
     return {
       accessName: `${p}gs_at`,
       refreshName: `${p}gs_rt`,
-      csrfName: `${p}gs_csrf`,
+      // Same source as every reader (common/csrf.ts), so the prefix rule lives
+      // in one place rather than being restated wherever a cookie is read.
+      csrfName: csrfCookieName(opts.secure),
       options: {
         httpOnly: true,
         secure: opts.secure,

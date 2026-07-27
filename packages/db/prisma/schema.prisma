@@ -325,6 +325,7 @@ model User {
 
   discordIdentity     DiscordIdentity?
   privacySettings     PrivacySetting?
+  twoFactor           TwoFactorCredential?
   cmdrVerifications   CmdrVerification[]
   userRoles           UserRole[]            @relation("UserRoleHolder")
   rolesGranted        UserRole[]            @relation("UserRoleGrantor")
@@ -552,6 +553,52 @@ model DeviceToken {
 
   @@index([userId, revokedAt])
   @@map("device_tokens")
+}
+
+/// TOTP second factor. MANDATORY to enter the admin console — an account holding officer
+/// permissions cannot perform a privileged action until this is enrolled (P1.10).
+///
+/// Enrolment is FORCED, not suggested: the accounts worth attacking are exactly the ones that
+/// can grant roles and change site config, and "we recommended it" is not a control.
+model TwoFactorCredential {
+  userId       String    @id @map("user_id") @db.Uuid
+  /// AES-256-GCM ciphertext of the base32 TOTP secret, bound to (purpose, subject) as AAD
+  /// so a row stolen from this table cannot be replayed elsewhere (INV-012).
+  secretEnc    Bytes     @map("secret_enc")
+  /// Null until the member proves possession by entering a valid code. An unconfirmed
+  /// credential grants nothing — otherwise starting enrolment would satisfy the requirement
+  /// without ever completing it.
+  confirmedAt  DateTime? @map("confirmed_at") @db.Timestamptz(6)
+  /// The last counter step accepted. REPLAY DEFENCE: a code is single-use, so an attacker who
+  /// observes one over the shoulder cannot reuse it inside its own 30-second window.
+  lastUsedStep BigInt?   @map("last_used_step")
+  /// Consecutive failures. Cleared on success. Guards against online brute force of a
+  /// six-digit code, which is otherwise only 10^6 and trivially grindable.
+  failedCount  Int       @default(0) @map("failed_count")
+  lockedUntil  DateTime? @map("locked_until") @db.Timestamptz(6)
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user          User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  recoveryCodes TwoFactorRecovery[]
+
+  @@map("two_factor_credentials")
+}
+
+/// Single-use recovery codes, shown ONCE at enrolment and stored only as hashes.
+/// A recovery code is a password equivalent; storing it recoverably would make this table
+/// a bypass of the very control it backs up.
+model TwoFactorRecovery {
+  id       String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId   String    @map("user_id") @db.Uuid
+  /// SHA-256 of the code. Never the code itself, never encrypted-and-recoverable.
+  codeHash String    @unique @map("code_hash")
+  usedAt   DateTime? @map("used_at") @db.Timestamptz(6)
+
+  credential TwoFactorCredential @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@index([userId, usedAt])
+  @@map("two_factor_recovery_codes")
 }
 
 /// Per-member privacy toggles. Defaults are conservative; a private field is ABSENT from public

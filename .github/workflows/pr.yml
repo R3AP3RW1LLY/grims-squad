@@ -35,6 +35,12 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
+      # Strict typecheck reads the GENERATED Prisma client. Without this the
+      # types are the untyped stub, every Prisma callback parameter becomes an
+      # implicit any, and the job fails on code that is perfectly correct.
+      - name: generate prisma client
+        run: pnpm --filter @grims/db exec prisma generate
+
       - name: lint
         run: pnpm lint
 

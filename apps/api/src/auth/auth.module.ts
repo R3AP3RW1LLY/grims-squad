@@ -4,10 +4,16 @@ import { DatabaseModule } from '../database.module.js';
 import { DiscordAdapter } from '@grims/ed-clients';
 import { createKeyring, TokenCipher } from '@grims/shared/server';
 import { DiscordAuthController } from './discord.controller.js';
+import { SessionController } from './session.controller.js';
 import { OnboardingController } from './onboarding.controller.js';
 import { OnboardingService } from './onboarding.service.js';
 import { DiscordAuthService, type DiscordAuthConfig } from './discord.service.js';
 import { PrismaIdentityStore } from './identity.store.prisma.js';
+import { SessionService } from './session.service.js';
+import { TotpService } from './totp.service.js';
+import { PrismaTotpStore } from './totp.store.prisma.js';
+import { TotpController } from './totp.controller.js';
+import { PrismaSessionStore } from './session.store.prisma.js';
 import { logger } from '../logging.js';
 
 /**
@@ -29,8 +35,43 @@ const REQUIRED = [
 
 @Module({
   imports: [DatabaseModule],
-  controllers: [DiscordAuthController, OnboardingController],
+  controllers: [DiscordAuthController, OnboardingController, SessionController, TotpController],
   providers: [
+    {
+      provide: TotpService,
+      inject: [PrismaClient],
+      useFactory: (prisma: PrismaClient): TotpService | null => {
+        const keyring = process.env['TOKEN_ENCRYPTION_KEYRING'] ?? '';
+        if (keyring === '') {
+          // Without the keyring the secret cannot be encrypted at rest, and
+          // INV-012 does not have a degraded mode. No service means the admin
+          // gate refuses rather than waving requests through.
+          logger.warn('Two-factor disabled: TOKEN_ENCRYPTION_KEYRING is not set.');
+          return null;
+        }
+        return new TotpService(
+          new PrismaTotpStore(prisma, new TokenCipher(createKeyring(keyring))),
+        );
+      },
+    },
+    {
+      provide: SessionService,
+      inject: [PrismaClient],
+      useFactory: (prisma: PrismaClient): SessionService | null => {
+        const secret = process.env['OAUTH_STATE_SECRET'] ?? '';
+        if (secret === '') {
+          logger.warn('Sessions disabled: OAUTH_STATE_SECRET is not set.');
+          return null;
+        }
+        return new SessionService(new PrismaSessionStore(prisma), {
+          // Reuses the state secret rather than adding a fifth key to rotate.
+          // Both are HMAC secrets of the same strength, both live only on the
+          // server, and one fewer secret is one fewer thing to lose.
+          accessSecret: secret,
+          issuer: 'grims-squad',
+        });
+      },
+    },
     {
       // Shares the Discord adapter and the state secret with the sign-in flow,
       // but is a separate service because the two do opposite things: one
@@ -110,5 +151,6 @@ const REQUIRED = [
       },
     },
   ],
+  exports: [SessionService, TotpService],
 })
 export class AuthModule {}

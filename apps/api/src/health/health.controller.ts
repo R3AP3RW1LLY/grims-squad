@@ -1,3 +1,4 @@
+import { Public } from '../auth/auth.guard.js';
 import { Controller, Get, Res } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
 import { PrismaClient } from '@prisma/client';
@@ -61,6 +62,7 @@ function buildProbes(): DependencyProbe[] {
 }
 
 @Controller('v1/health')
+@Public()
 export class HealthController {
   private readonly service = new HealthService(buildProbes(), VERSION);
 
