@@ -283,6 +283,58 @@ body {
 }
 
 /* ========================================================================== */
+/*  GALNET TICKER                                                             */
+/* ========================================================================== */
+
+.galnet-track {
+  /* Translates exactly -50% over a duplicated list, so it lands where it began
+     and the loop has no visible seam. Very slow on purpose: a ticker fast
+     enough to feel exciting is too fast to actually read, which defeats the
+     point of putting words on it. */
+  animation: galnet-scroll 150s linear infinite;
+  width: max-content;
+}
+
+@keyframes galnet-scroll {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-50%); }
+}
+
+/*
+ * No background and no border: the strip is text drifting over the galaxy map,
+ * not a panel sitting on it. That means the EDGES have to do the containing
+ * work a border used to — headlines fade up from nothing at both sides rather
+ * than appearing abruptly at a boundary.
+ *
+ * The fade is generous (18% of the width each side) because the strip is now
+ * full-bleed; a narrow fade at that width reads as a hard cut.
+ */
+.galnet-ticker {
+  overflow: hidden;
+  mask-image: linear-gradient(to right, transparent 0, black 18%, black 82%, transparent 100%);
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent 0,
+    black 18%,
+    black 82%,
+    transparent 100%
+  );
+}
+
+/*
+ * prefers-reduced-motion stops it dead and lets the strip scroll by hand
+ * instead. The headlines are still READABLE and still LINKS — reducing motion
+ * must never mean removing content.
+ */
+@media (prefers-reduced-motion: reduce) {
+  .galnet-track {
+    animation: none !important;
+    width: auto;
+    overflow-x: auto;
+  }
+}
+
+/* ========================================================================== */
 /*  LEGAL PROSE                                                               */
 /* ========================================================================== */
 

@@ -39,4 +39,14 @@ describe('Frontier attribution @INV-029', () => {
     expect(html).not.toMatch(/aria-hidden="true"[^>]*>[^<]*Frontier Developments plc/);
     expect(html).not.toMatch(/display:\s*none[^"]*"[^>]*>[^<]*Frontier/);
   });
+
+  it('links to the privacy policy and terms from every page', () => {
+    // Asserted against RENDERED markup, so a refactor of how the list is built
+    // cannot break the test while the links still work — nor pass while they
+    // have quietly gone. The footer lives in the root layout, so this covers
+    // every page.
+    expect(html).toMatch(/href="\/privacy"/);
+    expect(html).toMatch(/href="\/terms"/);
+    expect(html).toContain('LEGAL');
+  });
 });

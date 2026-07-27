@@ -1,4 +1,6 @@
 import Image from 'next/image';
+import { GalnetAdapter } from '@grims/ed-clients';
+import { GalnetTicker } from '../components/galnet-ticker';
 import { DIVISIONS } from '../components/site-chrome';
 import { GalaxyMap } from '../components/galaxy-map';
 
@@ -63,7 +65,12 @@ const INSTRUMENTS: ReadonlyArray<{
   { label: 'PLATFORM', value: 'PC · Odyssey' },
 ];
 
-export default function HomePage() {
+export default async function HomePage() {
+  // Fetched on the SERVER and cached for an hour. No key, no client request, and
+  // no headline invented if Frontier's CMS is down — the adapter returns an
+  // empty list and the ticker renders nothing at all.
+  const galnet = await new GalnetAdapter().latest(12);
+
   return (
     <main id="main">
       {/* ============================================================= hero */}
@@ -79,7 +86,7 @@ export default function HomePage() {
             ornament: this is the view every CMDR already knows. */}
         <GalaxyMap />
 
-        <div className="relative mx-auto grid w-full max-w-[1440px] items-center gap-y-10 px-4 py-10 sm:px-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] lg:gap-x-16 lg:gap-y-12 lg:py-12">
+        <div className="relative mx-auto grid w-full max-w-[1440px] items-center gap-y-10 px-4 pb-24 pt-8 sm:px-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] lg:gap-x-16 lg:gap-y-12 lg:pb-28 lg:pt-10">
           {/* ---- left: the mark ---- */}
           {/*
             The lockup IS the h1. `alt` carries the wordmark, so the page's main
@@ -134,8 +141,14 @@ export default function HomePage() {
 
             Four across at `sm` and up now that it has the full width back —
             2x2 was a concession to the narrow column it used to live in.
+
+            The top margin drops it further down the map. Because the grid is
+            vertically centred in the section, adding height at the bottom
+            pushes the card down and the wordmark up, which opens the gap
+            between them as well as lowering the card. The ticker is absolutely
+            positioned and is not in this flow at all, so it does not move.
           */}
-          <dl className="mx-auto grid w-full max-w-3xl grid-cols-2 gap-px border border-[var(--color-border-hairline)] bg-[var(--color-border-hairline)] text-left shadow-[0_0_40px_rgba(0,0,0,0.5)] backdrop-blur-sm sm:grid-cols-[1.5fr_1fr_1.4fr_1fr] lg:col-span-2">
+          <dl className="mx-auto mt-16 grid w-full max-w-3xl grid-cols-2 gap-px lg:mt-24 border border-[var(--color-border-hairline)] bg-[var(--color-border-hairline)] text-left shadow-[0_0_40px_rgba(0,0,0,0.5)] backdrop-blur-sm sm:grid-cols-[1.5fr_1fr_1.4fr_1fr] lg:col-span-2">
               {INSTRUMENTS.map((item) => (
                 <div
                   key={item.label}
@@ -180,6 +193,23 @@ export default function HomePage() {
                 </div>
               ))}
           </dl>
+
+        </div>
+
+        {/*
+          OUTSIDE the grid, pinned to the foot of the hero. As a grid row it
+          added height that pushed the info card off the map's plane grid — the
+          exact position it was moved there to occupy. Taking it out of the flow
+          means the card centres as though the ticker were not there, and the
+          ticker gets the strip of space below it.
+
+          Lifted clear of the very bottom edge: sitting flush against it made
+          the strip read as browser furniture rather than part of the scene.
+          The grid's bottom padding is sized to match, so the card keeps its
+          place on the map's plane grid and the two never meet.
+        */}
+        <div className="pointer-events-auto absolute inset-x-0 bottom-12 z-10 sm:bottom-14">
+          <GalnetTicker articles={galnet} />
         </div>
       </section>
 
