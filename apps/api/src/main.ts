@@ -1,8 +1,10 @@
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
+import { createHash } from 'node:crypto';
 import { FastifyAdapter, type NestFastifyApplication } from '@nestjs/platform-fastify';
 import { randomUUID } from 'node:crypto';
 import fastifyCookie from '@fastify/cookie';
+import fastifyRateLimit from '@fastify/rate-limit';
 import { AppModule } from './app.module.js';
 import { GlobalExceptionFilter } from './common/exception.filter.js';
 import { logger } from './logging.js';
@@ -26,6 +28,39 @@ async function bootstrap(): Promise<void> {
 
   // Needed by the OAuth nonce cookie that binds login state to the browser.
   await app.register(fastifyCookie);
+
+  /*
+   * ★ RED-TEAM FINDING, 2026-07-27 — the API had NO rate limiting at all. ★
+   *
+   * TOTP had its own lockout, which was the loudest case and hid the general
+   * one: every other endpoint was unthrottled. That leaves handle enumeration
+   * on /v1/members/:handle, repeated Inara link attempts, and refresh-token
+   * grinding all free of charge.
+   *
+   * Keyed on the SESSION where there is one and the IP otherwise. Keying on IP
+   * alone would let one member behind a shared address exhaust the budget for
+   * everybody else on it — which for a squadron that games together is a
+   * realistic Saturday night, not a hypothetical.
+   *
+   * Generous on purpose: 300/minute is far above anything a person does and
+   * far below what a script does. This is a backstop against automation, not a
+   * quota, and a limit that legitimate use ever touches is a limit that gets
+   * removed.
+   */
+  await app.register(fastifyRateLimit, {
+    max: 300,
+    timeWindow: '1 minute',
+    keyGenerator: (req) => {
+      const cookies = (req as unknown as { cookies?: Record<string, string | undefined> }).cookies;
+      const session = cookies?.['__Host-gs_rt'] ?? cookies?.['gs_rt'];
+      // The refresh token is hashed rather than used raw: it is a credential,
+      // and a rate-limit key ends up in memory and in metrics.
+      return session === undefined ? req.ip : createHash('sha256').update(session).digest('hex');
+    },
+    // The health endpoint is polled by the container runtime. Throttling it
+    // would make a busy API look unhealthy and get it restarted.
+    allowList: (req) => req.url.startsWith('/v1/health'),
+  });
 
   app.useGlobalFilters(new GlobalExceptionFilter());
 

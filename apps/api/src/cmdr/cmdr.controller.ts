@@ -1,8 +1,9 @@
-import { Controller, Get, Post, Delete, Body, Param, Req, Inject } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Param, Req, Inject, UseGuards } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
 import { AppError, ErrorCode, Permission } from '@grims/shared';
 import { User, type CurrentUser } from '../auth/current-user.js';
-import { RequiresPermission } from '../authz/requires-permission.guard.js';
+import { RequiresPermission, CloakAsNotFound } from '../authz/requires-permission.guard.js';
+import { AdminGateGuard, RequiresTwoFactor } from '../auth/admin-gate.guard.js';
 import { verifyCsrf, readCsrfCookie } from '../common/csrf.js';
 import { CMDR_SERVICE, NONCE_SERVICE, INARA_LINK } from './cmdr.tokens.js';
 import type { CmdrService, ClaimRecord, QueueEntry } from './cmdr.service.js';
@@ -17,6 +18,21 @@ function readString(body: unknown, key: string): string {
   return v;
 }
 
+/*
+ * ★ RED-TEAM FINDING, 2026-07-27 ★
+ *
+ * The officer routes below approve who a member CLAIMS TO BE — a privileged
+ * action that affects other people — and they were guarded by MEMBER_MANAGE
+ * alone. The admin console requires a confirmed second factor for exactly this
+ * class of action; these did not, so a stolen session cookie could approve
+ * verifications while /app refused the same officer.
+ *
+ * AdminGateGuard is registered here and applied per-route, because the MEMBER
+ * routes on this same controller (linking your own Inara key, declaring your
+ * own commander) must stay reachable with one factor. Putting the guard at
+ * class level would lock ordinary members out of their own account.
+ */
+@UseGuards(AdminGateGuard)
 @Controller('v1')
 export class CmdrController {
   constructor(
@@ -152,12 +168,16 @@ export class CmdrController {
    * the mask harder to reason about without making it more precise.
    */
   @RequiresPermission(Permission.MEMBER_MANAGE)
+  @RequiresTwoFactor()
+  @CloakAsNotFound()
   @Get('admin/cmdr-claims')
   async queue(): Promise<{ claims: QueueEntry[] }> {
     return { claims: await this.cmdr.pendingQueue() };
   }
 
   @RequiresPermission(Permission.MEMBER_MANAGE)
+  @RequiresTwoFactor()
+  @CloakAsNotFound()
   @Post('admin/cmdr-claims/:id/approve')
   async approve(
     @User() caller: CurrentUser | undefined,
@@ -174,6 +194,8 @@ export class CmdrController {
   }
 
   @RequiresPermission(Permission.MEMBER_MANAGE)
+  @RequiresTwoFactor()
+  @CloakAsNotFound()
   @Post('admin/cmdr-claims/:id/reject')
   async reject(
     @User() caller: CurrentUser | undefined,

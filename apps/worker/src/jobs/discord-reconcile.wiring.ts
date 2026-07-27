@@ -92,8 +92,33 @@ export class PrismaReconcileStore implements ReconcileStore {
     await this.#db.userRole.deleteMany({ where: { userId, roleId, source: 'discord' } });
   }
 
+  /**
+   * Marks a member as having left, and ENDS THEIR SESSIONS.
+   *
+   * ★ RED-TEAM FINDING, 2026-07-27 ★
+   *
+   * Setting the status alone was not enough. computeEffectiveMask collapses any
+   * non-active status to NO_PERMISSIONS, so a departed member could do nothing
+   * privileged — but their refresh token family survived, so they kept a
+   * working login to a members-only site indefinitely, refreshing it forever
+   * after leaving the community.
+   *
+   * Zero permissions is not the same as no access: they could still read
+   * whatever a signed-in-but-unprivileged session can read, and the site would
+   * have no reason to stop them.
+   *
+   * One transaction, so a member is never left with the status changed and the
+   * sessions live — which is the failure that looks exactly like it worked.
+   */
   async markLeftGuild(userId: string): Promise<void> {
-    await this.#db.user.update({ where: { id: userId }, data: { status: 'left' } });
+    const now = new Date();
+    await this.#db.$transaction([
+      this.#db.user.update({ where: { id: userId }, data: { status: 'left' } }),
+      this.#db.refreshTokenFamily.updateMany({
+        where: { userId, revokedAt: null },
+        data: { revokedAt: now, revokeReason: 'left_guild' },
+      }),
+    ]);
   }
 
   async writeAudit(entry: Record<string, unknown>): Promise<void> {

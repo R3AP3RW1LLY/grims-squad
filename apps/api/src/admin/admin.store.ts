@@ -58,6 +58,8 @@ export interface AdminStore {
   members(): Promise<MemberRow[]>;
   auditTail(limit: number): Promise<AuditRow[]>;
   auditSearch(filter: AuditFilter): Promise<AuditRow[]>;
+  /** Clears a member's second factor. Audited; never silent. */
+  resetTwoFactor(userId: string, actorId: string, reason: string): Promise<void>;
   /** Distinct action names present in the log, so the UI can offer them. */
   auditActions(): Promise<string[]>;
 }
@@ -199,6 +201,36 @@ export class PrismaAdminStore implements AdminStore {
       targetId: r.targetId,
       createdAt: r.createdAt.toISOString(),
     }));
+  }
+
+  /**
+   * Removes a member's TOTP enrolment and every recovery code with it.
+   *
+   * One transaction: a half-reset that deleted the credential but left the
+   * recovery codes would leave codes that unlock nothing, and the member would
+   * be told to use one.
+   */
+  async resetTwoFactor(userId: string, actorId: string, reason: string): Promise<void> {
+    await this.#db.$transaction([
+      // Recovery codes cascade from the credential, but deleted explicitly so
+      // the intent survives a future schema change to the cascade rule.
+      this.#db.twoFactorRecovery.deleteMany({ where: { userId } }),
+      this.#db.twoFactorCredential.deleteMany({ where: { userId } }),
+      this.#db.auditLog.create({
+        data: {
+          // A HUMAN did this, so they are the actor — and this is the row
+          // somebody will look for when asking how an account lost its second
+          // factor.
+          actorId,
+          actorType: 'user',
+          action: 'security.two_factor.reset',
+          targetType: 'user',
+          targetId: userId,
+          before: { twoFactorEnrolled: true },
+          after: { twoFactorEnrolled: false, reason },
+        },
+      }),
+    ]);
   }
 
   async auditActions(): Promise<string[]> {
