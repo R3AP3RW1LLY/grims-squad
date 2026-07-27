@@ -156,6 +156,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@grims/ed-clients':
+        specifier: workspace:*
+        version: link:../../packages/ed-clients
       next:
         specifier: ^15.5.21
         version: 15.5.21(@types/node@24.13.3)(react-dom@19.2.8(react@19.2.8))(react@19.2.8)

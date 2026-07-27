@@ -113,9 +113,14 @@ describe('privacy policy claims match the code', () => {
 describe('the policies are reachable', () => {
   it('is linked from the site footer, which renders on every page', () => {
     // A policy nobody can find is a policy nobody consented to.
+    // Matches the PATH, not a literal href attribute. The footer builds its
+    // link lists with .map(), so `href="/privacy"` no longer appears verbatim
+    // in the source — the original assertion failed on a refactor that had not
+    // removed anything. The rendered-output check lives in the web suite, where
+    // the footer is actually rendered.
     const chrome = read('apps/web/src/components/site-chrome.tsx');
-    expect(chrome).toMatch(/href="\/privacy"/);
-    expect(chrome).toMatch(/href="\/terms"/);
+    expect(chrome).toContain("'/privacy'");
+    expect(chrome).toContain("'/terms'");
     expect(read('apps/web/src/app/layout.tsx')).toMatch(/<SiteFooter \/>/);
   });
 

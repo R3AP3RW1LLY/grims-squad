@@ -185,7 +185,7 @@ export function SiteFooter() {
   return (
     <footer className="relative mt-24 border-t border-[var(--color-border-hairline)] bg-[color-mix(in_srgb,var(--color-surface-panel-sunken)_70%,transparent)]">
       <div className="mx-auto max-w-[1440px] px-6 py-12">
-        <div className="grid gap-10 md:grid-cols-[2fr_1fr_1fr]">
+        <div className="grid gap-10 md:grid-cols-[2fr_1fr_1fr_1fr]">
           <div>
             {/* The full lockup belongs here, at a size where "CIRCA 2006" can
                 actually be read — the squadron predates Elite Dangerous by
@@ -247,6 +247,27 @@ export function SiteFooter() {
               ))}
             </ul>
           </nav>
+
+          <nav aria-label="Legal">
+            <h2 className="font-mono text-[11px] tracking-[0.28em] text-[var(--color-text-secondary)]">
+              LEGAL
+            </h2>
+            <ul className="mt-4 list-none space-y-2 p-0 text-sm">
+              {[
+                { href: '/privacy', label: 'Privacy Policy' },
+                { href: '/terms', label: 'Terms of Service' },
+              ].map((l) => (
+                <li key={l.href}>
+                  <a
+                    href={l.href}
+                    className="text-[var(--color-text-secondary)] no-underline transition-colors hover:text-[var(--color-brand-cyan-bright)] hover:underline hover:underline-offset-4"
+                  >
+                    {l.label}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </nav>
         </div>
 
         {/*
@@ -264,28 +285,6 @@ export function SiteFooter() {
             Ship-fit mathematics ported from Coriolis (MIT) with attribution.
           </p>
 
-          {/* Reachable from every page. A policy nobody can find is a policy
-              nobody consented to. */}
-          <nav aria-label="Legal" className="mt-5">
-            <ul className="flex list-none flex-wrap gap-x-6 gap-y-2 p-0 text-xs">
-              <li>
-                <a
-                  href="/privacy"
-                  className="text-[var(--color-text-secondary)] no-underline transition-colors hover:text-[var(--color-brand-cyan-bright)] hover:underline hover:underline-offset-4"
-                >
-                  Privacy Policy
-                </a>
-              </li>
-              <li>
-                <a
-                  href="/terms"
-                  className="text-[var(--color-text-secondary)] no-underline transition-colors hover:text-[var(--color-brand-cyan-bright)] hover:underline hover:underline-offset-4"
-                >
-                  Terms of Service
-                </a>
-              </li>
-            </ul>
-          </nav>
           <p
             className="mt-6 text-sm text-[var(--color-brand-orange-bright)]"
             style={{ fontFamily: 'var(--font-display)' }}
