@@ -44,6 +44,12 @@ const REQUIRED = [
             clientId: process.env['DISCORD_CLIENT_ID'] as string,
             clientSecret: process.env['DISCORD_CLIENT_SECRET'] as string,
             botToken: process.env['DISCORD_BOT_TOKEN'] as string,
+            // The adapter refuses to grant anything outside this list, even
+            // though Discord would allow it.
+            grantableRoleIds: [
+              process.env['DISCORD_ROLE_SQUADRON'] ?? '',
+              process.env['DISCORD_ROLE_ALLY'] ?? '',
+            ].filter((v) => v !== ''),
           }),
           {
             // From the environment, never from source (INV-008).

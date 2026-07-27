@@ -6,6 +6,7 @@ import {
   DISCORD_SCOPE_STRING,
   DiscordApiError,
 } from './types.js';
+import { assertNotDestructive, assertRoleGrantAllowed } from './guard.js';
 
 /**
  * The real Discord adapter.
@@ -28,6 +29,12 @@ export interface DiscordAdapterConfig {
   readonly clientSecret: string;
   /** Needed only for guild writes (adding a member, applying a role). */
   readonly botToken: string;
+  /**
+   * The ONLY role ids this adapter may ever grant. The bot sits above every
+   * leadership role in the live guild, so Discord's own hierarchy check will
+   * not stop it handing out Galactic Admiral — this ceiling is ours.
+   */
+  readonly grantableRoleIds?: readonly string[];
   readonly timeoutMs?: number;
 }
 
@@ -102,6 +109,7 @@ export class DiscordAdapter implements IDiscordIdentityProvider {
     userAccessToken: string,
     roles: readonly string[],
   ): Promise<void> {
+    for (const r of roles) assertRoleGrantAllowed(r, this.config.grantableRoleIds ?? []);
     const res = await this.#fetch(`${API}/guilds/${guildId}/members/${userId}`, {
       method: 'PUT',
       headers: {
@@ -114,6 +122,7 @@ export class DiscordAdapter implements IDiscordIdentityProvider {
   }
 
   async addRoleToMember(guildId: string, userId: string, roleId: string): Promise<void> {
+    assertRoleGrantAllowed(roleId, this.config.grantableRoleIds ?? []);
     const res = await this.#fetch(`${API}/guilds/${guildId}/members/${userId}/roles/${roleId}`, {
       method: 'PUT',
       headers: { authorization: `Bot ${this.config.botToken}` },
@@ -165,6 +174,14 @@ export class DiscordAdapter implements IDiscordIdentityProvider {
   }
 
   async #fetch(url: string, init: RequestInit): Promise<Response> {
+    // EVERY call funnels through here, so the guard cannot be bypassed by a new
+    // method being added later that forgets to check. That is the whole reason
+    // it lives at this layer rather than in each caller.
+    assertNotDestructive({
+      method: init.method ?? 'GET',
+      path: url.startsWith(API) ? url.slice(API.length) : url,
+    });
+
     // An unbounded upstream call is an unbounded request on our side too.
     const ac = new AbortController();
     const t = setTimeout(() => ac.abort(), this.config.timeoutMs ?? DEFAULT_TIMEOUT_MS);

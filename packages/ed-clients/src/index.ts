@@ -3,3 +3,4 @@
 export * from './discord/types.js';
 export * from './discord/discord.fake.js';
 export * from './discord/discord.adapter.js';
+export * from './discord/guard.js';
