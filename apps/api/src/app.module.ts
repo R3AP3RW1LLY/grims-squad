@@ -5,11 +5,12 @@ import { DatabaseModule } from './database.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { AuthzModule } from './authz/authz.module.js';
 import { MembersModule } from './members/members.module.js';
+import { CmdrModule } from './cmdr/cmdr.module.js';
 import { AuthGuard } from './auth/auth.guard.js';
 import { RequiresPermissionGuard } from './authz/requires-permission.guard.js';
 
 @Module({
-  imports: [DatabaseModule, AuthzModule, AuthModule, MembersModule],
+  imports: [DatabaseModule, AuthzModule, AuthModule, MembersModule, CmdrModule],
   controllers: [HealthController],
   providers: [
     /*
