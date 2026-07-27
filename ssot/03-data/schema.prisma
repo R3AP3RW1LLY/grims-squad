@@ -360,6 +360,7 @@ model User {
   tradeOffers         TradeBoardOffer[]
   haulContributions   HaulingContribution[]
   telemetryEvents     TelemetryEvent[]
+  activityMonths      MemberActivityMonth[]
   achievementAwards   AchievementAward[]    @relation("AchievementHolder")
   achievementsAwarded AchievementAward[]    @relation("AchievementAwarder")
   rankAwards          RankAward[]           @relation("RankHolder")
@@ -1583,6 +1584,60 @@ model KnowledgeChunk {
 
 /// Append-only record of every privileged action (INV-009). Never updated or deleted by
 /// application code; purged only by the 1-year retention job.
+/// One row per Discord member per calendar month. The input to rank progression.
+///
+/// ★ KEYED ON THE DISCORD SNOWFLAKE, NOT OUR USER UUID. ★
+/// A `users` row only exists once someone has signed in to the WEBSITE. In
+/// production that is 1 person, against 49 in the rank ladder and 108 in the
+/// guild. Keying this on `userId` would mean tracking activity for one member
+/// and silently ignoring everyone else — and the failure would look like
+/// "nobody is active" rather than "the schema is wrong".
+///
+/// `userId` is filled in opportunistically when a member does sign in, so the
+/// admin dashboard can join through to a profile where one exists.
+model MemberActivityMonth {
+  /// Discord snowflake. Present for every guild member, website account or not.
+  discordId    String   @map("discord_id")
+  /// First day of the month, UTC. The month key.
+  month        DateTime @map("month") @db.Date
+  /// Linked when the member signs in. Null for members who never have.
+  userId       String?  @map("user_id") @db.Uuid
+
+  /// Messages in the configured activity channel. The Discord half of the test.
+  messageCount   Int       @default(0) @map("message_count")
+  firstMessageAt DateTime? @map("first_message_at") @db.Timestamptz(6)
+  lastMessageAt  DateTime? @map("last_message_at") @db.Timestamptz(6)
+
+  /// Whether an Elite Dangerous session was seen, and on what evidence.
+  /// `assumed` means the upstream check FAILED and we counted it anyway
+  /// (D26, fail open). It must never be presented as observed activity.
+  gameActivity GameActivityState @default(unknown) @map("game_activity")
+  gameCheckedAt DateTime?        @map("game_checked_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@id([discordId, month])
+  @@index([month])
+  @@index([userId])
+  @@map("member_activity_months")
+}
+
+enum GameActivityState {
+  /// Not checked yet this month.
+  unknown
+  /// A session was positively observed via Inara/EDSM.
+  observed
+  /// Upstream was unreachable; counted as qualifying under D26 (fail open).
+  assumed
+  /// Checked, and no session was found.
+  absent
+  /// No CMDR name is linked, so no check is possible. NOT qualifying.
+  unlinked
+}
+
 model AuditLog {
   id         BigInt    @id @default(autoincrement())
   actorId    String?   @map("actor_id") @db.Uuid
