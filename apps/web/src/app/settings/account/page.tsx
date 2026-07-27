@@ -82,9 +82,17 @@ export default async function AccountSettingsPage() {
             </section>
 
             <p className="mt-16 text-sm text-[var(--color-text-muted)]">
-              Looking for what other people can see?{' '}
+              Also here:{' '}
               <a href="/settings/privacy" className="text-[var(--color-brand-cyan-bright)]">
-                Privacy settings
+                privacy settings
+              </a>
+              ,{' '}
+              <a href="/settings/commander" className="text-[var(--color-brand-cyan-bright)]">
+                your commander
+              </a>{' '}
+              and{' '}
+              <a href="/settings/security" className="text-[var(--color-brand-cyan-bright)]">
+                security
               </a>
               .
             </p>

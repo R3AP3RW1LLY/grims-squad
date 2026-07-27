@@ -177,3 +177,21 @@ export const getAdminRoles = (): Promise<{ roles: AdminRoleRow[] } | null> =>
 
 export const getAdminMappings = (): Promise<{ mappings: AdminMappingRow[] } | null> =>
   get('/v1/admin/mappings', { authed: true });
+
+export interface InaraStatus {
+  linked: boolean;
+  cmdrName: string | null;
+  verifiedAt: string | null;
+  lastCheckedAt: string | null;
+  lastError: string | null;
+  source: string | null;
+}
+
+/**
+ * Whether an Inara key is on file, and the verified commander name.
+ *
+ * Note what is NOT in the type: the key. The server reports that one exists and
+ * never what it is, so there is no shape here for a component to leak (INV-012).
+ */
+export const getInaraStatus = (): Promise<InaraStatus | null> =>
+  get('/v1/me/inara', { authed: true });
