@@ -35,13 +35,17 @@ describe('GalaxyMap', () => {
   });
 
 
-  it('names ONLY the home system, and names it correctly', () => {
-    // Inventing plausible system names would present fiction in the same visual
-    // language the real BGS data will use later. The one label here is true.
-    expect(html).toContain('HYADES SECTOR AV-W b2-4');
-    const labels = [...html.matchAll(/class="gm-label"[^>]*>([^<]+)</g)].map((m) => m[1]);
-    expect(labels).toEqual(['HYADES SECTOR AV-W b2-4']);
+  it('names NO system at all', () => {
+    // The home-system reticle and label were removed on 2026-07-27: the system
+    // is named in the hero's info card, and saying it twice on one screen made
+    // the map look like it was repeating the card. Inventing OTHER system names
+    // would be worse — fiction rendered in the same visual language the real
+    // BGS data will use later.
+    expect(html).not.toMatch(/HYADES|SECTOR|gm-label/);
+    const labels = [...html.matchAll(/<text[^>]*>([^<]+)</g)].map((m) => m[1]);
+    expect(labels).toEqual([]);
   });
+
 
   it('renders no numeric readouts that could be mistaken for live data', () => {
     // No "1,247 CMDRS" or "34.7 LY" anywhere. If a future edit adds a figure to
