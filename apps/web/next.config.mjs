@@ -18,6 +18,31 @@ const nextConfig = {
   // `process` global (which eslint rightly flags in a browser-adjacent config).
   outputFileTracingRoot: path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..'),
   poweredByHeader: false,
+
+  /**
+   * Proxies /v1/* to the API in DEVELOPMENT ONLY.
+   *
+   * In production Caddy does this (infra/caddy/Caddyfile), which is what makes
+   * the API same-origin and lets the session cookie work without CORS. Locally
+   * there is no Caddy, so every relative /v1/... call — sign-in, the privacy
+   * toggles, TOTP enrolment, the whole admin console — 404s against the Next
+   * server instead of reaching the API on :5001.
+   *
+   * That failure is confusing rather than obvious: the page renders fine and
+   * only the buttons are dead, and the 404 comes from Next, so nothing appears
+   * in the API log at all.
+   *
+   * Scoped to development deliberately. In production Caddy intercepts /v1
+   * before Next ever sees it, so a rewrite here would be dead configuration
+   * that looks meaningful — and if the container were ever addressed directly,
+   * a silent second proxy path is not something to discover during an incident.
+   */
+  async rewrites() {
+    if (process.env.NODE_ENV === 'production') return [];
+    const api = process.env.API_INTERNAL_URL ?? 'http://localhost:5001';
+    return [{ source: '/v1/:path*', destination: `${api}/v1/:path*` }];
+  },
+
   async headers() {
     return [
       {
