@@ -184,9 +184,13 @@ gameActivity:
       FAIL OPEN — treat the month as qualifying. Our outage must not cost a
       member their promotion. Recorded as `assumed` in the audit row so it is
       never mistaken for observed activity.
-    OPEN_QUESTION: >
-      The human chose the data source but not the failure mode. The split above
-      is my proposal, not their decision, and needs confirming.
+    DECIDED: >
+      Human decision, 2026-07-27: FAIL OPEN, as proposed above. An outage on our
+      side, or on Inara's, must not cost a member their promotion. Every month
+      counted this way is stored as `assumed` rather than `observed`, so the
+      audit row and the admin dashboard both show WHY it counted — a promotion
+      granted on an assumption must never be indistinguishable from one earned
+      on evidence.
 
 # ---------------------------------------------------------------- privacy
 privacy:
