@@ -29,6 +29,31 @@ async function bootstrap(): Promise<void> {
 
   app.useGlobalFilters(new GlobalExceptionFilter());
 
+  /*
+   * Request logging. Absent until now, which meant a failed login left no trace
+   * on the server at all — the only evidence was whatever Discord happened to
+   * show the member. One line per completed request, with the correlation id.
+   *
+   * Deliberately NOT logging query strings: OAuth `code` and `state` arrive
+   * there, and a code in a log file is a code someone can replay.
+   */
+  app
+    .getHttpAdapter()
+    .getInstance()
+    .addHook('onResponse', (req, reply, done) => {
+      logger.info(
+        {
+          reqId: req.id,
+          method: req.method,
+          path: (req.url ?? '').split('?')[0],
+          status: reply.statusCode,
+          ms: Math.round(reply.elapsedTime),
+        },
+        'request',
+      );
+      done();
+    });
+
   // Echo the request ID back so a member can quote it in a bug report.
   app.getHttpAdapter().getInstance().addHook('onSend', (req, reply, _payload, done) => {
     void reply.header('x-request-id', req.id);

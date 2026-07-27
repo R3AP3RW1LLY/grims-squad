@@ -15,6 +15,18 @@
 {$SITE_HOSTNAMES} {
 	encode zstd gzip
 
+	# Access logging was NOT enabled originally, and the first time a member
+	# reported a problem there was no record of their request AT ALL — not the
+	# URL, not the status, nothing. An edge proxy that logs nothing turns every
+	# support question into guesswork.
+	log {
+		output file /data/access.log {
+			roll_size 20MiB
+			roll_keep 10
+		}
+		format json
+	}
+
 	# Security headers applied at the edge, so they cover every response
 	# including static assets and error pages that never reach Next.
 	header {
