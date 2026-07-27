@@ -4,23 +4,27 @@ import { NicknameSyncService, type NicknameSyncDeps } from './nickname-sync.serv
 /**
  * Keeping a member's Discord nickname equal to their verified in-game name.
  *
- * Human decision: when someone signs in with Discord and has an Inara key on
- * file, their server nickname is set to the commander name Inara reports —
- * across the board.
+ * Human decision, refined 2026-07-27: set when the Inara key is FIRST ADDED,
+ * and re-checked whenever we call Inara for anything. NOT driven by sign-in —
+ * a login tells us nothing new about their commander name, so syncing on it
+ * would be a Discord write per login for 108 people that could only ever
+ * produce the same answer.
+ *
+ * It self-heals: a member who renames themselves in Discord is put back at the
+ * next Inara call, because every check compares current against verified.
  *
  * ★ THE RULE THAT MATTERS MOST HERE ★
  *
- * THIS MUST NEVER BREAK SIGN-IN. It runs during the OAuth callback, and every
- * way it can fail is an ordinary fact about the guild rather than a fault:
+ * IT MUST NEVER BREAK ITS CALLER. It hangs off a verification the member is
+ * waiting on, and every way it can fail is an ordinary fact about the guild:
  *
  *   - the guild OWNER cannot be renamed by a bot, ever, by Discord's design
  *   - a member outranking the bot cannot be renamed
  *   - the bot may not hold Manage Nicknames
  *   - Discord may simply be rate limiting us
  *
- * Any of those turning a successful login into an error page would be absurd.
- * The member gets in; the nickname is a nice-to-have that reports why it did
- * not happen.
+ * Any of those failing the verification itself would be absurd — it worked;
+ * only the cosmetic rename did not.
  */
 
 const OK = { ok: true, reason: null };
@@ -59,18 +63,17 @@ const recording = (over: Partial<NicknameSyncDeps> = {}): NicknameSyncDeps =>
 describe('when a member has a verified name', () => {
   it('sets the Discord nickname to match', async () => {
     const svc = new NicknameSyncService(recording());
-    const r = await svc.syncOnLogin('u1', 'd1');
+    const r = await svc.sync('u1', 'd1');
 
     expect(r.changed).toBe(true);
     expect(calls).toEqual([{ userId: 'd1', nick: 'GRIM' }]);
   });
 
   it('MANDATORY: does nothing when the nickname already matches', async () => {
-    // Every sign-in would otherwise be a Discord write and an audit row, for
-    // 108 people, forever — and a guild audit log full of no-op renames is one
-    // nobody reads.
+    // Every Inara call would otherwise be a Discord write and an audit row —
+    // and a guild audit log full of no-op renames is one nobody reads.
     const svc = new NicknameSyncService(recording({ currentNickFor: async () => 'GRIM' }));
-    const r = await svc.syncOnLogin('u1', 'd1');
+    const r = await svc.sync('u1', 'd1');
 
     expect(r.changed).toBe(false);
     expect(calls).toEqual([]);
@@ -79,15 +82,15 @@ describe('when a member has a verified name', () => {
 
   it('treats a case-only difference as already matching', async () => {
     // Elite is case-insensitive about commander names, and rewriting "Grim" to
-    // "GRIM" on every login is churn that means nothing.
+    // "GRIM" on every check is churn that means nothing.
     const svc = new NicknameSyncService(recording({ currentNickFor: async () => 'grim' }));
-    expect((await svc.syncOnLogin('u1', 'd1')).changed).toBe(false);
+    expect((await svc.sync('u1', 'd1')).changed).toBe(false);
     expect(calls).toEqual([]);
   });
 
   it('audits a change, with both names', async () => {
     const svc = new NicknameSyncService(recording({ currentNickFor: async () => 'OldName' }));
-    await svc.syncOnLogin('u1', 'd1');
+    await svc.sync('u1', 'd1');
 
     expect(audit).toHaveLength(1);
     expect(JSON.stringify(audit[0])).toContain('OldName');
@@ -99,7 +102,7 @@ describe('when it cannot or should not run', () => {
   it('does nothing when the member has no verified name', async () => {
     // No Inara key, or not verified yet. Their nickname is their own business.
     const svc = new NicknameSyncService(recording({ verifiedNameFor: async () => null }));
-    const r = await svc.syncOnLogin('u1', 'd1');
+    const r = await svc.sync('u1', 'd1');
 
     expect(r.changed).toBe(false);
     expect(r.reason).toMatch(/no verified/i);
@@ -108,19 +111,19 @@ describe('when it cannot or should not run', () => {
 
   it('MANDATORY: a Discord refusal is reported, never thrown', async () => {
     // The owner case, the hierarchy case and the missing-permission case all
-    // land here. Sign-in must survive every one of them.
+    // land here. The verification must survive every one of them.
     const svc = new NicknameSyncService(
       deps({ setNickname: async () => ({ ok: false, reason: 'Discord refused: server owner.' }) }),
     );
 
-    const r = await svc.syncOnLogin('u1', 'd1');
+    const r = await svc.sync('u1', 'd1');
     expect(r.changed).toBe(false);
     expect(r.reason).toMatch(/owner/i);
   });
 
   it('MANDATORY: an unexpected error is swallowed, not propagated', async () => {
-    // This runs inside the OAuth callback. A network blip while renaming
-    // somebody must not turn a successful login into an error page.
+    // A network blip while renaming somebody must not fail the verification
+    // they were actually doing.
     const svc = new NicknameSyncService(
       deps({
         setNickname: async () => {
@@ -129,7 +132,7 @@ describe('when it cannot or should not run', () => {
       }),
     );
 
-    await expect(svc.syncOnLogin('u1', 'd1')).resolves.toMatchObject({ changed: false });
+    await expect(svc.sync('u1', 'd1')).resolves.toMatchObject({ changed: false });
   });
 
   it('survives the lookup itself failing', async () => {
@@ -140,14 +143,14 @@ describe('when it cannot or should not run', () => {
         },
       }),
     );
-    await expect(svc.syncOnLogin('u1', 'd1')).resolves.toMatchObject({ changed: false });
+    await expect(svc.sync('u1', 'd1')).resolves.toMatchObject({ changed: false });
   });
 
   it('does not write an audit row when nothing changed', async () => {
     const svc = new NicknameSyncService(
       recording({ setNickname: async () => ({ ok: false, reason: 'nope' }) }),
     );
-    await svc.syncOnLogin('u1', 'd1');
+    await svc.sync('u1', 'd1');
     expect(audit).toEqual([]);
   });
 });
@@ -156,7 +159,7 @@ describe('the name itself', () => {
   it('truncates to Discord’s 32-character ceiling', async () => {
     const long = 'A'.repeat(50);
     const svc = new NicknameSyncService(recording({ verifiedNameFor: async () => long }));
-    await svc.syncOnLogin('u1', 'd1');
+    await svc.sync('u1', 'd1');
 
     expect(calls[0]?.nick).toHaveLength(32);
   });
@@ -165,7 +168,7 @@ describe('the name itself', () => {
     // A blank nick RESETS the member to their username. Doing that because a
     // lookup returned an empty string would silently rename people for a bug.
     const svc = new NicknameSyncService(recording({ verifiedNameFor: async () => '   ' }));
-    const r = await svc.syncOnLogin('u1', 'd1');
+    const r = await svc.sync('u1', 'd1');
 
     expect(r.changed).toBe(false);
     expect(calls).toEqual([]);

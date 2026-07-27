@@ -43,6 +43,17 @@ export interface InaraLinkStore {
   writeAudit(entry: Record<string, unknown>): Promise<void>;
 }
 
+/**
+ * Reconciles the member's Discord nickname against their verified name.
+ *
+ * Injected and OPTIONAL: the link service is useful without Discord wired up
+ * (tests, and any deployment where the bot is not configured), and a nickname
+ * is cosmetic next to the verification itself.
+ */
+export interface NicknameReconciler {
+  sync(userId: string, discordId: string): Promise<{ changed: boolean; reason: string | null }>;
+}
+
 /** The one Inara call this service needs. Narrow on purpose. */
 export interface InaraOwnProfile {
   /** The commander bound to THIS key. `null` when Inara does not recognise it. */
@@ -71,7 +82,35 @@ export class InaraLinkService {
   constructor(
     private readonly store: InaraLinkStore,
     private readonly inara: InaraOwnProfile,
+    /**
+     * Runs after ANY successful Inara call, per the human decision of
+     * 2026-07-27: set the nickname when the key is first added, and re-check it
+     * whenever we talk to Inara. Not on sign-in — a login tells us nothing new
+     * about their commander name.
+     *
+     * Because it compares current against verified every time, a member who
+     * renames themselves in Discord is put back at the next check.
+     */
+    private readonly nicknames?: NicknameReconciler,
+    private readonly discordIdFor?: (userId: string) => Promise<string | null>,
   ) {}
+
+  /**
+   * Best-effort nickname reconciliation.
+   *
+   * Never throws and never blocks the result: the member linked a key and it
+   * worked, and a Discord rename that Discord refused is not a reason to tell
+   * them otherwise.
+   */
+  async #reconcileNickname(userId: string): Promise<void> {
+    if (this.nicknames === undefined || this.discordIdFor === undefined) return;
+    try {
+      const discordId = await this.discordIdFor(userId);
+      if (discordId !== null) await this.nicknames.sync(userId, discordId);
+    } catch {
+      /* cosmetic; the verification stands regardless */
+    }
+  }
 
   /**
    * Links a key and verifies the commander it belongs to.
@@ -140,6 +179,10 @@ export class InaraLinkService {
       after: { cmdrName, trustTier: TIER_INARA, source },
     });
 
+    // FIRST ADD — the nickname is set here, which is the moment the human
+    // asked for.
+    await this.#reconcileNickname(userId);
+
     return { cmdrName, verified: true, error: null };
   }
 
@@ -177,6 +220,11 @@ export class InaraLinkService {
 
     await this.store.recordSuccess(userId, cmdrName, now);
     await this.store.upsertVerification(userId, cmdrName, TIER_INARA);
+
+    // We just called Inara, so the nickname is re-checked — this is what puts
+    // back a member who renamed themselves in Discord.
+    await this.#reconcileNickname(userId);
+
     return { cmdrName, verified: true, error: null };
   }
 

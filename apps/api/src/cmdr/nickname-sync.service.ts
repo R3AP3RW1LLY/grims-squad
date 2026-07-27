@@ -1,24 +1,32 @@
 /**
  * Keeps a member's Discord nickname equal to their verified in-game name.
  *
- * Human decision: on sign-in, if the member has an Inara key on file, their
- * server nickname becomes the commander name Inara reports — across the board.
- * It means the member list reads as commander names rather than as whatever
- * someone set their Discord handle to in 2019.
+ * Human decision, refined 2026-07-27: the nickname is set when the Inara key is
+ * FIRST ADDED, and re-checked every time we call Inara for anything. It is not
+ * driven by sign-in — signing in tells us nothing new about their commander
+ * name, so renaming on it would be a Discord write per login for 108 people
+ * that could only ever produce the same answer.
  *
- * ★ IT MUST NEVER BREAK SIGN-IN ★
+ * ★ IT SELF-HEALS ★
  *
- * This runs inside the OAuth callback, and every way it can fail is an ordinary
- * fact about the guild rather than a fault:
+ * Because every check compares the CURRENT nickname against the verified name,
+ * a member who renames themselves in Discord is put back at the next Inara
+ * call. That is deliberate: the whole point is that the member list reads as
+ * commander names, and a nickname that drifts silently defeats it.
+ *
+ * ★ IT MUST NEVER BREAK ITS CALLER ★
+ *
+ * It hangs off a verification flow that the member is waiting on, and every way
+ * it can fail is an ordinary fact about the guild rather than a fault:
  *
  *   - the GUILD OWNER cannot be renamed by a bot, ever, by Discord's design
  *   - a member whose highest role outranks the bot cannot be renamed
  *   - the bot may not hold MANAGE_NICKNAMES
  *   - Discord may be rate limiting us
  *
- * Any of those turning a successful login into an error page would be absurd.
- * So nothing here throws: the member signs in, and the result explains why the
- * nickname did not change.
+ * Any of those turning a successful key-link into an error would be absurd —
+ * the verification worked; only the cosmetic rename did not. So nothing here
+ * throws, and the result explains what happened.
  */
 
 export interface NicknameSyncDeps {
@@ -46,7 +54,13 @@ const MAX_NICK = 32;
 export class NicknameSyncService {
   constructor(private readonly deps: NicknameSyncDeps) {}
 
-  async syncOnLogin(userId: string, discordId: string): Promise<SyncResult> {
+  /**
+   * Reconciles one member's nickname against their verified name.
+   *
+   * Called after a key is linked and after every refresh — that is, after
+   * anything that touched Inara. Never on its own schedule and never on login.
+   */
+  async sync(userId: string, discordId: string): Promise<SyncResult> {
     try {
       const verified = await this.deps.verifiedNameFor(userId);
 
@@ -90,10 +104,10 @@ export class NicknameSyncService {
       /*
        * Swallowed deliberately, and this is the whole point of the file.
        *
-       * A socket hang-up while renaming somebody must not turn a successful
-       * login into an error page. The cause is not re-thrown and not
-       * interpolated into the reason: the failing call carries a bot token, and
-       * upstream error payloads have a habit of echoing request context.
+       * A socket hang-up while renaming somebody must not fail the
+       * verification they were actually doing. The cause is not re-thrown and
+       * not interpolated into the reason: the failing call carries a bot token,
+       * and upstream error payloads have a habit of echoing request context.
        */
       return { changed: false, reason: 'Could not update the Discord nickname this time.' };
     }

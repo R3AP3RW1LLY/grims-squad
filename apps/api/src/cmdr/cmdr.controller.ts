@@ -1,12 +1,13 @@
-import { Controller, Get, Post, Body, Param, Req, Inject } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Param, Req, Inject } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
 import { AppError, ErrorCode, Permission } from '@grims/shared';
 import { User, type CurrentUser } from '../auth/current-user.js';
 import { RequiresPermission } from '../authz/requires-permission.guard.js';
 import { verifyCsrf, readCsrfCookie } from '../common/csrf.js';
-import { CMDR_SERVICE, NONCE_SERVICE } from './cmdr.tokens.js';
+import { CMDR_SERVICE, NONCE_SERVICE, INARA_LINK } from './cmdr.tokens.js';
 import type { CmdrService, ClaimRecord, QueueEntry } from './cmdr.service.js';
 import type { NonceService } from '@grims/shared';
+import type { InaraLinkService, LinkStatus } from './inara-link.service.js';
 
 function readString(body: unknown, key: string): string {
   const v = (body as Record<string, unknown> | null)?.[key];
@@ -21,7 +22,68 @@ export class CmdrController {
   constructor(
     @Inject(CMDR_SERVICE) private readonly cmdr: CmdrService,
     @Inject(NONCE_SERVICE) private readonly nonce: NonceService,
+    @Inject(INARA_LINK) private readonly inara: InaraLinkService,
   ) {}
+
+  // --------------------------------------------------------- Inara API key
+  /**
+   * Links the member's own Inara API key (trust tier 2).
+   *
+   * There is NO commander-name field. The name comes back from Inara, which is
+   * what makes this verification rather than self-declaration — see
+   * InaraLinkService. Adding one here would defeat the whole design.
+   *
+   * `source` distinguishes the website from the companion app, because a key
+   * added in the app shows up here with no action from the member.
+   */
+  @Post('me/inara')
+  async linkInara(
+    @User() caller: CurrentUser | undefined,
+    @Body() body: unknown,
+    @Req() req: FastifyRequest,
+  ): Promise<{ cmdrName: string | null; verified: boolean }> {
+    const userId = requireUser(caller);
+    csrf(req);
+    const b = body as Record<string, unknown> | null;
+    const source = b?.['source'] === 'app' ? 'app' : 'web';
+    const r = await this.inara.link(userId, readString(b, 'apiKey'), source);
+    // Deliberately NOT spreading the result: no key, ever, in any response.
+    return { cmdrName: r.cmdrName, verified: r.verified };
+  }
+
+  /** Whether a key is on file, and the verified name. Never the key itself. */
+  @Get('me/inara')
+  async inaraStatus(@User() caller: CurrentUser | undefined): Promise<LinkStatus> {
+    return this.inara.status(requireUser(caller));
+  }
+
+  /** Re-checks the stored key against Inara, and reconciles the nickname. */
+  @Post('me/inara/refresh')
+  async refreshInara(
+    @User() caller: CurrentUser | undefined,
+    @Req() req: FastifyRequest,
+  ): Promise<{ cmdrName: string | null; verified: boolean; error: string | null }> {
+    const userId = requireUser(caller);
+    csrf(req);
+    return this.inara.refresh(userId);
+  }
+
+  /**
+   * Removes the stored key.
+   *
+   * Does NOT un-verify the commander name — the member proved it, and removing
+   * the credential is a privacy choice rather than a retraction.
+   */
+  @Delete('me/inara')
+  async unlinkInara(
+    @User() caller: CurrentUser | undefined,
+    @Req() req: FastifyRequest,
+  ): Promise<{ unlinked: true }> {
+    const userId = requireUser(caller);
+    csrf(req);
+    await this.inara.unlink(userId);
+    return { unlinked: true };
+  }
 
   /**
    * Starts Inara verification (trust tier 2).

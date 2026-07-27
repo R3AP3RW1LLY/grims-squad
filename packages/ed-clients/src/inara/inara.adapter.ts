@@ -82,6 +82,24 @@ export class InaraAdapter {
   constructor(private readonly config: InaraConfig) {}
 
   /**
+   * The commander name bound to THIS API key.
+   *
+   * ★ THIS IS THE VERIFICATION PRIMITIVE ★
+   *
+   * `searchName` is omitted deliberately. With no search term Inara answers for
+   * the account the key belongs to, so the name that comes back is a fact about
+   * the key rather than a request the caller made. That is the entire
+   * difference between verifying a commander and taking somebody's word for it,
+   * and it is why this method takes no name parameter and never will.
+   *
+   * Returns null when Inara does not recognise the key.
+   */
+  async getOwnCommanderName(apiKey: string): Promise<string | null> {
+    const profile = await this.#call(apiKey, undefined);
+    return profile?.cmdrName ?? null;
+  }
+
+  /**
    * Reads a commander's public Inara profile.
    *
    * Returns `null` when Inara has no such commander — an expected outcome, not
@@ -90,6 +108,21 @@ export class InaraAdapter {
    * unavailable" to someone who simply made a typo.
    */
   async getCommanderProfile(cmdrName: string): Promise<InaraProfile | null> {
+    return this.#call(this.config.apiKey, cmdrName);
+  }
+
+  /**
+   * One Inara call.
+   *
+   * `searchName` is OMITTED when undefined rather than sent empty — an empty
+   * search term is a different request from no search term, and only the latter
+   * means "tell me about the key's own account".
+   *
+   * `apiKey` is a parameter rather than always `this.config.apiKey`, because
+   * verification calls Inara with the MEMBER'S key while everything else uses
+   * the squadron's.
+   */
+  async #call(apiKey: string, cmdrName: string | undefined): Promise<InaraProfile | null> {
     // EVERY call goes through the global limiter (INV-033). Never called from a
     // request path: this queue can legitimately be minutes long.
     return inaraLimiter().run(async () => {
@@ -98,13 +131,17 @@ export class InaraAdapter {
           appName: this.config.appName,
           appVersion: this.config.appVersion,
           isBeingDeveloped: this.config.isDeveloped ?? false,
-          APIkey: this.config.apiKey,
+          // The CALLER's key, not necessarily the squadron's: verification
+          // calls Inara with the MEMBER's key, which is the whole reason the
+          // returned name is proof rather than a claim.
+          APIkey: apiKey,
         },
         events: [
           {
             eventName: 'getCommanderProfile',
             eventTimestamp: new Date().toISOString(),
-            eventData: { searchName: cmdrName },
+            // Absent, not empty, when we want the key owner's own profile.
+            eventData: cmdrName === undefined ? {} : { searchName: cmdrName },
           },
         ],
       };
@@ -174,7 +211,7 @@ export class InaraAdapter {
 
       const d = event.eventData ?? {};
       return {
-        cmdrName: d.commanderName ?? d.userName ?? cmdrName,
+        cmdrName: d.commanderName ?? d.userName ?? cmdrName ?? '',
         // Inara exposes the bio under two different keys depending on which
         // field the member filled in. Both are checked, and they are JOINED
         // rather than one preferred — a nonce in either is proof of control.
