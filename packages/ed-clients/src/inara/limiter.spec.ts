@@ -86,28 +86,36 @@ describe('failures do not break the queue', () => {
     // that turns a transient Inara failure into a permanent outage of every
     // verification, and the symptom is silence.
     const results: string[] = [];
-    const a = limiter.run(async () => {
-      throw new Error('inara exploded');
-    });
+    // The assertion is attached BEFORE the clock advances. A rejected promise
+    // with no handler yet is an unhandled rejection for however long the gap
+    // lasts — which passes locally and fails in CI, where the reporter is
+    // stricter about them.
+    const a = expect(
+      limiter.run(async () => {
+        throw new Error('inara exploded');
+      }),
+    ).rejects.toThrow(/exploded/);
     const b = limiter.run(async () => {
       results.push('b ran');
     });
 
     await vi.advanceTimersByTimeAsync(INARA_MIN_SPACING_MS * 2);
-    await expect(a).rejects.toThrow(/exploded/);
+    await a;
     await b;
     expect(results).toEqual(['b ran']);
   });
 
   it('a rejection reaches its own caller and nobody else', async () => {
-    const a = limiter.run(async () => {
-      throw new Error('mine');
-    });
-    const b = limiter.run(async () => 'yours');
+    const a = expect(
+      limiter.run(async () => {
+        throw new Error('mine');
+      }),
+    ).rejects.toThrow('mine');
+    const b = expect(limiter.run(async () => 'yours')).resolves.toBe('yours');
 
     await vi.advanceTimersByTimeAsync(INARA_MIN_SPACING_MS * 2);
-    await expect(a).rejects.toThrow('mine');
-    await expect(b).resolves.toBe('yours');
+    await a;
+    await b;
   });
 });
 
@@ -121,7 +129,9 @@ describe('the singleton', () => {
   it('is shared across module boundaries, not per-import', () => {
     const a = inaraLimiter();
     const b = inaraLimiter();
-    a.run(async () => undefined).catch(() => undefined);
+    // .catch attached IMMEDIATELY — this promise is never awaited and would
+    // otherwise be an unhandled rejection if the task ever threw.
+    void a.run(async () => undefined).catch(() => undefined);
     expect(b.pending()).toBe(a.pending());
   });
 });
