@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run --passWithNoTests",
     "test:unit": "vitest run --passWithNoTests",
-    "clean": "rm -rf .next dist"
+    "clean": "rm -rf .next dist",
+    "predev": "node -e \"const fs=require('fs');if(fs.existsSync('.next/BUILD_ID')){fs.rmSync('.next',{recursive:true,force:true});console.log('Cleared a production .next before starting dev.')}\""
   },
   "devDependencies": {
     "@grims/config": "workspace:*",
