@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { errorFromResponse } from '../../../lib/api-error';
 
 export interface RoleRow {
   id: string;
@@ -79,11 +80,12 @@ async function post<T>(path: string, body: unknown): Promise<T> {
     headers: { 'content-type': 'application/json', 'x-csrf-token': readCsrf() },
     body: JSON.stringify(body),
   });
-  const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (!res.ok) {
-    throw new Error(typeof json['message'] === 'string' ? json['message'] : 'That did not work.');
+    // The API answers with an ENVELOPE. Reading json.message off the top level
+    // always yielded undefined and threw away the real reason.
+    throw new Error((await errorFromResponse(res)).message);
   }
-  return json as T;
+  return (await res.json().catch(() => ({}))) as T;
 }
 
 /**

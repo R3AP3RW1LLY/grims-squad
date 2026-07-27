@@ -9,7 +9,25 @@ import { cookies } from 'next/headers';
  * browser calls go relative — the same URL string would be wrong in one of the
  * two places.
  */
-const SERVER_API = process.env['API_INTERNAL_URL'] ?? 'http://localhost:3001';
+/**
+ * Where the API lives, as seen FROM THE SERVER.
+ *
+ * ★ THIS DEFAULT AND THE ONE IN next.config.mjs MUST AGREE ★
+ *
+ * They did not. The rewrite used :5001 and this used :3001, so every
+ * browser-side call worked (it went through the proxy) and every SERVER-side
+ * call failed with ECONNREFUSED — which the client then swallowed and turned
+ * into a null. The visible symptom was a dashboard that said "sign in with
+ * Discord" immediately after signing in successfully, with nothing anywhere
+ * explaining why.
+ *
+ * The API's own default is API_PORT ?? 5001 (apps/api/src/main.ts), which is
+ * the number all three have to match. There is a test asserting these two
+ * agree, because one value written down twice will drift again.
+ */
+export const DEFAULT_API_ORIGIN = 'http://localhost:5001';
+
+const SERVER_API = process.env['API_INTERNAL_URL'] ?? DEFAULT_API_ORIGIN;
 
 export interface PublicProfile {
   handle: string;
@@ -68,11 +86,38 @@ async function get<T>(path: string, opts: { authed?: boolean } = {}): Promise<T 
       // a perfectly innocent cause.
       cache: 'no-store',
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      /*
+       * A non-2xx is USUALLY 401 on an authed call, which is an ordinary
+       * signed-out request and not worth a log line. Anything else is worth
+       * knowing about, because the symptom on the page is identical — an empty
+       * state — and silence makes "not signed in" and "the API is broken" look
+       * exactly the same to whoever is debugging it.
+       */
+      if (res.status !== 401 && process.env.NODE_ENV !== 'production') {
+        console.error(`[api] ${path} → ${res.status}`);
+      }
+      return null;
+    }
     return (await res.json()) as T;
-  } catch {
-    // The page renders its empty state rather than a 500. An API that is down
-    // should not take the public site down with it.
+  } catch (cause) {
+    /*
+     * The page renders its empty state rather than a 500: an API that is down
+     * should not take the public site down with it.
+     *
+     * But it SAYS SO in development. A bare `catch { return null }` here cost
+     * real debugging time — a dashboard that rendered "sign in" after a
+     * successful login, with nothing anywhere to explain it, because the fetch
+     * never reached the API at all.
+     */
+    if (process.env.NODE_ENV !== 'production') {
+      const inner = (cause as { cause?: { code?: string; message?: string } }).cause;
+      console.error(
+        `[api] ${SERVER_API}${path} FAILED:`,
+        cause instanceof Error ? cause.message : cause,
+        inner?.code ?? inner?.message ?? '',
+      );
+    }
     return null;
   }
 }

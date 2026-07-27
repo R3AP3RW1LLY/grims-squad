@@ -51,6 +51,19 @@ export default async function CommanderPage() {
               anyone else being involved.
             </p>
 
+            {/*
+              Stated UP FRONT rather than only after a failed attempt. Inara
+              rejects every call from an unregistered application, so somebody
+              pasting a key today gets an error through no fault of their own —
+              and being told that before they try is the difference between a
+              known limitation and a broken site.
+            */}
+            <p className="mt-6 rounded border border-[var(--color-brand-orange)] px-4 py-3 text-sm text-[var(--color-brand-orange)]">
+              <strong>Not available yet.</strong> Inara requires our application to be registered
+              before it will answer any key, and that request is still outstanding. Ask an officer
+              to verify you for now — it works just as well.
+            </p>
+
             <InaraForm initial={status} />
 
             <section aria-labelledby="privacy-heading" className="mt-16">

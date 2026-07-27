@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { errorFromResponse } from '../../../lib/api-error';
 
 function readCsrf(): string {
   const jar = document.cookie.split('; ');
@@ -23,13 +24,10 @@ async function post<T>(path: string, body?: unknown): Promise<T> {
   if (body !== undefined) init.body = JSON.stringify(body);
 
   const res = await fetch(path, init);
-  const json = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (!res.ok) {
-    throw new Error(
-      typeof json['message'] === 'string' ? json['message'] : 'That did not work. Try again.',
-    );
+    throw new Error((await errorFromResponse(res, 'That did not work. Try again.')).message);
   }
-  return json as T;
+  return (await res.json().catch(() => ({}))) as T;
 }
 
 type Stage = 'idle' | 'showing-secret' | 'showing-codes';
