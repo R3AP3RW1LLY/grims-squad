@@ -15,6 +15,10 @@ COPY . .
 RUN pnpm install --frozen-lockfile
 RUN pnpm --filter @grims/shared build
 ENV NEXT_TELEMETRY_DISABLED=1
+# Next inlines NEXT_PUBLIC_* at BUILD time, so this must be an ARG on the build
+# stage — setting it only at runtime leaves og:image pointing at localhost.
+ARG NEXT_PUBLIC_SITE_URL=https://45-63-35-93.sslip.io
+ENV NEXT_PUBLIC_SITE_URL=$NEXT_PUBLIC_SITE_URL
 RUN pnpm --filter @grims/web build
 
 FROM base AS runtime
