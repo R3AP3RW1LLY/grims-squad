@@ -97,3 +97,42 @@ export interface SessionRow {
 
 export const getMySessions = (): Promise<{ sessions: SessionRow[] } | null> =>
   get('/v1/me/sessions', { authed: true });
+
+export const getTotpStatus = (): Promise<{ enrolled: boolean } | null> =>
+  get('/v1/auth/totp/status', { authed: true });
+
+export interface AdminActivityRow {
+  discordId: string;
+  handle: string | null;
+  displayName: string | null;
+  messageCount: number;
+  forumPostCount: number;
+  voiceJoinCount: number;
+  gameActivity: string;
+  qualifies: boolean;
+  lastActivityAt: string | null;
+}
+
+export interface AdminAuditRow {
+  id: string;
+  action: string;
+  actorHandle: string | null;
+  targetType: string | null;
+  targetId: string | null;
+  createdAt: string;
+}
+
+/**
+ * Admin reads return null on ANY non-2xx, which includes the 401 that the
+ * two-factor gate produces. The page renders its own step-up prompt rather
+ * than a crash — a locked door should look like a locked door.
+ */
+export const getAdminActivity = (
+  month?: string,
+): Promise<{ month: string; rows: AdminActivityRow[] } | null> =>
+  get(`/v1/admin/activity${month === undefined ? '' : `?month=${encodeURIComponent(month)}`}`, {
+    authed: true,
+  });
+
+export const getAdminAudit = (): Promise<{ entries: AdminAuditRow[] } | null> =>
+  get('/v1/admin/audit?limit=100', { authed: true });

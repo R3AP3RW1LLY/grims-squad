@@ -62,6 +62,18 @@ export class AuthGuard implements CanActivate {
       }
     }
 
+    /*
+     * The step-up marker, read here rather than in AdminGateGuard so that the
+     * guard which DECIDES has nothing to do with cookie parsing. The value is
+     * a timestamp we set ourselves in an httpOnly cookie; freshness is judged
+     * downstream, and a malformed value simply means "not stepped up".
+     */
+    const stepUpRaw = cookies[`${secure ? '__Host-' : ''}gs_2fa`];
+    if (typeof stepUpRaw === 'string') {
+      const ms = Number(stepUpRaw);
+      if (Number.isFinite(ms) && ms > 0) req.twoFactorAt = new Date(ms);
+    }
+
     if (isPublic === true) return true;
     if (req.user === undefined) {
       throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in to continue.');

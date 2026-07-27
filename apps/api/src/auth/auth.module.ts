@@ -10,6 +10,9 @@ import { OnboardingService } from './onboarding.service.js';
 import { DiscordAuthService, type DiscordAuthConfig } from './discord.service.js';
 import { PrismaIdentityStore } from './identity.store.prisma.js';
 import { SessionService } from './session.service.js';
+import { TotpService } from './totp.service.js';
+import { PrismaTotpStore } from './totp.store.prisma.js';
+import { TotpController } from './totp.controller.js';
 import { PrismaSessionStore } from './session.store.prisma.js';
 import { logger } from '../logging.js';
 
@@ -32,8 +35,25 @@ const REQUIRED = [
 
 @Module({
   imports: [DatabaseModule],
-  controllers: [DiscordAuthController, OnboardingController, SessionController],
+  controllers: [DiscordAuthController, OnboardingController, SessionController, TotpController],
   providers: [
+    {
+      provide: TotpService,
+      inject: [PrismaClient],
+      useFactory: (prisma: PrismaClient): TotpService | null => {
+        const keyring = process.env['TOKEN_ENCRYPTION_KEYRING'] ?? '';
+        if (keyring === '') {
+          // Without the keyring the secret cannot be encrypted at rest, and
+          // INV-012 does not have a degraded mode. No service means the admin
+          // gate refuses rather than waving requests through.
+          logger.warn('Two-factor disabled: TOKEN_ENCRYPTION_KEYRING is not set.');
+          return null;
+        }
+        return new TotpService(
+          new PrismaTotpStore(prisma, new TokenCipher(createKeyring(keyring))),
+        );
+      },
+    },
     {
       provide: SessionService,
       inject: [PrismaClient],
@@ -131,6 +151,6 @@ const REQUIRED = [
       },
     },
   ],
-  exports: [SessionService],
+  exports: [SessionService, TotpService],
 })
 export class AuthModule {}
