@@ -4,9 +4,14 @@ _Last updated: 2026-07-27 by agent (P1 build-out)_
 ## Current position
 Phase: **P1 — Identity & shell, IN PROGRESS**
 P0:     7 of 8 done. **P0.7 (deploy) DEFERRED by the human, 2026-07-26** — no infrastructure work for now; development continues locally.
-Next:   **Deploy (P0.7), then live-verify, then a P1 exit review** — in that order.
-        Every P1 task except cAPI is now built. None of it has run anywhere but
-        locally and in CI.
+Next:   **P1.11 — the Electron companion app** (ADR-022, D27), then deploy,
+        then live verification, then a P1 exit review. In that order.
+
+★ **FRONTIER cAPI IS OFF THE CRITICAL PATH, PERMANENTLY** (ADR-022, 2026-07-27).
+Journals give us everything it would, in real time, with no discretionary approval.
+P1.8 is marked `superseded` rather than deleted — it would still be a genuine upgrade
+if approval ever arrived, but nothing waits on it. Verification is now the member's own
+Inara API key (tier 2) or an officer (tier 1).
 
 Done:   **P1.1 Discord OAuth** — VERIFIED LIVE against the real Discord API on 2026-07-26.
         **P1.2 Sessions** — rotating refresh, reuse detection, CSRF, idempotency namespacing.
@@ -16,8 +21,17 @@ Done:   **P1.1 Discord OAuth** — VERIFIED LIVE against the real Discord API on
         **P1.6 Member profiles and privacy** — INV-027, sessions list, revoke, data export.
         **P1.7 Admin console** — activity, members, audit log with filters, the role
         editor with a mandatory impact preview, and the Discord mapping editor.
-        **P1.8b CMDR verification** — BOTH paths: officer-manual (tier 1) and the
-        Inara nonce (tier 2), behind the global 2/min limiter.
+        **P1.8b CMDR verification** — THREE paths: officer-manual (tier 1), the
+        Inara nonce, and the member's own Inara API key (tier 2). The key is the
+        primary route: the commander name comes back FROM Inara, so it is proof
+        rather than a claim, and there is deliberately no field anywhere to type
+        a name into.
+        **Rank ladder** — all ten ranks seeded as roles with mask 0 (INV-046) and
+        mapped to their Discord roles. A live promotion now changes Discord too,
+        or `single_rank` would break on the next reconciliation.
+        **Discord nickname sync** — set when the Inara key is first added,
+        re-checked on every Inara call, self-healing if a member renames
+        themselves.
         **P1.9 Public landing with live stats** — from our own database.
         **P1.10 TOTP** — forced enrolment, single-use codes, step-up on the admin console.
 
@@ -154,6 +168,7 @@ invariant gate that would have been switched off in week one.
 ## Session handoff notes
 _Newest first. One line per session that changed state._
 
+- **2026-07-27 · agent** — cAPI dropped from the critical path (ADR-022, D27): an **Electron** companion app collects journals instead, which is what will finally move `game_activity` off `unknown` and let anyone qualify for promotion. Electron is a non-negotiable human instruction; the size/memory trade against Tauri is recorded in the ADR rather than left implicit. **The existing schema already supports the whole ingest design** — `DeviceToken` for pairing and `TelemetryEvent` with an idempotency key that already reasons about Elite's whole-second journal timestamps (INV-017, DATA-INTEGRITY B1) — so P1.11 needs no schema change. Also this session: the ten ladder ranks seeded and mapped (promotions had nothing to read before, which is why every dry run reported zero); promotion now writes to Discord as well or reconciliation would hand back the old rank; Inara API key verification with the name coming FROM Inara; nickname sync driven by Inara calls. **Three local-dev faults fixed, all of which failed silently:** the API never loaded `.env` (no `--env-file`), a production `.next` broke dev CSS, and `/v1/*` had no local proxy so sign-in and every client-side call 404'd. 597+ tests green.
 - **2026-07-27 · agent** — Finished P1.7 and P1.8b, the two tasks left partial overnight. Role editor with a MANDATORY who-does-this-affect preview (save is disabled until it runs), Discord mapping editor with snowflake validation and duplicate refusal, server-side audit filters. Inara nonce path complete: global 2/min singleton limiter (INV-033), `events[0].eventStatus` checked rather than `res.ok` — Inara answers HTTP 200 for its own failures — and not-found-yet treated as a normal in-progress state. **566 tests passing, all five CI jobs green.** NonceService moved to `packages/shared` and its Prisma store to `packages/db` so the worker can use both. **Every P1 task except cAPI is now built; nothing is deployed and nothing is live-verified.**
 - **2026-07-27 · agent** — P1 built out overnight, unattended. Completed P1.3 (data-layer ACL, the MANDATORY criterion), P1.5, P1.6, P1.9, P1.10, the officer-manual half of P1.8b, and the promotion engine in dry-run. **P1 invariant coverage went 10/15 → 15/15.** 460 tests passing; typecheck, lint, build, secret scan and drift check clean. PRs #40 and #41 are green and awaiting merge — the merge itself was blocked by a permission prompt, so **both are open and unmerged.** P1.7 and P1.8b are PARTIAL and P1.8 is externally blocked; see the gap table above. **Nothing has been deployed and nothing built in this session has been verified against a live external API.**
 - **2026-07-26 · agent** — P0.4 and P0.5 completed. API on :5001 with a health endpoint verified against the real stack in all three states. Website live on :5000, themed from `tokens.json`, accessibility criteria asserted against the rendered HTML. **7 of 8 P0 tasks done; only P0.7 (deploy) remains, blocked on the Vultr key.**
