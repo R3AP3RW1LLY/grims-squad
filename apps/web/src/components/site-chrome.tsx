@@ -1,3 +1,4 @@
+import Image from 'next/image';
 /**
  * Persistent site chrome: background, navigation and footer.
  *
@@ -85,7 +86,21 @@ export function SiteNav() {
         className="mx-auto flex max-w-[1440px] items-center gap-6 px-6 py-3.5"
       >
         <a href="/" className="group flex items-center gap-3">
-          <SquadronMark />
+          {/*
+            The BADGE only, not the full lockup. At 40px the lockup would render
+            the wordmark about 2mm high; keeping the words as real HTML text
+            means they stay crisp at any zoom, are read by screen readers, and
+            are indexable. alt="" because the adjacent text already names us —
+            announcing it twice is noise.
+          */}
+          <Image
+            src="/brand/badge-128.png"
+            alt=""
+            width={40}
+            height={40}
+            priority
+            className="shrink-0"
+          />
           <span className="flex flex-col leading-none">
             <span
               className="text-[15px] tracking-[0.22em] text-[var(--color-brand-orange-bright)]"
@@ -166,12 +181,17 @@ export function SiteFooter() {
       <div className="mx-auto max-w-[1440px] px-6 py-12">
         <div className="grid gap-10 md:grid-cols-[2fr_1fr_1fr]">
           <div>
-            <span
-              className="text-lg tracking-[0.2em] text-[var(--color-brand-orange-bright)]"
-              style={{ fontFamily: 'var(--font-display)' }}
-            >
-              GRIM&rsquo;S SQUAD
-            </span>
+            {/* The full lockup belongs here, at a size where "CIRCA 2006" can
+                actually be read — the squadron predates Elite Dangerous by
+                eight years, which is worth showing rather than burying. */}
+            <Image
+              src="/brand/lockup-720.png"
+              alt="Grim's Squad — circa 2006"
+              width={360}
+              height={240}
+              className="mb-4 h-auto w-[280px] max-w-full"
+            />
+            <span className="sr-only">Grim&rsquo;s Squad</span>
             <p className="mt-3 max-w-[46ch] text-sm text-[var(--color-text-secondary)]">
               An Elite Dangerous squadron operating a player minor faction, a carrier fleet and
               everything from conflict zones to the deep black.
@@ -273,23 +293,6 @@ export function SiteFooter() {
 }
 
 /* ------------------------------------------------------------------ glyphs */
-
-function SquadronMark() {
-  return (
-    <svg
-      width="34"
-      height="34"
-      viewBox="0 0 34 34"
-      fill="none"
-      aria-hidden="true"
-      className="shrink-0"
-    >
-      <path d="M17 2 31 10v14L17 32 3 24V10L17 2Z" stroke="var(--color-brand-orange)" strokeWidth="1.5" />
-      <path d="M17 9 25 13.5v9L17 27l-8-4.5v-9L17 9Z" stroke="var(--color-brand-cyan)" strokeWidth="1" opacity="0.75" />
-      <circle cx="17" cy="17" r="2.5" fill="var(--color-brand-orange)" />
-    </svg>
-  );
-}
 
 function DiscordGlyph() {
   return (

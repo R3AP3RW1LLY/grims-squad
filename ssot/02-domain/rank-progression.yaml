@@ -1,0 +1,203 @@
+# Automatic rank progression — human decisions, 2026-07-27.
+#
+# ★ THIS REPLACES THE OLD TENURE MODEL. ★
+# Ranks were previously COMPUTED from `guildJoinedAt` (INV-047 as originally
+# written), so time in the server alone decided them. They are now EARNED: a
+# member advances only by being active, and the rank they hold is stored state
+# with an audited history. INV-047 has been rewritten accordingly — the old
+# wording said the exact opposite of this file.
+
+meta:
+  activityChannelId: '801929817149669388' # #grim-general-chat
+  timezone: UTC
+  # Runs DAILY, not only on the 1st. Activity is still measured per calendar
+  # month, so most promotions land shortly after a month closes — but a daily
+  # pass picks up late-arriving Inara data and anyone a failed run missed,
+  # instead of making them wait a further month.
+  schedule: 'daily at 00:15 UTC'
+
+# ---------------------------------------------------------------- eligibility
+qualifyingMonth:
+  description: >
+    A calendar month (UTC) counts toward promotion only if the member held the
+    rank for the WHOLE month and met every requirement below during it.
+  requirements:
+    - id: discord_activity
+      description: At least one message in the activity channel.
+      default: 1
+    - id: game_activity
+      description: At least one Elite Dangerous session observed.
+      default: 1
+  # Both are configurable per rank later, through a leadership-gated page.
+  # Recorded as defaults so the config UI has something to diverge from.
+
+# --------------------------------------------------------------- the ladder
+# `qualifyingMonthsRequired` is months at THIS rank before advancing to `next`.
+# The cumulative totals reproduce the rank names exactly: 1, 2, 3, 4, 5, 6, 7,
+# 9, 12 — including the deliberate two-month gap before Lord General and the
+# three-month gap before Grand Master General.
+ladder:
+  - rank: Cadet
+    roleName: Cadet
+    qualifyingMonthsRequired: 1
+    next: Sergeant
+    cumulativeMonths: 1
+    notes: >
+      The floor. Nobody below Cadet is ever promoted by this system, and Cadet
+      itself is only ever granted by an officer — it marks onboarding complete.
+
+  - rank: Sergeant
+    roleName: Sergeant
+    qualifyingMonthsRequired: 1
+    next: Master Sergeant
+    cumulativeMonths: 2
+
+  - rank: Master Sergeant
+    roleName: Master Sergeant
+    qualifyingMonthsRequired: 1
+    next: 2nd Lieutenant
+    cumulativeMonths: 3
+
+  - rank: 2nd Lieutenant
+    roleName: 2nd Lieutenant
+    qualifyingMonthsRequired: 1
+    next: 1st Lieutenant
+    cumulativeMonths: 4
+
+  - rank: 1st Lieutenant
+    roleName: 1st Lieutenant
+    qualifyingMonthsRequired: 1
+    next: Commander
+    cumulativeMonths: 5
+
+  - rank: Commander
+    roleName: Commander
+    qualifyingMonthsRequired: 1
+    next: Master Commander
+    cumulativeMonths: 6
+
+  - rank: Master Commander
+    roleName: Master Commander
+    qualifyingMonthsRequired: 1
+    next: General
+    cumulativeMonths: 7
+
+  - rank: General
+    roleName: General
+    qualifyingMonthsRequired: 2 # deliberate gap: no 8-month rank exists
+    next: Lord General
+    cumulativeMonths: 9
+
+  - rank: Lord General
+    roleName: Lord General
+    qualifyingMonthsRequired: 3 # deliberate gap: no 10 or 11-month rank exists
+    next: Grand Master General
+    cumulativeMonths: 12
+
+  - rank: Grand Master General
+    roleName: Grand Master General
+    qualifyingMonthsRequired: null
+    next: null
+    cumulativeMonths: 12
+    notes: The top non-administrative rank. The cycle ends here.
+
+# ------------------------------------------------------------------- rules
+rules:
+  - id: cumulative_not_consecutive
+    rule: >
+      Qualifying months ACCUMULATE and are never reset. A member who misses a
+      month simply takes longer; they are not sent back to zero.
+    why: >
+      The human ruled out demotion for inactivity. Resetting the counter is
+      demotion by another name — it destroys progress the member already
+      earned — so the count only ever goes up.
+
+  - id: no_demotion
+    rule: Inactivity never lowers a rank. It only withholds the next one.
+
+  - id: single_rank
+    rule: >
+      A member holds exactly one ladder rank. The previous role is REMOVED in
+      the same operation that grants the new one.
+    why: >
+      Otherwise members accumulate every rank they have ever held and the
+      hierarchy stops meaning anything at a glance.
+
+  - id: one_step_per_run
+    rule: >
+      At most one promotion per member per run, even if they have banked enough
+      qualifying months for two. Advancement is visible and celebrated; two at
+      once reads as a bug.
+
+  - id: floor
+    rule: Members without the Cadet role are invisible to this system.
+    why: >
+      Deliberate (human decision). 56 of 108 members currently hold no ladder
+      rank; they enter only when an officer grants Cadet.
+
+  - id: audited
+    rule: >
+      Every promotion writes an audit row with actor `system`, the member, the
+      old and new rank, and the qualifying months that justified it (INV-009).
+    why: >
+      An automated change to someone's standing that nobody can explain
+      afterwards is indistinguishable from a bug, and impossible to appeal.
+
+  - id: dry_run_first
+    rule: >
+      The engine ships in DRY-RUN. It reports what it would do and writes
+      nothing to Discord until a human has reviewed one full cycle.
+    why: >
+      A defect here promotes or skips 49 people at once, publicly, and is
+      tedious to unwind by hand.
+
+  - id: kill_switch
+    rule: >
+      A single configuration flag halts all writes. It must not require a
+      deploy to use.
+
+# ------------------------------------------------------- game activity source
+gameActivity:
+  source: inara_edsm
+  decidedBy: human, 2026-07-27
+  rationale: >
+    Members already use Inara as a condition of joining the squadron, so
+    coverage should be good and it costs them nothing extra.
+  dependencies:
+    - id: cmdr_name_required
+      note: >
+        A member cannot be checked without a verified CMDR name linked to their
+        account. We do not store one today — CMDR verification (P1.8 / P1.8b)
+        is therefore a hard prerequisite for the game-activity half of this.
+    - id: inara_api_terms
+      note: >
+        Inara's API requires an application key and is rate-limited to roughly
+        2 requests per minute, with whitelisting for higher volume. At 108
+        members that is about an hour per full sweep — workable for a daily
+        job, but it rules out on-demand polling.
+  failureMode:
+    noLinkedCmdr: >
+      NOT eligible, and surfaced on the admin dashboard so an officer can fix
+      the cause. Silently promoting on missing data would make the requirement
+      meaningless.
+    upstreamUnavailable: >
+      FAIL OPEN — treat the month as qualifying. Our outage must not cost a
+      member their promotion. Recorded as `assumed` in the audit row so it is
+      never mistaken for observed activity.
+    OPEN_QUESTION: >
+      The human chose the data source but not the failure mode. The split above
+      is my proposal, not their decision, and needs confirming.
+
+# ---------------------------------------------------------------- privacy
+privacy:
+  messageContentIntent: false
+  note: >
+    MESSAGE_CREATE carries author id, channel id and timestamp WITHOUT the
+    privileged Message Content intent. We learn that a member posted, never what
+    they wrote — so the privacy policy's "we cannot read your messages" stays
+    literally true. Enabling that intent to build this would be an unnecessary
+    and irreversible expansion of what we can see.
+  disclosure: >
+    The privacy policy must state that activity is recorded for rank
+    progression before this ships. tools/policy-truth.spec.ts fails if the
+    policy and the code disagree.
