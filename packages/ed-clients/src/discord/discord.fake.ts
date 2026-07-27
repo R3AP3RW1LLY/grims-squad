@@ -156,6 +156,22 @@ export class DiscordFake implements IDiscordIdentityProvider {
     }
   }
 
+  /** Mirrors the real adapter: refusal is a RESULT, never a throw. */
+  async setMemberNickname(
+    _guildId: string,
+    userId: string,
+    nickname: string,
+  ): Promise<{ ok: boolean; reason: string | null }> {
+    if (this.nicknameRefusal !== null) return { ok: false, reason: this.nicknameRefusal };
+    const m = this.#members.get(userId);
+    if (m === undefined) return { ok: false, reason: 'fake: not a member' };
+    m.nick = nickname.trim().slice(0, 32);
+    return { ok: true, reason: null };
+  }
+
+  /** Set by a test to simulate the owner / hierarchy / permission refusals. */
+  nicknameRefusal: string | null = null;
+
   async removeRoleFromMember(_guildId: string, userId: string, roleId: string): Promise<void> {
     if (this.#addFailure !== null) throw this.#addFailure;
     const m = this.#members.get(userId);

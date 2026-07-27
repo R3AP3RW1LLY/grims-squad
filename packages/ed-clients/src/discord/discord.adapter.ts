@@ -208,6 +208,61 @@ export class DiscordAdapter implements IDiscordIdentityProvider {
     if (!res.ok && res.status !== 204 && res.status !== 404) throw await this.#toError(res);
   }
 
+  /**
+   * Sets a member's guild nickname.
+   *
+   * ★ THREE THINGS DISCORD WILL REFUSE, AND ONE IT WILL TRUNCATE ★
+   *
+   * 1. The GUILD OWNER can never be renamed by a bot. Not a permissions
+   *    problem and not fixable — Discord forbids it outright, and the owner is
+   *    exactly the sort of person who will notice their name did not change and
+   *    report it as a bug.
+   * 2. A member whose highest role sits ABOVE the bot's own is untouchable.
+   * 3. Without MANAGE_NICKNAMES it is a flat 403.
+   *
+   * And a nickname over 32 characters is rejected, so it is truncated here
+   * rather than failing — a commander with a long name should get a shortened
+   * nickname, not no nickname and an error.
+   *
+   * Returns a RESULT rather than throwing on refusal. Every one of the cases
+   * above is an ordinary fact about the guild, not an exception, and the caller
+   * (a login handler) must not be broken by any of them.
+   */
+  async setMemberNickname(
+    guildId: string,
+    userId: string,
+    nickname: string,
+  ): Promise<{ ok: boolean; reason: string | null }> {
+    // Discord's ceiling. Truncating beats failing: a shortened nickname is
+    // still the right person, and no nickname at all is a support question.
+    const nick = nickname.trim().slice(0, 32);
+
+    const res = await this.#fetch(`${API}/guilds/${guildId}/members/${userId}`, {
+      method: 'PATCH',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bot ${this.config.botToken}`,
+      },
+      body: JSON.stringify({ nick }),
+    });
+
+    if (res.ok || res.status === 204) return { ok: true, reason: null };
+
+    // Read and DISCARD the body, as everywhere else in this adapter: Discord
+    // echoes request parameters in some error payloads (INV-012).
+    await res.text().catch(() => '');
+
+    if (res.status === 403) {
+      return {
+        ok: false,
+        reason:
+          'Discord refused: the member is the server owner, outranks the bot, or the bot lacks Manage Nicknames.',
+      };
+    }
+    if (res.status === 429) return { ok: false, reason: 'Rate limited by Discord.' };
+    return { ok: false, reason: `Discord returned ${res.status}.` };
+  }
+
   // ------------------------------------------------------------------ private
   async #token(params: Record<string, string>): Promise<DiscordTokenSet> {
     const body = new URLSearchParams({ ...params, scope: DISCORD_SCOPE_STRING });

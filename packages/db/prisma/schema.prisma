@@ -326,6 +326,7 @@ model User {
   discordIdentity     DiscordIdentity?
   privacySettings     PrivacySetting?
   twoFactor           TwoFactorCredential?
+  inaraLink           InaraLink?
   cmdrVerifications   CmdrVerification[]
   userRoles           UserRole[]            @relation("UserRoleHolder")
   rolesGranted        UserRole[]            @relation("UserRoleGrantor")
@@ -553,6 +554,40 @@ model DeviceToken {
 
   @@index([userId, revokedAt])
   @@map("device_tokens")
+}
+
+/// A member's own Inara API key, supplied voluntarily from the website or the companion app.
+///
+/// ★ THIS IS WHAT MAKES CMDR VERIFICATION PROOF RATHER THAN A CLAIM ★
+/// Calling Inara with the member's OWN key returns the commander bound to that account. The
+/// name therefore comes back from Inara — it is never a name the member typed — which is the
+/// whole difference between verification and self-declaration.
+///
+/// Optional by design. A member who does not add a key is verified by an officer instead
+/// (trust tier 1); adding one upgrades them to tier 2 without anyone's involvement.
+model InaraLink {
+  userId       String    @id @map("user_id") @db.Uuid
+  /// AES-256-GCM ciphertext, AAD-bound to (purpose, subject) so a row lifted from this table
+  /// cannot be decrypted as another member's (INV-012). NEVER returned by any endpoint.
+  apiKeyEnc    Bytes     @map("api_key_enc")
+  /// The commander name INARA REPORTED for this key. Null until the first successful call.
+  /// Case-insensitive, because Elite is.
+  cmdrName     String?   @map("cmdr_name") @db.Citext
+  /// Set when Inara last confirmed the key works and returned a name.
+  verifiedAt   DateTime? @map("verified_at") @db.Timestamptz(6)
+  lastCheckedAt DateTime? @map("last_checked_at") @db.Timestamptz(6)
+  /// Why the last check failed, for the member to read. Never contains the key.
+  lastError    String?   @map("last_error")
+  /// Which surface it arrived from. Recorded because a key added in the desktop app appears
+  /// on the website without the member doing anything, and that should be explicable later.
+  source       String    @default("web")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([cmdrName])
+  @@map("inara_links")
 }
 
 /// TOTP second factor. MANDATORY to enter the admin console — an account holding officer
