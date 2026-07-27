@@ -63,3 +63,8 @@ vendor/coriolis-data/
 vendor/coriolis/
 venv/
 wg*.conf
+
+# Encrypted secret backups — never committed, even encrypted.
+*.tar.gz.enc
+grims-secrets-*
+restored-secrets/
