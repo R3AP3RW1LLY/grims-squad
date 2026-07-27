@@ -1,3 +1,4 @@
+import { AppError, ErrorCode } from '@grims/shared';
 import type { PrismaClient } from '@grims/db';
 import type { TokenCipher } from '@grims/shared/server';
 import type { InaraLinkStore, LinkRecord } from './inara-link.service.js';
@@ -106,16 +107,41 @@ export class PrismaInaraLinkStore implements InaraLinkStore {
         await tx.cmdrVerification.update({ where: { id: existing.id }, data: { revokedAt: now } });
       }
 
-      await tx.cmdrVerification.create({
-        data: {
-          userId,
-          cmdrName,
-          method: 'inara_nonce',
-          trustTier,
-          isVerified: true,
-          verifiedAt: now,
-        },
-      });
+      /*
+       * @DATA-ADV FINDING, 2026-07-27 — this could raise a raw constraint error.
+       *
+       * The partial unique index on (cmdr_name) WHERE is_verified AND NOT
+       * revoked is the real enforcement, and it fires when two members link
+       * keys for the SAME commander — which sounds impossible until you
+       * remember that two people can share one Inara account, and that the
+       * application-level check runs before the write rather than inside it.
+       *
+       * Unhandled, that surfaced as a 500 with a Postgres constraint name in
+       * it. Caught here it becomes the same clean CMDR_ALREADY_CLAIMED the
+       * pre-check produces, so the member is told something they can act on
+       * rather than being shown a database error.
+       */
+      try {
+        await tx.cmdrVerification.create({
+          data: {
+            userId,
+            cmdrName,
+            method: 'inara_nonce',
+            trustTier,
+            isVerified: true,
+            verifiedAt: now,
+          },
+        });
+      } catch (cause) {
+        const code = (cause as { code?: string }).code;
+        // P2002 is Prisma's unique-constraint violation. Anything else is a
+        // genuine fault and must keep propagating.
+        if (code !== 'P2002') throw cause;
+        throw new AppError(
+          ErrorCode.CMDR_ALREADY_CLAIMED,
+          `CMDR ${cmdrName} was verified by another member a moment ago. Speak to an officer if that is wrong.`,
+        );
+      }
     });
   }
 

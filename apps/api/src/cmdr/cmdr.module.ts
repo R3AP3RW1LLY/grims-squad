@@ -59,6 +59,14 @@ function nicknameReconciler(prisma: PrismaClient): NicknameSyncService | undefin
       return i?.guildNick ?? null;
     },
     setNickname: (g, d, nick) => discord.setMemberNickname(g, d, nick),
+    async rememberNickname(discordId, nickname) {
+      // updateMany, not update: an identity row that has since been deleted is
+      // not an error worth failing a rename over.
+      await prisma.discordIdentity.updateMany({
+        where: { discordId },
+        data: { guildNick: nickname },
+      });
+    },
     async writeAudit(entry) {
       await prisma.auditLog.create({
         data: {

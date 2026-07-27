@@ -78,3 +78,7 @@ GRIMS-SQUAD-RECOVERY.txt
 grims-vault-passphrase*
 *.enc
 vault-*.enc
+
+# Verification builds. Kept OUT of .next so a build cannot disturb a running
+# dev server — see apps/web/next.config.mjs.
+.next-check/

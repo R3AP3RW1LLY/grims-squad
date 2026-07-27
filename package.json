@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Grim's Squad Hub — Elite Dangerous squadron platform",
+  "description": "Grim's Squad Hub \u2014 Elite Dangerous squadron platform",
   "engines": {
     "node": ">=24 <25",
     "pnpm": ">=9"
@@ -28,7 +28,8 @@
     "db:seed": "pnpm --filter @grims/db seed",
     "db:studio": "pnpm --filter @grims/db studio",
     "db:reset": "pnpm --filter @grims/db reset",
-    "lint:fix": "eslint . --fix"
+    "lint:fix": "eslint . --fix",
+    "grant-role": "pnpm --filter @grims/db grant-role"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

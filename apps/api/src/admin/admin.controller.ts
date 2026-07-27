@@ -106,8 +106,25 @@ export class AdminController {
     return { entries, actions };
   }
 
-  // ------------------------------------------------------------------- roles
+  /* ---------------------------------------------------------------- roles
+   *
+   * ★ THESE ROUTES REQUIRE ROLE_MANAGE, NOT MEMBER_MANAGE ★
+   *
+   * The officer bundle deliberately WITHHOLDS ROLE_MANAGE and SITE_CONFIG, for
+   * a reason stated in the migration that created it: "an officer who can grant
+   * roles can grant themselves anything, which makes the tier boundary
+   * decorative."
+   *
+   * Guarding the role editor with MEMBER_MANAGE — which every officer holds —
+   * hands that back. An officer could open the editor, add ROLE_MANAGE and
+   * SITE_CONFIG to their own role, save, and become a superuser. Nothing would
+   * fail, and the audit row would look like an ordinary permissions edit.
+   *
+   * The mapping editor is the same escalation by a different route: mapping a
+   * Discord role they can already assign onto a platform role with a wider mask.
+   */
   @Get('roles')
+  @RequiresPermission(Permission.ROLE_MANAGE)
   async listRoles(): Promise<{ roles: Array<Record<string, unknown>> }> {
     const rows = await this.roles.listRoles();
     return {
@@ -131,6 +148,7 @@ export class AdminController {
    * made should not be a cacheable, linkable, logged GET.
    */
   @Post('roles/:id/preview')
+  @RequiresPermission(Permission.ROLE_MANAGE)
   async previewRole(
     @Param('id') id: string,
     @Body() body: unknown,
@@ -141,6 +159,7 @@ export class AdminController {
   }
 
   @Post('roles/:id')
+  @RequiresPermission(Permission.ROLE_MANAGE)
   async saveRole(
     @User() caller: CurrentUser | undefined,
     @Param('id') id: string,
@@ -154,11 +173,13 @@ export class AdminController {
 
   // ---------------------------------------------------------------- mappings
   @Get('mappings')
+  @RequiresPermission(Permission.ROLE_MANAGE)
   async listMappings(): Promise<{ mappings: MappingRecord[] }> {
     return { mappings: await this.mappings.list() };
   }
 
   @Post('mappings')
+  @RequiresPermission(Permission.ROLE_MANAGE)
   async addMapping(
     @User() caller: CurrentUser | undefined,
     @Body() body: unknown,
@@ -172,6 +193,7 @@ export class AdminController {
   }
 
   @Delete('mappings/:roleId/:discordRoleId')
+  @RequiresPermission(Permission.ROLE_MANAGE)
   async removeMapping(
     @User() caller: CurrentUser | undefined,
     @Param('roleId') roleId: string,
