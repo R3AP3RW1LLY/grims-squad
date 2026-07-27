@@ -3,6 +3,7 @@ import {
   type DiscordTokenSet,
   type DiscordUser,
   type DiscordGuildMember,
+  type DiscordGuildMemberSummary,
   DISCORD_SCOPE_STRING,
   DiscordApiError,
 } from './types.js';
@@ -23,6 +24,10 @@ import { assertNotDestructive, assertRoleGrantAllowed } from './guard.js';
 
 const API = 'https://discord.com/api/v10';
 const DEFAULT_TIMEOUT_MS = 8_000;
+/** Discord's documented ceiling for this endpoint. */
+const MEMBER_PAGE_SIZE = 1000;
+/** 100k members. A guild of 108 will never reach this; a pagination bug would. */
+const MAX_MEMBER_PAGES = 100;
 
 export interface DiscordAdapterConfig {
   readonly clientId: string;
@@ -119,6 +124,53 @@ export class DiscordAdapter implements IDiscordIdentityProvider {
       body: JSON.stringify({ access_token: userAccessToken, roles: [...roles] }),
     });
     if (res.status !== 201 && res.status !== 204) throw await this.#toError(res);
+  }
+
+  /**
+   * Every member of the guild, following Discord's `after` cursor.
+   *
+   * Requires the SERVER MEMBERS privileged intent. WITHOUT it Discord answers
+   * 200 with an empty array rather than an error — which is why the reconciler
+   * refuses to act on an empty list. A silent empty page here is far more
+   * likely to be a missing intent than a deserted server.
+   *
+   * A read, so the destructive guard permits it. Capped so a pagination bug
+   * cannot spin forever against the API.
+   */
+  async listGuildMembers(guildId: string): Promise<DiscordGuildMemberSummary[]> {
+    const out: DiscordGuildMemberSummary[] = [];
+    let after = '0';
+
+    for (let page = 0; page < MAX_MEMBER_PAGES; page += 1) {
+      const res = await this.#fetch(
+        `${API}/guilds/${guildId}/members?limit=${MEMBER_PAGE_SIZE}&after=${after}`,
+        { headers: { authorization: `Bot ${this.config.botToken}` } },
+      );
+      if (!res.ok) throw await this.#toError(res);
+
+      const batch = (await res.json()) as Array<{
+        user?: { id?: string };
+        roles?: string[];
+        nick?: string | null;
+      }>;
+      if (batch.length === 0) break;
+
+      for (const m of batch) {
+        const id = m.user?.id;
+        // A member object with no user is a bot-scoped payload or a partial.
+        // Skipping is right: we cannot key it to an account either way.
+        if (typeof id !== 'string') continue;
+        out.push({ discordId: id, roles: m.roles ?? [], nick: m.nick ?? null });
+      }
+
+      // Snowflakes are monotonic, so the highest id on the page is the cursor.
+      const last = batch[batch.length - 1]?.user?.id;
+      if (typeof last !== 'string') break;
+      after = last;
+      if (batch.length < MEMBER_PAGE_SIZE) break;
+    }
+
+    return out;
   }
 
   async addRoleToMember(guildId: string, userId: string, roleId: string): Promise<void> {

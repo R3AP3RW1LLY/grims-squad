@@ -192,8 +192,14 @@ describe('grants this job must not touch', () => {
 
 describe('members who left the guild', () => {
   it('revokes discord-sourced grants for someone no longer in the guild', async () => {
-    guild.members = [];
-    store.identities = [{ userId: 'u1', discordId: 'd1', guildRoles: [ROLE_OVERSEER] }];
+    // The guild list must be NON-EMPTY here. An empty one is refused outright
+    // by the rule below, so departures are only ever acted on relative to a
+    // list that plainly contains other people.
+    guild.members = [{ discordId: 'd-other', roles: [], nick: 'Still here' }];
+    store.identities = [
+      { userId: 'u1', discordId: 'd1', guildRoles: [ROLE_OVERSEER] },
+      { userId: 'u-other', discordId: 'd-other', guildRoles: [] },
+    ];
     store.seedGrant('u1', 'sector_overseer', 'discord');
     store.seedGrant('u1', 'webmaster', 'system');
 

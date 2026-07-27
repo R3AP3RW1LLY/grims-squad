@@ -3,6 +3,7 @@ import type {
   DiscordTokenSet,
   DiscordUser,
   DiscordGuildMember,
+  DiscordGuildMemberSummary,
 } from './types.js';
 
 interface FakeMember {
@@ -153,6 +154,14 @@ export class DiscordFake implements IDiscordIdentityProvider {
       m.roles = [...roles];
       m.inGuild = true;
     }
+  }
+
+  async listGuildMembers(guildId: string): Promise<DiscordGuildMemberSummary[]> {
+    if (this.#guildFailure !== null) throw this.#guildFailure;
+    if (guildId !== this.#guildId) return [];
+    return [...this.#members.entries()]
+      .filter(([, m]) => m.inGuild)
+      .map(([id, m]) => ({ discordId: id, roles: [...m.roles], nick: m.nick }));
   }
 
   async addRoleToMember(_guildId: string, userId: string, roleId: string): Promise<void> {
