@@ -85,3 +85,15 @@ export const getProfile = (handle: string): Promise<PublicProfile | null> =>
 
 export const getMyPrivacy = (): Promise<PrivacySettings | null> =>
   get('/v1/me/privacy', { authed: true });
+
+export interface SessionRow {
+  id: string;
+  deviceLabel: string | null;
+  userAgent: string | null;
+  createdAt: string;
+  lastUsedAt: string;
+  current: boolean;
+}
+
+export const getMySessions = (): Promise<{ sessions: SessionRow[] } | null> =>
+  get('/v1/me/sessions', { authed: true });
