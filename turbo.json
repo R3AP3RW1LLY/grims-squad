@@ -1,7 +1,7 @@
 {
   "$schema": "https://turbo.build/schema.json",
   "ui": "stream",
-  "//": "Turborepo 2 runs tasks in STRICT env mode by default: a task sees only the variables declared here. Anything a task genuinely reads must be listed, or it arrives undefined — and the failure lands in CI rather than locally, because a developer shell usually has the variable set anyway. The test task declares DATABASE_URL and friends on the TASK rather than globally so they also feed the cache hash: a run against a different database is not the same run. (`//` is only legal at the top level here, not inside a task.)",
+  "//": "Turborepo 2 runs tasks in STRICT env mode by default: a task sees only the variables declared here. Anything a task genuinely reads must be listed, or it arrives undefined \u2014 and the failure lands in CI rather than locally, because a developer shell usually has the variable set anyway. The test task declares DATABASE_URL and friends on the TASK rather than globally so they also feed the cache hash: a run against a different database is not the same run. (`//` is only legal at the top level here, not inside a task.)",
   "globalEnv": [
     "CI",
     "NODE_ENV"
@@ -36,7 +36,12 @@
     "test:unit": {},
     "dev": {
       "cache": false,
-      "persistent": true
+      "persistent": true,
+      "env": [
+        "API_INTERNAL_URL",
+        "WEB_BASE_URL",
+        "NEXT_PUBLIC_SITE_URL"
+      ]
     }
   }
 }
