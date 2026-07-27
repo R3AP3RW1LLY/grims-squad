@@ -1,6 +1,6 @@
 import { Controller, Get, Query, Inject, UseGuards } from '@nestjs/common';
 import { Permission } from '@grims/shared';
-import { RequiresPermission } from '../authz/requires-permission.guard.js';
+import { RequiresPermission, CloakAsNotFound } from '../authz/requires-permission.guard.js';
 import { AdminGateGuard, RequiresTwoFactor } from '../auth/admin-gate.guard.js';
 import { ADMIN_STORE } from './admin.tokens.js';
 import type { AdminStore, ActivityRow, AuditRow, MemberRow } from './admin.store.js';
@@ -20,6 +20,9 @@ import type { AdminStore, ActivityRow, AuditRow, MemberRow } from './admin.store
 @UseGuards(AdminGateGuard)
 @RequiresTwoFactor()
 @RequiresPermission(Permission.MEMBER_MANAGE)
+// A non-officer gets 404, not 403. A 403 confirms the admin surface exists and
+// tells an outsider exactly what to go looking for.
+@CloakAsNotFound()
 @Controller('v1/admin')
 export class AdminController {
   constructor(@Inject(ADMIN_STORE) private readonly store: AdminStore) {}

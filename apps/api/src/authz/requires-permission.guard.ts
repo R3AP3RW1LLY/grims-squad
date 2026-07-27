@@ -11,6 +11,7 @@ import { AppError, ErrorCode, type PermissionMask } from '@grims/shared';
 import { PermissionService } from './permission.service.js';
 
 const KEY = 'authz:required';
+const CLOAK_KEY = 'authz:cloak-404';
 
 /**
  * Requires EVERY bit in `mask`.
@@ -24,6 +25,19 @@ const KEY = 'authz:required';
  * boundary.
  */
 export const RequiresPermission = (mask: PermissionMask) => SetMetadata(KEY, mask.toString());
+
+/**
+ * Answer 404 rather than 403 when permission is missing.
+ *
+ * A 403 CONFIRMS the route exists. On the admin surface that hands an outsider
+ * a map: which endpoints are there, and therefore what the console can do. A
+ * 404 tells them the same thing as a mistyped URL.
+ *
+ * Not the default everywhere, because for a route a member legitimately knows
+ * about — one they simply lack a permission for — a 404 is a lie that sends
+ * them looking for a bug instead of asking an officer for access.
+ */
+export const CloakAsNotFound = () => SetMetadata(CLOAK_KEY, true);
 
 @Injectable()
 export class RequiresPermissionGuard implements CanActivate {
@@ -47,7 +61,13 @@ export class RequiresPermissionGuard implements CanActivate {
     if (!(await this.permissions.has(userId, BigInt(raw)))) {
       // Deliberately does NOT say which permission was missing. Telling an
       // attacker exactly which bit to acquire is a map of the way in.
-      throw new AppError(ErrorCode.PERMISSION_DENIED, 'You do not have access to this.');
+      const cloak = this.reflector.getAllAndOverride<boolean>(CLOAK_KEY, [
+        ctx.getHandler(),
+        ctx.getClass(),
+      ]);
+      throw cloak === true
+        ? new AppError(ErrorCode.RESOURCE_NOT_VISIBLE, 'Not found.')
+        : new AppError(ErrorCode.PERMISSION_DENIED, 'You do not have access to this.');
     }
     return true;
   }
