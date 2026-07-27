@@ -156,6 +156,13 @@ export class DiscordFake implements IDiscordIdentityProvider {
     }
   }
 
+  async removeRoleFromMember(_guildId: string, userId: string, roleId: string): Promise<void> {
+    if (this.#addFailure !== null) throw this.#addFailure;
+    const m = this.#members.get(userId);
+    if (m === undefined) throw new Error('fake: not a member');
+    m.roles = m.roles.filter((r) => r !== roleId);
+  }
+
   async listGuildMembers(guildId: string): Promise<DiscordGuildMemberSummary[]> {
     if (this.#guildFailure !== null) throw this.#guildFailure;
     if (guildId !== this.#guildId) return [];

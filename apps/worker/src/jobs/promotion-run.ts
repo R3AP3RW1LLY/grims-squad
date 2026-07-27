@@ -52,6 +52,26 @@ export interface WouldPromote {
   readonly qualifyingMonths: number;
 }
 
+/**
+ * Applies a rank change in DISCORD.
+ *
+ * Separate from the store because it is a different system with a different
+ * failure mode, and because the ORDER between them is load-bearing: Discord
+ * first, our row second. Ladder ranks are mapped to Discord roles so that
+ * reconciliation can learn them, which means our database disagreeing with the
+ * guild is not a cosmetic difference — the next reconciliation resolves it in
+ * Discord's favour and hands the old rank back.
+ */
+export interface RankApplier {
+  applyRank(userId: string, fromRank: string, toRank: string): Promise<void>;
+}
+
+export interface Failed {
+  readonly userId: string;
+  readonly handle: string;
+  readonly reason: string;
+}
+
 export interface Skipped {
   readonly userId: string;
   readonly handle: string;
@@ -67,6 +87,8 @@ export interface PromotionReport {
   readonly skipped: readonly Skipped[];
   /** Actually written. Always 0 in a dry run. */
   readonly promoted: number;
+  /** Eligible, attempted, and refused by Discord. Neither side was changed. */
+  readonly failed: readonly Failed[];
 }
 
 export interface RunOptions {
@@ -76,7 +98,16 @@ export interface RunOptions {
 }
 
 export class PromotionEngine {
-  constructor(private readonly store: PromotionStore) {}
+  constructor(
+    private readonly store: PromotionStore,
+    /**
+     * Optional so the engine stays runnable for a DRY RUN without Discord
+     * wired up — which is how every rehearsal before August is done. A LIVE
+     * run without one is refused, because it would write a rank here that
+     * Discord does not have.
+     */
+    private readonly ranks?: RankApplier,
+  ) {}
 
   async run(opts: RunOptions = {}): Promise<PromotionReport> {
     const now = opts.now ?? new Date();
@@ -91,7 +122,15 @@ export class PromotionEngine {
      * day when being wrong is most visible. A dry run writes nothing, so the
      * instruction is not weakened by allowing it.
      */
-    if (!dryRun) assertPromotionsPermitted(now);
+    if (!dryRun) {
+      assertPromotionsPermitted(now);
+      if (this.ranks === undefined) {
+        throw new Error(
+          'Refusing a live promotion run with no Discord rank applier: our database would ' +
+            'say one rank and the guild another, and the next reconciliation would undo it.',
+        );
+      }
+    }
 
     const ladder = await this.store.ladder();
     const byRank = new Map(ladder.map((r) => [r.rank, r]));
@@ -150,8 +189,24 @@ export class PromotionEngine {
     }
 
     let promoted = 0;
+    const failed: Failed[] = [];
     if (!dryRun) {
       for (const p of wouldPromote) {
+        try {
+          // DISCORD FIRST. If it refuses, nothing here changes either, and the
+          // next run simply tries again — recoverable. The other order leaves
+          // our database and the guild disagreeing, which reconciliation then
+          // resolves by handing back the rank the member just left.
+          await this.ranks?.applyRank(p.userId, p.from, p.to);
+        } catch (cause) {
+          failed.push({
+            userId: p.userId,
+            handle: p.handle,
+            reason: `Discord refused the role change: ${String(cause)}`,
+          });
+          continue;
+        }
+
         await this.store.applyPromotion(p.userId, p.from, p.to);
         await this.store.writeAudit({
           // No actor. Nobody CHOSE this — the member earned it and the engine
@@ -174,6 +229,7 @@ export class PromotionEngine {
       wouldPromote,
       skipped,
       promoted,
+      failed,
     };
   }
 }

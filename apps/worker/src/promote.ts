@@ -1,9 +1,11 @@
 import { resolve } from 'node:path';
 import { PrismaClient } from '@grims/db';
+import { DiscordAdapter } from '@grims/ed-clients';
 import { promotionsPermitted, EARLIEST_PROMOTION_AT } from '@grims/shared';
 import { PromotionEngine, formatReport } from './jobs/promotion-run.js';
 import { readLadderFromSsot, PrismaPromotionStore } from './jobs/promotion-run.wiring.js';
 import { WebhookReporter } from './jobs/discord-reconcile.wiring.js';
+import { DiscordRankApplier, ladderRoleIds } from './jobs/rank-applier.discord.js';
 
 /**
  * The monthly promotion run.
@@ -43,7 +45,34 @@ async function main(): Promise<number> {
   const prisma = new PrismaClient();
   try {
     const ladder = readLadderFromSsot(repoRoot);
-    const engine = new PromotionEngine(new PrismaPromotionStore(prisma, ladder));
+
+    /*
+     * The Discord applier is built ONLY for a live run.
+     *
+     * A dry run must not construct something that can change roles at all —
+     * not because it would be used, but because "the object exists and nothing
+     * calls it" is a weaker guarantee than "the object does not exist". Before
+     * August every run is a dry run, so this stays null.
+     */
+    const guildId = process.env['DISCORD_GUILD_ID'] ?? '';
+    const applier = live
+      ? new DiscordRankApplier(
+          prisma,
+          new DiscordAdapter({
+            clientId: process.env['DISCORD_CLIENT_ID'] ?? '',
+            clientSecret: process.env['DISCORD_CLIENT_SECRET'] ?? '',
+            botToken: process.env['DISCORD_BOT_TOKEN'] ?? '',
+            // EXACTLY the ten ladder ranks, derived from the mappings table.
+            // The bot outranks every leadership role in the guild, so Discord's
+            // own hierarchy check would not stop it handing out Galactic
+            // Admiral — this ceiling is ours.
+            grantableRoleIds: await ladderRoleIds(prisma),
+          }),
+          guildId,
+        )
+      : undefined;
+
+    const engine = new PromotionEngine(new PrismaPromotionStore(prisma, ladder), applier);
 
     // dryRun is TRUE unless --live was passed. Note the shape: the safe value
     // is the default, and going live takes a deliberate act.

@@ -182,6 +182,32 @@ export class DiscordAdapter implements IDiscordIdentityProvider {
     if (!res.ok && res.status !== 204) throw await this.#toError(res);
   }
 
+  /**
+   * Removes ONE role from a member.
+   *
+   * Subject to the same grantable ceiling as adding: a method that can strip
+   * any role is as dangerous as one that can grant any role — arguably more so,
+   * since it can demote every officer in the guild in a loop.
+   *
+   * Path is /guilds/{g}/members/{u}/roles/{r}, which the destructive guard
+   * permits. The rules it DOES block are guild-level role management
+   * (/guilds/{g}/roles) and member deletion (DELETE /guilds/{g}/members/{u});
+   * neither pattern matches this one, and that distinction is deliberate rather
+   * than an oversight — assigning a role is routine, restructuring the guild is
+   * not.
+   *
+   * 404 is treated as success: the member does not have the role, which is the
+   * state the caller asked for.
+   */
+  async removeRoleFromMember(guildId: string, userId: string, roleId: string): Promise<void> {
+    assertRoleGrantAllowed(roleId, this.config.grantableRoleIds ?? []);
+    const res = await this.#fetch(`${API}/guilds/${guildId}/members/${userId}/roles/${roleId}`, {
+      method: 'DELETE',
+      headers: { authorization: `Bot ${this.config.botToken}` },
+    });
+    if (!res.ok && res.status !== 204 && res.status !== 404) throw await this.#toError(res);
+  }
+
   // ------------------------------------------------------------------ private
   async #token(params: Record<string, string>): Promise<DiscordTokenSet> {
     const body = new URLSearchParams({ ...params, scope: DISCORD_SCOPE_STRING });

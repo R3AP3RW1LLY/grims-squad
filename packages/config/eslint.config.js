@@ -69,4 +69,31 @@ export default tseslint.config(
       '@typescript-eslint/no-non-null-assertion': 'off',
     },
   },
+  {
+    /*
+     * Build configuration files RUN IN NODE, whatever the app around them
+     * targets. Linting next.config.mjs as browser-adjacent makes `process`
+     * an undefined global — which is correct for application code and simply
+     * wrong here, and the workaround is otherwise to contort the config to
+     * avoid reading its own environment.
+     *
+     * Scoped to config files by name so application code keeps the strict
+     * treatment: a stray `process.env` in a component is still an error, which
+     * is the thing this rule is actually for.
+     */
+    // Listed one by one rather than with a {js,mjs,cjs} brace group: the
+    // minimatch version resolved here throws "expand is not a function" on
+    // brace expansion, and it fails as an ESLint crash rather than a lint
+    // error, which reads like a broken install.
+    files: [
+      '**/*.config.js',
+      '**/*.config.mjs',
+      '**/*.config.cjs',
+      '**/*.config.ts',
+      '**/*.config.mts',
+    ],
+    languageOptions: {
+      globals: { process: 'readonly', __dirname: 'readonly', module: 'writable' },
+    },
+  },
 );

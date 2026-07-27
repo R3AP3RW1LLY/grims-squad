@@ -68,12 +68,22 @@ const member = (over: Partial<MemberStanding> = {}): MemberStanding => ({
   ...over,
 });
 
+/**
+ * A no-op rank applier.
+ *
+ * These tests are about ELIGIBILITY — who qualifies and when — not about
+ * Discord. A live run refuses without an applier (see promotion-discord.spec.ts
+ * for why), so one is supplied here and does nothing. The Discord interaction
+ * is tested where it belongs rather than incidentally in every eligibility case.
+ */
+const noopApplier = { applyRank: async (): Promise<void> => undefined };
+
 let store: FakeStore;
 let engine: PromotionEngine;
 
 beforeEach(() => {
   store = new FakeStore();
-  engine = new PromotionEngine(store);
+  engine = new PromotionEngine(store, noopApplier);
 });
 
 describe('★ the 1 August 2026 floor — NON-NEGOTIABLE ★', () => {
