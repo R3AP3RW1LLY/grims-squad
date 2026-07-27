@@ -17,6 +17,28 @@ import { AppError, ErrorCode } from '@grims/shared';
 
 export const SAFE_METHODS = ['GET', 'HEAD', 'OPTIONS'] as const;
 
+/**
+ * The CSRF cookie's name, which is NOT constant.
+ *
+ * Over https it carries the `__Host-` prefix; over plain http browsers reject
+ * that prefix outright, so local development uses the bare name. Any reader
+ * that hard-codes one spelling verifies against a cookie that is not there —
+ * and because `verifyCsrf` fails closed, the symptom is every write returning
+ * CSRF_TOKEN_INVALID in exactly one environment. Derived here so there is a
+ * single place that decides.
+ */
+export function csrfCookieName(secure: boolean): string {
+  return `${secure ? '__Host-' : ''}gs_csrf`;
+}
+
+/** Reads the CSRF cookie, choosing the right name for the current environment. */
+export function readCsrfCookie(
+  cookies: Record<string, string | undefined>,
+  secure: boolean = process.env['NODE_ENV'] === 'production',
+): string | undefined {
+  return cookies[csrfCookieName(secure)];
+}
+
 /** 32 bytes base64url. Shorter than this is not a token we minted. */
 const MIN_LEN = 43;
 
