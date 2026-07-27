@@ -132,15 +132,57 @@ export class InaraLinkService {
     let cmdrName: string | null;
     try {
       cmdrName = await this.inara.getOwnCommanderName(key);
-    } catch {
+    } catch (cause) {
       /*
-       * The cause is deliberately NOT included in the message.
+       * ★ FOUND IN USE, 2026-07-27 ★
        *
-       * Inara echoes request parameters in some error payloads, and the request
-       * contains the key. Interpolating the upstream error would put a live
-       * credential into an HTTP response, a log line and an error report at
-       * once — the exact back door INV-012 exists to close.
+       * This used to collapse EVERY failure into "could not reach Inara", so a
+       * member whose key was simply wrong was told the service was down — and
+       * would sensibly wait and try the same wrong key again. The three cases
+       * need three different answers because they need three different actions.
+       *
+       * The cause is still never interpolated into any message: Inara echoes
+       * request parameters in some error payloads and the request carries the
+       * key, so quoting upstream would put a live credential into an HTTP
+       * response, a log line and an error report at once (INV-012). The CLASS
+       * of error is safe to distinguish; its text is not.
        */
+      const name = (cause as { name?: string }).name;
+
+      if (name === 'InaraNotApprovedError') {
+        /*
+         * ★ CONFIRMED AGAINST THE LIVE API, 2026-07-27 ★
+         *
+         * Inara answers HTTP 200 with header.eventStatus 400 and the text
+         * "This application has no access allowed" until OUR APPLICATION is
+         * registered with them. It is an envelope-level rejection of us, not
+         * of the member's key — no key of any kind will work until that is
+         * done.
+         *
+         * The first draft of this message told the member to generate a new
+         * key. That is worse than saying nothing: they would replace a
+         * perfectly good key, fail again, and reasonably conclude the site is
+         * broken. A wrong instruction costs more than a vague one.
+         *
+         * A member's key being WRONG is a different signal entirely — Inara
+         * returns event-level 204, which the adapter maps to null and which is
+         * handled below as "did not recognise".
+         */
+        throw new AppError(
+          ErrorCode.CAPI_NOT_APPROVED,
+          'Inara verification is not available yet — our application is still awaiting access from Inara. Your key is fine; nothing you can do will change this. Ask an officer to verify you in the meantime.',
+        );
+      }
+
+      if (name === 'LimiterBusyError') {
+        // Our own queue, not Inara's fault and not the member's. Inara allows
+        // two calls a minute globally (INV-033), so this genuinely does clear.
+        throw new AppError(
+          ErrorCode.UPSTREAM_UNAVAILABLE,
+          'Too many verifications happening at once. Wait a minute and try again — your key is fine.',
+        );
+      }
+
       throw new AppError(
         ErrorCode.UPSTREAM_UNAVAILABLE,
         'Could not reach Inara to check that key. Try again in a few minutes.',
