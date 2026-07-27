@@ -34,6 +34,17 @@
   --glow-orange: 0 0 24px rgba(255, 113, 0, 0.35);
   --glow-cyan: 0 0 24px rgba(0, 200, 255, 0.3);
   --cut: 10px;
+
+  /*
+   * The navbar's exact height. The header is set to this, and the hero to
+   * calc(100dvh - var(--nav-h)), so the two agree by construction instead of
+   * by a guess that drifts the moment a font or padding changes.
+   *
+   * dvh, NOT vh. On mobile, 100vh includes the browser chrome that hides on
+   * scroll, so a 100vh hero is taller than the screen and the page jumps as
+   * the toolbar retracts. dvh tracks the visible viewport.
+   */
+  --nav-h: 4rem;
 }
 
 html {
@@ -515,10 +526,18 @@ body {
   .gm-jump,
   .gm-reticle,
   .gm-lane { display: none; }
+  /* The mobile menu's stagger and slide collapse to a plain show/hide. The
+     panel must still APPEAR — disabling motion cannot disable navigation. */
+  #mobile-nav-panel,
+  #mobile-nav-panel a { transition: none !important; }
   .gm-star { opacity: 0.85; }
 }
 
 /* prefers-contrast: more raises text contrast and drops decorative glow. */
+@media (min-width: 640px) {
+  :root { --nav-h: 4.5rem; }
+}
+
 @media (prefers-contrast: more) {
   html { --color-text-secondary: #cfd8e3; }
   .panel {

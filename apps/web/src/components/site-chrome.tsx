@@ -1,4 +1,5 @@
 import Image from 'next/image';
+import { MobileNav } from './mobile-nav';
 /**
  * Persistent site chrome: background, navigation and footer.
  *
@@ -71,7 +72,7 @@ export function DeepField() {
 
 /* --------------------------------------------------------------------- nav */
 
-const NAV_LINKS = [
+export const NAV_LINKS = [
   { href: '/situation', label: 'Situation' },
   { href: '/market', label: 'Market' },
   { href: '/shipyard', label: 'Shipyard' },
@@ -83,7 +84,7 @@ export function SiteNav() {
     <header className="sticky top-0 z-50 border-b border-[var(--color-border-hairline)] bg-[color-mix(in_srgb,var(--color-surface-void)_78%,transparent)] backdrop-blur-md">
       <nav
         aria-label="Primary"
-        className="mx-auto flex max-w-[1440px] items-center gap-6 px-6 py-3.5"
+        className="mx-auto flex h-[var(--nav-h)] max-w-[1440px] items-center gap-3 px-4 sm:gap-6 sm:px-6"
       >
         <a href="/" className="group flex items-center gap-3">
           {/*
@@ -99,7 +100,7 @@ export function SiteNav() {
             width={40}
             height={40}
             priority
-            className="shrink-0"
+            className="h-8 w-8 shrink-0 sm:h-10 sm:w-10"
           />
           <span className="flex flex-col leading-none">
             <span
@@ -108,7 +109,10 @@ export function SiteNav() {
             >
               GRIM&rsquo;S SQUAD
             </span>
-            <span className="mt-1 font-mono text-[10px] tracking-[0.3em] text-[var(--color-text-secondary)]">
+            {/* Dropped below `sm`: at 360px the badge, wordmark, strapline and
+                two buttons cannot all fit, and the strapline is the one that
+                repeats verbatim in the hero directly below. */}
+            <span className="mt-1 hidden font-mono text-[10px] tracking-[0.3em] text-[var(--color-text-secondary)] sm:block">
               NO QUARTER IN THE VOID
             </span>
           </span>
@@ -143,7 +147,7 @@ export function SiteNav() {
           <a
             href="/join"
             aria-label="Join Grim's Squad now"
-            className="inline-flex items-center gap-2 whitespace-nowrap bg-[var(--color-brand-orange)] px-4 py-2 text-sm text-[var(--color-text-on-accent)] transition-opacity hover:opacity-90"
+            className="inline-flex items-center gap-2 whitespace-nowrap bg-[var(--color-brand-orange)] px-3 py-2 text-sm text-[var(--color-text-on-accent)] transition-opacity hover:opacity-90 sm:px-4"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             <DiscordGlyph />
@@ -157,7 +161,7 @@ export function SiteNav() {
           <a
             href="/v1/auth/discord"
             aria-label="Squadron portal sign in"
-            className="inline-flex items-center gap-2 whitespace-nowrap border border-[var(--color-border-active)] px-4 py-2 text-sm text-[var(--color-brand-orange-bright)] transition-colors hover:bg-[var(--color-surface-panel-hover)]"
+            className="hidden items-center gap-2 whitespace-nowrap border border-[var(--color-border-active)] px-3 py-2 text-sm text-[var(--color-brand-orange-bright)] transition-colors hover:bg-[var(--color-surface-panel-hover)] sm:inline-flex sm:px-4"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             <span className="hidden md:inline" aria-hidden="true">
@@ -167,6 +171,8 @@ export function SiteNav() {
               SIGN IN
             </span>
           </a>
+
+          <MobileNav links={NAV_LINKS} />
         </div>
       </nav>
     </header>

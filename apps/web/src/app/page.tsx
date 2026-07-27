@@ -41,14 +41,17 @@ export default function HomePage() {
     <main id="main">
       {/* ============================================================= hero */}
       <section
-        className="relative overflow-hidden border-b border-[var(--color-border-hairline)]"
+        // Exactly one screen, minus the navbar. `min-h` rather than `h` so a
+        // small phone in landscape scrolls instead of clipping the CTAs — a
+        // hero that hides its own buttons is worse than one that scrolls.
+        className="relative flex min-h-[calc(100dvh-var(--nav-h))] flex-col justify-center overflow-hidden border-b border-[var(--color-border-hairline)]"
         aria-labelledby="hero-heading"
       >
         {/* The in-game galaxy map, with traffic. Replaces the earlier orbital
             ornament: this is the view every CMDR already knows. */}
         <GalaxyMap />
 
-        <div className="relative mx-auto max-w-[1440px] px-6 py-20 text-center sm:py-28">
+        <div className="relative mx-auto w-full max-w-[1440px] px-4 py-10 text-center sm:px-6 sm:py-14">
           <p className="mb-8 flex items-center justify-center gap-3 font-mono text-[11px] uppercase tracking-[0.35em] text-[var(--color-brand-cyan-bright)]">
             <span className="inline-block h-px w-8 bg-[var(--color-brand-cyan)]" aria-hidden="true" />
             Elite Dangerous Squadron
@@ -70,7 +73,7 @@ export default function HomePage() {
               height={800}
               priority
               sizes="(max-width: 640px) 92vw, (max-width: 1024px) 80vw, 860px"
-              className="mx-auto h-auto w-full max-w-[860px] drop-shadow-[0_0_60px_rgba(255,113,0,0.18)]"
+              className="mx-auto h-auto w-full max-w-[min(860px,72vw)] drop-shadow-[0_0_60px_rgba(255,113,0,0.18)] sm:max-w-[min(860px,62vw)]"
             />
           </h1>
 
@@ -83,13 +86,13 @@ export default function HomePage() {
             NO QUARTER IN THE VOID
           </p>
 
-          <p className="mx-auto mt-8 max-w-[62ch] text-lg leading-relaxed text-[var(--color-text-primary)]">
+          <p className="mx-auto mt-6 max-w-[62ch] text-base leading-relaxed text-[var(--color-text-primary)] sm:text-lg">
             We run a player minor faction, operate fleet carriers, and fly everything from conflict
             zones to the black. Combat and AX, trade, mining, exploration &mdash; and the background
             simulation that decides who actually holds a system.
           </p>
 
-          <div className="mt-10 flex flex-wrap justify-center gap-4">
+          <div className="mt-8 flex flex-wrap justify-center gap-3 sm:gap-4">
             <a
               href="/apply"
               className="bg-[var(--color-brand-orange)] px-7 py-3.5 text-[var(--color-text-on-accent)] shadow-[var(--glow-orange)] transition-opacity hover:opacity-90"
@@ -107,20 +110,26 @@ export default function HomePage() {
           </div>
 
           {/* Instrument strip — real, static facts only. */}
-          <dl className="mx-auto mt-20 grid max-w-3xl grid-cols-2 gap-px border border-[var(--color-border-hairline)] bg-[var(--color-border-hairline)] text-left sm:grid-cols-4">
+          <dl className="mx-auto mt-10 grid w-full max-w-3xl grid-cols-2 gap-px border border-[var(--color-border-hairline)] bg-[var(--color-border-hairline)] text-left sm:mt-14 sm:grid-cols-[1.5fr_1fr_1.4fr_1fr]">
             {[
-              ['HOME SYSTEM', 'Hyades Sector AV-W b2-4'],
+              // NON-BREAKING HYPHEN in "b2‑4". With an ordinary hyphen the
+              // cell broke after "b2-" and left the "4" orphaned on its own
+              // line, which read as a typo rather than a wrap.
+              ['HOME SYSTEM', 'Hyades Sector AV‑W b2‑4'],
               ['DIVISIONS', 'Seven'],
               ['ALLEGIANCE', 'Player Minor Faction'],
               ['PLATFORM', 'PC · Odyssey'],
             ].map(([label, value]) => (
-              <div key={label} className="bg-[var(--color-surface-panel-sunken)] px-4 py-4">
-                <dt className="font-mono text-[10px] tracking-[0.24em] text-[var(--color-text-secondary)]">
+              <div
+                key={label}
+                className="flex flex-col justify-between bg-[var(--color-surface-panel-sunken)] px-3 py-3 sm:px-4 sm:py-4"
+              >
+                <dt className="font-mono text-[9px] tracking-[0.2em] text-[var(--color-text-secondary)] sm:text-[10px] sm:tracking-[0.24em]">
                   {label}
                 </dt>
                 <dd
-                  className="mt-2 text-sm text-[var(--color-brand-orange-bright)]"
-                  style={{ fontFamily: 'var(--font-display)' }}
+                  className="mt-1.5 text-[13px] leading-snug text-[var(--color-brand-orange-bright)] sm:mt-2 sm:text-sm"
+                  style={{ fontFamily: 'var(--font-display)', textWrap: 'balance' }}
                 >
                   {value}
                 </dd>
