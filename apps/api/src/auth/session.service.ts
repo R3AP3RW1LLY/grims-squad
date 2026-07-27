@@ -115,6 +115,13 @@ export class SessionService {
     };
   }
 
+  /** Revokes the family a refresh token belongs to. Used by logout. */
+  async revokeByRefreshToken(refreshToken: string, reason: string): Promise<void> {
+    const found = await this.store.findByHash(sha256(refreshToken));
+    if (found === null) return;
+    await this.store.revokeFamily(found.family.id, reason, new Date());
+  }
+
   async revokeFamily(familyId: string, reason: string): Promise<void> {
     await this.store.revokeFamily(familyId, reason, new Date());
   }
