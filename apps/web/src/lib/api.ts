@@ -134,8 +134,10 @@ export const getAdminActivity = (
     authed: true,
   });
 
-export const getAdminAudit = (): Promise<{ entries: AdminAuditRow[] } | null> =>
-  get('/v1/admin/audit?limit=100', { authed: true });
+export const getAdminAudit = (): Promise<{
+  entries: AdminAuditRow[];
+  actions: string[];
+} | null> => get('/v1/admin/audit?limit=100', { authed: true });
 
 export interface SquadronStats {
   members: number;
@@ -154,3 +156,24 @@ export interface SquadronStats {
  * uptime and rate limits in front of the squadron's front door.
  */
 export const getSquadronStats = (): Promise<SquadronStats | null> => get('/v1/public/stats');
+
+export interface AdminRoleRow {
+  id: string;
+  key: string;
+  name: string;
+  /** DECIMAL STRING. Above 2^53 a JSON number would round it (INV-006). */
+  permMask: string;
+  rankOrder: number;
+}
+
+export interface AdminMappingRow {
+  roleId: string;
+  roleName: string;
+  discordRoleId: string;
+}
+
+export const getAdminRoles = (): Promise<{ roles: AdminRoleRow[] } | null> =>
+  get('/v1/admin/roles', { authed: true });
+
+export const getAdminMappings = (): Promise<{ mappings: AdminMappingRow[] } | null> =>
+  get('/v1/admin/mappings', { authed: true });

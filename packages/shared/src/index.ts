@@ -11,3 +11,6 @@ export {
   assertPromotionsPermitted,
   promotionsPermitted,
 } from './promotion-floor.js';
+
+export { NonceService, formatNonce, NONCE_TTL_MS } from './nonce.service.js';
+export type { NonceStore, NonceClaim, CheckResult, CheckOutcome } from './nonce.service.js';
