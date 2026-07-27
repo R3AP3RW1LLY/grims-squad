@@ -116,20 +116,41 @@ export function SiteNav() {
           {/* Two doors, deliberately distinct. NEW arrivals are not yet in the
               Discord server, so "sign in" would fail for them with a membership
               error that reads like a rejection. */}
+          {/*
+            Both labels shorten below `md` (768px). At full length they are ~3x wider
+            than before, and two of them plus the wordmark overflow a phone
+            viewport — which on a sticky header means the sign-in button is
+            simply unreachable. `sm` (640px) is still too narrow once the
+            wordmark is counted, so the switch happens at `md`. The accessible name stays the FULL label via
+            aria-label, so a screen reader hears "Join Grim's Squad now"
+            regardless of which visual variant the viewport is showing.
+          */}
           <a
             href="/join"
-            className="inline-flex items-center gap-2 bg-[var(--color-brand-orange)] px-4 py-2 text-sm text-[var(--color-text-on-accent)] transition-opacity hover:opacity-90"
+            aria-label="Join Grim's Squad now"
+            className="inline-flex items-center gap-2 whitespace-nowrap bg-[var(--color-brand-orange)] px-4 py-2 text-sm text-[var(--color-text-on-accent)] transition-opacity hover:opacity-90"
             style={{ fontFamily: 'var(--font-display)' }}
           >
             <DiscordGlyph />
-            JOIN
+            <span className="hidden md:inline" aria-hidden="true">
+              JOIN GRIM&rsquo;S SQUAD NOW
+            </span>
+            <span className="md:hidden" aria-hidden="true">
+              JOIN
+            </span>
           </a>
           <a
             href="/v1/auth/discord"
-            className="inline-flex items-center gap-2 border border-[var(--color-border-active)] px-4 py-2 text-sm text-[var(--color-brand-orange-bright)] transition-colors hover:bg-[var(--color-surface-panel-hover)]"
+            aria-label="Squadron portal sign in"
+            className="inline-flex items-center gap-2 whitespace-nowrap border border-[var(--color-border-active)] px-4 py-2 text-sm text-[var(--color-brand-orange-bright)] transition-colors hover:bg-[var(--color-surface-panel-hover)]"
             style={{ fontFamily: 'var(--font-display)' }}
           >
-            SIGN IN
+            <span className="hidden md:inline" aria-hidden="true">
+              SQUADRON PORTAL SIGN IN
+            </span>
+            <span className="md:hidden" aria-hidden="true">
+              SIGN IN
+            </span>
           </a>
         </div>
       </nav>
