@@ -112,14 +112,26 @@ export function SiteNav() {
           ))}
         </ul>
 
-        <a
-          href="/v1/auth/discord"
-          className="ml-auto inline-flex items-center gap-2 border border-[var(--color-border-active)] px-4 py-2 text-sm text-[var(--color-brand-orange-bright)] transition-colors hover:bg-[var(--color-surface-panel-hover)] lg:ml-0"
-          style={{ fontFamily: 'var(--font-display)' }}
-        >
-          <DiscordGlyph />
-          SIGN IN
-        </a>
+        <div className="ml-auto flex items-center gap-2 lg:ml-0">
+          {/* Two doors, deliberately distinct. NEW arrivals are not yet in the
+              Discord server, so "sign in" would fail for them with a membership
+              error that reads like a rejection. */}
+          <a
+            href="/join"
+            className="inline-flex items-center gap-2 bg-[var(--color-brand-orange)] px-4 py-2 text-sm text-[var(--color-text-on-accent)] transition-opacity hover:opacity-90"
+            style={{ fontFamily: 'var(--font-display)' }}
+          >
+            <DiscordGlyph />
+            JOIN
+          </a>
+          <a
+            href="/v1/auth/discord"
+            className="inline-flex items-center gap-2 border border-[var(--color-border-active)] px-4 py-2 text-sm text-[var(--color-brand-orange-bright)] transition-colors hover:bg-[var(--color-surface-panel-hover)]"
+            style={{ fontFamily: 'var(--font-display)' }}
+          >
+            SIGN IN
+          </a>
+        </div>
       </nav>
     </header>
   );

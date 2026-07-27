@@ -26,6 +26,8 @@ const DEFAULT_TIMEOUT_MS = 8_000;
 export interface DiscordAdapterConfig {
   readonly clientId: string;
   readonly clientSecret: string;
+  /** Needed only for guild writes (adding a member, applying a role). */
+  readonly botToken: string;
   readonly timeoutMs?: number;
 }
 
@@ -83,6 +85,40 @@ export class DiscordAdapter implements IDiscordIdentityProvider {
       throw new DiscordApiError('Guild member payload had no joined_at.', 502, false);
     }
     return { roles: j.roles ?? [], nick: j.nick ?? null, joinedAt: j.joined_at };
+  }
+
+  /**
+   * Adds a user to the guild with roles pre-applied, using THEIR access token
+   * (scope `guilds.join`) plus the bot's own authority. Requires the bot to hold
+   * CREATE_INSTANT_INVITE, and its role to sit above every role being applied.
+   *
+   * 201 = added. 204 = they were already a member and nothing changed — which is
+   * a success, not a failure, and treating it otherwise shows an error to
+   * someone whose join worked.
+   */
+  async addGuildMember(
+    guildId: string,
+    userId: string,
+    userAccessToken: string,
+    roles: readonly string[],
+  ): Promise<void> {
+    const res = await this.#fetch(`${API}/guilds/${guildId}/members/${userId}`, {
+      method: 'PUT',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bot ${this.config.botToken}`,
+      },
+      body: JSON.stringify({ access_token: userAccessToken, roles: [...roles] }),
+    });
+    if (res.status !== 201 && res.status !== 204) throw await this.#toError(res);
+  }
+
+  async addRoleToMember(guildId: string, userId: string, roleId: string): Promise<void> {
+    const res = await this.#fetch(`${API}/guilds/${guildId}/members/${userId}/roles/${roleId}`, {
+      method: 'PUT',
+      headers: { authorization: `Bot ${this.config.botToken}` },
+    });
+    if (!res.ok && res.status !== 204) throw await this.#toError(res);
   }
 
   // ------------------------------------------------------------------ private
