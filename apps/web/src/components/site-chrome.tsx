@@ -271,7 +271,7 @@ export function SiteFooter() {
               <li>
                 <a
                   href="/privacy"
-                  className="text-[var(--color-text-secondary)] underline underline-offset-4 transition-colors hover:text-[var(--color-brand-cyan-bright)]"
+                  className="text-[var(--color-text-secondary)] no-underline transition-colors hover:text-[var(--color-brand-cyan-bright)] hover:underline hover:underline-offset-4"
                 >
                   Privacy Policy
                 </a>
@@ -279,7 +279,7 @@ export function SiteFooter() {
               <li>
                 <a
                   href="/terms"
-                  className="text-[var(--color-text-secondary)] underline underline-offset-4 transition-colors hover:text-[var(--color-brand-cyan-bright)]"
+                  className="text-[var(--color-text-secondary)] no-underline transition-colors hover:text-[var(--color-brand-cyan-bright)] hover:underline hover:underline-offset-4"
                 >
                   Terms of Service
                 </a>
