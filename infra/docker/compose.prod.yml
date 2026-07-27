@@ -114,6 +114,19 @@ services:
       NEXT_PUBLIC_SITE_URL: ${PUBLIC_SITE_URL:-https://45-63-35-93.sslip.io}
     depends_on: [api]
 
+  bot:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.bot
+    restart: unless-stopped
+    env_file: [/srv/grims/.env]
+    environment:
+      NODE_ENV: production
+    depends_on:
+      postgres: { condition: service_healthy }
+    # No ports. The bot dials OUT to Discord's gateway and never accepts a
+    # connection, so exposing anything would only add attack surface.
+
 volumes:
   pgdata:
   redisdata:

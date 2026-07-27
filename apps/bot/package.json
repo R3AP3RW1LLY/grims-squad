@@ -15,5 +15,11 @@
     "@grims/config": "workspace:*",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
+  },
+  "dependencies": {
+    "discord.js": "^14.27.0",
+    "@grims/db": "workspace:*",
+    "@grims/shared": "workspace:*",
+    "pino": "^10.3.1"
   }
 }

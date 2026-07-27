@@ -1638,6 +1638,23 @@ enum GameActivityState {
   unlinked
 }
 
+/// Small key/value checkpoints for long-running workers.
+///
+/// The first use is the activity backfill watermark: the highest Discord
+/// message snowflake already counted. Discord snowflakes are MONOTONIC, so
+/// "process everything after this id" is exact and costs one row rather than a
+/// table of every message id ever seen.
+///
+/// Without it, every bot restart re-reads recent history and re-counts the same
+/// messages, inflating everyone's activity a little more each deploy.
+model BotCheckpoint {
+  key       String   @id
+  value     String
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("bot_checkpoints")
+}
+
 model AuditLog {
   id         BigInt    @id @default(autoincrement())
   actorId    String?   @map("actor_id") @db.Uuid

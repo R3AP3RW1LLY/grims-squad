@@ -1,0 +1,32 @@
+# syntax=docker/dockerfile:1
+#
+# The squadron bot. Holds a persistent gateway connection and records activity.
+#
+# Built from the REPO ROOT: pnpm workspaces need the lockfile and every
+# workspace manifest to resolve the same dependency graph CI tested.
+FROM node:24-slim AS base
+RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH
+RUN corepack enable
+
+FROM base AS build
+WORKDIR /app
+COPY . .
+RUN pnpm install --frozen-lockfile
+RUN pnpm --filter @grims/db exec prisma generate
+# EVERY workspace package the bot imports, built first. Each resolves through
+# its `main` to dist/, which does not exist until tsc has run — the exact
+# omission that broke the web image with "Module not found" for a package
+# plainly listed in its package.json.
+RUN pnpm --filter @grims/shared build \
+ && pnpm --filter @grims/db build \
+ && pnpm --filter @grims/bot exec tsc -b
+
+FROM base AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=build /app /app
+RUN useradd -r -u 10003 -m grims && chown -R grims:grims /app
+USER grims
+CMD ["node", "apps/bot/dist/main.js"]
