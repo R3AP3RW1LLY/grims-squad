@@ -1603,10 +1603,21 @@ model MemberActivityMonth {
   /// Linked when the member signs in. Null for members who never have.
   userId       String?  @map("user_id") @db.Uuid
 
-  /// Messages in the configured activity channel. The Discord half of the test.
-  messageCount   Int       @default(0) @map("message_count")
-  firstMessageAt DateTime? @map("first_message_at") @db.Timestamptz(6)
-  lastMessageAt  DateTime? @map("last_message_at") @db.Timestamptz(6)
+  /// Discord activity, counted by KIND (human decision, 2026-07-27).
+  ///
+  /// All three are forms of taking part, and any of them satisfies the Discord
+  /// half of the monthly test. They are counted separately so the admin
+  /// dashboard can show HOW someone is active — a member who only ever sits in
+  /// voice is participating differently from one who only posts, and an officer
+  /// deciding on a promotion should be able to see which.
+  messageCount   Int @default(0) @map("message_count")
+  /// Posts and replies in forum channels, including threads under them.
+  forumPostCount Int @default(0) @map("forum_post_count")
+  /// Times they joined a voice channel that is open to members.
+  voiceJoinCount Int @default(0) @map("voice_join_count")
+
+  firstActivityAt DateTime? @map("first_activity_at") @db.Timestamptz(6)
+  lastActivityAt  DateTime? @map("last_activity_at") @db.Timestamptz(6)
 
   /// Whether an Elite Dangerous session was seen, and on what evidence.
   /// `assumed` means the upstream check FAILED and we counted it anyway

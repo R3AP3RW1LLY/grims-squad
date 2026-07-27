@@ -10,11 +10,28 @@
 meta:
   activityChannelId: '801929817149669388' # #grim-general-chat
   timezone: UTC
-  # Runs DAILY, not only on the 1st. Activity is still measured per calendar
-  # month, so most promotions land shortly after a month closes — but a daily
-  # pass picks up late-arriving Inara data and anyone a failed run missed,
-  # instead of making them wait a further month.
-  schedule: 'daily at 00:15 UTC'
+  # ★ MONTHLY, on the 1st at 00:00 UTC. ★
+  #
+  # SUPERSEDES the earlier 'check daily' instruction (human, 2026-07-27, later
+  # the same day). Recorded rather than quietly swapped, because the two
+  # instructions genuinely conflict and the later one wins.
+  schedule: '0 0 1 * *'   # 1st of the month, 00:00 UTC
+  scheduleTimezone: UTC
+
+  # ★★ HARD FLOOR — NOTHING MAY BE PROMOTED BEFORE THIS INSTANT. ★★
+  #
+  # Human instruction, 2026-07-27, given as non-negotiable. July 2026 is a
+  # PARTIAL month of data: the bot began recording on 27 July and backfilled
+  # only from the 1st, so July can never be a fair qualifying month for anyone.
+  #
+  # The engine MUST refuse to write any promotion before this timestamp, and
+  # that refusal must be a coded guard with its own test — not a cron
+  # expression that happens not to fire yet, and not a comment. A schedule can
+  # be triggered by hand; a guard cannot be.
+  earliestPromotionAt: '2026-08-01T00:00:00Z'
+  earliestPromotionReason: >
+    Human instruction, non-negotiable. The first promotion run is 1 August 2026.
+    July 2026 is partial data and must never produce a promotion.
 
 # ---------------------------------------------------------------- eligibility
 qualifyingMonth:
@@ -23,8 +40,37 @@ qualifyingMonth:
     rank for the WHOLE month and met every requirement below during it.
   requirements:
     - id: discord_activity
-      description: At least one message in the activity channel.
+      description: >
+        At least one act of taking part in Discord. ANY of the three kinds
+        below satisfies it; they are recorded separately so the dashboard can
+        show HOW a member participates, not merely whether they did.
       default: 1
+      kinds:
+        - id: message
+          description: A message in the activity channel.
+          channelId: '801929817149669388'   # #grim-general-chat
+        - id: forum
+          description: >
+            A post or reply in any forum channel. Both are messages inside a
+            thread whose parent is a forum, so one check catches both.
+        - id: voice
+          description: Joining one of the listed voice channels.
+          # Named EXPLICITLY rather than derived from permissions. A derived
+          # list ("anywhere @everyone can Connect") maintains itself but also
+          # silently opts in every future channel, including ones created for a
+          # purpose nobody meant to count.
+          channelIds:
+            - '1394739606754168852'   # Squadron Open Comms
+            - '1394739785037250711'   # Saturday Night Game Night Comms
+            - '1512926175205265509'   # Squad Wing 1
+            - '1512926227399442533'   # Squad Wing 2
+            - '1528069369509187624'   # Squad Wing 3
+            - '1528069836159189133'   # NSFW Squadron Open Comms
+          note: >
+            Only a JOIN counts. Toggling mute, deafen or camera fires the same
+            gateway event and would otherwise inflate the count for sitting
+            still. All six ids were verified against the live guild as voice
+            channels before being recorded here.
     - id: game_activity
       description: At least one Elite Dangerous session observed.
       default: 1
@@ -142,6 +188,17 @@ rules:
     why: >
       An automated change to someone's standing that nobody can explain
       afterwards is indistinguishable from a bug, and impossible to appeal.
+
+  - id: never_before_the_floor
+    rule: >
+      The engine refuses to write ANY promotion before meta.earliestPromotionAt,
+      whatever the schedule, whatever the data, and whether it was triggered by
+      cron or by hand. Enforced in code with a test, not by the schedule.
+    why: >
+      A cron expression that does not fire yet is not a safeguard — someone runs
+      the job manually to test it and 49 people get promoted on partial July
+      data. The floor has to be something the code checks, not something the
+      calendar happens to prevent.
 
   - id: dry_run_first
     rule: >

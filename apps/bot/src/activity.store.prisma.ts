@@ -1,5 +1,5 @@
 import { PrismaClient } from '@grims/db';
-import type { IActivityStore } from './activity.recorder.js';
+import type { IActivityStore, ActivityKind } from './activity.recorder.js';
 
 /**
  * Prisma-backed activity store.
@@ -17,16 +17,33 @@ import type { IActivityStore } from './activity.recorder.js';
 export class PrismaActivityStore implements IActivityStore {
   constructor(private readonly prisma: PrismaClient) {}
 
-  async record(discordId: string, month: Date, at: Date, _messageId?: string): Promise<boolean> {
+  async record(
+    discordId: string,
+    month: Date,
+    at: Date,
+    kind: ActivityKind = 'message',
+    _eventId?: string,
+  ): Promise<boolean> {
+    // Which counter moves is decided HERE and passed as three literals, rather
+    // than interpolating a column name into the SQL. A column name built from a
+    // value is an injection point, and `kind` ultimately originates from a
+    // gateway payload.
+    const m = kind === 'message' ? 1 : 0;
+    const f = kind === 'forum' ? 1 : 0;
+    const v = kind === 'voice' ? 1 : 0;
+
     await this.prisma.$executeRaw`
       INSERT INTO member_activity_months
-        (discord_id, month, message_count, first_message_at, last_message_at)
-      VALUES (${discordId}, ${month}::date, 1, ${at}, ${at})
+        (discord_id, month, message_count, forum_post_count, voice_join_count,
+         first_activity_at, last_activity_at)
+      VALUES (${discordId}, ${month}::date, ${m}, ${f}, ${v}, ${at}, ${at})
       ON CONFLICT (discord_id, month) DO UPDATE SET
-        message_count    = member_activity_months.message_count + 1,
-        first_message_at = LEAST(member_activity_months.first_message_at, EXCLUDED.first_message_at),
-        last_message_at  = GREATEST(member_activity_months.last_message_at, EXCLUDED.last_message_at),
-        updated_at       = now()
+        message_count     = member_activity_months.message_count    + ${m},
+        forum_post_count  = member_activity_months.forum_post_count + ${f},
+        voice_join_count  = member_activity_months.voice_join_count + ${v},
+        first_activity_at = LEAST(member_activity_months.first_activity_at, EXCLUDED.first_activity_at),
+        last_activity_at  = GREATEST(member_activity_months.last_activity_at, EXCLUDED.last_activity_at),
+        updated_at        = now()
     `;
     return true;
   }
