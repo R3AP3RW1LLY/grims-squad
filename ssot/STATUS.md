@@ -4,8 +4,9 @@ _Last updated: 2026-07-27 by agent (P1 build-out)_
 ## Current position
 Phase: **P1 — Identity & shell, IN PROGRESS**
 P0:     7 of 8 done. **P0.7 (deploy) DEFERRED by the human, 2026-07-26** — no infrastructure work for now; development continues locally.
-Next:   **Finish P1.7 (role/mapping editors, audit filters) and P1.8b (Inara nonce path).**
-        Then deploy, then a P1 exit review against the criteria — NOT before.
+Next:   **Deploy (P0.7), then live-verify, then a P1 exit review** — in that order.
+        Every P1 task except cAPI is now built. None of it has run anywhere but
+        locally and in CI.
 
 Done:   **P1.1 Discord OAuth** — VERIFIED LIVE against the real Discord API on 2026-07-26.
         **P1.2 Sessions** — rotating refresh, reuse detection, CSRF, idempotency namespacing.
@@ -13,14 +14,12 @@ Done:   **P1.1 Discord OAuth** — VERIFIED LIVE against the real Discord API on
         **P1.4 Role-sync bot** — activity recording across message, forum and voice.
         **P1.5 Nightly reconciliation** — refuses to act on an empty or failed guild fetch.
         **P1.6 Member profiles and privacy** — INV-027, sessions list, revoke, data export.
+        **P1.7 Admin console** — activity, members, audit log with filters, the role
+        editor with a mandatory impact preview, and the Discord mapping editor.
+        **P1.8b CMDR verification** — BOTH paths: officer-manual (tier 1) and the
+        Inara nonce (tier 2), behind the global 2/min limiter.
         **P1.9 Public landing with live stats** — from our own database.
         **P1.10 TOTP** — forced enrolment, single-use codes, step-up on the admin console.
-
-Partial: **P1.7 Admin console** — activity dashboard, members and audit log are live and
-        gated. The role editor, the Discord mapping editor and the audit log's
-        filters are NOT built. See the P1 exit gap table below.
-        **P1.8b CMDR verification** — the officer-manual path is complete and audited.
-        The Inara nonce path is NOT built.
 
 Blocked: **P1.8 Frontier cAPI** — the application to Frontier has never been submitted.
         See `CAPI-APPLICATION.local.md`. Weeks of lead time, discretionary approval.
@@ -155,6 +154,7 @@ invariant gate that would have been switched off in week one.
 ## Session handoff notes
 _Newest first. One line per session that changed state._
 
+- **2026-07-27 · agent** — Finished P1.7 and P1.8b, the two tasks left partial overnight. Role editor with a MANDATORY who-does-this-affect preview (save is disabled until it runs), Discord mapping editor with snowflake validation and duplicate refusal, server-side audit filters. Inara nonce path complete: global 2/min singleton limiter (INV-033), `events[0].eventStatus` checked rather than `res.ok` — Inara answers HTTP 200 for its own failures — and not-found-yet treated as a normal in-progress state. **566 tests passing, all five CI jobs green.** NonceService moved to `packages/shared` and its Prisma store to `packages/db` so the worker can use both. **Every P1 task except cAPI is now built; nothing is deployed and nothing is live-verified.**
 - **2026-07-27 · agent** — P1 built out overnight, unattended. Completed P1.3 (data-layer ACL, the MANDATORY criterion), P1.5, P1.6, P1.9, P1.10, the officer-manual half of P1.8b, and the promotion engine in dry-run. **P1 invariant coverage went 10/15 → 15/15.** 460 tests passing; typecheck, lint, build, secret scan and drift check clean. PRs #40 and #41 are green and awaiting merge — the merge itself was blocked by a permission prompt, so **both are open and unmerged.** P1.7 and P1.8b are PARTIAL and P1.8 is externally blocked; see the gap table above. **Nothing has been deployed and nothing built in this session has been verified against a live external API.**
 - **2026-07-26 · agent** — P0.4 and P0.5 completed. API on :5001 with a health endpoint verified against the real stack in all three states. Website live on :5000, themed from `tokens.json`, accessibility criteria asserted against the rendered HTML. **7 of 8 P0 tasks done; only P0.7 (deploy) remains, blocked on the Vultr key.**
 - **2026-07-26 · agent** — P0 started and 5 of 8 tasks completed (P0.1, P0.2, P0.3, P0.6, P0.8), merged as PR #7 with all 5 CI jobs green. Node pinned to 24 LTS. Database live with 56 tables, TimescaleDB hypertable and every hand-written index. 35 tests passing. The SSOT drift check is proven to fail on an edited copy, not merely assumed to. **P0.4 (API) and P0.5 (web) remain; P0.7 (deploy) is blocked on the Vultr key.**

@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { getAdminActivity, getAdminAudit } from '../../lib/api';
 import { StepUp } from './step-up';
+import { AuditFilters } from './audit-filters';
 
 /**
  * The admin console (P1.7).
@@ -60,6 +61,15 @@ export default async function AdminPage() {
         ADMIN CONSOLE
       </h1>
       <div className="rule-glow mt-5" aria-hidden="true" />
+
+      <nav aria-label="Admin sections" className="mt-8">
+        <a
+          href="/app/roles"
+          className="rounded border border-[var(--color-border-hairline)] px-4 py-2 font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--color-brand-cyan-bright)]"
+        >
+          Roles &amp; permissions
+        </a>
+      </nav>
 
       <section aria-labelledby="activity-heading" className="mt-12">
         <h2
@@ -136,30 +146,7 @@ export default async function AdminPage() {
           an audit log that proves nothing.
         </p>
 
-        <ul className="mt-6 space-y-1">
-          {(audit?.entries ?? []).map((e) => (
-            <li
-              key={e.id}
-              className="flex flex-wrap gap-x-4 border-b border-[var(--color-border-hairline)] py-2.5 font-mono text-xs"
-            >
-              <time
-                dateTime={e.createdAt}
-                className="w-40 shrink-0 text-[var(--color-text-muted)]"
-              >
-                {new Date(e.createdAt).toISOString().replace('T', ' ').slice(0, 16)}
-              </time>
-              <span className="text-[var(--color-brand-cyan-bright)]">{e.action}</span>
-              <span className="text-[var(--color-text-muted)]">
-                {e.actorHandle ?? 'system'}
-                {e.targetId !== null && ` → ${e.targetType ?? ''} ${e.targetId.slice(0, 8)}`}
-              </span>
-            </li>
-          ))}
-        </ul>
-
-        {(audit?.entries.length ?? 0) === 0 && (
-          <p className="mt-6 text-sm text-[var(--color-text-muted)]">Nothing audited yet.</p>
-        )}
+        <AuditFilters initial={audit?.entries ?? []} actions={audit?.actions ?? []} />
       </section>
     </main>
   );

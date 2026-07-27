@@ -25,7 +25,8 @@
     "clean": "rm -rf dist *.tsbuildinfo"
   },
   "dependencies": {
-    "@prisma/client": "^6.19.0"
+    "@prisma/client": "^6.19.0",
+    "@grims/shared": "workspace:*"
   },
   "devDependencies": {
     "@grims/config": "workspace:*",

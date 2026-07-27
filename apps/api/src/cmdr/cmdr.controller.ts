@@ -4,8 +4,9 @@ import { AppError, ErrorCode, Permission } from '@grims/shared';
 import { User, type CurrentUser } from '../auth/current-user.js';
 import { RequiresPermission } from '../authz/requires-permission.guard.js';
 import { verifyCsrf, readCsrfCookie } from '../common/csrf.js';
-import { CMDR_SERVICE } from './cmdr.tokens.js';
+import { CMDR_SERVICE, NONCE_SERVICE } from './cmdr.tokens.js';
 import type { CmdrService, ClaimRecord, QueueEntry } from './cmdr.service.js';
+import type { NonceService } from '@grims/shared';
 
 function readString(body: unknown, key: string): string {
   const v = (body as Record<string, unknown> | null)?.[key];
@@ -17,7 +18,55 @@ function readString(body: unknown, key: string): string {
 
 @Controller('v1')
 export class CmdrController {
-  constructor(@Inject(CMDR_SERVICE) private readonly cmdr: CmdrService) {}
+  constructor(
+    @Inject(CMDR_SERVICE) private readonly cmdr: CmdrService,
+    @Inject(NONCE_SERVICE) private readonly nonce: NonceService,
+  ) {}
+
+  /**
+   * Starts Inara verification (trust tier 2).
+   *
+   * Returns a code the member pastes into their Inara profile. The WORKER then
+   * polls Inara and completes it — this route never calls Inara itself, because
+   * the global limiter allows two calls a minute and a member must never be
+   * waiting on that queue inside an HTTP request (INV-031, INV-033).
+   */
+  @Post('me/cmdr/inara')
+  async startInara(
+    @User() caller: CurrentUser | undefined,
+    @Body() body: unknown,
+    @Req() req: FastifyRequest,
+  ): Promise<{ nonce: string; expiresAt: string; instructions: string }> {
+    const userId = requireUser(caller);
+    csrf(req);
+
+    const claim = await this.nonce.issue(userId, readString(body, 'cmdrName'));
+    return {
+      nonce: claim.claimNonce,
+      expiresAt: claim.nonceExpiresAt.toISOString(),
+      instructions:
+        'Add this code anywhere in your Inara profile bio, then leave it there. We check every few minutes and it can take up to an hour. You can remove it once you are verified.',
+    };
+  }
+
+  /** Where the member's own verification stands. */
+  @Get('me/cmdr')
+  async myClaim(
+    @User() caller: CurrentUser | undefined,
+  ): Promise<{ pending: { cmdrName: string; nonce: string; expiresAt: string } | null }> {
+    const userId = requireUser(caller);
+    const claim = await this.nonce.pendingFor(userId);
+    return {
+      pending:
+        claim === null
+          ? null
+          : {
+              cmdrName: claim.cmdrName,
+              nonce: claim.claimNonce,
+              expiresAt: claim.nonceExpiresAt.toISOString(),
+            },
+    };
+  }
 
   /** The member declares their own commander name. Creates a pending claim. */
   @Post('me/cmdr')

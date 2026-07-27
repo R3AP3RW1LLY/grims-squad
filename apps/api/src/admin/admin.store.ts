@@ -33,10 +33,33 @@ export interface AuditRow {
   readonly createdAt: string;
 }
 
+/**
+ * Filters for the audit viewer.
+ *
+ * Every field is optional and they AND together. An audit log you cannot query
+ * is a log nobody reads — "what did this officer do last week" and "who has
+ * been granting roles" are the two questions it exists to answer, and a flat
+ * tail of 100 rows answers neither.
+ */
+export interface AuditFilter {
+  /** Matched against the actor's HANDLE, not their uuid — nobody knows a uuid. */
+  readonly actor?: string;
+  /** Prefix match, so `role.` finds every role action without listing them. */
+  readonly action?: string;
+  readonly targetType?: string;
+  readonly targetId?: string;
+  readonly since?: Date;
+  readonly until?: Date;
+  readonly limit: number;
+}
+
 export interface AdminStore {
   activityForMonth(monthKey: string): Promise<ActivityRow[]>;
   members(): Promise<MemberRow[]>;
   auditTail(limit: number): Promise<AuditRow[]>;
+  auditSearch(filter: AuditFilter): Promise<AuditRow[]>;
+  /** Distinct action names present in the log, so the UI can offer them. */
+  auditActions(): Promise<string[]>;
 }
 
 export class PrismaAdminStore implements AdminStore {
@@ -115,6 +138,76 @@ export class PrismaAdminStore implements AdminStore {
       // Whether it is ENROLLED, never anything about the secret itself.
       twoFactorEnrolled: u.twoFactor?.confirmedAt != null,
     }));
+  }
+
+  /**
+   * Filtered search.
+   *
+   * Built as a Prisma `where` rather than string-concatenated SQL: the actor
+   * and action values come straight from a query string, and this is a table
+   * whose whole purpose is being trustworthy. Prisma parameterises, so a
+   * quote in the input is a quote in the input.
+   */
+  async auditSearch(filter: AuditFilter): Promise<AuditRow[]> {
+    const where: Record<string, unknown> = {};
+
+    if (filter.actor !== undefined && filter.actor !== '') {
+      // By handle, case-insensitively. Nobody knows anyone's uuid.
+      where['actor'] = { handle: { equals: filter.actor, mode: 'insensitive' } };
+    }
+    if (filter.action !== undefined && filter.action !== '') {
+      // Prefix, so `role.` finds role.grant, role.revoke, role.mask.update and
+      // anything added later without the filter needing to know about it.
+      where['action'] = { startsWith: filter.action };
+    }
+    if (filter.targetType !== undefined && filter.targetType !== '') {
+      where['targetType'] = filter.targetType;
+    }
+    if (filter.targetId !== undefined && filter.targetId !== '') {
+      where['targetId'] = filter.targetId;
+    }
+    if (filter.since !== undefined || filter.until !== undefined) {
+      const range: Record<string, Date> = {};
+      if (filter.since !== undefined) range['gte'] = filter.since;
+      // `lte`, not `lt`. A human entering an end date means that whole day, and
+      // the caller has already pushed it to the end of it.
+      if (filter.until !== undefined) range['lte'] = filter.until;
+      where['createdAt'] = range;
+    }
+
+    const rows = await this.#db.auditLog.findMany({
+      where,
+      take: filter.limit,
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        action: true,
+        targetType: true,
+        targetId: true,
+        before: true,
+        after: true,
+        createdAt: true,
+        actor: { select: { handle: true } },
+      },
+    });
+
+    return rows.map((r) => ({
+      id: r.id.toString(),
+      action: r.action,
+      actorHandle: r.actor?.handle ?? null,
+      targetType: r.targetType,
+      targetId: r.targetId,
+      createdAt: r.createdAt.toISOString(),
+    }));
+  }
+
+  async auditActions(): Promise<string[]> {
+    const rows = await this.#db.auditLog.findMany({
+      distinct: ['action'],
+      select: { action: true },
+      orderBy: { action: 'asc' },
+    });
+    return rows.map((r) => r.action);
   }
 
   async auditTail(limit: number): Promise<AuditRow[]> {

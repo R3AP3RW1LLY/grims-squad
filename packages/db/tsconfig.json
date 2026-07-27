@@ -11,5 +11,10 @@
     "node_modules",
     "dist",
     "**/*.spec.ts"
+  ],
+  "references": [
+    {
+      "path": "../shared"
+    }
   ]
 }

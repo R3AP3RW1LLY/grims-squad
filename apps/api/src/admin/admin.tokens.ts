@@ -1,3 +1,8 @@
-/** DI token. Symbol, not the class — esbuild emits no decorator metadata (P1.2). */
+/** DI tokens. Symbols, not classes — esbuild emits no decorator metadata (P1.2). */
 export const ADMIN_STORE = Symbol('AdminStore');
-export type { AdminStore, ActivityRow, MemberRow, AuditRow } from './admin.store.js';
+export const ROLE_ADMIN = Symbol('RoleAdminService');
+export const MAPPING_ADMIN = Symbol('MappingAdminService');
+
+export type { AdminStore, ActivityRow, MemberRow, AuditRow, AuditFilter } from './admin.store.js';
+export type { RoleAdminService, MaskPreview } from './role-admin.service.js';
+export type { MappingAdminService, MappingRecord } from './mapping-admin.service.js';
