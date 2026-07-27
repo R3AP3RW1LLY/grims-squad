@@ -136,3 +136,21 @@ export const getAdminActivity = (
 
 export const getAdminAudit = (): Promise<{ entries: AdminAuditRow[] } | null> =>
   get('/v1/admin/audit?limit=100', { authed: true });
+
+export interface SquadronStats {
+  members: number;
+  activeThisMonth: number;
+  activityThisMonth: number;
+  verifiedCommanders: number;
+  foundedYear: number;
+  generatedAt: string;
+}
+
+/**
+ * Squadron statistics for the landing page.
+ *
+ * From OUR database, never a third party (P1.9): the landing page is the first
+ * thing anyone sees, and reading it live from Inara or EDSM would put their
+ * uptime and rate limits in front of the squadron's front door.
+ */
+export const getSquadronStats = (): Promise<SquadronStats | null> => get('/v1/public/stats');

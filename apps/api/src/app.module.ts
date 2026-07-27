@@ -7,11 +7,12 @@ import { AuthzModule } from './authz/authz.module.js';
 import { MembersModule } from './members/members.module.js';
 import { CmdrModule } from './cmdr/cmdr.module.js';
 import { AdminModule } from './admin/admin.module.js';
+import { PublicModule } from './public/public.module.js';
 import { AuthGuard } from './auth/auth.guard.js';
 import { RequiresPermissionGuard } from './authz/requires-permission.guard.js';
 
 @Module({
-  imports: [DatabaseModule, AuthzModule, AuthModule, MembersModule, CmdrModule, AdminModule],
+  imports: [DatabaseModule, AuthzModule, AuthModule, MembersModule, CmdrModule, AdminModule, PublicModule],
   controllers: [HealthController],
   providers: [
     /*
