@@ -222,3 +222,49 @@ onboardingIntents:
 # below every leadership and reserved role (34-38) so it can never grant one.
 # That gap IS the security boundary — if the bot is ever moved above 34, a
 # leaked token could promote its holder to leadership.
+
+# ---------------------------------------------------------------------------
+# PERMISSION TIERS (human decision, 2026-07-27)
+#
+# Assigned automatically when a member signs in to the portal, from the Discord
+# roles they hold. Mappings live in `role_mappings` as DATA, so renaming a role
+# in Discord changes nothing.
+#
+# Role sync only ever touches grants whose source is `discord`. A `manual` or
+# `system` grant — webmaster is `system` — is invisible to it. Without that, the
+# first sign-in after this shipped would have revoked webmaster and locked the
+# only superuser out of the admin console.
+permissionTiers:
+  - tier: superuser
+    permMask: 1197902339489246755967   # every bit that exists
+    roles:
+      - { name: 'Galactic Admiral (Community Leader)', discordRoleId: '804027885081591818' }
+      - { name: 'Prime Legate',                        discordRoleId: '1512912541771235601' }
+      - { name: 'Webmaster (site, not Discord)',       discordRoleId: null }
+
+  - tier: officer
+    permMask: 1186364117243923545215   # superuser MINUS the three below
+    withheld:
+      - ROLE_MANAGE      # bit 61 — an officer who can grant roles can grant
+                         # themselves anything, which makes the tier boundary
+                         # decorative
+      - SITE_CONFIG      # bit 63
+      - AI_TOOLS_ADMIN   # bit 53
+    includes:
+      - MEMBER_MANAGE    # bit 60 — officers administer members
+      - AUDIT_VIEW       # bit 62 — and can see what other officers did
+    roles:
+      - { name: 'Chief Fleet Commander', discordRoleId: '1512912750416760892' }
+      - { name: 'First Commander',       discordRoleId: '1513748632963387523' }
+      - { name: 'Sector Overseer',       discordRoleId: '1513749464458723469' }
+      - { name: 'Squadron Leader',       discordRoleId: '1513669809756311593' }
+    note: >
+      Per-feature CRUD becomes configurable through the leadership settings
+      page. Until then all four share one bundle. NINE members currently hold
+      Squadron Leader, which is by far the largest group gaining admin access —
+      worth knowing before the console has anything destructive behind it.
+
+# D24 (Squadron Leader's place in the ladder) is now MOOT for permissions: all
+# four leadership roles receive the same bundle, so their relative order no
+# longer decides who can do what. It still matters for DISPLAY order, and is
+# recorded here as unresolved rather than silently dropped.

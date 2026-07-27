@@ -39,7 +39,34 @@ server, not to edit this file.
 """
 
 regexes = [
+  # The guild (server) ID.
   '''801929816596152320''',
+
+  # ---------------------------------------------------------------------------
+  # Discord ROLE ids for the six leadership roles, recorded in
+  # ssot/02-domain/discord-roles.yaml because INV-008 requires them to live in
+  # DATA rather than in source.
+  #
+  # A role id is not a credential. Every member of the server can read it from
+  # the Discord client, and it grants nothing at all without a bot token.
+  #
+  # gitleaks' `discord-client-id` rule matches any 17-20 digit number NEAR the
+  # word "discord". Two dozen role ids already sat in that file untouched; these
+  # six tripped it only because the key is spelled `discordRoleId`, which puts
+  # the keyword next to the number.
+  #
+  # Listed as LITERALS rather than allowlisting the file, deliberately. A path
+  # allowlist would exempt that file from every rule, so a bot token pasted into
+  # it — which IS a credential, and has a completely different shape — would go
+  # unnoticed. The cost is that a future role id added with a `discord*` key
+  # needs adding here too; that is a real maintenance tax, accepted so the file
+  # keeps being scanned for actual secrets.
+  '''804027885081591818''',   # Galactic Admiral (Community Leader)
+  '''1512912541771235601''',  # Prime Legate
+  '''1512912750416760892''',  # Chief Fleet Commander
+  '''1513748632963387523''',  # First Commander
+  '''1513749464458723469''',  # Sector Overseer
+  '''1513669809756311593''',  # Squadron Leader
 ]
 
 paths = [
