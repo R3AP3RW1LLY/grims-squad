@@ -13,7 +13,14 @@ FROM base AS build
 WORKDIR /app
 COPY . .
 RUN pnpm install --frozen-lockfile
-RUN pnpm --filter @grims/shared build
+# EVERY workspace package the web app imports must be built first: each one
+# resolves through its `main` field to dist/, which does not exist until tsc has
+# run. Missing one fails with "Module not found" for a package that is plainly
+# in package.json, which is a confusing way to spend twenty minutes.
+#
+# This broke on @grims/ed-clients: local builds and CI both passed because both
+# had already built the whole workspace, while the image builds a subset.
+RUN pnpm --filter @grims/shared build  && pnpm --filter @grims/ed-clients build
 ENV NEXT_TELEMETRY_DISABLED=1
 # Next inlines NEXT_PUBLIC_* at BUILD time, so this must be an ARG on the build
 # stage — setting it only at runtime leaves og:image pointing at localhost.
