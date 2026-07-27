@@ -45,6 +45,34 @@ const cookies = (req: FastifyRequest): Record<string, string | undefined> =>
   (req as unknown as { cookies?: Record<string, string | undefined> }).cookies ?? {};
 
 const IS_SECURE = process.env['NODE_ENV'] === 'production';
+
+/**
+ * Where to send the browser after login.
+ *
+ * ★ WHY THIS IS NEEDED AT ALL ★
+ *
+ * `safeRedirectPath` returns a PATH, and in production that is exactly right:
+ * Caddy serves the API and the web app from ONE origin under /v1, so `/` lands
+ * on the site. Locally they are separate ports, so the same relative redirect
+ * lands on the API's own root and answers "Cannot GET /" — a login that
+ * completed successfully and then dumped the member on a JSON error.
+ *
+ * Empty by default, which preserves the production behaviour exactly. Set to
+ * http://localhost:5000 for local development.
+ *
+ * ★ WHY THIS IS NOT AN OPEN REDIRECT ★
+ *
+ * The base comes from OUR configuration and the path from `safeRedirectPath`,
+ * which is allowlisted. A caller controls neither. Concatenating a
+ * caller-supplied base here would be the classic hole — hence the base is read
+ * once, from the environment, and never from the request.
+ */
+const WEB_BASE_URL = (process.env['WEB_BASE_URL'] ?? '').replace(/\/+$/, '');
+
+/** Absolute when a base is configured, relative when it is not. */
+function afterLogin(path: string): string {
+  return `${WEB_BASE_URL}${path}`;
+}
 export const NONCE_COOKIE = IS_SECURE ? '__Host-gs_oauth_nonce' : 'gs_oauth_nonce';
 
 @Controller('v1/auth/discord')
@@ -91,7 +119,7 @@ export class DiscordAuthController {
   ): Promise<void> {
     // The member declined the consent screen. That is a choice, not a fault.
     if (oauthError !== undefined) {
-      reply.redirect('/?login=cancelled', 302);
+      reply.redirect(afterLogin('/?login=cancelled'), 302);
       return;
     }
     if (typeof code !== 'string' || typeof state !== 'string') {
@@ -124,7 +152,7 @@ export class DiscordAuthController {
       jar(reply).setCookie(c.csrfName, issueCsrfToken(), { ...c.options, httpOnly: false });
     }
 
-    reply.redirect(result.redirectTo, 302);
+    reply.redirect(afterLogin(result.redirectTo), 302);
   }
 }
 
