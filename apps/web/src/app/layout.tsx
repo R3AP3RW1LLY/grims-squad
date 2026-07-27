@@ -38,7 +38,9 @@ export const metadata: Metadata = {
     title: "Grim's Squad — No Quarter in the Void",
     description: 'Elite Dangerous squadron. Recruiting CMDRs.',
     type: 'website',
+    siteName: "Grim's Squad",
   },
+  twitter: { card: 'summary_large_image' },
 };
 
 export const viewport: Viewport = {
