@@ -68,3 +68,13 @@ wg*.conf
 *.tar.gz.enc
 grims-secrets-*
 restored-secrets/
+
+# Recovery material. These live OUTSIDE the repo by design (the recovery card is
+# written to the user's home directory), but a copy pasted in here would be the
+# single worst thing this repository could contain: the vault passphrase opens
+# both the secrets vault and every database backup.
+GRIMS-SQUAD-RECOVERY.txt
+*RECOVERY*.txt
+grims-vault-passphrase*
+*.enc
+vault-*.enc

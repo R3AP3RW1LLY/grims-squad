@@ -82,3 +82,38 @@ describe('@INV-036 no secrets in the repository', () => {
     expect(cfg).toMatch(/discord-bot-token/);
   });
 });
+
+describe('recovery material can never be committed', () => {
+  /**
+   * The recovery card holds the vault passphrase, which opens BOTH the secrets
+   * vault and every encrypted database backup. It is written to the user's home
+   * directory precisely so it is nowhere near this repository — but a copy
+   * pasted into the project folder would be the worst single file this repo
+   * could contain, and gitignore is the last line of defence for a mistake
+   * that takes two seconds to make.
+   */
+  const MUST_BE_IGNORED = [
+    'GRIMS-SQUAD-RECOVERY.txt',
+    'grims-vault-passphrase.txt',
+    'vault-latest.enc',
+    'vault-20260726-170623.enc',
+    'grims-secrets-20260726.tar.gz.enc',
+    'TODO.local.md',
+    'apps/api/.env',
+  ];
+
+  for (const path of MUST_BE_IGNORED) {
+    it(`git ignores ${path}`, () => {
+      // `git check-ignore` is the authority here rather than reading the file
+      // and reasoning about the patterns ourselves — it answers the question
+      // git will actually answer at commit time.
+      let ignored = true;
+      try {
+        execFileSync('git', ['check-ignore', '-q', '--no-index', path], { cwd: REPO });
+      } catch {
+        ignored = false;
+      }
+      expect(ignored, `${path} is NOT gitignored`).toBe(true);
+    });
+  }
+});
