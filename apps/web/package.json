@@ -12,7 +12,8 @@
     "test": "vitest run --passWithNoTests",
     "test:unit": "vitest run --passWithNoTests",
     "clean": "rm -rf .next dist",
-    "predev": "node -e \"const fs=require('fs');if(fs.existsSync('.next/BUILD_ID')){fs.rmSync('.next',{recursive:true,force:true});console.log('Cleared a production .next before starting dev.')}\""
+    "predev": "node -e \"const fs=require('fs');if(fs.existsSync('.next/BUILD_ID')){fs.rmSync('.next',{recursive:true,force:true});console.log('Cleared a production .next before starting dev.')}\"",
+    "build:check": "cross-env NEXT_DIST_DIR=.next-check next build"
   },
   "devDependencies": {
     "@grims/config": "workspace:*",
@@ -22,7 +23,8 @@
     "postcss": "^8.5.23",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.7.0",
-    "vitest": "^3.0.0"
+    "vitest": "^3.0.0",
+    "cross-env": "^10.1.0"
   },
   "dependencies": {
     "next": "^15.5.21",

@@ -17,6 +17,23 @@ const nextConfig = {
   // does not depend on where the build was invoked from, and so it needs no
   // `process` global (which eslint rightly flags in a browser-adjacent config).
   outputFileTracingRoot: path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..'),
+  /**
+   * Where build output goes. Defaults to `.next`, which is what CI and the
+   * Dockerfile expect — but overridable, and that override is the whole point.
+   *
+   * `next build` and `next dev` otherwise share one directory. A production
+   * build run while the dev server is up replaces the chunks that server has
+   * open, and it then dies on the next request with "Cannot find module
+   * './307.js'" — a message that points at webpack internals and says nothing
+   * about the actual cause. It has happened three times in this project, each
+   * time from someone verifying a route while dev was running.
+   *
+   * So a verification build uses `pnpm build:check`, which sets this to a
+   * separate directory and cannot touch the running server. Deployment is
+   * unaffected: nothing sets the variable, so it stays `.next`.
+   */
+  distDir: process.env.NEXT_DIST_DIR ?? '.next',
+
   poweredByHeader: false,
 
   /**
