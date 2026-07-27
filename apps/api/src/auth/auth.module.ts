@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { PrismaClient } from '@grims/db';
 import { DatabaseModule } from '../database.module.js';
+import { AuthzModule } from '../authz/authz.module.js';
 import { DiscordAdapter } from '@grims/ed-clients';
 import { createKeyring, TokenCipher } from '@grims/shared/server';
 import { DiscordAuthController } from './discord.controller.js';
@@ -34,7 +35,10 @@ const REQUIRED = [
 ] as const;
 
 @Module({
-  imports: [DatabaseModule],
+  // AuthzModule for PermissionService: the OAuth callback needs the effective
+  // mask to decide where to send the member, and a guard whose dependency is
+  // missing from the injector fails at request time rather than at boot.
+  imports: [DatabaseModule, AuthzModule],
   controllers: [DiscordAuthController, OnboardingController, SessionController, TotpController],
   providers: [
     {

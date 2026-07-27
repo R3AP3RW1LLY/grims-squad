@@ -42,7 +42,20 @@ type Stage = 'idle' | 'showing-secret' | 'showing-codes';
  * "show it to me again" button, because there is nothing to show. The server
  * keeps only a hash of the codes and never returns the secret after enrolment.
  */
-export function SecurityForm({ enrolled }: { enrolled: boolean }) {
+export function SecurityForm({
+  enrolled,
+  /**
+   * Where to send them once the recovery codes have been acknowledged.
+   *
+   * Only set by the FORCED onboarding flow. On the ordinary settings page there
+   * is nowhere to go — they came here deliberately and can leave the same way —
+   * so it stays undefined and no button appears.
+   */
+  onDone,
+}: {
+  enrolled: boolean;
+  onDone?: string;
+}) {
   const [stage, setStage] = useState<Stage>('idle');
   const [secret, setSecret] = useState('');
   const [uri, setUri] = useState('');
@@ -179,15 +192,30 @@ export function SecurityForm({ enrolled }: { enrolled: boolean }) {
               <li key={c}>{c}</li>
             ))}
           </ul>
-          <button
-            type="button"
-            onClick={() => {
-              void navigator.clipboard?.writeText(codes.join('\n'));
-            }}
-            className="mt-6 rounded border border-[var(--color-border-hairline)] px-5 py-2.5 font-mono text-[12px] uppercase tracking-[0.24em] text-[var(--color-text-primary)]"
-          >
-            Copy codes
-          </button>
+          <div className="mt-6 flex flex-wrap gap-4">
+            <button
+              type="button"
+              onClick={() => {
+                void navigator.clipboard?.writeText(codes.join('\n'));
+              }}
+              className="rounded border border-[var(--color-border-hairline)] px-5 py-2.5 font-mono text-[12px] uppercase tracking-[0.24em] text-[var(--color-text-primary)]"
+            >
+              Copy codes
+            </button>
+            {onDone !== undefined && (
+              /*
+                A full navigation, not a client-side push. The destination is
+                server-rendered and its access check runs on the server, so it
+                has to be asked again now that enrolment has actually happened.
+              */
+              <a
+                href={onDone}
+                className="rounded border border-[var(--color-brand-cyan-bright)] px-5 py-2.5 font-mono text-[12px] uppercase tracking-[0.24em] text-[var(--color-brand-cyan-bright)]"
+              >
+                I have saved them — continue
+              </a>
+            )}
+          </div>
         </>
       )}
     </div>

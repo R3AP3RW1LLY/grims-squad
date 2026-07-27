@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import { Chakra_Petch, Inter, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
+import { SecureAccountBanner } from '../components/secure-account-banner';
 import { DeepField, SiteNav, SiteFooter } from '../components/site-chrome';
 
 /*
@@ -75,6 +76,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
         <DeepField />
         <SiteNav />
+        {/* Directly under the navbar, per the human decision. In the LAYOUT so it
+            follows the member everywhere rather than being remembered per page. */}
+        <SecureAccountBanner />
 
         <div className="flex-1">{children}</div>
 

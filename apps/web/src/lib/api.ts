@@ -195,3 +195,21 @@ export interface InaraStatus {
  */
 export const getInaraStatus = (): Promise<InaraStatus | null> =>
   get('/v1/me/inara', { authed: true });
+
+export interface AccountStatus {
+  privileged: boolean;
+  twoFactorEnrolled: boolean;
+  needsSecuring: boolean;
+  /** The permission names that create the obligation, so the UI can say WHY. */
+  because: string[];
+}
+
+/**
+ * What this member still has to do.
+ *
+ * Takes no id — it reports the CALLER's own status and nothing else, so there
+ * is no way to point it at somebody else or enumerate who holds privileged
+ * permissions.
+ */
+export const getAccountStatus = (): Promise<AccountStatus | null> =>
+  get('/v1/auth/me/account-status', { authed: true });
