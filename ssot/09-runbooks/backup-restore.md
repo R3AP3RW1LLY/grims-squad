@@ -151,3 +151,62 @@ Verify `recovery_target_time` is **before** the damaging event, in **UTC**. A lo
 | Accidental destructive migration | PITR to immediately before it. This is why a destructive migration requires a fresh backup and a human (ADR-018). |
 | Local AI box lost | **Nothing to restore.** No unique state lives there — models re-pull, the RAG index is on the VPS. Rebuild from `models.md`. |
 | Backup storage credentials lost | The reason a second admin holds credentials (risk R3). |
+
+## Encrypted database backups (live since 2026-07-26)
+
+**Schedule:** 04:00 and 16:00 `America/Los_Angeles`, via `/etc/cron.d/grims-backup`.
+`CRON_TZ` is pinned so the times hold across daylight saving — without it they
+would drift by an hour twice a year, which nobody notices until they are looking
+for a backup that ran at the wrong time.
+
+**Destination:** `s3://grims-squad-vault/database/` on Vultr Object Storage
+(`sjc1`, private, verified 403 to anonymous requests).
+
+**Script:** `infra/scripts/backup-db.sh`, deployed to `/srv/grims/backup-db.sh`.
+
+### Why the dump is encrypted before it leaves the server
+
+The bucket is on the **same Vultr account** as the server. Without client-side
+encryption, one compromised Vultr login yields the server *and* every backup of
+it. `BACKUP_ENCRYPTION_KEY` lives in `/srv/grims/.env`, which is itself inside
+the secrets vault — so a total server loss is recoverable, but a stolen bucket
+on its own is not useful.
+
+### Why `pg_dump` rather than disk snapshots
+
+A snapshot restores the whole machine to a moment. A dump restores **one table**
+to a moment, which is what you actually need when a migration ate a column. It
+is also roughly a fifth of the price of Vultr's snapshot surcharge.
+
+### What the script refuses to do
+
+It will not upload a backup it has not verified:
+
+- under 2 KB → refused as truncated
+- fewer than 40 `CREATE TABLE` statements → refused as the wrong database or a
+  dump that stopped early
+- no `PostgreSQL database dump complete` marker → refused as truncated
+
+A stub that uploads "successfully" is worse than a visible failure, because it
+silently replaces the belief that a backup exists.
+
+### Retention
+
+30 days, with a **floor of 10 backups** that are never pruned regardless of age.
+Clock skew or a stalled job must not be able to sweep away every copy at once.
+
+### Restore
+
+```bash
+aws --endpoint-url https://sjc1.vultrobjects.com     s3 cp s3://grims-squad-vault/database/<file> .
+openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 -in <file> | gunzip > dump.sql
+psql -U grims -d grims < dump.sql
+```
+
+Verified end to end on 2026-07-26: dump → upload → download → decrypt → restore
+into a scratch database → 57 tables, the webmaster mask intact at
+`1197902339489246755967`, and the member row with all 8 Discord roles. The
+scratch database was dropped afterwards.
+
+**Restore is tested, not assumed.** Re-test after any schema change large enough
+to worry about.
