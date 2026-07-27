@@ -68,17 +68,18 @@ export default function HomePage() {
     <main id="main">
       {/* ============================================================= hero */}
       <section
-        // Exactly one screen, minus the navbar. `min-h` rather than `h` so a
-        // small phone in landscape scrolls instead of clipping the CTAs — a
-        // hero that hides its own buttons is worse than one that scrolls.
-        className="relative flex min-h-[calc(100dvh-var(--nav-h))] flex-col justify-center overflow-hidden border-b border-[var(--color-border-hairline)]"
+        // Exactly one screen, minus the navbar, with the whole grid centred in
+        // it. `min-h` rather than `h` so a short viewport scrolls instead of
+        // clipping content — a hero that hides its own text is worse than one
+        // that scrolls.
+        className="relative flex min-h-[calc(100dvh-var(--nav-h))] items-center overflow-hidden border-b border-[var(--color-border-hairline)]"
         aria-labelledby="hero-heading"
       >
         {/* The in-game galaxy map, with traffic. Replaces the earlier orbital
             ornament: this is the view every CMDR already knows. */}
         <GalaxyMap />
 
-        <div className="relative mx-auto grid w-full max-w-[1440px] flex-1 items-center gap-10 px-4 py-10 sm:px-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] lg:gap-16 lg:py-12">
+        <div className="relative mx-auto grid w-full max-w-[1440px] items-center gap-10 px-4 py-10 sm:px-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] lg:gap-16 lg:py-12">
           {/* ---- left: the mark ---- */}
           {/*
             The lockup IS the h1. `alt` carries the wordmark, so the page's main
@@ -86,7 +87,7 @@ export default function HomePage() {
             readers rather than being an unlabelled image. `priority` because it
             is the largest element above the fold.
           */}
-          <h1 id="hero-heading" className="m-0 flex justify-center lg:justify-end">
+          <h1 id="hero-heading" className="m-0 flex items-center justify-center">
             <Image
               src="/brand/lockup-1200.png"
               alt="Grim's Squad"
@@ -94,13 +95,16 @@ export default function HomePage() {
               height={800}
               priority
               sizes="(max-width: 1024px) 88vw, 46vw"
-              className="h-auto w-full max-w-[min(620px,86vw)] drop-shadow-[0_0_70px_rgba(255,113,0,0.2)] lg:max-w-none"
+              className="h-auto w-full max-w-[min(620px,86vw)] drop-shadow-[0_0_70px_rgba(255,113,0,0.2)]"
             />
           </h1>
 
           {/* ---- right: everything else ---- */}
-          <div className="text-center lg:text-left">
-            <p className="flex items-center justify-center gap-3 font-mono text-[11px] uppercase tracking-[0.35em] text-[var(--color-brand-cyan-bright)] lg:justify-start">
+          {/* Centred both ways within its own column: the copy block is
+              narrower than the column, so left-aligning it against a centred
+              logo left an uneven gutter down the middle. */}
+          <div className="flex flex-col items-center justify-center text-center">
+            <p className="flex items-center justify-center gap-3 font-mono text-[11px] uppercase tracking-[0.35em] text-[var(--color-brand-cyan-bright)]">
               <span className="inline-block h-px w-8 bg-[var(--color-brand-cyan)]" aria-hidden="true" />
               Elite Dangerous Squadron
             </p>
@@ -114,7 +118,7 @@ export default function HomePage() {
               <br className="hidden sm:inline" /> IN THE VOID
             </p>
 
-            <p className="mx-auto mt-6 max-w-[58ch] text-base leading-relaxed text-[var(--color-text-primary)] sm:text-lg lg:mx-0">
+            <p className="mx-auto mt-6 max-w-[58ch] text-base leading-relaxed text-[var(--color-text-primary)] sm:text-lg">
               We run a player minor faction, operate fleet carriers, and fly everything from
               conflict zones to the black. Combat and AX, trade, mining, exploration &mdash; and the
               background simulation that decides who actually holds a system.
@@ -126,7 +130,7 @@ export default function HomePage() {
               label were removed from the map, because saying it twice on one
               screen made the map look like it was repeating the card.
             */}
-            <dl className="mt-8 grid grid-cols-2 gap-px border border-[var(--color-border-hairline)] bg-[var(--color-border-hairline)] text-left shadow-[0_0_40px_rgba(0,0,0,0.45)]">
+            <dl className="mt-8 grid w-full max-w-[36rem] grid-cols-2 gap-px border border-[var(--color-border-hairline)] bg-[var(--color-border-hairline)] text-left shadow-[0_0_40px_rgba(0,0,0,0.45)]">
               {INSTRUMENTS.map((item) => (
                 <div
                   key={item.label}
@@ -146,7 +150,7 @@ export default function HomePage() {
                         href={item.href}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="inline-flex items-baseline gap-1 underline decoration-[var(--color-border-active)] decoration-1 underline-offset-4 transition-colors hover:text-[var(--color-brand-orange)] hover:decoration-[var(--color-brand-orange)]"
+                        className="inline-flex items-baseline gap-1 no-underline transition-colors hover:text-[var(--color-brand-orange)]"
                       >
                         {item.value}
                         <span className="sr-only"> (opens EDSM in a new tab)</span>

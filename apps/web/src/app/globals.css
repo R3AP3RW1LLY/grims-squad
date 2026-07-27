@@ -334,6 +334,24 @@ body {
   transform: rotate(45deg);
 }
 
+/*
+ * ★ THESE UNDERLINES STAY. ★
+ *
+ * Underlines were removed from standalone links across the site on 2026-07-27.
+ * Links inside a PARAGRAPH are the exception, and the numbers are why:
+ *
+ *   link cyanBright vs body-secondary   1.56:1
+ *   link cyanBright vs body-primary     1.40:1
+ *
+ * WCAG technique G183 allows colour alone to identify a link only at 3:1 or
+ * better against the surrounding text. At 1.4:1 the colour is nowhere near
+ * enough, so stripping the underline here would leave a link in the privacy
+ * policy invisible to a colour-blind reader — in the one document where
+ * following a link matters most.
+ *
+ * Standalone links in nav bars, cards and footer lists are identified by their
+ * position instead, which is why they can lose the underline safely.
+ */
 .legal-prose a {
   color: var(--color-brand-cyan-bright);
   text-decoration: underline;
