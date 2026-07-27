@@ -1,4 +1,11 @@
-import { Client, GatewayIntentBits, Events, type Message, TextChannel } from 'discord.js';
+import {
+  Client,
+  GatewayIntentBits,
+  Events,
+  ChannelType,
+  type Message,
+  TextChannel,
+} from 'discord.js';
 import { PrismaClient } from '@grims/db';
 import pino from 'pino';
 import { ActivityRecorder, monthKey } from './activity.recorder.js';
@@ -21,10 +28,29 @@ const TOKEN = process.env['DISCORD_BOT_TOKEN'] ?? '';
 const GUILD_ID = process.env['DISCORD_GUILD_ID'] ?? '';
 const ACTIVITY_CHANNEL = process.env['DISCORD_ACTIVITY_CHANNEL_ID'] ?? '';
 
+/**
+ * Voice channels that count toward activity, named explicitly by the human.
+ *
+ * Configuration, not source (INV-008). An earlier draft derived this from
+ * permissions — "any channel @everyone can Connect to" — which self-maintains
+ * but also silently opts in every future channel, including ones created for a
+ * purpose nobody meant to count. An explicit list is predictable, and the cost
+ * is that adding a channel means adding an id here.
+ *
+ * A member joining a channel NOT on this list records nothing.
+ */
+const VOICE_CHANNELS = new Set(
+  (process.env['DISCORD_VOICE_CHANNEL_IDS'] ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s !== ''),
+);
+
 for (const [name, value] of [
   ['DISCORD_BOT_TOKEN', TOKEN],
   ['DISCORD_GUILD_ID', GUILD_ID],
   ['DISCORD_ACTIVITY_CHANNEL_ID', ACTIVITY_CHANNEL],
+  ['DISCORD_VOICE_CHANNEL_IDS', [...VOICE_CHANNELS].join(',')],
 ] as const) {
   if (value === '') {
     // Refuse rather than idle. A bot that starts, connects and silently records
@@ -53,7 +79,13 @@ const client = new Client({
    * policy's "we cannot read your messages" is therefore true by construction
    * rather than by promise, and cannot be broken by a future code change alone.
    */
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages],
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    // Voice STATE, not voice audio. Tells us who joined which channel and when.
+    // Not a privileged intent, and it carries nothing anyone said.
+    GatewayIntentBits.GuildVoiceStates,
+  ],
 });
 
 async function handle(msg: Message): Promise<void> {
@@ -126,8 +158,47 @@ client.once(Events.ClientReady, (c) => {
   void backfill().catch((err: unknown) => logger.error({ err }, 'backfill failed'));
 });
 
+client.on(Events.VoiceStateUpdate, (before, after) => {
+  // Only a JOIN counts. Without this a member toggling mute, deafen or camera
+  // would fire repeatedly and inflate the count for sitting still.
+  if (after.channelId === null) return;
+  if (before.channelId === after.channelId) return;
+  if (after.guild.id !== GUILD_ID) return;
+  if (!VOICE_CHANNELS.has(after.channelId)) return;
+
+  void recorder
+    .record({
+      discordId: after.id,
+      kind: 'voice',
+      at: new Date(),
+      isBot: after.member?.user.bot ?? false,
+      channelId: after.channelId,
+    })
+    .catch((err: unknown) => logger.error({ err }, 'failed to record voice join'));
+});
+
 client.on(Events.MessageCreate, (msg) => {
   if (msg.guildId !== GUILD_ID) return;
+
+  /*
+   * Forum activity. A forum post and its replies are messages inside a THREAD
+   * whose parent is a forum channel, so both are caught by the same check —
+   * there is no separate event for "commented on a forum post".
+   */
+  const parentType = msg.channel.isThread() ? msg.channel.parent?.type : undefined;
+  if (parentType === ChannelType.GuildForum) {
+    void recorder
+      .record({
+        discordId: msg.author?.id ?? '',
+        kind: 'forum',
+        at: new Date(msg.createdTimestamp),
+        isBot: msg.author?.bot ?? false,
+        channelId: msg.channelId,
+        eventId: msg.id,
+      })
+      .catch((err: unknown) => logger.error({ err }, 'failed to record forum post'));
+    return;
+  }
   void handle(msg).then(async () => {
     // Keep the watermark current so a restart does not replay live traffic.
     if (msg.channelId === ACTIVITY_CHANNEL) {

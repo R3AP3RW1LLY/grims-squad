@@ -12,12 +12,33 @@
  * promise even if someone asked it to.
  */
 
+/**
+ * The kinds of taking part that count (human decision, 2026-07-27).
+ *
+ * Any ONE of them satisfies the Discord half of the monthly test. They are
+ * recorded separately so the dashboard can show HOW a member participates —
+ * one member is mute and takes part in voice through text-to-speech, which a
+ * message count alone would render as silence.
+ */
+export type ActivityKind = 'message' | 'forum' | 'voice';
+
+export interface ActivityEvent {
+  readonly discordId: string;
+  readonly kind: ActivityKind;
+  readonly at: Date;
+  readonly isBot: boolean;
+  /** Text channel id for `message`; thread/forum id or voice channel id otherwise. */
+  readonly channelId: string;
+  /** Deduplicates replayed messages during backfill. Absent for voice. */
+  readonly eventId?: string | undefined;
+}
+
+/** Kept for the message path, which is the only one that backfills. */
 export interface IncomingMessage {
   readonly discordId: string;
   readonly channelId: string;
   readonly at: Date;
   readonly isBot: boolean;
-  /** Used to dedupe when backfilling after downtime. */
   readonly messageId?: string;
 }
 
@@ -26,16 +47,24 @@ export interface ActivityRow {
   /** First of the month, midnight UTC. */
   month: Date;
   messageCount: number;
-  firstMessageAt: Date | null;
-  lastMessageAt: Date | null;
+  forumPostCount: number;
+  voiceJoinCount: number;
+  firstActivityAt: Date | null;
+  lastActivityAt: Date | null;
 }
 
 export interface IActivityStore {
   /**
-   * Adds one message to the member's month, creating the row if needed.
-   * Returns false if `messageId` was already counted.
+   * Adds one event of `kind` to the member's month, creating the row if needed.
+   * Returns false if `eventId` was already counted.
    */
-  record(discordId: string, month: Date, at: Date, messageId?: string): Promise<boolean>;
+  record(
+    discordId: string,
+    month: Date,
+    at: Date,
+    kind: ActivityKind,
+    eventId?: string,
+  ): Promise<boolean>;
 }
 
 export interface RecorderConfig {
@@ -59,14 +88,32 @@ export class ActivityRecorder {
     private readonly config: RecorderConfig,
   ) {}
 
+  /** A message in the designated activity channel. */
   async onMessage(msg: IncomingMessage): Promise<void> {
+    if (msg.channelId !== this.config.activityChannelId) return;
+    await this.record({
+      discordId: msg.discordId,
+      kind: 'message',
+      at: msg.at,
+      isBot: msg.isBot,
+      channelId: msg.channelId,
+      eventId: msg.messageId,
+    });
+  }
+
+  /**
+   * Any activity event. Forum posts and voice joins arrive here directly —
+   * unlike messages they are not restricted to one configured channel, because
+   * taking part in a forum thread or sitting in voice is participation wherever
+   * it happens.
+   */
+  async record(e: ActivityEvent): Promise<void> {
     // Bots are ignored, including our own. Otherwise the bot's own
     // notifications would register as squadron activity and everyone would
     // look permanently active.
-    if (msg.isBot) return;
-    if (msg.discordId === '') return;
-    if (msg.channelId !== this.config.activityChannelId) return;
+    if (e.isBot) return;
+    if (e.discordId === '') return;
 
-    await this.store.record(msg.discordId, monthKey(msg.at), msg.at, msg.messageId);
+    await this.store.record(e.discordId, monthKey(e.at), e.at, e.kind, e.eventId);
   }
 }

@@ -66,8 +66,8 @@ describe('recording a message', () => {
     });
     const row = store.find('111', '2026-07-01');
     expect(row?.messageCount).toBe(1);
-    expect(row?.firstMessageAt?.toISOString()).toBe('2026-07-14T10:00:00.000Z');
-    expect(row?.lastMessageAt?.toISOString()).toBe('2026-07-14T10:00:00.000Z');
+    expect(row?.firstActivityAt?.toISOString()).toBe('2026-07-14T10:00:00.000Z');
+    expect(row?.lastActivityAt?.toISOString()).toBe('2026-07-14T10:00:00.000Z');
   });
 
   it('increments rather than replacing on later messages', async () => {
@@ -76,10 +76,10 @@ describe('recording a message', () => {
     }
     const row = store.find('111', '2026-07-01');
     expect(row?.messageCount).toBe(3);
-    // firstMessageAt must NOT drift forward — it is the evidence of when they
+    // firstActivityAt must NOT drift forward — it is the evidence of when they
     // first appeared that month.
-    expect(row?.firstMessageAt?.toISOString()).toBe('2026-07-02T09:00:00.000Z');
-    expect(row?.lastMessageAt?.toISOString()).toBe('2026-07-20T18:00:00.000Z');
+    expect(row?.firstActivityAt?.toISOString()).toBe('2026-07-02T09:00:00.000Z');
+    expect(row?.lastActivityAt?.toISOString()).toBe('2026-07-20T18:00:00.000Z');
   });
 
   it('keeps months separate', async () => {
@@ -146,10 +146,12 @@ describe('what is NOT stored', () => {
     // accident. This asserts the shape stays that way.
     expect(Object.keys(row ?? {}).sort()).toEqual([
       'discordId',
-      'firstMessageAt',
-      'lastMessageAt',
+      'firstActivityAt',
+      'forumPostCount',
+      'lastActivityAt',
       'messageCount',
       'month',
+      'voiceJoinCount',
     ]);
   });
 });
@@ -176,5 +178,65 @@ describe('backfill after downtime', () => {
     await rec.onMessage({ ...base, at: new Date('2026-07-14T10:00:00.000Z'), messageId: 'm-1' });
     await rec.onMessage({ ...base, at: new Date('2026-07-14T10:05:00.000Z'), messageId: 'm-2' });
     expect(store.find('111', '2026-07-01')?.messageCount).toBe(2);
+  });
+});
+
+describe('forum and voice activity', () => {
+  const AT = new Date('2026-07-14T10:00:00.000Z');
+
+  it('counts a forum post in ANY forum channel, not just the activity channel', async () => {
+    // Taking part in a forum thread is participation wherever it happens; there
+    // is no reason to privilege one channel for it the way messages do.
+    await rec.record({
+      discordId: '111',
+      kind: 'forum',
+      at: AT,
+      isBot: false,
+      channelId: '999999999999999999',
+      eventId: 'f-1',
+    });
+    const row = store.find('111', '2026-07-01');
+    expect(row?.forumPostCount).toBe(1);
+    expect(row?.messageCount).toBe(0);
+  });
+
+  it('counts a voice join', async () => {
+    await rec.record({ discordId: '111', kind: 'voice', at: AT, isBot: false, channelId: 'v-1' });
+    expect(store.find('111', '2026-07-01')?.voiceJoinCount).toBe(1);
+  });
+
+  it('keeps the three kinds separate but on ONE row per member per month', async () => {
+    await rec.onMessage({ discordId: '111', channelId: CHANNEL, at: AT, isBot: false, messageId: 'm-1' });
+    await rec.record({ discordId: '111', kind: 'forum', at: AT, isBot: false, channelId: 'f', eventId: 'f-1' });
+    await rec.record({ discordId: '111', kind: 'voice', at: AT, isBot: false, channelId: 'v' });
+    const row = store.find('111', '2026-07-01');
+    expect(row).toMatchObject({ messageCount: 1, forumPostCount: 1, voiceJoinCount: 1 });
+    expect(store.rows).toHaveLength(1);
+  });
+
+  it('a member who ONLY uses voice is still visibly active', async () => {
+    // One squadron member is mute and takes part in voice through
+    // text-to-speech. Counting messages alone would render her as silent, and
+    // she would never qualify for a promotion she has plainly earned.
+    for (const d of ['2026-07-03', '2026-07-11', '2026-07-25']) {
+      await rec.record({
+        discordId: '222',
+        kind: 'voice',
+        at: new Date(`${d}T19:00:00.000Z`),
+        isBot: false,
+        channelId: 'v-1',
+      });
+    }
+    const row = store.find('222', '2026-07-01');
+    expect(row?.voiceJoinCount).toBe(3);
+    expect(row?.messageCount).toBe(0);
+    expect(row?.firstActivityAt?.toISOString()).toBe('2026-07-03T19:00:00.000Z');
+    expect(row?.lastActivityAt?.toISOString()).toBe('2026-07-25T19:00:00.000Z');
+  });
+
+  it('still ignores bots on the forum and voice paths', async () => {
+    await rec.record({ discordId: 'b', kind: 'forum', at: AT, isBot: true, channelId: 'f' });
+    await rec.record({ discordId: 'b', kind: 'voice', at: AT, isBot: true, channelId: 'v' });
+    expect(store.rows).toHaveLength(0);
   });
 });
