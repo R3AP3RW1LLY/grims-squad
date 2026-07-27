@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { InaraLimiter, inaraLimiter, INARA_MIN_SPACING_MS } from './limiter.js';
+import { InaraLimiter, inaraLimiter, LimiterBusyError, INARA_MIN_SPACING_MS } from './limiter.js';
 
 /**
  * @INV-033 Inara is called at most twice per minute GLOBALLY, through one
@@ -133,5 +133,68 @@ describe('the singleton', () => {
     // otherwise be an unhandled rejection if the task ever threw.
     void a.run(async () => undefined).catch(() => undefined);
     expect(b.pending()).toBe(a.pending());
+  });
+});
+
+/**
+ * @ARCH-ADV FINDING, 2026-07-27 — a request path waited on this queue.
+ *
+ * The limiter is global and 30 seconds wide, so under contention it is
+ * legitimately MINUTES deep. Inara-key verification runs while a member waits
+ * on an HTTP response, and it was calling `run()` — meaning the tenth member to
+ * link a key would have waited four and a half minutes inside a request that
+ * would have timed out long before.
+ *
+ * `runWithin` bounds that wait without weakening INV-033: the same singleton,
+ * the same 30-second spacing, the caller simply declines to keep queueing.
+ */
+describe('@ARCH-ADV bounded waiting for request-path callers', () => {
+  it('runs immediately when the queue is idle', async () => {
+    // The dispatch still goes through a setTimeout(0), so the fake clock has to
+    // tick — "immediately" means no SPACING wait, not no event loop.
+    const p = limiter.runWithin(5_000, async () => 'done');
+    await vi.advanceTimersByTimeAsync(10);
+    expect(await p).toBe('done');
+  });
+
+  it('MANDATORY: gives up rather than queueing behind a deep backlog', async () => {
+    // Fill the queue so the next caller would wait a full spacing interval.
+    void limiter.run(async () => 'first').catch(() => undefined);
+    void limiter.run(async () => 'second').catch(() => undefined);
+
+    const attempt = limiter.runWithin(1_000, async () => 'never');
+    const caught = attempt.catch((e: Error) => e);
+
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect((await caught) as Error).toBeInstanceOf(LimiterBusyError);
+  });
+
+  it('MANDATORY: the give-up error is distinguishable from Inara refusing', async () => {
+    // Conflating them would tell a member with a perfectly good key that it was
+    // invalid, which is the one message guaranteed to make them give up.
+    void limiter.run(async () => 'first').catch(() => undefined);
+    void limiter.run(async () => 'second').catch(() => undefined);
+
+    const caught = limiter.runWithin(500, async () => 'never').catch((e: Error) => e);
+    await vi.advanceTimersByTimeAsync(1_000);
+
+    const err = (await caught) as Error;
+    expect(err.name).toBe('LimiterBusyError');
+    expect(err.message).toMatch(/slot/i);
+  });
+
+  it('does NOT abandon a call that has already reached Inara', async () => {
+    // Once the request is in flight we have spent the rate-limit slot — the
+    // scarcest thing here. Giving up then would waste it and still fail.
+    let finished = false;
+    const p = limiter.runWithin(50, async () => {
+      await new Promise((r) => setTimeout(r, 5_000));
+      finished = true;
+      return 'slow but real';
+    });
+
+    await vi.advanceTimersByTimeAsync(6_000);
+    expect(await p).toBe('slow but real');
+    expect(finished).toBe(true);
   });
 });

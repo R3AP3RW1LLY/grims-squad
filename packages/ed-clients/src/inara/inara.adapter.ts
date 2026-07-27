@@ -24,6 +24,16 @@ import { inaraLimiter } from './limiter.js';
 const API = 'https://inara.cz/inapi/v1/';
 const DEFAULT_TIMEOUT_MS = 10_000;
 
+/**
+ * How long a REQUEST-PATH caller will wait for a rate-limit slot.
+ *
+ * Eight seconds: long enough that an idle queue always serves immediately —
+ * which is every realistic case, since 108 members link a key once each over
+ * weeks — and short enough that a member never sits watching a spinner while
+ * nine other calls drain at thirty seconds apiece.
+ */
+const REQUEST_PATH_WAIT_MS = 8_000;
+
 export class InaraApiError extends Error {
   constructor(
     message: string,
@@ -95,7 +105,11 @@ export class InaraAdapter {
    * Returns null when Inara does not recognise the key.
    */
   async getOwnCommanderName(apiKey: string): Promise<string | null> {
-    const profile = await this.#call(apiKey, undefined);
+    // BOUNDED. This is the one Inara call that happens while a member waits on
+    // an HTTP response, and the global limiter is legitimately minutes deep
+    // under contention (INV-033). Waiting it out inside a request would time
+    // the connection out; in practice the queue is empty and this is instant.
+    const profile = await this.#call(apiKey, undefined, REQUEST_PATH_WAIT_MS);
     return profile?.cmdrName ?? null;
   }
 
@@ -122,10 +136,16 @@ export class InaraAdapter {
    * verification calls Inara with the MEMBER'S key while everything else uses
    * the squadron's.
    */
-  async #call(apiKey: string, cmdrName: string | undefined): Promise<InaraProfile | null> {
-    // EVERY call goes through the global limiter (INV-033). Never called from a
-    // request path: this queue can legitimately be minutes long.
-    return inaraLimiter().run(async () => {
+  async #call(
+    apiKey: string,
+    cmdrName: string | undefined,
+    maxWaitMs?: number,
+  ): Promise<InaraProfile | null> {
+    // EVERY call goes through the global limiter (INV-033). Worker calls wait
+    // as long as it takes; a request-path caller passes maxWaitMs and gives up
+    // rather than holding a connection open behind a minutes-deep queue.
+    const limiter = inaraLimiter();
+    const dispatch = async (): Promise<InaraProfile | null> => {
       const body = {
         header: {
           appName: this.config.appName,
@@ -219,6 +239,13 @@ export class InaraAdapter {
         profileUrl: d.inaraURL ?? null,
         squadronName: d.commanderSquadron?.SquadronName ?? null,
       };
-    });
+    };
+
+    // Unbounded for the worker, bounded for a request. Both go through the SAME
+    // singleton, so INV-033's "at most twice a minute globally" holds either
+    // way — the only difference is who is willing to keep waiting.
+    return maxWaitMs === undefined
+      ? limiter.run(dispatch)
+      : limiter.runWithin(maxWaitMs, dispatch);
   }
 }

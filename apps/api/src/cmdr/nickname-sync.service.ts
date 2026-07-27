@@ -40,6 +40,20 @@ export interface NicknameSyncDeps {
     discordId: string,
     nickname: string,
   ): Promise<{ ok: boolean; reason: string | null }>;
+  /**
+   * Records the nickname we just set, so the next check sees it.
+   *
+   * ★ DESIGN-ADV FINDING, 2026-07-27 ★
+   *
+   * `currentNickFor` reads our STORED copy of the guild nickname, which was
+   * only ever written by the OAuth callback. After we renamed somebody our copy
+   * stayed stale, so every subsequent check compared the OLD nickname against
+   * the verified name, saw a mismatch, and issued the same rename again — on
+   * every Inara call, forever. The "does nothing when it matches" path could
+   * never fire after the first rename, and the guild audit log would fill with
+   * identical renames.
+   */
+  rememberNickname(discordId: string, nickname: string): Promise<void>;
   writeAudit(entry: Record<string, unknown>): Promise<void>;
 }
 
@@ -87,6 +101,10 @@ export class NicknameSyncService {
 
       const result = await this.deps.setNickname(this.deps.guildId, discordId, want);
       if (!result.ok) return { changed: false, reason: result.reason };
+
+      // Write our copy forward. Without this the next check reads the OLD value,
+      // sees a mismatch it just fixed, and renames again — every time.
+      await this.deps.rememberNickname(discordId, want);
 
       await this.deps.writeAudit({
         // No actor. The member signed in; they did not ask for this, and

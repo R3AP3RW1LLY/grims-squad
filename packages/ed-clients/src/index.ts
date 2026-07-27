@@ -8,4 +8,9 @@ export * from './galnet/galnet.adapter.js';
 
 export { InaraAdapter, InaraApiError, InaraNotApprovedError } from './inara/inara.adapter.js';
 export type { InaraConfig, InaraProfile } from './inara/inara.adapter.js';
-export { inaraLimiter, InaraLimiter, INARA_MIN_SPACING_MS } from './inara/limiter.js';
+export {
+  inaraLimiter,
+  InaraLimiter,
+  LimiterBusyError,
+  INARA_MIN_SPACING_MS,
+} from './inara/limiter.js';

@@ -186,7 +186,7 @@ export function SiteFooter() {
   return (
     <footer className="relative mt-24 border-t border-[var(--color-border-hairline)] bg-[color-mix(in_srgb,var(--color-surface-panel-sunken)_70%,transparent)]">
       <div className="mx-auto max-w-[1440px] px-6 py-12">
-        <div className="grid gap-10 md:grid-cols-[2fr_1fr_1fr_1fr]">
+        <div className="grid gap-10 md:grid-cols-[2fr_1fr_1fr_1fr_1fr]">
           <div>
             {/* The full lockup belongs here, at a size where "CIRCA 2006" can
                 actually be read — the squadron predates Elite Dangerous by
@@ -267,6 +267,32 @@ export function SiteFooter() {
                   </a>
                 </li>
               ))}
+            </ul>
+          </nav>
+
+          <nav aria-label="Resources">
+            <h2 className="font-mono text-[11px] tracking-[0.28em] text-[var(--color-text-secondary)]">
+              RESOURCES
+            </h2>
+            <ul className="mt-4 list-none space-y-2 p-0 text-sm">
+              <li>
+                <a
+                  href="https://github.com/R3AP3RW1LLY/grims-squad"
+                  // An EXTERNAL link, so it gets the treatment the internal ones
+                  // do not need: noopener stops the opened page reaching back
+                  // through window.opener, and noreferrer keeps our URLs out of
+                  // its analytics.
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[var(--color-text-secondary)] no-underline transition-colors hover:text-[var(--color-brand-cyan-bright)] hover:underline hover:underline-offset-4"
+                >
+                  Source on GitHub
+                  {/* No visible arrow, by request. The screen-reader text stays:
+                      without it there is NO cue at all that the link leaves the
+                      site, and that cue was previously carried by the arrow. */}
+                  <span className="sr-only"> (opens in a new tab)</span>
+                </a>
+              </li>
             </ul>
           </nav>
         </div>

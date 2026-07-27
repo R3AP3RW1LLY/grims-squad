@@ -35,6 +35,7 @@ function deps(over: Partial<NicknameSyncDeps> = {}): NicknameSyncDeps {
     verifiedNameFor: async () => 'GRIM',
     currentNickFor: async () => null,
     setNickname: async () => OK,
+    rememberNickname: async () => undefined,
     writeAudit: async () => undefined,
     ...over,
   };
@@ -152,6 +153,49 @@ describe('when it cannot or should not run', () => {
     );
     await svc.sync('u1', 'd1');
     expect(audit).toEqual([]);
+  });
+});
+
+describe('@DESIGN-ADV it does not rename the same person forever', () => {
+  it('MANDATORY: records the nickname it set, so the next check sees a match', async () => {
+    /*
+     * The bug this closes: currentNickFor reads our STORED copy, which was
+     * only ever written by the OAuth callback. After a rename our copy stayed
+     * stale, so every later check compared the OLD nickname against the
+     * verified name, saw a mismatch it had just fixed, and renamed again — on
+     * every Inara call, forever, filling the guild audit log with identical
+     * renames.
+     */
+    const remembered: Array<{ discordId: string; nick: string }> = [];
+    const svc = new NicknameSyncService(
+      recording({
+        currentNickFor: async () => 'OldName',
+        rememberNickname: async (discordId, nick) => {
+          remembered.push({ discordId, nick });
+        },
+      }),
+    );
+
+    await svc.sync('u1', 'd1');
+    expect(remembered).toEqual([{ discordId: 'd1', nick: 'GRIM' }]);
+  });
+
+  it('does not record anything when Discord refused the rename', async () => {
+    // Remembering a nickname we failed to set would be worse than not
+    // remembering at all: the next check would see a false match and never
+    // retry, leaving the member permanently misnamed.
+    const remembered: string[] = [];
+    const svc = new NicknameSyncService(
+      deps({
+        setNickname: async () => ({ ok: false, reason: 'Discord refused: server owner.' }),
+        rememberNickname: async (_d, nick) => {
+          remembered.push(nick);
+        },
+      }),
+    );
+
+    await svc.sync('u1', 'd1');
+    expect(remembered).toEqual([]);
   });
 });
 

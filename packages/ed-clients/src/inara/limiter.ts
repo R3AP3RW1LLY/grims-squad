@@ -20,6 +20,20 @@
 /** Two per minute. */
 export const INARA_MIN_SPACING_MS = 30_000;
 
+/**
+ * The queue was too deep to serve a request-path caller in time.
+ *
+ * A distinct class so callers can tell it apart from Inara refusing: one means
+ * "try again shortly", the other means "your key is wrong". Conflating them
+ * would tell a member with a perfectly good key that it was invalid.
+ */
+export class LimiterBusyError extends Error {
+  constructor(waitedMs: number) {
+    super(`No Inara rate-limit slot within ${waitedMs}ms.`);
+    this.name = 'LimiterBusyError';
+  }
+}
+
 type Task = () => void;
 
 export class InaraLimiter {
@@ -47,6 +61,46 @@ export class InaraLimiter {
       });
       this.#schedule();
     });
+  }
+
+  /**
+   * Queues a call, but GIVES UP if the slot does not arrive in time.
+   *
+   * ★ WHY THIS EXISTS ★
+   *
+   * The limiter is deliberately global and 30 seconds wide, so a busy queue is
+   * legitimately minutes deep. That is fine for a worker and unacceptable on a
+   * request path: a member linking their Inara key while nine others are queued
+   * would wait four and a half minutes inside an HTTP request, and the
+   * connection would time out long before Inara answered.
+   *
+   * So a request-path caller waits a SHORT bounded time. In practice the queue
+   * is empty — 108 members add a key once, over weeks — and the slot is
+   * immediate. Under contention it degrades to "we will verify this shortly"
+   * instead of hanging, and the worker finishes the job.
+   *
+   * Rejects with a distinguishable error rather than resolving null, so a
+   * caller cannot mistake "no slot" for "Inara said no".
+   */
+  async runWithin<T>(timeoutMs: number, task: () => Promise<T>): Promise<T> {
+    let dispatched = false;
+    const wrapped = async (): Promise<T> => {
+      dispatched = true;
+      return task();
+    };
+
+    return Promise.race([
+      this.run(wrapped),
+      new Promise<never>((_resolve, reject) => {
+        const t = setTimeout(() => {
+          // Only give up if the task has NOT started. Once Inara is actually
+          // being called, abandoning it would waste the rate-limit slot we just
+          // spent — the scarcest thing here.
+          if (!dispatched) reject(new LimiterBusyError(timeoutMs));
+        }, timeoutMs);
+        t.unref?.();
+      }),
+    ]);
   }
 
   #schedule(): void {

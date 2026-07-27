@@ -50,3 +50,41 @@ describe('Frontier attribution @INV-029', () => {
     expect(html).toContain('LEGAL');
   });
 });
+
+/**
+ * The Resources column — the project's own source.
+ *
+ * A footer link is trivial; an EXTERNAL footer link is not. `target="_blank"`
+ * without `rel="noopener"` hands the opened page a live `window.opener`
+ * reference back into ours, and without `noreferrer` it hands its analytics our
+ * URL. Neither matters much for GitHub specifically, and both matter enormously
+ * as a habit — this is the first external link on the site and it sets the
+ * pattern every later one will be copied from.
+ */
+describe('the Resources footer column', () => {
+  const html = renderToStaticMarkup(<SiteFooter />);
+
+  it('links to the project source', () => {
+    expect(html).toContain('https://github.com/R3AP3RW1LLY/grims-squad');
+    expect(html).toMatch(/RESOURCES/);
+  });
+
+  it('MANDATORY: the external link carries noopener and noreferrer', () => {
+    const link = html.slice(
+      html.indexOf('https://github.com/R3AP3RW1LLY/grims-squad') - 300,
+      html.indexOf('https://github.com/R3AP3RW1LLY/grims-squad') + 300,
+    );
+    expect(link).toContain('rel="noopener noreferrer"');
+    expect(link).toContain('target="_blank"');
+  });
+
+  it('tells a screen-reader user it opens a new tab', () => {
+    // The visible arrow was removed by request, which makes this the ONLY cue
+    // that the link leaves the site. It matters more now, not less.
+    expect(html).toContain('(opens in a new tab)');
+  });
+
+  it('has no visible arrow glyph', () => {
+    expect(html).not.toContain('↗');
+  });
+});
