@@ -47,7 +47,7 @@ const SYSTEMS: readonly StarSystem[] = [
   { x: 392, y: 152, r: 2.5, tone: 'cyan' },
   { x: 468, y: 252, r: 3, tone: 'cyan' },
   { x: 540, y: 398, r: 2, tone: 'blue' },
-  { x: 604, y: 178, r: 5, tone: 'orange' }, // home
+  { x: 604, y: 178, r: 5, tone: 'orange' },
   { x: 690, y: 268, r: 2, tone: 'white' },
   { x: 726, y: 372, r: 2.5, tone: 'blue' },
   { x: 832, y: 228, r: 3.5, tone: 'white' },
@@ -71,8 +71,6 @@ const SYSTEMS: readonly StarSystem[] = [
   { x: 1180, y: 400, r: 1.6, tone: 'orange' },
   { x: 62, y: 392, r: 1.8, tone: 'white' },
 ];
-
-const HOME = { x: 604, y: 178 };
 
 const TONE: Record<StarSystem['tone'], string> = {
   orange: 'var(--color-brand-orange)',
@@ -237,49 +235,13 @@ export function GalaxyMap() {
           ))}
         </g>
 
-        {/* ------------------------------------------------- the home system */}
-        <g className="gm-home">
-          <circle cx={HOME.x} cy={HOME.y} r="26" fill="url(#gm-core)" opacity="0.5" />
-          {/* Rotating selection reticle, as the map draws around a target. */}
-          <g className="gm-reticle" style={{ transformOrigin: `${HOME.x}px ${HOME.y}px` }}>
-            <circle
-              cx={HOME.x}
-              cy={HOME.y}
-              r="19"
-              fill="none"
-              stroke="var(--color-brand-orange)"
-              strokeOpacity="0.85"
-              strokeWidth="1"
-              strokeDasharray="4 6"
-            />
-          </g>
-          {/* Static corner brackets — the actual selection indicator. */}
-          <path
-            d={`M${HOME.x - 26},${HOME.y - 16} v-10 h10 M${HOME.x + 26},${HOME.y - 16} v-10 h-10
-                M${HOME.x - 26},${HOME.y + 16} v10 h10 M${HOME.x + 26},${HOME.y + 16} v10 h-10`}
-            fill="none"
-            stroke="var(--color-brand-orange)"
-            strokeWidth="1.5"
-          />
-          <circle cx={HOME.x} cy={HOME.y} r="5" fill="#fff" filter="url(#gm-bloom-lg)" />
-
-          <text
-            x={HOME.x + 40}
-            y={HOME.y - 20}
-            className="gm-label"
-            fill="var(--color-brand-orange-bright)"
-          >
-            HYADES SECTOR AV-W b2-4
-          </text>
-          <line
-            x1={HOME.x + 28}
-            y1={HOME.y - 24}
-            x2={HOME.x + 36}
-            y2={HOME.y - 24}
-            stroke="var(--color-brand-orange)"
-            strokeWidth="1"
-          />
-        </g>
+        {/*
+          The home-system reticle and label used to sit here. Removed on
+          2026-07-27: the system is now named in the hero's info card, and
+          labelling it twice on the same screen made the map look like it was
+          trying to say something the card had already said better.
+          The system remains in SYSTEMS as an ordinary star.
+        */}
 
       </svg>
     </div>

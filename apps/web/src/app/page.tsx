@@ -36,6 +36,33 @@ const CAPABILITIES = [
   },
 ] as const;
 
+/**
+ * The four facts in the hero card. Only the home system links out.
+ *
+ * EDSM rather than Inara: I checked all three candidates. The Elite Dangerous
+ * wiki 404s for this system — procedurally-generated sector systems do not get
+ * wiki pages. Inara's page requires an account for parts of it. EDSM's is
+ * public, needs no login, and its API confirmed system id 1795223, so this URL
+ * is verified rather than guessed. It also shows the live controlling faction,
+ * which is the thing a visitor clicking through actually wants.
+ */
+const INSTRUMENTS: ReadonlyArray<{
+  label: string;
+  value: string;
+  href?: string;
+}> = [
+  {
+    label: 'HOME SYSTEM',
+    // NON-BREAKING HYPHENS. With ordinary ones the cell broke after "b2-" and
+    // orphaned the "4" on its own line, which reads as a typo, not a wrap.
+    value: 'Hyades Sector AV‑W b2‑4',
+    href: 'https://www.edsm.net/en/system/id/1795223/name/Hyades+Sector+AV-W+b2-4',
+  },
+  { label: 'DIVISIONS', value: 'Seven' },
+  { label: 'ALLEGIANCE', value: 'Player Minor Faction' },
+  { label: 'PLATFORM', value: 'PC · Odyssey' },
+];
+
 export default function HomePage() {
   return (
     <main id="main">
@@ -51,84 +78,100 @@ export default function HomePage() {
             ornament: this is the view every CMDR already knows. */}
         <GalaxyMap />
 
-        <div className="relative mx-auto flex w-full max-w-[1440px] flex-1 flex-col px-4 py-8 text-center sm:px-6 sm:py-10">
-          {/* The wordmark block takes the space that is going spare and centres
-              itself in it, so the composition holds at any viewport height
-              rather than being pinned to a padding value that only suits one. */}
-          <div className="flex flex-1 flex-col justify-center">
-          <p className="mb-8 flex items-center justify-center gap-3 font-mono text-[11px] uppercase tracking-[0.35em] text-[var(--color-brand-cyan-bright)]">
-            <span className="inline-block h-px w-8 bg-[var(--color-brand-cyan)]" aria-hidden="true" />
-            Elite Dangerous Squadron
-            <span className="inline-block h-px w-8 bg-[var(--color-brand-cyan)]" aria-hidden="true" />
-          </p>
-
+        <div className="relative mx-auto grid w-full max-w-[1440px] flex-1 items-center gap-10 px-4 py-10 sm:px-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] lg:gap-16 lg:py-12">
+          {/* ---- left: the mark ---- */}
           {/*
-            The lockup IS the h1. `alt` carries the wordmark, so the heading has
-            a real text equivalent for search engines and screen readers rather
-            than being an unlabelled image where the page's main heading should
-            be. `priority` because this is the largest element above the fold —
-            lazy-loading it would leave a hole during first paint.
+            The lockup IS the h1. `alt` carries the wordmark, so the page's main
+            heading has a real text equivalent for search engines and screen
+            readers rather than being an unlabelled image. `priority` because it
+            is the largest element above the fold.
           */}
-          <h1 id="hero-heading" className="m-0">
+          <h1 id="hero-heading" className="m-0 flex justify-center lg:justify-end">
             <Image
               src="/brand/lockup-1200.png"
               alt="Grim's Squad"
               width={1200}
               height={800}
               priority
-              sizes="(max-width: 640px) 92vw, (max-width: 1024px) 80vw, 860px"
-              className="mx-auto h-auto w-full max-w-[min(860px,72vw)] drop-shadow-[0_0_60px_rgba(255,113,0,0.18)] sm:max-w-[min(860px,62vw)]"
+              sizes="(max-width: 1024px) 88vw, 46vw"
+              className="h-auto w-full max-w-[min(620px,86vw)] drop-shadow-[0_0_70px_rgba(255,113,0,0.2)] lg:max-w-none"
             />
           </h1>
 
-          {/* The tagline, demoted to a subtitle now the logo leads. Large text,
-              so pure brand.orange stays compliant here (7.31:1 on void). */}
-          <p
-            className="mx-auto mt-2 text-[clamp(1.15rem,3.2vw,2rem)] leading-tight tracking-[0.18em] text-[var(--color-brand-orange)]"
-            style={{ fontFamily: 'var(--font-display)' }}
-          >
-            NO QUARTER IN THE VOID
-          </p>
+          {/* ---- right: everything else ---- */}
+          <div className="text-center lg:text-left">
+            <p className="flex items-center justify-center gap-3 font-mono text-[11px] uppercase tracking-[0.35em] text-[var(--color-brand-cyan-bright)] lg:justify-start">
+              <span className="inline-block h-px w-8 bg-[var(--color-brand-cyan)]" aria-hidden="true" />
+              Elite Dangerous Squadron
+            </p>
 
-          <p className="mx-auto mt-6 max-w-[62ch] text-base leading-relaxed text-[var(--color-text-primary)] sm:text-lg">
-            We run a player minor faction, operate fleet carriers, and fly everything from conflict
-            zones to the black. Combat and AX, trade, mining, exploration &mdash; and the background
-            simulation that decides who actually holds a system.
-          </p>
+            {/* Large text, so pure brand.orange stays compliant (7.31:1 on void). */}
+            <p
+              className="mt-4 text-[clamp(1.4rem,4.2vw,2.6rem)] leading-[1.05] tracking-[0.14em] text-[var(--color-brand-orange)]"
+              style={{ fontFamily: 'var(--font-display)' }}
+            >
+              NO QUARTER
+              <br className="hidden sm:inline" /> IN THE VOID
+            </p>
 
+            <p className="mx-auto mt-6 max-w-[58ch] text-base leading-relaxed text-[var(--color-text-primary)] sm:text-lg lg:mx-0">
+              We run a player minor faction, operate fleet carriers, and fly everything from
+              conflict zones to the black. Combat and AX, trade, mining, exploration &mdash; and the
+              background simulation that decides who actually holds a system.
+            </p>
 
-          </div>
-
-          {/* Anchored to the foot of the hero rather than floated after the
-              copy. It reads as an instrument panel along the bottom of a
-              cockpit view, and it guarantees the four facts are inside the
-              first screen instead of just below it. */}
-          <dl className="mx-auto mt-8 grid w-full max-w-4xl grid-cols-2 gap-px border border-[var(--color-border-hairline)] bg-[var(--color-border-hairline)] text-left shadow-[0_0_40px_rgba(0,0,0,0.45)] sm:mt-10 sm:grid-cols-[1.5fr_1fr_1.4fr_1fr]">
-            {[
-              // NON-BREAKING HYPHEN in "b2‑4". With an ordinary hyphen the
-              // cell broke after "b2-" and left the "4" orphaned on its own
-              // line, which read as a typo rather than a wrap.
-              ['HOME SYSTEM', 'Hyades Sector AV‑W b2‑4'],
-              ['DIVISIONS', 'Seven'],
-              ['ALLEGIANCE', 'Player Minor Faction'],
-              ['PLATFORM', 'PC · Odyssey'],
-            ].map(([label, value]) => (
-              <div
-                key={label}
-                className="flex flex-col justify-between bg-[var(--color-surface-panel-sunken)] px-3 py-3 sm:px-4 sm:py-4"
-              >
-                <dt className="font-mono text-[9px] tracking-[0.2em] text-[var(--color-text-secondary)] sm:text-[10px] sm:tracking-[0.24em]">
-                  {label}
-                </dt>
-                <dd
-                  className="mt-1.5 text-[13px] leading-snug text-[var(--color-brand-orange-bright)] sm:mt-2 sm:text-sm"
-                  style={{ fontFamily: 'var(--font-display)', textWrap: 'balance' }}
+            {/*
+              2x2 in the narrower column rather than four across. The info card
+              is now the ONLY place the home system is named — the reticle and
+              label were removed from the map, because saying it twice on one
+              screen made the map look like it was repeating the card.
+            */}
+            <dl className="mt-8 grid grid-cols-2 gap-px border border-[var(--color-border-hairline)] bg-[var(--color-border-hairline)] text-left shadow-[0_0_40px_rgba(0,0,0,0.45)]">
+              {INSTRUMENTS.map((item) => (
+                <div
+                  key={item.label}
+                  className="flex flex-col justify-between bg-[var(--color-surface-panel-sunken)] px-3 py-3 sm:px-4 sm:py-4"
                 >
-                  {value}
-                </dd>
-              </div>
-            ))}
-          </dl>
+                  <dt className="font-mono text-[9px] tracking-[0.2em] text-[var(--color-text-secondary)] sm:text-[10px] sm:tracking-[0.24em]">
+                    {item.label}
+                  </dt>
+                  <dd
+                    className="mt-1.5 text-[13px] leading-snug text-[var(--color-brand-orange-bright)] sm:mt-2 sm:text-sm"
+                    style={{ fontFamily: 'var(--font-display)', textWrap: 'balance' }}
+                  >
+                    {item.href === undefined ? (
+                      item.value
+                    ) : (
+                      <a
+                        href={item.href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-baseline gap-1 underline decoration-[var(--color-border-active)] decoration-1 underline-offset-4 transition-colors hover:text-[var(--color-brand-orange)] hover:decoration-[var(--color-brand-orange)]"
+                      >
+                        {item.value}
+                        <span className="sr-only"> (opens EDSM in a new tab)</span>
+                        <svg
+                          width="9"
+                          height="9"
+                          viewBox="0 0 12 12"
+                          fill="none"
+                          aria-hidden="true"
+                          className="shrink-0 self-center opacity-70"
+                        >
+                          <path
+                            d="M4 2h6v6M10 2 3 9"
+                            stroke="currentColor"
+                            strokeWidth="1.6"
+                            strokeLinecap="round"
+                          />
+                        </svg>
+                      </a>
+                    )}
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          </div>
         </div>
       </section>
 
