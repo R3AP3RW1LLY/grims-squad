@@ -28,3 +28,24 @@ integration is broken rather than that everyone suddenly became active.
 A member with NO linked CMDR name is a separate case and is NOT eligible:
 that is missing configuration, not an outage, and it is surfaced on the
 dashboard so an officer can fix the cause.
+
+## D27 — the companion app is Electron, and it is OPTIONAL
+
+**Human instruction, 2026-07-27: Electron, non-negotiable.** Tauri was proposed
+on binary-size and memory grounds and rejected. Recorded so the trade reads as
+deliberate rather than overlooked — Electron carries a Chromium runtime, so
+installers are ~100MB rather than a few, in exchange for the most widely
+understood desktop stack in the ecosystem and packaging paths that are already
+trodden flat.
+
+The app collects JOURNAL data, which is what replaces Frontier cAPI. It is not
+a market client: market prices come from EDDN, which thousands of players
+already feed and which `apps/eddn-collector` consumes, so whether our members
+run any particular tool barely affects our coverage.
+
+**Optional, permanently.** The website stays complete on its own and anyone who
+will not install a binary is verified by an officer and holds a full rank. The
+moment the app becomes a prerequisite we have excluded people for the
+convenience of automation.
+
+See ADR-022.

@@ -349,13 +349,21 @@ phase_P1:
       - "A non-officer receives 404, not 403, on every admin route"
     ssot_updates: [STATUS.md]
 
+  # SUPERSEDED BY ADR-022 (2026-07-27). Frontier cAPI is off the critical path
+  # permanently: the journals give us everything it would, in real time, without
+  # a discretionary approval that has never been applied for. This task remains
+  # recorded rather than deleted because cAPI would still be a genuine UPGRADE
+  # (trust tier 3 is Frontier's own attestation, which nothing else can give) —
+  # it is simply no longer something anything waits on.
   - id: P1.8
     phase: P1
     name: Frontier cAPI verification
+    status: superseded
+    superseded_by: [P1.11, P1.8b]
     depends_on: [P1.6]
     estimate_hours: 8
     risk_tier: 3
-    conditional: only if cAPI approval has arrived
+    conditional: only if cAPI approval has arrived, and never blocking
     files:
       - apps/api/src/auth/frontier.controller.ts
       - packages/ed-clients/src/frontier/capi.adapter.ts
@@ -420,6 +428,33 @@ phase_P1:
       manage members and read the audit log - Discord OAuth alone means a compromised Discord
       account is a compromised officer account. Retrofitting auth is always worse than building
       it in.
+    ssot_updates: [STATUS.md]
+
+  - id: P1.11
+    phase: P1
+    name: Electron companion app — journal collection
+    depends_on: [P1.6, P1.8b]
+    estimate_hours: 20
+    risk_tier: 3
+    decision: ADR-022, D27
+    files:
+      - apps/companion/
+      - apps/api/src/telemetry/journal.controller.ts
+      - apps/api/src/telemetry/pairing.service.ts
+    acceptance:
+      - "MANDATORY: the app is OPTIONAL — every feature of the website works without it, and a member who never installs it can hold any rank"
+      - "A journal session event sets game_activity to `observed` for that month, which is what unblocks promotion"
+      - "Pairing uses a single-use token issued from an authenticated web session; the token is hashed at rest and cannot be replayed"
+      - "MANDATORY: the app reads ONLY the journal directory and posts only to our own ingest endpoint — no EDDN upload, no other filesystem access"
+      - "An Inara key added in the app is the same record as one added on the web, distinguished only by `source`"
+      - "Ingest is idempotent per (member, journal file, event offset): a re-sent batch after a crash creates no duplicate activity"
+      - "The app works offline — events queue locally and flush when the API is reachable"
+      - "No credential is written to disk in plaintext, including the pairing token and the Inara key"
+    notes: >
+      ELECTRON, non-negotiable per D27. The app WRAPS the existing web frontend
+      rather than reimplementing it. It is not a market client: market data
+      comes from EDDN via apps/eddn-collector, and uploading to EDDN would take
+      on a data-quality obligation to the whole community for no benefit to us.
     ssot_updates: [STATUS.md]
 
   - id: P1.9

@@ -29,6 +29,7 @@ Every ADR has: Context · Decision · Consequences · Alternatives rejected (and
 | [019](ADR-019-cicd-quality-gates.md) | CI/CD is the enforcement mechanism | Accepted | Pipeline stages; SSOT-drift as a hard failure | all |
 | [020](ADR-020-contract-first-generation.md) | Contracts generate code, not the reverse | Accepted | OpenAPI, permissions.ts, tools.yaml as sources | all |
 | [021](ADR-021-risk-tiering.md) | Risk tiers scale the gates | Accepted | How much ceremony a given change gets | all |
+| [022](ADR-022-electron-companion-app.md) | An Electron companion app replaces Frontier cAPI | Accepted | Journals give us what cAPI would, without Frontier's approval | P1.8, P1.11 |
 
 ## Proposed
 
