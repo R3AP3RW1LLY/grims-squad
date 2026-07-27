@@ -1,4 +1,7 @@
 import { Public } from './auth.guard.js';
+import { postLoginDestination } from './post-login-destination.js';
+import { PermissionService } from '../authz/permission.service.js';
+import { TotpService } from './totp.service.js';
 import { Controller, Get, Query, Req, Res, Inject, Optional } from '@nestjs/common';
 import type { CookieSerializeOptions } from '@fastify/cookie';
 import type { FastifyReply, FastifyRequest } from 'fastify';
@@ -81,6 +84,15 @@ export class DiscordAuthController {
   constructor(
     @Optional() @Inject(DiscordAuthService) private readonly svc: DiscordAuthService | null,
     @Optional() @Inject(SessionService) private readonly sessions: SessionService | null,
+    /*
+     * Both @Optional: this controller must keep working when neither is
+     * configured. Without them the callback simply falls back to the requested
+     * path, which is the behaviour it had before routing existed — a login that
+     * succeeds and lands somewhere reasonable beats a login that 500s because a
+     * convenience is unavailable.
+     */
+    @Optional() @Inject(PermissionService) private readonly permissions: PermissionService | null,
+    @Optional() @Inject(TotpService) private readonly totp: TotpService | null,
   ) {}
 
   #service(): DiscordAuthService {
@@ -152,7 +164,28 @@ export class DiscordAuthController {
       jar(reply).setCookie(c.csrfName, issueCsrfToken(), { ...c.options, httpOnly: false });
     }
 
-    reply.redirect(afterLogin(result.redirectTo), 302);
+    /*
+     * Route them, rather than telling them where to go.
+     *
+     * An unsecured admin is sent into the onboarding flow automatically; a
+     * secured one lands in the console; everyone else lands on their own
+     * dashboard. Failing here must not fail the LOGIN, which has already
+     * succeeded — so a broken lookup falls back to the requested path.
+     */
+    let destination = result.redirectTo;
+    try {
+      if (this.permissions !== null && this.totp !== null) {
+        destination = await postLoginDestination({
+          mask: await this.permissions.effectiveMask(result.userId),
+          twoFactorEnrolled: await this.totp.isEnrolled(result.userId),
+          requested: result.redirectTo === '/' ? undefined : result.redirectTo,
+        });
+      }
+    } catch {
+      /* the session is already issued; a routing hiccup is not worth a 500 */
+    }
+
+    reply.redirect(afterLogin(destination), 302);
   }
 }
 

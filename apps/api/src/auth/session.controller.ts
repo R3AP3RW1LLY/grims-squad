@@ -5,6 +5,9 @@ import { AppError, ErrorCode } from '@grims/shared';
 import { SessionService } from './session.service.js';
 import { verifyCsrf, issueCsrfToken } from '../common/csrf.js';
 import { Public } from './auth.guard.js';
+import { PermissionService } from '../authz/permission.service.js';
+import { TotpService } from './totp.service.js';
+import { PRIVILEGED_PERMISSIONS, describePermissions, requiresTwoFactor } from '@grims/shared';
 
 const IS_SECURE = process.env['NODE_ENV'] === 'production';
 
@@ -18,7 +21,11 @@ const cookies = (r: FastifyRequest): Record<string, string | undefined> =>
 
 @Controller('v1/auth')
 export class SessionController {
-  constructor(@Optional() @Inject(SessionService) private readonly sessions: SessionService | null) {}
+  constructor(
+    @Optional() @Inject(SessionService) private readonly sessions: SessionService | null,
+    @Optional() @Inject(PermissionService) private readonly permissions: PermissionService | null,
+    @Optional() @Inject(TotpService) private readonly totp: TotpService | null,
+  ) {}
 
   #svc(): SessionService {
     if (this.sessions === null) {
@@ -100,5 +107,44 @@ export class SessionController {
       jar(reply).setCookie(c.csrfName, issueCsrfToken(), { ...c.options, httpOnly: false });
     }
     void reply.send({ user: req.user ?? null });
+  }
+
+  /**
+   * What this member still has to do to be in good standing.
+   *
+   * Drives the banner and the onboarding flow. Deliberately reports the member's
+   * OWN status only — it takes no id, so there is nothing here to point at
+   * somebody else and no way to enumerate who does or does not hold privileged
+   * permissions.
+   *
+   * Names the permissions that create the obligation, because "secure your
+   * account" with no reason is an instruction, and people comply with
+   * explanations rather than instructions.
+   */
+  @Get('me/account-status')
+  async accountStatus(@Req() req: FastifyRequest): Promise<{
+    privileged: boolean;
+    twoFactorEnrolled: boolean;
+    needsSecuring: boolean;
+    because: string[];
+  }> {
+    const userId = req.user?.userId;
+    if (userId === undefined || this.permissions === null || this.totp === null) {
+      // Anonymous, or the services are not configured. Nothing to prompt about,
+      // and CERTAINLY nothing to prompt about wrongly — a banner telling a
+      // signed-out visitor to secure an account they do not have is noise.
+      return { privileged: false, twoFactorEnrolled: false, needsSecuring: false, because: [] };
+    }
+
+    const mask = await this.permissions.effectiveMask(userId);
+    const privileged = requiresTwoFactor(mask);
+    const enrolled = await this.totp.isEnrolled(userId);
+
+    return {
+      privileged,
+      twoFactorEnrolled: enrolled,
+      needsSecuring: privileged && !enrolled,
+      because: privileged ? describePermissions(mask & PRIVILEGED_PERMISSIONS) : [],
+    };
   }
 }

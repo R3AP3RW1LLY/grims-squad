@@ -133,6 +133,47 @@ export type PermissionName = keyof typeof Permission;
 /** Every permission name, in bit order. Used by `describePermissions` and the admin UI. */
 export const PERMISSION_NAMES = Object.keys(Permission) as PermissionName[];
 
+/**
+ * Permissions that oblige a member to secure their account with a second factor.
+ *
+ * ★ WHAT MAKES A PERMISSION BELONG HERE ★
+ *
+ * Not "is it an admin permission" — that is vague and drifts. The test is: CAN
+ * HOLDING THIS AFFECT SOMEBODY OTHER THAN YOURSELF, OR THE SITE ITSELF? If yes,
+ * a stolen Discord account for this member is a problem for other people, and
+ * one factor is not enough.
+ *
+ * By that test FORUM_MODERATE belongs (it removes other people's words) and
+ * FLEET_EDIT_OWN does not (it is your own ship). BGS_SET_ORDERS belongs: it
+ * directs the whole squadron's effort for a week.
+ *
+ * Deliberately a UNION rather than "anything above bit 60". Bit position is an
+ * allocation detail — TELEMETRY_WRITE sits at 70 and is not privileged at all —
+ * and a rule based on it would silently capture whatever gets allocated next.
+ */
+export const PRIVILEGED_PERMISSIONS: PermissionMask =
+  Permission.MEMBER_MANAGE |
+  Permission.ROLE_MANAGE |
+  Permission.AUDIT_VIEW |
+  Permission.SITE_CONFIG |
+  Permission.AI_TOOLS_ADMIN |
+  Permission.FORUM_MODERATE |
+  Permission.OPS_MANAGE |
+  Permission.BGS_SET_ORDERS |
+  Permission.FLEET_APPROVE_DOCTRINE;
+
+/**
+ * Does this member have to enrol a second factor?
+ *
+ * Answered from the EFFECTIVE mask, so a member who loses a privileged role
+ * stops being obliged, and one who gains it starts — without anybody running a
+ * migration or remembering to re-check. That is what makes "when a member is
+ * promoted to an admin rank" work with no promotion-time hook at all.
+ */
+export function requiresTwoFactor(effectiveMask: PermissionMask): boolean {
+  return (effectiveMask & PRIVILEGED_PERMISSIONS) !== 0n;
+}
+
 /** No permissions. The unauthenticated baseline before FORUM_VIEW_PUBLIC is applied. */
 export const NO_PERMISSIONS: PermissionMask = 0n;
 
