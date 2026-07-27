@@ -1,3 +1,4 @@
+import Image from 'next/image';
 import { DIVISIONS } from '../components/site-chrome';
 import { GalaxyMap } from '../components/galaxy-map';
 
@@ -47,50 +48,66 @@ export default function HomePage() {
             ornament: this is the view every CMDR already knows. */}
         <GalaxyMap />
 
-        <div className="relative mx-auto max-w-[1440px] px-6 py-24 sm:py-32">
-          <div className="max-w-[46rem]">
-            <p className="mb-5 flex items-center gap-3 font-mono text-[11px] uppercase tracking-[0.35em] text-[var(--color-brand-cyan-bright)]">
-              <span className="inline-block h-px w-8 bg-[var(--color-brand-cyan)]" aria-hidden="true" />
-              Elite Dangerous Squadron
-            </p>
+        <div className="relative mx-auto max-w-[1440px] px-6 py-20 text-center sm:py-28">
+          <p className="mb-8 flex items-center justify-center gap-3 font-mono text-[11px] uppercase tracking-[0.35em] text-[var(--color-brand-cyan-bright)]">
+            <span className="inline-block h-px w-8 bg-[var(--color-brand-cyan)]" aria-hidden="true" />
+            Elite Dangerous Squadron
+            <span className="inline-block h-px w-8 bg-[var(--color-brand-cyan)]" aria-hidden="true" />
+          </p>
 
-            {/* Large text, so pure brand.orange is compliant here (7.31:1 on void). */}
-            <h1
-              id="hero-heading"
-              className="text-[clamp(2.75rem,8vw,5.5rem)] leading-[0.95] text-[var(--color-brand-orange)]"
+          {/*
+            The lockup IS the h1. `alt` carries the wordmark, so the heading has
+            a real text equivalent for search engines and screen readers rather
+            than being an unlabelled image where the page's main heading should
+            be. `priority` because this is the largest element above the fold —
+            lazy-loading it would leave a hole during first paint.
+          */}
+          <h1 id="hero-heading" className="m-0">
+            <Image
+              src="/brand/lockup-1200.png"
+              alt="Grim's Squad"
+              width={1200}
+              height={800}
+              priority
+              sizes="(max-width: 640px) 92vw, (max-width: 1024px) 80vw, 860px"
+              className="mx-auto h-auto w-full max-w-[860px] drop-shadow-[0_0_60px_rgba(255,113,0,0.18)]"
+            />
+          </h1>
+
+          {/* The tagline, demoted to a subtitle now the logo leads. Large text,
+              so pure brand.orange stays compliant here (7.31:1 on void). */}
+          <p
+            className="mx-auto mt-2 text-[clamp(1.15rem,3.2vw,2rem)] leading-tight tracking-[0.18em] text-[var(--color-brand-orange)]"
+            style={{ fontFamily: 'var(--font-display)' }}
+          >
+            NO QUARTER IN THE VOID
+          </p>
+
+          <p className="mx-auto mt-8 max-w-[62ch] text-lg leading-relaxed text-[var(--color-text-primary)]">
+            We run a player minor faction, operate fleet carriers, and fly everything from conflict
+            zones to the black. Combat and AX, trade, mining, exploration &mdash; and the background
+            simulation that decides who actually holds a system.
+          </p>
+
+          <div className="mt-10 flex flex-wrap justify-center gap-4">
+            <a
+              href="/apply"
+              className="bg-[var(--color-brand-orange)] px-7 py-3.5 text-[var(--color-text-on-accent)] shadow-[var(--glow-orange)] transition-opacity hover:opacity-90"
               style={{ fontFamily: 'var(--font-display)' }}
             >
-              NO QUARTER
-              <br />
-              IN THE VOID
-            </h1>
-
-            <p className="mt-8 max-w-[58ch] text-lg leading-relaxed text-[var(--color-text-primary)]">
-              We run a player minor faction, operate fleet carriers, and fly everything from
-              conflict zones to the black. Combat and AX, trade, mining, exploration &mdash; and the
-              background simulation that decides who actually holds a system.
-            </p>
-
-            <div className="mt-10 flex flex-wrap gap-4">
-              <a
-                href="/apply"
-                className="bg-[var(--color-brand-orange)] px-7 py-3.5 text-[var(--color-text-on-accent)] shadow-[var(--glow-orange)] transition-opacity hover:opacity-90"
-                style={{ fontFamily: 'var(--font-display)' }}
-              >
-                APPLY TO JOIN
-              </a>
-              <a
-                href="/forum"
-                className="border border-[var(--color-border-active)] px-7 py-3.5 text-[var(--color-brand-orange-bright)] transition-colors hover:bg-[var(--color-surface-panel-hover)]"
-                style={{ fontFamily: 'var(--font-display)' }}
-              >
-                OPEN COMMS
-              </a>
-            </div>
+              APPLY TO JOIN
+            </a>
+            <a
+              href="/forum"
+              className="border border-[var(--color-border-active)] px-7 py-3.5 text-[var(--color-brand-orange-bright)] transition-colors hover:bg-[var(--color-surface-panel-hover)]"
+              style={{ fontFamily: 'var(--font-display)' }}
+            >
+              OPEN COMMS
+            </a>
           </div>
 
           {/* Instrument strip — real, static facts only. */}
-          <dl className="mt-20 grid max-w-3xl grid-cols-2 gap-px border border-[var(--color-border-hairline)] bg-[var(--color-border-hairline)] sm:grid-cols-4">
+          <dl className="mx-auto mt-20 grid max-w-3xl grid-cols-2 gap-px border border-[var(--color-border-hairline)] bg-[var(--color-border-hairline)] text-left sm:grid-cols-4">
             {[
               ['HOME SYSTEM', 'Hyades Sector AV-W b2-4'],
               ['DIVISIONS', 'Seven'],
