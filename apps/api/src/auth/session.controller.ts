@@ -9,6 +9,7 @@ import { Public } from './auth.guard.js';
 import { PermissionService } from '../authz/permission.service.js';
 import { TotpService } from './totp.service.js';
 import { grantStillValid, sessionLifetimeSec, type GrantState } from './discord-grant.js';
+import { VERIFY_DISMISSED_COOKIE } from './verify-dismissal.js';
 import { PRIVILEGED_PERMISSIONS, describePermissions, requiresTwoFactor } from '@grims/shared';
 
 const IS_SECURE = process.env['NODE_ENV'] === 'production';
@@ -151,7 +152,15 @@ export class SessionController {
       // it — logout has to mean revoked, not merely forgotten.
       await svc.revokeByRefreshToken(refresh, 'user signed out').catch(() => undefined);
     }
-    for (const n of [c.accessName, c.refreshName, c.csrfName]) {
+    /*
+     * The dismissal cookie goes with them.
+     *
+     * "Dismissed for this session" is only true if signing out ends it.
+     * Otherwise a member dismisses the verification prompt once and never sees
+     * it again on that browser — which turns "not now" into "never", silently,
+     * for an obligation nobody has met.
+     */
+    for (const n of [c.accessName, c.refreshName, c.csrfName, VERIFY_DISMISSED_COOKIE]) {
       jar(reply).clearCookie(n, { path: '/' });
     }
     void reply.send({ ok: true });

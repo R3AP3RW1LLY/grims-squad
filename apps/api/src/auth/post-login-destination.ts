@@ -25,11 +25,22 @@ export const ONBOARDING_PATH = '/onboarding/security';
 export const ADMIN_PATH = '/app';
 /** The members' area. */
 export const MEMBER_PATH = '/dashboard';
+/**
+ * Where an unverified member who is NOT blocked lands.
+ *
+ * In practice that means admins: an ordinary member is held at
+ * /onboarding/verification by the gate, and never reaches this. Admins are let
+ * past because the approval queue would deadlock otherwise — so this is what
+ * keeps the obligation in front of them instead.
+ */
+export const VERIFY_PATH = '/settings/commander?tab=verification';
 
 export interface DestinationInput {
   /** EFFECTIVE mask — roles minus deny, as the permission engine computes it. */
   readonly mask: PermissionMask;
   readonly twoFactorEnrolled: boolean;
+  /** Has anybody confirmed which commander they are? */
+  readonly verified?: boolean | undefined;
   /** A ?redirect= from the sign-in link. Untrusted. */
   readonly requested?: string | undefined;
 }
@@ -46,6 +57,19 @@ export async function postLoginDestination(input: DestinationInput): Promise<str
    * even considered.
    */
   if (mustSecure && !input.twoFactorEnrolled) return ONBOARDING_PATH;
+
+  /*
+   * ★ AN UNVERIFIED ADMIN LANDS ON THE PAGE THAT FIXES IT ★
+   *
+   * Also ahead of the requested path, and for the same reason: a bookmarked
+   * ?redirect=/app would walk them past the one thing still outstanding.
+   *
+   * This repeats on EVERY sign-in until somebody verifies them. That is the
+   * point — the banner can be dismissed for a session, so without this the
+   * obligation would quietly disappear after the first dismissal and never come
+   * back. Dismissing means "not now", not "never".
+   */
+  if (mustSecure && input.verified === false) return VERIFY_PATH;
 
   // Allowlisted, always. The value came from a query string, and honouring it
   // must never mean trusting it: an absolute URL here would be an open redirect

@@ -1,7 +1,9 @@
+import { cookies } from 'next/headers';
 import { getMe } from '../lib/api';
+import { VerifyBannerView, VERIFY_DISMISSED_COOKIE } from './verify-banner-view';
 
 /**
- * "Get yourself verified" — for admins only, and it does not block them.
+ * "Get yourself verified" — for admins only, dismissible for one session.
  *
  * ★ WHY ADMINS ARE ASKED BUT NOT STOPPED ★
  *
@@ -14,39 +16,34 @@ import { getMe } from '../lib/api';
  * verification would confirm they deserve, so stopping them protects nothing
  * and only stops the person who has to clear everybody else's queue.
  *
+ * ★ DISMISSIBLE, BUT NOT FORGETTABLE ★
+ *
+ * It can be closed for the session, because a permanent bar across every page
+ * is a bar people stop seeing. It comes back on the next sign-in — the cookie
+ * is cleared at logout, and the login redirect sends an unverified admin
+ * straight to the page that fixes it.
+ *
+ * Dismissing means "not now". It must not be able to mean "never", because
+ * nothing about the obligation has changed.
+ *
  * ★ WHO NEVER SEES IT ★
  *
  * An ordinary member. They are stopped by the wall, on a page that exists to
  * explain the wait — a banner would be a second instruction competing with the
- * first. The server decides this (`promptForVerification`), so the rule lives
- * in one place rather than being re-derived here.
+ * first. The SERVER decides this (`promptForVerification`), so the rule lives in
+ * one place rather than being re-derived here.
  */
 export async function VerifyPromptBanner() {
   const me = await getMe();
   if (!me.onboarding.promptForVerification) return null;
 
-  return (
-    <div className="border-b border-[var(--color-brand-orange)] bg-[color-mix(in_srgb,var(--color-brand-orange)_10%,transparent)]">
-      <div className="mx-auto flex max-w-[1440px] flex-wrap items-center gap-x-4 gap-y-2 px-4 py-3 sm:px-6 lg:px-8">
-        <p className="text-sm text-[var(--color-text-primary)]">
-          <span className="font-mono text-[11px] uppercase tracking-[0.24em] text-[var(--color-brand-orange)]">
-            Not verified
-          </span>{' '}
-          {/*
-            Says why it matters to THEM rather than restating the rule. "You are
-            not verified" is a status; "your own activity will not count" is a
-            reason, and people act on reasons.
-          */}
-          Nobody has confirmed which commander you fly as, so your own months will not count toward
-          a rank. Ask a colleague to verify you, or link an Inara key.
-        </p>
-        <a
-          href="/settings/commander?tab=verification"
-          className="ml-auto shrink-0 rounded border border-[var(--color-brand-orange)] px-4 py-1.5 font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--color-brand-orange)] transition-colors hover:bg-[color-mix(in_srgb,var(--color-brand-orange)_14%,transparent)]"
-        >
-          Sort it out
-        </a>
-      </div>
-    </div>
-  );
+  /*
+   * Read on the server so a dismissed banner is absent from the FIRST paint.
+   * Rendering it and hiding it in the browser would flash it on every
+   * navigation, which is worse than not having a dismiss button at all.
+   */
+  const jar = await cookies();
+  if (jar.get(VERIFY_DISMISSED_COOKIE)?.value === '1') return null;
+
+  return <VerifyBannerView />;
 }

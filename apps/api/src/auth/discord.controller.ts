@@ -11,6 +11,7 @@ import { TotpService } from './totp.service.js';
 import { postLoginDestination } from './post-login-destination.js';
 import { PermissionService } from '../authz/permission.service.js';
 import { WebmasterService } from '../authz/webmaster.js';
+import { PrismaClient } from '@grims/db';
 import { AVATAR_SERVICE } from '../media/media.tokens.js';
 import type { AvatarService } from '../media/avatar.service.js';
 
@@ -91,6 +92,7 @@ export class DiscordAuthController {
     @Optional()
     @Inject(WebmasterService)
     private readonly webmaster: WebmasterService | null,
+    @Optional() @Inject(PrismaClient) private readonly db: PrismaClient | null = null,
     @Optional() @Inject(DiscordAuthService) private readonly svc: DiscordAuthService | null,
     @Optional() @Inject(SessionService) private readonly sessions: SessionService | null,
     /*
@@ -217,6 +219,10 @@ export class DiscordAuthController {
         destination = await postLoginDestination({
           mask: await this.permissions.effectiveMask(result.userId),
           twoFactorEnrolled: await this.totp.isEnrolled(result.userId),
+          // Read fresh on every sign-in, which is what makes the prompt come
+          // back after a dismissal: the cookie holding the dismissal was
+          // cleared at logout, and this decides where they land.
+          verified: await this.#isVerified(result.userId),
           requested: result.redirectTo === '/' ? undefined : result.redirectTo,
         });
       }
@@ -226,6 +232,21 @@ export class DiscordAuthController {
 
     reply.redirect(afterLogin(destination), 302);
   }
+
+  /**
+   * Has anybody confirmed which commander this is?
+   *
+   * `isVerified` AND not revoked. A pending claim proves nothing — that is the
+   * entire point of the approval queue (INV-005).
+   */
+  async #isVerified(userId: string): Promise<boolean> {
+    if (this.db === null) return true;
+    const count = await this.db.cmdrVerification.count({
+      where: { userId, isVerified: true, revokedAt: null },
+    });
+    return count > 0;
+  }
+
 }
 
 /**
