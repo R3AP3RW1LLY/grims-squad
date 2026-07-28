@@ -29,6 +29,7 @@ allowBuilds:
   # but there is no binary, and the failure reads as "electron is not a
   # command" rather than as a blocked install script.
   electron: true
+  electron-winstaller: set this to true or false
 
 onlyBuiltDependencies:
   - esbuild
@@ -63,3 +64,15 @@ overrides:
   "find-my-way@<9.6.1": ">=9.6.1" # HTTP/2 DoS
   "postcss@<8.5.12": ">=8.5.12" # arbitrary file read
   "sharp@<0.35.0": ">=0.35.0" # inherited libvips CVEs
+  # CRITICAL: node-tar decompression/parse DoS via unlimited input. Reached only
+  # through electron-builder -> app-builder-lib -> @electron/rebuild -> node-gyp,
+  # i.e. BUILD tooling that never runs on a member's machine or on the server.
+  # Overridden anyway rather than ignored: a suppressed advisory is one nobody
+  # revisits, and "it is only the build" is exactly what gets said about supply
+  # chain compromises before they matter.
+  "tar@<7.5.19": ">=7.5.19"
+  # electron-updater: cross-origin redirect leaks credentials, and uncontrolled
+  # search path elements. BUILD tooling again — it never ships to a member —
+  # but pinned so a future electron-builder cannot quietly drag an old copy back.
+  "builder-util-runtime@<9.7.0": ">=9.7.0"
+  "app-builder-lib@<26.15.0": ">=26.15.0"
