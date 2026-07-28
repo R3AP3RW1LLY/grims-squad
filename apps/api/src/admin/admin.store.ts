@@ -1,4 +1,5 @@
 import type { PrismaClient } from '@grims/db';
+import { LEADERSHIP_CEILING } from '../members/members.store.js';
 
 /**
  * The rank ladder, for reporting what somebody is working toward.
@@ -33,8 +34,26 @@ export interface ActivityRow {
   readonly discordId: string;
   readonly handle: string | null;
   readonly displayName: string | null;
-  /** The rank they hold now, from granted roles (INV-047). */
+  /** Server nickname — the in-game name, by this squadron's convention. */
+  readonly nick: string | null;
+  /** They have an account here, not merely a presence in Discord. */
+  readonly joinedWebsite: boolean;
+  /** A verified commander name, and how it was proven. Null when unverified. */
+  readonly cmdrName: string | null;
+  readonly verifiedVia: string | null;
+  /**
+   * Their TENURE rank — the ladder promotion moves them up. Null when they
+   * hold no rank role at all.
+   */
   readonly currentRank: string | null;
+  /**
+   * A leadership APPOINTMENT, if they hold one. A separate axis entirely.
+   *
+   * Somebody can be a Cadet by tenure and a Squadron Leader by appointment at
+   * the same time, and the two must not be shown as one thing — see the note
+   * on the query.
+   */
+  readonly appointment: string | null;
   /** The next rung up. Null at the top of the ladder, and for unranked members. */
   readonly nextRank: string | null;
   readonly messageCount: number;
@@ -125,8 +144,18 @@ export class PrismaAdminStore implements AdminStore {
 
   async activityForMonth(monthKey: string): Promise<ActivityRow[]> {
     const month = new Date(`${monthKey}-01T00:00:00Z`);
-    const rows = await this.#db.memberActivityMonth.findMany({
-      where: { month },
+
+    /*
+     * ★ THE MONTH IS AN EXACT MATCH, NOT A RANGE ★
+     *
+     * `member_activity_months` stores one row per member per calendar month,
+     * with `month` pinned to the first at midnight UTC. So equality here IS the
+     * calendar-month scope — a message from June cannot appear in July's row
+     * because it was never added to it.
+     */
+    const [rows, guildMembers, mappings] = await Promise.all([
+      this.#db.memberActivityMonth.findMany({
+        where: { month },
       select: {
         discordId: true,
         messageCount: true,
@@ -134,35 +163,114 @@ export class PrismaAdminStore implements AdminStore {
         voiceJoinCount: true,
         gameActivity: true,
         lastActivityAt: true,
-        user: {
-          select: {
-            handle: true,
-            displayName: true,
-            /*
-             * The rank they HOLD, read from granted roles (INV-047).
-             *
-             * Highest first and take:1 — a member can hold several hierarchical
-             * roles over time and the ladder position, not the grant date,
-             * decides which one they are. Sorting by grantedAt would show a
-             * demoted member their old rank.
-             */
-            userRoles: {
-              where: { role: { isHierarchical: true } },
-              select: { role: { select: { name: true, rankOrder: true } } },
-              orderBy: { role: { rankOrder: 'desc' as const } },
-              take: 1,
+          user: {
+            select: {
+              handle: true,
+              displayName: true,
+              cmdrVerifications: {
+                where: { isVerified: true, revokedAt: null },
+                select: { cmdrName: true, method: true },
+                orderBy: { verifiedAt: 'desc' as const },
+                take: 1,
+              },
             },
           },
         },
-      },
-      orderBy: [{ messageCount: 'desc' }, { voiceJoinCount: 'desc' }],
-    });
+        orderBy: [{ messageCount: 'desc' }, { voiceJoinCount: 'desc' }],
+      }),
 
-    return rows.map((r) => ({
+      /*
+       * Names and Discord roles for EVERY guild member, account or not.
+       *
+       * `discord_identities` was the obvious join and is the wrong one: it is
+       * keyed on a website user id and exists only for people who have signed
+       * in. One member of fifty-one had a row, so the table showed a name for
+       * one person and a raw snowflake for the rest.
+       */
+      this.#db.discordGuildMember.findMany({
+        select: { discordId: true, nick: true, username: true, globalName: true, roles: true },
+      }),
+
+      /*
+       * ★ RANK COMES FROM DISCORD, NOT FROM GRANTED ROLES ★
+       *
+       * Reading granted `UserRole` rows showed nothing for a member who is
+       * plainly a Cadet in Discord — the mapping exists, but the internal role
+       * had never been granted, because grants only appear once reconciliation
+       * has run for an account that exists. Most of the squadron has neither.
+       *
+       * This is the same correction already made for officer status: the roles
+       * somebody WEARS are the current fact, and the grants catch up.
+       */
+      this.#db.roleMapping.findMany({
+        where: { role: { isHierarchical: true } },
+        select: { discordRoleId: true, role: { select: { name: true, rankOrder: true } } },
+      }),
+    ]);
+
+    const byDiscordId = new Map(guildMembers.map((m) => [m.discordId, m]));
+    const rankByRoleId = new Map(mappings.map((m) => [m.discordRoleId, m.role]));
+
+    return rows.map((r) => {
+      const guild = byDiscordId.get(r.discordId);
+
+      /*
+       * ★ TWO LADDERS, NOT ONE, AND MIXING THEM MISREPORTS PEOPLE ★
+       *
+       * Roles below LEADERSHIP_CEILING are APPOINTMENTS ("Reserved",
+       * "Leadership. Admin area access"). Roles from it upward are TENURE ranks
+       * earned by qualifying months, Cadet at one through Grand Master General
+       * at twelve.
+       *
+       * Taking the single highest across both put "Squadron Leader" in the rank
+       * column with nothing above it, which the table rendered as "Top of
+       * ladder" — wrong twice over: Squadron Leader is not the top of anything,
+       * and it is not on the promotion ladder at all.
+       *
+       * So they are picked separately. Somebody can be a Cadet by tenure AND a
+       * Squadron Leader by appointment; promotion concerns only the first.
+       *
+       * Highest of each wins, because a member can wear several mapped roles at
+       * once — mid-promotion, or because an old one was never removed — and
+       * picking the first would make the answer depend on Discord's ordering.
+       */
+      let currentRank: string | null = null;
+      let appointment: string | null = null;
+      let bestTenure = -Infinity;
+      let bestAppointment = -Infinity;
+
+      for (const roleId of guild?.roles ?? []) {
+        const mapped = rankByRoleId.get(roleId);
+        if (mapped === undefined) continue;
+
+        if (mapped.rankOrder >= LEADERSHIP_CEILING) {
+          if (mapped.rankOrder > bestTenure) {
+            bestTenure = mapped.rankOrder;
+            currentRank = mapped.name;
+          }
+        } else if (mapped.rankOrder > bestAppointment) {
+          bestAppointment = mapped.rankOrder;
+          appointment = mapped.name;
+        }
+      }
+
+      const verification = r.user?.cmdrVerifications[0];
+
+      return {
       discordId: r.discordId,
       handle: r.user?.handle ?? null,
       displayName: r.user?.displayName ?? null,
-      currentRank: r.user?.userRoles[0]?.role.name ?? null,
+      /*
+       * Nickname first, then Discord's display name, then the handle. The
+       * squadron's convention is that the nickname IS the commander name, so
+       * it is what an officer recognises somebody by.
+       */
+      nick: guild?.nick ?? guild?.globalName ?? guild?.username ?? null,
+      joinedWebsite: r.user !== null,
+      cmdrName: verification?.cmdrName ?? null,
+      verifiedVia: verification?.method ?? null,
+      currentRank,
+      appointment,
       messageCount: r.messageCount,
       forumPostCount: r.forumPostCount,
       voiceJoinCount: r.voiceJoinCount,
@@ -180,15 +288,13 @@ export class PrismaAdminStore implements AdminStore {
        * Master General has nothing above it, and showing a blank arrow there
        * would read as missing data rather than as an achievement.
        */
-      nextRank:
-        r.user?.userRoles[0]?.role.name === undefined
-          ? null
-          : (LADDER_NEXT[r.user.userRoles[0].role.name] ?? null),
+      nextRank: currentRank === null ? null : (LADDER_NEXT[currentRank] ?? null),
       qualifies:
         (r.messageCount > 0 || r.forumPostCount > 0 || r.voiceJoinCount > 0) &&
         (r.gameActivity === 'observed' || r.gameActivity === 'assumed'),
       lastActivityAt: r.lastActivityAt?.toISOString() ?? null,
-    }));
+      };
+    });
   }
 
   async members(): Promise<MemberRow[]> {

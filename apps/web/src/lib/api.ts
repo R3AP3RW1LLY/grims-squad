@@ -216,8 +216,18 @@ export interface AdminActivityRow {
   discordId: string;
   handle: string | null;
   displayName: string | null;
-  /** The rank they hold now. */
+  /** Server nickname — the in-game name, by this squadron's convention. */
+  nick: string | null;
+  /** They have an account here, not merely a presence in Discord. */
+  joinedWebsite: boolean;
+  /** A verified commander name. Null when unverified. */
+  cmdrName: string | null;
+  /** How it was proven: `inara_nonce`, `fdev_capi`, `officer_manual`. */
+  verifiedVia: string | null;
+  /** Their TENURE rank — the ladder promotion moves them up. */
   currentRank: string | null;
+  /** A leadership APPOINTMENT, a separate axis. Not on the promotion ladder. */
+  appointment: string | null;
   /** The next rung up, or null at the top of the ladder. */
   nextRank: string | null;
   messageCount: number;

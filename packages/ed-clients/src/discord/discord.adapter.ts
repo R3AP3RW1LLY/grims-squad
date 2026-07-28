@@ -150,7 +150,7 @@ export class DiscordAdapter implements IDiscordIdentityProvider {
       if (!res.ok) throw await this.#toError(res);
 
       const batch = (await res.json()) as Array<{
-        user?: { id?: string };
+        user?: { id?: string; username?: string; global_name?: string | null; bot?: boolean };
         roles?: string[];
         nick?: string | null;
       }>;
@@ -161,7 +161,20 @@ export class DiscordAdapter implements IDiscordIdentityProvider {
         // A member object with no user is a bot-scoped payload or a partial.
         // Skipping is right: we cannot key it to an account either way.
         if (typeof id !== 'string') continue;
-        out.push({ discordId: id, roles: m.roles ?? [], nick: m.nick ?? null });
+        out.push({
+          discordId: id,
+          roles: m.roles ?? [],
+          nick: m.nick ?? null,
+          /*
+           * Carried because this endpoint is already returning them and the
+           * alternative is a second call per member. `discord_identities` only
+           * exists for people who have signed in, so without these there is no
+           * name to show for the fifty who have not.
+           */
+          username: m.user?.username ?? null,
+          globalName: m.user?.global_name ?? null,
+          isBot: m.user?.bot ?? false,
+        });
       }
 
       // Snowflakes are monotonic, so the highest id on the page is the cursor.

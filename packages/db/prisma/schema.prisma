@@ -670,6 +670,31 @@ model InaraLink {
   @@map("inara_links")
 }
 
+/// Every member of the guild, whether or not they have ever visited the website.
+///
+/// ★ WHY THIS IS NOT DiscordIdentity ★
+/// `DiscordIdentity` is keyed on `userId` and only exists once somebody has SIGNED IN. Fifty of
+/// the squadron's fifty-one active members have no such row, so anything joining through it can
+/// only ever name one person — the admin activity table showed raw snowflakes for everyone else.
+///
+/// This is a CACHE of the guild, keyed on the snowflake, populated by the bot. It carries no
+/// tokens and no secrets: names, roles and a timestamp. A member who leaves keeps their row, so
+/// last month's activity still has a name against it rather than becoming an unattributed number.
+model DiscordGuildMember {
+  /// Discord snowflake. Never hard-coded in application source (INV-008).
+  discordId  String   @id @map("discord_id")
+  /// Server nickname — the IN-GAME NAME, in this squadron's convention. Null when unset.
+  nick       String?
+  username   String?
+  globalName String?  @map("global_name")
+  /// Role snowflakes, for reading a rank without waiting for reconciliation.
+  roles      String[] @default([])
+  isBot      Boolean  @default(false) @map("is_bot")
+  syncedAt   DateTime @default(now()) @map("synced_at") @db.Timestamptz(6)
+
+  @@map("discord_guild_members")
+}
+
 /// Inara's public view of a commander, refreshed on a schedule and read from cache.
 ///
 /// ★ A CACHE, AND NOTHING MAY BLOCK ON FILLING IT ★

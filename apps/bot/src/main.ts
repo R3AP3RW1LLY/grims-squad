@@ -122,6 +122,19 @@ const client = new Client({
     // Voice STATE, not voice audio. Tells us who joined which channel and when.
     // Not a privileged intent, and it carries nothing anyone said.
     GatewayIntentBits.GuildVoiceStates,
+    /*
+     * PRIVILEGED, and needed only for NAMES — the nickname a member wears in
+     * this guild, which by squadron convention is their commander name.
+     *
+     * Not for message content: that intent is separate, is deliberately absent,
+     * and its absence is what makes "we cannot read your messages" true by
+     * construction rather than by promise. This one carries no message text.
+     *
+     * If it is switched off in the developer portal the member fetch fails, the
+     * bot logs a warning and carries on counting activity — names fall back to
+     * snowflakes rather than anything breaking.
+     */
+    GatewayIntentBits.GuildMembers,
   ],
 });
 
@@ -284,6 +297,72 @@ async function backfill(): Promise<void> {
 }
 
 /**
+ * Caches every guild member's NAMES, so activity has somebody's name against it.
+ *
+ * ★ THE PROBLEM THIS SOLVES ★
+ *
+ * `discord_identities` is keyed on a website user id and only exists once
+ * somebody has signed in. One member of fifty-one has. So the admin activity
+ * table could name exactly one person and showed raw snowflakes for everyone
+ * else — which is unreadable, and makes the table useless for the decision it
+ * exists to support.
+ *
+ * The bot already has the guild in its gateway cache, so this costs no API
+ * calls at all.
+ *
+ * ★ ROWS ARE UPDATED, NEVER DELETED ★
+ *
+ * A member who leaves keeps their row. Their activity for the month is still
+ * real and an officer reviewing it should see a name, not a number that used
+ * to be somebody.
+ */
+async function syncMemberNames(): Promise<void> {
+  const guild = await client.guilds.fetch(GUILD_ID);
+  const members = await guild.members.fetch().catch(() => null);
+
+  if (members === null) {
+    /*
+     * Almost always the SERVER MEMBERS privileged intent being switched off in
+     * the developer portal. Logged loudly rather than swallowed: without it the
+     * activity table silently falls back to snowflakes, which looks like a
+     * display bug and is really a missing permission.
+     */
+    logger.warn('could not fetch guild members — is the SERVER MEMBERS intent enabled?');
+    return;
+  }
+
+  let synced = 0;
+  for (const m of members.values()) {
+    await prisma.discordGuildMember
+      .upsert({
+        where: { discordId: m.id },
+        create: {
+          discordId: m.id,
+          nick: m.nickname,
+          username: m.user.username,
+          globalName: m.user.globalName,
+          roles: [...m.roles.cache.keys()],
+          isBot: m.user.bot,
+        },
+        update: {
+          nick: m.nickname,
+          username: m.user.username,
+          globalName: m.user.globalName,
+          roles: [...m.roles.cache.keys()],
+          isBot: m.user.bot,
+          syncedAt: new Date(),
+        },
+      })
+      .then(() => {
+        synced += 1;
+      })
+      .catch(() => undefined);
+  }
+
+  logger.info({ synced, total: members.size }, 'guild member names cached');
+}
+
+/**
  * Counts everybody already sitting in voice when the bot starts.
  *
  * ★ WHY THIS IS NEEDED AT ALL ★
@@ -339,6 +418,7 @@ client.once(Events.ClientReady, (c) => {
   // classifying against an empty role list marks every channel admin-gated and
   // records nothing at all, which is the failure this change exists to fix.
   void loadRoles()
+    .then(() => syncMemberNames())
     .then(() => seedVoiceOccupancy())
     .then(() => backfill())
     .catch((err: unknown) => logger.error({ err }, 'startup sweep failed'));
@@ -404,6 +484,37 @@ client.on(Events.MessageCreate, (msg) => {
     // message instead of replaying traffic the listener already counted.
     await checkpoints.set(checkpointKey(msg.channelId), msg.id).catch(() => undefined);
   });
+});
+
+/*
+ * A nickname change is the one thing that would otherwise go stale between
+ * restarts, and in this squadron the nickname IS the commander name — the thing
+ * officers recognise each other by. Cheap to keep current: the event carries
+ * the new value, so this is one write and no fetch.
+ */
+client.on(Events.GuildMemberUpdate, (_before, after) => {
+  if (after.guild.id !== GUILD_ID) return;
+
+  void prisma.discordGuildMember
+    .upsert({
+      where: { discordId: after.id },
+      create: {
+        discordId: after.id,
+        nick: after.nickname,
+        username: after.user.username,
+        globalName: after.user.globalName,
+        roles: [...after.roles.cache.keys()],
+        isBot: after.user.bot,
+      },
+      update: {
+        nick: after.nickname,
+        username: after.user.username,
+        globalName: after.user.globalName,
+        roles: [...after.roles.cache.keys()],
+        syncedAt: new Date(),
+      },
+    })
+    .catch((err: unknown) => logger.error({ err }, 'failed to cache member name'));
 });
 
 client.on(Events.Error, (err) => logger.error({ err }, 'gateway error'));

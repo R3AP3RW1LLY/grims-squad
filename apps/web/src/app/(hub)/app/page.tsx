@@ -61,6 +61,13 @@ function Num({ n, dim = false }: { n: number; dim?: boolean }) {
   );
 }
 
+/** How a commander name was proven. The tier is the point, not the tick. */
+const VERIFY_LABEL: Record<string, string> = {
+  inara_nonce: 'Inara',
+  fdev_capi: 'Frontier',
+  officer_manual: 'By officer',
+};
+
 const GAME_LABEL: Record<string, string> = {
   observed: 'Seen',
   // Shown distinctly from "Seen" on purpose. `assumed` means the upstream check
@@ -181,13 +188,15 @@ function ActivityTab({
 
       <Section
         title={`Activity — ${activity.month}`}
-        description="A month counts when there is any Discord activity AND an Elite session. Nothing is promoted before 1 August 2026, and the first live run will follow a dry run you have read."
+        description="Counts are for this calendar month only, reset at 00:00 UTC on the 1st. A month counts when there is any Discord activity AND an Elite session; qualifying rows are tinted green. Nothing is promoted before 1 August 2026, and the first live run will follow a dry run you have read."
       >
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[980px] border-collapse text-sm">
+          <table className="w-full min-w-[1180px] border-collapse text-sm">
             <thead>
               <tr className="border-b border-[var(--color-border-hairline)] text-left font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--color-text-secondary)]">
                 <th scope="col" className="py-3 pr-4">Member</th>
+                <th scope="col" className="py-3 pr-4">Hub</th>
+                <th scope="col" className="py-3 pr-4">CMDR verified</th>
                 <th scope="col" className="py-3 pr-4">Rank</th>
                 <th scope="col" className="py-3 pr-4">Working toward</th>
                 <th scope="col" className="py-3 pr-4">Messages</th>
@@ -199,12 +208,76 @@ function ActivityTab({
             </thead>
             <tbody>
               {activity.rows.map((r) => (
-                <tr key={r.discordId} className="border-b border-[var(--color-border-hairline)]">
+                <tr
+                  key={r.discordId}
+                  /*
+                    ★ QUALIFYING ROWS ARE TINTED, NOT JUST TICKED ★
+
+                    The question this table answers is "who is due a promotion
+                    on the 1st". Scanning a Qualifies column down fifty rows to
+                    answer it is work; a tinted row answers it at a glance.
+
+                    A tint, not a fill: the row still has to be readable, and
+                    fifty solid green rows in a good month would be worse than
+                    none. The YES in the last column stays, because colour alone
+                    is not information anybody can rely on.
+                  */
+                  className={`border-b border-[var(--color-border-hairline)] ${
+                    r.qualifies
+                      ? 'bg-[color-mix(in_srgb,var(--color-semantic-success)_10%,transparent)]'
+                      : ''
+                  }`}
+                >
                   <td className="py-3 pr-4 text-[var(--color-text-primary)]">
-                    {r.displayName ?? r.handle ?? (
-                      <span className="text-[var(--color-text-secondary)]">
-                        Discord only ({r.discordId})
+                    {/*
+                      ★ THE SERVER NICKNAME, WHICH IS THE IN-GAME NAME ★
+
+                      By this squadron's convention the Discord nickname is the
+                      commander name, and it is what officers recognise each
+                      other by. It used to fall back to a raw snowflake for
+                      everyone without a website account — fifty of fifty-one
+                      members — which made the table unreadable.
+                    */}
+                    {r.nick ?? r.displayName ?? r.handle ?? (
+                      <span className="font-mono text-xs text-[var(--color-text-secondary)]">
+                        {r.discordId}
                       </span>
+                    )}
+                  </td>
+
+                  {/*
+                    Has an account here, versus present in Discord only. An
+                    officer needs to know which, because someone who has never
+                    signed in cannot have linked a commander and cannot be
+                    chased through the site.
+                  */}
+                  <td className="py-3 pr-4 font-mono text-xs">
+                    {r.joinedWebsite ? (
+                      <span className="text-[var(--color-brand-cyan-bright)]">
+                        <span aria-hidden="true">✓ </span>Joined
+                      </span>
+                    ) : (
+                      <span className="text-[var(--color-text-secondary)]">Discord only</span>
+                    )}
+                  </td>
+
+                  {/*
+                    The commander name and HOW it was proven. Tier matters: an
+                    officer's manual say-so and a name Inara returned for the
+                    member's own API key are not the same claim, and collapsing
+                    them to a tick would present the weaker one as the stronger.
+                  */}
+                  <td className="py-3 pr-4 font-mono text-xs">
+                    {r.cmdrName !== null ? (
+                      <span className="text-[var(--color-semantic-success)]">
+                        <span aria-hidden="true">✓ </span>
+                        {r.cmdrName}
+                        <span className="ml-2 text-[10px] text-[var(--color-text-secondary)]">
+                          {VERIFY_LABEL[r.verifiedVia ?? ''] ?? r.verifiedVia}
+                        </span>
+                      </span>
+                    ) : (
+                      <span className="text-[var(--color-text-secondary)]">Not verified</span>
                     )}
                   </td>
                   {/*
@@ -215,20 +288,51 @@ function ActivityTab({
                   */}
                   <td className="py-3 pr-4 font-mono text-xs text-[var(--color-brand-cyan-bright)]">
                     {r.currentRank ?? (
-                      <span className="text-[var(--color-text-secondary)]">—</span>
+                      <span className="text-[var(--color-text-secondary)]">Unranked</span>
+                    )}
+                    {/*
+                      The APPOINTMENT, beneath the tenure rank rather than
+                      instead of it. They are different axes: somebody can be a
+                      Cadet by tenure and a Squadron Leader by appointment, and
+                      showing only the higher number made a Squadron Leader
+                      appear to be at the top of a ladder they are not on.
+                    */}
+                    {r.appointment !== null && (
+                      <span className="mt-0.5 block text-[10px] text-[var(--color-brand-orange)]">
+                        {r.appointment}
+                      </span>
                     )}
                   </td>
                   <td className="py-3 pr-4 font-mono text-xs">
                     {r.nextRank !== null ? (
-                      <span className="text-[var(--color-text-secondary)]">
+                      <span
+                        className={
+                          r.qualifies
+                            ? 'text-[var(--color-semantic-success)]'
+                            : 'text-[var(--color-text-secondary)]'
+                        }
+                      >
                         <span aria-hidden="true">↑ </span>
                         {r.nextRank}
                       </span>
                     ) : r.currentRank !== null ? (
-                      /* Top of the ladder. An achievement, not missing data. */
+                      /*
+                        Genuinely the top of the TENURE ladder — Grand Master
+                        General, twelve qualifying months. An achievement, not
+                        missing data.
+
+                        Reached only when a tenure rank exists, which is what
+                        stops a leadership appointment being labelled this way.
+                      */
                       <span className="text-[var(--color-brand-orange)]">Top of ladder</span>
                     ) : (
-                      <span className="text-[var(--color-text-secondary)]">—</span>
+                      /*
+                        No mapped rank in Discord. Says so rather than showing a
+                        dash: "—" reads as a rendering failure, and the real
+                        answer — nobody has given them a rank role — is
+                        something an officer can act on.
+                      */
+                      <span className="text-[var(--color-text-secondary)]">No rank role</span>
                     )}
                   </td>
                   <td className="py-3 pr-4"><Num n={r.messageCount} /></td>

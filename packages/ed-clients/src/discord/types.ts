@@ -47,6 +47,11 @@ export interface DiscordGuildRole {
 }
 
 export interface DiscordGuildMemberSummary {
+  /** Discord's own handle, e.g. `r3ap3ractual_22545`. */
+  readonly username?: string | null;
+  /** The display name Discord shows globally, if they set one. */
+  readonly globalName?: string | null;
+  readonly isBot?: boolean;
   readonly discordId: string;
   readonly roles: readonly string[];
   readonly nick: string | null;
