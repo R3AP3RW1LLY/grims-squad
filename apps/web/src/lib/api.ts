@@ -122,8 +122,17 @@ async function get<T>(path: string, opts: { authed?: boolean } = {}): Promise<T 
   }
 }
 
+/**
+ * ★ `authed: true` IS LOAD-BEARING ★
+ *
+ * The endpoint moved behind the sign-in and this call did not follow. Without
+ * credentials the API answered 401, `get` swallowed it, and the roster rendered
+ * "nobody has opted in yet" — a sentence that was both wrong and impossible to
+ * debug from, because it described a privacy setting rather than a failed
+ * request.
+ */
 export const getRoster = (): Promise<{ members: PublicProfile[]; total: number } | null> =>
-  get('/v1/members');
+  get('/v1/members', { authed: true });
 
 export const getProfile = (handle: string): Promise<PublicProfile | null> =>
   get(`/v1/members/${encodeURIComponent(handle)}`, { authed: true });

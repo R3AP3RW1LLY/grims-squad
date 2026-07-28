@@ -28,7 +28,6 @@ export default async function PrivacySettingsPage() {
     settings === null
       ? 0
       : [
-          settings.showOnPublicRoster,
           settings.showLocation,
           settings.showCredits,
           settings.showFleet,
@@ -53,13 +52,15 @@ export default async function PrivacySettingsPage() {
               <Panel title="At a glance">
                 <RailStat
                   label="Fields shared"
-                  value={`${shown} of 6`}
+                  value={`${shown} of 5`}
                   tone={shown === 0 ? 'good' : 'default'}
                 />
-                <RailStat
-                  label="On the roster"
-                  value={settings.showOnPublicRoster ? 'Yes' : 'No'}
-                />
+                {/*
+                  Stated as a fact rather than offered as a switch. Being on the
+                  roster is not a setting any more, and a member should learn
+                  that here rather than by looking for a toggle that is gone.
+                */}
+                <RailStat label="On the roster" value="Everyone" />
                 <RailStat
                   label="On leaderboards"
                   value={settings.showOnLeaderboard ? 'Yes' : 'No'}

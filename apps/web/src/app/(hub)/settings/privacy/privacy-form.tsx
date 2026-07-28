@@ -24,11 +24,20 @@ interface Toggle {
 }
 
 const TOGGLES: readonly Toggle[] = [
-  {
-    key: 'showOnPublicRoster',
-    label: 'List me on the squadron roster',
-    help: 'Off by default. The roster is visible to signed-in members only — not to the public — and while this is off you do not appear on it at all, whatever else you turn on here.',
-  },
+  /*
+   * ★ THE ROSTER TOGGLE IS GONE, DELIBERATELY ★
+   *
+   * Appearing on the roster stopped being optional on 2026-07-28: it is the
+   * squadron's own directory, behind the sign-in, and one that most of the team
+   * is missing from does not answer the question it exists for.
+   *
+   * The switch is REMOVED rather than shown disabled. A control that cannot
+   * change anything is a control that lies about what a member can decide, and
+   * a greyed-out one invites them to keep trying.
+   *
+   * Every field BELOW is still opt-in and still defaults to off. Being listed
+   * means a name and a rank; everything beyond that is theirs to give.
+   */
   {
     key: 'showLocation',
     label: 'Show my last known position',

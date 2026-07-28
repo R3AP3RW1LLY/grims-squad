@@ -118,25 +118,62 @@ describe('GET /v1/members/:handle @INV-027', () => {
 });
 
 describe('GET /v1/members', () => {
-  it('MANDATORY: lists only members who opted into the public roster', async () => {
+  it('MANDATORY: lists EVERY member, whatever their privacy settings', () => {
+    /*
+     * ★ PRESENCE STOPPED BEING OPTIONAL ON 2026-07-28 ★
+     *
+     * The roster is behind the sign-in now, and it is the squadron's own
+     * directory — the answer to "who is in this squadron and who do I fly
+     * with". Opt-in defaulting to OFF meant it could never answer that, because
+     * the default is what most people leave alone.
+     */
     store.rows = [
-      { source: base({ id: 'a', handle: 'hidden' }), privacy: PRIVATE },
-      { source: base({ id: 'b', handle: 'shown' }), privacy: ROSTER_ONLY },
+      { source: base({ id: 'a', handle: 'private' }), privacy: PRIVATE },
+      { source: base({ id: 'b', handle: 'sharing' }), privacy: ROSTER_ONLY },
       { source: base({ id: 'c', handle: 'norow' }), privacy: null },
     ];
-    const out = await ctl.roster();
-    expect(out.members.map((m) => m.handle)).toEqual(['shown']);
+
+    return ctl.roster().then((out) => {
+      expect(out.members.map((m) => m.handle).sort()).toEqual(['norow', 'private', 'sharing']);
+    });
   });
 
-  it('reports the true total even though most members are not listed', async () => {
-    // The squadron's SIZE is public — it is on Inara. Who they are is not.
+  it('MANDATORY: a member who shares NOTHING still appears, as a name', async () => {
+    /*
+     * The line this change draws. Being on a team roster means being named on
+     * it; it does not mean handing over your position and your bank balance.
+     */
+    store.rows = [{ source: base({ handle: 'private' }), privacy: PRIVATE }];
+    const out = await ctl.roster();
+
+    expect(out.members).toHaveLength(1);
+    expect(out.members[0]?.handle).toBe('private');
+    expect(out.members[0]).not.toHaveProperty('location');
+    expect(out.members[0]).not.toHaveProperty('credits');
+    expect(out.members[0]).not.toHaveProperty('fleet');
+  });
+
+  it('MANDATORY: a member with NO privacy row is listed and still private', async () => {
+    // Somebody who has never opened their settings. They belong on the roster
+    // and they have consented to nothing, and both must hold at once.
+    store.rows = [{ source: base({ handle: 'norow' }), privacy: null }];
+    const out = await ctl.roster();
+
+    expect(out.members).toHaveLength(1);
+    expect(out.members[0]).not.toHaveProperty('location');
+  });
+
+  it('the total matches what is listed', async () => {
+    // These used to differ, because most members were filtered out. Now that
+    // everybody is listed, a mismatch would mean something was dropped.
     store.rows = [
-      { source: base({ id: 'a', handle: 'hidden' }), privacy: PRIVATE },
-      { source: base({ id: 'b', handle: 'shown' }), privacy: ROSTER_ONLY },
+      { source: base({ id: 'a', handle: 'one' }), privacy: PRIVATE },
+      { source: base({ id: 'b', handle: 'two' }), privacy: ROSTER_ONLY },
     ];
     const out = await ctl.roster();
+
     expect(out.total).toBe(2);
-    expect(out.members).toHaveLength(1);
+    expect(out.members).toHaveLength(2);
   });
 
   it('a rostered member still hides fields they did not opt into', async () => {

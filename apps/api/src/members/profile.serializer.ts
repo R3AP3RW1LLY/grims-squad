@@ -188,14 +188,38 @@ export function serializeProfile(
 }
 
 /**
- * Filters a roster to the members who have opted into appearing on it.
+ * Who appears on the roster.
  *
- * Stronger than hiding a member's individual fields: this keeps them off the
- * page entirely. The roster is the highest-traffic public surface we have, so
- * the toggle that governs it is checked before anything is serialised at all.
+ * ★ EVERYBODY, AS OF 2026-07-28 ★
+ *
+ * Appearing used to be opt-in and defaulted to off, which made sense while the
+ * roster was a public recruitment page: nobody should be listed on the open
+ * internet without asking.
+ *
+ * The roster is now behind the sign-in, and it is the squadron's own directory
+ * — the answer to "who is in this squadron and who do I fly with". A directory
+ * that most of the squadron is missing from does not answer that question, and
+ * the default being OFF meant it never would.
+ *
+ * ★ WHAT THIS DOES NOT CHANGE ★
+ *
+ * Only PRESENCE became mandatory. Every field on the entry is still opt-in and
+ * still defaults to off: location, credits, fleet and activity are omitted
+ * entirely — not blanked — for anybody who has not turned them on (INV-027).
+ * So a member who shares nothing appears as a name and a rank, which is what
+ * being on a team roster means.
+ *
+ * ★ THE ONE EXCLUSION LEFT ★
+ *
+ * Account status. A banned or deactivated account is not a member of the
+ * squadron, and listing one would be describing the team wrongly rather than
+ * protecting anybody's privacy.
  */
-export function visibleOnRoster<T extends { privacy: Partial<PrivacySettings> | null | undefined }>(
-  rows: readonly T[],
-): T[] {
-  return rows.filter((r) => resolvePrivacy(r.privacy).showOnPublicRoster);
+export function visibleOnRoster<
+  T extends {
+    privacy: Partial<PrivacySettings> | null | undefined;
+    source: { status?: string };
+  },
+>(rows: readonly T[]): T[] {
+  return rows.filter((r) => (r.source.status ?? 'active') === 'active');
 }

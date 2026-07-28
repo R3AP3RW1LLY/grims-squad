@@ -39,18 +39,19 @@ export default async function RosterPage() {
       <PageHeader eyebrow="Squadron register" title="ROSTER" />
 
       <PageBody
-        lead="Commanders who have chosen to appear. Being listed is opt-in, and so is every field on it — somebody missing here has simply not turned it on, and it says nothing about their standing."
+        lead="Everyone who flies with Grim's Squad. Being listed is not optional — this is the squadron's own directory — but every detail on an entry is: a commander who has shared nothing appears here as a name and a rank."
         rail={
           <>
             <Panel title="At a glance">
               <RailStat label="Squadron" value={String(total)} />
-              <RailStat label="Listed here" value={String(listed)} tone={listed === 0 ? 'warn' : 'default'} />
+              <RailStat label="Listed" value={String(listed)} tone={listed === 0 ? 'warn' : 'default'} />
               <RailStat label="Verified CMDRs" value={String(withCmdr)} />
             </Panel>
 
-            <Panel title="Not listed?">
+            <Panel title="What is shown">
               <p className="text-sm leading-relaxed text-[var(--color-text-secondary)]">
-                You choose whether to appear, field by field.
+                Everybody appears. What appears on YOUR entry beyond a name and a rank — your
+                position, your ships, your activity — is yours to decide, field by field.
               </p>
               <a
                 href="/settings/privacy"
@@ -74,12 +75,16 @@ export default async function RosterPage() {
         }
       >
         {members.length === 0 ? (
-          <p className="rounded border border-[var(--color-border-hairline)] px-5 py-6 text-sm leading-relaxed text-[var(--color-text-secondary)]">
-            Nobody has opted into the roster yet. Members turn this on under{' '}
-            <a href="/settings/privacy" className="text-[var(--color-brand-cyan-bright)]">
-              privacy settings
-            </a>
-            .
+          /*
+           * An empty roster now means something went WRONG, not that nobody
+           * opted in — everybody active is listed. The old copy blamed a
+           * privacy setting, which sent me looking in exactly the wrong place
+           * when the real cause was an unauthenticated fetch.
+           */
+          <p className="rounded border border-[var(--color-semantic-warning)] bg-[color-mix(in_srgb,var(--color-semantic-warning)_8%,transparent)] px-5 py-6 text-sm leading-relaxed text-[var(--color-text-primary)]">
+            The roster came back empty, which should not happen — every active member is listed.
+            This is our end rather than a setting of yours. Try again in a moment, and tell an
+            officer if it persists.
           </p>
         ) : (
           <ul className="grid list-none grid-cols-1 gap-4 p-0 sm:grid-cols-2 2xl:grid-cols-3">

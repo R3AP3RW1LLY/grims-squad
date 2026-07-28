@@ -56,13 +56,18 @@ export class MembersController {
    * PAGE alone would have been theatre — the data was one curl away, and an
    * endpoint that answers anybody is public however the interface is arranged.
    *
-   * ★ WHAT DID NOT CHANGE ★
+   * ★ EVERY ACTIVE MEMBER APPEARS ★
    *
-   * Filtered by `showOnPublicRoster` BEFORE anything is serialised, so a member
-   * who has not opted in is not in the response at all — stronger than hiding
-   * their individual fields (INV-027). Signing in does not entitle anybody to
-   * see somebody who chose not to be listed, and this is strictly MORE
-   * restrictive than the invariant requires rather than a relaxation of it.
+   * Presence is no longer opt-in. This is the squadron's own directory — the
+   * answer to "who is in this squadron" — and one most of the squadron is
+   * missing from does not answer it.
+   *
+   * ★ FIELD-LEVEL PRIVACY IS UNTOUCHED ★
+   *
+   * Location, credits, fleet and activity are still opt-in and still default to
+   * off, and are OMITTED rather than blanked for anybody who has not turned
+   * them on (INV-027). A member who shares nothing appears as a name and a
+   * rank, which is what being on a team roster means.
    */
   @Get('members')
   async roster(): Promise<{ members: PublicProfile[]; total: number }> {
