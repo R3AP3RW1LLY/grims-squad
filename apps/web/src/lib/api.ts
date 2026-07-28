@@ -358,6 +358,28 @@ export interface InaraStatus {
   lastCheckedAt: string | null;
   lastError: string | null;
   source: string | null;
+  /**
+   * Name proven, squadron confirmed, or neither.
+   *
+   * One field rather than two booleans for each page to combine. Three states
+   * have three messages, and letting every screen derive them invites two of
+   * them to disagree about what "partially verified" means.
+   */
+  squadronStatus?: 'unverified' | 'partial' | 'verified';
+  /** The squadron Inara last reported, verbatim. Null when they set none. */
+  inaraSquadron?: string | null;
+  /** The squadron we are looking for, so no page hardcodes it. */
+  expectedSquadron?: string;
+  /** They have said they applied. Drives the twenty-minute re-check. */
+  squadronClaimed?: boolean;
+  squadronCheckedAt?: string | null;
+  /**
+   * The Discord nickname they will wear, computed by the same function that
+   * sets it. Shown rather than described as "RANK - COMMANDER", because a long
+   * commander name drops the rank to fit Discord's 32 characters — the template
+   * is sometimes a shape nobody wears.
+   */
+  discordNickname?: string | null;
 }
 
 /**

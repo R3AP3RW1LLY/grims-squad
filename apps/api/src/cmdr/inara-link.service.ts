@@ -84,6 +84,8 @@ export interface InaraLinkStore {
  */
 export interface NicknameReconciler {
   sync(userId: string, discordId: string): Promise<{ changed: boolean; reason: string | null }>;
+  /** What the nickname would be, without setting it. Optional: see the note above. */
+  preview?(userId: string, discordId: string): Promise<string | null>;
 }
 
 /** The one Inara call this service needs. Narrow on purpose. */
@@ -147,6 +149,14 @@ export interface LinkStatus {
   /** They have said they applied. Drives the twenty-minute re-check. */
   squadronClaimed?: boolean;
   squadronCheckedAt?: string | null;
+  /**
+   * The Discord nickname this member will wear, computed exactly as it is set.
+   *
+   * Shown rather than described: "RANK - COMMANDER" is a template, and a long
+   * commander name drops the rank to fit Discord's 32 characters, so the
+   * template is sometimes a shape nobody wears.
+   */
+  discordNickname?: string | null;
   readonly linked: boolean;
   readonly cmdrName: string | null;
   readonly verifiedAt: string | null;
@@ -446,7 +456,18 @@ export class InaraLinkService {
      * to be told whether we can see them in the squadron.
      */
     const squadron = await this.store.squadronState(userId).catch(() => null);
+    /*
+     * Best-effort. A page that cannot preview a nickname should still render
+     * the verification state, which is what somebody actually came for.
+     */
+    const discordNickname = await (async () => {
+      if (this.nicknames?.preview === undefined || this.discordIdFor === undefined) return null;
+      const discordId = await this.discordIdFor(userId);
+      return discordId === null ? null : this.nicknames.preview(userId, discordId);
+    })().catch(() => null);
+
     const squadronFields = {
+      discordNickname,
       squadronStatus: statusOf(squadron),
       inaraSquadron: squadron?.inaraSquadron ?? null,
       expectedSquadron: expectedSquadronName(),

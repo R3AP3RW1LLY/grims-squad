@@ -79,31 +79,70 @@ export function SquadronStatus({ initial }: { initial: InaraStatus }) {
   }
 
   return (
-    <section className="mb-8 rounded border border-[var(--color-border-hairline)] p-5">
+    /*
+      ★ THE ONLY BOX ON THIS PAGE THAT REPORTS VERIFICATION STATE ★
+
+      There were three: a `VerificationBadge`, this panel, and a block inside
+      the key form — all announcing "Verified commander / CMDR X". Worse than
+      repetitive: the badge called somebody VERIFIED on the strength of their
+      NAME alone, while this panel, which also knows about the squadron, said
+      partially verified. Two boxes, one page, contradicting each other about
+      the single most important fact on it.
+
+      Every state lives here now, unverified through to verified. The key form
+      below owns the KEY and nothing else.
+
+      The border takes the state's colour, so the answer is legible before a
+      word is read — and it is a border rather than a fill, because a solid
+      green panel would shout at somebody whose account is simply fine.
+    */
+    <section
+      className={`mb-8 rounded border p-5 ${
+        state === 'verified'
+          ? 'border-[var(--color-semantic-success)] bg-[color-mix(in_srgb,var(--color-semantic-success)_7%,transparent)]'
+          : state === 'partial'
+            ? 'border-[var(--color-semantic-warning)] bg-[color-mix(in_srgb,var(--color-semantic-warning)_6%,transparent)]'
+            : 'border-[var(--color-border-hairline)]'
+      }`}
+    >
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-[var(--color-text-secondary)]">
-          Squadron membership
+          Commander verification
         </p>
         {state === 'verified' && <Badge tone="ok">Verified commander</Badge>}
         {state === 'partial' && <Badge tone="wait">Partially verified</Badge>}
         {state === 'unverified' && <Badge tone="no">Not verified</Badge>}
       </div>
 
+      {/*
+        The commander name, large, as soon as there is one to show. This is what
+        the removed badge existed for and it is the thing a member came to see —
+        it belongs at the top of the one box that owns the state, not in a
+        second box below it.
+      */}
+      {status.cmdrName !== null && (
+        <p
+          className="mt-3 text-2xl text-[var(--color-brand-orange)]"
+          style={{ fontFamily: 'var(--font-display)' }}
+        >
+          CMDR {status.cmdrName.toUpperCase()}
+        </p>
+      )}
+
       {/* ------------------------------------------------------- unverified */}
       {state === 'unverified' && (
-        <p className="mt-4 text-sm leading-relaxed text-[var(--color-text-secondary)]">
-          Nothing is verified yet. Add your Inara API key below and we will read your commander
-          name and your squadron from Inara in one step — you never type either of them here.
+        <p className="mt-3 text-sm leading-relaxed text-[var(--color-text-secondary)]">
+          Nobody has confirmed which commander is yours yet. Add an Inara key below and we read
+          your commander name AND your squadron from Inara in one step — you never type either of
+          them here. An officer can also verify you by hand; both end in the same place.
         </p>
       )}
 
       {/* ----------------------------------------------------------- partial */}
       {state === 'partial' && (
         <>
-          <p className="mt-4 text-sm leading-relaxed text-[var(--color-text-primary)]">
-            <span className="text-[var(--color-semantic-success)]">
-              CMDR {status.cmdrName} is proven.
-            </span>{' '}
+          <p className="mt-3 text-sm leading-relaxed text-[var(--color-text-primary)]">
+            <span className="text-[var(--color-semantic-success)]">Your name is proven.</span>{' '}
             {/*
               ★ THREE DIFFERENT THINGS, NOT ONE MESSAGE ★
 
@@ -205,10 +244,30 @@ export function SquadronStatus({ initial }: { initial: InaraStatus }) {
 
       {/* ---------------------------------------------------------- verified */}
       {state === 'verified' && (
-        <p className="mt-4 text-sm leading-relaxed text-[var(--color-text-primary)]">
-          CMDR {status.cmdrName}, confirmed in{' '}
-          <strong>{status.inaraSquadron ?? expected}</strong> on Inara. Your Discord nickname is
-          kept as <span className="font-mono">RANK - COMMANDER</span> automatically.
+        // The name is already above. Repeating it here is what made the old
+        // layout read as two boxes saying one thing.
+        <p className="mt-3 text-sm leading-relaxed text-[var(--color-text-secondary)]">
+          Confirmed in <strong className="text-[var(--color-semantic-success)]">
+            {status.inaraSquadron ?? expected}
+          </strong>{' '}
+          on Inara.
+          {status.discordNickname != null && (
+            <>
+              {' '}Your Discord nickname is kept as{' '}
+              {/*
+                The ACTUAL nickname, computed by the same function that sets it
+                (composeNickname) rather than described as a template. "RANK -
+                COMMANDER" told a member the shape and not the result — and the
+                shape is a half-truth, because a long name drops the rank
+                entirely to fit Discord's 32 characters. Showing the real string
+                is the only version that cannot be wrong.
+              */}
+              <span className="font-mono text-[var(--color-text-primary)]">
+                {status.discordNickname}
+              </span>
+              {' '}automatically.
+            </>
+          )}
         </p>
       )}
     </section>

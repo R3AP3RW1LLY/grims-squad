@@ -2,30 +2,18 @@
 
 import { useState } from 'react';
 import { apiCall } from '../../../../lib/api-client';
+import type { InaraStatus } from '../../../../lib/api';
 
-export interface InaraStatus {
-  linked: boolean;
-  cmdrName: string | null;
-  verifiedAt: string | null;
-  lastCheckedAt: string | null;
-  lastError: string | null;
-  source: string | null;
-  /**
-   * Name proven, squadron confirmed, or neither.
-   *
-   * One field rather than two booleans for the page to combine: three states
-   * have three messages, and letting each screen derive them invites two of
-   * them to disagree about what "partially verified" means.
-   */
-  squadronStatus?: 'unverified' | 'partial' | 'verified';
-  /** The squadron Inara last reported, verbatim. Null when they set none. */
-  inaraSquadron?: string | null;
-  /** The squadron we are looking for, so no page hardcodes it. */
-  expectedSquadron?: string;
-  /** They have said they applied. Drives the twenty-minute re-check. */
-  squadronClaimed?: boolean;
-  squadronCheckedAt?: string | null;
-}
+export type { InaraStatus };
+
+/*
+ * ★ ONE TYPE, RE-EXPORTED — NOT A SECOND COPY ★
+ *
+ * This file declared its own `InaraStatus` alongside the one in lib/api.ts, and
+ * they drifted the moment squadron fields were added to one of them: the form
+ * compiled, the page did not, and the page is the file that reads the API. Two
+ * descriptions of one response is the bug, not either description.
+ */
 
 /**
  * Linking an Inara API key.
@@ -114,21 +102,25 @@ export function InaraForm({ initial }: { initial: InaraStatus }) {
         </p>
       )}
 
-      {status.cmdrName !== null && (
-        <div className="mb-8 rounded border border-[var(--color-border-hairline)] p-5">
-          <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-[var(--color-brand-cyan-bright)]">
-            Verified commander
-          </p>
-          <p
-            className="mt-2 text-2xl text-[var(--color-brand-orange)]"
-            style={{ fontFamily: 'var(--font-display)' }}
-          >
-            CMDR {status.cmdrName}
-          </p>
-          {status.lastError !== null && (
-            <p className="mt-3 text-sm text-[var(--color-brand-orange)]">{status.lastError}</p>
-          )}
-        </div>
+      {/*
+        ★ THE VERIFIED NAME IS NOT SHOWN HERE ★
+
+        This block announced "Verified commander / CMDR X" a second time,
+        directly beneath the panel that already says it. Three boxes on one page
+        claimed the same fact, and one of them called somebody VERIFIED on the
+        strength of the name alone while another said partially verified.
+
+        `SquadronStatus` owns every verification state now, from unverified
+        through to verified. This form owns the KEY — adding it, re-checking it,
+        removing it — and nothing else.
+
+        The last error stays, because it is about the key rather than about the
+        verification, and it is the only place that reports it.
+      */}
+      {status.lastError !== null && (
+        <p className="mb-6 rounded border border-[var(--color-brand-orange)] px-4 py-3 text-sm text-[var(--color-brand-orange)]">
+          {status.lastError}
+        </p>
       )}
 
       {status.linked ? (

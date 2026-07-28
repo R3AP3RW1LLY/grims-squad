@@ -211,14 +211,22 @@ export function RailStat({
 }: {
   label: string;
   value: string;
-  tone?: 'default' | 'good' | 'warn';
+  /**
+   * `warn` is amber — something needs attention. `bad` is red — something is
+   * WRONG. They are distinct because "we have not checked yet" and "you are in
+   * the wrong squadron" are different situations and amber for both would make
+   * the second easy to skim past.
+   */
+  tone?: 'default' | 'good' | 'warn' | 'bad';
 }) {
   const colour =
     tone === 'good'
       ? 'text-[var(--color-semantic-success)]'
       : tone === 'warn'
         ? 'text-[var(--color-semantic-warning)]'
-        : 'text-[var(--color-text-primary)]';
+        : tone === 'bad'
+          ? 'text-[var(--color-semantic-hostile-bright)]'
+          : 'text-[var(--color-text-primary)]';
 
   return (
     <div className="flex items-baseline justify-between gap-4 border-b border-[var(--color-border-hairline)] py-2 last:border-0">

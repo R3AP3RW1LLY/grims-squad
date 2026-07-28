@@ -103,6 +103,33 @@ export class NicknameSyncService {
   constructor(private readonly deps: NicknameSyncDeps) {}
 
   /**
+   * What the nickname WOULD be, without setting it.
+   *
+   * ★ THE SAME FUNCTION THAT SETS IT, NOT A DESCRIPTION OF IT ★
+   *
+   * The settings page used to tell members their nickname was kept as
+   * "RANK - COMMANDER". That is a template, and templates lie: a long name
+   * drops the rank entirely to fit Discord's 32 characters, so the member being
+   * shown the shape was sometimes shown a shape they would never wear.
+   *
+   * Computing it through `composeNickname` means the page cannot disagree with
+   * the guild, because there is one implementation and this is it.
+   *
+   * Returns null when there is nothing to show — no verified name means no
+   * nickname, and a preview of "" would render as a claim about an empty
+   * string.
+   */
+  async preview(userId: string, discordId: string): Promise<string | null> {
+    const verified = await this.deps.verifiedNameFor(userId);
+    if (verified === null || verified.trim() === '') return null;
+
+    // Same tolerance as the real path: a rank lookup that fails costs the
+    // prefix, never the preview.
+    const rank = await (async () => this.deps.rankFor(discordId))().catch(() => null);
+    return composeNickname(rank, verified);
+  }
+
+  /**
    * Reconciles one member's nickname against their verified name.
    *
    * Called after a key is linked and after every refresh — that is, after

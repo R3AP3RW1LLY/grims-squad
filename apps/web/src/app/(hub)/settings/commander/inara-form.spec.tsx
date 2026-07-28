@@ -5,8 +5,13 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const form = readFileSync(resolve(HERE, 'inara-form.tsx'), 'utf8');
-const page = readFileSync(resolve(HERE, 'page.tsx'), 'utf8');
 const api = readFileSync(resolve(HERE, '../../../../lib/api.ts'), 'utf8');
+/*
+ * The verification state moved OUT of the page and the form and into this one
+ * component, so the assertions about what a member is told follow it. Three
+ * boxes used to claim the same state and two of them could disagree.
+ */
+const statusPanel = readFileSync(resolve(HERE, 'squadron-status.tsx'), 'utf8');
 
 /**
  * The Inara key UI.
@@ -61,13 +66,31 @@ describe('the Inara key form', () => {
   });
 
   it('tells the member the manual route exists', () => {
-    // Optional means optional. Somebody who will not hand over a key needs to
-    // know an officer can verify them instead, or the page reads as a wall.
-    expect(page).toMatch(/officer verifies you/i);
-    expect(page).toMatch(/optional/i);
+    /*
+     * Optional means optional. Somebody who will not hand over a key needs to
+     * know an officer can verify them instead, or the page reads as a wall.
+     *
+     * Asserted against the STATUS PANEL, which now owns every verification
+     * state. It used to live in the page's prose, which the squadron owner
+     * removed as redundant — the promise survived the move, the wording did
+     * not, so this matches on the promise.
+     */
+    expect(statusPanel).toMatch(/officer can also verify you/i);
   });
 
   it('says removing the key does not un-verify them', () => {
-    expect(page).toMatch(/does not un-verify/i);
+    /*
+     * ★ WHERE THIS PROMISE NOW LIVES ★
+     *
+     * It was a paragraph on the page explaining this in advance. The squadron
+     * owner removed that as information members do not need, so the assertion
+     * follows it to the place it still exists: the confirmation shown when a
+     * key is actually removed.
+     *
+     * The promise itself is not negotiable — a member who removes their key
+     * must not be silently demoted for it — so this test stays, pointed at the
+     * surviving wording rather than deleted along with the paragraph.
+     */
+    expect(form).toMatch(/stays verified/i);
   });
 });

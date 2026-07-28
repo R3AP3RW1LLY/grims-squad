@@ -1,5 +1,4 @@
 import type { Metadata } from 'next';
-import { CheckBadgeIcon, ExclamationCircleIcon } from '@heroicons/react/24/outline';
 import { getInaraStatus, getMe, getTimezones } from '../../../../lib/api';
 import { SquadronStatus } from './squadron-status';
 import { InaraForm } from './inara-form';
@@ -106,6 +105,36 @@ export default async function CommanderPage({
                   value={verified ?? 'Not verified'}
                   tone={verified === null ? 'default' : 'good'}
                 />
+                {/*
+                  ★ THE SQUADRON, IN THE SAME BOX AS THE NAME ★
+
+                  They are the two halves of being verified, and separating them
+                  is what let a member read "Verified commander" while the
+                  squadron half was still unconfirmed.
+
+                  GREEN when Inara puts them in ours, matching the commander
+                  line above. RED — not amber — when Inara puts them somewhere
+                  else: that is not "needs attention", it is wrong, and worth
+                  spotting from across the page. Plain when we have not asked,
+                  which is neither.
+                */}
+                <RailStat
+                  label="Squadron"
+                  value={
+                    status.squadronStatus === 'verified'
+                      ? (status.inaraSquadron ?? status.expectedSquadron ?? "Grim's Squad")
+                      : status.squadronCheckedAt == null
+                        ? 'Not checked'
+                        : (status.inaraSquadron ?? 'None on Inara')
+                  }
+                  tone={
+                    status.squadronStatus === 'verified'
+                      ? 'good'
+                      : status.squadronCheckedAt == null
+                        ? 'default'
+                        : 'bad'
+                  }
+                />
                 <RailStat label="Inara key" value={status.linked ? 'Linked' : 'None'} />
                 <RailStat
                   label="Verified"
@@ -131,122 +160,36 @@ export default async function CommanderPage({
                 </p>
               </Panel>
 
-              <Panel title="What Inara is for">
-                <p className="text-sm leading-relaxed text-[var(--color-text-secondary)]">
-                  Two things only: confirming your commander name, and checking you are in
-                  Grim&rsquo;s Squad. Ranks, ships, loadouts and activity come from the{' '}
-                  <a href="/companion" className="text-[var(--color-brand-cyan-bright)]">
-                    companion app
-                  </a>
-                  , which reads the game&rsquo;s own journals and carries far more than Inara has.
-                </p>
-              </Panel>
+{/*
+                "What Inara is for" stood here and was removed on the squadron
+                owner's instruction: not information members need. The page now
+                says what your state IS and what to do about it, and explains
+                our architecture to nobody.
+              */}
             </>
           }
         >
-          <VerificationBadge cmdrName={verified} />
+          {/*
+            ★ ONE STATUS PANEL, NOT TWO ★
 
-          <p className="mt-6 max-w-[68ch] text-sm leading-relaxed text-[var(--color-text-secondary)]">
-            Entirely optional. Without a key an officer verifies you by hand instead — it works just
-            as well, it simply needs a person. Adding a key later upgrades you without anyone else
-            being involved.
-          </p>
+            A `VerificationBadge` stood here announcing "Verified commander,
+            CMDR X" directly above `SquadronStatus`, which announces the same
+            thing — and worse, the badge said VERIFIED on the strength of the
+            NAME ALONE while the panel beneath it said partially verified. Two
+            components disagreeing about the headline state of the page.
 
-          <div className="mt-6">
-            {/*
+            SquadronStatus wins because it is the one that knows about both
+            halves. The badge is deleted rather than reworded: two sources for
+            one fact is the problem, not the wording of either.
 
-              Where they stand, ABOVE the key form.
-
-            
-
-              A member arriving here wants to know whether they are verified before
-
-              they want a form. Putting the form first answers a question they have
-
-              not asked yet.
-
-            */}
-            <SquadronStatus initial={status} />
-            <InaraForm initial={status} />
-          </div>
-
-          <div className="mt-14">
-            <Section title="What we do with it">
-              <ul className="space-y-3 text-sm leading-relaxed text-[var(--color-text-secondary)]">
-                <li>
-                  We ask Inara which commander the key belongs to. That answer is what verifies you —
-                  you never type your own commander name here.
-                </li>
-                <li>
-                  The key is encrypted before it is stored and is never shown again, to you or to
-                  anyone else.
-                </li>
-                <li>
-                  Removing the key does not un-verify you. You proved it once; taking the key back is
-                  about us not calling Inara on your behalf any more.
-                </li>
-              </ul>
-            </Section>
-          </div>
+            The prose that sat between and below them has moved into the rail,
+            where the other explanatory panels already live — a settings page
+            should open with your state, not with three paragraphs about it.
+          */}
+          <SquadronStatus initial={status} />
+          <InaraForm initial={status} />
         </PageBody>
       )}
     </>
-  );
-}
-
-/**
- * Verified, or not — at a glance.
- *
- * ★ AN ICON *AND* WORDS ★
- *
- * A tick on its own is a colour-coded state with no text: unreadable to anyone
- * who cannot tell the two colours apart, and meaningless to a screen reader.
- * The icon makes the state scannable; the words make it unambiguous.
- *
- * The unverified case says what to DO. "Not verified" alone is a diagnosis, and
- * somebody reading it has no idea whether they are supposed to act.
- */
-function VerificationBadge({ cmdrName }: { cmdrName: string | null }) {
-  if (cmdrName !== null) {
-    return (
-      <div className="flex items-start gap-4 rounded-lg border border-[var(--color-semantic-success)] bg-[color-mix(in_srgb,var(--color-semantic-success)_8%,transparent)] p-5">
-        <CheckBadgeIcon
-          aria-hidden="true"
-          className="size-8 shrink-0 text-[var(--color-semantic-success)]"
-        />
-        <div>
-          <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-[var(--color-semantic-success)]">
-            Verified commander
-          </p>
-          <p
-            className="mt-1 text-xl text-[var(--color-text-primary)]"
-            style={{ fontFamily: 'var(--font-display)' }}
-          >
-            CMDR {cmdrName.toUpperCase()}
-          </p>
-          <p className="mt-2 text-sm text-[var(--color-text-secondary)]">
-            Your Discord nickname is kept matching this name.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex items-start gap-4 rounded-lg border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel)] p-5">
-      <ExclamationCircleIcon
-        aria-hidden="true"
-        className="size-8 shrink-0 text-[var(--color-semantic-warning)]"
-      />
-      <div>
-        <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-[var(--color-semantic-warning)]">
-          Not verified
-        </p>
-        <p className="mt-1 max-w-[60ch] text-sm leading-relaxed text-[var(--color-text-primary)]">
-          Nobody has confirmed which commander is yours yet. Link an Inara key below, or ask an
-          officer to verify you by hand — both end in the same place.
-        </p>
-      </div>
-    </div>
   );
 }
