@@ -260,6 +260,12 @@ enum TelemetryCategory {
   bgs
   carrier
   fleet
+  /// Whether the commander played at all — the LoadGame journal event, and nothing more.
+  /// The single input the promotion engine needs, and deliberately separable from everything
+  /// else so a member can confirm they play without sharing what they did (INV-013).
+  session
+  /// Ranks, progress and squadron standing. What a commander IS, rather than what they did.
+  profile
 }
 
 /// Delivery channel for a notification fan-out.
