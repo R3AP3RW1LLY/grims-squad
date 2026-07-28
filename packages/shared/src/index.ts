@@ -32,6 +32,7 @@ export {
   ELITE_RANK_LABELS,
   eliteRankName,
   describeEliteRanks,
+  describeInaraRanks,
 } from './journal/elite-ranks.js';
 export type { EliteRankKey } from './journal/elite-ranks.js';
 

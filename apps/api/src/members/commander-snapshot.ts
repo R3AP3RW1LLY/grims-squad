@@ -34,6 +34,21 @@ export interface CommanderSnapshot {
    * beats "Elite" in a string comparison, which is the opposite of true.
    */
   readonly ranks: Array<{ key: EliteRankKey; label: string; name: string; index: number }>;
+  /**
+   * Where the ranks above came from.
+   *
+   * ★ TWO SOURCES MAKING DIFFERENT CLAIMS ★
+   *
+   * A rank read from a member's own game and a rank they typed into a website
+   * are not the same statement, and presenting them identically would quietly
+   * upgrade the second. The card says which it got.
+   *
+   * `null` when there are no ranks at all, because "no source" and "the journal
+   * said nothing" are the same thing to a reader.
+   */
+  readonly rankSource: 'inara' | 'journal' | null;
+  /** When Inara was last asked. Null unless the ranks came from Inara. */
+  readonly ranksFetchedAt: string | null;
   /** Squadron rank as the GAME reports it, which is not our own rank ladder. */
   readonly squadronRank: number | null;
   /** The ship they were last flying. */
@@ -44,10 +59,48 @@ export interface CommanderSnapshot {
 
 export const EMPTY_SNAPSHOT: CommanderSnapshot = {
   ranks: [],
+  rankSource: null,
+  ranksFetchedAt: null,
   squadronRank: null,
   currentShip: null,
   lastPlayedAt: null,
 };
+
+/** Inara's cached view of one commander, as the roster reads it. */
+export interface InaraRanks {
+  readonly ranks: Array<{ key: EliteRankKey; label: string; name: string; index: number }>;
+  readonly fetchedAt: Date;
+}
+
+/**
+ * Puts Inara's ranks in front of the journal's, where Inara has any.
+ *
+ * ★ WHY THIS IS A MERGE AND NOT A REPLACEMENT ★
+ *
+ * Inara only knows commanders who have an Inara account and have made their
+ * ranks public. The journal knows every member running the companion app, live,
+ * with no third party involved. Replacing one with the other outright would
+ * empty the cards of the majority to standardise on a source covering a
+ * minority (ADR-004, amended 2026-07-28).
+ *
+ * An EMPTY Inara rank list does not win. A commander Inara has never heard of,
+ * or one who has published nothing, comes back with `[]` — and letting that
+ * overwrite real journal ranks is precisely the "it worked yesterday" bug this
+ * function exists to prevent.
+ */
+export function withInaraRanks(
+  snapshot: CommanderSnapshot,
+  inara: InaraRanks | undefined,
+): CommanderSnapshot {
+  if (inara === undefined || inara.ranks.length === 0) return snapshot;
+
+  return {
+    ...snapshot,
+    ranks: inara.ranks,
+    rankSource: 'inara',
+    ranksFetchedAt: inara.fetchedAt.toISOString(),
+  };
+}
 
 /** One raw event, as stored. */
 export interface SnapshotEvent {
@@ -103,11 +156,14 @@ export function buildSnapshots(events: readonly SnapshotEvent[]): Map<string, Co
     const rank = squadronPayload['CurrentRank'];
     const ship = loadPayload['Ship_Localised'] ?? loadPayload['Ship'];
 
+    const ranks = slot.rank === undefined ? [] : describeEliteRanks(asRecord(slot.rank.payload));
+
     out.set(userId, {
-      ranks:
-        slot.rank === undefined
-          ? []
-          : describeEliteRanks(asRecord(slot.rank.payload)),
+      ranks,
+      // Attributed even before Inara is consulted, so a snapshot is always
+      // self-describing and `withInaraRanks` has nothing to remember to set.
+      rankSource: ranks.length > 0 ? 'journal' : null,
+      ranksFetchedAt: null,
       squadronRank: typeof rank === 'number' ? rank : null,
       currentShip: typeof ship === 'string' && ship !== '' ? ship : null,
       lastPlayedAt: slot.load?.occurredAt.toISOString() ?? null,

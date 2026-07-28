@@ -7,6 +7,7 @@ import { MEMBERS_STORE, type MembersStore } from './members.tokens.js';
 import { LEADERSHIP_CEILING } from './members.store.js';
 import {
   buildSnapshots,
+  withInaraRanks,
   EMPTY_SNAPSHOT,
   type CommanderSnapshot,
 } from './commander-snapshot.js';
@@ -99,10 +100,15 @@ export class MembersController {
      * members the per-member version is a hundred round trips to render a page
      * — the classic N+1, and the classic place to introduce it.
      */
-    const [snapshots, catalogue] = await Promise.all([
-      this.store
-        .snapshotEvents(visible.map((r) => r.source.id))
-        .then((events) => buildSnapshots(events)),
+    const ids = visible.map((r) => r.source.id);
+    const [snapshots, inara, catalogue] = await Promise.all([
+      this.store.snapshotEvents(ids).then((events) => buildSnapshots(events)),
+      /*
+       * Inara's ranks, from the CACHE the worker fills every twenty minutes.
+       * Never a call to Inara — ADR-004 forbids it on a request path, and a
+       * roster that could be slowed by a third party is one that will be.
+       */
+      this.store.inaraRanks(ids),
       /*
        * The guild's role names and colours, fetched ONCE. A few dozen rows for
        * the whole page rather than a join multiplied by the roster.
@@ -122,7 +128,10 @@ export class MembersController {
          * `showFleet` and stay governed by it; this must never become a way
          * around a toggle somebody set.
          */
-        commander: snapshots.get(r.source.id) ?? EMPTY_SNAPSHOT,
+        commander: withInaraRanks(
+          snapshots.get(r.source.id) ?? EMPTY_SNAPSHOT,
+          inara.get(r.source.id),
+        ),
         /*
          * ★ WHAT THEY ACTUALLY WEAR IN DISCORD ★
          *

@@ -5,7 +5,24 @@ import { fileURLToPath } from 'node:url';
 import { isPlayingNow } from './roster-card';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const source = readFileSync(resolve(HERE, 'roster-card.tsx'), 'utf8');
+
+/**
+ * The card's source, WITH COMMENTS REMOVED.
+ *
+ * ★ WHY THIS STRIPPING EXISTS ★
+ *
+ * These tests assert on the order of "Playing now" and "Last flew" in the file.
+ * The comments in that file explain the very decision being tested, so they
+ * necessarily contain both phrases — and a raw scan finds whichever the prose
+ * mentions first, not whichever the JSX renders first.
+ *
+ * That has now caused a false failure more than once: the code was correct and
+ * a comment above it moved. Documentation must be free to explain the rule in
+ * whatever order reads best, so the scan looks at code only.
+ */
+const source = readFileSync(resolve(HERE, 'roster-card.tsx'), 'utf8')
+  .replace(/\/\*[\s\S]*?\*\//g, '')
+  .replace(/^\s*\/\/.*$/gm, '');
 
 /**
  * The roster card.

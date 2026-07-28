@@ -47,11 +47,12 @@ describe('P0.2 database schema', () => {
   // The count is hardcoded ON PURPOSE. Every schema addition has to come and
   // bump it, which is a two-second acknowledgement that a table was added —
   // versus a self-counting assertion that would let one appear unnoticed.
-  // 62 as of 2026-07-28: discord_roles, a CACHE of the guild's role names and
-  // colours so the roster can show every role a member wears — not only the few
-  // our permission system maps. 61 was inara_links (P1.8b), 60 with
-  // two_factor_credentials and two_factor_recovery_codes, 58 before rank
-  // progression.
+  // 63 as of 2026-07-28: inara_commander_profiles, a CACHE of Inara's public
+  // view of each verified commander. Nothing on a request path may call Inara
+  // (ADR-004), so the roster reads this and a 20-minute worker sweep fills it.
+  // 62 was discord_roles, the guild's role names and colours. 61 was
+  // inara_links (P1.8b), 60 with two_factor_credentials and
+  // two_factor_recovery_codes, 58 before rank progression.
   it('creates every table in the SSOT schema', async () => {
     const r = await rows<{ n: string }>(
       `select count(*)::text as n from information_schema.tables
@@ -59,7 +60,7 @@ describe('P0.2 database schema', () => {
          and table_name not like '\\_prisma%'`,
     );
     // 59 models in ssot/03-data/schema.prisma.
-    expect(Number(r[0]?.n)).toBe(62);
+    expect(Number(r[0]?.n)).toBe(63);
   });
 
   describe('hand-written DDL that Prisma cannot express', () => {

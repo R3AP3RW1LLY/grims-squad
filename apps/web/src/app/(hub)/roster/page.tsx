@@ -148,7 +148,20 @@ export default async function RosterPage({
             officer if it persists.
           </p>
         ) : (
-          <ul className="grid list-none grid-cols-1 gap-4 p-0 sm:grid-cols-2 2xl:grid-cols-3">
+          /*
+          ★ EVERY CARD THE SAME HEIGHT ★
+
+          `auto-rows-fr` is the load-bearing class. Grid already stretches
+          items to their ROW, so cards within a row match — but rows size to
+          their own tallest card, so a row holding somebody with three ranks
+          and an award towers over the row below it. Equal rows is what makes
+          the grid read as a grid rather than as a ragged pile.
+
+          The card itself must then fill the cell it was given: see the
+          flex column and the `mt-auto` footer in RosterCard. Without those,
+          uniform rows just add empty space under short cards.
+          */
+          <ul className="grid list-none auto-rows-fr grid-cols-1 gap-4 p-0 sm:grid-cols-2 2xl:grid-cols-3">
             {members.map((m) => (
               <RosterCard
                 key={m.handle}

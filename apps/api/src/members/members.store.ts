@@ -1,6 +1,10 @@
 import type { PrismaClient } from '@grims/db';
 import type { PrivacySettings, ProfileSource } from './profile.serializer.js';
-import { SNAPSHOT_EVENT_TYPES, type SnapshotEvent } from './commander-snapshot.js';
+import {
+  SNAPSHOT_EVENT_TYPES,
+  type InaraRanks,
+  type SnapshotEvent,
+} from './commander-snapshot.js';
 
 export interface MemberRow {
   readonly source: ProfileSource;
@@ -15,6 +19,7 @@ export interface MembersStore {
   handleOf(userId: string): Promise<string | null>;
   /** Latest journal event of each interesting type, for the roster cards. */
   snapshotEvents(userIds: readonly string[]): Promise<SnapshotEvent[]>;
+  inaraRanks(userIds: readonly string[]): Promise<Map<string, InaraRanks>>;
   /** Every guild role we know the name and colour of, keyed by snowflake. */
   discordRoleCatalogue(): Promise<Map<string, DiscordRoleInfo>>;
 }
@@ -148,16 +153,6 @@ export class PrismaMembersStore implements MembersStore {
         // cached guild roles — see `discordRoleCatalogue`.
         guildRoleIds: u.discordIdentity?.guildRoles ?? [],
         /*
-         * ★ OFFICER IS A PERMISSION QUESTION, NOT A NAME ONE ★
-         *
-         * Computed from the granted roles' masks rather than from a list of
-         * role names, so renaming a rank or adding a new leadership role does
-         * not silently drop somebody out of the officers tab.
-         *
-         * toFixed(0), never Number(): the mask is NUMERIC(40,0) and exceeds 64
-         * bits — SITE_CONFIG alone is 1n<<63n (INV-006).
-         */
-        /*
          * ★ SITE ROLES ARE NOT SQUADRON RANKS ★
          *
          * `webmaster` is a platform role: it grants every permission and confers
@@ -212,6 +207,38 @@ export class PrismaMembersStore implements MembersStore {
       orderBy: [{ userId: 'asc' }, { eventType: 'asc' }, { occurredAt: 'desc' }],
       distinct: ['userId', 'eventType'],
     });
+  }
+
+  /**
+   * Inara's cached ranks for these members.
+   *
+   * ★ READS THE CACHE. NEVER CALLS INARA ★
+   *
+   * ADR-004 forbids Inara on a request path, and this is a request path. A
+   * member with no row simply has no Inara ranks and falls back to the journal;
+   * nothing here can be slowed down, rate-limited or broken by Inara's
+   * availability. The worker's twenty-minute sweep is the only writer.
+   */
+  async inaraRanks(userIds: readonly string[]): Promise<Map<string, InaraRanks>> {
+    if (userIds.length === 0) return new Map();
+
+    const rows = await this.#db.inaraCommanderProfile.findMany({
+      where: { userId: { in: [...userIds] }, isFound: true },
+      select: { userId: true, ranks: true, fetchedAt: true },
+    });
+
+    return new Map(
+      rows.map((r) => [
+        r.userId,
+        {
+          // Stored already resolved onto our ladders. Cast rather than
+          // re-derived: re-deriving would mean this endpoint knowing Inara's
+          // wording, which is exactly what storing it resolved avoids.
+          ranks: Array.isArray(r.ranks) ? (r.ranks as InaraRanks['ranks']) : [],
+          fetchedAt: r.fetchedAt,
+        },
+      ]),
+    );
   }
 
   /**

@@ -18,3 +18,12 @@ export {
   type MemberStanding,
 } from './jobs/promotion-run.js';
 export { readLadderFromSsot, PrismaPromotionStore } from './jobs/promotion-run.wiring.js';
+export {
+  syncInaraRanks,
+  type RankSyncReport,
+  type InaraRankStore,
+  type InaraProfileSource,
+  type InaraProfileRow,
+  type SyncableCommander,
+} from './jobs/inara-rank-sync.js';
+export { AdapterInaraSource, PrismaInaraRankStore } from './jobs/inara-rank-sync.wiring.js';

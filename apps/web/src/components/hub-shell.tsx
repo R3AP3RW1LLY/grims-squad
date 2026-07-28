@@ -158,6 +158,30 @@ function SidebarContents({ me, current }: { me: MeResponse; current: string }) {
               <GlobeAltIcon aria-hidden="true" className="size-5 shrink-0" />
               Back to the site
             </a>
+
+            {/*
+              ★ THE POLICIES HAVE TO BE REACHABLE FROM IN HERE TOO ★
+
+              They used to be, when every page shared the public footer. Splitting
+              the site into `(site)` and `(hub)` route groups gave the hub its own
+              chrome and quietly took the footer — and with it the only link to
+              the privacy policy and terms — away from every signed-in page.
+
+              Nothing broke visibly, which is exactly the problem: a member
+              spends their whole session in here, and "where is your privacy
+              policy" had no answer that did not involve typing a URL.
+
+              Small and at the bottom, because they are reference material rather
+              than navigation. Present is what matters.
+            */}
+            <p className="mt-3 flex gap-x-3 border-t border-[var(--color-border-hairline)] px-2 pt-3 text-xs text-[var(--color-text-secondary)]">
+              <a href="/privacy" className="hover:text-[var(--color-text-primary)]">
+                Privacy
+              </a>
+              <a href="/terms" className="hover:text-[var(--color-text-primary)]">
+                Terms
+              </a>
+            </p>
           </li>
         </ul>
       </nav>

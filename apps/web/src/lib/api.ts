@@ -137,6 +137,10 @@ async function get<T>(path: string, opts: { authed?: boolean } = {}): Promise<T 
 /** What the journal knows about a commander, for the roster cards. */
 export interface CommanderSnapshot {
   ranks: Array<{ key: string; label: string; name: string; index: number }>;
+  /** Where the ranks came from. Inara is self-reported; the journal is the game. */
+  rankSource: 'inara' | 'journal' | null;
+  /** When Inara was last asked. Null unless rankSource is 'inara'. */
+  ranksFetchedAt: string | null;
   squadronRank: number | null;
   currentShip: string | null;
   lastPlayedAt: string | null;

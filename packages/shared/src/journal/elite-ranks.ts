@@ -115,6 +115,75 @@ export const ELITE_RANK_LABELS: Record<EliteRankKey, string> = {
 };
 
 /**
+ * Inara's names for the same ladders.
+ *
+ * ★ THEY DO NOT MATCH THE JOURNAL'S, AND THE MISMATCH IS SILENT ★
+ *
+ * The game's journal says `Explore`; Inara says `exploration`. A lookup written
+ * against one set returns undefined for the other and simply drops the rank —
+ * no error, no log, just a commander whose exploration rank stops appearing.
+ *
+ * Both spellings are accepted for every ladder, so this keeps working whichever
+ * side changes its wording. Naval ranks (`empire`, `federation`) arrive from
+ * Inara and are deliberately unmapped: they are not among the ladders a roster
+ * card shows, and adding them here is the only change needed if that alters.
+ */
+const INARA_RANK_KEYS: Record<string, EliteRankKey> = {
+  combat: 'Combat',
+  trade: 'Trade',
+  explore: 'Explore',
+  exploration: 'Explore',
+  soldier: 'Soldier',
+  mercenary: 'Soldier',
+  exobiologist: 'Exobiologist',
+  exobiology: 'Exobiologist',
+  cqc: 'CQC',
+};
+
+/** One rank as Inara reports it. `rankValue` is the same ordinal the journal uses. */
+export interface InaraPilotRank {
+  readonly rankName?: unknown;
+  readonly rankValue?: unknown;
+}
+
+/**
+ * Maps Inara's rank array onto our ladders.
+ *
+ * Returns the SAME shape as {@link describeEliteRanks} so the two sources are
+ * interchangeable at the point of display — that is what lets the roster fall
+ * back from one to the other without the card knowing which it got.
+ *
+ * Unknown ladder names are skipped rather than guessed. Inara sends naval ranks
+ * we do not show, and inventing a ladder for them would put "Empire: Elite" on
+ * a card, which is not a rank that exists.
+ */
+export function describeInaraRanks(
+  raw: unknown,
+): Array<{ key: EliteRankKey; label: string; name: string; index: number }> {
+  if (!Array.isArray(raw)) return [];
+
+  const out: Array<{ key: EliteRankKey; label: string; name: string; index: number }> = [];
+  const seen = new Set<EliteRankKey>();
+
+  for (const entry of raw as InaraPilotRank[]) {
+    if (typeof entry !== 'object' || entry === null) continue;
+    if (typeof entry.rankName !== 'string') continue;
+
+    const key = INARA_RANK_KEYS[entry.rankName.toLowerCase().trim()];
+    // Skipped, not defaulted. A ladder we do not recognise is one we cannot name.
+    if (key === undefined || seen.has(key)) continue;
+
+    const name = eliteRankName(key, entry.rankValue);
+    if (name === null) continue;
+
+    seen.add(key);
+    out.push({ key, label: ELITE_RANK_LABELS[key], name, index: entry.rankValue as number });
+  }
+
+  return out;
+}
+
+/**
  * Turns a rank index into its name.
  *
  * Returns null for anything unusable rather than guessing — a missing rank and

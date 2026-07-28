@@ -35,6 +35,20 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 const REQUEST_PATH_WAIT_MS = 8_000;
 
 /**
+ * How many commanders one request may ask about.
+ *
+ * Thirty is a deliberate compromise. Inara publishes no hard cap on events per
+ * request, and the whole squadron would fit in one — but a single oversized
+ * body is the kind of thing an operator throttles without warning, and if it
+ * fails, it fails for everybody at once. Thirty keeps a hundred members inside
+ * four requests while leaving each one small enough to be unremarkable.
+ *
+ * Enforced HERE rather than left to callers, so no future caller can quietly
+ * send a batch of four hundred.
+ */
+const MAX_EVENTS_PER_REQUEST = 30;
+
+/**
  * The application identity Inara whitelists us by.
  *
  * ★ THIS STRING MUST MATCH WHAT WAS REGISTERED, EXACTLY ★
@@ -92,21 +106,34 @@ export interface InaraProfile {
   readonly bio: string;
   readonly profileUrl: string | null;
   readonly squadronName: string | null;
-  /**
-   * The squadron Inara says they belong to, and their rank in it.
-   *
-   * Human decision, 2026-07-27: Inara is used for TWO things only — confirming
-   * the commander name, and confirming squadron membership. Everything else
-   * (ranks, ships, loadouts, position, statistics) comes from the game's own
-   * journals via the companion app, which carries all of it in far more detail
-   * and in real time.
-   *
-   * Ranks, allegiance and avatar WERE parsed here and have been removed rather
-   * than left unused. Dead parsing that looks live is a liability: it invites
-   * somebody to build on data we no longer ask Inara for, and it would make our
-   * API request overstate what we need.
-   */
+  /** The squadron Inara says they belong to, and their rank in it. */
   readonly squadronRank: string | null;
+  /**
+   * Pilot ranks, in INARA'S OWN VOCABULARY.
+   *
+   * ★ REINSTATED 2026-07-28, ON THE SQUADRON OWNER'S DECISION ★
+   *
+   * Parsed here, removed on 2026-07-27 when Inara was narrowed to name and
+   * squadron only, and now the roster's preferred rank source again (ADR-004,
+   * amended). Empty when Inara reports none, which is the normal answer for a
+   * commander with no Inara account.
+   *
+   * ★ DELIBERATELY NOT MAPPED ONTO OUR LADDERS ★
+   *
+   * Inara says `exploration` where the game says `Explore`, and translating
+   * between them is a decision about OUR domain. This package knows about
+   * external APIs and nothing else (ADR-013) — it depends on no internal
+   * package, and importing our rank tables to do the mapping here would be the
+   * first edge in a graph that is currently empty for good reason.
+   *
+   * So this reports what Inara said, faithfully, and the caller decides what it
+   * means. `rankValue` is the same ordinal the journal uses, which is the one
+   * fact about the shape worth relying on.
+   *
+   * ENRICHMENT, not evidence. A member types these into a website; they are not
+   * read from anyone's game and prove nothing. The journal is the authority.
+   */
+  readonly pilotRanks: ReadonlyArray<{ rankName: string; rankValue: number }>;
 }
 
 interface InaraEnvelope {
@@ -118,6 +145,8 @@ interface InaraEnvelope {
       userName?: string;
       commanderName?: string;
       commanderSquadron?: { SquadronName?: string; SquadronRank?: string };
+      /** `[{rankName:"exploration",rankValue:5,...}]`. Inara's names, not the journal's. */
+      commanderRanksPilot?: unknown;
       inaraURL?: string;
       otherNamesFound?: string[];
       commanderBio?: string;
@@ -190,11 +219,125 @@ export class InaraAdapter {
     cmdrName: string | undefined,
     maxWaitMs?: number,
   ): Promise<InaraProfile | null> {
+    const events = await this.#post(apiKey, [cmdrName], maxWaitMs);
+
+    const event = events[0];
+    if (event === undefined) {
+      throw new InaraApiError('Inara returned no event for our request.', 0, true);
+    }
+
+    return parseEvent(event, cmdrName);
+  }
+
+  /**
+   * Reads many commanders' public profiles in as few requests as possible.
+   *
+   * ★ THIS IS WHY A TWENTY-MINUTE SWEEP IS AFFORDABLE ★
+   *
+   * Inara's request body takes an ARRAY of events, so one POST asks about thirty
+   * commanders and comes back with thirty results in the order they were sent.
+   * A hundred members therefore cost four requests rather than a hundred — the
+   * difference between roughly fifty minutes of the global budget and roughly
+   * two (ADR-004, amended 2026-07-28).
+   *
+   * INV-033 is untouched by this. It bounds REQUESTS, which is what Inara's
+   * guidance bounds and what its throttle counts, and every chunk below still
+   * queues through the one global limiter.
+   *
+   * ★ WHAT THE CALLER GETS BACK ★
+   *
+   * Keyed by LOWERCASED name, because Elite treats commander names
+   * case-insensitively and so does the column this ends up in. Names that
+   * differ only by case are one request, not two.
+   *
+   * A name maps to `null` when Inara answered "no such commander" — the normal
+   * answer for someone with no Inara account. A name is ABSENT from the map
+   * when its chunk failed outright, which is a different fact: absent means
+   * "unknown, ask again", null means "asked, and there is nothing". Collapsing
+   * the two would let one failed request erase real ranks from every card in it.
+   */
+  async getCommanderProfiles(
+    names: readonly string[],
+  ): Promise<Map<string, InaraProfile | null>> {
+    /*
+     * ★ DE-DUPLICATED CASE-INSENSITIVELY, TO MATCH THE LOOKUP ★
+     *
+     * The returned map is keyed by lowercased name. De-duplicating by exact
+     * spelling therefore sends "Pebble" and "PEBBLE" as two separate questions
+     * — paying twice from a rate budget measured in requests per minute — and
+     * then collapses both answers onto one key, where the last one silently
+     * wins. Two members whose names differ only in case would overwrite each
+     * other's ranks.
+     *
+     * The FIRST spelling seen is the one sent, because Inara's search is itself
+     * case-insensitive and any of them would do.
+     */
+    const seen = new Set<string>();
+    const wanted: string[] = [];
+    for (const raw of names) {
+      const name = raw.trim();
+      if (name === '') continue;
+      const key = name.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      wanted.push(name);
+    }
+
+    const out = new Map<string, InaraProfile | null>();
+
+    for (let i = 0; i < wanted.length; i += MAX_EVENTS_PER_REQUEST) {
+      const chunk = wanted.slice(i, i + MAX_EVENTS_PER_REQUEST);
+
+      let events: NonNullable<InaraEnvelope['events']>;
+      try {
+        // Unbounded wait: this is a scheduled job with nobody watching, and
+        // giving up on the limiter would silently sync only the first chunk.
+        events = await this.#post(this.config.apiKey, chunk);
+      } catch (cause) {
+        // One bad chunk must not lose the others. A rejected key throws on
+        // every chunk anyway, so nothing is masked by continuing.
+        if (cause instanceof InaraNotApprovedError) throw cause;
+        continue;
+      }
+
+      chunk.forEach((name, index) => {
+        const event = events[index];
+        // A short array is Inara disagreeing with us about what we asked. Left
+        // ABSENT rather than recorded as "not found", because index-shifted
+        // results would otherwise be written onto the wrong commanders.
+        if (event === undefined) return;
+
+        try {
+          out.set(name.toLowerCase(), parseEvent(event, name));
+        } catch {
+          // A per-event error — malformed, throttled, unavailable. Absent, so
+          // the next sweep retries it and the stored row is left alone.
+        }
+      });
+    }
+
+    return out;
+  }
+
+  /**
+   * One POST carrying one or more `getCommanderProfile` events.
+   *
+   * Returns the events array as Inara sent it, positionally aligned with the
+   * names given. Envelope-level failures throw; per-event ones are the caller's
+   * to interpret, because in a batch they apply to one commander and not the
+   * rest.
+   */
+  async #post(
+    apiKey: string,
+    cmdrNames: ReadonlyArray<string | undefined>,
+    maxWaitMs?: number,
+  ): Promise<NonNullable<InaraEnvelope['events']>> {
     // EVERY call goes through the global limiter (INV-033). Worker calls wait
     // as long as it takes; a request-path caller passes maxWaitMs and gives up
     // rather than holding a connection open behind a minutes-deep queue.
     const limiter = inaraLimiter();
-    const dispatch = async (): Promise<InaraProfile | null> => {
+    const dispatch = async (): Promise<NonNullable<InaraEnvelope['events']>> => {
+      const timestamp = new Date().toISOString();
       const body = {
         header: {
           appName: this.config.appName,
@@ -205,14 +348,12 @@ export class InaraAdapter {
           // returned name is proof rather than a claim.
           APIkey: apiKey,
         },
-        events: [
-          {
-            eventName: 'getCommanderProfile',
-            eventTimestamp: new Date().toISOString(),
-            // Absent, not empty, when we want the key owner's own profile.
-            eventData: cmdrName === undefined ? {} : { searchName: cmdrName },
-          },
-        ],
+        events: cmdrNames.map((cmdrName) => ({
+          eventName: 'getCommanderProfile',
+          eventTimestamp: timestamp,
+          // Absent, not empty, when we want the key owner's own profile.
+          eventData: cmdrName === undefined ? {} : { searchName: cmdrName },
+        })),
       };
 
       const ac = new AbortController();
@@ -258,37 +399,7 @@ export class InaraAdapter {
         );
       }
 
-      // ---- the event itself -------------------------------------------------
-      const event = json.events?.[0];
-      if (event === undefined) {
-        throw new InaraApiError('Inara returned no event for our request.', 0, true);
-      }
-
-      const status = event.eventStatus ?? 0;
-
-      // 204 = no results. The commander name is not on Inara. Expected.
-      if (status === 204) return null;
-
-      if (status !== 200) {
-        const retryable = status >= 500;
-        throw new InaraApiError(
-          `Inara event error ${status}: ${event.eventStatusText ?? ''}`,
-          status,
-          retryable,
-        );
-      }
-
-      const d = event.eventData ?? {};
-      return {
-        cmdrName: d.commanderName ?? d.userName ?? cmdrName ?? '',
-        // Inara exposes the bio under two different keys depending on which
-        // field the member filled in. Both are checked, and they are JOINED
-        // rather than one preferred — a nonce in either is proof of control.
-        bio: [d.commanderBio ?? '', d.userProfileText ?? ''].join('\n').trim(),
-        profileUrl: d.inaraURL ?? null,
-        squadronName: d.commanderSquadron?.SquadronName ?? null,
-        squadronRank: d.commanderSquadron?.SquadronRank ?? null,
-      };
+      return json.events ?? [];
     };
 
     // Unbounded for the worker, bounded for a request. Both go through the SAME
@@ -298,4 +409,69 @@ export class InaraAdapter {
       ? limiter.run(dispatch)
       : limiter.runWithin(maxWaitMs, dispatch);
   }
+}
+
+/**
+ * Turns one event from Inara's reply into a profile.
+ *
+ * Shared by the single and batch paths deliberately. When these were two copies
+ * the batch one is exactly where a subtly different reading of `eventStatus`
+ * would go unnoticed, because nobody watches a scheduled job's output.
+ *
+ * Returns null for 204 (no such commander) and THROWS for anything else that is
+ * not 200 — in a batch the caller catches that per event, so one throttled
+ * commander does not discard twenty-nine good ones.
+ */
+function parseEvent(
+  event: NonNullable<InaraEnvelope['events']>[number],
+  cmdrName: string | undefined,
+): InaraProfile | null {
+  const status = event.eventStatus ?? 0;
+
+  // 204 = no results. The commander name is not on Inara. Expected.
+  if (status === 204) return null;
+
+  if (status !== 200) {
+    const retryable = status >= 500;
+    throw new InaraApiError(
+      `Inara event error ${status}: ${event.eventStatusText ?? ''}`,
+      status,
+      retryable,
+    );
+  }
+
+  const d = event.eventData ?? {};
+  return {
+    cmdrName: d.commanderName ?? d.userName ?? cmdrName ?? '',
+    // Inara exposes the bio under two different keys depending on which
+    // field the member filled in. Both are checked, and they are JOINED
+    // rather than one preferred — a nonce in either is proof of control.
+    bio: [d.commanderBio ?? '', d.userProfileText ?? ''].join('\n').trim(),
+    profileUrl: d.inaraURL ?? null,
+    squadronName: d.commanderSquadron?.SquadronName ?? null,
+    squadronRank: d.commanderSquadron?.SquadronRank ?? null,
+    pilotRanks: parsePilotRanks(d.commanderRanksPilot),
+  };
+}
+
+/**
+ * Narrows Inara's rank array to the two fields that carry meaning.
+ *
+ * Validated rather than cast. Everything past this point can rely on
+ * `rankName` being a string and `rankValue` a number, which is what lets the
+ * mapping on our side skip defensive checks it would otherwise need at every
+ * use — and a malformed entry is dropped rather than propagated as NaN.
+ */
+function parsePilotRanks(raw: unknown): Array<{ rankName: string; rankValue: number }> {
+  if (!Array.isArray(raw)) return [];
+
+  const out: Array<{ rankName: string; rankValue: number }> = [];
+  for (const entry of raw as Array<Record<string, unknown>>) {
+    if (typeof entry !== 'object' || entry === null) continue;
+    const { rankName, rankValue } = entry;
+    if (typeof rankName !== 'string' || typeof rankValue !== 'number') continue;
+    out.push({ rankName, rankValue });
+  }
+
+  return out;
 }

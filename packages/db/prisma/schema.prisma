@@ -351,6 +351,7 @@ model User {
   privacySettings     PrivacySetting?
   twoFactor           TwoFactorCredential?
   inaraLink           InaraLink?
+  inaraProfile        InaraCommanderProfile?
   cmdrVerifications   CmdrVerification[]
   userRoles           UserRole[]            @relation("UserRoleHolder")
   rolesGranted        UserRole[]            @relation("UserRoleGrantor")
@@ -667,6 +668,39 @@ model InaraLink {
 
   @@index([cmdrName])
   @@map("inara_links")
+}
+
+/// Inara's public view of a commander, refreshed on a schedule and read from cache.
+///
+/// ★ A CACHE, AND NOTHING MAY BLOCK ON FILLING IT ★
+/// ADR-004 forbids Inara on any request path. A roster page therefore reads THIS TABLE and
+/// never Inara; a row that is missing or stale renders as missing or stale, and the page is
+/// otherwise unaffected. That is the entire reason this table exists rather than a fetch.
+///
+/// ★ WHY A ROW CAN EXIST WITH NOTHING IN IT ★
+/// `isFound` false means Inara answered and had no such commander — a typo in a name, or a
+/// member with no Inara account, which is the common case and not an error. Distinguishing it
+/// from "never fetched" (no row at all) is what stops the sync retrying a known-absent
+/// commander as though the last attempt had failed.
+model InaraCommanderProfile {
+  userId       String   @id @map("user_id") @db.Uuid
+  /// The name we ASKED Inara about, recorded so a later rename is detectable. Case-insensitive.
+  searchName   String   @map("search_name") @db.Citext
+  /// Pilot ranks as `[{key,label,name,index}]`, already mapped onto our own ladders.
+  /// Stored resolved rather than raw so the roster does no interpretation at render time.
+  ranks        Json     @default("[]")
+  squadronName String?  @map("squadron_name")
+  /// Squadron rank as INARA words it, which is not our rank ladder and not the game's integer.
+  squadronRank String?  @map("squadron_rank")
+  /// Inara answered. Says nothing about whether it knew the commander — see isFound.
+  fetchedAt    DateTime @map("fetched_at") @db.Timestamptz(6)
+  /// Inara returned a profile. False means it answered "no such commander".
+  isFound      Boolean  @default(false) @map("is_found")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([fetchedAt])
+  @@map("inara_commander_profiles")
 }
 
 /// TOTP second factor. MANDATORY to enter the admin console — an account holding officer

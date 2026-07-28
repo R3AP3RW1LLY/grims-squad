@@ -11,7 +11,8 @@
     "test:unit": "vitest run --passWithNoTests",
     "clean": "rm -rf dist *.tsbuildinfo",
     "reconcile": "tsx src/main.ts",
-    "promote": "tsx src/promote.ts"
+    "promote": "tsx src/promote.ts",
+    "inara:sync": "tsx src/inara-sync.ts"
   },
   "devDependencies": {
     "@grims/config": "workspace:*",

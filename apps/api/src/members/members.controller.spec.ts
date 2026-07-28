@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { MembersController } from './members.controller.js';
 import type { MembersStore, MemberRow, DiscordRoleInfo } from './members.store.js';
-import type { SnapshotEvent } from './commander-snapshot.js';
+import type { SnapshotEvent, InaraRanks } from './commander-snapshot.js';
 import type { PrivacySettings, ProfileSource } from './profile.serializer.js';
 import { issueCsrfToken, csrfCookieName } from '../common/csrf.js';
 
@@ -68,6 +68,19 @@ class FakeStore implements MembersStore {
 
   async snapshotEvents(userIds: readonly string[]): Promise<SnapshotEvent[]> {
     return this.snapshots.filter((e) => userIds.includes(e.userId));
+  }
+
+  /**
+   * Inara's cached ranks. Empty unless a test sets them.
+   *
+   * Empty is the REALISTIC default, not a shortcut: most members have no Inara
+   * account, and the roster has to render identically whether the sweep has
+   * ever run or not.
+   */
+  inara = new Map<string, InaraRanks>();
+
+  async inaraRanks(userIds: readonly string[]): Promise<Map<string, InaraRanks>> {
+    return new Map([...this.inara].filter(([id]) => userIds.includes(id)));
   }
 
   /** Guild role names and colours. Empty unless a test sets them. */

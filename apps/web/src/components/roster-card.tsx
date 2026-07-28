@@ -109,9 +109,24 @@ export function RosterCard({
    */
   const topRanks = [...commander.ranks].sort((a, b) => b.index - a.index).slice(0, 3);
 
+  /*
+   * ★ h-full ON BOTH THE <li> AND THE <a>, AND THE SECOND IS THE SUBTLE ONE ★
+   *
+   * The grid stretches the <li>, so the border already spans the row. But the
+   * <a> inside it is what carries the padding and the content, and an anchor
+   * that does not fill its parent leaves a short card sitting in the top of a
+   * tall cell with dead space beneath it — visibly worse than the ragged rows
+   * this was meant to fix.
+   *
+   * flex-col then lets the footer claim the slack with mt-auto, so the card
+   * grows from the middle rather than trailing off.
+   */
   return (
-    <li className="rounded-lg border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel)] transition-colors hover:border-[var(--color-border-active)]">
-      <a href={`/members/${encodeURIComponent(member.handle)}`} className="block p-5">
+    <li className="h-full rounded-lg border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel)] transition-colors hover:border-[var(--color-border-active)]">
+      <a
+        href={`/members/${encodeURIComponent(member.handle)}`}
+        className="flex h-full flex-col p-5"
+      >
         <div className="flex items-start gap-4">
           {member.avatarUrl !== null ? (
             /* Served from our own API, at the size we asked Discord for. */
@@ -210,7 +225,30 @@ export function RosterCard({
           alphabetically "Surveyor" beats "Elite", which is exactly backwards.
         */}
         {topRanks.length > 0 && (
-          <ul className="mt-3 flex list-none flex-wrap gap-1.5 p-0">
+          <ul
+            className="mt-3 flex list-none flex-wrap items-center gap-1.5 p-0"
+            /*
+              ★ SAYING WHICH SOURCE, WITHOUT SPENDING A LINE ON IT ★
+
+              A rank read from somebody's own game and a rank they typed into a
+              website are different claims, and rendering them identically
+              quietly promotes the second to the standing of the first.
+
+              It lives in the tooltip rather than on the card because it matters
+              to whoever asks "is this current?", and to nobody else — a visible
+              "via Inara" on every chip would be noise on a card that is already
+              dense, and would push the layout around depending on the source.
+            */
+            title={
+              commander.rankSource === 'inara'
+                ? `Pilot ranks via Inara${
+                    commander.ranksFetchedAt === null
+                      ? ''
+                      : `, updated ${new Date(commander.ranksFetchedAt).toLocaleString()}`
+                  }`
+                : 'Pilot ranks from their game journal'
+            }
+          >
             {topRanks.map((r) => (
               <li
                 key={r.key}
@@ -223,7 +261,15 @@ export function RosterCard({
           </ul>
         )}
 
-        <dl className="mt-4 space-y-1.5 border-t border-[var(--color-border-hairline)] pt-3 text-xs">
+        {/*
+          mt-auto pins this to the BOTTOM of the card, which is what makes
+          uniform heights read as deliberate. Members have different numbers of
+          roles and ranks, so without it the "Timezone" and "Last flew" lines
+          land at a different height on every card and the eye has to hunt for
+          them — the extra space then looks like a rendering fault rather than
+          a layout.
+        */}
+        <dl className="mt-auto space-y-1.5 border-t border-[var(--color-border-hairline)] pt-4 text-xs">
           {commander.currentShip !== null && (
             <div className="flex justify-between gap-3">
               <dt className="text-[var(--color-text-secondary)]">Flying</dt>
