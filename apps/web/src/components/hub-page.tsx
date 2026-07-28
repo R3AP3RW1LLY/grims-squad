@@ -163,14 +163,29 @@ export function Section({
   title,
   description,
   children,
+  fill = false,
 }: {
   title: string;
   description?: string;
   children: React.ReactNode;
+  /**
+   * Stretch to the height of the tallest sibling in a grid row.
+   *
+   * ★ WHY THIS IS OPT-IN ★
+   *
+   * Down a single column a section should be exactly as tall as its content —
+   * stretching there would only add dead space. It matters only where two sit
+   * SIDE BY SIDE and their bottom rules land at different heights, which reads
+   * as a rendering fault rather than as two panels of different length.
+   *
+   * The child of a `fill` section becomes a flex column, so a footer marked
+   * `mt-auto` is pushed to the bottom and lines up with its neighbour's.
+   */
+  fill?: boolean;
 }) {
   const id = title.toLowerCase().replace(/[^a-z0-9]+/g, '-');
   return (
-    <section aria-labelledby={id} className="mb-12">
+    <section aria-labelledby={id} className={`mb-12 ${fill ? 'flex h-full flex-col' : ''}`}>
       <h2
         id={id}
         className="text-xl text-[var(--color-brand-orange)]"
@@ -183,7 +198,7 @@ export function Section({
           {description}
         </p>
       )}
-      <div className="mt-5">{children}</div>
+      <div className={`mt-5 ${fill ? 'flex flex-1 flex-col' : ''}`}>{children}</div>
     </section>
   );
 }
