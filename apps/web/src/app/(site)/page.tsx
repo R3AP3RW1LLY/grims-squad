@@ -135,9 +135,9 @@ export default async function HomePage() {
             </p>
 
             <p className="mx-auto mt-6 max-w-[58ch] text-base leading-relaxed text-[var(--color-text-primary)] sm:text-lg">
-              We run a player minor faction, operate fleet carriers, and fly everything from
-              conflict zones to the black. Combat and AX, trade, mining, exploration &mdash; and the
-              background simulation that decides who actually holds a system.
+              Every system has a story. We intend to write ours across the galaxy. From conflict
+              zones to the deepest black, Grim&rsquo;s Squad fights, explores, builds, and expands
+              with one goal: leave our mark on the Milky Way.
             </p>
 
           </div>
