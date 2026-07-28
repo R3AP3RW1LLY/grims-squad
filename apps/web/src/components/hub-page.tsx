@@ -24,11 +24,21 @@
  * which is invalid HTML and left the skip link pointing at an ambiguous target.
  */
 
+/**
+ * ★ THE LEAD PARAGRAPH IS NOT IN HERE ★
+ *
+ * It used to be, and it pushed the whole page down: the header spans the full
+ * width, so anything in it sits ABOVE both columns — leaving the context rail
+ * starting a paragraph lower than the text it belongs beside, and the two
+ * reading as unrelated.
+ *
+ * The lead now belongs to PageBody, which renders it at the top of the primary
+ * column. The rail and the first line of prose then start together.
+ */
 export function PageHeader({
   eyebrow,
   title,
   subtitle,
-  lead,
   action,
   icon,
 }: {
@@ -36,7 +46,6 @@ export function PageHeader({
   title: string;
   /** A line under the title — a rank, a status. */
   subtitle?: string;
-  lead?: string;
   action?: React.ReactNode;
   /** Rendered to the LEFT of the text. The dashboard puts an avatar here. */
   icon?: React.ReactNode;
@@ -72,10 +81,6 @@ export function PageHeader({
       </div>
 
       <div className="rule-glow mt-5" aria-hidden="true" />
-
-      {lead !== undefined && (
-        <p className="mt-6 max-w-[68ch] text-[var(--color-text-primary)]">{lead}</p>
-      )}
     </header>
   );
 }
@@ -90,17 +95,32 @@ export function PageHeader({
 export function PageBody({
   children,
   rail,
+  lead,
 }: {
   children: React.ReactNode;
   rail?: React.ReactNode;
+  /**
+   * The opening paragraph. Rendered HERE rather than in the header so its first
+   * line is level with the top of the rail beside it.
+   */
+  lead?: string;
 }) {
+  const body = (
+    <>
+      {lead !== undefined && (
+        <p className="mb-6 max-w-[68ch] text-[var(--color-text-primary)]">{lead}</p>
+      )}
+      {children}
+    </>
+  );
+
   if (rail === undefined) {
-    return <div className="max-w-[68ch]">{children}</div>;
+    return <div className="max-w-[68ch]">{body}</div>;
   }
 
   return (
     <div className="grid grid-cols-1 gap-8 xl:grid-cols-[minmax(0,1fr)_20rem]">
-      <div className="min-w-0">{children}</div>
+      <div className="min-w-0">{body}</div>
       {/*
         Sticky, so the status stays visible while somebody scrolls a long form.
         `self-start` is what makes that work in a grid — without it the item

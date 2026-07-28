@@ -84,18 +84,34 @@ export class AdminController {
   @Get('audit')
   async audit(
     @Query('limit') limit?: string,
+    @Query('page') page?: string,
     @Query('actor') actor?: string,
     @Query('action') action?: string,
     @Query('targetType') targetType?: string,
     @Query('targetId') targetId?: string,
     @Query('since') since?: string,
     @Query('until') until?: string,
-  ): Promise<{ entries: AuditRow[]; actions: string[] }> {
+  ): Promise<{
+    entries: AuditRow[];
+    actions: string[];
+    total: number;
+    page: number;
+    pageSize: number;
+  }> {
     const n = Number(limit ?? '100');
     const capped = Number.isFinite(n) ? Math.min(Math.max(Math.trunc(n), 1), 500) : 100;
 
-    const [entries, actions] = await Promise.all([
+    /*
+     * Page is 1-based because it is shown to a person. Anything unparseable,
+     * negative or zero reads as page 1 rather than erroring: a bad page number
+     * in a URL should show the first page, not a stack trace.
+     */
+    const requested = Number(page ?? '1');
+    const currentPage = Number.isFinite(requested) ? Math.max(Math.trunc(requested), 1) : 1;
+
+    const [result, actions] = await Promise.all([
       this.store.auditSearch({
+        offset: (currentPage - 1) * capped,
         ...(actor === undefined ? {} : { actor }),
         ...(action === undefined ? {} : { action }),
         ...(targetType === undefined ? {} : { targetType }),
@@ -107,7 +123,14 @@ export class AdminController {
       // than a string somebody has to guess the spelling of.
       this.store.auditActions(),
     ]);
-    return { entries, actions };
+
+    return {
+      entries: result.rows,
+      actions,
+      total: result.total,
+      page: currentPage,
+      pageSize: capped,
+    };
   }
 
   /* ---------------------------------------------------------------- roles

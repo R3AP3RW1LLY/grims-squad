@@ -25,13 +25,13 @@ export default async function AccountSettingsPage() {
       <PageHeader
         eyebrow="Your account"
         title="ACCOUNT"
-        lead="Where you are signed in, and everything the hub holds about you."
       />
 
       {data === null ? (
         <CouldNotLoad what="your account details" />
       ) : (
         <PageBody
+          lead="Where you are signed in, and everything the hub holds about you."
           rail={
             <>
               <Panel title="You">

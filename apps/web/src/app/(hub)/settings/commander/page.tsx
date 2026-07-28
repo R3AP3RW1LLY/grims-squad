@@ -25,13 +25,13 @@ export default async function CommanderPage() {
       <PageHeader
         eyebrow="Your account"
         title="COMMANDER"
-        lead="Link your Inara account and we can confirm which commander is yours, rather than taking your word for it. Your Discord nickname is then kept matching your in-game name."
       />
 
       {status === null ? (
         <CouldNotLoad what="your commander details" />
       ) : (
         <PageBody
+          lead="Link your Inara account and we can confirm which commander is yours, rather than taking your word for it. Your Discord nickname is then kept matching your in-game name."
           rail={
             <>
               <Panel title="Status">

@@ -31,13 +31,13 @@ export default async function DevicesPage() {
       <PageHeader
         eyebrow="Your account"
         title="COMPANION APP"
-        lead="The companion app reads your Elite Dangerous journals and keeps your squadron profile current. It is optional — everything here works without it, and running it is a recommendation rather than a requirement."
       />
 
       {devices === null || consent === null ? (
         <CouldNotLoad what="your paired devices" />
       ) : (
         <PageBody
+          lead="The companion app reads your Elite Dangerous journals and keeps your squadron profile current. It is optional — everything here works without it, and running it is a recommendation rather than a requirement."
           rail={
             <>
               <Panel title="Status">

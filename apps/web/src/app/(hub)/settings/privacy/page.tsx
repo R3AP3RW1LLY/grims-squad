@@ -41,13 +41,13 @@ export default async function PrivacySettingsPage() {
       <PageHeader
         eyebrow="Your account"
         title="PRIVACY"
-        lead="Everything here starts switched off. Nothing on this list is shared with anyone until you turn it on, and each item is separate — showing your position does not also show your balance."
       />
 
       {settings === null ? (
         <CouldNotLoad what="your privacy settings" />
       ) : (
         <PageBody
+          lead="Everything here starts switched off. Nothing on this list is shared with anyone until you turn it on, and each item is separate — showing your position does not also show your balance."
           rail={
             <>
               <Panel title="At a glance">

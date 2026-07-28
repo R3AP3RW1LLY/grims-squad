@@ -180,6 +180,8 @@ export interface AdminAuditRow {
   id: string;
   action: string;
   actorHandle: string | null;
+  /** Discord server nickname, kept matching the member's in-game name. */
+  actorName: string | null;
   targetType: string | null;
   targetId: string | null;
   createdAt: string;
@@ -200,7 +202,10 @@ export const getAdminActivity = (
 export const getAdminAudit = (): Promise<{
   entries: AdminAuditRow[];
   actions: string[];
-} | null> => get('/v1/admin/audit?limit=100', { authed: true });
+  total: number;
+  page: number;
+  pageSize: number;
+} | null> => get('/v1/admin/audit?limit=100&page=1', { authed: true });
 
 export interface SquadronStats {
   members: number;

@@ -28,13 +28,13 @@ export default async function SecurityPage() {
       <PageHeader
         eyebrow="Your account"
         title="SECURITY"
-        lead="Signing in to the hub takes one step — your Discord account. A second factor is required only to open the admin console, because those accounts can grant roles and change how the site works."
       />
 
       {status === null ? (
         <CouldNotLoad what="your security settings" />
       ) : (
         <PageBody
+          lead="Signing in to the hub takes one step — your Discord account. A second factor is required only to open the admin console, because those accounts can grant roles and change how the site works."
           rail={
             <>
               <Panel title="Status">

@@ -158,7 +158,11 @@ export default async function AdminPage() {
         title="Audit log"
         description="Read-only here and append-only in the database. A console that can edit the audit log is an audit log that proves nothing."
       >
-        <AuditFilters initial={audit?.entries ?? []} actions={audit?.actions ?? []} />
+        <AuditFilters
+          initial={audit?.entries ?? []}
+          actions={audit?.actions ?? []}
+          initialTotal={audit?.total ?? 0}
+        />
       </Section>
     </>
   );

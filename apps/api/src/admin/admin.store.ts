@@ -28,6 +28,17 @@ export interface AuditRow {
   readonly id: string;
   readonly action: string;
   readonly actorHandle: string | null;
+  /**
+   * The actor's display name — their Discord server nickname, which the hub
+   * keeps matching their in-game commander name.
+   *
+   * Shown ALONGSIDE the handle rather than instead of it. A display name is
+   * chosen by the member and can be changed to match somebody else's, so an
+   * audit log identifying people by display name alone could be made to
+   * misattribute an action. The handle is stable and unique, so it stays as the
+   * thing that actually identifies the row.
+   */
+  readonly actorName: string | null;
   readonly targetType: string | null;
   readonly targetId: string | null;
   readonly createdAt: string;
@@ -51,13 +62,21 @@ export interface AuditFilter {
   readonly since?: Date;
   readonly until?: Date;
   readonly limit: number;
+  /** How many matching rows to skip. Page N is offset = (N - 1) * limit. */
+  readonly offset?: number;
+}
+
+/** A page of audit rows, and how many matched the filter in total. */
+export interface AuditPage {
+  readonly rows: AuditRow[];
+  readonly total: number;
 }
 
 export interface AdminStore {
   activityForMonth(monthKey: string): Promise<ActivityRow[]>;
   members(): Promise<MemberRow[]>;
   auditTail(limit: number): Promise<AuditRow[]>;
-  auditSearch(filter: AuditFilter): Promise<AuditRow[]>;
+  auditSearch(filter: AuditFilter): Promise<AuditPage>;
   /** Clears a member's second factor. Audited; never silent. */
   resetTwoFactor(userId: string, actorId: string, reason: string): Promise<void>;
   /** Distinct action names present in the log, so the UI can offer them. */
@@ -150,7 +169,7 @@ export class PrismaAdminStore implements AdminStore {
    * whose whole purpose is being trustworthy. Prisma parameterises, so a
    * quote in the input is a quote in the input.
    */
-  async auditSearch(filter: AuditFilter): Promise<AuditRow[]> {
+  async auditSearch(filter: AuditFilter): Promise<AuditPage> {
     const where: Record<string, unknown> = {};
 
     if (filter.actor !== undefined && filter.actor !== '') {
@@ -177,30 +196,55 @@ export class PrismaAdminStore implements AdminStore {
       where['createdAt'] = range;
     }
 
-    const rows = await this.#db.auditLog.findMany({
-      where,
-      take: filter.limit,
-      orderBy: { createdAt: 'desc' },
-      select: {
-        id: true,
-        action: true,
-        targetType: true,
-        targetId: true,
-        before: true,
-        after: true,
-        createdAt: true,
-        actor: { select: { handle: true } },
-      },
-    });
+    const [rows, total] = await Promise.all([
+      this.#db.auditLog.findMany({
+        where,
+        take: filter.limit,
+        skip: filter.offset ?? 0,
+        /*
+         * ★ THE TIEBREAK IS LOAD-BEARING ★
+         *
+         * `createdAt` alone is not a total order: rows written in one
+         * transaction share a timestamp to the microsecond, and Postgres is
+         * free to return equal keys in any order it likes — including a
+         * DIFFERENT order for the same query run twice.
+         *
+         * Without pagination that was invisible. With it, a tie straddling a
+         * page boundary means a row appears on both pages, or on neither. A
+         * silently missing row is not an acceptable failure for an audit log:
+         * the whole value of the thing is that it is complete.
+         *
+         * `id` is a monotonic bigint, so it breaks every tie deterministically.
+         */
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        select: {
+          id: true,
+          action: true,
+          targetType: true,
+          targetId: true,
+          before: true,
+          after: true,
+          createdAt: true,
+          actor: { select: { handle: true, displayName: true } },
+        },
+      }),
+      // Counted with the SAME filter, so the page count describes the query the
+      // member is actually looking at rather than the table as a whole.
+      this.#db.auditLog.count({ where }),
+    ]);
 
-    return rows.map((r) => ({
-      id: r.id.toString(),
-      action: r.action,
-      actorHandle: r.actor?.handle ?? null,
-      targetType: r.targetType,
-      targetId: r.targetId,
-      createdAt: r.createdAt.toISOString(),
-    }));
+    return {
+      rows: rows.map((r) => ({
+        id: r.id.toString(),
+        action: r.action,
+        actorHandle: r.actor?.handle ?? null,
+        actorName: r.actor?.displayName ?? null,
+        targetType: r.targetType,
+        targetId: r.targetId,
+        createdAt: r.createdAt.toISOString(),
+      })),
+      total,
+    };
   }
 
   /**
@@ -245,14 +289,14 @@ export class PrismaAdminStore implements AdminStore {
   async auditTail(limit: number): Promise<AuditRow[]> {
     const rows = await this.#db.auditLog.findMany({
       take: limit,
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       select: {
         id: true,
         action: true,
         targetType: true,
         targetId: true,
         createdAt: true,
-        actor: { select: { handle: true } },
+        actor: { select: { handle: true, displayName: true } },
       },
     });
 
@@ -262,6 +306,7 @@ export class PrismaAdminStore implements AdminStore {
       id: r.id.toString(),
       action: r.action,
       actorHandle: r.actor?.handle ?? null,
+      actorName: r.actor?.displayName ?? null,
       targetType: r.targetType,
       targetId: r.targetId,
       createdAt: r.createdAt.toISOString(),
