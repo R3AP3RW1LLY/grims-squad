@@ -29,7 +29,12 @@ allowBuilds:
   # but there is no binary, and the failure reads as "electron is not a
   # command" rather than as a blocked install script.
   electron: true
-  electron-winstaller: set this to true or false
+  # DECLINED, deliberately. electron-winstaller builds Squirrel installers; our
+  # Windows target is NSIS (apps/companion/electron-builder.yml), so its
+  # postinstall fetches tooling we never invoke. `false` is a real answer and
+  # stops pnpm asking — leaving it blank re-triggers the placeholder state that
+  # disables every OTHER build script too.
+  electron-winstaller: false
 
 onlyBuiltDependencies:
   - esbuild
