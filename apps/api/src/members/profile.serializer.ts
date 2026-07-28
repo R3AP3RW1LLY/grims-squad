@@ -79,9 +79,24 @@ export interface ProfileSource {
   readonly avatarStoredHash: string | null;
   readonly bio: string | null;
   readonly timezone: string;
+  /**
+   * Last moment the companion app saw their journal still being WRITTEN.
+   *
+   * Not private in the way a position is: it says somebody is playing, not
+   * where or what. It is the difference between a roster and a phone book, and
+   * it is the question anybody scanning one before an operation actually has.
+   */
+  readonly lastPlayingAt: Date | null;
   readonly joinedAt: Date;
   readonly status: string;
-  readonly ranks: readonly string[];
+  /**
+   * Squadron roles, highest first.
+   *
+   * Carries the Discord colour so a card can render a role the way the member
+   * already sees it in Discord — recognising your own colour is faster than
+   * reading your own role name, and the two disagreeing looks like a bug.
+   */
+  readonly ranks: ReadonlyArray<{ name: string; colour: string | null }>;
   readonly cmdrName: string | null;
   readonly location?: ProfileLocation | null;
   readonly credits?: bigint | null;
@@ -106,6 +121,8 @@ export interface PublicProfile {
   readonly avatarUrl: string | null;
   readonly bio: string | null;
   readonly timezone: string;
+  /** ISO instant, or null. See the note on ProfileSource. */
+  readonly lastPlayingAt: string | null;
   readonly joinedAt: string;
   readonly status: string;
   readonly ranks: readonly string[];
@@ -181,6 +198,7 @@ export function serializeProfile(
       avatarUrl: source.avatarStoredHash === null ? null : `/v1/media/avatars/${source.id}`,
     bio: source.bio,
     timezone: source.timezone,
+    lastPlayingAt: source.lastPlayingAt?.toISOString() ?? null,
     joinedAt: source.joinedAt.toISOString(),
     status: source.status,
     ranks: source.ranks,

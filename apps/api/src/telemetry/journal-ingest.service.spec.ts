@@ -32,6 +32,12 @@ class FakeStore implements IngestStore {
     return this.consent;
   }
 
+  playingAt: Date | null = null;
+
+  async markPlaying(_userId: string, at: Date): Promise<void> {
+    this.playingAt = at;
+  }
+
   async insertIgnoringDuplicates(rows: readonly Row[]): Promise<number> {
     let n = 0;
     for (const r of rows) {

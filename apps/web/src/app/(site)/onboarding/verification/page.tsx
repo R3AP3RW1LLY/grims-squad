@@ -97,11 +97,10 @@ export default async function VerificationWaitPage() {
             <div className="rounded-lg border border-[var(--color-border-hairline)] p-5">
               <h3 className="text-[var(--color-text-primary)]">Link an Inara key</h3>
               <p className="mt-2 text-sm leading-relaxed text-[var(--color-text-secondary)]">
-                Automatic, and needs nobody else — but{' '}
-                <strong className="text-[var(--color-brand-orange)]">not available yet</strong>:
-                Inara requires our application to be registered before it will answer any key, and
-                that request is still outstanding.
-                {inara?.linked === true && ' Your key is stored and will be used the moment it is.'}
+                Automatic, immediate, and needs nobody else. We ask Inara who the key belongs to and
+                verify you from their answer — you never type your own commander name, which is what
+                makes it proof rather than a claim.
+                {inara?.linked === true && ' Your key is already stored.'}
               </p>
             </div>
           </div>

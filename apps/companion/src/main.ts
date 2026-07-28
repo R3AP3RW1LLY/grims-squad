@@ -225,6 +225,7 @@ async function tick(): Promise<void> {
   const dir = await findJournalDir();
   if (dir === null) {
     lastOutcome = {
+      gameRunning: false,
       filesRead: 0,
       sent: 0,
       duplicates: 0,
@@ -260,6 +261,7 @@ async function tick(): Promise<void> {
     }
   } catch (error) {
     lastOutcome = {
+      gameRunning: false,
       filesRead: 0,
       sent: 0,
       duplicates: 0,

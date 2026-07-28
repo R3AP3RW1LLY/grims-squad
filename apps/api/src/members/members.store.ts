@@ -40,6 +40,7 @@ export class PrismaMembersStore implements MembersStore {
     avatarStoredHash: true,
     bio: true,
     timezone: true,
+    lastPlayingAt: true,
     joinedAt: true,
     status: true,
     privacySettings: {
@@ -58,7 +59,11 @@ export class PrismaMembersStore implements MembersStore {
       orderBy: { verifiedAt: 'desc' as const },
       take: 1,
     },
-    userRoles: { select: { role: { select: { name: true } } } },
+    userRoles: {
+      select: { role: { select: { name: true, colour: true, rankOrder: true } } },
+      // Highest first, so a card showing only the top one shows the top one.
+      orderBy: { role: { rankOrder: 'desc' as const } },
+    },
   };
 
   #toRow(u: {
@@ -69,11 +74,12 @@ export class PrismaMembersStore implements MembersStore {
     avatarStoredHash: string | null;
     bio: string | null;
     timezone: string;
+    lastPlayingAt: Date | null;
     joinedAt: Date;
     status: string;
     privacySettings: Partial<PrivacySettings> | null;
     cmdrVerifications: Array<{ cmdrName: string }>;
-    userRoles: Array<{ role: { name: string } }>;
+    userRoles: Array<{ role: { name: string; colour: string | null; rankOrder: number } }>;
   }): MemberRow {
     return {
       source: {
@@ -84,9 +90,10 @@ export class PrismaMembersStore implements MembersStore {
         avatarStoredHash: u.avatarStoredHash,
         bio: u.bio,
         timezone: u.timezone,
+        lastPlayingAt: u.lastPlayingAt,
         joinedAt: u.joinedAt,
         status: u.status,
-        ranks: u.userRoles.map((r) => r.role.name),
+        ranks: u.userRoles.map((r) => ({ name: r.role.name, colour: r.role.colour })),
         cmdrName: u.cmdrVerifications[0]?.cmdrName ?? null,
         // location, credits and fleet arrive with cAPI (P1.8, blocked on
         // Frontier). Absent here means absent from the response, which is the

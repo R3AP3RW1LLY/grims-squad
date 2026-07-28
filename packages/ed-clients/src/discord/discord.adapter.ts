@@ -4,6 +4,7 @@ import {
   type DiscordUser,
   type DiscordGuildMember,
   type DiscordGuildMemberSummary,
+  type DiscordGuildRole,
   DISCORD_SCOPE_STRING,
   DiscordApiError,
 } from './types.js';
@@ -171,6 +172,47 @@ export class DiscordAdapter implements IDiscordIdentityProvider {
     }
 
     return out;
+  }
+
+  /**
+   * Every role in the guild, with its colour.
+   *
+   * ★ THE COLOUR IS AN INTEGER, AND 0 MEANS "NO COLOUR" ★
+   *
+   * Discord stores a role colour as a 24-bit integer, and zero is not black —
+   * it is the sentinel for "this role has no colour set", in which case the
+   * member's name takes the colour of the next role down that does have one.
+   *
+   * Rendering 0 as #000000 would paint every uncoloured role invisible against
+   * a dark background, which is both wrong and the kind of wrong that looks
+   * like a CSS bug.
+   */
+  async listGuildRoles(guildId: string): Promise<DiscordGuildRole[]> {
+    const res = await this.#fetch(`${API}/guilds/${guildId}/roles`, {
+      headers: { authorization: `Bot ${this.config.botToken}` },
+    });
+    if (!res.ok) throw await this.#toError(res);
+
+    const roles = (await res.json()) as Array<{
+      id?: string;
+      name?: string;
+      color?: number;
+      position?: number;
+    }>;
+
+    return roles
+      .filter((r): r is { id: string; name: string; color?: number; position?: number } =>
+        typeof r.id === 'string' && typeof r.name === 'string',
+      )
+      .map((r) => ({
+        id: r.id,
+        name: r.name,
+        colour:
+          typeof r.color === 'number' && r.color > 0
+            ? `#${r.color.toString(16).padStart(6, '0')}`
+            : null,
+        position: typeof r.position === 'number' ? r.position : 0,
+      }));
   }
 
   async addRoleToMember(guildId: string, userId: string, roleId: string): Promise<void> {

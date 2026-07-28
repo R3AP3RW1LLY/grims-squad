@@ -162,7 +162,22 @@ export class TelemetryController {
       throw new AppError(ErrorCode.VALIDATION_FAILED, 'Expected an events array.');
     }
 
-    return this.ingest.ingest(device.userId, device.id, events as IncomingEvent[]);
+    /*
+     * ★ THE HEARTBEAT ★
+     *
+     * `gameRunning` says the member's journal is still being WRITTEN, which is
+     * the only honest "playing right now" signal we have. Elite's journal
+     * clusters at session start and then goes quiet for hours, so presence
+     * inferred from event recency would report somebody mid-flight as offline.
+     *
+     * A batch may carry this with NO events at all — that is the case it exists
+     * for, and why an empty array is accepted here rather than rejected.
+     */
+    const gameRunning = (body as Record<string, unknown> | null)?.['gameRunning'] === true;
+
+    return this.ingest.ingest(device.userId, device.id, events as IncomingEvent[], undefined, {
+      gameRunning,
+    });
   }
 }
 

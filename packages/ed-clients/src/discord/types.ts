@@ -34,6 +34,16 @@ export interface DiscordGuildMember {
 }
 
 /** One row of the full guild listing. Keyed by snowflake, since there is no OAuth token involved. */
+/** One role in the guild, as Discord describes it. */
+export interface DiscordGuildRole {
+  readonly id: string;
+  readonly name: string;
+  /** `#rrggbb`, or null when Discord reports no colour (integer 0). */
+  readonly colour: string | null;
+  /** Higher is nearer the top of the guild's role list. */
+  readonly position: number;
+}
+
 export interface DiscordGuildMemberSummary {
   readonly discordId: string;
   readonly roles: readonly string[];

@@ -46,8 +46,18 @@ export interface UploaderOptions {
 export class Uploader {
   constructor(private readonly opts: UploaderOptions) {}
 
-  async send(events: readonly ParsedEvent[]): Promise<UploadResult> {
-    if (events.length === 0) {
+  async send(
+    events: readonly ParsedEvent[],
+    options: { gameRunning?: boolean } = {},
+  ): Promise<UploadResult> {
+    const gameRunning = options.gameRunning ?? false;
+
+    /*
+     * An empty batch is normally nothing to do. It is NOT nothing when the
+     * journal is still growing: that is the heartbeat, and it is the only way
+     * the hub learns somebody is mid-flight rather than gone.
+     */
+    if (events.length === 0 && !gameRunning) {
       return { ok: true, accepted: 0, duplicates: 0, unauthorised: false, refused: {}, error: null };
     }
 
@@ -64,7 +74,7 @@ export class Uploader {
           // carrying a session — the device token is its whole identity.
           authorization: `Bearer ${this.opts.deviceToken}`,
         },
-        body: JSON.stringify({ events: events.slice(0, MAX_BATCH) }),
+        body: JSON.stringify({ events: events.slice(0, MAX_BATCH), gameRunning }),
         signal: ac.signal,
       });
 

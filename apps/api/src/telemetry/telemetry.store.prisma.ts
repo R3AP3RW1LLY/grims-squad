@@ -99,6 +99,18 @@ export class PrismaIngestStore implements IngestStore {
   }
 
   /**
+   * Records that the member's journal is being written right now.
+   *
+   * A bare timestamp rather than a session row: presence is a question with a
+   * five-minute answer, and modelling sessions would mean deciding when one
+   * ENDS — which the journal never says, because a game that crashes writes no
+   * goodbye.
+   */
+  async markPlaying(userId: string, at: Date): Promise<void> {
+    await this.#db.user.update({ where: { id: userId }, data: { lastPlayingAt: at } });
+  }
+
+  /**
    * The categories this member has opted into. Empty by default (INV-013).
    */
   async consentedCategories(userId: string): Promise<readonly string[]> {

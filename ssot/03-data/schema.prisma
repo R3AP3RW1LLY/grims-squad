@@ -326,6 +326,13 @@ model User {
   bio         String?
   /// IANA zone. Every user-facing time renders in this AND UTC (INV-025).
   timezone    String     @default("UTC")
+  /// Last moment the companion app saw the member's journal still being WRITTEN.
+  ///
+  /// Not "last event received" — Elite's journal clusters at session start and then goes quiet for
+  /// hours, so a member three hours into a flight has sent nothing recently and is very much
+  /// playing. The app reports that the file is still growing, which is the only honest in-game
+  /// signal available without widening what we collect.
+  lastPlayingAt DateTime? @map("last_playing_at") @db.Timestamptz(6)
   /// When the member finished the commander onboarding step.
   ///
   /// A SEPARATE COLUMN rather than inferring from `timezone`, because the default is "UTC" and

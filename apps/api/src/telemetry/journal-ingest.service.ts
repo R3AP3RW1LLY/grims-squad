@@ -55,6 +55,8 @@ export interface IngestStore {
   markGameActivityObserved(userId: string, month: Date, at: Date): Promise<void>;
   /** The telemetry categories this member has opted into. Empty by default. */
   consentedCategories(userId: string): Promise<readonly string[]>;
+  /** Records that the member's journal is being written right now. */
+  markPlaying(userId: string, at: Date): Promise<void>;
 }
 
 export interface IngestResult {
@@ -137,7 +139,18 @@ export class JournalIngestService {
     deviceTokenId: string,
     events: readonly IncomingEvent[],
     now: Date = new Date(),
+    options: { gameRunning?: boolean } = {},
   ): Promise<IngestResult> {
+    /*
+     * Stamped BEFORE anything else, and independently of whether a single event
+     * survives the filters. Presence is not a reward for sending us data — a
+     * member who has consented to nothing but is sitting in a cockpit right now
+     * should still show as playing.
+     */
+    if (options.gameRunning === true) {
+      await this.store.markPlaying(userId, now).catch(() => undefined);
+    }
+
     if (events.length > MAX_EVENTS_PER_REQUEST) {
       throw new AppError(
         ErrorCode.VALIDATION_FAILED,

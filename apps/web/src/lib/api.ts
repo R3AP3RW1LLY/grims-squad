@@ -35,9 +35,12 @@ export interface PublicProfile {
   avatarUrl: string | null;
   bio: string | null;
   timezone: string;
+  /** Journal still being written as of this instant. Drives "playing now".*/
+  lastPlayingAt: string | null;
   joinedAt: string;
   status: string;
-  ranks: string[];
+  /** Squadron roles, highest first, with the colour Discord shows them in. */
+  ranks: Array<{ name: string; colour: string | null }>;
   cmdrName: string | null;
   /*
    * These are OPTIONAL in the type, not nullable, and that is deliberate

@@ -32,18 +32,53 @@ function initials(name: string): string {
 }
 
 /**
- * "Today", "yesterday", or a date.
+ * How long ago, in units that are actually true.
  *
- * Relative for the recent past because that is how people think about activity —
- * "three days ago" lands, "25 July" needs arithmetic. Beyond a week it flips to
- * a date, where relative phrasing stops being easier to read than the thing it
- * describes.
+ * ★ THE BUG THIS REPLACES ★
+ *
+ * It used to compute ELAPSED 24-hour periods and then label them with CALENDAR
+ * words: anything under a day became "today". A session fifteen hours ago read
+ * as "today" even though it was the previous evening where the member lives —
+ * and "today" is a claim about a calendar, not about elapsed time, so the two
+ * were never the same statement.
+ *
+ * Elapsed hours are what we can compute correctly from an instant without
+ * knowing anybody's calendar, so that is what it now says. Beyond a couple of
+ * days hours stop being meaningful and it moves to days, then to a date.
  */
+/**
+ * How long a journal must have been quiet before we stop calling it "playing".
+ *
+ * The companion polls every twenty seconds, so a live session refreshes this
+ * constantly. Five minutes covers a slow poll, a brief network drop and a
+ * loading screen without leaving somebody marked online for an hour after they
+ * quit — which is the failure that makes a presence indicator worthless.
+ */
+const PLAYING_WINDOW_MS = 5 * 60_000;
+
+export function isPlayingNow(lastPlayingAt: string | null, now: number = Date.now()): boolean {
+  if (lastPlayingAt === null) return false;
+  const since = now - new Date(lastPlayingAt).getTime();
+  return Number.isFinite(since) && since >= 0 && since < PLAYING_WINDOW_MS;
+}
+
 function lastSeen(iso: string, timezone: string): string {
-  const days = Math.floor((Date.now() - new Date(iso).getTime()) / 86400_000);
-  if (days <= 0) return 'today';
-  if (days === 1) return 'yesterday';
+  const ms = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(ms)) return '';
+
+  // A clock skewed slightly ahead should not produce "-1 hours ago".
+  if (ms < 0) return 'just now';
+
+  const minutes = Math.floor(ms / 60_000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes} min ago`;
+
+  const hours = Math.floor(ms / 3_600_000);
+  if (hours < 48) return hours === 1 ? '1 hour ago' : `${hours} hours ago`;
+
+  const days = Math.floor(ms / 86_400_000);
   if (days < 7) return `${days} days ago`;
+
   return formatLocal(iso, timezone, { withTime: false });
 }
 
@@ -56,6 +91,7 @@ export function RosterCard({
   viewerTimezone: string;
 }) {
   const { commander } = member;
+  const playing = isPlayingNow(member.lastPlayingAt);
 
   /*
    * Three at most, highest first. A commander who has ground every ladder would
@@ -107,8 +143,29 @@ export function RosterCard({
               </p>
             )}
             {member.ranks.length > 0 && (
-              <p className="mt-1.5 truncate text-xs text-[var(--color-text-secondary)]">
-                {member.ranks.join(' · ')}
+              /*
+                ★ IN THE COLOUR DISCORD USES ★
+
+                Recognising your own colour is faster than reading your own role
+                name, and the two disagreeing across the two places a member
+                looks reads as a bug in one of them.
+
+                A role with no colour set falls back to the theme's secondary
+                text. Discord reports that case as integer 0, which is NOT black
+                — painting it #000000 would make it invisible on a dark page.
+              */
+              <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
+                {member.ranks.map((r, i) => (
+                  <span key={r.name} className="flex items-center gap-2">
+                    {i > 0 && <span className="text-[var(--color-text-secondary)]">·</span>}
+                    <span
+                      style={r.colour !== null ? { color: r.colour } : undefined}
+                      className={r.colour === null ? 'text-[var(--color-text-secondary)]' : ''}
+                    >
+                      {r.name}
+                    </span>
+                  </span>
+                ))}
               </p>
             )}
           </div>
@@ -153,13 +210,32 @@ export function RosterCard({
             </dd>
           </div>
 
-          {commander.lastPlayedAt !== null && (
+          {/*
+            "Playing now" outranks "last flew" — they are answers to the same
+            question and the live one is strictly better. Shown with a dot as
+            well as words: a colour alone is unreadable to anybody who cannot
+            distinguish it, and "now" is worth being unambiguous about.
+          */}
+          {playing ? (
             <div className="flex justify-between gap-3">
-              <dt className="text-[var(--color-text-secondary)]">Last flew</dt>
-              <dd className="truncate text-right text-[var(--color-text-primary)]">
-                {lastSeen(commander.lastPlayedAt, viewerTimezone)}
+              <dt className="text-[var(--color-text-secondary)]">Status</dt>
+              <dd className="flex items-center gap-2 text-right text-[var(--color-semantic-success)]">
+                <span
+                  aria-hidden="true"
+                  className="size-2 shrink-0 rounded-full bg-[var(--color-semantic-success)]"
+                />
+                Playing now
               </dd>
             </div>
+          ) : (
+            commander.lastPlayedAt !== null && (
+              <div className="flex justify-between gap-3">
+                <dt className="text-[var(--color-text-secondary)]">Last flew</dt>
+                <dd className="truncate text-right text-[var(--color-text-primary)]">
+                  {lastSeen(commander.lastPlayedAt, viewerTimezone)}
+                </dd>
+              </div>
+            )
           )}
 
           {/*
@@ -182,15 +258,36 @@ export function RosterCard({
   );
 }
 
-/** What time it is where they are. */
+/**
+ * What time it is where they are, as `9:15 PM`.
+ *
+ * ★ COMPOSED FROM PARTS, NOT FORMATTED AND PATCHED ★
+ *
+ * `hour12: true` under en-GB renders "9:15 pm" — lowercase, and with a
+ * non-breaking space that a naive `.toUpperCase()` on the whole string leaves
+ * looking wrong. Other locales put the period first or use a different
+ * separator entirely.
+ *
+ * Reading the parts and assembling them means the output is the same shape
+ * whatever locale the runtime defaults to, which for a card comparing a dozen
+ * members' clocks is the point.
+ */
 function localClock(timeZone: string): string {
   try {
-    return new Intl.DateTimeFormat('en-GB', {
+    const parts = new Intl.DateTimeFormat('en-US', {
       timeZone,
-      hour: '2-digit',
+      hour: 'numeric',
       minute: '2-digit',
-      hourCycle: 'h23',
-    }).format(new Date());
+      hour12: true,
+    }).formatToParts(new Date());
+
+    const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '';
+    const hour = get('hour');
+    const minute = get('minute');
+    const period = get('dayPeriod').toUpperCase();
+
+    if (hour === '' || minute === '') return '';
+    return `${hour}:${minute} ${period}`.trim();
   } catch {
     return '';
   }

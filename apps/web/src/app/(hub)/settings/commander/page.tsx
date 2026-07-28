@@ -117,16 +117,16 @@ export default async function CommanderPage({
               </Panel>
 
               {/*
-                In the rail, where it is read BEFORE somebody pastes a key — not
-                surfaced after a failure that was never their fault. Inara
-                refuses every call from an unregistered application, and our
-                registration is still outstanding.
+                Inara approved our application on 2026-07-28, so the warning that
+                stood here is gone. It is replaced rather than simply deleted:
+                somebody who read the old panel needs to know the situation
+                changed, not just find the explanation missing.
               */}
-              <Panel title="Not available yet" tone="warning">
-                <p className="text-sm leading-relaxed text-[var(--color-text-primary)]">
-                  Inara requires our application to be registered before it will answer any key, and
-                  that request is still outstanding. Ask an officer to verify you for now — it works
-                  just as well.
+              <Panel title="How long it takes">
+                <p className="text-sm leading-relaxed text-[var(--color-text-secondary)]">
+                  Immediate. We ask Inara who the key belongs to and verify you from their answer —
+                  no queue and nobody else involved. Inara limits us to a couple of calls a minute
+                  across the whole squadron, so a busy moment may mean a short wait.
                 </p>
               </Panel>
 

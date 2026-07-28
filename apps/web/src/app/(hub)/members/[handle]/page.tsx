@@ -122,7 +122,18 @@ export default async function MemberPage({ params }: { params: Promise<{ handle:
               {formatLocal(p.joinedAt, me.user?.timezone ?? 'UTC', { withTime: false })}
             </time>
           </Row>
-          {p.ranks.length > 0 && <Row label="Ranks">{p.ranks.join(' · ')}</Row>}
+          {p.ranks.length > 0 && (
+            <Row label="Roles">
+              <span className="flex flex-wrap items-center gap-x-2">
+                {p.ranks.map((r, i) => (
+                  <span key={r.name} className="flex items-center gap-2">
+                    {i > 0 && <span className="text-[var(--color-text-secondary)]">·</span>}
+                    <span style={r.colour !== null ? { color: r.colour } : undefined}>{r.name}</span>
+                  </span>
+                ))}
+              </span>
+            </Row>
+          )}
           <Row label="Timezone">{p.timezone}</Row>
 
           {'location' in p && (
