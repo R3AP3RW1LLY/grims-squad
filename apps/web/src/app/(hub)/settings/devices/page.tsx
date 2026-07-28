@@ -1,11 +1,18 @@
 import type { Metadata } from 'next';
-import { getMyDevices, getMyTelemetryConsent, getMe } from '../../../../lib/api';
+import {
+  getMyDevices,
+  getMyTelemetryConsent,
+  getMe,
+  getCompanionReleases,
+} from '../../../../lib/api';
 import { formatLocal } from '../../../../lib/time';
 import { DevicesPanel } from './devices-panel';
+import { CompanionDownload } from './download';
 import {
   PageHeader,
   PageBody,
   Panel,
+  Section,
   RailStat,
   CouldNotLoad,
 } from '../../../../components/hub-page';
@@ -18,10 +25,11 @@ export const metadata: Metadata = {
 export const dynamic = 'force-dynamic';
 
 export default async function DevicesPage() {
-  const [devices, consent, me] = await Promise.all([
+  const [devices, consent, me, releases] = await Promise.all([
     getMyDevices(),
     getMyTelemetryConsent(),
     getMe(),
+    getCompanionReleases(),
   ]);
 
   const active = devices?.devices.length ?? 0;
@@ -93,6 +101,20 @@ export default async function DevicesPage() {
                   href="/settings/privacy"
                   className="mt-2 block text-sm text-[var(--color-brand-cyan-bright)]"
                 >
+          {/*
+            ★ THE DOWNLOAD COMES FIRST ★
+
+            The order is: get it, pair it, choose what it sends. Somebody who
+            has not installed the app cannot act on anything below, so putting
+            the pairing panel above the download asks them to do step two first.
+          */}
+          <Section
+            title="Download"
+            description="Windows, macOS and Linux. Elite has had no native Mac client since 2015 and none on Linux, so players on both run it through CrossOver, Whisky or Proton — this is a normal Mac or Linux program that knows where those put the journal files."
+          >
+            <CompanionDownload assets={releases?.assets ?? []} />
+          </Section>
+
                   Who can see this data
                 </a>
               </Panel>
