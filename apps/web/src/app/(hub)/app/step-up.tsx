@@ -1,15 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-
-function readCsrf(): string {
-  const jar = document.cookie.split('; ');
-  for (const name of ['__Host-gs_csrf', 'gs_csrf']) {
-    const hit = jar.find((c) => c.startsWith(`${name}=`));
-    if (hit !== undefined) return decodeURIComponent(hit.slice(name.length + 1));
-  }
-  return '';
-}
+import { apiPost } from '../../../lib/api-client';
 
 /**
  * The step-up challenge.
@@ -30,16 +22,18 @@ export function StepUp() {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch('/v1/auth/totp/verify', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'content-type': 'application/json', 'x-csrf-token': readCsrf() },
-        body: JSON.stringify(recovery.trim() === '' ? { code } : { recoveryCode: recovery }),
-      });
-      if (!res.ok) {
-        const j = (await res.json().catch(() => ({}))) as { message?: string };
-        throw new Error(j.message ?? 'That code was not accepted.');
-      }
+      /*
+       * Through the shared client, which fixes a second bug on the way: this
+       * read `j.message` off the TOP LEVEL of the response, but the API answers
+       * with an envelope — { error: { message } }. So the real reason was always
+       * undefined, and every failure read "That code was not accepted." —
+       * including the ones that were about something else entirely.
+       */
+      await apiPost(
+        '/v1/auth/totp/verify',
+        recovery.trim() === '' ? { code } : { recoveryCode: recovery },
+        'That code was not accepted.',
+      );
       // Full reload rather than a client-side refresh: the step-up cookie has
       // just been set and the page is server-rendered, so the server has to
       // fetch again with it.
@@ -92,7 +86,7 @@ export function StepUp() {
         />
 
         <details className="mt-8">
-          <summary className="cursor-pointer text-sm text-[var(--color-text-muted)]">
+          <summary className="cursor-pointer text-sm text-[var(--color-text-secondary)]">
             Lost your authenticator?
           </summary>
           <label htmlFor="stepup-recovery" className="mt-4 block text-sm text-[var(--color-text-primary)]">
@@ -104,7 +98,7 @@ export function StepUp() {
             onChange={(e) => setRecovery(e.currentTarget.value)}
             className="mt-2 w-full max-w-sm rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-void)] px-4 py-2.5 font-mono text-sm text-[var(--color-text-primary)]"
           />
-          <p className="mt-2 text-xs text-[var(--color-text-muted)]">
+          <p className="mt-2 text-xs text-[var(--color-text-secondary)]">
             Each code works once. Set up a new authenticator afterwards.
           </p>
         </details>
@@ -118,7 +112,7 @@ export function StepUp() {
           Continue
         </button>
 
-        <p className="mt-10 text-sm text-[var(--color-text-muted)]">
+        <p className="mt-10 text-sm text-[var(--color-text-secondary)]">
           Not set up yet?{' '}
           <a href="/settings/security" className="text-[var(--color-brand-cyan-bright)]">
             Enrol an authenticator

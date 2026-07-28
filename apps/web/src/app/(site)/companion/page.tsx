@@ -26,7 +26,7 @@ function Row({ what, journal, without }: { what: string; journal: string; withou
     <tr className="border-b border-[var(--color-border-hairline)]">
       <td className="py-3 pr-6 text-[var(--color-text-primary)]">{what}</td>
       <td className="py-3 pr-6 text-sm text-[var(--color-brand-cyan-bright)]">{journal}</td>
-      <td className="py-3 text-sm text-[var(--color-text-muted)]">{without}</td>
+      <td className="py-3 text-sm text-[var(--color-text-secondary)]">{without}</td>
     </tr>
   );
 }
@@ -53,7 +53,7 @@ export default function CompanionPage() {
           entering anything.
         </p>
 
-        <p className="mt-4 rounded border border-[var(--color-border-hairline)] px-4 py-3 text-sm text-[var(--color-text-muted)]">
+        <p className="mt-4 rounded border border-[var(--color-border-hairline)] px-4 py-3 text-sm text-[var(--color-text-secondary)]">
           <strong className="text-[var(--color-text-primary)]">It is optional.</strong> The site
           works fully without it and always will. An officer can verify your commander by hand, and
           you can hold any rank in the squadron without ever installing it. This is about
@@ -71,7 +71,7 @@ export default function CompanionPage() {
           <div className="mt-6 overflow-x-auto">
             <table className="w-full min-w-[640px] border-collapse text-left">
               <thead>
-                <tr className="border-b border-[var(--color-border-hairline)] font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-muted)]">
+                <tr className="border-b border-[var(--color-border-hairline)] font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-secondary)]">
                   <th scope="col" className="py-3 pr-6">Your record</th>
                   <th scope="col" className="py-3 pr-6">With the app</th>
                   <th scope="col" className="py-3">Without it</th>
@@ -104,7 +104,7 @@ export default function CompanionPage() {
             which is a real thing to ask — the answer to "what is it doing on my
             machine" should be on the page, not in a FAQ nobody opens.
           */}
-          <ul className="mt-4 space-y-2 text-sm text-[var(--color-text-muted)]">
+          <ul className="mt-4 space-y-2 text-sm text-[var(--color-text-secondary)]">
             <li>
               It reads <strong>only</strong> the Elite Dangerous journal folder. Nothing else on
               your machine is touched.
@@ -125,7 +125,7 @@ export default function CompanionPage() {
           >
             MARKET DATA AND TRADE ROUTES
           </h2>
-          <p className="mt-4 text-sm text-[var(--color-text-muted)]">
+          <p className="mt-4 text-sm text-[var(--color-text-secondary)]">
             Our app does not do market or route planning, and does not try to. If you want those,
             keep using EDMC, EDDiscovery or Inara alongside it — they feed the community data
             network that the whole game relies on, and ours is happy to sit beside them rather than
@@ -150,7 +150,7 @@ export default function CompanionPage() {
             In testing. It will be announced in Discord when there is a build worth installing, and
             this page will carry the download.
           </p>
-          <p className="mt-3 text-sm text-[var(--color-text-muted)]">
+          <p className="mt-3 text-sm text-[var(--color-text-secondary)]">
             Windows, macOS and Linux. Elite has had no native Mac client since 2015 and none on
             Linux, so players on both run it through CrossOver, Whisky or Proton — the app is a
             normal Mac or Linux program that knows where those put the game&rsquo;s journal files.

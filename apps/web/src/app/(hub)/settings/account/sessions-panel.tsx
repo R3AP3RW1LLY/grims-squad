@@ -61,7 +61,7 @@ export function SessionsPanel({ initial }: { initial: SessionRow[] }) {
   }
 
   if (rows.length === 0) {
-    return <p className="mt-8 text-sm text-[var(--color-text-muted)]">No active sessions.</p>;
+    return <p className="mt-8 text-sm text-[var(--color-text-secondary)]">No active sessions.</p>;
   }
 
   return (
@@ -89,7 +89,7 @@ export function SessionsPanel({ initial }: { initial: SessionRow[] }) {
                   </span>
                 )}
               </p>
-              <p className="mt-1 font-mono text-xs text-[var(--color-text-muted)]">
+              <p className="mt-1 font-mono text-xs text-[var(--color-text-secondary)]">
                 Last used {when(s.lastUsedAt)} UTC · signed in {when(s.createdAt)} UTC
               </p>
             </div>

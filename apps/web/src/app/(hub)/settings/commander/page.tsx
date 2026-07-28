@@ -45,7 +45,7 @@ export default async function CommanderPage() {
               taking your word for it. Your Discord nickname is then kept matching your in-game
               name.
             </p>
-            <p className="mt-3 text-sm text-[var(--color-text-muted)]">
+            <p className="mt-3 text-sm text-[var(--color-text-secondary)]">
               Entirely optional. Without a key an officer verifies you by hand instead — it works
               just as well, it simply needs a person. Adding a key later upgrades you without
               anyone else being involved.
@@ -71,7 +71,7 @@ export default async function CommanderPage() {
               shows comes from the companion app, and saying so here stops
               people wondering why their ships never appear.
             */}
-            <p className="mt-4 text-sm text-[var(--color-text-muted)]">
+            <p className="mt-4 text-sm text-[var(--color-text-secondary)]">
               Inara is used for two things only: confirming your commander name, and checking you
               are in Grim&rsquo;s Squad. Your ranks, ships, loadouts and activity all come from the{' '}
               <a href="/companion" className="text-[var(--color-brand-cyan-bright)]">
@@ -91,7 +91,7 @@ export default async function CommanderPage() {
               >
                 WHAT WE DO WITH IT
               </h2>
-              <ul className="mt-4 space-y-2 text-sm text-[var(--color-text-muted)]">
+              <ul className="mt-4 space-y-2 text-sm text-[var(--color-text-secondary)]">
                 <li>
                   We ask Inara which commander the key belongs to. That answer is what verifies you
                   — you never type your own commander name here.

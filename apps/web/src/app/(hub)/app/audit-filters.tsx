@@ -67,7 +67,7 @@ export function AuditFilters({
     <div className="mt-6">
       <div className="flex flex-wrap items-end gap-4">
         <div>
-          <label htmlFor="f-actor" className="block text-xs text-[var(--color-text-muted)]">
+          <label htmlFor="f-actor" className="block text-xs text-[var(--color-text-secondary)]">
             Actor (handle)
           </label>
           <input
@@ -79,7 +79,7 @@ export function AuditFilters({
         </div>
 
         <div>
-          <label htmlFor="f-action" className="block text-xs text-[var(--color-text-muted)]">
+          <label htmlFor="f-action" className="block text-xs text-[var(--color-text-secondary)]">
             Action
           </label>
           {/*
@@ -102,7 +102,7 @@ export function AuditFilters({
         </div>
 
         <div>
-          <label htmlFor="f-since" className="block text-xs text-[var(--color-text-muted)]">
+          <label htmlFor="f-since" className="block text-xs text-[var(--color-text-secondary)]">
             From
           </label>
           <input
@@ -115,7 +115,7 @@ export function AuditFilters({
         </div>
 
         <div>
-          <label htmlFor="f-until" className="block text-xs text-[var(--color-text-muted)]">
+          <label htmlFor="f-until" className="block text-xs text-[var(--color-text-secondary)]">
             To
           </label>
           <input
@@ -138,7 +138,7 @@ export function AuditFilters({
         <button
           type="button"
           onClick={reset}
-          className="rounded border border-[var(--color-border-hairline)] px-4 py-1.5 font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--color-text-muted)]"
+          className="rounded border border-[var(--color-border-hairline)] px-4 py-1.5 font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--color-text-secondary)]"
         >
           Reset
         </button>
@@ -150,7 +150,7 @@ export function AuditFilters({
         </p>
       )}
 
-      <p aria-live="polite" className="mt-4 text-xs text-[var(--color-text-muted)]">
+      <p aria-live="polite" className="mt-4 text-xs text-[var(--color-text-secondary)]">
         {rows.length} entries
       </p>
 
@@ -160,11 +160,11 @@ export function AuditFilters({
             key={e.id}
             className="flex flex-wrap gap-x-4 border-b border-[var(--color-border-hairline)] py-2.5 font-mono text-xs"
           >
-            <time dateTime={e.createdAt} className="w-40 shrink-0 text-[var(--color-text-muted)]">
+            <time dateTime={e.createdAt} className="w-40 shrink-0 text-[var(--color-text-secondary)]">
               {new Date(e.createdAt).toISOString().replace('T', ' ').slice(0, 16)}
             </time>
             <span className="text-[var(--color-brand-cyan-bright)]">{e.action}</span>
-            <span className="text-[var(--color-text-muted)]">
+            <span className="text-[var(--color-text-secondary)]">
               {/*
                 "system" when there is no actor, and that is a real distinction:
                 a reconciliation or a promotion had no human behind it, and
@@ -178,7 +178,7 @@ export function AuditFilters({
       </ul>
 
       {rows.length === 0 && (
-        <p className="mt-6 text-sm text-[var(--color-text-muted)]">
+        <p className="mt-6 text-sm text-[var(--color-text-secondary)]">
           Nothing matches those filters.
         </p>
       )}

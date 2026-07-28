@@ -47,14 +47,14 @@ export default async function RosterPage() {
             'The register is not available right now.'
           )}
         </p>
-        <p className="mt-3 text-sm text-[var(--color-text-muted)]">
+        <p className="mt-3 text-sm text-[var(--color-text-secondary)]">
           Appearing on this page is opt-in, and so is every field on it. A commander who is not
           listed has simply chosen not to be — it says nothing about their standing.
         </p>
       </div>
 
       {members.length === 0 ? (
-        <p className="mx-auto mt-14 max-w-[70ch] rounded border border-[var(--color-border-hairline)] px-5 py-6 text-sm text-[var(--color-text-muted)]">
+        <p className="mx-auto mt-14 max-w-[70ch] rounded border border-[var(--color-border-hairline)] px-5 py-6 text-sm text-[var(--color-text-secondary)]">
           No commander has opted into the public roster yet. Members can turn this on under{' '}
           <a href="/settings/privacy" className="text-[var(--color-brand-cyan-bright)]">
             privacy settings
@@ -81,7 +81,7 @@ export default async function RosterPage() {
                   </p>
                 )}
                 {m.ranks.length > 0 && (
-                  <p className="mt-3 text-sm text-[var(--color-text-muted)]">{m.ranks.join(' · ')}</p>
+                  <p className="mt-3 text-sm text-[var(--color-text-secondary)]">{m.ranks.join(' · ')}</p>
                 )}
                 {/*
                   Rendered ONLY when the key is present. `m.location != null`
@@ -89,7 +89,7 @@ export default async function RosterPage() {
                   data", and the second of those deserves a different answer.
                 */}
                 {'location' in m && m.location != null && (
-                  <p className="mt-3 font-mono text-xs text-[var(--color-text-muted)]">
+                  <p className="mt-3 font-mono text-xs text-[var(--color-text-secondary)]">
                     {m.location.system}
                   </p>
                 )}

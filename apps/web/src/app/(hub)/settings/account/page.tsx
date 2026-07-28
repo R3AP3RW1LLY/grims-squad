@@ -48,7 +48,7 @@ export default async function AccountSettingsPage() {
               >
                 SIGNED-IN DEVICES
               </h2>
-              <p className="mt-3 text-sm text-[var(--color-text-muted)]">
+              <p className="mt-3 text-sm text-[var(--color-text-secondary)]">
                 Ending a session signs that device out immediately. If you see something here you do
                 not recognise, end it and tell an officer.
               </p>
@@ -68,7 +68,7 @@ export default async function AccountSettingsPage() {
                 settings, Discord link, roles, verified commander names, activity totals and
                 sessions.
               </p>
-              <p className="mt-3 text-sm text-[var(--color-text-muted)]">
+              <p className="mt-3 text-sm text-[var(--color-text-secondary)]">
                 Access tokens are not included. They are credentials for your Discord account that
                 we hold on your behalf, and a copy in your downloads folder would help nobody.
               </p>
@@ -81,7 +81,7 @@ export default async function AccountSettingsPage() {
               </a>
             </section>
 
-            <p className="mt-16 text-sm text-[var(--color-text-muted)]">
+            <p className="mt-16 text-sm text-[var(--color-text-secondary)]">
               Also here:{' '}
               <a href="/settings/privacy" className="text-[var(--color-brand-cyan-bright)]">
                 privacy settings

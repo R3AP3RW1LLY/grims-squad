@@ -45,7 +45,7 @@ export default async function PrivacySettingsPage() {
               you turn it on, and each item is separate — showing your position does not also show
               your balance.
             </p>
-            <p className="mt-3 text-sm text-[var(--color-text-muted)]">
+            <p className="mt-3 text-sm text-[var(--color-text-secondary)]">
               Changes save as you make them. A field you have not turned on is not sent to anyone
               asking — it is left out of the answer entirely, rather than sent blank.
             </p>

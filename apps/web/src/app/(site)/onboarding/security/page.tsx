@@ -13,6 +13,14 @@ export const dynamic = 'force-dynamic';
 /**
  * The forced onboarding step for a privileged account.
  *
+ * ★ THERE IS NO WAY PAST IT ★
+ *
+ * The (hub) layout redirects here from every members-area page while the
+ * account is privileged and unenrolled, so this is not a suggestion and cannot
+ * be navigated around. The API refuses the same accounts regardless — that is
+ * the security boundary — and this is what stops somebody wandering a members
+ * area where every admin link 403s.
+ *
  * A member lands here automatically the first time they sign in holding an
  * admin permission, or the next time they sign in after being promoted into
  * one. Nobody is told to go and find a settings page.
@@ -78,7 +86,7 @@ export default async function SecurityOnboardingPage() {
               instruction; naming what they hold makes it an explanation, and
               people follow explanations.
             */}
-            <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-[var(--color-text-muted)]">
+            <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-[var(--color-text-secondary)]">
               You hold
             </p>
             <ul className="mt-3 space-y-1 font-mono text-xs text-[var(--color-brand-cyan-bright)]">
@@ -86,7 +94,7 @@ export default async function SecurityOnboardingPage() {
                 <li key={p}>{p.replace(/_/g, ' ').toLowerCase()}</li>
               ))}
             </ul>
-            <p className="mt-4 text-sm text-[var(--color-text-muted)]">
+            <p className="mt-4 text-sm text-[var(--color-text-secondary)]">
               A stolen Discord account with these permissions is other people&rsquo;s problem, not
               just yours. That is the whole reason this step exists.
             </p>
@@ -95,9 +103,9 @@ export default async function SecurityOnboardingPage() {
 
         <SecurityForm enrolled={false} onDone="/app" />
 
-        <p className="mt-12 text-sm text-[var(--color-text-muted)]">
-          Nothing else on the site is blocked — you can browse normally. Only the admin tools wait
-          on this.
+        <p className="mt-12 text-sm text-[var(--color-text-secondary)]">
+          The public site is still open to you — the roster, the recruitment pages, everything a
+          visitor can see. Your own dashboard and the admin tools wait on this step.
         </p>
       </div>
     </main>

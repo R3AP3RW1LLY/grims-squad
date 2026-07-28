@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { errorFromResponse } from '../../../../lib/api-error';
+import { apiPost } from '../../../../lib/api-client';
 
 export interface RoleRow {
   id: string;
@@ -64,30 +64,6 @@ const PERMISSIONS: ReadonlyArray<[string, number]> = [
   ['TELEMETRY_WRITE', 70],
 ];
 
-function readCsrf(): string {
-  const jar = document.cookie.split('; ');
-  for (const name of ['__Host-gs_csrf', 'gs_csrf']) {
-    const hit = jar.find((c) => c.startsWith(`${name}=`));
-    if (hit !== undefined) return decodeURIComponent(hit.slice(name.length + 1));
-  }
-  return '';
-}
-
-async function post<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(path, {
-    method: 'POST',
-    credentials: 'same-origin',
-    headers: { 'content-type': 'application/json', 'x-csrf-token': readCsrf() },
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    // The API answers with an ENVELOPE. Reading json.message off the top level
-    // always yielded undefined and threw away the real reason.
-    throw new Error((await errorFromResponse(res)).message);
-  }
-  return (await res.json().catch(() => ({}))) as T;
-}
-
 /**
  * The role editor.
  *
@@ -131,7 +107,7 @@ export function RoleEditor({ roles }: { roles: RoleRow[] }) {
     setBusy(true);
     setError(null);
     try {
-      setPreview(await post<MaskPreview>(`/v1/admin/roles/${selected.id}/preview`, {
+      setPreview(await apiPost<MaskPreview>(`/v1/admin/roles/${selected.id}/preview`, {
         permMask: mask.toString(),
       }));
     } catch (e) {
@@ -146,7 +122,7 @@ export function RoleEditor({ roles }: { roles: RoleRow[] }) {
     setBusy(true);
     setError(null);
     try {
-      const r = await post<MaskPreview>(`/v1/admin/roles/${selected.id}`, {
+      const r = await apiPost<MaskPreview>(`/v1/admin/roles/${selected.id}`, {
         permMask: mask.toString(),
       });
       setSaved(`Saved. ${r.affected.length} member(s) affected.`);
@@ -182,7 +158,7 @@ export function RoleEditor({ roles }: { roles: RoleRow[] }) {
 
       <div>
         {selected === null ? (
-          <p className="text-sm text-[var(--color-text-muted)]">Pick a role to edit.</p>
+          <p className="text-sm text-[var(--color-text-secondary)]">Pick a role to edit.</p>
         ) : (
           <>
             <h3
@@ -264,11 +240,11 @@ export function RoleEditor({ roles }: { roles: RoleRow[] }) {
                 )}
 
                 {preview.unchanged ? (
-                  <p className="text-sm text-[var(--color-text-muted)]">
+                  <p className="text-sm text-[var(--color-text-secondary)]">
                     Nothing would change.
                   </p>
                 ) : preview.affected.length === 0 ? (
-                  <p className="text-sm text-[var(--color-text-muted)]">
+                  <p className="text-sm text-[var(--color-text-secondary)]">
                     The mask changes, but no current member&rsquo;s effective permissions do — they
                     hold these through another role, or their deny mask removes them.
                   </p>

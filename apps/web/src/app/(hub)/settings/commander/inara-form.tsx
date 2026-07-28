@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { errorFromResponse } from '../../../../lib/api-error';
+import { apiCall } from '../../../../lib/api-client';
 
 export interface InaraStatus {
   linked: boolean;
@@ -10,32 +10,6 @@ export interface InaraStatus {
   lastCheckedAt: string | null;
   lastError: string | null;
   source: string | null;
-}
-
-function readCsrf(): string {
-  const jar = document.cookie.split('; ');
-  for (const name of ['__Host-gs_csrf', 'gs_csrf']) {
-    const hit = jar.find((c) => c.startsWith(`${name}=`));
-    if (hit !== undefined) return decodeURIComponent(hit.slice(name.length + 1));
-  }
-  return '';
-}
-
-async function send<T>(path: string, method: string, body?: unknown): Promise<T> {
-  const init: RequestInit = {
-    method,
-    credentials: 'same-origin',
-    headers: { 'content-type': 'application/json', 'x-csrf-token': readCsrf() },
-  };
-  if (body !== undefined) init.body = JSON.stringify(body);
-
-  const res = await fetch(path, init);
-  if (!res.ok) {
-    // The API answers with an ENVELOPE. Reading json.message off the top level
-    // always yielded undefined and threw away the real reason.
-    throw new Error((await errorFromResponse(res)).message);
-  }
-  return (await res.json().catch(() => ({}))) as T;
 }
 
 /**
@@ -62,9 +36,8 @@ export function InaraForm({ initial }: { initial: InaraStatus }) {
     setError(null);
     setNotice(null);
     try {
-      const r = await send<{ cmdrName: string; verified: boolean }>('/v1/me/inara', 'POST', {
-        apiKey: key,
-        source: 'web',
+      const r = await apiCall<{ cmdrName: string; verified: boolean }>('POST', '/v1/me/inara', {
+        body: { apiKey: key, source: 'web' },
       });
       // Cleared immediately. There is no reason for a credential to sit in a
       // form field after it has been accepted.
@@ -83,9 +56,9 @@ export function InaraForm({ initial }: { initial: InaraStatus }) {
     setError(null);
     setNotice(null);
     try {
-      const r = await send<{ cmdrName: string; error: string | null }>(
-        '/v1/me/inara/refresh',
+      const r = await apiCall<{ cmdrName: string; error: string | null }>(
         'POST',
+        '/v1/me/inara/refresh',
       );
       setStatus({ ...status, cmdrName: r.cmdrName, lastError: r.error });
       setNotice(r.error ?? `Still CMDR ${r.cmdrName}. Nickname checked.`);
@@ -100,7 +73,7 @@ export function InaraForm({ initial }: { initial: InaraStatus }) {
     setBusy(true);
     setError(null);
     try {
-      await send('/v1/me/inara', 'DELETE');
+      await apiCall('DELETE', '/v1/me/inara');
       setStatus({ ...status, linked: false, lastError: null, source: null });
       setNotice('Key removed. Your commander name stays verified.');
     } catch (e) {
@@ -162,7 +135,7 @@ export function InaraForm({ initial }: { initial: InaraStatus }) {
               type="button"
               onClick={() => void unlink()}
               disabled={busy}
-              className="rounded border border-[var(--color-border-hairline)] px-5 py-2.5 font-mono text-[12px] uppercase tracking-[0.24em] text-[var(--color-text-muted)] hover:border-[var(--color-brand-orange)] hover:text-[var(--color-brand-orange)] disabled:opacity-50"
+              className="rounded border border-[var(--color-border-hairline)] px-5 py-2.5 font-mono text-[12px] uppercase tracking-[0.24em] text-[var(--color-text-secondary)] hover:border-[var(--color-brand-orange)] hover:text-[var(--color-brand-orange)] disabled:opacity-50"
             >
               Remove key
             </button>
@@ -173,7 +146,7 @@ export function InaraForm({ initial }: { initial: InaraStatus }) {
           <label htmlFor="inara-key" className="block text-[var(--color-text-primary)]">
             Inara API key
           </label>
-          <p id="inara-help" className="mt-2 max-w-[70ch] text-sm text-[var(--color-text-muted)]">
+          <p id="inara-help" className="mt-2 max-w-[70ch] text-sm text-[var(--color-text-secondary)]">
             On Inara, open your profile menu &rarr; <strong>API keys</strong>, generate one, and
             paste it here. We use it only to ask Inara which commander the key belongs to.
           </p>

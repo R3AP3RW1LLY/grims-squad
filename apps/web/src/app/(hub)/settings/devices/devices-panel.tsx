@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import type { DeviceRow, TelemetryConsent } from '../../../../lib/api';
-import { errorFromResponse } from '../../../../lib/api-error';
+import { apiPost, apiPut, apiDelete } from '../../../../lib/api-client';
 
 /**
  * Pairing the companion app, and choosing what it may send.
@@ -37,17 +37,6 @@ const CATEGORY_COPY: Record<string, { label: string; help: string }> = {
   },
 };
 
-function readCsrf(): string {
-  // Deliberately readable — that is the whole mechanism. The __Host- prefix is
-  // used over https and not over plain http, so both spellings are checked.
-  const jar = document.cookie.split('; ');
-  for (const name of ['__Host-gs_csrf', 'gs_csrf']) {
-    const hit = jar.find((c) => c.startsWith(`${name}=`));
-    if (hit !== undefined) return decodeURIComponent(hit.slice(name.length + 1));
-  }
-  return '';
-}
-
 export function DevicesPanel({
   initialDevices,
   initialConsent,
@@ -69,15 +58,10 @@ export function DevicesPanel({
     setError(null);
     setPurged(null);
     try {
-      const res = await fetch('/v1/me/devices', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'content-type': 'application/json', 'x-csrf-token': readCsrf() },
-        body: JSON.stringify({ label }),
-      });
-      if (!res.ok) throw await errorFromResponse(res);
-
-      const body = (await res.json()) as { token: string; deviceId: string; label: string };
+      const body = await apiPost<{ token: string; deviceId: string; label: string }>(
+        '/v1/me/devices',
+        { label },
+      );
       setFreshToken(body.token);
       setDevices((d) => [
         {
@@ -100,12 +84,7 @@ export function DevicesPanel({
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(`/v1/me/devices/${encodeURIComponent(id)}`, {
-        method: 'DELETE',
-        credentials: 'same-origin',
-        headers: { 'x-csrf-token': readCsrf() },
-      });
-      if (!res.ok) throw await errorFromResponse(res);
+      await apiDelete(`/v1/me/devices/${encodeURIComponent(id)}`);
       setDevices((d) => d.filter((row) => row.id !== id));
     } catch (e) {
       setError(e instanceof Error ? e.message : 'That did not work.');
@@ -128,15 +107,10 @@ export function DevicesPanel({
        * toggle would race itself when two are changed quickly, and the second
        * request would overwrite the first with a stale view of the rest.
        */
-      const res = await fetch('/v1/me/telemetry-consent', {
-        method: 'PUT',
-        credentials: 'same-origin',
-        headers: { 'content-type': 'application/json', 'x-csrf-token': readCsrf() },
-        body: JSON.stringify({ categories: next }),
-      });
-      if (!res.ok) throw await errorFromResponse(res);
-
-      const saved = (await res.json()) as { categories: string[]; purged: number };
+      const saved = await apiPut<{ categories: string[]; purged: number }>(
+        '/v1/me/telemetry-consent',
+        { categories: next },
+      );
       // The SERVER's answer, not the optimistic guess. A consent control that
       // shows what you asked for rather than what was stored is a lie.
       setConsent((c) => ({ ...c, categories: saved.categories }));

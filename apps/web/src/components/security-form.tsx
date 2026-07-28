@@ -1,34 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { errorFromResponse } from '../lib/api-error';
-
-function readCsrf(): string {
-  const jar = document.cookie.split('; ');
-  for (const name of ['__Host-gs_csrf', 'gs_csrf']) {
-    const hit = jar.find((c) => c.startsWith(`${name}=`));
-    if (hit !== undefined) return decodeURIComponent(hit.slice(name.length + 1));
-  }
-  return '';
-}
-
-async function post<T>(path: string, body?: unknown): Promise<T> {
-  // The init object is built first so `body` is simply absent when there is
-  // none. Passing `body: undefined` inline trips the fetch overload under
-  // exactOptionalPropertyTypes.
-  const init: RequestInit = {
-    method: 'POST',
-    credentials: 'same-origin',
-    headers: { 'content-type': 'application/json', 'x-csrf-token': readCsrf() },
-  };
-  if (body !== undefined) init.body = JSON.stringify(body);
-
-  const res = await fetch(path, init);
-  if (!res.ok) {
-    throw new Error((await errorFromResponse(res, 'That did not work. Try again.')).message);
-  }
-  return (await res.json().catch(() => ({}))) as T;
-}
+import { apiPost } from '../lib/api-client';
 
 type Stage = 'idle' | 'showing-secret' | 'showing-codes';
 
@@ -66,7 +39,7 @@ export function SecurityForm({
     setBusy(true);
     setError(null);
     try {
-      const r = await post<{ secret: string; otpauthUri: string }>('/v1/auth/totp/enrol');
+      const r = await apiPost<{ secret: string; otpauthUri: string }>('/v1/auth/totp/enrol');
       setSecret(r.secret);
       setUri(r.otpauthUri);
       setStage('showing-secret');
@@ -81,7 +54,7 @@ export function SecurityForm({
     setBusy(true);
     setError(null);
     try {
-      const r = await post<{ recoveryCodes: string[] }>('/v1/auth/totp/confirm', { code });
+      const r = await apiPost<{ recoveryCodes: string[] }>('/v1/auth/totp/confirm', { code });
       setCodes(r.recoveryCodes);
       // The secret is dropped from component state the moment it is no longer
       // needed. It stays in the authenticator, which is the only place it
@@ -104,7 +77,7 @@ export function SecurityForm({
           <span className="text-[var(--color-brand-cyan-bright)]">Two-factor is on.</span> You will
           be asked for a code when you open the admin console.
         </p>
-        <p className="mt-3 text-sm text-[var(--color-text-muted)]">
+        <p className="mt-3 text-sm text-[var(--color-text-secondary)]">
           Lost your authenticator? Use a recovery code to get in, then set it up again from a device
           you still have.
         </p>

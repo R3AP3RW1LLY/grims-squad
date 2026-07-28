@@ -33,6 +33,24 @@ export default async function HubLayout({ children }: { children: React.ReactNod
     redirect(`/v1/auth/discord?redirect=${encodeURIComponent(path)}`);
   }
 
+  /*
+   * ★ AN UNSECURED ADMIN GOES NOWHERE ELSE ★
+   *
+   * Not a nudge, not a banner they can scroll past — a redirect, on every page
+   * under this layout, until enrolment is done. Somebody whose account can
+   * affect other members has to hold a second factor first, and "has to" means
+   * the interface will not take them anywhere else.
+   *
+   * The API refuses them regardless (admin-gate.guard.ts) and that is the
+   * actual security boundary. This is what stops them wandering into a members
+   * area that half-works and wondering why every admin link 403s.
+   *
+   * The onboarding page itself lives in (site), so this cannot loop.
+   */
+  if (me.mustSecureAccount) {
+    redirect('/onboarding/security');
+  }
+
   return (
     <HubShell me={me} current={await currentPath()}>
       {/*

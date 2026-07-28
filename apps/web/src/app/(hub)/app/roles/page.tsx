@@ -34,7 +34,7 @@ export default async function RolesPage() {
         <h2 id="roles-heading" className="sr-only">
           Role permissions
         </h2>
-        <p className="max-w-[70ch] text-sm text-[var(--color-text-muted)]">
+        <p className="max-w-[70ch] text-sm text-[var(--color-text-secondary)]">
           Every change has to be previewed before it can be saved. A permission mask is a 70-bit
           number and nobody can read one — the preview lists exactly which members gain and lose
           what, by name, before anything is written.
@@ -50,7 +50,7 @@ export default async function RolesPage() {
         >
           DISCORD ROLE MAPPINGS
         </h2>
-        <p className="mt-3 max-w-[70ch] text-sm text-[var(--color-text-muted)]">
+        <p className="mt-3 max-w-[70ch] text-sm text-[var(--color-text-secondary)]">
           This is the only place Discord role IDs enter the system. They live in data rather than in
           code, so a role deleted and recreated in Discord can be fixed here rather than by a
           deploy.

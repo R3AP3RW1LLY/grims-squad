@@ -113,8 +113,27 @@ describe('the forced onboarding page', () => {
     expect(onboarding).toContain('status.because');
   });
 
-  it('says the rest of the site is not blocked', () => {
-    // Otherwise it reads as a lockout, and somebody assumes the site is broken.
-    expect(onboarding).toMatch(/Nothing else on the site is blocked/i);
+  it('MANDATORY: is accurate about what IS blocked', () => {
+    /*
+     * It used to say "nothing else on the site is blocked", which stopped
+     * being true the moment the members area started redirecting here. A
+     * reassurance that is false is worse than none — somebody reads it, tries
+     * their dashboard, gets bounced back, and concludes the site is broken.
+     *
+     * The public site genuinely IS still open, so that is what it now says.
+     */
+    expect(onboarding).toMatch(/public site is still open/i);
+    expect(onboarding).not.toMatch(/Nothing else on the site is blocked/i);
+  });
+
+  it('MANDATORY: the members area redirects here until enrolment is done', () => {
+    /*
+     * Not a banner, not a nudge — a redirect on every page under the (hub)
+     * layout. Somebody whose account can affect other members holds a second
+     * factor first, and "has to" means the interface will not take them
+     * anywhere else.
+     */
+    expect(hubLayout).toContain('mustSecureAccount');
+    expect(hubLayout).toMatch(/redirect\('\/onboarding\/security'\)/);
   });
 });

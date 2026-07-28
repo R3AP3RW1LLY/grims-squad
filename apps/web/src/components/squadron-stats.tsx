@@ -29,7 +29,7 @@ function Stat({ value, label, hint }: { value: string; label: string; hint?: str
         {label}
       </p>
       {hint !== undefined && (
-        <p className="mt-2 text-xs text-[var(--color-text-muted)]">{hint}</p>
+        <p className="mt-2 text-xs text-[var(--color-text-secondary)]">{hint}</p>
       )}
     </div>
   );
@@ -66,7 +66,7 @@ export function SquadronStatsBand({ stats }: { stats: SquadronStats | null }) {
           />
         </div>
 
-        <p className="mt-10 text-center text-xs text-[var(--color-text-muted)]">
+        <p className="mt-10 text-center text-xs text-[var(--color-text-secondary)]">
           {/*
             Says WHEN, rather than implying the numbers are live to the second.
             They are read from our own database on each request, but "this

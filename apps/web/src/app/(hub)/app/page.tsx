@@ -24,7 +24,7 @@ export const dynamic = 'force-dynamic';
 function Num({ n, dim = false }: { n: number; dim?: boolean }) {
   return (
     <span
-      className={`font-mono ${n === 0 || dim ? 'text-[var(--color-text-muted)]' : 'text-[var(--color-text-primary)]'}`}
+      className={`font-mono ${n === 0 || dim ? 'text-[var(--color-text-secondary)]' : 'text-[var(--color-text-primary)]'}`}
     >
       {n.toLocaleString('en-GB')}
     </span>
@@ -79,7 +79,7 @@ export default async function AdminPage() {
         >
           ACTIVITY — {activity.month}
         </h2>
-        <p className="mt-3 max-w-[70ch] text-sm text-[var(--color-text-muted)]">
+        <p className="mt-3 max-w-[70ch] text-sm text-[var(--color-text-secondary)]">
           {qualifying} of {activity.rows.length} tracked members qualify this month. A month counts
           when there is any Discord activity <em>and</em> an Elite session. Nothing is promoted
           before 1 August 2026, and the first live run will follow a dry run you have read.
@@ -88,7 +88,7 @@ export default async function AdminPage() {
         <div className="mt-6 overflow-x-auto">
           <table className="w-full min-w-[720px] border-collapse text-sm">
             <thead>
-              <tr className="border-b border-[var(--color-border-hairline)] text-left font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--color-text-muted)]">
+              <tr className="border-b border-[var(--color-border-hairline)] text-left font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--color-text-secondary)]">
                 <th scope="col" className="py-3 pr-4">Member</th>
                 <th scope="col" className="py-3 pr-4">Messages</th>
                 <th scope="col" className="py-3 pr-4">Forum</th>
@@ -102,7 +102,7 @@ export default async function AdminPage() {
                 <tr key={r.discordId} className="border-b border-[var(--color-border-hairline)]">
                   <td className="py-3 pr-4 text-[var(--color-text-primary)]">
                     {r.displayName ?? r.handle ?? (
-                      <span className="text-[var(--color-text-muted)]">
+                      <span className="text-[var(--color-text-secondary)]">
                         Discord only ({r.discordId})
                       </span>
                     )}
@@ -110,14 +110,14 @@ export default async function AdminPage() {
                   <td className="py-3 pr-4"><Num n={r.messageCount} /></td>
                   <td className="py-3 pr-4"><Num n={r.forumPostCount} /></td>
                   <td className="py-3 pr-4"><Num n={r.voiceJoinCount} /></td>
-                  <td className="py-3 pr-4 font-mono text-xs text-[var(--color-text-muted)]">
+                  <td className="py-3 pr-4 font-mono text-xs text-[var(--color-text-secondary)]">
                     {GAME_LABEL[r.gameActivity] ?? r.gameActivity}
                   </td>
                   <td className="py-3 font-mono text-xs">
                     {r.qualifies ? (
                       <span className="text-[var(--color-brand-cyan-bright)]">YES</span>
                     ) : (
-                      <span className="text-[var(--color-text-muted)]">no</span>
+                      <span className="text-[var(--color-text-secondary)]">no</span>
                     )}
                   </td>
                 </tr>
@@ -127,7 +127,7 @@ export default async function AdminPage() {
         </div>
 
         {activity.rows.length === 0 && (
-          <p className="mt-6 text-sm text-[var(--color-text-muted)]">
+          <p className="mt-6 text-sm text-[var(--color-text-secondary)]">
             No activity recorded for this month yet.
           </p>
         )}
@@ -141,7 +141,7 @@ export default async function AdminPage() {
         >
           AUDIT LOG
         </h2>
-        <p className="mt-3 max-w-[70ch] text-sm text-[var(--color-text-muted)]">
+        <p className="mt-3 max-w-[70ch] text-sm text-[var(--color-text-secondary)]">
           Read-only here and append-only in the database. A console that can edit the audit log is
           an audit log that proves nothing.
         </p>

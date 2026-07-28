@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import type { PrivacySettings } from '../../../../lib/api';
+import { apiPatch } from '../../../../lib/api-client';
 
 /**
  * The privacy toggles.
@@ -51,18 +52,6 @@ const TOGGLES: readonly Toggle[] = [
   },
 ];
 
-function readCsrf(): string {
-  // The CSRF cookie is deliberately readable — that is the whole mechanism. Its
-  // name carries the __Host- prefix over https and not over plain http, so both
-  // spellings are checked rather than assuming the deployed one.
-  const jar = document.cookie.split('; ');
-  for (const name of ['__Host-gs_csrf', 'gs_csrf']) {
-    const hit = jar.find((c) => c.startsWith(`${name}=`));
-    if (hit !== undefined) return decodeURIComponent(hit.slice(name.length + 1));
-  }
-  return '';
-}
-
 export function PrivacyForm({ initial }: { initial: PrivacySettings }) {
   const [settings, setSettings] = useState<PrivacySettings>(initial);
   const [busy, setBusy] = useState<keyof PrivacySettings | null>(null);
@@ -76,14 +65,7 @@ export function PrivacyForm({ initial }: { initial: PrivacySettings }) {
     setBusy(key);
     setError(null);
     try {
-      const res = await fetch('/v1/me/privacy', {
-        method: 'PATCH',
-        credentials: 'same-origin',
-        headers: { 'content-type': 'application/json', 'x-csrf-token': readCsrf() },
-        body: JSON.stringify({ [key]: value }),
-      });
-      if (!res.ok) throw new Error(String(res.status));
-      const saved = (await res.json()) as PrivacySettings;
+      const saved = await apiPatch<PrivacySettings>('/v1/me/privacy', { [key]: value });
       // Trust the SERVER's answer over the optimistic guess, so a rejected or
       // adjusted value shows what is actually stored.
       setSettings(saved);
@@ -121,7 +103,7 @@ export function PrivacyForm({ initial }: { initial: PrivacySettings }) {
                   </label>
                   <p
                     id={`help-${t.key}`}
-                    className="mt-1 max-w-[60ch] text-sm text-[var(--color-text-muted)]"
+                    className="mt-1 max-w-[60ch] text-sm text-[var(--color-text-secondary)]"
                   >
                     {t.help}
                   </p>
@@ -140,7 +122,7 @@ export function PrivacyForm({ initial }: { initial: PrivacySettings }) {
                   disabled={busy === t.key}
                   aria-describedby={`help-${t.key}`}
                   onChange={(e) => void set(t.key, e.currentTarget.checked)}
-                  className="mt-1 h-6 w-11 shrink-0 cursor-pointer appearance-none rounded-full border border-[var(--color-border-hairline)] bg-[var(--color-surface-void)] transition-colors before:ml-[3px] before:block before:h-4 before:w-4 before:translate-y-[3px] before:rounded-full before:bg-[var(--color-text-muted)] before:transition-transform checked:border-[var(--color-brand-cyan-bright)] checked:bg-[color-mix(in_srgb,var(--color-brand-cyan-bright)_28%,transparent)] checked:before:translate-x-5 checked:before:bg-[var(--color-brand-cyan-bright)] disabled:opacity-50"
+                  className="mt-1 h-6 w-11 shrink-0 cursor-pointer appearance-none rounded-full border border-[var(--color-border-hairline)] bg-[var(--color-surface-void)] transition-colors before:ml-[3px] before:block before:h-4 before:w-4 before:translate-y-[3px] before:rounded-full before:bg-[var(--color-text-secondary)] before:transition-transform checked:border-[var(--color-brand-cyan-bright)] checked:bg-[color-mix(in_srgb,var(--color-brand-cyan-bright)_28%,transparent)] checked:before:translate-x-5 checked:before:bg-[var(--color-brand-cyan-bright)] disabled:opacity-50"
                 />
               </div>
             </li>

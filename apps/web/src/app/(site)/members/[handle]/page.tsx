@@ -32,7 +32,7 @@ export async function generateMetadata({
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-1 border-b border-[var(--color-border-hairline)] py-4 sm:flex-row sm:items-baseline sm:gap-6">
-      <dt className="font-mono text-[11px] uppercase tracking-[0.24em] text-[var(--color-text-muted)] sm:w-44 sm:shrink-0">
+      <dt className="font-mono text-[11px] uppercase tracking-[0.24em] text-[var(--color-text-secondary)] sm:w-44 sm:shrink-0">
         {label}
       </dt>
       <dd className="text-[var(--color-text-primary)]">{children}</dd>
@@ -87,12 +87,12 @@ export default async function MemberPage({ params }: { params: Promise<{ handle:
           {'location' in p && (
             <Row label="Last known position">
               {p.location == null ? (
-                <span className="text-[var(--color-text-muted)]">Not recorded yet</span>
+                <span className="text-[var(--color-text-secondary)]">Not recorded yet</span>
               ) : (
                 <>
                   {p.location.system}
                   {p.location.station !== null && (
-                    <span className="text-[var(--color-text-muted)]">
+                    <span className="text-[var(--color-text-secondary)]">
                       {' '}
                       &mdash; {p.location.station}
                     </span>
@@ -105,7 +105,7 @@ export default async function MemberPage({ params }: { params: Promise<{ handle:
           {'credits' in p && (
             <Row label="Balance">
               {p.credits == null ? (
-                <span className="text-[var(--color-text-muted)]">Not recorded yet</span>
+                <span className="text-[var(--color-text-secondary)]">Not recorded yet</span>
               ) : (
                 // Formatted from the STRING via BigInt. Passing it through
                 // Number first would round a balance over 2^53.
@@ -117,14 +117,14 @@ export default async function MemberPage({ params }: { params: Promise<{ handle:
           {'fleet' in p && (
             <Row label="Fleet">
               {p.fleet == null || p.fleet.length === 0 ? (
-                <span className="text-[var(--color-text-muted)]">Not recorded yet</span>
+                <span className="text-[var(--color-text-secondary)]">Not recorded yet</span>
               ) : (
                 <ul className="space-y-1">
                   {p.fleet.map((s, i) => (
                     <li key={`${s.shipType}-${i}`}>
                       {s.shipType}
                       {s.name !== null && (
-                        <span className="text-[var(--color-text-muted)]"> &ldquo;{s.name}&rdquo;</span>
+                        <span className="text-[var(--color-text-secondary)]"> &ldquo;{s.name}&rdquo;</span>
                       )}
                     </li>
                   ))}
@@ -141,7 +141,7 @@ export default async function MemberPage({ params }: { params: Promise<{ handle:
           )}
         </dl>
 
-        <p className="mt-8 text-sm text-[var(--color-text-muted)]">
+        <p className="mt-8 text-sm text-[var(--color-text-secondary)]">
           Commanders choose which details appear here. A field that is not shown has not been shared
           — it is not missing data.
         </p>

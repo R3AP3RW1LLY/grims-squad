@@ -29,8 +29,13 @@ describe('the Inara key form', () => {
     // the response type is `{ cmdrName: string }` and the form legitimately
     // reads that back to display it. Sending a name and receiving one are
     // opposite directions, and only one of them is a problem.
-    const start = form.indexOf("'/v1/me/inara', 'POST', {");
-    const body = form.slice(start, form.indexOf('})', start));
+    // Anchored on `body: {`, not on the whole call. That is the request payload
+    // whatever the client helper's argument order happens to be — the previous
+    // anchor was the literal argument list, and it silently matched NOTHING the
+    // moment the call was migrated to the shared client.
+    const start = form.indexOf('body: {');
+    expect(start, 'no request body found in the Inara form').toBeGreaterThan(-1);
+    const body = form.slice(start, form.indexOf('}', start));
 
     expect(body).toContain('apiKey: key');
     expect(body).toMatch(/source:\s*'web'/);

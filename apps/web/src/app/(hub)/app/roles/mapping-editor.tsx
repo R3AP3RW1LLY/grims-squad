@@ -2,20 +2,12 @@
 
 import { useState } from 'react';
 import type { RoleRow } from './role-editor';
+import { apiPost, apiDelete } from '../../../../lib/api-client';
 
 export interface MappingRow {
   roleId: string;
   roleName: string;
   discordRoleId: string;
-}
-
-function readCsrf(): string {
-  const jar = document.cookie.split('; ');
-  for (const name of ['__Host-gs_csrf', 'gs_csrf']) {
-    const hit = jar.find((c) => c.startsWith(`${name}=`));
-    if (hit !== undefined) return decodeURIComponent(hit.slice(name.length + 1));
-  }
-  return '';
 }
 
 /**
@@ -43,14 +35,9 @@ export function MappingEditor({ roles, mappings }: { roles: RoleRow[]; mappings:
     setError(null);
     setNotice(null);
     try {
-      const res = await fetch('/v1/admin/mappings', {
-        method: 'POST',
-        credentials: 'same-origin',
-        headers: { 'content-type': 'application/json', 'x-csrf-token': readCsrf() },
-        body: JSON.stringify({ roleId, discordRoleId: snowflake.trim() }),
-      });
-      const j = (await res.json().catch(() => ({}))) as { message?: string };
-      if (!res.ok) throw new Error(j.message ?? 'That did not work.');
+      // Was reading `j.message` off the top level; the API answers with an
+      // envelope, so the real reason was always discarded.
+      await apiPost('/v1/admin/mappings', { roleId, discordRoleId: snowflake.trim() });
 
       const role = roles.find((r) => r.id === roleId);
       setRows((r) => [
@@ -69,12 +56,9 @@ export function MappingEditor({ roles, mappings }: { roles: RoleRow[]; mappings:
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(
+      const j = await apiDelete<{ warning?: string }>(
         `/v1/admin/mappings/${encodeURIComponent(m.roleId)}/${encodeURIComponent(m.discordRoleId)}`,
-        { method: 'DELETE', credentials: 'same-origin', headers: { 'x-csrf-token': readCsrf() } },
       );
-      const j = (await res.json().catch(() => ({}))) as { message?: string; warning?: string };
-      if (!res.ok) throw new Error(j.message ?? 'That did not work.');
 
       setRows((r) =>
         r.filter((x) => !(x.roleId === m.roleId && x.discordRoleId === m.discordRoleId)),
@@ -114,7 +98,7 @@ export function MappingEditor({ roles, mappings }: { roles: RoleRow[]; mappings:
           >
             <span className="text-sm text-[var(--color-text-primary)]">
               {m.roleName}
-              <span className="ml-4 font-mono text-xs text-[var(--color-text-muted)]">
+              <span className="ml-4 font-mono text-xs text-[var(--color-text-secondary)]">
                 {m.discordRoleId}
               </span>
             </span>
@@ -122,7 +106,7 @@ export function MappingEditor({ roles, mappings }: { roles: RoleRow[]; mappings:
               type="button"
               onClick={() => void remove(m)}
               disabled={busy}
-              className="rounded border border-[var(--color-border-hairline)] px-3 py-1 font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-muted)] hover:border-[var(--color-brand-orange)] hover:text-[var(--color-brand-orange)] disabled:opacity-50"
+              className="rounded border border-[var(--color-border-hairline)] px-3 py-1 font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-secondary)] hover:border-[var(--color-brand-orange)] hover:text-[var(--color-brand-orange)] disabled:opacity-50"
             >
               Remove
             </button>
@@ -130,11 +114,11 @@ export function MappingEditor({ roles, mappings }: { roles: RoleRow[]; mappings:
         ))}
       </ul>
 
-      {rows.length === 0 && <p className="text-sm text-[var(--color-text-muted)]">No mappings yet.</p>}
+      {rows.length === 0 && <p className="text-sm text-[var(--color-text-secondary)]">No mappings yet.</p>}
 
       <div className="mt-8 flex flex-wrap items-end gap-4">
         <div>
-          <label htmlFor="map-role" className="block text-xs text-[var(--color-text-muted)]">
+          <label htmlFor="map-role" className="block text-xs text-[var(--color-text-secondary)]">
             Platform role
           </label>
           <select
@@ -152,7 +136,7 @@ export function MappingEditor({ roles, mappings }: { roles: RoleRow[]; mappings:
         </div>
 
         <div>
-          <label htmlFor="map-snowflake" className="block text-xs text-[var(--color-text-muted)]">
+          <label htmlFor="map-snowflake" className="block text-xs text-[var(--color-text-secondary)]">
             Discord role ID
           </label>
           <input
@@ -178,7 +162,7 @@ export function MappingEditor({ roles, mappings }: { roles: RoleRow[]; mappings:
         </button>
       </div>
 
-      <p id="map-help" className="mt-3 max-w-[70ch] text-xs text-[var(--color-text-muted)]">
+      <p id="map-help" className="mt-3 max-w-[70ch] text-xs text-[var(--color-text-secondary)]">
         {snowflake.trim() !== '' && !shapeOk
           ? 'That is not a role ID. Copying a role out of a message gives you a mention, not an id — use Server Settings → Roles → right-click → Copy Role ID instead, with Developer Mode enabled.'
           : 'Server Settings → Roles → right-click a role → Copy Role ID, with Developer Mode enabled.'}
