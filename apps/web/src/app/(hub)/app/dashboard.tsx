@@ -185,27 +185,6 @@ export function Dashboard({ data }: { data: AdminDashboard }) {
           )}
 
           {/*
-            ★ APPOINTMENTS ARE NOT RUNGS ★
-
-            Squadron Leader and above are appointments, not ranks earned by
-            qualifying months, and promotion never moves anybody along them.
-            One segmented bar rather than more of the bars above, because that
-            reads as "this is the leadership" instead of as a continuation of
-            the ladder — which is exactly the confusion to avoid.
-          */}
-          {squadron.appointments.length > 0 && (
-            <div className="mt-6">
-              <p className="mb-3 font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--color-text-secondary)]">
-                Leadership appointments
-              </p>
-              <StackedStrip
-                unit="held"
-                data={squadron.appointments.map((r) => ({ label: r.rank, value: r.held }))}
-              />
-            </div>
-          )}
-
-          {/*
             ONE rule per panel, pinned to the foot. It used to sit ABOVE the
             appointments block, which put it at a different height from the
             telemetry panel's — the misalignment that was reported.
@@ -251,6 +230,37 @@ export function Dashboard({ data }: { data: AdminDashboard }) {
           )}
         </Section>
       </div>
+
+      {/*
+        ★ ITS OWN PANEL, AND FULL WIDTH ★
+
+        This sat inside "The ladder", which was wrong twice over. Visually, a
+        segmented bar squeezed into half a column left every small office too
+        narrow to carry its own number — the counts collapsed into a stray
+        "2 4" floating above a legend that then repeated them.
+
+        More importantly it READ as part of the ladder. Appointments are not
+        rungs: they are not earned by qualifying months and promotion never
+        moves anybody along them. Somebody can be a Cadet by tenure and a
+        Galactic Admiral by appointment at once, and nesting the two invites
+        exactly the confusion that had every officer displaying as "Squadron
+        Leader" in the first place.
+
+        Full width because a stacked bar IS wide, and because the leadership of
+        a squadron deserves its own line rather than a footnote beneath a chart
+        about something else.
+      */}
+      {squadron.appointments.length > 0 && (
+        <Section
+          title="Leadership appointments"
+          description="Offices held right now, most senior first. A separate axis from the ladder above — these are appointed, not earned by qualifying months, and promotion never moves anybody along them."
+        >
+          <StackedStrip
+            unit={squadron.appointments.length === 1 ? 'officer' : 'officers'}
+            data={squadron.appointments.map((r) => ({ label: r.rank, value: r.held }))}
+          />
+        </Section>
+      )}
     </>
   );
 }

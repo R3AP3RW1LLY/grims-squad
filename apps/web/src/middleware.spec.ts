@@ -51,8 +51,18 @@ async function run(cookies: Record<string, string>) {
   return middleware(req(cookies));
 }
 
+/** What middleware passes to fetch. Declared so the call can be asserted on. */
+type FetchInit = { headers: Record<string, string> };
+
 function apiReturns(status: number, setCookie: string[] = []) {
-  const fetchMock = vi.fn(async () => ({
+  /*
+   * The parameters are DECLARED even though the body ignores them.
+   *
+   * `vi.fn(async () => ...)` types its calls as an empty tuple, so
+   * `calls[0][1]` is a type error and the assertion below cannot be written at
+   * all. Naming them is what makes the recorded call inspectable.
+   */
+  const fetchMock = vi.fn(async (_url: string, _init: FetchInit) => ({
     ok: status >= 200 && status < 300,
     status,
     headers: { getSetCookie: () => setCookie },
@@ -94,10 +104,10 @@ describe('silent refresh', () => {
     const fetchMock = apiReturns(200);
     await run(AGED_OUT);
 
-    const init = fetchMock.mock.calls[0]?.[1] as { headers: Record<string, string> };
-    expect(init.headers['x-csrf-token']).toBe('csrf');
+    const init = fetchMock.mock.calls[0]?.[1];
+    expect(init?.headers['x-csrf-token']).toBe('csrf');
     // And the cookies, or the endpoint has no session to rotate.
-    expect(init.headers['cookie']).toContain('gs_rt=refresh');
+    expect(init?.headers['cookie']).toContain('gs_rt=refresh');
   });
 
   it('does not attempt a refresh it knows will fail', async () => {
@@ -118,7 +128,12 @@ describe('silent refresh', () => {
 
   it('survives the API being unreachable', async () => {
     // The site must not go down because the API is restarting.
-    vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('ECONNREFUSED'); }));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, _init: FetchInit) => {
+        throw new Error('ECONNREFUSED');
+      }),
+    );
     const res = await run(AGED_OUT);
     expect(res.headers.getSetCookie()).toEqual([]);
   });

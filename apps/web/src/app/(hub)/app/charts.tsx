@@ -400,8 +400,13 @@ export function StackedStrip({ data, unit }: { data: Datum[]; unit: string }) {
               The count sits inside its own segment, but ONLY when the segment
               is wide enough to hold it. A number overflowing a 3% sliver is
               worse than no number, and the legend below carries it anyway.
+
+              6%, not 12%. At half a column the old threshold hid the three
+              single-officer segments and left a bare "2" and "4" floating above
+              a legend that then repeated them — numbers with nothing to attach
+              them to. Full width gives a 6% segment ample room for one digit.
             */}
-            {d.value / total > 0.12 && (
+            {d.value / total > 0.06 && (
               <span className="font-mono text-xs font-semibold text-[var(--color-surface-void)]">
                 {d.value}
               </span>
