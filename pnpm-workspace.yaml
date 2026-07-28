@@ -3,23 +3,33 @@ packages:
   - 'packages/*'
   - 'tools'
 
-allowBuilds:
-  '@nestjs/core': set this to true or false
-  '@prisma/client': set this to true or false
-  '@prisma/engines': set this to true or false
-  electron: set this to true or false
-  esbuild: set this to true or false
-  prisma: set this to true or false
-  sharp: set this to true or false
-
-# NOTE: when pnpm meets an unapproved build script it WRITES an `allowBuilds:`
-# block here with every entry set to "set this to true or false" — and while
-# that placeholder is present it ignores EVERY build script, including ones
-# already approved below. The symptom is unrelated packages breaking at once.
-# If that block reappears, resolve it or delete it; do not leave it.
+# ★ BOTH KEYS ARE HERE ON PURPOSE ★
 #
-# pnpm 10+ requires build scripts to be allow-listed explicitly. esbuild is a
+# `allowBuilds` carries EXPLICIT booleans. When pnpm meets a build script with
+# no decision recorded it rewrites this block with every entry set to the string
+# "set this to true or false" — and while that placeholder is present it ignores
+# EVERY build script, including ones already approved. The symptom is unrelated
+# packages breaking all at once, and CI failing on a fresh --frozen-lockfile
+# install while a warm local tree keeps working.
+#
+# Deleting the block does not help: the next install writes it again. Answering
+# it does. That is what the booleans below are.
+#
+# `onlyBuiltDependencies` is the older key and is kept in step with it, so the
+# policy is the same whichever one a given pnpm version reads. esbuild is a
 # vitest dependency and needs its postinstall to produce a usable binary.
+allowBuilds:
+  '@nestjs/core': true
+  '@prisma/client': true
+  '@prisma/engines': true
+  esbuild: true
+  prisma: true
+  sharp: true
+  # Downloads the Chromium runtime (~100MB). Without it the package installs
+  # but there is no binary, and the failure reads as "electron is not a
+  # command" rather than as a blocked install script.
+  electron: true
+
 onlyBuiltDependencies:
   - esbuild
   - prisma
