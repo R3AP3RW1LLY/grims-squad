@@ -22,8 +22,9 @@ const bannerCode = banner
   .split(/\r?\n/)
   .filter((l) => !l.trim().startsWith('//'))
   .join(' ');
-const layout = readFileSync(resolve(HERE, '../app/layout.tsx'), 'utf8');
-const onboarding = readFileSync(resolve(HERE, '../app/onboarding/security/page.tsx'), 'utf8');
+const siteLayout = readFileSync(resolve(HERE, '../app/(site)/layout.tsx'), 'utf8');
+const hubLayout = readFileSync(resolve(HERE, '../app/(hub)/layout.tsx'), 'utf8');
+const onboarding = readFileSync(resolve(HERE, '../app/(site)/onboarding/security/page.tsx'), 'utf8');
 
 /**
  * The secure-your-account prompt.
@@ -70,14 +71,27 @@ describe('the banner', () => {
     expect(bannerCode).not.toContain('role="alert"');
   });
 
-  it('MANDATORY: lives in the ROOT LAYOUT, under the navbar', () => {
-    // In the layout it follows the member everywhere. Per-page, it becomes
+  it('MANDATORY: lives in a LAYOUT, under the navbar, on the public site', () => {
+    // In a layout it follows the member everywhere. Per-page, it becomes
     // something each future page author has to remember, which means it will
     // eventually be missing from the page that mattered.
-    expect(layout).toContain('<SecureAccountBanner />');
-    const navAt = layout.indexOf('<SiteNav />');
-    const bannerAt = layout.indexOf('<SecureAccountBanner />');
+    expect(siteLayout).toContain('<SecureAccountBanner />');
+    const navAt = siteLayout.indexOf('<SiteNav />');
+    const bannerAt = siteLayout.indexOf('<SecureAccountBanner />');
     expect(bannerAt).toBeGreaterThan(navAt);
+  });
+
+  it('MANDATORY: is in the MEMBERS AREA layout too', () => {
+    /*
+     * Caught by this test during the route-group split, which is the only
+     * reason it is not a live bug.
+     *
+     * Splitting the chrome into (site) and (hub) left the banner behind on the
+     * public side — and the members area is where an unsecured admin actually
+     * LANDS after signing in. The prompt would have been missing from the one
+     * place it exists to appear.
+     */
+    expect(hubLayout).toContain('<SecureAccountBanner />');
   });
 });
 

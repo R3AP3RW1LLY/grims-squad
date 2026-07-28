@@ -185,3 +185,38 @@ describe('parseBootstrapIds', () => {
     expect(() => parseBootstrapIds('123')).toThrow(); // too short to be one
   });
 });
+
+describe('reading the bootstrap list', () => {
+  it('MANDATORY: treats the .env.example placeholder as unset', () => {
+    /*
+     * `.env.example` ships WEBMASTER_BOOTSTRAP_DISCORD_IDS=CHANGE_ME. Without
+     * this, copying that file unedited crashes the API at startup with a
+     * validation error about a value the operator never chose — which reads as
+     * a broken build rather than as an unfinished configuration.
+     */
+    expect(parseBootstrapIds('CHANGE_ME')).toEqual([]);
+    expect(parseBootstrapIds('CHANGE_ME,CHANGE_ME')).toEqual([]);
+  });
+
+  it('MANDATORY: still throws on a genuine typo', () => {
+    /*
+     * The distinction that matters. Silence about a mistyped id is a LOCKOUT —
+     * nobody is bootstrapped and nobody is told. Silence about an untouched
+     * placeholder is just an app nobody has configured yet.
+     */
+    expect(() => parseBootstrapIds('12345')).toThrow(/non-snowflake/i);
+    expect(() => parseBootstrapIds('not-an-id')).toThrow(/non-snowflake/i);
+  });
+
+  it('reads real snowflakes, and ignores whitespace', () => {
+    expect(parseBootstrapIds(' 123456789012345678 , 876543210987654321 ')).toEqual([
+      '123456789012345678',
+      '876543210987654321',
+    ]);
+  });
+
+  it('an unset variable bootstraps nobody', () => {
+    expect(parseBootstrapIds(undefined)).toEqual([]);
+    expect(parseBootstrapIds('')).toEqual([]);
+  });
+});

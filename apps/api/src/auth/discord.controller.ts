@@ -10,6 +10,7 @@ import { SessionService } from './session.service.js';
 import { TotpService } from './totp.service.js';
 import { postLoginDestination } from './post-login-destination.js';
 import { PermissionService } from '../authz/permission.service.js';
+import { WebmasterService } from '../authz/webmaster.js';
 import { AVATAR_SERVICE } from '../media/media.tokens.js';
 import type { AvatarService } from '../media/avatar.service.js';
 
@@ -87,6 +88,9 @@ export class DiscordAuthController {
     @Optional()
     @Inject(AVATAR_SERVICE)
     private readonly avatars: AvatarService | null,
+    @Optional()
+    @Inject(WebmasterService)
+    private readonly webmaster: WebmasterService | null,
     @Optional() @Inject(DiscordAuthService) private readonly svc: DiscordAuthService | null,
     @Optional() @Inject(SessionService) private readonly sessions: SessionService | null,
     /*
@@ -186,6 +190,26 @@ export class DiscordAuthController {
      * actually changed, so the common case is a single cheap lookup.
      */
     void this.avatars?.syncFromDiscord(result.userId);
+
+    /*
+     * ★ THE WEBMASTER BOOTSTRAP ★
+     *
+     * Re-asserted on EVERY sign-in rather than once, deliberately: if the role
+     * is removed by accident — or by somebody who should not have — the next
+     * sign-in by a configured Discord ID restores it. A one-shot bootstrap is
+     * not a recovery path, it is a single point of failure with a nice name.
+     *
+     * Awaited, unlike the avatar sync. Being an admin is the whole reason this
+     * person is signing in, and racing it against the redirect would send them
+     * to a members' dashboard and leave them wondering why.
+     */
+    if (this.webmaster !== null) {
+      try {
+        await this.webmaster.applyBootstrap(result.userId, result.discordUserId);
+      } catch {
+        /* a failed bootstrap must not fail the login; the next sign-in retries */
+      }
+    }
 
     let destination = result.redirectTo;
     try {

@@ -33,7 +33,19 @@ export function parseBootstrapIds(raw: string | undefined): string[] {
   const parts = raw
     .split(',')
     .map((s) => s.trim())
-    .filter((s) => s !== '');
+    .filter((s) => s !== '')
+    /*
+     * The .env.example placeholder means UNSET, not "a snowflake called
+     * CHANGE_ME". Without this, copying the example file unedited crashes the
+     * API at startup with a validation error about a value the operator never
+     * chose — which reads as a broken build rather than as an unfinished
+     * configuration.
+     *
+     * A genuine typo still throws. That distinction is the point: silence about
+     * a mistyped id is a lockout, silence about an untouched placeholder is
+     * just an app that nobody has been bootstrapped on yet.
+     */
+    .filter((s) => !s.includes('CHANGE_ME'));
   for (const p of parts) {
     if (!SNOWFLAKE.test(p)) {
       // Fail loudly. A typo that quietly becomes "nobody is bootstrapped" is a

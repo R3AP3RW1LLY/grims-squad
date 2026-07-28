@@ -1,10 +1,7 @@
 import type { Metadata, Viewport } from 'next';
 import { Chakra_Petch, Inter, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
-import { SecureAccountBanner } from '../components/secure-account-banner';
-import { DeepField, SiteNav, SiteFooter } from '../components/site-chrome';
-import { AuthedNav } from '../components/authed-nav';
-import { getMe } from '../lib/api';
+import { DeepField } from '../components/site-chrome';
 
 /*
  * Fonts are downloaded at BUILD time and served from our own origin. No runtime
@@ -65,20 +62,22 @@ export const viewport: Viewport = {
 };
 
 /**
- * ★ THE NAVBAR SWAPS ENTIRELY WHEN SIGNED IN ★
+ * html, body, fonts and the starfield. Nothing else.
  *
- * Not the public bar with a couple of extras bolted on. A member who has
- * already joined has no use for "Join now" and the recruitment strapline, and
- * leaving them there spends the most valuable strip of the page advertising to
- * somebody who already bought.
+ * ★ WHY THE CHROME MOVED OUT ★
  *
- * Resolved on the SERVER, so the correct bar is in the first byte of HTML.
- * Deciding it in the browser would mean every signed-in member watching the
- * public navbar flash and swap on every navigation.
+ * There are two shells now, and a page belongs to exactly one:
+ *
+ *   (site)  the public squadron — a navbar, a footer, and a page that anybody
+ *           can read
+ *   (hub)   the members' area — a sidebar, a compact top bar, and no footer,
+ *           because a signed-in member is working rather than browsing
+ *
+ * A layout that tried to serve both would render the hub's sidebar underneath
+ * the site's navbar. Route groups let each own its chrome, and this file owns
+ * only what genuinely belongs to every page.
  */
-export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const me = await getMe();
-
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`${display.variable} ${body.variable} ${mono.variable}`}>
       <body className="scanlines flex min-h-dvh flex-col antialiased">
@@ -91,15 +90,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         </a>
 
         <DeepField />
-        {me.user === null ? <SiteNav /> : <AuthedNav me={me} />}
-        {/* Directly under the navbar, per the human decision. In the LAYOUT so it
-            follows the member everywhere rather than being remembered per page. */}
-        <SecureAccountBanner />
-
-        <div className="flex-1">{children}</div>
-
-        {/* Rendered here so INV-029's attribution cannot be omitted by a page. */}
-        <SiteFooter />
+        {children}
       </body>
     </html>
   );

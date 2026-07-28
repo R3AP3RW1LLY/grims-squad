@@ -20,16 +20,18 @@
     "@tailwindcss/postcss": "^4.3.3",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
+    "cross-env": "^10.1.0",
     "postcss": "^8.5.23",
     "tailwindcss": "^4.3.3",
     "typescript": "^5.7.0",
-    "vitest": "^3.0.0",
-    "cross-env": "^10.1.0"
+    "vitest": "^3.0.0"
   },
   "dependencies": {
+    "@grims/ed-clients": "workspace:*",
+    "@headlessui/react": "^2.2.10",
+    "@heroicons/react": "^2.2.0",
     "next": "^15.5.21",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8",
-    "@grims/ed-clients": "workspace:*"
+    "react-dom": "^19.2.8"
   }
 }
