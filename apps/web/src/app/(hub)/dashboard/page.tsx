@@ -6,6 +6,8 @@ import {
   getMe,
   getMyDevices,
 } from '../../../lib/api';
+import { Avatar } from '../../../components/account-menu';
+import { PageHeader, StatGrid, StatTile } from '../../../components/hub-page';
 
 export const metadata: Metadata = {
   title: "Your dashboard — Grim's Squad",
@@ -33,37 +35,6 @@ export const dynamic = 'force-dynamic';
  * As each feature lands it replaces its own placeholder. Nothing here has to be
  * torn out first.
  */
-
-function Stat({
-  label,
-  value,
-  hint,
-  accent = false,
-}: {
-  label: string;
-  value: string;
-  hint?: string;
-  accent?: boolean;
-}) {
-  return (
-    <div className="rounded-lg border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel)] p-5">
-      <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-[var(--color-text-secondary)]">
-        {label}
-      </p>
-      <p
-        className={`mt-2 text-3xl leading-none ${
-          accent ? 'text-[var(--color-brand-cyan-bright)]' : 'text-[var(--color-text-primary)]'
-        }`}
-        style={{ fontFamily: 'var(--font-display)' }}
-      >
-        {value}
-      </p>
-      {hint !== undefined && (
-        <p className="mt-2 text-xs text-[var(--color-text-secondary)]">{hint}</p>
-      )}
-    </div>
-  );
-}
 
 function Panel({
   title,
@@ -158,7 +129,7 @@ export default async function DashboardPage() {
   }
 
   return (
-    <div className="mx-auto max-w-[1100px]">
+    <div>
       {/*
         ★ A GREETING, NOT A CONTROL PANEL ★
 
@@ -166,52 +137,40 @@ export default async function DashboardPage() {
         and weekends. The first line should read like somebody is glad they
         turned up, not like a status board for an outage.
       */}
-      <header>
-        <p className="font-mono text-[11px] uppercase tracking-[0.32em] text-[var(--color-brand-cyan-bright)]">
-          {greeting()}
-        </p>
-        <h1
-          className="mt-2 text-[clamp(1.6rem,3.5vw,2.4rem)] leading-tight text-[var(--color-brand-orange)]"
-          style={{ fontFamily: 'var(--font-display)' }}
-        >
-          {verified === null ? name.toUpperCase() : `CMDR ${verified.toUpperCase()}`}
-        </h1>
-        {me.user?.rank != null && (
-          <p className="mt-1 font-mono text-[11px] uppercase tracking-[0.24em] text-[var(--color-text-secondary)]">
-            {me.user.rank}
-          </p>
-        )}
-      </header>
-      <div className="rule-glow mt-6" aria-hidden="true" />
+      <PageHeader
+        eyebrow={greeting()}
+        title={verified === null ? name.toUpperCase() : `CMDR ${verified.toUpperCase()}`}
+        {...(me.user?.rank != null && { subtitle: me.user.rank })}
+        {...(me.user !== null && { icon: <Avatar user={me.user} size={56} /> })}
+      />
 
-      {/* ------------------------------------------------------------ stats */}
-      <div className="mt-8 grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <Stat
+      <StatGrid>
+        <StatTile
           label="Squadron"
           value={stats === null ? '—' : String(stats.members)}
           hint="Commanders on the roster"
         />
-        <Stat
+        <StatTile
           label="Active this month"
           value={stats === null ? '—' : String(stats.activeThisMonth)}
           hint="Seen in Discord or in game"
-          accent
+          tone="accent"
         />
-        <Stat
+        <StatTile
           label="Your commander"
           value={verified === null ? 'Unverified' : 'Verified'}
           hint={verified === null ? 'Link Inara, or ask an officer' : `CMDR ${verified}`}
         />
-        <Stat
+        <StatTile
           label="Paired devices"
           value={String(activeDevices)}
           hint={activeDevices === 0 ? 'The companion app is not running' : 'Sending journal data'}
         />
-      </div>
+      </StatGrid>
 
       {/* ------------------------------------------------------------- todo */}
       {todo.length > 0 && (
-        <div className="mt-8">
+        <div className="mb-8">
           <Panel title="Worth doing">
             <ul className="list-none space-y-4 p-0">
               {todo.map((item) => (
@@ -233,7 +192,12 @@ export default async function DashboardPage() {
       )}
 
       {/* ----------------------------------------------------------- panels */}
-      <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-2">
+      {/*
+        Two columns at lg, three at 2xl. The panels are short and independent,
+        so a single column left two thirds of a wide screen empty while pushing
+        the last of them below the fold.
+      */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 2xl:grid-cols-3">
         <Panel title="Your activity" action={{ href: '/settings/devices', label: 'Devices' }}>
           {activeDevices === 0 ? (
             <p className="text-sm leading-relaxed text-[var(--color-text-secondary)]">

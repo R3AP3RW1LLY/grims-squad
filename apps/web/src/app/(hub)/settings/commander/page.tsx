@@ -1,6 +1,14 @@
 import type { Metadata } from 'next';
 import { getInaraStatus } from '../../../../lib/api';
 import { InaraForm } from './inara-form';
+import {
+  PageHeader,
+  PageBody,
+  Panel,
+  Section,
+  RailStat,
+  CouldNotLoad,
+} from '../../../../components/hub-page';
 
 export const metadata: Metadata = {
   title: "Commander — Grim's Squad",
@@ -13,102 +21,93 @@ export default async function CommanderPage() {
   const status = await getInaraStatus();
 
   return (
-    <main id="main" className="mx-auto max-w-[1440px] px-6 py-20">
-      <div className="mx-auto max-w-[70ch]">
-        <p className="font-mono text-[11px] uppercase tracking-[0.32em] text-[var(--color-brand-cyan-bright)]">
-          Your account
-        </p>
-        <h1
-          className="mt-3 text-[clamp(2rem,5vw,3.25rem)] leading-tight text-[var(--color-brand-orange)]"
-          style={{ fontFamily: 'var(--font-display)' }}
+    <>
+      <PageHeader
+        eyebrow="Your account"
+        title="COMMANDER"
+        lead="Link your Inara account and we can confirm which commander is yours, rather than taking your word for it. Your Discord nickname is then kept matching your in-game name."
+      />
+
+      {status === null ? (
+        <CouldNotLoad what="your commander details" />
+      ) : (
+        <PageBody
+          rail={
+            <>
+              <Panel title="Status">
+                <RailStat
+                  label="Commander"
+                  value={status.cmdrName ?? 'Not verified'}
+                  tone={status.cmdrName === null ? 'default' : 'good'}
+                />
+                <RailStat label="Inara key" value={status.linked ? 'Linked' : 'None'} />
+                <RailStat
+                  label="Verified"
+                  value={
+                    status.verifiedAt === null
+                      ? 'No'
+                      : new Date(status.verifiedAt).toLocaleDateString()
+                  }
+                />
+              </Panel>
+
+              {/*
+                In the rail, where it is read BEFORE somebody pastes a key —
+                not surfaced after a failure that was never their fault. Inara
+                refuses every call from an unregistered application, and our
+                registration is still outstanding.
+              */}
+              <Panel title="Not available yet" tone="warning">
+                <p className="text-sm leading-relaxed text-[var(--color-text-primary)]">
+                  Inara requires our application to be registered before it will answer any key, and
+                  that request is still outstanding. Ask an officer to verify you for now — it works
+                  just as well.
+                </p>
+              </Panel>
+
+              <Panel title="What Inara is for">
+                <p className="text-sm leading-relaxed text-[var(--color-text-secondary)]">
+                  Two things only: confirming your commander name, and checking you are in
+                  Grim&rsquo;s Squad. Ranks, ships, loadouts and activity come from the{' '}
+                  <a href="/companion" className="text-[var(--color-brand-cyan-bright)]">
+                    companion app
+                  </a>
+                  , which reads the game&rsquo;s own journals and carries far more than Inara has.
+                </p>
+              </Panel>
+            </>
+          }
         >
-          COMMANDER
-        </h1>
-        <div className="rule-glow mt-5" aria-hidden="true" />
+          <p className="max-w-[68ch] text-sm leading-relaxed text-[var(--color-text-secondary)]">
+            Entirely optional. Without a key an officer verifies you by hand instead — it works just
+            as well, it simply needs a person. Adding a key later upgrades you without anyone else
+            being involved.
+          </p>
 
-        {status === null ? (
-          <div className="mt-8">
-            <p className="text-lg text-[var(--color-text-primary)]">
-              Sign in to link your commander.
-            </p>
-            <a
-              href="/v1/auth/discord"
-              className="mt-6 inline-block rounded border border-[var(--color-brand-cyan-bright)] px-5 py-2.5 font-mono text-[12px] uppercase tracking-[0.24em] text-[var(--color-brand-cyan-bright)]"
-            >
-              Sign in with Discord
-            </a>
-          </div>
-        ) : (
-          <>
-            <p className="mt-6 text-lg text-[var(--color-text-primary)]">
-              Link your Inara account and we can confirm which commander is yours, rather than
-              taking your word for it. Your Discord nickname is then kept matching your in-game
-              name.
-            </p>
-            <p className="mt-3 text-sm text-[var(--color-text-secondary)]">
-              Entirely optional. Without a key an officer verifies you by hand instead — it works
-              just as well, it simply needs a person. Adding a key later upgrades you without
-              anyone else being involved.
-            </p>
-
-            {/*
-              Stated UP FRONT rather than only after a failed attempt. Inara
-              rejects every call from an unregistered application, so somebody
-              pasting a key today gets an error through no fault of their own —
-              and being told that before they try is the difference between a
-              known limitation and a broken site.
-            */}
-            <p className="mt-6 rounded border border-[var(--color-brand-orange)] px-4 py-3 text-sm text-[var(--color-brand-orange)]">
-              <strong>Not available yet.</strong> Inara requires our application to be registered
-              before it will answer any key, and that request is still outstanding. Ask an officer
-              to verify you for now — it works just as well.
-            </p>
-
-            {/*
-              Set expectations HERE, on the page where somebody is thinking
-              about their commander. Inara answers one question — is this
-              really you, and are you in the squadron. Everything else the hub
-              shows comes from the companion app, and saying so here stops
-              people wondering why their ships never appear.
-            */}
-            <p className="mt-4 text-sm text-[var(--color-text-secondary)]">
-              Inara is used for two things only: confirming your commander name, and checking you
-              are in Grim&rsquo;s Squad. Your ranks, ships, loadouts and activity all come from the{' '}
-              <a href="/companion" className="text-[var(--color-brand-cyan-bright)]">
-                companion app
-              </a>{' '}
-              instead — it reads the game&rsquo;s own journal files, which carry far more than Inara
-              has.
-            </p>
-
+          <div className="mt-6">
             <InaraForm initial={status} />
+          </div>
 
-            <section aria-labelledby="privacy-heading" className="mt-16">
-              <h2
-                id="privacy-heading"
-                className="text-xl text-[var(--color-brand-orange)]"
-                style={{ fontFamily: 'var(--font-display)' }}
-              >
-                WHAT WE DO WITH IT
-              </h2>
-              <ul className="mt-4 space-y-2 text-sm text-[var(--color-text-secondary)]">
+          <div className="mt-14">
+            <Section title="What we do with it">
+              <ul className="space-y-3 text-sm leading-relaxed text-[var(--color-text-secondary)]">
                 <li>
-                  We ask Inara which commander the key belongs to. That answer is what verifies you
-                  — you never type your own commander name here.
+                  We ask Inara which commander the key belongs to. That answer is what verifies you —
+                  you never type your own commander name here.
                 </li>
                 <li>
                   The key is encrypted before it is stored and is never shown again, to you or to
                   anyone else.
                 </li>
                 <li>
-                  Removing the key does not un-verify you. You proved it once; taking the key back
-                  is about us not calling Inara on your behalf any more.
+                  Removing the key does not un-verify you. You proved it once; taking the key back is
+                  about us not calling Inara on your behalf any more.
                 </li>
               </ul>
-            </section>
-          </>
-        )}
-      </div>
-    </main>
+            </Section>
+          </div>
+        </PageBody>
+      )}
+    </>
   );
 }

@@ -31,7 +31,14 @@ export class PrismaRoleAdminStore implements RoleAdminStore {
 
   async listRoles(): Promise<RoleRecord[]> {
     const rows = await this.#db.role.findMany({
-      select: { id: true, key: true, name: true, permMask: true, rankOrder: true },
+      select: {
+        id: true,
+        key: true,
+        name: true,
+        permMask: true,
+        rankOrder: true,
+        isHierarchical: true,
+      },
       orderBy: { rankOrder: 'asc' },
     });
     return rows.map((r) => ({
@@ -45,7 +52,14 @@ export class PrismaRoleAdminStore implements RoleAdminStore {
   async roleById(id: string): Promise<RoleRecord | null> {
     const r = await this.#db.role.findUnique({
       where: { id },
-      select: { id: true, key: true, name: true, permMask: true, rankOrder: true },
+      select: {
+        id: true,
+        key: true,
+        name: true,
+        permMask: true,
+        rankOrder: true,
+        isHierarchical: true,
+      },
     });
     return r === null ? null : { ...r, permMask: BigInt(r.permMask.toFixed(0)) };
   }

@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { getAdminActivity, getAdminAudit } from '../../../lib/api';
 import { StepUp } from './step-up';
 import { AuditFilters } from './audit-filters';
+import { PageHeader, Section, StatGrid, StatTile } from '../../../components/hub-page';
 
 /**
  * The admin console (P1.7).
@@ -49,43 +50,63 @@ export default async function AdminPage() {
 
   const qualifying = activity.rows.filter((r) => r.qualifies).length;
 
+  const observed = activity.rows.filter((r) => r.gameActivity === 'observed').length;
+  const linked = activity.rows.filter((r) => r.handle !== null).length;
+
   return (
-    <main id="main" className="mx-auto max-w-[1440px] px-6 py-16">
-      <p className="font-mono text-[11px] uppercase tracking-[0.32em] text-[var(--color-brand-cyan-bright)]">
-        Squadron leadership
-      </p>
-      <h1
-        className="mt-3 text-[clamp(1.75rem,4vw,2.75rem)] leading-tight text-[var(--color-brand-orange)]"
-        style={{ fontFamily: 'var(--font-display)' }}
+    <>
+      <PageHeader
+        eyebrow="Squadron leadership"
+        title="ADMIN CONSOLE"
+        action={
+          <a
+            href="/app/roles"
+            className="rounded border border-[var(--color-border-hairline)] px-4 py-2 font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--color-brand-cyan-bright)]"
+          >
+            Roles &amp; permissions
+          </a>
+        }
+      />
+
+      {/*
+        Figures first, table beneath, both full width.
+
+        This page's subject is a WIDE TABLE, so it gets no context rail — an
+        activity roster squeezed into two-thirds to make room for one would be a
+        worse page, not a fuller one. The band across the top is what fills the
+        width here, and it answers the questions an officer opens this page with
+        before they read a single row.
+      */}
+      <StatGrid>
+        <StatTile
+          label="Qualifying"
+          value={String(qualifying)}
+          hint={`of ${activity.rows.length} tracked, ${activity.month}`}
+          tone="accent"
+        />
+        <StatTile
+          label="Elite session seen"
+          value={String(observed)}
+          hint={observed === 0 ? 'Nothing has reported a session yet' : 'Confirmed from journals'}
+          tone={observed === 0 ? 'warn' : 'default'}
+        />
+        <StatTile
+          label="Linked accounts"
+          value={String(linked)}
+          hint="Have signed in to the hub"
+        />
+        <StatTile
+          label="Audit entries"
+          value={String(audit?.entries.length ?? 0)}
+          hint="Most recent first"
+        />
+      </StatGrid>
+
+      <Section
+        title={`Activity — ${activity.month}`}
+        description="A month counts when there is any Discord activity AND an Elite session. Nothing is promoted before 1 August 2026, and the first live run will follow a dry run you have read."
       >
-        ADMIN CONSOLE
-      </h1>
-      <div className="rule-glow mt-5" aria-hidden="true" />
-
-      <nav aria-label="Admin sections" className="mt-8">
-        <a
-          href="/app/roles"
-          className="rounded border border-[var(--color-border-hairline)] px-4 py-2 font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--color-brand-cyan-bright)]"
-        >
-          Roles &amp; permissions
-        </a>
-      </nav>
-
-      <section aria-labelledby="activity-heading" className="mt-12">
-        <h2
-          id="activity-heading"
-          className="text-xl text-[var(--color-brand-orange)]"
-          style={{ fontFamily: 'var(--font-display)' }}
-        >
-          ACTIVITY — {activity.month}
-        </h2>
-        <p className="mt-3 max-w-[70ch] text-sm text-[var(--color-text-secondary)]">
-          {qualifying} of {activity.rows.length} tracked members qualify this month. A month counts
-          when there is any Discord activity <em>and</em> an Elite session. Nothing is promoted
-          before 1 August 2026, and the first live run will follow a dry run you have read.
-        </p>
-
-        <div className="mt-6 overflow-x-auto">
+        <div className="overflow-x-auto">
           <table className="w-full min-w-[720px] border-collapse text-sm">
             <thead>
               <tr className="border-b border-[var(--color-border-hairline)] text-left font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--color-text-secondary)]">
@@ -131,23 +152,14 @@ export default async function AdminPage() {
             No activity recorded for this month yet.
           </p>
         )}
-      </section>
+      </Section>
 
-      <section aria-labelledby="audit-heading" className="mt-16">
-        <h2
-          id="audit-heading"
-          className="text-xl text-[var(--color-brand-orange)]"
-          style={{ fontFamily: 'var(--font-display)' }}
-        >
-          AUDIT LOG
-        </h2>
-        <p className="mt-3 max-w-[70ch] text-sm text-[var(--color-text-secondary)]">
-          Read-only here and append-only in the database. A console that can edit the audit log is
-          an audit log that proves nothing.
-        </p>
-
+      <Section
+        title="Audit log"
+        description="Read-only here and append-only in the database. A console that can edit the audit log is an audit log that proves nothing."
+      >
         <AuditFilters initial={audit?.entries ?? []} actions={audit?.actions ?? []} />
-      </section>
-    </main>
+      </Section>
+    </>
   );
 }

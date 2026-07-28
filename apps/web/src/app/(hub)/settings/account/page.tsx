@@ -1,6 +1,14 @@
 import type { Metadata } from 'next';
-import { getMySessions } from '../../../../lib/api';
+import { getMySessions, getMe } from '../../../../lib/api';
 import { SessionsPanel } from './sessions-panel';
+import {
+  PageHeader,
+  PageBody,
+  Panel,
+  Section,
+  RailStat,
+  CouldNotLoad,
+} from '../../../../components/hub-page';
 
 export const metadata: Metadata = {
   title: "Account — Grim's Squad",
@@ -10,95 +18,77 @@ export const metadata: Metadata = {
 export const dynamic = 'force-dynamic';
 
 export default async function AccountSettingsPage() {
-  const data = await getMySessions();
+  const [data, me] = await Promise.all([getMySessions(), getMe()]);
 
   return (
-    <main id="main" className="mx-auto max-w-[1440px] px-6 py-20">
-      <div className="mx-auto max-w-[70ch]">
-        <p className="font-mono text-[11px] uppercase tracking-[0.32em] text-[var(--color-brand-cyan-bright)]">
-          Your account
-        </p>
-        <h1
-          className="mt-3 text-[clamp(2rem,5vw,3.25rem)] leading-tight text-[var(--color-brand-orange)]"
-          style={{ fontFamily: 'var(--font-display)' }}
-        >
-          ACCOUNT
-        </h1>
-        <div className="rule-glow mt-5" aria-hidden="true" />
+    <>
+      <PageHeader
+        eyebrow="Your account"
+        title="ACCOUNT"
+        lead="Where you are signed in, and everything the hub holds about you."
+      />
 
-        {data === null ? (
-          <div className="mt-8">
-            <p className="text-lg text-[var(--color-text-primary)]">
-              Sign in to manage your account.
+      {data === null ? (
+        <CouldNotLoad what="your account details" />
+      ) : (
+        <PageBody
+          rail={
+            <>
+              <Panel title="You">
+                <RailStat label="Display name" value={me.user?.displayName ?? '—'} />
+                <RailStat label="Handle" value={me.user?.handle ?? '—'} />
+                <RailStat label="Rank" value={me.user?.rank ?? 'None'} />
+                <RailStat label="Open sessions" value={String(data.sessions.length)} />
+              </Panel>
+
+              <Panel title="Related">
+                <a
+                  href="/settings/privacy"
+                  className="block text-sm text-[var(--color-brand-cyan-bright)]"
+                >
+                  Privacy settings
+                </a>
+                <a
+                  href="/settings/commander"
+                  className="mt-2 block text-sm text-[var(--color-brand-cyan-bright)]"
+                >
+                  Your commander
+                </a>
+                <a
+                  href="/settings/security"
+                  className="mt-2 block text-sm text-[var(--color-brand-cyan-bright)]"
+                >
+                  Security
+                </a>
+              </Panel>
+            </>
+          }
+        >
+          <Section
+            title="Signed-in devices"
+            description="Ending a session signs that device out immediately. If you see something here you do not recognise, end it and tell an officer."
+          >
+            <SessionsPanel initial={data.sessions} />
+          </Section>
+
+          <Section
+            title="Your data"
+            description="Download everything the hub holds about you as a JSON file: your profile, privacy settings, Discord link, roles, verified commander names, activity totals and sessions."
+          >
+            <p className="max-w-[68ch] text-sm leading-relaxed text-[var(--color-text-secondary)]">
+              Access tokens are not included. They are credentials for your Discord account that we
+              hold on your behalf, and a copy in your downloads folder would help nobody.
             </p>
             <a
-              href="/v1/auth/discord"
+              href="/v1/me/export"
+              download="grims-squad-export.json"
               className="mt-6 inline-block rounded border border-[var(--color-brand-cyan-bright)] px-5 py-2.5 font-mono text-[12px] uppercase tracking-[0.24em] text-[var(--color-brand-cyan-bright)]"
             >
-              Sign in with Discord
+              Download my data
             </a>
-          </div>
-        ) : (
-          <>
-            <section aria-labelledby="sessions-heading" className="mt-10">
-              <h2
-                id="sessions-heading"
-                className="text-xl text-[var(--color-brand-orange)]"
-                style={{ fontFamily: 'var(--font-display)' }}
-              >
-                SIGNED-IN DEVICES
-              </h2>
-              <p className="mt-3 text-sm text-[var(--color-text-secondary)]">
-                Ending a session signs that device out immediately. If you see something here you do
-                not recognise, end it and tell an officer.
-              </p>
-              <SessionsPanel initial={data.sessions} />
-            </section>
-
-            <section aria-labelledby="export-heading" className="mt-16">
-              <h2
-                id="export-heading"
-                className="text-xl text-[var(--color-brand-orange)]"
-                style={{ fontFamily: 'var(--font-display)' }}
-              >
-                YOUR DATA
-              </h2>
-              <p className="mt-3 text-[var(--color-text-primary)]">
-                Download everything the hub holds about you as a JSON file: your profile, privacy
-                settings, Discord link, roles, verified commander names, activity totals and
-                sessions.
-              </p>
-              <p className="mt-3 text-sm text-[var(--color-text-secondary)]">
-                Access tokens are not included. They are credentials for your Discord account that
-                we hold on your behalf, and a copy in your downloads folder would help nobody.
-              </p>
-              <a
-                href="/v1/me/export"
-                download="grims-squad-export.json"
-                className="mt-6 inline-block rounded border border-[var(--color-brand-cyan-bright)] px-5 py-2.5 font-mono text-[12px] uppercase tracking-[0.24em] text-[var(--color-brand-cyan-bright)]"
-              >
-                Download my data
-              </a>
-            </section>
-
-            <p className="mt-16 text-sm text-[var(--color-text-secondary)]">
-              Also here:{' '}
-              <a href="/settings/privacy" className="text-[var(--color-brand-cyan-bright)]">
-                privacy settings
-              </a>
-              ,{' '}
-              <a href="/settings/commander" className="text-[var(--color-brand-cyan-bright)]">
-                your commander
-              </a>{' '}
-              and{' '}
-              <a href="/settings/security" className="text-[var(--color-brand-cyan-bright)]">
-                security
-              </a>
-              .
-            </p>
-          </>
-        )}
-      </div>
-    </main>
+          </Section>
+        </PageBody>
+      )}
+    </>
   );
 }

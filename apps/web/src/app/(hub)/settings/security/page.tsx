@@ -1,6 +1,13 @@
 import type { Metadata } from 'next';
-import { getTotpStatus } from '../../../../lib/api';
+import { getTotpStatus, getAccountStatus, getMySessions } from '../../../../lib/api';
 import { SecurityForm } from '../../../../components/security-form';
+import {
+  PageHeader,
+  PageBody,
+  Panel,
+  RailStat,
+  CouldNotLoad,
+} from '../../../../components/hub-page';
 
 export const metadata: Metadata = {
   title: "Security — Grim's Squad",
@@ -10,45 +17,81 @@ export const metadata: Metadata = {
 export const dynamic = 'force-dynamic';
 
 export default async function SecurityPage() {
-  const status = await getTotpStatus();
+  const [status, account, sessions] = await Promise.all([
+    getTotpStatus(),
+    getAccountStatus(),
+    getMySessions(),
+  ]);
 
   return (
-    <main id="main" className="mx-auto max-w-[1440px] px-6 py-20">
-      <div className="mx-auto max-w-[70ch]">
-        <p className="font-mono text-[11px] uppercase tracking-[0.32em] text-[var(--color-brand-cyan-bright)]">
-          Your account
-        </p>
-        <h1
-          className="mt-3 text-[clamp(2rem,5vw,3.25rem)] leading-tight text-[var(--color-brand-orange)]"
-          style={{ fontFamily: 'var(--font-display)' }}
-        >
-          SECURITY
-        </h1>
-        <div className="rule-glow mt-5" aria-hidden="true" />
+    <>
+      <PageHeader
+        eyebrow="Your account"
+        title="SECURITY"
+        lead="Signing in to the hub takes one step — your Discord account. A second factor is required only to open the admin console, because those accounts can grant roles and change how the site works."
+      />
 
-        {status === null ? (
-          <div className="mt-8">
-            <p className="text-lg text-[var(--color-text-primary)]">
-              Sign in to manage your security settings.
-            </p>
-            <a
-              href="/v1/auth/discord"
-              className="mt-6 inline-block rounded border border-[var(--color-brand-cyan-bright)] px-5 py-2.5 font-mono text-[12px] uppercase tracking-[0.24em] text-[var(--color-brand-cyan-bright)]"
-            >
-              Sign in with Discord
-            </a>
-          </div>
-        ) : (
-          <>
-            <p className="mt-6 text-[var(--color-text-primary)]">
-              Signing in to the hub takes one step — your Discord account. A second factor is
-              required only to open the admin console, because those accounts can grant roles and
-              change how the site works.
-            </p>
-            <SecurityForm enrolled={status.enrolled} />
-          </>
-        )}
-      </div>
-    </main>
+      {status === null ? (
+        <CouldNotLoad what="your security settings" />
+      ) : (
+        <PageBody
+          rail={
+            <>
+              <Panel title="Status">
+                <RailStat
+                  label="Second factor"
+                  value={status.enrolled ? 'Enrolled' : 'Not set up'}
+                  tone={status.enrolled ? 'good' : account?.privileged === true ? 'warn' : 'default'}
+                />
+                <RailStat
+                  label="Account type"
+                  value={account?.privileged === true ? 'Privileged' : 'Standard'}
+                />
+                <RailStat
+                  label="Signed-in devices"
+                  value={sessions === null ? '—' : String(sessions.sessions.length)}
+                />
+              </Panel>
+
+              {/*
+                Named, not summarised. "You hold admin permissions" is an
+                assertion; a list is something a member can check against what
+                they think they were given, and dispute if it is wrong.
+              */}
+              {account !== null && account.because.length > 0 && (
+                <Panel title="Why this is required">
+                  <ul className="list-none space-y-1 p-0 font-mono text-xs text-[var(--color-brand-cyan-bright)]">
+                    {account.because.map((p) => (
+                      <li key={p}>{p.replace(/_/g, ' ').toLowerCase()}</li>
+                    ))}
+                  </ul>
+                  <p className="mt-3 text-sm leading-relaxed text-[var(--color-text-secondary)]">
+                    A stolen Discord account holding these is other people&rsquo;s problem, not just
+                    yours.
+                  </p>
+                </Panel>
+              )}
+
+              <Panel title="Related">
+                <a
+                  href="/settings/account"
+                  className="block text-sm text-[var(--color-brand-cyan-bright)]"
+                >
+                  Signed-in devices
+                </a>
+                <a
+                  href="/settings/privacy"
+                  className="mt-2 block text-sm text-[var(--color-brand-cyan-bright)]"
+                >
+                  Privacy settings
+                </a>
+              </Panel>
+            </>
+          }
+        >
+          <SecurityForm enrolled={status.enrolled} />
+        </PageBody>
+      )}
+    </>
   );
 }

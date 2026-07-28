@@ -140,6 +140,7 @@ export class AdminController {
         // (INV-006), and this response feeds an editor that sends it back.
         permMask: r.permMask.toString(),
         rankOrder: r.rankOrder,
+        isHierarchical: r.isHierarchical,
       })),
     };
   }

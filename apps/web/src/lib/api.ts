@@ -227,6 +227,8 @@ export interface AdminRoleRow {
   /** DECIMAL STRING. Above 2^53 a JSON number would round it (INV-006). */
   permMask: string;
   rankOrder: number;
+  /** True for the promotion ladder, false for orthogonal tags. */
+  isHierarchical: boolean;
 }
 
 export interface AdminMappingRow {
