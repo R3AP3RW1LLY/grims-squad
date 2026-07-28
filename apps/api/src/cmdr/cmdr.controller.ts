@@ -67,6 +67,33 @@ export class CmdrController {
     return { cmdrName: r.cmdrName, verified: r.verified };
   }
 
+  /**
+   * "I have applied to join the squadron on Inara."
+   *
+   * ★ A CLAIM, WHICH IS NOT PROOF ★
+   *
+   * Ticking this grants nothing. It records that the member says they applied,
+   * and re-asks Inara immediately — Inara is what confirms membership, and this
+   * only decides whether it is worth spending a request from a budget of two a
+   * minute asking about them at all.
+   *
+   * The immediate re-check matters because the common case is somebody who
+   * joined a moment before ticking the box, and telling them to come back in
+   * twenty minutes for something we can answer now would be needless.
+   */
+  @Post('me/inara/squadron-claim')
+  async claimSquadron(
+    @User() caller: CurrentUser | undefined,
+    @Req() req: FastifyRequest,
+  ): Promise<LinkStatus> {
+    const userId = requireUser(caller);
+    csrf(req);
+    await this.inara.claimSquadron(userId);
+    // The STATUS, not the raw result: one shape for the page to render, whether
+    // the check confirmed them, found a different squadron, or could not run.
+    return this.inara.status(userId);
+  }
+
   /** Whether a key is on file, and the verified name. Never the key itself. */
   @Get('me/inara')
   async inaraStatus(@User() caller: CurrentUser | undefined): Promise<LinkStatus> {

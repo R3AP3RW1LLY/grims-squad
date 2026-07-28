@@ -64,6 +64,34 @@ class FakeStore implements InaraLinkStore {
   async upsertVerification(userId: string, cmdrName: string, tier: number): Promise<void> {
     this.verifications.push({ userId, cmdrName, tier });
   }
+
+  /** What Inara said about each member's squadron, in call order. */
+  squadrons: Array<{ userId: string; reported: string | null; matched: boolean }> = [];
+  claims: string[] = [];
+
+  async recordSquadron(
+    userId: string,
+    reported: string | null,
+    matched: boolean,
+  ): Promise<void> {
+    this.squadrons.push({ userId, reported, matched });
+  }
+  async claimSquadron(userId: string): Promise<void> {
+    this.claims.push(userId);
+  }
+  async squadronState(userId: string) {
+    const v = this.verifications.filter((x) => x.userId === userId).at(-1);
+    if (v === undefined) return null;
+    const s = this.squadrons.filter((x) => x.userId === userId).at(-1);
+    return {
+      cmdrName: v.cmdrName,
+      isVerified: true,
+      inaraSquadron: s?.reported ?? null,
+      squadronVerifiedAt: s?.matched === true ? new Date() : null,
+      squadronClaimedAt: this.claims.includes(userId) ? new Date() : null,
+      squadronCheckedAt: s === undefined ? null : new Date(),
+    };
+  }
   async writeAudit(e: Record<string, unknown>): Promise<void> {
     this.audit.push(e);
   }

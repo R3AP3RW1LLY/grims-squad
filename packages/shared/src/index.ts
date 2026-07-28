@@ -49,3 +49,9 @@ export {
   JOURNAL_FILE_PATTERN,
 } from './journal/journal-paths.js';
 export type { Platform, PathContext } from './journal/journal-paths.js';
+export {
+  expectedSquadronName,
+  sameSquadron,
+  evaluateSquadron,
+  type SquadronCheckOutcome,
+} from './squadron.js';

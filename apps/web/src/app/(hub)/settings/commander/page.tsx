@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { CheckBadgeIcon, ExclamationCircleIcon } from '@heroicons/react/24/outline';
 import { getInaraStatus, getMe, getTimezones } from '../../../../lib/api';
+import { SquadronStatus } from './squadron-status';
 import { InaraForm } from './inara-form';
 import { TimezoneForm } from './timezone-form';
 import {
@@ -152,6 +153,20 @@ export default async function CommanderPage({
           </p>
 
           <div className="mt-6">
+            {/*
+
+              Where they stand, ABOVE the key form.
+
+            
+
+              A member arriving here wants to know whether they are verified before
+
+              they want a form. Putting the form first answers a question they have
+
+              not asked yet.
+
+            */}
+            <SquadronStatus initial={status} />
             <InaraForm initial={status} />
           </div>
 

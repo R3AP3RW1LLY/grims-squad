@@ -10,6 +10,21 @@ export interface InaraStatus {
   lastCheckedAt: string | null;
   lastError: string | null;
   source: string | null;
+  /**
+   * Name proven, squadron confirmed, or neither.
+   *
+   * One field rather than two booleans for the page to combine: three states
+   * have three messages, and letting each screen derive them invites two of
+   * them to disagree about what "partially verified" means.
+   */
+  squadronStatus?: 'unverified' | 'partial' | 'verified';
+  /** The squadron Inara last reported, verbatim. Null when they set none. */
+  inaraSquadron?: string | null;
+  /** The squadron we are looking for, so no page hardcodes it. */
+  expectedSquadron?: string;
+  /** They have said they applied. Drives the twenty-minute re-check. */
+  squadronClaimed?: boolean;
+  squadronCheckedAt?: string | null;
 }
 
 /**

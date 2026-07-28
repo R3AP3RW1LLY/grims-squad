@@ -92,6 +92,64 @@ export class PrismaInaraLinkStore implements InaraLinkStore {
    * claim per member, or an old name keeps holding a lock nobody is using
    * (INV-005).
    */
+  /**
+   * Records what Inara said about their squadron.
+   *
+   * ★ CONFIRMATION IS SET, AND ALSO CLEARED ★
+   *
+   * `squadronVerifiedAt` is stamped when Inara agrees and set back to null when
+   * it does not. A member who leaves the squadron on Inara must stop being
+   * shown as confirmed — a one-way flag would keep somebody who left last month
+   * looking like a member forever, and nobody would ever notice.
+   *
+   * `updateMany` on the member's ACTIVE verification: there is at most one, and
+   * a row that has since been revoked is not an error worth failing over.
+   */
+  async recordSquadron(
+    userId: string,
+    reported: string | null,
+    matched: boolean,
+    at: Date,
+  ): Promise<void> {
+    await this.#db.cmdrVerification.updateMany({
+      where: { userId, isVerified: true, revokedAt: null },
+      data: {
+        inaraSquadron: reported,
+        squadronVerifiedAt: matched ? at : null,
+        squadronCheckedAt: at,
+      },
+    });
+  }
+
+  /**
+   * Records that the member says they have applied to join.
+   *
+   * Their claim, never proof — it only decides whether the sweep spends a
+   * request asking Inara about them. Inara is what confirms it.
+   */
+  async claimSquadron(userId: string, at: Date): Promise<void> {
+    await this.#db.cmdrVerification.updateMany({
+      where: { userId, isVerified: true, revokedAt: null },
+      data: { squadronClaimedAt: at },
+    });
+  }
+
+  /** The squadron half of a member's verification, for the settings page. */
+  async squadronState(userId: string) {
+    return this.#db.cmdrVerification.findFirst({
+      where: { userId, isVerified: true, revokedAt: null },
+      select: {
+        cmdrName: true,
+        isVerified: true,
+        inaraSquadron: true,
+        squadronVerifiedAt: true,
+        squadronClaimedAt: true,
+        squadronCheckedAt: true,
+      },
+      orderBy: { verifiedAt: 'desc' },
+    });
+  }
+
   async upsertVerification(userId: string, cmdrName: string, trustTier: number): Promise<void> {
     const now = new Date();
     await this.#db.$transaction(async (tx) => {

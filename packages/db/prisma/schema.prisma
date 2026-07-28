@@ -459,6 +459,29 @@ model CmdrVerification {
   /// - any member could permanently deny any CMDR name, including every officer's, by opening
   /// a claim and never completing it (RED-TEAM R7). See `indexes.md`.
   isVerified     Boolean            @default(false) @map("is_verified")
+
+  /// ★ SQUADRON MEMBERSHIP IS A SECOND, SEPARATE CHECK (2026-07-28) ★
+  ///
+  /// Proving you control a commander name proves nothing about whether you are in THIS
+  /// squadron. The two were previously one step, so anybody who verified a name was treated
+  /// as a member — which is exactly backwards for a squadron platform.
+  ///
+  /// Three states fall out of these fields: no verified name at all; a verified name with no
+  /// confirmed squadron (PARTIAL); and both (VERIFIED).
+  ///
+  /// The squadron Inara reported at the last check. Recorded verbatim, so a member who is in
+  /// a DIFFERENT squadron can be told which one rather than a bare "not a member".
+  inaraSquadron     String?   @map("inara_squadron")
+  /// Set when Inara confirmed they are in OUR squadron. Cleared if they later leave.
+  squadronVerifiedAt DateTime? @map("squadron_verified_at") @db.Timestamptz(6)
+  /// When the member said they had applied to join. Drives the 20-minute re-check.
+  ///
+  /// Their CLAIM, never proof. Inara is what confirms it; this only says whether it is worth
+  /// spending rate budget asking, so somebody who has not applied is not polled forever.
+  squadronClaimedAt DateTime? @map("squadron_claimed_at") @db.Timestamptz(6)
+  /// Last time Inara was asked about their squadron, successful or not.
+  squadronCheckedAt DateTime? @map("squadron_checked_at") @db.Timestamptz(6)
+
   revokedAt      DateTime?          @map("revoked_at") @db.Timestamptz(6)
   createdAt      DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
 

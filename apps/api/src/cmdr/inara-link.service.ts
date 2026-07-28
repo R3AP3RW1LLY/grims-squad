@@ -1,3 +1,9 @@
+import {
+  evaluateSquadron,
+  expectedSquadronName,
+  sameSquadron,
+  statusOf,
+} from './squadron-verification.service.js';
 import { AppError, ErrorCode } from '@grims/shared';
 
 /**
@@ -32,6 +38,32 @@ export interface LinkRecord {
 }
 
 export interface InaraLinkStore {
+  /**
+   * Records what Inara said about their squadron.
+   *
+   * ★ PART OF THE FIRST CHECK, NOT A LATER STEP ★
+   *
+   * A member who links a key finds out immediately whether we can see them in
+   * the squadron. Making them link, wait, and then discover a second hurdle
+   * would be two disappointments where one honest answer will do.
+   */
+  recordSquadron(
+    userId: string,
+    reported: string | null,
+    matched: boolean,
+    at: Date,
+  ): Promise<void>;
+  /** Records that the member says they have applied. Their claim, never proof. */
+  claimSquadron(userId: string, at: Date): Promise<void>;
+  /** The squadron half of their verification, for the settings page. */
+  squadronState(userId: string): Promise<{
+    cmdrName: string | null;
+    isVerified: boolean;
+    inaraSquadron: string | null;
+    squadronVerifiedAt: Date | null;
+    squadronClaimedAt: Date | null;
+    squadronCheckedAt: Date | null;
+  } | null>;
   get(userId: string): Promise<LinkRecord | null>;
   saveKey(userId: string, apiKey: string, source: string): Promise<void>;
   recordSuccess(userId: string, cmdrName: string, at: Date): Promise<void>;
@@ -72,19 +104,15 @@ export interface InaraOwnProfile {
 }
 
 /**
- * The squadron name as Inara spells it.
+ * Does Inara say this commander is in our squadron?
  *
- * Compared case-insensitively and trimmed, because a member types their
- * squadron into Inara by hand and "Grims Squad" or a trailing space should not
- * read as a different squadron.
+ * Delegates to `sameSquadron`, which is the ONE comparison rule. This file used
+ * to carry its own normaliser and its own hardcoded name; two rules for the
+ * same question drift, and the drift here would mark real members as outsiders
+ * with a failure that looks like Inara being wrong.
  */
-export const SQUADRON_NAME = "Grim's Squad";
-
-/** Does Inara say this commander is in our squadron? */
 export function isInSquadron(squadronName: string | null): boolean {
-  if (squadronName === null) return false;
-  const normalise = (v: string): string => v.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
-  return normalise(squadronName) === normalise(SQUADRON_NAME);
+  return sameSquadron(squadronName, expectedSquadronName());
 }
 
 export interface LinkResult {
@@ -104,6 +132,21 @@ export interface LinkResult {
 }
 
 export interface LinkStatus {
+  /**
+   * Where they stand overall: no verified name, a name but no squadron, or both.
+   *
+   * A single field rather than two booleans for the page to combine. Three
+   * states have three messages, and letting the UI derive them invites two
+   * screens to disagree about what "partially verified" means.
+   */
+  squadronStatus?: 'unverified' | 'partial' | 'verified';
+  /** The squadron Inara last reported, verbatim. Null when they have set none. */
+  inaraSquadron?: string | null;
+  /** The squadron we are looking for, so the page never hardcodes it. */
+  expectedSquadron?: string;
+  /** They have said they applied. Drives the twenty-minute re-check. */
+  squadronClaimed?: boolean;
+  squadronCheckedAt?: string | null;
   readonly linked: boolean;
   readonly cmdrName: string | null;
   readonly verifiedAt: string | null;
@@ -256,6 +299,15 @@ export class InaraLinkService {
     await this.store.saveKey(userId, key, source);
     await this.store.recordSuccess(userId, cmdrName, now);
     await this.store.upsertVerification(userId, cmdrName, TIER_INARA);
+
+    /*
+     * The squadron check runs HERE, in the same breath as the name. Inara
+     * returned both in one call, and asking again later would spend a second
+     * request from a budget of two a minute to learn something we already know.
+     */
+    const squadron = evaluateSquadron(squadronName, expectedSquadronName());
+    await this.store.recordSquadron(userId, squadron.reported, squadron.matched, now);
+
     await this.store.writeAudit({
       // The member did this themselves, so they ARE the actor — unlike a poll
       // or a reconciliation, where nobody chose anything.
@@ -265,7 +317,13 @@ export class InaraLinkService {
       targetId: userId,
       before: null,
       // The key is not in here, and must never be.
-      after: { cmdrName, trustTier: TIER_INARA, source },
+      after: {
+        cmdrName,
+        trustTier: TIER_INARA,
+        source,
+        squadron: squadron.reported,
+        inSquadron: squadron.matched,
+      },
     });
 
     // FIRST ADD — the nickname is set here, which is the moment the human
@@ -276,11 +334,8 @@ export class InaraLinkService {
       cmdrName,
       verified: true,
       error: null,
-      squadronName,
-      // Reported, never enforced. Plenty of real members never set a squadron
-      // on Inara, and refusing them would punish people for not using a
-      // third-party site we do not run.
-      inSquadron: isInSquadron(squadronName),
+      squadronName: squadron.reported,
+      inSquadron: squadron.matched,
     };
   }
 
@@ -299,8 +354,23 @@ export class InaraLinkService {
     }
 
     let cmdrName: string | null = null;
+    let squadronName: string | null = null;
     try {
-      cmdrName = await this.inara.getOwnCommanderName(link.apiKey);
+      /*
+       * ★ THE RICHER CALL, SO A RE-CHECK RE-CHECKS THE SQUADRON TOO ★
+       *
+       * This used to ask only for the commander name and throw the squadron
+       * away — so a member who joined the squadron on Inara could refresh
+       * forever and never become verified. It is the same one request either
+       * way; discarding half of it bought nothing and broke the feature.
+       */
+      if (this.inara.getOwnIdentity !== undefined) {
+        const identity = await this.inara.getOwnIdentity(link.apiKey);
+        cmdrName = identity?.cmdrName ?? null;
+        squadronName = identity?.squadronName ?? null;
+      } else {
+        cmdrName = await this.inara.getOwnCommanderName(link.apiKey);
+      }
     } catch {
       const message = 'Could not reach Inara at the last check. Your verification is unchanged.';
       await this.store.recordFailure(userId, message, now);
@@ -319,17 +389,75 @@ export class InaraLinkService {
     await this.store.recordSuccess(userId, cmdrName, now);
     await this.store.upsertVerification(userId, cmdrName, TIER_INARA);
 
-    // We just called Inara, so the nickname is re-checked — this is what puts
-    // back a member who renamed themselves in Discord.
+    const squadron = evaluateSquadron(squadronName, expectedSquadronName());
+    await this.store.recordSquadron(userId, squadron.reported, squadron.matched, now);
+
+    /*
+     * The nickname LAST, after the squadron is recorded.
+     *
+     * Order matters: the nickname is `RANK - COMMANDER`, and a member who has
+     * just been confirmed into the squadron may have gained a rank role with
+     * it. Reconciling first would write the old title and leave it until the
+     * next check.
+     */
     await this.#reconcileNickname(userId);
 
-    return { cmdrName, verified: true, error: null };
+    return {
+      cmdrName,
+      verified: true,
+      error: null,
+      squadronName: squadron.reported,
+      inSquadron: squadron.matched,
+    };
+  }
+
+  /**
+   * Records the member's claim to have applied, then re-checks immediately.
+   *
+   * ★ THE IMMEDIATE RE-CHECK IS THE POINT ★
+   *
+   * Ticking the box and being told to come back in twenty minutes is a bad
+   * experience for the common case, where they joined on Inara a moment before
+   * ticking it. So this asks Inara there and then; the scheduled sweep exists
+   * for the case where Inara had not caught up yet.
+   *
+   * A failed check is NOT an error. The claim is recorded either way, so the
+   * sweep will keep trying — the member has done their part.
+   */
+  async claimSquadron(userId: string, now: Date = new Date()): Promise<LinkResult> {
+    await this.store.claimSquadron(userId, now);
+
+    try {
+      return await this.refresh(userId, now);
+    } catch {
+      return {
+        cmdrName: null,
+        verified: false,
+        error: 'We could not reach Inara just now. We will keep checking every twenty minutes.',
+      };
+    }
   }
 
   /** What the member sees. Reports that a key EXISTS, never what it is. */
   async status(userId: string): Promise<LinkStatus> {
+    /*
+     * The squadron half is read even when there is no key on file. A member can
+     * be verified by an officer without ever linking one, and they still need
+     * to be told whether we can see them in the squadron.
+     */
+    const squadron = await this.store.squadronState(userId).catch(() => null);
+    const squadronFields = {
+      squadronStatus: statusOf(squadron),
+      inaraSquadron: squadron?.inaraSquadron ?? null,
+      expectedSquadron: expectedSquadronName(),
+      squadronClaimed: squadron?.squadronClaimedAt != null,
+      squadronCheckedAt: squadron?.squadronCheckedAt?.toISOString() ?? null,
+    };
+
     const link = await this.store.get(userId);
     if (link === null) {
+      // No key on file. The squadron half still travels: a member verified by
+      // an officer has no key and still needs to know where they stand.
       return {
         linked: false,
         cmdrName: null,
@@ -337,6 +465,7 @@ export class InaraLinkService {
         lastCheckedAt: null,
         lastError: null,
         source: null,
+        ...squadronFields,
       };
     }
     return {
@@ -346,6 +475,7 @@ export class InaraLinkService {
       lastCheckedAt: link.lastCheckedAt?.toISOString() ?? null,
       lastError: link.lastError,
       source: link.source,
+      ...squadronFields,
     };
   }
 
