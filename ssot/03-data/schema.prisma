@@ -326,6 +326,11 @@ model User {
   bio         String?
   /// IANA zone. Every user-facing time renders in this AND UTC (INV-025).
   timezone    String     @default("UTC")
+  /// When the member finished the commander onboarding step.
+  ///
+  /// A SEPARATE COLUMN rather than inferring from `timezone`, because the default is "UTC" and
+  /// somebody who genuinely lives in UTC would otherwise be asked forever. Null means never asked.
+  commanderOnboardedAt DateTime? @map("commander_onboarded_at") @db.Timestamptz(6)
   status      UserStatus @default(active)
   joinedAt    DateTime   @default(now()) @map("joined_at") @db.Timestamptz(6)
   lastSeenAt  DateTime?  @map("last_seen_at") @db.Timestamptz(6)

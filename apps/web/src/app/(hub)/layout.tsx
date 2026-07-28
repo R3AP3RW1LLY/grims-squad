@@ -2,6 +2,7 @@ import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { HubShell } from '../../components/hub-shell';
 import { SecureAccountBanner } from '../../components/secure-account-banner';
+import { VerifyPromptBanner } from '../../components/verify-prompt-banner';
 import { getMe } from '../../lib/api';
 
 /**
@@ -34,21 +35,26 @@ export default async function HubLayout({ children }: { children: React.ReactNod
   }
 
   /*
-   * ★ AN UNSECURED ADMIN GOES NOWHERE ELSE ★
+   * ★ ONBOARDING IS A WALL, NOT A NUDGE ★
    *
-   * Not a nudge, not a banner they can scroll past — a redirect, on every page
-   * under this layout, until enrolment is done. Somebody whose account can
-   * affect other members has to hold a second factor first, and "has to" means
-   * the interface will not take them anywhere else.
+   * A redirect on every page under this layout until the member owes nothing.
+   * Three obligations in a specific order — second factor for privileged
+   * accounts, then commander settings for everybody, then verification for
+   * everybody except admins — and the ORDER is decided by the server, in
+   * onboarding-gate.ts, rather than re-derived here.
    *
-   * The API refuses them regardless (admin-gate.guard.ts) and that is the
-   * actual security boundary. This is what stops them wandering into a members
-   * area that half-works and wondering why every admin link 403s.
+   * That matters: two copies of an ordering this fiddly drift, and the symptom
+   * is a member bounced between two pages that each think the other should
+   * have run first.
    *
-   * The onboarding page itself lives in (site), so this cannot loop.
+   * None of it is the security boundary — the API refuses these accounts
+   * regardless. It is what stops somebody wandering a members area that
+   * half-works, wondering why everything 403s.
+   *
+   * The onboarding pages live in (site), so this cannot loop.
    */
-  if (me.mustSecureAccount) {
-    redirect('/onboarding/security');
+  if (me.onboarding.path !== null) {
+    redirect(me.onboarding.path);
   }
 
   return (
@@ -62,6 +68,7 @@ export default async function HubLayout({ children }: { children: React.ReactNod
         follows them across every settings page too.
       */}
       <SecureAccountBanner />
+      <VerifyPromptBanner />
       {children}
     </HubShell>
   );

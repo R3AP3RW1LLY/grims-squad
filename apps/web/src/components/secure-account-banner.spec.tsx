@@ -126,14 +126,31 @@ describe('the forced onboarding page', () => {
     expect(onboarding).not.toMatch(/Nothing else on the site is blocked/i);
   });
 
-  it('MANDATORY: the members area redirects here until enrolment is done', () => {
+  it('MANDATORY: the members area redirects until the member owes nothing', () => {
     /*
      * Not a banner, not a nudge — a redirect on every page under the (hub)
-     * layout. Somebody whose account can affect other members holds a second
-     * factor first, and "has to" means the interface will not take them
-     * anywhere else.
+     * layout, until every obligation is met.
+     *
+     * The layout no longer names a specific step. There are three now, in an
+     * order that matters, and the ORDER is decided once on the server
+     * (onboarding-gate.ts, with its own tests) rather than re-derived here.
+     * Two copies of a rule this fiddly drift, and the symptom is a member
+     * bounced between two pages that each think the other should have run.
      */
-    expect(hubLayout).toContain('mustSecureAccount');
-    expect(hubLayout).toMatch(/redirect\('\/onboarding\/security'\)/);
+    expect(hubLayout).toContain('me.onboarding.path');
+    expect(hubLayout).toMatch(/redirect\(me\.onboarding\.path\)/);
+  });
+
+  it('MANDATORY: the redirect is unconditional on the path being set', () => {
+    /*
+     * The failure this forecloses: a well-meaning `&& somethingElse` added to
+     * the condition, which would let one class of member past the wall while
+     * the code still LOOKED like it gated everybody.
+     */
+    const guard = hubLayout.slice(
+      hubLayout.indexOf('me.onboarding.path'),
+      hubLayout.indexOf('redirect(me.onboarding.path)'),
+    );
+    expect(guard).not.toMatch(/&&|\|\|/);
   });
 });

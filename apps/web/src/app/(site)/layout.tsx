@@ -1,4 +1,5 @@
 import { SecureAccountBanner } from '../../components/secure-account-banner';
+import { VerifyPromptBanner } from '../../components/verify-prompt-banner';
 import { SiteNav, SiteFooter } from '../../components/site-chrome';
 import { AuthedNav } from '../../components/authed-nav';
 import { getMe } from '../../lib/api';
@@ -26,6 +27,7 @@ export default async function SiteLayout({ children }: { children: React.ReactNo
       {/* Directly under the navbar, per the human decision. In the LAYOUT so it
           follows the member everywhere rather than being remembered per page. */}
       <SecureAccountBanner />
+      <VerifyPromptBanner />
 
       <div className="flex-1">{children}</div>
 

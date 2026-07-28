@@ -1,9 +1,15 @@
-import { Controller, Get, Patch, Body, Req, Inject, Optional } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Body, Req, Inject, Optional } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
 import { PrismaClient } from '@grims/db';
 import { NO_PERMISSIONS, requiresTwoFactor } from '@grims/shared';
 import { Public } from './auth.guard.js';
 import { navFor, hasAdminArea, type NavItem } from './nav.js';
+import {
+  nextOnboardingStep,
+  shouldPromptForVerification,
+  ONBOARDING_PATHS,
+  type OnboardingStep,
+} from './onboarding-gate.js';
 import { PermissionService } from '../authz/permission.service.js';
 import { verifyCsrf, readCsrfCookie } from '../common/csrf.js';
 import { isValidTimezone, knownTimezones, DEFAULT_TIMEZONE } from '../common/timezone.js';
@@ -43,6 +49,20 @@ export interface MeResponse {
   isAdmin: boolean;
   /** Privileged AND unenrolled — the chrome uses this to keep admin links honest. */
   mustSecureAccount: boolean;
+  /**
+   * What they still owe, decided in ONE place (onboarding-gate.ts).
+   *
+   * The web layout redirects on `step`; it does not re-derive the rule. Two
+   * copies of an ordering this fiddly drift, and the symptom is a member
+   * bounced between two pages that each think the other should have run.
+   */
+  onboarding: {
+    step: OnboardingStep;
+    path: string | null;
+    /** Nag without blocking — true only for the admins the wall lets past. */
+    promptForVerification: boolean;
+    verified: boolean;
+  };
 }
 
 @Controller('v1')
@@ -63,12 +83,24 @@ export class MeController {
   async me(@Req() req: FastifyRequest): Promise<MeResponse> {
     const userId = req.user?.userId;
     if (userId === undefined) {
-      return { user: null, nav: [], isAdmin: false, mustSecureAccount: false };
+      return {
+        user: null,
+        nav: [],
+        isAdmin: false,
+        mustSecureAccount: false,
+        onboarding: { step: null, path: null, promptForVerification: false, verified: false },
+      };
     }
 
     const user = await this.db.user.findUnique({
       where: { id: userId },
-      select: { handle: true, displayName: true, avatarStoredHash: true, timezone: true },
+      select: {
+        handle: true,
+        displayName: true,
+        avatarStoredHash: true,
+        timezone: true,
+        commanderOnboardedAt: true,
+      },
     });
     if (user === null) {
       /*
@@ -77,13 +109,29 @@ export class MeController {
        * as an error, so the chrome offers a sign-in button instead of a broken
        * page the member cannot get out of.
        */
-      return { user: null, nav: [], isAdmin: false, mustSecureAccount: false };
+      return {
+        user: null,
+        nav: [],
+        isAdmin: false,
+        mustSecureAccount: false,
+        onboarding: { step: null, path: null, promptForVerification: false, verified: false },
+      };
     }
 
     const mask =
       this.permissions === null ? NO_PERMISSIONS : await this.permissions.effectiveMask(userId);
 
-    const mustSecure = requiresTwoFactor(mask) && !(await this.#enrolled(userId));
+    const privileged = requiresTwoFactor(mask);
+    const enrolled = await this.#enrolled(userId);
+    const mustSecure = privileged && !enrolled;
+
+    const state = {
+      privileged,
+      twoFactorEnrolled: enrolled,
+      commanderOnboarded: user.commanderOnboardedAt !== null,
+      verified: await this.#verified(userId),
+    };
+    const step = nextOnboardingStep(state);
 
     return {
       user: {
@@ -114,6 +162,12 @@ export class MeController {
       // explain why they are being asked; it just must not link them anywhere.
       isAdmin: hasAdminArea(mask),
       mustSecureAccount: mustSecure,
+      onboarding: {
+        step,
+        path: step === null ? null : ONBOARDING_PATHS[step],
+        promptForVerification: shouldPromptForVerification(state),
+        verified: state.verified,
+      },
     };
   }
 
@@ -153,6 +207,41 @@ export class MeController {
     return { timezone };
   }
 
+  /**
+   * Finishes the commander onboarding step.
+   *
+   * Sets the timezone AND stamps the completion together, because they are one
+   * decision. Two calls would leave a member who closed the tab between them
+   * with a timezone saved and the step still owed — asked again next sign-in,
+   * with the answer already filled in and no explanation.
+   */
+  @Post('me/onboarding/commander')
+  async completeCommanderOnboarding(
+    @Req() req: FastifyRequest,
+    @Body() body: unknown,
+  ): Promise<{ timezone: string; done: true }> {
+    const userId = req.user?.userId;
+    if (userId === undefined) throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
+
+    const cookies =
+      (req as unknown as { cookies?: Record<string, string | undefined> }).cookies ?? {};
+    verifyCsrf(req.method, readCsrfCookie(cookies), req.headers['x-csrf-token'] as string | undefined);
+
+    const timezone = (body as Record<string, unknown> | null)?.['timezone'];
+    if (!isValidTimezone(timezone)) {
+      throw new AppError(
+        ErrorCode.VALIDATION_FAILED,
+        'That is not a timezone we recognise. Pick one from the list.',
+      );
+    }
+
+    await this.db.user.update({
+      where: { id: userId },
+      data: { timezone, commanderOnboardedAt: new Date() },
+    });
+    return { timezone, done: true };
+  }
+
   /** The zones the picker offers. Read from the runtime, never a hand-kept list. */
   @Get('me/timezones')
   timezones(): { timezones: string[]; fallback: string } {
@@ -182,6 +271,19 @@ export class MeController {
       .sort((a, b) => b.rankOrder - a.rankOrder);
 
     return ranks[0]?.name ?? ranks[0]?.key ?? null;
+  }
+
+  /**
+   * Has anybody confirmed which commander this is?
+   *
+   * `isVerified` AND not revoked. A pending claim is not a verification — the
+   * whole point of the queue is that declaring a name proves nothing (INV-005).
+   */
+  async #verified(userId: string): Promise<boolean> {
+    const count = await this.db.cmdrVerification.count({
+      where: { userId, isVerified: true, revokedAt: null },
+    });
+    return count > 0;
   }
 
   async #enrolled(userId: string): Promise<boolean> {

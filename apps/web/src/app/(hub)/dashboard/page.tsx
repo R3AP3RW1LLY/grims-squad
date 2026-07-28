@@ -138,7 +138,7 @@ export default async function DashboardPage() {
         turned up, not like a status board for an outage.
       */}
       <PageHeader
-        eyebrow={greeting()}
+        eyebrow={greeting(me.user?.timezone ?? 'UTC')}
         title={verified === null ? name.toUpperCase() : `CMDR ${verified.toUpperCase()}`}
         {...(me.user?.rank != null && { subtitle: me.user.rank })}
         {...(me.user !== null && { icon: <Avatar user={me.user} size={56} /> })}
@@ -245,20 +245,35 @@ export default async function DashboardPage() {
 }
 
 /**
- * Morning, afternoon or evening.
+ * Morning, afternoon or evening — on THEIR clock.
  *
- * ★ IN UTC, WHICH IS A KNOWN COMPROMISE ★
+ * ★ THIS USED TO READ UTC, AND IT WAS WRONG ★
  *
- * The honest version reads the member's own timezone — we store one on `User` —
- * but that would mean blocking the render on a lookup, for a greeting. The
- * squadron is largely UK and US-evening and the server runs UTC, so this is
- * right for most people most of the time.
+ * It was written when we had no timezone to read, and the compromise was
+ * recorded rather than hidden: somebody in Australia was wished good morning at
+ * bedtime. The zone is now asked for during onboarding, so the compromise has
+ * no reason to survive.
  *
- * Written down rather than left to be discovered: if somebody in Australia is
- * wished good morning at bedtime, this is why, and `User.timezone` is the fix.
+ * `hourCycle: 'h23'` matters. The default for en-GB gives "24" for midnight,
+ * which parses as 24 and falls past every branch — a member signing in at
+ * 00:30 would be wished good evening.
  */
-function greeting(): string {
-  const hour = new Date().getUTCHours();
+function greeting(timeZone: string): string {
+  let hour: number;
+  try {
+    hour = Number(
+      new Intl.DateTimeFormat('en-GB', {
+        timeZone,
+        hour: 'numeric',
+        hourCycle: 'h23',
+      }).format(new Date()),
+    );
+  } catch {
+    // An unknown zone costs the right greeting, never the page.
+    hour = new Date().getUTCHours();
+  }
+
+  if (!Number.isFinite(hour)) hour = new Date().getUTCHours();
   if (hour < 12) return 'Good morning, commander';
   if (hour < 18) return 'Good afternoon, commander';
   return 'Good evening, commander';

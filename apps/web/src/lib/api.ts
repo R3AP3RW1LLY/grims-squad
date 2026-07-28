@@ -287,6 +287,17 @@ export interface MeResponse {
   nav: NavItem[];
   isAdmin: boolean;
   mustSecureAccount: boolean;
+  /**
+   * What they still owe. Decided by the SERVER (onboarding-gate.ts) so the
+   * ordering lives in one place — two copies of a rule this fiddly drift, and
+   * the symptom is a member bounced between two pages.
+   */
+  onboarding: {
+    step: 'security' | 'commander' | 'verification' | null;
+    path: string | null;
+    promptForVerification: boolean;
+    verified: boolean;
+  };
 }
 
 /**
@@ -306,6 +317,7 @@ export const getMe = async (): Promise<MeResponse> =>
     nav: [],
     isAdmin: false,
     mustSecureAccount: false,
+    onboarding: { step: null, path: null, promptForVerification: false, verified: false },
   };
 
 /**
@@ -317,6 +329,11 @@ export const getMe = async (): Promise<MeResponse> =>
  */
 export const getTimezones = (): Promise<{ timezones: string[]; fallback: string } | null> =>
   get('/v1/me/timezones', { authed: true });
+
+/** The member's own pending commander claim, if any. */
+export const getMyClaim = (): Promise<{
+  pending: { cmdrName: string; nonce: string; expiresAt: string } | null;
+} | null> => get('/v1/me/cmdr', { authed: true });
 
 export interface AccountStatus {
   privileged: boolean;
