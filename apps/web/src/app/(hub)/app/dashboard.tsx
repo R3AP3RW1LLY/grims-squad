@@ -1,7 +1,7 @@
 import type { AdminDashboard } from '../../../lib/api';
 import { Section, StatGrid, StatTile } from '../../../components/hub-page';
 import {
-  ActivityHeatmap,
+  ActivityChart,
   Donut,
   RankedBars,
   StackedStrip,
@@ -106,10 +106,10 @@ export function Dashboard({ data }: { data: AdminDashboard }) {
 
       <Section
         title={`Who showed up — ${label}`}
-        description="Every day of the month, shaded by how much happened. Counted from per-day records rather than from a monthly total, so a member active on the 5th and the 20th appears on both."
+        description="Actions per day against the number of people behind them. Counted from per-day records rather than from a monthly total, so a member active on the 5th and the 20th appears on both."
       >
         {discord.daily.some((d) => d > 0) ? (
-          <ActivityHeatmap days={heat} monthLabel={label} />
+          <ActivityChart days={heat} monthLabel={label} />
         ) : (
           <Empty>Nothing recorded this month yet.</Empty>
         )}

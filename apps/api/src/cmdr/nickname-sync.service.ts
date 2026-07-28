@@ -54,6 +54,14 @@ export interface NicknameSyncDeps {
    * identical renames.
    */
   rememberNickname(discordId: string, nickname: string): Promise<void>;
+  /**
+   * The rank to put in front of their name, or null if they hold none.
+   *
+   * Read from the Discord roles the member WEARS rather than from granted
+   * internal roles: grants only appear after reconciliation for an account that
+   * exists, and most of the squadron has neither.
+   */
+  rankFor(discordId: string): Promise<string | null>;
   writeAudit(entry: Record<string, unknown>): Promise<void>;
 }
 
@@ -64,6 +72,32 @@ export interface SyncResult {
 
 /** Discord's hard ceiling on a nickname. */
 const MAX_NICK = 32;
+
+/**
+ * Builds the nickname: `RANK - COMMANDER`.
+ *
+ * ★ WHEN IT DOES NOT FIT, THE RANK GOES — NEVER THE NAME ★
+ *
+ * Discord allows 32 characters and "Chief Fleet Commander - PEBBLEMERCAHNT" is
+ * thirty-eight. Something has to give, and it must not be the commander name:
+ * the name is the identity, it is what people are called in game and in voice,
+ * and a truncated one is a different person's name.
+ *
+ * Truncating the RANK instead was considered and rejected — "Chief Fleet Comma"
+ * is not a rank, and a nickname that looks corrupted invites somebody to fix it
+ * by hand, which this would then overwrite on their next sign-in.
+ *
+ * So the rank is dropped whole, and a long-named Chief Fleet Commander simply
+ * appears under their commander name. Exported for its own test, because the
+ * boundary is the interesting part and it is invisible from the outside.
+ */
+export function composeNickname(rank: string | null, cmdrName: string): string {
+  const name = cmdrName.trim();
+  if (rank === null || rank.trim() === '') return name.slice(0, MAX_NICK);
+
+  const full = `${rank.trim()} - ${name}`;
+  return full.length <= MAX_NICK ? full : name.slice(0, MAX_NICK);
+}
 
 export class NicknameSyncService {
   constructor(private readonly deps: NicknameSyncDeps) {}
@@ -84,9 +118,23 @@ export class NicknameSyncService {
         return { changed: false, reason: 'No verified commander name for this member.' };
       }
 
-      // Truncated rather than rejected: a commander with a long name should get
-      // a shortened nickname, not none and an error.
-      const want = verified.trim().slice(0, MAX_NICK);
+      /*
+       * `RANK - COMMANDER`, where the rank is whichever they actually hold:
+       * their leadership appointment if they have one, otherwise their rung on
+       * the tenure ladder. A failure to read it is not a reason to skip the
+       * rename — the name alone is still better than a stale nickname.
+       */
+      /*
+       * Wrapped in an async IIFE, not just `.catch()`.
+       *
+       * A dependency that throws SYNCHRONOUSLY — a missing implementation, a
+       * null store — never produces a promise, so `.catch()` never runs and the
+       * throw escapes to the outer handler. That would abandon the rename
+       * entirely over a decoration, when the commander name alone is still
+       * better than a stale nickname.
+       */
+      const rank = await (async () => this.deps.rankFor(discordId))().catch(() => null);
+      const want = composeNickname(rank, verified);
       const current = await this.deps.currentNickFor(discordId);
 
       /*

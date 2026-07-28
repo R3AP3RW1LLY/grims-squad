@@ -282,7 +282,20 @@ export class PrismaDashboardStore implements DashboardStore {
 
         if (mapped.rankOrder >= LEADERSHIP_CEILING) {
           if (tenure === null || mapped.rankOrder > tenure.rankOrder) tenure = mapped;
-        } else if (appointment === null || mapped.rankOrder > appointment.rankOrder) {
+        } else if (appointment === null || mapped.rankOrder < appointment.rankOrder) {
+          /*
+       * ★ FOR APPOINTMENTS, THE LOWEST NUMBER IS THE MOST SENIOR ★
+       *
+       * The two ladders run in OPPOSITE directions and this is the trap. Tenure
+       * ascends — Cadet 100 up to Grand Master General 190 — while appointments
+       * descend: Squadron Leader 60, Sector Overseer 50, First Commander 40,
+       * Chief Fleet Commander 30, Prime Legate 20, Galactic Admiral 10.
+       *
+       * Every officer also holds Squadron Leader as their base, so taking the
+       * highest number reported the BASE rank for all nine of them. The
+       * Galactic Admiral and the Prime Legate both showed as Squadron Leader,
+       * which is precisely backwards.
+       */
           appointment = mapped;
         }
       }
@@ -379,10 +392,11 @@ export class PrismaDashboardStore implements DashboardStore {
         ranks: [...heldByRank.entries()]
           .map(([rank, held]) => ({ rank, held }))
           .sort((a, b) => (rankOrderOf.get(b.rank) ?? 0) - (rankOrderOf.get(a.rank) ?? 0)),
+        // Ascending, so the most senior office comes FIRST — rank 10 is the
+        // Galactic Admiral. The reverse of the tenure ladder's ordering, for
+        // the same reason the picker above runs the other way.
         appointments: [...heldByAppointment.entries()]
           .map(([rank, held]) => ({ rank, held }))
-          // Ascending: rank 10 (Galactic Admiral) is the MOST senior appointment,
-          // which is the reverse of the tenure ladder's ordering.
           .sort((a, b) => (rankOrderOf.get(a.rank) ?? 0) - (rankOrderOf.get(b.rank) ?? 0)),
         qualifying: activity.filter(
           (r) =>

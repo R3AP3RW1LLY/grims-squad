@@ -237,7 +237,7 @@ export class PrismaAdminStore implements AdminStore {
       let currentRank: string | null = null;
       let appointment: string | null = null;
       let bestTenure = -Infinity;
-      let bestAppointment = -Infinity;
+      let bestAppointment = Infinity;
 
       for (const roleId of guild?.roles ?? []) {
         const mapped = rankByRoleId.get(roleId);
@@ -248,7 +248,20 @@ export class PrismaAdminStore implements AdminStore {
             bestTenure = mapped.rankOrder;
             currentRank = mapped.name;
           }
-        } else if (mapped.rankOrder > bestAppointment) {
+        } else if (mapped.rankOrder < bestAppointment) {
+          /*
+       * ★ FOR APPOINTMENTS, THE LOWEST NUMBER IS THE MOST SENIOR ★
+       *
+       * The two ladders run in OPPOSITE directions and this is the trap. Tenure
+       * ascends — Cadet 100 up to Grand Master General 190 — while appointments
+       * descend: Squadron Leader 60, Sector Overseer 50, First Commander 40,
+       * Chief Fleet Commander 30, Prime Legate 20, Galactic Admiral 10.
+       *
+       * Every officer also holds Squadron Leader as their base, so taking the
+       * highest number reported the BASE rank for all nine of them. The
+       * Galactic Admiral and the Prime Legate both showed as Squadron Leader,
+       * which is precisely backwards.
+       */
           bestAppointment = mapped.rankOrder;
           appointment = mapped.name;
         }

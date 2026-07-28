@@ -1,9 +1,13 @@
 'use client';
 
 import {
+  Area,
   Bar,
   BarChart,
+  CartesianGrid,
   Cell,
+  ComposedChart,
+  Line,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -78,190 +82,156 @@ const TOOLTIP_STYLE = {
   color: BRAND.text,
 } as const;
 
-/* ------------------------------------------------------------------ heatmap */
+/* ----------------------------------------------------------- activity chart */
 
 export interface HeatDay {
   /** Day of the month, 1-indexed. */
   readonly day: number;
   readonly messages: number;
   readonly members: number;
-  /** 0 = Sunday, matching Date.getUTCDay(). */
+  /** 0 = Sunday, matching Date.getUTCDay(). Retained for weekend shading. */
   readonly weekday: number;
 }
 
 /**
- * Five buckets, GitHub's scheme.
+ * The month, as a time series.
  *
- * ★ QUANTILES, NOT EVEN SLICES OF THE RANGE ★
+ * ★ WHY THIS REPLACED A CALENDAR HEATMAP ★
  *
- * Activity is heavily skewed — one day at 1,203 messages against a median near
- * 250. Splitting the RANGE into five equal bands puts almost every day in the
- * bottom bucket and produces a chart that is one bright square and thirty dark
- * ones. Ranking the days and cutting by position spreads them across the scale,
- * which is what makes the shape of the month visible at all.
+ * The calendar was thirty-one squares each big enough to hold two numbers, and
+ * at full width that is an enormous block of colour for one panel — reported as
+ * "way too big, really hard to look at". It was also the wrong tool: a grid of
+ * shaded squares makes you compare colours to answer "is the squadron getting
+ * busier", which is a question a LINE answers instantly.
+ *
+ * Two series, because they are genuinely different questions and one loud
+ * member should not look like a crowd:
+ *
+ *   area   total actions — how much happened
+ *   line   distinct members — how many people it was
+ *
+ * Separate axes, since the two are orders of magnitude apart. Sharing one would
+ * flatten the member line onto the floor.
  */
-function bucketise(values: readonly number[]): (v: number) => number {
-  const active = values.filter((v) => v > 0).sort((a, b) => a - b);
-  if (active.length === 0) return () => 0;
-
-  const at = (q: number) => active[Math.min(active.length - 1, Math.floor(active.length * q))] ?? 0;
-  const [q25, q50, q75, q90] = [at(0.25), at(0.5), at(0.75), at(0.9)];
-
-  return (v: number) => {
-    if (v <= 0) return 0;
-    // Strictly greater, so the quietest active day is bucket 1 rather than 0 —
-    // "somebody was here" and "nobody was here" must never look the same.
-    if (v > (q90 ?? 0)) return 4;
-    if (v > (q75 ?? 0)) return 3;
-    if (v > (q50 ?? 0)) return 2;
-    // q25 is read for symmetry with the bands above; everything at or below it
-    // is bucket 1, which is the fallthrough.
-    void q25;
-    return 1;
-  };
-}
-
-/** Empty through busiest. Bucket 0 is a panel-coloured square, not a hole. */
-const HEAT = [
-  'rgba(147,164,184,0.07)',
-  'rgba(0,200,255,0.25)',
-  'rgba(0,200,255,0.45)',
-  'rgba(92,217,255,0.7)',
-  '#5cd9ff',
-] as const;
-
-const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
-
-export function ActivityHeatmap({ days, monthLabel }: { days: HeatDay[]; monthLabel: string }) {
-  const bucket = bucketise(days.map((d) => d.messages));
-
-  /*
-   * Laid out as a CALENDAR — weeks down, weekdays across — rather than as
-   * GitHub's single ribbon of columns.
-   *
-   * GitHub's shape exists to fit a whole YEAR in one strip. For one month it
-   * produces five thin columns in the corner of a wide panel. A calendar fills
-   * the width, gives every day a cell big enough to carry its own number, and
-   * is a shape everybody already knows how to read.
-   *
-   * Monday-first: the squadron's week, and it keeps the weekend together
-   * instead of splitting it across both ends.
-   */
-  // Monday-first, so the leading blanks are counted from Monday rather than
-  // from Sunday, which is what (weekday + 6) % 7 does.
-  const first = days[0];
-  const leading = first === undefined ? 0 : (first.weekday + 6) % 7;
-  const cells: Array<HeatDay | null> = [...Array.from({ length: leading }, () => null), ...days];
-  while (cells.length % 7 !== 0) cells.push(null);
-
-  const weeks: Array<Array<HeatDay | null>> = [];
-  for (let i = 0; i < cells.length; i += 7) weeks.push(cells.slice(i, i + 7));
-
-  /*
-   * No seed. Reducing with `days[0]` as the initial value types the accumulator
-   * as possibly-undefined for the empty case, and the caller already guarantees
-   * a non-empty month — but stating it as a guard is honest, and cheaper than
-   * asserting it away.
-   */
+export function ActivityChart({ days, monthLabel }: { days: HeatDay[]; monthLabel: string }) {
   const busiest = days.length === 0 ? undefined : days.reduce((a, b) => (b.messages > a.messages ? b : a));
+  const active = days.filter((d) => d.messages > 0);
+  const busiestMembers =
+    days.length === 0 ? undefined : days.reduce((a, b) => (b.members > a.members ? b : a));
 
   return (
     <div>
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0 flex-1">
-          <div className="mb-1 grid grid-cols-7 gap-1.5">
-            {WEEKDAYS.map((w) => (
-              <div
-                key={w}
-                className="text-center font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-dim)]"
-              >
-                {w}
-              </div>
-            ))}
-          </div>
+      <ResponsiveContainer width="100%" height={200}>
+        <ComposedChart data={days} margin={{ top: 8, right: 8, bottom: 0, left: -20 }}>
+          <defs>
+            {/*
+              A gradient, not a flat fill. At 200px tall a solid block hides the
+              line crossing it; fading to nothing keeps both readable.
+            */}
+            <linearGradient id="actionsFill" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor={BRAND.cyan} stopOpacity={0.5} />
+              <stop offset="100%" stopColor={BRAND.cyan} stopOpacity={0.02} />
+            </linearGradient>
+          </defs>
 
-          <div className="grid grid-cols-7 gap-1.5">
-            {weeks.flat().map((d, i) =>
-              d === null ? (
-                // A day belonging to the neighbouring month. Kept as an empty
-                // slot so the weekday columns stay aligned.
-                <div key={`pad-${i}`} aria-hidden="true" className="aspect-square" />
-              ) : (
-                <div
-                  key={d.day}
-                  className="group relative aspect-square rounded-sm ring-1 ring-inset ring-[rgba(255,255,255,0.04)] transition-transform hover:scale-105 hover:ring-[var(--color-brand-orange)]"
-                  style={{ backgroundColor: HEAT[bucket(d.messages)] ?? HEAT[0] }}
-                  title={`${d.day} ${monthLabel}: ${d.messages.toLocaleString('en-GB')} actions from ${d.members} ${d.members === 1 ? 'member' : 'members'}`}
-                >
-                  <span
-                    className={`absolute left-1 top-0.5 font-mono text-[10px] ${
-                      bucket(d.messages) >= 3
-                        ? 'text-[var(--color-surface-void)]'
-                        : 'text-[var(--color-text-dim)]'
-                    }`}
-                  >
-                    {d.day}
-                  </span>
-                  {/*
-                    The member count, only where the square is big enough and
-                    the day busy enough to be worth reading. On a quiet day it
-                    is noise; on a busy one it is the second half of the story.
-                  */}
-                  {d.members > 0 && (
-                    <span
-                      className={`absolute inset-x-0 bottom-1 text-center font-mono text-[10px] ${
-                        bucket(d.messages) >= 3
-                          ? 'text-[var(--color-surface-void)]'
-                          : 'text-[var(--color-text-secondary)]'
-                      }`}
-                    >
-                      {d.members}
-                    </span>
-                  )}
-                </div>
-              ),
-            )}
-          </div>
-        </div>
+          <CartesianGrid stroke="rgba(147,164,184,0.08)" vertical={false} />
+          <XAxis
+            dataKey="day"
+            tick={{ fill: BRAND.textSecondary, fontSize: 10 }}
+            axisLine={false}
+            tickLine={false}
+            // Every other day. Thirty-one labels on a narrow panel overlap into
+            // a smear, and the shape is what matters here rather than the dates.
+            interval={1}
+          />
+          <YAxis
+            yAxisId="actions"
+            tick={{ fill: BRAND.textSecondary, fontSize: 10 }}
+            axisLine={false}
+            tickLine={false}
+            width={44}
+          />
+          <YAxis
+            yAxisId="members"
+            orientation="right"
+            tick={{ fill: BRAND.orangeBright, fontSize: 10 }}
+            axisLine={false}
+            tickLine={false}
+            width={28}
+          />
+          <Tooltip
+            contentStyle={TOOLTIP_STYLE}
+            cursor={{ stroke: BRAND.orange, strokeWidth: 1, strokeDasharray: '3 3' }}
+            labelFormatter={(d) => `${String(d)} ${monthLabel}`}
+            formatter={(v, n) => [Number(v).toLocaleString('en-GB'), n === 'messages' ? 'Actions' : 'Members']}
+          />
+          <Area
+            yAxisId="actions"
+            type="monotone"
+            dataKey="messages"
+            stroke={BRAND.cyanBright}
+            strokeWidth={2}
+            fill="url(#actionsFill)"
+          />
+          <Line
+            yAxisId="members"
+            type="monotone"
+            dataKey="members"
+            stroke={BRAND.orange}
+            strokeWidth={2}
+            dot={false}
+          />
+        </ComposedChart>
+      </ResponsiveContainer>
 
-        {/* ------------------------------------------------------- legend */}
-        <aside className="shrink-0 sm:w-44 sm:border-l sm:border-[var(--color-border-hairline)] sm:pl-5">
-          <p className="mb-2 font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-secondary)]">
-            Activity
-          </p>
-          <div className="mb-1 flex items-center gap-1">
-            <span className="mr-1 font-mono text-[10px] text-[var(--color-text-dim)]">Less</span>
-            {HEAT.map((c, i) => (
-              <span
-                key={i}
-                className="size-3.5 rounded-sm ring-1 ring-inset ring-[rgba(255,255,255,0.04)]"
-                style={{ backgroundColor: c }}
-              />
-            ))}
-            <span className="ml-1 font-mono text-[10px] text-[var(--color-text-dim)]">More</span>
-          </div>
-          <p className="mt-3 text-[11px] leading-relaxed text-[var(--color-text-secondary)]">
-            Each square is a day. The small number is how many members were
-            active; hover for the total.
-          </p>
+      {/* ------------------------------------------------------------ legend */}
+      <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-[var(--color-border-hairline)] pt-3 text-[11px]">
+        <span className="flex items-center gap-2">
+          <span
+            aria-hidden="true"
+            className="h-0.5 w-5 rounded"
+            style={{ backgroundColor: BRAND.cyanBright }}
+          />
+          <span className="text-[var(--color-text-secondary)]">Actions</span>
+        </span>
+        <span className="flex items-center gap-2">
+          <span
+            aria-hidden="true"
+            className="h-0.5 w-5 rounded"
+            style={{ backgroundColor: BRAND.orange }}
+          />
+          <span className="text-[var(--color-text-secondary)]">Members active</span>
+        </span>
 
-          {busiest !== undefined && busiest.messages > 0 && (
-            <dl className="mt-4 space-y-1.5 border-t border-[var(--color-border-hairline)] pt-3 text-[11px]">
-              <div className="flex justify-between gap-2">
-                <dt className="text-[var(--color-text-secondary)]">Busiest</dt>
-                <dd className="font-mono text-[var(--color-brand-cyan-bright)]">
-                  {busiest.day} {monthLabel.split(' ')[0]}
-                </dd>
-              </div>
-              <div className="flex justify-between gap-2">
-                <dt className="text-[var(--color-text-secondary)]">Peak</dt>
-                <dd className="font-mono text-[var(--color-text-primary)]">
-                  {busiest.messages.toLocaleString('en-GB')}
-                </dd>
-              </div>
-            </dl>
-          )}
-        </aside>
+        {busiest !== undefined && busiest.messages > 0 && (
+          <span className="text-[var(--color-text-secondary)]">
+            Busiest{' '}
+            <span className="font-mono text-[var(--color-brand-cyan-bright)]">
+              {busiest.day} {monthLabel.split(' ')[0]}
+            </span>{' '}
+            at{' '}
+            <span className="font-mono text-[var(--color-text-primary)]">
+              {busiest.messages.toLocaleString('en-GB')}
+            </span>
+          </span>
+        )}
+        {busiestMembers !== undefined && busiestMembers.members > 0 && (
+          <span className="text-[var(--color-text-secondary)]">
+            Most people{' '}
+            <span className="font-mono text-[var(--color-brand-orange)]">
+              {busiestMembers.members}
+            </span>{' '}
+            on the{' '}
+            <span className="font-mono text-[var(--color-text-primary)]">
+              {busiestMembers.day}
+            </span>
+          </span>
+        )}
+        <span className="text-[var(--color-text-secondary)]">
+          <span className="font-mono text-[var(--color-text-primary)]">{active.length}</span> active
+          {' '}
+          {active.length === 1 ? 'day' : 'days'}
+        </span>
       </div>
     </div>
   );
