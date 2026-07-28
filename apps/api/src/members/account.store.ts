@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { PrismaClient } from '@grims/db';
 
 /** One signed-in device, as the member sees it. Deliberately NOT the row. */
@@ -34,6 +35,22 @@ export interface ExportBundle {
 
 export interface AccountStore {
   sessionsOf(userId: string, currentFamilyId?: string | null): Promise<SessionSummary[]>;
+  /**
+   * Which session family a refresh token belongs to.
+   *
+   * ★ WHY THIS HAD TO EXIST ★
+   *
+   * The controller read `req.sessionFamilyId` — a property NOTHING ever set. So
+   * "which of these devices am I on" was always nobody, and the sign-out that
+   * depends on the same answer could never fire. Both features were dead and
+   * neither said so.
+   *
+   * The refresh cookie is the only thing on a request that identifies the
+   * session: the access token is a JWT carrying no authorization data by
+   * design, and putting a family id in it purely for a UI label would weaken
+   * it.
+   */
+  familyIdForRefreshToken(rawToken: string): Promise<string | null>;
   ownerOfFamily(familyId: string): Promise<string | null>;
   revokeFamily(familyId: string, reason: string): Promise<void>;
   exportFor(userId: string, at: Date): Promise<ExportBundle>;
@@ -44,6 +61,27 @@ export class PrismaAccountStore implements AccountStore {
 
   constructor(db: PrismaClient) {
     this.#db = db;
+  }
+
+  /**
+   * Resolves a refresh token to its family.
+   *
+   * Hashed here, never compared in plaintext — the column holds a SHA-256 and
+   * the raw token exists only in the member's cookie. Returns null for anything
+   * unrecognised, which covers an expired cookie, a revoked family, and a
+   * caller who simply sent nonsense; the difference is not this method's
+   * business and telling them apart would be an oracle.
+   */
+  async familyIdForRefreshToken(rawToken: string): Promise<string | null> {
+    if (rawToken === '') return null;
+
+    const hash = createHash('sha256').update(rawToken).digest('hex');
+    const row = await this.#db.refreshToken.findFirst({
+      where: { tokenHash: hash },
+      select: { familyId: true },
+    });
+
+    return row?.familyId ?? null;
   }
 
   async sessionsOf(userId: string, currentFamilyId: string | null = null): Promise<SessionSummary[]> {

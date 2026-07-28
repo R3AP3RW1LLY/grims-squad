@@ -41,6 +41,19 @@ class FakeAccountStore implements AccountStore {
   async ownerOfFamily(familyId: string): Promise<string | null> {
     return this.owners.get(familyId) ?? null;
   }
+  /**
+   * Which family a refresh token belongs to.
+   *
+   * The real store hashes and looks it up; the fake keeps a plain map, because
+   * what these tests are about is whether the CONTROLLER asks and what it does
+   * with the answer — not SHA-256.
+   */
+  tokensToFamily = new Map<string, string>();
+
+  async familyIdForRefreshToken(rawToken: string): Promise<string | null> {
+    return this.tokensToFamily.get(rawToken) ?? null;
+  }
+
   async revokeFamily(familyId: string, reason: string): Promise<void> {
     this.revoked.push({ familyId, reason });
   }
@@ -50,15 +63,22 @@ class FakeAccountStore implements AccountStore {
   }
 }
 
-function req(method = 'POST', sessionFamilyId?: string): never {
+function req(method = 'POST', refreshToken?: string): never {
   const token = issueCsrfToken();
   return {
     method,
     headers: { 'x-csrf-token': token },
-    cookies: { [csrfCookieName(false)]: token },
-    // Which family this request actually arrived on. The controller needs it to
-    // know whether the member is ending THEIR OWN session.
-    ...(sessionFamilyId === undefined ? {} : { sessionFamilyId }),
+    cookies: {
+      [csrfCookieName(false)]: token,
+      /*
+       * The REFRESH COOKIE, which is the only thing on a request that
+       * identifies the session. An earlier version of this faked a
+       * `sessionFamilyId` property — which is exactly why the bug survived:
+       * the fake supplied something the real request never had, so the tests
+       * passed while the feature was dead in production.
+       */
+      ...(refreshToken === undefined ? {} : { gs_rt: refreshToken }),
+    },
   } as never;
 }
 
@@ -112,7 +132,8 @@ describe('GET /v1/me/sessions', () => {
     store.families = [family({ id: 'fam-1', current: true }), family({ id: 'fam-2' })];
     store.owners.set('fam-1', 'u-1');
     store.owners.set('fam-2', 'u-1');
-    const out = await ctl.sessions({ userId: 'u-1' }, req('GET'));
+    store.tokensToFamily.set('tok-1', 'fam-1');
+    const out = await ctl.sessions({ userId: 'u-1' }, req('GET', 'tok-1'));
     expect(out.sessions.filter((s) => s.current)).toHaveLength(1);
   });
 
@@ -227,9 +248,10 @@ describe('@SECURITY ending your own session signs you out', () => {
    */
   it('MANDATORY: clears the session cookies when the caller ends their OWN session', async () => {
     store.owners.set('fam-1', 'u-1');
+    store.tokensToFamily.set('tok-1', 'fam-1');
     const res = reply();
 
-    const out = await ctl.revokeSession({ userId: 'u-1' }, 'fam-1', req('DELETE', 'fam-1'), res);
+    const out = await ctl.revokeSession({ userId: 'u-1' }, 'fam-1', req('DELETE', 'tok-1'), res);
 
     expect(out.signedOut).toBe(true);
     // Both prefixes. The API picks `__Host-` from NODE_ENV rather than from the
@@ -246,9 +268,10 @@ describe('@SECURITY ending your own session signs you out', () => {
     // of the machine you are using to do it — that would make the feature
     // unusable for the thing people mostly use it for.
     store.owners.set('fam-2', 'u-1');
+    store.tokensToFamily.set('tok-1', 'fam-1');
     const res = reply();
 
-    const out = await ctl.revokeSession({ userId: 'u-1' }, 'fam-2', req('DELETE', 'fam-1'), res);
+    const out = await ctl.revokeSession({ userId: 'u-1' }, 'fam-2', req('DELETE', 'tok-1'), res);
 
     expect(out.signedOut).toBe(false);
     expect(res.cleared).toEqual([]);
