@@ -34,6 +34,31 @@ const DEFAULT_TIMEOUT_MS = 10_000;
  */
 const REQUEST_PATH_WAIT_MS = 8_000;
 
+/**
+ * The application identity Inara whitelists us by.
+ *
+ * ★ THIS STRING MUST MATCH WHAT WAS REGISTERED, EXACTLY ★
+ *
+ * Inara's own instructions: "let me know your app name/identifier you will be
+ * using, as it needs to be white-listed first" and "your application name,
+ * exactly as it will be sent in the requests". A mismatch is not a soft
+ * failure — every call comes back "This application has no access allowed",
+ * which is indistinguishable from never having applied.
+ *
+ * Plain ASCII, no apostrophe and no spaces. The squadron is "Grim's Squad", but
+ * an identifier carrying a typographic apostrophe travels through JSON, a
+ * whitelist lookup and somebody's copy-paste before it is compared, and only
+ * one of those has to normalise it differently for the match to fail silently.
+ *
+ * Defined ONCE. It was previously written out in two call sites, which is the
+ * same shape as the API-origin bug that cost hours: one value in two places
+ * drifts, and the failure looks like something else entirely.
+ */
+export const INARA_APP_NAME = 'GrimsSquadHub';
+
+/** Sent alongside the name. Bump when behaviour Inara would care about changes. */
+export const INARA_APP_VERSION = '1.0.0';
+
 export class InaraApiError extends Error {
   constructor(
     message: string,

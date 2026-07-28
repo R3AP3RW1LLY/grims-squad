@@ -1,5 +1,11 @@
 import { PrismaClient } from '@grims/db';
-import { InaraAdapter, InaraNotApprovedError, InaraApiError } from '@grims/ed-clients';
+import {
+  InaraAdapter,
+  InaraNotApprovedError,
+  InaraApiError,
+  INARA_APP_NAME,
+  INARA_APP_VERSION,
+} from '@grims/ed-clients';
 import { NonceService } from '@grims/shared';
 import { PrismaNonceStore } from '@grims/db';
 
@@ -145,8 +151,8 @@ export async function main(): Promise<number> {
     const summary = await pollInaraNonces(
       new NonceService(new PrismaNonceStore(prisma)),
       new InaraAdapter({
-        appName: "Grim's Squad Hub",
-        appVersion: '1.0.0',
+        appName: INARA_APP_NAME,
+        appVersion: INARA_APP_VERSION,
         apiKey,
         isDeveloped: process.env['NODE_ENV'] !== 'production',
       }),
