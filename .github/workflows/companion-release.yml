@@ -1,0 +1,93 @@
+# Builds the companion app for every platform a member might play Elite on.
+#
+# ★ WHY A MATRIX AND NOT ONE MACHINE ★
+#
+# electron-builder cannot cross-compile the parts that matter. A DMG has to be
+# made on macOS (and eventually signed and notarized there), and an AppImage
+# needs a Linux filesystem. Building all three from one runner produces two
+# artifacts that either fail to build or fail to run, and the second is worse
+# because nobody finds out until a member downloads it.
+#
+# ★ WHAT "SUPPORTS MAC" MEANS HERE ★
+#
+# Elite Dangerous has had no native macOS client since 2015. Mac players run it
+# through CrossOver or Whisky, so their journals sit inside a Wine bottle. This
+# app is a native macOS build that reads the journals out of that bottle — it is
+# not pretending the game is native. Linux is the same story with Proton.
+
+name: companion release
+
+on:
+  push:
+    tags:
+      - 'companion-v*'
+  # Buildable on demand, so packaging breakage is found before a release rather
+  # than during one.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      # One platform failing must not cancel the others. A broken DMG is worth
+      # knowing about at the same time as a working installer, not instead of it.
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: --win
+            artifact: windows-installer
+            pattern: 'apps/companion/release/*.exe'
+          - os: macos-latest
+            target: --mac
+            artifact: macos-dmg
+            pattern: 'apps/companion/release/*.dmg'
+          - os: ubuntu-latest
+            target: --linux
+            artifact: linux-appimage
+            pattern: 'apps/companion/release/*.AppImage'
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: install
+        run: pnpm install --frozen-lockfile
+        env:
+          # The main CI skips the Electron binary download because nothing there
+          # needs it. This job DOES — electron-builder packages that binary.
+          ELECTRON_SKIP_BINARY_DOWNLOAD: 0
+
+      - name: build the shared package
+        run: pnpm --filter @grims/shared build
+
+      - name: test
+        # The app is about to be handed to members. Packaging a build whose
+        # tests were never run is how a filter that drops private data silently
+        # stops working.
+        run: pnpm --filter @grims/companion test
+
+      - name: package
+        run: pnpm --filter @grims/companion exec electron-builder ${{ matrix.target }}
+        env:
+          # Not signed yet. Windows SmartScreen and macOS Gatekeeper will both
+          # warn until there is a certificate and an Apple Developer ID, and the
+          # download page has to say so plainly rather than let members meet a
+          # scary dialog with no explanation.
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.pattern }}
+          if-no-files-found: error

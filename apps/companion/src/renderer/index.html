@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!--
+      A strict CSP on a page that loads nothing remote.
+
+      Belt and braces: the window is local HTML today, and this is what stops a
+      future change that pulls in a script from anywhere else from being a
+      silent full compromise of the member's machine.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; script-src 'unsafe-inline'"
+    />
+    <title>Grim's Squad Hub</title>
+    <style>
+      :root {
+        --bg: #0b0d10;
+        --panel: #14181d;
+        --line: #232a32;
+        --text: #e6e9ed;
+        --dim: #8b95a1;
+        --orange: #ff7100;
+        --green: #4ade80;
+        --red: #f87171;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 20px;
+        background: var(--bg);
+        color: var(--text);
+        font: 14px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+      h1 { font-size: 17px; margin: 0 0 2px; letter-spacing: .02em; }
+      h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .09em; color: var(--dim); margin: 0 0 10px; }
+      .sub { color: var(--dim); margin: 0 0 18px; font-size: 13px; }
+      .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 14px; }
+      .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+      .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-right: 8px; }
+      .ok { background: var(--green); } .off { background: var(--dim); } .bad { background: var(--red); }
+      button {
+        background: var(--orange); color: #14181d; border: 0; border-radius: 7px;
+        padding: 8px 14px; font: inherit; font-weight: 600; cursor: pointer;
+      }
+      button.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); font-weight: 500; }
+      button:disabled { opacity: .45; cursor: default; }
+      input {
+        width: 100%; padding: 9px 11px; border-radius: 7px; border: 1px solid var(--line);
+        background: #0b0d10; color: var(--text); font: inherit; font-family: ui-monospace, Menlo, Consolas, monospace;
+      }
+      .muted { color: var(--dim); font-size: 12.5px; }
+      .err { color: var(--red); font-size: 12.5px; }
+      .stat { display: flex; gap: 22px; margin-top: 12px; }
+      .stat div span { display: block; font-size: 19px; font-weight: 600; }
+      .stat div small { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .07em; }
+      pre {
+        background: #0b0d10; border: 1px solid var(--line); border-radius: 7px; padding: 11px;
+        max-height: 220px; overflow: auto; font-size: 11.5px; color: var(--dim); margin: 10px 0 0;
+      }
+      a { color: var(--orange); }
+      .stack > * + * { margin-top: 10px; }
+    </style>
+  </head>
+  <body>
+    <h1>Grim's Squad Hub</h1>
+    <p class="sub">Keeps your squadron profile current from your Elite Dangerous journals.</p>
+
+    <div class="panel">
+      <div class="row">
+        <div><span class="dot off" id="dot"></span><strong id="status">Loading…</strong></div>
+        <button class="ghost" id="toggle" hidden>Pause</button>
+      </div>
+      <div class="stat" id="stats" hidden>
+        <div><span id="sent">0</span><small>Sent</small></div>
+        <div><span id="dupes">0</span><small>Already had</small></div>
+        <div><span id="files">0</span><small>Journals read</small></div>
+      </div>
+      <p class="err" id="error" hidden></p>
+      <p class="muted" id="refused" hidden></p>
+    </div>
+
+    <div class="panel" id="pairing">
+      <h2>Pairing</h2>
+      <div class="stack">
+        <p class="muted" id="pairHelp">
+          Sign in on the squadron website, add this device, and paste the code it gives you. The code
+          is shown once and only lets this app send journal events — nothing else.
+        </p>
+        <input id="token" type="password" placeholder="gsq_…" autocomplete="off" spellcheck="false" />
+        <div class="row">
+          <button id="pair">Pair this device</button>
+          <button class="ghost" id="openHub">Open the website</button>
+        </div>
+        <p class="err" id="pairError" hidden></p>
+      </div>
+      <div class="stack" id="paired" hidden>
+        <p class="muted">Paired as <code id="hint"></code></p>
+        <div class="row">
+          <button class="ghost" id="unpair">Forget this device</button>
+          <button class="ghost" id="openHub2">Manage devices</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>What gets sent</h2>
+      <p class="muted">
+        Six event types and nothing else: when you start the game, your ranks and progress, your
+        squadron standing, and your ships. Never your chat, your bounties, your credits, or where you
+        have been. The filtering happens on this PC, before anything leaves it.
+      </p>
+      <div class="row" style="margin-top: 10px">
+        <button class="ghost" id="preview">Show me, from my own journal</button>
+        <button class="ghost" id="folder">Change journal folder</button>
+      </div>
+      <pre id="previewOut" hidden></pre>
+    </div>
+
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const api = window.companion;
+
+      function render(s) {
+        const running = s.running && s.enabled && s.paired;
+        const failing = s.last?.error != null || s.last?.unauthorised === true;
+
+        $('dot').className = 'dot ' + (failing ? 'bad' : running ? 'ok' : 'off');
+        $('status').textContent = !s.paired
+          ? 'Not paired yet'
+          : !s.enabled
+            ? 'Paused'
+            : s.last?.unauthorised
+              ? 'This device is no longer paired'
+              : failing
+                ? 'Cannot reach the hub'
+                : 'Watching your journals';
+
+        $('toggle').hidden = !s.paired;
+        $('toggle').textContent = s.enabled ? 'Pause' : 'Resume';
+
+        $('stats').hidden = !s.paired || s.last == null;
+        if (s.last) {
+          $('sent').textContent = s.last.sent ?? 0;
+          $('dupes').textContent = s.last.duplicates ?? 0;
+          $('files').textContent = s.last.filesRead ?? 0;
+        }
+
+        $('error').hidden = s.last?.error == null;
+        $('error').textContent = s.last?.error ?? '';
+
+        const refused = Object.entries(s.last?.refused ?? {});
+        $('refused').hidden = refused.length === 0;
+        $('refused').textContent = refused.length
+          ? 'Not stored, because you have not turned these on in your privacy settings: ' +
+            refused.map(([c, n]) => `${c} (${n})`).join(', ') + '.'
+          : '';
+
+        $('pairing').querySelector('.stack').hidden = s.paired;
+        $('paired').hidden = !s.paired;
+        $('hint').textContent = s.tokenHint;
+      }
+
+      $('pair').onclick = async () => {
+        const r = await api.pair($('token').value);
+        $('pairError').hidden = r.ok;
+        $('pairError').textContent = r.error ?? '';
+        if (r.ok) $('token').value = '';
+        render(await api.getState());
+      };
+      $('unpair').onclick = async () => { await api.unpair(); render(await api.getState()); };
+      $('toggle').onclick = async () => {
+        const s = await api.getState();
+        await api.setEnabled(!s.enabled);
+        render(await api.getState());
+      };
+      $('openHub').onclick = () => api.openHub();
+      $('openHub2').onclick = () => api.openHub();
+      $('folder').onclick = async () => { await api.chooseJournalFolder(); render(await api.getState()); };
+
+      $('preview').onclick = async () => {
+        const r = await api.preview();
+        $('previewOut').hidden = false;
+        $('previewOut').textContent = r.ok
+          ? `${r.file}\n\n` +
+            (r.events.length
+              ? r.events.map((e) => `${e.occurredAt}  ${e.name}\n${JSON.stringify(e.data, null, 2)}`).join('\n\n')
+              : 'Nothing in this journal that we would send.')
+          : r.advice;
+      };
+
+      api.onState(render);
+      api.getState().then(render);
+    </script>
+  </body>
+</html>

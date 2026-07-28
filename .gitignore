@@ -82,3 +82,9 @@ vault-*.enc
 # Verification builds. Kept OUT of .next so a build cannot disturb a running
 # dev server — see apps/web/next.config.mjs.
 .next-check/
+
+# Packaged desktop builds. electron-builder writes the entire Electron runtime
+# here — a few hundred megabytes of Chromium per platform, none of which is
+# ours and all of which is reproducible from source. Releases are built by CI
+# and attached as workflow artifacts.
+apps/companion/release/

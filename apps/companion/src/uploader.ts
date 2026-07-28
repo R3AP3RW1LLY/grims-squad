@@ -21,6 +21,15 @@ export interface UploadResult {
   readonly duplicates: number;
   /** Set when the token is no longer valid — the member must re-pair. */
   readonly unauthorised: boolean;
+  /**
+   * Categories the hub refused for want of consent, and how many events each
+   * cost.
+   *
+   * Surfaced rather than ignored: a member who has not opted into a category is
+   * entitled to be told their events are being dropped, instead of watching an
+   * app that looks like it is working and a website that never updates.
+   */
+  readonly refused: Record<string, number>;
   readonly error: string | null;
 }
 
@@ -39,7 +48,7 @@ export class Uploader {
 
   async send(events: readonly ParsedEvent[]): Promise<UploadResult> {
     if (events.length === 0) {
-      return { ok: true, accepted: 0, duplicates: 0, unauthorised: false, error: null };
+      return { ok: true, accepted: 0, duplicates: 0, unauthorised: false, refused: {}, error: null };
     }
 
     const doFetch = this.opts.fetchImpl ?? fetch;
@@ -71,6 +80,7 @@ export class Uploader {
           accepted: 0,
           duplicates: 0,
           unauthorised: true,
+          refused: {},
           error: 'This device is no longer paired. Pair it again from the website.',
         };
       }
@@ -81,6 +91,7 @@ export class Uploader {
           accepted: 0,
           duplicates: 0,
           unauthorised: false,
+          refused: {},
           error: `The hub answered ${res.status}.`,
         };
       }
@@ -88,12 +99,14 @@ export class Uploader {
       const body = (await res.json().catch(() => ({}))) as {
         accepted?: number;
         duplicates?: number;
+        refused?: Record<string, number>;
       };
       return {
         ok: true,
         accepted: body.accepted ?? 0,
         duplicates: body.duplicates ?? 0,
         unauthorised: false,
+        refused: body.refused ?? {},
         error: null,
       };
     } catch {
@@ -104,6 +117,7 @@ export class Uploader {
         accepted: 0,
         duplicates: 0,
         unauthorised: false,
+        refused: {},
         error: ac.signal.aborted ? 'The hub took too long to answer.' : 'Could not reach the hub.',
       };
     } finally {

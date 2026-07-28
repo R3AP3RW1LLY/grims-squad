@@ -32,6 +32,14 @@ export interface CompanionConfig {
   journalPathOverride: string | null;
   /** Per-file byte offsets, so a restart re-reads nothing. */
   offsets: Record<string, number>;
+  /**
+   * Per-file verdict on whether it is the LIVE galaxy.
+   *
+   * Fileheader is the first line, so a later chunk of the same file has no clue
+   * which galaxy it belongs to. Persisted rather than held in memory, because a
+   * restart mid-session would otherwise start sending a Legacy file's events.
+   */
+  sessionLive: Record<string, boolean>;
   /** Whether the member has agreed to send anything at all. */
   enabled: boolean;
 }
@@ -41,6 +49,7 @@ export const DEFAULT_CONFIG: CompanionConfig = {
   deviceToken: '',
   journalPathOverride: null,
   offsets: {},
+  sessionLive: {},
   // OFF until the member turns it on. An app that starts transmitting the
   // moment it is installed has not asked, and being installed is not consent.
   enabled: false,
@@ -69,6 +78,10 @@ export function loadConfig(userDataDir: string): CompanionConfig {
       journalPathOverride:
         typeof parsed.journalPathOverride === 'string' ? parsed.journalPathOverride : null,
       offsets: typeof parsed.offsets === 'object' && parsed.offsets !== null ? parsed.offsets : {},
+      sessionLive:
+        typeof parsed.sessionLive === 'object' && parsed.sessionLive !== null
+          ? parsed.sessionLive
+          : {},
       // Explicitly `=== true`. A truthy string from a hand-edited file must not
       // switch transmission on.
       enabled: parsed.enabled === true,
@@ -76,6 +89,20 @@ export function loadConfig(userDataDir: string): CompanionConfig {
   } catch {
     return { ...DEFAULT_CONFIG };
   }
+}
+
+/**
+ * A development override for the hub address.
+ *
+ * There is deliberately no UI for this. A field labelled "server address" on a
+ * member's screen is a field somebody can be talked into changing, and the
+ * result would be their journals going somewhere else entirely. Anyone who
+ * needs to point at a test server can set an environment variable, which is a
+ * thing you do on purpose.
+ */
+export function apiBaseUrlFor(config: CompanionConfig, env: NodeJS.ProcessEnv): string {
+  const override = env['GRIMS_API_URL'];
+  return typeof override === 'string' && override !== '' ? override : config.apiBaseUrl;
 }
 
 export function saveConfig(userDataDir: string, config: CompanionConfig): void {

@@ -1,0 +1,37 @@
+import { contextBridge, ipcRenderer } from 'electron';
+
+/**
+ * The only bridge between the page and the app.
+ *
+ * ★ A NAMED LIST, NOT A PASSTHROUGH ★
+ *
+ * Exposing `ipcRenderer` itself — or a generic `invoke(channel, ...args)` —
+ * would hand the renderer every channel the main process will ever register,
+ * including ones added later by somebody who did not know this file existed.
+ *
+ * Each function here is a decision. The renderer can do these things and
+ * nothing else, and adding a capability means adding a line, which means
+ * somebody has to think about it.
+ */
+
+contextBridge.exposeInMainWorld('companion', {
+  /** The current state, for a first paint. */
+  getState: () => ipcRenderer.invoke('state'),
+
+  /** Pushed whenever the state changes, so the window does not have to poll. */
+  onState: (handler: (state: unknown) => void) => {
+    // The listener is wrapped rather than passed through: the raw handler
+    // receives an IpcRendererEvent whose `sender` is a live handle back into
+    // the main process, and the page has no business holding one.
+    ipcRenderer.on('state', (_event, state) => handler(state));
+  },
+
+  pair: (token: string) => ipcRenderer.invoke('pair', token),
+  unpair: () => ipcRenderer.invoke('unpair'),
+  setEnabled: (enabled: boolean) => ipcRenderer.invoke('setEnabled', enabled),
+  openHub: () => ipcRenderer.invoke('openHub'),
+  chooseJournalFolder: () => ipcRenderer.invoke('chooseJournalFolder'),
+
+  /** Shows what a batch would contain, from the member's own journals. */
+  preview: () => ipcRenderer.invoke('preview'),
+});
