@@ -1,4 +1,5 @@
 import type { PrismaClient } from '@grims/db';
+import { LEADERSHIP_CEILING } from '../members/members.store.js';
 
 /**
  * The numbers behind the admin dashboard.
@@ -35,7 +36,13 @@ export interface DashboardData {
     readonly trackedMembers: number;
     /** Message count per day of the month, index 0 = the 1st. */
     readonly daily: readonly number[];
-    readonly top: ReadonlyArray<{ name: string; messages: number; voice: number }>;
+    readonly top: ReadonlyArray<{
+      name: string;
+      messages: number;
+      voice: number;
+      /** Their verified commander name, when they have one. */
+      cmdrName: string | null;
+    }>;
   };
 
   readonly game: {
@@ -55,10 +62,15 @@ export interface DashboardData {
   };
 
   readonly squadron: {
+    /** Members of the GUILD. Not website accounts — see the note on the query. */
     readonly members: number;
+    /** Of those, how many have an account here. */
+    readonly withAccounts: number;
     readonly verified: number;
-    /** Members holding each hierarchical rank, highest rung first. */
+    /** Members at each TENURE rank, highest rung first. Appointments are separate. */
     readonly ranks: ReadonlyArray<{ rank: string; held: number }>;
+    /** Leadership appointments, which are not on the promotion ladder at all. */
+    readonly appointments: ReadonlyArray<{ rank: string; held: number }>;
     /** Meets both halves of the monthly test right now. */
     readonly qualifying: number;
   };
@@ -88,6 +100,7 @@ export class PrismaDashboardStore implements DashboardStore {
     const [
       activity,
       trackedMembers,
+      guildMembers,
       daily,
       events,
       reporting,
@@ -107,11 +120,59 @@ export class PrismaDashboardStore implements DashboardStore {
           voiceJoinCount: true,
           gameActivity: true,
           discordId: true,
-          user: { select: { displayName: true } },
+          user: {
+            select: {
+              displayName: true,
+              /*
+               * The verified commander name, so the leaderboard can show who
+               * somebody is IN GAME as well as in Discord. Read live rather
+               * than cached, so a verification completed a minute ago shows on
+               * the next load without waiting for anything.
+               */
+              cmdrVerifications: {
+                where: { isVerified: true, revokedAt: null },
+                select: { cmdrName: true },
+                orderBy: { verifiedAt: 'desc' as const },
+                take: 1,
+              },
+            },
+          },
         },
         orderBy: { messageCount: 'desc' },
       }),
       this.#db.memberActivityMonth.findMany({ distinct: ['discordId'], select: { discordId: true } }),
+
+      /*
+       * ★ NAMES FOR EVERY MEMBER, NOT JUST THE ONES WITH ACCOUNTS ★
+       *
+       * The leaderboard used to fall back to the last four digits of a
+       * snowflake for anybody who had not signed in — fifty of fifty-one
+       * members — which made "most active" a list of numbers and useless for
+       * the one thing it exists to do.
+       *
+       * Same cache the activity tab reads, so the two can never disagree about
+       * what somebody is called. The bot keeps it current on every
+       * GuildMemberUpdate, so a nickname changed in Discord is right here on
+       * the next load.
+       */
+      this.#db.discordGuildMember.findMany({
+        select: {
+          discordId: true,
+          nick: true,
+          username: true,
+          globalName: true,
+          /*
+           * Roles too, because the ladder panel is built from them. Reading
+           * granted UserRole rows produced an EMPTY ladder against real data:
+           * the only grant in the database is Webmaster, which is not
+           * hierarchical, while fifty members wear mapped rank roles in
+           * Discord. Grants appear after reconciliation for an account that
+           * exists, and most of the squadron has neither.
+           */
+          roles: true,
+          isBot: true,
+        },
+      }),
 
       /*
        * Messages per day.
@@ -170,20 +231,66 @@ export class PrismaDashboardStore implements DashboardStore {
 
       this.#db.user.count({ where: { status: 'active' } }),
       this.#db.cmdrVerification.count({ where: { isVerified: true, revokedAt: null } }),
-      this.#db.userRole.groupBy({
-        by: ['roleId'],
-        _count: { _all: true },
+      /*
+       * The mapping from Discord role to internal rank. Small, and read once
+       * for the whole page rather than joined per member.
+       */
+      this.#db.roleMapping.findMany({
+        where: { role: { isHierarchical: true } },
+        select: { discordRoleId: true, role: { select: { name: true, rankOrder: true } } },
       }),
     ]);
 
-    // Rank names for the grouped counts. One extra small read rather than a
-    // join multiplied across every grant.
-    const roleRows = await this.#db.role.findMany({
-      where: { isHierarchical: true },
-      select: { id: true, name: true, rankOrder: true },
-      orderBy: { rankOrder: 'desc' },
-    });
-    const heldByRole = new Map(ranks.map((r) => [r.roleId, r._count._all]));
+    /*
+     * ★ ONE MEMBER COUNTS ONCE, AT THEIR HIGHEST RANK ★
+     *
+     * A member can wear several mapped roles — mid-promotion, or because an old
+     * one was never removed. Counting each role separately would make the
+     * ladder add up to more than the squadron, and the distribution would look
+     * top-heavy for a reason nobody could see.
+     *
+     * Bots are excluded: they hold roles and are not members.
+     */
+    const rankByRoleId = new Map(ranks.map((m) => [m.discordRoleId, m.role]));
+    const heldByRank = new Map<string, number>();
+    const heldByAppointment = new Map<string, number>();
+    const rankOrderOf = new Map<string, number>();
+
+    for (const m of guildMembers) {
+      if (m.isBot) continue;
+
+      /*
+       * ★ TENURE AND APPOINTMENTS ARE DIFFERENT LADDERS ★
+       *
+       * Roles below LEADERSHIP_CEILING are appointments; from it upward they
+       * are tenure ranks earned by qualifying months. Counting them in one list
+       * put "Squadron Leader" at the bottom of a ladder it is not on — the same
+       * error already corrected on the activity tab, and leaving the two
+       * disagreeing would be worse than either.
+       */
+      let tenure: { name: string; rankOrder: number } | null = null;
+      let appointment: { name: string; rankOrder: number } | null = null;
+
+      for (const roleId of m.roles) {
+        const mapped = rankByRoleId.get(roleId);
+        if (mapped === undefined) continue;
+
+        if (mapped.rankOrder >= LEADERSHIP_CEILING) {
+          if (tenure === null || mapped.rankOrder > tenure.rankOrder) tenure = mapped;
+        } else if (appointment === null || mapped.rankOrder > appointment.rankOrder) {
+          appointment = mapped;
+        }
+      }
+
+      if (tenure !== null) {
+        heldByRank.set(tenure.name, (heldByRank.get(tenure.name) ?? 0) + 1);
+        rankOrderOf.set(tenure.name, tenure.rankOrder);
+      }
+      if (appointment !== null) {
+        heldByAppointment.set(appointment.name, (heldByAppointment.get(appointment.name) ?? 0) + 1);
+        rankOrderOf.set(appointment.name, appointment.rankOrder);
+      }
+    }
 
     const daysInMonth = new Date(
       Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0),
@@ -195,6 +302,8 @@ export class PrismaDashboardStore implements DashboardStore {
       const slot = row.day - 1;
       if (slot >= 0 && slot < dailyArray.length) dailyArray[slot] = Number(row.n);
     }
+
+    const byDiscordId = new Map(guildMembers.map((m) => [m.discordId, m]));
 
     const sum = (pick: (r: (typeof activity)[number]) => number) =>
       activity.reduce((acc, r) => acc + pick(r), 0);
@@ -210,13 +319,29 @@ export class PrismaDashboardStore implements DashboardStore {
         ).length,
         trackedMembers: trackedMembers.length,
         daily: dailyArray,
-        top: activity.slice(0, 8).map((r) => ({
-          // Falls back to the snowflake for members who have never signed in.
-          // Showing an id is honest; inventing "Unknown" hides that they exist.
-          name: r.user?.displayName ?? `Discord ${r.discordId.slice(-4)}`,
-          messages: r.messageCount,
-          voice: r.voiceJoinCount,
-        })),
+        top: activity.slice(0, 8).map((r) => {
+          const guild = byDiscordId.get(r.discordId);
+          return {
+            /*
+             * Nickname first — by this squadron's convention that IS the
+             * commander name, and it is what officers recognise each other by.
+             * Then Discord's global display name, then the handle.
+             *
+             * The snowflake remains the last resort rather than "Unknown":
+             * showing an id is honest about a member we cannot name, whereas a
+             * placeholder hides that they exist at all.
+             */
+            name:
+              guild?.nick ??
+              guild?.globalName ??
+              guild?.username ??
+              r.user?.displayName ??
+              `Discord ${r.discordId.slice(-4)}`,
+            messages: r.messageCount,
+            voice: r.voiceJoinCount,
+            cmdrName: r.user?.cmdrVerifications[0]?.cmdrName ?? null,
+          };
+        }),
       },
       game: {
         events,
@@ -228,11 +353,28 @@ export class PrismaDashboardStore implements DashboardStore {
         byType: byType.map((t) => ({ type: t.eventType, count: t._count._all })),
       },
       squadron: {
-        members,
+        /*
+         * ★ GUILD MEMBERS, NOT WEBSITE ACCOUNTS ★
+         *
+         * This was `users where status = active`, which is ONE. The dashboard
+         * then divided fifty-one active members by it and reported five
+         * thousand per cent participation.
+         *
+         * The squadron is the guild. Having an account here is a separate fact,
+         * and it is reported as one.
+         */
+        members: guildMembers.filter((m) => !m.isBot).length,
+        withAccounts: members,
         verified,
-        ranks: roleRows
-          .map((r) => ({ rank: r.name, held: heldByRole.get(r.id) ?? 0 }))
-          .filter((r) => r.held > 0),
+        // Highest rung first, so the ladder reads top-down the way it is climbed.
+        ranks: [...heldByRank.entries()]
+          .map(([rank, held]) => ({ rank, held }))
+          .sort((a, b) => (rankOrderOf.get(b.rank) ?? 0) - (rankOrderOf.get(a.rank) ?? 0)),
+        appointments: [...heldByAppointment.entries()]
+          .map(([rank, held]) => ({ rank, held }))
+          // Ascending: rank 10 (Galactic Admiral) is the MOST senior appointment,
+          // which is the reverse of the tenure ladder's ordering.
+          .sort((a, b) => (rankOrderOf.get(a.rank) ?? 0) - (rankOrderOf.get(b.rank) ?? 0)),
         qualifying: activity.filter(
           (r) =>
             (r.messageCount > 0 || r.forumPostCount > 0 || r.voiceJoinCount > 0) &&

@@ -265,7 +265,7 @@ export interface AdminDashboard {
     trackedMembers: number;
     /** One entry per day of the month, index 0 = the 1st. */
     daily: number[];
-    top: Array<{ name: string; messages: number; voice: number }>;
+    top: Array<{ name: string; messages: number; voice: number; cmdrName: string | null }>;
   };
   game: {
     events: number;
@@ -277,9 +277,15 @@ export interface AdminDashboard {
     byType: Array<{ type: string; count: number }>;
   };
   squadron: {
+    /** Members of the GUILD, bots excluded. Not website accounts. */
     members: number;
+    /** Of those, how many have an account here. */
+    withAccounts: number;
     verified: number;
+    /** Tenure ranks, highest first. */
     ranks: Array<{ rank: string; held: number }>;
+    /** Leadership appointments — a separate axis, not on the promotion ladder. */
+    appointments: Array<{ rank: string; held: number }>;
     qualifying: number;
   };
 }

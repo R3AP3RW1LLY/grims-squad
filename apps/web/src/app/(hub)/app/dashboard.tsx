@@ -110,7 +110,7 @@ export function Dashboard({ data }: { data: AdminDashboard }) {
         <StatTile
           label="Active this month"
           value={String(discord.activeMembers)}
-          hint={`${participation}% of ${squadron.members} members`}
+          hint={`${participation}% of ${squadron.members} in the guild`}
           tone={discord.activeMembers === 0 ? 'warn' : 'accent'}
         />
         <StatTile
@@ -127,7 +127,7 @@ export function Dashboard({ data }: { data: AdminDashboard }) {
         <StatTile
           label="Qualifying"
           value={String(squadron.qualifying)}
-          hint="Discord activity AND an Elite session"
+          hint={`Discord activity AND an Elite session · ${squadron.withAccounts} signed up, ${squadron.verified} verified`}
           tone={squadron.qualifying === 0 ? 'warn' : 'default'}
         />
       </StatGrid>
@@ -146,7 +146,7 @@ export function Dashboard({ data }: { data: AdminDashboard }) {
       <div className="grid gap-6 lg:grid-cols-2">
         <Section
           title="Most active"
-          description="By message count this month. The same figures the promotion system reads."
+          description="By message count this month, named by their Discord server nickname — which in this squadron is the commander name. The same figures the promotion system reads."
         >
           {discord.top.length > 0 ? (
             <Ranked
@@ -154,7 +154,19 @@ export function Dashboard({ data }: { data: AdminDashboard }) {
               rows={discord.top.map((t) => ({
                 label: t.name,
                 value: t.messages,
-                sub: t.voice > 0 ? `${t.voice} voice` : undefined,
+                /*
+                  The verified CMDR name when it differs from the nickname, and
+                  the voice count. Suppressed when they match, because printing
+                  the same name twice on one line reads as a rendering fault
+                  rather than as two facts.
+                */
+                sub:
+                  [
+                    t.cmdrName !== null && t.cmdrName !== t.name ? `CMDR ${t.cmdrName}` : null,
+                    t.voice > 0 ? `${t.voice} voice` : null,
+                  ]
+                    .filter((x) => x !== null)
+                    .join(' · ') || undefined,
               }))}
             />
           ) : (
@@ -178,15 +190,35 @@ export function Dashboard({ data }: { data: AdminDashboard }) {
 
         <Section
           title="The ladder"
-          description="Members holding each rank right now, read from granted roles."
+          description="Members at each tenure rank right now, read from the roles they wear in Discord. Counted once each, at their highest rung."
         >
           {squadron.ranks.length > 0 ? (
             <Ranked
-              unit={'held'}
+              unit="held"
               rows={squadron.ranks.map((r) => ({ label: r.rank, value: r.held }))}
             />
           ) : (
             <Empty>Nobody holds a squadron rank yet.</Empty>
+          )}
+
+          {/*
+            ★ APPOINTMENTS ARE NOT RUNGS ★
+
+            Squadron Leader and above are appointments, not ranks earned by
+            qualifying months, and promotion never moves anybody along them.
+            Listed apart so the ladder above stays a ladder — mixed in, a
+            Squadron Leader sat at the bottom of a ladder they are not on.
+          */}
+          {squadron.appointments.length > 0 && (
+            <div className="mt-5 border-t border-[var(--color-border-hairline)] pt-4">
+              <p className="mb-2 font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--color-text-secondary)]">
+                Leadership appointments
+              </p>
+              <Ranked
+                unit="held"
+                rows={squadron.appointments.map((r) => ({ label: r.rank, value: r.held }))}
+              />
+            </div>
           )}
         </Section>
 
