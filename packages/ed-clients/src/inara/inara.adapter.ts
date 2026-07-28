@@ -86,16 +86,6 @@ export interface InaraConfig {
   readonly timeoutMs?: number;
 }
 
-/** One pilot rank, as Inara reports it. */
-export interface InaraRank {
-  /** 'combat', 'trade', 'exploration', 'cqc', 'empire', 'federation'. */
-  readonly name: string;
-  /** 0-8 for the main ranks, 0-14 for the naval ones. Inara's own numbering. */
-  readonly value: number;
-  /** 0.0-1.0 progress toward the next rank, when Inara knows it. */
-  readonly progress: number | null;
-}
-
 export interface InaraProfile {
   readonly cmdrName: string;
   /** The free-text bio. Where the nonce is looked for. */
@@ -103,18 +93,20 @@ export interface InaraProfile {
   readonly profileUrl: string | null;
   readonly squadronName: string | null;
   /**
-   * Pilot ranks — combat, trade, exploration, CQC, and the naval ranks.
+   * The squadron Inara says they belong to, and their rank in it.
    *
-   * Empty when Inara has none, which is NOT the same as the commander having
-   * rank zero: Inara only knows what the member's own tooling has uploaded. A
-   * missing rank means "unknown", and displaying it as Harmless would be
-   * inventing a fact about somebody.
+   * Human decision, 2026-07-27: Inara is used for TWO things only — confirming
+   * the commander name, and confirming squadron membership. Everything else
+   * (ranks, ships, loadouts, position, statistics) comes from the game's own
+   * journals via the companion app, which carries all of it in far more detail
+   * and in real time.
+   *
+   * Ranks, allegiance and avatar WERE parsed here and have been removed rather
+   * than left unused. Dead parsing that looks live is a liability: it invites
+   * somebody to build on data we no longer ask Inara for, and it would make our
+   * API request overstate what we need.
    */
-  readonly ranks: readonly InaraRank[];
   readonly squadronRank: string | null;
-  readonly allegiance: string | null;
-  readonly gameRole: string | null;
-  readonly avatarUrl: string | null;
 }
 
 interface InaraEnvelope {
@@ -125,14 +117,6 @@ interface InaraEnvelope {
     eventData?: {
       userName?: string;
       commanderName?: string;
-      commanderRanksPilot?: Array<{
-        rankName?: string;
-        rankValue?: number;
-        rankProgress?: number;
-      }>;
-      preferredGameRole?: string;
-      preferredAllegianceName?: string;
-      avatarImageURL?: string;
       commanderSquadron?: { SquadronName?: string; SquadronRank?: string };
       inaraURL?: string;
       otherNamesFound?: string[];
@@ -158,6 +142,17 @@ export class InaraAdapter {
    *
    * Returns null when Inara does not recognise the key.
    */
+  async getOwnIdentity(apiKey: string): Promise<{
+    cmdrName: string;
+    squadronName: string | null;
+    squadronRank: string | null;
+  } | null> {
+    // BOUNDED, for the same reason as below: a member is waiting on this.
+    const p = await this.#call(apiKey, undefined, REQUEST_PATH_WAIT_MS);
+    if (p === null || p.cmdrName === '') return null;
+    return { cmdrName: p.cmdrName, squadronName: p.squadronName, squadronRank: p.squadronRank };
+  }
+
   async getOwnCommanderName(apiKey: string): Promise<string | null> {
     // BOUNDED. This is the one Inara call that happens while a member waits on
     // an HTTP response, and the global limiter is legitimately minutes deep
@@ -292,26 +287,7 @@ export class InaraAdapter {
         bio: [d.commanderBio ?? '', d.userProfileText ?? ''].join('\n').trim(),
         profileUrl: d.inaraURL ?? null,
         squadronName: d.commanderSquadron?.SquadronName ?? null,
-        /*
-         * Ranks are filtered to entries that actually carry a name and a value.
-         * A partial entry is dropped rather than coerced: rankValue ?? 0 would
-         * render an unknown rank as "Harmless", which invents a fact about
-         * somebody rather than admitting we do not know.
-         */
-        ranks: (d.commanderRanksPilot ?? [])
-          .filter(
-            (r): r is { rankName: string; rankValue: number; rankProgress?: number } =>
-              typeof r.rankName === 'string' && typeof r.rankValue === 'number',
-          )
-          .map((r) => ({
-            name: r.rankName,
-            value: r.rankValue,
-            progress: typeof r.rankProgress === 'number' ? r.rankProgress : null,
-          })),
         squadronRank: d.commanderSquadron?.SquadronRank ?? null,
-        allegiance: d.preferredAllegianceName ?? null,
-        gameRole: d.preferredGameRole ?? null,
-        avatarUrl: d.avatarImageURL ?? null,
       };
     };
 

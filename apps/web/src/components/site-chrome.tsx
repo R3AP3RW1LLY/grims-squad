@@ -277,6 +277,14 @@ export function SiteFooter() {
             <ul className="mt-4 list-none space-y-2 p-0 text-sm">
               <li>
                 <a
+                  href="/companion"
+                  className="text-[var(--color-text-secondary)] no-underline transition-colors hover:text-[var(--color-brand-cyan-bright)] hover:underline hover:underline-offset-4"
+                >
+                  Companion app
+                </a>
+              </li>
+              <li>
+                <a
                   href="https://github.com/R3AP3RW1LLY/grims-squad"
                   // An EXTERNAL link, so it gets the treatment the internal ones
                   // do not need: noopener stops the opened page reaching back

@@ -64,6 +64,23 @@ export default async function CommanderPage() {
               to verify you for now — it works just as well.
             </p>
 
+            {/*
+              Set expectations HERE, on the page where somebody is thinking
+              about their commander. Inara answers one question — is this
+              really you, and are you in the squadron. Everything else the hub
+              shows comes from the companion app, and saying so here stops
+              people wondering why their ships never appear.
+            */}
+            <p className="mt-4 text-sm text-[var(--color-text-muted)]">
+              Inara is used for two things only: confirming your commander name, and checking you
+              are in Grim&rsquo;s Squad. Your ranks, ships, loadouts and activity all come from the{' '}
+              <a href="/companion" className="text-[var(--color-brand-cyan-bright)]">
+                companion app
+              </a>{' '}
+              instead — it reads the game&rsquo;s own journal files, which carry far more than Inara
+              has.
+            </p>
+
             <InaraForm initial={status} />
 
             <section aria-labelledby="privacy-heading" className="mt-16">
