@@ -4,6 +4,7 @@ import { AppError, ErrorCode } from '@grims/shared';
 import { User, type CurrentUser } from '../auth/current-user.js';
 import { verifyCsrf, readCsrfCookie } from '../common/csrf.js';
 import { MEMBERS_STORE, type MembersStore } from './members.tokens.js';
+import { LEADERSHIP_CEILING } from './members.store.js';
 import {
   buildSnapshots,
   EMPTY_SNAPSHOT,
@@ -85,6 +86,7 @@ export class MembersController {
           category: 'rank' | 'membership' | 'award';
         }>;
         isOfficer: boolean;
+        siteRoles: ReadonlyArray<{ name: string; colour: string | null }>;
       }
     >;
     total: number;
@@ -156,7 +158,23 @@ export class MembersController {
           )
           .sort((a, b) => b.position - a.position)
           .map(({ name, colour, category }) => ({ name, colour, category })),
-        isOfficer: r.source.isOfficer === true,
+        /*
+         * ★ OFFICER IS A SQUADRON RANK, NOT A WEBSITE PERMISSION ★
+         *
+         * This used to read the permission mask, which made the webmaster an
+         * officer — someone who holds every permission on the platform and no
+         * standing in the squadron at all. Corrected on the squadron owner's
+         * instruction: rank decides.
+         *
+         * A leadership APPOINTMENT (rankOrder below 100) makes an officer. The
+         * tenure ladder from Cadet up does not, however senior it sounds —
+         * "Grand Master General" is twelve qualifying months, not an office.
+         */
+        isOfficer: (r.source.guildRoleIds ?? []).some((id) => {
+          const order = catalogue.get(id)?.rankOrder;
+          return order !== null && order !== undefined && order < LEADERSHIP_CEILING;
+        }),
+        siteRoles: r.source.siteRoles ?? [],
       })),
       // The COUNT of active members is not private — it is the squadron's size,
       // which is public on Inara anyway. Who they are is the private part.

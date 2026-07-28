@@ -148,10 +148,29 @@ export function RosterCard({
               </p>
             )}
             {/*
-              The squadron ROLE line that used to sit here has moved into the
-              labelled rows below. It said the same thing twice otherwise, and
-              the unlabelled version was the one nobody could interpret.
+              ★ A PLATFORM TITLE, NOT A SQUADRON RANK ★
+
+              Webmaster grants every permission on the site and confers no
+              standing in the squadron whatsoever. It sits here, beside the
+              name, precisely so it is not mistaken for one — the squadron rows
+              below are about the squadron, and this is about the website.
+
+              The squadron ROLE line that used to sit here moved into those
+              labelled rows: it said the same thing twice, and the unlabelled
+              version was the one nobody could interpret.
             */}
+            {member.siteRoles.length > 0 && (
+              <p className="mt-1 flex flex-wrap gap-1.5">
+                {member.siteRoles.map((r) => (
+                  <span
+                    key={r.name}
+                    className="rounded border border-[var(--color-brand-cyan-bright)] px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.16em] text-[var(--color-brand-cyan-bright)]"
+                  >
+                    {r.name}
+                  </span>
+                ))}
+              </p>
+            )}
           </div>
         </div>
 

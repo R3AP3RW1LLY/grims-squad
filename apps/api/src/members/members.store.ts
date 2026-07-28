@@ -1,5 +1,4 @@
 import type { PrismaClient } from '@grims/db';
-import { PRIVILEGED_PERMISSIONS } from '@grims/shared';
 import type { PrivacySettings, ProfileSource } from './profile.serializer.js';
 import { SNAPSHOT_EVENT_TYPES, type SnapshotEvent } from './commander-snapshot.js';
 
@@ -28,7 +27,25 @@ export interface DiscordRoleInfo {
   readonly hoist: boolean;
   /** What the role MEANS to us. Discord has no such concept. */
   readonly category: 'rank' | 'membership' | 'award' | 'hidden' | 'other';
+  /** Ladder position of the internal role this maps to, or null if it maps to none. */
+  readonly rankOrder: number | null;
 }
+
+/**
+ * Below this is a LEADERSHIP APPOINTMENT; at or above it is a TENURE RANK.
+ *
+ * ★ NOT A GUESS — THE LADDER SAYS SO ★
+ *
+ * The roles below 100 describe themselves as "Reserved" and "Leadership. Admin
+ * area access". The roles from 100 up are earned by qualifying months: Cadet at
+ * one, Grand Master General at twelve.
+ *
+ * So seniority-sounding names are misleading and must not be used. "Grand
+ * Master General" is the TOP of the tenure ladder and confers no office; "Cadet"
+ * is its floor. Somebody can be both a Cadet and a Squadron Leader, and only the
+ * second makes them an officer.
+ */
+export const LEADERSHIP_CEILING = 100;
 
 /**
  * Reads only what a profile needs.
@@ -74,7 +91,17 @@ export class PrismaMembersStore implements MembersStore {
     },
     discordIdentity: { select: { guildRoles: true } },
     userRoles: {
-      select: { role: { select: { name: true, colour: true, rankOrder: true, permMask: true } } },
+      select: {
+        role: {
+          select: {
+            name: true,
+            colour: true,
+            rankOrder: true,
+            isHierarchical: true,
+            permMask: true,
+          },
+        },
+      },
       // Highest first, so a card showing only the top one shows the top one.
       orderBy: { role: { rankOrder: 'desc' as const } },
     },
@@ -95,7 +122,13 @@ export class PrismaMembersStore implements MembersStore {
     cmdrVerifications: Array<{ cmdrName: string }>;
     discordIdentity: { guildRoles: string[] } | null;
     userRoles: Array<{
-      role: { name: string; colour: string | null; rankOrder: number; permMask: unknown };
+      role: {
+        name: string;
+        colour: string | null;
+        rankOrder: number;
+        isHierarchical: boolean;
+        permMask: unknown;
+      };
     }>;
   }): MemberRow {
     return {
@@ -124,10 +157,16 @@ export class PrismaMembersStore implements MembersStore {
          * toFixed(0), never Number(): the mask is NUMERIC(40,0) and exceeds 64
          * bits — SITE_CONFIG alone is 1n<<63n (INV-006).
          */
-        isOfficer: u.userRoles.some((r) => {
-          const mask = BigInt((r.role.permMask as { toFixed(n: number): string }).toFixed(0));
-          return (mask & PRIVILEGED_PERMISSIONS) !== 0n;
-        }),
+        /*
+         * ★ SITE ROLES ARE NOT SQUADRON RANKS ★
+         *
+         * `webmaster` is a platform role: it grants every permission and confers
+         * no standing in the squadron whatsoever. Shown as a title beside the
+         * commander name, never as a rank and never as an officer.
+         */
+        siteRoles: u.userRoles
+          .filter((r) => !r.role.isHierarchical)
+          .map((r) => ({ name: r.role.name, colour: r.role.colour })),
         cmdrName: u.cmdrVerifications[0]?.cmdrName ?? null,
         // location, credits and fleet arrive with cAPI (P1.8, blocked on
         // Frontier). Absent here means absent from the response, which is the
@@ -188,16 +227,32 @@ export class PrismaMembersStore implements MembersStore {
    * still carrying one shows nothing for it rather than an id.
    */
   async discordRoleCatalogue(): Promise<Map<string, DiscordRoleInfo>> {
-    const rows = await this.#db.discordRole.findMany({
-      select: {
-        discordRoleId: true,
-        name: true,
-        colour: true,
-        position: true,
-        hoist: true,
-        category: true,
-      },
-    });
+    const [rows, mappings] = await Promise.all([
+      this.#db.discordRole.findMany({
+        select: {
+          discordRoleId: true,
+          name: true,
+          colour: true,
+          position: true,
+          hoist: true,
+          category: true,
+        },
+      }),
+      /*
+       * The ladder position of each mapped role, which is what separates a
+       * LEADERSHIP APPOINTMENT from a tenure rank — see LEADERSHIP_CEILING.
+       *
+       * Read from the mapping rather than from a member's granted roles, so it
+       * reflects what they hold in Discord TODAY rather than what the nightly
+       * reconciliation has got round to writing.
+       */
+      this.#db.roleMapping.findMany({
+        where: { role: { isHierarchical: true } },
+        select: { discordRoleId: true, role: { select: { rankOrder: true } } },
+      }),
+    ]);
+
+    const rankOrders = new Map(mappings.map((m) => [m.discordRoleId, m.role.rankOrder]));
 
     return new Map(
       rows.map((r) => [
@@ -208,6 +263,7 @@ export class PrismaMembersStore implements MembersStore {
           position: r.position,
           hoist: r.hoist,
           category: r.category,
+          rankOrder: rankOrders.get(r.discordRoleId) ?? null,
         },
       ]),
     );

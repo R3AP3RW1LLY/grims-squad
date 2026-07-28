@@ -154,8 +154,15 @@ export type RosterMember = PublicProfile & {
   commander: CommanderSnapshot;
   /** Membership, rank and awards, highest first. Channel access is filtered server-side. */
   discordRoles: DiscordRoleBadge[];
-  /** Holds a permission requiring a second factor. Drives the officers tab. */
+  /**
+   * Holds a squadron LEADERSHIP appointment. Drives the officers tab.
+   *
+   * A rank question, not a permission one: the webmaster holds every permission
+   * on the platform and no standing in the squadron at all.
+   */
   isOfficer: boolean;
+  /** Platform roles such as webmaster. Shown as a title, never as a rank. */
+  siteRoles: Array<{ name: string; colour: string | null }>;
 };
 
 export const getRoster = (): Promise<{ members: RosterMember[]; total: number } | null> =>
