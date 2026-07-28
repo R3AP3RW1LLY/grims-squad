@@ -144,7 +144,29 @@ interface InaraEnvelope {
     eventData?: {
       userName?: string;
       commanderName?: string;
-      commanderSquadron?: { SquadronName?: string; SquadronRank?: string };
+      /*
+       * ★ INARA'S REAL FIELD NAMES, VERIFIED AGAINST A LIVE RESPONSE ★
+       *
+       * These were written as `SquadronName` and `SquadronRank` — capitalised,
+       * and the rank key invented. Inara actually sends:
+       *
+       *   { squadronID, squadronName, squadronMembersCount,
+       *     squadronMemberRank, inaraURL }
+       *
+       * So every read was `undefined`, every commander looked like they were in
+       * no squadron, and a member who IS in Grim's Squad was told Inara could
+       * not see them. Nothing errored — a missing optional field is silence.
+       *
+       * Both spellings are accepted rather than swapped, because this cost a
+       * whole feature once and an API that changes its casing must not do it
+       * again.
+       */
+      commanderSquadron?: {
+        squadronName?: string;
+        squadronMemberRank?: string;
+        SquadronName?: string;
+        SquadronRank?: string;
+      };
       /** `[{rankName:"exploration",rankValue:5,...}]`. Inara's names, not the journal's. */
       commanderRanksPilot?: unknown;
       inaraURL?: string;
@@ -448,8 +470,10 @@ function parseEvent(
     // rather than one preferred — a nonce in either is proof of control.
     bio: [d.commanderBio ?? '', d.userProfileText ?? ''].join('\n').trim(),
     profileUrl: d.inaraURL ?? null,
-    squadronName: d.commanderSquadron?.SquadronName ?? null,
-    squadronRank: d.commanderSquadron?.SquadronRank ?? null,
+    squadronName:
+      d.commanderSquadron?.squadronName ?? d.commanderSquadron?.SquadronName ?? null,
+    squadronRank:
+      d.commanderSquadron?.squadronMemberRank ?? d.commanderSquadron?.SquadronRank ?? null,
     pilotRanks: parsePilotRanks(d.commanderRanksPilot),
   };
 }
@@ -469,8 +493,29 @@ function parsePilotRanks(raw: unknown): Array<{ rankName: string; rankValue: num
   for (const entry of raw as Array<Record<string, unknown>>) {
     if (typeof entry !== 'object' || entry === null) continue;
     const { rankName, rankValue } = entry;
-    if (typeof rankName !== 'string' || typeof rankValue !== 'number') continue;
-    out.push({ rankName, rankValue });
+    if (typeof rankName !== 'string') continue;
+
+    /*
+     * ★ INARA SENDS rankValue AS A STRING ★
+     *
+     * `{"rankName":"trade","rankValue":"8"}` — quoted, verified against a live
+     * response. The check here required a NUMBER, so every rank failed it and
+     * the array came back empty. Silently: an empty rank list is exactly what a
+     * commander with no public ranks looks like.
+     *
+     * Numbers are still accepted, in case Inara ever sends them, and anything
+     * that is neither is skipped rather than coerced — Number('') is 0, which
+     * is Harmless, and inventing a rank is worse than reporting none.
+     */
+    const value =
+      typeof rankValue === 'number'
+        ? rankValue
+        : typeof rankValue === 'string' && rankValue.trim() !== ''
+          ? Number(rankValue)
+          : Number.NaN;
+
+    if (!Number.isInteger(value) || value < 0) continue;
+    out.push({ rankName, rankValue: value });
   }
 
   return out;

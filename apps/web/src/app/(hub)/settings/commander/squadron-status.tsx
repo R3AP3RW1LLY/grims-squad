@@ -105,12 +105,24 @@ export function SquadronStatus({ initial }: { initial: InaraStatus }) {
               CMDR {status.cmdrName} is proven.
             </span>{' '}
             {/*
-              Naming the squadron they ARE in, when Inara reports one, rather
-              than a bare "not a member". Somebody in the wrong squadron and
-              somebody in none need different things from this page, and only
-              one of them is about to apply.
+              ★ THREE DIFFERENT THINGS, NOT ONE MESSAGE ★
+
+              This said "Inara does not show you in Grim's Squad yet" in every
+              case — including when we had NEVER ASKED. A member who is plainly
+              in the squadron was told Inara disagreed, which is a claim about
+              Inara we had no basis for, and it sent them looking for a problem
+              on Inara's side that did not exist.
+
+              Naming the squadron they ARE in matters for the same reason:
+              somebody in the wrong squadron and somebody in none need different
+              things from this page, and only one of them is about to apply.
             */}
-            {status.inaraSquadron != null && status.inaraSquadron !== '' ? (
+            {status.squadronCheckedAt == null ? (
+              <>
+                We have not checked your squadron yet. Use <strong>Re-check now</strong> below, or
+                tick the box if you have applied to <strong>{expected}</strong>.
+              </>
+            ) : status.inaraSquadron != null && status.inaraSquadron !== '' ? (
               <>
                 Inara has you in <strong>{status.inaraSquadron}</strong>, which is not{' '}
                 <strong>{expected}</strong>.

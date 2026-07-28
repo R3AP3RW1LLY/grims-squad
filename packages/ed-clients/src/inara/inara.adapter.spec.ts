@@ -310,3 +310,118 @@ describe('InaraAdapter.getCommanderProfiles', () => {
     );
   });
 });
+
+/**
+ * The shape Inara ACTUALLY sends.
+ *
+ * ★ WHY THIS SUITE EXISTS ★
+ *
+ * Every field below was written from assumption and was wrong, and every one
+ * failed SILENTLY — a missing optional field is just `undefined`, and an empty
+ * rank array is exactly what a commander with no public ranks looks like.
+ *
+ * The visible symptom was a member who IS in Grim's Squad being told "Inara
+ * does not show you in Grim's Squad yet", with nothing in any log.
+ *
+ * The payloads here are copied verbatim from a live response for CMDR
+ * PEBBLEMERCAHNT on 2026-07-28. Do not "tidy" them.
+ */
+describe('@REGRESSION Inara’s real payload shape', () => {
+  const live = (eventData: Record<string, unknown>) => ({
+    header: { eventStatus: 200 },
+    events: [{ eventStatus: 200, eventData }],
+  });
+
+  it('MANDATORY: reads commanderSquadron.squadronName, not SquadronName', async () => {
+    /*
+     * ★ THE BUG THAT COST A FEATURE ★
+     *
+     * The type declared `SquadronName` with a capital S. Inara sends
+     * `squadronName`. So the read was undefined for every commander, every one
+     * looked like they were in no squadron, and squadron verification could
+     * never succeed for anybody.
+     */
+    inaraResponds(
+      live({
+        commanderName: 'PEBBLEMERCAHNT',
+        commanderSquadron: {
+          squadronID: 16806,
+          squadronName: "Grim's Squad",
+          squadronMembersCount: 73,
+          squadronMemberRank: 'Recruit',
+          inaraURL: 'https://inara.cz/elite/squadron/16806/',
+        },
+      }),
+    );
+
+    const p = await adapter.getOwnIdentity('key');
+    expect(p?.squadronName).toBe("Grim's Squad");
+    // And the rank is `squadronMemberRank` — `SquadronRank` was invented.
+    expect(p?.squadronRank).toBe('Recruit');
+  });
+
+  it('MANDATORY: accepts rankValue as a STRING', async () => {
+    /*
+     * Inara sends `{"rankName":"trade","rankValue":"8"}` — quoted. The parser
+     * required a number, so every rank was dropped and the list came back
+     * empty, which is indistinguishable from a commander who has published
+     * none.
+     */
+    inaraResponds(
+      live({
+        commanderName: 'PEBBLEMERCAHNT',
+        commanderRanksPilot: [
+          { rankName: 'combat', rankValue: '0', rankProgress: 0.05 },
+          { rankName: 'trade', rankValue: '8', rankProgress: 0.29 },
+          { rankName: 'exploration', rankValue: '3', rankProgress: 0.4 },
+        ],
+      }),
+    );
+
+    const p = await adapter.getCommanderProfile('PEBBLEMERCAHNT');
+    expect(p?.pilotRanks).toEqual([
+      { rankName: 'combat', rankValue: 0 },
+      { rankName: 'trade', rankValue: 8 },
+      { rankName: 'exploration', rankValue: 3 },
+    ]);
+  });
+
+  it('keeps rank 0, which is a real rank and not an absence', async () => {
+    // "combat":"0" is Harmless — a rank a new commander genuinely holds. A
+    // truthiness check anywhere on this path would delete it.
+    inaraResponds(live({ commanderRanksPilot: [{ rankName: 'combat', rankValue: '0' }] }));
+    const p = await adapter.getCommanderProfile('X');
+    expect(p?.pilotRanks).toHaveLength(1);
+  });
+
+  it('skips a rankValue that is not a number at all', async () => {
+    // Number('') is 0, which is Harmless. Coercing junk would invent a rank,
+    // which is worse than reporting none.
+    inaraResponds(
+      live({
+        commanderRanksPilot: [
+          { rankName: 'combat', rankValue: '' },
+          { rankName: 'trade', rankValue: 'elite' },
+          { rankName: 'exploration', rankValue: null },
+        ],
+      }),
+    );
+    const p = await adapter.getCommanderProfile('X');
+    expect(p?.pilotRanks).toEqual([]);
+  });
+
+  it('still reads the capitalised spelling, if Inara ever sends it', async () => {
+    // Both accepted rather than swapped. This cost a whole feature once, and an
+    // API that changes its casing must not be able to do it again.
+    inaraResponds(live({ commanderSquadron: { SquadronName: "Grim's Squad" } }));
+    const p = await adapter.getCommanderProfile('X');
+    expect(p?.squadronName).toBe("Grim's Squad");
+  });
+
+  it('reports no squadron when the member is in none', async () => {
+    // The genuine case, which must stay distinguishable from the bug above.
+    inaraResponds(live({ commanderName: 'X' }));
+    const p = await adapter.getCommanderProfile('X');
+    expect(p?.squadronName).toBeNull();
+  });
+});
