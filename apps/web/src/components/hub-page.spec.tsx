@@ -83,12 +83,33 @@ describe('hub pages', () => {
     ).toEqual([]);
   });
 
-  it('every hub page uses the shared header', () => {
-    // Not style policing: PageHeader is what keeps the eyebrow, title size and
-    // rule consistent, and a page that rolls its own drifts the moment one of
-    // them changes.
+  it('every hub page that RENDERS uses the shared header', () => {
+    /*
+     * Not style policing: PageHeader is what keeps the eyebrow, title size and
+     * rule consistent, and a page that rolls its own drifts the moment one of
+     * them changes.
+     *
+     * ★ A REDIRECT IS NOT A PAGE ★
+     *
+     * Privacy, Security and Account became tabs on Commander Management, and
+     * their old routes now exist only to redirect — those URLs are in members'
+     * bookmarks and quite possibly a pinned Discord message, so a 404 would be
+     * a broken promise for no benefit.
+     *
+     * A file whose whole body is `redirect(...)` has no header because it has
+     * no output. Exempting them by SHAPE rather than by name means the next one
+     * is covered automatically, and a page that redirects conditionally and
+     * also renders is still held to the rule.
+     */
     const offenders = hubPages
-      .filter((p) => !readFileSync(p, 'utf8').includes('PageHeader'))
+      .filter((p) => {
+        const src = readFileSync(p, 'utf8');
+        if (src.includes('PageHeader')) return false;
+        // Pure redirect: imports `redirect` and returns `never`.
+        const isPureRedirect =
+          /from 'next\/navigation'/.test(src) && /\): never \{\s*redirect\(/.test(src);
+        return !isPureRedirect;
+      })
       .map((p) => p.slice(HUB.length + 1));
 
     expect(offenders).toEqual([]);

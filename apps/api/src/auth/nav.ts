@@ -80,9 +80,9 @@ const NAV: readonly NavDefinition[] = [
   // ---- personal ------------------------------------------------------------
   {
     href: '/settings/commander',
-    label: 'Commander',
+    label: 'Commander management',
     section: 'personal',
-    blurb: 'Your CMDR name, and linking Inara.',
+    blurb: 'Your name, verification, privacy, security and account.',
     requires: null,
   },
   {
@@ -92,27 +92,16 @@ const NAV: readonly NavDefinition[] = [
     blurb: 'Pair a device and choose what it sends.',
     requires: null,
   },
-  {
-    href: '/settings/privacy',
-    label: 'Privacy',
-    section: 'personal',
-    blurb: 'What other members can see about you.',
-    requires: null,
-  },
-  {
-    href: '/settings/security',
-    label: 'Security',
-    section: 'personal',
-    blurb: 'Two-factor, and where you are signed in.',
-    requires: null,
-  },
-  {
-    href: '/settings/account',
-    label: 'Account',
-    section: 'personal',
-    blurb: 'Your profile, and your data.',
-    requires: null,
-  },
+  /*
+   * ★ PRIVACY, SECURITY AND ACCOUNT ARE TABS NOW ★
+   *
+   * They were three more entries here and three more routes. Answering "how is
+   * my account set up" took four page loads, and each of those pages carried a
+   * "Related" panel whose only job was hopping between them.
+   *
+   * The companion app stays: it is not a setting, it is software somebody
+   * downloads, and burying it three tabs deep is how nobody finds it.
+   */
 
   // ---- admin ---------------------------------------------------------------
   {

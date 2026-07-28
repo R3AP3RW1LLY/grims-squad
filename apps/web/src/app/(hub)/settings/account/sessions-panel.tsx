@@ -52,6 +52,26 @@ export function SessionsPanel({ initial }: { initial: SessionRow[] }) {
         headers: { 'x-csrf-token': readCsrf() },
       });
       if (!res.ok) throw new Error(String(res.status));
+
+      /*
+       * ★ IF THAT WAS THIS DEVICE, LEAVE ★
+       *
+       * The server has already cleared the cookies — it decides, not us — but
+       * the page in front of the member is still the signed-in one, and every
+       * link on it now leads to a redirect. A hard navigation is deliberate
+       * over a router push: it discards the client-side cache along with the
+       * session, so nothing rendered while signed in survives the sign-out.
+       *
+       * `signedOut` comes from the server rather than being compared here,
+       * because the server is the only side that knows which family the request
+       * actually arrived on.
+       */
+      const body = (await res.json().catch(() => null)) as { signedOut?: boolean } | null;
+      if (body?.signedOut === true) {
+        window.location.href = '/?signed-out=1';
+        return;
+      }
+
       setRows((r) => r.filter((s) => s.id !== id));
     } catch {
       setError('That session was not ended. It is still signed in — please try again.');

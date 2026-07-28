@@ -12,6 +12,9 @@ import {
   CouldNotLoad,
 } from '../../../../components/hub-page';
 import { PageTabs, resolveTab, type PageTab } from '../../../../components/page-tabs';
+import { PrivacyBody } from '../privacy/body';
+import { SecurityBody } from '../security/body';
+import { AccountBody } from '../account/body';
 
 export const metadata: Metadata = {
   title: "Commander management — Grim's Squad",
@@ -21,18 +24,32 @@ export const metadata: Metadata = {
 export const dynamic = 'force-dynamic';
 
 /**
- * ★ TWO TABS, NOT ONE LONG PAGE ★
+ * ★ EVERYTHING ABOUT YOUR ACCOUNT, IN ONE PLACE ★
  *
- * Settings and verification are different jobs done at different times.
- * Verification happens once, usually in somebody's first week; settings change
- * whenever something moves. Stacked, the thing done constantly sat below the
- * thing done once, behind a scroll.
+ * Privacy, Security and Account were three more sidebar entries and three more
+ * routes. Answering "how is my account set up" meant four page loads, and each
+ * of those pages carried a "Related" panel whose entire job was hopping to the
+ * other three — a rail full of links to the rest of the same page.
+ *
+ * They are tabs now. The old routes redirect rather than 404, because those
+ * URLs are in bookmarks and quite possibly in a pinned Discord message.
+ *
+ * ★ WHAT DELIBERATELY DID NOT MOVE ★
+ *
+ * The companion app keeps its own sidebar entry. It is not a setting — it is
+ * software somebody downloads and installs, and burying the download three
+ * tabs deep in an account screen is how nobody finds it.
  *
  * Settings is FIRST and default, because it is the one people come back for.
+ * Verification is second because it happens once, usually in somebody's first
+ * week, and never again.
  */
 const TABS: readonly PageTab[] = [
   { key: 'settings', label: 'Commander settings' },
   { key: 'verification', label: 'Name & verification' },
+  { key: 'privacy', label: 'Privacy' },
+  { key: 'security', label: 'Security' },
+  { key: 'account', label: 'Account' },
 ];
 
 export default async function CommanderPage({
@@ -54,7 +71,19 @@ export default async function CommanderPage({
         action={<PageTabs tabs={TABS} current={tab} basePath="/settings/commander" />}
       />
 
-      {status === null ? (
+      {/*
+        The folded tabs fetch their own data and are rendered BEFORE the
+        commander-specific branches, so a failure to load Inara status — which
+        only the first two tabs need — cannot blank a privacy screen that never
+        depended on it.
+      */}
+      {tab === 'privacy' ? (
+        <PrivacyBody />
+      ) : tab === 'security' ? (
+        <SecurityBody />
+      ) : tab === 'account' ? (
+        <AccountBody />
+      ) : status === null ? (
         <CouldNotLoad what="your commander details" />
       ) : tab === 'settings' ? (
         <PageBody

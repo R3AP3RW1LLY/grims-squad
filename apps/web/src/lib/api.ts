@@ -388,6 +388,24 @@ export interface InaraStatus {
  * Note what is NOT in the type: the key. The server reports that one exists and
  * never what it is, so there is no shape here for a component to leak (INV-012).
  */
+/** One companion-app installer, as offered for download. */
+export interface ReleaseAsset {
+  file: string;
+  platform: 'windows' | 'macos' | 'linux';
+  version: string | null;
+  sizeBytes: number;
+  builtAt: string;
+}
+
+/**
+ * Installers available right now.
+ *
+ * Empty is a NORMAL answer — nothing built yet — and the page says so rather
+ * than offering a dead button. Null means the call failed, which is different.
+ */
+export const getCompanionReleases = (): Promise<{ assets: ReleaseAsset[] } | null> =>
+  get('/v1/companion/releases', { authed: true });
+
 export const getInaraStatus = (): Promise<InaraStatus | null> =>
   get('/v1/me/inara', { authed: true });
 

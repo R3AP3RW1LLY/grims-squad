@@ -28,10 +28,28 @@ describe('what a signed-in member sees', () => {
     const items = navFor(NO_PERMISSIONS);
     const hrefs = items.map((i) => i.href);
 
-    expect(hrefs).toContain('/settings/privacy');
-    expect(hrefs).toContain('/settings/security');
+    /*
+     * ★ PRIVACY AND SECURITY ARE TABS NOW, NOT NAV ENTRIES ★
+     *
+     * They moved onto Commander Management on 2026-07-28, so the assertion
+     * follows them: what must be true is that an unranked member can REACH
+     * their own settings, not that a particular href exists in the sidebar.
+     *
+     * The companion app keeps its own entry — it is software somebody
+     * downloads, not a setting.
+     */
+    expect(hrefs).toContain('/settings/commander');
     expect(hrefs).toContain('/settings/devices');
     expect(hrefs).toContain('/dashboard');
+
+    /*
+     * That personal entries SURVIVE a no-permissions mask is itself the proof
+     * they are ungated — navFor filters on `requires` and strips it from the
+     * output, so there is no field left to assert on, and asserting on the
+     * source list would test the data rather than the function.
+     */
+    const personal = items.filter((i) => i.section === 'personal');
+    expect(personal.length).toBeGreaterThan(0);
   });
 
   it('MANDATORY: a member with no permissions sees no admin links', () => {

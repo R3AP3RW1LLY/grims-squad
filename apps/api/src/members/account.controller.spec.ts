@@ -50,12 +50,26 @@ class FakeAccountStore implements AccountStore {
   }
 }
 
-function req(method = 'POST'): never {
+function req(method = 'POST', sessionFamilyId?: string): never {
   const token = issueCsrfToken();
   return {
     method,
     headers: { 'x-csrf-token': token },
     cookies: { [csrfCookieName(false)]: token },
+    // Which family this request actually arrived on. The controller needs it to
+    // know whether the member is ending THEIR OWN session.
+    ...(sessionFamilyId === undefined ? {} : { sessionFamilyId }),
+  } as never;
+}
+
+/** A reply that records which cookies were cleared. */
+function reply(): { cleared: string[] } & never {
+  const cleared: string[] = [];
+  return {
+    cleared,
+    clearCookie: (name: string) => {
+      cleared.push(name);
+    },
   } as never;
 }
 
@@ -110,7 +124,7 @@ describe('GET /v1/me/sessions', () => {
 describe('DELETE /v1/me/sessions/:id', () => {
   it('revokes a session the caller owns', async () => {
     store.owners.set('fam-1', 'u-1');
-    await ctl.revokeSession({ userId: 'u-1' }, 'fam-1', req('DELETE'));
+    await ctl.revokeSession({ userId: 'u-1' }, 'fam-1', req('DELETE'), reply());
     expect(store.revoked).toEqual([{ familyId: 'fam-1', reason: 'user_revoked' }]);
   });
 
@@ -118,7 +132,9 @@ describe('DELETE /v1/me/sessions/:id', () => {
     // The whole reason ownership is checked rather than assumed from a uuid
     // being hard to guess.
     store.owners.set('fam-1', 'someone-else');
-    await expect(ctl.revokeSession({ userId: 'u-1' }, 'fam-1', req('DELETE'))).rejects.toThrow(
+    await expect(
+      ctl.revokeSession({ userId: 'u-1' }, 'fam-1', req('DELETE'), reply()),
+    ).rejects.toThrow(
       /not found/i,
     );
     expect(store.revoked).toEqual([]);
@@ -192,5 +208,61 @@ describe('GET /v1/me/export', () => {
 
   it('rejects an anonymous caller', async () => {
     await expect(ctl.exportMe(undefined, req('GET'))).rejects.toThrow(/sign in/i);
+  });
+});
+
+describe('@SECURITY ending your own session signs you out', () => {
+  /**
+   * ★ THE HOLE THIS CLOSES ★
+   *
+   * Revoking a family removes the REFRESH side. It does nothing to the access
+   * token, which is a JWT carrying no authorization data and therefore never
+   * consulted against the database — so a member who clicked "Sign out" on the
+   * device in front of them stayed fully signed in on it for up to fifteen
+   * minutes.
+   *
+   * That is the opposite of what the button says, and it is worst in the exact
+   * situation the button exists for: somebody on a shared or borrowed machine
+   * signing out and walking away.
+   */
+  it('MANDATORY: clears the session cookies when the caller ends their OWN session', async () => {
+    store.owners.set('fam-1', 'u-1');
+    const res = reply();
+
+    const out = await ctl.revokeSession({ userId: 'u-1' }, 'fam-1', req('DELETE', 'fam-1'), res);
+
+    expect(out.signedOut).toBe(true);
+    // Both prefixes. The API picks `__Host-` from NODE_ENV rather than from the
+    // request, so clearing only the name THIS process would have set leaves the
+    // other in the browser — behind a proxy that is the difference between
+    // signing somebody out and appearing to.
+    expect(res.cleared).toEqual(
+      expect.arrayContaining(['gs_at', '__Host-gs_at', 'gs_rt', '__Host-gs_rt']),
+    );
+  });
+
+  it('MANDATORY: does NOT sign you out when you end a DIFFERENT device', async () => {
+    // Ending the session on a phone you left somewhere must not throw you out
+    // of the machine you are using to do it — that would make the feature
+    // unusable for the thing people mostly use it for.
+    store.owners.set('fam-2', 'u-1');
+    const res = reply();
+
+    const out = await ctl.revokeSession({ userId: 'u-1' }, 'fam-2', req('DELETE', 'fam-1'), res);
+
+    expect(out.signedOut).toBe(false);
+    expect(res.cleared).toEqual([]);
+  });
+
+  it('does not sign anyone out when the request carries no family id', async () => {
+    // Belt and braces: an unknown current family must not be treated as a match
+    // for whatever id was passed in.
+    store.owners.set('fam-1', 'u-1');
+    const res = reply();
+
+    const out = await ctl.revokeSession({ userId: 'u-1' }, 'fam-1', req('DELETE'), res);
+
+    expect(out.signedOut).toBe(false);
+    expect(res.cleared).toEqual([]);
   });
 });

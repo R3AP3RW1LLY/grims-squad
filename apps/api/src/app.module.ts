@@ -9,12 +9,13 @@ import { CmdrModule } from './cmdr/cmdr.module.js';
 import { AdminModule } from './admin/admin.module.js';
 import { PublicModule } from './public/public.module.js';
 import { TelemetryModule } from './telemetry/telemetry.module.js';
+import { CompanionModule } from './companion/companion.module.js';
 import { MediaModule } from './media/media.module.js';
 import { AuthGuard } from './auth/auth.guard.js';
 import { RequiresPermissionGuard } from './authz/requires-permission.guard.js';
 
 @Module({
-  imports: [DatabaseModule, AuthzModule, AuthModule, MembersModule, CmdrModule, AdminModule, PublicModule, TelemetryModule, MediaModule],
+  imports: [DatabaseModule, AuthzModule, AuthModule, MembersModule, CmdrModule, AdminModule, PublicModule, TelemetryModule, MediaModule, CompanionModule],
   controllers: [HealthController],
   providers: [
     /*
