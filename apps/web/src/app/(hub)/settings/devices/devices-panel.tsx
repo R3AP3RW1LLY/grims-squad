@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import type { DeviceRow, TelemetryConsent } from '../../../../lib/api';
+import { formatLocal } from '../../../../lib/time';
 import { apiPost, apiPut, apiDelete } from '../../../../lib/api-client';
 
 /**
@@ -40,9 +41,12 @@ const CATEGORY_COPY: Record<string, { label: string; help: string }> = {
 export function DevicesPanel({
   initialDevices,
   initialConsent,
+  timezone,
 }: {
   initialDevices: DeviceRow[];
   initialConsent: TelemetryConsent;
+  /** The member's own zone. Passed in so the server renders the right time first go. */
+  timezone: string;
 }) {
   const [devices, setDevices] = useState(initialDevices);
   const [consent, setConsent] = useState(initialConsent);
@@ -189,7 +193,7 @@ export function DevicesPanel({
                   <span className="mt-1 block text-sm text-[var(--color-text-secondary)]">
                     {device.lastUsedAt === null
                       ? 'Never used — it has not sent anything yet.'
-                      : `Last sent ${new Date(device.lastUsedAt).toLocaleString()}`}
+                      : `Last sent ${formatLocal(device.lastUsedAt, timezone)}`}
                   </span>
                 </span>
                 <button

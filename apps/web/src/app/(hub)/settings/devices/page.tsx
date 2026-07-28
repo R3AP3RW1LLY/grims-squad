@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
-import { getMyDevices, getMyTelemetryConsent } from '../../../../lib/api';
+import { getMyDevices, getMyTelemetryConsent, getMe } from '../../../../lib/api';
+import { formatLocal } from '../../../../lib/time';
 import { DevicesPanel } from './devices-panel';
 import {
   PageHeader,
@@ -17,7 +18,11 @@ export const metadata: Metadata = {
 export const dynamic = 'force-dynamic';
 
 export default async function DevicesPage() {
-  const [devices, consent] = await Promise.all([getMyDevices(), getMyTelemetryConsent()]);
+  const [devices, consent, me] = await Promise.all([
+    getMyDevices(),
+    getMyTelemetryConsent(),
+    getMe(),
+  ]);
 
   const active = devices?.devices.length ?? 0;
   const lastSeen = devices?.devices
@@ -48,7 +53,11 @@ export default async function DevicesPage() {
                 />
                 <RailStat
                   label="Last upload"
-                  value={lastSeen === undefined ? 'Never' : new Date(lastSeen).toLocaleDateString()}
+                  value={
+                    lastSeen === undefined
+                      ? 'Never'
+                      : formatLocal(lastSeen, me.user?.timezone ?? 'UTC', { withTime: false })
+                  }
                 />
                 <RailStat
                   label="Extra categories"
@@ -90,7 +99,11 @@ export default async function DevicesPage() {
             </>
           }
         >
-          <DevicesPanel initialDevices={devices.devices} initialConsent={consent} />
+          <DevicesPanel
+            initialDevices={devices.devices}
+            initialConsent={consent}
+            timezone={me.user?.timezone ?? 'UTC'}
+          />
         </PageBody>
       )}
     </>

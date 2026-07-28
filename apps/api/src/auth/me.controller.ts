@@ -1,10 +1,13 @@
-import { Controller, Get, Req, Inject, Optional } from '@nestjs/common';
+import { Controller, Get, Patch, Body, Req, Inject, Optional } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
 import { PrismaClient } from '@grims/db';
 import { NO_PERMISSIONS, requiresTwoFactor } from '@grims/shared';
 import { Public } from './auth.guard.js';
 import { navFor, hasAdminArea, type NavItem } from './nav.js';
 import { PermissionService } from '../authz/permission.service.js';
+import { verifyCsrf, readCsrfCookie } from '../common/csrf.js';
+import { isValidTimezone, knownTimezones, DEFAULT_TIMEZONE } from '../common/timezone.js';
+import { AppError, ErrorCode } from '@grims/shared';
 
 /**
  * Everything the signed-in chrome needs, in ONE request.
@@ -30,6 +33,11 @@ export interface MeResponse {
     /** Our own URL, never Discord's. Null when they have no picture. */
     avatarUrl: string | null;
     rank: string | null;
+    /**
+     * IANA zone. Every time on the site outside the audit log renders in this,
+     * on the SERVER, so there is nothing to correct after the page loads.
+     */
+    timezone: string;
   } | null;
   nav: NavItem[];
   isAdmin: boolean;
@@ -60,7 +68,7 @@ export class MeController {
 
     const user = await this.db.user.findUnique({
       where: { id: userId },
-      select: { handle: true, displayName: true, avatarStoredHash: true },
+      select: { handle: true, displayName: true, avatarStoredHash: true, timezone: true },
     });
     if (user === null) {
       /*
@@ -86,6 +94,7 @@ export class MeController {
         // the URL does not carry it, so a changed picture is not a changed URL.
         avatarUrl: user.avatarStoredHash === null ? null : `/v1/media/avatars/${userId}`,
         rank: await this.#rankOf(userId),
+        timezone: user.timezone,
       },
       /*
        * ★ AN UNSECURED PRIVILEGED ACCOUNT GETS NO LINKS AT ALL ★
@@ -106,6 +115,48 @@ export class MeController {
       isAdmin: hasAdminArea(mask),
       mustSecureAccount: mustSecure,
     };
+  }
+
+  /**
+   * Changes the member's timezone.
+   *
+   * Its own route rather than part of a general profile update: it is the only
+   * field here a member can set, and a broad PATCH would need a per-field
+   * allowlist to stop it becoming a way to write `handle` or `status`.
+   */
+  @Patch('me/timezone')
+  async setTimezone(
+    @Req() req: FastifyRequest,
+    @Body() body: unknown,
+  ): Promise<{ timezone: string }> {
+    const userId = req.user?.userId;
+    if (userId === undefined) throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
+
+    const cookies =
+      (req as unknown as { cookies?: Record<string, string | undefined> }).cookies ?? {};
+    verifyCsrf(req.method, readCsrfCookie(cookies), req.headers['x-csrf-token'] as string | undefined);
+
+    const timezone = (body as Record<string, unknown> | null)?.['timezone'];
+    if (!isValidTimezone(timezone)) {
+      /*
+       * Rejected rather than quietly falling back to UTC. Storing something
+       * other than what was asked for, and saying nothing, means every time on
+       * the site is silently wrong for that member and nothing explains why.
+       */
+      throw new AppError(
+        ErrorCode.VALIDATION_FAILED,
+        'That is not a timezone we recognise. Pick one from the list.',
+      );
+    }
+
+    await this.db.user.update({ where: { id: userId }, data: { timezone } });
+    return { timezone };
+  }
+
+  /** The zones the picker offers. Read from the runtime, never a hand-kept list. */
+  @Get('me/timezones')
+  timezones(): { timezones: string[]; fallback: string } {
+    return { timezones: knownTimezones(), fallback: DEFAULT_TIMEZONE };
   }
 
   /**

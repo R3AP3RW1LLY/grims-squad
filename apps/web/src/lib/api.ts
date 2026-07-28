@@ -281,6 +281,8 @@ export interface MeResponse {
     /** Our own URL, never Discord's. Null when they have no picture. */
     avatarUrl: string | null;
     rank: string | null;
+    /** IANA zone. Every time outside the audit log renders in this. */
+    timezone: string;
   } | null;
   nav: NavItem[];
   isAdmin: boolean;
@@ -305,6 +307,16 @@ export const getMe = async (): Promise<MeResponse> =>
     isAdmin: false,
     mustSecureAccount: false,
   };
+
+/**
+ * The zones the picker offers.
+ *
+ * Read from the SERVER's runtime rather than hard-coded here, because the IANA
+ * database changes and a list we maintained would eventually deny somebody the
+ * zone they actually live in.
+ */
+export const getTimezones = (): Promise<{ timezones: string[]; fallback: string } | null> =>
+  get('/v1/me/timezones', { authed: true });
 
 export interface AccountStatus {
   privileged: boolean;

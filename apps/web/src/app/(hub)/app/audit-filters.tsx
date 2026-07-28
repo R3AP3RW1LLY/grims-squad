@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { formatUtcSeconds } from '../../../lib/time';
 
 export interface AuditRow {
   id: string;
@@ -189,7 +190,7 @@ export function AuditFilters({
         <table className="w-full min-w-[760px] border-collapse text-xs">
           <thead>
             <tr className="border-b border-[var(--color-border-hairline)] text-left font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-secondary)]">
-              <th scope="col" className="py-2 pr-4">When</th>
+              <th scope="col" className="py-2 pr-4">When (UTC)</th>
               <th scope="col" className="py-2 pr-4">Who</th>
               <th scope="col" className="py-2 pr-4">Action</th>
               <th scope="col" className="py-2">Target</th>
@@ -198,12 +199,24 @@ export function AuditFilters({
           <tbody>
             {rows.map((e) => (
               <tr key={e.id} className="border-b border-[var(--color-border-hairline)]">
-                <td className="py-2.5 pr-4 align-top">
+                <td className="py-2.5 pr-4 align-top whitespace-nowrap">
+                  {/*
+                    ★ ALWAYS UTC, ALWAYS LABELLED, ALWAYS TO THE SECOND ★
+
+                    This is the one surface where several officers compare notes
+                    about the same event, often from different countries. Local
+                    time would make "which happened first" unanswerable from a
+                    screenshot.
+
+                    Seconds because privileged actions arrive in bursts — a role
+                    change and the grant it caused land in the same minute, and
+                    minute resolution loses the order between them.
+                  */}
                   <time
                     dateTime={e.createdAt}
                     className="font-mono text-[var(--color-text-secondary)]"
                   >
-                    {new Date(e.createdAt).toISOString().replace('T', ' ').slice(0, 16)}
+                    {formatUtcSeconds(e.createdAt)}
                   </time>
                 </td>
                 <td className="py-2.5 pr-4 align-top">
