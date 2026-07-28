@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { getRoster, getMe } from '../../../lib/api';
 import { PageHeader, PageBody, Panel, RailStat } from '../../../components/hub-page';
 import { RosterCard } from '../../../components/roster-card';
+import { PageTabs, resolveTab, type PageTab } from '../../../components/page-tabs';
 
 /**
  * The squadron roster.
@@ -27,17 +28,52 @@ export const metadata: Metadata = {
 
 export const dynamic = 'force-dynamic';
 
-export default async function RosterPage() {
+/**
+ * ★ THE SAME ROSTER, THREE WAYS IN ★
+ *
+ * "Everyone" is the default because it is the honest answer to "who is in this
+ * squadron" — the other two are filters on it, not different pages.
+ *
+ * Officers and members are complements: every member is in exactly one, and the
+ * two counts always add to the whole. Split any other way and somebody appears
+ * twice or not at all, and a roster nobody can trust to be complete is a roster
+ * nobody uses.
+ *
+ * The split is a PERMISSION question — does this account hold something that
+ * requires a second factor — decided on the server. Not a list of role names,
+ * which would silently drop somebody the day a rank was renamed.
+ */
+const TABS: readonly PageTab[] = [
+  { key: 'all', label: 'All members' },
+  { key: 'officers', label: 'Officers' },
+  { key: 'members', label: 'Members' },
+];
+
+export default async function RosterPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = await searchParams;
+  const tab = resolveTab(TABS, params['tab']);
+
   const [data, me] = await Promise.all([getRoster(), getMe()]);
-  const members = data?.members ?? [];
+  const all = data?.members ?? [];
   const total = data?.total ?? 0;
 
-  const listed = members.length;
-  const withCmdr = members.filter((m) => m.cmdrName !== null).length;
+  const officers = all.filter((m) => m.isOfficer);
+  const members = tab === 'officers' ? officers : tab === 'members' ? all.filter((m) => !m.isOfficer) : all;
+
+  const listed = all.length;
+  const withCmdr = all.filter((m) => m.cmdrName !== null).length;
 
   return (
     <>
-      <PageHeader eyebrow="Squadron register" title="ROSTER" />
+      <PageHeader
+        eyebrow="Squadron register"
+        title="ROSTER"
+        action={<PageTabs tabs={TABS} current={tab} basePath="/roster" />}
+      />
 
       <PageBody
         lead="Everyone who flies with Grim's Squad. Being listed is not optional — this is the squadron's own directory — but every detail on an entry is: a commander who has shared nothing appears here as a name and a rank."
@@ -46,6 +82,7 @@ export default async function RosterPage() {
             <Panel title="At a glance">
               <RailStat label="Squadron" value={String(total)} />
               <RailStat label="Listed" value={String(listed)} tone={listed === 0 ? 'warn' : 'default'} />
+              <RailStat label="Officers" value={String(officers.length)} />
               <RailStat label="Verified CMDRs" value={String(withCmdr)} />
               <RailStat
                 label="Flew this week"
@@ -85,7 +122,20 @@ export default async function RosterPage() {
           </>
         }
       >
-        {members.length === 0 ? (
+        {members.length === 0 && all.length > 0 ? (
+          /*
+           * The FILTER is empty, not the roster. A squadron with no officers yet
+           * is a normal state on a new install, and telling somebody the roster
+           * failed would send them looking for a fault that is not there.
+           */
+          <p className="rounded border border-[var(--color-border-hairline)] px-5 py-6 text-sm leading-relaxed text-[var(--color-text-secondary)]">
+            Nobody here yet.{' '}
+            <a href="/roster" className="text-[var(--color-brand-cyan-bright)]">
+              See everyone
+            </a>
+            .
+          </p>
+        ) : members.length === 0 ? (
           /*
            * An empty roster now means something went WRONG, not that nobody
            * opted in — everybody active is listed. The old copy blamed a

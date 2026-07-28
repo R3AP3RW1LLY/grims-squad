@@ -1,4 +1,5 @@
 import type { PrismaClient } from '@grims/db';
+import { PRIVILEGED_PERMISSIONS } from '@grims/shared';
 import type { PrivacySettings, ProfileSource } from './profile.serializer.js';
 import { SNAPSHOT_EVENT_TYPES, type SnapshotEvent } from './commander-snapshot.js';
 
@@ -25,6 +26,8 @@ export interface DiscordRoleInfo {
   readonly colour: string | null;
   readonly position: number;
   readonly hoist: boolean;
+  /** What the role MEANS to us. Discord has no such concept. */
+  readonly category: 'rank' | 'membership' | 'award' | 'hidden' | 'other';
 }
 
 /**
@@ -71,7 +74,7 @@ export class PrismaMembersStore implements MembersStore {
     },
     discordIdentity: { select: { guildRoles: true } },
     userRoles: {
-      select: { role: { select: { name: true, colour: true, rankOrder: true } } },
+      select: { role: { select: { name: true, colour: true, rankOrder: true, permMask: true } } },
       // Highest first, so a card showing only the top one shows the top one.
       orderBy: { role: { rankOrder: 'desc' as const } },
     },
@@ -91,7 +94,9 @@ export class PrismaMembersStore implements MembersStore {
     privacySettings: Partial<PrivacySettings> | null;
     cmdrVerifications: Array<{ cmdrName: string }>;
     discordIdentity: { guildRoles: string[] } | null;
-    userRoles: Array<{ role: { name: string; colour: string | null; rankOrder: number } }>;
+    userRoles: Array<{
+      role: { name: string; colour: string | null; rankOrder: number; permMask: unknown };
+    }>;
   }): MemberRow {
     return {
       source: {
@@ -109,6 +114,20 @@ export class PrismaMembersStore implements MembersStore {
         // Snowflakes only. Names and colours are resolved separately, from the
         // cached guild roles — see `discordRoleCatalogue`.
         guildRoleIds: u.discordIdentity?.guildRoles ?? [],
+        /*
+         * ★ OFFICER IS A PERMISSION QUESTION, NOT A NAME ONE ★
+         *
+         * Computed from the granted roles' masks rather than from a list of
+         * role names, so renaming a rank or adding a new leadership role does
+         * not silently drop somebody out of the officers tab.
+         *
+         * toFixed(0), never Number(): the mask is NUMERIC(40,0) and exceeds 64
+         * bits — SITE_CONFIG alone is 1n<<63n (INV-006).
+         */
+        isOfficer: u.userRoles.some((r) => {
+          const mask = BigInt((r.role.permMask as { toFixed(n: number): string }).toFixed(0));
+          return (mask & PRIVILEGED_PERMISSIONS) !== 0n;
+        }),
         cmdrName: u.cmdrVerifications[0]?.cmdrName ?? null,
         // location, credits and fleet arrive with cAPI (P1.8, blocked on
         // Frontier). Absent here means absent from the response, which is the
@@ -170,13 +189,26 @@ export class PrismaMembersStore implements MembersStore {
    */
   async discordRoleCatalogue(): Promise<Map<string, DiscordRoleInfo>> {
     const rows = await this.#db.discordRole.findMany({
-      select: { discordRoleId: true, name: true, colour: true, position: true, hoist: true },
+      select: {
+        discordRoleId: true,
+        name: true,
+        colour: true,
+        position: true,
+        hoist: true,
+        category: true,
+      },
     });
 
     return new Map(
       rows.map((r) => [
         r.discordRoleId,
-        { name: r.name, colour: r.colour, position: r.position, hoist: r.hoist },
+        {
+          name: r.name,
+          colour: r.colour,
+          position: r.position,
+          hoist: r.hoist,
+          category: r.category,
+        },
       ]),
     );
   }

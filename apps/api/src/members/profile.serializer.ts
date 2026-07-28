@@ -99,6 +99,8 @@ export interface ProfileSource {
   readonly ranks: ReadonlyArray<{ name: string; colour: string | null }>;
   /** Snowflakes of the Discord roles this member currently holds. Resolved by the caller. */
   readonly guildRoleIds?: readonly string[];
+  /** Holds a permission that requires a second factor. Drives the officers tab. */
+  readonly isOfficer?: boolean;
   readonly cmdrName: string | null;
   readonly location?: ProfileLocation | null;
   readonly credits?: bigint | null;

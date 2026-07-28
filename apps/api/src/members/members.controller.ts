@@ -79,7 +79,12 @@ export class MembersController {
     members: Array<
       PublicProfile & {
         commander: CommanderSnapshot;
-        discordRoles: Array<{ name: string; colour: string | null; hoist: boolean }>;
+        discordRoles: Array<{
+          name: string;
+          colour: string | null;
+          category: 'rank' | 'membership' | 'award';
+        }>;
+        isOfficer: boolean;
       }
     >;
     total: number;
@@ -135,8 +140,23 @@ export class MembersController {
         discordRoles: (r.source.guildRoleIds ?? [])
           .map((id) => catalogue.get(id))
           .filter((role): role is NonNullable<typeof role> => role !== undefined)
+          /*
+           * `hidden` and `other` never leave the API.
+           *
+           * Filtered HERE rather than in the browser: a card that received
+           * eleven roles and rendered three would still have sent eleven, and
+           * "which channels can this member see" is not the roster's business
+           * to publish even to other members.
+           */
+          .filter(
+            (role): role is typeof role & { category: 'rank' | 'membership' | 'award' } =>
+              role.category === 'rank' ||
+              role.category === 'membership' ||
+              role.category === 'award',
+          )
           .sort((a, b) => b.position - a.position)
-          .map(({ name, colour, hoist }) => ({ name, colour, hoist })),
+          .map(({ name, colour, category }) => ({ name, colour, category })),
+        isOfficer: r.source.isOfficer === true,
       })),
       // The COUNT of active members is not private — it is the squadron's size,
       // which is public on Inara anyway. Who they are is the private part.

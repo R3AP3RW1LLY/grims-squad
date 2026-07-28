@@ -142,19 +142,20 @@ export interface CommanderSnapshot {
   lastPlayedAt: string | null;
 }
 
-/** A Discord role exactly as the server defines it. */
+/** A Discord role, with what it means to us. Channel-access roles never arrive. */
 export interface DiscordRoleBadge {
   name: string;
   /** `#rrggbb`, or null where Discord reports no colour. */
   colour: string | null;
-  /** Discord shows this role separately in its member list. */
-  hoist: boolean;
+  category: 'rank' | 'membership' | 'award';
 }
 
 export type RosterMember = PublicProfile & {
   commander: CommanderSnapshot;
-  /** Every Discord role they hold, highest first — not just the ones we map. */
+  /** Membership, rank and awards, highest first. Channel access is filtered server-side. */
   discordRoles: DiscordRoleBadge[];
+  /** Holds a permission requiring a second factor. Drives the officers tab. */
+  isOfficer: boolean;
 };
 
 export const getRoster = (): Promise<{ members: RosterMember[]; total: number } | null> =>

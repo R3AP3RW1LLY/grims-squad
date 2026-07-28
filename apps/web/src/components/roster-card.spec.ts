@@ -68,10 +68,24 @@ describe('how long ago they flew', () => {
   });
 
   it('MANDATORY: playing now takes precedence over last flew', () => {
-    // They answer the same question and the live one is strictly better.
-    // Showing "14 hours ago" beside a green dot would be two answers.
-    const dl = source.slice(source.indexOf('<dl'), source.indexOf('</dl>'));
-    expect(dl.indexOf('Playing now')).toBeLessThan(dl.indexOf('Last flew'));
+    /*
+     * They answer the same question and the live one is strictly better —
+     * "14 hours ago" beside a green dot would be two answers to one question.
+     *
+     * Anchored on the two labels rather than on a <dl>: the card grew a second
+     * list (the labelled squadron rows) and an earlier version of this sliced
+     * the first one it found, which no longer contains either label.
+     */
+    const playingAt = source.indexOf('Playing now');
+    const lastFlewAt = source.indexOf('Last flew');
+
+    expect(playingAt).toBeGreaterThan(-1);
+    expect(lastFlewAt).toBeGreaterThan(-1);
+    expect(playingAt).toBeLessThan(lastFlewAt);
+
+    // And they are branches of ONE decision, not two independent blocks that
+    // could both render.
+    expect(source.slice(playingAt, lastFlewAt)).toContain(') : (');
   });
 
   it('MANDATORY: presence is shown with a WORD, not only a colour', () => {

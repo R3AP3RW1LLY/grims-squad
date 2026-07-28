@@ -94,6 +94,10 @@ export function RosterCard({
   const { commander } = member;
   const playing = isPlayingNow(member.lastPlayingAt);
 
+  const membership = member.discordRoles.filter((r) => r.category === 'membership');
+  const rank = member.discordRoles.filter((r) => r.category === 'rank');
+  const awards = member.discordRoles.filter((r) => r.category === 'award');
+
   /*
    * Three at most, highest first. A commander who has ground every ladder would
    * otherwise fill the card with rank names and bury everything else, and the
@@ -143,59 +147,51 @@ export function RosterCard({
                 CMDR {member.cmdrName}
               </p>
             )}
-            {member.ranks.length > 0 && (
-              /*
-                ★ IN THE COLOUR DISCORD USES ★
-
-                Recognising your own colour is faster than reading your own role
-                name, and the two disagreeing across the two places a member
-                looks reads as a bug in one of them.
-
-                A role with no colour set falls back to the theme's secondary
-                text. Discord reports that case as integer 0, which is NOT black
-                — painting it #000000 would make it invisible on a dark page.
-              */
-              <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs">
-                {member.ranks.map((r, i) => (
-                  <span key={r.name} className="flex items-center gap-2">
-                    {i > 0 && <span className="text-[var(--color-text-secondary)]">·</span>}
-                    <span
-                      style={r.colour !== null ? { color: r.colour } : undefined}
-                      className={r.colour === null ? 'text-[var(--color-text-secondary)]' : ''}
-                    >
-                      {r.name}
-                    </span>
-                  </span>
-                ))}
-              </p>
-            )}
+            {/*
+              The squadron ROLE line that used to sit here has moved into the
+              labelled rows below. It said the same thing twice otherwise, and
+              the unlabelled version was the one nobody could interpret.
+            */}
           </div>
         </div>
 
         {/*
-          ★ EVERY DISCORD ROLE THEY HOLD ★
+          ★ THREE LABELLED LINES, NOT A PILE OF CHIPS ★
 
-          Not just the ones our permission system maps. Colour roles, division
-          roles, ping roles — a member wearing them is wearing them, and showing
-          only the mapped ones would show a fraction of somebody's actual
-          standing in the server.
+          A wrapped list of eleven roles is a wall — the eye cannot tell which
+          one is the rank and which opens a channel. Labelled rows answer the
+          three questions somebody actually has about a squadron member:
 
-          Ordered by Discord POSITION, highest first, which is the order Discord
-          itself displays. Matching that is what lets somebody glance between
-          the two and recognise the same person.
+            Membership   are they one of us, or an ally
+            Rank         where do they sit in the ladder
+            Awards       what have they earned
+
+          Channel-access roles never arrive here at all; the API filters them,
+          so this cannot accidentally start showing them.
+
+          The awards row is OMITTED when empty rather than rendered blank. An
+          empty line invites the reader to wonder what is missing, and most
+          members have no award yet.
         */}
-        {member.discordRoles.length > 0 && (
-          <ul className="mt-4 flex list-none flex-wrap gap-1.5 p-0">
-            {member.discordRoles.map((r) => (
-              <li key={r.name}>
-                <RoleChip name={r.name} colour={r.colour} />
-              </li>
-            ))}
-          </ul>
-        )}
+        <dl className="mt-4 space-y-2 border-t border-[var(--color-border-hairline)] pt-3 text-xs">
+          {membership.length > 0 && (
+            <RoleRow label="Squadron membership" roles={membership} />
+          )}
+          {rank.length > 0 && <RoleRow label="Squadron rank" roles={rank} />}
+          {awards.length > 0 && <RoleRow label="Squadron awards" roles={awards} />}
+        </dl>
 
+        {/*
+          The pilot ranks the GAME awards, which answer a different question
+          from the rows above: those say where somebody sits in the squadron,
+          these say what they are good at.
+
+          Three at most, highest first — a commander who has ground every ladder
+          would otherwise bury everything else. Sorted by INDEX, because
+          alphabetically "Surveyor" beats "Elite", which is exactly backwards.
+        */}
         {topRanks.length > 0 && (
-          <ul className="mt-4 flex list-none flex-wrap gap-1.5 p-0">
+          <ul className="mt-3 flex list-none flex-wrap gap-1.5 p-0">
             {topRanks.map((r) => (
               <li
                 key={r.key}
@@ -314,4 +310,29 @@ function localClock(timeZone: string): string {
   } catch {
     return '';
   }
+}
+
+/**
+ * One labelled row of roles.
+ *
+ * The label is what makes a role legible: "Cadet" on its own could be a rank, a
+ * division or a joke, and only its position in the list says which.
+ */
+function RoleRow({
+  label,
+  roles,
+}: {
+  label: string;
+  roles: ReadonlyArray<{ name: string; colour: string | null }>;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-3">
+      <dt className="shrink-0 pt-0.5 text-[var(--color-text-secondary)]">{label}</dt>
+      <dd className="flex flex-wrap justify-end gap-1.5">
+        {roles.map((r) => (
+          <RoleChip key={r.name} name={r.name} colour={r.colour} />
+        ))}
+      </dd>
+    </div>
+  );
 }

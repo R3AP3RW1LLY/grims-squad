@@ -490,6 +490,21 @@ model Role {
   @@map("roles")
 }
 
+/// What a Discord role means to the hub. Discord itself has no such concept — every role is just
+/// a role — so the distinction between "this is a rank" and "this opens a channel" lives here.
+enum DiscordRoleCategory {
+  /// The squadron ladder: Cadet through Grand Master General. Mapped to an internal Role.
+  rank
+  /// Standing in the squadron itself: a member, or an ally.
+  membership
+  /// Earned and worth showing off.
+  award
+  /// Channel access and similar plumbing. Deliberately never rendered on a profile.
+  hidden
+  /// Not yet classified. Not shown, because guessing wrong is worse than showing nothing.
+  other
+}
+
 /// A role as DISCORD defines it: its name, its colour and where it sits in the guild list.
 ///
 /// Distinct from `Role`, which is OUR permission bundle. Most Discord roles are not mapped to one
@@ -508,6 +523,15 @@ model DiscordRole {
   position      Int      @default(0)
   /// Whether Discord shows this role separately in the member list. Mirrored for display parity.
   hoist         Boolean  @default(false)
+  /// What this role MEANS to us, which Discord has no concept of.
+  ///
+  /// Discord roles serve several unrelated purposes in one flat list — rank, membership, awards,
+  /// and channel access. A roster card wants three of those and emphatically not the fourth: a
+  /// member's card should not be eight lines of "has access to the mining channel".
+  ///
+  /// Stored rather than derived from names in code, so renaming a role in Discord is a data fix
+  /// rather than a deploy. Seeded by rule at sync time; see the role-sync job.
+  category      DiscordRoleCategory @default(other)
   syncedAt      DateTime @default(now()) @map("synced_at") @db.Timestamptz(6)
 
   @@index([position])
