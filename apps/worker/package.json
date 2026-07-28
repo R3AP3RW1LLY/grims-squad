@@ -12,7 +12,8 @@
     "clean": "rm -rf dist *.tsbuildinfo",
     "reconcile": "tsx src/main.ts",
     "promote": "tsx src/promote.ts",
-    "inara:sync": "tsx src/inara-sync.ts"
+    "inara:sync": "tsx src/inara-sync.ts",
+    "audit:daily": "tsx src/daily-audit.ts"
   },
   "devDependencies": {
     "@grims/config": "workspace:*",

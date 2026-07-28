@@ -70,34 +70,19 @@ export interface SyncResult {
   readonly reason: string | null;
 }
 
-/** Discord's hard ceiling on a nickname. */
-const MAX_NICK = 32;
-
-/**
- * Builds the nickname: `RANK - COMMANDER`.
+/*
+ * ★ THE COMPOSER MOVED TO @grims/shared ★
  *
- * ★ WHEN IT DOES NOT FIT, THE RANK GOES — NEVER THE NAME ★
+ * The daily worker sweep puts back nicknames that members changed by hand, and
+ * it cannot import from this app. Three callers now need the same truncation
+ * rule — this service, the settings page's preview, and that sweep — and three
+ * copies would drift into a member whose name the site shows one way and the
+ * guild another.
  *
- * Discord allows 32 characters and "Chief Fleet Commander - PEBBLEMERCAHNT" is
- * thirty-eight. Something has to give, and it must not be the commander name:
- * the name is the identity, it is what people are called in game and in voice,
- * and a truncated one is a different person's name.
- *
- * Truncating the RANK instead was considered and rejected — "Chief Fleet Comma"
- * is not a rank, and a nickname that looks corrupted invites somebody to fix it
- * by hand, which this would then overwrite on their next sign-in.
- *
- * So the rank is dropped whole, and a long-named Chief Fleet Commander simply
- * appears under their commander name. Exported for its own test, because the
- * boundary is the interesting part and it is invisible from the outside.
+ * Re-exported so callers in this app keep one import.
  */
-export function composeNickname(rank: string | null, cmdrName: string): string {
-  const name = cmdrName.trim();
-  if (rank === null || rank.trim() === '') return name.slice(0, MAX_NICK);
-
-  const full = `${rank.trim()} - ${name}`;
-  return full.length <= MAX_NICK ? full : name.slice(0, MAX_NICK);
-}
+import { composeNickname } from '@grims/shared';
+export { composeNickname, MAX_NICK } from '@grims/shared';
 
 export class NicknameSyncService {
   constructor(private readonly deps: NicknameSyncDeps) {}

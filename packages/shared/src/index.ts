@@ -55,3 +55,9 @@ export {
   evaluateSquadron,
   type SquadronCheckOutcome,
 } from './squadron.js';
+export {
+  composeNickname,
+  rankForDisplay,
+  MAX_NICK,
+  LEADERSHIP_CEILING,
+} from './nickname.js';

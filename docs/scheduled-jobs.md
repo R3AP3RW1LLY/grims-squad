@@ -20,6 +20,9 @@ schedule shows up in cron's own mail rather than looking healthy forever.
 
 # Promotions — the 1st of the month, 00:00 UTC. NOT before 1 August 2026.
 0 0 1 * *      cd /srv/grims && docker compose run --rm worker pnpm promote
+
+# Commander audit — every commander's squadron and nickname, nightly.
+15 0 * * *     cd /srv/grims && docker compose run --rm worker pnpm audit:daily
 ```
 
 Set `CRON_TZ=UTC` at the top of the crontab. Promotions are defined in UTC and a
@@ -60,3 +63,50 @@ identical to a healthy one.
 the same source) but it doubles rate-limit spend for nothing. A run takes ~2
 minutes against a 20-minute interval, so there is an order of magnitude of
 headroom; if the squadron grows past ~1,000 verified commanders, revisit it.
+
+## `audit:daily` — every night at 00:15 UTC
+
+**What it catches.** Two facts go stale between logins, and a member has no
+reason to notice either:
+
+- **Squadron** — somebody leaves Grim's Squad on Inara, or is removed. Nothing
+  on our side is told, so they keep a green "verified" badge indefinitely.
+- **Nickname** — somebody renames themselves in Discord, or is promoted, or an
+  officer edits their nickname by hand. The `RANK - COMMANDER` prefix is then
+  wrong until they next happen to touch their Inara key, which for most members
+  is never.
+
+The twenty-minute sweep only looks at people waiting on a squadron application.
+This looks at **everybody**, once a day.
+
+**Why 00:15 and not midnight.** Promotions run at 00:00 on the first of the
+month. Starting at the same instant would have two jobs writing rank state while
+each reads it, and the loser would sweep with a half-applied ladder — writing
+nicknames for ranks that were mid-change. Fifteen minutes is not a lock; it is
+enough separation that they never overlap in practice, and the audit is
+idempotent besides.
+
+**Why daily and not more often.** A member's OWN key cannot be batched —
+`getOwnIdentity` answers for one key — so a hundred members with keys is a
+hundred requests, roughly fifty minutes at 2/min (INV-033). Fine once a night,
+impossible every twenty minutes. Members *without* a key are read from public
+profiles, thirty to a request, which costs almost nothing.
+
+**★ IT AUDITS. IT DOES NOT PUNISH ★**
+
+A member Inara no longer shows in the squadron is recorded and written to the
+audit log (`cmdr.squadron.departed`) for an officer to see. **Nothing is
+revoked.** Inara membership is self-managed on a third-party site we do not run,
+and stripping somebody's access at quarter past midnight with nobody watching is
+not a decision a cron job gets to make.
+
+| Code | Meaning |
+|---|---|
+| `0` | Swept cleanly |
+| `1` | One or more commanders got no answer from Inara |
+| `2` | `TOKEN_ENCRYPTION_KEYRING` is unset — refuses rather than silently falling back to public lookups for everybody |
+
+Departures and refused renames are **not** failures. The guild owner cannot be
+renamed by a bot, and neither can anybody whose highest role sits above the
+bot's; both are ordinary facts about a guild. `unreachable` is the one outcome
+worth waking somebody for.
