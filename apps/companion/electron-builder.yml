@@ -18,6 +18,9 @@ copyright: Grim's Squad
 
 directories:
   output: release
+  # electron-builder reads build/icon.png from here for the app icon, the
+  # taskbar icon and the installer icon on every platform — one 512px squadron
+  # badge, converted per target rather than maintained three times.
   buildResources: build
 
 files:
@@ -28,6 +31,7 @@ files:
 # Where almost every member is. NSIS gives a normal installer that a
 # non-technical player recognises rather than a zip they have to reason about.
 win:
+  icon: build/icon.png
   target:
     - target: nsis
       arch: [x64]
@@ -35,6 +39,9 @@ win:
   # find a game, which is worse than not offering it.
 
 nsis:
+  installerIcon: build/icon.png
+  uninstallerIcon: build/icon.png
+  installerHeaderIcon: build/icon.png
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true
@@ -45,6 +52,7 @@ nsis:
 
 # ------------------------------------------------------------------- macOS
 mac:
+  icon: build/icon.png
   target:
     - target: dmg
       arch: [arm64, x64]
@@ -72,6 +80,7 @@ dmg:
 
 # ------------------------------------------------------------------- Linux
 linux:
+  icon: build/icon.png
   target:
     - target: AppImage
       arch: [x64]

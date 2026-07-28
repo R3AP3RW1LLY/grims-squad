@@ -39,6 +39,45 @@ export const JOURNAL_EVENTS = {
 
   /** Squadron name and rank, as the game itself reports it. */
   SquadronStartup: 'squadron',
+
+  // ---------------------------------------------------------------- OPTIONAL
+  // Everything below is opt-in and off by default. It answers questions about
+  // a MEMBER — where they went, what they killed, what they hauled — rather
+  // than about the squadron, and it exists for leaderboards.
+
+  /** Every hyperspace jump: system, distance, and the star at the far end. */
+  FSDJump: 'location',
+  /** Where they are on a normal-space arrival, and where they docked. */
+  Location: 'location',
+  Docked: 'location',
+
+  /** A bounty claimed, and what it was worth. */
+  Bounty: 'combat',
+  /** A kill in a conflict zone or a war, with the faction it counted for. */
+  FactionKillBond: 'combat',
+  /** A ship destroyed under their guns, by class. */
+  PVPKill: 'combat',
+
+  /** Cargo bought and sold, with the commodity and the station. */
+  MarketBuy: 'trade',
+  MarketSell: 'trade',
+  /** Mined and refined, which the trade board counts separately. */
+  MiningRefined: 'trade',
+
+  /** Scan data sold, which is how exploration is actually scored. */
+  MultiSellExplorationData: 'exploration',
+  SellExplorationData: 'exploration',
+  /** A body scanned in detail — the first-discovery credit. */
+  SAAScanComplete: 'exploration',
+
+  /** A mission handed in for a faction, which is what moves the BGS. */
+  MissionCompleted: 'bgs',
+  /** Data and materials donated to a faction. */
+  SellMicroResources: 'bgs',
+
+  /** Fleet carrier jumps and finances, for the squadron's own carrier. */
+  CarrierJump: 'carrier',
+  CarrierStats: 'carrier',
 } as const;
 
 export type JournalEventName = keyof typeof JOURNAL_EVENTS;
@@ -72,7 +111,59 @@ export const EVENT_FIELDS: Record<JournalEventName, readonly string[]> = {
   Loadout: ['Ship', 'Ship_Localised', 'ShipName', 'ShipIdent', 'Modules'],
   StoredShips: ['StationName', 'StarSystem', 'ShipsHere', 'ShipsRemote'],
   SquadronStartup: ['SquadronName', 'CurrentRank'],
+
+  // ---- optional -----------------------------------------------------------
+  // Money survives HERE and nowhere else. A trade leaderboard measured in
+  // anything but credits is not a trade leaderboard, and a bounty board that
+  // cannot say what a bounty was worth is a list of names. The member opted in
+  // to exactly this — see BASELINE_CATEGORIES for what they did not.
+  FSDJump: ['StarSystem', 'SystemAddress', 'StarPos', 'JumpDist', 'FuelUsed'],
+  Location: ['StarSystem', 'SystemAddress', 'StationName', 'Docked'],
+  Docked: ['StarSystem', 'StationName', 'StationType', 'StationFaction'],
+
+  Bounty: ['Target', 'Target_Localised', 'TotalReward', 'VictimFaction'],
+  FactionKillBond: ['AwardingFaction', 'VictimFaction', 'Reward'],
+  PVPKill: ['CombatRank'],
+
+  MarketBuy: ['Type', 'Type_Localised', 'Count', 'TotalCost', 'MarketID'],
+  MarketSell: ['Type', 'Type_Localised', 'Count', 'TotalSale', 'MarketID'],
+  MiningRefined: ['Type', 'Type_Localised'],
+
+  MultiSellExplorationData: ['TotalEarnings', 'BaseValue', 'Bonus', 'Discovered'],
+  SellExplorationData: ['TotalEarnings', 'BaseValue', 'Bonus', 'Systems'],
+  SAAScanComplete: ['BodyName', 'ProbesUsed', 'EfficiencyTarget'],
+
+  MissionCompleted: ['Name', 'LocalisedName', 'Faction', 'Reward', 'FactionEffects'],
+  SellMicroResources: ['MicroResources', 'Price', 'MarketID'],
+
+  CarrierJump: ['StarSystem', 'SystemAddress', 'StationName', 'CarrierID'],
+  CarrierStats: ['CarrierID', 'Callsign', 'Name', 'DockingAccess', 'JumpRangeCurr'],
 };
+
+/**
+ * Money fields the OPTIONAL categories are allowed to keep.
+ *
+ * ★ WHY AN EXCEPTION EXISTS AT ALL ★
+ *
+ * The baseline strips every price at every depth, because "how rich is this
+ * member" is not a question the squadron needs answered to know they play.
+ *
+ * But a trade leaderboard measured in anything other than credits is not a
+ * trade leaderboard, and a bounty board that cannot say what a bounty was worth
+ * is a list of names. So the events a member OPTS IN to may carry the figure
+ * that is the entire point of them — and only that figure, named here rather
+ * than by lifting the rule generally.
+ */
+const EARNINGS_FIELDS = new Set([
+  'TotalReward',
+  'Reward',
+  'TotalCost',
+  'TotalSale',
+  'TotalEarnings',
+  'BaseValue',
+  'Bonus',
+  'Price',
+]);
 
 /**
  * Strips an event down to the allowed fields.
@@ -89,7 +180,10 @@ export function pickAllowedFields(
   const allowed = EVENT_FIELDS[eventName];
   const out: Record<string, unknown> = {};
   for (const field of allowed) {
-    if (raw[field] !== undefined) out[field] = stripMoney(raw[field]);
+    if (raw[field] === undefined) continue;
+    // A named earnings field on an opted-in event survives intact; everything
+    // else is stripped of prices at every depth. See EARNINGS_FIELDS.
+    out[field] = EARNINGS_FIELDS.has(field) ? raw[field] : stripMoney(raw[field]);
   }
   return out;
 }
@@ -127,22 +221,35 @@ function stripMoney(value: unknown): unknown {
 /**
  * The consent category an event is stored under (INV-013).
  *
- * ★ WHY `session` IS ALONE ★
+ * ★ THREE BASELINE, SIX OPTIONAL ★
  *
- * Consent is per-category, so a category is only meaningful if a member can
- * predict what lands in it. `session` holds LoadGame and nothing else: the one
- * input the promotion engine needs, and the least revealing thing we collect.
- * Split out like this, a member can confirm they play — and qualify for a
- * promotion — WITHOUT sharing what they did while playing.
+ * The baseline — session, profile, fleet — comes with running the app. The
+ * optional six are opt-in, default to off, and purge when revoked.
+ *
+ * The split is not arbitrary: the baseline answers questions about the
+ * SQUADRON (who is active, what rank, what can they field) and the optional set
+ * answers questions about a MEMBER (where they went, what they killed, what
+ * they hauled). The first is why the platform exists; the second is a
+ * leaderboard, and nobody's business unless they say so.
  *
  * Total Record, so adding a label to `JOURNAL_EVENTS` without deciding where it
- * belongs fails to compile. These three strings are values of the database's
+ * belongs fails to compile. These strings are values of the database's
  * `TelemetryCategory` enum; a test in the API pins them to it, because this
  * package cannot import the generated client.
  */
-export type TelemetryCategoryName = 'session' | 'profile' | 'fleet';
+export type TelemetryCategoryName =
+  | 'session'
+  | 'profile'
+  | 'fleet'
+  | 'location'
+  | 'combat'
+  | 'trade'
+  | 'exploration'
+  | 'bgs'
+  | 'carrier';
 
 const CATEGORY_BY_LABEL: Record<JournalCategory, TelemetryCategoryName> = {
+  // ---- baseline -----------------------------------------------------------
   session: 'session',
   // What a commander IS, rather than what they did.
   ranks: 'profile',
@@ -151,7 +258,53 @@ const CATEGORY_BY_LABEL: Record<JournalCategory, TelemetryCategoryName> = {
   // distinction that matters to the app and not to consent.
   ship: 'fleet',
   fleet: 'fleet',
+
+  // ---- optional -----------------------------------------------------------
+  location: 'location',
+  combat: 'combat',
+  trade: 'trade',
+  exploration: 'exploration',
+  bgs: 'bgs',
+  carrier: 'carrier',
 };
+
+/**
+ * The categories that come with running the app at all (INV-013).
+ *
+ * ★ WHY THESE THREE ARE NOT A CHECKBOX ★
+ *
+ * They are what the platform exists to hold: who is playing, what rank they
+ * hold, what they fly. Making them conditional on a setting meant a member
+ * could install the app, leave it running for a month, and be told they had not
+ * qualified for a promotion because of a box they never saw.
+ *
+ * The consent is the INSTALL. The app is entirely optional, ships switched off,
+ * says plainly what it sends, and will show a member the exact contents of a
+ * batch from their own journals before they turn it on — which is a good deal
+ * more informed than a checkbox nobody reads.
+ */
+export const BASELINE_CATEGORIES: readonly TelemetryCategoryName[] = ['session', 'profile', 'fleet'];
+
+/**
+ * The categories that are opt-in, default to off, and purge on revoke.
+ *
+ * These answer questions about a MEMBER rather than about the squadron — where
+ * they went, what they fought, what they hauled. Useful for leaderboards, and
+ * nobody's business unless they say so.
+ */
+export const OPTIONAL_CATEGORIES: readonly TelemetryCategoryName[] = [
+  'location',
+  'combat',
+  'trade',
+  'exploration',
+  'bgs',
+  'carrier',
+];
+
+/** Is this category collected regardless of consent? */
+export function isBaselineCategory(category: string): boolean {
+  return (BASELINE_CATEGORIES as readonly string[]).includes(category);
+}
 
 export function telemetryCategoryFor(eventName: JournalEventName): TelemetryCategoryName {
   return CATEGORY_BY_LABEL[JOURNAL_EVENTS[eventName]];

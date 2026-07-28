@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { JOURNAL_EVENTS, telemetryCategoryFor, type JournalEventName } from '@grims/shared';
+import {
+  JOURNAL_EVENTS,
+  telemetryCategoryFor,
+  BASELINE_CATEGORIES,
+  isBaselineCategory,
+  type JournalEventName,
+} from '@grims/shared';
 import { CONSENT_CATEGORIES } from './consent.service.js';
 
 /**
@@ -33,11 +39,26 @@ describe('journal event consent categories', () => {
     expect(inSession).toEqual(['LoadGame']);
   });
 
-  it('every allowlisted event lands in a category a member can actually choose', () => {
-    // A category the settings screen never offers is a category nothing can ever
-    // be consented to, so anything filed under it would be permanently refused.
+  it('MANDATORY: every allowlisted event is either baseline or offered as a choice', () => {
+    /*
+     * An event in neither set could never be stored: not baseline, so it needs
+     * consent — and not offered, so consent can never be given. It would be
+     * refused forever, silently, and the only symptom would be missing data
+     * nobody could explain.
+     */
     for (const name of EVENT_NAMES) {
-      expect(CONSENT_CATEGORIES, name).toContain(telemetryCategoryFor(name));
+      const category = telemetryCategoryFor(name);
+      const reachable =
+        isBaselineCategory(category) || (CONSENT_CATEGORIES as readonly string[]).includes(category);
+      expect(reachable, name + ' -> ' + category).toBe(true);
+    }
+  });
+
+  it('MANDATORY: baseline and optional do not overlap', () => {
+    // A category in both would be collected regardless AND offered as a switch,
+    // so turning it off would appear to work and change nothing.
+    for (const category of BASELINE_CATEGORIES) {
+      expect(CONSENT_CATEGORIES, category).not.toContain(category);
     }
   });
 
@@ -57,17 +78,26 @@ describe('journal event consent categories', () => {
     }
   });
 
-  it('MANDATORY: nothing is filed under a category that overstates it', () => {
+  it('MANDATORY: no baseline event is filed under a category that overstates it', () => {
     /*
-     * `location`, `combat`, `trade`, `exploration`, `bgs` and `carrier` describe
-     * what a commander DID. Nothing in the current allowlist observes any of
-     * that — we collect who they are, what they own, and the fact that they
-     * played. Filing a rank under `combat` would be a lie told to the consent
-     * screen.
+     * The optional categories describe what a commander DID. Nothing in the
+     * BASELINE observes any of that — it is who they are, what they own, and
+     * the fact that they played.
+     *
+     * Filing a rank under `combat` would be a lie told to the consent screen:
+     * the member would see combat data collected whether or not they opted in.
      */
-    const overstated = ['location', 'combat', 'trade', 'exploration', 'bgs', 'carrier'];
-    for (const name of EVENT_NAMES) {
-      expect(overstated, name).not.toContain(telemetryCategoryFor(name));
+    const baselineEvents = [
+      'LoadGame',
+      'Rank',
+      'Progress',
+      'Loadout',
+      'StoredShips',
+      'SquadronStartup',
+    ] as const;
+
+    for (const name of baselineEvents) {
+      expect(isBaselineCategory(telemetryCategoryFor(name)), name).toBe(true);
     }
   });
 });

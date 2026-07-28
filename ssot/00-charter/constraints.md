@@ -81,7 +81,7 @@ The right to use Frontier's game data and imagery, and Coriolis's bundled data, 
 ## Privacy & data protection
 
 - **GDPR / UK GDPR applies** if there are EU or UK members, hobbyist status notwithstanding. At this scale it is a page of plain-English policy and two API endpoints — not a compliance programme.
-- **Telemetry is opt-in per category, defaulting to off**, with one-click revoke and purge (INV-013).
+- **Telemetry has a baseline and an opt-in layer** (INV-013). The baseline — that you played, your ranks, your ships — comes with running the companion app, which is itself entirely optional and ships switched off. Everything beyond it (where you went, what you fought, what you traded) is **opt-in per category, defaulting to off**, with one-click revoke and purge.
 - **Never publish** a member's credit balance, exact location, or fleet without an explicit per-field opt-in.
 - **Data export** — any member can download everything held about them as JSON.
 - **Deletion on departure** — offer full purge; default to anonymising forum posts rather than deleting them, to preserve thread coherence, unless they ask otherwise.

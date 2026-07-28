@@ -31,6 +31,8 @@ contextBridge.exposeInMainWorld('companion', {
   setEnabled: (enabled: boolean) => ipcRenderer.invoke('setEnabled', enabled),
   openHub: () => ipcRenderer.invoke('openHub'),
   chooseJournalFolder: () => ipcRenderer.invoke('chooseJournalFolder'),
+  /** Searches the disk again — the game may have been installed since. */
+  rescan: () => ipcRenderer.invoke('rescan'),
 
   /** Shows what a batch would contain, from the member's own journals. */
   preview: () => ipcRenderer.invoke('preview'),

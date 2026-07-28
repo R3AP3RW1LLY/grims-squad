@@ -25,9 +25,8 @@ class FakeStore implements IngestStore {
   inserted: Row[] = [];
   seenKeys = new Set<string>();
   observed: Array<{ userId: string; month: string }> = [];
-  // Consent to everything by default, so tests about OTHER behaviour are not
-  // all about consent. The consent tests narrow it deliberately.
-  consent: string[] = ['session', 'profile', 'fleet'];
+  // The OPTIONAL categories only. Baseline needs no consent — see INV-013.
+  consent: string[] = ['location', 'combat', 'trade', 'exploration', 'bgs', 'carrier'];
 
   async consentedCategories(): Promise<readonly string[]> {
     return this.consent;
@@ -193,7 +192,8 @@ describe('what is refused', () => {
       'dev1',
       [
         ev(),
-        ev({ name: 'Bounty' }),
+        // ReceiveText is chat. It is not on the allowlist and never will be.
+        ev({ name: 'ReceiveText' }),
         ev({ name: 'Rank', data: { Combat: 7 } }),
       ],
       NOW,
@@ -221,28 +221,19 @@ describe('monthKeyOf', () => {
 });
 
 describe('consent (INV-013)', () => {
-  it('MANDATORY: stores nothing for a member who has consented to nothing', async () => {
+  it('MANDATORY: the BASELINE is stored with no consent recorded at all', async () => {
     /*
-     * The default. Pairing a device is permission to TALK to us, not permission
-     * to collect — a member who installs the app and never opens their privacy
-     * settings has agreed to nothing, and nothing is what we keep.
+     * ★ THE AMENDMENT THIS ENCODES ★
+     *
+     * Session, profile and fleet come with running the app. They are what the
+     * platform exists to hold, and making them conditional on a checkbox meant
+     * a member could install the app, leave it running for a month, and be told
+     * they had not qualified for a promotion because of a box they never saw.
+     *
+     * The consent is the INSTALL — an app that is entirely optional, ships
+     * switched off, and shows them a real batch from their own journals first.
      */
     store.consent = [];
-    const r = await svc.ingest('u1', 'dev1', [ev()], NOW);
-
-    expect(r.accepted).toBe(0);
-    expect(store.inserted).toEqual([]);
-    expect(store.observed).toEqual([]);
-  });
-
-  it('MANDATORY: says WHICH categories were refused, rather than dropping them silently', async () => {
-    /*
-     * The invariant is explicit that a non-consented event is REJECTED with a
-     * clear answer. Folding it into a rejection count would leave the app
-     * appearing to work while uploading into a void, and the member with no way
-     * to discover it.
-     */
-    store.consent = ['session'];
     const r = await svc.ingest(
       'u1',
       'dev1',
@@ -250,34 +241,68 @@ describe('consent (INV-013)', () => {
       NOW,
     );
 
-    expect(r.accepted).toBe(1);
-    expect(r.refused).toEqual({ profile: 1, fleet: 1 });
+    expect(r.accepted).toBe(3);
+    expect(r.refused).toEqual({});
+    expect(store.observed).toHaveLength(1);
   });
 
-  it('MANDATORY: consenting to `session` alone is enough to qualify for promotion', async () => {
+  it('MANDATORY: an OPTIONAL category is refused without consent', async () => {
+    // Where they went, what they fought, what they hauled. Off until asked for.
+    store.consent = [];
+    const r = await svc.ingest(
+      'u1',
+      'dev1',
+      [
+        ev({ name: 'FSDJump', data: { StarSystem: 'Sol' } }),
+        ev({ name: 'Bounty', data: { TotalReward: 50_000 } }),
+      ],
+      NOW,
+    );
+
+    expect(r.accepted).toBe(0);
+    expect(r.refused).toEqual({ location: 1, combat: 1 });
+    expect(store.inserted).toEqual([]);
+  });
+
+  it('MANDATORY: says WHICH categories were refused, rather than dropping them silently', async () => {
     /*
-     * The whole reason `session` is a category of its own. A member must be able
-     * to confirm they play — the one thing the promotion engine needs — WITHOUT
-     * also handing over their ranks and their fleet.
+     * The invariant is explicit that a non-consented event gets a clear answer.
+     * Folding it into a rejection count would leave the app appearing to work
+     * while uploading into a void, and the member with no way to discover it.
      */
-    store.consent = ['session'];
-    await svc.ingest('u1', 'dev1', [ev()], NOW);
+    store.consent = ['trade'];
+    const r = await svc.ingest(
+      'u1',
+      'dev1',
+      [
+        ev({ name: 'MarketSell', data: { Type: 'gold', TotalSale: 1_000 } }),
+        ev({ name: 'FSDJump', data: { StarSystem: 'Sol' } }),
+      ],
+      NOW,
+    );
 
-    expect(store.observed).toEqual([{ userId: 'u1', month: '2026-07-01T00:00:00.000Z' }]);
+    expect(r.accepted).toBe(1);
+    expect(r.refused).toEqual({ location: 1 });
   });
 
-  it('MANDATORY: consenting to everything EXCEPT session records no activity', async () => {
-    // The mirror of the above, and the case that would be easy to get wrong: a
-    // member who shares their fleet but not their sessions must not be credited
-    // with a month on the strength of a Loadout.
-    store.consent = ['profile', 'fleet'];
-    await svc.ingest('u1', 'dev1', [ev(), ev({ name: 'Rank', data: { Combat: 7 } })], NOW);
+  it('opting into one optional category does not open the others', async () => {
+    store.consent = ['combat'];
+    const r = await svc.ingest(
+      'u1',
+      'dev1',
+      [
+        ev({ name: 'Bounty', data: { TotalReward: 50_000 } }),
+        ev({ name: 'MarketSell', data: { Type: 'gold', TotalSale: 1_000 } }),
+      ],
+      NOW,
+    );
 
-    expect(store.observed).toEqual([]);
-    expect(store.inserted).toHaveLength(1);
+    expect(r.accepted).toBe(1);
+    expect(r.refused).toEqual({ trade: 1 });
   });
 
   it('files each event under the right category', async () => {
+    store.consent = ['location', 'combat', 'trade'];
     await svc.ingest(
       'u1',
       'dev1',
@@ -286,6 +311,8 @@ describe('consent (INV-013)', () => {
         ev({ name: 'Rank', data: { Combat: 7 } }),
         ev({ name: 'SquadronStartup', data: { SquadronName: "Grim's Squad" } }),
         ev({ name: 'StoredShips', data: { StarSystem: 'Sol' } }),
+        ev({ name: 'FSDJump', data: { StarSystem: 'Sol' } }),
+        ev({ name: 'Bounty', data: { TotalReward: 1 } }),
       ],
       NOW,
     );
@@ -295,6 +322,8 @@ describe('consent (INV-013)', () => {
       ['Rank', 'profile'],
       ['SquadronStartup', 'profile'],
       ['StoredShips', 'fleet'],
+      ['FSDJump', 'location'],
+      ['Bounty', 'combat'],
     ]);
   });
 });

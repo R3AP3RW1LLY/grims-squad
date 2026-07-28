@@ -143,6 +143,24 @@ export interface SessionRow {
 export const getMySessions = (): Promise<{ sessions: SessionRow[] } | null> =>
   get('/v1/me/sessions', { authed: true });
 
+export interface DeviceRow {
+  id: string;
+  label: string;
+  lastUsedAt: string | null;
+  createdAt: string;
+}
+
+export const getMyDevices = (): Promise<{ devices: DeviceRow[] } | null> =>
+  get('/v1/me/devices', { authed: true });
+
+export interface TelemetryConsent {
+  categories: string[];
+  available: string[];
+}
+
+export const getMyTelemetryConsent = (): Promise<TelemetryConsent | null> =>
+  get('/v1/me/telemetry-consent', { authed: true });
+
 export const getTotpStatus = (): Promise<{ enrolled: boolean } | null> =>
   get('/v1/auth/totp/status', { authed: true });
 

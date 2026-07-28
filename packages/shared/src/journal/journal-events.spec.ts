@@ -6,6 +6,9 @@ import {
   pickAllowedFields,
   isLiveGameVersion,
   canonicalJson,
+  telemetryCategoryFor,
+  isBaselineCategory,
+  type JournalEventName,
 } from './journal-events.js';
 
 /**
@@ -24,32 +27,78 @@ import {
  */
 describe('the event allowlist', () => {
   it('MANDATORY: is an ALLOWLIST — an unlisted event is refused', () => {
-    // The failure mode of a blocklist is that every new game update adds
-    // events nobody has thought about, and they flow straight through.
+    /*
+     * The failure mode of a blocklist is that every game update adds events
+     * nobody has thought about, and they flow straight through.
+     *
+     * These are the ones that must stay out however far the list widens. Chat,
+     * the friends list, how somebody died, what crimes they committed — none of
+     * it answers a question the squadron has, and all of it is the sort of
+     * thing that arrives quietly with a feature nobody reviewed.
+     */
     for (const denied of [
-      'Bounty',
-      'FSDJump',
-      'Docked',
       'SendText',
       'ReceiveText',
       'Friends',
       'Died',
       'CommitCrime',
+      'Interdicted',
       'Statistics',
       'Materials',
+      'Fileheader',
     ]) {
       expect(isAllowedEvent(denied), denied).toBe(false);
     }
   });
 
-  it('allows exactly the six events we use', () => {
-    expect(Object.keys(JOURNAL_EVENTS).sort()).toEqual([
+  it('MANDATORY: the BASELINE is exactly the six squadron events', () => {
+    /*
+     * These six are collected from everybody running the app, with no opt-out
+     * (INV-013). The list is pinned here because widening it widens what is
+     * collected WITHOUT ASKING — which is a decision that must show up in
+     * review, not drift in with a feature.
+     */
+    const baseline = Object.entries(JOURNAL_EVENTS)
+      .filter(([name]) => isBaselineCategory(telemetryCategoryFor(name as JournalEventName)))
+      .map(([name]) => name)
+      .sort();
+
+    expect(baseline).toEqual([
       'LoadGame',
       'Loadout',
       'Progress',
       'Rank',
       'SquadronStartup',
       'StoredShips',
+    ]);
+  });
+
+  it('MANDATORY: everything beyond the baseline needs consent', () => {
+    // The leaderboard events. Widening this list is a smaller decision than
+    // widening the baseline, because a member has to ask for any of it — but it
+    // is still a decision, and it still shows up here.
+    const optional = Object.entries(JOURNAL_EVENTS)
+      .filter(([name]) => !isBaselineCategory(telemetryCategoryFor(name as JournalEventName)))
+      .map(([name]) => name)
+      .sort();
+
+    expect(optional).toEqual([
+      'Bounty',
+      'CarrierJump',
+      'CarrierStats',
+      'Docked',
+      'FSDJump',
+      'FactionKillBond',
+      'Location',
+      'MarketBuy',
+      'MarketSell',
+      'MiningRefined',
+      'MissionCompleted',
+      'MultiSellExplorationData',
+      'PVPKill',
+      'SAAScanComplete',
+      'SellExplorationData',
+      'SellMicroResources',
     ]);
   });
 

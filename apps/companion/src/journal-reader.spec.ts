@@ -30,13 +30,20 @@ describe('what gets sent', () => {
   });
 
   it('MANDATORY: skips everything not on the allowlist', () => {
-    // These are ordinary journal lines. None of them is our business, and none
-    // is parsed, buffered or counted.
+    /*
+     * These are ordinary journal lines. None of them is our business, and none
+     * is parsed, buffered or counted.
+     *
+     * Chat and death, deliberately: the allowlist widened to cover leaderboards
+     * — jumps, bounties, trades — and these are the kind of thing that must
+     * stay out however far it widens. Who somebody messaged and how they died
+     * answer no question the squadron has.
+     */
     const text =
       line({ timestamp: '2026-07-27T12:00:00Z', event: 'SendText', Message: 'private message' }) +
-      line({ timestamp: '2026-07-27T12:00:01Z', event: 'Bounty', Reward: 100000 }) +
-      line({ timestamp: '2026-07-27T12:00:02Z', event: 'FSDJump', StarSystem: 'Sol' }) +
-      line({ timestamp: '2026-07-27T12:00:03Z', event: 'Died', KillerName: 'someone' });
+      line({ timestamp: '2026-07-27T12:00:01Z', event: 'ReceiveText', From: 'CMDR X' }) +
+      line({ timestamp: '2026-07-27T12:00:02Z', event: 'Died', KillerName: 'someone' }) +
+      line({ timestamp: '2026-07-27T12:00:03Z', event: 'Friends', Name: 'someone' });
 
     expect(readJournalChunk(text).events).toEqual([]);
   });

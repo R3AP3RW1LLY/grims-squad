@@ -96,9 +96,18 @@ export default tseslint.config(
       '**/*.config.cjs',
       '**/*.config.ts',
       '**/*.config.mts',
+      // Build and launch scripts. They are Node programs that happen not to be
+      // called *.config.* — same environment, same globals.
+      '**/build.mjs',
+      '**/dev.mjs',
     ],
     languageOptions: {
-      globals: { process: 'readonly', __dirname: 'readonly', module: 'writable' },
+      globals: {
+        process: 'readonly',
+        __dirname: 'readonly',
+        module: 'writable',
+        Buffer: 'readonly',
+      },
     },
   },
 );

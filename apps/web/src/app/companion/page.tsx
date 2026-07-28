@@ -142,17 +142,25 @@ export default function CompanionPage() {
             GETTING IT
           </h2>
           {/*
-            Honest placeholder. A dead "Download" button is worse than saying
-            it is not ready — one wastes somebody's time and makes the site look
+            Honest placeholder. A dead "Download" button is worse than saying it
+            is not ready — one wastes somebody's time and makes the site look
             broken; the other sets an expectation.
           */}
           <p className="mt-4 text-[var(--color-text-primary)]">
-            In development. It will be announced in Discord when there is a build worth installing,
-            and this page will carry the download.
+            In testing. It will be announced in Discord when there is a build worth installing, and
+            this page will carry the download.
           </p>
           <p className="mt-3 text-sm text-[var(--color-text-muted)]">
-            Windows first, since that is where Elite runs for almost everyone. Linux under Proton
-            is intended; macOS is not, because the game does not run there.
+            Windows, macOS and Linux. Elite has had no native Mac client since 2015 and none on
+            Linux, so players on both run it through CrossOver, Whisky or Proton — the app is a
+            normal Mac or Linux program that knows where those put the game&rsquo;s journal files.
+          </p>
+          <p className="mt-6 text-[var(--color-text-primary)]">
+            Already have it?{' '}
+            <a href="/settings/devices" className="text-[var(--color-brand-cyan-bright)]">
+              Pair a device and choose what it may send
+            </a>
+            .
           </p>
         </section>
       </div>

@@ -130,8 +130,8 @@ export default async function DashboardPage() {
           <Card
             title="Companion app"
             body="Recommended. Runs quietly in the background and reads the game's own journal files, so your ranks, ships, loadouts and activity keep themselves up to date. Nothing else gives the hub this."
-            href="/companion"
-            cta="Get the app"
+            href="/settings/devices"
+            cta="Pair a device"
           />
         </div>
 

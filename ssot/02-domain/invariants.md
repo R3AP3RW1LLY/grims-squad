@@ -50,8 +50,22 @@ Severity: `SEC` = security; violating it is a breach. `DATA` = data integrity; v
 **INV-012** `SEC` `due:P1` · OAuth refresh tokens, cAPI tokens and device tokens are **encrypted at rest** (AES-256-GCM, key from the secret store) and never appear in logs, error messages, audit rows or API responses.
 *Test:* write a token, read the raw column, assert the plaintext is absent; assert a log-scrubbing test over a payload containing a token.
 
-**INV-013** `SEC` `due:P3` · Telemetry is opt-in per category, defaults to off, and **consent is enforced server-side**: an event in a non-consented category is **rejected with an explicit error**, never silently discarded.
-*Test:* post an event in a non-consented category; assert a 4xx with the documented error code and zero rows written.
+**INV-013** `SEC` `due:P3` · Telemetry has a **BASELINE** — session, profile and fleet — collected from every member running the companion app, and **OPTIONAL** categories that are opt-in, default to off, and can be revoked with a purge. Consent for the optional set is **enforced server-side**: an event in a non-consented optional category is **rejected with an explicit answer**, never silently discarded.
+*Test:* post an event in a non-consented optional category; assert zero rows written and the category named in the response. Post a baseline event with no consent recorded; assert it IS stored.
+
+> **Amended 2026-07-27.** Previously every category was opt-in. That made the
+> squadron's own core function — knowing who is playing, what rank they hold and
+> what they fly — conditional on a checkbox, so a member could install the app,
+> leave it running for a month, and be told they had not qualified for a
+> promotion because of a setting they never saw.
+>
+> The baseline is the data the platform exists to hold, and running the app is
+> the act of agreeing to it: the app is **entirely optional**, ships disabled,
+> states plainly what it sends, and will show a member the exact contents of a
+> batch from their own journals before they turn it on. The optional categories
+> — where they went, what they fought, what they traded — are for leaderboards
+> and remain opt-in, because those answer questions about a member rather than
+> about the squadron.
 
 **INV-014** `SEC` `due:P8` · A mutating AI tool never executes without explicit human confirmation of that specific call. `grant_role` requires two-step confirmation. No exception for convenience, permission level, or an "obviously safe" argument set.
 *Test:* invoke each mutating tool without a confirmation token; assert `needsConfirmation` and no side effect.

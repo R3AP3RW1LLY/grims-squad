@@ -1,5 +1,7 @@
 import { app, BrowserWindow, Tray, Menu, shell, ipcMain, nativeImage, dialog } from 'electron';
 import { readdir, readFile, stat, open } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { join } from 'node:path';
 import { homedir, platform } from 'node:os';
 import {
@@ -17,6 +19,7 @@ import {
 } from './config.js';
 import { Uploader } from './uploader.js';
 import { runWatchPass, type JournalFs, type WatchOutcome } from './watcher.js';
+import { searchForJournalDir, searchRootsFor, type SearchFs } from './journal-search.js';
 
 /**
  * The Electron half: a window, a tray icon, and a timer.
@@ -55,6 +58,7 @@ let config: CompanionConfig;
 let timer: NodeJS.Timeout | null = null;
 let lastOutcome: WatchOutcome | null = null;
 let explainedTrayOnce = false;
+let searching = false;
 
 /**
  * The platform, narrowed to one Elite actually runs on.
@@ -96,12 +100,54 @@ const nodeFs: JournalFs = {
   },
 };
 
+const searchFs: SearchFs = {
+  async readDir(path) {
+    const entries = await readdir(path, { withFileTypes: true });
+    return entries.map((e) => ({ name: e.name, isDirectory: e.isDirectory() }));
+  },
+};
+
+/**
+ * Every fixed drive, on Windows.
+ *
+ * A Steam library on D: is completely normal and is the single most common
+ * reason the known paths miss. `wmic` is deprecated but present everywhere;
+ * PowerShell is the fallback, and if both fail we look at C: and say so rather
+ * than failing the whole search.
+ */
+async function windowsDrives(): Promise<string[]> {
+  const run = promisify(execFile);
+  try {
+    const { stdout } = await run('powershell', [
+      '-NoProfile',
+      '-Command',
+      '(Get-PSDrive -PSProvider FileSystem).Root',
+    ]);
+    const drives = stdout
+      .split(/\r?\n/)
+      .map((l) => l.trim().replace(/\\$/, ''))
+      .filter((l) => /^[A-Za-z]:$/.test(l));
+    return drives.length > 0 ? drives : ['C:'];
+  } catch {
+    return ['C:'];
+  }
+}
+
 /**
  * Where the journals are.
  *
- * The override wins, then the first candidate that exists. Returns null when
- * nothing is found, which is a normal state on a machine where Elite has never
- * run — not an error to shout about.
+ * ★ THREE STEPS, CHEAPEST FIRST ★
+ *
+ *   1. The member's own override, if they set one.
+ *   2. The known paths, which cover a normal install and cost nothing.
+ *   3. A bounded SEARCH, once, cached.
+ *
+ * Step 3 is the one that matters for the people this app is hardest for. The
+ * known paths miss a Steam library on a second drive, a Proton prefix under a
+ * non-default root, a renamed CrossOver bottle, or OneDrive having quietly
+ * moved Saved Games — and every one of those ends with a member being asked to
+ * find a folder they have never heard of, inside a prefix that only exists
+ * because the game does not run natively. Most will not.
  */
 async function findJournalDir(): Promise<string | null> {
   if (config.journalPathOverride !== null) return config.journalPathOverride;
@@ -123,7 +169,56 @@ async function findJournalDir(): Promise<string | null> {
       // three platforms use and only one of them is ever right.
     }
   }
-  return null;
+
+  // Cached from a previous search. Re-checked, because a member can uninstall
+  // the game or unplug the drive it was on.
+  if (config.discoveredJournalPath !== null) {
+    try {
+      if ((await stat(config.discoveredJournalPath)).isDirectory()) {
+        return config.discoveredJournalPath;
+      }
+    } catch {
+      // Gone. Fall through and search again.
+      config = { ...config, discoveredJournalPath: null, searchedAndFoundNothing: false };
+    }
+  }
+
+  // Already searched and came up empty. Not repeated every twenty seconds —
+  // the answer will not have changed, and the member has been told.
+  if (config.searchedAndFoundNothing) return null;
+
+  return runDeepSearch(os);
+}
+
+/** The bounded search, run once and remembered either way. */
+async function runDeepSearch(os: Platform): Promise<string | null> {
+  searching = true;
+  push();
+  try {
+    const roots = searchRootsFor({
+      platform: os,
+      home: homedir(),
+      drives: os === 'win32' ? await windowsDrives() : undefined,
+    });
+
+    const { found, timedOut } = await searchForJournalDir(searchFs, roots, { deadlineMs: 25_000 });
+    const hit = found[0] ?? null;
+
+    config = {
+      ...config,
+      discoveredJournalPath: hit,
+      /*
+       * A search that ran out of TIME is not a search that found nothing — it
+       * is a search that was interrupted, and giving up permanently on the
+       * strength of it would strand somebody with a slow disk forever.
+       */
+      searchedAndFoundNothing: hit === null && !timedOut,
+    };
+    saveConfig(app.getPath('userData'), config);
+    return hit;
+  } finally {
+    searching = false;
+  }
 }
 
 async function tick(): Promise<void> {
@@ -203,6 +298,8 @@ function state(): Record<string, unknown> {
     apiBaseUrl: apiBaseUrlFor(config, process.env),
     journalPathOverride: config.journalPathOverride,
     running: timer !== null,
+    searching,
+    journalPath: config.journalPathOverride ?? config.discoveredJournalPath,
     last: lastOutcome,
   };
 }
@@ -245,6 +342,9 @@ function refreshTray(): void {
 
 function showWindow(): void {
   if (window !== null) {
+    // Restore first: a window minimised to the taskbar stays minimised when
+    // shown, so clicking the tray icon would appear to do nothing at all.
+    if (window.isMinimized()) window.restore();
     window.show();
     window.focus();
     return;
@@ -254,6 +354,9 @@ function showWindow(): void {
     width: 620,
     height: 700,
     title: "Grim's Squad Hub",
+    // The squadron badge, so the taskbar and Alt-Tab show us rather than the
+    // default Electron atom — which reads as "some developer's test build".
+    icon: ours('renderer', 'icon.png'),
     autoHideMenuBar: true,
     webPreferences: {
       preload: ours('preload.cjs'),
@@ -298,6 +401,18 @@ function showWindow(): void {
     }
   });
 
+  /*
+   * Minimising goes to the TRAY, not the taskbar.
+   *
+   * The app is a background agent — it is useful precisely when nobody is
+   * looking at it, and a taskbar button that does nothing but sit there is
+   * clutter on a machine that is also running a game. Hiding takes it out of
+   * the taskbar entirely, and the tray icon stays as the way back in.
+   */
+  window.on('minimize', () => {
+    window?.hide();
+  });
+
   window.on('closed', () => {
     window = null;
   });
@@ -331,7 +446,16 @@ if (!app.requestSingleInstanceLock()) {
   void app.whenReady().then(() => {
     config = loadConfig(app.getPath('userData'));
 
-    tray = new Tray(nativeImage.createFromPath(ours('renderer', 'tray.png')));
+    /*
+     * The tray icon.
+     *
+     * macOS wants a TEMPLATE image — a monochrome mask it recolours for light
+     * and dark menu bars. Handing it a colour badge produces something that
+     * looks broken in dark mode, so the badge is used everywhere else and the
+     * template flag is set only where it means something.
+     */
+    const trayIcon = nativeImage.createFromPath(ours('renderer', 'tray.png'));
+    tray = new Tray(trayIcon);
     tray.on('click', () => showWindow());
     refreshTray();
 
@@ -378,6 +502,23 @@ if (!app.requestSingleInstanceLock()) {
 
     ipcMain.handle('openHub', () => {
       void shell.openExternal(`${apiBaseUrlFor(config, process.env).replace(/\/+$/, '')}/settings/devices`);
+    });
+
+    /*
+     * Runs the search again on demand.
+     *
+     * The member has just installed the game, or plugged the drive back in, or
+     * moved their library — all of which mean the cached "found nothing" is now
+     * wrong. Better than telling them to reinstall the app.
+     */
+    ipcMain.handle('rescan', async () => {
+      const os = supportedPlatform();
+      if (os === null) return { ok: false, advice: advice() };
+
+      config = { ...config, discoveredJournalPath: null, searchedAndFoundNothing: false };
+      const hit = await runDeepSearch(os);
+      void tick();
+      return hit === null ? { ok: false, advice: advice() } : { ok: true, path: hit };
     });
 
     ipcMain.handle('chooseJournalFolder', async () => {

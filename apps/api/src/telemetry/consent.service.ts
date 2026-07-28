@@ -1,13 +1,14 @@
-import { AppError, ErrorCode, type TelemetryCategoryName } from '@grims/shared';
+import { AppError, ErrorCode, OPTIONAL_CATEGORIES, type TelemetryCategoryName } from '@grims/shared';
 
 /**
- * Telemetry consent (INV-013).
+ * Telemetry consent for the OPTIONAL categories (INV-013).
  *
- * ★ OPT-IN, DEFAULTING TO NOTHING ★
+ * ★ WHAT THIS DOES NOT COVER ★
  *
- * A member who installs the app and pairs a device stores NOTHING until they
- * choose a category. That is deliberate and is not a bug to route around:
- * pairing is permission to talk to us, not permission to collect.
+ * The baseline — that they played, their ranks, their ships — is not on this
+ * list, because it comes with running the app rather than with a checkbox. This
+ * governs the leaderboard data: where they went, what they fought, what they
+ * hauled. All of it off until asked for.
  *
  * ★ REVOKING PURGES ★
  *
@@ -19,8 +20,14 @@ import { AppError, ErrorCode, type TelemetryCategoryName } from '@grims/shared';
  * The purge is why this is a service rather than a column update.
  */
 
-/** The categories the companion app can produce. Ordered least to most revealing. */
-export const CONSENT_CATEGORIES: readonly TelemetryCategoryName[] = ['session', 'profile', 'fleet'];
+/**
+ * The categories a member can choose.
+ *
+ * The BASELINE is deliberately absent: session, profile and fleet come with
+ * running the app, and offering a switch that does nothing would be worse than
+ * offering none. See BASELINE_CATEGORIES and INV-013.
+ */
+export const CONSENT_CATEGORIES: readonly TelemetryCategoryName[] = OPTIONAL_CATEGORIES;
 
 export interface ConsentStore {
   read(userId: string): Promise<readonly string[]>;

@@ -1,6 +1,5 @@
 import { build } from 'esbuild';
-import { cp, mkdir, writeFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { cp, mkdir } from 'node:fs/promises';
 
 /**
  * Bundles the Electron halves to CommonJS.
@@ -27,9 +26,6 @@ const common = {
   logLevel: 'info',
 };
 
-const TRAY_PNG_BASE64 =
-  'iVBORw0KGgoAAAANSUhEUgAAABYAAAAWCAYAAADEtGw7AAAAOElEQVR42mP4X8jAgIT/U4jhZlHTUBTDqW0o3HBaGArGowaPGjxq8KjBowaTbDDNCnqaVk1Ur0wBkRKCMUOoeWwAAAAASUVORK5CYII=';
-
 await build({ ...common, entryPoints: ['src/main.ts'], outfile: 'dist/main.cjs' });
 await build({ ...common, entryPoints: ['src/preload.ts'], outfile: 'dist/preload.cjs' });
 
@@ -37,12 +33,16 @@ await mkdir('dist/renderer', { recursive: true });
 await cp('src/renderer/index.html', 'dist/renderer/index.html');
 
 /*
- * The tray icon.
+ * The squadron badge, used for the tray, the taskbar, the window and the
+ * installer.
  *
- * Generated rather than committed as a binary: a 22px orange square is the
- * placeholder until somebody draws the squadron badge, and a checked-in PNG
- * nobody can diff is a worse placeholder than eleven lines of code.
+ * Copied from build/ rather than kept in two places: electron-builder already
+ * reads build/icon.png for the packaged app and the installer, and a tray icon
+ * that drifted out of step with the installer icon would look like two
+ * different programs.
  */
-if (!existsSync('dist/renderer/tray.png')) {
-  await writeFile('dist/renderer/tray.png', Buffer.from(TRAY_PNG_BASE64, 'base64'));
-}
+await cp('build/tray.png', 'dist/renderer/tray.png');
+await cp('build/tray@2x.png', 'dist/renderer/tray@2x.png');
+await cp('build/icon.png', 'dist/renderer/icon.png');
+
+

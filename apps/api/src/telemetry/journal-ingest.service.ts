@@ -5,6 +5,7 @@ import {
   isAllowedEvent,
   pickAllowedFields,
   telemetryCategoryFor,
+  isBaselineCategory,
   canonicalJson,
   type JournalEventName,
   type TelemetryCategoryName,
@@ -145,17 +146,24 @@ export class JournalIngestService {
     }
 
     /*
-     * ★ CONSENT IS CHECKED HERE, BEFORE ANYTHING IS STORED (INV-013) ★
+     * ★ BASELINE ALWAYS, OPTIONAL ONLY WITH CONSENT (INV-013) ★
      *
-     * Telemetry is opt-in per category and defaults to NOTHING, so a member who
-     * has paired a device but chosen no categories stores nothing at all. That
-     * is the intended behaviour, not a bug to route around: pairing is
-     * permission to talk to us, not permission to collect.
+     * The baseline — that they played, their ranks, their ships — comes with
+     * running the app. It is what the platform exists to hold, and making it
+     * conditional on a setting meant a member could run the app for a month and
+     * be told they had not qualified for a promotion because of a box they
+     * never saw. The consent is the INSTALL: the app is entirely optional,
+     * ships switched off, and shows them a real batch from their own journals
+     * before they turn it on.
      *
-     * Refusals are reported back per category rather than silently dropped —
-     * the invariant is explicit that a non-consented event is REJECTED with a
-     * clear answer, so the app can tell the member what was not stored instead
-     * of appearing to work while sending into a void.
+     * Everything else — where they went, what they fought, what they hauled —
+     * is opt-in and off by default, because it answers questions about a MEMBER
+     * rather than about the squadron.
+     *
+     * Refusals are reported back per category rather than silently dropped: the
+     * invariant is explicit that a non-consented event gets a clear answer, so
+     * the app can tell the member what was not stored instead of appearing to
+     * work while sending into a void.
      */
     const consented = new Set(await this.store.consentedCategories(userId));
 
@@ -189,7 +197,7 @@ export class JournalIngestService {
       }
 
       const category = telemetryCategoryFor(e.name as JournalEventName);
-      if (!consented.has(category)) {
+      if (!isBaselineCategory(category) && !consented.has(category)) {
         refused[category] = (refused[category] ?? 0) + 1;
         continue;
       }

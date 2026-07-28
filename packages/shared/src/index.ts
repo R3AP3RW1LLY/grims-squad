@@ -22,6 +22,9 @@ export {
   pickAllowedFields,
   isLiveGameVersion,
   telemetryCategoryFor,
+  isBaselineCategory,
+  BASELINE_CATEGORIES,
+  OPTIONAL_CATEGORIES,
   canonicalJson,
 } from './journal/journal-events.js';
 export type {

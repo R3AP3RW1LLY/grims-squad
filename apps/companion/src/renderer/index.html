@@ -107,13 +107,24 @@
     <div class="panel">
       <h2>What gets sent</h2>
       <p class="muted">
-        Six event types and nothing else: when you start the game, your ranks and progress, your
-        squadron standing, and your ships. Never your chat, your bounties, your credits, or where you
-        have been. The filtering happens on this PC, before anything leaves it.
+        <strong>Always:</strong> when you start the game, your ranks and progress, your squadron
+        standing, and your ships. That is what the squadron runs on, and it is what the monthly rank
+        check reads.
       </p>
+      <p class="muted" style="margin-top: 8px">
+        <strong>Only if you ask:</strong> where you jumped, what you fought, what you traded, what
+        you explored. Off unless you turn it on for the leaderboards, on the website.
+      </p>
+      <p class="muted" style="margin-top: 8px">
+        <strong>Never:</strong> your chat, your friends list, how you died, or your credit balance.
+        The filtering happens on this PC, before anything leaves it — and the button below shows you
+        exactly what a batch looks like from your own files.
+      </p>
+      <p class="muted" id="journalPath" hidden></p>
       <div class="row" style="margin-top: 10px">
         <button class="ghost" id="preview">Show me, from my own journal</button>
-        <button class="ghost" id="folder">Change journal folder</button>
+        <button class="ghost" id="rescan">Search again</button>
+        <button class="ghost" id="folder">Set it myself</button>
       </div>
       <pre id="previewOut" hidden></pre>
     </div>
@@ -127,15 +138,21 @@
         const failing = s.last?.error != null || s.last?.unauthorised === true;
 
         $('dot').className = 'dot ' + (failing ? 'bad' : running ? 'ok' : 'off');
-        $('status').textContent = !s.paired
-          ? 'Not paired yet'
-          : !s.enabled
-            ? 'Paused'
-            : s.last?.unauthorised
-              ? 'This device is no longer paired'
-              : failing
-                ? 'Cannot reach the hub'
-                : 'Watching your journals';
+        $('status').textContent = s.searching
+          ? 'Looking for your journals…'
+          : !s.paired
+            ? 'Not paired yet'
+            : !s.enabled
+              ? 'Paused'
+              : s.last?.unauthorised
+                ? 'This device is no longer paired'
+                : failing
+                  ? 'Cannot reach the hub'
+                  : 'Watching your journals';
+
+        $('journalPath').hidden = s.journalPath == null;
+        $('journalPath').textContent = s.journalPath ? `Reading from ${s.journalPath}` : '';
+        $('rescan').disabled = s.searching;
 
         $('toggle').hidden = !s.paired;
         $('toggle').textContent = s.enabled ? 'Pause' : 'Resume';
@@ -178,6 +195,25 @@
       $('openHub').onclick = () => api.openHub();
       $('openHub2').onclick = () => api.openHub();
       $('folder').onclick = async () => { await api.chooseJournalFolder(); render(await api.getState()); };
+
+      /*
+       * The manual folder picker is the LAST resort, not the first.
+       *
+       * Asking somebody to locate a folder they have never heard of, inside a
+       * Wine prefix that only exists because the game does not run natively on
+       * their machine, is where most people give up. The app searches for it
+       * instead; this button just runs that again for somebody who has since
+       * installed the game or plugged a drive back in.
+       */
+      $('rescan').onclick = async () => {
+        $('rescan').disabled = true;
+        const r = await api.rescan();
+        if (!r.ok) {
+          $('previewOut').hidden = false;
+          $('previewOut').textContent = r.advice;
+        }
+        render(await api.getState());
+      };
 
       $('preview').onclick = async () => {
         const r = await api.preview();

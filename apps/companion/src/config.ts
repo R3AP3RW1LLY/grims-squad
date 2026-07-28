@@ -42,6 +42,15 @@ export interface CompanionConfig {
   sessionLive: Record<string, boolean>;
   /** Whether the member has agreed to send anything at all. */
   enabled: boolean;
+  /**
+   * Where the deep search found the journals, once it has run.
+   *
+   * Cached because the search costs seconds and the answer does not move. `null`
+   * means it has not run; a path means it has and this is what it found.
+   */
+  discoveredJournalPath: string | null;
+  /** True once the search has run and found nothing, so it is not repeated every launch. */
+  searchedAndFoundNothing: boolean;
 }
 
 export const DEFAULT_CONFIG: CompanionConfig = {
@@ -53,6 +62,8 @@ export const DEFAULT_CONFIG: CompanionConfig = {
   // OFF until the member turns it on. An app that starts transmitting the
   // moment it is installed has not asked, and being installed is not consent.
   enabled: false,
+  discoveredJournalPath: null,
+  searchedAndFoundNothing: false,
 };
 
 export function configPath(userDataDir: string): string {
@@ -85,6 +96,9 @@ export function loadConfig(userDataDir: string): CompanionConfig {
       // Explicitly `=== true`. A truthy string from a hand-edited file must not
       // switch transmission on.
       enabled: parsed.enabled === true,
+      discoveredJournalPath:
+        typeof parsed.discoveredJournalPath === 'string' ? parsed.discoveredJournalPath : null,
+      searchedAndFoundNothing: parsed.searchedAndFoundNothing === true,
     };
   } catch {
     return { ...DEFAULT_CONFIG };
