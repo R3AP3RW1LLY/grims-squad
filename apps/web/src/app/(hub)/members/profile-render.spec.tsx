@@ -54,8 +54,29 @@ describe('@INV-027 profile rendering distinguishes absent from empty', () => {
     }
   });
 
-  it('the roster checks key presence before rendering a location', () => {
-    expect(rosterPage).toContain(`'location' in m`);
+  it('MANDATORY: the roster card checks key presence before rendering a location', () => {
+    /*
+     * The card moved out of the page into its own component when the roster
+     * gained avatars and journal data. The RULE did not move: a location is
+     * rendered only when the KEY is present, because the API omits a field the
+     * member did not opt into — and `member.location != null` alone would read
+     * the same for "opted out" and "opted in with nothing recorded".
+     */
+    const card = readFileSync(resolve(HERE, '../../../components/roster-card.tsx'), 'utf8');
+    expect(card).toContain(`'location' in member`);
+  });
+
+  it('MANDATORY: the roster card shows no field that needs consent it cannot see', () => {
+    /*
+     * Ranks, ship and last-played come from the BASELINE journal categories and
+     * are shown to members. Credits and fleet are NOT — they have their own
+     * toggles, and a card is exactly where somebody would add them "just to
+     * make it look fuller".
+     */
+    const card = code(readFileSync(resolve(HERE, '../../../components/roster-card.tsx'), 'utf8'));
+
+    expect(card).not.toContain('member.credits');
+    expect(card).not.toContain('member.fleet');
   });
 
   it('MANDATORY: the client type declares gated fields OPTIONAL, not just nullable', () => {

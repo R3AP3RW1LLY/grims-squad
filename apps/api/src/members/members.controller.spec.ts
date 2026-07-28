@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { MembersController } from './members.controller.js';
 import type { MembersStore, MemberRow } from './members.store.js';
+import type { SnapshotEvent } from './commander-snapshot.js';
 import type { PrivacySettings, ProfileSource } from './profile.serializer.js';
 import { issueCsrfToken, csrfCookieName } from '../common/csrf.js';
 
@@ -60,6 +61,13 @@ class FakeStore implements MembersStore {
   }
   async handleOf(): Promise<string | null> {
     return 'grim';
+  }
+
+  /** Journal events the roster reads. Empty unless a test sets them. */
+  snapshots: SnapshotEvent[] = [];
+
+  async snapshotEvents(userIds: readonly string[]): Promise<SnapshotEvent[]> {
+    return this.snapshots.filter((e) => userIds.includes(e.userId));
   }
 }
 

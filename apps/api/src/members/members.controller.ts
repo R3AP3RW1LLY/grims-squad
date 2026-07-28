@@ -5,6 +5,11 @@ import { User, type CurrentUser } from '../auth/current-user.js';
 import { verifyCsrf, readCsrfCookie } from '../common/csrf.js';
 import { MEMBERS_STORE, type MembersStore } from './members.tokens.js';
 import {
+  buildSnapshots,
+  EMPTY_SNAPSHOT,
+  type CommanderSnapshot,
+} from './commander-snapshot.js';
+import {
   serializeProfile,
   resolvePrivacy,
   visibleOnRoster,
@@ -70,11 +75,36 @@ export class MembersController {
    * rank, which is what being on a team roster means.
    */
   @Get('members')
-  async roster(): Promise<{ members: PublicProfile[]; total: number }> {
+  async roster(): Promise<{
+    members: Array<PublicProfile & { commander: CommanderSnapshot }>;
+    total: number;
+  }> {
     const rows = await this.store.roster();
     const visible = visibleOnRoster(rows);
+
+    /*
+     * ONE query for everybody's journal state, not one per member. At a hundred
+     * members the per-member version is a hundred round trips to render a page
+     * — the classic N+1, and the classic place to introduce it.
+     */
+    const snapshots = buildSnapshots(
+      await this.store.snapshotEvents(visible.map((r) => r.source.id)),
+    );
+
     return {
-      members: visible.map((r) => serializeProfile(r.source, r.privacy, { audience: 'public' })),
+      members: visible.map((r) => ({
+        ...serializeProfile(r.source, r.privacy, { audience: 'public' }),
+        /*
+         * Ranks, squadron rank and last-played come from the BASELINE
+         * categories every member running the app supplies, and the audience
+         * here is other members — which is what "who do I fly with" means.
+         *
+         * Ships are deliberately NOT in this object. They are governed by
+         * `showFleet` and stay governed by it; this must never become a way
+         * around a toggle somebody set.
+         */
+        commander: snapshots.get(r.source.id) ?? EMPTY_SNAPSHOT,
+      })),
       // The COUNT of active members is not private — it is the squadron's size,
       // which is public on Inara anyway. Who they are is the private part.
       total: rows.length,

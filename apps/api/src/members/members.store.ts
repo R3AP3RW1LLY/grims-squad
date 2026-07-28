@@ -1,5 +1,6 @@
 import type { PrismaClient } from '@grims/db';
 import type { PrivacySettings, ProfileSource } from './profile.serializer.js';
+import { SNAPSHOT_EVENT_TYPES, type SnapshotEvent } from './commander-snapshot.js';
 
 export interface MemberRow {
   readonly source: ProfileSource;
@@ -12,6 +13,8 @@ export interface MembersStore {
   privacyOf(userId: string): Promise<Partial<PrivacySettings> | null>;
   savePrivacy(userId: string, patch: Partial<PrivacySettings>): Promise<PrivacySettings>;
   handleOf(userId: string): Promise<string | null>;
+  /** Latest journal event of each interesting type, for the roster cards. */
+  snapshotEvents(userIds: readonly string[]): Promise<SnapshotEvent[]>;
 }
 
 /**
@@ -34,6 +37,7 @@ export class PrismaMembersStore implements MembersStore {
     handle: true,
     displayName: true,
     avatarUrl: true,
+    avatarStoredHash: true,
     bio: true,
     timezone: true,
     joinedAt: true,
@@ -62,6 +66,7 @@ export class PrismaMembersStore implements MembersStore {
     handle: string;
     displayName: string;
     avatarUrl: string | null;
+    avatarStoredHash: string | null;
     bio: string | null;
     timezone: string;
     joinedAt: Date;
@@ -76,6 +81,7 @@ export class PrismaMembersStore implements MembersStore {
         handle: u.handle,
         displayName: u.displayName,
         avatarUrl: u.avatarUrl,
+        avatarStoredHash: u.avatarStoredHash,
         bio: u.bio,
         timezone: u.timezone,
         joinedAt: u.joinedAt,
@@ -105,6 +111,27 @@ export class PrismaMembersStore implements MembersStore {
       orderBy: { joinedAt: 'asc' },
     });
     return rows.map((u) => this.#toRow(u as never));
+  }
+
+  /**
+   * The latest journal event of each interesting type, per member.
+   *
+   * ★ NARROWED IN SQL, NOT IN MEMORY ★
+   *
+   * `distinct` on (userId, eventType) with a descending sort becomes DISTINCT ON
+   * in Postgres, so the database returns one row per pair rather than every
+   * event ever ingested. At a hundred members with months of history that is the
+   * difference between six rows and tens of thousands.
+   */
+  async snapshotEvents(userIds: readonly string[]): Promise<SnapshotEvent[]> {
+    if (userIds.length === 0) return [];
+
+    return this.#db.telemetryEvent.findMany({
+      where: { userId: { in: [...userIds] }, eventType: { in: [...SNAPSHOT_EVENT_TYPES] } },
+      select: { userId: true, eventType: true, occurredAt: true, payload: true },
+      orderBy: [{ userId: 'asc' }, { eventType: 'asc' }, { occurredAt: 'desc' }],
+      distinct: ['userId', 'eventType'],
+    });
   }
 
   async privacyOf(userId: string): Promise<Partial<PrivacySettings> | null> {

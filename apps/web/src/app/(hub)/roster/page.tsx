@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { getRoster, getMe } from '../../../lib/api';
 import { PageHeader, PageBody, Panel, RailStat } from '../../../components/hub-page';
+import { RosterCard } from '../../../components/roster-card';
 
 /**
  * The squadron roster.
@@ -46,6 +47,16 @@ export default async function RosterPage() {
               <RailStat label="Squadron" value={String(total)} />
               <RailStat label="Listed" value={String(listed)} tone={listed === 0 ? 'warn' : 'default'} />
               <RailStat label="Verified CMDRs" value={String(withCmdr)} />
+              <RailStat
+                label="Flew this week"
+                value={String(
+                  members.filter(
+                    (m) =>
+                      m.commander.lastPlayedAt !== null &&
+                      Date.now() - new Date(m.commander.lastPlayedAt).getTime() < 7 * 86400_000,
+                  ).length,
+                )}
+              />
             </Panel>
 
             <Panel title="What is shown">
@@ -89,39 +100,11 @@ export default async function RosterPage() {
         ) : (
           <ul className="grid list-none grid-cols-1 gap-4 p-0 sm:grid-cols-2 2xl:grid-cols-3">
             {members.map((m) => (
-              <li
+              <RosterCard
                 key={m.handle}
-                className="rounded-lg border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel)] transition-colors hover:border-[var(--color-border-active)]"
-              >
-                <a href={`/members/${encodeURIComponent(m.handle)}`} className="block p-5">
-                  <p
-                    className="text-lg text-[var(--color-brand-orange)]"
-                    style={{ fontFamily: 'var(--font-display)' }}
-                  >
-                    {m.displayName}
-                  </p>
-                  {m.cmdrName !== null && (
-                    <p className="mt-1 font-mono text-[11px] uppercase tracking-[0.24em] text-[var(--color-brand-cyan-bright)]">
-                      CMDR {m.cmdrName}
-                    </p>
-                  )}
-                  {m.ranks.length > 0 && (
-                    <p className="mt-3 text-sm text-[var(--color-text-secondary)]">
-                      {m.ranks.join(' · ')}
-                    </p>
-                  )}
-                  {/*
-                    Rendered ONLY when the key is present. `m.location != null`
-                    would read the same for "opted out" and "opted in with no
-                    data", and the second of those deserves a different answer.
-                  */}
-                  {'location' in m && m.location != null && (
-                    <p className="mt-3 font-mono text-xs text-[var(--color-text-secondary)]">
-                      {m.location.system}
-                    </p>
-                  )}
-                </a>
-              </li>
+                member={m}
+                viewerTimezone={me.user?.timezone ?? 'UTC'}
+              />
             ))}
           </ul>
         )}

@@ -27,6 +27,14 @@ export {
   OPTIONAL_CATEGORIES,
   canonicalJson,
 } from './journal/journal-events.js';
+export {
+  ELITE_RANK_LADDERS,
+  ELITE_RANK_LABELS,
+  eliteRankName,
+  describeEliteRanks,
+} from './journal/elite-ranks.js';
+export type { EliteRankKey } from './journal/elite-ranks.js';
+
 export type {
   JournalEventName,
   JournalCategory,

@@ -131,7 +131,17 @@ async function get<T>(path: string, opts: { authed?: boolean } = {}): Promise<T 
  * debug from, because it described a privacy setting rather than a failed
  * request.
  */
-export const getRoster = (): Promise<{ members: PublicProfile[]; total: number } | null> =>
+/** What the journal knows about a commander, for the roster cards. */
+export interface CommanderSnapshot {
+  ranks: Array<{ key: string; label: string; name: string; index: number }>;
+  squadronRank: number | null;
+  currentShip: string | null;
+  lastPlayedAt: string | null;
+}
+
+export type RosterMember = PublicProfile & { commander: CommanderSnapshot };
+
+export const getRoster = (): Promise<{ members: RosterMember[]; total: number } | null> =>
   get('/v1/members', { authed: true });
 
 export const getProfile = (handle: string): Promise<PublicProfile | null> =>

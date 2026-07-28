@@ -73,7 +73,10 @@ export interface ProfileSource {
   readonly id: string;
   readonly handle: string;
   readonly displayName: string;
+  /** Discord's avatar HASH as last seen, despite the name. See the column comment. */
   readonly avatarUrl: string | null;
+  /** The hash we have actually COPIED into object storage. Null means no picture to serve. */
+  readonly avatarStoredHash: string | null;
   readonly bio: string | null;
   readonly timezone: string;
   readonly joinedAt: Date;
@@ -163,7 +166,19 @@ export function serializeProfile(
   const out: Record<string, unknown> = {
     handle: source.handle,
     displayName: source.displayName,
-    avatarUrl: source.avatarUrl,
+    /*
+       * ★ OUR OWN URL, NOT DISCORD'S HASH ★
+       *
+       * `source.avatarUrl` holds the avatar HASH despite its name, so emitting
+       * it directly produced `<img src="a1b2c3...">` — a broken image on every
+       * card, and one that would have looked like a CSS problem.
+       *
+       * The URL carries no hash, so a member changing their picture does not
+       * change the URL; the media route serves whatever we currently hold.
+       * Null when there is nothing stored, so the UI draws initials instead of
+       * a broken frame.
+       */
+      avatarUrl: source.avatarStoredHash === null ? null : `/v1/media/avatars/${source.id}`,
     bio: source.bio,
     timezone: source.timezone,
     joinedAt: source.joinedAt.toISOString(),
