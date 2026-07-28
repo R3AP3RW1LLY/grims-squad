@@ -24,7 +24,32 @@ import { csrfCookieName } from '../common/csrf.js';
  */
 
 export const ACCESS_TTL_SEC = 15 * 60;
-export const REFRESH_TTL_SEC = 30 * 24 * 60 * 60;
+
+/**
+ * How long one sign-in lasts, ABSOLUTELY.
+ *
+ * ★ FIXED AT LOGIN, NEVER EXTENDED ★
+ *
+ * Rotation mints a fresh refresh token every fifteen minutes, and each carries
+ * its own expiry. Left to that alone, an active member's session slides forward
+ * forever and "signed in for 14 days" would really mean "signed in until you
+ * stop using it" — a session that never ends for exactly the accounts that use
+ * the site most, which is the opposite of what a session limit is for.
+ *
+ * So the FAMILY carries the real deadline and rotation cannot move it. That is
+ * also what makes the countdown on the dashboard mean something: it counts down
+ * to a moment that exists, rather than resetting every quarter of an hour.
+ */
+export const SESSION_MAX_SEC = 14 * 24 * 60 * 60;
+
+/**
+ * How long an individual refresh token lives.
+ *
+ * Shorter than the session, and always clamped to the session's own deadline —
+ * a token that outlived its family would be a credential the deadline does not
+ * apply to.
+ */
+export const REFRESH_TTL_SEC = SESSION_MAX_SEC;
 
 /** 256 bits of entropy. Guessing is not a viable attack on this. */
 const REFRESH_BYTES = 32;
@@ -41,6 +66,8 @@ export interface IssuedSession {
   readonly familyId: string;
   /** Whose session this is. The caller needs it to check the Discord grant. */
   readonly userId: string;
+  /** When this SIGN-IN ends, regardless of rotation. Drives the dashboard countdown. */
+  readonly expiresAt: Date;
 }
 
 export interface AccessClaims {
@@ -67,9 +94,17 @@ export class SessionService {
 
   // ------------------------------------------------------------------- issue
   async issue(userId: string, ctx: SessionContext): Promise<IssuedSession> {
-    const familyId = await this.store.createFamily(userId, ctx);
-    const refreshToken = await this.#mintRefresh(familyId);
-    return { accessToken: await this.#mintAccess(userId), refreshToken, familyId, userId };
+    // The deadline is set HERE, once, and nothing afterwards moves it.
+    const expiresAt = new Date(Date.now() + SESSION_MAX_SEC * 1000);
+    const familyId = await this.store.createFamily(userId, ctx, expiresAt);
+    const refreshToken = await this.#mintRefresh(familyId, expiresAt);
+    return {
+      accessToken: await this.#mintAccess(userId),
+      refreshToken,
+      familyId,
+      userId,
+      expiresAt,
+    };
   }
 
   // ------------------------------------------------------------------ rotate
@@ -109,13 +144,29 @@ export class SessionService {
       throw new AppError(ErrorCode.SESSION_EXPIRED, 'Your session expired. Please sign in again.');
     }
 
+    /*
+     * ★ THE ABSOLUTE DEADLINE, CHECKED SEPARATELY ★
+     *
+     * The token above may be perfectly valid while the SIGN-IN it belongs to has
+     * run out. Checking only the token would let a member rotate past their own
+     * fourteen days indefinitely, one quarter-hour at a time, and the limit
+     * would exist only on the dashboard.
+     */
+    if (family.expiresAt.getTime() <= Date.now()) {
+      throw new AppError(
+        ErrorCode.SESSION_EXPIRED,
+        'You have been signed in for 14 days. Please sign in again.',
+      );
+    }
+
     await this.store.markUsed(token.id, new Date());
-    const next = await this.#mintRefresh(family.id);
+    const next = await this.#mintRefresh(family.id, family.expiresAt);
     return {
       accessToken: await this.#mintAccess(family.userId),
       refreshToken: next,
       familyId: family.id,
       userId: family.userId,
+      expiresAt: family.expiresAt,
     };
   }
 
@@ -200,12 +251,21 @@ export class SessionService {
       .sign(this.#key);
   }
 
-  async #mintRefresh(familyId: string): Promise<string> {
+  /**
+   * A fresh refresh token, never outliving the sign-in it belongs to.
+   *
+   * Clamped to the family's deadline. A token that expired AFTER its family
+   * would be a credential the fourteen-day limit did not apply to — valid on
+   * its face, and the one thing the limit exists to prevent.
+   */
+  async #mintRefresh(familyId: string, familyExpiresAt: Date): Promise<string> {
     const token = randomBytes(REFRESH_BYTES).toString('base64url');
+    const tokenExpiry = new Date(Date.now() + REFRESH_TTL_SEC * 1000);
+
     await this.store.insertToken(
       familyId,
       sha256(token),
-      new Date(Date.now() + REFRESH_TTL_SEC * 1000),
+      tokenExpiry < familyExpiresAt ? tokenExpiry : familyExpiresAt,
     );
     return token;
   }

@@ -13,7 +13,7 @@ export class InMemorySessionStore implements ISessionStore {
   readonly tokens: TokenRow[] = [];
   readonly securityEvents: Array<{ kind: string; userId: string; detail: unknown }> = [];
 
-  async createFamily(userId: string, ctx: SessionContext): Promise<string> {
+  async createFamily(userId: string, ctx: SessionContext, expiresAt: Date): Promise<string> {
     const id = randomUUID();
     this.families.push({
       id,
@@ -22,6 +22,7 @@ export class InMemorySessionStore implements ISessionStore {
       revokeReason: null,
       userAgent: ctx.userAgent,
       ipHash: ctx.ipHash,
+      expiresAt,
     });
     return id;
   }

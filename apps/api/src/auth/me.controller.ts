@@ -10,7 +10,9 @@ import {
   ONBOARDING_PATHS,
   type OnboardingStep,
 } from './onboarding-gate.js';
+import { createHash } from 'node:crypto';
 import { PermissionService } from '../authz/permission.service.js';
+import { STEP_UP_TTL_MS } from './admin-gate.guard.js';
 import { verifyCsrf, readCsrfCookie } from '../common/csrf.js';
 import { isValidTimezone, knownTimezones, DEFAULT_TIMEZONE } from '../common/timezone.js';
 import { AppError, ErrorCode } from '@grims/shared';
@@ -56,6 +58,18 @@ export interface MeResponse {
    * copies of an ordering this fiddly drift, and the symptom is a member
    * bounced between two pages that each think the other should have run.
    */
+  /**
+   * When this SIGN-IN ends, and when the step-up does.
+   *
+   * Both are absolute instants rather than durations, so the browser can count
+   * down without our clock and its clock having to agree on how long is left —
+   * only on what time it is, which they already do.
+   */
+  session: {
+    expiresAt: string | null;
+    /** Null when they hold no step-up, or do not need one. */
+    twoFactorExpiresAt: string | null;
+  };
   onboarding: {
     step: OnboardingStep;
     path: string | null;
@@ -88,6 +102,7 @@ export class MeController {
         nav: [],
         isAdmin: false,
         mustSecureAccount: false,
+        session: { expiresAt: null, twoFactorExpiresAt: null },
         onboarding: { step: null, path: null, promptForVerification: false, verified: false },
       };
     }
@@ -114,6 +129,7 @@ export class MeController {
         nav: [],
         isAdmin: false,
         mustSecureAccount: false,
+        session: { expiresAt: null, twoFactorExpiresAt: null },
         onboarding: { step: null, path: null, promptForVerification: false, verified: false },
       };
     }
@@ -162,6 +178,13 @@ export class MeController {
       // explain why they are being asked; it just must not link them anywhere.
       isAdmin: hasAdminArea(mask),
       mustSecureAccount: mustSecure,
+      session: {
+        expiresAt: (await this.#sessionEndsAt(req))?.toISOString() ?? null,
+        twoFactorExpiresAt:
+          req.twoFactorAt === undefined
+            ? null
+            : new Date(req.twoFactorAt.getTime() + STEP_UP_TTL_MS).toISOString(),
+      },
       onboarding: {
         step,
         path: step === null ? null : ONBOARDING_PATHS[step],
@@ -271,6 +294,27 @@ export class MeController {
       .sort((a, b) => b.rankOrder - a.rankOrder);
 
     return ranks[0]?.name ?? ranks[0]?.key ?? null;
+  }
+
+  /**
+   * When the current sign-in runs out.
+   *
+   * Read from the FAMILY, which carries the absolute deadline — not from the
+   * refresh token, whose expiry moves on every rotation and would count down to
+   * fifteen minutes over and over.
+   */
+  async #sessionEndsAt(req: FastifyRequest): Promise<Date | null> {
+    const raw = (req as unknown as { cookies?: Record<string, string | undefined> }).cookies ?? {};
+    const refresh = raw['__Host-gs_rt'] ?? raw['gs_rt'];
+    if (typeof refresh !== 'string' || refresh === '') return null;
+
+    const row = await this.db.refreshToken.findUnique({
+      where: { tokenHash: createHash('sha256').update(refresh).digest('hex') },
+      select: { family: { select: { expiresAt: true, revokedAt: true } } },
+    });
+
+    if (row === null || row.family.revokedAt !== null) return null;
+    return row.family.expiresAt;
   }
 
   /**

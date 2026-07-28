@@ -292,6 +292,11 @@ export interface MeResponse {
    * ordering lives in one place — two copies of a rule this fiddly drift, and
    * the symptom is a member bounced between two pages.
    */
+  /** Absolute instants, so the browser can count down without clock agreement. */
+  session: {
+    expiresAt: string | null;
+    twoFactorExpiresAt: string | null;
+  };
   onboarding: {
     step: 'security' | 'commander' | 'verification' | null;
     path: string | null;
@@ -317,6 +322,7 @@ export const getMe = async (): Promise<MeResponse> =>
     nav: [],
     isAdmin: false,
     mustSecureAccount: false,
+    session: { expiresAt: null, twoFactorExpiresAt: null },
     onboarding: { step: null, path: null, promptForVerification: false, verified: false },
   };
 

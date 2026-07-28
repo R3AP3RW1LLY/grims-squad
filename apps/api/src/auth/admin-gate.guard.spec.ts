@@ -1,6 +1,11 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { Reflector } from '@nestjs/core';
-import { AdminGateGuard, twoFactorFreshInSession, STEP_UP_TTL_MS } from './admin-gate.guard.js';
+import {
+  AdminGateGuard,
+  twoFactorFreshInSession,
+  STEP_UP_TTL_MS,
+  FRESH_STEP_UP_TTL_MS,
+} from './admin-gate.guard.js';
 
 /**
  * The gate on the admin console.
@@ -116,9 +121,29 @@ describe('step-up freshness', () => {
     expect(twoFactorFreshInSession({ twoFactorAt: future } as never, NOW)).toBe(false);
   });
 
-  it('the window is fifteen minutes', () => {
-    // Long enough to work through the console without being nagged, short
-    // enough that a session stolen an hour ago does not open it.
-    expect(STEP_UP_TTL_MS).toBe(15 * 60_000);
+  it('MANDATORY: the window is two hours, and no longer', () => {
+    /*
+     * Raised from fifteen minutes on the squadron owner's instruction. Pinned
+     * as a CEILING: the cost of a longer window is that a stepped-up session
+     * left open on an unattended machine stays privileged for longer, and that
+     * cost was accepted deliberately rather than drifting upward later.
+     */
+    expect(STEP_UP_TTL_MS).toBe(2 * 60 * 60_000);
+  });
+
+  it('MANDATORY: the TIER-3 window was NOT raised with it', () => {
+    /*
+     * ★ WHAT MAKES TWO HOURS SURVIVABLE ★
+     *
+     * Granting roles, changing site config and resetting somebody's second
+     * factor still require a challenge from the last two minutes. So the longer
+     * window buys convenience for reading and routine work, and buys nothing
+     * for the operations that can do lasting damage.
+     *
+     * If these two ever converge, the reasoning above stops holding — which is
+     * why they are asserted together.
+     */
+    expect(FRESH_STEP_UP_TTL_MS).toBe(2 * 60_000);
+    expect(FRESH_STEP_UP_TTL_MS).toBeLessThan(STEP_UP_TTL_MS);
   });
 });

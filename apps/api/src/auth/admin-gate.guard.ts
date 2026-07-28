@@ -119,15 +119,35 @@ export class AdminGateGuard implements CanActivate {
   }
 }
 
-/** How long a step-up lasts before the console asks again. */
-export const STEP_UP_TTL_MS = 15 * 60_000;
+/**
+ * How long a step-up lasts before the console asks again.
+ *
+ * ★ TWO HOURS IS A CEILING, NOT A TARGET ★
+ *
+ * Raised from fifteen minutes on the squadron owner's instruction. Worth being
+ * clear about the trade rather than burying it: a longer window means a
+ * stepped-up session left open on an unattended machine stays privileged for
+ * longer, and that is the cost being accepted.
+ *
+ * What makes it defensible is the tier below. The actions that can do lasting
+ * damage — granting roles, changing site config, resetting somebody's second
+ * factor — do NOT run on this window; they require a challenge from the last
+ * two minutes. So two hours buys convenience for reading and routine work, and
+ * buys nothing at all for the operations that matter most.
+ */
+export const STEP_UP_TTL_MS = 2 * 60 * 60_000;
 
 /**
  * The window for a TIER-3 action: granting roles, site config, AI kill switches.
  *
- * Two minutes. Long enough to preview a permission change and then save it,
- * short enough that a stepped-up session left unattended is not a standing
- * authorisation to grant anybody anything.
+ * Two minutes, and deliberately NOT raised alongside the general window above.
+ * Long enough to preview a permission change and then save it, short enough
+ * that a stepped-up session left unattended is not a standing authorisation to
+ * grant anybody anything.
+ *
+ * This is what makes a two-hour general window survivable: the longer window
+ * covers reading and routine work, and the actions that can do lasting damage
+ * still ask again.
  */
 export const FRESH_STEP_UP_TTL_MS = 2 * 60_000;
 

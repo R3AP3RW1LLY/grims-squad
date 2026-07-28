@@ -527,6 +527,13 @@ model RefreshTokenFamily {
   ipHash       String?   @map("ip_hash")
   createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   lastUsedAt   DateTime  @default(now()) @map("last_used_at") @db.Timestamptz(6)
+  /// ABSOLUTE end of this sign-in, fixed when it began and never extended.
+  ///
+  /// Rotation issues a fresh refresh token every fifteen minutes, and each one carries its own
+  /// shorter expiry — so without a cap here an active member's session slides forever and
+  /// "signed in for 14 days" would mean "signed in until you stop using it". It would also make
+  /// the countdown on the dashboard meaningless, since it would reset on every rotation.
+  expiresAt    DateTime  @map("expires_at") @db.Timestamptz(6)
 
   user   User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   tokens RefreshToken[]

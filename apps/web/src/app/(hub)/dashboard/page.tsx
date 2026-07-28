@@ -8,6 +8,7 @@ import {
 } from '../../../lib/api';
 import { Avatar } from '../../../components/account-menu';
 import { PageHeader, StatGrid, StatTile } from '../../../components/hub-page';
+import { SessionCountdown } from '../../../components/session-countdown';
 
 export const metadata: Metadata = {
   title: "Your dashboard — Grim's Squad",
@@ -168,28 +169,61 @@ export default async function DashboardPage() {
         />
       </StatGrid>
 
-      {/* ------------------------------------------------------------- todo */}
-      {todo.length > 0 && (
-        <div className="mb-8">
-          <Panel title="Worth doing">
-            <ul className="list-none space-y-4 p-0">
-              {todo.map((item) => (
-                <li key={item.href} className="flex flex-col gap-1">
-                  <a
-                    href={item.href}
-                    className="text-sm text-[var(--color-brand-cyan-bright)] hover:underline"
-                  >
-                    {item.label}
-                  </a>
-                  <span className="text-sm leading-relaxed text-[var(--color-text-secondary)]">
-                    {item.why}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </Panel>
+      {/*
+        ★ ONE ROW: WHAT YOU OWE, AND HOW LONG YOU HAVE ★
+
+        The countdown deliberately does NOT go in the stat band above. That band
+        answers questions about the SQUADRON — how many of us, how many active —
+        and this answers one about the browser you happen to be sitting at.
+        Mixing the two makes both harder to scan.
+
+        "Worth doing" takes the wide column because its items are sentences.
+        When there is nothing outstanding it becomes a short acknowledgement
+        rather than vanishing, so the row keeps its shape and the countdown does
+        not jump across the page the day somebody finishes their setup.
+      */}
+      <div className="mb-8 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+        <div className="order-2 lg:order-1">
+          {todo.length > 0 ? (
+            <Panel title="Worth doing">
+              <ul className="list-none space-y-4 p-0">
+                {todo.map((item) => (
+                  <li key={item.href} className="flex flex-col gap-1">
+                    <a
+                      href={item.href}
+                      className="text-sm text-[var(--color-brand-cyan-bright)] hover:underline"
+                    >
+                      {item.label}
+                    </a>
+                    <span className="text-sm leading-relaxed text-[var(--color-text-secondary)]">
+                      {item.why}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </Panel>
+          ) : (
+            <Panel title="All set">
+              <p className="text-sm leading-relaxed text-[var(--color-text-secondary)]">
+                Nothing outstanding on your account — your commander is confirmed, your months
+                count, and the companion app is reporting.
+              </p>
+            </Panel>
+          )}
         </div>
-      )}
+
+        {/*
+          First on a phone. On a narrow screen the countdown is the one thing
+          here that is time-sensitive, and burying it under a list of chores
+          means it is the thing nobody scrolls to.
+        */}
+        <div className="order-1 lg:order-2">
+          <SessionCountdown
+            expiresAt={me.session.expiresAt}
+            twoFactorExpiresAt={me.session.twoFactorExpiresAt}
+          />
+        </div>
+      </div>
 
       {/* ----------------------------------------------------------- panels */}
       {/*
