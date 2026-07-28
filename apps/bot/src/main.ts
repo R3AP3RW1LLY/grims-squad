@@ -98,6 +98,18 @@ for (const [name, value] of [
  * older in every other channel.
  */
 const checkpointKey = (channelId: string) => `activity:${channelId}`;
+
+/**
+ * A SEPARATE watermark for the daily rebuild.
+ *
+ * The daily table arrived after a month of messages had already been counted
+ * into the monthly totals. Re-reading that history under the normal watermark
+ * would have added every message to the monthly counts a second time — silently
+ * doubling the numbers that decide promotions. Its own key, and a write path
+ * that touches only the daily table, makes that impossible rather than merely
+ * unlikely.
+ */
+const dailyCheckpointKey = (channelId: string) => `activity-daily:${channelId}`;
 /** Discord's epoch, for turning a timestamp into a snowflake. */
 const DISCORD_EPOCH = 1420070400000n;
 
@@ -258,6 +270,49 @@ async function backfillChannel(channel: BackfillableChannel): Promise<number> {
 }
 
 /**
+ * Rebuilds one channel's DAILY rows for the current month.
+ *
+ * Writes through `recordDayOnly`, so it cannot touch the monthly totals however
+ * many times it runs. That matters because this reads history the monthly
+ * counters have already consumed.
+ */
+async function backfillChannelDaily(channel: BackfillableChannel): Promise<number> {
+  const key = dailyCheckpointKey(channel.id);
+  let after = await checkpoints.get(key);
+
+  if (after === null) {
+    const start = monthKey(new Date());
+    after = String((BigInt(start.getTime()) - DISCORD_EPOCH) << 22n);
+  }
+
+  let counted = 0;
+  let highest = after;
+
+  for (;;) {
+    const batch = await channel.messages.fetch({ limit: 100, after: highest }).catch(() => null);
+    if (batch === null || batch.size === 0) break;
+
+    const ordered = [...batch.values()].sort((a, b) => Number(a.id) - Number(b.id));
+    for (const m of ordered) {
+      // Bots excluded here too. The recorder does it on the normal path, and
+      // this path bypasses the recorder entirely.
+      if (m.author?.bot !== true && typeof m.author?.id === 'string') {
+        await activity
+          .recordDayOnly(m.author.id, new Date(m.createdTimestamp), 'message')
+          .catch(() => undefined);
+        counted += 1;
+      }
+      if (BigInt(m.id) > BigInt(highest)) highest = m.id;
+    }
+
+    await checkpoints.set(key, highest).catch(() => undefined);
+    if (batch.size < 100) break;
+  }
+
+  return counted;
+}
+
+/**
  * Sweeps EVERY countable channel in the guild for the current month.
  *
  * ★ WHY THIS SWEEPS EVERYTHING AND NOT ONE CHANNEL ★
@@ -278,6 +333,7 @@ async function backfill(): Promise<void> {
   const channels = await guild.channels.fetch();
 
   let counted = 0;
+  let dailyCounted = 0;
   let swept = 0;
   let skipped = 0;
 
@@ -290,10 +346,13 @@ async function backfill(): Promise<void> {
     }
 
     swept += 1;
-    counted += await backfillChannel(channel as unknown as BackfillableChannel);
+    const readable = channel as unknown as BackfillableChannel;
+    counted += await backfillChannel(readable);
+    // Independent watermark, day-only writes. See dailyCheckpointKey.
+    dailyCounted += await backfillChannelDaily(readable);
   }
 
-  logger.info({ counted, channels: swept, skipped }, 'backfill complete');
+  logger.info({ counted, dailyCounted, channels: swept, skipped }, 'backfill complete');
 }
 
 /**

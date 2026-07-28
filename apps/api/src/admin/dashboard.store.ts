@@ -34,8 +34,10 @@ export interface DashboardData {
     readonly activeMembers: number;
     /** Members the bot has ever seen, this month or not. */
     readonly trackedMembers: number;
-    /** Message count per day of the month, index 0 = the 1st. */
+    /** Messages per day of the month, index 0 = the 1st. */
     readonly daily: readonly number[];
+    /** Distinct members active on each day, index 0 = the 1st. */
+    readonly dailyMembers: readonly number[];
     readonly top: ReadonlyArray<{
       name: string;
       messages: number;
@@ -175,21 +177,24 @@ export class PrismaDashboardStore implements DashboardStore {
       }),
 
       /*
-       * Messages per day.
+       * ★ REAL PER-DAY DATA, FROM ITS OWN TABLE ★
        *
-       * ★ THIS CANNOT COME FROM member_activity_months ★
+       * This used to read `last_activity_at` off the MONTHLY rows, which counts
+       * each member on the single day they were last seen — somebody active on
+       * the 5th and the 20th appeared only on the 20th. A busy month rendered
+       * as a scattering of single marks, which looked entirely plausible.
        *
-       * That table holds one row per member per MONTH — the day is not in it.
-       * The shape of a month has to be read from the audit of activity times,
-       * and the only per-event record we keep is the last-activity timestamp.
-       * So this is a histogram of when members were LAST active each day,
-       * which is a real signal (how many people showed up) and is labelled as
-       * such rather than being passed off as a message count.
+       * Both figures come back in one pass: total messages (the intensity of a
+       * day) and distinct members (how many people showed up). They answer
+       * different questions and one loud member should not look like a crowd.
        */
-      this.#db.$queryRaw<Array<{ day: number; n: bigint }>>`
-        SELECT EXTRACT(DAY FROM last_activity_at)::int AS day, COUNT(*)::bigint AS n
-        FROM member_activity_months
-        WHERE month = ${month}::date AND last_activity_at IS NOT NULL
+      this.#db.$queryRaw<Array<{ day: number; msgs: bigint; members: bigint }>>`
+        SELECT
+          EXTRACT(DAY FROM day)::int                                   AS day,
+          SUM(message_count + forum_post_count + voice_join_count)::bigint AS msgs,
+          COUNT(DISTINCT discord_id)::bigint                           AS members
+        FROM member_activity_days
+        WHERE day >= ${month}::date AND day < ${nextMonth}::date
         GROUP BY 1 ORDER BY 1
       `,
 
@@ -220,7 +225,7 @@ export class PrismaDashboardStore implements DashboardStore {
           ORDER BY user_id, occurred_at DESC
         ) latest
         WHERE ship IS NOT NULL
-        GROUP BY ship ORDER BY pilots DESC, ship ASC LIMIT 8
+        GROUP BY ship ORDER BY pilots DESC, ship ASC LIMIT 10
       `,
 
       this.#db.telemetryEvent.groupBy({
@@ -296,11 +301,14 @@ export class PrismaDashboardStore implements DashboardStore {
       Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0),
     ).getUTCDate();
     const dailyArray = Array.from({ length: daysInMonth }, () => 0);
+    const dailyMembers = Array.from({ length: daysInMonth }, () => 0);
     for (const row of daily) {
       // 1-indexed day to 0-indexed slot. Guarded because a clock-skewed row
       // would otherwise write past the end of the array.
       const slot = row.day - 1;
-      if (slot >= 0 && slot < dailyArray.length) dailyArray[slot] = Number(row.n);
+      if (slot < 0 || slot >= dailyArray.length) continue;
+      dailyArray[slot] = Number(row.msgs);
+      dailyMembers[slot] = Number(row.members);
     }
 
     const byDiscordId = new Map(guildMembers.map((m) => [m.discordId, m]));
@@ -319,7 +327,8 @@ export class PrismaDashboardStore implements DashboardStore {
         ).length,
         trackedMembers: trackedMembers.length,
         daily: dailyArray,
-        top: activity.slice(0, 8).map((r) => {
+        dailyMembers,
+        top: activity.slice(0, 10).map((r) => {
           const guild = byDiscordId.get(r.discordId);
           return {
             /*

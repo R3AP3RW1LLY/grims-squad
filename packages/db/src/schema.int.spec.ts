@@ -47,7 +47,12 @@ describe('P0.2 database schema', () => {
   // The count is hardcoded ON PURPOSE. Every schema addition has to come and
   // bump it, which is a two-second acknowledgement that a table was added —
   // versus a self-counting assertion that would let one appear unnoticed.
-  // 64 as of 2026-07-28: discord_guild_members, a CACHE of every member of the
+  // 65 as of 2026-07-28: member_activity_days. The monthly table carries one
+  // last_activity_at, so a daily chart built from it counts each member on the
+  // ONE day they were last seen — a member active on the 5th and the 20th
+  // appeared only on the 20th. Display only; promotion still reads the monthly
+  // table, and a disagreement between them must never change who is promoted.
+  // 64 was discord_guild_members, a CACHE of every member of the
   // guild — account or not. discord_identities is keyed on a website user id
   // and existed for 1 of 51 members, so the admin activity table could name
   // exactly one person and showed raw snowflakes for the rest.
@@ -64,7 +69,7 @@ describe('P0.2 database schema', () => {
          and table_name not like '\\_prisma%'`,
     );
     // 59 models in ssot/03-data/schema.prisma.
-    expect(Number(r[0]?.n)).toBe(64);
+    expect(Number(r[0]?.n)).toBe(65);
   });
 
   describe('hand-written DDL that Prisma cannot express', () => {

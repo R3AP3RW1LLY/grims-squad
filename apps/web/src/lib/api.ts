@@ -263,8 +263,10 @@ export interface AdminDashboard {
     voiceJoins: number;
     activeMembers: number;
     trackedMembers: number;
-    /** One entry per day of the month, index 0 = the 1st. */
+    /** Messages per day of the month, index 0 = the 1st. */
     daily: number[];
+    /** Distinct members active on each day, index 0 = the 1st. */
+    dailyMembers: number[];
     top: Array<{ name: string; messages: number; voice: number; cmdrName: string | null }>;
   };
   game: {

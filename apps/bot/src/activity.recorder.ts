@@ -55,6 +55,13 @@ export interface ActivityRow {
 
 export interface IActivityStore {
   /**
+   * Writes ONLY the per-day row, never the monthly totals.
+   *
+   * Used to rebuild history the monthly counters have already consumed, where
+   * going through the normal path would double every count.
+   */
+  recordDayOnly?(discordId: string, at: Date, kind: ActivityKind): Promise<void>;
+  /**
    * Adds one event of `kind` to the member's month, creating the row if needed.
    * Returns false if `eventId` was already counted.
    */

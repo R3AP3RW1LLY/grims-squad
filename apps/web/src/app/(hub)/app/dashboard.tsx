@@ -1,5 +1,13 @@
 import type { AdminDashboard } from '../../../lib/api';
 import { Section, StatGrid, StatTile } from '../../../components/hub-page';
+import {
+  ActivityHeatmap,
+  Donut,
+  RankedBars,
+  StackedStrip,
+  BRAND,
+  type HeatDay,
+} from './charts';
 
 /**
  * The admin dashboard.
@@ -8,86 +16,34 @@ import { Section, StatGrid, StatTile } from '../../../components/hub-page';
  *
  * Answering, in one screen, the three questions an officer actually opens this
  * page with: is the squadron alive, is anyone flying, and who is due a
- * promotion. Every panel below is one of those three and nothing else — a
- * dashboard that shows everything is a dashboard nobody reads.
+ * promotion. Every panel is one of those three and nothing else — a dashboard
+ * that shows everything is a dashboard nobody reads.
  *
- * ★ NO CHARTING LIBRARY ★
+ * ★ WHY EACH PANEL IS THE SHAPE IT IS ★
  *
- * The bars are divs. A charting library would be ~90 kB on a page four people
- * see, would need a client component and would ship a rendering engine to draw
- * thirty rectangles. CSS grid does it, renders on the server, and works with
- * JavaScript switched off.
+ *   heatmap    the SHAPE of a month. Thirty-one bars answer "how busy was the
+ *              17th"; a calendar answers "when does this squadron play", which
+ *              is the question somebody scheduling an operation actually has.
+ *   bars       rankings. Horizontal, because commander names and ship types do
+ *              not fit under a vertical bar without rotating the labels.
+ *   donut      composition out of a whole — what the squadron flies, and what
+ *              the companion app is sending.
+ *   strip      a small set that IS a whole. Nine officers across a few offices
+ *              is a composition, not a ranking.
+ *
+ * The page stays a server component; only the drawing is a client one. See
+ * charts.tsx.
  */
 
-function Bars({ values, label }: { values: readonly number[]; label: string }) {
-  // Scaled to the busiest day, not to a fixed ceiling. A fixed one either
-  // clips a good month or flattens a quiet one into a straight line.
-  const peak = Math.max(1, ...values);
-
-  return (
-    <figure className="m-0">
-      <figcaption className="sr-only">{label}</figcaption>
-      <div className="flex h-24 items-end gap-px" role="img" aria-label={label}>
-        {values.map((v, i) => (
-          <div
-            key={i}
-            className="flex-1 rounded-t-sm bg-[var(--color-brand-cyan-bright)] transition-all"
-            style={{
-              height: `${Math.max(2, (v / peak) * 100)}%`,
-              // Quiet days recede rather than vanishing. A zero-height bar and
-              // a missing day look identical, and they are not the same thing.
-              opacity: v === 0 ? 0.15 : 0.45 + (v / peak) * 0.55,
-            }}
-            title={`Day ${i + 1}: ${v}`}
-          />
-        ))}
-      </div>
-    </figure>
-  );
-}
-
-/** A labelled proportional bar, for rankings where the numbers matter as much as the order. */
-function Ranked({
-  rows,
-  unit,
-}: {
-  rows: ReadonlyArray<{ label: string; value: number; sub?: string | undefined }>;
-  unit: string;
-}) {
-  const peak = Math.max(1, ...rows.map((r) => r.value));
-
-  return (
-    <ol className="m-0 list-none space-y-2 p-0">
-      {rows.map((r) => (
-        <li key={r.label} className="relative overflow-hidden rounded px-3 py-2">
-          {/*
-            The bar sits BEHIND the text rather than beside it. A separate bar
-            column forces the labels into a narrow gutter, and commander names
-            and ship types are both long.
-          */}
-          <span
-            aria-hidden="true"
-            className="absolute inset-y-0 left-0 rounded bg-[var(--color-brand-cyan-bright)] opacity-[0.14]"
-            style={{ width: `${(r.value / peak) * 100}%` }}
-          />
-          <span className="relative flex items-baseline justify-between gap-3">
-            <span className="truncate text-sm text-[var(--color-text-primary)]">
-              {r.label}
-              {r.sub !== undefined && (
-                <span className="ml-2 font-mono text-[10px] text-[var(--color-text-secondary)]">
-                  {r.sub}
-                </span>
-              )}
-            </span>
-            <span className="shrink-0 font-mono text-sm text-[var(--color-brand-cyan-bright)]">
-              {r.value.toLocaleString('en-GB')}
-              <span className="ml-1 text-[10px] text-[var(--color-text-secondary)]">{unit}</span>
-            </span>
-          </span>
-        </li>
-      ))}
-    </ol>
-  );
+/** `2026-07` as `July 2026`. Nobody reads a month as a number. */
+function monthLabel(key: string): string {
+  const [y, m] = key.split('-').map(Number);
+  if (y === undefined || m === undefined || Number.isNaN(y) || Number.isNaN(m)) return key;
+  return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString('en-GB', {
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
 }
 
 function Empty({ children }: { children: React.ReactNode }) {
@@ -101,8 +57,24 @@ function Empty({ children }: { children: React.ReactNode }) {
 export function Dashboard({ data }: { data: AdminDashboard }) {
   const { discord, game, squadron } = data;
 
+  const label = monthLabel(data.month);
   const participation =
     squadron.members === 0 ? 0 : Math.round((discord.activeMembers / squadron.members) * 100);
+
+  /*
+   * The weekday of each day, computed HERE rather than sent by the API.
+   *
+   * It is derived from the month and the index — the same two facts on both
+   * sides — so sending it would be shipping something the client already knows,
+   * and giving two places the chance to disagree about what day the 3rd was.
+   */
+  const [year, month] = data.month.split('-').map(Number);
+  const heat: HeatDay[] = discord.daily.map((messages, i) => ({
+    day: i + 1,
+    messages,
+    members: discord.dailyMembers[i] ?? 0,
+    weekday: new Date(Date.UTC(year ?? 2026, (month ?? 1) - 1, i + 1)).getUTCDay(),
+  }));
 
   return (
     <>
@@ -127,17 +99,17 @@ export function Dashboard({ data }: { data: AdminDashboard }) {
         <StatTile
           label="Qualifying"
           value={String(squadron.qualifying)}
-          hint={`Discord activity AND an Elite session · ${squadron.withAccounts} signed up, ${squadron.verified} verified`}
+          hint={`${squadron.withAccounts} signed up, ${squadron.verified} verified`}
           tone={squadron.qualifying === 0 ? 'warn' : 'default'}
         />
       </StatGrid>
 
       <Section
-        title={`Who showed up — ${data.month}`}
-        description="Members active on each day of the month. Discord keeps no per-message history, so this counts people rather than messages: a tall bar is a busy day for the squadron, not for one person."
+        title={`Who showed up — ${label}`}
+        description="Every day of the month, shaded by how much happened. Counted from per-day records rather than from a monthly total, so a member active on the 5th and the 20th appears on both."
       >
         {discord.daily.some((d) => d > 0) ? (
-          <Bars values={discord.daily} label={`Active members per day, ${data.month}`} />
+          <ActivityHeatmap days={heat} monthLabel={label} />
         ) : (
           <Empty>Nothing recorded this month yet.</Empty>
         )}
@@ -146,27 +118,16 @@ export function Dashboard({ data }: { data: AdminDashboard }) {
       <div className="grid gap-6 lg:grid-cols-2">
         <Section
           title="Most active"
-          description="By message count this month, named by their Discord server nickname — which in this squadron is the commander name. The same figures the promotion system reads."
+          description="Top ten by messages this month, named by their Discord server nickname — which in this squadron is the commander name."
         >
           {discord.top.length > 0 ? (
-            <Ranked
-              unit="msg"
-              rows={discord.top.map((t) => ({
+            <RankedBars
+              unit="messages"
+              colour={BRAND.cyan}
+              data={discord.top.map((t) => ({
                 label: t.name,
                 value: t.messages,
-                /*
-                  The verified CMDR name when it differs from the nickname, and
-                  the voice count. Suppressed when they match, because printing
-                  the same name twice on one line reads as a rendering fault
-                  rather than as two facts.
-                */
-                sub:
-                  [
-                    t.cmdrName !== null && t.cmdrName !== t.name ? `CMDR ${t.cmdrName}` : null,
-                    t.voice > 0 ? `${t.voice} voice` : null,
-                  ]
-                    .filter((x) => x !== null)
-                    .join(' · ') || undefined,
+                hint: t.cmdrName ?? undefined,
               }))}
             />
           ) : (
@@ -179,9 +140,9 @@ export function Dashboard({ data }: { data: AdminDashboard }) {
           description="The ship each commander was last seen in — not every ship they own, and not counted per session, so the most frequent player does not decide this alone."
         >
           {game.ships.length > 0 ? (
-            <Ranked
+            <Donut
               unit={game.ships.length === 1 ? 'pilot' : 'pilots'}
-              rows={game.ships.map((s) => ({ label: s.ship, value: s.pilots }))}
+              data={game.ships.map((s) => ({ label: s.ship, value: s.pilots }))}
             />
           ) : (
             <Empty>No commander has reported a session yet.</Empty>
@@ -190,12 +151,13 @@ export function Dashboard({ data }: { data: AdminDashboard }) {
 
         <Section
           title="The ladder"
-          description="Members at each tenure rank right now, read from the roles they wear in Discord. Counted once each, at their highest rung."
+          description="Members at each tenure rank, read from the roles they wear in Discord. Counted once each, at their highest rung."
         >
           {squadron.ranks.length > 0 ? (
-            <Ranked
-              unit="held"
-              rows={squadron.ranks.map((r) => ({ label: r.rank, value: r.held }))}
+            <RankedBars
+              unit="members"
+              colourful
+              data={squadron.ranks.map((r) => ({ label: r.rank, value: r.held }))}
             />
           ) : (
             <Empty>Nobody holds a squadron rank yet.</Empty>
@@ -206,17 +168,18 @@ export function Dashboard({ data }: { data: AdminDashboard }) {
 
             Squadron Leader and above are appointments, not ranks earned by
             qualifying months, and promotion never moves anybody along them.
-            Listed apart so the ladder above stays a ladder — mixed in, a
-            Squadron Leader sat at the bottom of a ladder they are not on.
+            One segmented bar rather than more of the bars above, because that
+            reads as "this is the leadership" instead of as a continuation of
+            the ladder — which is exactly the confusion to avoid.
           */}
           {squadron.appointments.length > 0 && (
-            <div className="mt-5 border-t border-[var(--color-border-hairline)] pt-4">
-              <p className="mb-2 font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--color-text-secondary)]">
+            <div className="mt-6 border-t border-[var(--color-border-hairline)] pt-4">
+              <p className="mb-3 font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--color-text-secondary)]">
                 Leadership appointments
               </p>
-              <Ranked
+              <StackedStrip
                 unit="held"
-                rows={squadron.appointments.map((r) => ({ label: r.rank, value: r.held }))}
+                data={squadron.appointments.map((r) => ({ label: r.rank, value: r.held }))}
               />
             </div>
           )}
@@ -228,9 +191,9 @@ export function Dashboard({ data }: { data: AdminDashboard }) {
         >
           {game.byType.length > 0 ? (
             <>
-              <Ranked
+              <Donut
                 unit="events"
-                rows={game.byType.slice(0, 8).map((t) => ({ label: t.type, value: t.count }))}
+                data={game.byType.slice(0, 10).map((t) => ({ label: t.type, value: t.count }))}
               />
               <p className="mt-4 border-t border-[var(--color-border-hairline)] pt-3 font-mono text-[11px] text-[var(--color-text-secondary)]">
                 {game.events.toLocaleString('en-GB')} events from {game.reporting}{' '}

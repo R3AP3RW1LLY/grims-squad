@@ -670,6 +670,30 @@ model InaraLink {
   @@map("inara_links")
 }
 
+/// Activity per member per DAY. The shape of a month, rather than its total.
+///
+/// ★ WHY THE MONTHLY TABLE CANNOT ANSWER THIS ★
+/// `member_activity_months` holds one row per member per month with a `last_activity_at`. A
+/// daily chart built from it counts each member on the ONE day they were last seen — somebody
+/// active on the 5th and the 20th appears only on the 20th, and a busy month renders as a
+/// scattering of single marks. The chart looked plausible and was wrong.
+///
+/// Promotion still reads the MONTHLY table. This exists for display, and deliberately carries no
+/// authority: a discrepancy between the two must never change who gets promoted.
+model MemberActivityDay {
+  /// Discord snowflake. Present for every guild member, website account or not.
+  discordId      String   @map("discord_id")
+  /// The UTC day. Midnight UTC, so a day never depends on where the server runs.
+  day            DateTime @db.Date
+  messageCount   Int      @default(0) @map("message_count")
+  forumPostCount Int      @default(0) @map("forum_post_count")
+  voiceJoinCount Int      @default(0) @map("voice_join_count")
+
+  @@id([discordId, day])
+  @@index([day])
+  @@map("member_activity_days")
+}
+
 /// Every member of the guild, whether or not they have ever visited the website.
 ///
 /// ★ WHY THIS IS NOT DiscordIdentity ★
