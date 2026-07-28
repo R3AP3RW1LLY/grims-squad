@@ -16,7 +16,7 @@ import { getMe } from '../../lib/api';
  * They keep their avatar, their menu and their way back to the hub, but the
  * page around it stays the public one. Sending somebody to the sidebar shell
  * just because they are signed in would mean they could never look at their own
- * public roster entry the way a visitor sees it.
+ * own public pages the way a visitor sees them.
  */
 export default async function SiteLayout({ children }: { children: React.ReactNode }) {
   const me = await getMe();

@@ -26,8 +26,8 @@ interface Toggle {
 const TOGGLES: readonly Toggle[] = [
   {
     key: 'showOnPublicRoster',
-    label: 'List me on the public roster',
-    help: 'Off by default. While this is off you do not appear on the roster at all, whatever else you turn on here.',
+    label: 'List me on the squadron roster',
+    help: 'Off by default. The roster is visible to signed-in members only — not to the public — and while this is off you do not appear on it at all, whatever else you turn on here.',
   },
   {
     key: 'showLocation',

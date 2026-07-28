@@ -9,6 +9,22 @@ const rosterPage = readFileSync(resolve(HERE, '../roster/page.tsx'), 'utf8');
 const apiClient = readFileSync(resolve(HERE, '../../../lib/api.ts'), 'utf8');
 
 /**
+ * Source with comments stripped.
+ *
+ * The roster page EXPLAINS, in prose, that the server filters by
+ * `showOnPublicRoster` — and an earlier version of the assertion below matched
+ * that explanation and failed. A test that fails on its own documentation is a
+ * test people learn to delete.
+ */
+function code(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split(/\r?\n/)
+    .filter((l) => !l.trim().startsWith('//'))
+    .join('\n');
+}
+
+/**
  * @INV-027 on the rendering side.
  *
  * The API omits a field the member has not opted into. That only stays true
@@ -73,12 +89,46 @@ describe('@INV-027 profile rendering distinguishes absent from empty', () => {
   });
 });
 
+describe('the roster is members-only', () => {
+  it('MANDATORY: neither endpoint is @Public', () => {
+    /*
+     * Gating the PAGE alone would be theatre — the data would be one curl away,
+     * and an endpoint that answers anybody is public however the interface is
+     * arranged.
+     *
+     * Anchored on the DECORATORS, in comment-stripped source, and looking
+     * BACKWARDS from each route. Two earlier attempts got this wrong in the
+     * same way: they sliced a region that began inside the doc comment
+     * explaining why @Public was removed, so the stripper had no opening
+     * delimiter to match and the prose counted as code.
+     */
+    const controller = code(
+      readFileSync(resolve(HERE, '../../../../../api/src/members/members.controller.ts'), 'utf8'),
+    );
+
+    for (const route of ["@Get('members')", "@Get('members/:handle')"]) {
+      const at = controller.indexOf(route);
+      expect(at, route).toBeGreaterThan(-1);
+
+      // Decorators stack above the route, so @Public would sit just before it.
+      const decorators = controller.slice(Math.max(0, at - 200), at);
+      expect(decorators, route).not.toContain('@Public');
+    }
+  });
+
+  it('MANDATORY: lives under (hub), so the layout gates it', () => {
+    // The (hub) layout redirects a signed-out visitor before any page renders.
+    // A roster under (site) would render for anybody who reached it.
+    expect(HERE).toContain('(hub)');
+  });
+});
+
 describe('the roster is opt-in end to end', () => {
   it('renders whatever the API returned without re-filtering it', () => {
     // The filter belongs on the server. A second filter here would look like
     // defence in depth but would actually hide the bug if the server one broke
     // — the page would keep working while the API leaked to every other client.
-    expect(rosterPage).not.toContain('showOnPublicRoster');
+    expect(code(rosterPage)).not.toContain('showOnPublicRoster');
   });
 
   it('never caches profile responses', () => {

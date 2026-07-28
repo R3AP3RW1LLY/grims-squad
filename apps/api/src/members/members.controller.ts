@@ -1,7 +1,6 @@
 import { Controller, Get, Patch, Param, Body, Req, Inject } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
 import { AppError, ErrorCode } from '@grims/shared';
-import { Public } from '../auth/auth.guard.js';
 import { User, type CurrentUser } from '../auth/current-user.js';
 import { verifyCsrf, readCsrfCookie } from '../common/csrf.js';
 import { MEMBERS_STORE, type MembersStore } from './members.tokens.js';
@@ -49,13 +48,22 @@ export class MembersController {
   constructor(@Inject(MEMBERS_STORE) private readonly store: MembersStore) {}
 
   /**
-   * The public roster.
+   * The squadron roster.
+   *
+   * ★ NO LONGER @Public, AS OF 2026-07-28 ★
+   *
+   * Moved behind the sign-in on the squadron owner's instruction. Gating the
+   * PAGE alone would have been theatre — the data was one curl away, and an
+   * endpoint that answers anybody is public however the interface is arranged.
+   *
+   * ★ WHAT DID NOT CHANGE ★
    *
    * Filtered by `showOnPublicRoster` BEFORE anything is serialised, so a member
-   * who has not opted in is not on the page at all — stronger than hiding their
-   * individual fields, and the roster is our highest-traffic public surface.
+   * who has not opted in is not in the response at all — stronger than hiding
+   * their individual fields (INV-027). Signing in does not entitle anybody to
+   * see somebody who chose not to be listed, and this is strictly MORE
+   * restrictive than the invariant requires rather than a relaxation of it.
    */
-  @Public()
   @Get('members')
   async roster(): Promise<{ members: PublicProfile[]; total: number }> {
     const rows = await this.store.roster();
@@ -71,11 +79,14 @@ export class MembersController {
   /**
    * One member's profile.
    *
+   * Behind the sign-in with the roster it is reached from. A profile that
+   * answered anonymously while the list of profiles did not would leave the
+   * whole thing enumerable by anybody who could guess a handle.
+   *
    * `audience: 'self'` only when the caller IS this member. There is no officer
    * branch and there must not be one: INV-027 is a promise to the member, not a
-   * permission level.
+   * permission level — and being signed in is not the same as being them.
    */
-  @Public()
   @Get('members/:handle')
   async profile(
     @Param('handle') handle: string,

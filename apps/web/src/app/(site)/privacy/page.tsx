@@ -113,7 +113,7 @@ export default function PrivacyPage() {
           <li>Your credit balance</li>
           <li>Your fleet</li>
           <li>Your recent activity</li>
-          <li>Whether you appear on the public roster</li>
+          <li>Whether you appear on the squadron roster, which signed-in members can see</li>
           <li>Whether you appear on leaderboards</li>
         </ul>
         <p>

@@ -57,7 +57,7 @@ export default async function PrivacySettingsPage() {
                   tone={shown === 0 ? 'good' : 'default'}
                 />
                 <RailStat
-                  label="On the public roster"
+                  label="On the roster"
                   value={settings.showOnPublicRoster ? 'Yes' : 'No'}
                 />
                 <RailStat
@@ -76,7 +76,7 @@ export default async function PrivacySettingsPage() {
 
               <Panel title="Related">
                 <a href="/roster" className="block text-sm text-[var(--color-brand-cyan-bright)]">
-                  See the public roster
+                  See the roster
                 </a>
                 <a
                   href="/settings/devices"

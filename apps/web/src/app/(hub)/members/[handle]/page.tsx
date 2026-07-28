@@ -1,6 +1,8 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
-import { getProfile } from '../../../../lib/api';
+import { getProfile, getMe } from '../../../../lib/api';
+import { PageHeader, PageBody, Panel, RailStat } from '../../../../components/hub-page';
+import { formatLocal } from '../../../../lib/time';
 
 /**
  * One commander's profile.
@@ -42,43 +44,82 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 
 export default async function MemberPage({ params }: { params: Promise<{ handle: string }> }) {
   const { handle } = await params;
-  const p = await getProfile(handle);
+  const [p, me] = await Promise.all([getProfile(handle), getMe()]);
   if (p === null) notFound();
 
-  const joined = new Date(p.joinedAt);
+  const isSelf = me.user?.handle === p.handle;
 
   return (
-    <main id="main" className="mx-auto max-w-[1440px] px-6 py-20">
-      <div className="mx-auto max-w-[70ch]">
-        <p className="font-mono text-[11px] uppercase tracking-[0.32em] text-[var(--color-brand-cyan-bright)]">
-          Commander record
-        </p>
-        <h1
-          className="mt-3 text-[clamp(2rem,5vw,3.25rem)] leading-tight text-[var(--color-brand-orange)]"
-          style={{ fontFamily: 'var(--font-display)' }}
-        >
-          {p.displayName.toUpperCase()}
-        </h1>
-        {p.cmdrName !== null && (
-          <p className="mt-2 font-mono text-sm uppercase tracking-[0.24em] text-[var(--color-brand-cyan-bright)]">
-            CMDR {p.cmdrName}
-          </p>
-        )}
-        <div className="rule-glow mt-5" aria-hidden="true" />
+    <>
+      <PageHeader
+        eyebrow="Commander record"
+        title={p.displayName.toUpperCase()}
+        {...(p.cmdrName !== null && { subtitle: `CMDR ${p.cmdrName}` })}
+        action={
+          <a
+            href="/roster"
+            className="rounded border border-[var(--color-border-hairline)] px-4 py-2 font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--color-text-secondary)]"
+          >
+            Back to roster
+          </a>
+        }
+      />
 
+      <PageBody
+        rail={
+          <>
+            <Panel title="At a glance">
+              <RailStat label="Joined" value={formatLocal(p.joinedAt, 'UTC', { withTime: false })} />
+              <RailStat label="Timezone" value={p.timezone} />
+              <RailStat
+                label="Commander"
+                value={p.cmdrName ?? 'Not verified'}
+                tone={p.cmdrName === null ? 'default' : 'good'}
+              />
+            </Panel>
+
+            {isSelf ? (
+              <Panel title="This is you">
+                {/*
+                  Said plainly, because a member looking at their own page
+                  cannot otherwise tell WHICH fields others can see — the API
+                  shows them everything when they are the caller.
+                */}
+                <p className="text-sm leading-relaxed text-[var(--color-text-secondary)]">
+                  You are seeing your own record, which includes fields others may not. What each
+                  person sees depends on what you have turned on.
+                </p>
+                <a
+                  href="/settings/privacy"
+                  className="mt-3 block text-sm text-[var(--color-brand-cyan-bright)]"
+                >
+                  Your privacy settings
+                </a>
+              </Panel>
+            ) : (
+              <Panel title="What is missing">
+                <p className="text-sm leading-relaxed text-[var(--color-text-secondary)]">
+                  Fields this commander has not turned on are absent entirely rather than blank.
+                  Nothing here is hidden from you — it was never sent.
+                </p>
+              </Panel>
+            )}
+          </>
+        }
+      >
         {p.bio !== null && p.bio !== '' && (
-          <p className="mt-6 text-lg text-[var(--color-text-primary)]">{p.bio}</p>
+          <p className="mb-8 max-w-[68ch] text-lg text-[var(--color-text-primary)]">{p.bio}</p>
         )}
 
-        <dl className="mt-10">
+        <dl>
           <Row label="Joined">
+            {/*
+              In the VIEWER's timezone, like every other date outside the audit
+              log. "When did they join" is a question about the reader's
+              calendar, not about UTC.
+            */}
             <time dateTime={p.joinedAt}>
-              {joined.toLocaleDateString('en-GB', {
-                day: 'numeric',
-                month: 'long',
-                year: 'numeric',
-                timeZone: 'UTC',
-              })}
+              {formatLocal(p.joinedAt, me.user?.timezone ?? 'UTC', { withTime: false })}
             </time>
           </Row>
           {p.ranks.length > 0 && <Row label="Ranks">{p.ranks.join(' · ')}</Row>}
@@ -141,11 +182,11 @@ export default async function MemberPage({ params }: { params: Promise<{ handle:
           )}
         </dl>
 
-        <p className="mt-8 text-sm text-[var(--color-text-secondary)]">
+        <p className="mt-8 max-w-[68ch] text-sm leading-relaxed text-[var(--color-text-secondary)]">
           Commanders choose which details appear here. A field that is not shown has not been shared
           — it is not missing data.
         </p>
-      </div>
-    </main>
+      </PageBody>
+    </>
   );
 }

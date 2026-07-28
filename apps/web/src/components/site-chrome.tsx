@@ -73,7 +73,6 @@ export function DeepField() {
 /* --------------------------------------------------------------------- nav */
 
 export const NAV_LINKS = [
-  { href: '/roster', label: 'Roster' },
   { href: '/situation', label: 'Situation' },
   { href: '/market', label: 'Market' },
   { href: '/shipyard', label: 'Shipyard' },
