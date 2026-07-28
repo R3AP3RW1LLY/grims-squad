@@ -316,7 +316,13 @@ model User {
   handle      String     @unique @db.Citext
   displayName String     @map("display_name")
   email       String?    @unique @db.Citext
+  /// Discord's avatar HASH as last seen at sign-in, not a URL. Misnamed for historical reasons.
   avatarUrl   String?    @map("avatar_url")
+  /// The avatar hash we have actually COPIED into object storage.
+  /// Distinct from avatarUrl on purpose: that one says what Discord shows, this one says what we
+  /// hold. They differ between a member changing their picture and our copy of it landing, and
+  /// conflating them would mean serving a 404 for the gap (D5, D22).
+  avatarStoredHash String? @map("avatar_stored_hash")
   bio         String?
   /// IANA zone. Every user-facing time renders in this AND UTC (INV-025).
   timezone    String     @default("UTC")

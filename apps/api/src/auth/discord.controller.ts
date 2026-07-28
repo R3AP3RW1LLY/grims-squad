@@ -1,15 +1,17 @@
-import { Public } from './auth.guard.js';
-import { postLoginDestination } from './post-login-destination.js';
-import { PermissionService } from '../authz/permission.service.js';
-import { TotpService } from './totp.service.js';
 import { Controller, Get, Query, Req, Res, Inject, Optional } from '@nestjs/common';
 import type { CookieSerializeOptions } from '@fastify/cookie';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { createHash } from 'node:crypto';
 import { AppError, ErrorCode } from '@grims/shared';
 import { issueCsrfToken } from '../common/csrf.js';
+import { Public } from './auth.guard.js';
 import { DiscordAuthService } from './discord.service.js';
 import { SessionService } from './session.service.js';
+import { TotpService } from './totp.service.js';
+import { postLoginDestination } from './post-login-destination.js';
+import { PermissionService } from '../authz/permission.service.js';
+import { AVATAR_SERVICE } from '../media/media.tokens.js';
+import type { AvatarService } from '../media/avatar.service.js';
 
 /**
  * P1.1 — the two OAuth endpoints.
@@ -82,6 +84,9 @@ export const NONCE_COOKIE = IS_SECURE ? '__Host-gs_oauth_nonce' : 'gs_oauth_nonc
 @Public()
 export class DiscordAuthController {
   constructor(
+    @Optional()
+    @Inject(AVATAR_SERVICE)
+    private readonly avatars: AvatarService | null,
     @Optional() @Inject(DiscordAuthService) private readonly svc: DiscordAuthService | null,
     @Optional() @Inject(SessionService) private readonly sessions: SessionService | null,
     /*
@@ -172,6 +177,16 @@ export class DiscordAuthController {
      * dashboard. Failing here must not fail the LOGIN, which has already
      * succeeded — so a broken lookup falls back to the requested path.
      */
+    /*
+     * Copy their Discord picture onto our own storage.
+     *
+     * Deliberately NOT awaited into the redirect path in a way that can delay
+     * it: the member is mid-sign-in and staring at a blank tab. The service
+     * swallows its own failures and only fetches when the avatar hash has
+     * actually changed, so the common case is a single cheap lookup.
+     */
+    void this.avatars?.syncFromDiscord(result.userId);
+
     let destination = result.redirectTo;
     try {
       if (this.permissions !== null && this.totp !== null) {

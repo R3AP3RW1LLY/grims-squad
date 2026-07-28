@@ -39,6 +39,8 @@ export interface IssuedSession {
   readonly accessToken: string;
   readonly refreshToken: string;
   readonly familyId: string;
+  /** Whose session this is. The caller needs it to check the Discord grant. */
+  readonly userId: string;
 }
 
 export interface AccessClaims {
@@ -67,7 +69,7 @@ export class SessionService {
   async issue(userId: string, ctx: SessionContext): Promise<IssuedSession> {
     const familyId = await this.store.createFamily(userId, ctx);
     const refreshToken = await this.#mintRefresh(familyId);
-    return { accessToken: await this.#mintAccess(userId), refreshToken, familyId };
+    return { accessToken: await this.#mintAccess(userId), refreshToken, familyId, userId };
   }
 
   // ------------------------------------------------------------------ rotate
@@ -113,6 +115,7 @@ export class SessionService {
       accessToken: await this.#mintAccess(family.userId),
       refreshToken: next,
       familyId: family.id,
+      userId: family.userId,
     };
   }
 

@@ -1,5 +1,7 @@
 import type { Metadata } from 'next';
-import { getAccountStatus, getInaraStatus, getSquadronStats } from '../../lib/api';
+import { getAccountStatus, getInaraStatus, getSquadronStats, getMe } from '../../lib/api';
+import { SideNav } from '../../components/side-nav';
+import { Avatar } from '../../components/account-menu';
 
 export const metadata: Metadata = {
   title: "Your dashboard — Grim's Squad",
@@ -52,10 +54,11 @@ function Card({
 }
 
 export default async function DashboardPage() {
-  const [status, inara, stats] = await Promise.all([
+  const [status, inara, stats, me] = await Promise.all([
     getAccountStatus(),
     getInaraStatus(),
     getSquadronStats(),
+    getMe(),
   ]);
 
   if (status === null) {
@@ -76,18 +79,46 @@ export default async function DashboardPage() {
 
   const verified = inara?.cmdrName ?? null;
 
+  const name = me.user?.displayName ?? 'Commander';
+
   return (
-    <main id="main" className="mx-auto max-w-[1440px] px-6 py-16">
-      <p className="font-mono text-[11px] uppercase tracking-[0.32em] text-[var(--color-brand-cyan-bright)]">
-        Squadron member
-      </p>
-      <h1
-        className="mt-3 text-[clamp(1.75rem,4vw,2.75rem)] leading-tight text-[var(--color-brand-orange)]"
-        style={{ fontFamily: 'var(--font-display)' }}
-      >
-        {verified === null ? 'YOUR DASHBOARD' : `CMDR ${verified.toUpperCase()}`}
-      </h1>
-      <div className="rule-glow mt-5" aria-hidden="true" />
+    <main id="main" className="mx-auto max-w-[1440px] px-6 py-12">
+      <div className="flex flex-col gap-10 lg:flex-row lg:gap-14">
+        <SideNav nav={me.nav} current="/dashboard" />
+
+        <div className="min-w-0 flex-1">
+          {/*
+            ★ A GREETING, NOT A CONTROL PANEL ★
+
+            This is a hobby squadron of about a hundred people who fly together
+            on evenings and weekends. The first thing they see should read like
+            somebody is glad they turned up, not like a status board for an
+            outage.
+
+            Time-aware because it costs one function and it is the difference
+            between a page written for everybody and a page that looks like it
+            was written for you.
+          */}
+          <header className="flex items-center gap-5">
+            {me.user !== null && <Avatar user={me.user} size={60} />}
+            <div className="min-w-0">
+              <p className="font-mono text-[11px] uppercase tracking-[0.32em] text-[var(--color-brand-cyan-bright)]">
+                {greeting()}
+              </p>
+              <h1
+                className="mt-2 truncate text-[clamp(1.6rem,3.5vw,2.5rem)] leading-tight text-[var(--color-brand-orange)]"
+                style={{ fontFamily: 'var(--font-display)' }}
+              >
+                {verified === null ? name.toUpperCase() : `CMDR ${verified.toUpperCase()}`}
+              </h1>
+              {me.user?.rank != null && (
+                <p className="mt-1 font-mono text-[11px] uppercase tracking-[0.24em] text-[var(--color-text-secondary)]">
+                  {me.user.rank}
+                </p>
+              )}
+            </div>
+          </header>
+          <div className="rule-glow mt-6" aria-hidden="true" />
 
       <section aria-labelledby="next-heading" className="mt-12">
         <h2
@@ -164,6 +195,29 @@ export default async function DashboardPage() {
           </a>
         </section>
       )}
+        </div>
+      </div>
     </main>
   );
+}
+
+/**
+ * Morning, afternoon or evening.
+ *
+ * ★ IN THE SERVER'S TIMEZONE, WHICH IS A KNOWN COMPROMISE ★
+ *
+ * The honest version reads the member's own timezone — we store one — but that
+ * would mean this page could not be rendered until we had looked it up, for a
+ * greeting. The squadron is largely UK and US-evening, and the server runs UTC,
+ * so this is right for most people most of the time.
+ *
+ * Recorded as a compromise rather than left to be discovered: if somebody in
+ * Australia reports being wished good morning at bedtime, this is the reason
+ * and `User.timezone` is the fix.
+ */
+function greeting(): string {
+  const hour = new Date().getUTCHours();
+  if (hour < 12) return 'Good morning, commander';
+  if (hour < 18) return 'Good afternoon, commander';
+  return 'Good evening, commander';
 }

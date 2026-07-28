@@ -3,6 +3,8 @@ import { Chakra_Petch, Inter, JetBrains_Mono } from 'next/font/google';
 import './globals.css';
 import { SecureAccountBanner } from '../components/secure-account-banner';
 import { DeepField, SiteNav, SiteFooter } from '../components/site-chrome';
+import { AuthedNav } from '../components/authed-nav';
+import { getMe } from '../lib/api';
 
 /*
  * Fonts are downloaded at BUILD time and served from our own origin. No runtime
@@ -62,7 +64,21 @@ export const viewport: Viewport = {
   initialScale: 1,
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+/**
+ * ★ THE NAVBAR SWAPS ENTIRELY WHEN SIGNED IN ★
+ *
+ * Not the public bar with a couple of extras bolted on. A member who has
+ * already joined has no use for "Join now" and the recruitment strapline, and
+ * leaving them there spends the most valuable strip of the page advertising to
+ * somebody who already bought.
+ *
+ * Resolved on the SERVER, so the correct bar is in the first byte of HTML.
+ * Deciding it in the browser would mean every signed-in member watching the
+ * public navbar flash and swap on every navigation.
+ */
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const me = await getMe();
+
   return (
     <html lang="en" className={`${display.variable} ${body.variable} ${mono.variable}`}>
       <body className="scanlines flex min-h-dvh flex-col antialiased">
@@ -75,7 +91,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         </a>
 
         <DeepField />
-        <SiteNav />
+        {me.user === null ? <SiteNav /> : <AuthedNav me={me} />}
         {/* Directly under the navbar, per the human decision. In the LAYOUT so it
             follows the member everywhere rather than being remembered per page. */}
         <SecureAccountBanner />

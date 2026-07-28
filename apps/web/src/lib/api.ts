@@ -259,6 +259,46 @@ export interface InaraStatus {
 export const getInaraStatus = (): Promise<InaraStatus | null> =>
   get('/v1/me/inara', { authed: true });
 
+export interface NavItem {
+  href: string;
+  label: string;
+  section: 'squadron' | 'personal' | 'admin';
+  blurb: string;
+}
+
+export interface MeResponse {
+  user: {
+    userId: string;
+    handle: string;
+    displayName: string;
+    /** Our own URL, never Discord's. Null when they have no picture. */
+    avatarUrl: string | null;
+    rank: string | null;
+  } | null;
+  nav: NavItem[];
+  isAdmin: boolean;
+  mustSecureAccount: boolean;
+}
+
+/**
+ * Everything the signed-in chrome needs, in ONE request.
+ *
+ * Four calls would mean four round trips per page AND four moments where the
+ * answers can disagree — so a member briefly sees an admin link that the next
+ * response takes away.
+ *
+ * Falls back to a signed-out shape rather than null: the navbar renders on
+ * every page including the public ones, and `me === null` at every call site
+ * would mean the same signed-out branch written a dozen times.
+ */
+export const getMe = async (): Promise<MeResponse> =>
+  (await get<MeResponse>('/v1/me', { authed: true })) ?? {
+    user: null,
+    nav: [],
+    isAdmin: false,
+    mustSecureAccount: false,
+  };
+
 export interface AccountStatus {
   privileged: boolean;
   twoFactorEnrolled: boolean;

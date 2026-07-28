@@ -22,8 +22,21 @@ async function bootstrap(): Promise<void> {
   });
 
   const app = await NestFactory.create<NestFastifyApplication>(AppModule, adapter, {
-    // Pino is the logger; Nest's own is silenced to avoid two formats in one stream.
-    logger: false,
+    /*
+     * Pino is the logger, so Nest's own is silenced to avoid two formats in one
+     * stream — EXCEPT for errors and warnings.
+     *
+     * ★ WHY THE EXCEPTION MATTERS ★
+     *
+     * `logger: false` also silences Nest's startup ExceptionHandler. A dependency
+     * that fails to resolve then kills the process with NO OUTPUT AT ALL: no
+     * stack, no message, exit code 1, and an empty log file. It looks exactly
+     * like the process was killed from outside.
+     *
+     * That cost an hour of bisecting to find a missing @Inject. Two log levels
+     * is a small price for never doing it again.
+     */
+    logger: ['error', 'warn'],
   });
 
   // Needed by the OAuth nonce cookie that binds login state to the browser.

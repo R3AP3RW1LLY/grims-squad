@@ -1,12 +1,14 @@
 import { Controller, Post, Get, Req, Res, Inject, Optional } from '@nestjs/common';
 import type { CookieSerializeOptions } from '@fastify/cookie';
 import type { FastifyReply, FastifyRequest } from 'fastify';
+import { PrismaClient } from '@grims/db';
 import { AppError, ErrorCode } from '@grims/shared';
-import { SessionService } from './session.service.js';
+import { SessionService, REFRESH_TTL_SEC } from './session.service.js';
 import { verifyCsrf, issueCsrfToken } from '../common/csrf.js';
 import { Public } from './auth.guard.js';
 import { PermissionService } from '../authz/permission.service.js';
 import { TotpService } from './totp.service.js';
+import { grantStillValid, sessionLifetimeSec, type GrantState } from './discord-grant.js';
 import { PRIVILEGED_PERMISSIONS, describePermissions, requiresTwoFactor } from '@grims/shared';
 
 const IS_SECURE = process.env['NODE_ENV'] === 'production';
@@ -25,6 +27,7 @@ export class SessionController {
     @Optional() @Inject(SessionService) private readonly sessions: SessionService | null,
     @Optional() @Inject(PermissionService) private readonly permissions: PermissionService | null,
     @Optional() @Inject(TotpService) private readonly totp: TotpService | null,
+    @Optional() @Inject(PrismaClient) private readonly db: PrismaClient | null = null,
   ) {}
 
   #svc(): SessionService {
@@ -41,6 +44,32 @@ export class SessionController {
    * anyone calls this — that is the entire point of refreshing. Authorisation
    * comes from the refresh cookie, which is checked inside.
    */
+  /**
+   * What Discord still says about this member.
+   *
+   * Reads our stored copy rather than calling Discord: the refresh token's
+   * PRESENCE is the signal, because Discord drops it on revocation. Calling out
+   * on every refresh would be a request to Discord every fifteen minutes per
+   * active member, to learn something we already have on disk.
+   */
+  async #grantFor(userId: string): Promise<GrantState> {
+    if (this.db === null) return { tokenExpiresAt: null, hasRefreshToken: true };
+
+    const identity = await this.db.discordIdentity.findUnique({
+      where: { userId },
+      select: { tokenExpiresAt: true, refreshTokenEnc: true },
+    });
+
+    // No identity row at all is the UNKNOWN case, not the revoked one — see
+    // grantStillValid. Left alone rather than signed out.
+    if (identity === null) return { tokenExpiresAt: null, hasRefreshToken: true };
+
+    return {
+      tokenExpiresAt: identity.tokenExpiresAt,
+      hasRefreshToken: identity.refreshTokenEnc !== null,
+    };
+  }
+
   @Public()
   @Post('refresh')
   async refresh(@Req() req: FastifyRequest, @Res() reply: FastifyReply): Promise<void> {
@@ -63,8 +92,38 @@ export class SessionController {
         userAgent: req.headers['user-agent'] ?? null,
         ipHash: null,
       });
+
+      /*
+       * ★ OUR SESSION MUST NOT OUTLIVE DISCORD'S AUTHORISATION ★
+       *
+       * Checked HERE rather than on every request. Refresh is the natural
+       * checkpoint: it happens every fifteen minutes for an active member, and
+       * not at all for one who has gone away — so a revocation is honoured
+       * promptly for the people it matters for, at no per-request cost.
+       *
+       * The case this closes: somebody removes our app in their Discord
+       * settings and stays signed in here for the rest of their thirty-day
+       * cookie. They have said stop; continuing would mean our idea of who they
+       * are outliving theirs, and the only way they would find out is by
+       * visiting a page they have no reason to visit.
+       */
+      const grant = await this.#grantFor(s.userId);
+      const verdict = grantStillValid(grant, new Date());
+      if (!verdict.ok) {
+        throw new AppError(
+          ErrorCode.REFRESH_TOKEN_INVALID,
+          verdict.reason === 'revoked'
+            ? 'Your Discord authorisation was removed. Sign in again to continue.'
+            : 'Your session has expired. Sign in again to continue.',
+        );
+      }
+
+      // Capped to whatever the grant has left, so the cookie expires cleanly
+      // rather than failing confusingly part-way through something.
+      const refreshMaxAge = sessionLifetimeSec(grant, REFRESH_TTL_SEC, new Date());
+
       jar(reply).setCookie(c.accessName, s.accessToken, { ...c.options, maxAge: 900 });
-      jar(reply).setCookie(c.refreshName, s.refreshToken, c.options);
+      jar(reply).setCookie(c.refreshName, s.refreshToken, { ...c.options, maxAge: refreshMaxAge });
       void reply.send({ ok: true });
     } catch (err) {
       // Any refresh failure clears the cookies. Leaving a dead refresh token in

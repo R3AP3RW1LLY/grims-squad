@@ -88,3 +88,4 @@ vault-*.enc
 # ours and all of which is reproducible from source. Releases are built by CI
 # and attached as workflow artifacts.
 apps/companion/release/
+.local-storage/
