@@ -221,6 +221,7 @@ export default async function DashboardPage() {
           <SessionCountdown
             expiresAt={me.session.expiresAt}
             twoFactorExpiresAt={me.session.twoFactorExpiresAt}
+            timezone={me.user?.timezone ?? 'UTC'}
           />
         </div>
       </div>
