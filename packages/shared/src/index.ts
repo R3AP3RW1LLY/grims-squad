@@ -33,8 +33,9 @@ export {
   eliteRankName,
   describeEliteRanks,
   describeInaraRanks,
+  allEliteRanks,
 } from './journal/elite-ranks.js';
-export type { EliteRankKey } from './journal/elite-ranks.js';
+export type { EliteRankKey, EliteRankStanding } from './journal/elite-ranks.js';
 
 export type {
   JournalEventName,

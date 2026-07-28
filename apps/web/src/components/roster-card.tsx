@@ -99,15 +99,19 @@ export function RosterCard({
   const awards = member.discordRoles.filter((r) => r.category === 'award');
 
   /*
-   * Three at most, highest first. A commander who has ground every ladder would
-   * otherwise fill the card with rank names and bury everything else, and the
-   * interesting thing about somebody is what they are BEST at.
+   * ★ ALL SIX LADDERS, ALWAYS, IN A FIXED ORDER ★
    *
-   * Sorted by INDEX, not by name. Alphabetically "Surveyor" beats "Elite",
-   * which is exactly backwards — caught against real data, where a Trade Elite
-   * was being listed below an Exploration Surveyor.
+   * This used to show the best three. That made two very different commanders
+   * look identical — one who has never flown a combat ship, and one whose data
+   * we simply do not have — and it made cards incomparable, because a member
+   * with three ladders and a member with six produced lists of different
+   * lengths in different orders.
+   *
+   * Fixed position is what lets somebody scan down a column of cards and see
+   * who the better trader is. A ladder with no reading says so, and stays
+   * clearly distinct from "Harmless", which is a rank a new pilot really holds.
    */
-  const topRanks = [...commander.ranks].sort((a, b) => b.index - a.index).slice(0, 3);
+  const ranks = commander.ranks;
 
   /*
    * ★ h-full ON BOTH THE <li> AND THE <a>, AND THE SECOND IS THE SUBTLE ONE ★
@@ -224,8 +228,7 @@ export function RosterCard({
           would otherwise bury everything else. Sorted by INDEX, because
           alphabetically "Surveyor" beats "Elite", which is exactly backwards.
         */}
-        {topRanks.length > 0 && (
-          <ul
+        <ul
             className="mt-3 flex list-none flex-wrap items-center gap-1.5 p-0"
             /*
               ★ SAYING WHICH SOURCE, WITHOUT SPENDING A LINE ON IT ★
@@ -249,17 +252,26 @@ export function RosterCard({
                 : 'Pilot ranks from their game journal'
             }
           >
-            {topRanks.map((r) => (
+            {ranks.map((r) => (
               <li
                 key={r.key}
                 className="rounded border border-[var(--color-border-hairline)] px-2 py-1 font-mono text-[10px] uppercase tracking-[0.1em] text-[var(--color-text-secondary)]"
-                title={`${r.label}: ${r.name}`}
+                title={r.name === null ? `${r.label}: not reported` : `${r.label}: ${r.name}`}
               >
-                {r.label} <span className="text-[var(--color-text-primary)]">{r.name}</span>
+                {r.label}{' '}
+                {r.name === null ? (
+                  /*
+                    Dimmed, not omitted. "None" at full strength would read as an
+                    achievement called None; removing the line would make an
+                    unflown ladder indistinguishable from a missing reading.
+                  */
+                  <span className="text-[var(--color-text-secondary)] opacity-60">None</span>
+                ) : (
+                  <span className="text-[var(--color-text-primary)]">{r.name}</span>
+                )}
               </li>
             ))}
-          </ul>
-        )}
+        </ul>
 
         {/*
           mt-auto pins this to the BOTTOM of the card, which is what makes

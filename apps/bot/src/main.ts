@@ -2,13 +2,51 @@ import {
   Client,
   GatewayIntentBits,
   Events,
-  ChannelType,
+  PermissionFlagsBits,
+  type Collection,
   type Message,
-  TextChannel,
+  type GuildBasedChannel,
 } from 'discord.js';
 import { PrismaClient } from '@grims/db';
 import pino from 'pino';
 import { ActivityRecorder, monthKey } from './activity.recorder.js';
+import {
+  countsTowardActivity,
+  isForumChannel,
+  type ScopeChannel,
+  type ScopeRole,
+} from './channel-scope.js';
+
+/**
+ * The parts of a channel this file touches.
+ *
+ * Structural rather than a discord.js union: the union of every channel type
+ * that has `permissionsFor` and `parent` is enormous and changes between
+ * library versions, and narrowing it correctly is not what this code is about.
+ */
+interface PermissionSurface {
+  readonly type: number;
+  permissionsFor(id: string): { has(flag: bigint): boolean } | null;
+}
+
+type GuildChannelish = Pick<GuildBasedChannel, 'id'> &
+  PermissionSurface & {
+    /*
+     * The parent carries the same surface, because a THREAD delegates the whole
+     * question to it: a thread has no overwrites of its own worth reading, and
+     * who may see it is decided by the channel it lives in.
+     */
+    parent?: PermissionSurface | null;
+    isThread?: () => boolean;
+  };
+
+/** A channel whose history can be paged. */
+interface BackfillableChannel {
+  readonly id: string;
+  readonly messages: {
+    fetch(opts: { limit: number; after: string }): Promise<Collection<string, Message>>;
+  };
+}
 import { PrismaActivityStore, PrismaCheckpointStore } from './activity.store.prisma.js';
 
 /**
@@ -26,31 +64,23 @@ const logger = pino({
 
 const TOKEN = process.env['DISCORD_BOT_TOKEN'] ?? '';
 const GUILD_ID = process.env['DISCORD_GUILD_ID'] ?? '';
-const ACTIVITY_CHANNEL = process.env['DISCORD_ACTIVITY_CHANNEL_ID'] ?? '';
-
-/**
- * Voice channels that count toward activity, named explicitly by the human.
+/*
+ * ★ NO CHANNEL LIST ANY MORE ★
  *
- * Configuration, not source (INV-008). An earlier draft derived this from
- * permissions — "any channel @everyone can Connect to" — which self-maintains
- * but also silently opts in every future channel, including ones created for a
- * purpose nobody meant to count. An explicit list is predictable, and the cost
- * is that adding a channel means adding an id here.
+ * DISCORD_ACTIVITY_CHANNEL_ID and DISCORD_VOICE_CHANNEL_IDS are gone. They
+ * scoped counting to ONE text channel and a hand-written set of voice channels,
+ * so a member active all month across the server recorded zero — reported as
+ * "why is it zeroes all across the board", and it looked like a broken bot
+ * rather than a bot doing exactly what it was configured to do.
  *
- * A member joining a channel NOT on this list records nothing.
+ * The scope is now derived per channel: anything that is not admin-gated and
+ * not an announcement channel counts, NSFW included (see channel-scope.ts).
+ * Nothing here names a channel, so INV-008 is untouched.
  */
-const VOICE_CHANNELS = new Set(
-  (process.env['DISCORD_VOICE_CHANNEL_IDS'] ?? '')
-    .split(',')
-    .map((s) => s.trim())
-    .filter((s) => s !== ''),
-);
 
 for (const [name, value] of [
   ['DISCORD_BOT_TOKEN', TOKEN],
   ['DISCORD_GUILD_ID', GUILD_ID],
-  ['DISCORD_ACTIVITY_CHANNEL_ID', ACTIVITY_CHANNEL],
-  ['DISCORD_VOICE_CHANNEL_IDS', [...VOICE_CHANNELS].join(',')],
 ] as const) {
   if (value === '') {
     // Refuse rather than idle. A bot that starts, connects and silently records
@@ -60,14 +90,21 @@ for (const [name, value] of [
   }
 }
 
-const CHECKPOINT_KEY = `activity:${ACTIVITY_CHANNEL}`;
+/**
+ * One watermark per channel, so a slow channel never blocks a busy one.
+ *
+ * A single global watermark would be wrong the moment two channels are read at
+ * different rates: the highest snowflake seen anywhere would skip everything
+ * older in every other channel.
+ */
+const checkpointKey = (channelId: string) => `activity:${channelId}`;
 /** Discord's epoch, for turning a timestamp into a snowflake. */
 const DISCORD_EPOCH = 1420070400000n;
 
 const prisma = new PrismaClient();
 const activity = new PrismaActivityStore(prisma);
 const checkpoints = new PrismaCheckpointStore(prisma);
-const recorder = new ActivityRecorder(activity, { activityChannelId: ACTIVITY_CHANNEL });
+const recorder = new ActivityRecorder(activity);
 
 const client = new Client({
   /*
@@ -88,6 +125,61 @@ const client = new Client({
   ],
 });
 
+/**
+ * Every role in the guild, reduced to "is this a staff role".
+ *
+ * Cached for the life of the process. Roles change rarely, the bot restarts
+ * often, and re-resolving them per message would put a lookup in front of every
+ * event on a busy server.
+ */
+let roleScope: ScopeRole[] = [];
+
+async function loadRoles(): Promise<void> {
+  const guild = await client.guilds.fetch(GUILD_ID);
+  const roles = await guild.roles.fetch();
+
+  roleScope = [...roles.values()].map((r) => ({
+    id: r.id,
+    /*
+     * Administrator implies everything, but is NOT the only staff marker. A
+     * moderator role with Manage Guild or Manage Channels is equally "admin
+     * gated" for our purposes, and a channel visible only to them is a staff
+     * channel whatever it happens to be called.
+     */
+    isPrivileged:
+      r.permissions.has(PermissionFlagsBits.Administrator) ||
+      r.permissions.has(PermissionFlagsBits.ManageGuild) ||
+      r.permissions.has(PermissionFlagsBits.ManageChannels),
+  }));
+
+  logger.info(
+    { roles: roleScope.length, privileged: roleScope.filter((r) => r.isPrivileged).length },
+    'role scope loaded',
+  );
+}
+
+/** Turns a discord.js channel into the shape the scope rule reads. */
+function describe(channel: GuildChannelish): ScopeChannel {
+  const parent = 'parent' in channel ? channel.parent : null;
+  const target = channel.isThread?.() === true && parent !== null ? parent : channel;
+
+  /*
+   * Which roles can SEE it, after overwrites. Resolved by discord.js rather
+   * than by us: Discord's overwrite precedence is exactly the sort of thing
+   * that is subtly wrong for months if reimplemented by hand.
+   */
+  const viewerRoleIds = roleScope
+    .filter((r) => target.permissionsFor(r.id)?.has(PermissionFlagsBits.ViewChannel) === true)
+    .map((r) => r.id);
+
+  return {
+    id: channel.id,
+    type: channel.type,
+    viewerRoleIds,
+    parentType: parent?.type,
+  };
+}
+
 async function handle(msg: Message): Promise<void> {
   try {
     await recorder.onMessage({
@@ -105,37 +197,38 @@ async function handle(msg: Message): Promise<void> {
 }
 
 /**
- * Reads everything posted since the watermark.
+ * Reads one channel's history since its own watermark.
  *
- * Runs on every start, so a deploy or a crash does not lose the messages sent
- * while the process was down. Snowflakes are monotonic, so `after` is exact —
- * no message is counted twice and none is skipped.
+ * Runs on every start, so a deploy or a crash does not lose what was posted
+ * while the process was down. Snowflakes are monotonic, so `after` is exact:
+ * nothing is counted twice and nothing is skipped.
  */
-async function backfill(): Promise<void> {
-  const channel = await client.channels.fetch(ACTIVITY_CHANNEL).catch(() => null);
-  if (!(channel instanceof TextChannel)) {
-    logger.error({ channel: ACTIVITY_CHANNEL }, 'activity channel is not a readable text channel');
-    return;
-  }
+async function backfillChannel(channel: BackfillableChannel): Promise<number> {
+  const key = checkpointKey(channel.id);
+  let after = await checkpoints.get(key);
 
-  let after = await checkpoints.get(CHECKPOINT_KEY);
   if (after === null) {
-    // First ever run: start at the beginning of the current month rather than
-    // the beginning of the channel. Earlier months can never qualify anyway —
-    // a member must hold their rank for a WHOLE calendar month — so reading
-    // years of history would cost a great many API calls for data that can
-    // never change an outcome.
+    /*
+     * First run for this channel: start at the beginning of THE CURRENT MONTH,
+     * not the beginning of the channel.
+     *
+     * A member must hold their rank for a whole calendar month, so an earlier
+     * month can never change an outcome. Reading years of history across every
+     * channel in the guild would be tens of thousands of API calls for data
+     * that is already settled.
+     */
     const start = monthKey(new Date());
     after = String((BigInt(start.getTime()) - DISCORD_EPOCH) << 22n);
-    logger.info({ from: start.toISOString() }, 'no checkpoint; backfilling from the start of month');
   }
 
   let counted = 0;
   let highest = after;
 
   for (;;) {
-    const batch = await channel.messages.fetch({ limit: 100, after: highest });
-    if (batch.size === 0) break;
+    const batch = await channel.messages.fetch({ limit: 100, after: highest }).catch(() => null);
+    // A channel we cannot read is not worth stopping the sweep for. Permissions
+    // change, and the other forty channels still need reading.
+    if (batch === null || batch.size === 0) break;
 
     // Oldest first, so the watermark only ever moves forward.
     const ordered = [...batch.values()].sort((a, b) => Number(a.id) - Number(b.id));
@@ -144,18 +237,111 @@ async function backfill(): Promise<void> {
       if (BigInt(m.id) > BigInt(highest)) highest = m.id;
       counted += 1;
     }
-    // Checkpoint after each page. A crash mid-backfill then resumes from where
-    // it stopped instead of starting the whole sweep again.
-    await checkpoints.set(CHECKPOINT_KEY, highest);
+    await checkpoints.set(key, highest).catch(() => undefined);
     if (batch.size < 100) break;
   }
 
-  logger.info({ counted, watermark: highest }, 'backfill complete');
+  return counted;
+}
+
+/**
+ * Sweeps EVERY countable channel in the guild for the current month.
+ *
+ * ★ WHY THIS SWEEPS EVERYTHING AND NOT ONE CHANNEL ★
+ *
+ * It used to read a single nominated channel, so a member talking all month
+ * everywhere else recorded zero. That is the reported bug, and it looked like a
+ * broken bot rather than a bot doing precisely what it was configured to do.
+ *
+ * ★ WHAT CANNOT BE RECOVERED ★
+ *
+ * Voice. Discord keeps no history of who sat in a channel, so there is nothing
+ * to read: voice counts start accumulating from the moment the bot is running
+ * and no earlier. Messages and forum posts for the current month are fully
+ * recoverable, and are recovered here.
+ */
+async function backfill(): Promise<void> {
+  const guild = await client.guilds.fetch(GUILD_ID);
+  const channels = await guild.channels.fetch();
+
+  let counted = 0;
+  let swept = 0;
+  let skipped = 0;
+
+  for (const channel of channels.values()) {
+    if (channel === null || !('messages' in channel)) continue;
+
+    if (!countsTowardActivity(describe(channel), roleScope)) {
+      skipped += 1;
+      continue;
+    }
+
+    swept += 1;
+    counted += await backfillChannel(channel as unknown as BackfillableChannel);
+  }
+
+  logger.info({ counted, channels: swept, skipped }, 'backfill complete');
+}
+
+/**
+ * Counts everybody already sitting in voice when the bot starts.
+ *
+ * ★ WHY THIS IS NEEDED AT ALL ★
+ *
+ * Discord keeps NO history of who was in a voice channel. Nothing can be
+ * backfilled, so voice counts can only ever start from the moment the bot is
+ * running — and without this, a restart during an operation loses everyone who
+ * simply stayed where they were. They never fire a join event again, so an
+ * evening in voice records nothing.
+ *
+ * ★ GUARDED ONCE PER DAY, BECAUSE record() DOES NOT DEDUPLICATE ★
+ *
+ * The store ignores its eventId parameter; the message path is idempotent only
+ * because of its snowflake watermark, and there is no equivalent here. So a
+ * checkpoint keyed on the UTC date makes this run at most once a day however
+ * often the process restarts — which under `tsx watch` is otherwise every time
+ * a file is saved.
+ */
+async function seedVoiceOccupancy(): Promise<void> {
+  const today = new Date().toISOString().slice(0, 10);
+  const key = `voice-seed:${today}`;
+  if ((await checkpoints.get(key)) !== null) return;
+
+  const guild = await client.guilds.fetch(GUILD_ID);
+  const states = guild.voiceStates.cache;
+
+  let seeded = 0;
+  for (const state of states.values()) {
+    const channel = state.channel;
+    if (channel === null) continue;
+    if (!countsTowardActivity(describe(channel), roleScope)) continue;
+
+    await recorder
+      .record({
+        discordId: state.id,
+        kind: 'voice',
+        at: new Date(),
+        isBot: state.member?.user.bot ?? false,
+        channelId: channel.id,
+      })
+      .catch(() => undefined);
+    seeded += 1;
+  }
+
+  await checkpoints.set(key, today).catch(() => undefined);
+  logger.info({ seeded }, 'voice occupancy seeded');
 }
 
 client.once(Events.ClientReady, (c) => {
   logger.info({ tag: c.user.tag, guilds: c.guilds.cache.size }, 'bot connected');
-  void backfill().catch((err: unknown) => logger.error({ err }, 'backfill failed'));
+
+  // Roles FIRST. The scope rule cannot classify a channel without them, and
+  // classifying against an empty role list marks every channel admin-gated and
+  // records nothing at all, which is the failure this change exists to fix.
+  void loadRoles()
+    .then(() => seedVoiceOccupancy())
+    .then(() => backfill())
+    .catch((err: unknown) => logger.error({ err }, 'startup sweep failed'));
 });
 
 client.on(Events.VoiceStateUpdate, (before, after) => {
@@ -164,7 +350,12 @@ client.on(Events.VoiceStateUpdate, (before, after) => {
   if (after.channelId === null) return;
   if (before.channelId === after.channelId) return;
   if (after.guild.id !== GUILD_ID) return;
-  if (!VOICE_CHANNELS.has(after.channelId)) return;
+
+  // The same rule as text: any voice channel that is not admin-gated. The
+  // hardcoded id list this replaces meant joining anything not on it recorded
+  // nothing, which is most of the server.
+  const voiceChannel = after.channel;
+  if (voiceChannel === null || !countsTowardActivity(describe(voiceChannel), roleScope)) return;
 
   void recorder
     .record({
@@ -181,12 +372,21 @@ client.on(Events.MessageCreate, (msg) => {
   if (msg.guildId !== GUILD_ID) return;
 
   /*
+   * The scope rule decides, per channel, every time. Not a configured id.
+   *
+   * Evaluated on the LIVE channel rather than cached, because a channel can be
+   * locked down mid-month and activity recorded after that point would be
+   * activity in a channel we were told not to count.
+   */
+  const scope = describe(msg.channel as unknown as GuildChannelish);
+  if (!countsTowardActivity(scope, roleScope)) return;
+
+  /*
    * Forum activity. A forum post and its replies are messages inside a THREAD
    * whose parent is a forum channel, so both are caught by the same check —
    * there is no separate event for "commented on a forum post".
    */
-  const parentType = msg.channel.isThread() ? msg.channel.parent?.type : undefined;
-  if (parentType === ChannelType.GuildForum) {
+  if (isForumChannel(scope)) {
     void recorder
       .record({
         discordId: msg.author?.id ?? '',
@@ -200,10 +400,9 @@ client.on(Events.MessageCreate, (msg) => {
     return;
   }
   void handle(msg).then(async () => {
-    // Keep the watermark current so a restart does not replay live traffic.
-    if (msg.channelId === ACTIVITY_CHANNEL) {
-      await checkpoints.set(CHECKPOINT_KEY, msg.id).catch(() => undefined);
-    }
+    // Keep this channel's watermark current, so a restart resumes after this
+    // message instead of replaying traffic the listener already counted.
+    await checkpoints.set(checkpointKey(msg.channelId), msg.id).catch(() => undefined);
   });
 });
 

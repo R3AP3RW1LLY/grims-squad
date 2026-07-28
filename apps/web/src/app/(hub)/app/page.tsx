@@ -1,8 +1,16 @@
 import type { Metadata } from 'next';
-import { getAdminActivity, getAdminAudit } from '../../../lib/api';
+import { redirect } from 'next/navigation';
+import {
+  getAdminActivity,
+  getAdminAudit,
+  getAdminDashboard,
+  type AdminActivityRow,
+} from '../../../lib/api';
 import { StepUp } from './step-up';
 import { AuditFilters } from './audit-filters';
+import { Dashboard } from './dashboard';
 import { PageHeader, Section, StatGrid, StatTile } from '../../../components/hub-page';
+import { PageTabs, resolveTab, type PageTab } from '../../../components/page-tabs';
 
 /**
  * The admin console (P1.7).
@@ -21,6 +29,27 @@ export const metadata: Metadata = {
 };
 
 export const dynamic = 'force-dynamic';
+
+/**
+ * ★ FOUR VIEWS OF ONE CONSOLE ★
+ *
+ * The dashboard is the DEFAULT because it is the only one that answers "how is
+ * the squadron doing" without reading a table. The other three are the tables,
+ * and somebody who wants a table knows which one they want.
+ *
+ * Roles & permissions is a link rather than a tab: it lives at its own route
+ * with its own editing surface, and pretending a separate page is a tab of this
+ * one would break the back button in a way that costs an officer their work.
+ *
+ * Each tab fetches only what it renders. The dashboard's aggregates and the
+ * audit log's hundred rows have no reason to be read on the same request.
+ */
+const TABS: readonly PageTab[] = [
+  { key: 'dashboard', label: 'Dashboard' },
+  { key: 'activity', label: 'Member activity & promotions' },
+  { key: 'audit', label: 'Audit log' },
+  { key: 'roles', label: 'Roles & permissions' },
+];
 
 function Num({ n, dim = false }: { n: number; dim?: boolean }) {
   return (
@@ -43,30 +72,78 @@ const GAME_LABEL: Record<string, string> = {
   unknown: 'Not checked',
 };
 
-export default async function AdminPage() {
-  const [activity, audit] = await Promise.all([getAdminActivity(), getAdminAudit()]);
+export default async function AdminPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
+  const params = await searchParams;
+  const tab = resolveTab(TABS, params['tab']);
 
-  if (activity === null) return <StepUp />;
+  /*
+   * Roles lives at its own route. Handled as a redirect rather than rendered
+   * here so the tab is a real destination and the URL is honest about where
+   * you are.
+   */
+  if (tab === 'roles') redirect('/app/roles');
 
-  const qualifying = activity.rows.filter((r) => r.qualifies).length;
+  /*
+   * Only what this tab shows. The gate check has to come from SOMETHING
+   * though — every tab needs to know whether the second factor is fresh, and
+   * a null from any admin read is that answer.
+   */
+  const [dashboard, activity, audit] = await Promise.all([
+    tab === 'dashboard' ? getAdminDashboard() : Promise.resolve(null),
+    tab === 'activity' ? getAdminActivity() : Promise.resolve(null),
+    tab === 'audit' ? getAdminAudit() : Promise.resolve(null),
+  ]);
 
-  const observed = activity.rows.filter((r) => r.gameActivity === 'observed').length;
-  const linked = activity.rows.filter((r) => r.handle !== null).length;
+  // Whichever tab is showing, a null from its own read means the door is shut.
+  const locked =
+    (tab === 'dashboard' && dashboard === null) ||
+    (tab === 'activity' && activity === null) ||
+    (tab === 'audit' && audit === null);
+  if (locked) return <StepUp />;
 
   return (
     <>
       <PageHeader
         eyebrow="Squadron leadership"
         title="ADMIN CONSOLE"
-        action={
-          <a
-            href="/app/roles"
-            className="rounded border border-[var(--color-border-hairline)] px-4 py-2 font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--color-brand-cyan-bright)]"
-          >
-            Roles &amp; permissions
-          </a>
-        }
+        action={<PageTabs tabs={TABS} current={tab} basePath="/app" />}
       />
+
+      {tab === 'dashboard' && dashboard !== null && <Dashboard data={dashboard} />}
+
+      {tab === 'activity' && activity !== null && <ActivityTab activity={activity} />}
+
+      {tab === 'audit' && audit !== null && (
+        <Section
+          title="Audit log"
+          description="Read-only here and append-only in the database. A console that can edit the audit log is an audit log that proves nothing."
+        >
+          <AuditFilters
+            initial={audit.entries}
+            actions={audit.actions}
+            initialTotal={audit.total}
+          />
+        </Section>
+      )}
+    </>
+  );
+}
+
+function ActivityTab({
+  activity,
+}: {
+  activity: { month: string; rows: AdminActivityRow[] };
+}) {
+  const qualifying = activity.rows.filter((r) => r.qualifies).length;
+  const observed = activity.rows.filter((r) => r.gameActivity === 'observed').length;
+  const linked = activity.rows.filter((r) => r.handle !== null).length;
+
+  return (
+    <>
 
       {/*
         Figures first, table beneath, both full width.
@@ -96,9 +173,9 @@ export default async function AdminPage() {
           hint="Have signed in to the hub"
         />
         <StatTile
-          label="Audit entries"
-          value={String(audit?.entries.length ?? 0)}
-          hint="Most recent first"
+          label="Tracked"
+          value={String(activity.rows.length)}
+          hint="Members the bot has seen this month"
         />
       </StatGrid>
 
@@ -107,10 +184,12 @@ export default async function AdminPage() {
         description="A month counts when there is any Discord activity AND an Elite session. Nothing is promoted before 1 August 2026, and the first live run will follow a dry run you have read."
       >
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] border-collapse text-sm">
+          <table className="w-full min-w-[980px] border-collapse text-sm">
             <thead>
               <tr className="border-b border-[var(--color-border-hairline)] text-left font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--color-text-secondary)]">
                 <th scope="col" className="py-3 pr-4">Member</th>
+                <th scope="col" className="py-3 pr-4">Rank</th>
+                <th scope="col" className="py-3 pr-4">Working toward</th>
                 <th scope="col" className="py-3 pr-4">Messages</th>
                 <th scope="col" className="py-3 pr-4">Forum</th>
                 <th scope="col" className="py-3 pr-4">Voice</th>
@@ -126,6 +205,30 @@ export default async function AdminPage() {
                       <span className="text-[var(--color-text-secondary)]">
                         Discord only ({r.discordId})
                       </span>
+                    )}
+                  </td>
+                  {/*
+                    The rank they hold, then the rung above it. Both on the
+                    member line because "is this person due a promotion" is the
+                    question this table exists to answer, and it cannot be
+                    answered by activity counts alone.
+                  */}
+                  <td className="py-3 pr-4 font-mono text-xs text-[var(--color-brand-cyan-bright)]">
+                    {r.currentRank ?? (
+                      <span className="text-[var(--color-text-secondary)]">—</span>
+                    )}
+                  </td>
+                  <td className="py-3 pr-4 font-mono text-xs">
+                    {r.nextRank !== null ? (
+                      <span className="text-[var(--color-text-secondary)]">
+                        <span aria-hidden="true">↑ </span>
+                        {r.nextRank}
+                      </span>
+                    ) : r.currentRank !== null ? (
+                      /* Top of the ladder. An achievement, not missing data. */
+                      <span className="text-[var(--color-brand-orange)]">Top of ladder</span>
+                    ) : (
+                      <span className="text-[var(--color-text-secondary)]">—</span>
                     )}
                   </td>
                   <td className="py-3 pr-4"><Num n={r.messageCount} /></td>
@@ -154,16 +257,6 @@ export default async function AdminPage() {
         )}
       </Section>
 
-      <Section
-        title="Audit log"
-        description="Read-only here and append-only in the database. A console that can edit the audit log is an audit log that proves nothing."
-      >
-        <AuditFilters
-          initial={audit?.entries ?? []}
-          actions={audit?.actions ?? []}
-          initialTotal={audit?.total ?? 0}
-        />
-      </Section>
     </>
   );
 }

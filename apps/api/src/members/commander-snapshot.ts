@@ -1,4 +1,4 @@
-import { describeEliteRanks, type EliteRankKey } from '@grims/shared';
+import { allEliteRanks, describeEliteRanks, type EliteRankKey } from '@grims/shared';
 
 /**
  * What the journal knows about a commander, reduced to what a roster card shows.
@@ -27,13 +27,22 @@ import { describeEliteRanks, type EliteRankKey } from '@grims/shared';
 
 export interface CommanderSnapshot {
   /**
-   * Named ranks, e.g. `Trade: Tycoon`. Empty when nothing has been reported.
+   * Ranks, e.g. `Trade: Tycoon`.
    *
-   * `index` is carried alongside the name because the UI needs to rank them by
-   * ACHIEVEMENT, and the names sort alphabetically into nonsense — "Surveyor"
-   * beats "Elite" in a string comparison, which is the opposite of true.
+   * HELD-ONLY inside the API; expanded to all six ladders by `fillLadders` on
+   * the way out, at which point `name` and `index` are null for a ladder
+   * nothing has been reported for.
+   *
+   * `index` travels with the name because the UI ranks them by ACHIEVEMENT,
+   * and the names sort alphabetically into nonsense — "Surveyor" beats "Elite"
+   * in a string comparison, which is the opposite of true.
    */
-  readonly ranks: Array<{ key: EliteRankKey; label: string; name: string; index: number }>;
+  readonly ranks: Array<{
+    key: EliteRankKey;
+    label: string;
+    name: string | null;
+    index: number | null;
+  }>;
   /**
    * Where the ranks above came from.
    *
@@ -100,6 +109,34 @@ export function withInaraRanks(
     rankSource: 'inara',
     ranksFetchedAt: inara.fetchedAt.toISOString(),
   };
+}
+
+/**
+ * Expands a snapshot's ranks to ALL SIX LADDERS before it leaves the API.
+ *
+ * ★ WHY HERE AND NOT IN THE BROWSER ★
+ *
+ * The ladder names live in @grims/shared, which the API depends on and the web
+ * app does not. Adding that dependency to ship six labels would pull a package
+ * built for the server into the browser bundle; filling them here costs
+ * nothing and leaves the card rendering exactly what it is given.
+ *
+ * The internals stay HELD-ONLY on purpose. `withInaraRanks` decides whether
+ * Inara has anything to say by looking at the length of its list, and a
+ * pre-filled six would make that test always true — Inara would then win with
+ * six nulls and wipe the journal's real ranks off every card.
+ */
+export function fillLadders(snapshot: CommanderSnapshot): CommanderSnapshot {
+  /*
+   * The null filter is a type narrowing, not a behaviour change: nothing
+   * reaches here with a null name, because filling is the LAST step and the
+   * held-only shape is what every producer emits.
+   */
+  const held = snapshot.ranks.flatMap((r) =>
+    r.name === null || r.index === null ? [] : [{ key: r.key, name: r.name, index: r.index }],
+  );
+
+  return { ...snapshot, ranks: allEliteRanks(held) };
 }
 
 /** One raw event, as stored. */

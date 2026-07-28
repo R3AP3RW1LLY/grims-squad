@@ -67,9 +67,17 @@ export interface IActivityStore {
   ): Promise<boolean>;
 }
 
-export interface RecorderConfig {
-  readonly activityChannelId: string;
-}
+/*
+ * ★ NO CHANNEL CONFIG ANY MORE ★
+ *
+ * `RecorderConfig.activityChannelId` scoped message counting to ONE channel, so
+ * a member talking all month everywhere else recorded zero. Which channels
+ * count is now decided per channel from Discord's own permissions, at the call
+ * site (channel-scope.ts) — the recorder counts whatever it is given.
+ *
+ * That is the right split: the recorder is about arithmetic and idempotency,
+ * and "is this a members' channel" is a question about a guild.
+ */
 
 /**
  * Pins an instant to the first of its month, midnight UTC.
@@ -83,14 +91,16 @@ export function monthKey(at: Date): Date {
 }
 
 export class ActivityRecorder {
-  constructor(
-    private readonly store: IActivityStore,
-    private readonly config: RecorderConfig,
-  ) {}
+  constructor(private readonly store: IActivityStore) {}
 
-  /** A message in the designated activity channel. */
+  /**
+   * A message in a channel that counts.
+   *
+   * The caller has already decided that it counts. This used to re-check
+   * against one configured id and drop everything else, which is what made the
+   * counts zero.
+   */
   async onMessage(msg: IncomingMessage): Promise<void> {
-    if (msg.channelId !== this.config.activityChannelId) return;
     await this.record({
       discordId: msg.discordId,
       kind: 'message',
@@ -102,10 +112,9 @@ export class ActivityRecorder {
   }
 
   /**
-   * Any activity event. Forum posts and voice joins arrive here directly —
-   * unlike messages they are not restricted to one configured channel, because
-   * taking part in a forum thread or sitting in voice is participation wherever
-   * it happens.
+   * Any activity event. Messages, forum posts and voice joins all arrive here,
+   * from any channel the scope rule accepted — taking part is participation
+   * wherever it happens.
    */
   async record(e: ActivityEvent): Promise<void> {
     // Bots are ignored, including our own. Otherwise the bot's own

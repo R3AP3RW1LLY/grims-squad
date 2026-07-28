@@ -17,6 +17,21 @@ import type { IActivityStore, ActivityKind } from './activity.recorder.js';
 export class PrismaActivityStore implements IActivityStore {
   constructor(private readonly prisma: PrismaClient) {}
 
+  /**
+   * Adds one event to a member's month.
+   *
+   * ★ THIS DOES NOT DEDUPLICATE, AND THE CALLER MUST NOT ASSUME IT DOES ★
+   *
+   * `_eventId` is accepted and ignored. Idempotency comes from the CHECKPOINT
+   * WATERMARK instead: the backfill only ever fetches messages after the
+   * highest snowflake it has already recorded for that channel, so a message
+   * cannot be presented twice in the first place.
+   *
+   * Written down because the parameter looks like a dedupe key and is not one.
+   * Anything that records an event WITHOUT a monotonic watermark behind it —
+   * voice occupancy at startup, for instance — has to guard itself, or a
+   * restart adds a duplicate every time.
+   */
   async record(
     discordId: string,
     month: Date,

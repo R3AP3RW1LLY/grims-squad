@@ -8,6 +8,7 @@ import { LEADERSHIP_CEILING } from './members.store.js';
 import {
   buildSnapshots,
   withInaraRanks,
+  fillLadders,
   EMPTY_SNAPSHOT,
   type CommanderSnapshot,
 } from './commander-snapshot.js';
@@ -128,9 +129,13 @@ export class MembersController {
          * `showFleet` and stay governed by it; this must never become a way
          * around a toggle somebody set.
          */
-        commander: withInaraRanks(
-          snapshots.get(r.source.id) ?? EMPTY_SNAPSHOT,
-          inara.get(r.source.id),
+        /*
+          Inara first, journal as the fallback, THEN expand to all six ladders.
+          In that order: filling before the merge would make Inara's "I have
+          nothing" indistinguishable from six real readings.
+        */
+        commander: fillLadders(
+          withInaraRanks(snapshots.get(r.source.id) ?? EMPTY_SNAPSHOT, inara.get(r.source.id)),
         ),
         /*
          * ★ WHAT THEY ACTUALLY WEAR IN DISCORD ★

@@ -21,7 +21,7 @@ let rec: ActivityRecorder;
 
 beforeEach(() => {
   store = new InMemoryActivityStore();
-  rec = new ActivityRecorder(store, { activityChannelId: CHANNEL });
+  rec = new ActivityRecorder(store);
 });
 
 describe('monthKey', () => {
@@ -99,14 +99,27 @@ describe('recording a message', () => {
 });
 
 describe('what is ignored', () => {
-  it('ignores messages in any other channel', async () => {
+  it('MANDATORY: counts a message from ANY channel it is given', async () => {
+    /*
+     * ★ THIS ASSERTION IS THE REVERSE OF THE ONE IT REPLACES ★
+     *
+     * The recorder used to drop anything outside one configured channel, and
+     * the old test pinned that. It is the reported bug: a member talking all
+     * month across the server showed 0 messages in the admin console, because
+     * only one channel out of dozens was ever counted.
+     *
+     * Which channels count is a question about a GUILD — permissions,
+     * announcement status, staff gating — and it now lives in channel-scope.ts
+     * where it can be reasoned about. The recorder is about arithmetic and
+     * idempotency, and counts whatever the caller decided was in scope.
+     */
     await rec.onMessage({
       discordId: '111',
       channelId: '999999999999999999',
       at: new Date('2026-07-14T10:00:00.000Z'),
       isBot: false,
     });
-    expect(store.rows).toHaveLength(0);
+    expect(store.rows).toHaveLength(1);
   });
 
   it('ignores bots, including our own', async () => {

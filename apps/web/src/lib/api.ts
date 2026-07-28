@@ -136,7 +136,8 @@ async function get<T>(path: string, opts: { authed?: boolean } = {}): Promise<T 
  */
 /** What the journal knows about a commander, for the roster cards. */
 export interface CommanderSnapshot {
-  ranks: Array<{ key: string; label: string; name: string; index: number }>;
+  /** All six ladders, always. `name` is null for one nothing has been reported for. */
+  ranks: Array<{ key: string; label: string; name: string | null; index: number | null }>;
   /** Where the ranks came from. Inara is self-reported; the journal is the game. */
   rankSource: 'inara' | 'journal' | null;
   /** When Inara was last asked. Null unless rankSource is 'inara'. */
@@ -215,6 +216,10 @@ export interface AdminActivityRow {
   discordId: string;
   handle: string | null;
   displayName: string | null;
+  /** The rank they hold now. */
+  currentRank: string | null;
+  /** The next rung up, or null at the top of the ladder. */
+  nextRank: string | null;
   messageCount: number;
   forumPostCount: number;
   voiceJoinCount: number;
@@ -239,6 +244,39 @@ export interface AdminAuditRow {
  * two-factor gate produces. The page renders its own step-up prompt rather
  * than a crash — a locked door should look like a locked door.
  */
+/** Squadron-wide figures for the admin dashboard. Aggregates only, never one member's data. */
+export interface AdminDashboard {
+  month: string;
+  discord: {
+    messages: number;
+    forumPosts: number;
+    voiceJoins: number;
+    activeMembers: number;
+    trackedMembers: number;
+    /** One entry per day of the month, index 0 = the 1st. */
+    daily: number[];
+    top: Array<{ name: string; messages: number; voice: number }>;
+  };
+  game: {
+    events: number;
+    reporting: number;
+    sessionsThisMonth: number;
+    flyingThisMonth: number;
+    playingNow: number;
+    ships: Array<{ ship: string; pilots: number }>;
+    byType: Array<{ type: string; count: number }>;
+  };
+  squadron: {
+    members: number;
+    verified: number;
+    ranks: Array<{ rank: string; held: number }>;
+    qualifying: number;
+  };
+}
+
+export const getAdminDashboard = (): Promise<AdminDashboard | null> =>
+  get('/v1/admin/dashboard', { authed: true });
+
 export const getAdminActivity = (
   month?: string,
 ): Promise<{ month: string; rows: AdminActivityRow[] } | null> =>

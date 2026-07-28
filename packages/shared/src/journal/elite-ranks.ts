@@ -114,6 +114,52 @@ export const ELITE_RANK_LABELS: Record<EliteRankKey, string> = {
   CQC: 'CQC',
 };
 
+/** One ladder's standing. `name` is null when nothing has been reported for it. */
+export interface EliteRankStanding {
+  readonly key: EliteRankKey;
+  readonly label: string;
+  readonly name: string | null;
+  readonly index: number | null;
+}
+
+/**
+ * Every ladder, in a fixed order, whether or not there is a rank for it.
+ *
+ * ★ WHY ABSENT LADDERS ARE LISTED RATHER THAN DROPPED ★
+ *
+ * Showing only the ladders somebody has a rank in makes two very different
+ * commanders look identical: one who has never flown a combat ship, and one
+ * whose data we simply do not have. Both render as silence.
+ *
+ * It also makes cards incomparable — a member with three ladders and a member
+ * with six produce lists of different lengths in different orders, and the eye
+ * cannot scan down a column of them to see who is the better trader.
+ *
+ * So all six always appear. A ladder with nothing behind it says so, and
+ * "Harmless" — a real rank that a rank-0 commander genuinely holds — stays
+ * clearly distinct from having no reading at all.
+ *
+ * The ORDER is the declaration order of the ladders, not the commander's
+ * achievement. Fixed position is what lets one card be read against another.
+ */
+export function allEliteRanks(
+  held: ReadonlyArray<{ key: EliteRankKey; name: string; index: number }>,
+): EliteRankStanding[] {
+  const byKey = new Map(held.map((r) => [r.key, r]));
+
+  return (Object.keys(ELITE_RANK_LADDERS) as EliteRankKey[]).map((key) => {
+    const hit = byKey.get(key);
+    return {
+      key,
+      label: ELITE_RANK_LABELS[key],
+      name: hit?.name ?? null,
+      // Explicitly null, not 0. Index 0 is Harmless, which is a rank somebody
+      // holds — conflating it with "unknown" would misreport every new pilot.
+      index: hit?.index ?? null,
+    };
+  });
+}
+
 /**
  * Inara's names for the same ladders.
  *

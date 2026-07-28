@@ -20,7 +20,8 @@ import {
 } from '../auth/admin-gate.guard.js';
 import { User, type CurrentUser } from '../auth/current-user.js';
 import { verifyCsrf, readCsrfCookie } from '../common/csrf.js';
-import { ADMIN_STORE, ROLE_ADMIN, MAPPING_ADMIN } from './admin.tokens.js';
+import { ADMIN_STORE, DASHBOARD_STORE, ROLE_ADMIN, MAPPING_ADMIN } from './admin.tokens.js';
+import type { DashboardStore, DashboardData } from './dashboard.store.js';
 import type { AdminStore, ActivityRow, AuditRow, MemberRow } from './admin.store.js';
 import type { RoleAdminService, MaskPreview } from './role-admin.service.js';
 import type { MappingAdminService, MappingRecord } from './mapping-admin.service.js';
@@ -47,6 +48,7 @@ import type { MappingAdminService, MappingRecord } from './mapping-admin.service
 export class AdminController {
   constructor(
     @Inject(ADMIN_STORE) private readonly store: AdminStore,
+    @Inject(DASHBOARD_STORE) private readonly dash: DashboardStore,
     @Inject(ROLE_ADMIN) private readonly roles: RoleAdminService,
     @Inject(MAPPING_ADMIN) private readonly mappings: MappingAdminService,
   ) {}
@@ -60,6 +62,22 @@ export class AdminController {
    * decided on this data, so an officer who cannot see it cannot do the job —
    * and the member's alternative is not to be enrolled in progression at all.
    */
+  /**
+   * The dashboard's figures.
+   *
+   * ★ AGGREGATES ONLY ★
+   *
+   * Everything here is a squadron-wide count or total. No member's location,
+   * credits or fleet appears, because those are governed by their own consent
+   * toggles and a dashboard is exactly where they would quietly stop being.
+   *
+   * Behind the same second-factor gate as every other read on this controller.
+   */
+  @Get('dashboard')
+  async dashboard(): Promise<DashboardData> {
+    return this.dash.dashboard(new Date());
+  }
+
   @Get('activity')
   async activity(@Query('month') month?: string): Promise<{ month: string; rows: ActivityRow[] }> {
     const key = normaliseMonth(month);

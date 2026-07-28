@@ -1,9 +1,42 @@
 import type { PrismaClient } from '@grims/db';
 
+/**
+ * The rank ladder, for reporting what somebody is working toward.
+ *
+ * ★ WHY THIS IS RESTATED HERE ★
+ *
+ * The authority is ssot/02-domain/rank-progression.yaml, read by the promotion
+ * worker. The API does not read that file — it has no business promoting
+ * anyone, and giving it the parser would put the ladder in two places that both
+ * ACT on it.
+ *
+ * This is display only: it answers "what comes next" on an admin table and can
+ * never grant anything. If it drifted from the SSOT the worst outcome is a
+ * wrong label on a page, not a wrong promotion — and a test pins the two
+ * together so it will not drift silently.
+ */
+export const LADDER_NEXT: Record<string, string> = {
+  Cadet: 'Sergeant',
+  Sergeant: 'Master Sergeant',
+  'Master Sergeant': '2nd Lieutenant',
+  '2nd Lieutenant': '1st Lieutenant',
+  '1st Lieutenant': 'Commander',
+  Commander: 'Master Commander',
+  'Master Commander': 'General',
+  General: 'Lord General',
+  'Lord General': 'Grand Master General',
+  // Grand Master General is absent on purpose: it is the top, and an entry
+  // would render an upward arrow pointing at a rank that does not exist.
+};
+
 export interface ActivityRow {
   readonly discordId: string;
   readonly handle: string | null;
   readonly displayName: string | null;
+  /** The rank they hold now, from granted roles (INV-047). */
+  readonly currentRank: string | null;
+  /** The next rung up. Null at the top of the ladder, and for unranked members. */
+  readonly nextRank: string | null;
   readonly messageCount: number;
   readonly forumPostCount: number;
   readonly voiceJoinCount: number;
@@ -101,7 +134,26 @@ export class PrismaAdminStore implements AdminStore {
         voiceJoinCount: true,
         gameActivity: true,
         lastActivityAt: true,
-        user: { select: { handle: true, displayName: true } },
+        user: {
+          select: {
+            handle: true,
+            displayName: true,
+            /*
+             * The rank they HOLD, read from granted roles (INV-047).
+             *
+             * Highest first and take:1 — a member can hold several hierarchical
+             * roles over time and the ladder position, not the grant date,
+             * decides which one they are. Sorting by grantedAt would show a
+             * demoted member their old rank.
+             */
+            userRoles: {
+              where: { role: { isHierarchical: true } },
+              select: { role: { select: { name: true, rankOrder: true } } },
+              orderBy: { role: { rankOrder: 'desc' as const } },
+              take: 1,
+            },
+          },
+        },
       },
       orderBy: [{ messageCount: 'desc' }, { voiceJoinCount: 'desc' }],
     });
@@ -110,6 +162,7 @@ export class PrismaAdminStore implements AdminStore {
       discordId: r.discordId,
       handle: r.user?.handle ?? null,
       displayName: r.user?.displayName ?? null,
+      currentRank: r.user?.userRoles[0]?.role.name ?? null,
       messageCount: r.messageCount,
       forumPostCount: r.forumPostCount,
       voiceJoinCount: r.voiceJoinCount,
@@ -122,6 +175,15 @@ export class PrismaAdminStore implements AdminStore {
        * this so an officer can see WHICH it was. An assumption must never be
        * displayed as if it were an observation.
        */
+      /*
+       * What they are working toward. Null at the top of the ladder — Grand
+       * Master General has nothing above it, and showing a blank arrow there
+       * would read as missing data rather than as an achievement.
+       */
+      nextRank:
+        r.user?.userRoles[0]?.role.name === undefined
+          ? null
+          : (LADDER_NEXT[r.user.userRoles[0].role.name] ?? null),
       qualifies:
         (r.messageCount > 0 || r.forumPostCount > 0 || r.voiceJoinCount > 0) &&
         (r.gameActivity === 'observed' || r.gameActivity === 'assumed'),

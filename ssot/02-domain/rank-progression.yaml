@@ -8,7 +8,45 @@
 # wording said the exact opposite of this file.
 
 meta:
-  activityChannelId: '801929817149669388' # #grim-general-chat
+  # ★ SUPERSEDED 2026-07-28 — see `activityScope` below. ★
+  #
+  # This nominated ONE channel, and counting was scoped to it. The result was
+  # that a member talking all month across fifty other channels recorded zero
+  # messages, which is what was reported from the admin console. Kept as a
+  # record of what the rule used to be; nothing reads it.
+  activityChannelId_superseded: '801929817149669388' # #grim-general-chat
+
+  # ★ WHICH CHANNELS COUNT — human decision, 2026-07-28 ★
+  #
+  # "Any channel that is not admin gated, and not an announcement channel. All
+  # other channels work, including NSFW channels."
+  #
+  # DERIVED from Discord's own permissions rather than listed, which reverses
+  # the earlier reasoning below. The old argument was that a derived rule
+  # "silently opts in every future channel"; that is now the intent, because a
+  # squadron that adds a channel expects talking in it to count and nobody will
+  # remember to edit a config. Silently counting NOTHING is the far worse
+  # failure, and it is the one that actually happened.
+  activityScope:
+    rule: >
+      A channel counts unless every role able to view it is privileged
+      (Administrator, Manage Guild or Manage Channels), or it is an
+      announcement or stage channel.
+    adminGatedMeans: >
+      ONLY staff can see it. Not "restricted at all" — the squadron gates
+      channels behind interest roles (Miners, Explorers, Anti-Xeno) and those
+      are ordinary members talking. A rule of "@everyone must be able to view
+      it" reads as reasonable and would discard most of the server.
+    nsfw: >
+      Counted. NSFW is a content warning, not a permission, and members talking
+      there are members talking. Explicit instruction.
+    excludedTypes: >
+      Announcement channels are readable by everyone and postable only by
+      staff, so counting them would award activity to the few who write
+      announcements and nothing to anybody else. Stage channels likewise: an
+      audience of two hundred with three speakers is not two hundred people
+      taking part.
+    implementation: apps/bot/src/channel-scope.ts
   timezone: UTC
   # ★ MONTHLY, on the 1st at 00:00 UTC. ★
   #
@@ -47,30 +85,29 @@ qualifyingMonth:
       default: 1
       kinds:
         - id: message
-          description: A message in the activity channel.
-          channelId: '801929817149669388'   # #grim-general-chat
+          description: >
+            A message in any channel that counts — see meta.activityScope.
+            No longer restricted to one nominated channel (2026-07-28).
         - id: forum
           description: >
             A post or reply in any forum channel. Both are messages inside a
             thread whose parent is a forum, so one check catches both.
         - id: voice
-          description: Joining one of the listed voice channels.
-          # Named EXPLICITLY rather than derived from permissions. A derived
-          # list ("anywhere @everyone can Connect") maintains itself but also
-          # silently opts in every future channel, including ones created for a
-          # purpose nobody meant to count.
-          channelIds:
-            - '1394739606754168852'   # Squadron Open Comms
-            - '1394739785037250711'   # Saturday Night Game Night Comms
-            - '1512926175205265509'   # Squad Wing 1
-            - '1512926227399442533'   # Squad Wing 2
-            - '1528069369509187624'   # Squad Wing 3
-            - '1528069836159189133'   # NSFW Squadron Open Comms
+          description: >
+            Joining any voice channel that counts — see meta.activityScope.
+            The explicit six-channel list was removed on 2026-07-28: joining
+            anything not on it recorded nothing, which was most of the server.
           note: >
             Only a JOIN counts. Toggling mute, deafen or camera fires the same
             gateway event and would otherwise inflate the count for sitting
-            still. All six ids were verified against the live guild as voice
-            channels before being recorded here.
+            still.
+          notBackfillable: >
+            Discord keeps NO history of voice channel occupancy, so voice
+            counts can only ever start from the moment the bot is running.
+            Messages and forum posts for the current month are recoverable;
+            voice is not. Members already sitting in voice when the bot starts
+            are counted once, guarded per UTC day so a restart cannot inflate
+            them.
     - id: game_activity
       description: At least one Elite Dangerous session observed.
       default: 1
