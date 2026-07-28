@@ -142,7 +142,20 @@ export interface CommanderSnapshot {
   lastPlayedAt: string | null;
 }
 
-export type RosterMember = PublicProfile & { commander: CommanderSnapshot };
+/** A Discord role exactly as the server defines it. */
+export interface DiscordRoleBadge {
+  name: string;
+  /** `#rrggbb`, or null where Discord reports no colour. */
+  colour: string | null;
+  /** Discord shows this role separately in its member list. */
+  hoist: boolean;
+}
+
+export type RosterMember = PublicProfile & {
+  commander: CommanderSnapshot;
+  /** Every Discord role they hold, highest first — not just the ones we map. */
+  discordRoles: DiscordRoleBadge[];
+};
 
 export const getRoster = (): Promise<{ members: RosterMember[]; total: number } | null> =>
   get('/v1/members', { authed: true });

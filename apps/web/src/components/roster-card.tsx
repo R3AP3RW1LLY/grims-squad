@@ -1,5 +1,6 @@
 import { formatLocal } from '../lib/time';
 import type { RosterMember } from '../lib/api';
+import { RoleChip } from './role-chip';
 
 /**
  * One commander on the roster.
@@ -170,6 +171,28 @@ export function RosterCard({
             )}
           </div>
         </div>
+
+        {/*
+          ★ EVERY DISCORD ROLE THEY HOLD ★
+
+          Not just the ones our permission system maps. Colour roles, division
+          roles, ping roles — a member wearing them is wearing them, and showing
+          only the mapped ones would show a fraction of somebody's actual
+          standing in the server.
+
+          Ordered by Discord POSITION, highest first, which is the order Discord
+          itself displays. Matching that is what lets somebody glance between
+          the two and recognise the same person.
+        */}
+        {member.discordRoles.length > 0 && (
+          <ul className="mt-4 flex list-none flex-wrap gap-1.5 p-0">
+            {member.discordRoles.map((r) => (
+              <li key={r.name}>
+                <RoleChip name={r.name} colour={r.colour} />
+              </li>
+            ))}
+          </ul>
+        )}
 
         {topRanks.length > 0 && (
           <ul className="mt-4 flex list-none flex-wrap gap-1.5 p-0">

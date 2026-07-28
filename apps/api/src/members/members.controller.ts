@@ -76,7 +76,12 @@ export class MembersController {
    */
   @Get('members')
   async roster(): Promise<{
-    members: Array<PublicProfile & { commander: CommanderSnapshot }>;
+    members: Array<
+      PublicProfile & {
+        commander: CommanderSnapshot;
+        discordRoles: Array<{ name: string; colour: string | null; hoist: boolean }>;
+      }
+    >;
     total: number;
   }> {
     const rows = await this.store.roster();
@@ -87,9 +92,16 @@ export class MembersController {
      * members the per-member version is a hundred round trips to render a page
      * — the classic N+1, and the classic place to introduce it.
      */
-    const snapshots = buildSnapshots(
-      await this.store.snapshotEvents(visible.map((r) => r.source.id)),
-    );
+    const [snapshots, catalogue] = await Promise.all([
+      this.store
+        .snapshotEvents(visible.map((r) => r.source.id))
+        .then((events) => buildSnapshots(events)),
+      /*
+       * The guild's role names and colours, fetched ONCE. A few dozen rows for
+       * the whole page rather than a join multiplied by the roster.
+       */
+      this.store.discordRoleCatalogue(),
+    ]);
 
     return {
       members: visible.map((r) => ({
@@ -104,6 +116,27 @@ export class MembersController {
          * around a toggle somebody set.
          */
         commander: snapshots.get(r.source.id) ?? EMPTY_SNAPSHOT,
+        /*
+         * ★ WHAT THEY ACTUALLY WEAR IN DISCORD ★
+         *
+         * Not our permission roles — those are `ranks`, and most Discord roles
+         * never map to one. Colour roles, division roles, ping roles: a member
+         * wearing them is wearing them, and a roster that showed only the ones
+         * our permission system cares about would show a fraction of somebody's
+         * actual standing in the server.
+         *
+         * Ordered by Discord POSITION, highest first, which is the order
+         * Discord itself displays them in. Matching that is why somebody can
+         * glance between the two and recognise the same person.
+         *
+         * A role Discord has since deleted is absent from the catalogue and is
+         * dropped rather than rendered as a snowflake.
+         */
+        discordRoles: (r.source.guildRoleIds ?? [])
+          .map((id) => catalogue.get(id))
+          .filter((role): role is NonNullable<typeof role> => role !== undefined)
+          .sort((a, b) => b.position - a.position)
+          .map(({ name, colour, hoist }) => ({ name, colour, hoist })),
       })),
       // The COUNT of active members is not private — it is the squadron's size,
       // which is public on Inara anyway. Who they are is the private part.

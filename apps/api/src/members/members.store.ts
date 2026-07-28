@@ -15,6 +15,16 @@ export interface MembersStore {
   handleOf(userId: string): Promise<string | null>;
   /** Latest journal event of each interesting type, for the roster cards. */
   snapshotEvents(userIds: readonly string[]): Promise<SnapshotEvent[]>;
+  /** Every guild role we know the name and colour of, keyed by snowflake. */
+  discordRoleCatalogue(): Promise<Map<string, DiscordRoleInfo>>;
+}
+
+/** One Discord role, as Discord defines it. */
+export interface DiscordRoleInfo {
+  readonly name: string;
+  readonly colour: string | null;
+  readonly position: number;
+  readonly hoist: boolean;
 }
 
 /**
@@ -59,6 +69,7 @@ export class PrismaMembersStore implements MembersStore {
       orderBy: { verifiedAt: 'desc' as const },
       take: 1,
     },
+    discordIdentity: { select: { guildRoles: true } },
     userRoles: {
       select: { role: { select: { name: true, colour: true, rankOrder: true } } },
       // Highest first, so a card showing only the top one shows the top one.
@@ -79,6 +90,7 @@ export class PrismaMembersStore implements MembersStore {
     status: string;
     privacySettings: Partial<PrivacySettings> | null;
     cmdrVerifications: Array<{ cmdrName: string }>;
+    discordIdentity: { guildRoles: string[] } | null;
     userRoles: Array<{ role: { name: string; colour: string | null; rankOrder: number } }>;
   }): MemberRow {
     return {
@@ -94,6 +106,9 @@ export class PrismaMembersStore implements MembersStore {
         joinedAt: u.joinedAt,
         status: u.status,
         ranks: u.userRoles.map((r) => ({ name: r.role.name, colour: r.role.colour })),
+        // Snowflakes only. Names and colours are resolved separately, from the
+        // cached guild roles — see `discordRoleCatalogue`.
+        guildRoleIds: u.discordIdentity?.guildRoles ?? [],
         cmdrName: u.cmdrVerifications[0]?.cmdrName ?? null,
         // location, credits and fleet arrive with cAPI (P1.8, blocked on
         // Frontier). Absent here means absent from the response, which is the
@@ -139,6 +154,31 @@ export class PrismaMembersStore implements MembersStore {
       orderBy: [{ userId: 'asc' }, { eventType: 'asc' }, { occurredAt: 'desc' }],
       distinct: ['userId', 'eventType'],
     });
+  }
+
+  /**
+   * The guild's roles, by snowflake.
+   *
+   * ★ ONE QUERY FOR THE WHOLE PAGE ★
+   *
+   * A guild has a few dozen roles and a roster has a hundred members, so
+   * fetching the catalogue ONCE and resolving in memory is a single small read
+   * — whereas joining per member would multiply it by the roster.
+   *
+   * Roles Discord has since deleted simply are not in the map, and a member
+   * still carrying one shows nothing for it rather than an id.
+   */
+  async discordRoleCatalogue(): Promise<Map<string, DiscordRoleInfo>> {
+    const rows = await this.#db.discordRole.findMany({
+      select: { discordRoleId: true, name: true, colour: true, position: true, hoist: true },
+    });
+
+    return new Map(
+      rows.map((r) => [
+        r.discordRoleId,
+        { name: r.name, colour: r.colour, position: r.position, hoist: r.hoist },
+      ]),
+    );
   }
 
   async privacyOf(userId: string): Promise<Partial<PrivacySettings> | null> {

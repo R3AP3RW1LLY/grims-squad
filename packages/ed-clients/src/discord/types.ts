@@ -42,6 +42,8 @@ export interface DiscordGuildRole {
   readonly colour: string | null;
   /** Higher is nearer the top of the guild's role list. */
   readonly position: number;
+  /** Discord lists this role separately in the member sidebar. */
+  readonly hoist: boolean;
 }
 
 export interface DiscordGuildMemberSummary {

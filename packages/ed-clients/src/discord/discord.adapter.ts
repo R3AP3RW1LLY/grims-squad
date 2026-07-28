@@ -198,11 +198,13 @@ export class DiscordAdapter implements IDiscordIdentityProvider {
       name?: string;
       color?: number;
       position?: number;
+      hoist?: boolean;
     }>;
 
     return roles
-      .filter((r): r is { id: string; name: string; color?: number; position?: number } =>
-        typeof r.id === 'string' && typeof r.name === 'string',
+      .filter(
+        (r): r is { id: string; name: string; color?: number; position?: number; hoist?: boolean } =>
+          typeof r.id === 'string' && typeof r.name === 'string',
       )
       .map((r) => ({
         id: r.id,
@@ -212,6 +214,7 @@ export class DiscordAdapter implements IDiscordIdentityProvider {
             ? `#${r.color.toString(16).padStart(6, '0')}`
             : null,
         position: typeof r.position === 'number' ? r.position : 0,
+        hoist: r.hoist === true,
       }));
   }
 

@@ -490,6 +490,30 @@ model Role {
   @@map("roles")
 }
 
+/// A role as DISCORD defines it: its name, its colour and where it sits in the guild list.
+///
+/// Distinct from `Role`, which is OUR permission bundle. Most Discord roles are not mapped to one
+/// and never will be — colour roles, ping roles, joke roles — and a member wearing them is still
+/// wearing them. The roster shows what somebody actually has in Discord, so it needs the names and
+/// colours of roles the permission system has no opinion about.
+///
+/// A CACHE, refreshed from the guild. Nothing here is authoritative: Discord is.
+model DiscordRole {
+  /// The snowflake. Data, not source (INV-008).
+  discordRoleId String   @id @map("discord_role_id")
+  name          String
+  /// `#rrggbb`, or null where Discord reports colour 0 — which means "no colour", NOT black.
+  colour        String?
+  /// Higher sits nearer the top of the guild's role list, which is the order Discord displays.
+  position      Int      @default(0)
+  /// Whether Discord shows this role separately in the member list. Mirrored for display parity.
+  hoist         Boolean  @default(false)
+  syncedAt      DateTime @default(now()) @map("synced_at") @db.Timestamptz(6)
+
+  @@index([position])
+  @@map("discord_roles")
+}
+
 /// Discord role ID → internal role. The only place a Discord snowflake may live (INV-008).
 model RoleMapping {
   roleId        String        @map("role_id") @db.Uuid

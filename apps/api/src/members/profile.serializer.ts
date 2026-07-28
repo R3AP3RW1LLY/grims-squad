@@ -97,6 +97,8 @@ export interface ProfileSource {
    * reading your own role name, and the two disagreeing looks like a bug.
    */
   readonly ranks: ReadonlyArray<{ name: string; colour: string | null }>;
+  /** Snowflakes of the Discord roles this member currently holds. Resolved by the caller. */
+  readonly guildRoleIds?: readonly string[];
   readonly cmdrName: string | null;
   readonly location?: ProfileLocation | null;
   readonly credits?: bigint | null;

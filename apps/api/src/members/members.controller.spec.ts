@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { MembersController } from './members.controller.js';
-import type { MembersStore, MemberRow } from './members.store.js';
+import type { MembersStore, MemberRow, DiscordRoleInfo } from './members.store.js';
 import type { SnapshotEvent } from './commander-snapshot.js';
 import type { PrivacySettings, ProfileSource } from './profile.serializer.js';
 import { issueCsrfToken, csrfCookieName } from '../common/csrf.js';
@@ -68,6 +68,13 @@ class FakeStore implements MembersStore {
 
   async snapshotEvents(userIds: readonly string[]): Promise<SnapshotEvent[]> {
     return this.snapshots.filter((e) => userIds.includes(e.userId));
+  }
+
+  /** Guild role names and colours. Empty unless a test sets them. */
+  catalogue = new Map<string, DiscordRoleInfo>();
+
+  async discordRoleCatalogue(): Promise<Map<string, DiscordRoleInfo>> {
+    return this.catalogue;
   }
 }
 
