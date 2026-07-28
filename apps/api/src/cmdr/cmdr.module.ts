@@ -2,7 +2,12 @@ import { Module } from '@nestjs/common';
 import { PrismaClient, PrismaNonceStore } from '@grims/db';
 import { NonceService } from '@grims/shared';
 import { createKeyring, TokenCipher } from '@grims/shared/server';
-import { DiscordAdapter, InaraAdapter } from '@grims/ed-clients';
+import {
+  DiscordAdapter,
+  InaraAdapter,
+  INARA_APP_NAME,
+  INARA_APP_VERSION,
+} from '@grims/ed-clients';
 import { DatabaseModule } from '../database.module.js';
 import { CmdrController } from './cmdr.controller.js';
 import { CmdrService } from './cmdr.service.js';
@@ -118,8 +123,8 @@ function nicknameReconciler(prisma: PrismaClient): NicknameSyncService | undefin
           // runs with the MEMBER's key, which is exactly what makes the
           // returned name proof rather than a claim.
           new InaraAdapter({
-            appName: "Grim's Squad Hub",
-            appVersion: '1.0.0',
+            appName: INARA_APP_NAME,
+            appVersion: INARA_APP_VERSION,
             apiKey: process.env['INARA_API_KEY'] ?? '',
             isDeveloped: process.env['NODE_ENV'] !== 'production',
           }),

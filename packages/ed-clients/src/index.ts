@@ -6,7 +6,13 @@ export * from './discord/discord.adapter.js';
 export * from './discord/guard.js';
 export * from './galnet/galnet.adapter.js';
 
-export { InaraAdapter, InaraApiError, InaraNotApprovedError } from './inara/inara.adapter.js';
+export {
+  InaraAdapter,
+  InaraApiError,
+  InaraNotApprovedError,
+  INARA_APP_NAME,
+  INARA_APP_VERSION,
+} from './inara/inara.adapter.js';
 export type { InaraConfig, InaraProfile } from './inara/inara.adapter.js';
 export {
   inaraLimiter,
