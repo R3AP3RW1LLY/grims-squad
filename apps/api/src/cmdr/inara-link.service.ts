@@ -58,12 +58,49 @@ export interface NicknameReconciler {
 export interface InaraOwnProfile {
   /** The commander bound to THIS key. `null` when Inara does not recognise it. */
   getOwnCommanderName(apiKey: string): Promise<string | null>;
+  /**
+   * Name AND squadron, which is the whole of what we ask Inara for.
+   *
+   * Optional so existing fakes keep working; the service falls back to the
+   * name-only call when it is absent.
+   */
+  getOwnIdentity?(apiKey: string): Promise<{
+    cmdrName: string;
+    squadronName: string | null;
+    squadronRank: string | null;
+  } | null>;
+}
+
+/**
+ * The squadron name as Inara spells it.
+ *
+ * Compared case-insensitively and trimmed, because a member types their
+ * squadron into Inara by hand and "Grims Squad" or a trailing space should not
+ * read as a different squadron.
+ */
+export const SQUADRON_NAME = "Grim's Squad";
+
+/** Does Inara say this commander is in our squadron? */
+export function isInSquadron(squadronName: string | null): boolean {
+  if (squadronName === null) return false;
+  const normalise = (v: string): string => v.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  return normalise(squadronName) === normalise(SQUADRON_NAME);
 }
 
 export interface LinkResult {
   readonly cmdrName: string | null;
   readonly verified: boolean;
   readonly error: string | null;
+  /** What Inara says their squadron is. Null when they have not set one. */
+  readonly squadronName?: string | null;
+  /**
+   * Whether Inara agrees they are in Grim's Squad.
+   *
+   * INFORMATIONAL, never a gate. Plenty of real members never set a squadron
+   * on Inara, and refusing them would punish people for not using a third-party
+   * site we do not run. Officers see the flag and decide.
+   */
+  readonly inSquadron?: boolean;
 }
 
 export interface LinkStatus {
@@ -130,8 +167,18 @@ export class InaraLinkService {
     }
 
     let cmdrName: string | null;
+    let squadronName: string | null = null;
     try {
-      cmdrName = await this.inara.getOwnCommanderName(key);
+      // Prefer the richer call. Inara is used for exactly two things — the
+      // commander name and squadron membership — and both come from one
+      // request, so there is no reason to make two.
+      if (this.inara.getOwnIdentity !== undefined) {
+        const identity = await this.inara.getOwnIdentity(key);
+        cmdrName = identity?.cmdrName ?? null;
+        squadronName = identity?.squadronName ?? null;
+      } else {
+        cmdrName = await this.inara.getOwnCommanderName(key);
+      }
     } catch (cause) {
       /*
        * ★ FOUND IN USE, 2026-07-27 ★
@@ -225,7 +272,16 @@ export class InaraLinkService {
     // asked for.
     await this.#reconcileNickname(userId);
 
-    return { cmdrName, verified: true, error: null };
+    return {
+      cmdrName,
+      verified: true,
+      error: null,
+      squadronName,
+      // Reported, never enforced. Plenty of real members never set a squadron
+      // on Inara, and refusing them would punish people for not using a
+      // third-party site we do not run.
+      inSquadron: isInSquadron(squadronName),
+    };
   }
 
   /**

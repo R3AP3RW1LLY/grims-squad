@@ -18,6 +18,13 @@ concurrency:
 
 env:
   NODE_VERSION: '24'
+  # Electron's postinstall downloads a ~100MB Chromium runtime. CI runs tests
+  # and typechecks — none of which start a browser — so downloading it wastes
+  # a minute per job and fails outright when the CDN resets the connection,
+  # which is what happened.
+  #
+  # Packaging installers DOES need it, and that job will have to unset this.
+  ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
 
 jobs:
   # ---------------------------------------------------------------------------

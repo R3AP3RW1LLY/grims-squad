@@ -14,3 +14,19 @@ export {
 
 export { NonceService, formatNonce, NONCE_TTL_MS } from './nonce.service.js';
 export type { NonceStore, NonceClaim, CheckResult, CheckOutcome } from './nonce.service.js';
+
+export {
+  JOURNAL_EVENTS,
+  EVENT_FIELDS,
+  isAllowedEvent,
+  pickAllowedFields,
+  isLiveGameSession,
+} from './journal/journal-events.js';
+export type { JournalEventName, JournalCategory } from './journal/journal-events.js';
+export {
+  journalPathCandidates,
+  noJournalsAdvice,
+  isJournalFile,
+  JOURNAL_FILE_PATTERN,
+} from './journal/journal-paths.js';
+export type { Platform, PathContext } from './journal/journal-paths.js';

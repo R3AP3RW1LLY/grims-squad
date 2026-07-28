@@ -127,6 +127,12 @@ export default async function DashboardPage() {
             href="/settings/privacy"
             cta="Review"
           />
+          <Card
+            title="Companion app"
+            body="Recommended. Runs quietly in the background and reads the game's own journal files, so your ranks, ships, loadouts and activity keep themselves up to date. Nothing else gives the hub this."
+            href="/companion"
+            cta="Get the app"
+          />
         </div>
 
         {status.privileged && status.twoFactorEnrolled && (

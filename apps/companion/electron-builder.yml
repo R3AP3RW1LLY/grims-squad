@@ -1,0 +1,86 @@
+# Packaging for every platform a member might play Elite on.
+#
+# ★ WHAT "SUPPORTS MAC" ACTUALLY MEANS HERE ★
+#
+# Elite Dangerous has no native macOS build — Frontier discontinued the Mac
+# client in 2015. Mac players run it through CrossOver or Whisky, so their
+# journals sit inside a Wine bottle. This app runs natively on macOS and reads
+# the journals out of that bottle; it is not pretending the game is native.
+#
+# Linux is the same story with Proton.
+#
+# So all three targets are built, and the journal path resolver knows where to
+# look on each (packages/shared/src/journal/journal-paths.ts).
+
+appId: org.pyrax.grimssquad.companion
+productName: Grims Squad Companion
+copyright: Grim's Squad
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - dist/**/*
+  - package.json
+
+# ---------------------------------------------------------------- Windows
+# Where almost every member is. NSIS gives a normal installer that a
+# non-technical player recognises rather than a zip they have to reason about.
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  # Elite runs on x64. An arm64 Windows build would be a download that cannot
+  # find a game, which is worse than not offering it.
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  # No desktop shortcut by default. It is a background agent, not something
+  # anybody wants to launch twice a day, and an unrequested icon reads as junk.
+  createDesktopShortcut: false
+  createStartMenuShortcut: true
+
+# ------------------------------------------------------------------- macOS
+mac:
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+  category: public.app-category.utilities
+  # Both architectures: a Mac running Elite through CrossOver is as likely to
+  # be Apple Silicon as Intel, and Rosetta is not something to make somebody
+  # discover on their own.
+  #
+  # NOT notarized yet. Gatekeeper will warn until it is, and pretending
+  # otherwise would leave members meeting a scary dialog with no explanation.
+  # The download page has to say so plainly until an Apple Developer ID exists.
+  hardenedRuntime: true
+  gatekeeperAssess: false
+
+dmg:
+  # A plain drag-to-Applications window. Anything cleverer is one more thing to
+  # go wrong on a platform where the game itself does not officially run.
+  contents:
+    - x: 130
+      y: 220
+    - x: 410
+      y: 220
+      type: link
+      path: /Applications
+
+# ------------------------------------------------------------------- Linux
+linux:
+  target:
+    - target: AppImage
+      arch: [x64]
+  category: Game
+  # AppImage rather than deb/rpm: it runs on any distribution without a package
+  # manager argument, and Linux players of a Windows game are already used to
+  # the format.
+
+# Auto-update is deliberately NOT configured yet. Shipping an updater before
+# there is a signed release and somewhere to publish it produces an app that
+# fails a silent check on every launch, and members would never know why.
+publish: null
