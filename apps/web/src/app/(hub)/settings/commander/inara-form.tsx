@@ -124,30 +124,81 @@ export function InaraForm({ initial }: { initial: InaraStatus }) {
       )}
 
       {status.linked ? (
-        <>
-          <p className="text-[var(--color-text-primary)]">
-            An Inara key is on file{status.source === 'app' ? ', added from the companion app' : ''}.
-            We never show it back — not even to you.
+        /*
+          ★ ITS OWN PANEL, MATCHING THE STATUS BOX ABOVE ★
+
+          This was a bare sentence with two buttons under it, floating on the
+          page directly beneath a bordered panel — so the page read as one
+          designed box followed by loose text, and "Remove key" sat in open
+          space with nothing to say it belonged to anything.
+
+          Boxed, with the key rendered as a masked field. A key on file is a
+          THING a member has, and drawing it as one makes "we never show it
+          back" self-evident rather than a promise in prose.
+        */
+        <section className="rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel)] p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-[var(--color-text-secondary)]">
+              Inara API key
+            </p>
+            <span className="inline-flex items-center gap-2 rounded border border-[var(--color-semantic-success)] px-3 py-1 font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--color-semantic-success)]">
+              <span aria-hidden="true">✓</span>
+              On file
+            </span>
+          </div>
+
+          {/*
+            Dots, not the key. Deliberately a fixed length that is NOT the key's
+            length — leaking how many characters it has would be a small gift to
+            anybody guessing, for no benefit to the member, who cannot read it
+            back either way.
+          */}
+          <p
+            className="mt-4 select-none rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-void)] px-4 py-2.5 font-mono text-sm tracking-[0.3em] text-[var(--color-text-dim)]"
+            aria-label="Your Inara key is stored and hidden"
+          >
+            ••••••••••••••••••••
           </p>
-          <div className="mt-6 flex flex-wrap gap-4">
+
+          <p className="mt-3 text-sm leading-relaxed text-[var(--color-text-secondary)]">
+            Encrypted before it was stored, and never shown again — not to you, not to an officer.
+            {status.source === 'app' ? ' Added from the companion app.' : ''}
+            {status.lastCheckedAt !== null && (
+              <>
+                {' '}Last checked{' '}
+                {new Date(status.lastCheckedAt).toLocaleString('en-GB', {
+                  dateStyle: 'medium',
+                  timeStyle: 'short',
+                })}
+                .
+              </>
+            )}
+          </p>
+
+          <div className="mt-5 flex flex-wrap items-center gap-3 border-t border-[var(--color-border-hairline)] pt-4">
             <button
               type="button"
               onClick={() => void refresh()}
               disabled={busy}
-              className="rounded border border-[var(--color-brand-cyan-bright)] px-5 py-2.5 font-mono text-[12px] uppercase tracking-[0.24em] text-[var(--color-brand-cyan-bright)] disabled:opacity-50"
+              className="rounded border border-[var(--color-brand-cyan-bright)] px-5 py-2.5 font-mono text-[12px] uppercase tracking-[0.24em] text-[var(--color-brand-cyan-bright)] transition-colors hover:bg-[color-mix(in_srgb,var(--color-brand-cyan-bright)_12%,transparent)] disabled:opacity-50"
             >
-              Re-check now
+              {busy ? 'Checking…' : 'Re-check now'}
             </button>
+            {/*
+              The destructive action is pushed to the far end and given no
+              border until hover. Two buttons of equal weight side by side is
+              how somebody removes a key they meant to re-check.
+            */}
             <button
               type="button"
               onClick={() => void unlink()}
               disabled={busy}
-              className="rounded border border-[var(--color-border-hairline)] px-5 py-2.5 font-mono text-[12px] uppercase tracking-[0.24em] text-[var(--color-text-secondary)] hover:border-[var(--color-brand-orange)] hover:text-[var(--color-brand-orange)] disabled:opacity-50"
+              className="ml-auto rounded px-4 py-2.5 font-mono text-[12px] uppercase tracking-[0.24em] text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-semantic-hostile-bright)] disabled:opacity-50"
             >
               Remove key
             </button>
           </div>
-        </>
+        </section>
       ) : (
         <>
           <label htmlFor="inara-key" className="block text-[var(--color-text-primary)]">

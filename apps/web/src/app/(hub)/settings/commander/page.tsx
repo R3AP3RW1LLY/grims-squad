@@ -96,7 +96,18 @@ export default async function CommanderPage({
         </PageBody>
       ) : (
         <PageBody
-          lead="Link your Inara account and we can confirm which commander is yours, rather than taking your word for it. Your Discord nickname is then kept matching your in-game name."
+          lead={
+            /*
+              ★ SAYS WHAT HAPPENS, NOT WHAT WE SUSPECT ★
+
+              The old lead was "we can confirm which commander is yours, rather
+              than taking your word for it" — which frames a routine setup step
+              as a member being doubted, in the first sentence they read. It is
+              also the wrong emphasis: the useful fact is that they never type
+              their own name, not that we would decline to believe it.
+            */
+            "Two steps, both answered by Inara: which commander is yours, and whether you fly with Grim's Squad. You never type either — we read them from your Inara account, and your Discord name is kept matching."
+          }
           rail={
             <>
               <Panel title="Status">
