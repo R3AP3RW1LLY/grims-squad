@@ -51,11 +51,29 @@ async function bootstrap(): Promise<void> {
     max: 300,
     timeWindow: '1 minute',
     keyGenerator: (req) => {
+      /*
+       * The companion app has no session cookie, so without this branch every
+       * paired device on a shared address — a household, a student hall, anyone
+       * behind CGNAT — would compete for one 300/minute budget, and a member's
+       * uploads could throttle their own web browsing.
+       *
+       * Keying on the DEVICE TOKEN gives each paired install its own bucket,
+       * which also caps what a single stolen token can push: 300 requests a
+       * minute rather than 300 shared with whatever else that IP is doing.
+       */
+      const auth = req.headers['authorization'];
+      const bearer =
+        typeof auth === 'string' && auth.startsWith('Bearer ') ? auth.slice(7).trim() : undefined;
+
       const cookies = (req as unknown as { cookies?: Record<string, string | undefined> }).cookies;
       const session = cookies?.['__Host-gs_rt'] ?? cookies?.['gs_rt'];
-      // The refresh token is hashed rather than used raw: it is a credential,
-      // and a rate-limit key ends up in memory and in metrics.
-      return session === undefined ? req.ip : createHash('sha256').update(session).digest('hex');
+
+      // Hashed rather than used raw: both are credentials, and a rate-limit key
+      // ends up in memory and in metrics.
+      const credential = bearer ?? session;
+      return credential === undefined
+        ? req.ip
+        : createHash('sha256').update(credential).digest('hex');
     },
     // The health endpoint is polled by the container runtime. Throttling it
     // would make a busy API look unhealthy and get it restarted.

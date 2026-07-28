@@ -4,7 +4,8 @@ import {
   EVENT_FIELDS,
   isAllowedEvent,
   pickAllowedFields,
-  isLiveGameSession,
+  isLiveGameVersion,
+  canonicalJson,
 } from './journal-events.js';
 
 /**
@@ -121,16 +122,123 @@ describe('field-level filtering', () => {
   });
 });
 
-describe('live game only', () => {
-  it('MANDATORY: rejects a Legacy session', () => {
-    // Horizons 3.8 describes a different galaxy state. Recording it against a
-    // member's current standing would be wrong, and it is the rule Inara
-    // states plainly for its own uploads.
-    expect(isLiveGameSession({ Commander: 'GRIM', Odyssey: false })).toBe(false);
-    expect(isLiveGameSession({ Commander: 'GRIM' })).toBe(false);
+describe('live galaxy only', () => {
+  it('MANDATORY: rejects a Legacy (3.8) journal', () => {
+    // Horizons 3.8 was split off in 2022 and its galaxy has diverged since.
+    // Recording it against a member's current standing would be confidently
+    // incorrect rather than merely missing.
+    expect(isLiveGameVersion({ gameversion: '3.8.0.407' })).toBe(false);
   });
 
-  it('accepts a live session', () => {
-    expect(isLiveGameSession({ Commander: 'GRIM', Odyssey: true })).toBe(true);
+  it('accepts a Live (4.x) journal', () => {
+    expect(isLiveGameVersion({ gameversion: '4.0.0.1904' })).toBe(true);
+  });
+
+  it('MANDATORY: does not mistake "no Odyssey" for "Legacy"', () => {
+    /*
+     * ★ THE BUG THIS EXISTS TO PREVENT ★
+     *
+     * The obvious field, `LoadGame.Odyssey`, reports whether the player owns
+     * the EXPANSION — not which galaxy they are in. A Horizons 4.0 player is on
+     * Live and reports `Odyssey: false`.
+     *
+     * Reading it as a Live/Legacy flag would silently discard everything sent
+     * by every member without Odyssey, and the symptom would be those members
+     * never qualifying for a promotion for reasons nobody could see.
+     */
+    expect(isLiveGameVersion({ gameversion: '4.0.0.1904', Odyssey: false })).toBe(true);
+  });
+
+  it('treats a journal with no gameversion as Live', () => {
+    // Journals predating Update 14 have no gameversion, and they pre-date the
+    // split, so they WERE Live when written. Refusing them would throw away
+    // real history; accepting a few genuinely old sessions is the milder error.
+    expect(isLiveGameVersion({})).toBe(true);
+  });
+});
+
+describe('money is stripped at every depth', () => {
+  it('MANDATORY: drops per-module values inside a Loadout', () => {
+    /*
+     * ★ THE HOLE THIS CLOSES ★
+     *
+     * EVENT_FIELDS is a TOP-LEVEL allowlist, and the comment above it — "anything
+     * not named here is dropped" — was not true of anything nested. We were
+     * carefully excluding `Credits` from LoadGame and then shipping a complete
+     * itemised valuation of the member's ship one level down.
+     */
+    const out = pickAllowedFields('Loadout', {
+      Ship: 'python',
+      HullValue: 55_000_000,
+      ModulesValue: 120_000_000,
+      Rebuy: 8_750_000,
+      Modules: [
+        { Slot: 'MainEngines', Item: 'int_engine_size6_class5', On: true, Value: 45_000_000 },
+        { Slot: 'PowerPlant', Item: 'int_powerplant_size7_class5', On: true, Value: 33_000_000 },
+      ],
+    });
+
+    const asText = JSON.stringify(out);
+    expect(asText).not.toContain('55000000');
+    expect(asText).not.toContain('120000000');
+    expect(asText).not.toContain('8750000');
+    expect(asText).not.toContain('45000000');
+    expect(asText).not.toContain('33000000');
+  });
+
+  it('MANDATORY: keeps the module list itself', () => {
+    // The point of the narrow strip. Throwing away the modules to avoid the
+    // prices attached to them would take exactly what a fleet doctrine check
+    // needs, which is the wrong trade.
+    const out = pickAllowedFields('Loadout', {
+      Ship: 'python',
+      Modules: [{ Slot: 'MainEngines', Item: 'int_engine_size6_class5', On: true, Value: 1 }],
+    });
+
+    expect(out['Modules']).toEqual([
+      { Slot: 'MainEngines', Item: 'int_engine_size6_class5', On: true },
+    ]);
+  });
+
+  it('MANDATORY: drops values from stored ships too', () => {
+    const out = pickAllowedFields('StoredShips', {
+      StarSystem: 'Shinrarta Dezhra',
+      ShipsHere: [{ ShipID: 3, ShipType: 'cutter', Name: 'Bertha', Value: 700_000_000 }],
+    });
+
+    expect(JSON.stringify(out)).not.toContain('700000000');
+    expect(out['ShipsHere']).toEqual([{ ShipID: 3, ShipType: 'cutter', Name: 'Bertha' }]);
+  });
+
+  it('does not confuse a legitimate field for a price', () => {
+    // `Health` is damage, not money, and a doctrine check may care about it.
+    const out = pickAllowedFields('Loadout', {
+      Ship: 'python',
+      Modules: [{ Slot: 'Hull', Item: 'armour', Health: 0.94, Value: 1 }],
+    });
+    expect(out['Modules']).toEqual([{ Slot: 'Hull', Item: 'armour', Health: 0.94 }]);
+  });
+});
+
+describe('canonicalJson', () => {
+  it('MANDATORY: sorts keys, so the same object always hashes the same', () => {
+    // JSON.stringify preserves insertion order. Without this, the same event
+    // parsed twice could produce two different idempotency keys and a retry
+    // would be stored again as though it were new.
+    expect(canonicalJson({ b: 1, a: 2 })).toBe(canonicalJson({ a: 2, b: 1 }));
+  });
+
+  it('sorts at every depth', () => {
+    expect(canonicalJson({ x: { b: 1, a: 2 } })).toBe(canonicalJson({ x: { a: 2, b: 1 } }));
+  });
+
+  it('MANDATORY: preserves array ORDER, which is meaningful', () => {
+    // Module order is a property of the ship, not an accident of serialisation.
+    expect(canonicalJson([1, 2])).not.toBe(canonicalJson([2, 1]));
+  });
+
+  it('distinguishes values that differ', () => {
+    expect(canonicalJson({ a: 1 })).not.toBe(canonicalJson({ a: 2 }));
+    expect(canonicalJson({ a: '1' })).not.toBe(canonicalJson({ a: 1 }));
   });
 });

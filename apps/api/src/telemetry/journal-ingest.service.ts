@@ -1,4 +1,14 @@
-import { AppError, ErrorCode, isAllowedEvent, pickAllowedFields } from '@grims/shared';
+import { createHash } from 'node:crypto';
+import {
+  AppError,
+  ErrorCode,
+  isAllowedEvent,
+  pickAllowedFields,
+  telemetryCategoryFor,
+  canonicalJson,
+  type JournalEventName,
+  type TelemetryCategoryName,
+} from '@grims/shared';
 
 /**
  * Receiving journal events from the companion app (P1.11).
@@ -25,7 +35,6 @@ export interface IncomingEvent {
   readonly name: string;
   readonly occurredAt: string;
   readonly data: Record<string, unknown>;
-  readonly eventKey: string;
 }
 
 export interface IngestStore {
@@ -34,6 +43,7 @@ export interface IngestStore {
     rows: ReadonlyArray<{
       userId: string;
       deviceTokenId: string;
+      category: TelemetryCategoryName;
       eventType: string;
       occurredAt: Date;
       payload: Record<string, unknown>;
@@ -42,12 +52,20 @@ export interface IngestStore {
   ): Promise<number>;
   /** Marks the member's month as having an observed Elite session. */
   markGameActivityObserved(userId: string, month: Date, at: Date): Promise<void>;
+  /** The telemetry categories this member has opted into. Empty by default. */
+  consentedCategories(userId: string): Promise<readonly string[]>;
 }
 
 export interface IngestResult {
   readonly accepted: number;
   readonly duplicates: number;
   readonly rejected: number;
+  /**
+   * Categories that were refused for want of consent, and how many events each
+   * cost. Reported explicitly rather than folded into `rejected`, so the app can
+   * tell the member exactly what was not stored and why (INV-013).
+   */
+  readonly refused: Record<string, number>;
 }
 
 /** One request may not carry more than this. */
@@ -68,6 +86,48 @@ export function monthKeyOf(at: Date): Date {
   return new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), 1));
 }
 
+/**
+ * The idempotency key for an event (INV-017).
+ *
+ * ★ COMPUTED HERE, ON THE SERVER, FROM WHAT WE ACTUALLY STORE ★
+ *
+ * It used to arrive from the client, which was wrong in two ways. The unique
+ * index over `event_key` is GLOBAL rather than per-member, so a client choosing
+ * its own keys could claim keys another member's events would later need, and
+ * the victim's genuine events would vanish as "duplicates" with nothing anywhere
+ * recording that they ever arrived. And a client with a bug that reused one key
+ * would silently lose everything after its first event.
+ *
+ * Deriving it from `deviceTokenId` makes both impossible: keys are namespaced by
+ * a credential the caller cannot choose or forge, so nothing can collide with
+ * another member's, or with its own past, except by genuinely resending the same
+ * event.
+ *
+ * ★ THE PAYLOAD TERM IS LOAD-BEARING ★
+ *
+ * Journal timestamps have WHOLE-SECOND resolution, so handing in 18 massacre
+ * missions emits 18 events sharing 3 timestamps. Without the payload in the
+ * hash, 15 are swallowed as duplicates — under-counting exactly the activity we
+ * exist to measure, with no anomaly visible in any metric (DATA-INTEGRITY B1).
+ *
+ * Hashed over the FILTERED payload, which is what gets stored, so the key
+ * describes the row rather than something we discarded.
+ */
+export function eventKeyFor(input: {
+  deviceTokenId: string;
+  occurredAt: Date;
+  eventType: string;
+  payload: Record<string, unknown>;
+}): string {
+  return createHash('sha256')
+    .update(
+      `${input.deviceTokenId}|${input.occurredAt.toISOString()}|${input.eventType}|${canonicalJson(input.payload)}`,
+    )
+    .digest('hex');
+}
+
+type Row = Parameters<IngestStore['insertIgnoringDuplicates']>[0][number];
+
 export class JournalIngestService {
   constructor(private readonly store: IngestStore) {}
 
@@ -84,15 +144,24 @@ export class JournalIngestService {
       );
     }
 
-    const rows: Array<{
-      userId: string;
-      deviceTokenId: string;
-      eventType: string;
-      occurredAt: Date;
-      payload: Record<string, unknown>;
-      eventKey: string;
-    }> = [];
+    /*
+     * ★ CONSENT IS CHECKED HERE, BEFORE ANYTHING IS STORED (INV-013) ★
+     *
+     * Telemetry is opt-in per category and defaults to NOTHING, so a member who
+     * has paired a device but chosen no categories stores nothing at all. That
+     * is the intended behaviour, not a bug to route around: pairing is
+     * permission to talk to us, not permission to collect.
+     *
+     * Refusals are reported back per category rather than silently dropped —
+     * the invariant is explicit that a non-consented event is REJECTED with a
+     * clear answer, so the app can tell the member what was not stored instead
+     * of appearing to work while sending into a void.
+     */
+    const consented = new Set(await this.store.consentedCategories(userId));
+
+    const rows: Row[] = [];
     const sessionMonths = new Set<number>();
+    const refused: Record<string, number> = {};
     let rejected = 0;
 
     for (const e of events) {
@@ -119,22 +188,25 @@ export class JournalIngestService {
         continue;
       }
 
-      if (typeof e.eventKey !== 'string' || e.eventKey.length < 32) {
-        // The key is what makes a retry safe. Without a real one we cannot
-        // dedupe, and accepting it would let a crash-loop inflate activity.
-        rejected += 1;
+      const category = telemetryCategoryFor(e.name as JournalEventName);
+      if (!consented.has(category)) {
+        refused[category] = (refused[category] ?? 0) + 1;
         continue;
       }
+
+      // Filtered AGAIN, so a field the app should not have sent is not stored
+      // even if it arrives.
+      const payload = pickAllowedFields(e.name as JournalEventName, e.data);
 
       rows.push({
         userId,
         deviceTokenId,
+        category,
         eventType: e.name,
         occurredAt,
-        // Filtered AGAIN, so a field the app should not have sent is not stored
-        // even if it arrives.
-        payload: pickAllowedFields(e.name, e.data),
-        eventKey: e.eventKey,
+        payload,
+        // Ours, not the caller's. See eventKeyFor.
+        eventKey: eventKeyFor({ deviceTokenId, occurredAt, eventType: e.name, payload }),
       });
 
       // LoadGame is the one that proves they played. Collected per month so a
@@ -145,16 +217,16 @@ export class JournalIngestService {
     const accepted = rows.length === 0 ? 0 : await this.store.insertIgnoringDuplicates(rows);
 
     /*
-     * Activity is marked from ACCEPTED rows only... except that a duplicate
-     * LoadGame still proves the session happened. Marking on every observed
-     * month is idempotent — it sets a flag rather than incrementing — so a
-     * re-send costs nothing and a first-install replay correctly backfills
-     * every month the member actually played.
+     * Activity is marked from every observed month, not only from newly
+     * inserted rows: a duplicate LoadGame still proves the session happened.
+     * Marking sets a flag rather than incrementing, so a re-send costs nothing —
+     * and a member whose only successful send was a retry still gets credited
+     * for a month they genuinely played.
      */
     for (const monthMs of sessionMonths) {
       await this.store.markGameActivityObserved(userId, new Date(monthMs), now);
     }
 
-    return { accepted, duplicates: rows.length - accepted, rejected };
+    return { accepted, duplicates: rows.length - accepted, rejected, refused };
   }
 }

@@ -25,6 +25,13 @@ class FakeStore implements IngestStore {
   inserted: Row[] = [];
   seenKeys = new Set<string>();
   observed: Array<{ userId: string; month: string }> = [];
+  // Consent to everything by default, so tests about OTHER behaviour are not
+  // all about consent. The consent tests narrow it deliberately.
+  consent: string[] = ['session', 'profile', 'fleet'];
+
+  async consentedCategories(): Promise<readonly string[]> {
+    return this.consent;
+  }
 
   async insertIgnoringDuplicates(rows: readonly Row[]): Promise<number> {
     let n = 0;
@@ -41,11 +48,10 @@ class FakeStore implements IngestStore {
   }
 }
 
-const ev = (over: Partial<{ name: string; occurredAt: string; data: Record<string, unknown>; eventKey: string }> = {}) => ({
+const ev = (over: Partial<{ name: string; occurredAt: string; data: Record<string, unknown> }> = {}) => ({
   name: 'LoadGame',
   occurredAt: '2026-07-27T11:00:00Z',
   data: { Commander: 'GRIM', Odyssey: true },
-  eventKey: 'k'.repeat(64),
   ...over,
 });
 
@@ -80,8 +86,8 @@ describe('the thing this exists for', () => {
       'u1',
       'dev1',
       [
-        ev({ occurredAt: '2026-06-30T23:00:00Z', eventKey: 'a'.repeat(64) }),
-        ev({ occurredAt: '2026-07-01T01:00:00Z', eventKey: 'b'.repeat(64) }),
+        ev({ occurredAt: '2026-06-30T23:00:00Z' }),
+        ev({ occurredAt: '2026-07-01T01:00:00Z' }),
       ],
       NOW,
     );
@@ -167,15 +173,6 @@ describe('what is refused', () => {
     expect((await svc.ingest('u1', 'dev1', [ev({ occurredAt: slightlyAhead })], NOW)).accepted).toBe(1);
   });
 
-  it('rejects a missing or too-short event key', async () => {
-    // The key is what makes a retry safe. Without a real one we cannot dedupe,
-    // and accepting it would let a crash-loop inflate somebody's activity.
-    for (const key of ['', 'short', 'x'.repeat(31)]) {
-      const r = await svc.ingest('u1', 'dev1', [ev({ eventKey: key })], NOW);
-      expect(r.rejected, key).toBe(1);
-    }
-  });
-
   it('rejects an unparseable timestamp', async () => {
     expect((await svc.ingest('u1', 'dev1', [ev({ occurredAt: 'not a date' })], NOW)).rejected).toBe(1);
   });
@@ -184,7 +181,7 @@ describe('what is refused', () => {
     // Otherwise a single request could carry a member's entire journal history
     // and hold a connection open while it is written.
     const many = Array.from({ length: MAX_EVENTS_PER_REQUEST + 1 }, (_, i) =>
-      ev({ eventKey: String(i).padStart(64, '0') }),
+      ev({ occurredAt: new Date(NOW.getTime() - i * 1000).toISOString() }),
     );
     await expect(svc.ingest('u1', 'dev1', many, NOW)).rejects.toThrow(/too many/i);
   });
@@ -195,9 +192,9 @@ describe('what is refused', () => {
       'u1',
       'dev1',
       [
-        ev({ eventKey: 'a'.repeat(64) }),
-        ev({ name: 'Bounty', eventKey: 'b'.repeat(64) }),
-        ev({ name: 'Rank', data: { Combat: 7 }, eventKey: 'c'.repeat(64) }),
+        ev(),
+        ev({ name: 'Bounty' }),
+        ev({ name: 'Rank', data: { Combat: 7 } }),
       ],
       NOW,
     );
@@ -220,5 +217,155 @@ describe('monthKeyOf', () => {
     expect(monthKeyOf(new Date('2026-07-01T00:30:00Z')).toISOString()).toBe(
       '2026-07-01T00:00:00.000Z',
     );
+  });
+});
+
+describe('consent (INV-013)', () => {
+  it('MANDATORY: stores nothing for a member who has consented to nothing', async () => {
+    /*
+     * The default. Pairing a device is permission to TALK to us, not permission
+     * to collect — a member who installs the app and never opens their privacy
+     * settings has agreed to nothing, and nothing is what we keep.
+     */
+    store.consent = [];
+    const r = await svc.ingest('u1', 'dev1', [ev()], NOW);
+
+    expect(r.accepted).toBe(0);
+    expect(store.inserted).toEqual([]);
+    expect(store.observed).toEqual([]);
+  });
+
+  it('MANDATORY: says WHICH categories were refused, rather than dropping them silently', async () => {
+    /*
+     * The invariant is explicit that a non-consented event is REJECTED with a
+     * clear answer. Folding it into a rejection count would leave the app
+     * appearing to work while uploading into a void, and the member with no way
+     * to discover it.
+     */
+    store.consent = ['session'];
+    const r = await svc.ingest(
+      'u1',
+      'dev1',
+      [ev(), ev({ name: 'Rank', data: { Combat: 7 } }), ev({ name: 'StoredShips', data: {} })],
+      NOW,
+    );
+
+    expect(r.accepted).toBe(1);
+    expect(r.refused).toEqual({ profile: 1, fleet: 1 });
+  });
+
+  it('MANDATORY: consenting to `session` alone is enough to qualify for promotion', async () => {
+    /*
+     * The whole reason `session` is a category of its own. A member must be able
+     * to confirm they play — the one thing the promotion engine needs — WITHOUT
+     * also handing over their ranks and their fleet.
+     */
+    store.consent = ['session'];
+    await svc.ingest('u1', 'dev1', [ev()], NOW);
+
+    expect(store.observed).toEqual([{ userId: 'u1', month: '2026-07-01T00:00:00.000Z' }]);
+  });
+
+  it('MANDATORY: consenting to everything EXCEPT session records no activity', async () => {
+    // The mirror of the above, and the case that would be easy to get wrong: a
+    // member who shares their fleet but not their sessions must not be credited
+    // with a month on the strength of a Loadout.
+    store.consent = ['profile', 'fleet'];
+    await svc.ingest('u1', 'dev1', [ev(), ev({ name: 'Rank', data: { Combat: 7 } })], NOW);
+
+    expect(store.observed).toEqual([]);
+    expect(store.inserted).toHaveLength(1);
+  });
+
+  it('files each event under the right category', async () => {
+    await svc.ingest(
+      'u1',
+      'dev1',
+      [
+        ev(),
+        ev({ name: 'Rank', data: { Combat: 7 } }),
+        ev({ name: 'SquadronStartup', data: { SquadronName: "Grim's Squad" } }),
+        ev({ name: 'StoredShips', data: { StarSystem: 'Sol' } }),
+      ],
+      NOW,
+    );
+
+    expect(store.inserted.map((r) => [r.eventType, r.category])).toEqual([
+      ['LoadGame', 'session'],
+      ['Rank', 'profile'],
+      ['SquadronStartup', 'profile'],
+      ['StoredShips', 'fleet'],
+    ]);
+  });
+});
+
+describe('the event key is ours, not the caller\'s', () => {
+  it('MANDATORY: a caller cannot choose the key its events are stored under', async () => {
+    /*
+     * The unique index over event_key is GLOBAL rather than per-member. A client
+     * that picked its own keys could claim keys another member's events would
+     * later need, and the victim's genuine events would vanish as "duplicates"
+     * with nothing anywhere recording that they had arrived.
+     *
+     * Deriving the key from the device token makes that impossible: it is
+     * namespaced by a credential the caller cannot choose.
+     */
+    await svc.ingest(
+      'u1',
+      'dev1',
+      [{ ...ev(), eventKey: 'attacker-chosen' } as never],
+      NOW,
+    );
+
+    expect(store.inserted[0]?.eventKey).not.toBe('attacker-chosen');
+    expect(store.inserted[0]?.eventKey).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('MANDATORY: the same event from two DIFFERENT devices does not collide', async () => {
+    /*
+     * A member may run the app on a desktop and a laptop reading the same
+     * journal. If the key ignored the device, the second install's events would
+     * be swallowed as duplicates of the first's — which is the behaviour we
+     * want for a RETRY and emphatically not for a second machine.
+     */
+    await svc.ingest('u1', 'dev1', [ev()], NOW);
+    await svc.ingest('u1', 'dev2', [ev()], NOW);
+
+    expect(store.inserted).toHaveLength(2);
+  });
+
+  it('MANDATORY: events sharing a whole-second timestamp are kept apart', async () => {
+    /*
+     * Elite's journal timestamps have WHOLE-SECOND resolution, so a burst of
+     * events shares one. Without the payload in the hash they would collapse
+     * into one row — under-counting exactly the activity we exist to measure,
+     * with no anomaly visible in any metric (DATA-INTEGRITY B1).
+     */
+    const at = '2026-07-27T11:00:00Z';
+    await svc.ingest(
+      'u1',
+      'dev1',
+      [
+        ev({ name: 'Rank', occurredAt: at, data: { Combat: 7 } }),
+        ev({ name: 'Rank', occurredAt: at, data: { Combat: 8 } }),
+      ],
+      NOW,
+    );
+
+    expect(store.inserted).toHaveLength(2);
+  });
+
+  it('MANDATORY: key order in the payload does not change the key', async () => {
+    // JSON.stringify preserves insertion order, so without canonicalisation the
+    // same event parsed twice could hash differently and a retry would be
+    // stored again as though it were new.
+    await svc.ingest('u1', 'dev1', [ev({ data: { Commander: 'GRIM', Odyssey: true } })], NOW);
+    const first = store.inserted[0]?.eventKey;
+
+    store.inserted.length = 0;
+    store.seenKeys.clear();
+    await svc.ingest('u1', 'dev1', [ev({ data: { Odyssey: true, Commander: 'GRIM' } })], NOW);
+
+    expect(store.inserted[0]?.eventKey).toBe(first);
   });
 });

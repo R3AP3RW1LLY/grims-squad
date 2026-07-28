@@ -20,9 +20,15 @@ export {
   EVENT_FIELDS,
   isAllowedEvent,
   pickAllowedFields,
-  isLiveGameSession,
+  isLiveGameVersion,
+  telemetryCategoryFor,
+  canonicalJson,
 } from './journal/journal-events.js';
-export type { JournalEventName, JournalCategory } from './journal/journal-events.js';
+export type {
+  JournalEventName,
+  JournalCategory,
+  TelemetryCategoryName,
+} from './journal/journal-events.js';
 export {
   journalPathCandidates,
   noJournalsAdvice,

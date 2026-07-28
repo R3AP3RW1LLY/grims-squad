@@ -1,18 +1,20 @@
-import { Controller, Post, Get, Delete, Body, Param, Req, Inject } from '@nestjs/common';
+import { Controller, Post, Get, Put, Delete, Body, Param, Req, Inject } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
 import { AppError, ErrorCode } from '@grims/shared';
 import { Public } from '../auth/auth.guard.js';
 import { User, type CurrentUser } from '../auth/current-user.js';
 import { verifyCsrf, readCsrfCookie } from '../common/csrf.js';
-import { PAIRING_SERVICE, INGEST_SERVICE } from './telemetry.tokens.js';
+import { PAIRING_SERVICE, INGEST_SERVICE, CONSENT_SERVICE } from './telemetry.tokens.js';
 import type { PairingService } from './pairing.service.js';
 import type { JournalIngestService, IncomingEvent } from './journal-ingest.service.js';
+import { CONSENT_CATEGORIES, type ConsentService } from './consent.service.js';
 
 @Controller('v1')
 export class TelemetryController {
   constructor(
     @Inject(PAIRING_SERVICE) private readonly pairing: PairingService,
     @Inject(INGEST_SERVICE) private readonly ingest: JournalIngestService,
+    @Inject(CONSENT_SERVICE) private readonly consent: ConsentService,
   ) {}
 
   // ------------------------------------------------------------------ pairing
@@ -65,6 +67,50 @@ export class TelemetryController {
     return { revoked: true };
   }
 
+  // ----------------------------------------------------------------- consent
+  /**
+   * What the member has opted into, and the full list of what they could.
+   *
+   * Returns the options as well as the choices, so a settings screen does not
+   * have to keep its own copy of the category list and drift out of step with
+   * what the server will actually accept.
+   */
+  @Get('me/telemetry-consent')
+  async getConsent(@User() caller: CurrentUser | undefined): Promise<{
+    categories: readonly string[];
+    available: readonly string[];
+  }> {
+    const userId = requireUser(caller);
+    return {
+      categories: await this.consent.get(userId),
+      available: CONSENT_CATEGORIES,
+    };
+  }
+
+  /**
+   * Replaces the member's consent, purging anything they turned off.
+   *
+   * PUT rather than PATCH, and the whole set rather than one toggle: a settings
+   * screen that sends one flag at a time races itself, and the second request
+   * overwrites the first with a stale view of the rest.
+   */
+  @Put('me/telemetry-consent')
+  async setConsent(
+    @User() caller: CurrentUser | undefined,
+    @Body() body: unknown,
+    @Req() req: FastifyRequest,
+  ): Promise<{ categories: readonly string[]; purged: number }> {
+    const userId = requireUser(caller);
+    csrf(req);
+
+    const categories = (body as Record<string, unknown> | null)?.['categories'];
+    if (!Array.isArray(categories) || categories.some((c) => typeof c !== 'string')) {
+      throw new AppError(ErrorCode.VALIDATION_FAILED, 'Expected a categories array.');
+    }
+
+    return this.consent.set(userId, categories as string[]);
+  }
+
   // ------------------------------------------------------------------ ingest
   /**
    * Receives journal events from the companion app.
@@ -94,7 +140,12 @@ export class TelemetryController {
   async journal(
     @Body() body: unknown,
     @Req() req: FastifyRequest,
-  ): Promise<{ accepted: number; duplicates: number; rejected: number }> {
+  ): Promise<{
+    accepted: number;
+    duplicates: number;
+    rejected: number;
+    refused: Record<string, number>;
+  }> {
     const header = req.headers['authorization'];
     const token =
       typeof header === 'string' && header.startsWith('Bearer ') ? header.slice(7).trim() : '';

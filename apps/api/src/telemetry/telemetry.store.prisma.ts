@@ -1,7 +1,7 @@
-import type { PrismaClient, TelemetryCategory } from '@grims/db';
-import { JOURNAL_EVENTS, type JournalCategory, type JournalEventName } from '@grims/shared';
+import type { PrismaClient } from '@grims/db';
 import type { PairingStore, DeviceTokenRecord } from './pairing.service.js';
 import type { IngestStore } from './journal-ingest.service.js';
+import type { ConsentStore } from './consent.service.js';
 
 export class PrismaPairingStore implements PairingStore {
   readonly #db: PrismaClient;
@@ -57,52 +57,6 @@ export class PrismaPairingStore implements PairingStore {
   }
 }
 
-/**
- * The consent category each journal event is stored under.
- *
- * ★ WHY NOT ONE CATEGORY FOR ALL JOURNAL DATA ★
- *
- * Consent is per-category (INV-013), so a category is only meaningful if a
- * member can predict what lands in it. Filing "did they play", "what rank are
- * they" and "what ships do they own" together would make the choice
- * all-or-nothing — and the one thing we actually need, did they play, is by far
- * the least revealing of the three. Split apart, a member can satisfy the
- * promotion rule WITHOUT also sharing what they did while playing.
- *
- * ★ DERIVED, NOT RESTATED ★
- *
- * The allowlist already labels every event (`JOURNAL_EVENTS`). This translates
- * those labels to the database enum rather than re-deciding per event name, so
- * adding an event to the allowlist cannot land it in the wrong bucket — it
- * inherits whatever its label maps to.
- *
- * Typed as a total Record, so adding a label to the allowlist without deciding
- * where it belongs fails to COMPILE. There is no runtime fallback because there
- * is no case for one to catch.
- */
-const CATEGORY_BY_LABEL: Record<JournalCategory, TelemetryCategory> = {
-  // The promotion input, and nothing else. Kept alone deliberately.
-  session: 'session',
-  // What a commander IS, rather than what they did.
-  ranks: 'profile',
-  squadron: 'profile',
-  // What they own. `ship` is the current one, `fleet` is all of them; the
-  // distinction matters to the app and not to consent.
-  ship: 'fleet',
-  fleet: 'fleet',
-};
-
-function categoryFor(eventType: string): TelemetryCategory {
-  const label = JOURNAL_EVENTS[eventType as JournalEventName];
-  /*
-   * Unreachable via the service, which rejects anything off the allowlist
-   * before reaching a store. Guarded anyway, and toward the NARROWEST category:
-   * if the two filters were ever bypassed, an unclassified event must reveal as
-   * little as possible rather than defaulting wide.
-   */
-  return label === undefined ? 'session' : CATEGORY_BY_LABEL[label];
-}
-
 export class PrismaIngestStore implements IngestStore {
   readonly #db: PrismaClient;
 
@@ -122,6 +76,7 @@ export class PrismaIngestStore implements IngestStore {
     rows: ReadonlyArray<{
       userId: string;
       deviceTokenId: string;
+      category: string;
       eventType: string;
       occurredAt: Date;
       payload: Record<string, unknown>;
@@ -132,7 +87,7 @@ export class PrismaIngestStore implements IngestStore {
       data: rows.map((r) => ({
         userId: r.userId,
         deviceTokenId: r.deviceTokenId,
-        category: categoryFor(r.eventType),
+        category: r.category as never,
         eventType: r.eventType,
         occurredAt: r.occurredAt,
         payload: r.payload as never,
@@ -141,6 +96,19 @@ export class PrismaIngestStore implements IngestStore {
       skipDuplicates: true,
     });
     return result.count;
+  }
+
+  /**
+   * The categories this member has opted into. Empty by default (INV-013).
+   */
+  async consentedCategories(userId: string): Promise<readonly string[]> {
+    const privacy = await this.#db.privacySetting.findUnique({
+      where: { userId },
+      select: { telemetryConsent: true },
+    });
+    // No row means no consent. Defaults are conservative by design, and a member
+    // who has never opened their privacy settings has not agreed to anything.
+    return privacy?.telemetryConsent ?? [];
   }
 
   /**
@@ -174,6 +142,63 @@ export class PrismaIngestStore implements IngestStore {
         gameCheckedAt: at,
       },
       update: { userId, gameActivity: 'observed', gameCheckedAt: at },
+    });
+  }
+}
+
+export class PrismaConsentStore implements ConsentStore {
+  readonly #db: PrismaClient;
+
+  constructor(db: PrismaClient) {
+    this.#db = db;
+  }
+
+  async read(userId: string): Promise<readonly string[]> {
+    const privacy = await this.#db.privacySetting.findUnique({
+      where: { userId },
+      select: { telemetryConsent: true },
+    });
+    return privacy?.telemetryConsent ?? [];
+  }
+
+  /**
+   * Upsert, because a member may never have touched their privacy settings.
+   * Every other toggle on that row defaults conservatively, so creating it here
+   * grants nothing beyond what was asked for.
+   */
+  async write(userId: string, categories: readonly string[]): Promise<void> {
+    await this.#db.privacySetting.upsert({
+      where: { userId },
+      create: { userId, telemetryConsent: categories as never },
+      update: { telemetryConsent: categories as never },
+    });
+  }
+
+  /**
+   * Deletes every stored event in these categories.
+   *
+   * A real DELETE, not a soft flag. "Purge" that leaves the rows in place with a
+   * column set is not what a member asked for, and it is not what the constraint
+   * says either.
+   */
+  async purge(userId: string, categories: readonly string[]): Promise<number> {
+    const result = await this.#db.telemetryEvent.deleteMany({
+      where: { userId, category: { in: categories as never } },
+    });
+    return result.count;
+  }
+
+  async writeAudit(entry: Record<string, unknown>): Promise<void> {
+    await this.#db.auditLog.create({
+      data: {
+        actorId: entry['actorId'] as string | null,
+        actorType: 'user',
+        action: String(entry['action']),
+        targetType: String(entry['targetType']),
+        targetId: String(entry['targetId']),
+        before: entry['before'] as never,
+        after: entry['after'] as never,
+      },
     });
   }
 }

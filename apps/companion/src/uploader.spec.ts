@@ -16,7 +16,6 @@ const event = (n: number): ParsedEvent => ({
   name: 'Rank',
   occurredAt: `2026-07-27T12:00:${String(n).padStart(2, '0')}Z`,
   data: { Combat: n },
-  eventKey: `key-${n}`,
 });
 
 function fakeFetch(handler: (init: RequestInit) => Partial<Response> & { json?: () => unknown }) {
