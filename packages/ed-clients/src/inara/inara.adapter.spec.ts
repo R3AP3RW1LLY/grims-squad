@@ -156,3 +156,68 @@ describe('the request', () => {
     expect(body.events[0].eventName).toBe('getCommanderProfile');
   });
 });
+
+describe('the full commander profile', () => {
+  it('parses pilot ranks with progress', async () => {
+    inaraResponds(
+      ok({
+        commanderName: 'GRIM',
+        commanderRanksPilot: [
+          { rankName: 'combat', rankValue: 7, rankProgress: 0.42 },
+          { rankName: 'exploration', rankValue: 8, rankProgress: 1 },
+          { rankName: 'federation', rankValue: 14 },
+        ],
+      }),
+    );
+    const p = await adapter.getCommanderProfile('GRIM');
+
+    expect(p?.ranks).toHaveLength(3);
+    expect(p?.ranks[0]).toEqual({ name: 'combat', value: 7, progress: 0.42 });
+    // Missing progress becomes null, not 0 — "we do not know" is different
+    // from "no progress at all".
+    expect(p?.ranks[2]).toEqual({ name: 'federation', value: 14, progress: null });
+  });
+
+  it('MANDATORY: drops a partial rank rather than defaulting it to zero', async () => {
+    /*
+     * rankValue ?? 0 would render an unknown rank as "Harmless" — inventing a
+     * fact about somebody. On a squadron roster that is the sort of error that
+     * gets noticed by the person it is wrong about.
+     */
+    inaraResponds(
+      ok({
+        commanderName: 'GRIM',
+        commanderRanksPilot: [{ rankName: 'combat' }, { rankValue: 3 }, {}],
+      }),
+    );
+    expect((await adapter.getCommanderProfile('GRIM'))?.ranks).toEqual([]);
+  });
+
+  it('reads squadron, allegiance, role and avatar', async () => {
+    inaraResponds(
+      ok({
+        commanderName: 'GRIM',
+        commanderSquadron: { SquadronName: "Grim's Squad", SquadronRank: 'Wingman' },
+        preferredAllegianceName: 'Independent',
+        preferredGameRole: 'Combat',
+        avatarImageURL: 'https://inara.cz/avatar.png',
+      }),
+    );
+    const p = await adapter.getCommanderProfile('GRIM');
+
+    expect(p?.squadronName).toBe("Grim's Squad");
+    expect(p?.squadronRank).toBe('Wingman');
+    expect(p?.allegiance).toBe('Independent');
+    expect(p?.gameRole).toBe('Combat');
+    expect(p?.avatarUrl).toBe('https://inara.cz/avatar.png');
+  });
+
+  it('returns empty ranks rather than throwing when Inara knows none', async () => {
+    // Inara only knows what a member's own tooling has uploaded. No ranks means
+    // UNKNOWN, and the absence must not read as an error.
+    inaraResponds(ok({ commanderName: 'GRIM' }));
+    const p = await adapter.getCommanderProfile('GRIM');
+    expect(p?.ranks).toEqual([]);
+    expect(p?.cmdrName).toBe('GRIM');
+  });
+});
