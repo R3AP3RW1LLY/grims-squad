@@ -75,6 +75,8 @@ export class MeController {
     const mask =
       this.permissions === null ? NO_PERMISSIONS : await this.permissions.effectiveMask(userId);
 
+    const mustSecure = requiresTwoFactor(mask) && !(await this.#enrolled(userId));
+
     return {
       user: {
         userId,
@@ -85,9 +87,24 @@ export class MeController {
         avatarUrl: user.avatarStoredHash === null ? null : `/v1/media/avatars/${userId}`,
         rank: await this.#rankOf(userId),
       },
-      nav: navFor(mask),
+      /*
+       * ★ AN UNSECURED PRIVILEGED ACCOUNT GETS NO LINKS AT ALL ★
+       *
+       * Emptied HERE rather than hidden in the browser, and that distinction is
+       * the point: the navbar, the sidebar and the account dropdown all render
+       * from this one list, so there is no second place for a link to survive
+       * and no future component that can forget.
+       *
+       * They keep the public site, the onboarding page, and sign out. Nothing
+       * else — because every one of those destinations would refuse them
+       * anyway, and offering doors that are locked teaches people the interface
+       * lies.
+       */
+      nav: mustSecure ? [] : navFor(mask),
+      // Still reported truthfully. The UI needs to know they ARE an admin to
+      // explain why they are being asked; it just must not link them anywhere.
       isAdmin: hasAdminArea(mask),
-      mustSecureAccount: requiresTwoFactor(mask) && !(await this.#enrolled(userId)),
+      mustSecureAccount: mustSecure,
     };
   }
 

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { QRCodeSVG } from 'qrcode.react';
 import { apiPost } from '../lib/api-client';
 
 type Stage = 'idle' | 'showing-secret' | 'showing-codes';
@@ -12,6 +13,20 @@ type Stage = 'idle' | 'showing-secret' | 'showing-codes';
  * and the recovery codes. Both are handled as one-way steps — there is no
  * "show it to me again" button, because there is nothing to show. The server
  * keeps only a hash of the codes and never returns the secret after enrolment.
+ *
+ * ★ THE QR CODE IS DRAWN HERE, IN THE BROWSER ★
+ *
+ * `qrcode.react` renders an SVG from the otpauth URI locally. No image is
+ * fetched, and that is the entire point.
+ *
+ * The obvious shortcut is an <img> pointing at a QR generator — Google Charts,
+ * api.qrserver.com, any of a dozen others. Doing that would put the TOTP SECRET
+ * in a URL and send it to a third party, in plaintext, from every member's
+ * browser, at the exact moment they are setting up their second factor. It
+ * would hand that service the ability to generate valid codes for every admin
+ * account on the platform, and nothing about the page would look wrong.
+ *
+ * A test in this directory fails if such a URL ever appears in the codebase.
  */
 export function SecurityForm({
   enrolled,
@@ -116,16 +131,56 @@ export function SecurityForm({
       {stage === 'showing-secret' && (
         <>
           <p className="text-[var(--color-text-primary)]">
-            Add this to your authenticator, then enter the six-digit code it shows.
+            Scan this with your authenticator app, then enter the six-digit code it shows.
           </p>
-          <p className="mt-4 break-all rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-void)] p-4 font-mono text-sm text-[var(--color-brand-cyan-bright)]">
-            {secret}
-          </p>
-          <p className="mt-3 text-sm">
-            <a href={uri} className="text-[var(--color-brand-cyan-bright)]">
-              Open in your authenticator app
-            </a>
-          </p>
+
+          {/*
+            ★ A WHITE PLATE UNDER THE CODE, DELIBERATELY ★
+
+            The site is near-black, and a QR rendered dark-on-dark is
+            unscannable — phone cameras look for a light field with dark
+            modules. This is the one place on the site that breaks the theme,
+            and it breaks it because the alternative is a control that does not
+            work.
+
+            Quiet zone included via `includeMargin`: readers need clear space
+            around the pattern, and without it scanning fails on exactly the
+            cheap cameras most likely to be pointed at it.
+          */}
+          <div className="mt-5 inline-block rounded-lg bg-white p-4">
+            <QRCodeSVG
+              value={uri}
+              size={192}
+              level="M"
+              marginSize={2}
+              // Described rather than decorative: a screen-reader user needs to
+              // know this is the enrolment code and that the manual key below
+              // does the same job.
+              title="Two-factor enrolment QR code"
+            />
+          </div>
+
+          <details className="mt-5">
+            <summary className="cursor-pointer text-sm text-[var(--color-brand-cyan-bright)]">
+              Can&rsquo;t scan it?
+            </summary>
+            {/*
+              Kept, not replaced. Somebody setting this up on the same device
+              they are reading it on has no second camera to point at the
+              screen, and a desktop authenticator needs the key typed in.
+            */}
+            <p className="mt-3 text-sm text-[var(--color-text-secondary)]">
+              Enter this key into your authenticator by hand:
+            </p>
+            <p className="mt-2 break-all rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-void)] p-4 font-mono text-sm text-[var(--color-brand-cyan-bright)]">
+              {secret}
+            </p>
+            <p className="mt-3 text-sm">
+              <a href={uri} className="text-[var(--color-brand-cyan-bright)]">
+                Or open it in an authenticator on this device
+              </a>
+            </p>
+          </details>
 
           <label htmlFor="totp-code" className="mt-8 block text-[var(--color-text-primary)]">
             Six-digit code

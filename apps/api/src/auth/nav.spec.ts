@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { navFor, hasAdminArea } from './nav.js';
 import { Permission, ROLE_PRESETS, NO_PERMISSIONS, ALL_PERMISSIONS } from '@grims/shared';
 
@@ -102,5 +105,35 @@ describe('the shape of each item', () => {
     // Two links to the same place in one sidebar reads as a rendering bug.
     const hrefs = navFor(ALL_PERMISSIONS).map((i) => i.href);
     expect(hrefs).toEqual([...new Set(hrefs)]);
+  });
+});
+
+describe('an unsecured privileged account', () => {
+  /*
+   * ★ NO LINKS AT ALL UNTIL THE SECOND FACTOR IS SET ★
+   *
+   * The emptying happens in MeController rather than in navFor, because it is a
+   * fact about the SESSION (are they enrolled) rather than about the mask (what
+   * could they do). These tests pin the contract that makes it safe: navFor is
+   * the single source every surface renders from, so emptying it there empties
+   * the navbar, the sidebar and the account dropdown together.
+   */
+  it('MANDATORY: every authenticated surface renders from ONE list', () => {
+    /*
+     * If the navbar kept its own hardcoded links, emptying this would hide the
+     * sidebar and leave the top bar advertising an admin console that will
+     * refuse them. One list means one place to get it right.
+     */
+    const source = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), 'me.controller.ts'), 'utf8');
+
+    expect(source).toMatch(/nav:\s*mustSecure\s*\?\s*\[\]\s*:\s*navFor\(mask\)/);
+  });
+
+  it('MANDATORY: is still reported AS an admin, so the UI can explain why', () => {
+    // isAdmin stays truthful. Lying about it would leave them looking at a
+    // "secure your account" prompt with no idea which account or why.
+    const source = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), 'me.controller.ts'), 'utf8');
+
+    expect(source).toContain('isAdmin: hasAdminArea(mask)');
   });
 });

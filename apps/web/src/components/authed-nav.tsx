@@ -45,6 +45,12 @@ export function AuthedNav({ me }: { me: MeResponse }) {
           </span>
         </a>
 
+        {/*
+          While an admin is unsecured the server sends an EMPTY nav, so this
+          renders nothing. That is intended — see me.controller.ts — but an
+          empty bar with no explanation looks like a broken page, so the prompt
+          below takes its place.
+        */}
         <ul className="ml-4 hidden list-none items-center gap-1 p-0 md:flex">
           {squadron.map((item) => (
             <li key={item.href}>
@@ -57,6 +63,15 @@ export function AuthedNav({ me }: { me: MeResponse }) {
             </li>
           ))}
         </ul>
+
+        {me.mustSecureAccount && (
+          <a
+            href="/onboarding/security"
+            className="ml-4 hidden rounded border border-[var(--color-brand-orange)] px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--color-brand-orange)] transition-colors hover:bg-[color-mix(in_srgb,var(--color-brand-orange)_12%,transparent)] sm:block"
+          >
+            Secure your account
+          </a>
+        )}
 
         <div className="ml-auto flex items-center gap-3">
           {/*
