@@ -57,3 +57,62 @@ export function goneQuiet(iso: string | null, now: number = Date.now()): boolean
   if (!Number.isFinite(ms)) return false;
   return ms > QUIET_AFTER_DAYS * 86_400_000;
 }
+
+/** What the Last Seen cell says, and how it should be coloured. */
+export interface LastSeen {
+  readonly label: string;
+  /**
+   * `live`   in voice right now
+   * `quiet`  silent past the threshold, or never seen — the red row
+   * `normal` everything else
+   */
+  readonly tone: 'live' | 'quiet' | 'normal';
+}
+
+/**
+ * The Last Seen cell for one member.
+ *
+ * ★ IN VOICE BEATS EVERYTHING ELSE ★
+ *
+ * Squadron owner, 2026-07-29: a member active in Discord voice should say so
+ * rather than showing a number of days.
+ *
+ * They are not merely fresh — they are HERE, and no timestamp can express that.
+ * A member who sat in comms all evening without typing showed "3 days", which
+ * was literally true of their last message and completely wrong as an answer to
+ * "has this person gone quiet". Voice therefore takes precedence over the
+ * message-derived figure and over the quiet flag, both of which are about the
+ * past.
+ *
+ * ★ AND IT CANNOT LEAVE A ROW RED ★
+ *
+ * Somebody in voice is never flagged as gone quiet, even when their last
+ * counted message is a year old. Highlighting a member in red while they are
+ * sitting in comms is the single most obviously wrong thing this column could
+ * do.
+ */
+export function lastSeen(
+  row: { lastSeenAt: string | null; inVoiceSince: string | null },
+  now: number = Date.now(),
+): LastSeen {
+  if (row.inVoiceSince !== null) {
+    const ms = now - new Date(row.inVoiceSince).getTime();
+    /*
+     * How long they have been in, when it is worth saying. Under an hour is
+     * just "in voice channel" — "in voice channel (0 hours)" is noise, and the
+     * useful signal is the presence, not the duration.
+     */
+    const hours = Number.isFinite(ms) && ms > 0 ? Math.floor(ms / 3_600_000) : 0;
+    return {
+      label: hours < 1 ? 'in voice channel' : `in voice channel (${hours}h)`,
+      tone: 'live',
+    };
+  }
+
+  if (row.lastSeenAt === null) return { label: 'never seen', tone: 'quiet' };
+
+  return {
+    label: sinceSeen(row.lastSeenAt, now),
+    tone: goneQuiet(row.lastSeenAt, now) ? 'quiet' : 'normal',
+  };
+}

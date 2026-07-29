@@ -82,7 +82,7 @@ export async function SecurityBody() {
                   Signed-in devices
                 </a>
                 <a
-                  href="/settings/privacy"
+                  href="/settings/commander"
                   className="mt-2 block text-sm text-[var(--color-brand-cyan-bright)]"
                 >
                   Privacy settings

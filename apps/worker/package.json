@@ -26,6 +26,7 @@
     "@grims/db": "workspace:*",
     "@grims/ed-clients": "workspace:*",
     "@grims/shared": "workspace:*",
+    "ioredis": "^5.11.1",
     "pino": "^10.3.1"
   }
 }

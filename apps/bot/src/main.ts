@@ -440,13 +440,97 @@ async function syncMemberNames(): Promise<void> {
  * often the process restarts — which under `tsx watch` is otherwise every time
  * a file is saved.
  */
+/**
+ * Records that somebody IS in a voice channel, from this moment.
+ *
+ * ★ PRESENCE, WHICH IS NOT THE SAME AS THE JOIN COUNT ★
+ *
+ * `member_activity_months.voice_join_count` answers "how often did they join
+ * voice this month". The admin console's Last Seen column needs the other
+ * question — "are they in voice RIGHT NOW" — so that somebody sitting in a
+ * channel reads as present instead of as however many days since their last
+ * message.
+ *
+ * Never overwrites an existing timestamp: moving between channels is not
+ * arriving, and resetting the clock would make a member who has been in voice
+ * for three hours look like they just walked in.
+ */
+async function markInVoice(discordId: string, isBot: boolean): Promise<void> {
+  const existing = await prisma.discordGuildMember.findUnique({
+    where: { discordId },
+    select: { inVoiceSince: true },
+  });
+  if (existing?.inVoiceSince != null) return;
+
+  await prisma.discordGuildMember.upsert({
+    where: { discordId },
+    // The row may genuinely not exist yet: a member can join voice between the
+    // bot connecting and the member-name sweep reaching them.
+    create: { discordId, isBot, inVoiceSince: new Date() },
+    update: { inVoiceSince: new Date() },
+  });
+}
+
+/** Records that somebody has left voice. */
+async function markLeftVoice(discordId: string): Promise<void> {
+  /*
+   * `updateMany`, not `update`. Prisma's `update` throws when the row is
+   * missing, and a member who left voice but was never cached is an ordinary
+   * situation rather than an error worth a log line.
+   */
+  await prisma.discordGuildMember.updateMany({
+    where: { discordId },
+    data: { inVoiceSince: null },
+  });
+}
+
 async function seedVoiceOccupancy(): Promise<void> {
+  const guild = await client.guilds.fetch(GUILD_ID);
+  const states = guild.voiceStates.cache;
+
+  /*
+   * ★ EVERY PRESENCE ROW IS CLEARED FIRST, BEFORE ANYTHING IS SEEDED ★
+   *
+   * Discord keeps no history of voice occupancy, and a bot that was killed
+   * mid-session left rows claiming people were still in a channel they left
+   * hours ago. Nothing would ever correct them: the leave event fired while the
+   * process was dead and will not be replayed.
+   *
+   * So the live voice states are treated as the ONLY truth about who is in
+   * voice, and everything else is wiped. Showing an officer "in voice channel"
+   * for somebody who went to bed is worse than showing nothing.
+   *
+   * Runs on EVERY start, deliberately outside the once-a-day checkpoint below —
+   * the checkpoint exists to stop the join COUNT being inflated by restarts,
+   * and presence has no such problem because it is a state, not a tally.
+   */
+  await prisma.discordGuildMember
+    .updateMany({ where: { inVoiceSince: { not: null } }, data: { inVoiceSince: null } })
+    .catch((err: unknown) => logger.error({ err }, 'failed to clear stale voice presence'));
+
+  let present = 0;
+  for (const state of states.values()) {
+    const channel = state.channel;
+    if (channel === null) continue;
+    if (!countsTowardActivity(describe(channel), roleScope)) continue;
+
+    await markInVoice(state.id, state.member?.user.bot ?? false).catch(() => undefined);
+    present += 1;
+  }
+  logger.info({ present }, 'voice presence seeded');
+
+  /*
+   * The join COUNT is separate, and guarded once a day.
+   *
+   * `record()` does not deduplicate — the message path is idempotent only
+   * because of its snowflake watermark, and there is no equivalent here. So a
+   * checkpoint keyed on the UTC date makes this run at most once a day however
+   * often the process restarts, which under `tsx watch` is otherwise every time
+   * a file is saved.
+   */
   const today = new Date().toISOString().slice(0, 10);
   const key = `voice-seed:${today}`;
   if ((await checkpoints.get(key)) !== null) return;
-
-  const guild = await client.guilds.fetch(GUILD_ID);
-  const states = guild.voiceStates.cache;
 
   let seeded = 0;
   for (const state of states.values()) {
@@ -484,11 +568,49 @@ client.once(Events.ClientReady, (c) => {
 });
 
 client.on(Events.VoiceStateUpdate, (before, after) => {
+  if (after.guild.id !== GUILD_ID) return;
+
+  /*
+   * ★ PRESENCE IS UPDATED BEFORE THE JOIN COUNT, AND ON DIFFERENT RULES ★
+   *
+   * The join count deliberately ignores leaves — you cannot join by leaving.
+   * Presence is the opposite: a leave is the ONLY thing that ends it, and the
+   * early `return` below used to discard exactly that event.
+   *
+   * Without this, "in voice channel" would appear next to a member's name and
+   * stay there for good. A status that can be entered and never left is worse
+   * than not showing one.
+   */
+  if (before.channelId !== after.channelId) {
+    if (after.channelId === null) {
+      void markLeftVoice(after.id).catch((err: unknown) =>
+        logger.error({ err }, 'failed to clear voice presence'),
+      );
+    } else if (
+      after.channel !== null &&
+      countsTowardActivity(describe(after.channel), roleScope)
+    ) {
+      /*
+       * Scoped the same way as the count. A member sitting in an admin-only
+       * channel is not somewhere the roster should be reporting on, and leaking
+       * "in voice channel" from a private room would disclose that a closed
+       * meeting is happening.
+       */
+      void markInVoice(after.id, after.member?.user.bot ?? false).catch((err: unknown) =>
+        logger.error({ err }, 'failed to record voice presence'),
+      );
+    } else {
+      // Moved INTO a channel that does not count. They are no longer visibly in
+      // voice, so the old presence must not linger.
+      void markLeftVoice(after.id).catch(() => undefined);
+    }
+  }
+
+  // ---------------------------------------------------------- the join count
   // Only a JOIN counts. Without this a member toggling mute, deafen or camera
   // would fire repeatedly and inflate the count for sitting still.
   if (after.channelId === null) return;
   if (before.channelId === after.channelId) return;
-  if (after.guild.id !== GUILD_ID) return;
 
   // The same rule as text: any voice channel that is not admin-gated. The
   // hardcoded id list this replaces meant joining anything not on it recorded

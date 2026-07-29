@@ -739,6 +739,24 @@ model DiscordGuildMember {
   isBot      Boolean  @default(false) @map("is_bot")
   syncedAt   DateTime @default(now()) @map("synced_at") @db.Timestamptz(6)
 
+  /// When this member joined the voice channel they are sitting in. Null when they are not in one.
+  ///
+  /// ★ PRESENCE, NOT HISTORY ★
+  ///
+  /// `member_activity_months.voice_join_count` counts how many times somebody joined voice this
+  /// month. It cannot answer "are they in voice RIGHT NOW", which is what the admin console's
+  /// Last Seen column needs in order to say "in voice channel" instead of a stale number of days.
+  ///
+  /// A nullable timestamp rather than a boolean, because "in voice" and "in voice for three
+  /// hours" are different facts and a boolean throws the second one away.
+  ///
+  /// ★ IT CAN BE WRONG AFTER A CRASH, AND THAT IS HANDLED ★
+  ///
+  /// Discord keeps no history of voice occupancy, so a bot that dies mid-session leaves rows
+  /// claiming people are still in a channel they left hours ago. The bot clears every row at
+  /// startup and re-seeds from the live voice states, which is the only way this can be true.
+  inVoiceSince DateTime? @map("in_voice_since") @db.Timestamptz(6)
+
   @@map("discord_guild_members")
 }
 
