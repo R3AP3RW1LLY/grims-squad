@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { sinceSeen, goneQuiet, lastSeen, QUIET_AFTER_DAYS } from './activity-freshness';
+import {
+  sinceSeen,
+  goneQuiet,
+  lastSeen,
+  voicePresenceIsCredible,
+  QUIET_AFTER_DAYS,
+  VOICE_PRESENCE_TRUSTED_HOURS,
+} from './activity-freshness';
 
 /**
  * The "last seen" column on the activity tab.
@@ -137,5 +144,57 @@ describe('lastSeen', () => {
     // A bot host running ahead of the web host must not produce "(-2h)".
     const r = lastSeen({ lastSeenAt: null, inVoiceSince: ago(-5 * 3_600_000) }, NOW);
     expect(r.label).toBe('in voice channel');
+  });
+});
+
+
+/**
+ * A voice-presence row the bot never got to clear.
+ *
+ * ★ ARCH-ADV FINDING AT P1 EXIT ★
+ *
+ * `in_voice_since` is set on join and cleared on leave. If the bot dies in
+ * between, the leave fires into a dead process and is never replayed — so the
+ * console showed "in voice channel (37h)" for somebody who went to bed on
+ * Tuesday. The bot clears every row at startup, so it self-heals on restart;
+ * that is not enough, because a bot down for a day leaves a day of confidently
+ * wrong presence, and an officer scanning for who has gone quiet saw the exact
+ * opposite of the truth.
+ */
+describe('stale voice presence', () => {
+  const HOUR = 3_600_000;
+
+  it('believes a plausible session', () => {
+    expect(voicePresenceIsCredible(ago(3 * HOUR), NOW)).toBe(true);
+    expect(voicePresenceIsCredible(ago(VOICE_PRESENCE_TRUSTED_HOURS * HOUR - 1), NOW)).toBe(true);
+  });
+
+  it('MANDATORY: stops believing a row the bot died holding', () => {
+    expect(voicePresenceIsCredible(ago(VOICE_PRESENCE_TRUSTED_HOURS * HOUR + 1), NOW)).toBe(false);
+    expect(voicePresenceIsCredible(ago(37 * HOUR), NOW)).toBe(false);
+  });
+
+  it('MANDATORY: a stale row falls back to the message timestamp, not to "present"', () => {
+    const r = lastSeen({ lastSeenAt: ago(200 * 86_400_000), inVoiceSince: ago(37 * HOUR) }, NOW);
+    expect(r.tone).toBe('quiet');
+    expect(r.label).not.toContain('voice');
+  });
+
+  it('a stale row on an otherwise active member reads as their last message', () => {
+    const r = lastSeen({ lastSeenAt: ago(5 * 86_400_000), inVoiceSince: ago(37 * HOUR) }, NOW);
+    expect(r.tone).toBe('normal');
+    expect(r.label).toBe(sinceSeen(ago(5 * 86_400_000), NOW));
+  });
+
+  it('refuses an unparseable timestamp rather than claiming presence', () => {
+    expect(voicePresenceIsCredible('not a date', NOW)).toBe(false);
+    expect(lastSeen({ lastSeenAt: null, inVoiceSince: 'not a date' }, NOW).label).toBe('never seen');
+  });
+
+  it('tolerates small clock skew but not a wildly wrong clock', () => {
+    // A few minutes ahead is ordinary between two hosts.
+    expect(voicePresenceIsCredible(ago(-5 * 60_000), NOW)).toBe(true);
+    // Days ahead is a broken clock, and must not buy indefinite trust.
+    expect(voicePresenceIsCredible(ago(-40 * HOUR), NOW)).toBe(false);
   });
 });

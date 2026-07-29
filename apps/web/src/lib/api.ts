@@ -454,8 +454,19 @@ export interface CommanderProfile {
   currentShip: string | null;
   fleet: OwnedShip[];
   /**
-   * Always null today. The companion app strips Credits before sending, and
-   * Inara does not report a balance — see the note on the server type.
+   * The commander's balance, from `LoadGame`.
+   *
+   * ★ THIS COMMENT SAID "ALWAYS NULL TODAY" AND WAS WRONG BY THE TIME IT WAS
+   * READ AT P1 EXIT ★
+   *
+   * `Credits` was added to the `LoadGame` allowlist on 2026-07-29 when the
+   * squadron owner asked for Balance to show on the profile. Verified in
+   * production the same day: 68 of 68 `LoadGame` events carry it. A comment
+   * asserting a field is always empty is exactly the kind of note somebody
+   * later trusts instead of checking.
+   *
+   * Still nullable: a member who has never run the companion app has no
+   * LoadGame, and the field is governed by the privacy toggles like the rest.
    */
   credits: number | null;
   lastPlayedAt: string | null;

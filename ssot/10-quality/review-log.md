@@ -144,3 +144,53 @@ week one.**
 - Invariants: 36 → **45**, every one carrying a `due:Pn` marker
 - Unresolved BLOCKER/MAJOR: **0**
 - **Autonomous merge NOT taken.** An SSOT change touching security controls is tier 3 (ADR-021). Recorded here for the human.
+
+---
+
+# P1 EXIT — adversarial panel, 2026-07-29
+
+_Run against the DEPLOYED system, not the build. Production commit `b8572f6` at
+`https://45-63-35-93.sslip.io`. Six gates. **3 findings confirmed, 1 BLOCKER (latent),
+1 MAJOR, 1 MINOR. 3 claims refuted.**_
+
+The point of running this after deploy rather than before: two of the three findings are
+invisible in source review. One needed 24 live probes to rule out, and the other only
+appears when a background process dies.
+
+## Confirmed
+
+| # | Gate | Severity | Finding | Resolution |
+|---|---|---|---|---|
+| P1-1 | ARCH-ADV / RED-TEAM | **BLOCKER (latent)** | **The data-layer ACL is not applied anywhere.** `withPrincipal`, `satisfies`, `resolveVisibleCategoryIds` have **zero callers** in `apps/`. INV-002 (`due:P1`) says a query on behalf of a user must not return rows whose `viewPerm` the mask fails, **enforced in the data layer**. Its test is an *integration* test that calls the extension directly — so it proves the extension works when applied, not that it *is* applied. The invariant has been reported as covered while unenforced. | **Not a live leak, and that is why it is latent, not critical:** all three ACL-bearing tables (`forum_categories`, `knowledge_chunks`, `loadouts`) are **empty in production** and belong to P2/P7/P8. No endpoint serves them. Recorded honestly: INV-002 is **NOT satisfied**, P1 exit is **conditional** on it, and applying `withPrincipal` becomes a **hard P2 entry gate** — the first forum category created would otherwise be served unfiltered. Schema drift is already covered: `assertAclModelsRegistered` reads the real schema and is proven to throw on an unregistered model. |
+| P1-2 | ARCH-ADV | **MAJOR** | **Stale voice presence had no upper bound.** `in_voice_since` is set on join and cleared on leave. If the bot dies between the two, the leave fires into a dead process and is never replayed — so the admin console shows "in voice channel (37h)" for somebody who went to bed on Tuesday. The bot clears every row at startup, so it self-heals on restart; a bot down for a day still leaves a day of confidently wrong presence, and an officer scanning for who has gone quiet sees the exact opposite of the truth. **A silent wrong answer is worse than a missing one.** | `voicePresenceIsCredible` — presence older than `VOICE_PRESENCE_TRUSTED_HOURS` (12) is disbelieved and the row falls back to the message-derived timestamp. Generous enough for a long carrier op, shorter than any bot outage nobody noticed. 6 tests, including the clock-skew cases. Found in code written the same day. |
+| P1-3 | DESIGN-ADV | MINOR | A comment on `RosterMember.credits` asserted "**Always null today.** The companion app strips Credits before sending" — untrue by the time it was read. `Credits` was added to the `LoadGame` allowlist the same day when the squadron owner asked for Balance to show. Verified in production: **68 of 68 `LoadGame` events carry it.** A comment asserting a field is permanently empty is the kind of note somebody later trusts instead of checking. | Comment corrected to describe what the field is and when it is null. |
+
+## Refuted
+
+| # | Gate | Claim | Why it does not hold |
+|---|---|---|---|
+| P1-N1 | RED-TEAM | "`/v1/me` returns 200 to an anonymous caller, and to forged and `alg=none` tokens — a session-verification bypass." | **My probe was wrong, not the code.** `/v1/me` is public by design; the web layout calls it to decide whether to redirect. All three cases return the signed-out shape: `user: null`, `nav: []`, `isAdmin: false`. The forged and `alg=none` tokens were correctly rejected — that is *why* the response is the signed-out one. Recorded rather than quietly dropped, because "3 FAILED" in a probe run is exactly the shape of a false alarm somebody acts on. |
+| P1-N2 | ARCH-ADV | "`@Optional()` on `AuthGuard.sessions` and `AdminGateGuard.totp` lets a missing provider fail the guard **open**." | Both fail **closed**, deliberately, with the reasoning in the source. `AuthGuard` leaves `req.user` undefined and throws `UNAUTHENTICATED` for any non-public route. `AdminGateGuard` throws `TWO_FACTOR_REQUIRED` with "two-factor is not configured on this server, so the admin console is unavailable" rather than waving the request through. |
+| P1-N3 | DATA-INTEGRITY-ADV | "Credit balances above 2^53 lose precision crossing the wire as a JSON number." | 2^53 is ~9 quadrillion credits, roughly three orders of magnitude above the richest plausible balance. The server type is `bigint`; the only `number` declaration is on a separate DTO. Not a realistic corruption path, and inventing a fix would add a conversion layer for a value nobody can reach. |
+
+## What each gate was given, and what it found
+
+| Gate | Method | Result |
+|---|---|---|
+| **RED-TEAM** | **24 live probes against production**: unauthenticated reads of five admin surfaces and five member surfaces, installer download, three path-traversal shapes, brand-asset rules, SSE, forged and `alg=none` cookies, garbage device tokens, error-body stack leakage, HSTS, server banner. | **0 real findings.** Every privileged surface answered 401. Traversal refused. Errors carry a code and a sentence, no stack. HSTS present with `includeSubDomains`; no version banner. |
+| **ARCH-ADV** | Orphan audit over 359 files / 331 exported symbols, looking for the failure this codebase has produced repeatedly — written, documented, tested, never wired. Plus every `@Optional()` injection. | **P1-1, P1-2.** Also confirmed the promotion floor guard IS called (`promotion-run.ts:126`), having been the same shape of risk. |
+| **DATA-INTEGRITY-ADV** | Telemetry idempotency, BigInt limits, voice presence after a crash, duplicate ingest. | **P1-2.** Idempotency is sound: the key is derived **server-side** from `deviceTokenId | occurredAt | eventType | canonicalJson(payload)` under a unique index, and the payload term is load-bearing because journal timestamps have whole-second resolution. |
+| **DESIGN-ADV** | Acceptance criteria against what shipped. | **P1-3.** Also: P0.7's "loads over HTTPS at the real domain" is met at the sslip.io address and **not** at a real domain — recorded in STATUS.md as met in spirit rather than ticked. |
+| **UX-ADV** | Colour-only signals, empty states, undo, jargon, touch targets. | No confirmed findings. Every state signal carries a glyph as well as a colour (`●` for in-voice, `◆` under construction, `✓ ◐ ○` on verification). Noted, not raised: several affordances use `title=`, which is hover-only and therefore invisible on touch — pre-existing and worth a P2 sweep. |
+| **OPS-ADV** | "It is 02:00 and this is broken." | No confirmed findings, one gap named: **`infra/scripts/` has no test harness**, which is why the backup-verification rule (D33) could not be made an invariant. Deploy, rollback and backup are all scripts whose correctness rests on having been run. |
+
+## Merge
+
+- Findings resolved: **2 of 3** (P1-2, P1-3). P1-1 is recorded as a P2 entry gate rather than
+  speculatively built for tables that do not yet exist.
+- Dead code removed: `SideNav`, superseded by `hub-shell` and referenced nowhere.
+- Invariants: 47 → **48** (INV-048, live-event anonymity). 18 due, 18 covered.
+- `pnpm ci:local` 17/17.
+- **P1 exit is CONDITIONAL.** One `due:P1` invariant (INV-002) is unenforced. Claiming the phase
+  complete would mean claiming an invariant that is not met, which is the specific failure the
+  independent panel warned about at bootstrap.

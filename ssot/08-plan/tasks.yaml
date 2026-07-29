@@ -480,10 +480,45 @@ phase_P1:
 phase_P2:
 # =============================================================================
 
+  # ===========================================================================
+  # ★ P2.0 EXISTS BECAUSE P1.3 WAS CLAIMED DONE AND ITS CENTRAL CONTROL WAS NOT
+  #   APPLIED. Found by the P1 exit panel, 2026-07-29 (finding P1-1).
+  #
+  #   The ACL extension in packages/db is written, works, and has an integration
+  #   test — and `withPrincipal` has ZERO callers in apps/. So INV-002 has been
+  #   reported as covered while nothing enforced it. No data leaked, because
+  #   every ACL-bearing table is empty and belongs to a later phase.
+  #
+  #   P2.1 already says "all queries go through the P1.3 data-layer filter". That
+  #   sentence assumed a filter that is not bound to anything, which is precisely
+  #   how the gap survived. This task makes the binding a deliverable with its own
+  #   acceptance rather than an assumption inside somebody else's.
+  # ===========================================================================
+  - id: P2.0
+    phase: P2
+    name: Bind the data-layer ACL — INV-002, a hard gate on all of P2
+    depends_on: []
+    estimate_hours: 5
+    risk_tier: 3
+    files:
+      - packages/db/src/acl-extension.ts
+      - apps/api/src/database.module.ts
+      - apps/api/src/authz/principal.provider.ts
+    acceptance:
+      - "MANDATORY: `withPrincipal` is applied to every read of an ACL-bearing model; a repository test calls the APPLICATION's repository as a Ring 0 principal and asserts zero Ring 1 rows"
+      - "INV-002's test no longer calls the extension directly — the old integration test proved the extension works when applied, which is the thing that was never in doubt"
+      - "A static check fails the build if a Prisma client reaching an ACL-bearing model is constructed without a principal"
+      - "The principal is derived from the SESSION, never from a request parameter — a caller cannot nominate their own mask"
+      - "ANONYMOUS is the default when no session is present, not a bypass"
+      - "`assertAclModelsRegistered` runs in CI against the real schema (already true — keep it true)"
+      - "Removing the binding makes at least one test fail; proven by reverting it, not assumed"
+    blocked_by_decisions: []
+    ssot_updates: [STATUS.md, 02-domain/invariants.md, 10-quality/review-log.md]
+
   - id: P2.1
     phase: P2
     name: Category and thread CRUD
-    depends_on: [P1.3]
+    depends_on: [P1.3, P2.0]
     estimate_hours: 7
     risk_tier: 3
     files:
