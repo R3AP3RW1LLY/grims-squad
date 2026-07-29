@@ -20,9 +20,30 @@ export {
   EVENT_FIELDS,
   isAllowedEvent,
   pickAllowedFields,
-  isLiveGameSession,
+  isLiveGameVersion,
+  telemetryCategoryFor,
+  isBaselineCategory,
+  BASELINE_CATEGORIES,
+  OPTIONAL_CATEGORIES,
+  canonicalJson,
+  NEVER_SENT,
+  isSendable,
 } from './journal/journal-events.js';
-export type { JournalEventName, JournalCategory } from './journal/journal-events.js';
+export {
+  ELITE_RANK_LADDERS,
+  ELITE_RANK_LABELS,
+  eliteRankName,
+  describeEliteRanks,
+  describeInaraRanks,
+  allEliteRanks,
+} from './journal/elite-ranks.js';
+export type { EliteRankKey, EliteRankStanding } from './journal/elite-ranks.js';
+
+export type {
+  JournalEventName,
+  JournalCategory,
+  TelemetryCategoryName,
+} from './journal/journal-events.js';
 export {
   journalPathCandidates,
   noJournalsAdvice,
@@ -30,3 +51,25 @@ export {
   JOURNAL_FILE_PATTERN,
 } from './journal/journal-paths.js';
 export type { Platform, PathContext } from './journal/journal-paths.js';
+export {
+  expectedSquadronName,
+  sameSquadron,
+  evaluateSquadron,
+  type SquadronCheckOutcome,
+} from './squadron.js';
+export {
+  composeNickname,
+  rankForDisplay,
+  resolveMemberRank,
+  MAX_NICK,
+  LEADERSHIP_CEILING,
+  type HeldRole,
+} from './nickname.js';
+export {
+  TELEMETRY_CATALOGUE,
+  REQUIRED_CATEGORY,
+  undescribedEvents,
+  categoryOf,
+  type CatalogueGroup,
+  type CatalogueEntry,
+} from './journal/telemetry-catalogue.js';

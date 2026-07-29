@@ -10,6 +10,8 @@ export interface FamilyRow {
   revokeReason: string | null;
   userAgent: string | null;
   ipHash: string | null;
+  /** Absolute end of this sign-in. Fixed at login; rotation never moves it. */
+  expiresAt: Date;
 }
 
 export interface TokenRow {
@@ -33,7 +35,7 @@ export interface SessionContext {
 }
 
 export interface ISessionStore {
-  createFamily(userId: string, ctx: SessionContext): Promise<string>;
+  createFamily(userId: string, ctx: SessionContext, expiresAt: Date): Promise<string>;
   insertToken(familyId: string, tokenHash: string, expiresAt: Date): Promise<void>;
   findByHash(tokenHash: string): Promise<TokenLookup | null>;
   markUsed(tokenId: string, at: Date): Promise<void>;

@@ -22,8 +22,9 @@ const bannerCode = banner
   .split(/\r?\n/)
   .filter((l) => !l.trim().startsWith('//'))
   .join(' ');
-const layout = readFileSync(resolve(HERE, '../app/layout.tsx'), 'utf8');
-const onboarding = readFileSync(resolve(HERE, '../app/onboarding/security/page.tsx'), 'utf8');
+const siteLayout = readFileSync(resolve(HERE, '../app/(site)/layout.tsx'), 'utf8');
+const hubLayout = readFileSync(resolve(HERE, '../app/(hub)/layout.tsx'), 'utf8');
+const onboarding = readFileSync(resolve(HERE, '../app/(site)/onboarding/security/page.tsx'), 'utf8');
 
 /**
  * The secure-your-account prompt.
@@ -70,14 +71,27 @@ describe('the banner', () => {
     expect(bannerCode).not.toContain('role="alert"');
   });
 
-  it('MANDATORY: lives in the ROOT LAYOUT, under the navbar', () => {
-    // In the layout it follows the member everywhere. Per-page, it becomes
+  it('MANDATORY: lives in a LAYOUT, under the navbar, on the public site', () => {
+    // In a layout it follows the member everywhere. Per-page, it becomes
     // something each future page author has to remember, which means it will
     // eventually be missing from the page that mattered.
-    expect(layout).toContain('<SecureAccountBanner />');
-    const navAt = layout.indexOf('<SiteNav />');
-    const bannerAt = layout.indexOf('<SecureAccountBanner />');
+    expect(siteLayout).toContain('<SecureAccountBanner />');
+    const navAt = siteLayout.indexOf('<SiteNav />');
+    const bannerAt = siteLayout.indexOf('<SecureAccountBanner />');
     expect(bannerAt).toBeGreaterThan(navAt);
+  });
+
+  it('MANDATORY: is in the MEMBERS AREA layout too', () => {
+    /*
+     * Caught by this test during the route-group split, which is the only
+     * reason it is not a live bug.
+     *
+     * Splitting the chrome into (site) and (hub) left the banner behind on the
+     * public side — and the members area is where an unsecured admin actually
+     * LANDS after signing in. The prompt would have been missing from the one
+     * place it exists to appear.
+     */
+    expect(hubLayout).toContain('<SecureAccountBanner />');
   });
 });
 
@@ -99,8 +113,44 @@ describe('the forced onboarding page', () => {
     expect(onboarding).toContain('status.because');
   });
 
-  it('says the rest of the site is not blocked', () => {
-    // Otherwise it reads as a lockout, and somebody assumes the site is broken.
-    expect(onboarding).toMatch(/Nothing else on the site is blocked/i);
+  it('MANDATORY: is accurate about what IS blocked', () => {
+    /*
+     * It used to say "nothing else on the site is blocked", which stopped
+     * being true the moment the members area started redirecting here. A
+     * reassurance that is false is worse than none — somebody reads it, tries
+     * their dashboard, gets bounced back, and concludes the site is broken.
+     *
+     * The public site genuinely IS still open, so that is what it now says.
+     */
+    expect(onboarding).toMatch(/public site is still open/i);
+    expect(onboarding).not.toMatch(/Nothing else on the site is blocked/i);
+  });
+
+  it('MANDATORY: the members area redirects until the member owes nothing', () => {
+    /*
+     * Not a banner, not a nudge — a redirect on every page under the (hub)
+     * layout, until every obligation is met.
+     *
+     * The layout no longer names a specific step. There are three now, in an
+     * order that matters, and the ORDER is decided once on the server
+     * (onboarding-gate.ts, with its own tests) rather than re-derived here.
+     * Two copies of a rule this fiddly drift, and the symptom is a member
+     * bounced between two pages that each think the other should have run.
+     */
+    expect(hubLayout).toContain('me.onboarding.path');
+    expect(hubLayout).toMatch(/redirect\(me\.onboarding\.path\)/);
+  });
+
+  it('MANDATORY: the redirect is unconditional on the path being set', () => {
+    /*
+     * The failure this forecloses: a well-meaning `&& somethingElse` added to
+     * the condition, which would let one class of member past the wall while
+     * the code still LOOKED like it gated everybody.
+     */
+    const guard = hubLayout.slice(
+      hubLayout.indexOf('me.onboarding.path'),
+      hubLayout.indexOf('redirect(me.onboarding.path)'),
+    );
+    expect(guard).not.toMatch(/&&|\|\|/);
   });
 });

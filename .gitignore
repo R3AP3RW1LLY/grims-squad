@@ -44,6 +44,18 @@ Thumbs.db
 __pycache__/
 apps/api/.env
 build/
+# ★ EXCEPT THE COMPANION'S SOURCE ICONS ★
+#
+# `build/` above is unanchored, so it matches at ANY depth — including
+# apps/companion/build/, which is not build output at all. It holds the squadron
+# badge that electron-builder reads for the app icon, the taskbar icon, the tray
+# icon and the installer icon on all three platforms.
+#
+# They were therefore never committed, and CI failed on a runner that had no
+# such file: `ENOENT: lstat 'build/tray.png'`. It worked locally for the one
+# reason that matters least — the files were sitting there untracked.
+!apps/companion/build/
+!apps/companion/build/**
 coverage/
 credentials.json
 data/
@@ -82,3 +94,10 @@ vault-*.enc
 # Verification builds. Kept OUT of .next so a build cannot disturb a running
 # dev server — see apps/web/next.config.mjs.
 .next-check/
+
+# Packaged desktop builds. electron-builder writes the entire Electron runtime
+# here — a few hundred megabytes of Chromium per platform, none of which is
+# ours and all of which is reproducible from source. Releases are built by CI
+# and attached as workflow artifacts.
+apps/companion/release/
+.local-storage/

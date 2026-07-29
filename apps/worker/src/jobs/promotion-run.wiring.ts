@@ -96,20 +96,31 @@ export class PrismaPromotionStore implements PromotionStore {
        * month's definition into rows that a later rule change silently
        * contradicts.
        *
-       * The rule: any ONE of the three Discord activity kinds, AND a game
-       * session that was seen or fairly assumed. `assumed` counts because the
-       * human chose fail-open when the upstream check cannot run (D26) —
-       * `absent` and `unlinked` do not.
+       * The rule: at least one MESSAGE, and a game session that was seen or
+       * fairly assumed. `assumed` counts because the human chose fail-open when
+       * the upstream check cannot run (D26) — `absent` and `unlinked` do not.
        */
       const months = await this.#db.memberActivityMonth.count({
         where: {
           userId: u.id,
           month: { gte: rankGrant.grantedAt },
-          OR: [
-            { messageCount: { gt: 0 } },
-            { forumPostCount: { gt: 0 } },
-            { voiceJoinCount: { gt: 0 } },
-          ],
+          /*
+           * ★ ONLY MESSAGES QUALIFY — squadron owner, 2026-07-29 ★
+           *
+           * This was `OR: [messageCount, forumPostCount, voiceJoinCount]`.
+           * Both of the others are still COLLECTED and still shown on a
+           * member's profile — they are a real part of how somebody takes part
+           * — they simply no longer earn a qualifying month.
+           *
+           * Expressed as a plain condition rather than a one-armed OR: an OR
+           * with a single clause invites the next person to add a second, which
+           * is precisely the change that must not be made casually.
+           *
+           * And it is in the QUERY, not a filter afterwards. A member whose only
+           * activity was voice must not be counted at any point, and a
+           * post-filter is one refactor away from being dropped.
+           */
+          messageCount: { gt: 0 },
           gameActivity: { in: ['observed', 'assumed'] },
         },
       });

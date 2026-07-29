@@ -20,7 +20,7 @@ const read = (p: string): string => readFileSync(resolve(REPO, p), 'utf8');
  * the build until the promise is updated to match.
  */
 
-const privacy = read('apps/web/src/app/privacy/page.tsx');
+const privacy = read('apps/web/src/app/(site)/privacy/page.tsx');
 
 describe('privacy policy claims match the code', () => {
   it('CLAIM: "we do not request the email permission from Discord at all"', () => {
@@ -85,7 +85,7 @@ describe('privacy policy claims match the code', () => {
 
   it('CLAIM: there are no third-party analytics or advertising trackers', () => {
     expect(privacy).toMatch(/no\s+trackers,\s+no\s+advertising\s+pixels\s+and\s+no\s+analytics/);
-    const webSrc = ['apps/web/src/app/layout.tsx', 'apps/web/src/app/page.tsx']
+    const webSrc = ['apps/web/src/app/layout.tsx', 'apps/web/src/app/(site)/page.tsx']
       .map(read)
       .join('\n');
     for (const tracker of [
@@ -121,11 +121,26 @@ describe('the policies are reachable', () => {
     const chrome = read('apps/web/src/components/site-chrome.tsx');
     expect(chrome).toContain("'/privacy'");
     expect(chrome).toContain("'/terms'");
-    expect(read('apps/web/src/app/layout.tsx')).toMatch(/<SiteFooter \/>/);
+    expect(read('apps/web/src/app/(site)/layout.tsx')).toMatch(/<SiteFooter \/>/);
+
+    /*
+     * ★ AND FROM INSIDE THE MEMBERS' AREA, WHICH HAS ITS OWN CHROME ★
+     *
+     * This assertion is here because splitting the app into `(site)` and `(hub)`
+     * route groups silently removed the footer — and the only link to either
+     * policy — from every signed-in page. Nothing errored; the links simply
+     * stopped existing for the people who spend the most time on the site.
+     *
+     * Checking only the public layout would have let that pass, which is how it
+     * got there in the first place.
+     */
+    const hub = read('apps/web/src/components/hub-shell.tsx');
+    expect(hub).toContain('href="/privacy"');
+    expect(hub).toContain('href="/terms"');
   });
 
   it('both pages carry a version and a date, so a change is visible', () => {
-    for (const p of ['apps/web/src/app/privacy/page.tsx', 'apps/web/src/app/terms/page.tsx']) {
+    for (const p of ['apps/web/src/app/(site)/privacy/page.tsx', 'apps/web/src/app/(site)/terms/page.tsx']) {
       const src = read(p);
       expect(src).toMatch(/version="\d+\.\d+"/);
       expect(src).toMatch(/updated="\d{1,2} \w+ \d{4}"/);

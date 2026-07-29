@@ -156,3 +156,272 @@ describe('the request', () => {
     expect(body.events[0].eventName).toBe('getCommanderProfile');
   });
 });
+
+/**
+ * Batched profile reads.
+ *
+ * ★ WHY THESE ARE WORTH TESTING SEPARATELY ★
+ *
+ * Inara answers a batch POSITIONALLY: result three belongs to name three, and
+ * nothing in the payload says so. Every failure mode here is silent — an
+ * off-by-one writes one commander's ranks onto another's card, a short array
+ * shifts everyone after it, and nobody sees an error in either case.
+ */
+describe('InaraAdapter.getCommanderProfiles', () => {
+  const batch = (events: unknown[]) => ({ header: { eventStatus: 200 }, events });
+
+  it('asks about many commanders in ONE request', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => batch([
+        { eventStatus: 200, eventData: { commanderName: 'ALPHA' } },
+        { eventStatus: 200, eventData: { commanderName: 'BETA' } },
+        { eventStatus: 200, eventData: { commanderName: 'GAMMA' } },
+      ]),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const out = await adapter.getCommanderProfiles(['ALPHA', 'BETA', 'GAMMA']);
+
+    // THE POINT OF THE WHOLE FEATURE: three commanders, one request. At one
+    // request each, a 20-minute sweep of the squadron is impossible under the
+    // global 2/min limit.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(out.size).toBe(3);
+
+    const body = JSON.parse((fetchMock.mock.calls[0]?.[1] as { body: string }).body);
+    expect(body.events).toHaveLength(3);
+    expect(body.events.map((e: { eventData: { searchName: string } }) => e.eventData.searchName))
+      .toEqual(['ALPHA', 'BETA', 'GAMMA']);
+  });
+
+  it('aligns each result with the name that was sent', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => batch([
+        { eventStatus: 200, eventData: { commanderRanksPilot: [{ rankName: 'trade', rankValue: 8 }] } },
+        { eventStatus: 204 },
+        { eventStatus: 200, eventData: { commanderRanksPilot: [{ rankName: 'combat', rankValue: 3 }] } },
+      ]),
+    })));
+
+    const out = await adapter.getCommanderProfiles(['ALPHA', 'BETA', 'GAMMA']);
+
+    // Middle one absent, and the third must NOT slide up into its place.
+    expect(out.get('alpha')?.pilotRanks).toEqual([{ rankName: 'trade', rankValue: 8 }]);
+    expect(out.get('beta')).toBeNull();
+    expect(out.get('gamma')?.pilotRanks).toEqual([{ rankName: 'combat', rankValue: 3 }]);
+  });
+
+  it('leaves names ABSENT when the reply is shorter than the request', async () => {
+    // A short reply means Inara disagrees with us about what we asked. Recording
+    // the survivors as found and the rest as "not found" would be a guess; the
+    // missing ones must simply not appear, so the next sweep retries them.
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => batch([{ eventStatus: 200, eventData: { commanderName: 'ALPHA' } }]),
+    })));
+
+    const out = await adapter.getCommanderProfiles(['ALPHA', 'BETA']);
+
+    expect(out.has('alpha')).toBe(true);
+    expect(out.has('beta')).toBe(false);
+  });
+
+  it('splits a large squadron into several requests', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => batch(Array.from({ length: 30 }, () => ({ eventStatus: 204 }))),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    /*
+      FAKE TIMERS, and not for speed — the global limiter really does space
+      requests 30s apart (INV-033), so three chunks genuinely take a minute.
+      Waiting it out would make the suite slower than the feature.
+
+      That the wait EXISTS is the reassuring part: it is the proof that batching
+      did not quietly acquire a second code path around the limiter.
+    */
+    vi.useFakeTimers();
+    try {
+      const names = Array.from({ length: 70 }, (_, i) => `CMDR${i}`);
+      const pending = adapter.getCommanderProfiles(names);
+      await vi.advanceTimersByTimeAsync(300_000);
+      await pending;
+    } finally {
+      vi.useRealTimers();
+    }
+
+    // 70 names at 30 per request. The cap is enforced in the adapter so no
+    // caller can send one enormous body and get the app throttled.
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('de-duplicates names differing only by case', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => batch([{ eventStatus: 204 }]),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await adapter.getCommanderProfiles(['Pebble', 'PEBBLE', 'pebble']);
+
+    const body = JSON.parse((fetchMock.mock.calls[0]?.[1] as { body: string }).body);
+    // Elite names are case-insensitive, so this is one question, not three —
+    // and rate budget spent asking it three times is budget stolen from
+    // somebody else's card.
+    expect(body.events).toHaveLength(1);
+  });
+
+  it('does not let one bad event discard the rest of its batch', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => batch([
+        { eventStatus: 200, eventData: { commanderName: 'ALPHA' } },
+        { eventStatus: 500, eventStatusText: 'nope' },
+      ]),
+    })));
+
+    const out = await adapter.getCommanderProfiles(['ALPHA', 'BETA']);
+
+    expect(out.get('alpha')?.cmdrName).toBe('ALPHA');
+    // Errored, so unknown rather than "not found" — retried next sweep.
+    expect(out.has('beta')).toBe(false);
+  });
+
+  it('gives up entirely when our key is rejected', async () => {
+    // Not retryable and not per-commander: every remaining chunk would fail the
+    // same way, so burning the rate budget to prove it is pure waste.
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({ header: { eventStatus: 401, eventStatusText: 'no access' } }),
+    })));
+
+    await expect(adapter.getCommanderProfiles(['ALPHA'])).rejects.toBeInstanceOf(
+      InaraNotApprovedError,
+    );
+  });
+});
+
+/**
+ * The shape Inara ACTUALLY sends.
+ *
+ * ★ WHY THIS SUITE EXISTS ★
+ *
+ * Every field below was written from assumption and was wrong, and every one
+ * failed SILENTLY — a missing optional field is just `undefined`, and an empty
+ * rank array is exactly what a commander with no public ranks looks like.
+ *
+ * The visible symptom was a member who IS in Grim's Squad being told "Inara
+ * does not show you in Grim's Squad yet", with nothing in any log.
+ *
+ * The payloads here are copied verbatim from a live response for CMDR
+ * PEBBLEMERCAHNT on 2026-07-28. Do not "tidy" them.
+ */
+describe('@REGRESSION Inara’s real payload shape', () => {
+  const live = (eventData: Record<string, unknown>) => ({
+    header: { eventStatus: 200 },
+    events: [{ eventStatus: 200, eventData }],
+  });
+
+  it('MANDATORY: reads commanderSquadron.squadronName, not SquadronName', async () => {
+    /*
+     * ★ THE BUG THAT COST A FEATURE ★
+     *
+     * The type declared `SquadronName` with a capital S. Inara sends
+     * `squadronName`. So the read was undefined for every commander, every one
+     * looked like they were in no squadron, and squadron verification could
+     * never succeed for anybody.
+     */
+    inaraResponds(
+      live({
+        commanderName: 'PEBBLEMERCAHNT',
+        commanderSquadron: {
+          squadronID: 16806,
+          squadronName: "Grim's Squad",
+          squadronMembersCount: 73,
+          squadronMemberRank: 'Recruit',
+          inaraURL: 'https://inara.cz/elite/squadron/16806/',
+        },
+      }),
+    );
+
+    const p = await adapter.getOwnIdentity('key');
+    expect(p?.squadronName).toBe("Grim's Squad");
+    // And the rank is `squadronMemberRank` — `SquadronRank` was invented.
+    expect(p?.squadronRank).toBe('Recruit');
+  });
+
+  it('MANDATORY: accepts rankValue as a STRING', async () => {
+    /*
+     * Inara sends `{"rankName":"trade","rankValue":"8"}` — quoted. The parser
+     * required a number, so every rank was dropped and the list came back
+     * empty, which is indistinguishable from a commander who has published
+     * none.
+     */
+    inaraResponds(
+      live({
+        commanderName: 'PEBBLEMERCAHNT',
+        commanderRanksPilot: [
+          { rankName: 'combat', rankValue: '0', rankProgress: 0.05 },
+          { rankName: 'trade', rankValue: '8', rankProgress: 0.29 },
+          { rankName: 'exploration', rankValue: '3', rankProgress: 0.4 },
+        ],
+      }),
+    );
+
+    const p = await adapter.getCommanderProfile('PEBBLEMERCAHNT');
+    expect(p?.pilotRanks).toEqual([
+      { rankName: 'combat', rankValue: 0 },
+      { rankName: 'trade', rankValue: 8 },
+      { rankName: 'exploration', rankValue: 3 },
+    ]);
+  });
+
+  it('keeps rank 0, which is a real rank and not an absence', async () => {
+    // "combat":"0" is Harmless — a rank a new commander genuinely holds. A
+    // truthiness check anywhere on this path would delete it.
+    inaraResponds(live({ commanderRanksPilot: [{ rankName: 'combat', rankValue: '0' }] }));
+    const p = await adapter.getCommanderProfile('X');
+    expect(p?.pilotRanks).toHaveLength(1);
+  });
+
+  it('skips a rankValue that is not a number at all', async () => {
+    // Number('') is 0, which is Harmless. Coercing junk would invent a rank,
+    // which is worse than reporting none.
+    inaraResponds(
+      live({
+        commanderRanksPilot: [
+          { rankName: 'combat', rankValue: '' },
+          { rankName: 'trade', rankValue: 'elite' },
+          { rankName: 'exploration', rankValue: null },
+        ],
+      }),
+    );
+    const p = await adapter.getCommanderProfile('X');
+    expect(p?.pilotRanks).toEqual([]);
+  });
+
+  it('still reads the capitalised spelling, if Inara ever sends it', async () => {
+    // Both accepted rather than swapped. This cost a whole feature once, and an
+    // API that changes its casing must not be able to do it again.
+    inaraResponds(live({ commanderSquadron: { SquadronName: "Grim's Squad" } }));
+    const p = await adapter.getCommanderProfile('X');
+    expect(p?.squadronName).toBe("Grim's Squad");
+  });
+
+  it('reports no squadron when the member is in none', async () => {
+    // The genuine case, which must stay distinguishable from the bug above.
+    inaraResponds(live({ commanderName: 'X' }));
+    const p = await adapter.getCommanderProfile('X');
+    expect(p?.squadronName).toBeNull();
+  });
+});

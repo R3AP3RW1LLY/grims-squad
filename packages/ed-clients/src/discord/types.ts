@@ -34,7 +34,24 @@ export interface DiscordGuildMember {
 }
 
 /** One row of the full guild listing. Keyed by snowflake, since there is no OAuth token involved. */
+/** One role in the guild, as Discord describes it. */
+export interface DiscordGuildRole {
+  readonly id: string;
+  readonly name: string;
+  /** `#rrggbb`, or null when Discord reports no colour (integer 0). */
+  readonly colour: string | null;
+  /** Higher is nearer the top of the guild's role list. */
+  readonly position: number;
+  /** Discord lists this role separately in the member sidebar. */
+  readonly hoist: boolean;
+}
+
 export interface DiscordGuildMemberSummary {
+  /** Discord's own handle, e.g. `r3ap3ractual_22545`. */
+  readonly username?: string | null;
+  /** The display name Discord shows globally, if they set one. */
+  readonly globalName?: string | null;
+  readonly isBot?: boolean;
   readonly discordId: string;
   readonly roles: readonly string[];
   readonly nick: string | null;

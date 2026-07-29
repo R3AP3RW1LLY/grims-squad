@@ -5,11 +5,11 @@
   "description": "Electron companion. Reads Elite Dangerous journals and keeps the hub current.",
   "main": "dist/main.cjs",
   "scripts": {
-    "build": "tsc -b",
+    "build": "tsc -b && node build.mjs",
     "typecheck": "tsc -b --noEmit false --emitDeclarationOnly",
     "test": "vitest run --passWithNoTests",
     "test:unit": "vitest run --passWithNoTests",
-    "start": "electron .",
+    "start": "pnpm build && node dev.mjs",
     "dist": "electron-builder --win --mac --linux",
     "dist:win": "electron-builder --win",
     "clean": "rm -rf dist release *.tsbuildinfo"
@@ -19,7 +19,8 @@
     "electron": "^43.2.0",
     "electron-builder": "^26.15.3",
     "typescript": "^5.7.0",
-    "vitest": "^3.0.0"
+    "vitest": "^3.0.0",
+    "esbuild": "^0.28.1"
   },
   "dependencies": {
     "@grims/shared": "workspace:*"

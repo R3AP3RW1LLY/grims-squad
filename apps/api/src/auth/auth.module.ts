@@ -14,6 +14,8 @@ import { SessionService } from './session.service.js';
 import { TotpService } from './totp.service.js';
 import { PrismaTotpStore } from './totp.store.prisma.js';
 import { TotpController } from './totp.controller.js';
+import { MeController } from './me.controller.js';
+import { MediaModule } from '../media/media.module.js';
 import { PrismaSessionStore } from './session.store.prisma.js';
 import { logger } from '../logging.js';
 
@@ -38,8 +40,14 @@ const REQUIRED = [
   // AuthzModule for PermissionService: the OAuth callback needs the effective
   // mask to decide where to send the member, and a guard whose dependency is
   // missing from the injector fails at request time rather than at boot.
-  imports: [DatabaseModule, AuthzModule],
-  controllers: [DiscordAuthController, OnboardingController, SessionController, TotpController],
+  imports: [DatabaseModule, AuthzModule, MediaModule],
+  controllers: [
+    DiscordAuthController,
+    OnboardingController,
+    SessionController,
+    TotpController,
+    MeController,
+  ],
   providers: [
     {
       provide: TotpService,

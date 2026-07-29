@@ -35,10 +35,23 @@ export interface PublicProfile {
   avatarUrl: string | null;
   bio: string | null;
   timezone: string;
+  /** Journal still being written as of this instant. Drives "playing now".*/
+  lastPlayingAt: string | null;
   joinedAt: string;
   status: string;
-  ranks: string[];
+  /** Squadron roles, highest first, with the colour Discord shows them in. */
+  ranks: Array<{ name: string; colour: string | null }>;
   cmdrName: string | null;
+  /**
+   * Inara confirms BOTH the commander name and that they fly with this
+   * squadron.
+   *
+   * Required, not optional: it is always emitted, and `false` is a real answer
+   * meaning "checked, not confirmed". Typing it as optional would let a card
+   * treat a missing key and a negative result the same way, which is the
+   * ambiguity the badge exists to remove.
+   */
+  squadronVerified: boolean;
   /*
    * These are OPTIONAL in the type, not nullable, and that is deliberate
    * (INV-027). A member who has not opted in produces a response with the key
@@ -48,7 +61,22 @@ export interface PublicProfile {
   location?: { system: string; station: string | null } | null;
   credits?: string | null;
   fleet?: Array<{ shipType: string; name: string | null }> | null;
-  activity?: { messages: number; voiceMinutes: number } | null;
+  /**
+   * This calendar month's squadron activity.
+   *
+   * Voice is JOINS, not minutes: Discord reports somebody entering a channel
+   * and never how long they stayed, so nothing records a minute of voice. The
+   * field this replaces was called `voiceMinutes` and the profile page divided
+   * it by sixty to render "hours in voice" — which would have been invented the
+   * moment anyone populated it.
+   */
+  activity?: {
+    messages: number;
+    voiceJoins: number;
+    forumPosts: number;
+    /** A game session was seen. The single input the promotion check reads. */
+    gameObserved: boolean;
+  } | null;
 }
 
 export interface PrivacySettings {
@@ -122,11 +150,87 @@ async function get<T>(path: string, opts: { authed?: boolean } = {}): Promise<T 
   }
 }
 
-export const getRoster = (): Promise<{ members: PublicProfile[]; total: number } | null> =>
-  get('/v1/members');
+/**
+ * ★ `authed: true` IS LOAD-BEARING ★
+ *
+ * The endpoint moved behind the sign-in and this call did not follow. Without
+ * credentials the API answered 401, `get` swallowed it, and the roster rendered
+ * "nobody has opted in yet" — a sentence that was both wrong and impossible to
+ * debug from, because it described a privacy setting rather than a failed
+ * request.
+ */
+/** What the journal knows about a commander, for the roster cards. */
+export interface CommanderSnapshot {
+  /** All six ladders, always. `name` is null for one nothing has been reported for. */
+  ranks: Array<{ key: string; label: string; name: string | null; index: number | null }>;
+  /** Where the ranks came from. Inara is self-reported; the journal is the game. */
+  rankSource: 'inara' | 'journal' | null;
+  /** When Inara was last asked. Null unless rankSource is 'inara'. */
+  ranksFetchedAt: string | null;
+  squadronRank: number | null;
+  currentShip: string | null;
+  lastPlayedAt: string | null;
+}
 
-export const getProfile = (handle: string): Promise<PublicProfile | null> =>
-  get(`/v1/members/${encodeURIComponent(handle)}`, { authed: true });
+/** A Discord role, with what it means to us. Channel-access roles never arrive. */
+export interface DiscordRoleBadge {
+  name: string;
+  /** `#rrggbb`, or null where Discord reports no colour. */
+  colour: string | null;
+  category: 'rank' | 'membership' | 'award';
+}
+
+export type RosterMember = PublicProfile & {
+  commander: CommanderSnapshot;
+  /** Membership, rank and awards, highest first. Channel access is filtered server-side. */
+  discordRoles: DiscordRoleBadge[];
+  /**
+   * Holds a squadron LEADERSHIP appointment. Drives the officers tab.
+   *
+   * A rank question, not a permission one: the webmaster holds every permission
+   * on the platform and no standing in the squadron at all.
+   */
+  isOfficer: boolean;
+  /** Platform roles such as webmaster. Shown as a title, never as a rank. */
+  siteRoles: Array<{ name: string; colour: string | null }>;
+};
+
+/**
+ * One commander's full record.
+ *
+ * Everything a roster entry has, plus the squadron join date — which the roster
+ * has no room for and which is the only honest answer to "how long have they
+ * been here".
+ */
+export type MemberProfileExtras = {
+  /**
+   * When DISCORD says they joined the squadron. Null when not known.
+   *
+   * Not `joinedAt`, which is when they created a website account: a commander
+   * who has flown here for years and signed in yesterday read as "1 day".
+   * Inara cannot answer it — its commander profile carries the squadron name
+   * and the member's rank in it, and no join date anywhere.
+   */
+  guildJoinedAt: string | null;
+};
+
+export const getRoster = (): Promise<{ members: RosterMember[]; total: number } | null> =>
+  get('/v1/members', { authed: true });
+
+/**
+ * One commander's full record.
+ *
+ * ★ THE SAME SHAPE AS A ROSTER ENTRY, DELIBERATELY ★
+ *
+ * The profile page is reached from a card, and a page that showed different
+ * pilot ranks from the card that linked to it is the kind of contradiction
+ * nobody reports and everybody notices. Identical shape, built by identical
+ * code on the server.
+ */
+export type MemberProfile = RosterMember & MemberProfileExtras;
+
+export const getProfile = (handle: string): Promise<MemberProfile | null> =>
+  get<MemberProfile>(`/v1/members/${encodeURIComponent(handle)}`, { authed: true });
 
 export const getMyPrivacy = (): Promise<PrivacySettings | null> =>
   get('/v1/me/privacy', { authed: true });
@@ -143,6 +247,49 @@ export interface SessionRow {
 export const getMySessions = (): Promise<{ sessions: SessionRow[] } | null> =>
   get('/v1/me/sessions', { authed: true });
 
+export interface DeviceRow {
+  id: string;
+  label: string;
+  lastUsedAt: string | null;
+  createdAt: string;
+}
+
+export const getMyDevices = (): Promise<{ devices: DeviceRow[] } | null> =>
+  get('/v1/me/devices', { authed: true });
+
+/** One journal event, described for somebody deciding whether to share it. */
+export interface CatalogueEntry {
+  event: string;
+  label: string;
+  reveals: string;
+}
+
+export interface CatalogueGroup {
+  category: string;
+  label: string;
+  purpose: string;
+  /** True for `session`, which cannot be switched off. */
+  required: boolean;
+  entries: CatalogueEntry[];
+}
+
+/**
+ * What the member has switched OFF, plus the catalogue of what they could.
+ *
+ * Opt-out (INV-013, amended 2026-07-29): empty lists mean everything is kept.
+ * The catalogue travels with the answer so this page cannot drift from what the
+ * server will actually accept.
+ */
+export interface TelemetryConsent {
+  optOutCategories: string[];
+  optOutEvents: string[];
+  catalogue: CatalogueGroup[];
+  requiredCategory: string;
+}
+
+export const getMyTelemetryConsent = (): Promise<TelemetryConsent | null> =>
+  get('/v1/me/telemetry-consent', { authed: true });
+
 export const getTotpStatus = (): Promise<{ enrolled: boolean } | null> =>
   get('/v1/auth/totp/status', { authed: true });
 
@@ -150,6 +297,29 @@ export interface AdminActivityRow {
   discordId: string;
   handle: string | null;
   displayName: string | null;
+  /** Server nickname — the in-game name, by this squadron's convention. */
+  nick: string | null;
+  /** They have an account here, not merely a presence in Discord. */
+  joinedWebsite: boolean;
+  /** A verified commander name. Null when unverified. */
+  cmdrName: string | null;
+  /** How it was proven: `inara_nonce`, `fdev_capi`, `officer_manual`. */
+  verifiedVia: string | null;
+  /**
+   * The last time they did anything in DISCORD, ever. Null if never.
+   *
+   * Not a website sign-in, and not scoped to the month on screen — somebody
+   * who has not spoken since May must still show as gone quiet in July.
+   */
+  lastSeenAt: string | null;
+  /** Their TENURE rank — the ladder promotion moves them up. */
+  currentRank: string | null;
+  /** A leadership APPOINTMENT, a separate axis. Not on the promotion ladder. */
+  appointment: string | null;
+  /** What to show when they hold no rank role. Display only — never a rung. */
+  membershipRole: string | null;
+  /** The next rung up, or null at the top of the ladder. */
+  nextRank: string | null;
   messageCount: number;
   forumPostCount: number;
   voiceJoinCount: number;
@@ -162,6 +332,8 @@ export interface AdminAuditRow {
   id: string;
   action: string;
   actorHandle: string | null;
+  /** Discord server nickname, kept matching the member's in-game name. */
+  actorName: string | null;
   targetType: string | null;
   targetId: string | null;
   createdAt: string;
@@ -172,6 +344,47 @@ export interface AdminAuditRow {
  * two-factor gate produces. The page renders its own step-up prompt rather
  * than a crash — a locked door should look like a locked door.
  */
+/** Squadron-wide figures for the admin dashboard. Aggregates only, never one member's data. */
+export interface AdminDashboard {
+  month: string;
+  discord: {
+    messages: number;
+    forumPosts: number;
+    voiceJoins: number;
+    activeMembers: number;
+    trackedMembers: number;
+    /** Messages per day of the month, index 0 = the 1st. */
+    daily: number[];
+    /** Distinct members active on each day, index 0 = the 1st. */
+    dailyMembers: number[];
+    top: Array<{ name: string; messages: number; voice: number; cmdrName: string | null }>;
+  };
+  game: {
+    events: number;
+    reporting: number;
+    sessionsThisMonth: number;
+    flyingThisMonth: number;
+    playingNow: number;
+    ships: Array<{ ship: string; pilots: number }>;
+    byType: Array<{ type: string; count: number }>;
+  };
+  squadron: {
+    /** Members of the GUILD, bots excluded. Not website accounts. */
+    members: number;
+    /** Of those, how many have an account here. */
+    withAccounts: number;
+    verified: number;
+    /** Tenure ranks, highest first. */
+    ranks: Array<{ rank: string; held: number }>;
+    /** Leadership appointments — a separate axis, not on the promotion ladder. */
+    appointments: Array<{ rank: string; held: number }>;
+    qualifying: number;
+  };
+}
+
+export const getAdminDashboard = (): Promise<AdminDashboard | null> =>
+  get('/v1/admin/dashboard', { authed: true });
+
 export const getAdminActivity = (
   month?: string,
 ): Promise<{ month: string; rows: AdminActivityRow[] } | null> =>
@@ -182,10 +395,16 @@ export const getAdminActivity = (
 export const getAdminAudit = (): Promise<{
   entries: AdminAuditRow[];
   actions: string[];
-} | null> => get('/v1/admin/audit?limit=100', { authed: true });
+  total: number;
+  page: number;
+  pageSize: number;
+} | null> => get('/v1/admin/audit?limit=100&page=1', { authed: true });
 
 export interface SquadronStats {
+  /** People in the Discord guild, bots excluded. THIS is the squadron. */
   members: number;
+  /** Of those, how many have signed up here. */
+  withAccounts: number;
   activeThisMonth: number;
   activityThisMonth: number;
   verifiedCommanders: number;
@@ -200,6 +419,38 @@ export interface SquadronStats {
  * thing anyone sees, and reading it live from Inara or EDSM would put their
  * uptime and rate limits in front of the squadron's front door.
  */
+/** One ship a commander owns, from their game journal. */
+export interface OwnedShip {
+  shipType: string;
+  name: string | null;
+  /** The ship they were last flying. */
+  current: boolean;
+  location: string | null;
+}
+
+/** A commander's own dashboard data. Their data, so no privacy filter applies. */
+export interface CommanderProfile {
+  cmdrName: string | null;
+  ranks: Array<{ key: string; label: string; name: string | null; index: number | null }>;
+  rankSource: 'inara' | 'journal' | null;
+  ranksFetchedAt: string | null;
+  currentShip: string | null;
+  fleet: OwnedShip[];
+  /**
+   * Always null today. The companion app strips Credits before sending, and
+   * Inara does not report a balance — see the note on the server type.
+   */
+  credits: number | null;
+  lastPlayedAt: string | null;
+  squadronRank: number | null;
+  /** The system they were last seen in. Null until something reports one. */
+  currentSystem: string | null;
+  systemSeenAt: string | null;
+}
+
+export const getMyCommander = (): Promise<CommanderProfile | null> =>
+  get('/v1/me/commander', { authed: true });
+
 export const getSquadronStats = (): Promise<SquadronStats | null> => get('/v1/public/stats');
 
 export interface AdminRoleRow {
@@ -209,12 +460,17 @@ export interface AdminRoleRow {
   /** DECIMAL STRING. Above 2^53 a JSON number would round it (INV-006). */
   permMask: string;
   rankOrder: number;
+  /** True for the promotion ladder, false for orthogonal tags. */
+  isHierarchical: boolean;
 }
 
 export interface AdminMappingRow {
   roleId: string;
   roleName: string;
   discordRoleId: string;
+  /** The role's name and colour in Discord. Null when the guild no longer has it. */
+  discordName: string | null;
+  discordColour: string | null;
 }
 
 export const getAdminRoles = (): Promise<{ roles: AdminRoleRow[] } | null> =>
@@ -230,6 +486,28 @@ export interface InaraStatus {
   lastCheckedAt: string | null;
   lastError: string | null;
   source: string | null;
+  /**
+   * Name proven, squadron confirmed, or neither.
+   *
+   * One field rather than two booleans for each page to combine. Three states
+   * have three messages, and letting every screen derive them invites two of
+   * them to disagree about what "partially verified" means.
+   */
+  squadronStatus?: 'unverified' | 'partial' | 'verified';
+  /** The squadron Inara last reported, verbatim. Null when they set none. */
+  inaraSquadron?: string | null;
+  /** The squadron we are looking for, so no page hardcodes it. */
+  expectedSquadron?: string;
+  /** They have said they applied. Drives the twenty-minute re-check. */
+  squadronClaimed?: boolean;
+  squadronCheckedAt?: string | null;
+  /**
+   * The Discord nickname they will wear, computed by the same function that
+   * sets it. Shown rather than described as "RANK - COMMANDER", because a long
+   * commander name drops the rank to fit Discord's 32 characters — the template
+   * is sometimes a shape nobody wears.
+   */
+  discordNickname?: string | null;
 }
 
 /**
@@ -238,8 +516,101 @@ export interface InaraStatus {
  * Note what is NOT in the type: the key. The server reports that one exists and
  * never what it is, so there is no shape here for a component to leak (INV-012).
  */
+/** One companion-app installer, as offered for download. */
+export interface ReleaseAsset {
+  file: string;
+  platform: 'windows' | 'macos' | 'linux';
+  version: string | null;
+  sizeBytes: number;
+  builtAt: string;
+}
+
+/**
+ * Installers available right now.
+ *
+ * Empty is a NORMAL answer — nothing built yet — and the page says so rather
+ * than offering a dead button. Null means the call failed, which is different.
+ */
+export const getCompanionReleases = (): Promise<{ assets: ReleaseAsset[] } | null> =>
+  get('/v1/companion/releases', { authed: true });
+
 export const getInaraStatus = (): Promise<InaraStatus | null> =>
   get('/v1/me/inara', { authed: true });
+
+export interface NavItem {
+  href: string;
+  label: string;
+  section: 'squadron' | 'personal' | 'admin';
+  blurb: string;
+}
+
+export interface MeResponse {
+  user: {
+    userId: string;
+    handle: string;
+    displayName: string;
+    /** Our own URL, never Discord's. Null when they have no picture. */
+    avatarUrl: string | null;
+    rank: string | null;
+    /** IANA zone. Every time outside the audit log renders in this. */
+    timezone: string;
+  } | null;
+  nav: NavItem[];
+  isAdmin: boolean;
+  mustSecureAccount: boolean;
+  /**
+   * What they still owe. Decided by the SERVER (onboarding-gate.ts) so the
+   * ordering lives in one place — two copies of a rule this fiddly drift, and
+   * the symptom is a member bounced between two pages.
+   */
+  /** Absolute instants, so the browser can count down without clock agreement. */
+  session: {
+    expiresAt: string | null;
+    twoFactorExpiresAt: string | null;
+  };
+  onboarding: {
+    step: 'security' | 'commander' | 'verification' | null;
+    path: string | null;
+    promptForVerification: boolean;
+    verified: boolean;
+  };
+}
+
+/**
+ * Everything the signed-in chrome needs, in ONE request.
+ *
+ * Four calls would mean four round trips per page AND four moments where the
+ * answers can disagree — so a member briefly sees an admin link that the next
+ * response takes away.
+ *
+ * Falls back to a signed-out shape rather than null: the navbar renders on
+ * every page including the public ones, and `me === null` at every call site
+ * would mean the same signed-out branch written a dozen times.
+ */
+export const getMe = async (): Promise<MeResponse> =>
+  (await get<MeResponse>('/v1/me', { authed: true })) ?? {
+    user: null,
+    nav: [],
+    isAdmin: false,
+    mustSecureAccount: false,
+    session: { expiresAt: null, twoFactorExpiresAt: null },
+    onboarding: { step: null, path: null, promptForVerification: false, verified: false },
+  };
+
+/**
+ * The zones the picker offers.
+ *
+ * Read from the SERVER's runtime rather than hard-coded here, because the IANA
+ * database changes and a list we maintained would eventually deny somebody the
+ * zone they actually live in.
+ */
+export const getTimezones = (): Promise<{ timezones: string[]; fallback: string } | null> =>
+  get('/v1/me/timezones', { authed: true });
+
+/** The member's own pending commander claim, if any. */
+export const getMyClaim = (): Promise<{
+  pending: { cmdrName: string; nonce: string; expiresAt: string } | null;
+} | null> => get('/v1/me/cmdr', { authed: true });
 
 export interface AccountStatus {
   privileged: boolean;

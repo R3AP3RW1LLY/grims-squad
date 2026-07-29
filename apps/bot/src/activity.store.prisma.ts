@@ -17,6 +17,21 @@ import type { IActivityStore, ActivityKind } from './activity.recorder.js';
 export class PrismaActivityStore implements IActivityStore {
   constructor(private readonly prisma: PrismaClient) {}
 
+  /**
+   * Adds one event to a member's month.
+   *
+   * ★ THIS DOES NOT DEDUPLICATE, AND THE CALLER MUST NOT ASSUME IT DOES ★
+   *
+   * `_eventId` is accepted and ignored. Idempotency comes from the CHECKPOINT
+   * WATERMARK instead: the backfill only ever fetches messages after the
+   * highest snowflake it has already recorded for that channel, so a message
+   * cannot be presented twice in the first place.
+   *
+   * Written down because the parameter looks like a dedupe key and is not one.
+   * Anything that records an event WITHOUT a monotonic watermark behind it —
+   * voice occupancy at startup, for instance — has to guard itself, or a
+   * restart adds a duplicate every time.
+   */
   async record(
     discordId: string,
     month: Date,
@@ -45,7 +60,62 @@ export class PrismaActivityStore implements IActivityStore {
         last_activity_at  = GREATEST(member_activity_months.last_activity_at, EXCLUDED.last_activity_at),
         updated_at        = now()
     `;
+
+    await this.#recordDay(discordId, at, m, f, v);
     return true;
+  }
+
+  /**
+   * The same event, against its DAY.
+   *
+   * ★ WHY THIS IS A SEPARATE TABLE AND NOT A COLUMN ★
+   *
+   * The monthly row carries one `last_activity_at`, so a chart of the month
+   * built from it counts each member on the single day they were last seen.
+   * Somebody active on the 5th and the 20th appears only on the 20th, and a
+   * busy month renders as a scattering of single marks — plausible, and wrong.
+   *
+   * Promotion still reads the MONTHLY table. This is display data and holds no
+   * authority: if the two ever disagree, the monthly one decides who is
+   * promoted and this one is the thing that is broken.
+   */
+  async #recordDay(discordId: string, at: Date, m: number, f: number, v: number): Promise<void> {
+    // Midnight UTC. In local time a message at 23:30 on the 31st would land on
+    // the 1st of the next month for half the world.
+    const day = new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), at.getUTCDate()));
+
+    await this.prisma.$executeRaw`
+      INSERT INTO member_activity_days
+        (discord_id, day, message_count, forum_post_count, voice_join_count)
+      VALUES (${discordId}, ${day}::date, ${m}, ${f}, ${v})
+      ON CONFLICT (discord_id, day) DO UPDATE SET
+        message_count    = member_activity_days.message_count    + ${m},
+        forum_post_count = member_activity_days.forum_post_count + ${f},
+        voice_join_count = member_activity_days.voice_join_count + ${v}
+    `;
+  }
+
+  /**
+   * Writes ONLY the daily row, never the monthly one.
+   *
+   * ★ THIS EXISTS SO HISTORY CAN BE REBUILT WITHOUT CORRUPTING THE TOTALS ★
+   *
+   * The daily table is new and empty while the monthly one already holds a
+   * fully counted month. Re-reading the same ten thousand messages through the
+   * normal path would fill the daily table correctly AND add every message to
+   * the monthly totals a second time — silently doubling the numbers that
+   * decide promotions.
+   *
+   * So the daily backfill runs through here, with its own watermarks.
+   */
+  async recordDayOnly(discordId: string, at: Date, kind: ActivityKind): Promise<void> {
+    await this.#recordDay(
+      discordId,
+      at,
+      kind === 'message' ? 1 : 0,
+      kind === 'forum' ? 1 : 0,
+      kind === 'voice' ? 1 : 0,
+    );
   }
 
   /**

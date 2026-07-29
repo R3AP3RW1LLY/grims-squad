@@ -11,9 +11,9 @@ import type { ISessionStore, SessionContext, TokenLookup } from './session.store
 export class PrismaSessionStore implements ISessionStore {
   constructor(private readonly prisma: PrismaClient) {}
 
-  async createFamily(userId: string, ctx: SessionContext): Promise<string> {
+  async createFamily(userId: string, ctx: SessionContext, expiresAt: Date): Promise<string> {
     const f = await this.prisma.refreshTokenFamily.create({
-      data: { userId, userAgent: ctx.userAgent, ipHash: ctx.ipHash },
+      data: { userId, userAgent: ctx.userAgent, ipHash: ctx.ipHash, expiresAt },
       select: { id: true },
     });
     return f.id;
@@ -44,6 +44,7 @@ export class PrismaSessionStore implements ISessionStore {
         revokeReason: t.family.revokeReason,
         userAgent: t.family.userAgent,
         ipHash: t.family.ipHash,
+        expiresAt: t.family.expiresAt,
       },
     };
   }

@@ -260,6 +260,12 @@ enum TelemetryCategory {
   bgs
   carrier
   fleet
+  /// Whether the commander played at all — the LoadGame journal event, and nothing more.
+  /// The single input the promotion engine needs, and deliberately separable from everything
+  /// else so a member can confirm they play without sharing what they did (INV-013).
+  session
+  /// Ranks, progress and squadron standing. What a commander IS, rather than what they did.
+  profile
 }
 
 /// Delivery channel for a notification fan-out.
@@ -310,10 +316,28 @@ model User {
   handle      String     @unique @db.Citext
   displayName String     @map("display_name")
   email       String?    @unique @db.Citext
+  /// Discord's avatar HASH as last seen at sign-in, not a URL. Misnamed for historical reasons.
   avatarUrl   String?    @map("avatar_url")
+  /// The avatar hash we have actually COPIED into object storage.
+  /// Distinct from avatarUrl on purpose: that one says what Discord shows, this one says what we
+  /// hold. They differ between a member changing their picture and our copy of it landing, and
+  /// conflating them would mean serving a 404 for the gap (D5, D22).
+  avatarStoredHash String? @map("avatar_stored_hash")
   bio         String?
   /// IANA zone. Every user-facing time renders in this AND UTC (INV-025).
   timezone    String     @default("UTC")
+  /// Last moment the companion app saw the member's journal still being WRITTEN.
+  ///
+  /// Not "last event received" — Elite's journal clusters at session start and then goes quiet for
+  /// hours, so a member three hours into a flight has sent nothing recently and is very much
+  /// playing. The app reports that the file is still growing, which is the only honest in-game
+  /// signal available without widening what we collect.
+  lastPlayingAt DateTime? @map("last_playing_at") @db.Timestamptz(6)
+  /// When the member finished the commander onboarding step.
+  ///
+  /// A SEPARATE COLUMN rather than inferring from `timezone`, because the default is "UTC" and
+  /// somebody who genuinely lives in UTC would otherwise be asked forever. Null means never asked.
+  commanderOnboardedAt DateTime? @map("commander_onboarded_at") @db.Timestamptz(6)
   status      UserStatus @default(active)
   joinedAt    DateTime   @default(now()) @map("joined_at") @db.Timestamptz(6)
   lastSeenAt  DateTime?  @map("last_seen_at") @db.Timestamptz(6)
@@ -327,6 +351,7 @@ model User {
   privacySettings     PrivacySetting?
   twoFactor           TwoFactorCredential?
   inaraLink           InaraLink?
+  inaraProfile        InaraCommanderProfile?
   cmdrVerifications   CmdrVerification[]
   userRoles           UserRole[]            @relation("UserRoleHolder")
   rolesGranted        UserRole[]            @relation("UserRoleGrantor")
@@ -434,6 +459,29 @@ model CmdrVerification {
   /// - any member could permanently deny any CMDR name, including every officer's, by opening
   /// a claim and never completing it (RED-TEAM R7). See `indexes.md`.
   isVerified     Boolean            @default(false) @map("is_verified")
+
+  /// ★ SQUADRON MEMBERSHIP IS A SECOND, SEPARATE CHECK (2026-07-28) ★
+  ///
+  /// Proving you control a commander name proves nothing about whether you are in THIS
+  /// squadron. The two were previously one step, so anybody who verified a name was treated
+  /// as a member — which is exactly backwards for a squadron platform.
+  ///
+  /// Three states fall out of these fields: no verified name at all; a verified name with no
+  /// confirmed squadron (PARTIAL); and both (VERIFIED).
+  ///
+  /// The squadron Inara reported at the last check. Recorded verbatim, so a member who is in
+  /// a DIFFERENT squadron can be told which one rather than a bare "not a member".
+  inaraSquadron     String?   @map("inara_squadron")
+  /// Set when Inara confirmed they are in OUR squadron. Cleared if they later leave.
+  squadronVerifiedAt DateTime? @map("squadron_verified_at") @db.Timestamptz(6)
+  /// When the member said they had applied to join. Drives the 20-minute re-check.
+  ///
+  /// Their CLAIM, never proof. Inara is what confirms it; this only says whether it is worth
+  /// spending rate budget asking, so somebody who has not applied is not polled forever.
+  squadronClaimedAt DateTime? @map("squadron_claimed_at") @db.Timestamptz(6)
+  /// Last time Inara was asked about their squadron, successful or not.
+  squadronCheckedAt DateTime? @map("squadron_checked_at") @db.Timestamptz(6)
+
   revokedAt      DateTime?          @map("revoked_at") @db.Timestamptz(6)
   createdAt      DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
 
@@ -464,6 +512,54 @@ model Role {
 
   @@index([rankOrder])
   @@map("roles")
+}
+
+/// What a Discord role means to the hub. Discord itself has no such concept — every role is just
+/// a role — so the distinction between "this is a rank" and "this opens a channel" lives here.
+enum DiscordRoleCategory {
+  /// The squadron ladder: Cadet through Grand Master General. Mapped to an internal Role.
+  rank
+  /// Standing in the squadron itself: a member, or an ally.
+  membership
+  /// Earned and worth showing off.
+  award
+  /// Channel access and similar plumbing. Deliberately never rendered on a profile.
+  hidden
+  /// Not yet classified. Not shown, because guessing wrong is worse than showing nothing.
+  other
+}
+
+/// A role as DISCORD defines it: its name, its colour and where it sits in the guild list.
+///
+/// Distinct from `Role`, which is OUR permission bundle. Most Discord roles are not mapped to one
+/// and never will be — colour roles, ping roles, joke roles — and a member wearing them is still
+/// wearing them. The roster shows what somebody actually has in Discord, so it needs the names and
+/// colours of roles the permission system has no opinion about.
+///
+/// A CACHE, refreshed from the guild. Nothing here is authoritative: Discord is.
+model DiscordRole {
+  /// The snowflake. Data, not source (INV-008).
+  discordRoleId String   @id @map("discord_role_id")
+  name          String
+  /// `#rrggbb`, or null where Discord reports colour 0 — which means "no colour", NOT black.
+  colour        String?
+  /// Higher sits nearer the top of the guild's role list, which is the order Discord displays.
+  position      Int      @default(0)
+  /// Whether Discord shows this role separately in the member list. Mirrored for display parity.
+  hoist         Boolean  @default(false)
+  /// What this role MEANS to us, which Discord has no concept of.
+  ///
+  /// Discord roles serve several unrelated purposes in one flat list — rank, membership, awards,
+  /// and channel access. A roster card wants three of those and emphatically not the fourth: a
+  /// member's card should not be eight lines of "has access to the mining channel".
+  ///
+  /// Stored rather than derived from names in code, so renaming a role in Discord is a data fix
+  /// rather than a deploy. Seeded by rule at sync time; see the role-sync job.
+  category      DiscordRoleCategory @default(other)
+  syncedAt      DateTime @default(now()) @map("synced_at") @db.Timestamptz(6)
+
+  @@index([position])
+  @@map("discord_roles")
 }
 
 /// Discord role ID → internal role. The only place a Discord snowflake may live (INV-008).
@@ -510,6 +606,13 @@ model RefreshTokenFamily {
   ipHash       String?   @map("ip_hash")
   createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   lastUsedAt   DateTime  @default(now()) @map("last_used_at") @db.Timestamptz(6)
+  /// ABSOLUTE end of this sign-in, fixed when it began and never extended.
+  ///
+  /// Rotation issues a fresh refresh token every fifteen minutes, and each one carries its own
+  /// shorter expiry — so without a cap here an active member's session slides forever and
+  /// "signed in for 14 days" would mean "signed in until you stop using it". It would also make
+  /// the countdown on the dashboard meaningless, since it would reset on every rotation.
+  expiresAt    DateTime  @map("expires_at") @db.Timestamptz(6)
 
   user   User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   tokens RefreshToken[]
@@ -590,6 +693,88 @@ model InaraLink {
   @@map("inara_links")
 }
 
+/// Activity per member per DAY. The shape of a month, rather than its total.
+///
+/// ★ WHY THE MONTHLY TABLE CANNOT ANSWER THIS ★
+/// `member_activity_months` holds one row per member per month with a `last_activity_at`. A
+/// daily chart built from it counts each member on the ONE day they were last seen — somebody
+/// active on the 5th and the 20th appears only on the 20th, and a busy month renders as a
+/// scattering of single marks. The chart looked plausible and was wrong.
+///
+/// Promotion still reads the MONTHLY table. This exists for display, and deliberately carries no
+/// authority: a discrepancy between the two must never change who gets promoted.
+model MemberActivityDay {
+  /// Discord snowflake. Present for every guild member, website account or not.
+  discordId      String   @map("discord_id")
+  /// The UTC day. Midnight UTC, so a day never depends on where the server runs.
+  day            DateTime @db.Date
+  messageCount   Int      @default(0) @map("message_count")
+  forumPostCount Int      @default(0) @map("forum_post_count")
+  voiceJoinCount Int      @default(0) @map("voice_join_count")
+
+  @@id([discordId, day])
+  @@index([day])
+  @@map("member_activity_days")
+}
+
+/// Every member of the guild, whether or not they have ever visited the website.
+///
+/// ★ WHY THIS IS NOT DiscordIdentity ★
+/// `DiscordIdentity` is keyed on `userId` and only exists once somebody has SIGNED IN. Fifty of
+/// the squadron's fifty-one active members have no such row, so anything joining through it can
+/// only ever name one person — the admin activity table showed raw snowflakes for everyone else.
+///
+/// This is a CACHE of the guild, keyed on the snowflake, populated by the bot. It carries no
+/// tokens and no secrets: names, roles and a timestamp. A member who leaves keeps their row, so
+/// last month's activity still has a name against it rather than becoming an unattributed number.
+model DiscordGuildMember {
+  /// Discord snowflake. Never hard-coded in application source (INV-008).
+  discordId  String   @id @map("discord_id")
+  /// Server nickname — the IN-GAME NAME, in this squadron's convention. Null when unset.
+  nick       String?
+  username   String?
+  globalName String?  @map("global_name")
+  /// Role snowflakes, for reading a rank without waiting for reconciliation.
+  roles      String[] @default([])
+  isBot      Boolean  @default(false) @map("is_bot")
+  syncedAt   DateTime @default(now()) @map("synced_at") @db.Timestamptz(6)
+
+  @@map("discord_guild_members")
+}
+
+/// Inara's public view of a commander, refreshed on a schedule and read from cache.
+///
+/// ★ A CACHE, AND NOTHING MAY BLOCK ON FILLING IT ★
+/// ADR-004 forbids Inara on any request path. A roster page therefore reads THIS TABLE and
+/// never Inara; a row that is missing or stale renders as missing or stale, and the page is
+/// otherwise unaffected. That is the entire reason this table exists rather than a fetch.
+///
+/// ★ WHY A ROW CAN EXIST WITH NOTHING IN IT ★
+/// `isFound` false means Inara answered and had no such commander — a typo in a name, or a
+/// member with no Inara account, which is the common case and not an error. Distinguishing it
+/// from "never fetched" (no row at all) is what stops the sync retrying a known-absent
+/// commander as though the last attempt had failed.
+model InaraCommanderProfile {
+  userId       String   @id @map("user_id") @db.Uuid
+  /// The name we ASKED Inara about, recorded so a later rename is detectable. Case-insensitive.
+  searchName   String   @map("search_name") @db.Citext
+  /// Pilot ranks as `[{key,label,name,index}]`, already mapped onto our own ladders.
+  /// Stored resolved rather than raw so the roster does no interpretation at render time.
+  ranks        Json     @default("[]")
+  squadronName String?  @map("squadron_name")
+  /// Squadron rank as INARA words it, which is not our rank ladder and not the game's integer.
+  squadronRank String?  @map("squadron_rank")
+  /// Inara answered. Says nothing about whether it knew the commander — see isFound.
+  fetchedAt    DateTime @map("fetched_at") @db.Timestamptz(6)
+  /// Inara returned a profile. False means it answered "no such commander".
+  isFound      Boolean  @default(false) @map("is_found")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([fetchedAt])
+  @@map("inara_commander_profiles")
+}
+
 /// TOTP second factor. MANDATORY to enter the admin console — an account holding officer
 /// permissions cannot perform a privileged action until this is enrolled (P1.10).
 ///
@@ -640,7 +825,24 @@ model TwoFactorRecovery {
 /// responses, not null and not merely hidden by the UI (INV-027).
 model PrivacySetting {
   userId             String              @id @map("user_id") @db.Uuid
-  /// Telemetry categories the member has consented to. Empty by default. Enforced server-side (INV-013).
+  /// ★ OPT-OUT, NOT OPT-IN (INV-013, amended 2026-07-29) ★
+  ///
+  /// Categories the member has switched OFF. Empty by default, which means everything is kept —
+  /// the companion app sends what it reads and the website is where a member declines.
+  ///
+  /// `session` may never appear here. Promotion eligibility is computed from it, so a member who
+  /// switched it off would silently stop qualifying for promotions they had earned. Refused by the
+  /// service, not merely hidden by the UI.
+  telemetryOptOutCategories TelemetryCategory[] @default([]) @map("telemetry_opt_out_categories")
+  /// Individual journal events the member has switched off, by name, e.g. `FSDJump`.
+  ///
+  /// Finer than a category on purpose: somebody may be happy for us to know they were in a combat
+  /// zone and not what bounties they claimed. Stored as names rather than an enum because the
+  /// journal's event set is Frontier's and grows with every game update — a new event must not
+  /// need a migration before a member can decline it.
+  telemetryOptOutEvents     String[]            @default([]) @map("telemetry_opt_out_events")
+  /// Superseded by the two columns above. Retained so the migration can read it, and so anybody
+  /// looking at an old backup can see what it meant. Nothing writes it.
   telemetryConsent   TelemetryCategory[] @default([]) @map("telemetry_consent")
   showLocation       Boolean             @default(false) @map("show_location")
   showCredits        Boolean             @default(false) @map("show_credits")

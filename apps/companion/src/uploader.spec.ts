@@ -16,16 +16,31 @@ const event = (n: number): ParsedEvent => ({
   name: 'Rank',
   occurredAt: `2026-07-27T12:00:${String(n).padStart(2, '0')}Z`,
   data: { Combat: n },
-  eventKey: `key-${n}`,
 });
 
+/**
+ * A stand-in for `fetch`.
+ *
+ * ★ THE BODY IS A STRING, AS IT IS IN A REAL RESPONSE ★
+ *
+ * This used to expose only `json()`. That made it a fake of something that does
+ * not exist: a real Response carries bytes, and `json()` is one of two ways to
+ * read them. When the uploader started reading `text()` — so it could MEASURE
+ * those bytes — the fake returned undefined and every send looked like a
+ * network failure.
+ *
+ * Both readers now come from one string, so the size the test sees is the size
+ * the uploader counts, and neither can drift from the other.
+ */
 function fakeFetch(handler: (init: RequestInit) => Partial<Response> & { json?: () => unknown }) {
   return (async (_url: string, init: RequestInit) => {
     const r = handler(init);
+    const body = JSON.stringify(r.json ? r.json() : {});
     return {
       ok: r.ok ?? true,
       status: r.status ?? 200,
-      json: async () => (r.json ? r.json() : {}),
+      text: async () => body,
+      json: async () => JSON.parse(body) as unknown,
     } as Response;
   }) as unknown as typeof fetch;
 }
@@ -151,5 +166,114 @@ describe('failures', () => {
     const r = await up.send([event(1)]);
     expect(r.unauthorised).toBe(false);
     expect(r.error).toContain('503');
+  });
+});
+
+describe('measuring the transfer', () => {
+  /*
+   * ★ MEASURED, NOT ESTIMATED ★
+   *
+   * The squadron owner asked for this to be "extremely accurate". So the byte
+   * count comes from the very string handed to fetch, not from re-serialising
+   * the events afterwards — two serialisations can differ, and the one nobody
+   * checks is the one that is wrong.
+   */
+  it('MANDATORY: txBytes is the exact byte length of the body sent', async () => {
+    let sentBody = '';
+    const up = new Uploader({
+      apiBaseUrl: 'https://hub.example',
+      deviceToken: 'gsq_test',
+      fetchImpl: ((async (_url: string, init: RequestInit) => {
+        sentBody = init.body as string;
+        return {
+          ok: true,
+          status: 200,
+          text: async () => '{"accepted":1}',
+          json: async () => ({ accepted: 1 }),
+        } as Response;
+      }) as unknown) as typeof fetch,
+    });
+
+    const r = await up.send([event(1)]);
+    expect(r.txBytes).toBe(Buffer.byteLength(sentBody, 'utf8'));
+    expect(r.rxBytes).toBe(Buffer.byteLength('{"accepted":1}', 'utf8'));
+  });
+
+  it('MANDATORY: counts BYTES, not characters', async () => {
+    /*
+     * A commander name with an accent is more bytes than characters. `.length`
+     * would under-report every non-ASCII payload, and the members it
+     * under-reports for would never know.
+     */
+    const accented: ParsedEvent = {
+      name: 'Rank',
+      occurredAt: '2026-07-27T12:00:00Z',
+      data: { Ship: 'Zoë’s Rêve' },
+    };
+
+    let sentBody = '';
+    const up = new Uploader({
+      apiBaseUrl: 'https://hub.example',
+      deviceToken: 'gsq_test',
+      fetchImpl: ((async (_url: string, init: RequestInit) => {
+        sentBody = init.body as string;
+        return { ok: true, status: 200, text: async () => '{}', json: async () => ({}) } as Response;
+      }) as unknown) as typeof fetch,
+    });
+
+    const r = await up.send([accented]);
+    expect(r.txBytes).toBe(Buffer.byteLength(sentBody, 'utf8'));
+    expect(r.txBytes).toBeGreaterThan(sentBody.length);
+  });
+
+  it('MANDATORY: a failed request still reports what it put on the wire', async () => {
+    // Those bytes went out regardless. A meter that hid them would under-report
+    // exactly when somebody is watching it to work out why nothing arrives.
+    const up = new Uploader({
+      apiBaseUrl: 'https://hub.example',
+      deviceToken: 'gsq_test',
+      fetchImpl: (async () => {
+        throw new Error('offline');
+      }) as unknown as typeof fetch,
+    });
+
+    const r = await up.send([event(1)]);
+    expect(r.ok).toBe(false);
+    expect(r.txBytes).toBeGreaterThan(0);
+  });
+
+  it('counts nothing when nothing is sent', async () => {
+    const up = new Uploader({
+      apiBaseUrl: 'https://hub.example',
+      deviceToken: 'gsq_test',
+      fetchImpl: fakeFetch(() => ({})),
+    });
+
+    const r = await up.send([]);
+    expect(r.txBytes).toBe(0);
+    expect(r.rxBytes).toBe(0);
+  });
+
+  it('survives a 200 that is not JSON, and still counts it', async () => {
+    // A proxy error page with a 200 status. The bytes are real even though the
+    // body is useless.
+    const up = new Uploader({
+      apiBaseUrl: 'https://hub.example',
+      deviceToken: 'gsq_test',
+      fetchImpl: ((async () =>
+        ({
+          ok: true,
+          status: 200,
+          text: async () => '<html>nope</html>',
+          json: async () => {
+            throw new Error('not json');
+          },
+        }) as Response) as unknown) as typeof fetch,
+    });
+
+    const r = await up.send([event(1)]);
+    expect(r.ok).toBe(true);
+    expect(r.accepted).toBe(0);
+    expect(r.rxBytes).toBe(Buffer.byteLength('<html>nope</html>', 'utf8'));
   });
 });

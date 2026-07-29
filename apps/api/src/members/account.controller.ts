@@ -1,5 +1,5 @@
-import { Controller, Get, Delete, Param, Req, Inject } from '@nestjs/common';
-import type { FastifyRequest } from 'fastify';
+import { Controller, Get, Delete, Param, Req, Res, Inject } from '@nestjs/common';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { AppError, ErrorCode } from '@grims/shared';
 import { User, type CurrentUser } from '../auth/current-user.js';
 import { verifyCsrf, readCsrfCookie } from '../common/csrf.js';
@@ -24,7 +24,8 @@ export class AccountController {
     @Req() req: FastifyRequest,
   ): Promise<{ sessions: SessionSummary[] }> {
     const userId = requireUser(caller);
-    return { sessions: await this.store.sessionsOf(userId, currentFamilyId(req)) };
+    const current = await this.store.familyIdForRefreshToken(refreshTokenOf(req));
+    return { sessions: await this.store.sessionsOf(userId, current) };
   }
 
   /**
@@ -39,7 +40,8 @@ export class AccountController {
     @User() caller: CurrentUser | undefined,
     @Param('familyId') familyId: string,
     @Req() req: FastifyRequest,
-  ): Promise<{ revoked: true }> {
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ): Promise<{ revoked: true; signedOut: boolean }> {
     const userId = requireUser(caller);
     csrf(req);
 
@@ -48,11 +50,43 @@ export class AccountController {
       throw new AppError(ErrorCode.RESOURCE_NOT_VISIBLE, 'Session not found.');
     }
 
+    /*
+     * Resolved BEFORE the revoke, deliberately.
+     *
+     * `revokeFamily` currently only stamps `revokedAt` and leaves the token
+     * rows, so looking it up afterwards happens to work — but that is a
+     * coincidence of the implementation, and the day revocation starts deleting
+     * tokens this would silently stop signing anybody out. Reading first makes
+     * the order irrelevant.
+     */
+    const current = await this.store.familyIdForRefreshToken(refreshTokenOf(req));
+
     // Revoking an already-revoked family is not an error. The member's intent
     // is "this device should not be signed in", and it already is not — failing
     // here would make a double-click look like a problem.
     await this.store.revokeFamily(familyId, 'user_revoked');
-    return { revoked: true };
+
+    /*
+     * ★ ENDING YOUR OWN SESSION MUST SIGN YOU OUT, HERE, ON THE SERVER ★
+     *
+     * Revoking the family removes the REFRESH side. It does nothing to the
+     * access token, which is a JWT carrying no authorization data and therefore
+     * never consulted against the database — so a member who ended "this
+     * device" stayed fully signed in for up to fifteen minutes on the very
+     * device they had just revoked.
+     *
+     * That is the opposite of what the button says, and it is worst in the
+     * exact situation the button exists for: somebody on a shared or borrowed
+     * machine clicking "Sign out" and walking away.
+     *
+     * The cookies are cleared in the RESPONSE rather than by the page, because
+     * a client-side sign-out is a request that can fail, be blocked, or simply
+     * not be made by a caller that is not our UI. The server decides.
+     */
+    const signedOut = current !== null && current === familyId;
+    if (signedOut) clearSessionCookies(reply);
+
+    return { revoked: true, signedOut };
   }
 
   /** Everything we hold, as JSON. */
@@ -67,15 +101,55 @@ export class AccountController {
 }
 
 /**
- * The family id behind the request's own session, so the list can mark it.
+ * The refresh token on this request, under either cookie name.
  *
- * Read from the request rather than derived from the access token: the access
- * token carries no family id by design (it carries no authorization data at
- * all), and adding one to it purely for a UI label would weaken it.
+ * ★ THE PREVIOUS VERSION OF THIS READ A PROPERTY NOTHING SET ★
+ *
+ * It looked for `req.sessionFamilyId`, which appears exactly once in the
+ * codebase — here, being read. So it always returned null: "which device am I
+ * on" marked nothing, and the sign-out that depends on the same answer could
+ * never fire. Two features dead, neither complaining.
+ *
+ * The refresh cookie is the only thing on a request that identifies the
+ * session. The access token is a JWT carrying no authorization data by design,
+ * and adding a family id to it purely for a UI label would weaken it.
+ *
+ * BOTH names, because the API picks `__Host-` from NODE_ENV rather than from
+ * the request — behind a proxy the process sees plain http while the browser
+ * holds the prefixed cookie.
  */
-function currentFamilyId(req: FastifyRequest): string | null {
-  const v = (req as unknown as { sessionFamilyId?: string }).sessionFamilyId;
-  return typeof v === 'string' && v !== '' ? v : null;
+function refreshTokenOf(req: FastifyRequest): string {
+  const cookies =
+    (req as unknown as { cookies?: Record<string, string | undefined> }).cookies ?? {};
+  return cookies['__Host-gs_rt'] ?? cookies['gs_rt'] ?? '';
+}
+
+/**
+ * Clears the session cookies on the way out.
+ *
+ * ★ EVERY NAME, BOTH PREFIXES ★
+ *
+ * The API chooses `__Host-` from NODE_ENV rather than from the request, so a
+ * response that clears only the name this process would have SET leaves the
+ * other one in the browser. Behind a proxy that is the difference between
+ * signing somebody out and appearing to.
+ *
+ * The CSRF cookie goes too. It is not a credential on its own, but leaving a
+ * token behind that pairs with cookies that are gone produces confusing 403s on
+ * the next sign-in rather than a clean start.
+ */
+function clearSessionCookies(reply: FastifyReply): void {
+  const jar = reply as unknown as {
+    clearCookie?: (name: string, opts?: Record<string, unknown>) => unknown;
+  };
+  if (typeof jar.clearCookie !== 'function') return;
+
+  for (const base of ['gs_at', 'gs_rt', 'gs_csrf']) {
+    for (const name of [base, `__Host-${base}`]) {
+      // Path must match the one they were set with, or the browser keeps them.
+      jar.clearCookie(name, { path: '/' });
+    }
+  }
 }
 
 function csrf(req: FastifyRequest): void {

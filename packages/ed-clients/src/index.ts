@@ -13,7 +13,7 @@ export {
   INARA_APP_NAME,
   INARA_APP_VERSION,
 } from './inara/inara.adapter.js';
-export type { InaraConfig, InaraProfile } from './inara/inara.adapter.js';
+export type { InaraConfig, InaraProfile, InaraKeyPool } from './inara/inara.adapter.js';
 export {
   inaraLimiter,
   InaraLimiter,

@@ -15,6 +15,22 @@ export interface MappingRecord {
   readonly roleId: string;
   readonly roleName: string;
   readonly discordRoleId: string;
+  /**
+   * What the role is called IN DISCORD, and the colour it wears there.
+   *
+   * ★ WHY THE SNOWFLAKE ALONE WAS NOT ENOUGH ★
+   *
+   * The mapping list showed `Sector Overseer → 1513749464458723469`. Nobody can
+   * read a snowflake, so the one question the page exists to answer — is this
+   * pointing at the role I think it is — could only be checked by opening
+   * Discord and comparing twenty digits by eye.
+   *
+   * Null when the guild catalogue has no such role: either it has been DELETED
+   * in Discord, or the sync has not run. That is worth showing loudly, because
+   * a mapping to a role that no longer exists silently grants nobody anything.
+   */
+  readonly discordName: string | null;
+  readonly discordColour: string | null;
 }
 
 export interface MappingAdminStore {

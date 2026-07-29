@@ -8,13 +8,50 @@ import type {
   Reporter,
   Anomaly,
 } from './discord-reconcile.js';
+import type { RoleSource, RoleCacheStore, GuildRoleRecord } from './discord-role-sync.js';
 
 /** Wraps the adapter so the service depends on one method, not on Discord. */
-export class AdapterGuildSource implements GuildSource {
+export class AdapterGuildSource implements GuildSource, RoleSource {
   constructor(private readonly discord: DiscordAdapter) {}
 
   async listMembers(guildId: string): Promise<GuildMemberRecord[]> {
     return this.discord.listGuildMembers(guildId);
+  }
+
+  async listRoles(guildId: string): Promise<GuildRoleRecord[]> {
+    return this.discord.listGuildRoles(guildId);
+  }
+}
+
+/**
+ * The cache of guild role names and colours.
+ *
+ * Upsert rather than replace-all: a role removed from Discord is removed from
+ * every member holding it, so it stops being shown anyway — and keeping the row
+ * means a role deleted by accident and recreated does not lose its name for
+ * however long the next sync takes.
+ */
+export class PrismaRoleCacheStore implements RoleCacheStore {
+  constructor(private readonly db: PrismaClient) {}
+
+  async upsertRole(role: GuildRoleRecord, at: Date): Promise<void> {
+    await this.db.discordRole.upsert({
+      where: { discordRoleId: role.id },
+      create: {
+        discordRoleId: role.id,
+        name: role.name,
+        colour: role.colour,
+        position: role.position,
+        hoist: role.hoist,
+      },
+      update: {
+        name: role.name,
+        colour: role.colour,
+        position: role.position,
+        hoist: role.hoist,
+        syncedAt: at,
+      },
+    });
   }
 }
 

@@ -123,9 +123,24 @@ export class InaraLimiter {
       this.#schedule();
     }, wait);
 
-    // Do not hold the process open just because calls are queued. A worker that
-    // has finished its work should exit, not linger for a 30-second timer.
-    this.#timer.unref?.();
+    /*
+     * ★ NOT unref'd — AND THAT REVERSES THE PREVIOUS REASONING ★
+     *
+     * It used to be, on the grounds that "a worker that has finished its work
+     * should exit, not linger for a 30-second timer". But this timer only
+     * exists when the queue is NOT empty, so unref'ing it says the opposite of
+     * what was intended: a process with Inara calls still queued would exit
+     * before dispatching them.
+     *
+     * That is not hypothetical. The worker is a one-shot cron process, and its
+     * twenty-minute sweep would have exited silently having called Inara zero
+     * times — reporting success, with nothing in any log. It showed up here as
+     * Node's "Detected unsettled top-level await" in a probe script.
+     *
+     * The timer clears itself once the queue drains, so nothing lingers. The
+     * only unref'd timer is the give-up timer in `runWithin`, which is correct:
+     * that one exists to STOP waiting.
+     */
   }
 }
 

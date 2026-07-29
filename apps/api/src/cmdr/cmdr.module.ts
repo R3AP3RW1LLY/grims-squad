@@ -15,6 +15,7 @@ import { PrismaCmdrStore } from './cmdr.store.prisma.js';
 import { InaraLinkService } from './inara-link.service.js';
 import { PrismaInaraLinkStore } from './inara-link.store.prisma.js';
 import { NicknameSyncService } from './nickname-sync.service.js';
+import { LEADERSHIP_CEILING } from '../members/members.store.js';
 import { CMDR_SERVICE, NONCE_SERVICE, INARA_LINK } from './cmdr.tokens.js';
 import { logger } from '../logging.js';
 
@@ -64,6 +65,50 @@ function nicknameReconciler(prisma: PrismaClient): NicknameSyncService | undefin
       return i?.guildNick ?? null;
     },
     setNickname: (g, d, nick) => discord.setMemberNickname(g, d, nick),
+    /**
+     * The rank that goes in front of their commander name.
+     *
+     * ★ APPOINTMENT FIRST, AND THE ORDERING IS INVERTED ★
+     *
+     * A leadership appointment outranks any tenure rank for display: somebody
+     * is introduced as the Prime Legate, not as a Grand Master General who also
+     * happens to hold an office.
+     *
+     * Within appointments the LOWEST rankOrder is the most senior — Galactic
+     * Admiral is 10, Squadron Leader 60 — which is the reverse of the tenure
+     * ladder, where Cadet is 100 and Grand Master General 190. Every officer
+     * also holds Squadron Leader as a base, so reading these the same way round
+     * would title the Galactic Admiral "Squadron Leader".
+     */
+    async rankFor(discordId) {
+      const [member, mappings] = await Promise.all([
+        prisma.discordGuildMember.findUnique({
+          where: { discordId },
+          select: { roles: true },
+        }),
+        prisma.roleMapping.findMany({
+          where: { role: { isHierarchical: true } },
+          select: { discordRoleId: true, role: { select: { name: true, rankOrder: true } } },
+        }),
+      ]);
+
+      if (member === null) return null;
+
+      const byId = new Map(mappings.map((m) => [m.discordRoleId, m.role]));
+      const held = member.roles.flatMap((id) => {
+        const r = byId.get(id);
+        return r === undefined ? [] : [r];
+      });
+
+      const appointments = held.filter((r) => r.rankOrder < LEADERSHIP_CEILING);
+      if (appointments.length > 0) {
+        return appointments.reduce((a, b) => (b.rankOrder < a.rankOrder ? b : a)).name;
+      }
+
+      const tenure = held.filter((r) => r.rankOrder >= LEADERSHIP_CEILING);
+      if (tenure.length === 0) return null;
+      return tenure.reduce((a, b) => (b.rankOrder > a.rankOrder ? b : a)).name;
+    },
     async rememberNickname(discordId, nickname) {
       // updateMany, not update: an identity row that has since been deleted is
       // not an error worth failing a rename over.

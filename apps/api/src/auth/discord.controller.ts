@@ -1,15 +1,19 @@
-import { Public } from './auth.guard.js';
-import { postLoginDestination } from './post-login-destination.js';
-import { PermissionService } from '../authz/permission.service.js';
-import { TotpService } from './totp.service.js';
 import { Controller, Get, Query, Req, Res, Inject, Optional } from '@nestjs/common';
 import type { CookieSerializeOptions } from '@fastify/cookie';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { createHash } from 'node:crypto';
 import { AppError, ErrorCode } from '@grims/shared';
 import { issueCsrfToken } from '../common/csrf.js';
+import { Public } from './auth.guard.js';
 import { DiscordAuthService } from './discord.service.js';
 import { SessionService } from './session.service.js';
+import { TotpService } from './totp.service.js';
+import { postLoginDestination } from './post-login-destination.js';
+import { PermissionService } from '../authz/permission.service.js';
+import { WebmasterService } from '../authz/webmaster.js';
+import { PrismaClient } from '@grims/db';
+import { AVATAR_SERVICE } from '../media/media.tokens.js';
+import type { AvatarService } from '../media/avatar.service.js';
 
 /**
  * P1.1 — the two OAuth endpoints.
@@ -82,6 +86,13 @@ export const NONCE_COOKIE = IS_SECURE ? '__Host-gs_oauth_nonce' : 'gs_oauth_nonc
 @Public()
 export class DiscordAuthController {
   constructor(
+    @Optional()
+    @Inject(AVATAR_SERVICE)
+    private readonly avatars: AvatarService | null,
+    @Optional()
+    @Inject(WebmasterService)
+    private readonly webmaster: WebmasterService | null,
+    @Optional() @Inject(PrismaClient) private readonly db: PrismaClient | null = null,
     @Optional() @Inject(DiscordAuthService) private readonly svc: DiscordAuthService | null,
     @Optional() @Inject(SessionService) private readonly sessions: SessionService | null,
     /*
@@ -172,12 +183,46 @@ export class DiscordAuthController {
      * dashboard. Failing here must not fail the LOGIN, which has already
      * succeeded — so a broken lookup falls back to the requested path.
      */
+    /*
+     * Copy their Discord picture onto our own storage.
+     *
+     * Deliberately NOT awaited into the redirect path in a way that can delay
+     * it: the member is mid-sign-in and staring at a blank tab. The service
+     * swallows its own failures and only fetches when the avatar hash has
+     * actually changed, so the common case is a single cheap lookup.
+     */
+    void this.avatars?.syncFromDiscord(result.userId);
+
+    /*
+     * ★ THE WEBMASTER BOOTSTRAP ★
+     *
+     * Re-asserted on EVERY sign-in rather than once, deliberately: if the role
+     * is removed by accident — or by somebody who should not have — the next
+     * sign-in by a configured Discord ID restores it. A one-shot bootstrap is
+     * not a recovery path, it is a single point of failure with a nice name.
+     *
+     * Awaited, unlike the avatar sync. Being an admin is the whole reason this
+     * person is signing in, and racing it against the redirect would send them
+     * to a members' dashboard and leave them wondering why.
+     */
+    if (this.webmaster !== null) {
+      try {
+        await this.webmaster.applyBootstrap(result.userId, result.discordUserId);
+      } catch {
+        /* a failed bootstrap must not fail the login; the next sign-in retries */
+      }
+    }
+
     let destination = result.redirectTo;
     try {
       if (this.permissions !== null && this.totp !== null) {
         destination = await postLoginDestination({
           mask: await this.permissions.effectiveMask(result.userId),
           twoFactorEnrolled: await this.totp.isEnrolled(result.userId),
+          // Read fresh on every sign-in, which is what makes the prompt come
+          // back after a dismissal: the cookie holding the dismissal was
+          // cleared at logout, and this decides where they land.
+          verified: await this.#isVerified(result.userId),
           requested: result.redirectTo === '/' ? undefined : result.redirectTo,
         });
       }
@@ -187,6 +232,21 @@ export class DiscordAuthController {
 
     reply.redirect(afterLogin(destination), 302);
   }
+
+  /**
+   * Has anybody confirmed which commander this is?
+   *
+   * `isVerified` AND not revoked. A pending claim proves nothing — that is the
+   * entire point of the approval queue (INV-005).
+   */
+  async #isVerified(userId: string): Promise<boolean> {
+    if (this.db === null) return true;
+    const count = await this.db.cmdrVerification.count({
+      where: { userId, isVerified: true, revokedAt: null },
+    });
+    return count > 0;
+  }
+
 }
 
 /**

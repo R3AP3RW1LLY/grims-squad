@@ -4,6 +4,7 @@ import {
   type DiscordUser,
   type DiscordGuildMember,
   type DiscordGuildMemberSummary,
+  type DiscordGuildRole,
   DISCORD_SCOPE_STRING,
   DiscordApiError,
 } from './types.js';
@@ -149,7 +150,7 @@ export class DiscordAdapter implements IDiscordIdentityProvider {
       if (!res.ok) throw await this.#toError(res);
 
       const batch = (await res.json()) as Array<{
-        user?: { id?: string };
+        user?: { id?: string; username?: string; global_name?: string | null; bot?: boolean };
         roles?: string[];
         nick?: string | null;
       }>;
@@ -160,7 +161,20 @@ export class DiscordAdapter implements IDiscordIdentityProvider {
         // A member object with no user is a bot-scoped payload or a partial.
         // Skipping is right: we cannot key it to an account either way.
         if (typeof id !== 'string') continue;
-        out.push({ discordId: id, roles: m.roles ?? [], nick: m.nick ?? null });
+        out.push({
+          discordId: id,
+          roles: m.roles ?? [],
+          nick: m.nick ?? null,
+          /*
+           * Carried because this endpoint is already returning them and the
+           * alternative is a second call per member. `discord_identities` only
+           * exists for people who have signed in, so without these there is no
+           * name to show for the fifty who have not.
+           */
+          username: m.user?.username ?? null,
+          globalName: m.user?.global_name ?? null,
+          isBot: m.user?.bot ?? false,
+        });
       }
 
       // Snowflakes are monotonic, so the highest id on the page is the cursor.
@@ -171,6 +185,50 @@ export class DiscordAdapter implements IDiscordIdentityProvider {
     }
 
     return out;
+  }
+
+  /**
+   * Every role in the guild, with its colour.
+   *
+   * ★ THE COLOUR IS AN INTEGER, AND 0 MEANS "NO COLOUR" ★
+   *
+   * Discord stores a role colour as a 24-bit integer, and zero is not black —
+   * it is the sentinel for "this role has no colour set", in which case the
+   * member's name takes the colour of the next role down that does have one.
+   *
+   * Rendering 0 as #000000 would paint every uncoloured role invisible against
+   * a dark background, which is both wrong and the kind of wrong that looks
+   * like a CSS bug.
+   */
+  async listGuildRoles(guildId: string): Promise<DiscordGuildRole[]> {
+    const res = await this.#fetch(`${API}/guilds/${guildId}/roles`, {
+      headers: { authorization: `Bot ${this.config.botToken}` },
+    });
+    if (!res.ok) throw await this.#toError(res);
+
+    const roles = (await res.json()) as Array<{
+      id?: string;
+      name?: string;
+      color?: number;
+      position?: number;
+      hoist?: boolean;
+    }>;
+
+    return roles
+      .filter(
+        (r): r is { id: string; name: string; color?: number; position?: number; hoist?: boolean } =>
+          typeof r.id === 'string' && typeof r.name === 'string',
+      )
+      .map((r) => ({
+        id: r.id,
+        name: r.name,
+        colour:
+          typeof r.color === 'number' && r.color > 0
+            ? `#${r.color.toString(16).padStart(6, '0')}`
+            : null,
+        position: typeof r.position === 'number' ? r.position : 0,
+        hoist: r.hoist === true,
+      }));
   }
 
   async addRoleToMember(guildId: string, userId: string, roleId: string): Promise<void> {

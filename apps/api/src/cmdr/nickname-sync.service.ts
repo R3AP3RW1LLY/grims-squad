@@ -54,6 +54,14 @@ export interface NicknameSyncDeps {
    * identical renames.
    */
   rememberNickname(discordId: string, nickname: string): Promise<void>;
+  /**
+   * The rank to put in front of their name, or null if they hold none.
+   *
+   * Read from the Discord roles the member WEARS rather than from granted
+   * internal roles: grants only appear after reconciliation for an account that
+   * exists, and most of the squadron has neither.
+   */
+  rankFor(discordId: string): Promise<string | null>;
   writeAudit(entry: Record<string, unknown>): Promise<void>;
 }
 
@@ -62,11 +70,49 @@ export interface SyncResult {
   readonly reason: string | null;
 }
 
-/** Discord's hard ceiling on a nickname. */
-const MAX_NICK = 32;
+/*
+ * ★ THE COMPOSER MOVED TO @grims/shared ★
+ *
+ * The daily worker sweep puts back nicknames that members changed by hand, and
+ * it cannot import from this app. Three callers now need the same truncation
+ * rule — this service, the settings page's preview, and that sweep — and three
+ * copies would drift into a member whose name the site shows one way and the
+ * guild another.
+ *
+ * Re-exported so callers in this app keep one import.
+ */
+import { composeNickname } from '@grims/shared';
+export { composeNickname, MAX_NICK } from '@grims/shared';
 
 export class NicknameSyncService {
   constructor(private readonly deps: NicknameSyncDeps) {}
+
+  /**
+   * What the nickname WOULD be, without setting it.
+   *
+   * ★ THE SAME FUNCTION THAT SETS IT, NOT A DESCRIPTION OF IT ★
+   *
+   * The settings page used to tell members their nickname was kept as
+   * "RANK - COMMANDER". That is a template, and templates lie: a long name
+   * drops the rank entirely to fit Discord's 32 characters, so the member being
+   * shown the shape was sometimes shown a shape they would never wear.
+   *
+   * Computing it through `composeNickname` means the page cannot disagree with
+   * the guild, because there is one implementation and this is it.
+   *
+   * Returns null when there is nothing to show — no verified name means no
+   * nickname, and a preview of "" would render as a claim about an empty
+   * string.
+   */
+  async preview(userId: string, discordId: string): Promise<string | null> {
+    const verified = await this.deps.verifiedNameFor(userId);
+    if (verified === null || verified.trim() === '') return null;
+
+    // Same tolerance as the real path: a rank lookup that fails costs the
+    // prefix, never the preview.
+    const rank = await (async () => this.deps.rankFor(discordId))().catch(() => null);
+    return composeNickname(rank, verified);
+  }
 
   /**
    * Reconciles one member's nickname against their verified name.
@@ -84,9 +130,23 @@ export class NicknameSyncService {
         return { changed: false, reason: 'No verified commander name for this member.' };
       }
 
-      // Truncated rather than rejected: a commander with a long name should get
-      // a shortened nickname, not none and an error.
-      const want = verified.trim().slice(0, MAX_NICK);
+      /*
+       * `RANK - COMMANDER`, where the rank is whichever they actually hold:
+       * their leadership appointment if they have one, otherwise their rung on
+       * the tenure ladder. A failure to read it is not a reason to skip the
+       * rename — the name alone is still better than a stale nickname.
+       */
+      /*
+       * Wrapped in an async IIFE, not just `.catch()`.
+       *
+       * A dependency that throws SYNCHRONOUSLY — a missing implementation, a
+       * null store — never produces a promise, so `.catch()` never runs and the
+       * throw escapes to the outer handler. That would abandon the rename
+       * entirely over a decoration, when the commander name alone is still
+       * better than a stale nickname.
+       */
+      const rank = await (async () => this.deps.rankFor(discordId))().catch(() => null);
+      const want = composeNickname(rank, verified);
       const current = await this.deps.currentNickFor(discordId);
 
       /*

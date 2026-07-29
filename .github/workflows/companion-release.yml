@@ -1,0 +1,183 @@
+# Builds the companion app for every platform a member might play Elite on.
+#
+# ★ WHY A MATRIX AND NOT ONE MACHINE ★
+#
+# electron-builder cannot cross-compile the parts that matter. A DMG has to be
+# made on macOS (and eventually signed and notarized there), and an AppImage
+# needs a Linux filesystem. Building all three from one runner produces two
+# artifacts that either fail to build or fail to run, and the second is worse
+# because nobody finds out until a member downloads it.
+#
+# ★ WHAT "SUPPORTS MAC" MEANS HERE ★
+#
+# Elite Dangerous has had no native macOS client since 2015. Mac players run it
+# through CrossOver or Whisky, so their journals sit inside a Wine bottle. This
+# app is a native macOS build that reads the journals out of that bottle — it is
+# not pretending the game is native. Linux is the same story with Proton.
+
+name: companion release
+
+on:
+  push:
+    tags:
+      - 'companion-v*'
+  # Buildable on demand, so packaging breakage is found before a release rather
+  # than during one.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      # One platform failing must not cancel the others. A broken DMG is worth
+      # knowing about at the same time as a working installer, not instead of it.
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: --win
+            artifact: windows-installer
+            pattern: 'apps/companion/release/*.exe'
+          - os: macos-latest
+            target: --mac
+            artifact: macos-dmg
+            pattern: 'apps/companion/release/*.dmg'
+          - os: ubuntu-latest
+            target: --linux
+            artifact: linux-appimage
+            pattern: 'apps/companion/release/*.AppImage'
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: install
+        run: pnpm install --frozen-lockfile
+        env:
+          # The main CI skips the Electron binary download because nothing there
+          # needs it. This job DOES — electron-builder packages that binary.
+          ELECTRON_SKIP_BINARY_DOWNLOAD: 0
+
+      - name: build the shared package
+        run: pnpm --filter @grims/shared build
+
+      - name: test
+        # The app is about to be handed to members. Packaging a build whose
+        # tests were never run is how a filter that drops private data silently
+        # stops working.
+        run: pnpm --filter @grims/companion test
+
+      - name: package
+        run: pnpm --filter @grims/companion exec electron-builder ${{ matrix.target }}
+        env:
+          # Not signed yet. Windows SmartScreen and macOS Gatekeeper will both
+          # warn until there is a certificate and an Apple Developer ID, and the
+          # download page has to say so plainly rather than let members meet a
+          # scary dialog with no explanation.
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.pattern }}
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------- publish
+  #
+  # ★ THE BUCKET HOLDS EXACTLY ONE VERSION ★
+  #
+  # Squadron owner's decision, 2026-07-28: the app is downloaded from the site
+  # from now on, not from GitHub, and object storage keeps only the current
+  # build. Old installers are deleted after the new ones land.
+  #
+  # ORDER MATTERS AND IS NOT NEGOTIABLE: upload first, prune second. Pruning
+  # first leaves a window — however short — in which a member clicking Download
+  # gets nothing, and a release that takes the app offline while it publishes is
+  # worse than one that briefly serves two versions.
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    # Only for a real release. `workflow_dispatch` builds are for checking that
+    # packaging still works, and they must not replace what members download.
+    if: startsWith(github.ref, 'refs/tags/companion-v')
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: collect every platform's installer
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: publish to object storage
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.S3_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.S3_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.S3_REGION }}
+          ENDPOINT: ${{ secrets.S3_ENDPOINT }}
+          BUCKET: ${{ secrets.S3_BUCKET }}
+        run: |
+          set -euo pipefail
+
+          # The tag is the version. `companion-v0.2.0` -> `0.2.0`.
+          VERSION="${GITHUB_REF_NAME#companion-v}"
+          echo "publishing version ${VERSION}"
+
+          # Installers only. The blockmap is electron-builder's differential
+          # update index and the yml is its update manifest — both sit beside
+          # the installer and neither is a thing anybody should click.
+          mapfile -t FILES < <(find dist -type f \
+            \( -name '*.exe' -o -name '*.dmg' -o -name '*.AppImage' \) | sort)
+
+          if [ "${#FILES[@]}" -eq 0 ]; then
+            echo "::error::No installers found. Refusing to prune the bucket."
+            exit 1
+          fi
+
+          # ---- UPLOAD FIRST -------------------------------------------------
+          KEPT=()
+          for f in "${FILES[@]}"; do
+            name="$(basename "$f")"
+            echo "  uploading ${name}"
+            aws s3 cp "$f" "s3://${BUCKET}/companion/${name}" \
+              --endpoint-url "${ENDPOINT}" \
+              --content-type application/octet-stream \
+              --only-show-errors
+            KEPT+=("companion/${name}")
+          done
+
+          # ---- THEN PRUNE ---------------------------------------------------
+          #
+          # Everything under companion/ that is not one of the files just
+          # uploaded. Compared against what WAS uploaded rather than against a
+          # version string: a build whose filename does not contain the tag —
+          # which has happened — would otherwise survive the prune and sit there
+          # as a second, older download.
+          echo "pruning older builds"
+          aws s3api list-objects-v2 \
+            --bucket "${BUCKET}" --prefix 'companion/' \
+            --endpoint-url "${ENDPOINT}" \
+            --query 'Contents[].Key' --output text 2>/dev/null | tr '\t' '\n' \
+          | while read -r key; do
+              [ -z "$key" ] && continue
+              for keep in "${KEPT[@]}"; do
+                if [ "$key" = "$keep" ]; then
+                  continue 2
+                fi
+              done
+              echo "  removing ${key}"
+              aws s3 rm "s3://${BUCKET}/${key}" \
+                --endpoint-url "${ENDPOINT}" --only-show-errors
+            done
+
+          echo "published ${#KEPT[@]} installer(s) for ${VERSION}"

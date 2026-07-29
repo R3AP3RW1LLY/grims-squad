@@ -73,17 +73,70 @@ export interface ProfileSource {
   readonly id: string;
   readonly handle: string;
   readonly displayName: string;
+  /** Discord's avatar HASH as last seen, despite the name. See the column comment. */
   readonly avatarUrl: string | null;
+  /** The hash we have actually COPIED into object storage. Null means no picture to serve. */
+  readonly avatarStoredHash: string | null;
   readonly bio: string | null;
   readonly timezone: string;
+  /**
+   * Last moment the companion app saw their journal still being WRITTEN.
+   *
+   * Not private in the way a position is: it says somebody is playing, not
+   * where or what. It is the difference between a roster and a phone book, and
+   * it is the question anybody scanning one before an operation actually has.
+   */
+  readonly lastPlayingAt: Date | null;
   readonly joinedAt: Date;
   readonly status: string;
-  readonly ranks: readonly string[];
+  /**
+   * Squadron roles, highest first.
+   *
+   * Carries the Discord colour so a card can render a role the way the member
+   * already sees it in Discord — recognising your own colour is faster than
+   * reading your own role name, and the two disagreeing looks like a bug.
+   */
+  readonly ranks: ReadonlyArray<{ name: string; colour: string | null }>;
+  /** Snowflakes of the Discord roles this member currently holds. Resolved by the caller. */
+  readonly guildRoleIds?: readonly string[];
+  /** Platform roles, e.g. webmaster. NOT squadron standing. */
+  readonly siteRoles?: ReadonlyArray<{ name: string; colour: string | null }>;
   readonly cmdrName: string | null;
+  /**
+   * Inara confirms BOTH the commander name and that they fly with this
+   * squadron.
+   *
+   * Not a privacy-governed field: it describes the standing of a name that is
+   * already being shown, and hiding it would leave an unverified name looking
+   * identical to a verified one — which is the confusion it exists to remove.
+   */
+  readonly squadronVerified?: boolean;
   readonly location?: ProfileLocation | null;
   readonly credits?: bigint | null;
   readonly fleet?: readonly ProfileShip[] | null;
-  readonly activity?: { messages: number; voiceMinutes: number } | null;
+  /**
+   * What this member has done in the squadron THIS CALENDAR MONTH.
+   *
+   * ★ `voiceMinutes` WAS FICTION, AND IS GONE ★
+   *
+   * This read `{ messages, voiceMinutes }` and the profile page divided that by
+   * sixty to render "hours in voice". Nothing anywhere records a minute of
+   * voice: `member_activity_months` counts JOINS, because Discord tells us when
+   * somebody enters a channel and never how long they stayed.
+   *
+   * It shipped harmless only because the field was never populated — the first
+   * person to wire it up would have published invented hours. So the shape now
+   * says what is actually counted.
+   *
+   * `gameObserved` is the one that matters: it is the single input the monthly
+   * promotion check reads.
+   */
+  readonly activity?: {
+    messages: number;
+    voiceJoins: number;
+    forumPosts: number;
+    gameObserved: boolean;
+  } | null;
   /** Present on the row, never on a profile. Listed so the type stops it being spread out by accident. */
   readonly email?: string | null;
 }
@@ -103,15 +156,25 @@ export interface PublicProfile {
   readonly avatarUrl: string | null;
   readonly bio: string | null;
   readonly timezone: string;
+  /** ISO instant, or null. See the note on ProfileSource. */
+  readonly lastPlayingAt: string | null;
   readonly joinedAt: string;
   readonly status: string;
   readonly ranks: readonly string[];
   readonly cmdrName: string | null;
+  /** Inara confirms both the commander name and squadron membership. */
+  readonly squadronVerified: boolean;
   readonly location?: ProfileLocation | null;
   /** A STRING. Balances exceed 2^53, where a JS number rounds silently. */
   readonly credits?: string | null;
   readonly fleet?: readonly ProfileShip[] | null;
-  readonly activity?: { messages: number; voiceMinutes: number } | null;
+  /** This calendar month. Voice is JOINS — nothing records minutes. */
+  readonly activity?: {
+    messages: number;
+    voiceJoins: number;
+    forumPosts: number;
+    gameObserved: boolean;
+  } | null;
 }
 
 /**
@@ -163,13 +226,34 @@ export function serializeProfile(
   const out: Record<string, unknown> = {
     handle: source.handle,
     displayName: source.displayName,
-    avatarUrl: source.avatarUrl,
+    /*
+       * ★ OUR OWN URL, NOT DISCORD'S HASH ★
+       *
+       * `source.avatarUrl` holds the avatar HASH despite its name, so emitting
+       * it directly produced `<img src="a1b2c3...">` — a broken image on every
+       * card, and one that would have looked like a CSS problem.
+       *
+       * The URL carries no hash, so a member changing their picture does not
+       * change the URL; the media route serves whatever we currently hold.
+       * Null when there is nothing stored, so the UI draws initials instead of
+       * a broken frame.
+       */
+      avatarUrl: source.avatarStoredHash === null ? null : `/v1/media/avatars/${source.id}`,
     bio: source.bio,
     timezone: source.timezone,
+    lastPlayingAt: source.lastPlayingAt?.toISOString() ?? null,
     joinedAt: source.joinedAt.toISOString(),
     status: source.status,
     ranks: source.ranks,
     cmdrName: source.cmdrName,
+    /*
+     * Emitted UNCONDITIONALLY, and false when there is no verification at all.
+     *
+     * Omitting it for unverified members would make "we checked and it is not
+     * confirmed" indistinguishable from "this build does not report it", and a
+     * badge that is silent in both cases cannot be trusted in either.
+     */
+    squadronVerified: source.squadronVerified === true,
   };
 
   // Keys are ASSIGNED, never assigned-then-deleted. Assigning `undefined` would
@@ -188,14 +272,38 @@ export function serializeProfile(
 }
 
 /**
- * Filters a roster to the members who have opted into appearing on it.
+ * Who appears on the roster.
  *
- * Stronger than hiding a member's individual fields: this keeps them off the
- * page entirely. The roster is the highest-traffic public surface we have, so
- * the toggle that governs it is checked before anything is serialised at all.
+ * ★ EVERYBODY, AS OF 2026-07-28 ★
+ *
+ * Appearing used to be opt-in and defaulted to off, which made sense while the
+ * roster was a public recruitment page: nobody should be listed on the open
+ * internet without asking.
+ *
+ * The roster is now behind the sign-in, and it is the squadron's own directory
+ * — the answer to "who is in this squadron and who do I fly with". A directory
+ * that most of the squadron is missing from does not answer that question, and
+ * the default being OFF meant it never would.
+ *
+ * ★ WHAT THIS DOES NOT CHANGE ★
+ *
+ * Only PRESENCE became mandatory. Every field on the entry is still opt-in and
+ * still defaults to off: location, credits, fleet and activity are omitted
+ * entirely — not blanked — for anybody who has not turned them on (INV-027).
+ * So a member who shares nothing appears as a name and a rank, which is what
+ * being on a team roster means.
+ *
+ * ★ THE ONE EXCLUSION LEFT ★
+ *
+ * Account status. A banned or deactivated account is not a member of the
+ * squadron, and listing one would be describing the team wrongly rather than
+ * protecting anybody's privacy.
  */
-export function visibleOnRoster<T extends { privacy: Partial<PrivacySettings> | null | undefined }>(
-  rows: readonly T[],
-): T[] {
-  return rows.filter((r) => resolvePrivacy(r.privacy).showOnPublicRoster);
+export function visibleOnRoster<
+  T extends {
+    privacy: Partial<PrivacySettings> | null | undefined;
+    source: { status?: string };
+  },
+>(rows: readonly T[]): T[] {
+  return rows.filter((r) => (r.source.status ?? 'active') === 'active');
 }

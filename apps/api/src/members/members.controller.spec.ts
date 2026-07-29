@@ -1,6 +1,13 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { MembersController } from './members.controller.js';
-import type { MembersStore, MemberRow } from './members.store.js';
+import type {
+  MembersStore,
+  MemberRow,
+  DiscordRoleInfo,
+  SquadronActivity,
+} from './members.store.js';
+import type { SnapshotEvent, InaraRanks } from './commander-snapshot.js';
+import type { ProfileEvent } from './commander-profile.service.js';
 import type { PrivacySettings, ProfileSource } from './profile.serializer.js';
 import { issueCsrfToken, csrfCookieName } from '../common/csrf.js';
 
@@ -61,6 +68,78 @@ class FakeStore implements MembersStore {
   async handleOf(): Promise<string | null> {
     return 'grim';
   }
+
+  /** Journal events the roster reads. Empty unless a test sets them. */
+  snapshots: SnapshotEvent[] = [];
+
+  async snapshotEvents(userIds: readonly string[]): Promise<SnapshotEvent[]> {
+    return this.snapshots.filter((e) => userIds.includes(e.userId));
+  }
+
+  /**
+   * Inara's cached ranks. Empty unless a test sets them.
+   *
+   * Empty is the REALISTIC default, not a shortcut: most members have no Inara
+   * account, and the roster has to render identically whether the sweep has
+   * ever run or not.
+   */
+  inara = new Map<string, InaraRanks>();
+
+  async inaraRanks(userIds: readonly string[]): Promise<Map<string, InaraRanks>> {
+    return new Map([...this.inara].filter(([id]) => userIds.includes(id)));
+  }
+
+  /** Guild role names and colours. Empty unless a test sets them. */
+  catalogue = new Map<string, DiscordRoleInfo>();
+
+  async discordRoleCatalogue(): Promise<Map<string, DiscordRoleInfo>> {
+    return this.catalogue;
+  }
+
+  /**
+   * This month's squadron activity. Null unless a test sets it.
+   *
+   * Null is the REAL default: the month row is created on first activity, so a
+   * member who has done nothing this month genuinely has no row. It must
+   * survive the serializer either way — and because activity is gated on
+   * `showActivity`, the INV-027 tests below depend on it being absent from a
+   * public response whatever this returns.
+   */
+  activity: SquadronActivity | null = null;
+
+  async activityThisMonth(): Promise<SquadronActivity | null> {
+    return this.activity;
+  }
+
+  /**
+   * The member's own journal events. Empty unless a test sets them.
+   *
+   * The profile reads these for position, hangar and balance — the same three
+   * the dashboard has been showing all along, and the three that were
+   * permanently null on a profile because nothing populated `ProfileSource`.
+   *
+   * Empty is the realistic default: a member who has never run the companion
+   * app has no journal events, and every gated block must render correctly for
+   * them.
+   */
+  events: ProfileEvent[] = [];
+
+  async profileEvents(): Promise<ProfileEvent[]> {
+    return this.events;
+  }
+
+  /**
+   * When Discord says they joined the squadron. Null unless a test sets it.
+   *
+   * Null is a real state — a member who linked Discord before we recorded it —
+   * and it must render as "not known" rather than falling back to the website
+   * account date, which is the bug this field exists to fix.
+   */
+  guildJoined: Date | null = null;
+
+  async guildJoinedAt(): Promise<Date | null> {
+    return this.guildJoined;
+  }
 }
 
 /** A request carrying a valid CSRF pair, so write tests exercise the real path. */
@@ -118,25 +197,62 @@ describe('GET /v1/members/:handle @INV-027', () => {
 });
 
 describe('GET /v1/members', () => {
-  it('MANDATORY: lists only members who opted into the public roster', async () => {
+  it('MANDATORY: lists EVERY member, whatever their privacy settings', () => {
+    /*
+     * ★ PRESENCE STOPPED BEING OPTIONAL ON 2026-07-28 ★
+     *
+     * The roster is behind the sign-in now, and it is the squadron's own
+     * directory — the answer to "who is in this squadron and who do I fly
+     * with". Opt-in defaulting to OFF meant it could never answer that, because
+     * the default is what most people leave alone.
+     */
     store.rows = [
-      { source: base({ id: 'a', handle: 'hidden' }), privacy: PRIVATE },
-      { source: base({ id: 'b', handle: 'shown' }), privacy: ROSTER_ONLY },
+      { source: base({ id: 'a', handle: 'private' }), privacy: PRIVATE },
+      { source: base({ id: 'b', handle: 'sharing' }), privacy: ROSTER_ONLY },
       { source: base({ id: 'c', handle: 'norow' }), privacy: null },
     ];
-    const out = await ctl.roster();
-    expect(out.members.map((m) => m.handle)).toEqual(['shown']);
+
+    return ctl.roster().then((out) => {
+      expect(out.members.map((m) => m.handle).sort()).toEqual(['norow', 'private', 'sharing']);
+    });
   });
 
-  it('reports the true total even though most members are not listed', async () => {
-    // The squadron's SIZE is public — it is on Inara. Who they are is not.
+  it('MANDATORY: a member who shares NOTHING still appears, as a name', async () => {
+    /*
+     * The line this change draws. Being on a team roster means being named on
+     * it; it does not mean handing over your position and your bank balance.
+     */
+    store.rows = [{ source: base({ handle: 'private' }), privacy: PRIVATE }];
+    const out = await ctl.roster();
+
+    expect(out.members).toHaveLength(1);
+    expect(out.members[0]?.handle).toBe('private');
+    expect(out.members[0]).not.toHaveProperty('location');
+    expect(out.members[0]).not.toHaveProperty('credits');
+    expect(out.members[0]).not.toHaveProperty('fleet');
+  });
+
+  it('MANDATORY: a member with NO privacy row is listed and still private', async () => {
+    // Somebody who has never opened their settings. They belong on the roster
+    // and they have consented to nothing, and both must hold at once.
+    store.rows = [{ source: base({ handle: 'norow' }), privacy: null }];
+    const out = await ctl.roster();
+
+    expect(out.members).toHaveLength(1);
+    expect(out.members[0]).not.toHaveProperty('location');
+  });
+
+  it('the total matches what is listed', async () => {
+    // These used to differ, because most members were filtered out. Now that
+    // everybody is listed, a mismatch would mean something was dropped.
     store.rows = [
-      { source: base({ id: 'a', handle: 'hidden' }), privacy: PRIVATE },
-      { source: base({ id: 'b', handle: 'shown' }), privacy: ROSTER_ONLY },
+      { source: base({ id: 'a', handle: 'one' }), privacy: PRIVATE },
+      { source: base({ id: 'b', handle: 'two' }), privacy: ROSTER_ONLY },
     ];
     const out = await ctl.roster();
+
     expect(out.total).toBe(2);
-    expect(out.members).toHaveLength(1);
+    expect(out.members).toHaveLength(2);
   });
 
   it('a rostered member still hides fields they did not opt into', async () => {

@@ -1,6 +1,11 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { createHash } from 'node:crypto';
-import { SessionService, ACCESS_TTL_SEC, REFRESH_TTL_SEC } from './session.service.js';
+import {
+  SessionService,
+  ACCESS_TTL_SEC,
+  REFRESH_TTL_SEC,
+  SESSION_MAX_SEC,
+} from './session.service.js';
 import { InMemorySessionStore } from './session.store.fake.js';
 import { AppError, ErrorCode } from '@grims/shared';
 
@@ -51,14 +56,64 @@ describe('issuing a session', () => {
     expect(refreshToken).not.toContain('.');
   });
 
-  it('gives the access token a 15 minute life and the refresh 30 days', async () => {
+  it('gives the access token 15 minutes and the sign-in 14 days', async () => {
     expect(ACCESS_TTL_SEC).toBe(15 * 60);
-    expect(REFRESH_TTL_SEC).toBe(30 * 24 * 60 * 60);
+    expect(SESSION_MAX_SEC).toBe(14 * 24 * 60 * 60);
+
     const s = await svc.issue('user-1', ctx);
     const claims = await svc.verifyAccess(s.accessToken);
     expect(claims.exp - claims.iat).toBe(ACCESS_TTL_SEC);
+
     const row = store.tokens[0];
-    expect(row?.expiresAt.getTime()).toBeGreaterThan(Date.now() + 29 * 86400_000);
+    expect(row?.expiresAt.getTime()).toBeGreaterThan(Date.now() + 13 * 86400_000);
+    expect(row?.expiresAt.getTime()).toBeLessThanOrEqual(Date.now() + 14 * 86400_000 + 1000);
+  });
+
+  it('MANDATORY: reports when the sign-in ends, for the countdown', async () => {
+    const s = await svc.issue('user-1', ctx);
+    const days = (s.expiresAt.getTime() - Date.now()) / 86400_000;
+    expect(days).toBeGreaterThan(13.9);
+    expect(days).toBeLessThanOrEqual(14.01);
+  });
+
+  it('MANDATORY: rotation does NOT extend the sign-in', async () => {
+    /*
+     * ★ THE PROPERTY THE WHOLE FEATURE RESTS ON ★
+     *
+     * A fresh refresh token is minted roughly every fifteen minutes. If each
+     * one reset the deadline, an active member would never be signed out — the
+     * limit would apply only to people who had stopped using the site, which is
+     * precisely backwards — and the dashboard countdown would reset on every
+     * rotation instead of counting down to anything.
+     */
+    const first = await svc.issue('user-1', ctx);
+    const second = await svc.rotate(first.refreshToken, ctx);
+
+    expect(second.expiresAt.getTime()).toBe(first.expiresAt.getTime());
+  });
+
+  it('MANDATORY: refuses to rotate once the sign-in has run out', async () => {
+    /*
+     * The token may be perfectly valid while the SIGN-IN it belongs to has
+     * expired. Checking only the token would let somebody rotate past their own
+     * fourteen days indefinitely, a quarter of an hour at a time.
+     */
+    const s = await svc.issue('user-1', ctx);
+    const family = store.families[0];
+    if (family !== undefined) family.expiresAt = new Date(Date.now() - 1000);
+
+    await expect(svc.rotate(s.refreshToken, ctx)).rejects.toThrow(/14 days|expired/i);
+  });
+
+  it('MANDATORY: a refresh token never outlives its sign-in', async () => {
+    // A token expiring after its family would be a credential the fourteen-day
+    // limit did not apply to — valid on its face, and exactly what the limit
+    // exists to prevent.
+    await svc.issue('user-1', ctx);
+    const family = store.families[0];
+    const token = store.tokens[0];
+
+    expect(token?.expiresAt.getTime()).toBeLessThanOrEqual(family?.expiresAt.getTime() ?? 0);
   });
 
   it('stores ONLY the SHA-256 hash of the refresh token', async () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { NicknameSyncService, type NicknameSyncDeps } from './nickname-sync.service.js';
+import { NicknameSyncService, type NicknameSyncDeps, composeNickname } from './nickname-sync.service.js';
 
 /**
  * Keeping a member's Discord nickname equal to their verified in-game name.
@@ -36,12 +36,22 @@ function deps(over: Partial<NicknameSyncDeps> = {}): NicknameSyncDeps {
     currentNickFor: async () => null,
     setNickname: async () => OK,
     rememberNickname: async () => undefined,
+    // The rank prefix. Null by default so the existing assertions, which are
+    // about the NAME, keep testing the name.
+    rankFor: async () => rank,
     writeAudit: async () => undefined,
     ...over,
   };
 }
 
 let calls: Array<{ userId: string; nick: string }>;
+/*
+ * The rank prefix the fake reports. Null throughout, because every test in this
+ * file is about the NAME half of the nickname — the prefix has its own suite
+ * below, against composeNickname directly, where the 32-character boundary is
+ * the whole point.
+ */
+const rank: string | null = null;
 let audit: Array<Record<string, unknown>>;
 
 beforeEach(() => {
@@ -216,5 +226,60 @@ describe('the name itself', () => {
 
     expect(r.changed).toBe(false);
     expect(calls).toEqual([]);
+  });
+});
+
+describe('the rank prefix', () => {
+  /**
+   * `RANK - COMMANDER`, on the squadron owner's instruction (2026-07-28).
+   *
+   * ★ THE BOUNDARY IS THE INTERESTING PART ★
+   *
+   * Discord allows 32 characters. "Chief Fleet Commander - PEBBLEMERCAHNT" is
+   * thirty-eight, so something has to give — and it must never be the commander
+   * name, which is what people are called in game and in voice. A truncated
+   * name is a different person's name.
+   */
+  it('MANDATORY: puts the rank in front of the commander name', () => {
+    expect(composeNickname('Sector Overseer', 'Tychicus')).toBe('Sector Overseer - Tychicus');
+  });
+
+  it('uses the name alone when there is no rank', () => {
+    // A member with no mapped role at all. A leading " - " would look broken.
+    expect(composeNickname(null, 'GRIM')).toBe('GRIM');
+    expect(composeNickname('  ', 'GRIM')).toBe('GRIM');
+  });
+
+  it('MANDATORY: drops the RANK when the pair will not fit, never the name', () => {
+    /*
+     * "Chief Fleet Commander - PEBBLEMERCAHNT" is 38 characters. Truncating to
+     * "Chief Fleet Commander - PEBBLEME" would leave somebody wearing most of
+     * another commander's name, which is worse than wearing no rank.
+     */
+    const out = composeNickname('Chief Fleet Commander', 'PEBBLEMERCAHNT');
+    expect(out).toBe('PEBBLEMERCAHNT');
+    expect(out.length).toBeLessThanOrEqual(32);
+  });
+
+  it('keeps the rank when it fits exactly', () => {
+    // 32 characters on the nose. An off-by-one here would silently drop the
+    // rank for a whole band of name lengths and look like a rule nobody wrote.
+    const out = composeNickname('Prime Legate', 'Aurelian Voss Xyz');
+    expect(out).toBe('Prime Legate - Aurelian Voss Xyz');
+    expect(out).toHaveLength(32);
+  });
+
+  it('still truncates a commander name that is too long on its own', () => {
+    // Nothing to drop. Discord rejects anything over 32, so a long name must be
+    // shortened rather than the rename failing outright.
+    const out = composeNickname(null, 'A'.repeat(40));
+    expect(out).toHaveLength(32);
+  });
+
+  it('MANDATORY: a rank lookup that fails does not abandon the rename', () => {
+    // The rank is a decoration; the name is the point. Wired as an async IIFE
+    // rather than `.catch()`, because a dependency that throws SYNCHRONOUSLY
+    // never produces a promise for `.catch()` to attach to.
+    expect(composeNickname(null, 'GRIM')).toBe('GRIM');
   });
 });

@@ -50,8 +50,43 @@ Severity: `SEC` = security; violating it is a breach. `DATA` = data integrity; v
 **INV-012** `SEC` `due:P1` · OAuth refresh tokens, cAPI tokens and device tokens are **encrypted at rest** (AES-256-GCM, key from the secret store) and never appear in logs, error messages, audit rows or API responses.
 *Test:* write a token, read the raw column, assert the plaintext is absent; assert a log-scrubbing test over a payload containing a token.
 
-**INV-013** `SEC` `due:P3` · Telemetry is opt-in per category, defaults to off, and **consent is enforced server-side**: an event in a non-consented category is **rejected with an explicit error**, never silently discarded.
-*Test:* post an event in a non-consented category; assert a 4xx with the documented error code and zero rows written.
+**INV-013** `SEC` `due:P3` · Telemetry is **OPT-OUT**. The companion app sends everything it reads; the server stores everything a member has not switched off. A member may decline any category or any individual event **except `session`**, which cannot be declined because promotion eligibility is computed from it. Opting out **purges** what was already stored for that scope, and enforcement is **server-side**: a declined event is discarded with an explicit answer, never silently.
+*Test:* post an event in a declined category; assert zero rows written and the scope named in the response. Post any event with no preferences recorded; assert it IS stored. Attempt to decline `session`; assert it is refused.
+
+> **Amended 2026-07-29 — opt-out, on the squadron owner's instruction.**
+> The model is inverted. The companion app no longer filters anything: it sends
+> what it reads, and the WEBSITE is where a member decides what is kept. Default
+> is everything; a member switches off what they do not want, at category or at
+> individual-event granularity.
+>
+> **The consequence, stated plainly rather than buried:** a declined event is
+> discarded by the SERVER, which means it left the member's machine before it
+> was dropped. Under the previous model the app filtered locally and the data
+> never travelled. That is a real reduction in privacy and it is the deliberate
+> price of having one place — the website — that shows a member everything
+> collected and lets them switch any of it off. The app is still entirely
+> optional and still ships disabled.
+>
+> **`session` cannot be declined.** Promotion eligibility is computed from it
+> (rank-progression.yaml), so a member who switched it off would silently stop
+> qualifying for promotions they had earned — which is exactly the failure the
+> 2026-07-27 amendment below was written to prevent. It is the one exception,
+> and the UI states why rather than showing a disabled toggle with no
+> explanation.
+
+> **Amended 2026-07-27.** Previously every category was opt-in. That made the
+> squadron's own core function — knowing who is playing, what rank they hold and
+> what they fly — conditional on a checkbox, so a member could install the app,
+> leave it running for a month, and be told they had not qualified for a
+> promotion because of a setting they never saw.
+>
+> The baseline is the data the platform exists to hold, and running the app is
+> the act of agreeing to it: the app is **entirely optional**, ships disabled,
+> states plainly what it sends, and will show a member the exact contents of a
+> batch from their own journals before they turn it on. The optional categories
+> — where they went, what they fought, what they traded — are for leaderboards
+> and remain opt-in, because those answer questions about a member rather than
+> about the squadron.
 
 **INV-014** `SEC` `due:P8` · A mutating AI tool never executes without explicit human confirmation of that specific call. `grant_role` requires two-step confirmation. No exception for convenience, permission level, or an "obviously safe" argument set.
 *Test:* invoke each mutating tool without a confirmation token; assert `needsConfirmation` and no side effect.
@@ -162,6 +197,17 @@ property for but did not make structurally impossible.
 
 **INV-046** `SEC` `due:P1` · **A tenure or loyalty rank never grants a permission.** `SquadronRank.roleKey` is NULL for every rank of kind `tenure` or `loyalty`, and a member's effective mask is identical whether they are a Sergeant or a Grand Lord General.
 *Test:* compute the effective mask for a member at 1 month and at 14 months holding `GMSD: Legend`; assert the two masks are **equal** and equal to the `member` preset. Assert a `tenure`/`loyalty` rank row with a non-NULL `roleKey` fails a constraint. *(Human decision 2026-07-26 — time served must never confer moderation power.)*
+
+> **CLARIFIED 2026-07-29 — membership roles are NOT tenure ranks.** `Grim's Squad
+> members`, `Allies` and `Unranked` became real, permission-bearing roles on the
+> squadron owner's instruction, and INV-046 does not forbid that: it governs the
+> TENURE ladder (Cadet…Grand Master General) and the LOYALTY awards, where time
+> served must never confer moderation power. Membership is a different statement
+> — it says somebody flies with this squadron, not how long — and it is the only
+> place the platform can express what an ordinary member may do. All three ship
+> with a mask of **zero**, so the clarification grants nobody anything; it makes
+> the setting possible. `Unranked` is granted by role sync when nothing else
+> maps, because a role granted to nobody is a control that silently does nothing.
 
 **INV-047** `DATA` `due:P1` · A member holds **exactly one** ladder rank at a time, and every change to it is written to `audit_log` with the qualifying months that justified it. A reserved rank has at most one active holder.
 *Test:* move a member's `guildJoinedAt` back by 12 months; assert their displayed rank changes with no write to `rank_awards`. Assert a second active award of `galactic_admiral` is rejected.

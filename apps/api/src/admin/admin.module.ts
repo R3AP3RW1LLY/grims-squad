@@ -8,7 +8,8 @@ import { PrismaAdminStore } from './admin.store.js';
 import { RoleAdminService } from './role-admin.service.js';
 import { MappingAdminService } from './mapping-admin.service.js';
 import { PrismaRoleAdminStore, PrismaMappingAdminStore } from './role-admin.store.prisma.js';
-import { ADMIN_STORE, ROLE_ADMIN, MAPPING_ADMIN } from './admin.tokens.js';
+import { ADMIN_STORE, DASHBOARD_STORE, ROLE_ADMIN, MAPPING_ADMIN } from './admin.tokens.js';
+import { PrismaDashboardStore } from './dashboard.store.js';
 
 /**
  * Imports AuthModule for TotpService: the AdminGateGuard resolves it, and a
@@ -21,6 +22,11 @@ const cache = (): Redis => new Redis(process.env['REDIS_URL'] ?? 'redis://localh
   imports: [DatabaseModule, AuthModule],
   controllers: [AdminController],
   providers: [
+    {
+      provide: DASHBOARD_STORE,
+      inject: [PrismaClient],
+      useFactory: (db: PrismaClient) => new PrismaDashboardStore(db),
+    },
     {
       provide: ADMIN_STORE,
       inject: [PrismaClient],

@@ -35,6 +35,8 @@ export interface RoleRecord {
   readonly name: string;
   readonly permMask: bigint;
   readonly rankOrder: number;
+  /** True for the promotion ladder, false for orthogonal tags like `bgs_team`. */
+  readonly isHierarchical: boolean;
 }
 
 export interface HolderRecord {

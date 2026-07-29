@@ -47,9 +47,21 @@ describe('P0.2 database schema', () => {
   // The count is hardcoded ON PURPOSE. Every schema addition has to come and
   // bump it, which is a two-second acknowledgement that a table was added —
   // versus a self-counting assertion that would let one appear unnoticed.
-  // 61 as of 2026-07-27: inara_links (P1.8b, verification by the member's own
-  // Inara API key). Previously 60 with two_factor_credentials and
-  // two_factor_recovery_codes, and 58 before rank progression.
+  // 65 as of 2026-07-28: member_activity_days. The monthly table carries one
+  // last_activity_at, so a daily chart built from it counts each member on the
+  // ONE day they were last seen — a member active on the 5th and the 20th
+  // appeared only on the 20th. Display only; promotion still reads the monthly
+  // table, and a disagreement between them must never change who is promoted.
+  // 64 was discord_guild_members, a CACHE of every member of the
+  // guild — account or not. discord_identities is keyed on a website user id
+  // and existed for 1 of 51 members, so the admin activity table could name
+  // exactly one person and showed raw snowflakes for the rest.
+  // 63 was inara_commander_profiles, a CACHE of Inara's public
+  // view of each verified commander. Nothing on a request path may call Inara
+  // (ADR-004), so the roster reads this and a 20-minute worker sweep fills it.
+  // 62 was discord_roles, the guild's role names and colours. 61 was
+  // inara_links (P1.8b), 60 with two_factor_credentials and
+  // two_factor_recovery_codes, 58 before rank progression.
   it('creates every table in the SSOT schema', async () => {
     const r = await rows<{ n: string }>(
       `select count(*)::text as n from information_schema.tables
@@ -57,7 +69,7 @@ describe('P0.2 database schema', () => {
          and table_name not like '\\_prisma%'`,
     );
     // 59 models in ssot/03-data/schema.prisma.
-    expect(Number(r[0]?.n)).toBe(61);
+    expect(Number(r[0]?.n)).toBe(65);
   });
 
   describe('hand-written DDL that Prisma cannot express', () => {

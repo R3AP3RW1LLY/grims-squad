@@ -1,4 +1,5 @@
 /** DI tokens. Symbols, not classes — esbuild emits no decorator metadata (P1.2). */
+export const DASHBOARD_STORE = Symbol('DASHBOARD_STORE');
 export const ADMIN_STORE = Symbol('AdminStore');
 export const ROLE_ADMIN = Symbol('RoleAdminService');
 export const MAPPING_ADMIN = Symbol('MappingAdminService');

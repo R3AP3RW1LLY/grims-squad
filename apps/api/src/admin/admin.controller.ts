@@ -20,7 +20,8 @@ import {
 } from '../auth/admin-gate.guard.js';
 import { User, type CurrentUser } from '../auth/current-user.js';
 import { verifyCsrf, readCsrfCookie } from '../common/csrf.js';
-import { ADMIN_STORE, ROLE_ADMIN, MAPPING_ADMIN } from './admin.tokens.js';
+import { ADMIN_STORE, DASHBOARD_STORE, ROLE_ADMIN, MAPPING_ADMIN } from './admin.tokens.js';
+import type { DashboardStore, DashboardData } from './dashboard.store.js';
 import type { AdminStore, ActivityRow, AuditRow, MemberRow } from './admin.store.js';
 import type { RoleAdminService, MaskPreview } from './role-admin.service.js';
 import type { MappingAdminService, MappingRecord } from './mapping-admin.service.js';
@@ -47,6 +48,7 @@ import type { MappingAdminService, MappingRecord } from './mapping-admin.service
 export class AdminController {
   constructor(
     @Inject(ADMIN_STORE) private readonly store: AdminStore,
+    @Inject(DASHBOARD_STORE) private readonly dash: DashboardStore,
     @Inject(ROLE_ADMIN) private readonly roles: RoleAdminService,
     @Inject(MAPPING_ADMIN) private readonly mappings: MappingAdminService,
   ) {}
@@ -60,6 +62,22 @@ export class AdminController {
    * decided on this data, so an officer who cannot see it cannot do the job —
    * and the member's alternative is not to be enrolled in progression at all.
    */
+  /**
+   * The dashboard's figures.
+   *
+   * ★ AGGREGATES ONLY ★
+   *
+   * Everything here is a squadron-wide count or total. No member's location,
+   * credits or fleet appears, because those are governed by their own consent
+   * toggles and a dashboard is exactly where they would quietly stop being.
+   *
+   * Behind the same second-factor gate as every other read on this controller.
+   */
+  @Get('dashboard')
+  async dashboard(): Promise<DashboardData> {
+    return this.dash.dashboard(new Date());
+  }
+
   @Get('activity')
   async activity(@Query('month') month?: string): Promise<{ month: string; rows: ActivityRow[] }> {
     const key = normaliseMonth(month);
@@ -84,18 +102,34 @@ export class AdminController {
   @Get('audit')
   async audit(
     @Query('limit') limit?: string,
+    @Query('page') page?: string,
     @Query('actor') actor?: string,
     @Query('action') action?: string,
     @Query('targetType') targetType?: string,
     @Query('targetId') targetId?: string,
     @Query('since') since?: string,
     @Query('until') until?: string,
-  ): Promise<{ entries: AuditRow[]; actions: string[] }> {
+  ): Promise<{
+    entries: AuditRow[];
+    actions: string[];
+    total: number;
+    page: number;
+    pageSize: number;
+  }> {
     const n = Number(limit ?? '100');
     const capped = Number.isFinite(n) ? Math.min(Math.max(Math.trunc(n), 1), 500) : 100;
 
-    const [entries, actions] = await Promise.all([
+    /*
+     * Page is 1-based because it is shown to a person. Anything unparseable,
+     * negative or zero reads as page 1 rather than erroring: a bad page number
+     * in a URL should show the first page, not a stack trace.
+     */
+    const requested = Number(page ?? '1');
+    const currentPage = Number.isFinite(requested) ? Math.max(Math.trunc(requested), 1) : 1;
+
+    const [result, actions] = await Promise.all([
       this.store.auditSearch({
+        offset: (currentPage - 1) * capped,
         ...(actor === undefined ? {} : { actor }),
         ...(action === undefined ? {} : { action }),
         ...(targetType === undefined ? {} : { targetType }),
@@ -107,7 +141,14 @@ export class AdminController {
       // than a string somebody has to guess the spelling of.
       this.store.auditActions(),
     ]);
-    return { entries, actions };
+
+    return {
+      entries: result.rows,
+      actions,
+      total: result.total,
+      page: currentPage,
+      pageSize: capped,
+    };
   }
 
   /* ---------------------------------------------------------------- roles
@@ -140,6 +181,7 @@ export class AdminController {
         // (INV-006), and this response feeds an editor that sends it back.
         permMask: r.permMask.toString(),
         rankOrder: r.rankOrder,
+        isHierarchical: r.isHierarchical,
       })),
     };
   }
