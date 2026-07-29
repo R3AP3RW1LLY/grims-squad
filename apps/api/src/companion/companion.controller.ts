@@ -4,6 +4,7 @@ import { basename } from 'node:path';
 import { AppError, ErrorCode } from '@grims/shared';
 import { User, type CurrentUser } from '../auth/current-user.js';
 import type { ReleaseAsset, ReleaseStore } from './release.service.js';
+import { newestRelease } from './release.service.js';
 import { RELEASE_STORE, DEVICE_VERSIONS } from './companion.tokens.js';
 
 /**
@@ -89,7 +90,18 @@ export class CompanionController {
      * exact bug the web-side comparison exists to avoid, which must not be
      * reintroduced here by sorting the wrong way.
      */
-    const newest = assets.find((a) => a.version !== null) ?? null;
+    /*
+     * ★ THE HIGHEST VERSION, NOT THE MOST RECENTLY BUILT ★
+     *
+     * This was `assets.find(...)` over a list sorted by build time, so
+     * rebuilding an older installer — or a failed prune leaving an old file
+     * with a newer timestamp — made a PREVIOUS version "latest".
+     *
+     * `newestRelease` also returns the EARLIEST build of that version, so a
+     * rebuild at the same version does not move the release date and does not
+     * restart the banner's fortnight. Squadron owner, 2026-07-29.
+     */
+    const newest = newestRelease(assets);
 
     return {
       latestVersion: newest?.version ?? null,

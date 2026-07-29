@@ -15,7 +15,8 @@ import {
 } from '../../../../components/hub-page';
 import { PageTabs, resolveTab, type PageTab } from '../../../../components/page-tabs';
 import { PrivacyControls, sharedFields } from '../privacy/body';
-import { getMyPrivacy } from '../../../../lib/api';
+import { appVersionSummary } from '../../../../components/update-banner-rules';
+import { getMyPrivacy, getUpdateStatus } from '../../../../lib/api';
 import { SecurityBody } from '../security/body';
 import { AccountBody } from '../account/body';
 
@@ -78,12 +79,35 @@ export default async function CommanderPage({
    * rail summary and the switches must agree — and Next dedupes identical
    * fetches within one render, so this costs no second request.
    */
-  const [status, me, zones, privacy] = await Promise.all([
+  const [status, me, zones, privacy, updates] = await Promise.all([
     getInaraStatus(),
     getMe(),
     getTimezones(),
     getMyPrivacy(),
+    /*
+     * The companion app's version, for the status rail. Squadron owner,
+     * 2026-07-29.
+     *
+     * Fetched here with everything else rather than inside its own component,
+     * so a slow release bucket cannot make this page render in two stages — and
+     * so the rail is derived from exactly the same numbers as the update banner
+     * in the layout above. Two places deriving that separately is how a member
+     * ends up with a bar saying "update available" over a panel saying they are
+     * current.
+     */
+    getUpdateStatus(),
   ]);
+
+  /*
+   * Null covers a signed-out read, an unreachable release bucket, and an API
+   * that is down. An empty shape is passed rather than skipping the row: a
+   * status panel with a hole in it reads as broken, and "Not installed" is the
+   * honest answer when we have been told nothing.
+   */
+  const app = appVersionSummary(
+    updates ?? { latestVersion: null, releasedAt: null, deviceVersions: [] },
+  );
+
   const sharedFieldCount = sharedFields(privacy);
   const verified = status?.cmdrName ?? null;
 
@@ -129,6 +153,34 @@ export default async function CommanderPage({
                   value={`${sharedFieldCount} of 5`}
                   tone={sharedFieldCount === 0 ? 'good' : 'default'}
                 />
+
+                {/*
+                  ★ THE COMPANION APP — squadron owner, 2026-07-29 ★
+
+                  "add a way to compare the members current version of the
+                  companion app... if they do not have the app installed, add a
+                  link to the download page, if they do run the app, show the
+                  version here."
+
+                  Derived by `appVersionSummary` from the SAME numbers the update
+                  banner reads. That is the point of it living in that file: a
+                  rail saying "v0.3.0" under a bar saying "update available" is
+                  worse than either message on its own, and is exactly the
+                  confusion being reported.
+
+                  The version is what the app itself reported on its five-minute
+                  poll, so it is what is actually installed rather than what we
+                  hope is.
+                */}
+                <RailStat label="Companion app" value={app.label} tone={app.tone} />
+                {app.href !== null && app.linkText !== null && (
+                  <a
+                    href={app.href}
+                    className="mt-1 block text-xs text-[var(--color-brand-cyan-bright)] hover:underline"
+                  >
+                    {app.linkText}
+                  </a>
+                )}
               </Panel>
 
               <Panel title="Related">

@@ -12,6 +12,7 @@ import { LIVE_SERVICE } from '../live/live.tokens.js';
 import type { LiveService } from '../live/live.service.js';
 import { TELEMETRY_CATALOGUE, REQUIRED_CATEGORY } from '@grims/shared';
 import { RELEASE_STORE } from '../companion/companion.tokens.js';
+import { newestVersion } from '../companion/release.service.js';
 import type { ReleaseStore } from '../companion/release.service.js';
 
 @Controller('v1')
@@ -249,11 +250,19 @@ export class TelemetryController {
        * publishes all three together, and an app comparing against another
        * platform's build would be comparing the same number anyway.
        */
-      latestVersion:
-        assets
-          .map((a) => a.version)
-          .filter((v): v is string => v !== null)
-          .sort((x, y) => (x < y ? 1 : x > y ? -1 : 0))[0] ?? null,
+      /*
+       * ★ WAS A STRING SORT, AND THAT WAS A REAL BUG ★
+       *
+       * `.sort((x, y) => x < y ? 1 : -1)` compares versions as TEXT. With
+       * 0.10.0 and 0.9.0 both in the bucket it answered 0.9.0 — and from the
+       * tenth release onward the app would have stopped being told about
+       * updates at all, silently, with nothing to see.
+       *
+       * `newestVersion` compares numerically and is the SAME function the
+       * website uses, so the app and the site can no longer disagree about
+       * which build is current.
+       */
+      latestVersion: newestVersion(assets),
     };
   }
 
