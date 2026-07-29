@@ -231,3 +231,90 @@ export class DirectoryReleaseStore implements ReleaseStore {
 export function releaseDirFrom(env: NodeJS.ProcessEnv): string {
   return env['COMPANION_RELEASE_DIR'] ?? resolve(process.cwd(), '../companion/release');
 }
+
+/**
+ * Compares two version strings numerically, segment by segment.
+ *
+ * ★ NOT A STRING COMPARISON ★
+ *
+ * `'0.10.0' < '0.9.0'` is TRUE as strings, because '1' sorts before '9'. It is
+ * the classic version bug: everything works for nine releases and then updates
+ * silently stop being announced, long after anybody is watching for it.
+ *
+ * A pre-release suffix is ignored rather than ordered — `1.2.0-beta.1` compares
+ * as `1.2.0`. Getting pre-release precedence right is a specification of its own
+ * and we do not publish them.
+ */
+function compareVersions(a: string, b: string): number {
+  const parts = (v: string): number[] =>
+    ((v.trim().replace(/^v/i, '').split('-')[0]) ?? '')
+      .split('.')
+      .map((n) => Number.parseInt(n, 10))
+      // A non-numeric segment becomes 0, not NaN — every NaN comparison is
+      // false, which would make every version look equal.
+      .map((n) => (Number.isFinite(n) ? n : 0));
+
+  const left = parts(a);
+  const right = parts(b);
+  for (let i = 0; i < Math.max(left.length, right.length); i += 1) {
+    // Missing segments are 0, so `1.2` and `1.2.0` are the same version.
+    const diff = (left[i] ?? 0) - (right[i] ?? 0);
+    if (diff !== 0) return diff > 0 ? 1 : -1;
+  }
+  return 0;
+}
+
+/**
+ * The newest published version across every platform.
+ *
+ * ★ THE HIGHEST VERSION, NOT THE MOST RECENTLY BUILT ★
+ *
+ * Squadron owner, 2026-07-29: "every time we release a new build that is not
+ * bumped we get the update notification and its really annoying to our members
+ * please! not to mention confusing!"
+ *
+ * Two callers were each picking "latest" a different wrong way:
+ *
+ *   the app's settings poll   sorted version STRINGS descending, so with 0.10.0
+ *                             and 0.9.0 both in the bucket it reported 0.9.0 —
+ *                             and from the tenth release onward would have
+ *                             stopped announcing updates entirely
+ *
+ *   the website's rail        took the most recently BUILT file, so rebuilding
+ *                             an older installer, or a failed prune leaving an
+ *                             old file with a newer timestamp, made a PREVIOUS
+ *                             version "latest"
+ *
+ * One function, used by both. Across platforms rather than per platform: a
+ * release publishes all three together, so a per-platform answer would be the
+ * same number reached less reliably.
+ *
+ * Returns null when nothing is published or the bucket could not be read —
+ * which reads as "no update", the only honest answer when we cannot see.
+ */
+export function newestVersion(assets: readonly ReleaseAsset[]): string | null {
+  const versions = assets.map((a) => a.version).filter((v): v is string => v !== null && v !== '');
+  if (versions.length === 0) return null;
+  return versions.reduce((best, v) => (compareVersions(v, best) > 0 ? v : best));
+}
+
+/** The published asset carrying `newestVersion`, for its build date. */
+export function newestRelease(assets: readonly ReleaseAsset[]): ReleaseAsset | null {
+  const version = newestVersion(assets);
+  if (version === null) return null;
+  /*
+   * The EARLIEST build of that version, not the latest.
+   *
+   * A rebuild at the same version must not move the release date — the website
+   * banner is bounded by a fortnight from release, and taking the newest file
+   * would restart that fortnight on every rebuild. Which is the complaint.
+   */
+  return (
+    assets
+      .filter((a) => a.version === version)
+      .reduce<ReleaseAsset | null>(
+        (best, a) => (best === null || a.builtAt < best.builtAt ? a : best),
+        null,
+      ) ?? null
+  );
+}

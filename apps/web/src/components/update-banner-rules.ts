@@ -69,30 +69,62 @@ export function compareVersions(a: string, b: string): number {
   return 0;
 }
 
-/** Is this member already running the newest release on every device? */
-export function allDevicesCurrent(
+/**
+ * Is at least one of this member's machines running something OLDER?
+ *
+ * ★ A MISMATCH, NOT AN ABSENCE ★
+ *
+ * Squadron owner, 2026-07-29: "every time we release a new build that is not
+ * bumped we get the update notification and its really annoying to our members
+ * please! not to mention confusing!" — and: show the banner when there is a
+ * version mismatch, and not otherwise.
+ *
+ * This replaces `allDevicesCurrent`, which asked the opposite question and got
+ * two cases badly wrong:
+ *
+ *   no devices at all         counted as "not current", so somebody who has
+ *                             never installed the app was shown an update
+ *                             notice for software they do not have
+ *
+ *   device has not reported   counted as "not current", so every member was
+ *                             nagged until their app next polled — which is
+ *                             every member, every time, for the first five
+ *                             minutes after this shipped
+ *
+ * Both produced a banner in the absence of evidence. The rule now needs
+ * EVIDENCE OF BEING BEHIND: a version we have actually been told, that is
+ * genuinely older than the published one. Silence when we do not know.
+ *
+ * ★ WHY THIS ALSO FIXES THE REBUILD COMPLAINT ★
+ *
+ * Rebuilding without bumping publishes a new FILE with the same VERSION. The
+ * release date moves, so any rule keyed on "is the release recent" fires again.
+ * This one compares versions, so an unbumped rebuild changes nothing for
+ * anybody already on that version.
+ */
+export function someDeviceBehind(
   deviceVersions: readonly (string | null)[],
   latestVersion: string,
 ): boolean {
   /*
-   * ★ NO DEVICES IS NOT "UP TO DATE" ★
-   *
-   * `[].every(...)` is true, which would have hidden the banner from precisely
-   * the people who have never installed the app — the ones a release
-   * announcement is most useful to.
+   * Only devices that have TOLD us what they run. A null is "we have not
+   * heard", which is not the same as "out of date" — and treating it as such is
+   * exactly the confusion being complained about.
    */
-  if (deviceVersions.length === 0) return false;
+  const known = deviceVersions.filter((v): v is string => v !== null && v.trim() !== '');
+
+  // Nothing to compare: no app, or no report yet. Say nothing.
+  if (known.length === 0) return false;
 
   /*
-   * A device that has never reported counts as NOT current.
+   * `some`, not `every`. Somebody with a desktop and a laptop who has updated
+   * only one of them genuinely does have an out-of-date machine, and telling
+   * them so is the point.
    *
-   * It might be running the newest build and simply not have polled yet, but
-   * assuming so would hide the banner on a guess. Showing an update notice to
-   * somebody who is already current is a small annoyance that fixes itself
-   * within five minutes; hiding it from somebody who is not is the failure this
-   * feature exists to prevent.
+   * A device running something NEWER than the bucket — a developer build, or a
+   * release mid-publish — is not behind and is not nagged.
    */
-  return deviceVersions.every((v) => v !== null && compareVersions(v, latestVersion) >= 0);
+  return known.some((v) => compareVersions(v, latestVersion) < 0);
 }
 
 /** Has the release passed its fourteen days? */
@@ -131,8 +163,21 @@ export function updateBanner(input: BannerInput, now: number = Date.now()): stri
   // honest answer; announcing an update we cannot name helps nobody.
   if (latestVersion === null || latestVersion === '') return null;
 
+  /*
+   * ★ THE MISMATCH IS CHECKED FIRST, AND IT IS THE REAL GATE ★
+   *
+   * Somebody already on the newest version must never see this, however recent
+   * the release is — that is the complaint this exists to answer.
+   */
+  if (!someDeviceBehind(deviceVersions, latestVersion)) return null;
+
+  /*
+   * The window is now only an UPPER BOUND on how long a genuine mismatch keeps
+   * nagging. It is not what decides whether to nag: a rebuild without a version
+   * bump moves the release date and would otherwise start the fortnight again
+   * for people who are perfectly up to date.
+   */
   if (!withinWindow(releasedAt, now)) return null;
-  if (allDevicesCurrent(deviceVersions, latestVersion)) return null;
 
   return latestVersion;
 }
@@ -161,4 +206,89 @@ export function updateBanner(input: BannerInput, now: number = Date.now()): stri
  */
 export function updateDismissedCookie(version: string): string {
   return `gs_update_${version.replace(/[^0-9A-Za-z]/g, '_')}`;
+}
+
+/** What the commander status rail should say about the companion app. */
+export interface AppVersionSummary {
+  /** The row's value. Never blank — an empty stat reads as broken. */
+  readonly label: string;
+  readonly tone: 'good' | 'warn' | 'default';
+  /** Where to send them, when there is somewhere useful to go. */
+  readonly href: string | null;
+  /** The text of that link. */
+  readonly linkText: string | null;
+}
+
+/**
+ * The companion app's state, for the status rail on Commander Management.
+ *
+ * ★ WHY IT LIVES BESIDE THE BANNER RULE ★
+ *
+ * Squadron owner, 2026-07-29: show the member's app version in the status box;
+ * link to the download page when they do not have it; and show the update
+ * banner only on a genuine mismatch.
+ *
+ * The rail and the banner are two views of one fact. Computing them separately
+ * is how a member ends up with a bar saying "update available" above a panel
+ * saying they are current — which is worse than either message alone, and is
+ * precisely the confusion being complained about. Same inputs, same file.
+ *
+ * ★ FOUR STATES, BECAUSE THERE ARE FOUR ★
+ *
+ *   no devices        never installed, or unpaired everything -> send them to
+ *                     the download page
+ *   nothing reported  paired, but has not checked in since version reporting
+ *                     shipped -> say so plainly rather than inventing a version
+ *   behind            a real mismatch -> name both versions
+ *   current           say the version and get out of the way
+ */
+export function appVersionSummary(
+  input: BannerInput & { readonly deviceCount?: number },
+): AppVersionSummary {
+  const { latestVersion, deviceVersions } = input;
+
+  const known = deviceVersions.filter((v): v is string => v !== null && v.trim() !== '');
+
+  if (deviceVersions.length === 0) {
+    return {
+      label: 'Not installed',
+      tone: 'default',
+      href: '/settings/devices',
+      linkText: 'Get the companion app',
+    };
+  }
+
+  if (known.length === 0) {
+    /*
+     * Paired, but silent. NOT "unknown" as a bare word — that reads as an
+     * error. The app reports on a five-minute poll, so the honest answer is
+     * that it has not checked in yet, and saying when it will is what stops
+     * somebody re-pairing a device that is working perfectly well.
+     */
+    return {
+      label: 'Waiting for the app',
+      tone: 'default',
+      href: null,
+      linkText: null,
+    };
+  }
+
+  /*
+   * The OLDEST machine decides the row. Somebody with a current desktop and a
+   * stale laptop is not up to date, and showing the newer number would hide the
+   * one that needs attention.
+   */
+  const oldest = known.reduce((a, b) => (compareVersions(b, a) < 0 ? b : a));
+
+  if (latestVersion !== null && latestVersion !== '' && compareVersions(oldest, latestVersion) < 0) {
+    return {
+      label: `v${oldest} — v${latestVersion} available`,
+      tone: 'warn',
+      href: '/settings/devices',
+      linkText: 'Update the companion app',
+    };
+  }
+
+  // Current, or ahead of the bucket. Either way, nothing to do.
+  return { label: `v${oldest}`, tone: 'good', href: null, linkText: null };
 }
