@@ -73,6 +73,13 @@ export function Dashboard({ data }: { data: AdminDashboard }) {
     day: i + 1,
     messages,
     members: discord.dailyMembers[i] ?? 0,
+    /*
+     * From `game`, not `discord` — it is a journal fact (`LoadGame`), and the
+     * two arrive as separate arrays covering the same days. `?? 0` because a
+     * month with no telemetry at all returns a shorter array, and a missing
+     * index must draw a zero rather than break the line.
+     */
+    signIns: data.game.dailySignIns[i] ?? 0,
     weekday: new Date(Date.UTC(year ?? 2026, (month ?? 1) - 1, i + 1)).getUTCDay(),
   }));
 
