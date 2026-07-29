@@ -9,6 +9,7 @@ import type {
   Anomaly,
 } from './discord-reconcile.js';
 import type { RoleSource, RoleCacheStore, GuildRoleRecord } from './discord-role-sync.js';
+import type { ClassifyStore, ClassifiableRole } from './discord-role-classify.js';
 
 /** Wraps the adapter so the service depends on one method, not on Discord. */
 export class AdapterGuildSource implements GuildSource, RoleSource {
@@ -209,6 +210,59 @@ export class WebhookReporter implements Reporter {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ content: body, allowed_mentions: { parse: [] } }),
+    });
+  }
+}
+
+/**
+ * Reads and writes what a Discord role MEANS to us.
+ *
+ * ★ THE CLASSIFIER HAD NO STORE, AND NO CALLER ★
+ *
+ * `classifyGuildRoles` and its rules were written, documented and tested, and
+ * nothing implemented `ClassifyStore` or invoked the function. So every synced
+ * role kept the default category `other` — and the roster, the profile and the
+ * activity table all filter to `rank`, `membership` and `award`, which meant
+ * they showed NOTHING even once the names were cached.
+ *
+ * Two uncalled functions in one pipeline: `syncGuildRoles` fetched no names,
+ * and this decided nothing about them.
+ */
+export class PrismaClassifyStore implements ClassifyStore {
+  constructor(private readonly db: PrismaClient) {}
+
+  async listForClassification(): Promise<ClassifiableRole[]> {
+    const [roles, mappings] = await Promise.all([
+      this.db.discordRole.findMany({
+        select: { discordRoleId: true, name: true, category: true },
+      }),
+      /*
+       * Which snowflakes grant an internal role with a ladder position.
+       *
+       * `mapsToRank` is what stops a mapped leadership role being classified by
+       * its NAME — the rules fall back to name matching, and "Sector Overseer"
+       * looks like nothing in particular.
+       */
+      this.db.roleMapping.findMany({
+        where: { role: { isHierarchical: true } },
+        select: { discordRoleId: true },
+      }),
+    ]);
+
+    const ranked = new Set(mappings.map((m) => m.discordRoleId));
+
+    return roles.map((r) => ({
+      id: r.discordRoleId,
+      name: r.name,
+      mapsToRank: ranked.has(r.discordRoleId),
+      category: r.category as ClassifiableRole['category'],
+    }));
+  }
+
+  async setCategory(roleId: string, category: string): Promise<void> {
+    await this.db.discordRole.update({
+      where: { discordRoleId: roleId },
+      data: { category: category as never },
     });
   }
 }
