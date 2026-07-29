@@ -34,8 +34,22 @@ export class PrismaPairingStore implements PairingStore {
     await this.#db.deviceToken.updateMany({ where: { id }, data: { revokedAt: at } });
   }
 
-  async touch(id: string, at: Date): Promise<void> {
-    await this.#db.deviceToken.updateMany({ where: { id }, data: { lastUsedAt: at } });
+  async touch(id: string, at: Date, appVersion?: string | null): Promise<void> {
+    /*
+     * ★ UNDEFINED LEAVES THE STORED VERSION ALONE ★
+     *
+     * Only the settings poll carries a version. Writing `null` on the routes
+     * that do not would make a member's reported version flicker between known
+     * and unknown every few seconds, and the website would offer them an update
+     * they had already installed.
+     *
+     * So the field is added to the update only when the caller actually said
+     * something — which is what `undefined` versus `null` is for.
+     */
+    await this.#db.deviceToken.updateMany({
+      where: { id },
+      data: appVersion === undefined ? { lastUsedAt: at } : { lastUsedAt: at, appVersion },
+    });
   }
 
   async countActiveFor(userId: string): Promise<number> {

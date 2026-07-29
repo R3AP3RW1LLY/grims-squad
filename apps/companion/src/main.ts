@@ -569,6 +569,13 @@ async function refreshHubSettings(force = false): Promise<void> {
   const result = await fetchHubSettings({
     apiBaseUrl: apiBaseUrlFor(config, process.env),
     deviceToken: config.deviceToken,
+    /*
+     * From Electron, never a constant — it is whatever was actually installed.
+     * A hardcoded string would go on telling the hub this machine is current
+     * after the next release, which is precisely the banner this exists to
+     * switch off.
+     */
+    appVersion: app.getVersion(),
   });
 
   hubFetchedAt = Date.now();

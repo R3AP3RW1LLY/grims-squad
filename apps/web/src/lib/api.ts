@@ -638,3 +638,20 @@ export interface AccountStatus {
  */
 export const getAccountStatus = (): Promise<AccountStatus | null> =>
   get('/v1/auth/me/account-status', { authed: true });
+
+/**
+ * What the website needs to decide whether to announce a new companion release.
+ *
+ * FACTS, not the decision — the rule lives in `update-banner-rules.ts`, where it
+ * is tested. Splitting it across the API and the browser is how one of its three
+ * conditions quietly stops being checked.
+ */
+export interface UpdateStatus {
+  latestVersion: string | null;
+  releasedAt: string | null;
+  /** One entry per ACTIVE device. Null means it has not reported a version yet. */
+  deviceVersions: Array<string | null>;
+}
+
+export const getUpdateStatus = (): Promise<UpdateStatus | null> =>
+  get<UpdateStatus>('/v1/companion/update-status', { authed: true });

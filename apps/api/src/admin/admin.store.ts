@@ -343,6 +343,17 @@ export class PrismaAdminStore implements AdminStore {
 
       const verification = r.user?.cmdrVerifications[0];
 
+      /*
+       * What they are working toward. Null at the top of the ladder — Grand
+       * Master General has nothing above it, and showing a blank arrow there
+       * would read as missing data rather than as an achievement.
+       *
+       * Computed BEFORE the row rather than inline, because `qualifies` now
+       * depends on it: there is no promotion to be eligible for when there is
+       * no rank above you.
+       */
+      const nextRank = currentRank === null ? null : (LADDER_NEXT[currentRank] ?? null);
+
       return {
       discordId: r.discordId,
       handle: r.user?.handle ?? null,
@@ -381,13 +392,27 @@ export class PrismaAdminStore implements AdminStore {
        * this so an officer can see WHICH it was. An assumption must never be
        * displayed as if it were an observation.
        */
+      nextRank,
       /*
-       * What they are working toward. Null at the top of the ladder — Grand
-       * Master General has nothing above it, and showing a blank arrow there
-       * would read as missing data rather than as an achievement.
+       * ★ AND THERE HAS TO BE SOMEWHERE TO GO ★
+       *
+       * Squadron owner, 2026-07-29: a member showing "Top of ladder" must not
+       * be highlighted green, because there is no promotion for them to be
+       * eligible for.
+       *
+       * They were. A Grand Master General with a message and a session met both
+       * activity conditions, so the row went green and the column read YES —
+       * telling an officer that somebody was due a promotion the engine will
+       * never grant. `promotion-run.ts` refuses them outright with "Already at
+       * the top of the ladder", so this was the console disagreeing with the
+       * thing that actually promotes people.
+       *
+       * That is the SECOND time this field has drifted from the engine in one
+       * day. Both times the console was the one that was wrong, and both times
+       * the symptom was a green row nobody could act on.
        */
-      nextRank: currentRank === null ? null : (LADDER_NEXT[currentRank] ?? null),
       qualifies:
+        nextRank !== null &&
         r.messageCount > 0 &&
         (r.gameActivity === 'observed' || r.gameActivity === 'assumed'),
       lastActivityAt: r.lastActivityAt?.toISOString() ?? null,
