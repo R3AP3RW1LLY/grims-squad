@@ -129,6 +129,14 @@ ok "schema up to date"
 # while the deploy reports success.
 say "Rolling out"
 
+# ★ CADDY FIRST, SO THE RETRY WINDOW IS IN PLACE BEFORE ANYTHING MOVES ★
+#
+# The proxy holds and retries requests that arrive while a container is being
+# replaced (see the Caddyfile). Reloading it AFTER the swap would leave the one
+# window it exists to cover uncovered. `caddy reload` is graceful — it does not
+# drop connections.
+$COMPOSE exec -T caddy caddy reload --config /etc/caddy/Caddyfile 2>/dev/null   && ok "proxy config reloaded"   || ok "proxy reload skipped (no change)"
+
 wait_healthy() {
   local service=$1 attempts=${2:-30} state
   for ((i = 1; i <= attempts; i++)); do
