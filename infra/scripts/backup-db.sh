@@ -45,11 +45,24 @@ POSTGRES_USER="$(envval POSTGRES_USER)"
 POSTGRES_DB="$(envval POSTGRES_DB)"
 BACKUP_ENCRYPTION_KEY="$(envval BACKUP_ENCRYPTION_KEY)"
 S3_HOST="$(envval S3_HOST)"
-S3_BUCKET="$(envval S3_BUCKET)"
 S3_ACCESS_KEY="$(envval S3_ACCESS_KEY)"
 S3_SECRET_KEY="$(envval S3_SECRET_KEY)"
 
-for v in POSTGRES_USER POSTGRES_DB BACKUP_ENCRYPTION_KEY S3_HOST S3_BUCKET S3_ACCESS_KEY S3_SECRET_KEY; do
+# ★ ITS OWN BUCKET VARIABLE, AND THAT IS THE WHOLE POINT ★
+#
+# This read `S3_BUCKET` — the same name the API reads for avatars and media.
+# The squadron owner asked for media to live in a SEPARATE storage, explicitly
+# so it is not mixed in with backups. Sharing one variable meant that the moment
+# the API was configured, every nightly database dump would have been written
+# into the media bucket instead: the exact arrangement that was ruled out, and
+# nothing anywhere would have said so.
+#
+# `BACKUP_S3_BUCKET` is required rather than defaulted. A default would silently
+# pick a bucket on a machine where somebody forgot to set it, and "silently
+# picks a bucket for your database dumps" is not a behaviour worth having.
+BACKUP_S3_BUCKET="$(envval BACKUP_S3_BUCKET)"
+
+for v in POSTGRES_USER POSTGRES_DB BACKUP_ENCRYPTION_KEY S3_HOST BACKUP_S3_BUCKET S3_ACCESS_KEY S3_SECRET_KEY; do
   [[ -n "${!v}" ]] || die "$v is missing from $ENV_FILE"
 done
 
@@ -105,7 +118,7 @@ aws_s3() {
     amazon/aws-cli:latest --endpoint-url "https://${S3_HOST}" "$@"
 }
 
-aws_s3 s3 cp /data/dump.enc "s3://${S3_BUCKET}/${OBJ}" >/dev/null 2>&1 \
+aws_s3 s3 cp /data/dump.enc "s3://${BACKUP_S3_BUCKET}/${OBJ}" >/dev/null 2>&1 \
   || die "upload failed"
 
 log "uploaded ${OBJ} (${SIZE} bytes)"
@@ -116,7 +129,7 @@ log "uploaded ${OBJ} (${SIZE} bytes)"
 KEEP_FLOOR=10
 CUTOFF=$(date -u -d "-${RETENTION_DAYS} days" +%Y%m%d)
 mapfile -t OLD < <(
-  aws_s3 s3 ls "s3://${S3_BUCKET}/database/" 2>/dev/null \
+  aws_s3 s3 ls "s3://${BACKUP_S3_BUCKET}/database/" 2>/dev/null \
     | awk '{print $4}' | grep -E '^grims-[0-9]{8}-' | sort
 )
 TOTAL=${#OLD[@]}
@@ -125,7 +138,7 @@ if (( TOTAL > KEEP_FLOOR )); then
     (( TOTAL <= KEEP_FLOOR )) && break
     d="${f#grims-}"; d="${d%%-*}"
     if [[ "$d" < "$CUTOFF" ]]; then
-      aws_s3 s3 rm "s3://${S3_BUCKET}/database/${f}" >/dev/null 2>&1 && {
+      aws_s3 s3 rm "s3://${BACKUP_S3_BUCKET}/database/${f}" >/dev/null 2>&1 && {
         log "pruned ${f}"; TOTAL=$((TOTAL - 1))
       }
     fi
