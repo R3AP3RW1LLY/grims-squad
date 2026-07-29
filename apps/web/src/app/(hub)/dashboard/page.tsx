@@ -99,7 +99,19 @@ export default async function DashboardPage() {
         it every time somebody else in the squadron loads the game would be
         constant work showing the same numbers.
       */}
-      <LiveRefresh types={['telemetry']} />
+      {/*
+        `verification` as well as `telemetry`.
+
+        The page TITLE is the verification state — "CMDR X" once proven, the
+        member's display name until then — and the rail says "Verified" or "Not
+        verified" beside it. Somebody who links their Inara key in another tab
+        would otherwise come back to a dashboard still calling them unverified
+        and still telling them to go and verify.
+
+        Squadron owner, 2026-07-29: verifications must show instantly across the
+        app. This is the page they land on.
+      */}
+      <LiveRefresh types={['telemetry', 'verification']} />
 
       {/*
         ★ A GREETING, NOT A CONTROL PANEL ★

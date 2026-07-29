@@ -1,6 +1,7 @@
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { HubShell } from '../../components/hub-shell';
+import { UpdateBanner } from '../../components/update-banner';
 import { SecureAccountBanner } from '../../components/secure-account-banner';
 import { VerifyPromptBanner } from '../../components/verify-prompt-banner';
 import { getMe } from '../../lib/api';
@@ -69,6 +70,15 @@ export default async function HubLayout({ children }: { children: React.ReactNod
       */}
       <SecureAccountBanner />
       <VerifyPromptBanner />
+      {/*
+        LAST of the three, deliberately.
+
+        A member who owes a second factor or a verification has something to do
+        that matters more than installing an update, and three bars stacked
+        across the top is how people learn to scroll past all of them. This one
+        also expires on its own, which neither of the others does.
+      */}
+      <UpdateBanner />
       {children}
     </HubShell>
   );

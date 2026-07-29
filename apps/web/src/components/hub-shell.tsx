@@ -22,7 +22,6 @@ import {
   UserCircleIcon,
   ComputerDesktopIcon,
   LockClosedIcon,
-  EyeSlashIcon,
   Cog6ToothIcon,
   KeyIcon,
 } from '@heroicons/react/24/outline';
@@ -69,7 +68,6 @@ const ICONS: Record<string, typeof HomeIcon> = {
   '/fleet': ShieldCheckIcon,
   '/settings/commander': UserCircleIcon,
   '/settings/devices': ComputerDesktopIcon,
-  '/settings/privacy': EyeSlashIcon,
   '/settings/security': LockClosedIcon,
   '/settings/account': Cog6ToothIcon,
   '/app': ShieldCheckIcon,

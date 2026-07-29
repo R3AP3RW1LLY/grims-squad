@@ -56,6 +56,23 @@ export interface HubSettings {
 export interface FetchSettingsOptions {
   readonly apiBaseUrl: string;
   readonly deviceToken: string;
+  /**
+   * What this app is running, told to the hub.
+   *
+   * ★ SO THE WEBSITE CAN STOP NAGGING ★
+   *
+   * The hub shows a banner when a new release is out and has to hide it once
+   * the member is running that release. It had no way to know: the release
+   * bucket knows what the newest version IS, and nothing anywhere recorded what
+   * anybody had actually installed.
+   *
+   * Sent on this call because the app already makes it every five minutes — no
+   * extra request, no second credential, and it self-corrects within minutes of
+   * an update rather than needing the member to do anything.
+   *
+   * Optional so the exchange still works when a caller has no version to give.
+   */
+  readonly appVersion?: string;
   readonly fetchImpl?: typeof fetch;
   readonly timeoutMs?: number;
 }
@@ -71,7 +88,18 @@ export async function fetchHubSettings(
 
   try {
     const res = await doFetch(`${opts.apiBaseUrl.replace(/\/+$/, '')}/v1/telemetry/settings`, {
-      headers: { authorization: `Bearer ${opts.deviceToken}` },
+      headers: {
+        authorization: `Bearer ${opts.deviceToken}`,
+        /*
+         * Omitted rather than sent empty when there is no version. The hub
+         * treats a missing header as "the caller did not say" and leaves the
+         * stored value alone; an empty one would be indistinguishable from a
+         * caller that meant to say something and failed.
+         */
+        ...(opts.appVersion !== undefined && opts.appVersion !== ''
+          ? { 'x-app-version': opts.appVersion }
+          : {}),
+      },
       signal: ac.signal,
     });
 

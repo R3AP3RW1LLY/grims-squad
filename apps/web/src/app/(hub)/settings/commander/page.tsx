@@ -1,6 +1,8 @@
 import type { Metadata } from 'next';
 import { getInaraStatus, getMe, getTimezones } from '../../../../lib/api';
 import { SquadronStatus } from './squadron-status';
+import { VerificationProvider } from './verification-state';
+import { LiveRefresh } from '../../../../components/live-refresh';
 import { InaraForm } from './inara-form';
 import { TimezoneForm } from './timezone-form';
 import {
@@ -12,7 +14,8 @@ import {
   CouldNotLoad,
 } from '../../../../components/hub-page';
 import { PageTabs, resolveTab, type PageTab } from '../../../../components/page-tabs';
-import { PrivacyBody } from '../privacy/body';
+import { PrivacyControls, sharedFields } from '../privacy/body';
+import { getMyPrivacy } from '../../../../lib/api';
 import { SecurityBody } from '../security/body';
 import { AccountBody } from '../account/body';
 
@@ -47,7 +50,17 @@ export const dynamic = 'force-dynamic';
 const TABS: readonly PageTab[] = [
   { key: 'settings', label: 'Commander settings' },
   { key: 'verification', label: 'Name & verification' },
-  { key: 'privacy', label: 'Privacy' },
+  /*
+   * ★ PRIVACY IS NOT A TAB ANY MORE — squadron owner, 2026-07-29 ★
+   *
+   * Its content sits on this first tab, beneath the timezone. It was two
+   * clicks and a page load away from the settings it belongs with, and a tab
+   * holding five switches is a tab somebody has to remember exists.
+   *
+   * `?tab=privacy` still resolves: `resolveTab` falls back to the first tab for
+   * anything it does not recognise, so an old bookmark lands on the page that
+   * now holds the same controls rather than on a 404.
+   */
   { key: 'security', label: 'Security' },
   { key: 'account', label: 'Account' },
 ];
@@ -60,7 +73,18 @@ export default async function CommanderPage({
   const params = await searchParams;
   const tab = resolveTab(TABS, params['tab']);
 
-  const [status, me, zones] = await Promise.all([getInaraStatus(), getMe(), getTimezones()]);
+  /*
+   * Privacy is fetched HERE as well as inside `PrivacyControls`, because the
+   * rail summary and the switches must agree — and Next dedupes identical
+   * fetches within one render, so this costs no second request.
+   */
+  const [status, me, zones, privacy] = await Promise.all([
+    getInaraStatus(),
+    getMe(),
+    getTimezones(),
+    getMyPrivacy(),
+  ]);
+  const sharedFieldCount = sharedFields(privacy);
   const verified = status?.cmdrName ?? null;
 
   return (
@@ -77,9 +101,7 @@ export default async function CommanderPage({
         only the first two tabs need — cannot blank a privacy screen that never
         depended on it.
       */}
-      {tab === 'privacy' ? (
-        <PrivacyBody />
-      ) : tab === 'security' ? (
+      {tab === 'security' ? (
         <SecurityBody />
       ) : tab === 'account' ? (
         <AccountBody />
@@ -97,6 +119,16 @@ export default async function CommanderPage({
                   tone={verified === null ? 'default' : 'good'}
                 />
                 <RailStat label="Timezone" value={me.user?.timezone ?? 'UTC'} />
+                {/*
+                  Moved off the deleted Privacy tab. "How exposed am I" is the
+                  question the toggles below answer collectively, and it is
+                  hard to hold five switches in your head at once.
+                */}
+                <RailStat
+                  label="Fields shared"
+                  value={`${sharedFieldCount} of 5`}
+                  tone={sharedFieldCount === 0 ? 'good' : 'default'}
+                />
               </Panel>
 
               <Panel title="Related">
@@ -122,6 +154,19 @@ export default async function CommanderPage({
           >
             <TimezoneForm initial={me.user?.timezone ?? 'UTC'} zones={zones?.timezones ?? ['UTC']} />
           </Section>
+
+          {/*
+            ★ THE PRIVACY CONTROLS, ON THE PAGE THEY BELONG TO ★
+
+            These had a tab of their own. Five switches do not need one, and a
+            tab is a thing somebody has to remember exists — whereas the answer
+            to "what does the squadron see about me" belongs beside the rest of
+            a member's own settings, where they are already looking.
+
+            Rendered as a SECTION rather than the whole body it used to be, so
+            it inherits this page's rail instead of bringing a second one.
+          */}
+          <PrivacyControls />
         </PageBody>
       ) : (
         <PageBody
@@ -226,8 +271,26 @@ export default async function CommanderPage({
             where the other explanatory panels already live — a settings page
             should open with your state, not with three paragraphs about it.
           */}
-          <SquadronStatus initial={status} />
-          <InaraForm initial={status} />
+          {/*
+            ★ ONE STATUS, AND IT LISTENS ★
+
+            These two panels each held a private `useState(initial)` copy of the
+            verification status. Pasting a key into the form proved the
+            commander name and updated the FORM, while the panel above it — the
+            one that announces verification in the largest text on the page —
+            went on saying "Not verified" until somebody reloaded by hand.
+
+            `LiveRefresh` re-runs this server component when the API says the
+            member's verification moved: their own action in another tab, an
+            officer approving from the console, or the fifteen-minute squadron
+            re-check finally getting an answer out of Inara. The provider adopts
+            each fresh snapshot, which a `useState` initialiser could not do.
+          */}
+          <LiveRefresh types={['verification']} />
+          <VerificationProvider initial={status}>
+            <SquadronStatus />
+            <InaraForm />
+          </VerificationProvider>
         </PageBody>
       )}
     </>

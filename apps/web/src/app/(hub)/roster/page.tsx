@@ -75,7 +75,16 @@ export default async function RosterPage({
         shown as playing now, and that is the one thing on this page worth
         watching in real time.
       */}
-      <LiveRefresh types={['presence', 'roster']} />
+      {/*
+        `verification` as well as `roster`.
+
+        A verification publishes BOTH — `roster` squadron-wide so every viewer's
+        card refreshes, and `verification` scoped to the member it happened to.
+        Listening for both means the person who just verified sees their own
+        badge appear here at the same instant everybody else does, rather than
+        one event later.
+      */}
+      <LiveRefresh types={['presence', 'roster', 'verification']} />
 
       <PageHeader
         eyebrow="Squadron register"

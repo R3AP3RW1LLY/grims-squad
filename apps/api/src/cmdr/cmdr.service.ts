@@ -107,7 +107,19 @@ export class CmdrService {
     return out;
   }
 
-  async approve(claimId: string, officerId: string, now: Date = new Date()): Promise<void> {
+  /**
+   * Returns WHOSE claim this was.
+   *
+   * Not decoration: an officer approving from the console changes somebody
+   * else's page, and the caller has to know which member to notify — otherwise
+   * the one person who has been waiting for this is the only one who does not
+   * find out until they reload.
+   */
+  async approve(
+    claimId: string,
+    officerId: string,
+    now: Date = new Date(),
+  ): Promise<{ userId: string }> {
     const claim = await this.store.byId(claimId);
     if (claim === null || claim.revokedAt !== null) {
       throw new AppError(ErrorCode.RESOURCE_NOT_VISIBLE, 'Claim not found.');
@@ -116,7 +128,7 @@ export class CmdrService {
     // Already done. Returning quietly rather than erroring, so a double-click
     // is not an incident — and without a second audit row saying it happened
     // twice, which it did not.
-    if (claim.isVerified) return;
+    if (claim.isVerified) return { userId: claim.userId };
 
     if (claim.userId === officerId) {
       // Self-approval turns a two-party check into a formality. The officer can
@@ -154,6 +166,8 @@ export class CmdrService {
       before: { cmdrName: claim.cmdrName, isVerified: false },
       after: { cmdrName: claim.cmdrName, isVerified: true, trustTier: 1, method: 'officer_manual' },
     });
+
+    return { userId: claim.userId };
   }
 
   async reject(
@@ -161,7 +175,7 @@ export class CmdrService {
     officerId: string,
     reason: string,
     now: Date = new Date(),
-  ): Promise<void> {
+  ): Promise<{ userId: string }> {
     const claim = await this.store.byId(claimId);
     if (claim === null || claim.revokedAt !== null) {
       throw new AppError(ErrorCode.RESOURCE_NOT_VISIBLE, 'Claim not found.');
@@ -184,5 +198,8 @@ export class CmdrService {
       before: { cmdrName: claim.cmdrName, isVerified: false },
       after: { revoked: true, reason: reason.trim() },
     });
+
+    // As with `approve`: the member whose claim this was, so they can be told.
+    return { userId: claim.userId };
   }
 }

@@ -78,6 +78,19 @@ export interface ActivityRow {
    * Discord activity, not website sign-ins. Squadron owner, 2026-07-29.
    */
   readonly lastSeenAt: string | null;
+  /**
+   * When they joined the voice channel they are in NOW. Null when not in one.
+   *
+   * ★ THE ONLY FIELD HERE THAT IS ABOUT THE PRESENT ★
+   *
+   * Everything else on this row is a tally or a timestamp in the past. A member
+   * sitting in comms all evening showed as "3 days" because their last MESSAGE
+   * was three days ago — which is true and completely misleading, and is why an
+   * officer looking for who has gone quiet needs this separately.
+   *
+   * Squadron owner, 2026-07-29.
+   */
+  readonly inVoiceSince: string | null;
 }
 
 export interface MemberRow {
@@ -203,7 +216,25 @@ export class PrismaAdminStore implements AdminStore {
        * one person and a raw snowflake for the rest.
        */
       this.#db.discordGuildMember.findMany({
-        select: { discordId: true, nick: true, username: true, globalName: true, roles: true },
+        select: {
+          discordId: true,
+          nick: true,
+          username: true,
+          globalName: true,
+          roles: true,
+          /*
+           * Whether they are sitting in a voice channel AT THIS MOMENT.
+           *
+           * Not derivable from anything else here. `voiceJoinCount` says how
+           * often they joined this month, and `lastActivityAt` is a timestamp
+           * in the past — neither can tell an officer that somebody is on the
+           * server right now, which is what the Last Seen column was showing
+           * as "3 days" for a member who was in comms at the time.
+           *
+           * Squadron owner, 2026-07-29.
+           */
+          inVoiceSince: true,
+        },
       }),
       // Names and categories, for the membership fallback.
       this.#db.discordRole.findMany({ select: { discordRoleId: true, name: true, category: true } }),
@@ -312,6 +343,17 @@ export class PrismaAdminStore implements AdminStore {
 
       const verification = r.user?.cmdrVerifications[0];
 
+      /*
+       * What they are working toward. Null at the top of the ladder — Grand
+       * Master General has nothing above it, and showing a blank arrow there
+       * would read as missing data rather than as an achievement.
+       *
+       * Computed BEFORE the row rather than inline, because `qualifies` now
+       * depends on it: there is no promotion to be eligible for when there is
+       * no rank above you.
+       */
+      const nextRank = currentRank === null ? null : (LADDER_NEXT[currentRank] ?? null);
+
       return {
       discordId: r.discordId,
       handle: r.user?.handle ?? null,
@@ -350,17 +392,32 @@ export class PrismaAdminStore implements AdminStore {
        * this so an officer can see WHICH it was. An assumption must never be
        * displayed as if it were an observation.
        */
+      nextRank,
       /*
-       * What they are working toward. Null at the top of the ladder — Grand
-       * Master General has nothing above it, and showing a blank arrow there
-       * would read as missing data rather than as an achievement.
+       * ★ AND THERE HAS TO BE SOMEWHERE TO GO ★
+       *
+       * Squadron owner, 2026-07-29: a member showing "Top of ladder" must not
+       * be highlighted green, because there is no promotion for them to be
+       * eligible for.
+       *
+       * They were. A Grand Master General with a message and a session met both
+       * activity conditions, so the row went green and the column read YES —
+       * telling an officer that somebody was due a promotion the engine will
+       * never grant. `promotion-run.ts` refuses them outright with "Already at
+       * the top of the ladder", so this was the console disagreeing with the
+       * thing that actually promotes people.
+       *
+       * That is the SECOND time this field has drifted from the engine in one
+       * day. Both times the console was the one that was wrong, and both times
+       * the symptom was a green row nobody could act on.
        */
-      nextRank: currentRank === null ? null : (LADDER_NEXT[currentRank] ?? null),
       qualifies:
+        nextRank !== null &&
         r.messageCount > 0 &&
         (r.gameActivity === 'observed' || r.gameActivity === 'assumed'),
       lastActivityAt: r.lastActivityAt?.toISOString() ?? null,
       lastSeenAt: lastSeenByDiscordId.get(r.discordId)?.toISOString() ?? null,
+      inVoiceSince: byDiscordId.get(r.discordId)?.inVoiceSince?.toISOString() ?? null,
       };
     });
   }

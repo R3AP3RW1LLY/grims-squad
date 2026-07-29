@@ -312,6 +312,15 @@ export interface AdminActivityRow {
    * who has not spoken since May must still show as gone quiet in July.
    */
   lastSeenAt: string | null;
+  /**
+   * When they joined the voice channel they are in RIGHT NOW. Null if not in one.
+   *
+   * The only field on this row about the present rather than the past, which is
+   * why it takes precedence in the Last Seen column: a member who has been in
+   * comms all evening without typing is not somebody who has gone quiet, however
+   * old their last message is.
+   */
+  inVoiceSince: string | null;
   /** Their TENURE rank — the ladder promotion moves them up. */
   currentRank: string | null;
   /** A leadership APPOINTMENT, a separate axis. Not on the promotion ladder. */
@@ -637,3 +646,20 @@ export interface AccountStatus {
  */
 export const getAccountStatus = (): Promise<AccountStatus | null> =>
   get('/v1/auth/me/account-status', { authed: true });
+
+/**
+ * What the website needs to decide whether to announce a new companion release.
+ *
+ * FACTS, not the decision — the rule lives in `update-banner-rules.ts`, where it
+ * is tested. Splitting it across the API and the browser is how one of its three
+ * conditions quietly stops being checked.
+ */
+export interface UpdateStatus {
+  latestVersion: string | null;
+  releasedAt: string | null;
+  /** One entry per ACTIVE device. Null means it has not reported a version yet. */
+  deviceVersions: Array<string | null>;
+}
+
+export const getUpdateStatus = (): Promise<UpdateStatus | null> =>
+  get<UpdateStatus>('/v1/companion/update-status', { authed: true });

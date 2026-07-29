@@ -10,6 +10,7 @@ import {
 import { syncInaraRanks } from './jobs/inara-rank-sync.js';
 import { AdapterInaraSource, PrismaInaraRankStore } from './jobs/inara-rank-sync.wiring.js';
 import { loadMemberKeys } from './jobs/member-key-pool.js';
+import { notifyLive } from './lib/live-notify.js';
 
 /**
  * The Inara sweep. One shot, every fifteen minutes.
@@ -71,7 +72,44 @@ async function main(): Promise<number> {
       // typographic apostrophe that the website accepts.
       (reported) => sameSquadron(reported, expectedSquadronName()),
     );
-    console.error(JSON.stringify({ msg: 'squadron recheck complete', ...report }));
+    const { confirmedUserIds, ...counts } = report;
+
+    /*
+     * ★ TELL THEIR BROWSERS ★
+     *
+     * The website promises a waiting member that they can close the page and
+     * will be verified automatically. This is the half of that promise that
+     * happens on the screen — without it the page sat on "partially verified"
+     * until they reloaded, and the automatic part was invisible.
+     *
+     * Awaited, but it cannot throw and cannot fail the job. See live-notify.ts.
+     */
+    const notified = await notifyLive([
+      ...confirmedUserIds.map((userId) => ({ type: 'verification' as const, userId })),
+      /*
+       * ★ AND EVERYBODY ELSE'S ROSTER, ONCE ★
+       *
+       * The events above reach only the members they name. The roster shows an
+       * "Inara verified" badge for EVERY member and the admin console has a
+       * CMDR verified column — neither of which is the verified member's own
+       * tab, so without this the squadron would go on seeing them unverified
+       * until somebody reloaded.
+       *
+       * One event for the whole pass, not one per member: a sweep confirming
+       * eleven people would otherwise tell every connected browser to re-read
+       * eleven times, and they would all read the same thing.
+       *
+       * Carries NO userId — it says "the roster changed", not "this person just
+       * proved their commander name".
+       */
+      ...(confirmedUserIds.length > 0
+        ? [{ type: 'roster' as const, userId: null }]
+        : []),
+    ]);
+
+    // `notified` is what was actually published, not what we hoped to publish.
+    // A log that says 11 when Redis was down is worse than no log.
+    console.error(JSON.stringify({ msg: 'squadron recheck complete', ...counts, notified }));
   } catch (err) {
     console.error('squadron recheck failed', err);
   } finally {

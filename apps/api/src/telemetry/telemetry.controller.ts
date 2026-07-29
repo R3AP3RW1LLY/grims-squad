@@ -342,7 +342,8 @@ export class TelemetryController {
     const token =
       typeof header === 'string' && header.startsWith('Bearer ') ? header.slice(7).trim() : '';
 
-    const device = token === '' ? null : await this.pairing.authenticate(token);
+    const device =
+      token === '' ? null : await this.pairing.authenticate(token, new Date(), appVersionOf(req));
     if (device === null) {
       // 401 with no detail. Unknown, revoked and wrongly-scoped are one answer,
       // so a caller learns only that their token is not usable.
@@ -351,6 +352,37 @@ export class TelemetryController {
 
     return device;
   }
+}
+
+/**
+ * The companion version the caller says it is running.
+ *
+ * ★ VALIDATED, BECAUSE IT IS DISPLAYED ★
+ *
+ * This string is written by a client we do not control and is shown back to the
+ * member on the devices page. Accepting it verbatim would put whatever a caller
+ * sent into somebody's browser, and "the app told us" is not a reason to trust
+ * a value with a token that anybody holding the device already has.
+ *
+ * A version is digits and dots, with an optional pre-release tag — anything
+ * else is not a version and is dropped rather than cleaned up, because a
+ * half-scrubbed string is still a string somebody chose.
+ *
+ * Returns `undefined` when the header is absent, which leaves the stored value
+ * untouched. Only the settings poll sends it, and the ingest route must not
+ * wipe a known version on every batch.
+ */
+function appVersionOf(req: FastifyRequest): string | undefined {
+  const raw = req.headers['x-app-version'];
+  if (typeof raw !== 'string') return undefined;
+
+  const value = raw.trim();
+  if (value === '') return undefined;
+  // Bounded before the regex runs. A megabyte of digits is a valid-looking
+  // version and a pointless amount of work to match against.
+  if (value.length > 32) return undefined;
+
+  return /^\d+(\.\d+){0,3}(-[0-9A-Za-z.-]+)?$/.test(value) ? value : undefined;
 }
 
 function csrf(req: FastifyRequest): void {
