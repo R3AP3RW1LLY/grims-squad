@@ -178,7 +178,6 @@ jobs:
             fi
             echo "  $(basename "$f") — $((size / 1048576)) MB"
           done
-          fi
 
           # ---- UPLOAD FIRST -------------------------------------------------
           KEPT=()
