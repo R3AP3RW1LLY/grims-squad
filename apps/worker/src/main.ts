@@ -2,10 +2,12 @@ import { PrismaClient } from '@grims/db';
 import { DiscordAdapter } from '@grims/ed-clients';
 import { ReconcileService } from './jobs/discord-reconcile.js';
 import { syncGuildRoles } from './jobs/discord-role-sync.js';
+import { classifyGuildRoles } from './jobs/discord-role-classify.js';
 import {
   AdapterGuildSource,
   PrismaReconcileStore,
   PrismaRoleCacheStore,
+  PrismaClassifyStore,
   WebhookReporter,
 } from './jobs/discord-reconcile.wiring.js';
 
@@ -67,6 +69,21 @@ async function main(): Promise<number> {
      */
     const roleSync = await syncGuildRoles(source, new PrismaRoleCacheStore(prisma), guildId);
     console.error(JSON.stringify({ msg: 'guild role cache synced', ...roleSync }));
+
+    /*
+     * ★ AND THEN DECIDE WHAT EACH ROLE MEANS ★
+     *
+     * Caching the NAME is only half of it. Every surface that shows roles
+     * filters to `rank`, `membership` and `award`, and a freshly synced role
+     * defaults to `other` — so without this the roster stays blank even with a
+     * full cache. That is exactly what production looked like: 44 roles
+     * cached, 0 categorised, nothing on any card.
+     *
+     * It never overwrites a category already set, so a correction made by hand
+     * in the database survives every future run.
+     */
+    const classified = await classifyGuildRoles(new PrismaClassifyStore(prisma));
+    console.error(JSON.stringify({ msg: 'guild roles classified', ...classified }));
 
     const svc = new ReconcileService(
       source,
