@@ -360,3 +360,44 @@ describe('display name', () => {
     expect(store.identities[0]?.guildNick).toBeNull();
   });
 });
+
+describe('claiming Discord history on sign-in', () => {
+  /*
+   * ★ REPORTED FROM PRODUCTION ★
+   *
+   * A member who had been in Discord for months joined the hub and verified
+   * their commander, and the admin console showed them as having done neither.
+   *
+   * `member_activity_months` is keyed on the DISCORD id — the bot counts
+   * messages for everyone in the guild, most of whom have never visited the
+   * site — and `user_id` is filled in when they do. Nothing was filling it in.
+   * A `linkUser` existed in the bot's store, fully documented, with no caller
+   * anywhere in the codebase.
+   */
+  it('MANDATORY: attaches the account to activity recorded before it existed', async () => {
+    discord.addMember('9001', { username: 'aurelian', globalName: 'Aurelian' });
+    const { state, nonce } = svc.beginLogin('/forum');
+
+    const r = await svc.completeLogin({ code: 'code-for-9001', state, nonce });
+
+    expect(store.linkedActivity.get('9001')).toBe(r.userId);
+  });
+
+  it('MANDATORY: a failure here does NOT fail the login', async () => {
+    /*
+     * Somebody signing in for the first time must get in even if their history
+     * cannot be claimed at that instant. The nightly reconciliation repairs
+     * anything missed; a login that 500s over a bookkeeping update would be a
+     * far worse trade.
+     */
+    discord.addMember('9002', { username: 'someone' });
+    store.linkActivityHistory = async () => {
+      throw new Error('database is having a moment');
+    };
+
+    const { state, nonce } = svc.beginLogin('/forum');
+    await expect(svc.completeLogin({ code: 'code-for-9002', state, nonce })).resolves.toMatchObject(
+      { discordUserId: '9002' },
+    );
+  });
+});

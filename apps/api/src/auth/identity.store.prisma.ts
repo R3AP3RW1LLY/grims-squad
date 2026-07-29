@@ -111,6 +111,22 @@ export class PrismaIdentityStore implements IIdentityStore {
    * bounded, and the final fallback is random rather than sequential so a
    * pathological case cannot spin.
    */
+  /**
+   * Attaches this account to the Discord activity already recorded for it.
+   *
+   * Raw SQL because `member_activity_months` is keyed on (discord_id, month)
+   * and this updates every month at once — Prisma's `updateMany` would do the
+   * same thing less clearly, and the guard on `IS DISTINCT FROM` means a
+   * repeat sign-in writes no rows rather than touching every one of them.
+   */
+  async linkActivityHistory(discordId: string, userId: string): Promise<number> {
+    return this.prisma.$executeRaw`
+      UPDATE member_activity_months
+      SET user_id = ${userId}::uuid, updated_at = now()
+      WHERE discord_id = ${discordId} AND user_id IS DISTINCT FROM ${userId}::uuid
+    `;
+  }
+
   async #uniqueHandle(tx: Prisma.TransactionClient, username: string): Promise<string> {
     const base =
       username

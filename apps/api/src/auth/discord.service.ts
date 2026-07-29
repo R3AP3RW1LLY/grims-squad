@@ -197,6 +197,21 @@ export class DiscordAuthService {
       tokenExpiresAt: new Date(Date.now() + tokens.expiresInSec * 1000),
     });
 
+    /*
+     * ★ CLAIM THE HISTORY THIS ACCOUNT ALREADY HAS ★
+     *
+     * The bot counts Discord activity against a SNOWFLAKE, long before anybody
+     * signs in. Without this the admin console shows a member who has been
+     * talking for months — and has just verified their commander — as having
+     * done none of it, because the row it reads has no account attached.
+     *
+     * Not awaited into the redirect in a way that can delay it, and never
+     * allowed to fail the login: somebody signing in for the first time must
+     * get in even if their history cannot be claimed this instant. The nightly
+     * reconciliation repairs anything missed.
+     */
+    void this.store.linkActivityHistory(user.id, result.userId).catch(() => undefined);
+
     // Note what is not here: no token, encrypted or otherwise (INV-012).
     return {
       userId: result.userId,
