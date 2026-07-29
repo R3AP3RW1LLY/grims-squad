@@ -35,7 +35,13 @@ export function accumulate(
    * equal, but returning one that differs by a stamped timestamp would rewrite
    * the config file every twenty seconds for the life of the process.
    */
-  if (outcome.sent === 0 && outcome.duplicates === 0 && outcome.newFilesRead === 0) {
+  if (
+    outcome.sent === 0 &&
+    outcome.duplicates === 0 &&
+    outcome.newFilesRead === 0 &&
+    outcome.txBytes === 0 &&
+    outcome.rxBytes === 0
+  ) {
     return totals;
   }
 
@@ -43,6 +49,8 @@ export function accumulate(
     sent: totals.sent + outcome.sent,
     duplicates: totals.duplicates + outcome.duplicates,
     journalsRead: totals.journalsRead + outcome.newFilesRead,
+    txBytes: totals.txBytes + outcome.txBytes,
+    rxBytes: totals.rxBytes + outcome.rxBytes,
     /*
      * Stamped ONCE, on the first pass that did something.
      *

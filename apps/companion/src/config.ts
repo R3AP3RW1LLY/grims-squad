@@ -80,6 +80,14 @@ export interface CompanionTotals {
   duplicates: number;
   /** DISTINCT journal files this machine has read at least one line from. */
   journalsRead: number;
+  /**
+   * Bytes of journal data this machine has sent and received, for all time.
+   *
+   * The size of the JSON bodies themselves — not headers, TLS or TCP overhead,
+   * none of which is observable from inside `fetch`. See `UploadResult`.
+   */
+  txBytes: number;
+  rxBytes: number;
   /** ISO instant of the first successful upload, or null. */
   since: string | null;
 }
@@ -88,6 +96,8 @@ export const EMPTY_TOTALS: CompanionTotals = {
   sent: 0,
   duplicates: 0,
   journalsRead: 0,
+  txBytes: 0,
+  rxBytes: 0,
   since: null,
 };
 
@@ -165,6 +175,8 @@ function readTotals(value: unknown): CompanionTotals {
     sent: count(t.sent),
     duplicates: count(t.duplicates),
     journalsRead: count(t.journalsRead),
+    txBytes: count(t.txBytes),
+    rxBytes: count(t.rxBytes),
     since: typeof t.since === 'string' && t.since !== '' ? t.since : null,
   };
 }

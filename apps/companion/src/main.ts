@@ -20,6 +20,7 @@ import {
 import { Uploader } from './uploader.js';
 import { runWatchPass, type JournalFs, type WatchOutcome } from './watcher.js';
 import { accumulate } from './totals.js';
+import { isGameRunning } from './game-process.js';
 import { fetchHubSettings, type HubSettings } from './hub-settings.js';
 import { searchForJournalDir, searchRootsFor, type SearchFs } from './journal-search.js';
 
@@ -100,6 +101,28 @@ const nodeFs: JournalFs = {
   async sizeOf(path) {
     return (await stat(path)).size;
   },
+};
+
+/**
+ * Runs a process listing.
+ *
+ * ★ A HARD TIMEOUT, BECAUSE THIS IS ON THE POLL PATH ★
+ *
+ * `tasklist` on a machine under load — which is what a machine running Elite
+ * is — can take a moment, and without a ceiling a hung call would stall the
+ * whole tick behind it. Two seconds is far longer than it ever needs and far
+ * shorter than the twenty-second poll.
+ *
+ * `windowsHide` stops a console window flashing on screen every poll, which on
+ * Windows is otherwise exactly what happens and is maddening while playing.
+ */
+const listProcesses = async (
+  command: string,
+  args: readonly string[],
+): Promise<{ stdout: string }> => {
+  const run = promisify(execFile);
+  const { stdout } = await run(command, [...args], { timeout: 2_000, windowsHide: true });
+  return { stdout };
 };
 
 const searchFs: SearchFs = {
@@ -242,6 +265,8 @@ async function tick(): Promise<void> {
       gameRunning: false,
       filesRead: 0,
       newFilesRead: 0,
+      txBytes: 0,
+      rxBytes: 0,
       sent: 0,
       duplicates: 0,
       refused: {},
@@ -258,15 +283,53 @@ async function tick(): Promise<void> {
   });
 
   try {
-    const { outcome, config: next } = await runWatchPass(nodeFs, dir, config, uploader);
+    const pass = await runWatchPass(nodeFs, dir, config, uploader);
+    const nextConfig = pass.config;
+    let outcome = pass.outcome;
+
+    /*
+     * ★ THE JOURNAL GOING QUIET IS NOT THE MEMBER LEAVING ★
+     *
+     * `outcome.gameRunning` means the newest journal GREW during this pass.
+     * That is a real signal and a poor one: outfitting, the galaxy map, a
+     * station menu and a parked ship all write nothing for half an hour.
+     *
+     * Reported from a live machine — EliteDangerous64.exe resident at 3.2 GB,
+     * journal untouched for twenty-six minutes, member shown as offline while
+     * sitting in the game.
+     *
+     * So when the journal is quiet we ask the operating system instead, and
+     * send the heartbeat ourselves. The process cannot be idle-quiet.
+     *
+     * Only when the journal is quiet: a pass that already sent a heartbeat has
+     * nothing to add, and spawning a process listing every twenty seconds for
+     * an answer we already have is a cost with no benefit.
+     */
+    if (!outcome.gameRunning && config.enabled && config.deviceToken !== '') {
+      if (await isGameRunning(platform(), listProcesses)) {
+        const beat = await uploader.send([], { gameRunning: true });
+        outcome = {
+          ...outcome,
+          gameRunning: true,
+          txBytes: outcome.txBytes + beat.txBytes,
+          rxBytes: outcome.rxBytes + beat.rxBytes,
+          // A heartbeat that comes back unauthorised must stop the loop exactly
+          // as an upload would; otherwise a revoked device polls forever.
+          unauthorised: outcome.unauthorised || beat.unauthorised,
+          error: outcome.error ?? beat.error,
+        };
+      }
+    }
+
     lastOutcome = outcome;
+    noteRate(outcome);
 
     /*
      * Folded in BEFORE the comparison below, so a pass that only moved the
      * totals still gets written to disk. Accumulating after the save would lose
      * the tally on every quit.
      */
-    const withTotals = { ...next, totals: accumulate(config.totals, outcome) };
+    const withTotals = { ...nextConfig, totals: accumulate(config.totals, outcome) };
 
     if (JSON.stringify(withTotals) !== JSON.stringify(config)) {
       config = withTotals;
@@ -286,6 +349,8 @@ async function tick(): Promise<void> {
       gameRunning: false,
       filesRead: 0,
       newFilesRead: 0,
+      txBytes: 0,
+      rxBytes: 0,
       sent: 0,
       duplicates: 0,
       refused: {},
@@ -333,6 +398,15 @@ function state(): Record<string, unknown> {
      */
     totals: config.totals,
     /*
+     * The instantaneous rate, computed over the gap between the last two passes
+     * that actually moved bytes.
+     *
+     * Held in memory rather than persisted: a rate is a statement about NOW, and
+     * one restored from disk after a restart would describe a transfer that
+     * finished days ago.
+     */
+    rate,
+    /*
      * What the hub says it is keeping. Null until the first fetch answers, so
      * the panel can say "asking…" rather than rendering an empty list that
      * looks like "nothing is being collected" — which would be the most
@@ -350,6 +424,49 @@ function state(): Record<string, unknown> {
  * and fetching them on every twenty-second poll would be a request a minute,
  * forever, to redraw a list that almost never differs.
  */
+/**
+ * Bytes per second, over the interval between the last two transfers.
+ *
+ * ★ MEASURED BETWEEN TRANSFERS, NOT OVER THE POLL ★
+ *
+ * Dividing by the twenty-second poll would report a burst that took 200ms as
+ * one-hundredth of its real speed. The elapsed time used is the gap between
+ * this transfer and the previous one, which is what those bytes actually
+ * occupied.
+ *
+ * Reset to zero once a poll passes with nothing moved, so the panel does not
+ * sit claiming a live transfer rate for a connection that has been silent for
+ * an hour.
+ */
+let rate = { tx: 0, rx: 0, at: 0 };
+let lastTransferAt = 0;
+
+function noteRate(outcome: WatchOutcome): void {
+  const moved = outcome.txBytes + outcome.rxBytes;
+  const now = Date.now();
+
+  if (moved === 0) {
+    rate = { tx: 0, rx: 0, at: now };
+    return;
+  }
+
+  /*
+   * The FIRST transfer has no previous one to measure against. Reporting
+   * bytes-since-the-epoch would be an absurd number; reporting zero would hide
+   * a real transfer. The poll interval is the honest bound on how long it could
+   * have taken.
+   */
+  const elapsedMs = lastTransferAt === 0 ? POLL_MS : Math.max(1, now - lastTransferAt);
+  const seconds = elapsedMs / 1000;
+
+  rate = {
+    tx: Math.round(outcome.txBytes / seconds),
+    rx: Math.round(outcome.rxBytes / seconds),
+    at: now,
+  };
+  lastTransferAt = now;
+}
+
 let hubSettings: HubSettings | null = null;
 let hubError: string | null = null;
 let hubFetchedAt = 0;

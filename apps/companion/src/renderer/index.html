@@ -81,6 +81,19 @@
       .ev.on { color: var(--text); }
       .ev.dropped { text-decoration: line-through; opacity: .55; }
       .stat div span.small { font-size: 15px; }
+      .bw { margin-top: 13px; border-top: 1px solid var(--line); padding-top: 11px; }
+      .bw-live {
+        display: flex; align-items: center; gap: 6px;
+        font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px;
+      }
+      /* Fixed width so a changing rate does not shove the labels sideways. */
+      .bw-live span[id$="Rate"] { min-width: 74px; }
+      .arrow { font-size: 10px; }
+      .arrow.up { color: var(--orange); }
+      .arrow.down { color: var(--green); }
+      .bw-idle { color: var(--dim); font-size: 11px; margin-left: 4px; }
+      .bw-total { color: var(--dim); font-size: 12px; margin-top: 5px; }
+      .bw-note { display: block; font-size: 11px; opacity: .8; margin-top: 2px; }
     </style>
   </head>
   <body>
@@ -104,8 +117,40 @@
         <div><span id="sent">0</span><small>Events sent</small></div>
         <div><span id="dupes">0</span><small>Already had</small></div>
         <div><span id="files">0</span><small>Journals read</small></div>
-        <div><span id="stored">—</span><small>Held for you</small></div>
+        <div>
+          <span id="stored">—</span>
+          <!--
+            "Held for you" said nothing. It is the number of events the SQUADRON
+            has stored — across every device, not just this PC — which is a
+            different figure from "events sent" and the one that actually
+            matters to a member wondering what the hub knows.
+          -->
+          <small title="Events the squadron has stored for you, from every device you use">
+            Stored on the hub
+          </small>
+        </div>
       </div>
+
+      <!--
+        ★ JOURNAL TRANSFER ONLY ★
+
+        Not the machine's network usage and not the app's total: the size of the
+        journal payloads themselves. Said plainly under the numbers, because a
+        meter labelled "bandwidth" that reports a fraction of what Task Manager
+        shows would look broken rather than specific.
+      -->
+      <div class="bw" id="bw" hidden>
+        <div class="bw-live">
+          <span class="arrow up">▲</span><span id="txRate">0 B/s</span>
+          <span class="arrow down">▼</span><span id="rxRate">0 B/s</span>
+          <span class="bw-idle" id="bwIdle">idle</span>
+        </div>
+        <div class="bw-total">
+          <span id="txTotal">0 B</span> sent · <span id="rxTotal">0 B</span> received
+          <span class="bw-note">journal transfer only, excluding HTTP and TLS overhead</span>
+        </div>
+      </div>
+
       <p class="muted" id="since" hidden></p>
       <p class="err" id="error" hidden></p>
       <p class="muted" id="refused" hidden></p>
@@ -176,6 +221,41 @@
 
       /** `12345` -> `12,345`. Six figures of raw digits is unreadable. */
       const num = (n) => (typeof n === 'number' && isFinite(n) ? n.toLocaleString() : '0');
+
+      /**
+       * How long a measured rate stays on screen before it reads as zero.
+       *
+       * A little over the poll interval, so a steady transfer never blinks out
+       * between passes, and a finished one does not linger claiming to be live.
+       */
+      const RATE_STALE_MS = 25_000;
+
+      /*
+       * ★ BINARY UNITS, AND ENOUGH PRECISION TO BE USEFUL ★
+       *
+       * KiB not kB: the numbers come from byte counts, and a member comparing
+       * this against a file size in Explorer would find a 2.4% discrepancy with
+       * nothing to explain it. Shown as KB/MB because that is what people say,
+       * with the binary divisor that everything on Windows actually uses.
+       *
+       * One decimal below 10 units, none above — "1.4 KB" is informative,
+       * "847.3 KB" is noise on a figure that changes every second.
+       */
+      function bytes(n) {
+        if (typeof n !== 'number' || !isFinite(n) || n < 0) return '0 B';
+        if (n < 1024) return `${Math.round(n)} B`;
+
+        const units = ['KB', 'MB', 'GB', 'TB'];
+        let value = n / 1024;
+        let i = 0;
+        while (value >= 1024 && i < units.length - 1) {
+          value /= 1024;
+          i += 1;
+        }
+        return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[i]}`;
+      }
+
+      const rateText = (n) => `${bytes(n)}/s`;
 
       const date = (iso) => {
         const d = new Date(iso);
@@ -258,7 +338,7 @@
         }
       }
 
-      function render(s) {
+      function draw(s) {
         const running = s.running && s.enabled && s.paired;
         const failing = s.last?.error != null || s.last?.unauthorised === true;
 
@@ -296,6 +376,24 @@
         // An em dash until the hub answers. A zero would be a claim, and the
         // wrong one — "we hold nothing for you" is alarming and untrue.
         $('stored').textContent = s.hub ? num(s.hub.storedEvents) : '—';
+
+        $('bw').hidden = !s.paired;
+        $('txTotal').textContent = bytes(t.txBytes);
+        $('rxTotal').textContent = bytes(t.rxBytes);
+
+        /*
+          The rate goes STALE on its own.
+
+          `rate.at` is stamped by the main process when it was measured. If the
+          renderer simply displayed whatever arrived it would sit showing
+          "4.2 KB/s" for an hour after the last transfer, which is the single
+          most misleading thing a live meter can do.
+        */
+        const r = s.rate ?? { tx: 0, rx: 0, at: 0 };
+        const fresh = r.at > 0 && Date.now() - r.at < RATE_STALE_MS;
+        $('txRate').textContent = rateText(fresh ? r.tx : 0);
+        $('rxRate').textContent = rateText(fresh ? r.rx : 0);
+        $('bwIdle').hidden = fresh && (r.tx > 0 || r.rx > 0);
 
         $('since').hidden = t.since == null;
         $('since').textContent = t.since ? `Sending from this PC since ${date(t.since)}.` : '';
@@ -380,6 +478,30 @@
               : 'Nothing in this journal that we would send.')
           : r.advice;
       };
+
+      /*
+       * ★ THE PANEL REDRAWS ITSELF, NOT ONLY WHEN PUSHED ★
+       *
+       * State arrives from the main process every twenty seconds. Rendering
+       * only on those pushes would leave the rate reading "4.2 KB/s" for the
+       * full twenty seconds after a transfer finished — and after the app went
+       * idle it would stay there indefinitely, which is the single most
+       * misleading thing a live meter can do.
+       *
+       * The last state is kept and re-rendered every second, so the rate ages
+       * out on time. Nothing is re-fetched: this is the same data being drawn
+       * against a current clock.
+       */
+      let lastState = null;
+
+      function render(s) {
+        lastState = s;
+        draw(s);
+      }
+
+      setInterval(() => {
+        if (lastState !== null) draw(lastState);
+      }, 1000);
 
       api.onState(render);
       api.getState().then(render);

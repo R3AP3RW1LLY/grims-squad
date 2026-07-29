@@ -58,6 +58,14 @@ export interface WatchOutcome {
    * not count.
    */
   readonly newFilesRead: number;
+  /**
+   * Bytes moved by the journal uploads in this pass. See `UploadResult`.
+   *
+   * Summed across every request the pass made, including the ones that failed —
+   * those bytes went out too.
+   */
+  readonly txBytes: number;
+  readonly rxBytes: number;
   readonly sent: number;
   readonly duplicates: number;
   readonly refused: Record<string, number>;
@@ -112,6 +120,8 @@ export async function runWatchPass(
   let next = { ...config, offsets: { ...config.offsets }, sessionLive: { ...config.sessionLive } };
   let filesRead = 0;
   let newFilesRead = 0;
+  let txBytes = 0;
+  let rxBytes = 0;
   let gameRunning = false;
   let sent = 0;
   let duplicates = 0;
@@ -167,11 +177,20 @@ export async function runWatchPass(
        * exactly the member a roster should show as playing.
        */
       next.offsets[name] = result.offset;
-      if (gameRunning) await uploader.send([], { gameRunning: true });
+      if (gameRunning) {
+        const beat = await uploader.send([], { gameRunning: true });
+        txBytes += beat.txBytes;
+        rxBytes += beat.rxBytes;
+      }
       continue;
     }
 
     const upload = await uploader.send(result.events, { gameRunning });
+    // Added BEFORE the early returns below, so a pass that failed partway still
+    // reports what it moved.
+    txBytes += upload.txBytes;
+    rxBytes += upload.rxBytes;
+
     if (upload.unauthorised) {
       // Stop immediately, and do NOT advance. When the member re-pairs, this
       // picks up exactly where it left off.
@@ -181,6 +200,8 @@ export async function runWatchPass(
           gameRunning,
           filesRead,
           newFilesRead,
+          txBytes,
+          rxBytes,
           unauthorised: true,
           error: upload.error,
         },
@@ -201,6 +222,8 @@ export async function runWatchPass(
           gameRunning,
           filesRead,
           newFilesRead,
+          txBytes,
+          rxBytes,
           sent,
           duplicates,
           refused,
@@ -240,6 +263,8 @@ export async function runWatchPass(
       gameRunning,
       filesRead,
       newFilesRead,
+      txBytes,
+      rxBytes,
       sent,
       duplicates,
       refused,
@@ -275,6 +300,8 @@ function empty(): WatchOutcome {
     gameRunning: false,
     filesRead: 0,
     newFilesRead: 0,
+    txBytes: 0,
+    rxBytes: 0,
     sent: 0,
     duplicates: 0,
     refused: {},

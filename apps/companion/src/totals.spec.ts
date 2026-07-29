@@ -20,6 +20,8 @@ function pass(over: Partial<WatchOutcome> = {}): WatchOutcome {
     gameRunning: false,
     filesRead: 0,
     newFilesRead: 0,
+    txBytes: 0,
+    rxBytes: 0,
     sent: 0,
     duplicates: 0,
     refused: {},
@@ -49,15 +51,45 @@ describe('accumulating totals', () => {
      * the stronger property: nothing about an idle pass may change, or the app
      * would rewrite the config file every twenty seconds forever.
      */
-    const t = { sent: 4, duplicates: 1, journalsRead: 2, since: NOW.toISOString() };
+    const t = {
+      sent: 4,
+      duplicates: 1,
+      journalsRead: 2,
+      txBytes: 900,
+      rxBytes: 60,
+      since: NOW.toISOString(),
+    };
     expect(accumulate(t, pass(), NOW)).toBe(t);
   });
 
-  it('MANDATORY: a heartbeat-only pass does not count as activity', () => {
-    // gameRunning with no events is the presence heartbeat. It stores nothing,
-    // so it must not stamp `since` or dirty the config.
+  it('MANDATORY: a pass that moved NOTHING is not activity', () => {
+    // Read a file, found no events, sent no request. Nothing happened, so
+    // nothing may change — or the config is rewritten every twenty seconds.
     const t = EMPTY_TOTALS;
     expect(accumulate(t, pass({ gameRunning: true, filesRead: 1 }), NOW)).toBe(t);
+  });
+
+  it('MANDATORY: a heartbeat counts its BYTES but not as events', () => {
+    /*
+     * ★ THE DISTINCTION THAT MATTERS ★
+     *
+     * The presence heartbeat is a real HTTP request — it puts bytes on the wire
+     * and the bandwidth meter must show them, or the meter is lying by
+     * omission. But it stores no events, so `sent` stays where it is.
+     *
+     * An earlier version of this test asserted a heartbeat changed nothing at
+     * all. That was true only because the fixture had no bytes in it; a live
+     * heartbeat moves about 128 out and 220 back, and the assertion described
+     * something the app does not do.
+     */
+    const beat = accumulate(EMPTY_TOTALS, pass({ gameRunning: true, txBytes: 128, rxBytes: 220 }), NOW);
+
+    expect(beat.txBytes).toBe(128);
+    expect(beat.rxBytes).toBe(220);
+    expect(beat.sent).toBe(0);
+    expect(beat.journalsRead).toBe(0);
+    // It IS the start of the record: something really was transmitted.
+    expect(beat.since).toBe(NOW.toISOString());
   });
 
   it('MANDATORY: `since` is stamped once and never moved', () => {

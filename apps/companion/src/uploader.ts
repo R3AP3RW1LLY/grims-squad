@@ -31,6 +31,32 @@ export interface UploadResult {
    */
   readonly refused: Record<string, number>;
   readonly error: string | null;
+  /**
+   * Bytes actually moved by this request.
+   *
+   * ★ WHAT THESE ARE, EXACTLY ★
+   *
+   * `txBytes` is the UTF-8 length of the JSON body we hand to fetch.
+   * `rxBytes` is the length of the response body we read back.
+   *
+   * Both are measured, never estimated: the body is serialised once and its
+   * byte length taken from the same string that is sent, so the number cannot
+   * drift from the payload the way a re-serialised estimate would.
+   *
+   * ★ AND WHAT THEY ARE NOT ★
+   *
+   * They exclude HTTP headers, TLS record framing and TCP overhead, none of
+   * which is observable from inside `fetch`. So this is the size of the journal
+   * data itself — which is the honest thing to show under a label about journal
+   * transfer, and it is stated plainly in the UI rather than passed off as a
+   * total for the network interface.
+   *
+   * Counted on failures too: a request that times out still put its bytes on
+   * the wire, and a meter that only counted successes would quietly under-report
+   * exactly when a member is watching it to find out why nothing is working.
+   */
+  readonly txBytes: number;
+  readonly rxBytes: number;
 }
 
 /** Batches are capped so one long session cannot post a ten-megabyte body. */
@@ -58,12 +84,31 @@ export class Uploader {
      * the hub learns somebody is mid-flight rather than gone.
      */
     if (events.length === 0 && !gameRunning) {
-      return { ok: true, accepted: 0, duplicates: 0, unauthorised: false, refused: {}, error: null };
+      return {
+        ok: true,
+        accepted: 0,
+        duplicates: 0,
+        unauthorised: false,
+        refused: {},
+        error: null,
+        txBytes: 0,
+        rxBytes: 0,
+      };
     }
 
     const doFetch = this.opts.fetchImpl ?? fetch;
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), this.opts.timeoutMs ?? 15_000);
+
+    /*
+     * Serialised ONCE, and measured from the very string that is sent.
+     * Re-stringifying to measure would be a second, possibly different, value —
+     * and `Buffer.byteLength` rather than `.length` because a commander name
+     * with an accent in it is more bytes than characters.
+     */
+    const payload = JSON.stringify({ events: events.slice(0, MAX_BATCH), gameRunning });
+    const txBytes = Buffer.byteLength(payload, 'utf8');
+    let rxBytes = 0;
 
     try {
       const res = await doFetch(`${this.opts.apiBaseUrl.replace(/\/+$/, '')}/v1/telemetry/journal`, {
@@ -74,7 +119,7 @@ export class Uploader {
           // carrying a session — the device token is its whole identity.
           authorization: `Bearer ${this.opts.deviceToken}`,
         },
-        body: JSON.stringify({ events: events.slice(0, MAX_BATCH), gameRunning }),
+        body: payload,
         signal: ac.signal,
       });
 
@@ -92,6 +137,8 @@ export class Uploader {
           unauthorised: true,
           refused: {},
           error: 'This device is no longer paired. Pair it again from the website.',
+          txBytes,
+          rxBytes,
         };
       }
 
@@ -103,14 +150,29 @@ export class Uploader {
           unauthorised: false,
           refused: {},
           error: `The hub answered ${res.status}.`,
+          txBytes,
+          rxBytes,
         };
       }
 
-      const body = (await res.json().catch(() => ({}))) as {
+      /*
+       * Read as TEXT first so the bytes can be counted, then parsed. `res.json()`
+       * consumes the body and gives no way to ask how large it was — and a
+       * response is a one-shot stream, so there is no second chance to measure.
+       */
+      const raw = await res.text().catch(() => '');
+      rxBytes = Buffer.byteLength(raw, 'utf8');
+
+      let body: {
         accepted?: number;
         duplicates?: number;
         refused?: Record<string, number>;
-      };
+      } = {};
+      try {
+        body = raw === '' ? {} : (JSON.parse(raw) as typeof body);
+      } catch {
+        // A 200 carrying something that is not JSON. The bytes still counted.
+      }
       return {
         ok: true,
         accepted: body.accepted ?? 0,
@@ -118,6 +180,8 @@ export class Uploader {
         unauthorised: false,
         refused: body.refused ?? {},
         error: null,
+        txBytes,
+        rxBytes,
       };
     } catch {
       // Offline, asleep, or the hub is down. All the same to us: keep the
@@ -129,6 +193,11 @@ export class Uploader {
         unauthorised: false,
         refused: {},
         error: ac.signal.aborted ? 'The hub took too long to answer.' : 'Could not reach the hub.',
+        // Counted even though it failed: those bytes went out regardless, and a
+        // meter that hid them would under-report exactly when somebody is
+        // watching it to work out why nothing is arriving.
+        txBytes,
+        rxBytes,
       };
     } finally {
       clearTimeout(timer);
