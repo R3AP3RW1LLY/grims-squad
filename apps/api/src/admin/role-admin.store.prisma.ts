@@ -136,11 +136,32 @@ export class PrismaMappingAdminStore implements MappingAdminStore {
     const rows = await this.#db.roleMapping.findMany({
       select: { roleId: true, discordRoleId: true, role: { select: { name: true } } },
     });
-    return rows.map((r) => ({
-      roleId: r.roleId,
-      roleName: r.role.name,
-      discordRoleId: r.discordRoleId,
-    }));
+
+    /*
+     * The guild catalogue, fetched ONCE and joined in memory. A per-row lookup
+     * would be one query per mapping to render a page of twenty — the classic
+     * N+1, and there is no relation to join on because the catalogue is keyed on
+     * the snowflake and populated by the bot rather than by us.
+     */
+    const catalogue = new Map(
+      (
+        await this.#db.discordRole.findMany({
+          where: { discordRoleId: { in: rows.map((r) => r.discordRoleId) } },
+          select: { discordRoleId: true, name: true, colour: true },
+        })
+      ).map((d) => [d.discordRoleId, d]),
+    );
+
+    return rows.map((r) => {
+      const discord = catalogue.get(r.discordRoleId);
+      return {
+        roleId: r.roleId,
+        roleName: r.role.name,
+        discordRoleId: r.discordRoleId,
+        discordName: discord?.name ?? null,
+        discordColour: discord?.colour ?? null,
+      };
+    });
   }
 
   async roleName(roleId: string): Promise<string | null> {
@@ -153,9 +174,20 @@ export class PrismaMappingAdminStore implements MappingAdminStore {
       where: { discordRoleId },
       select: { roleId: true, discordRoleId: true, role: { select: { name: true } } },
     });
-    return r === null
-      ? null
-      : { roleId: r.roleId, roleName: r.role.name, discordRoleId: r.discordRoleId };
+    if (r === null) return null;
+
+    const discord = await this.#db.discordRole.findUnique({
+      where: { discordRoleId: r.discordRoleId },
+      select: { name: true, colour: true },
+    });
+
+    return {
+      roleId: r.roleId,
+      roleName: r.role.name,
+      discordRoleId: r.discordRoleId,
+      discordName: discord?.name ?? null,
+      discordColour: discord?.colour ?? null,
+    };
   }
 
   async create(roleId: string, discordRoleId: string): Promise<void> {

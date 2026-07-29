@@ -49,10 +49,36 @@ describe('granting on sign-in', () => {
     expect(store.rolesOf('u1').sort()).toEqual(['galactic_admiral', 'squadron_leader']);
   });
 
-  it('ignores Discord roles that map to nothing', async () => {
-    // Tenure and loyalty ranks are cosmetic and grant no permissions (INV-046).
+  it('ignores Discord roles that map to nothing, and lands on the floor', async () => {
+    /*
+     * Tenure and loyalty ranks are cosmetic and grant no permissions (INV-046),
+     * so a Cadet maps to nothing at all.
+     *
+     * They are not left holding NOTHING, though — they hold `unranked`, which is
+     * the editable floor. Before it existed there was no row an admin could edit
+     * to say what an ordinary member may do, so the console could describe
+     * officers and nobody else.
+     */
     await svc.sync('u1', [DISCORD.cadet]);
-    expect(store.rolesOf('u1')).toEqual([]);
+    expect(store.rolesOf('u1')).toEqual(['unranked']);
+  });
+
+  it('MANDATORY: the floor is REVOKED the moment a real role arrives', async () => {
+    /*
+     * It is granted with source `discord` precisely so this sync owns it. A
+     * floor that outlived the member's promotion would keep applying its
+     * permissions to somebody who had moved past it, and nothing would ever
+     * take it away.
+     */
+    await svc.sync('u1', [DISCORD.cadet]);
+    expect(store.rolesOf('u1')).toEqual(['unranked']);
+
+    await svc.sync('u1', [DISCORD.sectorOverseer]);
+    expect(store.rolesOf('u1')).toEqual(['sector_overseer']);
+
+    // And back again when they lose it.
+    await svc.sync('u1', []);
+    expect(store.rolesOf('u1')).toEqual(['unranked']);
   });
 
   it('is idempotent across repeated sign-ins', async () => {
@@ -73,7 +99,9 @@ describe('revoking when Discord changes', () => {
   it('removes a role the member no longer holds in Discord', async () => {
     await svc.sync('u1', [DISCORD.sectorOverseer]);
     await svc.sync('u1', []); // demoted in Discord
-    expect(store.rolesOf('u1')).toEqual([]);
+    // Down to the floor, not to nothing: they are still a member, and the floor
+    // is the row that says what a member with no rank may do.
+    expect(store.rolesOf('u1')).toEqual(['unranked']);
   });
 
   it('MANDATORY: never touches a manual or system grant', async () => {
@@ -90,8 +118,16 @@ describe('revoking when Discord changes', () => {
       'webmaster',
     ]);
 
+    /*
+     * `unranked` joins them once the Discord role is gone — the member now maps
+     * to nothing, which is what the floor is for. The invariant under test is
+     * unchanged and is asserted directly below: the manual and system grants
+     * survive.
+     */
     await svc.sync('u1', []);
-    expect(store.rolesOf('u1').sort()).toEqual(['special_project', 'webmaster']);
+    expect(store.rolesOf('u1').sort()).toEqual(['special_project', 'unranked', 'webmaster']);
+    expect(store.rolesOf('u1')).toContain('webmaster');
+    expect(store.rolesOf('u1')).toContain('special_project');
   });
 
   it('handles a promotion — old role out, new role in, in one sync', async () => {

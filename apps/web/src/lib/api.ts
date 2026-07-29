@@ -305,6 +305,13 @@ export interface AdminActivityRow {
   cmdrName: string | null;
   /** How it was proven: `inara_nonce`, `fdev_capi`, `officer_manual`. */
   verifiedVia: string | null;
+  /**
+   * The last time they did anything in DISCORD, ever. Null if never.
+   *
+   * Not a website sign-in, and not scoped to the month on screen — somebody
+   * who has not spoken since May must still show as gone quiet in July.
+   */
+  lastSeenAt: string | null;
   /** Their TENURE rank — the ladder promotion moves them up. */
   currentRank: string | null;
   /** A leadership APPOINTMENT, a separate axis. Not on the promotion ladder. */
@@ -461,6 +468,9 @@ export interface AdminMappingRow {
   roleId: string;
   roleName: string;
   discordRoleId: string;
+  /** The role's name and colour in Discord. Null when the guild no longer has it. */
+  discordName: string | null;
+  discordColour: string | null;
 }
 
 export const getAdminRoles = (): Promise<{ roles: AdminRoleRow[] } | null> =>

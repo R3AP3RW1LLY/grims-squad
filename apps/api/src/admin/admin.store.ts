@@ -62,7 +62,22 @@ export interface ActivityRow {
   readonly gameActivity: string;
   /** Derived, not stored — see the note on the query. */
   readonly qualifies: boolean;
+  /** Last activity WITHIN THE MONTH being shown. Null when they did nothing in it. */
   readonly lastActivityAt: string | null;
+  /**
+   * The last time they did anything in Discord, EVER.
+   *
+   * ★ WHY THIS IS NOT `lastActivityAt` ★
+   *
+   * That one is scoped to the month on screen, so somebody who has not spoken
+   * since May has no July row for it to come from — it would read as null and
+   * be indistinguishable from a member who joined yesterday. A "last seen"
+   * column has to look across every month or it cannot answer the one question
+   * it exists for: who has gone quiet.
+   *
+   * Discord activity, not website sign-ins. Squadron owner, 2026-07-29.
+   */
+  readonly lastSeenAt: string | null;
 }
 
 export interface MemberRow {
@@ -153,7 +168,7 @@ export class PrismaAdminStore implements AdminStore {
      * calendar-month scope — a message from June cannot appear in July's row
      * because it was never added to it.
      */
-    const [rows, guildMembers, discordRoles, mappings] = await Promise.all([
+    const [rows, guildMembers, discordRoles, lastSeen, mappings] = await Promise.all([
       this.#db.memberActivityMonth.findMany({
         where: { month },
       select: {
@@ -194,6 +209,18 @@ export class PrismaAdminStore implements AdminStore {
       this.#db.discordRole.findMany({ select: { discordRoleId: true, name: true, category: true } }),
 
       /*
+       * The newest activity across EVERY month, per member.
+       *
+       * A `groupBy` rather than a second pass over the rows above: those are
+       * scoped to the month on screen, and the whole point of this figure is to
+       * see past it. One aggregate query for the page, not one per member.
+       */
+      this.#db.memberActivityMonth.groupBy({
+        by: ['discordId'],
+        _max: { lastActivityAt: true },
+      }),
+
+      /*
        * ★ RANK COMES FROM DISCORD, NOT FROM GRANTED ROLES ★
        *
        * Reading granted `UserRole` rows showed nothing for a member who is
@@ -213,6 +240,10 @@ export class PrismaAdminStore implements AdminStore {
     const byDiscordId = new Map(guildMembers.map((m) => [m.discordId, m]));
     const rankByRoleId = new Map(mappings.map((m) => [m.discordRoleId, m.role]));
     const roleById = new Map(discordRoles.map((r) => [r.discordRoleId, r]));
+
+    const lastSeenByDiscordId = new Map(
+      lastSeen.map((g) => [g.discordId, g._max.lastActivityAt]),
+    );
 
     return rows.map((r) => {
       const guild = byDiscordId.get(r.discordId);
@@ -302,8 +333,18 @@ export class PrismaAdminStore implements AdminStore {
       voiceJoinCount: r.voiceJoinCount,
       gameActivity: r.gameActivity,
       /*
-       * Computed here, exactly as the promotion engine computes it: any one of
-       * the three Discord kinds, AND a game session observed or fairly assumed.
+       * Computed here, exactly as the promotion engine computes it: a MESSAGE,
+       * and a game session observed or fairly assumed.
+       *
+       * ★ THIS DRIFTED, AND THE CONSOLE WAS THE ONE THAT WAS WRONG ★
+       *
+       * It read `messageCount > 0 || forumPostCount > 0 || voiceJoinCount > 0`,
+       * which was the rule until the squadron owner narrowed it to messages
+       * alone on 2026-07-29. Left as it was, this table would have told an
+       * officer that a member with nothing but voice joins had qualified, while
+       * the engine that actually promotes people disagreed — and nobody would
+       * have found out until August.
+       *
        * `assumed` counts because the human chose fail-open when the upstream
        * check cannot run (D26) — but the dashboard shows gameActivity beside
        * this so an officer can see WHICH it was. An assumption must never be
@@ -316,9 +357,10 @@ export class PrismaAdminStore implements AdminStore {
        */
       nextRank: currentRank === null ? null : (LADDER_NEXT[currentRank] ?? null),
       qualifies:
-        (r.messageCount > 0 || r.forumPostCount > 0 || r.voiceJoinCount > 0) &&
+        r.messageCount > 0 &&
         (r.gameActivity === 'observed' || r.gameActivity === 'assumed'),
       lastActivityAt: r.lastActivityAt?.toISOString() ?? null,
+      lastSeenAt: lastSeenByDiscordId.get(r.discordId)?.toISOString() ?? null,
       };
     });
   }

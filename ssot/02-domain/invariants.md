@@ -198,6 +198,17 @@ property for but did not make structurally impossible.
 **INV-046** `SEC` `due:P1` · **A tenure or loyalty rank never grants a permission.** `SquadronRank.roleKey` is NULL for every rank of kind `tenure` or `loyalty`, and a member's effective mask is identical whether they are a Sergeant or a Grand Lord General.
 *Test:* compute the effective mask for a member at 1 month and at 14 months holding `GMSD: Legend`; assert the two masks are **equal** and equal to the `member` preset. Assert a `tenure`/`loyalty` rank row with a non-NULL `roleKey` fails a constraint. *(Human decision 2026-07-26 — time served must never confer moderation power.)*
 
+> **CLARIFIED 2026-07-29 — membership roles are NOT tenure ranks.** `Grim's Squad
+> members`, `Allies` and `Unranked` became real, permission-bearing roles on the
+> squadron owner's instruction, and INV-046 does not forbid that: it governs the
+> TENURE ladder (Cadet…Grand Master General) and the LOYALTY awards, where time
+> served must never confer moderation power. Membership is a different statement
+> — it says somebody flies with this squadron, not how long — and it is the only
+> place the platform can express what an ordinary member may do. All three ship
+> with a mask of **zero**, so the clarification grants nobody anything; it makes
+> the setting possible. `Unranked` is granted by role sync when nothing else
+> maps, because a role granted to nobody is a control that silently does nothing.
+
 **INV-047** `DATA` `due:P1` · A member holds **exactly one** ladder rank at a time, and every change to it is written to `audit_log` with the qualifying months that justified it. A reserved rank has at most one active holder.
 *Test:* move a member's `guildJoinedAt` back by 12 months; assert their displayed rank changes with no write to `rank_awards`. Assert a second active award of `galactic_admiral` is rejected.
 

@@ -14,6 +14,15 @@
 
 export type GrantSource = 'discord' | 'manual' | 'system';
 
+/**
+ * The role a member holds when they hold nothing else.
+ *
+ * Matches the `roles.key` created by the membership-roles migration. Named here
+ * rather than written inline so the sync and the console cannot disagree about
+ * which row is the floor.
+ */
+export const UNRANKED_ROLE_KEY = 'unranked';
+
 export interface AuditEntry {
   actorId: string | null;
   action: string;
@@ -53,6 +62,24 @@ export class RoleSyncService {
       const key = mappings.get(id);
       if (key !== undefined) wanted.add(key);
     }
+
+    /*
+     * ★ THE FLOOR IS A ROLE, NOT AN ABSENCE ★
+     *
+     * Somebody who maps to nothing used to hold nothing, so there was no row an
+     * admin could edit to say what a brand-new member may do — the console could
+     * describe officers and nobody else.
+     *
+     * `unranked` is granted here rather than mapped to a Discord role, because
+     * it IS the absence of one: no snowflake exists to map. It is granted with
+     * source `discord` deliberately, so this same sync revokes it the moment the
+     * member gains a real role — a floor that outlived the member's promotion
+     * would keep applying its permissions forever.
+     *
+     * Its mask ships as zero, so this grants nobody anything until an admin
+     * decides otherwise.
+     */
+    if (wanted.size === 0) wanted.add(UNRANKED_ROLE_KEY);
 
     const held = new Set(await this.store.discordGrants(userId));
 

@@ -11,6 +11,7 @@ import { AuditFilters } from './audit-filters';
 import { Dashboard } from './dashboard';
 import { PageHeader, Section, StatGrid, StatTile } from '../../../components/hub-page';
 import { PageTabs, resolveTab, type PageTab } from '../../../components/page-tabs';
+import { sinceSeen, goneQuiet } from './activity-freshness';
 
 /**
  * The admin console (P1.7).
@@ -203,6 +204,7 @@ function ActivityTab({
                 <th scope="col" className="py-3 pr-4">Forum</th>
                 <th scope="col" className="py-3 pr-4">Voice</th>
                 <th scope="col" className="py-3 pr-4">Elite</th>
+                <th scope="col" className="py-3 pr-4">Last seen</th>
                 <th scope="col" className="py-3">Qualifies</th>
               </tr>
             </thead>
@@ -222,10 +224,21 @@ function ActivityTab({
                     none. The YES in the last column stays, because colour alone
                     is not information anybody can rely on.
                   */
+                  /*
+                    ★ TWO TINTS, AND GONE-QUIET WINS ★
+
+                    A member can be BOTH stale and qualifying: three months
+                    silent, then one message and a session this month. Green
+                    alone would hide the thing an officer most needs to see, so
+                    red takes precedence — the row still reads YES in the last
+                    column, so nothing is lost by colouring it red.
+                  */
                   className={`border-b border-[var(--color-border-hairline)] ${
-                    r.qualifies
-                      ? 'bg-[color-mix(in_srgb,var(--color-semantic-success)_10%,transparent)]'
-                      : ''
+                    goneQuiet(r.lastSeenAt)
+                      ? 'bg-[color-mix(in_srgb,var(--color-semantic-hostile)_14%,transparent)]'
+                      : r.qualifies
+                        ? 'bg-[color-mix(in_srgb,var(--color-semantic-success)_10%,transparent)]'
+                        : ''
                   }`}
                 >
                   <td className="py-3 pr-4 text-[var(--color-text-primary)]">
@@ -349,6 +362,35 @@ function ActivityTab({
                   <td className="py-3 pr-4 font-mono text-xs text-[var(--color-text-secondary)]">
                     {GAME_LABEL[r.gameActivity] ?? r.gameActivity}
                   </td>
+                  {/*
+                    ★ LAST SEEN IN DISCORD, NOT ON THE WEBSITE ★
+
+                    Squadron owner, 2026-07-29. Somebody can read the site every
+                    day without saying a word to anyone, and a roster of silent
+                    accounts is exactly what this column exists to surface.
+                  */}
+                  <td className="py-3 pr-4 font-mono text-xs">
+                    {r.lastSeenAt === null ? (
+                      <span
+                        className="text-[var(--color-semantic-hostile-bright)]"
+                        title="Nothing recorded in Discord at all"
+                      >
+                        Never
+                      </span>
+                    ) : (
+                      <span
+                        className={
+                          goneQuiet(r.lastSeenAt)
+                            ? 'text-[var(--color-semantic-hostile-bright)]'
+                            : 'text-[var(--color-text-secondary)]'
+                        }
+                        title={new Date(r.lastSeenAt).toLocaleString('en-GB')}
+                      >
+                        {sinceSeen(r.lastSeenAt)}
+                      </span>
+                    )}
+                  </td>
+
                   <td className="py-3 font-mono text-xs">
                     {r.qualifies ? (
                       <span className="text-[var(--color-brand-cyan-bright)]">YES</span>

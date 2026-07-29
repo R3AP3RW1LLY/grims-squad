@@ -8,6 +8,16 @@ export interface MappingRow {
   roleId: string;
   roleName: string;
   discordRoleId: string;
+  /**
+   * The role's name and colour IN DISCORD.
+   *
+   * Null when the guild catalogue has no such role — it has been deleted in
+   * Discord, or the bot's sync has not run. Either way that mapping now grants
+   * nobody anything, which is worth saying out loud rather than leaving as a
+   * row that looks exactly like a working one.
+   */
+  discordName?: string | null;
+  discordColour?: string | null;
 }
 
 /**
@@ -40,6 +50,12 @@ export function MappingEditor({ roles, mappings }: { roles: RoleRow[]; mappings:
       await apiPost('/v1/admin/mappings', { roleId, discordRoleId: snowflake.trim() });
 
       const role = roles.find((r) => r.id === roleId);
+      /*
+       * `discordName: undefined`, NOT null. Null means "the catalogue was asked
+       * and had nothing", which renders the warning. This row has simply never
+       * been resolved — a refresh fills it in — and flagging it as broken the
+       * instant it is created would be alarming and wrong.
+       */
       setRows((r) => [
         ...r,
         { roleId, roleName: role?.name ?? '', discordRoleId: snowflake.trim() },
@@ -90,28 +106,76 @@ export function MappingEditor({ roles, mappings }: { roles: RoleRow[]; mappings:
         </p>
       )}
 
+      {/*
+        THE DISCORD ROLE, SHOWN AS DISCORD SHOWS IT.
+
+        This listed `Sector Overseer -> 1513749464458723469`. Nobody can read a
+        snowflake, so the one question this page exists to answer — is this
+        pointing at the role I think it is — could only be checked by opening
+        Discord and comparing twenty digits by eye.
+
+        The name and its colour come from the guild catalogue the bot syncs, and
+        the dot carries the colour at full strength exactly as the roster chips
+        do, so the same role is recognisable in both places.
+      */}
       <ul className="space-y-1">
-        {rows.map((m) => (
-          <li
-            key={`${m.roleId}-${m.discordRoleId}`}
-            className="flex flex-wrap items-baseline justify-between gap-4 border-b border-[var(--color-border-hairline)] py-3"
-          >
-            <span className="text-sm text-[var(--color-text-primary)]">
-              {m.roleName}
-              <span className="ml-4 font-mono text-xs text-[var(--color-text-secondary)]">
-                {m.discordRoleId}
-              </span>
-            </span>
-            <button
-              type="button"
-              onClick={() => void remove(m)}
-              disabled={busy}
-              className="rounded border border-[var(--color-border-hairline)] px-3 py-1 font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-secondary)] hover:border-[var(--color-brand-orange)] hover:text-[var(--color-brand-orange)] disabled:opacity-50"
+        {rows.map((m) => {
+          const missing = m.discordName === null || m.discordName === undefined;
+          return (
+            <li
+              key={`${m.roleId}-${m.discordRoleId}`}
+              className={`flex flex-wrap items-center justify-between gap-4 rounded border px-4 py-3 ${
+                missing
+                  ? 'border-[var(--color-semantic-warning)]'
+                  : 'border-[var(--color-border-hairline)]'
+              }`}
             >
-              Remove
-            </button>
-          </li>
-        ))}
+              <div className="flex min-w-0 flex-wrap items-center gap-3">
+                <span className="text-sm text-[var(--color-text-primary)]">{m.roleName}</span>
+                <span aria-hidden="true" className="text-[var(--color-text-dim)]">
+                  &larr;
+                </span>
+
+                {missing ? (
+                  <span className="text-sm text-[var(--color-semantic-warning)]">
+                    No such role in Discord
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-2 rounded-full border px-2.5 py-0.5 text-[12px]"
+                    style={{
+                      borderColor:
+                        m.discordColour == null
+                          ? 'var(--color-border-hairline)'
+                          : `${m.discordColour}66`,
+                    }}
+                  >
+                    {m.discordColour != null && (
+                      <span
+                        aria-hidden="true"
+                        className="size-1.5 shrink-0 rounded-full"
+                        style={{ backgroundColor: m.discordColour }}
+                      />
+                    )}
+                    <span className="text-[var(--color-text-primary)]">{m.discordName}</span>
+                  </span>
+                )}
+
+                <span className="font-mono text-[10px] text-[var(--color-text-dim)]">
+                  {m.discordRoleId}
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => void remove(m)}
+                disabled={busy}
+                className="shrink-0 rounded border border-[var(--color-border-hairline)] px-3 py-1 font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-secondary)] hover:border-[var(--color-brand-orange)] hover:text-[var(--color-brand-orange)] disabled:opacity-50"
+              >
+                Remove
+              </button>
+            </li>
+          );
+        })}
       </ul>
 
       {rows.length === 0 && <p className="text-sm text-[var(--color-text-secondary)]">No mappings yet.</p>}
