@@ -84,7 +84,30 @@ export class CmdrController {
    */
   private publishVerification(userId: string): void {
     try {
+      // Their own tabs: the settings page, which shows the full state.
       this.live?.publish({ type: 'verification', userId });
+
+      /*
+       * ★ AND EVERYBODY ELSE'S ROSTER ★
+       *
+       * A verification is not only news to the person it happened to. The
+       * roster shows an "Inara verified" badge for every member, the admin
+       * console has a CMDR verified column, and a member profile shows the
+       * commander name — none of which is that member's own tab.
+       *
+       * The member-scoped event above reaches only them, so without this the
+       * squadron owner would verify somebody and watch the roster go on showing
+       * them unverified until it was reloaded by hand. Squadron owner,
+       * 2026-07-29: verifications must show instantly ACROSS the app.
+       *
+       * `roster` rather than a squadron-wide `verification`, and that
+       * distinction is deliberate: this event carries NO userId, so it says
+       * "the roster changed" and not "this particular person just proved their
+       * commander name". Every page re-reads through the normal endpoints with
+       * the normal permission checks, so nothing is disclosed that the viewer
+       * could not already have fetched.
+       */
+      this.live?.publish({ type: 'roster', userId: null });
     } catch {
       /* Never fails the request that caused it. */
     }

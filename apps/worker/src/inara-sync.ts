@@ -84,9 +84,28 @@ async function main(): Promise<number> {
      *
      * Awaited, but it cannot throw and cannot fail the job. See live-notify.ts.
      */
-    const notified = await notifyLive(
-      confirmedUserIds.map((userId) => ({ type: 'verification' as const, userId })),
-    );
+    const notified = await notifyLive([
+      ...confirmedUserIds.map((userId) => ({ type: 'verification' as const, userId })),
+      /*
+       * ★ AND EVERYBODY ELSE'S ROSTER, ONCE ★
+       *
+       * The events above reach only the members they name. The roster shows an
+       * "Inara verified" badge for EVERY member and the admin console has a
+       * CMDR verified column — neither of which is the verified member's own
+       * tab, so without this the squadron would go on seeing them unverified
+       * until somebody reloaded.
+       *
+       * One event for the whole pass, not one per member: a sweep confirming
+       * eleven people would otherwise tell every connected browser to re-read
+       * eleven times, and they would all read the same thing.
+       *
+       * Carries NO userId — it says "the roster changed", not "this person just
+       * proved their commander name".
+       */
+      ...(confirmedUserIds.length > 0
+        ? [{ type: 'roster' as const, userId: null }]
+        : []),
+    ]);
 
     // `notified` is what was actually published, not what we hoped to publish.
     // A log that says 11 when Redis was down is worse than no log.
