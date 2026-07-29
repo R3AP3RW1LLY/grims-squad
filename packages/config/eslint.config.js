@@ -98,8 +98,14 @@ export default tseslint.config(
       '**/*.config.mts',
       // Build and launch scripts. They are Node programs that happen not to be
       // called *.config.* — same environment, same globals.
+      //
+      // Each launcher has to be named here. `prod.mjs` was added and promptly
+      // failed lint on `process` and `console`, because the list is explicit by
+      // design — see the brace-expansion note above. Anything new that spawns
+      // Electron or drives a build belongs in this list.
       '**/build.mjs',
       '**/dev.mjs',
+      '**/prod.mjs',
     ],
     languageOptions: {
       globals: {
@@ -107,6 +113,10 @@ export default tseslint.config(
         __dirname: 'readonly',
         module: 'writable',
         Buffer: 'readonly',
+        // A launch script that cannot say what it is doing is a launch script
+        // nobody can debug. `dev.mjs` never printed anything, so this was
+        // missing until a launcher needed to announce which hub it had chosen.
+        console: 'readonly',
       },
     },
   },
