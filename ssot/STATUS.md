@@ -2,10 +2,26 @@
 _Last updated: 2026-07-29 by agent (deployed to production)_
 
 ## Current position
-Phase: **P1 — Identity & shell, REVIEW** (every task built, deployed and live-verified; the exit review itself is not done)
+Phase: **P1 — Identity & shell, EXIT CONDITIONAL** — every task built, deployed and
+        live-verified, and the adversarial panel has run (`10-quality/review-log.md`,
+        2026-07-29). **One `due:P1` invariant is not met: INV-002, the data-layer ACL,
+        is not applied anywhere.** Latent rather than live — every ACL-bearing table is
+        empty and belongs to a later phase — but the phase is not claimed complete on it.
 P0:     **8 of 8 DONE.** P0.7 (deploy) closed 2026-07-29 — production is live.
-Next:   **The P1 exit review**, and before 1 August, **a reviewed promotion dry run
-        against production data**. In that order — see "What to pick up next".
+Next:   **P2 — Forums**, whose FIRST task is the INV-002 gate below. The promotion dry run
+        has been run (2026-07-29): it reports nobody eligible, 3 of 107 members considered,
+        and the earliest possible promotion is **1 September** — August is the first month
+        that can qualify.
+
+★ **HARD P2 ENTRY GATE — INV-002.** `withPrincipal` must be applied to every read of an
+ACL-bearing model, and INV-002's test replaced with one that calls the APPLICATION's
+repository rather than the extension directly, BEFORE any P2 work writes a forum category.
+The extension is built and proven; it is simply not bound to anything.
+
+★ **THE REAL BOTTLENECK IS NOT SOFTWARE.** 107 guild members, 53 of whom sent a message
+this month, and **3 website accounts**. The promotion engine considers 3 people and 2 of
+those are already at the top of the ladder. Adoption is the constraint on the squadron's
+headline feature, and no amount of code moves it.
 
 ★ **PRODUCTION IS LIVE.** `https://45-63-35-93.sslip.io`, commit `b8572f6`, all seven
 containers healthy. Deployed with a health-gated rolling swap and automatic rollback
@@ -14,8 +30,15 @@ server across a deploy: **web 900/900 at HTTP 200; the API 899/900**, the single
 being one sample during its container swap, with zero 502/503/504 recorded by Caddy.
 True zero downtime for the API needs a second replica — recorded as debt below.
 
-⚠ **`grims-squad.com` DOES NOT RESOLVE.** The site is reachable only at the sslip.io
-address, which is what `PUBLIC_SITE_URL` is set to. DNS has never been pointed.
+★ **THE PRODUCTION ADDRESS IS `https://45-63-35-93.sslip.io`, AND THAT IS DELIBERATE.**
+Squadron owner, 2026-07-29: **the domain is not owned yet.** Adoption is being driven to
+the sslip.io address until it is acquired, and the owner will say when that happens.
+
+Correcting my own error from earlier the same day: I recorded `grims-squad.com` as
+"registered". It is not — `nslookup` returns NXDOMAIN for A, NS and SOA, so the name is
+not in the DNS at all. D1 chose a NAME; it never recorded an acquisition, and I read the
+one as the other. Nothing is blocked by this: Caddy holds a valid Let's Encrypt
+certificate for the sslip.io name.
 
 ★ **FRONTIER cAPI IS OFF THE CRITICAL PATH, PERMANENTLY** (ADR-022, 2026-07-27).
 Journals give us everything it would, in real time, with no discretionary approval.
@@ -121,7 +144,7 @@ Local dev: `docker compose -f infra/docker/compose.dev.yml up -d`, then `pnpm de
 | Phase | Name | Status | Completed |
 |-------|------|--------|-----------|
 | P0 | Foundations | **DONE** | 8 of 8 · 2026-07-29 |
-| P1 | Identity & shell | **REVIEW** | All 11 tasks built, deployed and live-verified. Exit review outstanding. |
+| P1 | Identity & shell | **EXIT CONDITIONAL** | All 11 tasks built, deployed, live-verified; panel run. Blocked from DONE by INV-002 (unenforced ACL), which is a P2 entry gate. |
 | P2 | Forums | NOT_STARTED | — |
 | P3 | Telemetry spine | NOT_STARTED | — |
 | P4 | BGS console | NOT_STARTED | — |
@@ -138,7 +161,7 @@ Status values: `NOT_STARTED | IN_PROGRESS | BLOCKED | REVIEW | DONE`.
 |------|--------|-----------|-------|
 | Frontier cAPI developer access | NOT_REQUESTED | — | BLOCKS P1.8 verification (`trust_tier` 3). Apply day 1 at `user.frontierstore.net`. Discretionary approval, days-to-weeks. Fallback path (P1.8b, Inara nonce + officer manual) ships regardless. |
 | Inara API app whitelisting | NOT_REQUESTED | — | Blocks enrichment only (nightly cross-check). Apply day 1 — PM CMDR Artie with app name, purpose, expected volume, non-commercial status. Unapproved key returns `400 This application has no access allowed.` |
-| Domain registered | **CONFIRMED, NOT POINTED** | 2026-07-26 | **`grims-squad.com`** is registered and does **not resolve** — `nslookup` returns NXDOMAIN. Production serves from `https://45-63-35-93.sslip.io`. **This is the one thing standing between the site and a real address.** |
+| Domain acquired | **NOT OWNED** | — | `grims-squad.com` is the CHOSEN name (D1) and has **not been bought** — NXDOMAIN on A, NS and SOA. Squadron owner, 2026-07-29: adoption runs on `https://45-63-35-93.sslip.io` until acquisition, and the owner will advise. Not blocking: Caddy has a valid certificate for the sslip.io name. |
 | VPS provisioned | **DONE** | 2026-07-29 | Vultr, `45.63.35.93`, hostname `grims-squad-hub`. SSH keys only. ⚠ The workstation's public IP rotates and the Vultr firewall allowlists it — a timeout means the allowlist, a permission-denied means the wrong key. |
 | Cloudflare account + DNS delegated | NOT_STARTED | — | No longer blocks anything: Caddy obtains certificates directly from Let's Encrypt for the sslip.io name. Needed for the real domain, Turnstile and Access. |
 | Discord app + bot created | **DONE** | — | Bot `Grim's Squad HQ Bot#9619` connected, 1 guild, 44 roles, 109 members cached. SERVER MEMBERS intent enabled. |
@@ -169,7 +192,7 @@ _Adapters written from documentation, not yet tested against the live API. Every
 ## Open decisions awaiting human
 | # | Question | Blocking | Asked |
 |---|----------|----------|-------|
-| ~~D1~~ | ~~Real domain name~~ — **RESOLVED 2026-07-26: `grims-squad.com`.** | ~~P0.7~~ | closed |
+| D1 | **Domain NAME chosen (`grims-squad.com`), domain NOT ACQUIRED.** Reopened 2026-07-29: the original entry read as though the name had been secured, and it has not been bought. The squadron owner is driving adoption on `https://45-63-35-93.sslip.io` and will advise on acquisition. Nothing is blocked — every URL in the app comes from `PUBLIC_SITE_URL` / `SITE_HOSTNAMES`, so acquiring it later is a config change and a Caddy reload. | nothing | reopened 2026-07-29 |
 | D2 | **PARTIALLY RESOLVED 2026-07-26.** Guild ID confirmed: `801929816596152320`. **Still needed: the Discord ROLE IDs.** A guild ID alone cannot map roles. Once the bot is in the server I can read them myself — or run `Server Settings → Roles → right-click a role → Copy Role ID` (Developer Mode on) for each of: the four leadership ranks, the two reserved ranks, and whatever role marks a plain member. Tenure and loyalty ranks need **no** Discord mapping, since they grant nothing. | P1.3, P1.4 | 2026-07-25 |
 | D3 | **PARTIALLY RESOLVED 2026-07-26.** Home system: **Hyades Sector AV-W b2-4**, `SystemAddress` **9467852891473**, coords `(67.4375, 23.3125, -216.5)`, Federation/Democracy, pop 680,227,079 — resolved from EDSM and seeded. **Still needed: which minor faction is OURS.** Three factions control stations in the home system (Blood Brothers from Alrai, Lords of Kamil, Explorers of the Anarchy) and *two* stations carry the squadron's name under *different* factions, so this cannot be inferred safely — a wrong `is_ours` poisons every BGS number the site produces. Tracked in `TODO.local.md` §1. | P3.4, P4.1 | 2026-07-25 |
 | ~~D4~~ | ~~EDDN prefilter radius~~ — **RESOLVED 2026-07-26: 500 ly** around `Hyades Sector AV-W b2-4`. ⚠ This is the wide option: ~60–110 GB of game data before indexes, which does **not** fit the 4 vCPU / 8 GB / 160 GB box the original budget assumed. Rolled into the Vultr sizing (D22). | ~~P3.4~~ | closed |
@@ -198,6 +221,12 @@ See `10-quality/review-log.md`. Summary:
 | SSOT bootstrap — self-review | — | 2 findings | 3 findings | 2 findings | — | — |
 | **SSOT bootstrap — independent panel** | — | **9 (3 BLOCKER)** | **8 (4 BLOCKER)** | **8 (3 BLOCKER)** | — | — |
 | P0 | pending | pending | n/a | n/a | pending | pending |
+| **P1 exit (2026-07-29, against the DEPLOYED system)** | 1 MINOR | **1 BLOCKER (latent), 1 MAJOR** | **0 findings** (24 live probes) | 0 new | 0 | 0, one gap named |
+
+**P1 exit panel: 3 confirmed (1 latent BLOCKER, 1 MAJOR, 1 MINOR), 3 claims refuted.** Two of the
+three findings are invisible in source review — one needed 24 live probes to rule out, the other
+only appears when a background process dies. The refutations are recorded too, including one where
+my own probe was wrong rather than the code.
 
 **Independent panel, 2026-07-25: 25 findings — 10 BLOCKER, 12 MAJOR, 3 MINOR. All confirmed, all
 resolved in the SSOT, 0 unresolved.** Three independent agents, run in parallel, none of them the
@@ -238,8 +267,9 @@ _Newest first. One line per session that changed state._
   announcing updates from the tenth release; a middleware rule of mine that broke every logo
   on the site while the markup still held the right URL; a `qualifies` flag that told
   officers a Grand Master General was due a promotion the engine refuses outright.
-  **Still open:** `grims-squad.com` does not resolve; five empty backup objects await the
-  owner's decision; the API needs a second replica for literal zero downtime.
+  **Still open:** five empty backup objects await the owner's decision; the API needs a
+  second replica for literal zero downtime. The domain is NOT owned — production stays on
+  the sslip.io address by the owner's instruction until it is acquired.
 
 - **2026-07-27 · agent** — cAPI dropped from the critical path (ADR-022, D27): an **Electron** companion app collects journals instead, which is what will finally move `game_activity` off `unknown` and let anyone qualify for promotion. Electron is a non-negotiable human instruction; the size/memory trade against Tauri is recorded in the ADR rather than left implicit. **The existing schema already supports the whole ingest design** — `DeviceToken` for pairing and `TelemetryEvent` with an idempotency key that already reasons about Elite's whole-second journal timestamps (INV-017, DATA-INTEGRITY B1) — so P1.11 needs no schema change. Also this session: the ten ladder ranks seeded and mapped (promotions had nothing to read before, which is why every dry run reported zero); promotion now writes to Discord as well or reconciliation would hand back the old rank; Inara API key verification with the name coming FROM Inara; nickname sync driven by Inara calls. **Three local-dev faults fixed, all of which failed silently:** the API never loaded `.env` (no `--env-file`), a production `.next` broke dev CSS, and `/v1/*` had no local proxy so sign-in and every client-side call 404'd. 597+ tests green.
 - **2026-07-27 · agent** — Finished P1.7 and P1.8b, the two tasks left partial overnight. Role editor with a MANDATORY who-does-this-affect preview (save is disabled until it runs), Discord mapping editor with snowflake validation and duplicate refusal, server-side audit filters. Inara nonce path complete: global 2/min singleton limiter (INV-033), `events[0].eventStatus` checked rather than `res.ok` — Inara answers HTTP 200 for its own failures — and not-found-yet treated as a normal in-progress state. **566 tests passing, all five CI jobs green.** NonceService moved to `packages/shared` and its Prisma store to `packages/db` so the worker can use both. **Every P1 task except cAPI is now built; nothing is deployed and nothing is live-verified.**

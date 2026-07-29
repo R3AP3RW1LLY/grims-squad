@@ -21,6 +21,28 @@
 export const QUIET_AFTER_DAYS = 90;
 
 /**
+ * How long a voice session is believed before it is treated as a stale row.
+ *
+ * ★ FOUND BY ARCH-ADV AT P1 EXIT, IN CODE WRITTEN THE SAME DAY ★
+ *
+ * `in_voice_since` is set when the bot sees somebody join and cleared when it
+ * sees them leave. If the bot DIES in between, the leave event fires into a dead
+ * process and is never replayed — so the row sits there and the admin console
+ * shows "in voice channel (37h)" for somebody who went to bed on Tuesday.
+ *
+ * The bot clears every row at startup, so it self-heals on restart. That is not
+ * enough: a bot that is down for a day leaves a day of confidently wrong
+ * presence, and an officer scanning for who has gone quiet would see the
+ * opposite of the truth. A silent wrong answer is worse than a missing one.
+ *
+ * Twelve hours is deliberately generous — a long op with a fleet carrier move
+ * genuinely runs past midnight — while still being shorter than any plausible
+ * bot outage that nobody noticed. Past it, the honest answer is that we do not
+ * know, so the row falls back to the message-derived timestamp.
+ */
+export const VOICE_PRESENCE_TRUSTED_HOURS = 12;
+
+/**
  * How long since they last did anything in Discord.
  *
  * Hours below two days, then days — the same shape the roster uses, so an
@@ -91,11 +113,38 @@ export interface LastSeen {
  * sitting in comms is the single most obviously wrong thing this column could
  * do.
  */
+/**
+ * Is this voice-presence row still worth believing?
+ *
+ * False for a row older than `VOICE_PRESENCE_TRUSTED_HOURS`, which almost
+ * certainly means the bot died holding it rather than that somebody has been in
+ * comms for two days. Also false for an unparseable or future timestamp — we
+ * cannot claim somebody is present on the strength of a broken value.
+ */
+export function voicePresenceIsCredible(
+  inVoiceSince: string,
+  now: number = Date.now(),
+): boolean {
+  const at = new Date(inVoiceSince).getTime();
+  if (!Number.isFinite(at)) return false;
+
+  const ms = now - at;
+  /*
+   * A future timestamp is a clock disagreement between the bot host and this
+   * one. Believed, because a few seconds of skew is ordinary and calling
+   * somebody absent over it would be worse — but only within the same window,
+   * so a wildly wrong clock does not buy indefinite trust.
+   */
+  if (ms < 0) return -ms <= VOICE_PRESENCE_TRUSTED_HOURS * 3_600_000;
+
+  return ms <= VOICE_PRESENCE_TRUSTED_HOURS * 3_600_000;
+}
+
 export function lastSeen(
   row: { lastSeenAt: string | null; inVoiceSince: string | null },
   now: number = Date.now(),
 ): LastSeen {
-  if (row.inVoiceSince !== null) {
+  if (row.inVoiceSince !== null && voicePresenceIsCredible(row.inVoiceSince, now)) {
     const ms = now - new Date(row.inVoiceSince).getTime();
     /*
      * How long they have been in, when it is worth saying. Under an hour is
