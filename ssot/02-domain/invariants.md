@@ -212,6 +212,9 @@ property for but did not make structurally impossible.
 **INV-047** `DATA` `due:P1` · A member holds **exactly one** ladder rank at a time, and every change to it is written to `audit_log` with the qualifying months that justified it. A reserved rank has at most one active holder.
 *Test:* move a member's `guildJoinedAt` back by 12 months; assert their displayed rank changes with no write to `rank_awards`. Assert a second active award of `galactic_admiral` is rejected.
 
+**INV-048** `SECURITY` `due:P1` · A live event delivered to EVERY connected browser never identifies a member. Member-scoped events carry a `userId`; squadron-wide events carry `userId: null` and a type that names no person. An event arriving on the cross-process bridge with a MISSING `userId` is refused rather than treated as squadron-wide.
+*Test:* publish a verification for member A and assert member B's stream receives nothing naming A; assert the accompanying broadcast event contains no user id anywhere in its payload; assert `{"type":"verification"}` with no `userId` field is dropped. *(D29 — "everybody" and "we forgot to say who" must not be the same message.)*
+
 **INV-045** `OPS` `due:P3` · A batch write never loses good rows because of one bad row. Market rows whose parent station has not yet arrived are buffered and drained, not dropped, and the buffer depth is a monitored metric.
 *Test:* submit a 500-row batch containing 1 row for an unknown `marketId`; assert 499 rows written, 1 buffered, and `writeFailureRate` non-zero. *(ARCH-ADV A6 — a mandatory FK plus an all-or-nothing statement lost 499 observations per orphan, while `parseFailureRate` stayed at 0.0%.)*
 
@@ -222,7 +225,7 @@ property for but did not make structurally impossible.
 | Phase | Invariants that must be proven before exit |
 |---|---|
 | P0 | INV-006, INV-036 |
-| P1 | INV-001, INV-002, INV-005, INV-007, INV-008, INV-009, INV-010, INV-012, INV-027, INV-029, INV-031 |
+| P1 | INV-001, INV-002, INV-005, INV-007, INV-008, INV-009, INV-010, INV-012, INV-027, INV-029, INV-031, INV-048 |
 | P2 | INV-022, INV-024, INV-035 |
 | P3 | INV-004, INV-013, INV-017, INV-018, INV-020, INV-021, INV-023, INV-032, INV-033, INV-034 |
 | P4 | INV-019 |
@@ -237,6 +240,16 @@ property for but did not make structurally impossible.
 Review-panel additions: INV-037, INV-041 (P1) · INV-039 (P2) · INV-042, INV-043, INV-044, INV-045 (P3) · INV-038, INV-040 (P8).
 
 Rank-model additions (human decision 2026-07-26): INV-046, INV-047 (P1).
+Live-event addition (2026-07-29): INV-048 (P1). Arose from D29 — a verification has to reach
+every viewer's roster, and the obvious way to do that would have told a hundred browsers who
+had just proved their commander name.
+
+**Deliberately NOT an invariant: the backup-verification rule (D33).** A backup is only
+recorded as successful after its size is read back from the bucket, which is exactly the
+shape of an invariant — but it lives in a shell script with no test harness, and the
+coverage gate can only prove tagged Vitest tests. An invariant that cannot be proven is
+the gate that gets switched off in week one (see the independent panel's findings). It is
+recorded as a decision, and proving it needs a test harness for `infra/scripts/`.
 
 > **INV-047 was REWRITTEN on 2026-07-27.** It previously read: *"A tenure rank is
 > **computed** from `guildJoinedAt`, never stored per user, so it cannot drift
