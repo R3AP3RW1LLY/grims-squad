@@ -12,6 +12,7 @@ import { Dashboard } from './dashboard';
 import { PageHeader, Section, StatGrid, StatTile } from '../../../components/hub-page';
 import { PageTabs, resolveTab, type PageTab } from '../../../components/page-tabs';
 import { lastSeen } from './activity-freshness';
+import { LiveRefresh } from '../../../components/live-refresh';
 
 /**
  * The admin console (P1.7).
@@ -115,6 +116,20 @@ export default async function AdminPage({
 
   return (
     <>
+      {/*
+        ★ THE CONSOLE UPDATES ITSELF ★
+
+        Squadron owner, 2026-07-29: verifications must show instantly across the
+        app. This is the page an officer sits on while somebody else links their
+        Inara key — the CMDR verified column was going stale the moment it
+        rendered, and the only way to see the change was to reload.
+
+        `roster` is the squadron-wide event a verification publishes; `activity`
+        and `presence` cover the rest of what this table shows. `verification`
+        is here for the officer's OWN state, which is member-scoped.
+      */}
+      <LiveRefresh types={['roster', 'verification', 'activity', 'presence']} />
+
       <PageHeader
         eyebrow="Squadron leadership"
         title="ADMIN CONSOLE"
