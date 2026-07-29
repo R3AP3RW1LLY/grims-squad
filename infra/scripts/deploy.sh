@@ -135,7 +135,18 @@ say "Rolling out"
 # replaced (see the Caddyfile). Reloading it AFTER the swap would leave the one
 # window it exists to cover uncovered. `caddy reload` is graceful — it does not
 # drop connections.
-$COMPOSE exec -T caddy caddy reload --config /etc/caddy/Caddyfile 2>/dev/null   && ok "proxy config reloaded"   || ok "proxy reload skipped (no change)"
+# `up -d` first, so a change to the MOUNT itself is applied — a reload alone
+# cannot fix a container holding a stale inode, which is exactly how two
+# earlier proxy fixes shipped without ever being loaded.
+$COMPOSE up -d caddy >/dev/null 2>&1 || true
+$COMPOSE exec -T caddy caddy reload --config /etc/caddy/Caddyfile >/dev/null 2>&1   && ok "proxy config reloaded"   || ok "proxy reload skipped (no change)"
+
+# Prove it took, rather than trusting a reload that reports success either way.
+if $COMPOSE exec -T caddy grep -q lb_try_duration /etc/caddy/Caddyfile 2>/dev/null; then
+  ok "proxy retry window active"
+else
+  die "the proxy is not serving the current Caddyfile — a swap would drop requests"
+fi
 
 wait_healthy() {
   local service=$1 attempts=${2:-30} state
