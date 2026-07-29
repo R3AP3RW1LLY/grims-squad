@@ -27,6 +27,17 @@ export interface MembersStore {
   discordRoleCatalogue(): Promise<Map<string, DiscordRoleInfo>>;
   /** What this member has done in the squadron this calendar month. */
   activityThisMonth(userId: string, now?: Date): Promise<SquadronActivity | null>;
+  /**
+   * When Discord says they joined the guild, or null.
+   *
+   * ★ THE ONLY REAL SQUADRON TENURE SIGNAL ★
+   *
+   * `User.joinedAt` is when somebody created a WEBSITE account — a commander
+   * who has flown here for years and signed in yesterday reads as one day.
+   * Inara cannot answer it either: `getCommanderProfile` returns the squadron
+   * name and the member's rank in it, and no join date anywhere.
+   */
+  guildJoinedAt(userId: string): Promise<Date | null>;
 }
 
 /**
@@ -285,6 +296,24 @@ export class PrismaMembersStore implements MembersStore {
        */
       gameObserved: row.gameActivity === 'observed',
     };
+  }
+
+  async guildJoinedAt(userId: string): Promise<Date | null> {
+    /*
+     * ★ IT WAS ALREADY HERE ★
+     *
+     * Written at every sign-in by the Discord service and documented as the
+     * sole input to tenure rank (INV-047). I very nearly added a second
+     * `joined_at` to `discord_guild_members` before finding it — which would
+     * have been the same fact in two tables, free to disagree, with nothing
+     * saying which one won.
+     */
+    const identity = await this.#db.discordIdentity.findUnique({
+      where: { userId },
+      select: { guildJoinedAt: true },
+    });
+
+    return identity?.guildJoinedAt ?? null;
   }
 
   async roster(): Promise<MemberRow[]> {

@@ -195,6 +195,25 @@ export type RosterMember = PublicProfile & {
   siteRoles: Array<{ name: string; colour: string | null }>;
 };
 
+/**
+ * One commander's full record.
+ *
+ * Everything a roster entry has, plus the squadron join date — which the roster
+ * has no room for and which is the only honest answer to "how long have they
+ * been here".
+ */
+export type MemberProfileExtras = {
+  /**
+   * When DISCORD says they joined the squadron. Null when not known.
+   *
+   * Not `joinedAt`, which is when they created a website account: a commander
+   * who has flown here for years and signed in yesterday read as "1 day".
+   * Inara cannot answer it — its commander profile carries the squadron name
+   * and the member's rank in it, and no join date anywhere.
+   */
+  guildJoinedAt: string | null;
+};
+
 export const getRoster = (): Promise<{ members: RosterMember[]; total: number } | null> =>
   get('/v1/members', { authed: true });
 
@@ -208,7 +227,7 @@ export const getRoster = (): Promise<{ members: RosterMember[]; total: number } 
  * nobody reports and everybody notices. Identical shape, built by identical
  * code on the server.
  */
-export type MemberProfile = RosterMember;
+export type MemberProfile = RosterMember & MemberProfileExtras;
 
 export const getProfile = (handle: string): Promise<MemberProfile | null> =>
   get<MemberProfile>(`/v1/members/${encodeURIComponent(handle)}`, { authed: true });

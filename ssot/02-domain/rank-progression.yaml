@@ -79,15 +79,31 @@ qualifyingMonth:
   requirements:
     - id: discord_activity
       description: >
-        At least one act of taking part in Discord. ANY of the three kinds
-        below satisfies it; they are recorded separately so the dashboard can
-        show HOW a member participates, not merely whether they did.
+        At least one MESSAGE in a channel that counts. Nothing else in Discord
+        earns a qualifying month.
       default: 1
       kinds:
         - id: message
           description: >
             A message in any channel that counts — see meta.activityScope.
             No longer restricted to one nominated channel (2026-07-28).
+      # ------------------------------------------------------------------
+      # ★ NEITHER VOICE NOR FORUM POSTS QUALIFY — squadron owner, 2026-07-29 ★
+      #
+      # Both did until this date, and both are still RECORDED: a profile shows
+      # HOW somebody takes part, and voice and the forums are a real part of
+      # that. They simply no longer earn a qualifying month.
+      #
+      # Recording without counting is deliberate, not an oversight. Deleting the
+      # counters would throw away the only voice history there will ever be (see
+      # notBackfillable) for a rule that could change back — and the dashboards
+      # that show participation would go blind for everyone who takes part that
+      # way.
+      #
+      # Every surface states this explicitly rather than silently omitting the
+      # note: a tile sitting mute beside one that says "counts toward promotion"
+      # reads as though it counted too.
+      notCounted:
         - id: forum
           description: >
             A post or reply in any forum channel. Both are messages inside a
@@ -98,9 +114,9 @@ qualifyingMonth:
             The explicit six-channel list was removed on 2026-07-28: joining
             anything not on it recorded nothing, which was most of the server.
           note: >
-            Only a JOIN counts. Toggling mute, deafen or camera fires the same
-            gateway event and would otherwise inflate the count for sitting
-            still.
+            Only a JOIN is recorded. Toggling mute, deafen or camera fires the
+            same gateway event and would otherwise inflate the count for
+            sitting still.
           notBackfillable: >
             Discord keeps NO history of voice channel occupancy, so voice
             counts can only ever start from the moment the bot is running.

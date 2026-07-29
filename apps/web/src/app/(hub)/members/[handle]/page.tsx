@@ -64,7 +64,16 @@ const isElite = (name: string): boolean => /^elite\b/i.test(name.trim());
  * arithmetic to answer the question they actually have — is this a new
  * commander or one of the old guard.
  */
-function tenure(joinedAt: string, now: number = Date.now()): string {
+function tenure(joinedAt: string | null, now: number = Date.now()): string {
+  /*
+   * ★ NULL IS AN ANSWER, AND IT IS "WE DO NOT KNOW" ★
+   *
+   * Falling back to the website account date is what produced "in the squadron:
+   * 1 day" for a founding member. A wrong number presented confidently is worse
+   * than an absent one, so this says so instead.
+   */
+  if (joinedAt === null) return 'Not known';
+
   const ms = now - new Date(joinedAt).getTime();
   if (!Number.isFinite(ms) || ms < 0) return '';
 
@@ -235,9 +244,23 @@ export default async function MemberPage({ params }: { params: Promise<{ handle:
         rail={
           <>
             <Panel title="At a glance">
-              <RailStat label="In the squadron" value={tenure(p.joinedAt)} />
+              {/*
+                ★ TWO DIFFERENT DATES, AND THEY ARE NOT INTERCHANGEABLE ★
+
+                `guildJoinedAt` is when Discord says they joined the squadron.
+                `joinedAt` is when they created an account on this website. The
+                page used the second for both and told a long-standing member
+                they had been in the squadron for one day.
+              */}
+              <RailStat label="In the squadron" value={tenure(p.guildJoinedAt)} />
+              {p.guildJoinedAt !== null && (
+                <RailStat
+                  label="Joined Discord"
+                  value={formatLocal(p.guildJoinedAt, viewerTz, { withTime: false })}
+                />
+              )}
               <RailStat
-                label="Joined"
+                label="On the hub"
                 value={formatLocal(p.joinedAt, viewerTz, { withTime: false })}
               />
               <RailStat
@@ -381,7 +404,11 @@ export default async function MemberPage({ params }: { params: Promise<{ handle:
             value={rank[0]?.name ?? membership[0]?.name ?? 'Unranked'}
             note={p.isOfficer ? 'Holds a leadership appointment' : undefined}
           />
-          <Stat label="In the squadron" value={tenure(p.joinedAt)} note="since joining" />
+          <Stat
+            label="In the squadron"
+            value={tenure(p.guildJoinedAt)}
+            note={p.guildJoinedAt === null ? 'no Discord join date on file' : 'since joining Discord'}
+          />
           <Stat
             label="Currently flying"
             value={p.commander.currentShip ?? 'Not reported'}
@@ -490,25 +517,77 @@ export default async function MemberPage({ params }: { params: Promise<{ handle:
             {p.activity == null ? (
               <NotYet>Nothing recorded this month yet.</NotYet>
             ) : (
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <Stat label="Messages" value={n(p.activity.messages)} />
+              <>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  {/*
+                    ★ WHICH OF THESE COUNTS, STATED ON EACH ★
+
+                    rank-progression.yaml: only a MESSAGE satisfies the Discord
+                    half. Forum posts and voice joins do NOT — squadron owner,
+                    2026-07-29 — though both are still recorded, because they
+                    are a real part of how somebody takes part.
+
+                    Those two say so explicitly rather than just omitting the
+                    note: sitting silent beside a tile that says "counts toward
+                    promotion", a reader would reasonably assume they counted.
+                  */}
+                  <Stat
+                    label="Messages"
+                    value={n(p.activity.messages)}
+                    tone={p.activity.messages > 0 ? 'good' : 'dim'}
+                    note="counts toward promotion"
+                  />
+                  {/*
+                    JOINS, and labelled as joins. Discord reports somebody
+                    ENTERING a channel and never how long they stayed, so there
+                    is no honest way to say "hours in voice" — an earlier version
+                    of this page divided a field called voiceMinutes by sixty and
+                    would have published invented hours the moment anybody wired
+                    it up.
+                  */}
+                  <Stat
+                    label="Voice joins"
+                    value={n(p.activity.voiceJoins)}
+                    tone="default"
+                    note="recorded, does not count"
+                  />
+                  <Stat
+                    label="Forum posts"
+                    value={n(p.activity.forumPosts)}
+                    tone="default"
+                    note="recorded, does not count"
+                  />
+                  <Stat
+                    label="Flew this month"
+                    value={p.activity.gameObserved ? 'Yes' : 'Not yet'}
+                    tone={p.activity.gameObserved ? 'good' : 'dim'}
+                    note="required for promotion"
+                  />
+                </div>
+
                 {/*
-                  JOINS, and labelled as joins. Discord reports somebody
-                  ENTERING a channel and never how long they stayed, so there is
-                  no honest way to say "hours in voice" — an earlier version of
-                  this page divided a field called voiceMinutes by sixty and
-                  would have published invented hours the moment anybody wired
-                  it up.
+                  ★ THE ACTUAL RULE, ONCE, IN A SENTENCE ★
+
+                  Four tiles each saying "counts toward promotion" tells a reader
+                  that things count and not how. The rule has two halves and they
+                  behave differently: the Discord half is satisfied by ANY of the
+                  three, the game half is its own requirement — so somebody with
+                  four hundred messages and no session has not qualified, which
+                  is exactly the case worth being clear about.
                 */}
-                <Stat label="Voice joins" value={n(p.activity.voiceJoins)} />
-                <Stat label="Forum posts" value={n(p.activity.forumPosts)} />
-                <Stat
-                  label="Flew this month"
-                  value={p.activity.gameObserved ? 'Yes' : 'Not yet'}
-                  tone={p.activity.gameObserved ? 'good' : 'dim'}
-                  note="counts toward promotion"
-                />
-              </div>
+                <p className="mt-4 max-w-[68ch] text-sm leading-relaxed text-[var(--color-text-secondary)]">
+                  A month counts toward promotion when there is{' '}
+                  <strong className="text-[var(--color-text-primary)]">
+                    at least one message
+                  </strong>{' '}
+                  and{' '}
+                  <strong className="text-[var(--color-text-primary)]">
+                    at least one Elite session
+                  </strong>
+                  , with the rank held for the whole month. Forum posts and voice
+                  joins are recorded but do not count toward it.
+                </p>
+              </>
             )}
           </Block>
         )}

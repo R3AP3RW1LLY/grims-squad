@@ -7,6 +7,7 @@ import type {
   SquadronActivity,
 } from './members.store.js';
 import type { SnapshotEvent, InaraRanks } from './commander-snapshot.js';
+import type { ProfileEvent } from './commander-profile.service.js';
 import type { PrivacySettings, ProfileSource } from './profile.serializer.js';
 import { issueCsrfToken, csrfCookieName } from '../common/csrf.js';
 
@@ -108,6 +109,36 @@ class FakeStore implements MembersStore {
 
   async activityThisMonth(): Promise<SquadronActivity | null> {
     return this.activity;
+  }
+
+  /**
+   * The member's own journal events. Empty unless a test sets them.
+   *
+   * The profile reads these for position, hangar and balance — the same three
+   * the dashboard has been showing all along, and the three that were
+   * permanently null on a profile because nothing populated `ProfileSource`.
+   *
+   * Empty is the realistic default: a member who has never run the companion
+   * app has no journal events, and every gated block must render correctly for
+   * them.
+   */
+  events: ProfileEvent[] = [];
+
+  async profileEvents(): Promise<ProfileEvent[]> {
+    return this.events;
+  }
+
+  /**
+   * When Discord says they joined the squadron. Null unless a test sets it.
+   *
+   * Null is a real state — a member who linked Discord before we recorded it —
+   * and it must render as "not known" rather than falling back to the website
+   * account date, which is the bug this field exists to fix.
+   */
+  guildJoined: Date | null = null;
+
+  async guildJoinedAt(): Promise<Date | null> {
+    return this.guildJoined;
   }
 }
 

@@ -263,6 +263,8 @@ export class MembersController {
       }>;
       isOfficer: boolean;
       siteRoles: ReadonlyArray<{ name: string; colour: string | null }>;
+      /** When Discord says they joined the squadron. Null when not known. */
+      guildJoinedAt: string | null;
     }
   > {
     const row = await this.store.byHandle(handle);
@@ -281,12 +283,42 @@ export class MembersController {
      * fallback, THEN expand to all six ladders. Filling before the merge would
      * make Inara's "I have nothing" indistinguishable from six real readings.
      */
-    const [snapshots, inara, catalogue, activity] = await Promise.all([
+    const [snapshots, inara, catalogue, activity, journal] = await Promise.all([
       this.store.snapshotEvents([row.source.id]).then((events) => buildSnapshots(events)),
       this.store.inaraRanks([row.source.id]),
       this.store.discordRoleCatalogue(),
       this.store.activityThisMonth(row.source.id),
+      /*
+       * ★ THE SAME JOURNAL DATA THE DASHBOARD SHOWS ★
+       *
+       * Position, hangar and balance were permanently null here: `ProfileSource`
+       * carried the fields and NOTHING populated them. The store still said they
+       * would "arrive with cAPI (P1.8, blocked on Frontier)" — written before the
+       * companion app existed and true when it was.
+       *
+       * Meanwhile /dashboard has been reading all three out of the member's own
+       * journal for weeks. So a commander looked at their own record and was
+       * told nothing had been reported, while the dashboard one click away
+       * showed their ship, their system and their balance.
+       */
+      this.store.profileEvents(row.source.id),
     ]);
+
+    /*
+     * ★ SQUADRON TENURE IS THE DISCORD JOIN DATE, NOT THE ACCOUNT ONE ★
+     *
+     * `joinedAt` on the profile is when somebody created a WEBSITE account.
+     * The page labelled it "in the squadron", so a commander who has flown here
+     * for years and signed in yesterday read as "1 day".
+     *
+     * Inara cannot answer it — `getCommanderProfile` returns the squadron name
+     * and the member's rank in it, and no join date anywhere in the response.
+     * Discord is the only place this squadron's membership has a timestamp, and
+     * we have written it at every sign-in all along (INV-047).
+     */
+    const guildJoinedAt = await this.store.guildJoinedAt(row.source.id);
+
+    const fromJournal = buildCommanderProfile(journal, row.source.cmdrName, null);
 
     const worn = (row.source.guildRoleIds ?? [])
       .map((id) => catalogue.get(id))
@@ -302,7 +334,34 @@ export class MembersController {
        * the toggle silently doing nothing.
        */
       ...serializeProfile(
-        { ...row.source, activity },
+        {
+          ...row.source,
+          activity,
+          /*
+           * ★ MERGED INTO THE SOURCE, SO THE TOGGLES STILL DECIDE ★
+           *
+           * Each of these is governed by its own switch — showLocation,
+           * showFleet, showCredits — and the serializer is the only thing that
+           * may apply them (INV-027). Attaching them to the response afterwards
+           * would publish a member's position and balance to everybody and
+           * leave three settings silently doing nothing.
+           */
+          location:
+            fromJournal.currentSystem === null
+              ? null
+              : // The journal's Location/FSDJump gives a system; the station is
+                // a separate fact we do not carry here, and inventing one from
+                // the ship's docking state would be a guess presented as a
+                // record.
+                { system: fromJournal.currentSystem, station: null },
+          fleet: fromJournal.fleet.map((s) => ({ shipType: s.shipType, name: s.name })),
+          /*
+           * BigInt, because the profile type is `bigint | null` and serialises
+           * to a STRING — a balance above 2^53 rounds silently through Number,
+           * and the members that hits are exactly the ones who would notice.
+           */
+          credits: fromJournal.credits === null ? null : BigInt(fromJournal.credits),
+        },
         row.privacy,
         { audience: isSelf ? 'self' : 'public' },
       ),
@@ -328,6 +387,12 @@ export class MembersController {
       isOfficer: worn.some(
         (role) => role.rankOrder !== null && role.rankOrder < LEADERSHIP_CEILING,
       ),
+      /*
+       * Null when they have never linked Discord, or linked before we recorded
+       * it. Null renders as "not known" rather than falling back to the account
+       * date — a wrong number presented confidently is worse than an absent one.
+       */
+      guildJoinedAt: guildJoinedAt?.toISOString() ?? null,
       siteRoles: row.source.siteRoles ?? [],
     };
   }
