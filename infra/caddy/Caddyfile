@@ -56,28 +56,37 @@
 			# waits a moment and then succeeds — which is what "zero downtime"
 			# has to mean when there is one instance of the service.
 			#
-			# Ten seconds is comfortably longer than the swap and far shorter
-			# than any sane client timeout. A genuinely dead upstream still
-			# fails, just ten seconds later, which is the right trade for a
-			# window that only opens during a deploy.
-			lb_try_duration 10s
+			# ★ NO `fail_duration`, AND THAT IS THE WHOLE FIX ★
+			#
+			# It was set to 5s and MADE THINGS WORSE — measured: two seconds of
+			# 502 became nine. `fail_duration` takes a failing upstream out of
+			# rotation for that long. With several upstreams that is exactly
+			# right; with ONE it removes the only backend there is, and Caddy
+			# then answers 502 immediately instead of retrying, for the whole
+			# five seconds. The setting that was supposed to help was doing the
+			# opposite.
+			#
+			# With no fail_duration the upstream is never blacklisted, so
+			# `lb_try_duration` keeps retrying the same address until the new
+			# container accepts a connection.
+			#
+			# 45s, not 10s: the window is not the swap, it is the NEW container
+			# booting. Node, Nest and Prisma take a few seconds, and the API's
+			# healthcheck allows a 30s start period. Ten seconds covered the
+			# gap between containers and expired long before the replacement was
+			# listening.
+			lb_try_duration 45s
 			lb_try_interval 250ms
-
-			# Retries are only safe on requests that can be repeated. Caddy will
-			# not replay a request whose body it has already streamed upstream,
-			# so this does not risk double-writes.
-			fail_duration 5s
 		}
 	}
 
 	handle {
 		reverse_proxy web:5000 {
-			# The same reasoning for the web container. It has no healthcheck,
-			# so the deploy waits on "Up" rather than "healthy" — which makes
-			# the retry window here more valuable, not less.
-			lb_try_duration 10s
+			# Same reasoning, and no fail_duration for the same reason: one
+			# upstream, so blacklisting it removes the only one. Next needs a
+			# moment to come up too.
+			lb_try_duration 45s
 			lb_try_interval 250ms
-			fail_duration 5s
 		}
 	}
 }
