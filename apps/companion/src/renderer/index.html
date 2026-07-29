@@ -125,7 +125,22 @@
     </div>
 
     <h1>Grim's Squad Hub</h1>
-    <p class="sub">Keeps your squadron profile current from your Elite Dangerous journals.</p>
+    <p class="sub">
+      Keeps your squadron profile current from your Elite Dangerous journals.
+      <!--
+        ★ THE VERSION, ALWAYS VISIBLE ★
+
+        It appeared in exactly one place: inside the "an update is available"
+        notice, which by definition is hidden whenever the app is current. So a
+        member who wanted to check what they were running — or answer "which
+        version are you on?" — had nowhere to look.
+
+        Filled from `app.getVersion()`, never written here as a string. A
+        hardcoded number would go on claiming to be current after every release,
+        which is the exact failure this is meant to make visible.
+      -->
+      <span class="ver" id="appVersion"></span>
+    </p>
 
     <div class="panel">
       <div class="row">
@@ -434,6 +449,12 @@
           bump.
         */
         $('updateBanner').hidden = s.updateAvailable !== true;
+        /*
+         * Shown whether or not an update is pending. `appVersion` comes from
+         * Electron, so it is whatever was actually installed.
+         */
+        $('appVersion').textContent = s.appVersion ? `v${s.appVersion}` : '';
+
         $('updateVersions').textContent =
           s.updateAvailable === true
             ? `You have ${s.appVersion}. The squadron has ${s.hub?.latestVersion}.`

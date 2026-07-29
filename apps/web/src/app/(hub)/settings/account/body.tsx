@@ -45,7 +45,7 @@ export async function AccountBody() {
 
               <Panel title="Related">
                 <a
-                  href="/settings/privacy"
+                  href="/settings/commander"
                   className="block text-sm text-[var(--color-brand-cyan-bright)]"
                 >
                   Privacy settings

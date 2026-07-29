@@ -1,99 +1,82 @@
 /**
- * The Privacy tab of Commander Management.
+ * The privacy controls, on the Commander Management page.
  *
- * ★ EXTRACTED FROM ITS OWN PAGE, NOT COPIED ★
+ * ★ IT WAS A PAGE, THEN A TAB, AND IS NOW A SECTION ★
  *
- * This was `/settings/privacy`, a separate sidebar entry and a separate route.
- * Four routes for one person's settings meant four page loads to answer "how is
- * my account set up", and the "Related" panels existed purely to hop between
- * them — a rail full of links to the other three quarters of the same page.
+ * `/settings/privacy` was its own route and its own sidebar entry. It became a
+ * tab on Commander Management, and on 2026-07-29 the squadron owner asked for
+ * the tab to go too.
  *
- * The BODY moved here verbatim so nothing was rewritten in the move; the old
- * route now redirects, so links and bookmarks still land in the right place.
+ * That is the right call: it is five switches. A tab is a thing somebody has to
+ * remember exists, and "what does the squadron see about me" belongs beside the
+ * rest of a member's settings, where they are already looking.
+ *
+ * ★ A SECTION, NOT A BODY ★
+ *
+ * It used to render its own `PageBody` with its own rail and its own lead.
+ * Dropped into a page that already has both, that would have produced two of
+ * each. It now renders only its own content and inherits the page around it —
+ * which is why the rail summary moved to the parent, and why `sharedFields` is
+ * exported rather than counted here.
  */
 
-import { getMyPrivacy } from '../../../../lib/api';
+import { getMyPrivacy, type PrivacySettings } from '../../../../lib/api';
 import { PrivacyForm } from './privacy-form';
-import {
-  PageBody,
-  Panel,
-  RailStat,
-  CouldNotLoad,
-} from '../../../../components/hub-page';
+import { Section } from '../../../../components/hub-page';
 
-export async function PrivacyBody() {
+/**
+ * How many of the five sharing toggles are on.
+ *
+ * ★ EXPORTED, BECAUSE THE RAIL LIVES ON THE PARENT NOW ★
+ *
+ * Computing it in two places is how a summary ends up disagreeing with the
+ * switches directly beneath it.
+ *
+ * `showOnPublicRoster` is deliberately NOT counted. Appearing on the roster
+ * stopped being a setting, and including a toggle nobody can change would make
+ * the total describe something a member cannot act on.
+ */
+export function sharedFields(settings: PrivacySettings | null): number {
+  if (settings === null) return 0;
+  return [
+    settings.showLocation,
+    settings.showCredits,
+    settings.showFleet,
+    settings.showActivity,
+    settings.showOnLeaderboard,
+  ].filter(Boolean).length;
+}
+
+export async function PrivacyControls() {
   const settings = await getMyPrivacy();
 
   /*
-   * Counted for the rail, and worth counting: the toggles are individually
-   * clear but collectively hard to hold in your head. "Two of six on" is the
-   * answer to the question a member actually has, which is "how exposed am I".
+   * A failure here does NOT take the page down.
+   *
+   * The timezone form above is unrelated and works perfectly well without
+   * privacy settings. Blanking the whole screen because one read failed would
+   * cost a member the setting they actually came for, so this says what is
+   * missing and leaves the rest alone.
    */
-  const shown =
-    settings === null
-      ? 0
-      : [
-          settings.showLocation,
-          settings.showCredits,
-          settings.showFleet,
-          settings.showActivity,
-          settings.showOnLeaderboard,
-        ].filter(Boolean).length;
+  if (settings === null) {
+    return (
+      <Section
+        title="What others can see"
+        description="These settings could not be loaded just now. Nothing has changed, and the rest of this page still works."
+      >
+        <p className="max-w-[68ch] rounded border border-dashed border-[var(--color-border-hairline)] px-5 py-5 text-sm leading-relaxed text-[var(--color-text-secondary)]">
+          Try again in a moment. If it keeps happening, tell an officer.
+        </p>
+      </Section>
+    );
+  }
 
   return (
-    <>
-      {/* No PageHeader: the Commander Management page renders one for every tab. */}
-
-      {settings === null ? (
-        <CouldNotLoad what="your privacy settings" />
-      ) : (
-        <PageBody
-          lead="Everything here starts switched off. Nothing on this list is shared with anyone until you turn it on, and each item is separate — showing your position does not also show your balance."
-          rail={
-            <>
-              <Panel title="At a glance">
-                <RailStat
-                  label="Fields shared"
-                  value={`${shown} of 5`}
-                  tone={shown === 0 ? 'good' : 'default'}
-                />
-                {/*
-                  Stated as a fact rather than offered as a switch. Being on the
-                  roster is not a setting any more, and a member should learn
-                  that here rather than by looking for a toggle that is gone.
-                */}
-                <RailStat label="On the roster" value="Everyone" />
-                <RailStat
-                  label="On leaderboards"
-                  value={settings.showOnLeaderboard ? 'Yes' : 'No'}
-                />
-              </Panel>
-
-              <Panel title="How this works">
-                <p className="text-sm leading-relaxed text-[var(--color-text-secondary)]">
-                  Changes save as you make them — there is no button to forget. A field you have not
-                  turned on is left out of the answer entirely rather than sent blank, so nothing can
-                  infer it from an empty space.
-                </p>
-              </Panel>
-
-              <Panel title="Related">
-                <a href="/roster" className="block text-sm text-[var(--color-brand-cyan-bright)]">
-                  See the roster
-                </a>
-                <a
-                  href="/settings/devices"
-                  className="mt-2 block text-sm text-[var(--color-brand-cyan-bright)]"
-                >
-                  What the companion app sends
-                </a>
-              </Panel>
-            </>
-          }
-        >
-          <PrivacyForm initial={settings} />
-        </PageBody>
-      )}
-    </>
+    <Section
+      title="What others can see"
+      description="Each item is separate — showing your position does not also show your balance. Changes save as you make them, so there is no button to forget."
+    >
+      <PrivacyForm initial={settings} />
+    </Section>
   );
 }

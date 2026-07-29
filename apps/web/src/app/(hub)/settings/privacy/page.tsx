@@ -8,5 +8,11 @@ import { redirect } from 'next/navigation';
  * somebody pinned. A 404 would be a broken promise for no benefit.
  */
 export default function PrivacySettingsRedirect(): never {
-  redirect('/settings/commander?tab=privacy');
+  /*
+   * Straight to the page, not to `?tab=privacy`. That tab was removed on
+   * 2026-07-29 and its controls now sit on the first one. `resolveTab` would
+   * fall back correctly either way, but pointing at a tab that no longer
+   * exists is a bookmark that works by accident.
+   */
+  redirect('/settings/commander');
 }

@@ -1,4 +1,15 @@
-import { Controller, Get, Post, Delete, Body, Param, Req, Inject, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Delete,
+  Body,
+  Param,
+  Req,
+  Inject,
+  Optional,
+  UseGuards,
+} from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
 import { AppError, ErrorCode, Permission } from '@grims/shared';
 import { User, type CurrentUser } from '../auth/current-user.js';
@@ -6,8 +17,10 @@ import { RequiresPermission, CloakAsNotFound } from '../authz/requires-permissio
 import { AdminGateGuard, RequiresTwoFactor } from '../auth/admin-gate.guard.js';
 import { verifyCsrf, readCsrfCookie } from '../common/csrf.js';
 import { CMDR_SERVICE, NONCE_SERVICE, INARA_LINK } from './cmdr.tokens.js';
+import { LIVE_SERVICE } from '../live/live.tokens.js';
 import type { CmdrService, ClaimRecord, QueueEntry } from './cmdr.service.js';
 import type { NonceService } from '@grims/shared';
+import type { LiveService } from '../live/live.service.js';
 import type { InaraLinkService, LinkStatus } from './inara-link.service.js';
 
 function readString(body: unknown, key: string): string {
@@ -39,7 +52,66 @@ export class CmdrController {
     @Inject(CMDR_SERVICE) private readonly cmdr: CmdrService,
     @Inject(NONCE_SERVICE) private readonly nonce: NonceService,
     @Inject(INARA_LINK) private readonly inara: InaraLinkService,
+    /*
+     * ★ @Optional, AND THAT IS A DELIBERATE RISK ACCEPTED HERE ★
+     *
+     * `LiveModule` is @Global, so in the running application this is always
+     * present. Optional because the controller's own tests construct it
+     * directly with three collaborators, and a required fourth would make every
+     * one of them a wiring test for a notification.
+     *
+     * The failure mode is bounded and honest: with no live service, pages stop
+     * updating by themselves and still show the truth on the next navigation.
+     * Nothing is written, granted or lost.
+     */
+    @Optional() @Inject(LIVE_SERVICE) private readonly live?: LiveService,
   ) {}
+
+  /**
+   * Tells this member's other tabs that their verification moved.
+   *
+   * ★ FIRE AND FORGET, ON PURPOSE ★
+   *
+   * Publishing is an in-memory loop over sockets, but a browser that vanished
+   * mid-write must never turn a successful verification into a 500 — the member
+   * really is verified by the time this runs, and the write is already
+   * committed. `LiveService.publish` swallows dead sockets for the same reason;
+   * this is the belt to that pair of braces.
+   *
+   * Scoped to the ONE member. A verification is not squadron news, and
+   * broadcasting it would tell a hundred browsers that a particular person just
+   * proved their commander name.
+   */
+  private publishVerification(userId: string): void {
+    try {
+      // Their own tabs: the settings page, which shows the full state.
+      this.live?.publish({ type: 'verification', userId });
+
+      /*
+       * ★ AND EVERYBODY ELSE'S ROSTER ★
+       *
+       * A verification is not only news to the person it happened to. The
+       * roster shows an "Inara verified" badge for every member, the admin
+       * console has a CMDR verified column, and a member profile shows the
+       * commander name — none of which is that member's own tab.
+       *
+       * The member-scoped event above reaches only them, so without this the
+       * squadron owner would verify somebody and watch the roster go on showing
+       * them unverified until it was reloaded by hand. Squadron owner,
+       * 2026-07-29: verifications must show instantly ACROSS the app.
+       *
+       * `roster` rather than a squadron-wide `verification`, and that
+       * distinction is deliberate: this event carries NO userId, so it says
+       * "the roster changed" and not "this particular person just proved their
+       * commander name". Every page re-reads through the normal endpoints with
+       * the normal permission checks, so nothing is disclosed that the viewer
+       * could not already have fetched.
+       */
+      this.live?.publish({ type: 'roster', userId: null });
+    } catch {
+      /* Never fails the request that caused it. */
+    }
+  }
 
   // --------------------------------------------------------- Inara API key
   /**
@@ -57,14 +129,32 @@ export class CmdrController {
     @User() caller: CurrentUser | undefined,
     @Body() body: unknown,
     @Req() req: FastifyRequest,
-  ): Promise<{ cmdrName: string | null; verified: boolean }> {
+  ): Promise<LinkStatus & { verified: boolean }> {
     const userId = requireUser(caller);
     csrf(req);
     const b = body as Record<string, unknown> | null;
     const source = b?.['source'] === 'app' ? 'app' : 'web';
     const r = await this.inara.link(userId, readString(b, 'apiKey'), source);
-    // Deliberately NOT spreading the result: no key, ever, in any response.
-    return { cmdrName: r.cmdrName, verified: r.verified };
+
+    /*
+     * ★ THE WHOLE STATUS, NOT JUST THE NAME ★
+     *
+     * This returned `{ cmdrName, verified }`. The website's status panel needs
+     * `squadronStatus` to decide between "Not verified", "Partially verified"
+     * and "Verified" — so after a member pasted their key, the panel had
+     * nothing to move to and went on announcing "Not verified" over a commander
+     * name it had just been given. The only way out was a manual reload.
+     *
+     * A SUPERSET of the old shape: `verified` is still here, because the
+     * companion app reads it and an app in the wild is not redeployed by
+     * merging this. Nothing is removed, so no existing caller notices.
+     *
+     * Deliberately NOT spreading the link result: no key, ever, in any
+     * response. `status()` reads from storage and cannot return one.
+     */
+    const status = await this.inara.status(userId);
+    this.publishVerification(userId);
+    return { ...status, verified: r.verified };
   }
 
   /**
@@ -89,6 +179,7 @@ export class CmdrController {
     const userId = requireUser(caller);
     csrf(req);
     await this.inara.claimSquadron(userId);
+    this.publishVerification(userId);
     // The STATUS, not the raw result: one shape for the page to render, whether
     // the check confirmed them, found a different squadron, or could not run.
     return this.inara.status(userId);
@@ -105,10 +196,16 @@ export class CmdrController {
   async refreshInara(
     @User() caller: CurrentUser | undefined,
     @Req() req: FastifyRequest,
-  ): Promise<{ cmdrName: string | null; verified: boolean; error: string | null }> {
+  ): Promise<LinkStatus & { verified: boolean; error: string | null }> {
     const userId = requireUser(caller);
     csrf(req);
-    return this.inara.refresh(userId);
+    const r = await this.inara.refresh(userId);
+    // Same reasoning as `linkInara`: a re-check can move somebody from partial
+    // to verified, and the panel needs the fields that say so. Superset again,
+    // so the companion app's `verified` and `error` still arrive.
+    const status = await this.inara.status(userId);
+    this.publishVerification(userId);
+    return { ...status, verified: r.verified, error: r.error };
   }
 
   /**
@@ -125,6 +222,7 @@ export class CmdrController {
     const userId = requireUser(caller);
     csrf(req);
     await this.inara.unlink(userId);
+    this.publishVerification(userId);
     return { unlinked: true };
   }
 
@@ -216,7 +314,15 @@ export class CmdrController {
     // The service refuses self-approval. Enforced there rather than here so it
     // holds for any future caller — a bot command, an admin script — and not
     // only for this route.
-    await this.cmdr.approve(id, officerId);
+    const approved = await this.cmdr.approve(id, officerId);
+    /*
+     * ★ THE MEMBER, NOT THE OFFICER ★
+     *
+     * An officer approving from the console changes somebody ELSE'S page. The
+     * event names the member whose verification moved, or the one person who
+     * has been waiting for it is the only one who does not hear.
+     */
+    this.publishVerification(approved.userId);
     return { approved: true };
   }
 
@@ -232,7 +338,9 @@ export class CmdrController {
   ): Promise<{ rejected: true }> {
     const officerId = requireUser(caller);
     csrf(req);
-    await this.cmdr.reject(id, officerId, readString(body, 'reason'));
+    const rejected = await this.cmdr.reject(id, officerId, readString(body, 'reason'));
+    // Same as approval: it is the member's page that changed, not the officer's.
+    this.publishVerification(rejected.userId);
     return { rejected: true };
   }
 }

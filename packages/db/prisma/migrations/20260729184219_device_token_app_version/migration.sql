@@ -1,0 +1,22 @@
+-- The companion app version a device last reported.
+--
+-- The website tells a member when a new release is out and must stop telling them once they
+-- have installed it. Nothing else could answer that: the release bucket knows the NEWEST
+-- version, and the account knew nothing about what the member was actually running — so the
+-- banner could only ever have been dismissed by hand or shown forever.
+--
+-- Per DEVICE, not per user: somebody with a desktop and a laptop can have updated one and not
+-- the other. Nullable, no backfill — null means "has not checked in since this shipped", which
+-- is exactly right for every existing row.
+--
+-- ★ TRIMMED BY HAND, LIKE EVERY MIGRATION IN THIS REPO ★
+--
+-- `prisma migrate dev --create-only` generated this ADD COLUMN together with DROP INDEX for
+-- knowledge_chunks_embedding_idx (pgvector), forum_posts_search_idx (GIN full-text),
+-- audit_log_recent_idx and refresh_token_families_expires_at_idx, plus dropping and re-adding
+-- four foreign keys and removing the forum_posts.search_tsv default.
+--
+-- Those are hand-written DDL from ssot/03-data/indexes.md that the Prisma schema language
+-- cannot express, so every generated migration proposes deleting them. Applying one as
+-- generated drops a vector index and a full-text index in production and rebuilds neither.
+ALTER TABLE "device_tokens" ADD COLUMN "app_version" TEXT;

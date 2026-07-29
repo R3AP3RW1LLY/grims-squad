@@ -652,6 +652,26 @@ model DeviceToken {
   revokedAt  DateTime? @map("revoked_at") @db.Timestamptz(6)
   createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
 
+  /// The companion app version this device last reported. Null until it has checked in once.
+  ///
+  /// ★ WHAT IT IS FOR ★
+  ///
+  /// The website tells a member when a new companion release is out, and must stop telling them
+  /// once they have installed it. Nothing else here can answer that: the release bucket knows
+  /// what the NEWEST version is, and the member's account knew nothing at all about what they
+  /// were actually running — so a banner could only ever have been dismissed by hand or shown
+  /// forever.
+  ///
+  /// Reported by the app on the settings poll it already makes every five minutes, so this costs
+  /// no extra request. Per DEVICE rather than per user, because somebody with a desktop and a
+  /// laptop can have updated one and not the other, and telling them they are up to date when
+  /// half their machines are not would be worse than not telling them.
+  ///
+  /// Not a credential and not a secret. Worst case it is stale, which reads as "you have an
+  /// update" for a member who already installed it — visible and self-correcting on their next
+  /// poll.
+  appVersion String? @map("app_version")
+
   user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   telemetryEvents TelemetryEvent[]
 
@@ -738,6 +758,24 @@ model DiscordGuildMember {
   roles      String[] @default([])
   isBot      Boolean  @default(false) @map("is_bot")
   syncedAt   DateTime @default(now()) @map("synced_at") @db.Timestamptz(6)
+
+  /// When this member joined the voice channel they are sitting in. Null when they are not in one.
+  ///
+  /// ★ PRESENCE, NOT HISTORY ★
+  ///
+  /// `member_activity_months.voice_join_count` counts how many times somebody joined voice this
+  /// month. It cannot answer "are they in voice RIGHT NOW", which is what the admin console's
+  /// Last Seen column needs in order to say "in voice channel" instead of a stale number of days.
+  ///
+  /// A nullable timestamp rather than a boolean, because "in voice" and "in voice for three
+  /// hours" are different facts and a boolean throws the second one away.
+  ///
+  /// ★ IT CAN BE WRONG AFTER A CRASH, AND THAT IS HANDLED ★
+  ///
+  /// Discord keeps no history of voice occupancy, so a bot that dies mid-session leaves rows
+  /// claiming people are still in a channel they left hours ago. The bot clears every row at
+  /// startup and re-seeds from the live voice states, which is the only way this can be true.
+  inVoiceSince DateTime? @map("in_voice_since") @db.Timestamptz(6)
 
   @@map("discord_guild_members")
 }
