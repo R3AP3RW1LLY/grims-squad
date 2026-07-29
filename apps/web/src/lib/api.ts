@@ -311,7 +311,10 @@ export const getAdminAudit = (): Promise<{
 } | null> => get('/v1/admin/audit?limit=100&page=1', { authed: true });
 
 export interface SquadronStats {
+  /** People in the Discord guild, bots excluded. THIS is the squadron. */
   members: number;
+  /** Of those, how many have signed up here. */
+  withAccounts: number;
   activeThisMonth: number;
   activityThisMonth: number;
   verifiedCommanders: number;

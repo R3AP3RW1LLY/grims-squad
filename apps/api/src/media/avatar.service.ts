@@ -69,7 +69,7 @@ export class AvatarService {
    * unable to sign in because Discord's CDN was slow would be an absurd trade —
    * so every failure here is swallowed and the old picture (or none) is kept.
    */
-  async syncFromDiscord(userId: string): Promise<{ updated: boolean }> {
+  async syncFromDiscord(userId: string, opts: { force?: boolean } = {}): Promise<{ updated: boolean }> {
     try {
       const identity = await this.store.readIdentity(userId);
       if (identity === null) return { updated: false };
@@ -83,7 +83,26 @@ export class AvatarService {
         return { updated: false };
       }
 
-      if ((await this.store.storedHash(userId)) === avatarHash) return { updated: false };
+      /*
+       * ★ THE SHORT-CIRCUIT THAT MADE HEALING A NO-OP ★
+       *
+       * On the sign-in path this is right: an unchanged hash means the bytes we
+       * hold are the bytes Discord has, and re-downloading a hundred avatars on
+       * every login would be pointless traffic.
+       *
+       * But it compares the DATABASE against DISCORD and never looks at the
+       * store — so in the one case that matters, where the row says stored and
+       * the object is missing, it concludes "nothing changed" and writes
+       * nothing. Every avatar on the site 404'd while this returned
+       * `updated: false` and reported success.
+       *
+       * `force` is passed by `read()`, which has already established that the
+       * object is gone. Nothing else sets it, so the login path keeps its
+       * short-circuit.
+       */
+      if (opts.force !== true && (await this.store.storedHash(userId)) === avatarHash) {
+        return { updated: false };
+      }
 
       const url = `${DISCORD_CDN}/avatars/${discordId}/${avatarHash}.png?size=${AVATAR_SIZE}`;
       const res = await this.fetchImpl(url, { signal: AbortSignal.timeout(8_000) });
@@ -115,9 +134,55 @@ export class AvatarService {
   }
 
   /** Reads a member's avatar back, or null when they have none. */
+  /**
+   * Reads a member's stored avatar, refetching it if the object has gone.
+   *
+   * ★ THE DATABASE AND THE STORE CAN DISAGREE, AND THEY DID ★
+   *
+   * `avatarStoredHash` records that we stored a picture. The object itself
+   * lives in the object store. Nothing keeps those two in step, so any of these
+   * leaves the row saying "stored" while the store has nothing:
+   *
+   *   - the storage backend changed. Avatars written to local disk during
+   *     development are invisible the moment a bucket is configured, which is
+   *     exactly what happened here: every avatar on the site 404'd while the
+   *     database insisted they were all fine.
+   *   - the object was deleted, expired, or lost.
+   *   - a write half-succeeded.
+   *
+   * A plain miss returned null forever, and the UI drew initials for a member
+   * who plainly has a picture. So a miss now RE-SYNCS from Discord and tries
+   * once more. That makes the store self-healing across exactly the transitions
+   * that broke it, and costs one Discord fetch per member per breakage rather
+   * than a manual backfill.
+   *
+   * ★ ONE RETRY, NEVER A LOOP ★
+   *
+   * If the second read misses too, it returns null and the caller draws
+   * initials. A member whose Discord avatar has genuinely gone must not send us
+   * round again on every page view — and `syncFromDiscord` never throws, so a
+   * CDN outage degrades to initials rather than to an error.
+   */
   async read(userId: string): Promise<StoredObject | null> {
     const hash = await this.store.storedHash(userId);
     if (hash === null) return null;
-    return this.objects.get(avatarKey(userId, hash));
+
+    const found = await this.objects.get(avatarKey(userId, hash)).catch(() => null);
+    if (found !== null) return found;
+
+    /*
+     * The row says stored and the store disagrees. Believe the store — and
+     * FORCE, because the ordinary path compares the row against Discord, would
+     * find them equal, and would decline to write the very object we have just
+     * discovered is missing.
+     */
+    await this.syncFromDiscord(userId, { force: true });
+
+    // Re-read the hash: the re-sync may have written a DIFFERENT one, because
+    // the member could have changed their picture since the row was written.
+    const fresh = await this.store.storedHash(userId);
+    if (fresh === null) return null;
+
+    return this.objects.get(avatarKey(userId, fresh)).catch(() => null);
   }
 }

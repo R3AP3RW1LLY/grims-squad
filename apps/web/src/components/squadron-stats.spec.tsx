@@ -8,7 +8,11 @@ import { SquadronStatsBand } from './squadron-stats';
  * Two properties worth protecting, both easy to "simplify" away later.
  */
 const STATS = {
+  // The guild headcount, which is what "members" means. It used to count
+  // WEBSITE ACCOUNTS — one — and the dashboard rendered "Squadron 1" beside
+  // "Active this month 52", which is not merely wrong but visibly absurd.
   members: 42,
+  withAccounts: 11,
   activeThisMonth: 17,
   activityThisMonth: 1_204,
   verifiedCommanders: 9,

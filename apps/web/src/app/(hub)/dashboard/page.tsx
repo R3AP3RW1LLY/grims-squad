@@ -7,7 +7,15 @@ import {
   getMyDevices,
 } from '../../../lib/api';
 import { Avatar } from '../../../components/account-menu';
-import { PageHeader, StatGrid, StatTile } from '../../../components/hub-page';
+import {
+  PageHeader,
+  PageBody,
+  Panel,
+  Section,
+  StatGrid,
+  StatTile,
+  RailStat,
+} from '../../../components/hub-page';
 import { SessionCountdown } from '../../../components/session-countdown';
 
 export const metadata: Metadata = {
@@ -36,56 +44,6 @@ export const dynamic = 'force-dynamic';
  * As each feature lands it replaces its own placeholder. Nothing here has to be
  * torn out first.
  */
-
-function Panel({
-  title,
-  children,
-  action,
-}: {
-  title: string;
-  children: React.ReactNode;
-  action?: { href: string; label: string };
-}) {
-  return (
-    <section className="rounded-lg border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel)] p-6">
-      <div className="flex items-baseline justify-between gap-4">
-        <h2
-          className="text-lg text-[var(--color-brand-orange)]"
-          style={{ fontFamily: 'var(--font-display)' }}
-        >
-          {title}
-        </h2>
-        {action !== undefined && (
-          <a
-            href={action.href}
-            className="shrink-0 font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--color-brand-cyan-bright)]"
-          >
-            {action.label}
-          </a>
-        )}
-      </div>
-      <div className="mt-4">{children}</div>
-    </section>
-  );
-}
-
-/**
- * A feature that is coming, stated plainly.
- *
- * Deliberately not a skeleton loader or a greyed-out chart. Both of those say
- * "this is loading" and then never load, which is how a page teaches somebody
- * that it is broken.
- */
-function NotYet({ children }: { children: React.ReactNode }) {
-  return (
-    <p className="text-sm leading-relaxed text-[var(--color-text-secondary)]">
-      <span className="mr-2 rounded border border-[var(--color-border-hairline)] px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-secondary)]">
-        Not built yet
-      </span>
-      {children}
-    </p>
-  );
-}
 
 export default async function DashboardPage() {
   const [status, inara, stats, me, devices] = await Promise.all([
@@ -130,7 +88,7 @@ export default async function DashboardPage() {
   }
 
   return (
-    <div>
+    <>
       {/*
         ★ A GREETING, NOT A CONTROL PANEL ★
 
@@ -145,137 +103,172 @@ export default async function DashboardPage() {
         {...(me.user !== null && { icon: <Avatar user={me.user} size={56} /> })}
       />
 
-      <StatGrid>
-        <StatTile
-          label="Squadron"
-          value={stats === null ? '—' : String(stats.members)}
-          hint="Commanders on the roster"
-        />
-        <StatTile
-          label="Active this month"
-          value={stats === null ? '—' : String(stats.activeThisMonth)}
-          hint="Seen in Discord or in game"
-          tone="accent"
-        />
-        <StatTile
-          label="Your commander"
-          value={verified === null ? 'Unverified' : 'Verified'}
-          hint={verified === null ? 'Link Inara, or ask an officer' : `CMDR ${verified}`}
-        />
-        <StatTile
-          label="Paired devices"
-          value={String(activeDevices)}
-          hint={activeDevices === 0 ? 'The companion app is not running' : 'Sending journal data'}
-        />
-      </StatGrid>
-
       {/*
-        ★ ONE ROW: WHAT YOU OWE, AND HOW LONG YOU HAVE ★
+        ★ YOU IN THE RAIL, THE SQUADRON IN THE BODY ★
 
-        The countdown deliberately does NOT go in the stat band above. That band
-        answers questions about the SQUADRON — how many of us, how many active —
-        and this answers one about the browser you happen to be sitting at.
-        Mixing the two makes both harder to scan.
+        The old layout put both in one band of four tiles: "Squadron 1",
+        "Active this month 52", "Your commander Verified", "Paired devices 1".
+        Two of those are facts about a hundred people and two are facts about
+        one person, and reading across them meant switching subject every tile —
+        which is what made the page feel clunky and hard to place.
 
-        "Worth doing" takes the wide column because its items are sentences.
-        When there is nothing outstanding it becomes a short acknowledgement
-        rather than vanishing, so the row keeps its shape and the countdown does
-        not jump across the page the day somebody finishes their setup.
+        Split by SUBJECT. The rail answers "how is my account", which is short,
+        personal, and mostly unchanging. The body answers "how is the squadron",
+        which is the reason to open a dashboard at all.
+
+        Same shape as the admin console, deliberately: somebody who learns to
+        read one should not have to learn the other.
       */}
-      <div className="mb-8 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-        <div className="order-2 lg:order-1">
-          {todo.length > 0 ? (
-            <Panel title="Worth doing">
-              <ul className="list-none space-y-4 p-0">
-                {todo.map((item) => (
-                  <li key={item.href} className="flex flex-col gap-1">
-                    <a
-                      href={item.href}
-                      className="text-sm text-[var(--color-brand-cyan-bright)] hover:underline"
-                    >
-                      {item.label}
-                    </a>
-                    <span className="text-sm leading-relaxed text-[var(--color-text-secondary)]">
-                      {item.why}
-                    </span>
-                  </li>
-                ))}
-              </ul>
+      <PageBody
+        lead={
+          stats === null
+            ? 'Signed in. Squadron figures are unavailable at the moment.'
+            : `${stats.activeThisMonth} of ${stats.members} commanders have been seen this month.`
+        }
+        rail={
+          <>
+            <Panel title="Your account">
+              <RailStat
+                label="Commander"
+                value={verified ?? 'Not verified'}
+                tone={verified === null ? 'warn' : 'good'}
+              />
+              <RailStat label="Rank" value={me.user?.rank ?? 'Unranked'} />
+              <RailStat
+                label="Companion app"
+                value={activeDevices === 0 ? 'Not paired' : `${activeDevices} paired`}
+                tone={activeDevices === 0 ? 'default' : 'good'}
+              />
             </Panel>
+
+            {/*
+              The countdown is about the BROWSER somebody is sitting at, which
+              is neither an account fact nor a squadron one — so it gets its own
+              box rather than being filed under either.
+            */}
+            <SessionCountdown
+              expiresAt={me.session.expiresAt}
+              twoFactorExpiresAt={me.session.twoFactorExpiresAt}
+              timezone={me.user?.timezone ?? 'UTC'}
+            />
+
+            {/*
+              Only when there IS something. A panel of ticks is a chore list;
+              its absence is the reward for finishing.
+            */}
+            {todo.length > 0 && (
+              <Panel title="Worth doing">
+                <ul className="m-0 list-none space-y-4 p-0">
+                  {todo.map((item) => (
+                    <li key={item.href}>
+                      <a
+                        href={item.href}
+                        className="text-sm text-[var(--color-brand-cyan-bright)] hover:underline"
+                      >
+                        {item.label}
+                      </a>
+                      <span className="mt-1 block text-sm leading-relaxed text-[var(--color-text-secondary)]">
+                        {item.why}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </Panel>
+            )}
+          </>
+        }
+      >
+        {/*
+          Squadron-wide only. Every tile here answers a question about the same
+          subject, so the eye can scan the row instead of re-orienting at each.
+        */}
+        <StatGrid>
+          <StatTile
+            label="Squadron"
+            value={stats === null ? '—' : String(stats.members)}
+            hint={stats === null ? 'Unavailable' : `${stats.withAccounts} signed up here`}
+          />
+          <StatTile
+            label="Active this month"
+            value={stats === null ? '—' : String(stats.activeThisMonth)}
+            hint="Seen in Discord or in game"
+            tone="accent"
+          />
+          <StatTile
+            label="Verified commanders"
+            value={stats === null ? '—' : String(stats.verifiedCommanders)}
+            hint="Proved their CMDR name"
+          />
+          <StatTile
+            label="Flying since"
+            value={stats === null ? '—' : String(stats.foundedYear)}
+            hint="Grim's Squad was founded"
+          />
+        </StatGrid>
+
+        <Section
+          title="Your activity"
+          description="The monthly rank check looks for two things: taking part in Discord, and an Elite session. The first is counted for everybody automatically; the second comes from the companion app."
+        >
+          {activeDevices === 0 ? (
+            <p className="max-w-[68ch] text-sm leading-relaxed text-[var(--color-text-secondary)]">
+              Nothing is reporting your sessions yet, so your months read as{' '}
+              <strong>unknown</strong> rather than as inactive.{' '}
+              <a href="/settings/devices" className="text-[var(--color-brand-cyan-bright)]">
+                Install the companion app
+              </a>{' '}
+              and it keeps your ranks, ships and monthly activity current on its own.
+            </p>
           ) : (
-            <Panel title="All set">
-              <p className="text-sm leading-relaxed text-[var(--color-text-secondary)]">
-                Nothing outstanding on your account — your commander is confirmed, your months
-                count, and the companion app is reporting.
-              </p>
-            </Panel>
+            <p className="max-w-[68ch] text-sm leading-relaxed text-[var(--color-text-secondary)]">
+              {activeDevices === 1 ? 'One device is' : `${activeDevices} devices are`} paired and
+              sending. Your sessions, ranks and ships update themselves whenever the app is
+              running.{' '}
+              <a href="/settings/devices" className="text-[var(--color-brand-cyan-bright)]">
+                Manage devices
+              </a>
+              .
+            </p>
           )}
-        </div>
+        </Section>
 
         {/*
-          First on a phone. On a narrow screen the countdown is the one thing
-          here that is time-sensitive, and burying it under a list of chores
-          means it is the thing nobody scrolls to.
+          ★ ONE HONEST SECTION, NOT FOUR EMPTY PANELS ★
+
+          Notifications, Operations and The Faction each had a panel saying "not
+          built yet". Three quarters of the page was a list of things that do
+          not exist, which reads as an unfinished site rather than a planned
+          one — and it pushed the things that ARE real below the fold.
+
+          Named in one line each instead. Still honest, still nothing invented,
+          and each becomes its own section the day it lands rather than
+          replacing a placeholder.
         */}
-        <div className="order-1 lg:order-2">
-          <SessionCountdown
-            expiresAt={me.session.expiresAt}
-            twoFactorExpiresAt={me.session.twoFactorExpiresAt}
-            timezone={me.user?.timezone ?? 'UTC'}
-          />
-        </div>
-      </div>
-
-      {/* ----------------------------------------------------------- panels */}
-      {/*
-        Two columns at lg, three at 2xl. The panels are short and independent,
-        so a single column left two thirds of a wide screen empty while pushing
-        the last of them below the fold.
-      */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 2xl:grid-cols-3">
-        <Panel title="Your activity" action={{ href: '/settings/devices', label: 'Devices' }}>
-          {activeDevices === 0 ? (
-            <p className="text-sm leading-relaxed text-[var(--color-text-secondary)]">
-              Nothing yet. The monthly rank check looks for a Discord message and an Elite session —
-              the companion app supplies the second, and until something reports one your months
-              read as unknown rather than as inactive.
-            </p>
-          ) : (
-            <p className="text-sm leading-relaxed text-[var(--color-text-secondary)]">
-              {activeDevices === 1 ? 'One device is' : `${activeDevices} devices are`} paired and
-              sending. Your sessions, ranks and ships update themselves whenever the app is running.
-            </p>
-          )}
-        </Panel>
-
-        <Panel title="Notifications">
-          <NotYet>
-            The forum arrives in a later phase, and notifications come with it. When there is
-            something to tell you — a reply, a promotion, an operation you signed up for — it will
-            appear here.
-          </NotYet>
-        </Panel>
-
-        <Panel title="Operations">
-          <NotYet>
-            Wings forming up, who has signed on, and what they still need. Coming with the
-            operations board.
-          </NotYet>
-        </Panel>
-
-        <Panel title="The faction">
-          <NotYet>
-            Our systems, their state, and this week&rsquo;s orders. Coming with the BGS module.
-          </NotYet>
-        </Panel>
-      </div>
-
-      <p className="mt-10 text-xs leading-relaxed text-[var(--color-text-secondary)]">
-        Panels marked <em>not built yet</em> are placeholders for features still to come. Nothing on
-        this page is invented — every figure above is read from live data, and a panel with nothing
-        behind it says so rather than showing a plausible number.
-      </p>
-    </div>
+        <Section
+          title="Still to come"
+          description="Named rather than mocked up. Nothing on this page is invented — every figure above is read from live data, and a feature that does not exist says so instead of showing a plausible number."
+        >
+          <dl className="m-0 grid gap-x-8 gap-y-3 sm:grid-cols-2">
+            {[
+              ['Notifications', 'Replies, promotions and operations you signed up for.'],
+              ['Operations', 'Wings forming up, who has signed on, and what they still need.'],
+              ['The faction', 'Our systems, their state, and this week’s orders.'],
+              ['Leaderboards', 'Who is flying what, and how far.'],
+            ].map(([title, blurb]) => (
+              <div key={title} className="flex gap-3 text-sm">
+                <dt className="shrink-0 font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--color-text-dim)]">
+                  Soon
+                </dt>
+                <dd className="m-0">
+                  <span className="text-[var(--color-text-primary)]">{title}</span>{' '}
+                  <span className="text-[var(--color-text-secondary)]">— {blurb}</span>
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </Section>
+      </PageBody>
+    </>
   );
 }
 
