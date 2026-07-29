@@ -137,8 +137,17 @@ export function MappingEditor({ roles, mappings }: { roles: RoleRow[]; mappings:
                 </span>
 
                 {missing ? (
-                  <span className="text-sm text-[var(--color-semantic-warning)]">
-                    No such role in Discord
+                  /*
+                    Says the CACHE has no name for it, not that Discord has no
+                    such role. Those are different claims and the second one is
+                    an accusation — it fired for every mapping on a fresh
+                    deployment while nothing in Discord had changed.
+                  */
+                  <span
+                    className="text-sm text-[var(--color-semantic-warning)]"
+                    title="Role names come from our nightly Discord sync. Until it has run, or if this role really was deleted, there is no name to show."
+                  >
+                    Name not synced
                   </span>
                 ) : (
                   <span className="inline-flex items-center gap-2 rounded-full border px-2.5 py-0.5 text-[12px]"
