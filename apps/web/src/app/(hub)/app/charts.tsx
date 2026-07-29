@@ -89,6 +89,15 @@ export interface HeatDay {
   readonly day: number;
   readonly messages: number;
   readonly members: number;
+  /**
+   * Elite sign-ins that day — `LoadGame` in the journal.
+   *
+   * Squadron owner, 2026-07-29. A THIRD question the other two cannot answer:
+   * Discord activity says who is talking, and this says who is actually flying.
+   * A squadron can be loud in chat and empty in the black, or the reverse, and
+   * only one of those is a problem an officer can do anything about.
+   */
+  readonly signIns: number;
   /** 0 = Sunday, matching Date.getUTCDay(). Retained for weekend shading. */
   readonly weekday: number;
 }
@@ -163,7 +172,17 @@ export function ActivityChart({ days, monthLabel }: { days: HeatDay[]; monthLabe
             contentStyle={TOOLTIP_STYLE}
             cursor={{ stroke: BRAND.orange, strokeWidth: 1, strokeDasharray: '3 3' }}
             labelFormatter={(d) => `${String(d)} ${monthLabel}`}
-            formatter={(v, n) => [Number(v).toLocaleString('en-GB'), n === 'messages' ? 'Actions' : 'Members']}
+            /*
+              A lookup rather than a ternary. With three series the ternary read
+              "messages ? Actions : Members" and would have labelled the new
+              green line "Members" — two lines in one tooltip claiming to be the
+              same thing.
+            */
+            formatter={(v, n) => [
+              Number(v).toLocaleString('en-GB'),
+              { messages: 'Actions', members: 'Members', signIns: 'Elite sign-ins' }[String(n)] ??
+                String(n),
+            ]}
           />
           <Area
             yAxisId="actions"
@@ -178,6 +197,22 @@ export function ActivityChart({ days, monthLabel }: { days: HeatDay[]; monthLabe
             type="monotone"
             dataKey="members"
             stroke={BRAND.orange}
+            strokeWidth={2}
+            dot={false}
+          />
+          {/*
+            ★ ELITE SIGN-INS — squadron owner, 2026-07-29 ★
+
+            Green, and on the MEMBERS axis rather than the actions one. Sign-ins
+            are counted in tens like the member line, while actions run into the
+            hundreds; sharing the actions axis would press this flat against the
+            floor and it would read as "nobody plays".
+          */}
+          <Line
+            yAxisId="members"
+            type="monotone"
+            dataKey="signIns"
+            stroke={BRAND.success}
             strokeWidth={2}
             dot={false}
           />
@@ -201,6 +236,20 @@ export function ActivityChart({ days, monthLabel }: { days: HeatDay[]; monthLabe
             style={{ backgroundColor: BRAND.orange }}
           />
           <span className="text-[var(--color-text-secondary)]">Members active</span>
+        </span>
+        <span className="flex items-center gap-2">
+          <span
+            aria-hidden="true"
+            className="h-0.5 w-5 rounded"
+            style={{ backgroundColor: BRAND.success }}
+          />
+          {/*
+            "Elite sign-ins", not "sign-ins". The hub has its own sign-in, and a
+            legend on the admin console reading just "Sign-ins" beside two
+            Discord series would be read as website logins by anybody who had
+            not written it.
+          */}
+          <span className="text-[var(--color-text-secondary)]">Elite sign-ins</span>
         </span>
 
         {busiest !== undefined && busiest.messages > 0 && (

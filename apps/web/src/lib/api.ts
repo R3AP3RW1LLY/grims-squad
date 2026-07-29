@@ -363,6 +363,14 @@ export interface AdminDashboard {
     events: number;
     reporting: number;
     sessionsThisMonth: number;
+    /**
+     * Elite sign-ins per day of the month, index 0 = the 1st.
+     *
+     * `LoadGame` in the journal — the event written when a commander loads into
+     * the game, so counting them IS counting sign-ins. Drives the green line on
+     * the activity chart.
+     */
+    dailySignIns: number[];
     flyingThisMonth: number;
     playingNow: number;
     ships: Array<{ ship: string; pilots: number }>;

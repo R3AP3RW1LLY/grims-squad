@@ -54,6 +54,17 @@ export interface DashboardData {
     readonly reporting: number;
     /** Game sessions started this month. */
     readonly sessionsThisMonth: number;
+    /**
+     * Elite sign-ins per day of the month, index 0 = the 1st.
+     *
+     * ★ UNDER `game`, NOT `discord` ★
+     *
+     * It sits beside the Discord daily series on the same chart, which makes it
+     * tempting to file it next to them. It is not a Discord fact: it comes from
+     * `LoadGame` in the journal, and putting it under `discord` would be the
+     * first step to somebody summing it into a Discord total.
+     */
+    readonly dailySignIns: readonly number[];
     /** Distinct commanders seen flying this month. */
     readonly flyingThisMonth: number;
     /** Playing right now, by the journal heartbeat. */
@@ -104,6 +115,7 @@ export class PrismaDashboardStore implements DashboardStore {
       trackedMembers,
       guildMembers,
       daily,
+      dailySignIns,
       events,
       reporting,
       sessions,
@@ -195,6 +207,35 @@ export class PrismaDashboardStore implements DashboardStore {
           COUNT(DISTINCT discord_id)::bigint                           AS members
         FROM member_activity_days
         WHERE day >= ${month}::date AND day < ${nextMonth}::date
+        GROUP BY 1 ORDER BY 1
+      `,
+
+      /*
+       * Elite sign-ins per day, for the activity chart's third line.
+       *
+       * ★ `LoadGame` IS THE SIGN-IN ★
+       *
+       * The journal writes it once when a commander loads into the game, so
+       * counting the events IS counting the sign-ins. Squadron owner,
+       * 2026-07-29.
+       *
+       * A separate query from the Discord one above rather than a join: the two
+       * come from different tables with different grains — `member_activity_days`
+       * is one row per member per day, `telemetry_events` is one row per event —
+       * and joining them would multiply one by the other.
+       *
+       * Bounded to the month on screen for the same reason as everything else
+       * here: a full scan of telemetry_events to draw thirty-one points would
+       * grow with the archive rather than with the chart.
+       */
+      this.#db.$queryRaw<Array<{ day: number; signins: bigint }>>`
+        SELECT
+          EXTRACT(DAY FROM occurred_at AT TIME ZONE 'UTC')::int AS day,
+          COUNT(*)::bigint                                      AS signins
+        FROM telemetry_events
+        WHERE event_type = 'LoadGame'
+          AND occurred_at >= ${month}::date
+          AND occurred_at <  ${nextMonth}::date
         GROUP BY 1 ORDER BY 1
       `,
 
@@ -315,6 +356,19 @@ export class PrismaDashboardStore implements DashboardStore {
     ).getUTCDate();
     const dailyArray = Array.from({ length: daysInMonth }, () => 0);
     const dailyMembers = Array.from({ length: daysInMonth }, () => 0);
+    /*
+     * Elite sign-ins, filled from its own query.
+     *
+     * Zero-filled first, like the other two: a day nobody signed in produces no
+     * ROW, and a chart that skipped those days would draw a straight line
+     * through a quiet weekend as though it had been busy.
+     */
+    const dailySignInsArray = Array.from({ length: daysInMonth }, () => 0);
+    for (const row of dailySignIns) {
+      const slot = row.day - 1;
+      if (slot < 0 || slot >= dailySignInsArray.length) continue;
+      dailySignInsArray[slot] = Number(row.signins);
+    }
     for (const row of daily) {
       // 1-indexed day to 0-indexed slot. Guarded because a clock-skewed row
       // would otherwise write past the end of the array.
@@ -369,6 +423,7 @@ export class PrismaDashboardStore implements DashboardStore {
         events,
         reporting: reporting.length,
         sessionsThisMonth: sessions.length,
+        dailySignIns: dailySignInsArray,
         flyingThisMonth: new Set(sessions.map((s) => s.userId)).size,
         playingNow,
         ships: ships.map((s) => ({ ship: s.ship, pilots: Number(s.pilots) })),
