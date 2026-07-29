@@ -6,7 +6,7 @@
   "description": "AI gateway + agent. Deploys to the LOCAL BOX, not the VPS.",
   "scripts": {
     "build": "tsc -b",
-    "typecheck": "tsc -b --noEmit false --emitDeclarationOnly",
+    "typecheck": "tsc -b --noEmit false --emitDeclarationOnly && tsc -p tsconfig.spec.json",
     "test": "vitest run --passWithNoTests",
     "test:unit": "vitest run --passWithNoTests",
     "clean": "rm -rf dist *.tsbuildinfo"

@@ -14,7 +14,7 @@
   },
   "scripts": {
     "build": "tsc -b",
-    "typecheck": "tsc -b --noEmit false --emitDeclarationOnly",
+    "typecheck": "tsc -b --noEmit false --emitDeclarationOnly && tsc -p tsconfig.spec.json",
     "generate": "prisma generate",
     "migrate:dev": "prisma migrate dev",
     "migrate:deploy": "prisma migrate deploy",

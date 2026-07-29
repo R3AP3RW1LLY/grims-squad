@@ -32,14 +32,26 @@ const SOURCE: ProfileSource = {
   avatarUrl: 'https://cdn.example/a.png',
   bio: 'Founded the squadron in 2006.',
   timezone: 'Europe/London',
+  /*
+   * Both REQUIRED by ProfileSource and both were missing. `avatarStoredHash` is
+   * what the serializer reads to decide whether to emit an avatar URL at all,
+   * and `lastPlayingAt` drives "playing now" — so every test here was building
+   * a profile the production type does not allow.
+   */
+  avatarStoredHash: null,
+  lastPlayingAt: null,
   joinedAt: new Date('2006-04-01T00:00:00Z'),
   status: 'active',
-  ranks: ['Galactic Admiral'],
+  ranks: [{ name: 'Galactic Admiral', colour: '#b16b2f' }],
   cmdrName: 'GRIM',
   location: { system: 'Shinrarta Dezhra', station: 'Jameson Memorial' },
   credits: 1_204_998_221n,
   fleet: [{ shipType: 'Anaconda', name: 'Bad Idea' }],
-  activity: { messages: 412, voiceMinutes: 3_180 },
+  /*
+   * JOINS, not minutes. Discord reports somebody ENTERING a voice channel and
+   * never how long they stayed, so nothing anywhere records a minute of it.
+   */
+  activity: { messages: 412, voiceJoins: 37, forumPosts: 9, gameObserved: true },
 };
 
 /** Every toggle off. This is what a member who has never touched settings gets. */

@@ -1,0 +1,40 @@
+{
+  // Typechecking ONLY — this never emits anything.
+  //
+  // ★ WHY A SECOND CONFIG AND NOT A CHANGE TO THE FIRST ★
+  //
+  // tsconfig.json excludes `**/*.spec.ts` and is RIGHT to: it is the build, and
+  // shipping compiled tests into dist would be wrong. But it meant specs were
+  // never typechecked at all — so a test fake declaring
+  // `implements SomeStore` was never verified against that interface.
+  //
+  // Fakes duly drifted. Every one of them still compiled, still ran, and still
+  // passed — until production called a method the fake had never grown, which
+  // is how "this.store.profileEvents is not a function" reached a deployed API
+  // twice in one day.
+  //
+  // `noEmit` with the specs INCLUDED gets the checking without touching what is
+  // built. Run by the package's `typecheck` script, which CI runs.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // The build config sets these to write dist/. Neither means anything when
+    // nothing is emitted, and rootDir would reject spec files that sit outside
+    // it in some packages.
+    "rootDir": null,
+    "outDir": null,
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "tsBuildInfoFile": null
+  },
+  "include": [
+    "src/**/*",
+    "**/*.spec.ts",
+    "**/*.spec.tsx"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
+}

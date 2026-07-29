@@ -45,6 +45,9 @@ class FakeUploader {
     unauthorised: false,
     refused: {},
     error: null,
+    // The uploader measures what it moved, so every result carries these.
+    txBytes: 0,
+    rxBytes: 0,
   };
 
   async send(events: readonly unknown[]): Promise<UploadResult> {

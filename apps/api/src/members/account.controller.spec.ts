@@ -1,3 +1,4 @@
+import type { FastifyReply } from 'fastify';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { AccountController } from './account.controller.js';
 import type { AccountStore, SessionSummary, ExportBundle } from './account.store.js';
@@ -83,14 +84,26 @@ function req(method = 'POST', refreshToken?: string): never {
 }
 
 /** A reply that records which cookies were cleared. */
-function reply(): { cleared: string[] } & never {
+/**
+ * A reply that records which cookies were cleared.
+ *
+ * ★ THE RETURN TYPE WAS `{ cleared: string[] } & never` ★
+ *
+ * Intersecting anything with `never` IS `never`, so `res.cleared` was an error
+ * the moment anybody typechecked this file — which nothing did, because the
+ * build config excluded specs. The tests ran anyway, because vitest transpiles
+ * without checking.
+ */
+type FakeReply = { cleared: string[] } & FastifyReply;
+
+function reply(): FakeReply {
   const cleared: string[] = [];
   return {
     cleared,
     clearCookie: (name: string) => {
       cleared.push(name);
     },
-  } as never;
+  } as unknown as FakeReply;
 }
 
 let store: FakeAccountStore;
@@ -164,7 +177,7 @@ describe('DELETE /v1/me/sessions/:id', () => {
   it('answers 404-shaped for an unknown family, same as for one it does not own', async () => {
     // Identical answers on purpose. A distinguishable error would confirm that
     // a given family id exists, which is exactly what an enumerator wants.
-    await expect(ctl.revokeSession({ userId: 'u-1' }, 'nope', req('DELETE'))).rejects.toThrow(
+    await expect(ctl.revokeSession({ userId: 'u-1' }, 'nope', req('DELETE'), reply())).rejects.toThrow(
       /not found/i,
     );
   });
@@ -172,14 +185,14 @@ describe('DELETE /v1/me/sessions/:id', () => {
   it('requires a CSRF token', async () => {
     store.owners.set('fam-1', 'u-1');
     const bare = { method: 'DELETE', headers: {}, cookies: {} } as never;
-    await expect(ctl.revokeSession({ userId: 'u-1' }, 'fam-1', bare)).rejects.toThrow(/csrf/i);
+    await expect(ctl.revokeSession({ userId: 'u-1' }, 'fam-1', bare, reply())).rejects.toThrow(/csrf/i);
     expect(store.revoked).toEqual([]);
   });
 
   it('is idempotent — revoking twice is not an error', async () => {
     store.owners.set('fam-1', 'u-1');
-    await ctl.revokeSession({ userId: 'u-1' }, 'fam-1', req('DELETE'));
-    await ctl.revokeSession({ userId: 'u-1' }, 'fam-1', req('DELETE'));
+    await ctl.revokeSession({ userId: 'u-1' }, 'fam-1', req('DELETE'), reply());
+    await ctl.revokeSession({ userId: 'u-1' }, 'fam-1', req('DELETE'), reply());
     expect(store.revoked).toHaveLength(2);
   });
 });
