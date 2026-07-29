@@ -312,6 +312,15 @@ export interface AdminActivityRow {
    * who has not spoken since May must still show as gone quiet in July.
    */
   lastSeenAt: string | null;
+  /**
+   * When they joined the voice channel they are in RIGHT NOW. Null if not in one.
+   *
+   * The only field on this row about the present rather than the past, which is
+   * why it takes precedence in the Last Seen column: a member who has been in
+   * comms all evening without typing is not somebody who has gone quiet, however
+   * old their last message is.
+   */
+  inVoiceSince: string | null;
   /** Their TENURE rank — the ladder promotion moves them up. */
   currentRank: string | null;
   /** A leadership APPOINTMENT, a separate axis. Not on the promotion ladder. */

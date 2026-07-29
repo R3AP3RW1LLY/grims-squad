@@ -105,9 +105,27 @@ describe('hub pages', () => {
       .filter((p) => {
         const src = readFileSync(p, 'utf8');
         if (src.includes('PageHeader')) return false;
-        // Pure redirect: imports `redirect` and returns `never`.
+        /*
+         * Pure redirect: imports `redirect`, returns `never`, and its body is
+         * nothing but that call.
+         *
+         * ★ COMMENTS MAY SIT BETWEEN THE BRACE AND THE CALL ★
+         *
+         * The previous pattern required `redirect(` IMMEDIATELY after
+         * `): never {`, so explaining why a route redirects made the file stop
+         * counting as a redirect and fail this test. In a codebase where every
+         * decision carries its reasoning, that punished the house style.
+         *
+         * Comments are stripped before the shape is checked, so the rule still
+         * catches a page that redirects conditionally AND renders — which is
+         * the case it exists for.
+         */
+        const withoutComments = src
+          .replace(/\/\*[\s\S]*?\*\//g, '')
+          .replace(/^\s*\/\/.*$/gm, '');
         const isPureRedirect =
-          /from 'next\/navigation'/.test(src) && /\): never \{\s*redirect\(/.test(src);
+          /from 'next\/navigation'/.test(src) &&
+          /\): never \{\s*redirect\(/.test(withoutComments);
         return !isPureRedirect;
       })
       .map((p) => p.slice(HUB.length + 1));

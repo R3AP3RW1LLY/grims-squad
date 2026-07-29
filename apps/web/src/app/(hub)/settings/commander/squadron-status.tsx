@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { apiCall } from '../../../../lib/api-client';
+import { useVerification } from './verification-state';
 import type { InaraStatus } from './inara-form';
 
 /**
@@ -48,8 +49,18 @@ function Badge({ tone, children }: { tone: 'ok' | 'wait' | 'no'; children: React
   );
 }
 
-export function SquadronStatus({ initial }: { initial: InaraStatus }) {
-  const [status, setStatus] = useState(initial);
+export function SquadronStatus() {
+  /*
+   * ★ SHARED, NOT PRIVATE ★
+   *
+   * This held `useState(initial)`. Pasting a key into the form below proved the
+   * commander name — and this panel, the one that announces verification in the
+   * largest text on the page, went on saying "Not verified" until somebody
+   * reloaded. It also never saw the background squadron re-check, because a
+   * `useState` initialiser reads its argument once and ignores every later
+   * render.
+   */
+  const { status, setStatus } = useVerification();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

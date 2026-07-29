@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { apiCall } from '../../../../lib/api-client';
+import { useVerification } from './verification-state';
 import type { InaraStatus } from '../../../../lib/api';
 
 export type { InaraStatus };
@@ -27,8 +28,10 @@ export type { InaraStatus };
  * The key is write-only from the browser's point of view: it goes up, and the
  * server only ever tells us whether one EXISTS. Nothing re-populates the input.
  */
-export function InaraForm({ initial }: { initial: InaraStatus }) {
-  const [status, setStatus] = useState(initial);
+export function InaraForm() {
+  // Shared with the status panel above, which is what makes verifying here
+  // change the headline up there without a reload. See verification-state.tsx.
+  const { status, setStatus } = useVerification();
   const [key, setKey] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

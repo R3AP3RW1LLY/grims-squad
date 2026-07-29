@@ -11,7 +11,7 @@ import { AuditFilters } from './audit-filters';
 import { Dashboard } from './dashboard';
 import { PageHeader, Section, StatGrid, StatTile } from '../../../components/hub-page';
 import { PageTabs, resolveTab, type PageTab } from '../../../components/page-tabs';
-import { sinceSeen, goneQuiet } from './activity-freshness';
+import { lastSeen } from './activity-freshness';
 
 /**
  * The admin console (P1.7).
@@ -234,7 +234,15 @@ function ActivityTab({
                     column, so nothing is lost by colouring it red.
                   */
                   className={`border-b border-[var(--color-border-hairline)] ${
-                    goneQuiet(r.lastSeenAt)
+                    /*
+                      `lastSeen(...).tone`, not `goneQuiet` directly. Somebody
+                      sitting in a voice channel must never be highlighted red
+                      for having gone quiet, however old their last message is —
+                      that is the most obviously wrong thing this table could
+                      show, and it would be showing it to an officer deciding
+                      who has left the squadron.
+                    */
+                    lastSeen(r).tone === 'quiet'
                       ? 'bg-[color-mix(in_srgb,var(--color-semantic-hostile)_14%,transparent)]'
                       : r.qualifies
                         ? 'bg-[color-mix(in_srgb,var(--color-semantic-success)_10%,transparent)]'
@@ -369,26 +377,43 @@ function ActivityTab({
                     day without saying a word to anyone, and a roster of silent
                     accounts is exactly what this column exists to surface.
                   */}
+                  {/*
+                    ★ IN VOICE IS ITS OWN ANSWER, NOT A FRESHER TIMESTAMP ★
+
+                    Somebody in comms is HERE. This column showed them as "3
+                    days" — true of their last message, and the wrong answer to
+                    the question the column exists for. Squadron owner,
+                    2026-07-29.
+
+                    A dot as well as a colour, because "live" and "quiet" are
+                    both rendered in colour and one of them must not depend on
+                    being able to tell red from cyan.
+                  */}
                   <td className="py-3 pr-4 font-mono text-xs">
-                    {r.lastSeenAt === null ? (
-                      <span
-                        className="text-[var(--color-semantic-hostile-bright)]"
-                        title="Nothing recorded in Discord at all"
-                      >
-                        Never
-                      </span>
-                    ) : (
-                      <span
-                        className={
-                          goneQuiet(r.lastSeenAt)
-                            ? 'text-[var(--color-semantic-hostile-bright)]'
-                            : 'text-[var(--color-text-secondary)]'
-                        }
-                        title={new Date(r.lastSeenAt).toLocaleString('en-GB')}
-                      >
-                        {sinceSeen(r.lastSeenAt)}
-                      </span>
-                    )}
+                    {(() => {
+                      const seen = lastSeen(r);
+                      return (
+                        <span
+                          className={
+                            seen.tone === 'live'
+                              ? 'text-[var(--color-brand-cyan-bright)]'
+                              : seen.tone === 'quiet'
+                                ? 'text-[var(--color-semantic-hostile-bright)]'
+                                : 'text-[var(--color-text-secondary)]'
+                          }
+                          title={
+                            seen.tone === 'live'
+                              ? `In a voice channel since ${new Date(r.inVoiceSince ?? '').toLocaleString('en-GB')}`
+                              : r.lastSeenAt === null
+                                ? 'Nothing recorded in Discord at all'
+                                : new Date(r.lastSeenAt).toLocaleString('en-GB')
+                          }
+                        >
+                          {seen.tone === 'live' && <span aria-hidden="true">● </span>}
+                          {seen.label}
+                        </span>
+                      );
+                    })()}
                   </td>
 
                   <td className="py-3 font-mono text-xs">
