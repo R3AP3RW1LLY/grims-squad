@@ -204,6 +204,26 @@ check() {
 
 check /v1/health 200
 check / 200
+
+# ★ THE WEB CONTAINER MUST BE ABLE TO REACH THE API ★
+#
+# Not the same question as "is the API up". A React Server Component runs inside
+# the web container, and if it cannot reach the API every server-side call
+# returns null — which `lib/api.ts` deliberately treats as "not signed in", so
+# every authenticated page renders its signed-out state while the site answers
+# 200 throughout.
+#
+# That shipped once. Signing in appeared to do nothing, and every public check
+# said the site was healthy.
+if $COMPOSE exec -T web node -e "
+  fetch('\''\${API_INTERNAL_URL:-http://api:5001}/v1/health'\'', { signal: AbortSignal.timeout(8000) })
+    .then((r) => process.exit(r.ok ? 0 : 1))
+    .catch(() => process.exit(1));
+" >/dev/null 2>&1; then
+  ok "web can reach the API internally"
+else
+  die "the web container cannot reach the API — signed-in pages would render as signed out"
+fi
 # Members-only, so a redirect to sign-in is the CORRECT answer. A 200 here would
 # mean the gate had come off.
 check /roster 307
