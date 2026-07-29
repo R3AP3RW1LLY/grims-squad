@@ -29,6 +29,14 @@ export interface DeviceTokenRecord {
   readonly lastUsedAt: Date | null;
   readonly revokedAt: Date | null;
   readonly createdAt: Date;
+  /**
+   * The companion version this device last reported. Null until it checks in.
+   *
+   * The website stops offering an update once the member is running it, and
+   * nothing else could answer that: the release bucket knows what the newest
+   * version IS, and the account knew nothing about what was actually installed.
+   */
+  readonly appVersion?: string | null;
 }
 
 export interface PairingStore {
@@ -36,7 +44,19 @@ export interface PairingStore {
   findByHash(tokenHash: string): Promise<DeviceTokenRecord | null>;
   listFor(userId: string): Promise<DeviceTokenRecord[]>;
   revoke(id: string, at: Date): Promise<void>;
-  touch(id: string, at: Date): Promise<void>;
+  /**
+   * Records that the device was used, and what it is running.
+   *
+   * One write rather than two. `appVersion` rides along because `touch` already
+   * runs on every authenticated call — a separate update would double the
+   * writes on the app's five-minute poll for a single short string, and could
+   * drift from `lastUsedAt` if one succeeded and the other did not.
+   *
+   * Undefined means "the caller did not say", which must LEAVE the stored value
+   * alone. Overwriting with null on a route that happens not to send the header
+   * would make a member's version flicker between known and unknown.
+   */
+  touch(id: string, at: Date, appVersion?: string | null): Promise<void>;
   countActiveFor(userId: string): Promise<number>;
   writeAudit(entry: Record<string, unknown>): Promise<void>;
 }
@@ -117,7 +137,11 @@ export class PairingService {
    * rather than distinguishing them. A caller holding a bad token learns only
    * that it is bad, which is all they are entitled to know.
    */
-  async authenticate(token: string, now: Date = new Date()): Promise<DeviceTokenRecord | null> {
+  async authenticate(
+    token: string,
+    now: Date = new Date(),
+    appVersion?: string | null,
+  ): Promise<DeviceTokenRecord | null> {
     if (!token.startsWith('gsq_')) return null;
 
     const record = await this.store.findByHash(hash(token));
@@ -128,9 +152,15 @@ export class PairingService {
     // acquired a different scope cannot be used for telemetry at all.
     if (!record.scopes.includes(TELEMETRY_SCOPE)) return null;
 
-    // Recorded so a member can see which devices are actually in use, and spot
-    // one that has gone quiet or one that should not be running at all.
-    await this.store.touch(record.id, now);
+    /*
+     * Recorded so a member can see which devices are actually in use, and spot
+     * one that has gone quiet or one that should not be running at all.
+     *
+     * The version travels with it: the app sends it on the settings poll it
+     * already makes, so the website can stop offering an update the moment the
+     * member is running it — without a second request or a second credential.
+     */
+    await this.store.touch(record.id, now, appVersion);
     return record;
   }
 

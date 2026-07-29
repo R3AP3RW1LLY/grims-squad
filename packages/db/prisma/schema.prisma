@@ -652,6 +652,26 @@ model DeviceToken {
   revokedAt  DateTime? @map("revoked_at") @db.Timestamptz(6)
   createdAt  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
 
+  /// The companion app version this device last reported. Null until it has checked in once.
+  ///
+  /// ★ WHAT IT IS FOR ★
+  ///
+  /// The website tells a member when a new companion release is out, and must stop telling them
+  /// once they have installed it. Nothing else here can answer that: the release bucket knows
+  /// what the NEWEST version is, and the member's account knew nothing at all about what they
+  /// were actually running — so a banner could only ever have been dismissed by hand or shown
+  /// forever.
+  ///
+  /// Reported by the app on the settings poll it already makes every five minutes, so this costs
+  /// no extra request. Per DEVICE rather than per user, because somebody with a desktop and a
+  /// laptop can have updated one and not the other, and telling them they are up to date when
+  /// half their machines are not would be worse than not telling them.
+  ///
+  /// Not a credential and not a secret. Worst case it is stale, which reads as "you have an
+  /// update" for a member who already installed it — visible and self-correcting on their next
+  /// poll.
+  appVersion String? @map("app_version")
+
   user            User             @relation(fields: [userId], references: [id], onDelete: Cascade)
   telemetryEvents TelemetryEvent[]
 

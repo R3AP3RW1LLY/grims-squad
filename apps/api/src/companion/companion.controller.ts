@@ -2,8 +2,26 @@ import { Controller, Get, Inject, Param, Res } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
 import { basename } from 'node:path';
 import { AppError, ErrorCode } from '@grims/shared';
+import { User, type CurrentUser } from '../auth/current-user.js';
 import type { ReleaseAsset, ReleaseStore } from './release.service.js';
-import { RELEASE_STORE } from './companion.tokens.js';
+import { RELEASE_STORE, DEVICE_VERSIONS } from './companion.tokens.js';
+
+/**
+ * What versions a member's active devices are running.
+ *
+ * ★ A NARROW READER, NOT `PairingService` ★
+ *
+ * `PairingService` lives in the telemetry module, and the telemetry module
+ * already imports THIS one for the release store. Injecting it here would close
+ * the loop into a circular dependency — resolvable with `forwardRef`, but that
+ * is a workaround for a design where two modules each need half of the other.
+ *
+ * One method, over the one table, so the dependency stays one-directional.
+ */
+export interface DeviceVersionReader {
+  /** Active devices only. Null entries have not reported a version yet. */
+  versionsFor(userId: string): Promise<Array<string | null>>;
+}
 
 /**
  * Downloading the companion app.
@@ -23,7 +41,65 @@ import { RELEASE_STORE } from './companion.tokens.js';
  */
 @Controller('v1/companion')
 export class CompanionController {
-  constructor(@Inject(RELEASE_STORE) private readonly releases: ReleaseStore) {}
+  constructor(
+    @Inject(RELEASE_STORE) private readonly releases: ReleaseStore,
+    @Inject(DEVICE_VERSIONS) private readonly devices: DeviceVersionReader,
+  ) {}
+
+  /**
+   * What the website needs to decide whether to announce a new release.
+   *
+   * ★ FACTS, NOT THE DECISION ★
+   *
+   * The rule — newest version, published within fourteen days, and not already
+   * installed on every one of this member's machines — lives in ONE place on
+   * the web side, where it is tested. Deciding half of it here and half there
+   * is how one of the three conditions quietly stops being checked.
+   *
+   * `deviceVersions` is the member's OWN devices and nobody else's. It is
+   * scoped by the session, so there is no id in the request to tamper with.
+   */
+  @Get('update-status')
+  async updateStatus(@User() caller: CurrentUser | undefined): Promise<{
+    latestVersion: string | null;
+    releasedAt: string | null;
+    deviceVersions: Array<string | null>;
+  }> {
+    if (caller === undefined) {
+      throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
+    }
+
+    /*
+     * A failing release store must not take the page down. An empty list reads
+     * as "nothing to announce", which is the honest answer when we cannot see
+     * what has been published.
+     */
+    const [assets, deviceVersions] = await Promise.all([
+      this.releases.list().catch((): ReleaseAsset[] => []),
+      this.devices.versionsFor(caller.userId).catch((): Array<string | null> => []),
+    ]);
+
+    /*
+     * The newest across every platform, not per platform: a release publishes
+     * all three together, so an app comparing against another platform's build
+     * would be comparing the same number anyway.
+     *
+     * Sorted by BUILD TIME rather than by version string. `list()` already
+     * returns newest-first, and '0.10.0' sorts below '0.9.0' as a string — the
+     * exact bug the web-side comparison exists to avoid, which must not be
+     * reintroduced here by sorting the wrong way.
+     */
+    const newest = assets.find((a) => a.version !== null) ?? null;
+
+    return {
+      latestVersion: newest?.version ?? null,
+      releasedAt: newest?.builtAt ?? null,
+      // Active devices only — see `versionsFor`. A revoked device is a machine
+      // the member has disowned, and holding its old version against them would
+      // keep the banner up for a laptop they stopped using.
+      deviceVersions,
+    };
+  }
 
   /** What is available to download. Empty when nothing has been built yet. */
   @Get('releases')

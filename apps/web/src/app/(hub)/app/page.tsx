@@ -417,8 +417,29 @@ function ActivityTab({
                   </td>
 
                   <td className="py-3 font-mono text-xs">
+                    {/*
+                      ★ THREE ANSWERS, BECAUSE THERE ARE THREE ★
+
+                      Somebody at the top of the ladder cannot qualify for a
+                      promotion — there is none above them. Rendering that as
+                      "no" alongside everybody who simply has not been active
+                      would read as a failure, and it is the opposite: they have
+                      finished the ladder.
+
+                      `qualifies` is false for them by design (see admin.store),
+                      which is what stops the row going green. This cell says
+                      WHY, so the two read as one consistent answer rather than
+                      as a member who has somehow stopped meeting the rules.
+                    */}
                     {r.qualifies ? (
                       <span className="text-[var(--color-brand-cyan-bright)]">YES</span>
+                    ) : r.nextRank === null && r.currentRank !== null ? (
+                      <span
+                        className="text-[var(--color-brand-orange)]"
+                        title="At the top of the tenure ladder. There is no further rank to be promoted to."
+                      >
+                        n/a
+                      </span>
                     ) : (
                       <span className="text-[var(--color-text-secondary)]">no</span>
                     )}
