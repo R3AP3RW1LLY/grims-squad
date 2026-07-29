@@ -1,4 +1,5 @@
-import { resolve } from 'node:path';
+import { resolve, join, dirname } from 'node:path';
+import { existsSync } from 'node:fs';
 import { PrismaClient } from '@grims/db';
 import { DiscordAdapter } from '@grims/ed-clients';
 import { promotionsPermitted, EARLIEST_PROMOTION_AT } from '@grims/shared';
@@ -25,11 +26,49 @@ import { DiscordRankApplier, ladderRoleIds } from './jobs/rank-applier.discord.j
  * refuses before 1 August 2026. Two independent barriers, because the cost of
  * getting this wrong is 49 people publicly promoted on partial data.
  */
+/**
+ * Where `ssot/` actually is.
+ *
+ * ★ THIS WAS `resolve(process.cwd(), '../..')` AND IT BROKE IN THE CONTAINER ★
+ *
+ * That is correct when the job is started from `apps/worker`, which is what
+ * `pnpm promote` does. The production image runs `node apps/worker/dist/promote.js`
+ * from `/app`, so it resolved to `/` and the job died on
+ * `ENOENT /ssot/02-domain/rank-progression.yaml`.
+ *
+ * It would have died at midnight on 1 August, on the one run that matters, and
+ * the only sign would have been a line in cron's mail.
+ *
+ * Walking UP looking for the file itself works in both layouts and in any
+ * future one — it asks the question that actually matters ("where is the
+ * ladder") instead of assuming a directory depth.
+ */
+function findRepoRoot(): string {
+  let dir = process.cwd();
+
+  for (;;) {
+    if (existsSync(join(dir, 'ssot', '02-domain', 'rank-progression.yaml'))) return dir;
+
+    const parent = dirname(dir);
+    // `dirname('/')` is `/`, so this is the filesystem root and there is
+    // nothing above it to check.
+    if (parent === dir) break;
+    dir = parent;
+  }
+
+  /*
+   * Fall back to the old behaviour rather than throwing here. The caller reads
+   * the ladder and fails with its own message naming the file, which is more
+   * use than "could not find the repo root" from a function nobody knew ran.
+   */
+  return resolve(process.cwd(), '../..');
+}
+
 async function main(): Promise<number> {
   const live = process.argv.includes('--live');
   // Opt-IN. Silence is the default for both dry and live runs.
   const post = process.argv.includes('--post');
-  const repoRoot = resolve(process.cwd(), '../..');
+  const repoRoot = findRepoRoot();
 
   if (live && !promotionsPermitted(new Date())) {
     // Caught early with a plain message. The engine would refuse anyway — this
