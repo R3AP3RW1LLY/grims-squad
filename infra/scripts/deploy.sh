@@ -58,6 +58,23 @@ envval() { sed -n "s/^$1=//p" "$ENV_FILE" | head -n1; }
 REQUIRED=(
   POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB
   DATABASE_URL REDIS_PASSWORD
+  # ★ ADDED 2026-07-29, AFTER A DEPLOY THAT WOULD HAVE PASSED WITHOUT IT ★
+  #
+  # REDIS_URL used to matter only to the permission cache, which fails soft — a
+  # missing value cost a little latency and nothing else, so it was reasonably
+  # left out of this list.
+  #
+  # It is now what the API's live-event bridge dials to receive notifications
+  # from the scheduled jobs. Unset, the bridge falls back to localhost:6379,
+  # which inside a container is nothing at all: it retries forever, the API
+  # starts perfectly happily, and every live update from the worker is silently
+  # dropped. A member watching the verification page would wait for something
+  # that was never coming.
+  #
+  # Exactly the class of failure this preflight exists for — knowable in a
+  # second, and otherwise discovered by a member wondering why a page never
+  # updated.
+  REDIS_URL
   DISCORD_CLIENT_ID DISCORD_CLIENT_SECRET DISCORD_BOT_TOKEN DISCORD_GUILD_ID
   OAUTH_STATE_SECRET TOKEN_ENCRYPTION_KEYRING
   # The five the API's object-store guard demands together. Missing ONE of them
