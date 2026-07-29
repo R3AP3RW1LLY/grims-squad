@@ -2,6 +2,7 @@ import { Global, Module } from '@nestjs/common';
 import { PrismaClient } from '@grims/db';
 import { Redis } from 'ioredis';
 import { PermissionService } from './permission.service.js';
+import { AclDbService } from './acl-db.service.js';
 import { PrismaPermissionStore, RedisPermissionCache } from './permission.store.prisma.js';
 import { RequiresPermissionGuard } from './requires-permission.guard.js';
 import { WebmasterService, parseBootstrapIds } from './webmaster.js';
@@ -27,6 +28,26 @@ import { PrismaWebmasterStore } from './webmaster.store.prisma.js';
     RequiresPermissionGuard,
     {
       /*
+       * ★ INV-002's ENFORCEMENT POINT — the thing that was missing ★
+       *
+       * `withPrincipal` existed, worked, failed closed, and had zero callers.
+       * The invariant was reported as covered by a test that called the
+       * extension directly, which proves the extension rather than its
+       * application. This provider is what makes the invariant true of the
+       * running system.
+       *
+       * Exported from a @Global module so that when P2 writes the first forum
+       * repository there is nothing to wire — the correct client is already
+       * injectable, and `acl-usage.spec.ts` fails the build if that repository
+       * reaches for the plain one instead.
+       */
+      provide: AclDbService,
+      inject: [PrismaClient, PermissionService],
+      useFactory: (prisma: PrismaClient, permissions: PermissionService) =>
+        new AclDbService(prisma, permissions),
+    },
+    {
+      /*
        * ★ THE RECOVERY PATH, FINALLY CONNECTED ★
        *
        * WebmasterService was written, documented and tested against an
@@ -50,6 +71,6 @@ import { PrismaWebmasterStore } from './webmaster.store.prisma.js';
         }),
     },
   ],
-  exports: [PermissionService, RequiresPermissionGuard, WebmasterService],
+  exports: [AclDbService, PermissionService, RequiresPermissionGuard, WebmasterService],
 })
 export class AuthzModule {}
