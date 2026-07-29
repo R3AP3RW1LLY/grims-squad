@@ -1,9 +1,11 @@
 import { PrismaClient } from '@grims/db';
 import { DiscordAdapter } from '@grims/ed-clients';
 import { ReconcileService } from './jobs/discord-reconcile.js';
+import { syncGuildRoles } from './jobs/discord-role-sync.js';
 import {
   AdapterGuildSource,
   PrismaReconcileStore,
+  PrismaRoleCacheStore,
   WebhookReporter,
 } from './jobs/discord-reconcile.wiring.js';
 
@@ -33,18 +35,41 @@ async function main(): Promise<number> {
 
   const prisma = new PrismaClient();
   try {
+    const source = new AdapterGuildSource(
+      new DiscordAdapter({
+        clientId: process.env['DISCORD_CLIENT_ID'] ?? '',
+        clientSecret: process.env['DISCORD_CLIENT_SECRET'] ?? '',
+        botToken,
+        // No grantable roles. This job never touches Discord roles — it reads
+        // them and changes OUR side. An empty ceiling makes that structural
+        // rather than a promise.
+        grantableRoleIds: [],
+      }),
+    );
+
+    /*
+     * ★ THE ROLE CACHE HAD NO WRITER AT ALL ★
+     *
+     * `syncGuildRoles` existed, `PrismaRoleCacheStore` existed, and NOTHING
+     * called either of them. So `discord_roles` stayed empty in production and
+     * every surface that turns a snowflake into a name came up blank — the
+     * roster's role chips, the membership fallback, and the mapping tab, which
+     * reported all eighteen mappings as pointing at "a role Discord no longer
+     * has".
+     *
+     * That message was wrong twice over: nothing had changed in Discord, and
+     * the cache had simply never been filled by anything.
+     *
+     * It runs BEFORE reconciliation, which reads roles to decide grants. It is
+     * allowed to fail without taking the run down — `syncGuildRoles` never
+     * throws — because refreshing names and colours matters far less than
+     * getting grants right.
+     */
+    const roleSync = await syncGuildRoles(source, new PrismaRoleCacheStore(prisma), guildId);
+    console.error(JSON.stringify({ msg: 'guild role cache synced', ...roleSync }));
+
     const svc = new ReconcileService(
-      new AdapterGuildSource(
-        new DiscordAdapter({
-          clientId: process.env['DISCORD_CLIENT_ID'] ?? '',
-          clientSecret: process.env['DISCORD_CLIENT_SECRET'] ?? '',
-          botToken,
-          // No grantable roles. This job never touches Discord roles — it reads
-          // them and changes OUR side. An empty ceiling makes that structural
-          // rather than a promise.
-          grantableRoleIds: [],
-        }),
-      ),
+      source,
       new PrismaReconcileStore(prisma),
       new WebhookReporter(process.env['DISCORD_ADMIN_WEBHOOK_URL'] ?? ''),
       { guildId },

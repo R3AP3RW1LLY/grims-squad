@@ -46,11 +46,23 @@ export default async function RolesPage({
   const mapped = new Set(rows.map((m) => m.roleId)).size;
 
   /*
-   * A mapping whose Discord role is not in the guild catalogue. Either it was
-   * DELETED in Discord or the bot's sync has not run — and either way that
-   * mapping now grants nobody anything, silently. Worth a number on the page.
+   * ★ AN EMPTY CACHE IS NOT A DELETED ROLE ★
+   *
+   * A mapping resolves through `discord_roles`, our own cache of guild role
+   * names, which the nightly reconciliation fills. When that cache is EMPTY —
+   * a fresh deployment, or a sync that has not run yet — every single mapping
+   * fails to resolve at once.
+   *
+   * This reported that as "N point at a role Discord no longer has", which is
+   * an accusation about somebody's Discord server based on our own table being
+   * cold. On production it fired for all eighteen mappings while nothing in
+   * Discord had changed at all.
+   *
+   * ALL of them unresolved means the cache, not the server. Some of them means
+   * those particular roles are genuinely gone. The two get different sentences.
    */
-  const orphaned = rows.filter((m) => m.discordName === null).length;
+  const unresolved = rows.filter((m) => m.discordName === null).length;
+  const cacheEmpty = rows.length > 0 && unresolved === rows.length;
 
   return (
     <>
@@ -86,13 +98,15 @@ export default async function RolesPage({
           label="Mapped to Discord"
           value={String(mapped)}
           hint={
-            orphaned > 0
-              ? `${orphaned} point at a role Discord no longer has`
-              : mapped === 0
-                ? 'Nothing reconciles yet'
-                : 'Reconciled nightly'
+            cacheEmpty
+              ? 'Role names not synced yet — runs nightly at 03:00'
+              : unresolved > 0
+                ? `${unresolved} no longer exist in Discord`
+                : mapped === 0
+                  ? 'Nothing reconciles yet'
+                  : 'Reconciled nightly'
           }
-          tone={orphaned > 0 || mapped === 0 ? 'warn' : 'default'}
+          tone={unresolved > 0 || mapped === 0 ? 'warn' : 'default'}
         />
       </StatGrid>
 
