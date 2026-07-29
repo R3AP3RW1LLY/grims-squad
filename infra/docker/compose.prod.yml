@@ -127,6 +127,31 @@ services:
     # No ports. The bot dials OUT to Discord's gateway and never accepts a
     # connection, so exposing anything would only add attack surface.
 
+  # ★ NOT A LONG-RUNNING SERVICE ★
+  #
+  # `docker compose up` must never start this. Every scheduled job is a one-shot
+  # process launched by the host's cron:
+  #
+  #   docker compose run --rm worker node apps/worker/dist/inara-sync.js
+  #
+  # `profiles:` is what keeps it out of `up`: a service with a profile is only
+  # created when that profile is named, and `run` names its service explicitly.
+  # Without it, `up -d` would start the container, the entrypoint would exit
+  # non-zero, and `restart: unless-stopped` would restart it forever.
+  #
+  # There is deliberately no `restart:` for the same reason. A job that fails
+  # should be visible in cron's mail, not retried in a loop against Inara.
+  worker:
+    profiles: ['jobs']
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.worker
+    env_file: [/srv/grims/.env]
+    environment:
+      NODE_ENV: production
+    depends_on:
+      postgres: { condition: service_healthy }
+
 volumes:
   pgdata:
   redisdata:

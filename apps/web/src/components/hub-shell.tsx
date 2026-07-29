@@ -24,7 +24,6 @@ import {
   LockClosedIcon,
   EyeSlashIcon,
   Cog6ToothIcon,
-  ClipboardDocumentListIcon,
   KeyIcon,
 } from '@heroicons/react/24/outline';
 import { ChevronDownIcon } from '@heroicons/react/20/solid';
@@ -74,9 +73,7 @@ const ICONS: Record<string, typeof HomeIcon> = {
   '/settings/security': LockClosedIcon,
   '/settings/account': Cog6ToothIcon,
   '/app': ShieldCheckIcon,
-  '/app/members': UsersIcon,
   '/app/roles': KeyIcon,
-  '/app/audit': ClipboardDocumentListIcon,
 };
 
 const SECTION_LABELS: Record<NavItem['section'], string> = {

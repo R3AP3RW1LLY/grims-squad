@@ -95,9 +95,48 @@ export class InaraNotApprovedError extends InaraApiError {
 export interface InaraConfig {
   readonly appName: string;
   readonly appVersion: string;
+  /**
+   * A key to call with when no pool is supplied.
+   *
+   * ★ THERE IS NO SQUADRON KEY — squadron owner, 2026-07-29 ★
+   *
+   * Inara issues keys to PEOPLE, not to squadrons, so the batch sweep has to
+   * borrow one from a member who has linked theirs. This stays for the paths
+   * that legitimately have a single key in hand — verifying one member with
+   * their own key — and for tests.
+   */
   readonly apiKey: string;
+  /**
+   * Where a batch gets its key, when the caller has several.
+   *
+   * ★ ONE KEY PER REQUEST, WHATEVER THE BATCH SIZE ★
+   *
+   * Inara's envelope carries exactly one `APIkey` in its header and any number
+   * of events in its body. So thirty commander lookups can share a request, but
+   * they cannot share thirty different keys — one member's key authenticates
+   * the whole chunk.
+   *
+   * Supplying a POOL rather than a key is what stops that being fragile: the
+   * sweep rotates, so no single member carries every call, and one revoked key
+   * costs one chunk rather than the entire sweep.
+   */
+  readonly apiKeyPool?: InaraKeyPool;
   readonly isDeveloped?: boolean;
   readonly timeoutMs?: number;
+}
+
+/**
+ * A rotating supply of member keys.
+ *
+ * Deliberately an interface rather than an array: the worker decrypts keys out
+ * of the database, and a package whose whole job is knowing about external APIs
+ * has no business knowing how our keys are stored (ADR-013).
+ */
+export interface InaraKeyPool {
+  /** The next key to use, or null when the pool is empty or exhausted. */
+  next(): string | null;
+  /** Tells the pool a key was rejected, so it is not handed out again. */
+  reject(key: string): void;
 }
 
 export interface InaraProfile {
@@ -314,10 +353,16 @@ export class InaraAdapter {
       try {
         // Unbounded wait: this is a scheduled job with nobody watching, and
         // giving up on the limiter would silently sync only the first chunk.
-        events = await this.#post(this.config.apiKey, chunk);
+        events = await this.#postWithPool(chunk);
       } catch (cause) {
-        // One bad chunk must not lose the others. A rejected key throws on
-        // every chunk anyway, so nothing is masked by continuing.
+        /*
+         * One bad chunk must not lose the others.
+         *
+         * A rejected KEY no longer throws past here in the pooled case —
+         * `#postWithPool` drops that key and tries the next member's. It only
+         * reaches this line when every key in the pool has been refused, and
+         * then the sweep genuinely cannot continue.
+         */
         if (cause instanceof InaraNotApprovedError) throw cause;
         continue;
       }
@@ -349,6 +394,50 @@ export class InaraAdapter {
    * to interpret, because in a batch they apply to one commander and not the
    * rest.
    */
+  /**
+   * Posts a chunk, borrowing a key from the pool and retiring rejected ones.
+   *
+   * ★ WHY A REJECTED KEY IS NOT FATAL HERE ★
+   *
+   * A member can revoke their Inara key at any moment, and they have no reason
+   * to tell us. With a single squadron key that would be the end of the sweep;
+   * with a pool it costs one attempt, the key is retired, and the next member's
+   * key carries the chunk.
+   *
+   * Falls back to `config.apiKey` when no pool was supplied, so every existing
+   * caller behaves exactly as before.
+   */
+  async #postWithPool(
+    chunk: readonly string[],
+  ): Promise<NonNullable<InaraEnvelope['events']>> {
+    const pool = this.config.apiKeyPool;
+    if (pool === undefined) return this.#post(this.config.apiKey, chunk);
+
+    let lastRejection: unknown = null;
+
+    /*
+     * Bounded by the number of keys, not `while (true)`. A pool that kept
+     * handing back the same rejected key would otherwise spin forever against
+     * a rate-limited third party.
+     */
+    for (;;) {
+      const key = pool.next();
+      if (key === null) {
+        if (lastRejection !== null) throw lastRejection;
+        throw new InaraNotApprovedError(401, 'No usable member API key.');
+      }
+
+      try {
+        return await this.#post(key, chunk);
+      } catch (cause) {
+        if (!(cause instanceof InaraNotApprovedError)) throw cause;
+        // That member's key is no longer good. Retire it and try another.
+        pool.reject(key);
+        lastRejection = cause;
+      }
+    }
+  }
+
   async #post(
     apiKey: string,
     cmdrNames: ReadonlyArray<string | undefined>,

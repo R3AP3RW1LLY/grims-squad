@@ -91,15 +91,35 @@ describe('the admin area', () => {
      * the site of a privilege-escalation bug earlier in this project.
      */
     const auditOnly = navFor(Permission.AUDIT_VIEW).map((i) => i.href);
-    expect(auditOnly).toContain('/app/audit');
+    // The console opens to any admin permission; the ROLE EDITOR does not.
+    expect(auditOnly).toContain('/app');
     expect(auditOnly).not.toContain('/app/roles');
-    expect(auditOnly).not.toContain('/app/members');
   });
 
-  it('MANDATORY: member management needs MEMBER_MANAGE specifically', () => {
+  it('MANDATORY: the role editor needs ROLE_MANAGE and nothing weaker', () => {
     const roleOnly = navFor(Permission.ROLE_MANAGE).map((i) => i.href);
     expect(roleOnly).toContain('/app/roles');
-    expect(roleOnly).not.toContain('/app/members');
+
+    // MEMBER_MANAGE alone must not reach it. This is the direction that
+    // matters: the role editor is the screen that can grant permissions.
+    const memberOnly = navFor(Permission.MEMBER_MANAGE).map((i) => i.href);
+    expect(memberOnly).not.toContain('/app/roles');
+  });
+
+  it('MANDATORY: no nav item points at a route that does not exist', () => {
+    /*
+     * `/app/members` and `/app/audit` were nav entries with no `page.tsx`
+     * behind them, so every officer who clicked either one got a 404 from
+     * their own sidebar. Both are tabs on `/app` and were removed on the
+     * squadron owner's instruction, 2026-07-29.
+     *
+     * Asserted rather than merely deleted, because the obvious way to
+     * "restore" them later is to add the link back — which would recreate the
+     * 404 exactly.
+     */
+    const everything = navFor(ALL_PERMISSIONS).map((i) => i.href);
+    expect(everything).not.toContain('/app/members');
+    expect(everything).not.toContain('/app/audit');
   });
 
   it('somebody holding everything sees every section', () => {

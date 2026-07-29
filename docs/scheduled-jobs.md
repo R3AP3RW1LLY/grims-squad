@@ -12,18 +12,32 @@ schedule shows up in cron's own mail rather than looking healthy forever.
 ## The crontab
 
 ```cron
+CRON_TZ=UTC
+COMPOSE=docker compose -f /srv/grims/repo/infra/docker/compose.prod.yml --env-file /srv/grims/.env
+
 # Discord reconciliation — role drift, orphaned identities, anomalies.
-0 3 * * *      cd /srv/grims && docker compose run --rm worker pnpm reconcile
+0 3 * * *      cd /srv/grims/repo && $COMPOSE run --rm worker node apps/worker/dist/main.js
 
 # Inara profile sweep — pilot ranks for the roster (ADR-004, amended 2026-07-28).
-*/15 * * * *   cd /srv/grims && docker compose run --rm worker pnpm inara:sync
+*/15 * * * *   cd /srv/grims/repo && $COMPOSE run --rm worker node apps/worker/dist/inara-sync.js
 
 # Promotions — the 1st of the month, 00:00 UTC. NOT before 1 August 2026.
-0 0 1 * *      cd /srv/grims && docker compose run --rm worker pnpm promote
+0 0 1 * *      cd /srv/grims/repo && $COMPOSE run --rm worker node apps/worker/dist/promote.js
 
 # Commander audit — every commander's squadron and nickname, nightly.
-15 0 * * *     cd /srv/grims && docker compose run --rm worker pnpm audit:daily
+15 0 * * *     cd /srv/grims/repo && $COMPOSE run --rm worker node apps/worker/dist/daily-audit.js
 ```
+
+**`node dist/…`, not `pnpm <script>`.** The package scripts run `tsx` against
+TypeScript source. That works, but it pays a compile on every one of the 96
+daily sweeps and depends on a devDependency being present in a production image
+— a `pnpm install --prod` anywhere in the future would break all four jobs at
+once, silently, at 3am.
+
+**The `worker` service carries `profiles: ['jobs']`.** Without it `docker compose
+up -d` would start the container alongside the API, the entrypoint would exit,
+and restart-on-failure would loop it forever. A profiled service is only created
+when something names it — and `run` always names its service explicitly.
 
 Set `CRON_TZ=UTC` at the top of the crontab. Promotions are defined in UTC and a
 host in a summer-time zone would otherwise run them an hour early for half the
@@ -46,13 +60,41 @@ treating it as evidence would undo the point of key-based verification.
 
 | Code | Meaning |
 |---|---|
-| `0` | Swept cleanly, **or no `INARA_API_KEY` is configured** |
+| `0` | Swept cleanly, **or no member has linked an Inara key** |
 | `1` | One or more commanders got no answer — requests are failing |
 
-A missing key exits **0 on purpose**. Inara is optional; a deployment without a
-key simply has no Inara-sourced ranks and the roster falls back to the journal.
-Alerting every twenty minutes about a feature nobody configured is how a
-monitoring channel gets muted, and a muted channel is worse than none.
+No keys exits **0 on purpose**. Nobody has linked one yet, so there is nothing
+to call with and the roster falls back to journal ranks. Alerting every fifteen
+minutes about a feature nobody has configured is how a monitoring channel gets
+muted, and a muted channel is worse than none.
+
+### ★ THERE IS NO SQUADRON KEY ★
+
+Corrected 2026-07-29, on the squadron owner's instruction. **Inara issues API
+keys to PEOPLE, not to squadrons.** This job was written around a single
+`INARA_API_KEY` that would belong to the squadron — a thing that does not exist
+and was never going to be set, which is why the sweep skipped cleanly every
+fifteen minutes and every pilot rank on the roster stayed blank for anybody not
+running the companion app.
+
+It now borrows from the members who have linked their own key: the same keys
+that already prove their commander name, decrypted the same way.
+
+**One key per request, whatever the batch size.** Inara's envelope carries
+exactly one `APIkey` in its header and any number of events in its body, so
+thirty commander lookups share a request but cannot share thirty keys — one
+member's key authenticates the whole chunk. The pool ROTATES so no single member
+carries every call, and a rejected key is retired for the rest of the run rather
+than retried on every chunk.
+
+**It reads nothing private.** The sweep asks for PUBLIC commander profiles by
+name — the same pages anyone can open in a browser. The key only identifies the
+caller to Inara's rate limiter; a member's key is never used to fetch something
+they could not already see themselves.
+
+`INARA_API_KEY` is still honoured if a deployment happens to have one, but only
+as a fallback when the pool is empty. Preferring it would put the squadron's
+whole rate spend on one key even when a dozen members had offered theirs.
 
 `unanswered > 0` is the one outcome worth waking someone for. "Not found" is
 normal — most members have no Inara account — but unanswered means requests are

@@ -1,0 +1,78 @@
+# What must never enter a build context.
+#
+# ★ THIS FILE DID NOT EXIST, AND EVERY IMAGE COPIED THE LOT ★
+#
+# All four Dockerfiles do `COPY . .` from the repo root. With no ignore list
+# that is literally everything in the working tree, and two of those things are
+# serious:
+#
+#   apps/api/.env      The Discord bot token, the OAuth client secret, the
+#                      state secret, the token-encryption keyring and the
+#                      database password — baked into an image layer, readable
+#                      by anyone who can `docker save` or pull the image, and
+#                      still there after a later layer deletes it.
+#
+#   node_modules/      Half a gigabyte of the BUILD MACHINE's dependencies,
+#                      including native binaries compiled for the host. It also
+#                      broke the build outright: pnpm tries to purge a modules
+#                      directory it did not create and aborts without a TTY
+#                      (ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY).
+#
+# The second is why this was found. The first is why it matters.
+
+# ── secrets ──────────────────────────────────────────────────────────────────
+# Every shape, not just the one that exists today. `.env` alone would have
+# missed `apps/api/.env`, which is the one that is actually on disk.
+.env
+.env.*
+**/.env
+**/.env.*
+!**/.env.example
+*.pem
+*.key
+**/secrets/
+
+# ── dependencies and build output ────────────────────────────────────────────
+# The image installs and builds from the lockfile itself, so anything already
+# built here is at best redundant and at worst compiled for the wrong platform.
+node_modules
+**/node_modules
+dist
+**/dist
+.next
+**/.next
+*.tsbuildinfo
+**/*.tsbuildinfo
+apps/companion/release
+apps/companion/build
+
+# ── version control and CI ───────────────────────────────────────────────────
+# `.git` is often the largest single directory in the context and nothing in
+# the image reads it.
+.git
+.gitignore
+.github
+
+# ── local noise ──────────────────────────────────────────────────────────────
+.vscode
+.idea
+.claude
+coverage
+**/coverage
+*.log
+.DS_Store
+Thumbs.db
+
+# ── things that describe the build rather than take part in it ───────────────
+docs
+infra/scripts
+README.md
+
+# ★ `ssot/` IS NOT IN THIS LIST, AND MUST NOT BE ★
+#
+# It looks like documentation and it is not: the promotion run READS
+# `ssot/02-domain/rank-progression.yaml` at runtime to get the ladder
+# (promotion-run.wiring.ts). Excluding it builds an image that passes every
+# test, starts cleanly, and throws "rank-progression.yaml has no ladder
+# section" on the 1st of the month at midnight — the one night nobody is
+# watching. It was in this list for about a minute.

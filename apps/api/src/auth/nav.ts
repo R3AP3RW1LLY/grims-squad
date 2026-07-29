@@ -115,26 +115,27 @@ const NAV: readonly NavDefinition[] = [
       Permission.SITE_CONFIG |
       Permission.AUDIT_VIEW,
   },
-  {
-    href: '/app/members',
-    label: 'Members',
-    section: 'admin',
-    blurb: 'Verify commanders and manage standing.',
-    requires: Permission.MEMBER_MANAGE,
-  },
+  /*
+   * ★ `/app/members` AND `/app/audit` ARE GONE — squadron owner, 2026-07-29 ★
+   *
+   * Neither page ever existed. Both were nav entries pointing at routes with no
+   * `page.tsx` behind them, so every officer who clicked either one got a 404
+   * from their own admin sidebar.
+   *
+   * The work lives in the console's TABS: members and their promotion standing
+   * under `/app?tab=activity`, the log under `/app?tab=audit`. `/app` is
+   * already in this list and already requires one of the four admin
+   * permissions, so nothing became unreachable by removing these.
+   *
+   * `/app/roles` stays. It IS a real page — it has its own tabs now, and it is
+   * the only surface that can edit a permission mask.
+   */
   {
     href: '/app/roles',
     label: 'Roles',
     section: 'admin',
     blurb: 'Who holds what, and what each role grants.',
     requires: Permission.ROLE_MANAGE,
-  },
-  {
-    href: '/app/audit',
-    label: 'Audit log',
-    section: 'admin',
-    blurb: 'Every privileged action, and who took it.',
-    requires: Permission.AUDIT_VIEW,
   },
 ];
 

@@ -1,0 +1,46 @@
+# syntax=docker/dockerfile:1
+#
+# Worker image: the scheduled jobs.
+#
+# ★ THIS DID NOT EXIST, AND THE CRON COULD NEVER HAVE RUN ★
+#
+# docs/scheduled-jobs.md documents four entries, every one of them
+# `docker compose run --rm worker …`. There was no `worker` service and no image
+# to build it from, so all four would have failed with "no such service" from
+# the first night — the Inara sweep, the Discord reconciliation, the nightly
+# commander audit and the monthly promotion run.
+#
+# Built from the REPO ROOT as context, like the others: pnpm workspaces need the
+# lockfile and every workspace manifest to resolve the same graph CI tested.
+FROM node:24-slim AS base
+RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH
+RUN corepack enable
+
+FROM base AS build
+WORKDIR /app
+COPY . .
+RUN pnpm install --frozen-lockfile
+RUN pnpm --filter @grims/db exec prisma generate
+RUN pnpm --filter @grims/shared build \
+ && pnpm --filter @grims/ed-clients build \
+ && pnpm --filter @grims/db build \
+ && pnpm --filter @grims/worker exec tsc -b
+
+FROM base AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=build /app /app
+# Non-root, as everywhere else: a container escape from a root process is a far
+# shorter path to the host than one from an unprivileged process.
+RUN useradd -r -u 10001 -m grims && chown -R grims:grims /app
+USER grims
+
+# ★ NO CMD THAT RUNS ANYTHING BY ITSELF ★
+#
+# Every entry in the crontab names its own script, and this image is only ever
+# started by `docker compose run --rm worker <script>`. A default CMD that ran a
+# job would mean `docker compose up` silently firing one — and one of these
+# scripts writes promotions.
+CMD ["node", "-e", "console.error('Give this container a job to run. See docs/scheduled-jobs.md.'); process.exit(1)"]

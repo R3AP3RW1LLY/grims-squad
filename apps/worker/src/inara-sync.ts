@@ -9,6 +9,7 @@ import {
 } from './jobs/squadron-recheck.wiring.js';
 import { syncInaraRanks } from './jobs/inara-rank-sync.js';
 import { AdapterInaraSource, PrismaInaraRankStore } from './jobs/inara-rank-sync.wiring.js';
+import { loadMemberKeys } from './jobs/member-key-pool.js';
 
 /**
  * The Inara sweep. One shot, every fifteen minutes.
@@ -25,8 +26,21 @@ import { AdapterInaraSource, PrismaInaraRankStore } from './jobs/inara-rank-sync
  * nothing, so the run is kept comfortably under its own interval by batching.
  */
 async function main(): Promise<number> {
+  /*
+   * ★ THERE IS NO SQUADRON KEY — squadron owner, 2026-07-29 ★
+   *
+   * Inara issues API keys to PEOPLE. This job was written around a single
+   * `INARA_API_KEY` belonging to the squadron, and no such thing exists — so it
+   * was never going to be set, and the sweep has been skipping cleanly every
+   * fifteen minutes ever since. That is why every pilot rank on the roster is
+   * blank for anybody not running the companion app.
+   *
+   * It now borrows from the members who have linked their own key. The variable
+   * is still read, because a deployment MAY have a key in hand for testing and
+   * honouring it costs one line — but nothing depends on it.
+   */
   const apiKey = process.env['INARA_API_KEY'] ?? '';
-  const hasSquadronKey = apiKey !== '' && !apiKey.includes('CHANGE_ME');
+  const hasStaticKey = apiKey !== '' && !apiKey.includes('CHANGE_ME');
 
   /*
    * ★ THE SQUADRON RE-CHECK RUNS WITHOUT THE SQUADRON KEY ★
@@ -64,28 +78,43 @@ async function main(): Promise<number> {
     await prismaForSquadron.$disconnect();
   }
 
-  if (!hasSquadronKey) {
-    /*
-     * Not an error. Inara is optional: a deployment without a key simply has no
-     * Inara-sourced ranks, and the roster falls back to the journal.
-     *
-     * Exits 0 deliberately. Alerting every twenty minutes about a feature
-     * nobody has configured is how a monitoring channel gets muted, and a muted
-     * channel is worse than no channel.
-     */
-    console.error(JSON.stringify({ msg: 'inara rank sweep skipped: no squadron API key' }));
-    return 0;
-  }
-
   const prisma = new PrismaClient();
   try {
+    const pool = await loadMemberKeys(
+      prisma,
+      new TokenCipher(createKeyring(process.env['TOKEN_ENCRYPTION_KEYRING'] ?? '')),
+    );
+
+    if (pool.size === 0 && !hasStaticKey) {
+      /*
+       * Not an error. Nobody has linked an Inara key yet, so there is nothing to
+       * call with and the roster falls back to journal ranks.
+       *
+       * Exits 0 deliberately. Alerting every fifteen minutes about a feature
+       * nobody has configured is how a monitoring channel gets muted, and a
+       * muted channel is worse than no channel.
+       */
+      console.error(
+        JSON.stringify({ msg: 'inara rank sweep skipped: no member has linked an Inara key' }),
+      );
+      return 0;
+    }
+
+    console.error(JSON.stringify({ msg: 'inara rank sweep starting', keys: pool.size }));
+
     const report = await syncInaraRanks(
       new PrismaInaraRankStore(prisma),
       new AdapterInaraSource(
         new InaraAdapter({
           appName: INARA_APP_NAME,
           appVersion: INARA_APP_VERSION,
+          /*
+           * The static key is the FALLBACK, and only when the pool is empty.
+           * Preferring it would put the squadron's whole rate spend on one key
+           * even when a dozen members had offered theirs.
+           */
           apiKey,
+          ...(pool.size > 0 ? { apiKeyPool: pool } : {}),
         }),
       ),
     );
