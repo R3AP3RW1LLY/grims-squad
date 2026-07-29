@@ -42,10 +42,42 @@
 	# cross-site relaxation: it can stay SameSite=Lax rather than None, and
 	# there is no CORS preflight on every call.
 	handle /v1/* {
-		reverse_proxy api:5001
+		reverse_proxy api:5001 {
+			# ★ RETRY ACROSS A CONTAINER SWAP ★
+			#
+			# Measured during a deploy: two seconds of 502 while the API
+			# container was replaced. `docker compose up -d` has no rolling
+			# replacement — it stops the old container and starts the new one,
+			# and every request arriving in that window has nowhere to go.
+			#
+			# `lb_try_duration` makes Caddy HOLD a request and retry the
+			# upstream instead of answering 502. The gap is short and bounded by
+			# the deploy's own health gate, so a request that arrives mid-swap
+			# waits a moment and then succeeds — which is what "zero downtime"
+			# has to mean when there is one instance of the service.
+			#
+			# Ten seconds is comfortably longer than the swap and far shorter
+			# than any sane client timeout. A genuinely dead upstream still
+			# fails, just ten seconds later, which is the right trade for a
+			# window that only opens during a deploy.
+			lb_try_duration 10s
+			lb_try_interval 250ms
+
+			# Retries are only safe on requests that can be repeated. Caddy will
+			# not replay a request whose body it has already streamed upstream,
+			# so this does not risk double-writes.
+			fail_duration 5s
+		}
 	}
 
 	handle {
-		reverse_proxy web:5000
+		reverse_proxy web:5000 {
+			# The same reasoning for the web container. It has no healthcheck,
+			# so the deploy waits on "Up" rather than "healthy" — which makes
+			# the retry window here more valuable, not less.
+			lb_try_duration 10s
+			lb_try_interval 250ms
+			fail_duration 5s
+		}
 	}
 }
