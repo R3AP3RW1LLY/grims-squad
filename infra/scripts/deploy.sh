@@ -215,13 +215,24 @@ check / 200
 #
 # That shipped once. Signing in appeared to do nothing, and every public check
 # said the site was healthy.
-if $COMPOSE exec -T web node -e "
-  fetch('\''\${API_INTERNAL_URL:-http://api:5001}/v1/health'\'', { signal: AbortSignal.timeout(8000) })
-    .then((r) => process.exit(r.ok ? 0 : 1))
-    .catch(() => process.exit(1));
-" >/dev/null 2>&1; then
+# The probe is a FILE, not an inline -e string. The inline version needed
+# quotes nested three deep — bash, then docker exec, then node — and the
+# escaping was wrong, so the check failed against a container that was working
+# perfectly. A false alarm on a deploy gate is worse than no gate: the next
+# person to see it assumes it lies.
+WEB_PROBE=$(mktemp)
+cat > "$WEB_PROBE" <<'PROBE'
+const url = (process.env.API_INTERNAL_URL || 'http://api:5001') + '/v1/health';
+fetch(url, { signal: AbortSignal.timeout(8000) })
+  .then((r) => process.exit(r.ok ? 0 : 1))
+  .catch(() => process.exit(1));
+PROBE
+
+if $COMPOSE exec -T web node < "$WEB_PROBE" >/dev/null 2>&1; then
   ok "web can reach the API internally"
+  rm -f "$WEB_PROBE"
 else
+  rm -f "$WEB_PROBE"
   die "the web container cannot reach the API — signed-in pages would render as signed out"
 fi
 # Members-only, so a redirect to sign-in is the CORRECT answer. A 200 here would
