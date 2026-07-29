@@ -32,7 +32,7 @@ describe('parseLiveMessage', () => {
    * changed. "Everybody" and "we did not say" must not be the same message —
    * broadcasting is a choice, never a default that a typo can reach.
    */
-  it('REFUSES an event with no userId rather than broadcasting it', () => {
+  it('REFUSES an event with no userId rather than broadcasting it @INV-048', () => {
     expect(parseLiveMessage('{"type":"verification"}')).toBeNull();
   });
 

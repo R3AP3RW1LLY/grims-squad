@@ -57,7 +57,7 @@ describe('verification broadcast', () => {
     expect(live.published).toContainEqual({ type: 'verification', userId: 'u1' });
   });
 
-  it('MANDATORY: also tells everybody, so the roster stops showing them unverified', () => {
+  it('MANDATORY @INV-048: also tells everybody, so the roster stops showing them unverified', () => {
     publish(controller, 'u1');
     expect(live.published).toContainEqual({ type: 'roster', userId: null });
   });
@@ -69,7 +69,7 @@ describe('verification broadcast', () => {
    * a particular person just proved their commander name. The broadcast half
    * must be anonymous; only the member-scoped half may name them.
    */
-  it('MANDATORY: the squadron-wide event never names the member', () => {
+  it('MANDATORY @INV-048: the squadron-wide event never names the member', () => {
     publish(controller, 'u1');
 
     const broadcast = live.published.filter((e) => e.userId === null);

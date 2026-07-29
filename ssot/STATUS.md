@@ -1,11 +1,21 @@
 # BUILD STATUS
-_Last updated: 2026-07-27 by agent (P1 build-out)_
+_Last updated: 2026-07-29 by agent (deployed to production)_
 
 ## Current position
-Phase: **P1 — Identity & shell, IN PROGRESS**
-P0:     7 of 8 done. **P0.7 (deploy) DEFERRED by the human, 2026-07-26** — no infrastructure work for now; development continues locally.
-Next:   **P1.11 — the Electron companion app** (ADR-022, D27), then deploy,
-        then live verification, then a P1 exit review. In that order.
+Phase: **P1 — Identity & shell, REVIEW** (every task built, deployed and live-verified; the exit review itself is not done)
+P0:     **8 of 8 DONE.** P0.7 (deploy) closed 2026-07-29 — production is live.
+Next:   **The P1 exit review**, and before 1 August, **a reviewed promotion dry run
+        against production data**. In that order — see "What to pick up next".
+
+★ **PRODUCTION IS LIVE.** `https://45-63-35-93.sslip.io`, commit `b8572f6`, all seven
+containers healthy. Deployed with a health-gated rolling swap and automatic rollback
+(`infra/scripts/deploy.sh`). Measured over 900 one-second samples from outside the
+server across a deploy: **web 900/900 at HTTP 200; the API 899/900**, the single miss
+being one sample during its container swap, with zero 502/503/504 recorded by Caddy.
+True zero downtime for the API needs a second replica — recorded as debt below.
+
+⚠ **`grims-squad.com` DOES NOT RESOLVE.** The site is reachable only at the sslip.io
+address, which is what `PUBLIC_SITE_URL` is set to. DNS has never been pointed.
 
 ★ **FRONTIER cAPI IS OFF THE CRITICAL PATH, PERMANENTLY** (ADR-022, 2026-07-27).
 Journals give us everything it would, in real time, with no discretionary approval.
@@ -34,32 +44,75 @@ Done:   **P1.1 Discord OAuth** — VERIFIED LIVE against the real Discord API on
         themselves.
         **P1.9 Public landing with live stats** — from our own database.
         **P1.10 TOTP** — forced enrolment, single-use codes, step-up on the admin console.
+        **P1.11 Electron companion app** — journal ingest, device pairing, telemetry
+        consent, and as of 0.3.0 it reports its own version so the website can stop
+        offering an update to somebody who already installed it (D30, D31).
+        **P0.7 Production deploy** — zero-downtime script with a 17-variable preflight,
+        pre-migration backup, health-gated swap and automatic rollback.
+        **Live event stream** — SSE, plus a Redis pub/sub bridge so the scheduled jobs
+        in the worker container can reach a browser (D29). Verified in production:
+        `grims-live-bridge` subscribed, a real event delivered, malformed ones dropped
+        without touching the API.
+        **Voice presence** — the bot records who is in a voice channel now, clearing
+        every row at startup because Discord keeps no occupancy history.
+        **Encrypted offsite backups, actually verified** — twice daily, and the object
+        is now read back from the bucket and its size compared (D33).
 
 Blocked: **P1.8 Frontier cAPI** — the application to Frontier has never been submitted.
         See `CAPI-APPLICATION.local.md`. Weeks of lead time, discretionary approval.
 
 ★ **PROMOTIONS ARE FLOORED AT 2026-08-01T00:00:00Z.** Non-negotiable human instruction,
 enforced by a coded guard (`packages/shared/src/promotion-floor.ts`) with tests at the exact
-millisecond boundary — NOT by a cron expression that happens not to fire yet. The engine also
-defaults to DRY RUN, so a live run needs both the date AND an explicit `--live`. **A dry run
-must be reviewed by a human before the first live run.**
+millisecond boundary — NOT by a cron expression that happens not to fire yet. Verified
+2026-07-29 that the guard is actually CALLED (`promotion-run.ts:126`), which is the failure
+this codebase has produced repeatedly: written, documented, tested and never wired.
+
+**Three days out, here is exactly what will happen on 1 August, and it is probably not
+what you would assume.**
+
+The production cron is `0 0 1 * *` and it invokes `promote.js` **without `--live`**. The
+engine's `dryRun` defaults to TRUE. So at 00:00 on 1 August it will write a REPORT to
+`/var/log/grims-promote.log` and **promote nobody.** A live run requires somebody to pass
+`--live` by hand, and the floor guard then has to agree on the date.
+
+That is the safe arrangement and it matches the standing instruction that a dry run be
+reviewed before the first live run. It is recorded here in plain terms because "promotions
+unlock on 1 August" and "promotions happen on 1 August" are different statements, and only
+the first is true.
+
+**Outstanding, and time-boxed:** run the dry run against production data NOW, while there
+are still days to fix whatever it reveals. See "What to pick up next".
 
 ## P1 exit gaps — what is NOT done
 _Recorded so the phase is not claimed complete on partial work._
 
+_Four rows below were stale on 2026-07-27 — they listed work the Done section above
+already claimed. Corrected 2026-07-29; a gap table that disagrees with the Done list
+is worse than no gap table._
+
 | Task | Missing | Why it matters |
 |------|---------|----------------|
-| P1.7 | Role editor with a "who does this affect" preview | Editing a permission mask blind is how someone accidentally grants the server. |
-| P1.7 | Discord mapping editor (the only path snowflakes may enter by) | Today mappings are seeded; there is no UI, so INV-008's intended entry point does not exist yet. |
-| P1.7 | Audit log filters by actor / action / target / date | The viewer is a flat tail of 100. Usable, not investigable. |
-| P1.8b | Inara nonce path (`trust_tier` 2) | Only officer-manual (`trust_tier` 1) exists. Needs the shared 2 req/min global limiter (INV-033) and `events[0].eventStatus` checking. |
-| P1.8 | Frontier cAPI entirely | Blocked externally. Ships as an upgrade, never a dependency. |
-| ALL | **Live verification of everything built since 2026-07-26** | Every adapter added in this stretch is `@unverified`. A fake proves the abstraction, not the contract (ADR-013). |
-| ALL | **Deploy** | P0.7 is still deferred. Nothing in this phase has run anywhere but locally and in CI.
+| ~~P1.7~~ | ~~Role editor with a "who does this affect" preview~~ | **DONE** — save is disabled until the preview runs. |
+| ~~P1.7~~ | ~~Discord mapping editor~~ | **DONE** — snowflake validation, duplicate refusal. |
+| ~~P1.7~~ | ~~Audit log filters~~ | **DONE** — server-side, by actor / action / target / date. |
+| ~~P1.8b~~ | ~~Inara nonce path (`trust_tier` 2)~~ | **DONE** — global 2/min limiter, `eventStatus` checked. |
+| P1.8 | Frontier cAPI entirely | Blocked externally, and **superseded** by ADR-022. Ships as an upgrade, never a dependency. |
+| ~~ALL~~ | ~~Live verification~~ | **DONE 2026-07-29** — Discord, Inara and the whole stack verified in production. |
+| ~~ALL~~ | ~~Deploy~~ | **DONE 2026-07-29** — P0.7 closed. |
+| **P1 exit** | **The exit review itself** | Every task is built, deployed and verified. No adversarial review has been run against the deployed system, so P1 is `REVIEW` and not `DONE`. |
+| **API** | **A second API replica** | One container means a ~12s gap on every deploy while it swaps. Web is unaffected (Caddy holds the old container until the new one is healthy). Nobody saw a 5xx, but "zero downtime" is not literally true for the API until there are two. |
 
-> **P0 was not formally exited.** Two of its exit criteria ("landing page live over HTTPS", "/v1/health all-green in production") require P0.7 and therefore cannot be met. The human explicitly authorised proceeding without infrastructure. This is recorded rather than glossed over: P0 exit is **conditionally met, pending deploy**, and P0.7 plus those two criteria must be closed before any production claim is made.
+> **P0 IS NOW FORMALLY EXITED (2026-07-29).** Both criteria that required P0.7 are met:
+> the landing page loads over HTTPS, and `/v1/health` returns all-green in production
+> (`db`, `redis`, `meilisearch` all `ok`). Verified from outside the server, not from
+> inside the container. One criterion is met in spirit rather than to the letter: the
+> page loads over HTTPS at the **sslip.io** address, not at "the real domain", because
+> `grims-squad.com` has never been pointed at the box.
 
-**Working locally without Discord/Frontier/Inara credentials.** Every external adapter is built against its fake, is marked `@unverified`, and appears in the table above. A P1 exit still requires live verification — building against a fake proves the abstraction, not the contract (ADR-013).
+**Live verification is done.** Discord OAuth and guild reads, Inara `getCommanderProfile`
+and the squadron check have all run against the real APIs in production. What Inara does
+NOT provide was established the same way: it has no squadron join date, so tenure comes
+from Discord's `guildJoinedAt` (INV-047).
 
 Local dev: `docker compose -f infra/docker/compose.dev.yml up -d`, then `pnpm dev`.
 **Website: http://localhost:5000** · API: http://localhost:5001/v1/health
@@ -67,8 +120,8 @@ Local dev: `docker compose -f infra/docker/compose.dev.yml up -d`, then `pnpm de
 ## Phase completion
 | Phase | Name | Status | Completed |
 |-------|------|--------|-----------|
-| P0 | Foundations | **CONDITIONALLY DONE** | 7 of 8 · P0.7 deferred by the human |
-| P1 | Identity & shell | **IN_PROGRESS** | — |
+| P0 | Foundations | **DONE** | 8 of 8 · 2026-07-29 |
+| P1 | Identity & shell | **REVIEW** | All 11 tasks built, deployed and live-verified. Exit review outstanding. |
 | P2 | Forums | NOT_STARTED | — |
 | P3 | Telemetry spine | NOT_STARTED | — |
 | P4 | BGS console | NOT_STARTED | — |
@@ -85,11 +138,11 @@ Status values: `NOT_STARTED | IN_PROGRESS | BLOCKED | REVIEW | DONE`.
 |------|--------|-----------|-------|
 | Frontier cAPI developer access | NOT_REQUESTED | — | BLOCKS P1.8 verification (`trust_tier` 3). Apply day 1 at `user.frontierstore.net`. Discretionary approval, days-to-weeks. Fallback path (P1.8b, Inara nonce + officer manual) ships regardless. |
 | Inara API app whitelisting | NOT_REQUESTED | — | Blocks enrichment only (nightly cross-check). Apply day 1 — PM CMDR Artie with app name, purpose, expected volume, non-commercial status. Unapproved key returns `400 This application has no access allowed.` |
-| Domain registered | **CONFIRMED** | 2026-07-26 | **`grims-squad.com`**. Still to do: point DNS at Cloudflare. |
-| VPS provisioned (4 vCPU / 8 GB / 160 GB NVMe) | NOT_STARTED | — | BLOCKS P0.7. Harden on provision: SSH keys only, fail2ban, ufw, unattended-upgrades. |
-| Cloudflare account + DNS delegated | NOT_STARTED | — | BLOCKS P0.7 (TLS, Turnstile, Access, Tunnel). |
-| Discord app + bot created | NOT_STARTED | — | BLOCKS P1.1. Guild ID known (`801929816596152320`). **Must enable the SERVER MEMBERS privileged intent** or `guild_roles` is silently empty. Role IDs still needed — see D2. |
-| Object storage bucket | NOT_STARTED | — | BLOCKS P2.3. See decision D5. |
+| Domain registered | **CONFIRMED, NOT POINTED** | 2026-07-26 | **`grims-squad.com`** is registered and does **not resolve** — `nslookup` returns NXDOMAIN. Production serves from `https://45-63-35-93.sslip.io`. **This is the one thing standing between the site and a real address.** |
+| VPS provisioned | **DONE** | 2026-07-29 | Vultr, `45.63.35.93`, hostname `grims-squad-hub`. SSH keys only. ⚠ The workstation's public IP rotates and the Vultr firewall allowlists it — a timeout means the allowlist, a permission-denied means the wrong key. |
+| Cloudflare account + DNS delegated | NOT_STARTED | — | No longer blocks anything: Caddy obtains certificates directly from Let's Encrypt for the sslip.io name. Needed for the real domain, Turnstile and Access. |
+| Discord app + bot created | **DONE** | — | Bot `Grim's Squad HQ Bot#9619` connected, 1 guild, 44 roles, 109 members cached. SERVER MEMBERS intent enabled. |
+| Object storage bucket | **DONE** | — | Two buckets, deliberately separate: `grims-squad-media` (avatars, and companion installers under `companion/`) and a distinct vault bucket for database dumps. The squadron owner required that backups not share storage with media. |
 | Git remote | **CREATED** | 2026-07-26 | `github.com/R3AP3RW1LLY/grims-squad`, **public**. Branch protection configured; outside PRs auto-closed by workflow. Local mode no longer applies. |
 | NVIDIA driver 580+ on the AI box | NOT_STARTED | — | BLOCKS P8.1. Verify both GPUs enumerate before anything else. |
 | Ollama models pulled + benchmarked | NOT_STARTED | — | BLOCKS P8.2. ≥75% tool-call reliability required before building on it. |
@@ -110,8 +163,8 @@ _Adapters written from documentation, not yet tested against the live API. Every
 | Frontier cAPI | OAuth2 PKCE + `/profile` | NO | NO | P1.8 |
 | Discord | `oauth2/token`, `/users/@me` | **YES** | **YES** (2026-07-26) | P1.1 |
 | Discord | `/users/@me/guilds/{id}/member` | **YES** | **YES** (2026-07-26) | P1.1 |
-| Inara | `getCommanderProfile` | NO | NO | P1.8b |
-| Discord | OAuth2 + Gateway + REST | NO | NO | P1.1 |
+| Inara | `getCommanderProfile` | **YES** | **YES** (2026-07-29) | P1.8b |
+| Discord | OAuth2 + Gateway + REST | **YES** | **YES** (2026-07-29) | P1.1 |
 
 ## Open decisions awaiting human
 | # | Question | Blocking | Asked |
@@ -167,6 +220,26 @@ invariant gate that would have been switched off in week one.
 
 ## Session handoff notes
 _Newest first. One line per session that changed state._
+
+- **2026-07-29 · agent** — **DEPLOYED TO PRODUCTION.** Eight PRs (#67–#74) merged through CI,
+  none pushed direct to main; `enforce_admins` enabled on `main` and it refused a merge
+  mid-sequence when a check was still running, which is what it is for. Two additive
+  migrations applied with the index count identical at 210 either side — every generated
+  Prisma migration in this repo proposes dropping the pgvector and full-text indexes and
+  must be trimmed by hand. Companion **0.3.0** published on all four platforms.
+  **Shipped:** live verification across the whole app via SSE plus a Redis bridge from the
+  worker (D29); voice presence on Last Seen; the privacy tab merged into Commander
+  Management; homepage hero naming Blood Brothers from Alrai and linking out; coming-soon
+  screens for `/ops`, `/bgs`, `/fleet`; Elite sign-ins on the activity chart; a 30-second
+  refresh grace window (D28); an update banner keyed to a real version mismatch (D30, D31);
+  brand-asset protection with its limits written down (D32); backups verified in-bucket
+  (D33). **Bugs found that nothing would have caught:** five consecutive zero-byte backups
+  reported as successful; `'0.10.0' < '0.9.0'` as strings, which would have silently stopped
+  announcing updates from the tenth release; a middleware rule of mine that broke every logo
+  on the site while the markup still held the right URL; a `qualifies` flag that told
+  officers a Grand Master General was due a promotion the engine refuses outright.
+  **Still open:** `grims-squad.com` does not resolve; five empty backup objects await the
+  owner's decision; the API needs a second replica for literal zero downtime.
 
 - **2026-07-27 · agent** — cAPI dropped from the critical path (ADR-022, D27): an **Electron** companion app collects journals instead, which is what will finally move `game_activity` off `unknown` and let anyone qualify for promotion. Electron is a non-negotiable human instruction; the size/memory trade against Tauri is recorded in the ADR rather than left implicit. **The existing schema already supports the whole ingest design** — `DeviceToken` for pairing and `TelemetryEvent` with an idempotency key that already reasons about Elite's whole-second journal timestamps (INV-017, DATA-INTEGRITY B1) — so P1.11 needs no schema change. Also this session: the ten ladder ranks seeded and mapped (promotions had nothing to read before, which is why every dry run reported zero); promotion now writes to Discord as well or reconciliation would hand back the old rank; Inara API key verification with the name coming FROM Inara; nickname sync driven by Inara calls. **Three local-dev faults fixed, all of which failed silently:** the API never loaded `.env` (no `--env-file`), a production `.next` broke dev CSS, and `/v1/*` had no local proxy so sign-in and every client-side call 404'd. 597+ tests green.
 - **2026-07-27 · agent** — Finished P1.7 and P1.8b, the two tasks left partial overnight. Role editor with a MANDATORY who-does-this-affect preview (save is disabled until it runs), Discord mapping editor with snowflake validation and duplicate refusal, server-side audit filters. Inara nonce path complete: global 2/min singleton limiter (INV-033), `events[0].eventStatus` checked rather than `res.ok` — Inara answers HTTP 200 for its own failures — and not-found-yet treated as a normal in-progress state. **566 tests passing, all five CI jobs green.** NonceService moved to `packages/shared` and its Prisma store to `packages/db` so the worker can use both. **Every P1 task except cAPI is now built; nothing is deployed and nothing is live-verified.**
