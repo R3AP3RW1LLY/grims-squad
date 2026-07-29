@@ -77,6 +77,22 @@ jobs:
         # stops working.
         run: pnpm --filter @grims/companion test
 
+      # ★ THE APP HAS TO BE BUILT BEFORE IT CAN BE PACKAGED ★
+      #
+      # This step did not exist. The job built @grims/shared, ran the
+      # companion's TESTS, and went straight to electron-builder — which duly
+      # packaged a directory with no `dist/main.cjs` in it and failed with
+      # "Application entry file ... is corrupted".
+      #
+      # It had never worked. The proof was sitting in object storage: a 0-byte
+      # `Grims Squad Companion Setup 0.1.0.exe`, uploaded by a job that reported
+      # success because the upload of nothing succeeded.
+      #
+      # `build` compiles TypeScript, generates the icons and bundles main and
+      # preload with esbuild. All three are required by the packager.
+      - name: build the app
+        run: pnpm --filter @grims/companion build
+
       - name: package
         run: pnpm --filter @grims/companion exec electron-builder ${{ matrix.target }}
         env:
@@ -142,6 +158,26 @@ jobs:
           if [ "${#FILES[@]}" -eq 0 ]; then
             echo "::error::No installers found. Refusing to prune the bucket."
             exit 1
+          fi
+
+          # ★ AND THEY MUST NOT BE EMPTY ★
+          #
+          # A 0-byte `Grims Squad Companion Setup 0.1.0.exe` sat in the bucket
+          # for a day. The packaging step had failed, produced an empty file,
+          # and the upload of nothing succeeded — so the job reported success
+          # and members had a download that could not possibly install.
+          #
+          # "A file exists" and "a file has an installer in it" are different
+          # claims, and only the second is worth publishing. One megabyte is far
+          # below any real Electron build and far above any truncation.
+          for f in "${FILES[@]}"; do
+            size=$(stat -c%s "$f")
+            if [ "$size" -lt 1000000 ]; then
+              echo "::error::${f} is ${size} bytes — that is not an installer. Refusing to publish."
+              exit 1
+            fi
+            echo "  $(basename "$f") — $((size / 1048576)) MB"
+          done
           fi
 
           # ---- UPLOAD FIRST -------------------------------------------------
