@@ -12,7 +12,8 @@
     "start": "pnpm build && node dev.mjs",
     "dist": "electron-builder --win --mac --linux",
     "dist:win": "electron-builder --win",
-    "clean": "rm -rf dist release *.tsbuildinfo"
+    "clean": "rm -rf dist release *.tsbuildinfo",
+    "start:prod": "pnpm build && node prod.mjs"
   },
   "devDependencies": {
     "@grims/config": "workspace:*",
