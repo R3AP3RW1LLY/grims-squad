@@ -14,6 +14,18 @@
 
 appId: org.pyrax.grimssquad.companion
 productName: Grims Squad Companion
+
+# ★ THE BINARY'S NAME, SET EXPLICITLY ★
+#
+# Without this electron-builder derives it from the package name — `@grims/companion`
+# — and strips the punctuation to `@grimscompanion`. Windows and macOS tolerate
+# that; Linux does not, and AppImage refuses outright:
+#
+#   executableName contains characters that cannot be safely used in file paths
+#
+# So two of three platforms packaged and the third failed, on a name nobody had
+# chosen and no file anywhere was supposed to be called.
+executableName: grims-squad-companion
 copyright: Grim's Squad
 
 directories:
