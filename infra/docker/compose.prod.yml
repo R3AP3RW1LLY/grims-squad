@@ -18,7 +18,19 @@ services:
       - '443:443'
       - '443:443/udp' # HTTP/3
     volumes:
-      - ../caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # ★ THE DIRECTORY, NOT THE FILE ★
+      #
+      # This mounted `../caddy/Caddyfile` directly. Bind-mounting a single FILE
+      # pins an INODE: `git pull` writes a new file and renames it into place,
+      # so the container keeps reading the old one forever while the host shows
+      # the new content.
+      #
+      # It cost two "fixes" that were never loaded. Caddy reported a successful
+      # reload each time — it WAS reloading, just the stale inode — and the
+      # measured downtime moved around only because container boot times vary.
+      #
+      # Mounting the directory means a replaced file is visible immediately.
+      - ../caddy:/etc/caddy:ro
       - caddy_data:/data # certificates and ACME account — MUST persist
       - caddy_config:/config
     environment:
