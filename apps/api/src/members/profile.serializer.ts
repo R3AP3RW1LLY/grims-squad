@@ -102,6 +102,15 @@ export interface ProfileSource {
   /** Platform roles, e.g. webmaster. NOT squadron standing. */
   readonly siteRoles?: ReadonlyArray<{ name: string; colour: string | null }>;
   readonly cmdrName: string | null;
+  /**
+   * Inara confirms BOTH the commander name and that they fly with this
+   * squadron.
+   *
+   * Not a privacy-governed field: it describes the standing of a name that is
+   * already being shown, and hiding it would leave an unverified name looking
+   * identical to a verified one — which is the confusion it exists to remove.
+   */
+  readonly squadronVerified?: boolean;
   readonly location?: ProfileLocation | null;
   readonly credits?: bigint | null;
   readonly fleet?: readonly ProfileShip[] | null;
@@ -131,6 +140,8 @@ export interface PublicProfile {
   readonly status: string;
   readonly ranks: readonly string[];
   readonly cmdrName: string | null;
+  /** Inara confirms both the commander name and squadron membership. */
+  readonly squadronVerified: boolean;
   readonly location?: ProfileLocation | null;
   /** A STRING. Balances exceed 2^53, where a JS number rounds silently. */
   readonly credits?: string | null;
@@ -207,6 +218,14 @@ export function serializeProfile(
     status: source.status,
     ranks: source.ranks,
     cmdrName: source.cmdrName,
+    /*
+     * Emitted UNCONDITIONALLY, and false when there is no verification at all.
+     *
+     * Omitting it for unverified members would make "we checked and it is not
+     * confirmed" indistinguishable from "this build does not report it", and a
+     * badge that is silent in both cases cannot be trusted in either.
+     */
+    squadronVerified: source.squadronVerified === true,
   };
 
   // Keys are ASSIGNED, never assigned-then-deleted. Assigning `undefined` would

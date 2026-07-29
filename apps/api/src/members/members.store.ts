@@ -91,9 +91,32 @@ export class PrismaMembersStore implements MembersStore {
         showOnLeaderboard: true,
       },
     },
+    /*
+     * ★ `isVerified: true` IS LOAD-BEARING, NOT BELT-AND-BRACES ★
+     *
+     * This filtered on `revokedAt: null` alone, which let an UNPROVEN claim
+     * supply the commander name the roster prints.
+     *
+     * It was not merely cosmetic. `createPending` stores the claimed name with
+     * `verifiedAt` set to NOW, and this orders by `verifiedAt desc` — so a
+     * claim opened seconds ago sorted ABOVE a genuinely verified row and
+     * replaced it. And INV-005's uniqueness lock deliberately applies only to
+     * `isVerified = true`, so a pending claim may name a commander somebody
+     * else has already proven.
+     *
+     * Together: anybody could type another member's verified CMDR name into
+     * the claim form and have the roster attribute it to them, with no
+     * verification step and nothing revoked. The name is an identity here, so
+     * only a proven one may appear.
+     */
     cmdrVerifications: {
-      where: { revokedAt: null },
-      select: { cmdrName: true },
+      where: { revokedAt: null, isVerified: true },
+      /*
+       * The squadron fields ride along because the card states whether Inara
+       * confirms BOTH the name and the squadron. Read from the same row as the
+       * name, so the two can never describe different verifications.
+       */
+      select: { cmdrName: true, squadronVerifiedAt: true, inaraSquadron: true },
       orderBy: { verifiedAt: 'desc' as const },
       take: 1,
     },
@@ -127,7 +150,11 @@ export class PrismaMembersStore implements MembersStore {
     joinedAt: Date;
     status: string;
     privacySettings: Partial<PrivacySettings> | null;
-    cmdrVerifications: Array<{ cmdrName: string }>;
+    cmdrVerifications: Array<{
+      cmdrName: string;
+      squadronVerifiedAt: Date | null;
+      inaraSquadron: string | null;
+    }>;
     discordIdentity: { guildRoles: string[] } | null;
     userRoles: Array<{
       role: {
@@ -166,6 +193,19 @@ export class PrismaMembersStore implements MembersStore {
           .filter((r) => !r.role.isHierarchical)
           .map((r) => ({ name: r.role.name, colour: r.role.colour })),
         cmdrName: u.cmdrVerifications[0]?.cmdrName ?? null,
+        /*
+         * ★ BOTH HALVES, OR IT IS NOT VERIFIED ★
+         *
+         * A proven commander name says somebody controls that account. It says
+         * nothing about whether they fly with US — which is the question a
+         * squadron roster is actually asking. Inara confirming the squadron is
+         * the second, separate check, and only the two together earn the badge.
+         *
+         * A row exists here only when `isVerified` is true, so the name is
+         * already proven by the time this is read; the squadron timestamp is
+         * what remains to decide.
+         */
+        squadronVerified: u.cmdrVerifications[0]?.squadronVerifiedAt != null,
         // location, credits and fleet arrive with cAPI (P1.8, blocked on
         // Frontier). Absent here means absent from the response, which is the
         // correct behaviour rather than a placeholder to fill in.

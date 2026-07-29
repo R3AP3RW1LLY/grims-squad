@@ -42,6 +42,16 @@ export interface PublicProfile {
   /** Squadron roles, highest first, with the colour Discord shows them in. */
   ranks: Array<{ name: string; colour: string | null }>;
   cmdrName: string | null;
+  /**
+   * Inara confirms BOTH the commander name and that they fly with this
+   * squadron.
+   *
+   * Required, not optional: it is always emitted, and `false` is a real answer
+   * meaning "checked, not confirmed". Typing it as optional would let a card
+   * treat a missing key and a negative result the same way, which is the
+   * ambiguity the badge exists to remove.
+   */
+  squadronVerified: boolean;
   /*
    * These are OPTIONAL in the type, not nullable, and that is deliberate
    * (INV-027). A member who has not opted in produces a response with the key

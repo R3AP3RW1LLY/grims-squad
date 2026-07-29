@@ -84,7 +84,19 @@ export default async function RosterPage({
       />
 
       <PageBody
-        lead="Everyone who flies with Grim's Squad. Being listed is not optional — this is the squadron's own directory — but every detail on an entry is: a commander who has shared nothing appears here as a name and a rank."
+        /*
+          ★ WRITTEN FOR MEMBERS, NOT FOR THE PEOPLE WHO BUILT IT ★
+
+          The previous line explained which parts of the page were optional and
+          which were not. That is a note about how the system works, and it
+          answered a question nobody arriving at a roster is asking — the reader
+          wants to know who is out there and who they can fly with.
+
+          Nothing anywhere in this application tells a member what they are and
+          are not obliged to share. Squadron owner's instruction, 2026-07-29, and
+          it applies to every surface, not only this one.
+        */
+        lead="Every commander flying under Grim's Squad colours — what they fly, what they have mastered, and what time it is where they are. See who is out in the black tonight, and go find yourself a wing."
         rail={
           <>
             <Panel title="At a glance">
@@ -102,19 +114,6 @@ export default async function RosterPage({
                   ).length,
                 )}
               />
-            </Panel>
-
-            <Panel title="What is shown">
-              <p className="text-sm leading-relaxed text-[var(--color-text-secondary)]">
-                Everybody appears. What appears on YOUR entry beyond a name and a rank — your
-                position, your ships, your activity — is yours to decide, field by field.
-              </p>
-              <a
-                href="/settings/privacy"
-                className="mt-3 block text-sm text-[var(--color-brand-cyan-bright)]"
-              >
-                Your privacy settings
-              </a>
             </Panel>
 
             {me.user !== null && (

@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { isPlayingNow } from './roster-card';
+import { isPlayingNow, nicknameNote } from './roster-card';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -119,5 +119,152 @@ describe('the local clock', () => {
     // convert in your head at the moment you are trying not to.
     expect(source).toContain('dayPeriod');
     expect(source).toContain('hour12: true');
+  });
+});
+
+describe('the Discord nickname note', () => {
+  /*
+   * ★ THE REDUNDANCY THIS REMOVES ★
+   *
+   * A verified member wears `RANK - COMMANDER`, so the card printed
+   * "Cadet - PEBBLEMERCAHNT", then "PEBBLEMERCAHNT" as the heading, then
+   * "Cadet" as a role chip. Two facts, three lines, on every single card.
+   */
+  const HELD = ['Cadet', 'Grim’s Squad members', 'GMSD: LEGEND'];
+
+  it('MANDATORY: says nothing when the nickname is just rank plus commander', () => {
+    expect(nicknameNote('Cadet - PEBBLEMERCAHNT', 'PEBBLEMERCAHNT', HELD)).toBeNull();
+  });
+
+  it('MANDATORY: says nothing when the nickname IS the commander name', () => {
+    expect(nicknameNote('PEBBLEMERCAHNT', 'PEBBLEMERCAHNT', HELD)).toBeNull();
+  });
+
+  it('MANDATORY: KEEPS a nickname whose prefix is not a role they hold', () => {
+    /*
+     * The conservative half, and the one that matters. "Grimreaper" is a name
+     * somebody chose. Suppressing every ` - ` prefix would have eaten it, and
+     * the member would have no idea why their name vanished from the roster.
+     */
+    expect(nicknameNote('Grimreaper - PEBBLEMERCAHNT', 'PEBBLEMERCAHNT', HELD)).toBe(
+      'Grimreaper - PEBBLEMERCAHNT',
+    );
+  });
+
+  it('keeps a nickname that has nothing to do with the commander name', () => {
+    expect(nicknameNote('Shawn', 'PEBBLEMERCAHNT', HELD)).toBe('Shawn');
+  });
+
+  it('matches the rank regardless of case or padding', () => {
+    expect(nicknameNote('  cadet  -  pebblemercahnt  ', 'PEBBLEMERCAHNT', HELD)).toBeNull();
+  });
+
+  it('MANDATORY: adds nothing when there is no verified commander name', () => {
+    // The nickname IS the heading in that case, so repeating it underneath
+    // would print the same string twice.
+    expect(nicknameNote('Cadet - PEBBLEMERCAHNT', null, HELD)).toBeNull();
+  });
+
+  it('survives a rank containing the separator', () => {
+    // lastIndexOf, not indexOf: the commander name is the part that must
+    // survive intact.
+    expect(nicknameNote('Sector - Overseer - PEBBLE', 'PEBBLE', ['Sector - Overseer'])).toBeNull();
+  });
+});
+
+describe('the session timer', () => {
+  it('MANDATORY: counts from LoadGame, not from the presence heartbeat', () => {
+    /*
+     * The heartbeat is refreshed every twenty seconds, so counting from it
+     * would show every commander as twenty seconds into their session forever.
+     * LoadGame is "the game finished loading", which is when the session began.
+     */
+    expect(source).toContain('commander.lastPlayedAt');
+    expect(source).not.toMatch(/SessionTimer[^>]*startedAt=\{member\.lastPlayingAt\}/);
+  });
+
+  it('MANDATORY: only appears while they are playing', () => {
+    // Beside "last flew" the same number would be the age of a FINISHED
+    // session — a different fact wearing the same clothes.
+    const playingAt = source.indexOf('Playing now');
+    const timerAt = source.indexOf('SessionTimer startedAt');
+    const lastFlewAt = source.indexOf('Last flew');
+
+    expect(timerAt).toBeGreaterThan(playingAt);
+    expect(timerAt).toBeLessThan(lastFlewAt);
+  });
+});
+
+describe('the verification badge', () => {
+  it('MANDATORY: is driven by squadronVerified, which requires BOTH checks', () => {
+    // A proven commander name says somebody controls that Inara account. It
+    // says nothing about whether they fly with US.
+    expect(source).toContain('verified={member.squadronVerified}');
+  });
+
+  it('MANDATORY: renders in both states, never only on success', () => {
+    // A badge that appears only when verified leaves everybody else merely
+    // unlabelled, and a reader cannot tell "not verified" from "not reported".
+    expect(source).toContain('Not verified');
+    expect(source).toContain('Inara verified');
+  });
+
+  it('MANDATORY: carries a glyph as well as a colour', () => {
+    expect(source).toMatch(/verified \? '✓' : '○'/);
+  });
+});
+
+describe('the layout', () => {
+  it('MANDATORY: the pilot ranks do not sit on the footer border', () => {
+    /*
+     * mt-auto only adds space when the card is SHORTER than its grid row. On
+     * the tallest card in a row there is no slack, which is exactly when the
+     * bottom row of rank values collides with the footer rule.
+     */
+    expect(source).toMatch(/grid-cols-3[^"]*pb-5/);
+  });
+
+  it('MANDATORY: both label blocks share one label column width', () => {
+    // Values lining up down the card is the whole reason it stopped looking
+    // ragged; two different widths would put them back out of step.
+    const columns = source.match(/grid-cols-\[4\.5rem_1fr\]/g) ?? [];
+    expect(columns.length).toBe(2);
+  });
+});
+
+describe('the header does not fight itself for width', () => {
+  it('MANDATORY: the badge is NOT in the header block', () => {
+    /*
+     * ★ REPORTED FROM A REAL SCREEN ★
+     *
+     * Top-right of the header, the badge took the width the commander name
+     * needed: "PEBBLEMERCAH…" truncated on a card with room to spare, and the
+     * title line beneath it wrapped "COMMANDER" and "| WEBMASTER" onto separate
+     * rows.
+     *
+     * It belongs in the squadron block anyway — it is a squadron fact, on the
+     * same label column as Member, Rank and Awards.
+     */
+    const squadronAt = source.indexOf('Squadron\n');
+    const badgeAt = source.indexOf('<VerificationBadge');
+
+    expect(badgeAt).toBeGreaterThan(-1);
+    expect(squadronAt).toBeGreaterThan(-1);
+    expect(badgeAt).toBeGreaterThan(squadronAt);
+  });
+
+  it('MANDATORY: the title line cannot wrap', () => {
+    // "COMMANDER" above "| WEBMASTER" reads as two facts rather than one title.
+    const lineAt = source.indexOf('Commander</span>');
+    expect(lineAt).toBeGreaterThan(-1);
+
+    const opening = source.lastIndexOf('<p className=', lineAt);
+    expect(source.slice(opening, lineAt)).not.toContain('flex-wrap');
+  });
+
+  it('MANDATORY: the squadron block always renders, so the badge always shows', () => {
+    // It used to be conditional on a member holding at least one Discord role.
+    // A member with none would then have had no verification state at all.
+    expect(source).not.toContain('hasSquadronRows');
   });
 });
