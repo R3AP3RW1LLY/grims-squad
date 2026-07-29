@@ -66,8 +66,8 @@ let svc: RoleAdminService;
 beforeEach(() => {
   store = new FakeStore();
   store.roles = [
-    { id: 'r1', key: 'sector_overseer', name: 'Sector Overseer', permMask: OFFICER, rankOrder: 20 },
-    { id: 'r2', key: 'member', name: 'Member', permMask: 0n, rankOrder: 90 },
+    { id: 'r1', key: 'sector_overseer', name: 'Sector Overseer', permMask: OFFICER, rankOrder: 20, isHierarchical: true },
+    { id: 'r2', key: 'member', name: 'Member', permMask: 0n, rankOrder: 90, isHierarchical: true },
   ];
   svc = new RoleAdminService(store);
 });

@@ -49,4 +49,24 @@ export interface IIdentityStore {
   upsertOnLogin(input: IdentityUpsertInput): Promise<IdentityUpsertResult>;
 
   findByUserId(userId: string): Promise<StoredIdentity | null>;
+
+  /**
+   * Claims the Discord activity recorded before this account existed.
+   *
+   * ★ WHY THIS IS NEEDED AT ALL ★
+   *
+   * `member_activity_months` is keyed on the DISCORD id, because the bot counts
+   * messages for everyone in the guild — most of whom have never visited the
+   * site. `user_id` is filled in when they do.
+   *
+   * Nothing was filling it in. A member who had been talking in Discord for
+   * months would sign in, verify their commander, and still appear on the
+   * activity table as having done none of it — because the row the table reads
+   * had no account attached. Reported from production for a member who had
+   * done both.
+   *
+   * Retroactive on purpose: their history is theirs from the day the bot saw
+   * it, not from the day they got round to signing in.
+   */
+  linkActivityHistory(discordId: string, userId: string): Promise<number>;
 }

@@ -95,7 +95,15 @@ describe('what is never transmitted', () => {
   it('nothing on the never-send list is in the catalogue', () => {
     // Offering a toggle for something never transmitted would be a control
     // over nothing.
-    const described = new Set(TELEMETRY_CATALOGUE.flatMap((g) => g.entries.map((e) => e.event)));
+    /*
+     * `Set<string>`, not `Set<JournalEventName>`. The never-send list holds
+     * names that are deliberately NOT in the allowlist union — that is the
+     * whole point of it — so a narrowly typed set cannot even be asked about
+     * them.
+     */
+    const described = new Set<string>(
+      TELEMETRY_CATALOGUE.flatMap((g) => g.entries.map((e) => e.event)),
+    );
     for (const e of NEVER_SENT) expect(described.has(e), `${e} is described but never sent`).toBe(false);
   });
 });

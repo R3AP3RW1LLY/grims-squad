@@ -27,6 +27,14 @@ const base = (over: Partial<ProfileSource> = {}): ProfileSource => ({
   avatarUrl: null,
   bio: null,
   timezone: 'UTC',
+  /*
+   * Both REQUIRED by ProfileSource and both were missing. `avatarStoredHash` is
+   * what the serializer reads to decide whether to emit an avatar URL at all,
+   * and `lastPlayingAt` drives "playing now" — so every test here was building
+   * a profile the production type does not allow.
+   */
+  avatarStoredHash: null,
+  lastPlayingAt: null,
   joinedAt: new Date('2006-04-01T00:00:00Z'),
   status: 'active',
   ranks: [],

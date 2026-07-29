@@ -171,7 +171,7 @@ describe('InaraAdapter.getCommanderProfiles', () => {
   const batch = (events: unknown[]) => ({ header: { eventStatus: 200 }, events });
 
   it('asks about many commanders in ONE request', async () => {
-    const fetchMock = vi.fn(async () => ({
+    const fetchMock = vi.fn(async (_url: string, _init: RequestInit) => ({
       ok: true,
       status: 200,
       json: async () => batch([
@@ -190,7 +190,7 @@ describe('InaraAdapter.getCommanderProfiles', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(out.size).toBe(3);
 
-    const body = JSON.parse((fetchMock.mock.calls[0]?.[1] as { body: string }).body);
+    const body = JSON.parse((fetchMock.mock.calls[0]?.[1] as unknown as { body: string }).body);
     expect(body.events).toHaveLength(3);
     expect(body.events.map((e: { eventData: { searchName: string } }) => e.eventData.searchName))
       .toEqual(['ALPHA', 'BETA', 'GAMMA']);
@@ -232,7 +232,7 @@ describe('InaraAdapter.getCommanderProfiles', () => {
   });
 
   it('splits a large squadron into several requests', async () => {
-    const fetchMock = vi.fn(async () => ({
+    const fetchMock = vi.fn(async (_url: string, _init: RequestInit) => ({
       ok: true,
       status: 200,
       json: async () => batch(Array.from({ length: 30 }, () => ({ eventStatus: 204 }))),
@@ -263,7 +263,7 @@ describe('InaraAdapter.getCommanderProfiles', () => {
   });
 
   it('de-duplicates names differing only by case', async () => {
-    const fetchMock = vi.fn(async () => ({
+    const fetchMock = vi.fn(async (_url: string, _init: RequestInit) => ({
       ok: true,
       status: 200,
       json: async () => batch([{ eventStatus: 204 }]),
@@ -272,7 +272,7 @@ describe('InaraAdapter.getCommanderProfiles', () => {
 
     await adapter.getCommanderProfiles(['Pebble', 'PEBBLE', 'pebble']);
 
-    const body = JSON.parse((fetchMock.mock.calls[0]?.[1] as { body: string }).body);
+    const body = JSON.parse((fetchMock.mock.calls[0]?.[1] as unknown as { body: string }).body);
     // Elite names are case-insensitive, so this is one question, not three —
     // and rate budget spent asking it three times is budget stolen from
     // somebody else's card.

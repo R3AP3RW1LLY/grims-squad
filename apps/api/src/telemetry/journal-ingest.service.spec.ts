@@ -51,7 +51,10 @@ class FakeStore implements IngestStore {
   }
 
   async contribution(): Promise<{ storedEvents: number; firstEventAt: Date | null }> {
-    return { storedEvents: this.rows.length, firstEventAt: null };
+    // `inserted` is what this fake actually records. I wrote `this.rows` and
+    // nothing caught it, because specs were not typechecked — which is the very
+    // hole this change closes.
+    return { storedEvents: this.inserted.length, firstEventAt: null };
   }
 
   async markPlaying(_userId: string, at: Date): Promise<void> {

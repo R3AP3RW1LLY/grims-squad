@@ -77,4 +77,14 @@ export class InMemoryIdentityStore implements IIdentityStore {
       ? null
       : { userId: i.userId, discordUserId: i.discordUserId, refreshTokenEnc: i.refreshTokenEnc };
   }
+
+  /** Discord ids whose history has been claimed, and by whom. */
+  linkedActivity = new Map<string, string>();
+
+  async linkActivityHistory(discordId: string, userId: string): Promise<number> {
+    const already = this.linkedActivity.get(discordId) === userId;
+    this.linkedActivity.set(discordId, userId);
+    // Mirrors the real store: a repeat sign-in updates nothing.
+    return already ? 0 : 1;
+  }
 }

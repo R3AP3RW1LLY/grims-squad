@@ -11,6 +11,27 @@ import {
   resolveVisibleCategoryIds,
 } from './acl-extension.js';
 
+/*
+ * ★ WHY THESE CASTS ARE HERE ★
+ *
+ * The production helpers take deliberately NARROW structural interfaces — they
+ * describe the two or three methods they use rather than demanding a whole
+ * PrismaClient, which is what keeps them testable and honest about their
+ * dependencies.
+ *
+ * Passing a REAL client to one is safe and is the point of an integration test,
+ * but TypeScript will not accept it: Prisma's generated method types are
+ * generic and invariant in their argument positions, so a client that has
+ * strictly MORE than the interface still does not structurally satisfy it.
+ *
+ * Cast at the boundary rather than widening the production interfaces, which
+ * would give the real code a dependency on all of Prisma to satisfy a test.
+ */
+function asNarrow<T>(client: unknown): T {
+  return client as T;
+}
+
+
 /**
  * @INV-002 A query executed on behalf of a user MUST NOT return rows from an
  * ACL-bearing record whose viewPerm the user's mask does not satisfy —
@@ -35,7 +56,7 @@ async function principal(mask: bigint, userId: string | null = null) {
   return {
     userId,
     mask,
-    visibleIds: { ForumCategory: await resolveVisibleCategoryIds(raw, mask) },
+    visibleIds: { ForumCategory: await resolveVisibleCategoryIds(asNarrow(raw), mask) },
   };
 }
 
@@ -82,19 +103,21 @@ const slugs = async (client: PrismaClient): Promise<string[]> =>
 describe('@INV-002 data-layer ACL', () => {
   it('MANDATORY: a Ring 0 principal calling the repository DIRECTLY cannot read a Ring 1 row', async () => {
     // Ring 0 = public only. No controller involved anywhere in this test.
-    const ring0 = withPrincipal(raw, await principal(FORUM_VIEW_PUBLIC));
+    const ring0 = asNarrow<typeof raw>(withPrincipal(asNarrow(raw), await principal(FORUM_VIEW_PUBLIC)));
     expect(await slugs(ring0)).toEqual(['acltest-public']);
   });
 
   it('a Ring 1 principal sees public and member, never officer', async () => {
-    const ring1 = withPrincipal(raw, await principal(FORUM_VIEW_PUBLIC | FORUM_VIEW_MEMBER));
+    const ring1 = asNarrow<typeof raw>(withPrincipal(asNarrow(raw), await principal(FORUM_VIEW_PUBLIC | FORUM_VIEW_MEMBER)));
     expect(await slugs(ring1)).toEqual(['acltest-member', 'acltest-public']);
   });
 
   it('a Ring 2 principal sees all three', async () => {
-    const ring2 = withPrincipal(
-      raw,
-      await principal(FORUM_VIEW_PUBLIC | FORUM_VIEW_MEMBER | FORUM_VIEW_OFFICER),
+    const ring2 = asNarrow<typeof raw>(
+      withPrincipal(
+        asNarrow(raw),
+        await principal(FORUM_VIEW_PUBLIC | FORUM_VIEW_MEMBER | FORUM_VIEW_OFFICER),
+      ),
     );
     expect(await slugs(ring2)).toEqual(['acltest-member', 'acltest-officer', 'acltest-public']);
   });
@@ -102,14 +125,16 @@ describe('@INV-002 data-layer ACL', () => {
   it('an anonymous principal sees ONLY the public row', async () => {
     // viewPerm NULL means public, so zero permissions still sees the public
     // category — and nothing else.
-    expect(await slugs(withPrincipal(raw, await principal(0n)))).toEqual(['acltest-public']);
+    expect(
+      await slugs(asNarrow<typeof raw>(withPrincipal(asNarrow(raw), await principal(0n)))),
+    ).toEqual(['acltest-public']);
   });
 
   it('MANDATORY: a principal with no resolved id set sees NOTHING — fails closed', async () => {
     // Skipping the resolve step must not yield a permissive client. Returning
     // an empty predicate here would match every row, which is the single most
     // dangerous mistake available in this file.
-    const unresolved = withPrincipal(raw, { userId: null, mask: FORUM_VIEW_OFFICER });
+    const unresolved = asNarrow<typeof raw>(withPrincipal(asNarrow(raw), { userId: null, mask: FORUM_VIEW_OFFICER }));
     expect(await slugs(unresolved)).toEqual([]);
   });
 
@@ -117,7 +142,7 @@ describe('@INV-002 data-layer ACL', () => {
     // A caller naming the same column must not overwrite the ACL. AND, never
     // merge — this is the whole reason the predicate is combined rather than
     // spread.
-    const ring0 = withPrincipal(raw, await principal(FORUM_VIEW_PUBLIC));
+    const ring0 = asNarrow<typeof raw>(withPrincipal(asNarrow(raw), await principal(FORUM_VIEW_PUBLIC)));
     const rows = await ring0.forumCategory.findMany({
       where: { viewPerm: FORUM_VIEW_OFFICER.toString(), slug: { startsWith: 'acltest-' } },
       select: { slug: true },
@@ -126,14 +151,14 @@ describe('@INV-002 data-layer ACL', () => {
   });
 
   it('filters findFirst and findUnique, not just findMany', async () => {
-    const ring0 = withPrincipal(raw, await principal(FORUM_VIEW_PUBLIC));
+    const ring0 = asNarrow<typeof raw>(withPrincipal(asNarrow(raw), await principal(FORUM_VIEW_PUBLIC)));
     expect(
       await ring0.forumCategory.findFirst({ where: { slug: 'acltest-officer' } }),
     ).toBeNull();
   });
 
   it('filters COUNT — an unfiltered total leaks how much exists', async () => {
-    const ring0 = withPrincipal(raw, await principal(FORUM_VIEW_PUBLIC));
+    const ring0 = asNarrow<typeof raw>(withPrincipal(asNarrow(raw), await principal(FORUM_VIEW_PUBLIC)));
     const n = await ring0.forumCategory.count({ where: { slug: { startsWith: 'acltest-' } } });
     expect(n).toBe(1);
   });
@@ -141,7 +166,7 @@ describe('@INV-002 data-layer ACL', () => {
   it('does NOT filter writes — the ACL governs reads', async () => {
     // Write authorization is a separate concern with different rules. Silently
     // filtering an update would make a failed write look like a successful one.
-    const ring0 = withPrincipal(raw, await principal(FORUM_VIEW_PUBLIC));
+    const ring0 = asNarrow<typeof raw>(withPrincipal(asNarrow(raw), await principal(FORUM_VIEW_PUBLIC)));
     const n = await ring0.forumCategory.updateMany({
       where: { slug: 'acltest-officer' },
       data: { position: 9003 },
@@ -156,7 +181,7 @@ describe('@INV-002 data-layer ACL', () => {
   });
 
   it('systemBypass returns everything, and is not reachable from a request', async () => {
-    const job = withPrincipal(raw, { userId: null, mask: 0n, systemBypass: true });
+    const job = asNarrow<typeof raw>(withPrincipal(asNarrow(raw), { userId: null, mask: 0n, systemBypass: true }));
     expect(await slugs(job)).toHaveLength(3);
   });
 });

@@ -32,7 +32,14 @@ const event = (n: number): ParsedEvent => ({
  * Both readers now come from one string, so the size the test sees is the size
  * the uploader counts, and neither can drift from the other.
  */
-function fakeFetch(handler: (init: RequestInit) => Partial<Response> & { json?: () => unknown }) {
+interface FakeResponseSpec {
+  ok?: boolean;
+  status?: number;
+  /** The body, as an object. Serialised once and read back both ways. */
+  json?: () => unknown;
+}
+
+function fakeFetch(handler: (init: RequestInit) => FakeResponseSpec) {
   return (async (_url: string, init: RequestInit) => {
     const r = handler(init);
     const body = JSON.stringify(r.json ? r.json() : {});
@@ -260,15 +267,14 @@ describe('measuring the transfer', () => {
     const up = new Uploader({
       apiBaseUrl: 'https://hub.example',
       deviceToken: 'gsq_test',
-      fetchImpl: ((async () =>
-        ({
-          ok: true,
-          status: 200,
-          text: async () => '<html>nope</html>',
-          json: async () => {
-            throw new Error('not json');
-          },
-        }) as Response) as unknown) as typeof fetch,
+      fetchImpl: (async () => ({
+        ok: true,
+        status: 200,
+        text: async () => '<html>nope</html>',
+        json: async () => {
+          throw new Error('not json');
+        },
+      })) as unknown as typeof fetch,
     });
 
     const r = await up.send([event(1)]);

@@ -6,7 +6,7 @@
   "description": "NestJS + Fastify. REST, WebSocket, all business logic and authorization.",
   "scripts": {
     "build": "tsc -b",
-    "typecheck": "tsc -b --noEmit false --emitDeclarationOnly",
+    "typecheck": "tsc -b --noEmit false --emitDeclarationOnly && tsc -p tsconfig.spec.json",
     "test": "vitest run",
     "test:unit": "vitest run --exclude \"**/*.int.spec.ts\"",
     "clean": "rm -rf dist *.tsbuildinfo",

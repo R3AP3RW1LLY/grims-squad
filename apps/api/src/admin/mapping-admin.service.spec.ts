@@ -41,7 +41,18 @@ class FakeStore implements MappingAdminStore {
     return this.mappings.find((m) => m.discordRoleId === id) ?? null;
   }
   async create(roleId: string, discordRoleId: string): Promise<void> {
-    this.mappings.push({ roleId, roleName: this.roles.get(roleId) ?? '', discordRoleId });
+    this.mappings.push({
+      roleId,
+      roleName: this.roles.get(roleId) ?? '',
+      discordRoleId,
+      /*
+       * What the role is called IN DISCORD. Null is the realistic default: the
+       * guild catalogue is filled by the nightly sync, not by this service, so
+       * a mapping created here genuinely has no name yet.
+       */
+      discordName: null,
+      discordColour: null,
+    });
   }
   async remove(roleId: string, discordRoleId: string): Promise<void> {
     this.mappings = this.mappings.filter(
