@@ -5,7 +5,7 @@ import {
   isAllowedEvent,
   pickAllowedFields,
   telemetryCategoryFor,
-  isBaselineCategory,
+
   canonicalJson,
   type JournalEventName,
   type TelemetryCategoryName,
@@ -54,7 +54,16 @@ export interface IngestStore {
   /** Marks the member's month as having an observed Elite session. */
   markGameActivityObserved(userId: string, month: Date, at: Date): Promise<void>;
   /** The telemetry categories this member has opted into. Empty by default. */
-  consentedCategories(userId: string): Promise<readonly string[]>;
+  /**
+   * What this member has switched OFF (INV-013, amended 2026-07-29).
+   *
+   * Both scopes: whole categories, and individual events by name. Empty means
+   * everything is kept, which is the default.
+   */
+  telemetryOptOuts(userId: string): Promise<{
+    categories: readonly string[];
+    events: readonly string[];
+  }>;
   /** Records that the member's journal is being written right now. */
   markPlaying(userId: string, at: Date): Promise<void>;
 }
@@ -159,26 +168,29 @@ export class JournalIngestService {
     }
 
     /*
-     * ★ BASELINE ALWAYS, OPTIONAL ONLY WITH CONSENT (INV-013) ★
+     * ★ OPT-OUT: KEEP EVERYTHING EXCEPT WHAT THEY DECLINED (INV-013, amended) ★
      *
-     * The baseline — that they played, their ranks, their ships — comes with
-     * running the app. It is what the platform exists to hold, and making it
-     * conditional on a setting meant a member could run the app for a month and
-     * be told they had not qualified for a promotion because of a box they
-     * never saw. The consent is the INSTALL: the app is entirely optional,
-     * ships switched off, and shows them a real batch from their own journals
-     * before they turn it on.
+     * The app no longer filters. It sends what it reads, and THIS is where a
+     * member's decision is applied — so this gate is the whole of their
+     * privacy, not a second line behind one.
      *
-     * Everything else — where they went, what they fought, what they hauled —
-     * is opt-in and off by default, because it answers questions about a MEMBER
-     * rather than about the squadron.
+     * Two scopes, and the finer one matters: somebody may be happy for us to
+     * know they were in a conflict zone and not what bounties they claimed.
+     * An event is discarded if EITHER its category or its own name is declined.
      *
-     * Refusals are reported back per category rather than silently dropped: the
-     * invariant is explicit that a non-consented event gets a clear answer, so
-     * the app can tell the member what was not stored instead of appearing to
-     * work while sending into a void.
+     * `session` is never declinable. The service refuses to record it as an
+     * opt-out, so it cannot arrive here as one — but the check below does not
+     * special-case it, because a gate that trusts an upstream guarantee is a
+     * gate that breaks when the guarantee moves.
+     *
+     * Refusals are counted and reported back rather than silently dropped: the
+     * invariant is explicit that a declined event gets a clear answer, so the
+     * app can say what was not stored instead of appearing to work while
+     * sending into a void.
      */
-    const consented = new Set(await this.store.consentedCategories(userId));
+    const optOut = await this.store.telemetryOptOuts(userId);
+    const declinedCategories = new Set(optOut.categories);
+    const declinedEvents = new Set(optOut.events);
 
     const rows: Row[] = [];
     const sessionMonths = new Set<number>();
@@ -210,7 +222,15 @@ export class JournalIngestService {
       }
 
       const category = telemetryCategoryFor(e.name as JournalEventName);
-      if (!isBaselineCategory(category) && !consented.has(category)) {
+
+      // The member declined this event by name.
+      if (declinedEvents.has(e.name)) {
+        refused[e.name] = (refused[e.name] ?? 0) + 1;
+        continue;
+      }
+
+      // ...or the whole category it belongs to.
+      if (declinedCategories.has(category)) {
         refused[category] = (refused[category] ?? 0) + 1;
         continue;
       }

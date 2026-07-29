@@ -363,3 +363,43 @@ export function isLiveGameVersion(fileheader: Record<string, unknown>): boolean 
   }
   return !version.startsWith('3.');
 }
+
+/**
+ * The handful of events the companion app will NOT send, whatever the settings.
+ *
+ * ★ THE ONE EXCEPTION TO "SEND EVERYTHING" (2026-07-29) ★
+ *
+ * Telemetry is opt-out and the app no longer filters by category — it sends
+ * what it reads and the server applies the member's choices. This list is
+ * deliberately not part of that model, and it is short.
+ *
+ * Every entry satisfies all four of:
+ *
+ *   1. It carries somebody's PRIVATE WORDS or personal relationships — the body
+ *      of a direct message, who sent it, who is on their friends list.
+ *   2. It belongs to no category, so no member could opt IN to it even if they
+ *      wanted to.
+ *   3. The server already rejects it as an unknown event, so transmitting it
+ *      achieves nothing.
+ *   4. It frequently contains a THIRD PARTY's words. A member can consent to
+ *      sharing their own data; they cannot consent on behalf of the commander
+ *      who messaged them.
+ *
+ * Point 4 is the one that settles it. Everything else on the journal is a fact
+ * about the member; this is a fact about somebody else who never agreed to
+ * anything.
+ *
+ * `Died` is here for a different reason: it names the commander who killed
+ * them, which is another player, and answers no question the squadron has.
+ */
+export const NEVER_SENT: readonly string[] = [
+  'SendText',
+  'ReceiveText',
+  'Friends',
+  'Died',
+];
+
+/** Will the companion app transmit this event? */
+export function isSendable(name: string): boolean {
+  return name !== '' && !NEVER_SENT.includes(name);
+}

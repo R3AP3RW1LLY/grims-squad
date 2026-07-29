@@ -25,11 +25,19 @@ class FakeStore implements IngestStore {
   inserted: Row[] = [];
   seenKeys = new Set<string>();
   observed: Array<{ userId: string; month: string }> = [];
-  // The OPTIONAL categories only. Baseline needs no consent — see INV-013.
-  consent: string[] = ['location', 'combat', 'trade', 'exploration', 'bgs', 'carrier'];
+  /*
+   * ★ OPT-OUT NOW: EMPTY MEANS KEEP EVERYTHING (INV-013, amended 2026-07-29) ★
+   *
+   * This used to be a list of CONSENTED categories, and the default listed all
+   * six optional ones — so the fake was permissive and the tests never
+   * exercised a refusal by default. Under opt-out the default is genuinely
+   * empty, which is both simpler and the real behaviour.
+   */
+  optOutCategories: string[] = [];
+  optOutEvents: string[] = [];
 
-  async consentedCategories(): Promise<readonly string[]> {
-    return this.consent;
+  async telemetryOptOuts(): Promise<{ categories: readonly string[]; events: readonly string[] }> {
+    return { categories: this.optOutCategories, events: this.optOutEvents };
   }
 
   playingAt: Date | null = null;
@@ -239,7 +247,7 @@ describe('consent (INV-013)', () => {
      * The consent is the INSTALL — an app that is entirely optional, ships
      * switched off, and shows them a real batch from their own journals first.
      */
-    store.consent = [];
+    store.optOutCategories = [];
     const r = await svc.ingest(
       'u1',
       'dev1',
@@ -252,9 +260,20 @@ describe('consent (INV-013)', () => {
     expect(store.observed).toHaveLength(1);
   });
 
-  it('MANDATORY: an OPTIONAL category is refused without consent', async () => {
-    // Where they went, what they fought, what they hauled. Off until asked for.
-    store.consent = [];
+  it('MANDATORY: everything is kept when nothing is declined', async () => {
+    /*
+     * ★ THE INVERSION (INV-013, amended 2026-07-29) ★
+     *
+     * This test previously asserted the OPPOSITE: that an optional category was
+     * refused without consent. Telemetry is opt-out now — the app sends what it
+     * reads and the website is where a member declines — so a member who has
+     * never opened their settings has everything kept.
+     *
+     * The consequence is stated in the invariant and worth repeating here: a
+     * declined event now leaves the member's machine and is discarded by the
+     * server, where it used to never travel.
+     */
+    store.optOutCategories = [];
     const r = await svc.ingest(
       'u1',
       'dev1',
@@ -265,9 +284,46 @@ describe('consent (INV-013)', () => {
       NOW,
     );
 
-    expect(r.accepted).toBe(0);
-    expect(r.refused).toEqual({ location: 1, combat: 1 });
-    expect(store.inserted).toEqual([]);
+    expect(r.accepted).toBe(2);
+    expect(r.refused).toEqual({});
+  });
+
+  it('MANDATORY: a declined CATEGORY is discarded', async () => {
+    store.optOutCategories = ['location'];
+    const r = await svc.ingest(
+      'u1',
+      'dev1',
+      [
+        ev({ name: 'FSDJump', data: { StarSystem: 'Sol' } }),
+        ev({ name: 'Bounty', data: { TotalReward: 50_000 } }),
+      ],
+      NOW,
+    );
+
+    expect(r.accepted).toBe(1);
+    expect(r.refused).toEqual({ location: 1 });
+  });
+
+  it('MANDATORY: a declined EVENT is discarded while its category survives', async () => {
+    /*
+     * The finer scope, and the reason it exists: somebody may be happy for us
+     * to know they were in a conflict zone and not what bounties they claimed.
+     * A category-only model would force them to give up both or neither.
+     */
+    store.optOutEvents = ['Bounty'];
+    const r = await svc.ingest(
+      'u1',
+      'dev1',
+      [
+        ev({ name: 'Bounty', data: { TotalReward: 50_000 } }),
+        ev({ name: 'PVPKill', data: { CombatRank: 3 } }),
+      ],
+      NOW,
+    );
+
+    expect(r.accepted).toBe(1);
+    expect(r.refused).toEqual({ Bounty: 1 });
+    expect(store.inserted.map((r2) => r2.eventType)).toEqual(['PVPKill']);
   });
 
   it('MANDATORY: says WHICH categories were refused, rather than dropping them silently', async () => {
@@ -276,7 +332,7 @@ describe('consent (INV-013)', () => {
      * Folding it into a rejection count would leave the app appearing to work
      * while uploading into a void, and the member with no way to discover it.
      */
-    store.consent = ['trade'];
+    store.optOutCategories = ['location'];
     const r = await svc.ingest(
       'u1',
       'dev1',
@@ -291,8 +347,8 @@ describe('consent (INV-013)', () => {
     expect(r.refused).toEqual({ location: 1 });
   });
 
-  it('opting into one optional category does not open the others', async () => {
-    store.consent = ['combat'];
+  it('declining one category does not close the others', async () => {
+    store.optOutCategories = ['trade'];
     const r = await svc.ingest(
       'u1',
       'dev1',
@@ -308,7 +364,7 @@ describe('consent (INV-013)', () => {
   });
 
   it('files each event under the right category', async () => {
-    store.consent = ['location', 'combat', 'trade'];
+    store.optOutCategories = [];
     await svc.ingest(
       'u1',
       'dev1',

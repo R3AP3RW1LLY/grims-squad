@@ -34,10 +34,17 @@ describe('what gets sent', () => {
      * These are ordinary journal lines. None of them is our business, and none
      * is parsed, buffered or counted.
      *
-     * Chat and death, deliberately: the allowlist widened to cover leaderboards
-     * — jumps, bounties, trades — and these are the kind of thing that must
-     * stay out however far it widens. Who somebody messaged and how they died
-     * answer no question the squadron has.
+     * ★ THE ONE FILTER THAT SURVIVED THE OPT-OUT CHANGE (2026-07-29) ★
+     *
+     * The app no longer filters by category — it sends what it reads and the
+     * server applies the member's choices. These four are the exception, and
+     * the reason is not squeamishness:
+     *
+     * They carry a THIRD PARTY's words. A member can consent to sharing their
+     * own data; they cannot consent on behalf of the commander who messaged
+     * them. They also belong to no category, so nobody could opt in to them,
+     * and the server rejects them as unknown — so transmitting them would be
+     * risk with no purpose at all.
      */
     const text =
       line({ timestamp: '2026-07-27T12:00:00Z', event: 'SendText', Message: 'private message' }) +
@@ -45,12 +52,25 @@ describe('what gets sent', () => {
       line({ timestamp: '2026-07-27T12:00:02Z', event: 'Died', KillerName: 'someone' }) +
       line({ timestamp: '2026-07-27T12:00:03Z', event: 'Friends', Name: 'someone' });
 
-    expect(readJournalChunk(text).events).toEqual([]);
+    const out = readJournalChunk(text);
+    expect(out.events).toEqual([]);
+    // And the message body is nowhere in what would be uploaded.
+    expect(JSON.stringify(out.events)).not.toContain('private message');
   });
 
-  it('MANDATORY: strips the credit balance from an allowed event', () => {
-    // LoadGame carries Credits, Loan and the Frontier account ID alongside the
-    // commander name. We need to know they played, not what they are worth.
+  it('sends the whole event, including the balance it used to strip', () => {
+    /*
+     * ★ THIS ASSERTION IS THE REVERSE OF WHAT IT WAS ★
+     *
+     * It used to prove the app stripped Credits from LoadGame before sending.
+     * Telemetry is opt-out now (INV-013, amended 2026-07-29): the app sends
+     * what it reads and the WEBSITE decides what is kept.
+     *
+     * The consequence is real and is the price of the change — the balance now
+     * leaves the member's machine. What happens to it is a server-side
+     * decision, and the settings page names every event and says what each
+     * reveals so that decision is an informed one.
+     */
     const text = line({
       timestamp: '2026-07-27T12:00:00Z',
       event: 'LoadGame',
@@ -62,9 +82,20 @@ describe('what gets sent', () => {
     });
     const sent = JSON.stringify(readJournalChunk(text).events);
 
-    expect(sent).not.toContain('1204998221');
-    expect(sent).not.toContain('F1234567');
+    // The balance and the Frontier account id now travel. What is KEPT is the
+    // server's decision, applied from the member's settings.
+    expect(sent).toContain('1204998221');
     expect(sent).toContain('GRIM');
+
+    /*
+     * The routing fields do NOT travel inside the body: `timestamp` goes up as
+     * `occurredAt` and `event` as `name`, so keeping them here would store the
+     * same two facts twice under four names.
+     */
+    const first = readJournalChunk(text).events[0];
+    expect(first?.name).toBe('LoadGame');
+    expect(Object.keys(first?.data ?? {})).not.toContain('timestamp');
+    expect(Object.keys(first?.data ?? {})).not.toContain('event');
   });
 
   it('MANDATORY: a private message never survives, even mixed among allowed events', () => {

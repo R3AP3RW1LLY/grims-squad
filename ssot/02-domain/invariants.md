@@ -50,8 +50,29 @@ Severity: `SEC` = security; violating it is a breach. `DATA` = data integrity; v
 **INV-012** `SEC` `due:P1` · OAuth refresh tokens, cAPI tokens and device tokens are **encrypted at rest** (AES-256-GCM, key from the secret store) and never appear in logs, error messages, audit rows or API responses.
 *Test:* write a token, read the raw column, assert the plaintext is absent; assert a log-scrubbing test over a payload containing a token.
 
-**INV-013** `SEC` `due:P3` · Telemetry has a **BASELINE** — session, profile and fleet — collected from every member running the companion app, and **OPTIONAL** categories that are opt-in, default to off, and can be revoked with a purge. Consent for the optional set is **enforced server-side**: an event in a non-consented optional category is **rejected with an explicit answer**, never silently discarded.
-*Test:* post an event in a non-consented optional category; assert zero rows written and the category named in the response. Post a baseline event with no consent recorded; assert it IS stored.
+**INV-013** `SEC` `due:P3` · Telemetry is **OPT-OUT**. The companion app sends everything it reads; the server stores everything a member has not switched off. A member may decline any category or any individual event **except `session`**, which cannot be declined because promotion eligibility is computed from it. Opting out **purges** what was already stored for that scope, and enforcement is **server-side**: a declined event is discarded with an explicit answer, never silently.
+*Test:* post an event in a declined category; assert zero rows written and the scope named in the response. Post any event with no preferences recorded; assert it IS stored. Attempt to decline `session`; assert it is refused.
+
+> **Amended 2026-07-29 — opt-out, on the squadron owner's instruction.**
+> The model is inverted. The companion app no longer filters anything: it sends
+> what it reads, and the WEBSITE is where a member decides what is kept. Default
+> is everything; a member switches off what they do not want, at category or at
+> individual-event granularity.
+>
+> **The consequence, stated plainly rather than buried:** a declined event is
+> discarded by the SERVER, which means it left the member's machine before it
+> was dropped. Under the previous model the app filtered locally and the data
+> never travelled. That is a real reduction in privacy and it is the deliberate
+> price of having one place — the website — that shows a member everything
+> collected and lets them switch any of it off. The app is still entirely
+> optional and still ships disabled.
+>
+> **`session` cannot be declined.** Promotion eligibility is computed from it
+> (rank-progression.yaml), so a member who switched it off would silently stop
+> qualifying for promotions they had earned — which is exactly the failure the
+> 2026-07-27 amendment below was written to prevent. It is the one exception,
+> and the UI states why rather than showing a disabled toggle with no
+> explanation.
 
 > **Amended 2026-07-27.** Previously every category was opt-in. That made the
 > squadron's own core function — knowing who is playing, what rank they hold and

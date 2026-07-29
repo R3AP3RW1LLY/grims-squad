@@ -111,16 +111,30 @@ export class PrismaIngestStore implements IngestStore {
   }
 
   /**
-   * The categories this member has opted into. Empty by default (INV-013).
+   * What this member has switched OFF (INV-013, amended 2026-07-29).
+   *
+   * ★ NO ROW MEANS KEEP EVERYTHING, WHICH IS THE REVERSE OF BEFORE ★
+   *
+   * Under the old opt-in model an absent row meant "consented to nothing".
+   * Under opt-out it means "declined nothing" — a member who has never opened
+   * their settings gets the default, and the default is everything.
+   *
+   * That inversion is the reason the migration backfills: reading old
+   * opt-in rows as an empty opt-out list would have switched on collection
+   * people had specifically refused.
    */
-  async consentedCategories(userId: string): Promise<readonly string[]> {
+  async telemetryOptOuts(
+    userId: string,
+  ): Promise<{ categories: readonly string[]; events: readonly string[] }> {
     const privacy = await this.#db.privacySetting.findUnique({
       where: { userId },
-      select: { telemetryConsent: true },
+      select: { telemetryOptOutCategories: true, telemetryOptOutEvents: true },
     });
-    // No row means no consent. Defaults are conservative by design, and a member
-    // who has never opened their privacy settings has not agreed to anything.
-    return privacy?.telemetryConsent ?? [];
+
+    return {
+      categories: privacy?.telemetryOptOutCategories ?? [],
+      events: privacy?.telemetryOptOutEvents ?? [],
+    };
   }
 
   /**

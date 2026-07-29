@@ -1,9 +1,7 @@
 import {
-  isAllowedEvent,
-  pickAllowedFields,
+  isSendable,
   isJournalFile,
   isLiveGameVersion,
-  type JournalEventName,
 } from '@grims/shared';
 
 /**
@@ -21,7 +19,18 @@ import {
  */
 
 export interface ParsedEvent {
-  readonly name: JournalEventName;
+  /**
+   * The journal's own event name, whatever it is.
+   *
+   * ★ A STRING, NOT THE ALLOWLIST UNION (2026-07-29) ★
+   *
+   * The app no longer decides what is sent, so it cannot type the name as one
+   * of twenty-two known events. Frontier adds events with every game update,
+   * and a union here would silently drop each new one until somebody edited a
+   * TypeScript file — which is exactly the kind of quiet loss the opt-out model
+   * exists to avoid.
+   */
+  readonly name: string;
   /** The journal's own timestamp, not the time we read it. */
   readonly occurredAt: string;
   readonly data: Record<string, unknown>;
@@ -106,10 +115,29 @@ export function readJournalChunk(
       live = isLiveGameVersion(raw);
       continue;
     }
-    // NOT on the allowlist: skipped without being parsed further, buffered or
-    // counted. This is the line that keeps chat, bounties and everything else
-    // on the member's own disk.
-    if (typeof name !== 'string' || !isAllowedEvent(name)) continue;
+    /*
+     * ★ THE APP NO LONGER DECIDES WHAT IS SENT (2026-07-29) ★
+     *
+     * This skipped anything off the allowlist, and `pickAllowedFields` then
+     * stripped the rest down to named columns. Both are gone on the squadron
+     * owner's instruction: the app sends what it reads, and the WEBSITE is
+     * where a member decides what is kept (INV-013, amended).
+     *
+     * The consequence is real and is written down rather than glossed: a
+     * declined event now leaves the member's machine and is discarded by the
+     * server. It used to never travel at all. That is the price of having one
+     * place that shows a member everything collected and lets them switch any
+     * of it off, and it is why the settings page names every event and says
+     * what each reveals.
+     *
+     * Only the SHAPE is still checked — an event needs a name to be routed and
+     * a timestamp to be ordered — plus the four events in NEVER_SENT, which
+     * carry somebody ELSE'S private words. A member can consent to sharing
+     * their own data; they cannot consent on behalf of the commander who
+     * messaged them, and the server rejects those events anyway, so sending
+     * them would be risk with no purpose.
+     */
+    if (typeof name !== 'string' || !isSendable(name)) continue;
 
     const occurredAt = typeof raw['timestamp'] === 'string' ? raw['timestamp'] : null;
     if (occurredAt === null) {
@@ -124,7 +152,17 @@ export function readJournalChunk(
     // may well have started mid-file.
     if (live === false) continue;
 
-    events.push({ name, occurredAt, data: pickAllowedFields(name, raw) });
+    /*
+     * The whole event, unaltered. `pickAllowedFields` used to reduce this to a
+     * per-event column list and strip money at every depth; the server applies
+     * the member's preferences now, and a second, quieter filter here would
+     * mean the settings page did not describe what actually happens.
+     *
+     * `timestamp` is dropped from the body because it travels as `occurredAt` —
+     * keeping both would store the same instant twice under two names.
+     */
+    const { timestamp: _timestamp, event: _event, ...data } = raw;
+    events.push({ name, occurredAt, data });
   }
 
   return {

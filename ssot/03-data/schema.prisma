@@ -825,7 +825,24 @@ model TwoFactorRecovery {
 /// responses, not null and not merely hidden by the UI (INV-027).
 model PrivacySetting {
   userId             String              @id @map("user_id") @db.Uuid
-  /// Telemetry categories the member has consented to. Empty by default. Enforced server-side (INV-013).
+  /// ★ OPT-OUT, NOT OPT-IN (INV-013, amended 2026-07-29) ★
+  ///
+  /// Categories the member has switched OFF. Empty by default, which means everything is kept —
+  /// the companion app sends what it reads and the website is where a member declines.
+  ///
+  /// `session` may never appear here. Promotion eligibility is computed from it, so a member who
+  /// switched it off would silently stop qualifying for promotions they had earned. Refused by the
+  /// service, not merely hidden by the UI.
+  telemetryOptOutCategories TelemetryCategory[] @default([]) @map("telemetry_opt_out_categories")
+  /// Individual journal events the member has switched off, by name, e.g. `FSDJump`.
+  ///
+  /// Finer than a category on purpose: somebody may be happy for us to know they were in a combat
+  /// zone and not what bounties they claimed. Stored as names rather than an enum because the
+  /// journal's event set is Frontier's and grows with every game update — a new event must not
+  /// need a migration before a member can decline it.
+  telemetryOptOutEvents     String[]            @default([]) @map("telemetry_opt_out_events")
+  /// Superseded by the two columns above. Retained so the migration can read it, and so anybody
+  /// looking at an old backup can see what it meant. Nothing writes it.
   telemetryConsent   TelemetryCategory[] @default([]) @map("telemetry_consent")
   showLocation       Boolean             @default(false) @map("show_location")
   showCredits        Boolean             @default(false) @map("show_credits")

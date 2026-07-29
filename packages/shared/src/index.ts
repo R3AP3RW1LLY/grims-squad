@@ -26,6 +26,8 @@ export {
   BASELINE_CATEGORIES,
   OPTIONAL_CATEGORIES,
   canonicalJson,
+  NEVER_SENT,
+  isSendable,
 } from './journal/journal-events.js';
 export {
   ELITE_RANK_LADDERS,
@@ -61,3 +63,11 @@ export {
   MAX_NICK,
   LEADERSHIP_CEILING,
 } from './nickname.js';
+export {
+  TELEMETRY_CATALOGUE,
+  REQUIRED_CATEGORY,
+  undescribedEvents,
+  categoryOf,
+  type CatalogueGroup,
+  type CatalogueEntry,
+} from './journal/telemetry-catalogue.js';
