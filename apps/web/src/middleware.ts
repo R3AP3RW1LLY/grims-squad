@@ -52,7 +52,94 @@ function sessionCookie(request: NextRequest, base: string): string | undefined {
   return plain === '' ? undefined : plain;
 }
 
+/**
+ * May this request for a brand asset be served?
+ *
+ * ★ EXTRACTED SO IT CAN BE TESTED ★
+ *
+ * The first version of this rule also refused requests carrying NO fetch
+ * metadata, which broke every logo on the site: `_next/image` fetches the
+ * source file over HTTP from the server to itself and sends no browser
+ * metadata, so the optimiser was handed a 404 and answered "The requested
+ * resource isn't a valid image".
+ *
+ * Nothing caught it. The page still contained the right URL, so a check that
+ * looked at the markup passed while every image was blank. A rule with a
+ * failure mode that invisible belongs in a function with tests around it.
+ */
+export function brandAssetAllowed(
+  dest: string | null,
+  site: string | null,
+): boolean {
+  // Opening the file itself: the address bar, or "open image in new tab".
+  if (dest === 'document') return false;
+  // Another site embedding our artwork.
+  if (site === 'cross-site') return false;
+  /*
+   * Everything else is allowed, deliberately — our own pages, the manifest
+   * fetching its icons, and the image optimiser. See the note at the call site
+   * for why refusing bare requests is not worth what it costs.
+   */
+  return true;
+}
+
 export async function middleware(request: NextRequest) {
+  /*
+   * ★ BRAND ASSETS CANNOT BE OPENED OR HOTLINKED ★
+   *
+   * Squadron owner, 2026-07-29: the logo assets must not be downloadable from
+   * the website. This is the only part a server can enforce, and it is worth
+   * being exact about what it does and does not cover.
+   *
+   * REFUSED:
+   *   Sec-Fetch-Dest: document     pasting the URL in the address bar, and
+   *                                right-click -> "open image in new tab"
+   *   Sec-Fetch-Site: cross-site   another site hotlinking our artwork
+   *
+   * ALLOWED: everything else, which is our own pages, the manifest fetching
+   * its icons, and Next's image optimiser.
+   *
+   * ★ WHY NOT ALSO REFUSE REQUESTS WITH NO METADATA ★
+   *
+   * The first version did, and it broke the logo everywhere. `_next/image`
+   * fetches the source file over HTTP from the server to itself, carrying no
+   * browser fetch metadata — so the optimiser was handed a 404 and answered
+   * "The requested resource isn't a valid image". Every brand image on the
+   * site would have been blank.
+   *
+   * It also bought very little. Refusing bare requests stops `curl` with no
+   * arguments and nothing else: one `-H "sec-fetch-dest: image"` defeats it.
+   * Trading every logo on the site for an obstacle that costs an attacker one
+   * header is not a trade worth making.
+   *
+   * ★ AND IT IS NOT A SEAL ★
+   *
+   * Nothing here makes the artwork un-downloadable, because nothing can. A
+   * browser must receive the bytes to paint them: anyone with developer tools
+   * has the file, and a screenshot needs no tools at all. This closes the
+   * casual routes and stops other sites embedding our logo. It must never be
+   * described as more than that.
+   */
+  if (request.nextUrl.pathname.startsWith('/brand/')) {
+    const dest = request.headers.get('sec-fetch-dest');
+    const site = request.headers.get('sec-fetch-site');
+
+    if (!brandAssetAllowed(dest, site)) {
+      /*
+       * 404, not 403. A refusal saying "forbidden" advertises that there is
+       * something here worth taking; "not found" ends the conversation. The
+       * same reasoning as CloakAsNotFound on the API.
+       */
+      return new NextResponse(null, { status: 404 });
+    }
+
+    // Served, but never by a SHARED cache. A CDN caching this under the URL
+    // alone would hand it to the next caller without the headers being checked.
+    const asset = NextResponse.next();
+    asset.headers.set('Cache-Control', 'private, max-age=3600');
+    return asset;
+  }
+
   const headers = new Headers(request.headers);
   headers.set('x-pathname', request.nextUrl.pathname);
 
@@ -155,5 +242,17 @@ export const config = {
    * Running on `/_next/static` would put a middleware invocation in front of
    * every stylesheet and font for a header that nothing serving them reads.
    */
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|brand/|v1/).*)'],
+  /*
+   * `brand/` was excluded here and is not any more.
+   *
+   * The exclusion was correct when this middleware only published a header —
+   * running it in front of every image bought nothing. It now decides whether
+   * brand assets may be served at all, so skipping them would leave the check
+   * written and never executed, which is the worst of both.
+   *
+   * `_next/image` stays excluded: that is Next's optimiser fetching the file
+   * server-side to resize it, and it does not send browser fetch metadata. It
+   * is not a route a visitor can point at a file of their choosing.
+   */
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|v1/).*)'],
 };
