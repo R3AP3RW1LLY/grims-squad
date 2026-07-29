@@ -13,6 +13,10 @@ import {
   type CommanderSnapshot,
 } from './commander-snapshot.js';
 import {
+  buildCommanderProfile,
+  type CommanderProfile,
+} from './commander-profile.service.js';
+import {
   serializeProfile,
   resolvePrivacy,
   visibleOnRoster,
@@ -77,6 +81,44 @@ export class MembersController {
    * them on (INV-027). A member who shares nothing appears as a name and a
    * rank, which is what being on a team roster means.
    */
+  /**
+   * The signed-in member's own commander dashboard.
+   *
+   * ★ THEIR OWN DATA, SO NO PRIVACY FILTER ★
+   *
+   * The toggles govern what OTHER people see. A member looking at their own
+   * dashboard is not an audience, and hiding somebody's fleet from them because
+   * they chose not to publish it would misread what the toggle is for.
+   *
+   * Scoped to the SESSION user. There is no id parameter and there must never
+   * be one — that is the whole difference between "my dashboard" and an
+   * endpoint that reads anybody's.
+   */
+  @Get('me/commander')
+  async myCommander(@User() caller: CurrentUser | undefined): Promise<CommanderProfile> {
+    if (caller === undefined) {
+      throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in to see your commander.');
+    }
+
+    const [events, inara, handle] = await Promise.all([
+      this.store.profileEvents(caller.userId),
+      this.store.inaraRanks([caller.userId]),
+      this.store.handleOf(caller.userId),
+    ]);
+
+    // The verified name comes from the member row. Two reads rather than one
+    // join, because `byHandle` is the only lookup that resolves verifications
+    // and it is keyed on the handle.
+    const row = handle === null ? null : await this.store.byHandle(handle);
+
+    const cached = inara.get(caller.userId);
+    return buildCommanderProfile(
+      events,
+      row?.source.cmdrName ?? null,
+      cached === undefined ? null : { ranks: [...cached.ranks], fetchedAt: cached.fetchedAt },
+    );
+  }
+
   @Get('members')
   async roster(): Promise<{
     members: Array<

@@ -5,6 +5,7 @@ import {
   type InaraRanks,
   type SnapshotEvent,
 } from './commander-snapshot.js';
+import { PROFILE_EVENT_TYPES, type ProfileEvent } from './commander-profile.service.js';
 
 export interface MemberRow {
   readonly source: ProfileSource;
@@ -20,6 +21,8 @@ export interface MembersStore {
   /** Latest journal event of each interesting type, for the roster cards. */
   snapshotEvents(userIds: readonly string[]): Promise<SnapshotEvent[]>;
   inaraRanks(userIds: readonly string[]): Promise<Map<string, InaraRanks>>;
+  /** Every event one member's own dashboard reads. */
+  profileEvents(userId: string): Promise<ProfileEvent[]>;
   /** Every guild role we know the name and colour of, keyed by snowflake. */
   discordRoleCatalogue(): Promise<Map<string, DiscordRoleInfo>>;
 }
@@ -206,6 +209,24 @@ export class PrismaMembersStore implements MembersStore {
       select: { userId: true, eventType: true, occurredAt: true, payload: true },
       orderBy: [{ userId: 'asc' }, { eventType: 'asc' }, { occurredAt: 'desc' }],
       distinct: ['userId', 'eventType'],
+    });
+  }
+
+  /**
+   * The latest of each event type this member's dashboard reads.
+   *
+   * ★ ONE MEMBER, NOT THE ROSTER ★
+   *
+   * `snapshotEvents` narrows across many users for the roster's cards. This is
+   * the same shape for exactly one, and it reads MORE types — a card does not
+   * show a hangar and a dashboard does.
+   */
+  async profileEvents(userId: string): Promise<ProfileEvent[]> {
+    return this.#db.telemetryEvent.findMany({
+      where: { userId, eventType: { in: [...PROFILE_EVENT_TYPES] } },
+      select: { eventType: true, occurredAt: true, payload: true },
+      orderBy: [{ eventType: 'asc' }, { occurredAt: 'desc' }],
+      distinct: ['eventType'],
     });
   }
 

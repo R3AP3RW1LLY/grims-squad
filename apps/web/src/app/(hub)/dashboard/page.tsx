@@ -5,7 +5,9 @@ import {
   getSquadronStats,
   getMe,
   getMyDevices,
+  getMyCommander,
 } from '../../../lib/api';
+import { PilotRanks, Fleet, Balance } from './commander-panels';
 import { Avatar } from '../../../components/account-menu';
 import {
   PageHeader,
@@ -15,6 +17,7 @@ import {
   StatGrid,
   StatTile,
   RailStat,
+  CouldNotLoad,
 } from '../../../components/hub-page';
 import { SessionCountdown } from '../../../components/session-countdown';
 
@@ -46,12 +49,13 @@ export const dynamic = 'force-dynamic';
  */
 
 export default async function DashboardPage() {
-  const [status, inara, stats, me, devices] = await Promise.all([
+  const [status, inara, stats, me, devices, commander] = await Promise.all([
     getAccountStatus(),
     getInaraStatus(),
     getSquadronStats(),
     getMe(),
     getMyDevices(),
+    getMyCommander(),
   ]);
 
   const verified = inara?.cmdrName ?? null;
@@ -182,29 +186,27 @@ export default async function DashboardPage() {
           Squadron-wide only. Every tile here answers a question about the same
           subject, so the eye can scan the row instead of re-orienting at each.
         */}
-        <StatGrid>
-          <StatTile
-            label="Squadron"
-            value={stats === null ? '—' : String(stats.members)}
-            hint={stats === null ? 'Unavailable' : `${stats.withAccounts} signed up here`}
-          />
-          <StatTile
-            label="Active this month"
-            value={stats === null ? '—' : String(stats.activeThisMonth)}
-            hint="Seen in Discord or in game"
-            tone="accent"
-          />
-          <StatTile
-            label="Verified commanders"
-            value={stats === null ? '—' : String(stats.verifiedCommanders)}
-            hint="Proved their CMDR name"
-          />
-          <StatTile
-            label="Flying since"
-            value={stats === null ? '—' : String(stats.foundedYear)}
-            hint="Grim's Squad was founded"
-          />
-        </StatGrid>
+        {/*
+          ★ THE COMMANDER FIRST, THE SQUADRON AFTER ★
+
+          This page used to open with squadron counts. That is backwards for the
+          page somebody lands on after signing in: they already know roughly how
+          many people are in the squadron, and they came to see how THEY are
+          doing.
+
+          Ranks, then hangar, then balance — the three things a commander checks
+          — and the squadron band below them as context rather than as the
+          headline.
+        */}
+        {commander === null ? (
+          <CouldNotLoad what="your commander profile" />
+        ) : (
+          <>
+            <PilotRanks profile={commander} />
+            <Fleet profile={commander} />
+            <Balance profile={commander} />
+          </>
+        )}
 
         <Section
           title="Your activity"
@@ -231,6 +233,37 @@ export default async function DashboardPage() {
             </p>
           )}
         </Section>
+
+        <Section
+          title="The squadron"
+          description="How the rest of us are doing."
+        >
+          <StatGrid>
+            <StatTile
+            label="Squadron"
+            value={stats === null ? '—' : String(stats.members)}
+            hint={stats === null ? 'Unavailable' : `${stats.withAccounts} signed up here`}
+          />
+            <StatTile
+            label="Active this month"
+            value={stats === null ? '—' : String(stats.activeThisMonth)}
+            hint="Seen in Discord or in game"
+            tone="accent"
+          />
+            <StatTile
+            label="Verified commanders"
+            value={stats === null ? '—' : String(stats.verifiedCommanders)}
+            hint="Proved their CMDR name"
+          />
+            <StatTile
+            label="Flying since"
+            value={stats === null ? '—' : String(stats.foundedYear)}
+            hint="Grim's Squad was founded"
+          />
+          </StatGrid>
+        </Section>
+
+
 
         {/*
           ★ ONE HONEST SECTION, NOT FOUR EMPTY PANELS ★

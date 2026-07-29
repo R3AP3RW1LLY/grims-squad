@@ -11,9 +11,9 @@ import { syncInaraRanks } from './jobs/inara-rank-sync.js';
 import { AdapterInaraSource, PrismaInaraRankStore } from './jobs/inara-rank-sync.wiring.js';
 
 /**
- * The Inara sweep. One shot, every twenty minutes.
+ * The Inara sweep. One shot, every fifteen minutes.
  *
- *   *\/20 * * * *  docker compose run --rm worker pnpm inara:sync
+ *   *\/15 * * * *  docker compose run --rm worker pnpm inara:sync
  *
  * A one-shot process for the same reason reconciliation is one: a resident
  * timer has to survive restarts, deploys and clock changes and gets all three

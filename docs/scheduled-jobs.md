@@ -16,7 +16,7 @@ schedule shows up in cron's own mail rather than looking healthy forever.
 0 3 * * *      cd /srv/grims && docker compose run --rm worker pnpm reconcile
 
 # Inara profile sweep — pilot ranks for the roster (ADR-004, amended 2026-07-28).
-*/20 * * * *   cd /srv/grims && docker compose run --rm worker pnpm inara:sync
+*/15 * * * *   cd /srv/grims && docker compose run --rm worker pnpm inara:sync
 
 # Promotions — the 1st of the month, 00:00 UTC. NOT before 1 August 2026.
 0 0 1 * *      cd /srv/grims && docker compose run --rm worker pnpm promote
@@ -30,7 +30,7 @@ host in a summer-time zone would otherwise run them an hour early for half the
 year — which for a monthly job means running on the last day of the previous
 month.
 
-## `inara:sync` — every 20 minutes
+## `inara:sync` — every 15 minutes
 
 **Why the cadence is affordable.** INV-033 caps Inara at 2 requests per minute
 globally. The adapter batches **30 commanders per request**, so the whole

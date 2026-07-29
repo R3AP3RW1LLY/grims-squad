@@ -329,6 +329,35 @@ export interface SquadronStats {
  * thing anyone sees, and reading it live from Inara or EDSM would put their
  * uptime and rate limits in front of the squadron's front door.
  */
+/** One ship a commander owns, from their game journal. */
+export interface OwnedShip {
+  shipType: string;
+  name: string | null;
+  /** The ship they were last flying. */
+  current: boolean;
+  location: string | null;
+}
+
+/** A commander's own dashboard data. Their data, so no privacy filter applies. */
+export interface CommanderProfile {
+  cmdrName: string | null;
+  ranks: Array<{ key: string; label: string; name: string | null; index: number | null }>;
+  rankSource: 'inara' | 'journal' | null;
+  ranksFetchedAt: string | null;
+  currentShip: string | null;
+  fleet: OwnedShip[];
+  /**
+   * Always null today. The companion app strips Credits before sending, and
+   * Inara does not report a balance — see the note on the server type.
+   */
+  credits: number | null;
+  lastPlayedAt: string | null;
+  squadronRank: number | null;
+}
+
+export const getMyCommander = (): Promise<CommanderProfile | null> =>
+  get('/v1/me/commander', { authed: true });
+
 export const getSquadronStats = (): Promise<SquadronStats | null> => get('/v1/public/stats');
 
 export interface AdminRoleRow {

@@ -65,7 +65,23 @@ export class PrismaInaraRankStore implements InaraRankStore {
        * else's — and continuing to sync it would keep a stranger's Inara ranks
        * attached to their card indefinitely.
        */
-      where: { isVerified: true, revokedAt: null },
+      /*
+       * ★ ONLY MEMBERS WHOSE INARA KEY WE HAVE VALIDATED ★
+       *
+       * Squadron owner's instruction, 2026-07-29. A verified commander NAME can
+       * come from an officer's say-so; a validated KEY is Inara itself telling
+       * us the account is theirs. Asking Inara about anybody else spends a
+       * budget of two requests a minute on people who never asked us to.
+       *
+       * `verifiedAt` on the link — not merely the row's existence — because a
+       * key that has never successfully answered is a key we cannot trust to
+       * name the right commander.
+       */
+      where: {
+        isVerified: true,
+        revokedAt: null,
+        user: { inaraLink: { verifiedAt: { not: null } } },
+      },
       select: { userId: true, cmdrName: true },
       /*
        * One row per member. Verifications are a HISTORY, not a current-state
