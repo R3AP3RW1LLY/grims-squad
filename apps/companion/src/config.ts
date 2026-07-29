@@ -51,7 +51,45 @@ export interface CompanionConfig {
   discoveredJournalPath: string | null;
   /** True once the search has run and found nothing, so it is not repeated every launch. */
   searchedAndFoundNothing: boolean;
+  /**
+   * What this machine has done, for as long as it has been paired.
+   *
+   * ★ WHY THE APP KEEPS ITS OWN TALLY AT ALL ★
+   *
+   * The panel used to show the LAST PASS, which is almost always zero: the app
+   * polls every twenty seconds and the game writes nothing most of those. A
+   * member glancing at three zeroes concluded, reasonably, that it was broken.
+   *
+   * These answer "has this thing ever done anything", which is the question
+   * somebody actually has. They are cumulative and survive restarts.
+   *
+   * ★ AND WHY IT IS NOT THE WHOLE STORY ★
+   *
+   * This counts what THIS PC sent. It misses a second machine, it counts an
+   * event twice if a failed upload is retried, and it resets if the config is
+   * lost. The authoritative number — rows actually held for the member — comes
+   * from the hub, and both are shown because they answer different questions.
+   */
+  totals: CompanionTotals;
 }
+
+export interface CompanionTotals {
+  /** Events handed to the hub, successfully, ever. */
+  sent: number;
+  /** Events the hub already had. Normal, and not a failure. */
+  duplicates: number;
+  /** DISTINCT journal files this machine has read at least one line from. */
+  journalsRead: number;
+  /** ISO instant of the first successful upload, or null. */
+  since: string | null;
+}
+
+export const EMPTY_TOTALS: CompanionTotals = {
+  sent: 0,
+  duplicates: 0,
+  journalsRead: 0,
+  since: null,
+};
 
 export const DEFAULT_CONFIG: CompanionConfig = {
   apiBaseUrl: 'https://45-63-35-93.sslip.io',
@@ -64,6 +102,7 @@ export const DEFAULT_CONFIG: CompanionConfig = {
   enabled: false,
   discoveredJournalPath: null,
   searchedAndFoundNothing: false,
+  totals: EMPTY_TOTALS,
 };
 
 export function configPath(userDataDir: string): string {
@@ -99,10 +138,35 @@ export function loadConfig(userDataDir: string): CompanionConfig {
       discoveredJournalPath:
         typeof parsed.discoveredJournalPath === 'string' ? parsed.discoveredJournalPath : null,
       searchedAndFoundNothing: parsed.searchedAndFoundNothing === true,
+      totals: readTotals(parsed.totals),
     };
   } catch {
     return { ...DEFAULT_CONFIG };
   }
+}
+
+/**
+ * Totals from a file that may predate them, or have been edited by hand.
+ *
+ * ★ EVERY FIELD CHECKED SEPARATELY ★
+ *
+ * A config written before totals existed has no key at all, and one somebody
+ * has edited may have a string where a number belongs. `Number.isFinite`
+ * rejects NaN and Infinity as well as the wrong type — and a NaN here would
+ * propagate into every subsequent addition and render as "NaN sent" forever,
+ * with nothing to explain it.
+ */
+function readTotals(value: unknown): CompanionTotals {
+  const t = (typeof value === 'object' && value !== null ? value : {}) as Partial<CompanionTotals>;
+  const count = (n: unknown): number =>
+    typeof n === 'number' && Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0;
+
+  return {
+    sent: count(t.sent),
+    duplicates: count(t.duplicates),
+    journalsRead: count(t.journalsRead),
+    since: typeof t.since === 'string' && t.since !== '' ? t.since : null,
+  };
 }
 
 /**

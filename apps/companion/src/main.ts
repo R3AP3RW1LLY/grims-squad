@@ -19,6 +19,8 @@ import {
 } from './config.js';
 import { Uploader } from './uploader.js';
 import { runWatchPass, type JournalFs, type WatchOutcome } from './watcher.js';
+import { accumulate } from './totals.js';
+import { fetchHubSettings, type HubSettings } from './hub-settings.js';
 import { searchForJournalDir, searchRootsFor, type SearchFs } from './journal-search.js';
 
 /**
@@ -222,11 +224,24 @@ async function runDeepSearch(os: Platform): Promise<string | null> {
 }
 
 async function tick(): Promise<void> {
+  /*
+   * ★ BEFORE THE JOURNAL CHECK, NOT AFTER ★
+   *
+   * This sat at the END of the tick, past the early return below — so a member
+   * whose journals we cannot find would never have seen what the squadron
+   * keeps. That is exactly the member most likely to open the window and look,
+   * and the panel would have said "Asking the hub…" forever.
+   *
+   * TTL-guarded, so on almost every pass this returns without a request.
+   */
+  void refreshHubSettings();
+
   const dir = await findJournalDir();
   if (dir === null) {
     lastOutcome = {
       gameRunning: false,
       filesRead: 0,
+      newFilesRead: 0,
       sent: 0,
       duplicates: 0,
       refused: {},
@@ -246,8 +261,15 @@ async function tick(): Promise<void> {
     const { outcome, config: next } = await runWatchPass(nodeFs, dir, config, uploader);
     lastOutcome = outcome;
 
-    if (JSON.stringify(next) !== JSON.stringify(config)) {
-      config = next;
+    /*
+     * Folded in BEFORE the comparison below, so a pass that only moved the
+     * totals still gets written to disk. Accumulating after the save would lose
+     * the tally on every quit.
+     */
+    const withTotals = { ...next, totals: accumulate(config.totals, outcome) };
+
+    if (JSON.stringify(withTotals) !== JSON.stringify(config)) {
+      config = withTotals;
       saveConfig(app.getPath('userData'), config);
     }
 
@@ -263,6 +285,7 @@ async function tick(): Promise<void> {
     lastOutcome = {
       gameRunning: false,
       filesRead: 0,
+      newFilesRead: 0,
       sent: 0,
       duplicates: 0,
       refused: {},
@@ -303,7 +326,62 @@ function state(): Record<string, unknown> {
     searching,
     journalPath: config.journalPathOverride ?? config.discoveredJournalPath,
     last: lastOutcome,
+    /*
+     * The lifetime tally, which is what the panel actually shows. `last` stays
+     * because the error and the refusal list come from it — but the numbers a
+     * member reads are these.
+     */
+    totals: config.totals,
+    /*
+     * What the hub says it is keeping. Null until the first fetch answers, so
+     * the panel can say "asking…" rather than rendering an empty list that
+     * looks like "nothing is being collected" — which would be the most
+     * alarming possible way to be wrong.
+     */
+    hub: hubSettings,
+    hubError,
   };
+}
+
+/*
+ * ★ CACHED, AND REFRESHED ON A SLOW TIMER ★
+ *
+ * The member changes these on the website, not here, so they change rarely —
+ * and fetching them on every twenty-second poll would be a request a minute,
+ * forever, to redraw a list that almost never differs.
+ */
+let hubSettings: HubSettings | null = null;
+let hubError: string | null = null;
+let hubFetchedAt = 0;
+
+const HUB_SETTINGS_TTL_MS = 5 * 60_000;
+
+async function refreshHubSettings(force = false): Promise<void> {
+  if (config.deviceToken === '') {
+    hubSettings = null;
+    hubError = null;
+    return;
+  }
+  if (!force && hubSettings !== null && Date.now() - hubFetchedAt < HUB_SETTINGS_TTL_MS) return;
+
+  const result = await fetchHubSettings({
+    apiBaseUrl: apiBaseUrlFor(config, process.env),
+    deviceToken: config.deviceToken,
+  });
+
+  hubFetchedAt = Date.now();
+  if (result.ok) {
+    hubSettings = result.settings;
+    hubError = null;
+  } else {
+    /*
+     * The last good answer is KEPT on a failure. A dropped connection is not
+     * news about what is being collected, and blanking the panel would tell the
+     * member their settings had changed when only the network had.
+     */
+    hubError = result.error;
+  }
+  push();
 }
 
 function refreshTray(): void {
@@ -462,6 +540,17 @@ if (!app.requestSingleInstanceLock()) {
     refreshTray();
 
     ipcMain.handle('state', () => state());
+
+    /*
+     * A FORCED refresh, bypassing the cache. This is the button somebody
+     * presses precisely because they just changed something on the website, so
+     * serving them a five-minute-old answer would look like the change had not
+     * taken.
+     */
+    ipcMain.handle('refreshSettings', async () => {
+      await refreshHubSettings(true);
+      return state();
+    });
 
     ipcMain.handle('pair', (_e, token: unknown) => {
       const value = typeof token === 'string' ? token.trim() : '';

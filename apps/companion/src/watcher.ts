@@ -42,6 +42,22 @@ export interface WatchOutcome {
    */
   readonly gameRunning: boolean;
   readonly filesRead: number;
+  /**
+   * Of those, the ones never read before.
+   *
+   * ★ WHY THIS IS NOT JUST `filesRead` ★
+   *
+   * The lifetime "journals read" tally must count each journal ONCE. A single
+   * file is read on many passes as the game appends to it, so accumulating
+   * `filesRead` would report a member who played one long session as having
+   * read two hundred journals.
+   *
+   * Decided from whether the file had a saved offset BEFORE this pass, which is
+   * the only record of having seen it. A first run records offsets for the old
+   * journals it deliberately skips without reading them, and those correctly do
+   * not count.
+   */
+  readonly newFilesRead: number;
   readonly sent: number;
   readonly duplicates: number;
   readonly refused: Record<string, number>;
@@ -95,6 +111,7 @@ export async function runWatchPass(
 
   let next = { ...config, offsets: { ...config.offsets }, sessionLive: { ...config.sessionLive } };
   let filesRead = 0;
+  let newFilesRead = 0;
   let gameRunning = false;
   let sent = 0;
   let duplicates = 0;
@@ -125,6 +142,9 @@ export async function runWatchPass(
     if (text === null) continue;
 
     filesRead += 1;
+    // Read against the ORIGINAL config, not `next` — `next.offsets[name]` has
+    // already been written by the time this pass finishes with the file.
+    if (config.offsets[name] === undefined) newFilesRead += 1;
     /*
      * The NEWEST file only. An old journal growing is not somebody playing —
      * it cannot happen — whereas a first-run replay reads dozens of old files
@@ -156,7 +176,14 @@ export async function runWatchPass(
       // Stop immediately, and do NOT advance. When the member re-pairs, this
       // picks up exactly where it left off.
       return {
-        outcome: { ...empty(), gameRunning, filesRead, unauthorised: true, error: upload.error },
+        outcome: {
+          ...empty(),
+          gameRunning,
+          filesRead,
+          newFilesRead,
+          unauthorised: true,
+          error: upload.error,
+        },
         config: next,
       };
     }
@@ -169,7 +196,16 @@ export async function runWatchPass(
        * each in turn just makes the member wait.
        */
       return {
-        outcome: { ...empty(), gameRunning, filesRead, sent, duplicates, refused, error: upload.error },
+        outcome: {
+          ...empty(),
+          gameRunning,
+          filesRead,
+          newFilesRead,
+          sent,
+          duplicates,
+          refused,
+          error: upload.error,
+        },
         config: next,
       };
     }
@@ -200,7 +236,16 @@ export async function runWatchPass(
 
   next = pruneOffsets(next, all);
   return {
-    outcome: { gameRunning, filesRead, sent, duplicates, refused, unauthorised: false, error: null },
+    outcome: {
+      gameRunning,
+      filesRead,
+      newFilesRead,
+      sent,
+      duplicates,
+      refused,
+      unauthorised: false,
+      error: null,
+    },
     config: next,
   };
 }
@@ -229,6 +274,7 @@ function empty(): WatchOutcome {
   return {
     gameRunning: false,
     filesRead: 0,
+    newFilesRead: 0,
     sent: 0,
     duplicates: 0,
     refused: {},

@@ -77,8 +77,20 @@ export const TELEMETRY_CATALOGUE: readonly CatalogueGroup[] = [
       {
         event: 'LoadGame',
         label: 'Game start',
+        /*
+         * ★ THIS SENTENCE WAS WRONG ★
+         *
+         * It read "Not your balance." — true when it was written, and false
+         * from the moment credits were added to the LoadGame allowlist on the
+         * squadron owner's instruction. A member reading it would have been
+         * told, by the very screen built to tell them the truth, that something
+         * was not collected while it was.
+         *
+         * The balance travels with `profile`, which CAN be switched off, so it
+         * is named there rather than here — see the note on the balance panel.
+         */
         reveals:
-          'That you launched Elite, the ship you loaded into, and whether it was open, solo or a private group. Not your balance.',
+          'That you launched Elite, the ship you loaded into, and whether it was open, solo or a private group. Your credit balance rides with this one.',
       },
     ],
   },

@@ -36,4 +36,13 @@ contextBridge.exposeInMainWorld('companion', {
 
   /** Shows what a batch would contain, from the member's own journals. */
   preview: () => ipcRenderer.invoke('preview'),
+
+  /**
+   * Asks the hub again what is being collected, ignoring the cache.
+   *
+   * For the member who has just changed something on the website and come back
+   * to check — a five-minute-old answer would look like the change had not
+   * taken.
+   */
+  refreshSettings: () => ipcRenderer.invoke('refreshSettings'),
 });

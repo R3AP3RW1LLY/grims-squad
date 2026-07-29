@@ -111,6 +111,29 @@ export class PrismaIngestStore implements IngestStore {
   }
 
   /**
+   * How many rows this member has contributed, and since when.
+   *
+   * ★ TWO QUERIES, NOT A GROUP BY ★
+   *
+   * `count` is answered from an index; the oldest row is one `ORDER BY … LIMIT
+   * 1` on the same index. Aggregating min() alongside the count would scan the
+   * member's whole history, which for somebody who has been running the app for
+   * a year is tens of thousands of rows every time the app polls.
+   */
+  async contribution(userId: string): Promise<{ storedEvents: number; firstEventAt: Date | null }> {
+    const [storedEvents, oldest] = await Promise.all([
+      this.#db.telemetryEvent.count({ where: { userId } }),
+      this.#db.telemetryEvent.findFirst({
+        where: { userId },
+        select: { occurredAt: true },
+        orderBy: { occurredAt: 'asc' },
+      }),
+    ]);
+
+    return { storedEvents, firstEventAt: oldest?.occurredAt ?? null };
+  }
+
+  /**
    * What this member has switched OFF (INV-013, amended 2026-07-29).
    *
    * ★ NO ROW MEANS KEEP EVERYTHING, WHICH IS THE REVERSE OF BEFORE ★

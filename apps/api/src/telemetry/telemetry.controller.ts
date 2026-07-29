@@ -168,6 +168,64 @@ export class TelemetryController {
    * requiring a CSRF cookie here would mean the app had to hold one, which
    * would defeat the point.
    */
+  /**
+   * What the companion app needs to describe itself to the member.
+   *
+   * ★ WHY THIS IS NOT `me/telemetry-consent` ★
+   *
+   * That route is authenticated by a SESSION, and the app deliberately holds no
+   * session — its whole identity is a device token, which is a far smaller
+   * credential than a cookie that can act as the member anywhere on the site.
+   * So the app gets its own route with its own authentication, returning only
+   * what a settings panel needs.
+   *
+   * ★ WHY NOT FOLD IT INTO THE UPLOAD RESPONSE ★
+   *
+   * Because the uploader does not call the hub at all when there is nothing to
+   * send and the game is not running — which is most of the time. The panel
+   * would then be blank or stale for exactly the member who opened the app to
+   * check on it.
+   *
+   * ★ READ ONLY ★
+   *
+   * The app can SEE what has been switched off; it cannot change it. Settings
+   * are changed on the website behind a real sign-in, because a device token
+   * pasted into the wrong place must never be able to alter what is collected
+   * about somebody.
+   */
+  @Public()
+  @Get('telemetry/settings')
+  async deviceSettings(@Req() req: FastifyRequest): Promise<{
+    optOutCategories: readonly string[];
+    optOutEvents: readonly string[];
+    catalogue: typeof TELEMETRY_CATALOGUE;
+    requiredCategory: string;
+    storedEvents: number;
+    firstEventAt: string | null;
+  }> {
+    const device = await this.#device(req);
+
+    const [state, contribution] = await Promise.all([
+      this.consent.get(device.userId),
+      this.ingest.contribution(device.userId),
+    ]);
+
+    return {
+      optOutCategories: state.categories,
+      optOutEvents: state.events,
+      /*
+       * The whole catalogue, so the app can name and explain every category
+       * without carrying its own copy. Two copies would drift, and the drift
+       * would be an app telling a member something is being collected that the
+       * server stopped storing — or worse, the reverse.
+       */
+      catalogue: TELEMETRY_CATALOGUE,
+      requiredCategory: REQUIRED_CATEGORY,
+      storedEvents: contribution.storedEvents,
+      firstEventAt: contribution.firstEventAt?.toISOString() ?? null,
+    };
+  }
+
   @Public()
   @Post('telemetry/journal')
   async journal(
@@ -179,16 +237,7 @@ export class TelemetryController {
     rejected: number;
     refused: Record<string, number>;
   }> {
-    const header = req.headers['authorization'];
-    const token =
-      typeof header === 'string' && header.startsWith('Bearer ') ? header.slice(7).trim() : '';
-
-    const device = token === '' ? null : await this.pairing.authenticate(token);
-    if (device === null) {
-      // 401 with no detail. Unknown, revoked and wrongly-scoped are one answer,
-      // so a caller learns only that their token is not usable.
-      throw new AppError(ErrorCode.UNAUTHENTICATED, 'This device is not paired.');
-    }
+    const device = await this.#device(req);
 
     const events = (body as Record<string, unknown> | null)?.['events'];
     if (!Array.isArray(events)) {
@@ -236,6 +285,31 @@ export class TelemetryController {
     }
 
     return result;
+  }
+
+  /**
+   * The device behind a bearer token, or 401.
+   *
+   * ★ ONE RULE, TWO ROUTES ★
+   *
+   * Extracted when the settings route was added rather than copied. Two
+   * inlined copies of an authentication check is how one of them ends up
+   * accepting a token the other rejects — and the looser one is always the one
+   * nobody notices.
+   */
+  async #device(req: FastifyRequest): Promise<{ id: string; userId: string }> {
+    const header = req.headers['authorization'];
+    const token =
+      typeof header === 'string' && header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+
+    const device = token === '' ? null : await this.pairing.authenticate(token);
+    if (device === null) {
+      // 401 with no detail. Unknown, revoked and wrongly-scoped are one answer,
+      // so a caller learns only that their token is not usable.
+      throw new AppError(ErrorCode.UNAUTHENTICATED, 'This device is not paired.');
+    }
+
+    return device;
   }
 }
 

@@ -66,6 +66,17 @@ export interface IngestStore {
   }>;
   /** Records that the member's journal is being written right now. */
   markPlaying(userId: string, at: Date): Promise<void>;
+  /**
+   * How much this member has contributed, in total.
+   *
+   * ★ THE SERVER IS THE AUTHORITY HERE, NOT THE APP ★
+   *
+   * The companion counts what IT sent from THIS machine. That is a different
+   * number: it misses everything sent from a second PC, it double-counts an
+   * event resent after a failed upload, and it resets to zero if the config
+   * file is ever lost. This is the row count actually held for them.
+   */
+  contribution(userId: string): Promise<{ storedEvents: number; firstEventAt: Date | null }>;
 }
 
 export interface IngestResult {
@@ -142,6 +153,11 @@ type Row = Parameters<IngestStore['insertIgnoringDuplicates']>[0][number];
 
 export class JournalIngestService {
   constructor(private readonly store: IngestStore) {}
+
+  /** How much this member has contributed in total. See `IngestStore`. */
+  async contribution(userId: string): Promise<{ storedEvents: number; firstEventAt: Date | null }> {
+    return this.store.contribution(userId);
+  }
 
   async ingest(
     userId: string,
