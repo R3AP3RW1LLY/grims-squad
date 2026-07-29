@@ -107,7 +107,7 @@ export default async function DevicesPage() {
                   Get the app
                 </a>
                 <a
-                  href="/settings/privacy"
+                  href="/settings/commander"
                   className="mt-2 block text-sm text-[var(--color-brand-cyan-bright)]"
                 >
           {/*

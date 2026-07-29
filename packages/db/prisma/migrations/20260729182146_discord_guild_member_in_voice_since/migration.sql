@@ -1,0 +1,29 @@
+-- Who is in a voice channel RIGHT NOW.
+--
+-- `member_activity_months.voice_join_count` counts joins for the month. It cannot answer
+-- "are they in voice at this moment", which is what the admin console's Last Seen column
+-- needs in order to say "in voice channel" instead of a stale number of days.
+--
+-- Nullable, no default, no backfill: nobody is in voice until the bot says so, and the bot
+-- re-seeds from live voice states at startup because Discord keeps no occupancy history.
+--
+-- ★ THIS FILE WAS TRIMMED BY HAND, ON PURPOSE ★
+--
+-- `prisma migrate dev --create-only` generated this ADD COLUMN together with:
+--
+--   DROP INDEX knowledge_chunks_embedding_idx       (the pgvector index)
+--   DROP INDEX forum_posts_search_idx               (the GIN full-text index)
+--   DROP INDEX audit_log_recent_idx
+--   DROP INDEX refresh_token_families_expires_at_idx
+--   ALTER TABLE forum_posts ALTER COLUMN search_tsv DROP DEFAULT
+--   ...plus dropping and re-adding four foreign keys, for no stated change
+--
+-- Nobody asked for any of that. Those objects are hand-written DDL from
+-- ssot/03-data/indexes.md, and the Prisma schema language has no syntax for them — so every
+-- generated migration "notices" they are absent from the schema and proposes deleting them.
+-- Applying it as generated would drop a vector index and a full-text index in production and
+-- rebuild neither.
+--
+-- Only the intended statement is kept. This drift is expected and permanent; the same edit is
+-- required of every future migration. See ssot/03-data/indexes.md for what Prisma cannot see.
+ALTER TABLE "discord_guild_members" ADD COLUMN "in_voice_since" TIMESTAMPTZ(6);

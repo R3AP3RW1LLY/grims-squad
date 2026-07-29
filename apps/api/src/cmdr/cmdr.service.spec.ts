@@ -212,7 +212,9 @@ describe('officer rejection', () => {
     await svc.declare('squatter', 'GRIM', NOW);
     await svc.reject('c1', 'officer-1', 'Not their commander', NOW);
     await svc.declare('u1', 'GRIM', NOW);
-    await expect(svc.approve('c2', 'officer-1', NOW)).resolves.toBeUndefined();
+    // Resolving at all is the assertion — it must not throw CMDR_ALREADY_CLAIMED.
+    // It now also names the member it verified, so the caller can tell them.
+    await expect(svc.approve('c2', 'officer-1', NOW)).resolves.toEqual({ userId: 'u1' });
   });
 
   it('requires a reason — a rejection with no explanation is not reviewable', async () => {

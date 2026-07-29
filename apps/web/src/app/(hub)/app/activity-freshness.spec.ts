@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sinceSeen, goneQuiet, QUIET_AFTER_DAYS } from './activity-freshness';
+import { sinceSeen, goneQuiet, lastSeen, QUIET_AFTER_DAYS } from './activity-freshness';
 
 /**
  * The "last seen" column on the activity tab.
@@ -63,5 +63,79 @@ describe('gone quiet', () => {
   it('is exclusive at the boundary', () => {
     expect(goneQuiet(ago(QUIET_AFTER_DAYS * DAY), NOW)).toBe(false);
     expect(goneQuiet(ago(QUIET_AFTER_DAYS * DAY + 1), NOW)).toBe(true);
+  });
+});
+
+
+/**
+ * ★ IN VOICE IS A DIFFERENT KIND OF FACT ★
+ *
+ * Squadron owner, 2026-07-29: a member active in Discord voice should say so
+ * rather than showing a number of days.
+ *
+ * Every other field on the row is a tally or a timestamp in the past. A member
+ * who sat in comms all evening without typing showed "3 days" — true of their
+ * last message, and the wrong answer to the question this column exists for.
+ */
+describe('lastSeen', () => {
+  const quietRow = { lastSeenAt: ago(200 * DAY), inVoiceSince: null };
+
+  it('says they are in a voice channel', () => {
+    const r = lastSeen({ lastSeenAt: ago(3 * DAY), inVoiceSince: ago(10 * 60_000) }, NOW);
+    expect(r.label).toBe('in voice channel');
+    expect(r.tone).toBe('live');
+  });
+
+  it('adds the hours once there are hours worth mentioning', () => {
+    // Under an hour is just "in voice channel" — "(0h)" is noise, and the
+    // signal is the presence rather than the duration.
+    expect(lastSeen({ lastSeenAt: null, inVoiceSince: ago(59 * 60_000) }, NOW).label).toBe(
+      'in voice channel',
+    );
+    expect(lastSeen({ lastSeenAt: null, inVoiceSince: ago(3 * 3_600_000) }, NOW).label).toBe(
+      'in voice channel (3h)',
+    );
+  });
+
+  /*
+   * ★ THE ONE THAT MATTERS ★
+   *
+   * Highlighting a member red for having gone quiet while they are sitting in
+   * comms is the most obviously wrong thing this table could show — and it
+   * would be showing it to an officer deciding who has left the squadron.
+   */
+  it('MANDATORY: somebody in voice is never flagged as gone quiet', () => {
+    expect(goneQuiet(quietRow.lastSeenAt, NOW)).toBe(true);
+    expect(lastSeen({ ...quietRow, inVoiceSince: ago(60_000) }, NOW).tone).toBe('live');
+  });
+
+  it('MANDATORY: somebody in voice with NO recorded activity at all is still live', () => {
+    // Voice occupancy was never backfillable, so a member who only ever sits in
+    // channels has nothing in `member_activity_months`. They are still present.
+    const r = lastSeen({ lastSeenAt: null, inVoiceSince: ago(60_000) }, NOW);
+    expect(r.tone).toBe('live');
+    expect(r.label).toContain('voice');
+  });
+
+  it('falls back to the timestamp when they are not in voice', () => {
+    const r = lastSeen({ lastSeenAt: ago(5 * DAY), inVoiceSince: null }, NOW);
+    expect(r.label).toBe(sinceSeen(ago(5 * DAY), NOW));
+    expect(r.tone).toBe('normal');
+  });
+
+  it('flags a genuinely quiet member', () => {
+    expect(lastSeen(quietRow, NOW).tone).toBe('quiet');
+  });
+
+  it('says "never seen" rather than a blank when nothing was ever recorded', () => {
+    const r = lastSeen({ lastSeenAt: null, inVoiceSince: null }, NOW);
+    expect(r.label).toBe('never seen');
+    expect(r.tone).toBe('quiet');
+  });
+
+  it('does not report a negative duration when the clock is skewed', () => {
+    // A bot host running ahead of the web host must not produce "(-2h)".
+    const r = lastSeen({ lastSeenAt: null, inVoiceSince: ago(-5 * 3_600_000) }, NOW);
+    expect(r.label).toBe('in voice channel');
   });
 });

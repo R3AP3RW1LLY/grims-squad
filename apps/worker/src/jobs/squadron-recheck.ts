@@ -48,6 +48,17 @@ export interface RecheckReport {
   readonly stillWaiting: number;
   /** Inara did not answer. Their stored state is untouched. */
   readonly unreachable: number;
+  /**
+   * WHO was confirmed on this pass.
+   *
+   * ★ NOT A STATISTIC — THE POINT OF THE JOB ★
+   *
+   * The page tells a waiting member they can close it and will be verified
+   * automatically. Keeping that promise on the SCREEN, and not only in the
+   * database, means telling their browser — and a count of eleven cannot be
+   * turned back into eleven people to tell.
+   */
+  readonly confirmedUserIds: readonly string[];
 }
 
 /**
@@ -66,7 +77,7 @@ export async function recheckSquadrons(
 ): Promise<RecheckReport> {
   const awaiting = await store.listAwaiting();
 
-  let confirmed = 0;
+  const confirmedUserIds: string[] = [];
   let stillWaiting = 0;
   let unreachable = 0;
 
@@ -102,9 +113,15 @@ export async function recheckSquadrons(
     const matched = matches(reported);
     await store.record(member.userId, reported, matched, now).catch(() => undefined);
 
-    if (matched) confirmed += 1;
+    if (matched) confirmedUserIds.push(member.userId);
     else stillWaiting += 1;
   }
 
-  return { checked: awaiting.length, confirmed, stillWaiting, unreachable };
+  return {
+    checked: awaiting.length,
+    confirmed: confirmedUserIds.length,
+    stillWaiting,
+    unreachable,
+    confirmedUserIds,
+  };
 }

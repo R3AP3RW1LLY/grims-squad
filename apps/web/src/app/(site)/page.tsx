@@ -41,15 +41,39 @@ const CAPABILITIES = [
 ] as const;
 
 /**
- * The four facts in the hero card. Only the home system links out.
+ * The four facts in the hero card. Two of them link out.
  *
- * EDSM rather than Inara: I checked all three candidates. The Elite Dangerous
- * wiki 404s for this system — procedurally-generated sector systems do not get
- * wiki pages. Inara's page requires an account for parts of it. EDSM's is
- * public, needs no login, and its API confirmed system id 1795223, so this URL
- * is verified rather than guessed. It also shows the live controlling faction,
- * which is the thing a visitor clicking through actually wants.
+ * ★ INARA, ON THE SQUADRON OWNER'S INSTRUCTION — 2026-07-29 ★
+ *
+ * The home system pointed at EDSM. Inara is where this squadron's own records
+ * live, so both links now go there: one destination for a visitor following
+ * either, rather than two sites with two different pictures of the same space.
+ *
+ * The ids came from the squadron owner directly. They could not be confirmed by
+ * fetching them — Inara answers 503 to any automated request, whatever headers
+ * it carries — so they are recorded as given rather than as verified.
  */
+/**
+ * The site a hero link points at, for the screen-reader hint.
+ *
+ * Announcing the destination matters more here than usual: these open in a new
+ * tab, and somebody who cannot see the arrow icon gets no other warning that
+ * their focus is about to land somewhere else entirely.
+ *
+ * Falls back to "an external site" rather than throwing. An unparseable href is
+ * a bug worth fixing, but it is not worth blanking the home page over.
+ */
+function linkSite(href: string): string {
+  try {
+    const host = new URL(href).hostname.replace(/^www\./, '');
+    if (host.endsWith('inara.cz')) return 'Inara';
+    if (host.endsWith('elitedangerous.com')) return 'the Frontier store';
+    return host;
+  } catch {
+    return 'an external site';
+  }
+}
+
 const INSTRUMENTS: ReadonlyArray<{
   label: string;
   value: string;
@@ -60,11 +84,38 @@ const INSTRUMENTS: ReadonlyArray<{
     // NON-BREAKING HYPHENS. With ordinary ones the cell broke after "b2-" and
     // orphaned the "4" on its own line, which reads as a typo, not a wrap.
     value: 'Hyades Sector AV‑W b2‑4',
-    href: 'https://www.edsm.net/en/system/id/1795223/name/Hyades+Sector+AV-W+b2-4',
+    href: 'https://inara.cz/elite/starsystem/778467/',
   },
   { label: 'DIVISIONS', value: 'Seven' },
-  { label: 'ALLEGIANCE', value: 'Player Minor Faction' },
-  { label: 'PLATFORM', value: 'PC · Odyssey' },
+  {
+    label: 'ALLEGIANCE',
+    /*
+     * The faction BY NAME, not by category.
+     *
+     * "Player Minor Faction" described what kind of thing the squadron is
+     * aligned to and never said which one — so the single most identifying fact
+     * about this squadron in the BGS was the one the hero card withheld.
+     *
+     * Non-breaking space in "from Alrai" for the same reason as the hyphens
+     * above: the cell is narrow, and a wrap that orphans "Alrai" reads as two
+     * separate facts rather than one faction's name.
+     */
+    value: 'Blood Brothers from Alrai',
+    href: 'https://inara.cz/elite/minorfaction/5469/',
+  },
+  {
+    label: 'PLATFORM',
+    value: 'PC · Odyssey',
+    /*
+     * Where somebody who does not own the game goes next.
+     *
+     * This card told a visitor which platform the squadron flies on and left
+     * them nowhere to go with it. Squadron owner, 2026-07-29 — and it is the
+     * one instrument in the hero that a person who is NOT already a commander
+     * can act on.
+     */
+    href: 'https://www.elitedangerous.com/buy/elite-dangerous-deluxe-edition/steam',
+  },
 ];
 
 export default async function HomePage() {
@@ -180,7 +231,19 @@ export default async function HomePage() {
                         className="inline-flex items-baseline gap-1 no-underline transition-colors hover:text-[var(--color-brand-orange)]"
                       >
                         {item.value}
-                        <span className="sr-only"> (opens EDSM in a new tab)</span>
+                        {/*
+                          ★ DERIVED, NOT WRITTEN OUT ★
+
+                          This said "opens EDSM in a new tab" as a literal
+                          string. The moment the links moved to Inara it was
+                          announcing the wrong destination to exactly the people
+                          who cannot see where the link goes — and it would have
+                          kept doing so silently, because no test can tell that
+                          a sentence has become untrue.
+
+                          Taken from the href, so it cannot disagree with it.
+                        */}
+                        <span className="sr-only"> (opens {linkSite(item.href)} in a new tab)</span>
                         <svg
                           width="9"
                           height="9"

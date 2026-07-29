@@ -1,6 +1,7 @@
-import { Global, Module } from '@nestjs/common';
+import { Global, Inject, Module, type OnModuleInit, type OnModuleDestroy } from '@nestjs/common';
 import { LiveController } from './live.controller.js';
 import { LiveService } from './live.service.js';
+import { LiveBridge } from './live.bridge.js';
 import { LIVE_SERVICE } from './live.tokens.js';
 
 /**
@@ -20,7 +21,34 @@ import { LIVE_SERVICE } from './live.tokens.js';
 @Global()
 @Module({
   controllers: [LiveController],
-  providers: [{ provide: LIVE_SERVICE, useFactory: () => new LiveService() }],
+  providers: [
+    { provide: LIVE_SERVICE, useFactory: () => new LiveService() },
+    {
+      /*
+       * The bridge from the scheduled jobs.
+       *
+       * Provided here rather than in the worker's own wiring because the
+       * SUBSCRIBER has to live wherever the sockets live, and they live in this
+       * process. See live.bridge.ts for why this exists at all.
+       */
+      provide: LiveBridge,
+      useFactory: (live: LiveService) =>
+        new LiveBridge(live, process.env['REDIS_URL'] ?? 'redis://localhost:6379'),
+      inject: [LIVE_SERVICE],
+    },
+  ],
   exports: [LIVE_SERVICE],
 })
-export class LiveModule {}
+export class LiveModule implements OnModuleInit, OnModuleDestroy {
+  constructor(@Inject(LiveBridge) private readonly bridge: LiveBridge) {}
+
+  onModuleInit(): void {
+    this.bridge.start();
+  }
+
+  async onModuleDestroy(): Promise<void> {
+    // Closed on shutdown so a rolling deploy does not leave a subscriber
+    // connection behind on the old container for Redis to hold open.
+    await this.bridge.stop();
+  }
+}

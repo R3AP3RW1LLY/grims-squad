@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
-import { CompanionController } from './companion.controller.js';
+import { PrismaClient } from '@grims/db';
+import { CompanionController, type DeviceVersionReader } from './companion.controller.js';
 import { s3ConfigFrom } from '../media/object-store.js';
 import { S3ReleaseBucket } from './release-bucket.s3.js';
 import {
@@ -8,7 +9,8 @@ import {
   releaseDirFrom,
   type ReleaseStore,
 } from './release.service.js';
-import { RELEASE_STORE } from './companion.tokens.js';
+import { RELEASE_STORE, DEVICE_VERSIONS } from './companion.tokens.js';
+import { DatabaseModule } from '../database.module.js';
 
 /**
  * Serving the companion app's installers.
@@ -26,8 +28,31 @@ import { RELEASE_STORE } from './companion.tokens.js';
  * offer a build that does not exist.
  */
 @Module({
+  imports: [DatabaseModule],
   controllers: [CompanionController],
   providers: [
+    {
+      /*
+       * One query, over one table.
+       *
+       * Deliberately NOT `PairingService`: telemetry already imports this
+       * module for the release store, so injecting it here would make the two
+       * modules mutually dependent. This reads what it needs and nothing else.
+       */
+      provide: DEVICE_VERSIONS,
+      inject: [PrismaClient],
+      useFactory: (db: PrismaClient): DeviceVersionReader => ({
+        async versionsFor(userId: string): Promise<Array<string | null>> {
+          const rows = await db.deviceToken.findMany({
+            // Revoked devices excluded. A machine the member has disowned must
+            // not keep an update banner up for them.
+            where: { userId, revokedAt: null },
+            select: { appVersion: true },
+          });
+          return rows.map((r) => r.appVersion ?? null);
+        },
+      }),
+    },
     {
       provide: RELEASE_STORE,
       useFactory: (): ReleaseStore => {

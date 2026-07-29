@@ -304,7 +304,7 @@ export default async function MemberPage({ params }: { params: Promise<{ handle:
                   You are seeing your own record, which includes fields others may not.
                 </p>
                 <a
-                  href="/settings/privacy"
+                  href="/settings/commander"
                   className="mt-3 block text-sm text-[var(--color-brand-cyan-bright)]"
                 >
                   Your settings
