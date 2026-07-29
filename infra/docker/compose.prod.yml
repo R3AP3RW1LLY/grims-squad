@@ -121,6 +121,22 @@ services:
     environment:
       NODE_ENV: production
       PORT: 5000
+      # ★ WITHOUT THIS, NOTHING SIGNED-IN WORKS ★
+      #
+      # A React Server Component runs INSIDE this container, where
+      # `localhost:5001` is this container — and nothing listens there. The API
+      # is a sibling service reachable by its compose name.
+      #
+      # It was missing, so `lib/api.ts` fell back to its localhost default and
+      # every server-side call died with ECONNREFUSED. That path deliberately
+      # swallows failures and returns null so a broken API cannot take the whole
+      # site down — which meant every authenticated page rendered its SIGNED-OUT
+      # state instead. The site answered 200 throughout and looked fine; signing
+      # in appeared to do nothing.
+      #
+      # It works locally because there the API really is on localhost:5001,
+      # which is exactly why this survived until production.
+      API_INTERNAL_URL: http://api:5001
       # Baked into the build: og:image must be an absolute URL a social crawler
       # can actually reach, and Next resolves it at build time.
       NEXT_PUBLIC_SITE_URL: ${PUBLIC_SITE_URL:-https://45-63-35-93.sslip.io}
