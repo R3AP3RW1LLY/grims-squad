@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
   updateBanner,
   compareVersions,
-  allDevicesCurrent,
+  someDeviceBehind,
+  appVersionSummary,
   withinWindow,
   BANNER_DAYS,
 } from './update-banner-rules';
@@ -50,36 +51,54 @@ describe('compareVersions', () => {
   });
 });
 
-describe('allDevicesCurrent', () => {
+describe('someDeviceBehind', () => {
   /*
-   * ★ `[].every()` IS TRUE, AND THAT WOULD HAVE BEEN A REAL BUG ★
+   * ★ THE COMPLAINT THIS ANSWERS ★
    *
-   * It would hide the release announcement from exactly the people who have
-   * never installed the app — the ones it is most useful to.
+   * Squadron owner, 2026-07-29: "every time we release a new build that is not
+   * bumped we get the update notification and its really annoying to our
+   * members please! not to mention confusing!"
+   *
+   * The rule this replaces (`allDevicesCurrent`) asked whether every device was
+   * up to date and treated "we have not heard" as "out of date". That produced
+   * a banner in the ABSENCE of evidence, which is the confusion being reported.
+   * This one needs evidence of being behind.
    */
-  it('MANDATORY: a member with no devices is not "up to date"', () => {
-    expect(allDevicesCurrent([], '1.0.0')).toBe(false);
+  it('MANDATORY: somebody with no app installed is never told to update', () => {
+    // They have nothing to update. The download link in the status rail is
+    // where somebody without the app is served, not a nag bar.
+    expect(someDeviceBehind([], '1.0.0')).toBe(false);
   });
 
-  it('is true only when every device is on the newest', () => {
-    expect(allDevicesCurrent(['1.0.0'], '1.0.0')).toBe(true);
-    expect(allDevicesCurrent(['1.0.0', '1.0.0'], '1.0.0')).toBe(true);
-    // Desktop updated, laptop not. Telling them they are current would be wrong
-    // for one of the two machines they actually use.
-    expect(allDevicesCurrent(['1.0.0', '0.9.0'], '1.0.0')).toBe(false);
+  it('MANDATORY: a device that has not reported yet is not assumed to be behind', () => {
+    // Every device is null until its first poll. Assuming the worst nagged the
+    // entire squadron the moment version reporting shipped.
+    expect(someDeviceBehind([null], '1.0.0')).toBe(false);
+    expect(someDeviceBehind([''], '1.0.0')).toBe(false);
   });
 
-  it('counts a device that has never reported as not current', () => {
-    // It might be on the newest build and simply not have polled. Assuming so
-    // would hide the banner on a guess; showing it to somebody already current
-    // fixes itself within five minutes.
-    expect(allDevicesCurrent([null], '1.0.0')).toBe(false);
-    expect(allDevicesCurrent(['1.0.0', null], '1.0.0')).toBe(false);
+  it('MANDATORY: an unbumped rebuild changes nothing for somebody on that version', () => {
+    // A rebuild publishes a new FILE with the same VERSION. Nobody is behind.
+    expect(someDeviceBehind(['1.0.0'], '1.0.0')).toBe(false);
   });
 
-  it('accepts a device running something NEWER than the bucket', () => {
+  it('reports a device genuinely running something older', () => {
+    expect(someDeviceBehind(['0.9.0'], '1.0.0')).toBe(true);
+  });
+
+  it('reports when only ONE of two machines is behind', () => {
+    // Desktop updated, laptop not. That laptop really is out of date.
+    expect(someDeviceBehind(['1.0.0', '0.9.0'], '1.0.0')).toBe(true);
+  });
+
+  it('ignores a device running something NEWER than the bucket', () => {
     // A developer build, or a release mid-publish. Not somebody to nag.
-    expect(allDevicesCurrent(['1.1.0'], '1.0.0')).toBe(true);
+    expect(someDeviceBehind(['1.1.0'], '1.0.0')).toBe(false);
+  });
+
+  it('compares a mix of known and unknown on the known ones alone', () => {
+    expect(someDeviceBehind(['1.0.0', null], '1.0.0')).toBe(false);
+    expect(someDeviceBehind(['0.9.0', null], '1.0.0')).toBe(true);
   });
 });
 
@@ -114,8 +133,32 @@ describe('updateBanner', () => {
     expect(updateBanner({ ...fresh, deviceVersions: ['0.9.0'] }, NOW)).toBe('1.0.0');
   });
 
-  it('announces it to somebody who has never installed the app', () => {
-    expect(updateBanner({ ...fresh, deviceVersions: [] }, NOW)).toBe('1.0.0');
+  it('MANDATORY: says nothing to somebody who has never installed the app', () => {
+    /*
+     * This used to announce, on the reasoning that a release is most useful to
+     * somebody who has never installed it. That was wrong: it is an UPDATE
+     * banner, and there is nothing to update. Somebody without the app is
+     * served by the download link in the commander status rail.
+     */
+    expect(updateBanner({ ...fresh, deviceVersions: [] }, NOW)).toBeNull();
+  });
+
+  it('MANDATORY: says nothing while a device has not yet reported', () => {
+    expect(updateBanner({ ...fresh, deviceVersions: [null] }, NOW)).toBeNull();
+  });
+
+  it('MANDATORY: a rebuild at the same version does not start nagging again', () => {
+    /*
+     * The exact complaint. A rebuild moves the release date, so a rule keyed on
+     * "is this release recent" fires all over again for people who are already
+     * on it. Keyed on the VERSION, nothing happens.
+     */
+    expect(
+      updateBanner(
+        { latestVersion: '1.0.0', releasedAt: ago(1000), deviceVersions: ['1.0.0'] },
+        NOW,
+      ),
+    ).toBeNull();
   });
 
   /* The squadron owner's second condition, and the one that matters most. */
@@ -154,5 +197,114 @@ describe('updateBanner', () => {
         NOW,
       ),
     ).toBeNull();
+  });
+});
+
+
+/**
+ * The companion-app row in the commander status rail.
+ *
+ * ★ WHY IT IS TESTED BESIDE THE BANNER ★
+ *
+ * Squadron owner, 2026-07-29: show the member's version in the status box, link
+ * to the download page when they have not got it, and show the banner only on a
+ * real mismatch.
+ *
+ * The rail and the banner are two views of ONE fact. Deriving them separately is
+ * how a member gets a bar saying "update available" above a panel saying they
+ * are current — worse than either message alone. These tests assert the two
+ * never disagree.
+ */
+describe('appVersionSummary', () => {
+  const at = (deviceVersions: Array<string | null>, latestVersion: string | null = '1.0.0') => ({
+    latestVersion,
+    releasedAt: ago(DAY),
+    deviceVersions,
+  });
+
+  it('sends somebody without the app to the download page', () => {
+    const r = appVersionSummary(at([]));
+    expect(r.label).toBe('Not installed');
+    expect(r.href).toBe('/settings/devices');
+    expect(r.linkText).toMatch(/get the companion app/i);
+  });
+
+  it('says it is waiting when a paired device has not reported yet', () => {
+    // NOT "Unknown" as a bare word — that reads as an error, and would have
+    // somebody re-pairing a device that is working perfectly well.
+    const r = appVersionSummary(at([null]));
+    expect(r.label).toBe('Waiting for the app');
+    expect(r.href).toBeNull();
+  });
+
+  it('shows the version, and nothing else, when current', () => {
+    const r = appVersionSummary(at(['1.0.0']));
+    expect(r.label).toBe('v1.0.0');
+    expect(r.tone).toBe('good');
+    // No link. There is nothing to do, and an action here would imply otherwise.
+    expect(r.href).toBeNull();
+  });
+
+  it('names both versions when behind, and offers the update', () => {
+    const r = appVersionSummary(at(['0.9.0']));
+    expect(r.label).toBe('v0.9.0 — v1.0.0 available');
+    expect(r.tone).toBe('warn');
+    expect(r.href).toBe('/settings/devices');
+  });
+
+  it('reports the OLDEST machine, not the newest', () => {
+    // A current desktop and a stale laptop is not up to date. Showing the newer
+    // number would hide the one that needs attention.
+    const r = appVersionSummary(at(['1.0.0', '0.9.0']));
+    expect(r.label).toContain('v0.9.0');
+    expect(r.tone).toBe('warn');
+  });
+
+  it('is calm about a device running something newer than the bucket', () => {
+    const r = appVersionSummary(at(['1.1.0']));
+    expect(r.tone).toBe('good');
+    expect(r.label).toBe('v1.1.0');
+  });
+
+  it('shows the installed version even when the bucket says nothing', () => {
+    // An unreachable release store must not turn into "Not installed" for
+    // somebody who plainly has it.
+    const r = appVersionSummary(at(['1.0.0'], null));
+    expect(r.label).toBe('v1.0.0');
+    expect(r.tone).toBe('good');
+  });
+
+  it('never returns a blank label', () => {
+    // An empty stat in a status panel reads as broken.
+    for (const devices of [[], [null], [''], ['1.0.0'], ['0.9.0'], ['1.0.0', null]]) {
+      expect(appVersionSummary(at(devices as Array<string | null>)).label.trim()).not.toBe('');
+    }
+  });
+
+  /*
+   * ★ THE ONE THAT MATTERS ★
+   *
+   * The rail and the banner must never contradict each other. If the banner is
+   * showing, the rail must be warning; if it is silent, the rail must not be.
+   */
+  it('MANDATORY: agrees with the banner in every case', () => {
+    const cases: Array<Array<string | null>> = [
+      [],
+      [null],
+      [''],
+      ['1.0.0'],
+      ['0.9.0'],
+      ['1.1.0'],
+      ['1.0.0', '0.9.0'],
+      ['1.0.0', null],
+      ['0.9.0', null],
+    ];
+
+    for (const devices of cases) {
+      const input = at(devices);
+      const banner = updateBanner(input, NOW) !== null;
+      const rail = appVersionSummary(input).tone === 'warn';
+      expect(rail, `devices ${JSON.stringify(devices)}`).toBe(banner);
+    }
   });
 });

@@ -51,6 +51,40 @@ export const SESSION_MAX_SEC = 14 * 24 * 60 * 60;
  */
 export const REFRESH_TTL_SEC = SESSION_MAX_SEC;
 
+/**
+ * How long after a token is rotated a second use of it is still forgiven.
+ *
+ * ★ WHY MEMBERS WERE BEING SIGNED OUT ★
+ *
+ * Squadron owner, 2026-07-29: "we need to implement true user sessions, were
+ * having to relog back in way too often".
+ *
+ * Strict rotation with no grace treats the SECOND presentation of a token as
+ * theft and kills the whole family. That is right when the two uses are minutes
+ * apart. It is wrong when they are milliseconds apart — and milliseconds apart
+ * is the normal case:
+ *
+ *   - two tabs open, both notice the access token has expired, both refresh
+ *   - a request retried after a dropped connection, where the first attempt
+ *     actually reached the server
+ *   - the companion app and the website refreshing the same session at once
+ *
+ * In every one of those the member is signed out and told their session ended
+ * "for security reasons", which is both alarming and untrue.
+ *
+ * ★ WHAT THE WINDOW DOES NOT WEAKEN ★
+ *
+ * Outside thirty seconds, nothing changes: a replayed token still revokes the
+ * family and still raises the alarm. A family already revoked is never revived.
+ * The absolute fourteen-day deadline is untouched — the grace mints a token
+ * clamped to the family's existing expiry, so nobody rides this past their own
+ * sign-in.
+ *
+ * Thirty seconds because the races above resolve in well under a second; the
+ * margin is for a slow network, not for a thief.
+ */
+export const REFRESH_GRACE_MS = 30_000;
+
 /** 256 bits of entropy. Guessing is not a viable attack on this. */
 const REFRESH_BYTES = 32;
 const MAX_REFRESH_LEN = 128;
@@ -123,6 +157,54 @@ export class SessionService {
     // check, because a replayed token that also happens to be expired is still
     // evidence of theft and must still kill the family.
     if (token.usedAt !== null) {
+      /*
+       * ★ THE GRACE WINDOW ★
+       *
+       * A second use moments after the first is two tabs racing, or a retried
+       * request whose first attempt got through — not a thief. Killing the
+       * family there signs a member out and tells them their session ended for
+       * security reasons, which is alarming and untrue.
+       *
+       * ★ WHAT THIS DOES NOT DO ★
+       *
+       * It does NOT hand back the token the first call produced. Only the
+       * SHA-256 of a refresh token is ever stored; the plaintext is generated,
+       * returned once, and forgotten. Keeping it to replay later would mean
+       * storing a live credential in the database in the clear, which is a
+       * worse problem than the one being solved.
+       *
+       * So the racing caller gets a NEW token from the same family. Both tabs
+       * end up holding a working session, which is the outcome that matters,
+       * and the family is untouched.
+       *
+       * Every other guard still applies below — a revoked family is never
+       * revived, and the fourteen-day deadline is checked before anything is
+       * minted.
+       */
+      const sinceFirstUse = Date.now() - token.usedAt.getTime();
+      const racing =
+        sinceFirstUse >= 0 &&
+        sinceFirstUse <= REFRESH_GRACE_MS &&
+        family.revokedAt === null &&
+        family.expiresAt.getTime() > Date.now();
+
+      if (racing) {
+        /*
+         * Recorded, but NOT as a security event. This is expected behaviour and
+         * filing it beside genuine reuse would train whoever reads that table to
+         * skim past the alarms that matter.
+         */
+        return {
+          accessToken: await this.#mintAccess(family.userId),
+          // Clamped to the family's own expiry by `#mintRefresh`, so a member
+          // cannot rotate past their fourteen days one race at a time.
+          refreshToken: await this.#mintRefresh(family.id, family.expiresAt),
+          familyId: family.id,
+          userId: family.userId,
+          expiresAt: family.expiresAt,
+        };
+      }
+
       const at = new Date();
       await this.store.revokeFamily(family.id, 'refresh token reuse detected', at);
       await this.store.recordSecurityEvent('refresh_token_reuse', family.userId, {

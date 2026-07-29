@@ -5,6 +5,7 @@ import {
   ACCESS_TTL_SEC,
   REFRESH_TTL_SEC,
   SESSION_MAX_SEC,
+  REFRESH_GRACE_MS,
 } from './session.service.js';
 import { InMemorySessionStore } from './session.store.fake.js';
 import { AppError, ErrorCode } from '@grims/shared';
@@ -40,6 +41,28 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 const ctx = { userAgent: 'vitest', ipHash: sha256('127.0.0.1') };
+
+/**
+ * Ages every already-used token past the grace window.
+ *
+ * ★ WHY THE REUSE TESTS NEED THIS NOW ★
+ *
+ * A replay milliseconds after the first use is two tabs racing, not a thief,
+ * and is forgiven for thirty seconds (REFRESH_GRACE_MS). These tests replay
+ * immediately, so without ageing they would exercise the grace path while
+ * claiming to test theft — passing for the wrong reason, which is worse than
+ * failing.
+ *
+ * The clock is moved on the DATA rather than with fake timers, because the
+ * service also mints JWTs and freezing time around `jose` makes these tests
+ * about token expiry instead of about reuse.
+ */
+function ageBeyondGrace(): void {
+  const old = new Date(Date.now() - (REFRESH_GRACE_MS + 60_000));
+  for (const t of store.tokens) {
+    if (t.usedAt !== null) t.usedAt = old;
+  }
+}
 
 describe('issuing a session', () => {
   it('returns an access token and a refresh token', async () => {
@@ -169,6 +192,7 @@ describe('reuse detection @INV-005', () => {
   it('MANDATORY: replaying a used refresh token revokes the ENTIRE family', async () => {
     const a = await svc.issue('user-1', ctx);
     const b = await svc.rotate(a.refreshToken, ctx); // legitimate rotation
+    ageBeyondGrace(); // a real theft, not two tabs racing
     // The attacker replays the stolen (already-used) token.
     await expect(svc.rotate(a.refreshToken, ctx)).rejects.toMatchObject({
       code: ErrorCode.REFRESH_TOKEN_REUSED,
@@ -187,6 +211,7 @@ describe('reuse detection @INV-005', () => {
     const desktop = await svc.issue('user-1', ctx);
     const phone = await svc.issue('user-1', { userAgent: 'phone', ipHash: sha256('10.0.0.2') });
     await svc.rotate(desktop.refreshToken, ctx);
+    ageBeyondGrace();
     await svc.rotate(desktop.refreshToken, ctx).catch(() => {});
 
     // The compromised device is gone; the phone is untouched. Logging a member
@@ -205,6 +230,7 @@ describe('reuse detection @INV-005', () => {
   it('records the reuse so an officer can see it happened', async () => {
     const a = await svc.issue('user-1', ctx);
     await svc.rotate(a.refreshToken, ctx);
+    ageBeyondGrace();
     await svc.rotate(a.refreshToken, ctx).catch(() => {});
     // A silent revocation leaves the member confused and leaves nobody able to
     // tell a theft from a bug.
@@ -292,5 +318,122 @@ describe('cookie attributes', () => {
     // Path-scoping a refresh cookie is a common trick, but it breaks silently
     // behind a proxy that rewrites paths, and Path is not a security boundary.
     expect(svc.cookieOptions({ secure: true }).options.path).toBe('/');
+  });
+});
+
+/**
+ * The grace window on refresh-token rotation.
+ *
+ * ★ WHY IT EXISTS ★
+ *
+ * Squadron owner, 2026-07-29: "we need to implement true user sessions, were
+ * having to relog back in way too often".
+ *
+ * Strict rotation treats the SECOND presentation of a token as theft and kills
+ * the family. Right when the two uses are minutes apart; wrong when they are
+ * milliseconds apart — and milliseconds apart is the normal case. Two tabs both
+ * noticing an expired access token, a retried request whose first attempt got
+ * through, the companion app and the website refreshing at once. Every one of
+ * those signed the member out and told them their session ended "for security
+ * reasons", which is alarming and untrue.
+ *
+ * ★ WHAT IT IS NOT ★
+ *
+ * It does NOT hand back the token the first call produced. Only the SHA-256 of
+ * a refresh token is stored — the plaintext is returned once and forgotten, and
+ * keeping it to replay later would mean holding a live credential in the clear.
+ * The racing caller gets a NEW token from the same family instead. Both tabs
+ * end up with a working session, which is the outcome that matters.
+ */
+describe('refresh grace window', () => {
+  it('MANDATORY: two tabs racing both end up signed in', async () => {
+    const a = await svc.issue('user-1', ctx);
+
+    const first = await svc.rotate(a.refreshToken, ctx);
+    // The second tab presents the SAME token, moments later.
+    const second = await svc.rotate(a.refreshToken, ctx);
+
+    // Neither is signed out, and the family is untouched.
+    expect(store.families[0]?.revokedAt).toBeNull();
+    await expect(svc.rotate(first.refreshToken, ctx)).resolves.toBeDefined();
+    await expect(svc.rotate(second.refreshToken, ctx)).resolves.toBeDefined();
+  });
+
+  it('issues a NEW token rather than the first one — the plaintext is never stored', async () => {
+    const a = await svc.issue('user-1', ctx);
+    const first = await svc.rotate(a.refreshToken, ctx);
+    const second = await svc.rotate(a.refreshToken, ctx);
+
+    expect(second.refreshToken).not.toBe(first.refreshToken);
+    expect(second.refreshToken).not.toBe(a.refreshToken);
+    // Same session throughout. A race must not fork somebody into two families.
+    expect(second.familyId).toBe(first.familyId);
+    expect(second.userId).toBe('user-1');
+  });
+
+  it('does not file a race as a security event', async () => {
+    // Filing it beside genuine reuse would train whoever reads that table to
+    // skim past the alarms that matter.
+    const a = await svc.issue('user-1', ctx);
+    await svc.rotate(a.refreshToken, ctx);
+    await svc.rotate(a.refreshToken, ctx);
+
+    expect(store.securityEvents.some((e) => /reuse/i.test(e.kind))).toBe(false);
+  });
+
+  /* ------------------------------------------------- and what it must not do */
+
+  it('MANDATORY: a replay AFTER the window still kills the family', async () => {
+    const a = await svc.issue('user-1', ctx);
+    await svc.rotate(a.refreshToken, ctx);
+    ageBeyondGrace();
+
+    await expect(svc.rotate(a.refreshToken, ctx)).rejects.toMatchObject({
+      code: ErrorCode.REFRESH_TOKEN_REUSED,
+    });
+    expect(store.families[0]?.revokedAt).not.toBeNull();
+  });
+
+  it('MANDATORY: never revives a family that was already revoked', async () => {
+    // Theft was detected earlier and the session killed. A race arriving after
+    // that must not resurrect it — this is the case where the grace window
+    // would turn a working defence into a hole.
+    const a = await svc.issue('user-1', ctx);
+    await svc.rotate(a.refreshToken, ctx);
+    await svc.revokeFamily(store.families[0]!.id, 'user signed out');
+
+    await expect(svc.rotate(a.refreshToken, ctx)).rejects.toThrow(AppError);
+    expect(store.families[0]?.revokedAt).not.toBeNull();
+  });
+
+  it('MANDATORY: does not let a member rotate past the 14-day deadline', async () => {
+    const a = await svc.issue('user-1', ctx);
+    await svc.rotate(a.refreshToken, ctx);
+    // The sign-in itself has run out, whatever the token says.
+    store.families[0]!.expiresAt = new Date(Date.now() - 1000);
+
+    await expect(svc.rotate(a.refreshToken, ctx)).rejects.toThrow(AppError);
+  });
+
+  it('is bounded at exactly the stated window', async () => {
+    const a = await svc.issue('user-1', ctx);
+    await svc.rotate(a.refreshToken, ctx);
+
+    // One millisecond past the window is a replay, not a race.
+    for (const t of store.tokens) {
+      if (t.usedAt !== null) t.usedAt = new Date(Date.now() - (REFRESH_GRACE_MS + 1));
+    }
+    await expect(svc.rotate(a.refreshToken, ctx)).rejects.toThrow(AppError);
+  });
+
+  it('is not fooled by a clock that jumped backwards', async () => {
+    // A usedAt in the future yields a negative age. Treating that as "within
+    // the window" would forgive a replay of any age after one clock correction.
+    const a = await svc.issue('user-1', ctx);
+    await svc.rotate(a.refreshToken, ctx);
+    for (const t of store.tokens) {
+      if (t.usedAt !== null) t.usedAt = new Date(Date.now() + 600_000);
+    }
+    await expect(svc.rotate(a.refreshToken, ctx)).rejects.toThrow(AppError);
   });
 });

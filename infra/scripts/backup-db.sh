@@ -121,7 +121,39 @@ aws_s3() {
 aws_s3 s3 cp /data/dump.enc "s3://${BACKUP_S3_BUCKET}/${OBJ}" >/dev/null 2>&1 \
   || die "upload failed"
 
-log "uploaded ${OBJ} (${SIZE} bytes)"
+# ---------------------------------------------------- verify what LANDED
+#
+# ★ EVERY CHECK ABOVE IS ABOUT THE LOCAL FILE ★
+#
+# Size, decryptability, table count, completion marker — all of it interrogates
+# the dump sitting on this disk, and then the script logged that same LOCAL size
+# as though it described the object in the bucket.
+#
+# Between 27 and 28 July 2026 that produced five consecutive log lines reading
+# "uploaded ... (22768 bytes)" against objects that were ZERO BYTES in the
+# bucket. Confirmed afterwards with head-object. The cause was fixed separately
+# (#51 — the dumps were being addressed through the media bucket variable), but
+# the reason nobody noticed for two days is right here: the script had no way to
+# be wrong about an upload, because it never looked.
+#
+# So it asks the bucket. `cp` exiting 0 is the storage provider's opinion; this
+# is the fact.
+REMOTE=$(
+  aws_s3 s3api head-object \
+    --bucket "${BACKUP_S3_BUCKET}" --key "${OBJ}" \
+    --query 'ContentLength' --output text 2>/dev/null | tr -d '[:space:]'
+)
+
+# `die`, not a warning. A backup that is not there is not a backup, and a job
+# that exits 0 having produced nothing is exactly how five empty objects came to
+# sit in a bucket looking like a fortnight of protection.
+[[ "$REMOTE" =~ ^[0-9]+$ ]] \
+  || die "could not read back ${OBJ} — the bucket did not report a size"
+
+(( REMOTE == SIZE )) \
+  || die "uploaded ${OBJ} is ${REMOTE} bytes in the bucket but ${SIZE} on disk"
+
+log "uploaded ${OBJ} (${SIZE} bytes, confirmed in bucket)"
 
 # ------------------------------------------------------------------ retention
 # Deletes by age, but NEVER below a floor. A clock skew or a stalled backup job
