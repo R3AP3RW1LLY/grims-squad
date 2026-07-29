@@ -40,16 +40,19 @@ describe('what gets sent', () => {
      * server applies the member's choices. These four are the exception, and
      * the reason is not squeamishness:
      *
-     * They carry a THIRD PARTY's words. A member can consent to sharing their
-     * own data; they cannot consent on behalf of the commander who messaged
-     * them. They also belong to no category, so nobody could opt in to them,
-     * and the server rejects them as unknown — so transmitting them would be
-     * risk with no purpose at all.
+     * They carry the CONTENT of private messages and a friends list. A member
+     * can consent to sharing their own data; they cannot consent on behalf of
+     * the commander who messaged them. They belong to no category, so nobody
+     * could opt in to them, and the server rejects them as unknown — so
+     * transmitting them would be risk with no purpose at all.
+     *
+     * `Died` was among these and was removed on 2026-07-29: it names another
+     * commander, but so does `PVPKill`, and a killboard needs both sides of a
+     * fight. See NEVER_SENT.
      */
     const text =
       line({ timestamp: '2026-07-27T12:00:00Z', event: 'SendText', Message: 'private message' }) +
       line({ timestamp: '2026-07-27T12:00:01Z', event: 'ReceiveText', From: 'CMDR X' }) +
-      line({ timestamp: '2026-07-27T12:00:02Z', event: 'Died', KillerName: 'someone' }) +
       line({ timestamp: '2026-07-27T12:00:03Z', event: 'Friends', Name: 'someone' });
 
     const out = readJournalChunk(text);

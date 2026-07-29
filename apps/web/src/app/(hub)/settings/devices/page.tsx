@@ -7,6 +7,7 @@ import {
 } from '../../../../lib/api';
 import { formatLocal } from '../../../../lib/time';
 import { DevicesPanel } from './devices-panel';
+import { TelemetryForm } from './telemetry-form';
 import { CompanionDownload } from './download';
 import {
   PageHeader,
@@ -67,21 +68,37 @@ export default async function DevicesPage() {
                       : formatLocal(lastSeen, me.user?.timezone ?? 'UTC', { withTime: false })
                   }
                 />
+                {/*
+                  Counts what is SWITCHED OFF, because that is the exceptional
+                  state now. Under opt-out "6 of 6 on" is the default and says
+                  nothing; "2 switched off" is the fact worth surfacing.
+                */}
                 <RailStat
-                  label="Extra categories"
-                  value={`${consent.categories.length} of ${consent.available.length}`}
+                  label="Switched off"
+                  value={
+                    consent.optOutCategories.length + consent.optOutEvents.length === 0
+                      ? 'Nothing'
+                      : `${consent.optOutCategories.length} categories, ${consent.optOutEvents.length} events`
+                  }
+                  tone={
+                    consent.optOutCategories.length + consent.optOutEvents.length === 0
+                      ? 'good'
+                      : 'default'
+                  }
                 />
               </Panel>
 
               {/*
-                The baseline stated plainly, in the rail, where it is visible
-                while somebody reads the opt-in list. Burying "this part is not
-                optional" below six checkboxes would be a way of not saying it.
+                The one thing that cannot be switched off, in the rail where it
+                is visible while somebody works through the list. Burying "this
+                part is not optional" below twenty toggles would be a way of not
+                saying it.
               */}
               <Panel title="Always collected">
                 <p className="text-sm leading-relaxed text-[var(--color-text-secondary)]">
-                  That you played, your ranks, and your ships. This is what the squadron runs on and
-                  what the monthly rank check reads — it comes with running the app, which is itself
+                  That you played, and when. Nothing else. The monthly promotion check reads it, so
+                  switching it off would stop you qualifying for promotions without telling you
+                  why — which is why it is the one exception. Running the app at all is still
                   entirely optional.
                 </p>
               </Panel>
@@ -121,11 +138,20 @@ export default async function DevicesPage() {
             </>
           }
         >
-          <DevicesPanel
-            initialDevices={devices.devices}
-            initialConsent={consent}
-            timezone={me.user?.timezone ?? 'UTC'}
-          />
+          <DevicesPanel initialDevices={devices.devices} timezone={me.user?.timezone ?? 'UTC'} />
+
+          {/*
+            ★ THE WHOLE CATALOGUE, BELOW THE DEVICES ★
+
+            Devices first because pairing is what makes any of this happen, and
+            somebody with no device paired has nothing to decide about yet.
+          */}
+          <Section
+            title="What is collected"
+            description="Everything is kept unless you switch it off. Each item says what it actually reveals — switching one off also deletes what has already been stored under it."
+          >
+            <TelemetryForm initial={consent} />
+          </Section>
         </PageBody>
       )}
     </>

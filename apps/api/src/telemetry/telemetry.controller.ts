@@ -7,7 +7,8 @@ import { verifyCsrf, readCsrfCookie } from '../common/csrf.js';
 import { PAIRING_SERVICE, INGEST_SERVICE, CONSENT_SERVICE } from './telemetry.tokens.js';
 import type { PairingService } from './pairing.service.js';
 import type { JournalIngestService, IncomingEvent } from './journal-ingest.service.js';
-import { CONSENT_CATEGORIES, type ConsentService } from './consent.service.js';
+import type { ConsentService } from './consent.service.js';
+import { TELEMETRY_CATALOGUE, REQUIRED_CATEGORY } from '@grims/shared';
 
 @Controller('v1')
 export class TelemetryController {
@@ -69,46 +70,71 @@ export class TelemetryController {
 
   // ----------------------------------------------------------------- consent
   /**
-   * What the member has opted into, and the full list of what they could.
+   * What the member has switched OFF, and the full catalogue of what they could.
    *
-   * Returns the options as well as the choices, so a settings screen does not
-   * have to keep its own copy of the category list and drift out of step with
-   * what the server will actually accept.
+   * ★ THE CATALOGUE TRAVELS WITH THE ANSWER ★
+   *
+   * Under opt-out a member can only decide about things they can SEE, so the
+   * page needs every category, every event, and a sentence saying what each
+   * reveals. Sending it from here rather than keeping a copy in the web app
+   * means the two cannot drift — a settings page offering a switch the server
+   * would reject is worse than no switch at all.
    */
   @Get('me/telemetry-consent')
   async getConsent(@User() caller: CurrentUser | undefined): Promise<{
-    categories: readonly string[];
-    available: readonly string[];
+    optOutCategories: readonly string[];
+    optOutEvents: readonly string[];
+    catalogue: typeof TELEMETRY_CATALOGUE;
+    requiredCategory: string;
   }> {
     const userId = requireUser(caller);
+    const state = await this.consent.get(userId);
+
     return {
-      categories: await this.consent.get(userId),
-      available: CONSENT_CATEGORIES,
+      optOutCategories: state.categories,
+      optOutEvents: state.events,
+      catalogue: TELEMETRY_CATALOGUE,
+      // Named rather than left for the page to hardcode, so the one thing that
+      // cannot be switched off is decided in exactly one place.
+      requiredCategory: REQUIRED_CATEGORY,
     };
   }
 
   /**
-   * Replaces the member's consent, purging anything they turned off.
+   * Replaces what the member has switched off, purging anything newly declined.
    *
    * PUT rather than PATCH, and the whole set rather than one toggle: a settings
    * screen that sends one flag at a time races itself, and the second request
    * overwrites the first with a stale view of the rest.
+   *
+   * Declining `session` is REFUSED with an explanation rather than quietly
+   * dropped — see the service.
    */
   @Put('me/telemetry-consent')
   async setConsent(
     @User() caller: CurrentUser | undefined,
     @Body() body: unknown,
     @Req() req: FastifyRequest,
-  ): Promise<{ categories: readonly string[]; purged: number }> {
+  ): Promise<{ optOutCategories: readonly string[]; optOutEvents: readonly string[]; purged: number }> {
     const userId = requireUser(caller);
     csrf(req);
 
-    const categories = (body as Record<string, unknown> | null)?.['categories'];
-    if (!Array.isArray(categories) || categories.some((c) => typeof c !== 'string')) {
-      throw new AppError(ErrorCode.VALIDATION_FAILED, 'Expected a categories array.');
+    const b = body as Record<string, unknown> | null;
+    const categories = b?.['optOutCategories'];
+    const events = b?.['optOutEvents'];
+
+    const isStrings = (v: unknown): v is string[] =>
+      Array.isArray(v) && v.every((x) => typeof x === 'string');
+
+    if (!isStrings(categories) || !isStrings(events)) {
+      throw new AppError(
+        ErrorCode.VALIDATION_FAILED,
+        'Expected optOutCategories and optOutEvents arrays.',
+      );
     }
 
-    return this.consent.set(userId, categories as string[]);
+    const { state, purged } = await this.consent.set(userId, { categories, events });
+    return { optOutCategories: state.categories, optOutEvents: state.events, purged };
   }
 
   // ------------------------------------------------------------------ ingest

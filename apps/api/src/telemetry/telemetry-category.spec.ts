@@ -2,11 +2,11 @@ import { describe, it, expect } from 'vitest';
 import {
   JOURNAL_EVENTS,
   telemetryCategoryFor,
-  BASELINE_CATEGORIES,
+  REQUIRED_CATEGORY,
   isBaselineCategory,
   type JournalEventName,
 } from '@grims/shared';
-import { CONSENT_CATEGORIES } from './consent.service.js';
+import { DECLINABLE_CATEGORIES } from './consent.service.js';
 
 /**
  * Journal events are stored under the right consent category (INV-013).
@@ -39,7 +39,7 @@ describe('journal event consent categories', () => {
     expect(inSession).toEqual(['LoadGame']);
   });
 
-  it('MANDATORY: every allowlisted event is either baseline or offered as a choice', () => {
+  it('MANDATORY: every allowlisted event is either required or declinable', () => {
     /*
      * An event in neither set could never be stored: not baseline, so it needs
      * consent — and not offered, so consent can never be given. It would be
@@ -49,17 +49,29 @@ describe('journal event consent categories', () => {
     for (const name of EVENT_NAMES) {
       const category = telemetryCategoryFor(name);
       const reachable =
-        isBaselineCategory(category) || (CONSENT_CATEGORIES as readonly string[]).includes(category);
+        isBaselineCategory(category) || (DECLINABLE_CATEGORIES as readonly string[]).includes(category);
       expect(reachable, name + ' -> ' + category).toBe(true);
     }
   });
 
-  it('MANDATORY: baseline and optional do not overlap', () => {
-    // A category in both would be collected regardless AND offered as a switch,
-    // so turning it off would appear to work and change nothing.
-    for (const category of BASELINE_CATEGORIES) {
-      expect(CONSENT_CATEGORIES, category).not.toContain(category);
-    }
+  it('MANDATORY: the required category is not also declinable', () => {
+    /*
+     * ★ THE OLD VERSION OF THIS CHECKED THE WHOLE BASELINE ★
+     *
+     * Session, profile and fleet were all collected regardless. Under opt-out
+     * (INV-013, amended 2026-07-29) only `session` is required — profile and
+     * fleet CAN now be switched off, and asserting otherwise would pin a rule
+     * that no longer exists.
+     *
+     * A category in both lists would be collected regardless AND offered as a
+     * switch, so turning it off would appear to work and change nothing.
+     */
+    expect(DECLINABLE_CATEGORIES).not.toContain(REQUIRED_CATEGORY);
+    expect(REQUIRED_CATEGORY).toBe('session');
+
+    // And profile and fleet ARE declinable now, which is the change.
+    expect(DECLINABLE_CATEGORIES).toContain('profile');
+    expect(DECLINABLE_CATEGORIES).toContain('fleet');
   });
 
   it('MANDATORY: the category names are real values of the database enum', () => {
@@ -73,7 +85,7 @@ describe('journal event consent categories', () => {
      * are what the database will actually accept.
      */
     const migration = readMigration();
-    for (const category of CONSENT_CATEGORIES) {
+    for (const category of DECLINABLE_CATEGORIES) {
       expect(migration, category).toMatch(new RegExp(`'${category}'`));
     }
   });

@@ -1,32 +1,53 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { ConsentService, CONSENT_CATEGORIES, type ConsentStore } from './consent.service.js';
+import {
+  ConsentService,
+  DECLINABLE_CATEGORIES,
+  DECLINABLE_EVENTS,
+  type ConsentStore,
+  type OptOutState,
+} from './consent.service.js';
 
 /**
- * Telemetry consent, and the purge that goes with withdrawing it (INV-013).
+ * What a member has switched OFF (INV-013, amended 2026-07-29).
  *
- * The constraint says "one-click revoke AND PURGE", and the two halves are not
- * separable. A member who withdraws consent and finds a year of their data still
- * sitting there has been given a switch, not a choice.
+ * ★ THIS FILE USED TO TEST THE OPPOSITE ★
+ *
+ * Telemetry was opt-in: nothing was collected until asked for, and these tests
+ * asserted that an empty list meant nothing was stored. It is opt-out now — the
+ * companion app sends what it reads and this service records what a member
+ * declines — so the assertions here are inverted from what they were.
+ *
+ * Two properties carry the weight:
+ *
+ *   `session` is REFUSED, loudly. Promotion eligibility is computed from it.
+ *   Declining PURGES. A switch that stops new writes and leaves a year of
+ *   history behind is not a choice.
  */
 
 class FakeStore implements ConsentStore {
-  categories: string[] = [];
-  events: Array<{ category: string }> = [];
-  audits: Array<Record<string, unknown>> = [];
+  state: OptOutState = { categories: [], events: [] };
+  purgedCategories: string[][] = [];
+  purgedEvents: string[][] = [];
+  audit: Array<Record<string, unknown>> = [];
+  /** How many rows each purge should claim to have deleted. */
+  purgeCount = 0;
 
-  async read(): Promise<readonly string[]> {
-    return this.categories;
+  async read(): Promise<OptOutState> {
+    return this.state;
   }
-  async write(_userId: string, categories: readonly string[]): Promise<void> {
-    this.categories = [...categories];
+  async write(_userId: string, state: OptOutState): Promise<void> {
+    this.state = state;
   }
-  async purge(_userId: string, categories: readonly string[]): Promise<number> {
-    const before = this.events.length;
-    this.events = this.events.filter((e) => !categories.includes(e.category));
-    return before - this.events.length;
+  async purgeCategories(_userId: string, categories: readonly string[]): Promise<number> {
+    this.purgedCategories.push([...categories]);
+    return this.purgeCount;
+  }
+  async purgeEvents(_userId: string, events: readonly string[]): Promise<number> {
+    this.purgedEvents.push([...events]);
+    return this.purgeCount;
   }
   async writeAudit(entry: Record<string, unknown>): Promise<void> {
-    this.audits.push(entry);
+    this.audit.push(entry);
   }
 }
 
@@ -38,109 +59,134 @@ beforeEach(() => {
   svc = new ConsentService(store);
 });
 
-describe('consent', () => {
-  it('MANDATORY: defaults to nothing', async () => {
-    // Opt-in, not opt-out. A member who has never opened their privacy settings
-    // has agreed to nothing, and pairing a device does not change that.
-    expect(await svc.get('u1')).toEqual([]);
+describe('opt-out defaults', () => {
+  it('MANDATORY: nothing is declined by default, so everything is kept', async () => {
+    // The inversion in one line. An untouched account collects everything,
+    // which is the reverse of what an empty list used to mean.
+    const s = await svc.get('u1');
+    expect(s.categories).toEqual([]);
+    expect(s.events).toEqual([]);
   });
 
-  it('records what was chosen', async () => {
-    const r = await svc.set('u1', ['location', 'trade']);
-    expect(r.categories).toEqual(['location', 'trade']);
-    expect(await svc.get('u1')).toEqual(['location', 'trade']);
+  it('offers every category except the required one', () => {
+    expect(DECLINABLE_CATEGORIES).not.toContain('session');
+    expect(DECLINABLE_CATEGORIES).toContain('combat');
+    // profile and fleet were BASELINE under the old model and can be declined
+    // now. That is the change, so it is asserted rather than assumed.
+    expect(DECLINABLE_CATEGORIES).toContain('profile');
   });
 
-  it('MANDATORY: rejects a category that does not exist', async () => {
-    // Ignoring it would tell a member their choice was saved when it was not.
-    await expect(svc.set('u1', ['location', 'everything'])).rejects.toThrow(/not a telemetry category/i);
-  });
-
-  it('a rejected request changes nothing', async () => {
-    await svc.set('u1', ['location']);
-    await expect(svc.set('u1', ['nonsense'])).rejects.toThrow();
-    expect(await svc.get('u1')).toEqual(['location']);
-  });
-
-  it('takes the whole set, so two toggles in flight cannot race', async () => {
-    await svc.set('u1', ['location', 'combat', 'trade']);
-    await svc.set('u1', ['location']);
-    expect(await svc.get('u1')).toEqual(['location']);
-  });
-
-  it('ignores order and duplicates in the request', async () => {
-    const r = await svc.set('u1', ['trade', 'location', 'location']);
-    expect(r.categories).toEqual(['location', 'trade']);
-  });
-});
-
-describe('purge on withdrawal', () => {
-  beforeEach(async () => {
-    await svc.set('u1', ['location', 'combat', 'trade']);
-    store.events = [
-      { category: 'location' },
-      { category: 'combat' },
-      { category: 'combat' },
-      { category: 'trade' },
-    ];
-  });
-
-  it('MANDATORY: turning a category off DELETES what was stored under it', async () => {
-    const r = await svc.set('u1', ['location', 'trade']);
-
-    expect(r.purged).toBe(2);
-    expect(store.events.map((e) => e.category)).toEqual(['location', 'trade']);
-  });
-
-  it('MANDATORY: leaves the categories still consented to alone', async () => {
-    // The failure this guards against is a purge that over-reaches and takes a
-    // member's whole history because they turned off one category.
-    await svc.set('u1', ['location']);
-    expect(store.events.map((e) => e.category)).toEqual(['location']);
-  });
-
-  it('purges nothing when consent only widens', async () => {
-    await svc.set('u1', ['location', 'combat']);
-    const r = await svc.set('u1', ['location', 'combat', 'trade']);
-    expect(r.purged).toBe(0);
-  });
-
-  it('MANDATORY: withdrawing everything leaves nothing behind', async () => {
-    const r = await svc.set('u1', []);
-    expect(r.purged).toBe(4);
-    expect(store.events).toEqual([]);
-  });
-
-  it('records the withdrawal in the audit log, with the count', async () => {
-    // Not for the member's benefit — for ours. If somebody later asks why their
-    // data is gone, "you turned this off on the 3rd" is an answer.
-    await svc.set('u1', ['location']);
-    const last = store.audits.at(-1);
-
-    expect(last?.['action']).toBe('telemetry.consent.set');
-    expect(last?.['after']).toMatchObject({ withdrawn: ['combat', 'trade'], purgedEvents: 3 });
-  });
-});
-
-describe('the offered categories', () => {
-  it('MANDATORY: are the OPTIONAL ones only', () => {
+  it('offers individual events, not just categories', () => {
     /*
-     * The baseline is deliberately absent. Session, profile and fleet come with
-     * running the app (INV-013), and offering a switch that does nothing would
-     * be worse than offering none — it would tell a member they had turned
-     * something off when they had not.
+     * The finer scope is the point: somebody may be happy for us to know they
+     * were in a conflict zone and not what bounties they claimed.
      */
-    expect(CONSENT_CATEGORIES).toEqual([
-      'location',
-      'combat',
-      'trade',
-      'exploration',
-      'bgs',
-      'carrier',
-    ]);
+    expect(DECLINABLE_EVENTS).toContain('Bounty');
+    expect(DECLINABLE_EVENTS).toContain('FSDJump');
+    expect(DECLINABLE_EVENTS).not.toContain('LoadGame');
+  });
+});
 
-    for (const baseline of ['session', 'profile', 'fleet']) {
-      expect(CONSENT_CATEGORIES, baseline).not.toContain(baseline);
-    }
+describe('declining session', () => {
+  it('MANDATORY: is refused, with a reason', async () => {
+    /*
+     * ★ NOT A PREFERENCE — A DEPENDENCY ★
+     *
+     * Promotion eligibility is computed from it. A member who switched it off
+     * would silently stop qualifying for promotions they had earned and would
+     * have no way to connect the two.
+     */
+    await expect(svc.set('u1', { categories: ['session'], events: [] })).rejects.toThrow(
+      /promotion/i,
+    );
+  });
+
+  it('MANDATORY: is refused rather than quietly dropped', async () => {
+    /*
+     * Silently removing it from the list would tell somebody their choice was
+     * saved when it was not — the worse of the two failures by a distance,
+     * because they would walk away believing they had switched it off.
+     */
+    await expect(svc.set('u1', { categories: ['session'], events: [] })).rejects.toThrow();
+    expect(store.state.categories).toEqual([]);
+  });
+
+  it('refuses anything that is not declinable at all', async () => {
+    await expect(svc.set('u1', { categories: ['not-a-category'], events: [] })).rejects.toThrow(
+      /not something you can switch off/i,
+    );
+    await expect(svc.set('u1', { categories: [], events: ['NotAnEvent'] })).rejects.toThrow();
+  });
+});
+
+describe('declining purges', () => {
+  it('MANDATORY: switching a category off deletes what was stored under it', async () => {
+    // A switch that stops new writes and leaves a year of history is not a
+    // choice. The constraint says purge and the two halves are not separable.
+    store.purgeCount = 42;
+    const r = await svc.set('u1', { categories: ['combat'], events: [] });
+
+    expect(store.purgedCategories).toEqual([['combat']]);
+    expect(r.purged).toBe(42);
+  });
+
+  it('MANDATORY: switching one EVENT off purges only that event', async () => {
+    /*
+     * Purging the whole category here would delete data the member did not ask
+     * to lose — worse than not purging at all, because it is irreversible and
+     * they never asked for it.
+     */
+    store.purgeCount = 7;
+    await svc.set('u1', { categories: [], events: ['Bounty'] });
+
+    expect(store.purgedEvents).toEqual([['Bounty']]);
+    expect(store.purgedCategories).toEqual([]);
+  });
+
+  it('does not purge an event twice when its category went too', async () => {
+    /*
+     * Declining `combat` AND `Bounty` in one save: the category purge already
+     * covers the event, and running both would double-count the deletion in
+     * the audit record.
+     */
+    store.purgeCount = 5;
+    await svc.set('u1', { categories: ['combat'], events: ['Bounty'] });
+
+    expect(store.purgedCategories).toEqual([['combat']]);
+    expect(store.purgedEvents).toEqual([]);
+  });
+
+  it('does not re-purge something already declined', async () => {
+    // Saving the same settings twice must not delete anything the second time
+    // — there is nothing new to remove, and a purge count would be a lie.
+    store.state = { categories: ['combat'], events: [] };
+    await svc.set('u1', { categories: ['combat'], events: [] });
+
+    expect(store.purgedCategories).toEqual([]);
+  });
+
+  it('switching something back ON purges nothing', async () => {
+    // Turning collection back on cannot restore what was deleted, and must not
+    // delete anything else either.
+    store.state = { categories: ['combat'], events: [] };
+    await svc.set('u1', { categories: [], events: [] });
+
+    expect(store.purgedCategories).toEqual([]);
+    expect(store.purgedEvents).toEqual([]);
+    expect(store.state.categories).toEqual([]);
+  });
+});
+
+describe('the audit record', () => {
+  it('records what changed and how much was deleted', async () => {
+    // Deletion is irreversible. An audit row is the only thing that can later
+    // explain where a member's history went.
+    store.purgeCount = 12;
+    await svc.set('u1', { categories: ['trade'], events: [] });
+
+    const entry = store.audit.at(-1);
+    expect(entry?.['action']).toBe('telemetry.optout.set');
+    expect(JSON.stringify(entry?.['after'])).toContain('12');
+    expect(JSON.stringify(entry?.['after'])).toContain('trade');
   });
 });

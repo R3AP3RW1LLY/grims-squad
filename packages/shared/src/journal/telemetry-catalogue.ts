@@ -122,7 +122,13 @@ export const TELEMETRY_CATALOGUE: readonly CatalogueGroup[] = [
     entries: [
       { event: 'Bounty', label: 'Bounties claimed', reveals: 'What you shot, its faction, and the reward.' },
       { event: 'FactionKillBond', label: 'Conflict zones', reveals: 'Kills in a war or conflict zone, and which faction they counted for.' },
-      { event: 'PVPKill', label: 'PVP', reveals: 'That you destroyed another commander, and their combat rank.' },
+      { event: 'PVPKill', label: 'PVP kills', reveals: 'That you destroyed another commander, and their combat rank.' },
+      {
+        event: 'Died',
+        label: 'Your losses',
+        reveals:
+          'That you were destroyed, who did it, and what they were flying. Feeds the squadron killboard — which needs both sides of a fight to mean anything.',
+      },
     ],
   },
   {

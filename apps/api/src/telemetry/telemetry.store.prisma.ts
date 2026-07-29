@@ -1,7 +1,7 @@
 import type { PrismaClient } from '@grims/db';
 import type { PairingStore, DeviceTokenRecord } from './pairing.service.js';
 import type { IngestStore } from './journal-ingest.service.js';
-import type { ConsentStore } from './consent.service.js';
+import type { ConsentStore, OptOutState } from './consent.service.js';
 
 export class PrismaPairingStore implements PairingStore {
   readonly #db: PrismaClient;
@@ -179,12 +179,18 @@ export class PrismaConsentStore implements ConsentStore {
     this.#db = db;
   }
 
-  async read(userId: string): Promise<readonly string[]> {
+  async read(userId: string): Promise<OptOutState> {
     const privacy = await this.#db.privacySetting.findUnique({
       where: { userId },
-      select: { telemetryConsent: true },
+      select: { telemetryOptOutCategories: true, telemetryOptOutEvents: true },
     });
-    return privacy?.telemetryConsent ?? [];
+
+    // No row means nothing declined, which under opt-out means everything is
+    // kept — the reverse of what an absent row used to mean.
+    return {
+      categories: privacy?.telemetryOptOutCategories ?? [],
+      events: privacy?.telemetryOptOutEvents ?? [],
+    };
   }
 
   /**
@@ -192,11 +198,18 @@ export class PrismaConsentStore implements ConsentStore {
    * Every other toggle on that row defaults conservatively, so creating it here
    * grants nothing beyond what was asked for.
    */
-  async write(userId: string, categories: readonly string[]): Promise<void> {
+  async write(userId: string, state: OptOutState): Promise<void> {
     await this.#db.privacySetting.upsert({
       where: { userId },
-      create: { userId, telemetryConsent: categories as never },
-      update: { telemetryConsent: categories as never },
+      create: {
+        userId,
+        telemetryOptOutCategories: state.categories as never,
+        telemetryOptOutEvents: [...state.events],
+      },
+      update: {
+        telemetryOptOutCategories: state.categories as never,
+        telemetryOptOutEvents: [...state.events],
+      },
     });
   }
 
@@ -207,9 +220,24 @@ export class PrismaConsentStore implements ConsentStore {
    * column set is not what a member asked for, and it is not what the constraint
    * says either.
    */
-  async purge(userId: string, categories: readonly string[]): Promise<number> {
+  async purgeCategories(userId: string, categories: readonly string[]): Promise<number> {
     const result = await this.#db.telemetryEvent.deleteMany({
       where: { userId, category: { in: categories as never } },
+    });
+    return result.count;
+  }
+
+  /**
+   * Deletes every stored event with these names.
+   *
+   * The finer scope. A member who declines `Bounty` alone keeps the rest of the
+   * combat category, so purging by category here would delete data they did not
+   * ask to lose — which is worse than not purging at all, because it is
+   * irreversible and they never asked for it.
+   */
+  async purgeEvents(userId: string, events: readonly string[]): Promise<number> {
+    const result = await this.#db.telemetryEvent.deleteMany({
+      where: { userId, eventType: { in: [...events] } },
     });
     return result.count;
   }

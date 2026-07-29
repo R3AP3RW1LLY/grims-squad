@@ -201,9 +201,34 @@ export interface DeviceRow {
 export const getMyDevices = (): Promise<{ devices: DeviceRow[] } | null> =>
   get('/v1/me/devices', { authed: true });
 
+/** One journal event, described for somebody deciding whether to share it. */
+export interface CatalogueEntry {
+  event: string;
+  label: string;
+  reveals: string;
+}
+
+export interface CatalogueGroup {
+  category: string;
+  label: string;
+  purpose: string;
+  /** True for `session`, which cannot be switched off. */
+  required: boolean;
+  entries: CatalogueEntry[];
+}
+
+/**
+ * What the member has switched OFF, plus the catalogue of what they could.
+ *
+ * Opt-out (INV-013, amended 2026-07-29): empty lists mean everything is kept.
+ * The catalogue travels with the answer so this page cannot drift from what the
+ * server will actually accept.
+ */
 export interface TelemetryConsent {
-  categories: string[];
-  available: string[];
+  optOutCategories: string[];
+  optOutEvents: string[];
+  catalogue: CatalogueGroup[];
+  requiredCategory: string;
 }
 
 export const getMyTelemetryConsent = (): Promise<TelemetryConsent | null> =>

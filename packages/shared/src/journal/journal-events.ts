@@ -57,6 +57,21 @@ export const JOURNAL_EVENTS = {
   FactionKillBond: 'combat',
   /** A ship destroyed under their guns, by class. */
   PVPKill: 'combat',
+  /**
+   * Their own death, and who did it.
+   *
+   * ★ THE OTHER HALF OF A KILLBOARD ★
+   *
+   * `PVPKill` records a member killing somebody; this records them being
+   * killed. A board with only the first is a scoreboard of wins — EVE's works
+   * because every kill is also somebody's loss, and both sides are recorded.
+   *
+   * It names the killer, who is another commander. That is inherent to the
+   * feature rather than incidental: a killboard that hid who did the killing
+   * would have nothing to show. The member who died is the one sharing their
+   * own death, which is theirs to share.
+   */
+  Died: 'combat',
 
   /** Cargo bought and sold, with the commodity and the station. */
   MarketBuy: 'trade',
@@ -122,6 +137,15 @@ export const EVENT_FIELDS: Record<JournalEventName, readonly string[]> = {
   Docked: ['StarSystem', 'StationName', 'StationType', 'StationFaction'],
 
   Bounty: ['Target', 'Target_Localised', 'TotalReward', 'VictimFaction'],
+  /*
+   * Enough for a killboard and no more. `KillerName` and `KillerShip` are what
+   * make a loss attributable; `KillerRank` is what makes it interesting.
+   *
+   * Deliberately NOT the wing variants' full member lists, and not the ship's
+   * value — a killboard needs to know who and what, not what the loss was
+   * worth.
+   */
+  Died: ['KillerName', 'KillerShip', 'KillerRank'],
   FactionKillBond: ['AwardingFaction', 'VictimFaction', 'Reward'],
   PVPKill: ['CombatRank'],
 
@@ -396,7 +420,20 @@ export const NEVER_SENT: readonly string[] = [
   'SendText',
   'ReceiveText',
   'Friends',
-  'Died',
+  /*
+   * `Died` was here and was REMOVED on 2026-07-29, on the squadron owner's
+   * instruction, to build an EVE-style killboard.
+   *
+   * The original objection was that it names another commander. That still
+   * holds — but it is inherent to a killboard rather than incidental, and
+   * `PVPKill` already records the mirror image: a member killing somebody else,
+   * naming them. Excluding one side while sending the other was the real
+   * inconsistency.
+   *
+   * The three that remain are different in kind. They carry the CONTENT of
+   * private messages and a friends list, which no feature needs and which no
+   * member could opt in to.
+   */
 ];
 
 /** Will the companion app transmit this event? */

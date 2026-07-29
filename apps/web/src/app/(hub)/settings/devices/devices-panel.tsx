@@ -1,9 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import type { DeviceRow, TelemetryConsent } from '../../../../lib/api';
+import type { DeviceRow } from '../../../../lib/api';
 import { formatLocal } from '../../../../lib/time';
-import { apiPost, apiPut, apiDelete } from '../../../../lib/api-client';
+import { apiPost, apiDelete } from '../../../../lib/api-client';
 
 /**
  * Pairing the companion app, and choosing what it may send.
@@ -23,44 +23,24 @@ import { apiPost, apiPut, apiDelete } from '../../../../lib/api-client';
  * remembers giving.
  */
 
-const CATEGORY_COPY: Record<string, { label: string; help: string }> = {
-  session: {
-    label: 'That I played',
-    help: 'Only that you launched the game, and when. Nothing about what you did. This is the one the monthly rank check looks at — without it you cannot qualify for a promotion.',
-  },
-  profile: {
-    label: 'My ranks and squadron standing',
-    help: 'Combat, trade, exploration, the naval ranks and your progress toward the next one, plus your squadron rank as the game reports it.',
-  },
-  fleet: {
-    label: 'My ships',
-    help: 'The ships you own, where they are parked, and the modules fitted to the one you are flying. Never what any of it is worth.',
-  },
-};
-
 export function DevicesPanel({
   initialDevices,
-  initialConsent,
   timezone,
 }: {
   initialDevices: DeviceRow[];
-  initialConsent: TelemetryConsent;
   /** The member's own zone. Passed in so the server renders the right time first go. */
   timezone: string;
 }) {
   const [devices, setDevices] = useState(initialDevices);
-  const [consent, setConsent] = useState(initialConsent);
   const [label, setLabel] = useState('');
   const [freshToken, setFreshToken] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [purged, setPurged] = useState<number | null>(null);
 
   async function pair(event: React.FormEvent) {
     event.preventDefault();
     setBusy(true);
     setError(null);
-    setPurged(null);
     try {
       const body = await apiPost<{ token: string; deviceId: string; label: string }>(
         '/v1/me/devices',
@@ -97,79 +77,21 @@ export function DevicesPanel({
     }
   }
 
-  async function toggleCategory(category: string, on: boolean) {
-    const next = on
-      ? [...consent.categories, category]
-      : consent.categories.filter((c) => c !== category);
-
-    setBusy(true);
-    setError(null);
-    setPurged(null);
-    try {
-      /*
-       * The WHOLE set is sent, not one flag. A screen that patched a single
-       * toggle would race itself when two are changed quickly, and the second
-       * request would overwrite the first with a stale view of the rest.
-       */
-      const saved = await apiPut<{ categories: string[]; purged: number }>(
-        '/v1/me/telemetry-consent',
-        { categories: next },
-      );
-      // The SERVER's answer, not the optimistic guess. A consent control that
-      // shows what you asked for rather than what was stored is a lie.
-      setConsent((c) => ({ ...c, categories: saved.categories }));
-      if (saved.purged > 0) setPurged(saved.purged);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'That did not work.');
-    } finally {
-      setBusy(false);
-    }
-  }
-
   return (
     <div className="mt-10 space-y-12">
-      {/* ---------------------------------------------------------- consent */}
-      <section>
-        <h2 className="font-mono text-[12px] uppercase tracking-[0.24em] text-[var(--color-brand-cyan-bright)]">
-          What the app may send
-        </h2>
-        <p className="mt-2 text-sm text-[var(--color-text-secondary)]">
-          All off to start with. Turning one off again deletes what has already been collected under
-          it.
-        </p>
+      {/*
+        ★ THE CONSENT UI MOVED OUT OF HERE (2026-07-29) ★
 
-        <ul className="mt-5 space-y-4">
-          {consent.available.map((category) => {
-            const copy = CATEGORY_COPY[category] ?? { label: category, help: '' };
-            const on = consent.categories.includes(category);
-            return (
-              <li key={category} className="rounded border border-[var(--color-border-hairline)] p-4">
-                <label className="flex cursor-pointer items-start gap-3">
-                  <input
-                    type="checkbox"
-                    checked={on}
-                    disabled={busy}
-                    onChange={(e) => void toggleCategory(category, e.target.checked)}
-                    className="mt-1 h-4 w-4 accent-[var(--color-brand-orange)]"
-                  />
-                  <span>
-                    <span className="text-[var(--color-text-primary)]">{copy.label}</span>
-                    <span className="mt-1 block text-sm text-[var(--color-text-secondary)]">
-                      {copy.help}
-                    </span>
-                  </span>
-                </label>
-              </li>
-            );
-          })}
-        </ul>
+        This section listed six optional categories with a checkbox each, under
+        the heading "What the app may send" and the line "All off to start
+        with". Every word of that is now wrong: telemetry is opt-out, the app
+        sends what it reads, and a member declines by category OR by individual
+        event.
 
-        {purged !== null && (
-          <p className="mt-4 text-sm text-[var(--color-text-secondary)]">
-            {purged === 1 ? '1 stored event was' : `${purged} stored events were`} deleted.
-          </p>
-        )}
-      </section>
+        It lives in `telemetry-form.tsx`, which renders the catalogue the SERVER
+        publishes — so the page cannot offer a switch the server would reject.
+        This panel owns DEVICES and nothing else.
+      */}
 
       {/* ---------------------------------------------------------- pairing */}
       <section>

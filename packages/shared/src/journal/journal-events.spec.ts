@@ -32,15 +32,20 @@ describe('the event allowlist', () => {
      * nobody has thought about, and they flow straight through.
      *
      * These are the ones that must stay out however far the list widens. Chat,
-     * the friends list, how somebody died, what crimes they committed — none of
-     * it answers a question the squadron has, and all of it is the sort of
-     * thing that arrives quietly with a feature nobody reviewed.
+     * the friends list, what crimes they committed — none of it answers a
+     * question the squadron has, and all of it is the sort of thing that
+     * arrives quietly with a feature nobody reviewed.
+     *
+     * `Died` was on this list and was REMOVED on 2026-07-29, deliberately, to
+     * build a killboard. It names another commander — but so does `PVPKill`,
+     * which was always collected, and a board with only kills and no losses is
+     * a scoreboard rather than a killboard. Excluding one side while sending
+     * the other was the real inconsistency.
      */
     for (const denied of [
       'SendText',
       'ReceiveText',
       'Friends',
-      'Died',
       'CommitCrime',
       'Interdicted',
       'Statistics',
@@ -73,10 +78,18 @@ describe('the event allowlist', () => {
     ]);
   });
 
-  it('MANDATORY: everything beyond the baseline needs consent', () => {
-    // The leaderboard events. Widening this list is a smaller decision than
-    // widening the baseline, because a member has to ask for any of it — but it
-    // is still a decision, and it still shows up here.
+  it('MANDATORY: pins every event outside the required category', () => {
+    /*
+     * ★ THE NAME CHANGED WITH THE MODEL (2026-07-29) ★
+     *
+     * This was "everything beyond the baseline needs consent" — true under
+     * opt-in, false now. These events are collected BY DEFAULT and a member
+     * switches them off.
+     *
+     * Which makes the list MORE important, not less: adding an event here now
+     * widens what is collected without anybody asking, so it has to show up in
+     * review rather than drift in with a feature.
+     */
     const optional = Object.entries(JOURNAL_EVENTS)
       .filter(([name]) => !isBaselineCategory(telemetryCategoryFor(name as JournalEventName)))
       .map(([name]) => name)
@@ -86,6 +99,7 @@ describe('the event allowlist', () => {
       'Bounty',
       'CarrierJump',
       'CarrierStats',
+      'Died',
       'Docked',
       'FSDJump',
       'FactionKillBond',
