@@ -44,25 +44,26 @@ export interface CommanderProfile {
   readonly currentShip: string | null;
   readonly fleet: readonly OwnedShip[];
   /**
-   * Their balance.
+   * Their balance, from the newest LoadGame.
    *
-   * ★ ALWAYS NULL TODAY, AND THAT IS A DECISION, NOT A GAP ★
+   * ★ COLLECTED SINCE 2026-07-29 ★
    *
-   * The companion app's allowlist for `LoadGame` is Commander, Ship,
-   * Ship_Localised, GameMode and Odyssey — with the comment "Deliberately NOT
-   * Credits, Loan, or FID". The balance is stripped on the member's own machine
-   * before anything is sent, so it has never reached us. Inara's API does not
-   * return it either, so there is no second source.
+   * It was stripped on the member's machine and this field was permanently
+   * null. Telemetry is opt-out now and the balance was asked for, so it rides
+   * with the `profile` category — which a member CAN switch off. Deliberately
+   * not with `session`, which they cannot: the required category must never be
+   * the reason somebody has no way to refuse something.
    *
-   * Surfaced as an explicit null rather than omitted, so the page can say WHY
-   * it is empty instead of leaving a hole somebody reads as a bug. Turning it
-   * on means widening what leaves members' machines, which is a squadron
-   * decision and an SSOT change, not a quiet edit to an array.
+   * Null when no session has been reported since the change, or when they have
+   * declined `profile`.
    */
   readonly credits: number | null;
   readonly lastPlayedAt: string | null;
   /** Squadron rank as the GAME reports it. Not our ladder, not Inara's. */
   readonly squadronRank: number | null;
+  /** The system they were last seen in, and when. Null until something reports one. */
+  readonly currentSystem: string | null;
+  readonly systemSeenAt: string | null;
 }
 
 /** One raw event, as stored. */
@@ -73,7 +74,24 @@ export interface ProfileEvent {
 }
 
 /** The event types this reads. Anything else is ignored. */
-export const PROFILE_EVENT_TYPES = ['Rank', 'LoadGame', 'StoredShips', 'SquadronStartup'] as const;
+export const PROFILE_EVENT_TYPES = [
+  'Rank',
+  'LoadGame',
+  'StoredShips',
+  'SquadronStartup',
+  /*
+   * Where they are. Collectable by default since telemetry became opt-out
+   * (INV-013, amended 2026-07-29) — under opt-in this was off for everybody
+   * unless they went looking for the switch.
+   *
+   * BOTH, because they answer at different moments: `FSDJump` fires on arrival
+   * in a new system and `Location` on loading into one you were already in. A
+   * member who logs in without jumping has only the second, and reading just
+   * the first would show them nothing.
+   */
+  'FSDJump',
+  'Location',
+] as const;
 
 function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {};
@@ -178,6 +196,24 @@ export function buildCommanderProfile(
 
   const rank = squadron['CurrentRank'];
 
+  /*
+   * The NEWER of the two location events wins. A jump and a load can both be
+   * present, and taking either by preference would sometimes show the system
+   * they left rather than the one they are in.
+   */
+  const jump = latest.get('FSDJump');
+  const location = latest.get('Location');
+  const newest =
+    jump === undefined
+      ? location
+      : location === undefined
+        ? jump
+        : jump.occurredAt > location.occurredAt
+          ? jump
+          : location;
+
+  const currentSystem = newest === undefined ? null : str(asRecord(newest.payload)['StarSystem']);
+
   return {
     cmdrName,
     ranks: allEliteRanks(held),
@@ -185,9 +221,17 @@ export function buildCommanderProfile(
     ranksFetchedAt: inara?.fetchedAt.toISOString() ?? null,
     currentShip,
     fleet: withCurrent,
-    // See the note on the field. Never populated today.
-    credits: null,
+    /*
+     * From the newest LoadGame. Allowed through since 2026-07-29 — it rides
+     * with `profile`, which a member can switch off, deliberately NOT with
+     * `session`, which they cannot.
+     */
+    credits: typeof load['Credits'] === 'number' ? load['Credits'] : null,
     lastPlayedAt: latest.get('LoadGame')?.occurredAt.toISOString() ?? null,
     squadronRank: typeof rank === 'number' ? rank : null,
+    currentSystem,
+    // The timestamp travels with it: "Sol" with no date is a claim about now,
+    // and it might be three weeks old.
+    systemSeenAt: currentSystem === null ? null : (newest?.occurredAt.toISOString() ?? null),
   };
 }

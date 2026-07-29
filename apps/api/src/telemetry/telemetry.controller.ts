@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Put, Delete, Body, Param, Req, Inject } from '@nestjs/common';
+import { Optional, Controller, Post, Get, Put, Delete, Body, Param, Req, Inject } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
 import { AppError, ErrorCode } from '@grims/shared';
 import { Public } from '../auth/auth.guard.js';
@@ -8,6 +8,8 @@ import { PAIRING_SERVICE, INGEST_SERVICE, CONSENT_SERVICE } from './telemetry.to
 import type { PairingService } from './pairing.service.js';
 import type { JournalIngestService, IncomingEvent } from './journal-ingest.service.js';
 import type { ConsentService } from './consent.service.js';
+import { LIVE_SERVICE } from '../live/live.tokens.js';
+import type { LiveService } from '../live/live.service.js';
 import { TELEMETRY_CATALOGUE, REQUIRED_CATEGORY } from '@grims/shared';
 
 @Controller('v1')
@@ -16,6 +18,11 @@ export class TelemetryController {
     @Inject(PAIRING_SERVICE) private readonly pairing: PairingService,
     @Inject(INGEST_SERVICE) private readonly ingest: JournalIngestService,
     @Inject(CONSENT_SERVICE) private readonly consent: ConsentService,
+    /*
+     * OPTIONAL. Ingest must not fail because the live stream is unavailable —
+     * a member's upload is the thing that matters and a notification is not.
+     */
+    @Optional() @Inject(LIVE_SERVICE) private readonly live: LiveService | null = null,
   ) {}
 
   // ------------------------------------------------------------------ pairing
@@ -201,9 +208,34 @@ export class TelemetryController {
      */
     const gameRunning = (body as Record<string, unknown> | null)?.['gameRunning'] === true;
 
-    return this.ingest.ingest(device.userId, device.id, events as IncomingEvent[], undefined, {
-      gameRunning,
-    });
+    const result = await this.ingest.ingest(
+      device.userId,
+      device.id,
+      events as IncomingEvent[],
+      undefined,
+      { gameRunning },
+    );
+
+    /*
+     * ★ ONLY WHEN SOMETHING ACTUALLY CHANGED ★
+     *
+     * The companion app uploads on a timer, and most batches are empty or
+     * entirely duplicates. Publishing on every request would wake every open
+     * tab several times a minute to re-fetch data that is identical — which is
+     * worse than not being live at all, because it is constant work with no
+     * visible result.
+     *
+     * `gameRunning` is published separately: it is a heartbeat, so it changes
+     * "playing now" without any event being stored.
+     */
+    if (result.accepted > 0) {
+      this.live?.publish({ type: 'telemetry', userId: device.userId });
+    }
+    if (gameRunning === true) {
+      this.live?.publish({ type: 'presence', userId: null });
+    }
+
+    return result;
   }
 }
 

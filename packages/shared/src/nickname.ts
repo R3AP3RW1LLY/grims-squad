@@ -75,3 +75,63 @@ export function rankForDisplay(
  * one, Grand Master General at twelve.
  */
 export const LEADERSHIP_CEILING = 100;
+
+/** One role a member wears, reduced to what rank resolution needs. */
+export interface HeldRole {
+  readonly name: string;
+  /** Ladder position, or null for a role that maps to none. */
+  readonly rankOrder: number | null;
+  /** What the role MEANS to us. `membership` is the fallback tier. */
+  readonly category: 'rank' | 'membership' | 'award' | 'hidden' | 'other';
+}
+
+/**
+ * The rank to show for a member, from the roles they WEAR in Discord.
+ *
+ * ★ THE ORDER IS THE SQUADRON OWNER'S, AND EACH STEP EARNS ITS PLACE ★
+ *
+ *   1. A LEADERSHIP APPOINTMENT. Somebody is introduced as the Prime Legate,
+ *      not as a Grand Master General who also holds an office. Lowest rankOrder
+ *      wins here, because appointments descend — Galactic Admiral is 10 and
+ *      Squadron Leader 60, and every officer also holds Squadron Leader as a
+ *      base. Reading them the same way round as tenure titles the Galactic
+ *      Admiral "Squadron Leader"; that bug shipped once.
+ *
+ *   2. A TENURE RANK. Highest wins, because tenure ascends — Cadet 100 up to
+ *      Grand Master General 190.
+ *
+ *   3. MEMBERSHIP. "Grim's Squad members" or "Allies". Not a rank, but it is
+ *      what somebody IS when they hold no rank role, and showing "Unranked" to
+ *      a full member of the squadron is both wrong and unwelcoming.
+ *
+ *   4. Only then null, which the UI renders as Unranked.
+ *
+ * ★ WHY THIS READS WORN ROLES AND NOT GRANTS ★
+ *
+ * Granted internal roles only appear after reconciliation, for an account that
+ * exists. Most of the squadron has neither, so a resolver reading grants
+ * returns null for almost everybody — which is exactly what "Unranked" on a
+ * plain Cadet's dashboard was.
+ */
+export function resolveMemberRank(held: readonly HeldRole[], leadershipCeiling: number): string | null {
+  const mapped = held.flatMap((r) => (r.rankOrder === null ? [] : [{ ...r, rankOrder: r.rankOrder }]));
+
+  const appointments = mapped.filter((r) => r.rankOrder < leadershipCeiling);
+  if (appointments.length > 0) {
+    return appointments.reduce((a, b) => (b.rankOrder < a.rankOrder ? b : a)).name;
+  }
+
+  const tenure = mapped.filter((r) => r.rankOrder >= leadershipCeiling);
+  if (tenure.length > 0) {
+    return tenure.reduce((a, b) => (b.rankOrder > a.rankOrder ? b : a)).name;
+  }
+
+  /*
+   * The membership fallback. Deliberately by CATEGORY rather than by name: the
+   * roles are classified in the database, so renaming "Allies" does not need a
+   * code change and a squadron that adds a third membership tier gets it for
+   * free.
+   */
+  const membership = held.filter((r) => r.category === 'membership');
+  return membership[0]?.name ?? null;
+}

@@ -7,7 +7,7 @@ import {
   getMyDevices,
   getMyCommander,
 } from '../../../lib/api';
-import { PilotRanks, Fleet, Balance } from './commander-panels';
+import { PilotRanks, Location, Fleet, Balance } from './commander-panels';
 import { Avatar } from '../../../components/account-menu';
 import {
   PageHeader,
@@ -20,6 +20,7 @@ import {
   CouldNotLoad,
 } from '../../../components/hub-page';
 import { SessionCountdown } from '../../../components/session-countdown';
+import { LiveRefresh } from '../../../components/live-refresh';
 
 export const metadata: Metadata = {
   title: "Your dashboard — Grim's Squad",
@@ -93,6 +94,13 @@ export default async function DashboardPage() {
 
   return (
     <>
+      {/*
+        Live. Only `telemetry` — this page is about ONE commander, and refreshing
+        it every time somebody else in the squadron loads the game would be
+        constant work showing the same numbers.
+      */}
+      <LiveRefresh types={['telemetry']} />
+
       {/*
         ★ A GREETING, NOT A CONTROL PANEL ★
 
@@ -203,6 +211,8 @@ export default async function DashboardPage() {
         ) : (
           <>
             <PilotRanks profile={commander} />
+            {/* Where they are, before what they own — it is the thing that changes. */}
+            <Location profile={commander} />
             <Fleet profile={commander} />
             <Balance profile={commander} />
           </>

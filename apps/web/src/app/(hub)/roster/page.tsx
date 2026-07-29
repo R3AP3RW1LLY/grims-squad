@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { getRoster, getMe } from '../../../lib/api';
 import { PageHeader, PageBody, Panel, RailStat } from '../../../components/hub-page';
 import { RosterCard } from '../../../components/roster-card';
+import { LiveRefresh } from '../../../components/live-refresh';
 import { PageTabs, resolveTab, type PageTab } from '../../../components/page-tabs';
 
 /**
@@ -69,6 +70,13 @@ export default async function RosterPage({
 
   return (
     <>
+      {/*
+        `presence` is squadron-wide: somebody launching the game changes who is
+        shown as playing now, and that is the one thing on this page worth
+        watching in real time.
+      */}
+      <LiveRefresh types={['presence', 'roster']} />
+
       <PageHeader
         eyebrow="Squadron register"
         title="ROSTER"

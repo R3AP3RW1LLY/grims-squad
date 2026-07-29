@@ -156,16 +156,30 @@ describe('what is refused', () => {
   });
 
   it('MANDATORY: strips a disallowed FIELD even from an allowed event', async () => {
+    /*
+     * ★ Credits MOVED TO THE ALLOWED SIDE ON 2026-07-29 ★
+     *
+     * The balance is collected now, on the squadron owner's instruction, and
+     * rides with the `profile` category — which a member can switch off.
+     * Deliberately not with `session`, which they cannot: the one required
+     * category must never be the reason somebody has no way to refuse
+     * something.
+     *
+     * `FID` did NOT move and never will. A Frontier account id identifies the
+     * member to Frontier and answers no question the squadron has — which is
+     * what this test is really guarding, now that the balance is not.
+     */
     const r = await svc.ingest(
       'u1',
       'dev1',
-      [ev({ data: { Commander: 'GRIM', Credits: 999_999_999, FID: 'F123' } })],
+      [ev({ data: { Commander: 'GRIM', Credits: 999_999_999, FID: 'F123', Loan: 5 } })],
       NOW,
     );
 
     expect(r.accepted).toBe(1);
-    expect(JSON.stringify(store.inserted[0]?.payload)).not.toContain('999999999');
+    expect(JSON.stringify(store.inserted[0]?.payload)).toContain('999999999');
     expect(JSON.stringify(store.inserted[0]?.payload)).not.toContain('F123');
+    expect(JSON.stringify(store.inserted[0]?.payload)).not.toContain('"Loan"');
   });
 
   it('MANDATORY: refuses an event from the FUTURE', async () => {

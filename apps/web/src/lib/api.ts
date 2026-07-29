@@ -253,6 +253,8 @@ export interface AdminActivityRow {
   currentRank: string | null;
   /** A leadership APPOINTMENT, a separate axis. Not on the promotion ladder. */
   appointment: string | null;
+  /** What to show when they hold no rank role. Display only — never a rung. */
+  membershipRole: string | null;
   /** The next rung up, or null at the top of the ladder. */
   nextRank: string | null;
   messageCount: number;
@@ -378,6 +380,9 @@ export interface CommanderProfile {
   credits: number | null;
   lastPlayedAt: string | null;
   squadronRank: number | null;
+  /** The system they were last seen in. Null until something reports one. */
+  currentSystem: string | null;
+  systemSeenAt: string | null;
 }
 
 export const getMyCommander = (): Promise<CommanderProfile | null> =>

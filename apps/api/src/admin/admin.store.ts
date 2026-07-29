@@ -153,7 +153,7 @@ export class PrismaAdminStore implements AdminStore {
      * calendar-month scope — a message from June cannot appear in July's row
      * because it was never added to it.
      */
-    const [rows, guildMembers, mappings] = await Promise.all([
+    const [rows, guildMembers, discordRoles, mappings] = await Promise.all([
       this.#db.memberActivityMonth.findMany({
         where: { month },
       select: {
@@ -190,6 +190,8 @@ export class PrismaAdminStore implements AdminStore {
       this.#db.discordGuildMember.findMany({
         select: { discordId: true, nick: true, username: true, globalName: true, roles: true },
       }),
+      // Names and categories, for the membership fallback.
+      this.#db.discordRole.findMany({ select: { discordRoleId: true, name: true, category: true } }),
 
       /*
        * ★ RANK COMES FROM DISCORD, NOT FROM GRANTED ROLES ★
@@ -210,6 +212,7 @@ export class PrismaAdminStore implements AdminStore {
 
     const byDiscordId = new Map(guildMembers.map((m) => [m.discordId, m]));
     const rankByRoleId = new Map(mappings.map((m) => [m.discordRoleId, m.role]));
+    const roleById = new Map(discordRoles.map((r) => [r.discordRoleId, r]));
 
     return rows.map((r) => {
       const guild = byDiscordId.get(r.discordId);
@@ -267,6 +270,15 @@ export class PrismaAdminStore implements AdminStore {
         }
       }
 
+      /*
+       * The membership fallback, for members with no rank role at all. Read by
+       * CATEGORY rather than by name, so renaming "Allies" needs no code change.
+       */
+      const membershipRole =
+        (guild?.roles ?? [])
+          .map((id) => roleById.get(id))
+          .find((role) => role?.category === 'membership')?.name ?? null;
+
       const verification = r.user?.cmdrVerifications[0];
 
       return {
@@ -284,6 +296,7 @@ export class PrismaAdminStore implements AdminStore {
       verifiedVia: verification?.method ?? null,
       currentRank,
       appointment,
+      membershipRole,
       messageCount: r.messageCount,
       forumPostCount: r.forumPostCount,
       voiceJoinCount: r.voiceJoinCount,

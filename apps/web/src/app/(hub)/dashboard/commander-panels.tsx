@@ -69,6 +69,46 @@ export function PilotRanks({ profile }: { profile: CommanderProfile }) {
   );
 }
 
+export function Location({ profile }: { profile: CommanderProfile }) {
+  return (
+    <Section
+      title="Where you are"
+      description="Read from your game journal — the newer of your last hyperspace jump and your last load-in."
+    >
+      {profile.currentSystem === null ? (
+        <p className="max-w-[68ch] rounded border border-dashed border-[var(--color-border-hairline)] px-5 py-6 text-sm leading-relaxed text-[var(--color-text-secondary)]">
+          No position reported yet. This arrives with the companion app the next time you jump or
+          load in — and it can be switched off, with everything else, on the{' '}
+          <a href="/settings/devices" className="text-[var(--color-brand-cyan-bright)]">
+            companion app page
+          </a>
+          .
+        </p>
+      ) : (
+        <div className="rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel)] px-5 py-4">
+          <p
+            className="text-2xl text-[var(--color-brand-cyan-bright)]"
+            style={{ fontFamily: 'var(--font-display)' }}
+          >
+            {profile.currentSystem}
+          </p>
+          {/*
+            The timestamp travels with it, deliberately. A system name on its own
+            is a claim about NOW, and it might be three weeks old — which for
+            somebody deciding whether to ask you for a wing is the whole
+            question.
+          */}
+          {profile.systemSeenAt !== null && (
+            <p className="mt-1 font-mono text-[11px] text-[var(--color-text-secondary)]">
+              Seen {new Date(profile.systemSeenAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })}
+            </p>
+          )}
+        </div>
+      )}
+    </Section>
+  );
+}
+
 export function Fleet({ profile }: { profile: CommanderProfile }) {
   return (
     <Section
@@ -123,35 +163,39 @@ export function Fleet({ profile }: { profile: CommanderProfile }) {
 
 export function Balance({ profile }: { profile: CommanderProfile }) {
   return (
-    <Section title="Balance">
+    <Section
+      title="Balance"
+      description="From your last game start. Collected with your ranks and standing, and switched off with them."
+    >
       {profile.credits === null ? (
         /*
           ★ SAYS WHY, RATHER THAN SHOWING A HOLE ★
 
-          The companion app strips Credits from LoadGame before anything leaves
-          the member's machine — a deliberate line in the allowlist, not an
-          oversight — and Inara's API does not return a balance either. A blank
-          tile would read as broken; naming the reason makes it a choice
-          somebody can change.
+          Two reasons it can be empty, and they need different actions from the
+          member: no session reported since the balance started being collected,
+          or they have switched off the category that carries it. A blank tile
+          would read as broken; naming the reason makes it actionable.
         */
         <div className="max-w-[68ch] rounded border border-dashed border-[var(--color-border-hairline)] px-5 py-6">
-          <p className="text-sm leading-relaxed text-[var(--color-text-primary)]">
-            Not collected.
-          </p>
+          <p className="text-sm leading-relaxed text-[var(--color-text-primary)]">Not reported yet.</p>
           <p className="mt-2 text-sm leading-relaxed text-[var(--color-text-secondary)]">
-            The companion app removes your balance from the journal before sending anything —
-            it never reaches us — and Inara&rsquo;s API does not report it either. Turning this on
-            would widen what leaves every member&rsquo;s machine, so it is a squadron decision
-            rather than a setting.
+            It arrives with your next game start, if the companion app is running. If you have
+            switched off <strong>Ranks and standing</strong> on the{' '}
+            <a href="/settings/devices" className="text-[var(--color-brand-cyan-bright)]">
+              companion app page
+            </a>
+            , that is why — the balance travels with it.
           </p>
         </div>
       ) : (
-        <p
-          className="text-3xl text-[var(--color-brand-orange)]"
-          style={{ fontFamily: 'var(--font-display)' }}
-        >
-          {credits(profile.credits)}
-        </p>
+        <div className="rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel)] px-5 py-4">
+          <p
+            className="text-3xl text-[var(--color-brand-orange)]"
+            style={{ fontFamily: 'var(--font-display)' }}
+          >
+            {credits(profile.credits)}
+          </p>
+        </div>
       )}
     </Section>
   );

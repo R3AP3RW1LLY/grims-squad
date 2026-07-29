@@ -60,8 +60,10 @@ export {
 export {
   composeNickname,
   rankForDisplay,
+  resolveMemberRank,
   MAX_NICK,
   LEADERSHIP_CEILING,
+  type HeldRole,
 } from './nickname.js';
 export {
   TELEMETRY_CATALOGUE,

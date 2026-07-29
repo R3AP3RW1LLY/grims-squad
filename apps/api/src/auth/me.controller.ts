@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Patch, Body, Req, Inject, Optional } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
 import { PrismaClient } from '@grims/db';
+import { resolveMemberRank, LEADERSHIP_CEILING } from '@grims/shared';
 import { NO_PERMISSIONS, requiresTwoFactor } from '@grims/shared';
 import { Public } from './auth.guard.js';
 import { navFor, hasAdminArea, type NavItem } from './nav.js';
@@ -278,22 +279,58 @@ export class MeController {
    * of the truth that drifts the first time a grant changes without it.
    */
   async #rankOf(userId: string): Promise<string | null> {
-    const grants = await this.db.userRole.findMany({
+    /*
+     * ★ READ FROM THE ROLES THEY WEAR, NOT FROM GRANTS ★
+     *
+     * This used to read `UserRole` and return the highest hierarchical grant.
+     * Against real data that is null for almost everybody: grants only appear
+     * after reconciliation, for an account that exists, and most of the
+     * squadron has neither. A plain Cadet's dashboard said "Unranked".
+     *
+     * The third place this same mistake was made — after officer status and the
+     * admin table — which is why the resolution now lives in ONE shared
+     * function rather than being written out again here.
+     */
+    const identity = await this.db.discordIdentity.findUnique({
       where: { userId },
-      select: { role: { select: { key: true, name: true, isHierarchical: true, rankOrder: true } } },
+      select: { discordId: true },
+    });
+    if (identity === null) return null;
+
+    const [member, roles, mappings] = await Promise.all([
+      this.db.discordGuildMember.findUnique({
+        where: { discordId: identity.discordId },
+        select: { roles: true },
+      }),
+      // Names and categories, for the membership fallback.
+      this.db.discordRole.findMany({ select: { discordRoleId: true, name: true, category: true } }),
+      this.db.roleMapping.findMany({
+        where: { role: { isHierarchical: true } },
+        select: { discordRoleId: true, role: { select: { rankOrder: true, name: true } } },
+      }),
+    ]);
+
+    if (member === null) return null;
+
+    const byId = new Map(roles.map((r) => [r.discordRoleId, r]));
+    const rankById = new Map(mappings.map((m) => [m.discordRoleId, m.role]));
+
+    const held = member.roles.flatMap((id) => {
+      const role = byId.get(id);
+      if (role === undefined) return [];
+      const mapped = rankById.get(id);
+      return [
+        {
+          // The MAPPED role's name where there is one — "Cadet" rather than
+          // whatever the Discord role happens to be called.
+          name: mapped?.name ?? role.name,
+          rankOrder: mapped?.rankOrder ?? null,
+          category: role.category,
+        },
+      ];
     });
 
-    /*
-     * Highest rankOrder wins. A member can hold several hierarchical roles
-     * during a promotion, and showing the lower one would tell somebody they
-     * had been demoted.
-     */
-    const ranks = grants
-      .map((g) => g.role)
-      .filter((r) => r.isHierarchical)
-      .sort((a, b) => b.rankOrder - a.rankOrder);
-
-    return ranks[0]?.name ?? ranks[0]?.key ?? null;
+    return resolveMemberRank(held, LEADERSHIP_CEILING);
   }
 
   /**

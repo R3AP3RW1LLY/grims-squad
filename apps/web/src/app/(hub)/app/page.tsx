@@ -287,8 +287,16 @@ function ActivityTab({
                     answered by activity counts alone.
                   */}
                   <td className="py-3 pr-4 font-mono text-xs text-[var(--color-brand-cyan-bright)]">
+                    {/*
+                      Rank, then the membership fallback, then Unranked. A full
+                      member of the squadron shown as "Unranked" is both wrong
+                      and unwelcoming — they are a member, they simply hold no
+                      rung yet.
+                    */}
                     {r.currentRank ?? (
-                      <span className="text-[var(--color-text-secondary)]">Unranked</span>
+                      <span className="text-[var(--color-text-secondary)]">
+                        {r.membershipRole ?? 'Unranked'}
+                      </span>
                     )}
                     {/*
                       The APPOINTMENT, beneath the tenure rank rather than

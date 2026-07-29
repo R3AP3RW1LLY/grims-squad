@@ -115,8 +115,24 @@ export function isAllowedEvent(name: string): name is JournalEventName {
  * Anything not named here is dropped on the member's machine and never sent.
  */
 export const EVENT_FIELDS: Record<JournalEventName, readonly string[]> = {
-  // Commander and ship only. Deliberately NOT Credits, Loan, or FID.
-  LoadGame: ['Commander', 'Ship', 'Ship_Localised', 'GameMode', 'Odyssey'],
+  /*
+   * ★ Credits ADDED 2026-07-29 ★
+   *
+   * This read "Deliberately NOT Credits, Loan, or FID", and under opt-in that
+   * was right: the balance was stripped on the member's machine and nobody had
+   * asked for it.
+   *
+   * Telemetry is opt-out now and the squadron owner asked for the balance on
+   * the commander dashboard. `session` cannot be declined, so Credits is
+   * deliberately NOT in it — a member who does not want their balance stored
+   * would otherwise have no way to refuse, which is the one thing the required
+   * category must never be used for. It rides with `profile`, which they can
+   * switch off. See LOADGAME_MONEY_FIELDS.
+   *
+   * `Loan` and `FID` stay out. A Frontier account id identifies the member to
+   * Frontier and answers no question the squadron has.
+   */
+  LoadGame: ['Commander', 'Ship', 'Ship_Localised', 'GameMode', 'Odyssey', 'Credits'],
   Rank: ['Combat', 'Trade', 'Explore', 'Soldier', 'Exobiologist', 'Empire', 'Federation', 'CQC'],
   Progress: ['Combat', 'Trade', 'Explore', 'Soldier', 'Exobiologist', 'Empire', 'Federation', 'CQC'],
   // Deliberately NOT HullValue or ModulesValue. Dropping `Credits` from
@@ -179,6 +195,12 @@ export const EVENT_FIELDS: Record<JournalEventName, readonly string[]> = {
  * than by lifting the rule generally.
  */
 const EARNINGS_FIELDS = new Set([
+  /*
+   * The commander's own balance, kept on purpose since 2026-07-29. `stripMoney`
+   * removes money at every depth, which would otherwise delete the very field
+   * the dashboard was asked to show.
+   */
+  'Credits',
   'TotalReward',
   'Reward',
   'TotalCost',

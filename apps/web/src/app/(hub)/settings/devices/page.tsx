@@ -89,26 +89,18 @@ export default async function DevicesPage() {
               </Panel>
 
               {/*
-                The one thing that cannot be switched off, in the rail where it
-                is visible while somebody works through the list. Burying "this
-                part is not optional" below twenty toggles would be a way of not
-                saying it.
-              */}
-              <Panel title="Always collected">
-                <p className="text-sm leading-relaxed text-[var(--color-text-secondary)]">
-                  That you played, and when. Nothing else. The monthly promotion check reads it, so
-                  switching it off would stop you qualifying for promotions without telling you
-                  why — which is why it is the one exception. Running the app at all is still
-                  entirely optional.
-                </p>
-              </Panel>
+                "Always collected" and "Never collected" stood here and were
+                removed on the squadron owner's instruction. Both were also
+                out of date the moment telemetry became opt-out: the second
+                still said the filtering happened on the member's own PC, and
+                listed the credit balance as never collected — neither is true
+                any more.
 
-              <Panel title="Never collected">
-                <p className="text-sm leading-relaxed text-[var(--color-text-secondary)]">
-                  Your chat, your friends list, how you died, or your credit balance. The filtering
-                  happens on your own PC, before anything leaves it.
-                </p>
-              </Panel>
+                The settings list below says what is collected, item by item,
+                and marks the one thing that cannot be switched off. Two
+                summary boxes restating it in the rail were a second place to
+                keep in step, and they had already fallen out of it.
+              */}
 
               <Panel title="Related">
                 <a href="/companion" className="block text-sm text-[var(--color-brand-cyan-bright)]">

@@ -125,12 +125,17 @@ describe('the event allowlist', () => {
 });
 
 describe('field-level filtering', () => {
-  it('MANDATORY: drops a member’s credit balance from LoadGame', () => {
+  it('MANDATORY: keeps the balance but never the Frontier account id', () => {
     /*
-     * LoadGame carries Credits, Loan and the Frontier account ID alongside the
-     * commander name. We need to know they PLAYED; we do not need their bank
-     * balance to establish that, and a squadron site holding it invites
-     * comparisons nobody asked for.
+     * ★ Credits FLIPPED SIDES ON 2026-07-29 ★
+     *
+     * This asserted the balance was DROPPED, and under opt-in that was right:
+     * nobody had asked for it. The squadron owner has since asked for it on the
+     * commander dashboard, and telemetry is opt-out — so it is kept, and a
+     * member who does not want it stored switches off `profile`.
+     *
+     * `Loan` and `FID` stay out regardless. A Frontier account id identifies
+     * the member to Frontier and answers no question the squadron has.
      */
     const raw = {
       Commander: 'GRIM',
@@ -144,7 +149,7 @@ describe('field-level filtering', () => {
     const picked = pickAllowedFields('LoadGame', raw);
 
     expect(picked['Commander']).toBe('GRIM');
-    expect(picked).not.toHaveProperty('Credits');
+    expect(picked['Credits']).toBe(1_204_998_221);
     expect(picked).not.toHaveProperty('Loan');
     expect(picked).not.toHaveProperty('FID');
   });
