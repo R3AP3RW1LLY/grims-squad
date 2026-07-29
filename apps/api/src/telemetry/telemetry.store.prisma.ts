@@ -111,6 +111,17 @@ export class PrismaIngestStore implements IngestStore {
   }
 
   /**
+   * Clears presence the moment the game closes.
+   *
+   * Null rather than an old timestamp: every reader asks "within the last five
+   * minutes", and null answers that correctly without any reader needing to
+   * know a stop signal exists.
+   */
+  async markStopped(userId: string): Promise<void> {
+    await this.#db.user.update({ where: { id: userId }, data: { lastPlayingAt: null } });
+  }
+
+  /**
    * How many rows this member has contributed, and since when.
    *
    * ★ TWO QUERIES, NOT A GROUP BY ★

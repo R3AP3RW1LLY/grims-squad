@@ -44,5 +44,14 @@ await cp('src/renderer/index.html', 'dist/renderer/index.html');
 await cp('build/tray.png', 'dist/renderer/tray.png');
 await cp('build/tray@2x.png', 'dist/renderer/tray@2x.png');
 await cp('build/icon.png', 'dist/renderer/icon.png');
+/*
+ * The .ico as well, for the RUNNING window on Windows.
+ *
+ * `BrowserWindow({ icon })` given a 512px PNG shows a downscaled mess in the
+ * title bar and Alt-Tab. Given an .ico, Windows picks the size it needs.
+ * Packaging uses this same file, so the running app and the installed shortcut
+ * cannot show different marks.
+ */
+await cp('build/icon.ico', 'dist/renderer/icon.ico');
 
 

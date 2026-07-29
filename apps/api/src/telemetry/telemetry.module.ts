@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { PrismaClient } from '@grims/db';
 import { DatabaseModule } from '../database.module.js';
+import { CompanionModule } from '../companion/companion.module.js';
 import { TelemetryController } from './telemetry.controller.js';
 import { PairingService } from './pairing.service.js';
 import { JournalIngestService } from './journal-ingest.service.js';
@@ -9,7 +10,11 @@ import { PrismaPairingStore, PrismaIngestStore, PrismaConsentStore } from './tel
 import { PAIRING_SERVICE, INGEST_SERVICE, CONSENT_SERVICE } from './telemetry.tokens.js';
 
 @Module({
-  imports: [DatabaseModule],
+  /*
+   * CompanionModule for the release store: the settings endpoint tells the app
+   * the newest published version, which is what drives the update banner.
+   */
+  imports: [DatabaseModule, CompanionModule],
   controllers: [TelemetryController],
   providers: [
     {

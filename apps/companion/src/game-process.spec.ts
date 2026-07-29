@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { commandFor, listingHasGame, isGameRunning, GAME_PROCESS } from './game-process.js';
+import {
+  commandFor,
+  listingHasGame,
+  isGameRunning,
+  isActivelyPlaying,
+  journalIsFresh,
+  GAME_PROCESS,
+  JOURNAL_FRESH_MS,
+} from './game-process.js';
 
 /**
  * Is the game running?
@@ -111,5 +119,59 @@ describe('when the lookup fails', () => {
   it('reports running when the listing has it', async () => {
     const ok = async () => ({ stdout: '"EliteDangerous64.exe","1","Console","1","3 K"' });
     expect(await isGameRunning('win32', ok)).toBe(true);
+  });
+});
+
+describe('in-game, not merely open', () => {
+  /*
+   * ★ THE REPORT THIS ANSWERS ★
+   *
+   * "still showing me playing now on the roster when I've quit the game" — and
+   * the process check was RIGHT: EliteDangerous64.exe was genuinely running.
+   * Elite keeps it alive at the main menu, at commander select, and for anyone
+   * who leaves it open and walks away.
+   *
+   * Squadron owner's decision, 2026-07-29: presence means in-game.
+   */
+  const NOW = new Date('2026-07-29T12:00:00Z').getTime();
+  const ago = (ms: number) => NOW - ms;
+  const MIN = 60_000;
+
+  it('MANDATORY: the process alone is NOT playing', () => {
+    // The exact case reported: game open at a menu, journal long quiet.
+    expect(isActivelyPlaying(true, ago(40 * MIN), NOW)).toBe(false);
+  });
+
+  it('MANDATORY: a fresh journal alone is NOT playing', () => {
+    /*
+     * The other half. Straight after quitting, the last write is still recent —
+     * treating that as live is precisely the five-minute lag members notice.
+     */
+    expect(isActivelyPlaying(false, ago(1 * MIN), NOW)).toBe(false);
+  });
+
+  it('MANDATORY: both together IS playing', () => {
+    expect(isActivelyPlaying(true, ago(2 * MIN), NOW)).toBe(true);
+  });
+
+  it('MANDATORY: survives a quiet stretch mid-flight', () => {
+    /*
+     * Elite writes nothing during long supercruise. A short window would blink
+     * somebody offline mid-jump — the very failure the process check was added
+     * to fix, reintroduced from the other side.
+     */
+    expect(isActivelyPlaying(true, ago(14 * MIN), NOW)).toBe(true);
+    expect(isActivelyPlaying(true, ago(16 * MIN), NOW)).toBe(false);
+    expect(JOURNAL_FRESH_MS).toBe(15 * MIN);
+  });
+
+  it('treats no journal at all as not playing', () => {
+    expect(isActivelyPlaying(true, null, NOW)).toBe(false);
+  });
+
+  it('MANDATORY: a file stamped in the future is a clock problem, not a session', () => {
+    // Otherwise a skewed clock pins somebody online permanently and nothing
+    // ever clears it.
+    expect(journalIsFresh(NOW + 60 * MIN, NOW)).toBe(false);
   });
 });

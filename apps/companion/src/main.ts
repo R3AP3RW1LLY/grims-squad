@@ -20,8 +20,9 @@ import {
 import { Uploader } from './uploader.js';
 import { runWatchPass, type JournalFs, type WatchOutcome } from './watcher.js';
 import { accumulate } from './totals.js';
-import { isGameRunning } from './game-process.js';
+import { isGameRunning, isActivelyPlaying } from './game-process.js';
 import { fetchHubSettings, type HubSettings } from './hub-settings.js';
+import { updateAvailable } from './update-check.js';
 import { searchForJournalDir, searchRootsFor, type SearchFs } from './journal-search.js';
 
 /**
@@ -246,6 +247,39 @@ async function runDeepSearch(os: Platform): Promise<string | null> {
   }
 }
 
+/**
+ * Whether the last pass considered them in-game.
+ *
+ * Held in memory rather than the config: it describes THIS run of the app, and
+ * a value restored from disk after a restart would fire a stop signal for a
+ * session that ended days ago.
+ */
+let wasPlaying = false;
+
+/**
+ * When the newest journal was last written, in epoch milliseconds.
+ *
+ * ★ WHY NOT JUST "DID IT GROW THIS PASS" ★
+ *
+ * That is what `outcome.gameRunning` already answers, and it is too strict on
+ * its own: Elite writes nothing during long supercruise, so a member mid-flight
+ * would flicker offline every pass that happened to catch a quiet moment. The
+ * modification time survives those gaps.
+ *
+ * Null when there are no journals or the directory cannot be read — which the
+ * caller treats as "not playing", the safe direction.
+ */
+async function newestJournalWriteAt(dir: string): Promise<number | null> {
+  try {
+    const files = (await readdir(dir)).filter(isJournalFile).sort();
+    const newest = files[files.length - 1];
+    if (newest === undefined) return null;
+    return (await stat(join(dir, newest))).mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
 async function tick(): Promise<void> {
   /*
    * ★ BEFORE THE JOURNAL CHECK, NOT AFTER ★
@@ -305,8 +339,27 @@ async function tick(): Promise<void> {
      * nothing to add, and spawning a process listing every twenty seconds for
      * an answer we already have is a cost with no benefit.
      */
-    if (!outcome.gameRunning && config.enabled && config.deviceToken !== '') {
-      if (await isGameRunning(platform(), listProcesses)) {
+    if (config.enabled && config.deviceToken !== '') {
+      /*
+       * ★ IN-GAME, NOT MERELY OPEN — owner's decision, 2026-07-29 ★
+       *
+       * The process alone was reported as wrong, and the report was right: a
+       * member had quit and the roster still said Playing now, because Elite
+       * keeps `EliteDangerous64.exe` alive at the main menu, at commander
+       * select, and for anybody who leaves it running and walks away.
+       *
+       * So both halves are required — the process AND a journal written
+       * recently. The pass above already tells us whether the newest journal
+       * GREW; `newestJournalWriteAt` covers the case where it did not grow this
+       * pass but was written moments ago, which is most of a real session.
+       */
+      const processRunning = await isGameRunning(platform(), listProcesses);
+      const playing =
+        outcome.gameRunning || isActivelyPlaying(processRunning, await newestJournalWriteAt(dir));
+
+      if (playing && !outcome.gameRunning) {
+        // The journal did not grow this pass but they are demonstrably in the
+        // game, so the hub still needs to hear it.
         const beat = await uploader.send([], { gameRunning: true });
         outcome = {
           ...outcome,
@@ -319,6 +372,29 @@ async function tick(): Promise<void> {
           error: outcome.error ?? beat.error,
         };
       }
+
+      /*
+       * ★ SAY SO THE MOMENT THEY STOP ★
+       *
+       * Presence ages out after five minutes on the server, so without this a
+       * member who quits keeps showing as Playing now for up to five minutes.
+       * The app knows within one poll; sitting on that is a choice, not a
+       * limitation.
+       *
+       * Sent ONCE, on the transition. Repeating it every pass would be a
+       * request every twenty seconds forever to say nothing has changed.
+       */
+      if (!playing && wasPlaying) {
+        const stop = await uploader.send([], { gameStopped: true });
+        outcome = {
+          ...outcome,
+          txBytes: outcome.txBytes + stop.txBytes,
+          rxBytes: outcome.rxBytes + stop.rxBytes,
+          unauthorised: outcome.unauthorised || stop.unauthorised,
+        };
+      }
+
+      wasPlaying = playing;
     }
 
     lastOutcome = outcome;
@@ -414,6 +490,15 @@ function state(): Record<string, unknown> {
      */
     hub: hubSettings,
     hubError,
+    /*
+     * The update banner.
+     *
+     * The version comes from Electron rather than a constant, so it is
+     * whatever was actually installed — a hardcoded string would keep claiming
+     * to be current after a release.
+     */
+    appVersion: app.getVersion(),
+    updateAvailable: updateAvailable(app.getVersion(), hubSettings?.latestVersion ?? null),
   };
 }
 
@@ -553,7 +638,18 @@ function showWindow(): void {
     title: "Grim's Squad Hub",
     // The squadron badge, so the taskbar and Alt-Tab show us rather than the
     // default Electron atom — which reads as "some developer's test build".
-    icon: ours('renderer', 'icon.png'),
+    /*
+     * ★ .ico ON WINDOWS, PNG EVERYWHERE ELSE ★
+     *
+     * Windows draws this in the title bar at 16px and in Alt-Tab at 32. Handed
+     * a 512px PNG it downscales in one step and the result is the smeared mark
+     * that was reported. The .ico carries 32/48/64/128/256 so it picks the
+     * nearest.
+     *
+     * macOS and Linux do not read .ico at all — they get the PNG, which they
+     * scale well and which has no title-bar equivalent to get wrong.
+     */
+    icon: ours('renderer', process.platform === 'win32' ? 'icon.ico' : 'icon.png'),
     autoHideMenuBar: true,
     webPreferences: {
       preload: ours('preload.cjs'),
@@ -650,6 +746,14 @@ if (!app.requestSingleInstanceLock()) {
      * and dark menu bars. Handing it a colour badge produces something that
      * looks broken in dark mode, so the badge is used everywhere else and the
      * template flag is set only where it means something.
+     */
+    /*
+     * The tray takes the SMALL mark, not the app icon.
+     *
+     * Windows draws the tray at 16px and macOS at 22, doubled on a high-DPI
+     * screen. `tray.png` is the 32px brand badge and `tray@2x.png` the 64px, so
+     * Electron has a real image at both densities instead of resampling the
+     * 512.
      */
     const trayIcon = nativeImage.createFromPath(ours('renderer', 'tray.png'));
     tray = new Tray(trayIcon);

@@ -106,6 +106,7 @@ export default tseslint.config(
       '**/build.mjs',
       '**/dev.mjs',
       '**/prod.mjs',
+      '**/make-icons.mjs',
     ],
     languageOptions: {
       globals: {

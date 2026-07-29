@@ -74,16 +74,21 @@ export class Uploader {
 
   async send(
     events: readonly ParsedEvent[],
-    options: { gameRunning?: boolean } = {},
+    options: { gameRunning?: boolean; gameStopped?: boolean } = {},
   ): Promise<UploadResult> {
     const gameRunning = options.gameRunning ?? false;
+    const gameStopped = options.gameStopped ?? false;
 
     /*
      * An empty batch is normally nothing to do. It is NOT nothing when the
      * journal is still growing: that is the heartbeat, and it is the only way
      * the hub learns somebody is mid-flight rather than gone.
      */
-    if (events.length === 0 && !gameRunning) {
+    /*
+     * The stop signal is worth a request on its own — it is the whole point of
+     * sending it, and it carries no events by definition.
+     */
+    if (events.length === 0 && !gameRunning && !gameStopped) {
       return {
         ok: true,
         accepted: 0,
@@ -106,7 +111,11 @@ export class Uploader {
      * and `Buffer.byteLength` rather than `.length` because a commander name
      * with an accent in it is more bytes than characters.
      */
-    const payload = JSON.stringify({ events: events.slice(0, MAX_BATCH), gameRunning });
+    const payload = JSON.stringify({
+      events: events.slice(0, MAX_BATCH),
+      gameRunning,
+      ...(gameStopped ? { gameStopped: true } : {}),
+    });
     const txBytes = Buffer.byteLength(payload, 'utf8');
     let rxBytes = 0;
 

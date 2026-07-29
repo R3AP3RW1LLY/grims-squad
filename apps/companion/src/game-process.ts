@@ -125,3 +125,46 @@ export async function isGameRunning(
     return false;
   }
 }
+
+/**
+ * How stale the journal may be before "playing" becomes a lie.
+ *
+ * ★ THE PROCESS BEING UP IS NOT THE SAME AS PLAYING ★
+ *
+ * Reported from a real machine: the member had quit and the roster still said
+ * "Playing now" — and the detection was RIGHT, because `EliteDangerous64.exe`
+ * was genuinely still running. Elite keeps the process alive at the main menu,
+ * at commander select, and for anybody who leaves it open and walks away.
+ *
+ * So presence is the process AND a journal that has been written recently.
+ * Fifteen minutes, because the journal falls quiet during long supercruise and
+ * a shorter window would blink somebody offline mid-flight — the exact failure
+ * the process check was added to fix.
+ *
+ * Squadron owner's decision, 2026-07-29: in-game, not merely open.
+ */
+export const JOURNAL_FRESH_MS = 15 * 60_000;
+
+/** Is the newest journal recent enough to call this an active session? */
+export function journalIsFresh(newestWriteAt: number | null, now: number = Date.now()): boolean {
+  if (newestWriteAt === null) return false;
+  const age = now - newestWriteAt;
+  // A file stamped in the future is a clock problem, not a live session.
+  return age >= 0 && age < JOURNAL_FRESH_MS;
+}
+
+/**
+ * Both halves. Neither alone is enough.
+ *
+ * Process without a fresh journal is the game sitting at a menu. A fresh
+ * journal without the process is a session that has just ended — the last write
+ * is still recent, and reporting that as live is exactly the lag members notice
+ * when they quit.
+ */
+export function isActivelyPlaying(
+  processRunning: boolean,
+  newestWriteAt: number | null,
+  now: number = Date.now(),
+): boolean {
+  return processRunning && journalIsFresh(newestWriteAt, now);
+}
