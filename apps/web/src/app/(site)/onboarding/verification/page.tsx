@@ -2,6 +2,9 @@ import type { Metadata } from 'next';
 import { redirect } from 'next/navigation';
 import { ClockIcon, ExclamationCircleIcon } from '@heroicons/react/24/outline';
 import { getMe, getInaraStatus, getMyClaim } from '../../../../lib/api';
+import { VerificationProvider } from '../../../(hub)/settings/commander/verification-state';
+import { InaraForm } from '../../../(hub)/settings/commander/inara-form';
+import { LiveRefresh } from '../../../../components/live-refresh';
 
 export const metadata: Metadata = {
   title: "Waiting on verification — Grim's Squad",
@@ -23,6 +26,22 @@ export const dynamic = 'force-dynamic';
  * A page that just said "pending approval" would leave somebody with no idea
  * whether they had done something wrong, whether anyone knew they were waiting,
  * or whether to ask.
+ *
+ * ★ IT DESCRIBED THE INARA ROUTE AND GAVE NO WAY TO TAKE IT — AND THAT WAS A LOOP ★
+ *
+ * Reported from production, 2026-07-29: a non-admin reaches this page and has
+ * nothing to paste a key into.
+ *
+ * The page listed "Link an Inara key" as one of two ways through. The only form
+ * that does it lives at `/settings/commander?tab=verification`, which is inside
+ * the hub — and the hub layout redirects anybody still owing onboarding straight
+ * back to THIS page. So the member was told to link a key, and every route to
+ * the form bounced them here. There was no way out that did not involve finding
+ * an officer, which makes the second "way through" fictional.
+ *
+ * The form is on the page now. `InaraForm` and `VerificationProvider` are the
+ * same components the settings page uses — the alternative was a second form
+ * against the same endpoint, and two forms for one job drift.
  */
 export default async function VerificationWaitPage() {
   const [me, inara, claim] = await Promise.all([getMe(), getInaraStatus(), getMyClaim()]);
@@ -40,6 +59,14 @@ export default async function VerificationWaitPage() {
 
   return (
     <main id="main" className="mx-auto max-w-[1440px] px-6 py-20">
+      {/*
+        The API publishes `verification` to this member's own tabs the moment a
+        key is accepted. That re-runs this server component, `me.onboarding.step`
+        is no longer `verification`, and the redirect at the top of this function
+        lets them through — so linking a key moves them on by itself rather than
+        leaving them on a page that has just stopped applying to them.
+      */}
+      <LiveRefresh types={['verification']} />
       <div className="mx-auto max-w-[62ch]">
         <p className="font-mono text-[11px] uppercase tracking-[0.32em] text-[var(--color-brand-orange)]">
           Almost there
@@ -94,14 +121,35 @@ export default async function VerificationWaitPage() {
               </p>
             </div>
 
-            <div className="rounded-lg border border-[var(--color-border-hairline)] p-5">
+            <div className="rounded-lg border border-[var(--color-brand-cyan-bright)] bg-[color-mix(in_srgb,var(--color-brand-cyan-bright)_6%,transparent)] p-5">
               <h3 className="text-[var(--color-text-primary)]">Link an Inara key</h3>
               <p className="mt-2 text-sm leading-relaxed text-[var(--color-text-secondary)]">
                 Automatic, immediate, and needs nobody else. We ask Inara who the key belongs to and
                 verify you from their answer — you never type your own commander name, which is what
                 makes it proof rather than a claim.
-                {inara?.linked === true && ' Your key is already stored.'}
               </p>
+
+              {/*
+                ★ THE FORM ITSELF, NOT A LINK TO IT ★
+
+                A link would go to `/settings/commander`, which is inside the hub,
+                and the hub bounces anybody still owing onboarding back here. That
+                is the loop this page shipped with.
+
+                Rendered only when we could read the status: `InaraForm` needs one
+                to know whether a key is already stored, and inventing a default
+                would show "add a key" to somebody who has one.
+              */}
+              {inara === null ? (
+                <p className="mt-4 rounded border border-dashed border-[var(--color-border-hairline)] px-4 py-3 text-sm text-[var(--color-text-secondary)]">
+                  We could not reach your commander details just now. Nothing is wrong with your
+                  account — refresh in a moment, or ask an officer to verify you meanwhile.
+                </p>
+              ) : (
+                <VerificationProvider initial={inara}>
+                  <InaraForm />
+                </VerificationProvider>
+              )}
             </div>
           </div>
         </section>
