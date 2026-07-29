@@ -13,7 +13,8 @@
     "reconcile": "tsx src/main.ts",
     "promote": "tsx src/promote.ts",
     "inara:sync": "tsx src/inara-sync.ts",
-    "audit:daily": "tsx src/daily-audit.ts"
+    "audit:daily": "tsx src/daily-audit.ts",
+    "role:sync": "tsx src/role-sync.ts"
   },
   "devDependencies": {
     "@grims/config": "workspace:*",

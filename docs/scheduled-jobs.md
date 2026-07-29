@@ -15,6 +15,14 @@ schedule shows up in cron's own mail rather than looking healthy forever.
 CRON_TZ=UTC
 COMPOSE=docker compose -f /srv/grims/repo/infra/docker/compose.prod.yml --env-file /srv/grims/.env
 
+# Discord roles onto platform roles. EVERY MINUTE (owner, 2026-07-29).
+#
+# Touches Discord not at all: the bot keeps `discord_guild_members` current from
+# gateway events, so this reads roles that are already fresh and costs a handful
+# of indexed queries. Asking Discord for 109 members every minute would be
+# 157,000 requests a day and would be rate-limited within the hour.
+* * * * *      cd /srv/grims/repo && $COMPOSE run --rm worker node apps/worker/dist/role-sync.js >> /var/log/grims-role-sync.log 2>&1
+
 # Discord reconciliation — role drift, orphaned identities, anomalies.
 0 3 * * *      cd /srv/grims/repo && $COMPOSE run --rm worker node apps/worker/dist/main.js
 
