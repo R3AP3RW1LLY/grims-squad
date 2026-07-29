@@ -11,6 +11,8 @@ import type { ConsentService } from './consent.service.js';
 import { LIVE_SERVICE } from '../live/live.tokens.js';
 import type { LiveService } from '../live/live.service.js';
 import { TELEMETRY_CATALOGUE, REQUIRED_CATEGORY } from '@grims/shared';
+import { RELEASE_STORE } from '../companion/companion.tokens.js';
+import type { ReleaseStore } from '../companion/release.service.js';
 
 @Controller('v1')
 export class TelemetryController {
@@ -23,6 +25,12 @@ export class TelemetryController {
      * a member's upload is the thing that matters and a notification is not.
      */
     @Optional() @Inject(LIVE_SERVICE) private readonly live: LiveService | null = null,
+    /*
+     * OPTIONAL, like the live service. The companion's settings call must not
+     * fail because no release store is configured — what a member has switched
+     * off matters far more than whether an update exists.
+     */
+    @Optional() @Inject(RELEASE_STORE) private readonly releases: ReleaseStore | null = null,
   ) {}
 
   // ------------------------------------------------------------------ pairing
@@ -202,12 +210,25 @@ export class TelemetryController {
     requiredCategory: string;
     storedEvents: number;
     firstEventAt: string | null;
+    latestVersion: string | null;
   }> {
     const device = await this.#device(req);
 
-    const [state, contribution] = await Promise.all([
+    const [state, contribution, assets] = await Promise.all([
       this.consent.get(device.userId),
       this.ingest.contribution(device.userId),
+      /*
+       * ★ THE UPDATE CHECK RIDES ALONG HERE ★
+       *
+       * The app already calls this every five minutes with its device token, so
+       * telling it the newest published version costs no extra request, no new
+       * endpoint and no second authentication path.
+       *
+       * Optional, so a deployment with no release store configured simply never
+       * offers an update rather than failing this call — which the app relies
+       * on for what it collects.
+       */
+      this.releases?.list().catch(() => []) ?? Promise.resolve([]),
     ]);
 
     return {
@@ -223,6 +244,16 @@ export class TelemetryController {
       requiredCategory: REQUIRED_CATEGORY,
       storedEvents: contribution.storedEvents,
       firstEventAt: contribution.firstEventAt?.toISOString() ?? null,
+      /*
+       * The newest version across every platform, not per-platform: a release
+       * publishes all three together, and an app comparing against another
+       * platform's build would be comparing the same number anyway.
+       */
+      latestVersion:
+        assets
+          .map((a) => a.version)
+          .filter((v): v is string => v !== null)
+          .sort((x, y) => (x < y ? 1 : x > y ? -1 : 0))[0] ?? null,
     };
   }
 
@@ -256,13 +287,20 @@ export class TelemetryController {
      * for, and why an empty array is accepted here rather than rejected.
      */
     const gameRunning = (body as Record<string, unknown> | null)?.['gameRunning'] === true;
+    /*
+     * A STATEMENT, not the absence of one. The app sends this once when the
+     * game closes, so presence drops in seconds instead of ageing out over five
+     * minutes — and an ordinary upload that simply omits the flag leaves
+     * presence exactly as it was.
+     */
+    const gameStopped = (body as Record<string, unknown> | null)?.['gameStopped'] === true;
 
     const result = await this.ingest.ingest(
       device.userId,
       device.id,
       events as IncomingEvent[],
       undefined,
-      { gameRunning },
+      { gameRunning, gameStopped },
     );
 
     /*
@@ -280,7 +318,9 @@ export class TelemetryController {
     if (result.accepted > 0) {
       this.live?.publish({ type: 'telemetry', userId: device.userId });
     }
-    if (gameRunning === true) {
+    if (gameRunning === true || gameStopped === true) {
+      // Both directions. A roster that updated when somebody arrived and not
+      // when they left would drift further from the truth with every session.
       this.live?.publish({ type: 'presence', userId: null });
     }
 

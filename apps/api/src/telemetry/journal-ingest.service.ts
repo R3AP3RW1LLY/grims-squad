@@ -67,6 +67,17 @@ export interface IngestStore {
   /** Records that the member's journal is being written right now. */
   markPlaying(userId: string, at: Date): Promise<void>;
   /**
+   * Records that they have STOPPED playing, right now.
+   *
+   * ★ WHY AN EXPLICIT STOP AND NOT JUST LETTING IT AGE OUT ★
+   *
+   * Presence is "seen within the last five minutes", so without this a member
+   * who quits keeps showing as Playing now for up to five minutes. Reported as
+   * a bug, and fairly: the app KNOWS the moment the game closes, and sitting on
+   * that for five minutes is a choice rather than a limitation.
+   */
+  markStopped(userId: string): Promise<void>;
+  /**
    * How much this member has contributed, in total.
    *
    * ★ THE SERVER IS THE AUTHORITY HERE, NOT THE APP ★
@@ -164,7 +175,7 @@ export class JournalIngestService {
     deviceTokenId: string,
     events: readonly IncomingEvent[],
     now: Date = new Date(),
-    options: { gameRunning?: boolean } = {},
+    options: { gameRunning?: boolean; gameStopped?: boolean } = {},
   ): Promise<IngestResult> {
     /*
      * Stamped BEFORE anything else, and independently of whether a single event
@@ -174,6 +185,18 @@ export class JournalIngestService {
      */
     if (options.gameRunning === true) {
       await this.store.markPlaying(userId, now).catch(() => undefined);
+    } else if (options.gameStopped === true) {
+      /*
+       * ★ ONLY ON AN EXPLICIT STOP ★
+       *
+       * Not `else` — an ordinary upload with no `gameRunning` flag must not
+       * clear presence. A batch arriving from a second machine, or a retry of
+       * an old batch, would otherwise knock somebody offline mid-flight.
+       *
+       * The app sends this once, on the transition from playing to not, so it
+       * is a statement about NOW rather than the absence of one.
+       */
+      await this.store.markStopped(userId).catch(() => undefined);
     }
 
     if (events.length > MAX_EVENTS_PER_REQUEST) {

@@ -38,5 +38,14 @@ import { RELEASE_STORE } from './companion.tokens.js';
       },
     },
   ],
+  /*
+   * Exported so the TELEMETRY module can read it.
+   *
+   * The companion's settings call tells the app the newest published version,
+   * which is how the update banner works. Without this export the injection
+   * resolves to null — and because it is `@Optional()`, silently: no error, no
+   * banner, ever.
+   */
+  exports: [RELEASE_STORE],
 })
 export class CompanionModule {}

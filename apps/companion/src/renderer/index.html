@@ -94,9 +94,36 @@
       .bw-idle { color: var(--dim); font-size: 11px; margin-left: 4px; }
       .bw-total { color: var(--dim); font-size: 12px; margin-top: 5px; }
       .bw-note { display: block; font-size: 11px; opacity: .8; margin-top: 2px; }
+      .update {
+        display: flex; align-items: center; justify-content: space-between; gap: 14px;
+        background: #1d1408; border: 1px solid var(--orange); border-radius: 10px;
+        padding: 12px 16px; margin-bottom: 14px;
+      }
+      .update strong { color: var(--orange); }
+      .update p { margin: 0; font-size: 13px; }
+      .update .ver { color: var(--dim); font-size: 12px; margin-top: 2px; }
     </style>
   </head>
   <body>
+    <!--
+      ★ A BANNER, NOT AN UPDATER ★
+
+      Squadron owner's decision, 2026-07-29: no over-the-air updates. An
+      auto-updater is only as trustworthy as its code signing, and without a
+      certificate an app that downloads and runs a binary by itself is a worse
+      proposition than one that sends the member to a page they can read.
+
+      So this tells them, and the button opens the website in their own browser
+      where the address bar is visible.
+    -->
+    <div class="update" id="updateBanner" hidden>
+      <div>
+        <p><strong>An update is available.</strong></p>
+        <p class="ver" id="updateVersions"></p>
+      </div>
+      <button id="getUpdate">Get it from the website</button>
+    </div>
+
     <h1>Grim's Squad Hub</h1>
     <p class="sub">Keeps your squadron profile current from your Elite Dangerous journals.</p>
 
@@ -400,6 +427,18 @@
 
         renderCategories(s);
 
+        /*
+          Shown only when the hub has named a NEWER version. `updateAvailable`
+          is computed in the main process, where the running version comes from
+          Electron itself rather than a constant somebody has to remember to
+          bump.
+        */
+        $('updateBanner').hidden = s.updateAvailable !== true;
+        $('updateVersions').textContent =
+          s.updateAvailable === true
+            ? `You have ${s.appVersion}. The squadron has ${s.hub?.latestVersion}.`
+            : '';
+
         $('error').hidden = s.last?.error == null;
         $('error').textContent = s.last?.error ?? '';
 
@@ -445,6 +484,10 @@
           $('refreshSettings').disabled = false;
         }
       };
+      // Opens the companion page in the real browser — never an in-app window.
+      // A download prompt inside an Electron shell is exactly the shape of a
+      // phishing page, and members should see the address bar.
+      $('getUpdate').onclick = () => api.openHub();
       $('openHub').onclick = () => api.openHub();
       $('openHub2').onclick = () => api.openHub();
       $('folder').onclick = async () => { await api.chooseJournalFolder(); render(await api.getState()); };

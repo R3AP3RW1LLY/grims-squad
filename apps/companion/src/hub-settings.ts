@@ -43,6 +43,14 @@ export interface HubSettings {
   /** Rows the hub actually holds for this member, across every device. */
   readonly storedEvents: number;
   readonly firstEventAt: string | null;
+  /**
+   * The newest version published on the hub, or null.
+   *
+   * Rides on this call rather than an endpoint of its own — the app already
+   * makes it every five minutes with its device token, so the update check
+   * costs no extra request and no second authentication path.
+   */
+  readonly latestVersion: string | null;
 }
 
 export interface FetchSettingsOptions {
@@ -95,6 +103,9 @@ export async function fetchHubSettings(
             : 'session',
         storedEvents: typeof body.storedEvents === 'number' ? body.storedEvents : 0,
         firstEventAt: typeof body.firstEventAt === 'string' ? body.firstEventAt : null,
+        // Null on anything unexpected. A malformed value must not become a
+        // banner pointing at a release that does not exist.
+        latestVersion: typeof body.latestVersion === 'string' ? body.latestVersion : null,
       },
     };
   } catch {

@@ -42,6 +42,18 @@ class FakeStore implements IngestStore {
 
   playingAt: Date | null = null;
 
+  /** Set when the app says the game closed. Null means it never did. */
+  stoppedFor: string | null = null;
+
+  async markStopped(userId: string): Promise<void> {
+    this.stoppedFor = userId;
+    this.playingAt = null;
+  }
+
+  async contribution(): Promise<{ storedEvents: number; firstEventAt: Date | null }> {
+    return { storedEvents: this.rows.length, firstEventAt: null };
+  }
+
   async markPlaying(_userId: string, at: Date): Promise<void> {
     this.playingAt = at;
   }
@@ -472,5 +484,56 @@ describe('the event key is ours, not the caller\'s', () => {
     await svc.ingest('u1', 'dev1', [ev({ data: { Odyssey: true, Commander: 'GRIM' } })], NOW);
 
     expect(store.inserted[0]?.eventKey).toBe(first);
+  });
+});
+
+describe('leaving the game', () => {
+  /*
+   * ★ PRESENCE MUST DROP WHEN THEY QUIT, NOT FIVE MINUTES LATER ★
+   *
+   * Presence is "seen within the last five minutes", so without an explicit
+   * stop a member who quits keeps showing as Playing now for up to five
+   * minutes. Reported from production, and fair: the app knows within one
+   * twenty-second poll, and sitting on that is a choice rather than a limit.
+   */
+  it('MANDATORY: an explicit stop clears presence', async () => {
+    const store = new FakeStore();
+    const svc = new JournalIngestService(store);
+
+    await svc.ingest('u1', 'd1', [], new Date(), { gameRunning: true });
+    expect(store.playingAt).not.toBeNull();
+
+    await svc.ingest('u1', 'd1', [], new Date(), { gameStopped: true });
+    expect(store.playingAt).toBeNull();
+    expect(store.stoppedFor).toBe('u1');
+  });
+
+  it('MANDATORY: an ordinary upload does NOT clear presence', async () => {
+    /*
+     * The dangerous case. A batch arriving from a SECOND machine, or a retry of
+     * an older batch, carries no gameRunning flag — and treating that as "they
+     * stopped" would knock somebody offline mid-flight from their own laptop.
+     */
+    const store = new FakeStore();
+    const svc = new JournalIngestService(store);
+
+    await svc.ingest('u1', 'd1', [], new Date(), { gameRunning: true });
+    const wasPlayingAt = store.playingAt;
+
+    await svc.ingest('u1', 'd1', [], new Date());
+
+    expect(store.playingAt).toBe(wasPlayingAt);
+    expect(store.stoppedFor).toBeNull();
+  });
+
+  it('MANDATORY: gameRunning wins if both somehow arrive', async () => {
+    // Contradictory input should resolve to the LIVE reading: a false negative
+    // hides somebody who is playing, which is the worse of the two errors.
+    const store = new FakeStore();
+    const svc = new JournalIngestService(store);
+
+    await svc.ingest('u1', 'd1', [], new Date(), { gameRunning: true, gameStopped: true });
+    expect(store.playingAt).not.toBeNull();
+    expect(store.stoppedFor).toBeNull();
   });
 });
