@@ -61,7 +61,22 @@ export interface PublicProfile {
   location?: { system: string; station: string | null } | null;
   credits?: string | null;
   fleet?: Array<{ shipType: string; name: string | null }> | null;
-  activity?: { messages: number; voiceMinutes: number } | null;
+  /**
+   * This calendar month's squadron activity.
+   *
+   * Voice is JOINS, not minutes: Discord reports somebody entering a channel
+   * and never how long they stayed, so nothing records a minute of voice. The
+   * field this replaces was called `voiceMinutes` and the profile page divided
+   * it by sixty to render "hours in voice" — which would have been invented the
+   * moment anyone populated it.
+   */
+  activity?: {
+    messages: number;
+    voiceJoins: number;
+    forumPosts: number;
+    /** A game session was seen. The single input the promotion check reads. */
+    gameObserved: boolean;
+  } | null;
 }
 
 export interface PrivacySettings {
@@ -183,8 +198,20 @@ export type RosterMember = PublicProfile & {
 export const getRoster = (): Promise<{ members: RosterMember[]; total: number } | null> =>
   get('/v1/members', { authed: true });
 
-export const getProfile = (handle: string): Promise<PublicProfile | null> =>
-  get(`/v1/members/${encodeURIComponent(handle)}`, { authed: true });
+/**
+ * One commander's full record.
+ *
+ * ★ THE SAME SHAPE AS A ROSTER ENTRY, DELIBERATELY ★
+ *
+ * The profile page is reached from a card, and a page that showed different
+ * pilot ranks from the card that linked to it is the kind of contradiction
+ * nobody reports and everybody notices. Identical shape, built by identical
+ * code on the server.
+ */
+export type MemberProfile = RosterMember;
+
+export const getProfile = (handle: string): Promise<MemberProfile | null> =>
+  get<MemberProfile>(`/v1/members/${encodeURIComponent(handle)}`, { authed: true });
 
 export const getMyPrivacy = (): Promise<PrivacySettings | null> =>
   get('/v1/me/privacy', { authed: true });

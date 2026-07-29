@@ -114,7 +114,29 @@ export interface ProfileSource {
   readonly location?: ProfileLocation | null;
   readonly credits?: bigint | null;
   readonly fleet?: readonly ProfileShip[] | null;
-  readonly activity?: { messages: number; voiceMinutes: number } | null;
+  /**
+   * What this member has done in the squadron THIS CALENDAR MONTH.
+   *
+   * ★ `voiceMinutes` WAS FICTION, AND IS GONE ★
+   *
+   * This read `{ messages, voiceMinutes }` and the profile page divided that by
+   * sixty to render "hours in voice". Nothing anywhere records a minute of
+   * voice: `member_activity_months` counts JOINS, because Discord tells us when
+   * somebody enters a channel and never how long they stayed.
+   *
+   * It shipped harmless only because the field was never populated — the first
+   * person to wire it up would have published invented hours. So the shape now
+   * says what is actually counted.
+   *
+   * `gameObserved` is the one that matters: it is the single input the monthly
+   * promotion check reads.
+   */
+  readonly activity?: {
+    messages: number;
+    voiceJoins: number;
+    forumPosts: number;
+    gameObserved: boolean;
+  } | null;
   /** Present on the row, never on a profile. Listed so the type stops it being spread out by accident. */
   readonly email?: string | null;
 }
@@ -146,7 +168,13 @@ export interface PublicProfile {
   /** A STRING. Balances exceed 2^53, where a JS number rounds silently. */
   readonly credits?: string | null;
   readonly fleet?: readonly ProfileShip[] | null;
-  readonly activity?: { messages: number; voiceMinutes: number } | null;
+  /** This calendar month. Voice is JOINS — nothing records minutes. */
+  readonly activity?: {
+    messages: number;
+    voiceJoins: number;
+    forumPosts: number;
+    gameObserved: boolean;
+  } | null;
 }
 
 /**

@@ -253,15 +253,83 @@ export class MembersController {
   async profile(
     @Param('handle') handle: string,
     @User() caller: CurrentUser | undefined,
-  ): Promise<PublicProfile> {
+  ): Promise<
+    PublicProfile & {
+      commander: CommanderSnapshot;
+      discordRoles: Array<{
+        name: string;
+        colour: string | null;
+        category: 'rank' | 'membership' | 'award';
+      }>;
+      isOfficer: boolean;
+      siteRoles: ReadonlyArray<{ name: string; colour: string | null }>;
+    }
+  > {
     const row = await this.store.byHandle(handle);
     if (row === null) {
       throw new AppError(ErrorCode.RESOURCE_NOT_VISIBLE, 'No such member.');
     }
     const isSelf = caller !== undefined && caller.userId === row.source.id;
-    return serializeProfile(row.source, row.privacy, {
-      audience: isSelf ? 'self' : 'public',
-    });
+
+    /*
+     * ★ THE SAME BUILDERS THE ROSTER USES ★
+     *
+     * A profile page showing different pilot ranks from the card that links to
+     * it is the kind of contradiction nobody reports and everybody notices. So
+     * the snapshot, the Inara merge and the ladder fill all come from the same
+     * three functions, in the same order — Inara first, journal as the
+     * fallback, THEN expand to all six ladders. Filling before the merge would
+     * make Inara's "I have nothing" indistinguishable from six real readings.
+     */
+    const [snapshots, inara, catalogue, activity] = await Promise.all([
+      this.store.snapshotEvents([row.source.id]).then((events) => buildSnapshots(events)),
+      this.store.inaraRanks([row.source.id]),
+      this.store.discordRoleCatalogue(),
+      this.store.activityThisMonth(row.source.id),
+    ]);
+
+    const worn = (row.source.guildRoleIds ?? [])
+      .map((id) => catalogue.get(id))
+      .filter((role): role is NonNullable<typeof role> => role !== undefined);
+
+    return {
+      /*
+       * Activity goes through the SERIALIZER, not around it.
+       *
+       * It is governed by `showActivity` like any other gated field, so merging
+       * it into the source is what keeps INV-027 in one place. Attaching it to
+       * the response afterwards would have published it for everybody and left
+       * the toggle silently doing nothing.
+       */
+      ...serializeProfile(
+        { ...row.source, activity },
+        row.privacy,
+        { audience: isSelf ? 'self' : 'public' },
+      ),
+      commander: fillLadders(
+        withInaraRanks(snapshots.get(row.source.id) ?? EMPTY_SNAPSHOT, inara.get(row.source.id)),
+      ),
+      /*
+       * `hidden` and `other` never leave the API — filtered HERE rather than in
+       * the browser, exactly as on the roster. Which channels a member can see
+       * is not this page's business to publish either.
+       */
+      discordRoles: worn
+        .filter(
+          (role): role is typeof role & { category: 'rank' | 'membership' | 'award' } =>
+            role.category === 'rank' ||
+            role.category === 'membership' ||
+            role.category === 'award',
+        )
+        .sort((a, b) => b.position - a.position)
+        .map(({ name, colour, category }) => ({ name, colour, category })),
+      // A leadership APPOINTMENT, not a permission and not a tenure rank. Same
+      // rule as the roster, for the same reason.
+      isOfficer: worn.some(
+        (role) => role.rankOrder !== null && role.rankOrder < LEADERSHIP_CEILING,
+      ),
+      siteRoles: row.source.siteRoles ?? [],
+    };
   }
 
   /** The caller's own toggles, for the settings page. */

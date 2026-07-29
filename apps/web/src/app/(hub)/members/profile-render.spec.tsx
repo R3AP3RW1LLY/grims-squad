@@ -101,10 +101,32 @@ describe('@INV-027 profile rendering distinguishes absent from empty', () => {
   it('does not put a member bio into page metadata', () => {
     // A search-engine snippet is a much wider audience than a profile page, and
     // the member wrote those words for the squadron.
-    const meta = profilePage.slice(
-      profilePage.indexOf('generateMetadata'),
-      profilePage.indexOf('function Row'),
-    );
+    /*
+     * ★ THE SLICE ENDS AT ITS OWN CLOSING BRACE ★
+     *
+     * This used to end at `function Row` — the helper that happened to follow
+     * it. When the page was rebuilt that helper was renamed, `indexOf` returned
+     * -1, and `slice(start, -1)` quietly scanned the ENTIRE FILE instead. The
+     * test then failed on the bio in the render body: a false alarm about
+     * correct code, which is exactly as costly as a missed one.
+     *
+     * A top-level `\n}` is the end of the function whatever its neighbours are
+     * called.
+     */
+    const start = profilePage.indexOf('generateMetadata');
+    expect(start).toBeGreaterThan(-1);
+
+    /*
+     * A closing brace ALONE on its line, which is the end of the function. A
+     * bare `\n}` also matches the `}: {` that closes the destructured
+     * parameters two lines in, cutting the slice to nothing — and a slice of
+     * nothing passes a `not.toContain` for entirely the wrong reason.
+     */
+    const rest = profilePage.slice(start);
+    const close = /\r?\n\}\r?\n/.exec(rest);
+    expect(close).not.toBeNull();
+
+    const meta = rest.slice(0, close?.index);
     expect(meta).not.toContain('p.bio');
     expect(meta).toContain('index: false');
   });

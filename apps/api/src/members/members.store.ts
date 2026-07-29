@@ -25,6 +25,31 @@ export interface MembersStore {
   profileEvents(userId: string): Promise<ProfileEvent[]>;
   /** Every guild role we know the name and colour of, keyed by snowflake. */
   discordRoleCatalogue(): Promise<Map<string, DiscordRoleInfo>>;
+  /** What this member has done in the squadron this calendar month. */
+  activityThisMonth(userId: string, now?: Date): Promise<SquadronActivity | null>;
+}
+
+/**
+ * One member's squadron activity for a calendar month.
+ *
+ * ★ JOINS, NOT MINUTES ★
+ *
+ * Discord tells us when somebody ENTERS a voice channel and never how long they
+ * stayed, so nothing anywhere records a minute of voice. The field this replaces
+ * was called `voiceMinutes` and the profile page divided it by sixty to render
+ * "hours in voice" — invented the moment anyone populated it.
+ */
+export interface SquadronActivity {
+  readonly messages: number;
+  readonly voiceJoins: number;
+  readonly forumPosts: number;
+  /**
+   * A game session was observed this month.
+   *
+   * The single input the monthly promotion check reads (rank-progression.yaml),
+   * which is why it is worth a member being able to see it on their own page.
+   */
+  readonly gameObserved: boolean;
 }
 
 /** One Discord role, as Discord defines it. */
@@ -220,6 +245,46 @@ export class PrismaMembersStore implements MembersStore {
       select: PrismaMembersStore.#SELECT,
     });
     return u === null ? null : this.#toRow(u as never);
+  }
+
+  /**
+   * This calendar month's activity for one member.
+   *
+   * ★ THE CURRENT MONTH ONLY, AND IN UTC ★
+   *
+   * Promotions are defined in UTC and counted per calendar month, so the window
+   * has to be built the same way. Using the server's local month would put a
+   * host in a negative offset a day out at the start of every month, and the
+   * figure a member reads would disagree with the one the promotion job used.
+   */
+  async activityThisMonth(userId: string, now: Date = new Date()): Promise<SquadronActivity | null> {
+    const month = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+
+    const row = await this.#db.memberActivityMonth.findFirst({
+      where: { userId, month },
+      select: {
+        messageCount: true,
+        voiceJoinCount: true,
+        forumPostCount: true,
+        gameActivity: true,
+      },
+    });
+
+    // No row means no activity recorded, which is a real answer — zero — rather
+    // than "we do not know". The month row is created on first activity.
+    if (row === null) return null;
+
+    return {
+      messages: row.messageCount,
+      voiceJoins: row.voiceJoinCount,
+      forumPosts: row.forumPostCount,
+      /*
+       * `observed` only. The enum also carries `unknown` and `none`, and
+       * treating anything-but-none as observed would report a member the check
+       * has not run for as having qualified.
+       */
+      gameObserved: row.gameActivity === 'observed',
+    };
   }
 
   async roster(): Promise<MemberRow[]> {

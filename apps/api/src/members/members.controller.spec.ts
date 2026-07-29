@@ -1,6 +1,11 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { MembersController } from './members.controller.js';
-import type { MembersStore, MemberRow, DiscordRoleInfo } from './members.store.js';
+import type {
+  MembersStore,
+  MemberRow,
+  DiscordRoleInfo,
+  SquadronActivity,
+} from './members.store.js';
 import type { SnapshotEvent, InaraRanks } from './commander-snapshot.js';
 import type { PrivacySettings, ProfileSource } from './profile.serializer.js';
 import { issueCsrfToken, csrfCookieName } from '../common/csrf.js';
@@ -88,6 +93,21 @@ class FakeStore implements MembersStore {
 
   async discordRoleCatalogue(): Promise<Map<string, DiscordRoleInfo>> {
     return this.catalogue;
+  }
+
+  /**
+   * This month's squadron activity. Null unless a test sets it.
+   *
+   * Null is the REAL default: the month row is created on first activity, so a
+   * member who has done nothing this month genuinely has no row. It must
+   * survive the serializer either way — and because activity is gated on
+   * `showActivity`, the INV-027 tests below depend on it being absent from a
+   * public response whatever this returns.
+   */
+  activity: SquadronActivity | null = null;
+
+  async activityThisMonth(): Promise<SquadronActivity | null> {
+    return this.activity;
   }
 }
 
