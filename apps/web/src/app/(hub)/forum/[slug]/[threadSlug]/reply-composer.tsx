@@ -129,7 +129,8 @@ export function ReplyComposer({
       <RichEditor
         onChange={setDoc}
         disabled={busy}
-        placeholder="Write a reply. Use the toolbar for headings, images and video."
+        placeholder="Write a reply. Type @ to mention somebody, or use the toolbar for headings, images and video."
+        mentionThreadId={threadId}
         {...(insert === undefined ? {} : { insert })}
       />
 

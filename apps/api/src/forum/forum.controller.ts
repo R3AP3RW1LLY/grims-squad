@@ -322,6 +322,27 @@ export class ForumController {
     };
   }
 
+  /**
+   * Who the caller can usefully @mention in this thread.
+   *
+   * Separate from the grant autocomplete because the two answer different questions and carry
+   * different permissions: granting is an admin act, mentioning is what every member does. Sharing
+   * one endpoint would mean either requiring FORUM_MODERATE to mention somebody, or dropping the
+   * check that makes granting safe.
+   */
+  @Get('threads/:threadId/mention-candidates')
+  async mentionCandidates(
+    @User() caller: CurrentUser | undefined,
+    @Param('threadId') threadId: string,
+    @Query('q') q: string | undefined,
+  ): Promise<{ candidates: GranteeCandidate[] }> {
+    if (caller === undefined) {
+      throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
+    }
+    const db = await this.acl.forCaller(caller.userId);
+    return { candidates: await this.grants.mentionCandidates(db, threadId, q ?? '') };
+  }
+
   /** Grants the named users read access. One request for the whole multi-select. */
   @Post('threads/:threadId/grants')
   async addGrants(

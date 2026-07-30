@@ -727,3 +727,28 @@ body {
   pointer-events: none;
   color: var(--color-text-secondary);
 }
+
+/*
+ * A @mention, in a post body and in the editor.
+ *
+ * Two selectors because the same thing has two shapes: `doc-mention` is what the SERVER renders
+ * into stored HTML, `forum-mention` is what TipTap renders while somebody is typing. Styling only
+ * one would mean a mention that changes appearance the moment it is posted, which reads as a bug.
+ *
+ * Deliberately not a coloured pill. A mention is a name inside a sentence, and a badge in the
+ * middle of a line breaks the reading rhythm — it wants to be recognisable at a glance, not to
+ * compete with the text around it.
+ */
+.guide-prose .doc-mention,
+.forum-mention {
+  color: var(--color-brand-cyan-bright);
+  text-decoration: none;
+  font-weight: 500;
+  border-radius: 0.2rem;
+  padding: 0 0.15rem;
+  background: color-mix(in srgb, var(--color-brand-cyan-bright) 10%, transparent);
+}
+
+.guide-prose .doc-mention:hover {
+  background: color-mix(in srgb, var(--color-brand-cyan-bright) 20%, transparent);
+}

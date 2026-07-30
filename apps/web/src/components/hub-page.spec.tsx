@@ -126,7 +126,35 @@ describe('hub pages', () => {
         const isPureRedirect =
           /from 'next\/navigation'/.test(src) &&
           /\): never \{\s*redirect\(/.test(withoutComments);
-        return !isPureRedirect;
+
+        /*
+         * ★ A PAGE THAT RENDERS NO MARKUP AT ALL ★
+         *
+         * The `): never {` shape above only recognises a SYNCHRONOUS redirect. A resolver that has
+         * to ask the API first — `/members/id/[userId]`, which turns a @mention's user id into a
+         * handle — is `async`, can 404, and still never renders anything: both `notFound()` and
+         * `redirect()` throw.
+         *
+         * Checked by the ABSENCE OF JSX rather than by filename, so the exemption cannot be
+         * borrowed by a page that grows a body later. The moment such a file returns markup it has
+         * a JSX element in it, and this rule applies again — which is the property the test wants.
+         */
+        const importsNav = /from 'next\/navigation'/.test(src);
+        const leavesViaThrow = /(redirect|notFound)\(/.test(withoutComments);
+        /*
+         * ★ THE SLASH IS OUTSIDE THE CHARACTER CLASS ON PURPOSE ★
+         *
+         * Written as `[\s/>]` this silently stopped working: esbuild's .tsx lexer ends the regex
+         * literal at that slash, so the expression compiled to something other than it reads as
+         * and the whole check quietly evaluated false. Escaping it inside the class fixes the lexer
+         * and then trips `no-useless-escape`, because inside a class the escape IS unnecessary.
+         *
+         * An alternation moves the slash where escaping it is both required and honest.
+         */
+        const hasJsx = /<[A-Za-z][A-Za-z0-9]*(?:[\s>]|\/)/.test(withoutComments);
+        const rendersNothing = importsNav && leavesViaThrow && !hasJsx;
+
+        return !isPureRedirect && !rendersNothing;
       })
       .map((p) => p.slice(HUB.length + 1));
 

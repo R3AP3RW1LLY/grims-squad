@@ -54,6 +54,17 @@ function toText(nodes: PmNode[] | undefined): TextNode[] {
               const href = m.attrs?.['href'];
               return typeof href === 'string' ? ({ type: 'link', href } as const) : null;
             }
+            case 'mention': {
+              /*
+               * Dropped when the id is missing, rather than saved as a mention of nobody. A mark
+               * with no `userId` would pass validation as styling and then notify no one — which
+               * looks identical to a working mention to the person who wrote it.
+               */
+              const userId = m.attrs?.['userId'];
+              return typeof userId === 'string' && userId !== ''
+                ? ({ type: 'mention', userId } as const)
+                : null;
+            }
             default:
               // An unmodelled mark is dropped rather than carried — see the note above.
               return null;
@@ -208,7 +219,11 @@ export function toDocument(root: PmNode): RichDocument | null {
 export function fromDocument(doc: RichDocument): PmNode {
   const marksOf = (t: TextNode): NonNullable<PmNode['marks']> =>
     (t.marks ?? []).map((m): { type: string; attrs?: Record<string, unknown> } =>
-      m.type === 'link' ? { type: 'link', attrs: { href: m.href } } : { type: m.type },
+      m.type === 'link'
+        ? { type: 'link', attrs: { href: m.href } }
+        : m.type === 'mention'
+          ? { type: 'mention', attrs: { userId: m.userId } }
+          : { type: m.type },
     );
 
   const textOf = (nodes: readonly TextNode[] | undefined): PmNode[] =>

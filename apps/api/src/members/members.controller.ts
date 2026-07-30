@@ -249,6 +249,38 @@ export class MembersController {
    * branch and there must not be one: INV-027 is a promise to the member, not a
    * permission level — and being signed in is not the same as being them.
    */
+  /**
+   * Resolves a member id to their handle.
+   *
+   * ★ WHY THIS EXISTS ★
+   *
+   * A @mention stores a user ID, deliberately: resolving the name once, when the author picks
+   * somebody, is what makes a mention survive a rename. But the profile route keys on HANDLE, so
+   * a mention has to be turned back into one somewhere. Doing it at RENDER time would mean a
+   * roster lookup per mention per page view, which is the cost the id was meant to avoid.
+   *
+   * Doing it here means it costs a request only when somebody actually clicks a mention.
+   *
+   * ★ AUTHENTICATED, AND 404 WHEN ABSENT ★
+   *
+   * Same reasoning as the profile route below: answering this anonymously would make the id space
+   * enumerable. A missing or inactive account is a 404 rather than a distinct answer.
+   */
+  @Get('members/id/:userId')
+  async handleFor(
+    @Param('userId') userId: string,
+    @User() caller: CurrentUser | undefined,
+  ): Promise<{ handle: string }> {
+    if (caller === undefined) {
+      throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
+    }
+    const handle = await this.store.handleForId(userId);
+    if (handle === null) {
+      throw new AppError(ErrorCode.RESOURCE_NOT_VISIBLE, 'Member not found.');
+    }
+    return { handle };
+  }
+
   @Get('members/:handle')
   async profile(
     @Param('handle') handle: string,

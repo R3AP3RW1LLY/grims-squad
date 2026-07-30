@@ -342,11 +342,18 @@ function renderText(nodes: readonly TextNode[]): string {
            * Rendered as a link to the member's profile, carrying the id in a data attribute so the
            * client can style or hover-card it without re-parsing the name.
            *
+           * ★ `/members/id/<uuid>`, NOT `/members/<uuid>` ★
+           *
+           * The profile route keys on HANDLE, so an id in that position is a 404 — every mention
+           * on the site would have been a dead link. `/members/id/…` resolves the id and redirects,
+           * which keeps this renderer pure: storing an id and resolving it at CLICK time rather
+           * than at render time is the whole reason mentions survive a rename.
+           *
            * `esc` has already been applied to the text; the id came from a uuid pattern, so nothing
            * here can carry markup. No `target="_blank"`: a mention points at our own site, and
            * opening an internal link in a new tab is a small rudeness.
            */
-          html = `<a class="doc-mention" data-mention="${esc(mark.userId ?? '')}" href="/members/${esc(mark.userId ?? '')}">${html}</a>`;
+          html = `<a class="doc-mention" data-mention="${esc(mark.userId ?? '')}" href="/members/id/${esc(mark.userId ?? '')}">${html}</a>`;
         } else if (type === 'link') {
           /*
            * `rel` and `target` forced, exactly as the Markdown sanitiser does: a member cannot

@@ -14,6 +14,8 @@ export interface MemberRow {
 
 export interface MembersStore {
   byHandle(handle: string): Promise<MemberRow | null>;
+  /** A member's handle from their id, or null. Used to make @mention links resolvable. */
+  handleForId(userId: string): Promise<string | null>;
   roster(): Promise<MemberRow[]>;
   privacyOf(userId: string): Promise<Partial<PrivacySettings> | null>;
   savePrivacy(userId: string, patch: Partial<PrivacySettings>): Promise<PrivacySettings>;
@@ -256,6 +258,24 @@ export class PrismaMembersStore implements MembersStore {
       select: PrismaMembersStore.#SELECT,
     });
     return u === null ? null : this.#toRow(u as never);
+  }
+
+  /**
+   * The handle behind a user id.
+   *
+   * Deliberately narrow — one column, no profile assembly. The only caller is the mention
+   * redirect, which needs a handle to build a URL and nothing else; returning a full profile row
+   * would make an internal redirect cost the same as rendering a profile.
+   *
+   * Banned accounts are excluded, matching `byHandle`: a mention of somebody since removed is a
+   * dead link rather than a route into their page.
+   */
+  async handleForId(userId: string): Promise<string | null> {
+    const u = await this.#db.user.findFirst({
+      where: { id: userId, status: { not: 'banned' } },
+      select: { handle: true },
+    });
+    return u?.handle ?? null;
   }
 
   /**

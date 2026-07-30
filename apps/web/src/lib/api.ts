@@ -229,6 +229,16 @@ export const getRoster = (): Promise<{ members: RosterMember[]; total: number } 
  */
 export type MemberProfile = RosterMember & MemberProfileExtras;
 
+/**
+ * The handle behind a member id, for resolving a @mention link.
+ *
+ * Null covers every failure — no such id, a banned account, the API unreachable — because the
+ * caller turns all of them into the same 404. A mention that points at a removed member is a dead
+ * link, not a page that confirms they existed.
+ */
+export const getHandleForId = (userId: string): Promise<{ handle: string } | null> =>
+  get<{ handle: string }>(`/v1/members/id/${encodeURIComponent(userId)}`, { authed: true });
+
 export const getProfile = (handle: string): Promise<MemberProfile | null> =>
   get<MemberProfile>(`/v1/members/${encodeURIComponent(handle)}`, { authed: true });
 

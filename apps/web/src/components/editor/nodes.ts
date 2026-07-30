@@ -1,4 +1,4 @@
-import { Node, mergeAttributes } from '@tiptap/core';
+import { Mark, Node, mergeAttributes } from '@tiptap/core';
 
 /**
  * Our two custom block nodes.
@@ -101,6 +101,48 @@ export const SquadronVideo = Node.create({
       'div',
       mergeAttributes({ 'data-squadron-video': attrs.videoId, class: 'doc-embed doc-embed-editing' }),
       ['span', { class: 'doc-embed-title' }, attrs.title === '' ? 'YouTube video' : attrs.title],
+    ];
+  },
+});
+
+/**
+ * A mention of another member.
+ *
+ * ★ A MARK, NOT A NODE, AND THAT IS THE FORMAT'S DECISION ★
+ *
+ * `rich-document.ts` models `mention` as a mark carrying a `userId`, so this matches it. The
+ * practical difference: a mention is TEXT that happens to be tagged, so it wraps, selects, copies
+ * and deletes like the words around it. An atom node would be an indivisible block in the middle
+ * of a sentence, which is why mention chips in other editors need arrow-key special cases.
+ *
+ * ★ THE ID IS RESOLVED ONCE, WHEN THE AUTHOR PICKS SOMEBODY ★
+ *
+ * Not by scanning stored text for `@something` at render time. That approach breaks every past
+ * mention when a member renames, is ambiguous forever between similar display names, and runs on
+ * every read of every post. The display text is stored alongside the id, so a post still reads
+ * correctly after the account is deleted.
+ *
+ * ★ NO parseHTML ★
+ *
+ * Same reasoning as the image node: pasting markup that looks like a mention must not produce one.
+ * A mention is a claim that a specific member was addressed, and the only thing entitled to make
+ * that claim is a pick from the autocomplete, which resolved a real id.
+ */
+export const Mention = Mark.create({
+  name: 'mention',
+  inclusive: false,
+
+  addAttributes() {
+    return {
+      userId: { default: '' },
+    };
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    return [
+      'span',
+      mergeAttributes(HTMLAttributes, { class: 'forum-mention', 'data-mention': '' }),
+      0,
     ];
   },
 });

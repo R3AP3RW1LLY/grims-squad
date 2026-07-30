@@ -6,7 +6,8 @@ import StarterKit from '@tiptap/starter-kit';
 import Link from '@tiptap/extension-link';
 import Placeholder from '@tiptap/extension-placeholder';
 import type { RichDocument } from '@grims/shared';
-import { SquadronImage, SquadronVideo } from './nodes';
+import { Mention, SquadronImage, SquadronVideo } from './nodes';
+import { MentionAutocomplete } from './mention-autocomplete';
 import { toDocument, fromDocument, parseYouTubeId } from './doc-convert';
 
 /**
@@ -51,6 +52,15 @@ export interface RichEditorProps {
    * is destroyed.
    */
   readonly insert?: { nonce: number; doc: RichDocument };
+  /**
+   * Enables @mention autocomplete, scoped to a thread.
+   *
+   * Omitted where there is no thread yet — the new-thread composer. Candidates are filtered to
+   * people who can READ the thread, and there is no thread to filter against until it exists.
+   * Mentioning in an opening post would need a category-scoped answer, which is a different
+   * question and not one anybody has asked for.
+   */
+  readonly mentionThreadId?: string;
 }
 
 /** One toolbar button. Extracted because there are eleven of them and they must look identical. */
@@ -111,6 +121,7 @@ export function RichEditor({
   placeholder,
   disabled = false,
   insert,
+  mentionThreadId,
 }: RichEditorProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -135,6 +146,7 @@ export function RichEditor({
       Placeholder.configure({ placeholder: placeholder ?? 'Write something…' }),
       SquadronImage,
       SquadronVideo,
+      Mention,
     ],
     /*
      * SPREAD, not `content: initial === undefined ? undefined : …`.
@@ -387,6 +399,14 @@ export function RichEditor({
         editor={editor}
         className="guide-prose min-h-[220px] px-4 py-3 [&_.ProseMirror]:min-h-[200px] [&_.ProseMirror]:outline-none"
       />
+
+      {/*
+        Rendered only where a thread exists to scope the candidate list — see `mentionThreadId`.
+        It returns null unless there is something to show, so it costs nothing when idle.
+      */}
+      {mentionThreadId !== undefined && (
+        <MentionAutocomplete editor={editor} threadId={mentionThreadId} />
+      )}
     </div>
   );
 }
