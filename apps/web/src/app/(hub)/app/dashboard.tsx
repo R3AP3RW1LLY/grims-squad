@@ -164,7 +164,7 @@ export function Dashboard({ data }: { data: AdminDashboard }) {
 
         <Section
           fill
-          title="What the squadron flies"
+          title="What we fly"
           description="The ship each commander was last seen in — not every ship they own, and not counted per session, so the most frequent player does not decide this alone."
         >
           {game.ships.length > 0 ? (
@@ -178,7 +178,22 @@ export function Dashboard({ data }: { data: AdminDashboard }) {
           <div className="mt-auto pt-5">
             <div className="border-t border-[var(--color-border-hairline)]" />
           </div>
+
         </Section>
+
+        <Section
+          fill
+          title="What we wear"
+          description="The suit each commander was last seen in, for anybody who plays on foot. Read from the same journal events as the ships above — a commander who never leaves the cockpit simply does not appear here."
+        >
+          {game.suits.length > 0 ? (
+            <Donut
+              unit={game.suits.length === 1 ? 'pilot' : 'pilots'}
+              data={game.suits.map((s) => ({ label: s.suit, value: s.pilots }))}
+            />
+          ) : (
+            <Empty>Nobody has been on foot yet.</Empty>
+          )}        </Section>
 
         <Section
           fill

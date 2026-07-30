@@ -399,6 +399,8 @@ export interface AdminDashboard {
     flyingThisMonth: number;
     playingNow: number;
     ships: Array<{ ship: string; pilots: number }>;
+    /** What the squadron is wearing on foot. Same journal source as `ships`, filtered the other way. */
+    suits: Array<{ suit: string; pilots: number }>;
     byType: Array<{ type: string; count: number }>;
   };
   squadron: {

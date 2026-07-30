@@ -1,4 +1,5 @@
 import type { PrismaClient } from '@grims/db';
+import { isSuit, shipDisplayName } from '@grims/shared';
 import { LEADERSHIP_CEILING } from '../members/members.store.js';
 
 /**
@@ -74,6 +75,8 @@ export interface DashboardData {
     /** Playing right now, by the journal heartbeat. */
     readonly playingNow: number;
     readonly ships: ReadonlyArray<{ ship: string; pilots: number }>;
+    /** What the squadron is WEARING. Same source, filtered the other way. */
+    readonly suits: ReadonlyArray<{ suit: string; pilots: number }>;
     /** Events per category, so it is visible WHAT is being collected. */
     readonly byType: ReadonlyArray<{ type: string; count: number }>;
   };
@@ -279,17 +282,31 @@ export class PrismaDashboardStore implements DashboardStore {
        * member who plays most often decides the fleet composition single
        * handed, and a ship somebody sold two months ago still appears.
        */
+      /*
+       * ★ THE RAW NAME, FROM Loadout, RESOLVED IN APPLICATION CODE ★
+       *
+       * This used to select `COALESCE(Ship_Localised, Ship)` from `LoadGame`, which was wrong
+       * three ways and produced `$TacticalSuit_Class1_Name;` on the production dashboard:
+       *
+       *   - `LoadGame` fires once at login and reports whatever the member logged out IN, so an
+       *     on-foot logout put a SUIT in the ships chart.
+       *   - `Ship_Localised` is WRONG for upgraded suits — Frontier registered only the grade-1
+       *     string, so Class 4 and Class 5 both localise to the Class 1 token.
+       *   - `COALESCE` preferred that token precisely because it is not null.
+       *
+       * So the query now returns the RAW name and `shipDisplayName` decides what it is. Grouping
+       * moves to application code for the same reason: two hulls can share a display name, and SQL
+       * cannot know that without the mapping table living in it.
+       */
       this.#db.$queryRaw<Array<{ ship: string; pilots: bigint }>>`
         SELECT ship, COUNT(*)::bigint AS pilots FROM (
-          SELECT DISTINCT ON (user_id)
-            user_id,
-            COALESCE(payload->>'Ship_Localised', payload->>'Ship') AS ship
+          SELECT DISTINCT ON (user_id) user_id, payload->>'Ship' AS ship
           FROM telemetry_events
-          WHERE event_type = 'LoadGame'
+          WHERE event_type IN ('Loadout', 'LoadGame')
           ORDER BY user_id, occurred_at DESC
         ) latest
         WHERE ship IS NOT NULL
-        GROUP BY ship ORDER BY pilots DESC, ship ASC LIMIT 10
+        GROUP BY ship ORDER BY pilots DESC, ship ASC
       `,
 
       this.#db.telemetryEvent.groupBy({
@@ -459,7 +476,21 @@ export class PrismaDashboardStore implements DashboardStore {
         dailySignIns: dailySignInsArray,
         flyingThisMonth: new Set(sessions.map((s) => s.userId)).size,
         playingNow,
-        ships: ships.map((s) => ({ ship: s.ship, pilots: Number(s.pilots) })),
+        /*
+         * ★ ONE QUERY, TWO CHARTS, RESOLVED HERE ★
+         *
+         * The rows carry RAW internal names; `shipDisplayName` decides what each one is and
+         * whether it belongs in this chart at all. Grouping happens after resolution because two
+         * internal names can share a display name, and a null means "not a ship" — a suit, or a
+         * hull nobody has mapped — which is dropped rather than shown as an identifier.
+         */
+        ships: rollUp(ships, (raw) => shipDisplayName(raw)).map((r) => ({
+          ship: r.name,
+          pilots: r.pilots,
+        })),
+        suits: rollUp(ships, (raw) =>
+          isSuit(raw) ? shipDisplayName(raw, null, { allowSuits: true }) : null,
+        ).map((r) => ({ suit: r.name, pilots: r.pilots })),
         byType: byType.map((t) => ({ type: t.eventType, count: t._count._all })),
       },
       squadron: {
@@ -494,4 +525,34 @@ export class PrismaDashboardStore implements DashboardStore {
       },
     };
   }
+}
+
+/**
+ * Groups raw journal names by their resolved display name.
+ *
+ * ★ RESOLVE THEN GROUP, NOT THE OTHER WAY ROUND ★
+ *
+ * Two internal names can resolve to the same thing, and SQL cannot know that without the mapping
+ * table living in the database. Grouping in SQL therefore split one ship across two slices.
+ *
+ * A null resolution means "not for this chart" — a suit in the ships list, or a hull nobody has
+ * mapped — and is dropped. Showing `panthermkii` to a member is worse than showing nothing, and
+ * showing `$TacticalSuit_Class1_Name;` is how this was noticed.
+ */
+function rollUp(
+  rows: ReadonlyArray<{ ship: string; pilots: bigint }>,
+  resolve: (raw: string) => string | null,
+): Array<{ name: string; pilots: number }> {
+  const byName = new Map<string, number>();
+
+  for (const row of rows) {
+    const name = resolve(row.ship);
+    if (name === null) continue;
+    byName.set(name, (byName.get(name) ?? 0) + Number(row.pilots));
+  }
+
+  return [...byName.entries()]
+    .map(([name, pilots]) => ({ name, pilots }))
+    .sort((a, b) => b.pilots - a.pilots || a.name.localeCompare(b.name))
+    .slice(0, 10);
 }

@@ -1,3 +1,4 @@
+import { shipDisplayName } from '@grims/shared';
 import { allEliteRanks, describeEliteRanks, type EliteRankStanding } from '@grims/shared';
 
 /**
@@ -77,6 +78,12 @@ export interface ProfileEvent {
 export const PROFILE_EVENT_TYPES = [
   'Rank',
   'LoadGame',
+  /*
+   * What they are actually flying. `LoadGame` fires once at login and reports whatever they logged
+   * out IN — a SUIT, for an on-foot logout — so it cannot answer "current ship" on its own.
+   * `Loadout` fires on every ship change, which is the question being asked.
+   */
+  'Loadout',
   'StoredShips',
   'SquadronStartup',
   /*
@@ -166,7 +173,26 @@ export function buildCommanderProfile(
   const stored = latest.get('StoredShips');
   const squadron = asRecord(latest.get('SquadronStartup')?.payload);
 
-  const currentShip = str(load['Ship_Localised']) ?? str(load['Ship']);
+  /*
+   * ★ Loadout FIRST, LoadGame ONLY AS A FALLBACK ★
+   *
+   * This read `LoadGame` alone, which is wrong twice over. `LoadGame` fires ONCE at login, so it
+   * goes stale the moment somebody swaps ship — and it reports whatever you logged out IN, which
+   * for an on-foot logout is a SUIT. Production had a member whose "current ship" resolved to
+   * `$TacticalSuit_Class1_Name;`.
+   *
+   * `Loadout` fires on every ship change and every login, so it is the event that actually answers
+   * "what are they flying". It carries the hull in lowercase with NO `Ship_Localised` at all,
+   * which is why the name is resolved from the raw value rather than from Frontier's localisation.
+   *
+   * `allowSuits` is left off deliberately: a suit is not a ship, and a profile field labelled
+   * "current ship" showing a Maverick is worse than showing nothing.
+   */
+  const loadout = asRecord(latest.get('Loadout')?.payload);
+
+  const currentShip =
+    shipDisplayName(str(loadout['Ship']), str(loadout['Ship_Localised'])) ??
+    shipDisplayName(str(load['Ship']), str(load['Ship_Localised']));
 
   /*
    * Inara first, journal as the fallback — the same order the roster uses, so a
