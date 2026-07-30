@@ -1,0 +1,23 @@
+-- Whether a thread is published for the open internet.
+--
+-- Squadron owner, 2026-07-29: guides need an option to be publicly visible, and public ones
+-- should appear in the public site's navigation.
+--
+-- ★ IT CAN ONLY EVER NARROW, NEVER WIDEN ★
+--
+-- A thread is readable by an anonymous visitor only when BOTH its category is publicly viewable
+-- (view_perm IS NULL) AND this flag is true. The flag cannot expose a thread sitting in a
+-- members-only or officers-only category: the category ACL still sets the ceiling, and this only
+-- decides whether a thread reaches it.
+--
+-- Deliberately that way round. A per-thread flag able to OVERRIDE its category would mean the
+-- category list was filtered correctly while a direct URL was not — the same trap the
+-- parent/child permissiveness rule closes one level up — and an officer could publish an
+-- officers-board thread to the internet by ticking one box.
+--
+-- DEFAULT false so a guide is drafted privately and published on purpose. The other default would
+-- publish every draft the instant it was created.
+--
+-- Hand-written rather than generated: `prisma migrate dev` proposes dropping the pgvector and
+-- full-text indexes alongside any change it emits, and this is the one intended statement.
+ALTER TABLE "forum_threads" ADD COLUMN "is_public" BOOLEAN NOT NULL DEFAULT false;

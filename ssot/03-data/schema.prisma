@@ -395,6 +395,9 @@ model User {
 
   @@index([status])
   @@index([lastSeenAt])
+  threadGrantsReceived ForumThreadGrant[] @relation("ThreadGrantee")
+  threadGrantsIssued   ForumThreadGrant[] @relation("ThreadGranter")
+
   @@map("users")
 }
 
@@ -939,6 +942,26 @@ model ForumThread {
   /// For kind=question: the post marked as the accepted answer.
   answerPostId String?    @map("answer_post_id") @db.Uuid
   tags         String[]   @default([])
+  /// Published for the open internet. Defaults to FALSE — see the note below.
+  ///
+  /// ★ IT CAN ONLY EVER NARROW, NEVER WIDEN ★
+  ///
+  /// Squadron owner, 2026-07-29: guides need an option to be publicly visible, and public ones
+  /// should appear in the public site's navigation.
+  ///
+  /// A thread is readable by an anonymous visitor only when BOTH its category is publicly
+  /// viewable (`view_perm IS NULL`) AND this flag is true. So the flag cannot expose a thread
+  /// that sits in a members-only or officers-only category — the category ACL still decides the
+  /// ceiling, and this only decides whether a thread reaches it.
+  ///
+  /// Designed that way round deliberately. A per-thread flag that could OVERRIDE its category
+  /// would mean the category list was filtered correctly while a direct URL was not, which is the
+  /// same trap `isAtLeastAsRestrictive` exists to close one level up. It also means an officer
+  /// cannot publish an officers-board thread to the internet by ticking one box.
+  ///
+  /// Default FALSE so a guide is drafted in private and published on purpose. The reverse default
+  /// would publish every draft the moment it was created.
+  isPublic     Boolean    @default(false) @map("is_public")
   viewCount    Int        @default(0) @map("view_count")
   postCount    Int        @default(0) @map("post_count")
   lastPostAt   DateTime?  @map("last_post_at") @db.Timestamptz(6)
@@ -954,14 +977,63 @@ model ForumThread {
   subscriptions ForumSubscription[]
   application   Application?
   operation     Operation?
+  grants        ForumThreadGrant[]
 
   @@unique([categoryId, slug])
   @@index([authorId])
   @@index([categoryId, isPinned, lastPostAt])
+  @@index([isPublic])
   @@map("forum_threads")
 }
 
 /// A message. Stores markdown AND pre-rendered sanitized HTML so sanitisation cannot be skipped at read time.
+/// Per-thread access for a NAMED USER who cannot see the thread's category.
+///
+/// ★ WHY A GRANT TABLE AND NOT A WIDER PERMISSION ★
+///
+/// Squadron owner, 2026-07-29: "officers category should only be visible to officers.
+/// non-officers should not have the ability to view unless permission to a specific user is
+/// provided this should be done from a dropdown on the post that allows an admin to allow access
+/// to one or more users."
+///
+/// The alternative — inventing a role, or clearing the board's `view_perm` — would grant access to
+/// EVERY thread on the board, and would persist after the one conversation that needed it. A grant
+/// is scoped to one thread and one person, and revoking it is deleting a row.
+///
+/// ★ IT WIDENS, WHICH IS THE OPPOSITE OF `is_public` ★
+///
+/// `ForumThread.is_public` can only ever NARROW: a thread reaches the open internet only if its
+/// category is public too. This table deliberately does the reverse — it lets a named individual
+/// past a category ACL they do not satisfy. That asymmetry is intentional and is the whole reason
+/// this is a table of explicit rows rather than a flag:
+///
+///   - every grant names WHO issued it (`granted_by`) and WHEN, so the widening is attributable;
+///   - it cannot be set in bulk or inferred from a mask;
+///   - `ON DELETE CASCADE` from the thread means a deleted thread cannot leave live grants behind.
+///
+/// A grant conveys READ ONLY. Posting is still decided by the category's `post_perm`, so somebody
+/// invited to read an officers' thread cannot reply in it. Being shown something is not the same as
+/// being given a voice in it, and conflating the two is how "let them look" becomes membership.
+model ForumThreadGrant {
+  threadId  String   @map("thread_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  /// The admin who issued it. Never nullable: an unattributable grant is one nobody can review.
+  grantedBy String   @map("granted_by") @db.Uuid
+  grantedAt DateTime @default(now()) @map("granted_at") @db.Timestamptz(6)
+  /// Free text, for the next person auditing the board. Not shown to the grantee.
+  reason    String?
+
+  thread  ForumThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  user    User        @relation("ThreadGrantee", fields: [userId], references: [id], onDelete: Cascade)
+  granter User        @relation("ThreadGranter", fields: [grantedBy], references: [id])
+
+  /// Composite PK, so the same person cannot be granted the same thread twice.
+  @@id([threadId, userId])
+  /// The hot path: "which extra threads may this user see", resolved once per request.
+  @@index([userId])
+  @@map("forum_thread_grants")
+}
+
 model ForumPost {
   id         String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   threadId   String                   @map("thread_id") @db.Uuid

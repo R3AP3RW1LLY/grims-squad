@@ -47,6 +47,11 @@ describe('P0.2 database schema', () => {
   // The count is hardcoded ON PURPOSE. Every schema addition has to come and
   // bump it, which is a two-second acknowledgement that a table was added —
   // versus a self-counting assertion that would let one appear unnoticed.
+  // 66 as of 2026-07-29: forum_thread_grants — per-thread read access for a NAMED
+  // user, so an admin can let one non-officer into one officers' thread without
+  // opening the board. It is the only thing in the forum that WIDENS access past a
+  // category ACL, which is why it is a table of attributable rows (granted_by,
+  // granted_at) rather than a flag.
   // 65 as of 2026-07-28: member_activity_days. The monthly table carries one
   // last_activity_at, so a daily chart built from it counts each member on the
   // ONE day they were last seen — a member active on the 5th and the 20th
@@ -68,8 +73,8 @@ describe('P0.2 database schema', () => {
        where table_schema = 'public' and table_type = 'BASE TABLE'
          and table_name not like '\\_prisma%'`,
     );
-    // 59 models in ssot/03-data/schema.prisma.
-    expect(Number(r[0]?.n)).toBe(65);
+    // 60 models in ssot/03-data/schema.prisma.
+    expect(Number(r[0]?.n)).toBe(66);
   });
 
   describe('hand-written DDL that Prisma cannot express', () => {

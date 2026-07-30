@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ForumController } from './forum.controller.js';
 import { CategoryService } from './category.service.js';
 import { ThreadService } from './thread.service.js';
+import { GrantService } from './grant.service.js';
 import { PendingReindexQueue } from './reindex.port.js';
 
 /**
@@ -20,6 +21,12 @@ import { PendingReindexQueue } from './reindex.port.js';
   controllers: [ForumController],
   providers: [
     CategoryService,
+    /*
+     * No dependencies of its own: every method takes the caller's bound client as its
+     * first argument, which is what keeps "you cannot grant access to a thread you
+     * cannot see" a property of the call rather than of this wiring.
+     */
+    GrantService,
     { provide: PendingReindexQueue, useFactory: () => new PendingReindexQueue() },
     {
       provide: ThreadService,

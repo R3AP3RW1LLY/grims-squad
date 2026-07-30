@@ -76,6 +76,23 @@ export const NAV_LINKS = [
   { href: '/situation', label: 'Situation' },
   { href: '/market', label: 'Market' },
   { href: '/shipyard', label: 'Shipyard' },
+  /*
+   * ★ GUIDES IS PUBLIC; COMMS IS NOT ★
+   *
+   * Squadron owner, 2026-07-29: "when a post is public in guides it should be publically
+   * visible on the website homepage navbar".
+   *
+   * `/guides` lives in this `(site)` group and reads the API with no credentials, so an
+   * anonymous visitor sees exactly the public guides and nothing else. `/forum` is in
+   * `(hub)` and redirects anybody without a session to sign in — which is right for the
+   * boards, and was wrong for the guides: the one board deliberately readable by the
+   * public sat behind a login, and it is the board whose whole purpose is being read by
+   * people who have not joined yet.
+   *
+   * Placed before Comms so the reading order is "here is how to join" and then "here is
+   * where members talk", which is the order a prospective member needs them in.
+   */
+  { href: '/guides', label: 'Guides' },
   { href: '/forum', label: 'Comms' },
 ] as const;
 

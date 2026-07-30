@@ -497,3 +497,128 @@ body {
   .hud::before,
   .hud::after { opacity: 1; }
 }
+
+/* ----------------------------------------------------- guide prose (P2.2)
+   Typography for server-rendered, pre-sanitised forum HTML.
+
+   Tailwind utilities cannot reach inside a `dangerouslySetInnerHTML` blob — there
+   is no element in the JSX to put a class on — so this is one scoped block of
+   descendant selectors rather than a stylesheet for the site at large. Every
+   colour is an existing token, so a guide looks like the rest of the site and
+   cannot introduce a second palette.
+
+   Deliberately NOT a `prose` plugin: those ship their own type scale and colours,
+   which is exactly the "keep the styling and branding in line with the current
+   website" problem in dependency form. */
+.guide-prose {
+  color: var(--color-text-secondary);
+  line-height: 1.75;
+}
+.guide-prose > * + * {
+  margin-top: 1rem;
+}
+.guide-prose h1,
+.guide-prose h2,
+.guide-prose h3 {
+  font-family: var(--font-display);
+  color: var(--color-text-primary);
+  letter-spacing: 0.02em;
+  line-height: 1.25;
+}
+.guide-prose h1 {
+  font-size: 1.75rem;
+  margin-top: 0;
+}
+.guide-prose h2 {
+  font-size: 1.35rem;
+  margin-top: 2.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--color-border-hairline);
+}
+.guide-prose h3 {
+  font-size: 1.1rem;
+  margin-top: 2rem;
+}
+.guide-prose strong {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+.guide-prose a {
+  color: var(--color-brand-cyan-bright);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.guide-prose a:hover {
+  color: var(--color-text-primary);
+}
+.guide-prose ul,
+.guide-prose ol {
+  padding-left: 1.5rem;
+}
+.guide-prose ul {
+  list-style: disc;
+}
+.guide-prose ol {
+  list-style: decimal;
+}
+.guide-prose li + li {
+  margin-top: 0.5rem;
+}
+.guide-prose li::marker {
+  color: var(--color-brand-orange);
+}
+.guide-prose code {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.875em;
+  background: var(--color-surface-panel-sunken);
+  border: 1px solid var(--color-border-hairline);
+  border-radius: 3px;
+  padding: 0.1em 0.35em;
+  color: var(--color-text-primary);
+}
+.guide-prose pre {
+  background: var(--color-surface-panel-sunken);
+  border: 1px solid var(--color-border-hairline);
+  border-radius: 4px;
+  padding: 1rem;
+  /* Wide content scrolls INSIDE its own box. Without this a long line makes the
+     whole page scroll sideways on a phone, which breaks every other element. */
+  overflow-x: auto;
+}
+.guide-prose pre code {
+  background: none;
+  border: none;
+  padding: 0;
+}
+/* Blockquotes carry the screenshot placeholders and the safety notes, so they have
+   to read as a deliberate callout rather than as a quotation. */
+.guide-prose blockquote {
+  border-left: 3px solid var(--color-brand-orange);
+  background: var(--color-surface-panel);
+  padding: 0.85rem 1.15rem;
+  border-radius: 0 4px 4px 0;
+}
+.guide-prose blockquote > * + * {
+  margin-top: 0.5rem;
+}
+.guide-prose hr {
+  border: 0;
+  border-top: 1px solid var(--color-border-hairline);
+  margin-top: 2.5rem;
+}
+.guide-prose table {
+  width: 100%;
+  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+}
+.guide-prose th,
+.guide-prose td {
+  border: 1px solid var(--color-border-hairline);
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+}
+.guide-prose th {
+  color: var(--color-text-primary);
+  background: var(--color-surface-panel-sunken);
+}

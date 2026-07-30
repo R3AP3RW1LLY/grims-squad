@@ -11,7 +11,8 @@
     "test:unit": "vitest run --exclude \"**/*.int.spec.ts\"",
     "clean": "rm -rf dist *.tsbuildinfo",
     "dev": "tsx watch --env-file-if-exists=.env src/main.ts",
-    "start": "node dist/main.js"
+    "start": "node dist/main.js",
+    "seed:guides": "tsx --env-file-if-exists=.env scripts/seed-guides.ts"
   },
   "devDependencies": {
     "@grims/config": "workspace:*",
