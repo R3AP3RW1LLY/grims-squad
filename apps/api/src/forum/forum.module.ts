@@ -7,6 +7,7 @@ import { PostService } from './post.service.js';
 import { NotifyService } from './notify.service.js';
 import { EngageService } from './engage.service.js';
 import { SearchService } from './search.service.js';
+import { ModerationService } from './moderation.service.js';
 import { PendingReindexQueue } from './reindex.port.js';
 
 /**
@@ -32,10 +33,12 @@ import { PendingReindexQueue } from './reindex.port.js';
      */
     GrantService,
     { provide: PendingReindexQueue, useFactory: () => new PendingReindexQueue() },
+    ModerationService,
     {
       provide: PostService,
-      inject: [PendingReindexQueue],
-      useFactory: (reindex: PendingReindexQueue) => new PostService(reindex),
+      inject: [PendingReindexQueue, ModerationService],
+      useFactory: (reindex: PendingReindexQueue, moderation: ModerationService) =>
+        new PostService(reindex, moderation),
     },
     NotifyService,
     EngageService,

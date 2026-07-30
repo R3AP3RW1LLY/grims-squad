@@ -12,6 +12,7 @@ import { GrantService, type GrantView, type GranteeCandidate } from './grant.ser
 import { PostService, type RevisionView } from './post.service.js';
 import { EngageService, type ReactionCount, type SubscriptionLevel } from './engage.service.js';
 import { SearchService, renderSnippet, type SearchResult } from './search.service.js';
+import { ModerationService } from './moderation.service.js';
 
 /**
  * The forum's HTTP surface.
@@ -45,6 +46,7 @@ export class ForumController {
     @Inject(PostService) private readonly posts: PostService,
     @Inject(EngageService) private readonly engage: EngageService,
     @Inject(SearchService) private readonly search: SearchService,
+    @Inject(ModerationService) private readonly moderation: ModerationService,
   ) {}
 
   /**
@@ -462,7 +464,130 @@ export class ForumController {
       snippets: result.hits.map((h) => renderSnippet(h.snippet)),
     };
   }
+
+  /*
+   * ★ MODERATION (P2.6, INV-009) ★
+   *
+   * Every route below funnels into ModerationService, which writes the member-facing record and the
+   * audit row in ONE transaction. Nothing here writes either directly — a second writer would be a
+   * second chance to write one without the other.
+   *
+   * A reason is required on all of them and is validated in the service, not here: the member is
+   * shown it, so "is this good enough to show somebody" is one decision in one place.
+   */
+
+  @Post('threads/:threadId/moderate/lock')
+  async lockThread(
+    @User() caller: CurrentUser | undefined,
+    @Param('threadId') threadId: string,
+    @Body() body: unknown,
+    @Req() req: FastifyRequest,
+  ): Promise<{ ok: true }> {
+    const c = requireSession(caller, 'Sign in to moderate.');
+    csrf(req);
+    const raw = body as { locked?: unknown; reason?: unknown } | null;
+    const db = await this.acl.forCaller(c.userId);
+    await this.moderation.setLocked(
+      db,
+      threadId,
+      raw?.locked !== false,
+      c.userId,
+      await this.#mask(caller),
+      raw?.reason,
+    );
+    return { ok: true };
+  }
+
+  @Post('threads/:threadId/moderate/pin')
+  async pinThread(
+    @User() caller: CurrentUser | undefined,
+    @Param('threadId') threadId: string,
+    @Body() body: unknown,
+    @Req() req: FastifyRequest,
+  ): Promise<{ ok: true }> {
+    const c = requireSession(caller, 'Sign in to moderate.');
+    csrf(req);
+    const raw = body as { pinned?: unknown; reason?: unknown } | null;
+    const db = await this.acl.forCaller(c.userId);
+    await this.moderation.setPinned(
+      db,
+      threadId,
+      raw?.pinned !== false,
+      c.userId,
+      await this.#mask(caller),
+      raw?.reason,
+    );
+    return { ok: true };
+  }
+
+  /**
+   * Warns, mutes, bans or unbans a member.
+   *
+   * One route with an `action` rather than four, because the shape is identical and the difference
+   * is a word the moderator chooses. Four near-identical handlers would drift on the reason
+   * handling, which is the part that must not.
+   */
+  @Post('members/:userId/moderate')
+  async moderateMember(
+    @User() caller: CurrentUser | undefined,
+    @Param('userId') userId: string,
+    @Body() body: unknown,
+    @Req() req: FastifyRequest,
+  ): Promise<{ ok: true; expiresAt?: string }> {
+    const c = requireSession(caller, 'Sign in to moderate.');
+    csrf(req);
+
+    const raw = body as
+      | { action?: unknown; reason?: unknown; hours?: unknown; appealThreadId?: unknown }
+      | null;
+    const mask = await this.#mask(caller);
+    const db = await this.acl.forCaller(c.userId);
+
+    switch (raw?.action) {
+      case 'warn':
+        await this.moderation.warn(db, userId, c.userId, mask, raw.reason);
+        return { ok: true };
+      case 'mute': {
+        const { expiresAt } = await this.moderation.mute(
+          db,
+          userId,
+          typeof raw.hours === 'number' ? raw.hours : Number.NaN,
+          c.userId,
+          mask,
+          raw.reason,
+        );
+        return { ok: true, expiresAt };
+      }
+      case 'ban':
+        await this.moderation.ban(
+          db,
+          userId,
+          c.userId,
+          mask,
+          raw.reason,
+          typeof raw.appealThreadId === 'string' ? raw.appealThreadId : null,
+        );
+        return { ok: true };
+      case 'unban':
+        await this.moderation.unban(db, userId, c.userId, mask, raw.reason);
+        return { ok: true };
+      default:
+        throw new AppError(ErrorCode.VALIDATION_FAILED, 'Warn, mute, ban or unban.');
+    }
+  }
+
+  /** A member's moderation history. Moderators only. */
+  @Get('members/:userId/moderation')
+  async memberModeration(
+    @User() caller: CurrentUser | undefined,
+    @Param('userId') userId: string,
+  ): Promise<{ history: Array<{ action: string; reason: string; createdAt: string; actorHandle: string }> }> {
+    const c = requireSession(caller, 'Sign in to read moderation history.');
+    const db = await this.acl.forCaller(c.userId);
+    return { history: await this.moderation.historyFor(db, userId, await this.#mask(caller)) };
+  }
 }
+
 
 
 

@@ -4,6 +4,7 @@ import { satisfiesMask } from './category.service.js';
 import { renderPostBody } from './sanitize.js';
 import { validateDocument, renderDocument, documentToText } from './rich-doc.js';
 import type { ReindexQueue } from './reindex.port.js';
+import type { ModerationService } from './moderation.service.js';
 
 /**
  * Posts — writing, editing and deleting them.
@@ -42,7 +43,15 @@ export interface PostWritten {
 const GRACE_MS = 3 * 60 * 1000;
 
 export class PostService {
-  constructor(private readonly reindex: ReindexQueue) {}
+  constructor(
+    private readonly reindex: ReindexQueue,
+    /*
+     * Injected so a mute is enforced where posting happens, rather than in a guard somebody could
+     * add a second route around. A sanction that does not stop the thing it names is not a
+     * sanction.
+     */
+    private readonly moderation: ModerationService,
+  ) {}
 
   /**
    * Adds a reply to a thread.
@@ -98,6 +107,18 @@ export class PostService {
     if (!satisfiesMask(callerMask, required)) {
       throw new AppError(ErrorCode.PERMISSION_DENIED, 'You cannot post in this board.');
     }
+
+    /*
+     * ★ THE MUTE CHECK, AFTER THE PERMISSION CHECK ★
+     *
+     * Ordering matters and this way round is deliberate. A member who cannot post in a board at all
+     * should be told THAT, not told they are muted — telling a non-officer they are "muted" from the
+     * officers' board would be both wrong and confusing.
+     *
+     * Read fresh on every attempt rather than cached: a mute that expired two minutes ago must stop
+     * applying, and a member left muted past their sentence reads as the site being broken.
+     */
+    await this.moderation.assertMayPost(db, authorId);
 
     const rendered =
       typeof body === 'string' ? this.#render(body) : this.#renderRich(body.doc);

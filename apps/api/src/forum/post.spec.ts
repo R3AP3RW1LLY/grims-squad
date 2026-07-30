@@ -32,6 +32,18 @@ function recordingQueue(): ReindexQueue & { readonly seen: ReindexRequest[] } {
 
 const stub = (over: Record<string, unknown>): AclBoundClient => over as unknown as AclBoundClient;
 
+/**
+ * A ModerationService that permits everybody.
+ *
+ * `create` now calls `assertMayPost`, because a mute has to stop the thing it names — and a check
+ * living in a guard rather than on the write path is one a second route can be added around.
+ *
+ * Stubbed here rather than using the real service: the sanction rules have their own suite, and
+ * duplicating them would mean two places to update when the rules change. The tests that care that
+ * a mute BLOCKS are in `moderation.spec.ts`.
+ */
+const allowAll = () => ({ assertMayPost: async () => undefined }) as never;
+
 const MODERATOR = Permission.FORUM_MODERATE;
 const MEMBER_POST = Permission.FORUM_POST_MEMBER;
 /**
@@ -86,7 +98,7 @@ describe('creating a post', () => {
      */
     const create = vi.fn(async () => ({ id: 'p1', bodyHtml: '', editCount: 0 }));
     const db = createDb({ forumPost: { create } });
-    const svc = new PostService(recordingQueue());
+    const svc = new PostService(recordingQueue(), allowAll());
 
     await svc.create(db, 't1', '<script>alert(1)</script> hello', 'u1', MEMBER_POST);
 
@@ -99,7 +111,7 @@ describe('creating a post', () => {
   it('MANDATORY: the author is the session user, never a request field', async () => {
     const create = vi.fn(async () => ({ id: 'p1', bodyHtml: '<p>x</p>', editCount: 0 }));
     const db = createDb({ forumPost: { create } });
-    const svc = new PostService(recordingQueue());
+    const svc = new PostService(recordingQueue(), allowAll());
 
     await svc.create(db, 't1', 'hello', 'session-user', MEMBER_POST);
 
@@ -108,7 +120,7 @@ describe('creating a post', () => {
   });
 
   it('MANDATORY: posting permission comes from the CATEGORY', async () => {
-    const svc = new PostService(recordingQueue());
+    const svc = new PostService(recordingQueue(), allowAll());
     // Mask 0 does not satisfy the board's postPerm of 8.
     await expect(svc.create(createDb(), 't1', 'hi', 'u1', 0n)).rejects.toMatchObject({
       code: ErrorCode.PERMISSION_DENIED,
@@ -118,7 +130,7 @@ describe('creating a post', () => {
   it('MANDATORY: an invisible thread is a 404, cloaked', async () => {
     // `findFirst` returning null IS the ACL predicate having filtered the row.
     const db = createDb({ forumThread: { findFirst: async () => null } });
-    const svc = new PostService(recordingQueue());
+    const svc = new PostService(recordingQueue(), allowAll());
 
     await expect(svc.create(db, 't1', 'hi', 'u1', MEMBER_POST)).rejects.toMatchObject({
       code: ErrorCode.RESOURCE_NOT_VISIBLE,
@@ -140,7 +152,7 @@ describe('creating a post', () => {
         update: vi.fn(),
       },
     });
-    const svc = new PostService(recordingQueue());
+    const svc = new PostService(recordingQueue(), allowAll());
 
     await expect(
       svc.create(db, 't1', 'hi', 'u1', MODERATOR | MEMBER_POST),
@@ -148,7 +160,7 @@ describe('creating a post', () => {
   });
 
   it('refuses an empty body', async () => {
-    const svc = new PostService(recordingQueue());
+    const svc = new PostService(recordingQueue(), allowAll());
 
     /*
      * Escape sequences, not literal whitespace. Written through a shell heredoc this became
@@ -181,7 +193,7 @@ describe('creating a post', () => {
     const create = vi.fn(async () => ({ id: 'p1', bodyHtml: '', editCount: 0 }));
     const db = createDb({ forumPost: { create } });
 
-    await new PostService(recordingQueue()).create(
+    await new PostService(recordingQueue(), allowAll()).create(
       db,
       't1',
       '<iframe src=x></iframe>',
@@ -198,7 +210,7 @@ describe('creating a post', () => {
     // Re-indexing a whole thread because somebody added one reply is wasteful at P8 scale,
     // and a consumer handling only `thread` would silently discard every reply.
     const q = recordingQueue();
-    await new PostService(q).create(createDb(), 't1', 'hi', 'u1', MEMBER_POST);
+    await new PostService(q, allowAll()).create(createDb(), 't1', 'hi', 'u1', MEMBER_POST);
 
     expect(q.seen).toEqual([{ kind: 'post', id: 'p1', reason: 'created' }]);
   });
@@ -241,7 +253,7 @@ describe('editing a post', () => {
      */
     const revisionCreate = vi.fn((a: unknown) => a);
     const db = editDb({ postRevision: { create: revisionCreate } });
-    const svc = new PostService(recordingQueue());
+    const svc = new PostService(recordingQueue(), allowAll());
 
     await svc.edit(db, 'p1', 'completely new text', 'author', MEMBER_POST);
 
@@ -257,7 +269,7 @@ describe('editing a post', () => {
      */
     const transaction = vi.fn(async () => [{}, { id: 'p1', bodyHtml: '<p>n</p>', editCount: 1 }]);
     const db = editDb({ $transaction: transaction });
-    const svc = new PostService(recordingQueue());
+    const svc = new PostService(recordingQueue(), allowAll());
 
     await svc.edit(db, 'p1', 'new text', 'author', MEMBER_POST);
 
@@ -266,14 +278,14 @@ describe('editing a post', () => {
   });
 
   it('MANDATORY: a stranger cannot edit somebody else’s post', async () => {
-    const svc = new PostService(recordingQueue());
+    const svc = new PostService(recordingQueue(), allowAll());
     await expect(svc.edit(editDb(), 'p1', 'x', 'someone-else', MEMBER_POST)).rejects.toMatchObject({
       code: ErrorCode.PERMISSION_DENIED,
     });
   });
 
   it('a moderator can edit anybody’s post', async () => {
-    const svc = new PostService(recordingQueue());
+    const svc = new PostService(recordingQueue(), allowAll());
     await expect(
       svc.edit(editDb(), 'p1', 'moderated', 'a-moderator', MODERATOR),
     ).resolves.toMatchObject({ editCount: 1 });
@@ -292,7 +304,7 @@ describe('editing a post', () => {
         update: (a: unknown) => a,
       },
     });
-    const svc = new PostService(recordingQueue());
+    const svc = new PostService(recordingQueue(), allowAll());
 
     await expect(svc.edit(locked, 'p1', 'x', 'author', MEMBER_POST)).rejects.toMatchObject({
       code: ErrorCode.VALIDATION_FAILED,
@@ -308,7 +320,7 @@ describe('editing a post', () => {
     const revisionCreate = vi.fn((a: unknown) => a);
     const transaction = vi.fn();
     const db = editDb({ postRevision: { create: revisionCreate }, $transaction: transaction });
-    const svc = new PostService(recordingQueue());
+    const svc = new PostService(recordingQueue(), allowAll());
 
     await svc.edit(db, 'p1', 'original text', 'author', MEMBER_POST);
 
@@ -331,7 +343,7 @@ describe('editing a post', () => {
       $transaction: transaction,
     });
 
-    await new PostService(recordingQueue()).edit(fresh, 'p1', 'quick fix', 'author', MEMBER_POST);
+    await new PostService(recordingQueue(), allowAll()).edit(fresh, 'p1', 'quick fix', 'author', MEMBER_POST);
 
     const ops = firstArg<unknown[]>(transaction, 'transaction');
     // Two operations either way: the revision is NOT skipped.
@@ -360,7 +372,7 @@ describe('deleting a post', () => {
       $transaction: transaction,
     });
 
-    const out = await new PostService(recordingQueue()).softDelete(db, 'p1', 'author', MEMBER_POST);
+    const out = await new PostService(recordingQueue(), allowAll()).softDelete(db, 'p1', 'author', MEMBER_POST);
 
     expect(out.deletedAt).toBeTruthy();
     const args = firstArg<{ data: { deletedAt: Date } }>(update, 'update');
@@ -375,7 +387,7 @@ describe('deleting a post', () => {
       $transaction: transaction,
     });
 
-    await new PostService(recordingQueue()).softDelete(db, 'p1', 'author', MEMBER_POST);
+    await new PostService(recordingQueue(), allowAll()).softDelete(db, 'p1', 'author', MEMBER_POST);
 
     const args = firstArg<{ data: { postCount: { decrement: number } } }>(threadUpdate, 'threadUpdate');
     expect(args.data.postCount.decrement).toBe(1);
@@ -389,19 +401,19 @@ describe('deleting a post', () => {
      */
     const db = deleteDb({ forumPost: { findFirst: async () => null } });
     await expect(
-      new PostService(recordingQueue()).softDelete(db, 'p1', 'author', MEMBER_POST),
+      new PostService(recordingQueue(), allowAll()).softDelete(db, 'p1', 'author', MEMBER_POST),
     ).rejects.toMatchObject({ code: ErrorCode.RESOURCE_NOT_VISIBLE });
   });
 
   it('MANDATORY: a stranger cannot delete somebody else’s post', async () => {
     await expect(
-      new PostService(recordingQueue()).softDelete(deleteDb(), 'p1', 'stranger', MEMBER_POST),
+      new PostService(recordingQueue(), allowAll()).softDelete(deleteDb(), 'p1', 'stranger', MEMBER_POST),
     ).rejects.toMatchObject({ code: ErrorCode.PERMISSION_DENIED });
   });
 
   it('a moderator can', async () => {
     await expect(
-      new PostService(recordingQueue()).softDelete(deleteDb(), 'p1', 'a-mod', MODERATOR),
+      new PostService(recordingQueue(), allowAll()).softDelete(deleteDb(), 'p1', 'a-mod', MODERATOR),
     ).resolves.toMatchObject({ id: 'p1' });
   });
 });
@@ -418,13 +430,13 @@ describe('restoring — the other half of "remains recoverable"', () => {
 
   it('MANDATORY @INV-022: a moderator can restore', async () => {
     await expect(
-      new PostService(recordingQueue()).restore(restoreDb(), 'p1', MODERATOR),
+      new PostService(recordingQueue(), allowAll()).restore(restoreDb(), 'p1', MODERATOR),
     ).resolves.toMatchObject({ id: 'p1' });
   });
 
   it('MANDATORY: an author cannot', async () => {
     await expect(
-      new PostService(recordingQueue()).restore(restoreDb(), 'p1', MEMBER_POST),
+      new PostService(recordingQueue(), allowAll()).restore(restoreDb(), 'p1', MEMBER_POST),
     ).rejects.toMatchObject({ code: ErrorCode.PERMISSION_DENIED });
   });
 
@@ -435,7 +447,7 @@ describe('restoring — the other half of "remains recoverable"', () => {
      * invisible in the result.
      */
     const findFirst = vi.fn(async () => ({ id: 'p1', threadId: 't1' }));
-    await new PostService(recordingQueue()).restore(restoreDb({ forumPost: { findFirst, update: (a: unknown) => a } }), 'p1', MODERATOR);
+    await new PostService(recordingQueue(), allowAll()).restore(restoreDb({ forumPost: { findFirst, update: (a: unknown) => a } }), 'p1', MODERATOR);
 
     const args = firstArg<{ where: { deletedAt: unknown } }>(findFirst, 'findFirst');
     expect(args.where.deletedAt).toEqual({ not: null });
@@ -443,7 +455,7 @@ describe('restoring — the other half of "remains recoverable"', () => {
 
   it('enqueues a reindex, or restored content is invisible to search forever', async () => {
     const q = recordingQueue();
-    await new PostService(q).restore(restoreDb(), 'p1', MODERATOR);
+    await new PostService(q, allowAll()).restore(restoreDb(), 'p1', MODERATOR);
     expect(q.seen).toEqual([{ kind: 'post', id: 'p1', reason: 'restored' }]);
   });
 });
@@ -460,7 +472,7 @@ describe('edit history', () => {
 
   it('MANDATORY: moderators only', async () => {
     await expect(
-      new PostService(recordingQueue()).history(historyDb, 'p1', MEMBER_POST),
+      new PostService(recordingQueue(), allowAll()).history(historyDb, 'p1', MEMBER_POST),
     ).rejects.toMatchObject({ code: ErrorCode.PERMISSION_DENIED });
   });
 
@@ -471,7 +483,7 @@ describe('edit history', () => {
      * read text an author has removed, which is not what it is for — recovery is a
      * deliberate act with its own path.
      */
-    const rows = await new PostService(recordingQueue()).history(historyDb, 'p1', MODERATOR);
+    const rows = await new PostService(recordingQueue(), allowAll()).history(historyDb, 'p1', MODERATOR);
 
     expect(rows).toEqual([{ editedAt: '2026-07-29T10:00:00.000Z', editedByHandle: 'grim' }]);
     expect(JSON.stringify(rows)).not.toContain('bodyMd');
