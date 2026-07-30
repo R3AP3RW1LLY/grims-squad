@@ -77,6 +77,23 @@ function CategoryRow({ category }: { category: ForumCategory }) {
               <span className="sr-only">Locked — nobody is posting here</span>
             </>
           )}
+          {/*
+            ★ THE NEW-POST INDICATOR ★
+
+            Counted against this member's own last visit to the board, so "new" means new TO THEM
+            rather than merely recent — a board nobody has posted in for a month is still new to
+            somebody who has never opened it.
+
+            The number is included rather than a bare dot: "3 new" tells you whether it is worth
+            opening now, and a dot does not. Capped at 99 so a long-neglected board cannot stretch
+            the card.
+          */}
+          {(category.unreadCount ?? 0) > 0 && (
+            <span className="ml-auto shrink-0 rounded-full border border-[var(--color-brand-orange)] px-2 py-0.5 font-mono text-[10px] leading-none text-[var(--color-brand-orange-bright)]">
+              {(category.unreadCount ?? 0) > 99 ? '99+' : category.unreadCount}
+              <span className="sr-only"> threads with new posts since you last looked</span>
+            </span>
+          )}
         </p>
         {category.description !== null && (
           <p className="mt-1 max-w-[70ch] text-sm leading-relaxed text-[var(--color-text-secondary)]">
@@ -199,11 +216,21 @@ export default async function ForumPage() {
               SEARCH THE BOARDS &rarr;
             </a>
           </p>
-          <div className="grid grid-cols-1 items-start gap-6 md:grid-cols-2">
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
             {groups.map(({ parent, children }) => (
               <section
                 key={parent.id}
-                className="rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel)]"
+                /*
+                  ★ EQUAL HEIGHT ACROSS A ROW ★
+
+                  `items-start` was removed from the grid so every card stretches to the tallest in
+                  its row, and `h-full` makes the section actually take that height rather than
+                  sitting at its natural size inside a stretched cell.
+
+                  `flex-col` is what makes the stretch useful: without it the extra height is empty
+                  space below the content, which looks like a rendering bug rather than a tidy grid.
+                */
+                className="flex h-full flex-col rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel)]"
               >
                 <CategoryRow category={parent} />
                 {children.length > 0 && (

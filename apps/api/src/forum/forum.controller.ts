@@ -123,7 +123,7 @@ export class ForumController {
     @User() caller: CurrentUser | undefined,
   ): Promise<{ categories: CategoryView[] }> {
     const db = await this.acl.forCaller(caller?.userId);
-    return { categories: await this.categories.list(db, await this.#mask(caller)) };
+    return { categories: await this.categories.list(db, await this.#mask(caller), caller?.userId) };
   }
 
   @Public()
@@ -140,7 +140,21 @@ export class ForumController {
      * threads" would confirm it exists.
      */
     const category = await this.categories.bySlug(db, slug, mask);
-    return { category, threads: await this.threads.listByCategory(db, slug, mask) };
+    const threads = await this.threads.listByCategory(db, slug, mask);
+
+    /*
+     * Opening a board marks it seen, so the "new posts" dot clears.
+     *
+     * AFTER the threads are read, deliberately: marking first would clear the indicator for content
+     * the caller had not been shown yet if the second read failed. Awaited rather than fired and
+     * forgotten — an unawaited write here would race the member's next page load and sometimes
+     * leave the dot up, which reads as the feature not working.
+     */
+    if (caller !== undefined) {
+      await this.categories.markSeen(db, caller.userId, category.id);
+    }
+
+    return { category, threads };
   }
 
   @Public()

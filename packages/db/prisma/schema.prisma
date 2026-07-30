@@ -426,6 +426,8 @@ model User {
 
   postRevisions        PostRevision[]     @relation("PostRevisionEditor")
 
+  forumReads           ForumCategoryRead[]
+
   @@map("users")
 }
 
@@ -954,6 +956,8 @@ model ForumCategory {
   subscribers ForumSubscription[]
 
   @@index([parentId, position])
+  reads       ForumCategoryRead[]
+
   @@map("forum_categories")
 }
 
@@ -1104,6 +1108,34 @@ model MediaUpload {
   /// "What has this member uploaded, newest first" - the quota and moderation query.
   @@index([uploaderId, createdAt])
   @@map("media_uploads")
+}
+
+/// When a member last looked at a board, for "new posts" indicators.
+///
+/// * ONE ROW PER MEMBER PER BOARD, NOT PER THREAD *
+///
+/// Squadron owner, 2026-07-30: "add the ability to show new post indicators on the category cards".
+///
+/// Per-THREAD read state is what a big forum does, and it costs a row per member per thread - at
+/// 107 members and a growing board that is the largest table in the schema within a year, written
+/// on every page view, to drive a dot on a card.
+///
+/// Per-BOARD is bounded by members x boards, which is a few hundred rows forever, and answers the
+/// question actually being asked: does this board have anything I have not seen. A thread-level
+/// unread mark can be added later without moving this - it is a different question with a different
+/// cost, and conflating them now would commit to the expensive one before anybody has asked for it.
+model ForumCategoryRead {
+  userId     String   @map("user_id") @db.Uuid
+  categoryId String   @map("category_id") @db.Uuid
+  /// The moment the member opened the board. Compared against threads' last_post_at.
+  lastSeenAt DateTime @default(now()) @map("last_seen_at") @db.Timestamptz(6)
+
+  user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category ForumCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([userId, categoryId])
+  @@index([userId])
+  @@map("forum_category_reads")
 }
 
 model ForumPost {

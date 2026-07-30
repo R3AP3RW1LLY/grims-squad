@@ -693,6 +693,13 @@ export interface ForumCategory {
    * network tab.
    */
   canPost: boolean;
+  /**
+   * Threads with activity this member has not seen since they last opened the board.
+   *
+   * Optional because an anonymous visitor gets nothing: an unread badge for somebody with no
+   * account is noise about content they cannot follow.
+   */
+  unreadCount?: number;
 }
 
 /**
@@ -768,6 +775,8 @@ export interface HubCategory {
   name: string;
   description: string | null;
   canPost: boolean;
+  /** Threads with activity this member has not seen. Absent or 0 for an anonymous visitor. */
+  unreadCount?: number;
 }
 
 export interface HubThread {
