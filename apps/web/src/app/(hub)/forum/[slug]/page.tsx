@@ -1,6 +1,8 @@
 import { notFound } from 'next/navigation';
 import { PageHeader, PageBody, Panel, RailStat } from '../../../../components/hub-page';
-import { getHubThreads } from '../../../../lib/api';
+import { getForumCategories, getHubThreads } from '../../../../lib/api';
+import { BoardNav } from '../../../../components/forum/board-nav';
+import { ThreadRow } from '../../../../components/forum/thread-row';
 
 /**
  * The threads in one board.
@@ -15,7 +17,11 @@ import { getHubThreads } from '../../../../lib/api';
 
 export default async function BoardPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const data = await getHubThreads(slug);
+  /*
+   * Both at once. The board list is not needed to decide whether this page 404s, so serialising
+   * them would add a whole round trip to every board view for no ordering benefit.
+   */
+  const [data, cats] = await Promise.all([getHubThreads(slug), getForumCategories()]);
 
   // Absent, invisible, or the API being unreachable all answer identically (INV-024).
   if (data === null) notFound();
@@ -63,15 +69,22 @@ export default async function BoardPage({ params }: { params: Promise<{ slug: st
 
       <PageBody
         rail={
-          <Panel title="Board">
-            <RailStat label="Threads" value={String(threads.length)} />
+          <div className="space-y-6">
+            {/*
+              The board list sits ABOVE the stats. Somebody who came here to go somewhere else
+              should not have to read this board's numbers first.
+            */}
+            <BoardNav categories={cats?.categories ?? []} currentSlug={slug} />
+            <Panel title="Board">
+              <RailStat label="Threads" value={String(threads.length)} />
             {/*
               `canPost` comes from the server, recomputed from the category each request. A
               boolean sent to a browser is a boolean a browser can change, which is why the
               write endpoint checks again rather than trusting this.
             */}
-            <RailStat label="You can post" value={category.canPost ? 'Yes' : 'No'} />
-          </Panel>
+              <RailStat label="You can post" value={category.canPost ? 'Yes' : 'No'} />
+            </Panel>
+          </div>
         }
       >
         {threads.length === 0 ? (
@@ -114,25 +127,7 @@ export default async function BoardPage({ params }: { params: Promise<{ slug: st
                   )}
                   <ul className="divide-y divide-[var(--color-border-hairline)] rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel)]">
                     {group.items.map((t) => (
-                      <li key={t.id}>
-                        <a
-                          href={`/forum/${slug}/${t.slug}`}
-                          className="flex items-baseline justify-between gap-4 px-4 py-3 transition-colors hover:bg-[var(--color-surface-panel-hover)]"
-                        >
-                          <span className="min-w-0">
-                            <span className="block truncate text-[var(--color-text-primary)]">
-                              {t.title}
-                            </span>
-                            <span className="mt-0.5 block font-mono text-[11px] text-[var(--color-text-secondary)]">
-                              {t.author.displayName}
-                              {t.isLocked && ' · locked'}
-                            </span>
-                          </span>
-                          <span className="shrink-0 font-mono text-xs text-[var(--color-text-secondary)]">
-                            {t.postCount}
-                          </span>
-                        </a>
-                      </li>
+                      <ThreadRow key={t.id} thread={t} boardSlug={slug} />
                     ))}
                   </ul>
                 </section>

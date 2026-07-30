@@ -779,6 +779,13 @@ export interface HubCategory {
   unreadCount?: number;
 }
 
+export interface ForumIdentity {
+  handle: string;
+  displayName: string;
+  /** A path on our own API, or null. Never a third-party address — see the API's `avatarPath`. */
+  avatarUrl: string | null;
+}
+
 export interface HubThread {
   id: string;
   slug: string;
@@ -786,9 +793,12 @@ export interface HubThread {
   isPinned: boolean;
   isLocked: boolean;
   postCount: number;
+  viewCount: number;
   lastPostAt: string | null;
   createdAt: string;
-  author: { handle: string; displayName: string };
+  author: ForumIdentity;
+  /** Null when nobody has replied, so a quiet thread cannot be made to look busy. */
+  lastPoster: ForumIdentity | null;
 }
 
 export interface HubPost {

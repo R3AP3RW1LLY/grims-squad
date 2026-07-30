@@ -35,9 +35,25 @@ export interface ThreadView {
   readonly isPinned: boolean;
   readonly isLocked: boolean;
   readonly postCount: number;
+  readonly viewCount: number;
   readonly lastPostAt: string | null;
   readonly createdAt: string;
-  readonly author: { handle: string; displayName: string };
+  /**
+   * The opener.
+   *
+   * `avatarUrl` is a path on OUR API, never Discord's CDN — the same convention the roster and
+   * profile serializers use. `img-src 'self'` in the CSP is what makes that a rule rather than a
+   * preference: a Discord URL here would simply fail to load, which is the correct outcome, since
+   * it would otherwise report every forum reader to a third party.
+   */
+  readonly author: { handle: string; displayName: string; avatarUrl: string | null };
+  /**
+   * Who posted most recently, when that is not the opener.
+   *
+   * Null when the thread has no replies — showing the author twice would imply activity that has
+   * not happened, which is precisely what somebody scanning a board is trying to judge.
+   */
+  readonly lastPoster: { handle: string; displayName: string; avatarUrl: string | null } | null;
 }
 
 /**
@@ -168,9 +184,15 @@ export class ThreadService {
         isPinned: true,
         isLocked: true,
         postCount: true,
+        viewCount: true,
         lastPostAt: true,
+        lastPostBy: true,
         createdAt: true,
-        author: { select: { handle: true, displayName: true } },
+        authorId: true,
+        author: { select: { handle: true, displayName: true, avatarStoredHash: true } },
+        lastPoster: {
+          select: { id: true, handle: true, displayName: true, avatarStoredHash: true },
+        },
       },
     });
 
@@ -205,15 +227,40 @@ export class ThreadService {
         isPinned: true,
         isLocked: true,
         postCount: true,
+        viewCount: true,
         lastPostAt: true,
+        lastPostBy: true,
         createdAt: true,
-        author: { select: { handle: true, displayName: true } },
+        authorId: true,
+        author: { select: { handle: true, displayName: true, avatarStoredHash: true } },
+        lastPoster: {
+          select: { id: true, handle: true, displayName: true, avatarStoredHash: true },
+        },
       },
     });
 
     if (row === null) {
       throw new AppError(ErrorCode.RESOURCE_NOT_VISIBLE, 'Thread not found.');
     }
+
+    /*
+     * ★ THE VIEW COUNT IS BUMPED HERE, AFTER THE ACL CHECK, AND NOT AWAITED ★
+     *
+     * After, because a counter that moves for a thread the caller could not read would leak that
+     * the thread exists — the same disclosure the 404 above is written to avoid, arriving through
+     * a number instead of a status code.
+     *
+     * Not awaited, because a view count is the least important thing on the page and a reader
+     * should not wait on a write to see a post. A failure is swallowed for the same reason: the
+     * thread renders, and the count is approximate, which is what a view count has always been.
+     *
+     * It counts VIEWS, not viewers — a refresh counts again. Deduplicating would mean a row per
+     * member per thread, which is the table this project already declined to create for read state.
+     */
+    void db.forumThread
+      .update({ where: { id: row.id }, data: { viewCount: { increment: 1 } } })
+      .catch(() => undefined);
+
     return toView(row);
   }
 
@@ -461,6 +508,17 @@ export class ThreadService {
   }
 }
 
+/**
+ * The avatar path for a member, or null when they have none.
+ *
+ * Keyed on `avatarStoredHash` rather than on `avatarUrl` — which, despite its name, holds Discord's
+ * avatar HASH, not an address. Emitting that field directly is the mistake this helper exists to
+ * make impossible; the profile serializer carries the same note for the same reason.
+ */
+function avatarPath(userId: string, storedHash: string | null): string | null {
+  return storedHash === null ? null : `/v1/media/avatars/${userId}`;
+}
+
 function toView(r: {
   id: string;
   categoryId: string;
@@ -470,10 +528,37 @@ function toView(r: {
   isPinned: boolean;
   isLocked: boolean;
   postCount: number;
+  viewCount: number;
   lastPostAt: Date | null;
+  lastPostBy: string | null;
   createdAt: Date;
-  author: { handle: string; displayName: string };
+  authorId: string;
+  author: { handle: string; displayName: string; avatarStoredHash: string | null };
+  lastPoster: {
+    id: string;
+    handle: string;
+    displayName: string;
+    avatarStoredHash: string | null;
+  } | null;
 }): ThreadView {
+  /*
+   * The last poster is omitted when it IS the opener.
+   *
+   * A board row exists to answer "has anything happened here". Showing the same person on both ends
+   * of a row with no replies answers it wrongly — it looks like a conversation. `lastPostBy` is also
+   * nullable because the relation is `onDelete: SetNull`, so a departed member leaves the thread
+   * intact rather than taking it with them; that case reads as "no distinct last poster", which is
+   * true and needs no special rendering.
+   */
+  const distinctLastPoster =
+    r.lastPoster !== null && r.lastPoster.id !== r.authorId
+      ? {
+          handle: r.lastPoster.handle,
+          displayName: r.lastPoster.displayName,
+          avatarUrl: avatarPath(r.lastPoster.id, r.lastPoster.avatarStoredHash),
+        }
+      : null;
+
   return {
     id: r.id,
     categoryId: r.categoryId,
@@ -483,8 +568,14 @@ function toView(r: {
     isPinned: r.isPinned,
     isLocked: r.isLocked,
     postCount: r.postCount,
+    viewCount: r.viewCount,
     lastPostAt: r.lastPostAt?.toISOString() ?? null,
     createdAt: r.createdAt.toISOString(),
-    author: r.author,
+    author: {
+      handle: r.author.handle,
+      displayName: r.author.displayName,
+      avatarUrl: avatarPath(r.authorId, r.author.avatarStoredHash),
+    },
+    lastPoster: distinctLastPoster,
   };
 }
