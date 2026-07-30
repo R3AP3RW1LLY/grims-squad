@@ -121,6 +121,36 @@ export interface AuditRow {
   readonly actorName: string | null;
   readonly targetType: string | null;
   readonly targetId: string | null;
+  /**
+   * The target's Discord nickname, when the target is a member.
+   *
+   * ★ RESOLVED, BECAUSE A UUID IS NOT AN AUDIT TRAIL ★
+   *
+   * Squadron owner, 2026-07-30: "in the target field show the actual squadron members discord
+   * nickname". Quite right — a log whose target column reads
+   * `f096ede9-d3c8-4916-96b7-fd37d00a0bf6` is a log nobody can read, which makes it a log nobody
+   * checks, which defeats the point of keeping one.
+   *
+   * The id STAYS alongside it, for the same reason the actor keeps its handle: a display name is
+   * chosen by the member and can be changed to match somebody else's, so the stable identifier
+   * remains the thing that actually identifies the row.
+   *
+   * Null when the target is not a member — a role, a category, a post — or when the account has
+   * since been deleted.
+   */
+  readonly targetName: string | null;
+  /**
+   * What changed, as stored (INV-009).
+   *
+   * ★ SELECTED ALL ALONG, AND SILENTLY THROWN AWAY ★
+   *
+   * These columns were already being read from the database and then dropped in the mapping, so
+   * every audit entry reached the screen as "somebody did something to something" with the actual
+   * change discarded. The invariant requires before/after to be RECORDED; recording it and never
+   * showing it satisfies the letter and none of the purpose.
+   */
+  readonly before: unknown;
+  readonly after: unknown;
   readonly createdAt: string;
 }
 
@@ -527,17 +557,72 @@ export class PrismaAdminStore implements AdminStore {
     ]);
 
     return {
-      rows: rows.map((r) => ({
-        id: r.id.toString(),
-        action: r.action,
-        actorHandle: r.actor?.handle ?? null,
-        actorName: r.actor?.displayName ?? null,
-        targetType: r.targetType,
-        targetId: r.targetId,
-        createdAt: r.createdAt.toISOString(),
-      })),
+      rows: await this.#withTargetNames(rows),
       total,
     };
+  }
+
+  /**
+   * Attaches a Discord nickname to every row whose target is a member.
+   *
+   * ★ ONE QUERY FOR THE PAGE ★
+   *
+   * Resolving per row would be a hundred lookups to render a hundred lines, and an audit page is
+   * exactly where somebody scrolls fast. The ids are deduplicated first, because the same officer
+   * being the target of twenty role changes is the normal case rather than an unusual one.
+   *
+   * Only `user` targets are looked up. A role id or a category id is not a member and asking the
+   * users table about one would be a hundred guaranteed misses per page.
+   */
+  async #withTargetNames(
+    rows: ReadonlyArray<{
+      id: bigint;
+      action: string;
+      targetType: string | null;
+      targetId: string | null;
+      before: unknown;
+      after: unknown;
+      createdAt: Date;
+      actor: { handle: string; displayName: string | null } | null;
+    }>,
+  ): Promise<AuditRow[]> {
+    const userIds = [
+      ...new Set(
+        rows
+          .filter((r) => r.targetType === 'user' && r.targetId !== null)
+          .map((r) => r.targetId as string),
+      ),
+    ];
+
+    const names =
+      userIds.length === 0
+        ? new Map<string, string>()
+        : new Map(
+            (
+              await this.#db.user.findMany({
+                where: { id: { in: userIds } },
+                select: { id: true, handle: true, displayName: true },
+              })
+              /*
+               * `displayName` is the Discord server nickname, which this squadron keeps matching
+               * the in-game commander name. Falls back to the handle rather than to nothing: a
+               * member with no nickname set should still read as a person.
+               */
+            ).map((u) => [u.id, u.displayName ?? u.handle]),
+          );
+
+    return rows.map((r) => ({
+      id: r.id.toString(),
+      action: r.action,
+      actorHandle: r.actor?.handle ?? null,
+      actorName: r.actor?.displayName ?? null,
+      targetType: r.targetType,
+      targetId: r.targetId,
+      targetName: r.targetId === null ? null : (names.get(r.targetId) ?? null),
+      before: r.before,
+      after: r.after,
+      createdAt: r.createdAt.toISOString(),
+    }));
   }
 
   /**
@@ -588,21 +673,20 @@ export class PrismaAdminStore implements AdminStore {
         action: true,
         targetType: true,
         targetId: true,
+        // Selected AND used now. These were read and then discarded in the mapping, so every
+        // entry reached the screen with the actual change thrown away.
+        before: true,
+        after: true,
         createdAt: true,
         actor: { select: { handle: true, displayName: true } },
       },
     });
 
-    return rows.map((r) => ({
-      // BigInt id — stringified rather than passed through, because JSON has no
-      // bigint and Fastify's serialiser would throw on the raw value.
-      id: r.id.toString(),
-      action: r.action,
-      actorHandle: r.actor?.handle ?? null,
-      actorName: r.actor?.displayName ?? null,
-      targetType: r.targetType,
-      targetId: r.targetId,
-      createdAt: r.createdAt.toISOString(),
-    }));
+    /*
+     * The same resolution the search path uses. Two mappings that were nearly identical is how
+     * `before`/`after` came to be dropped in one of them and not noticed — there is now one.
+     */
+    return this.#withTargetNames(rows);
   }
+
 }

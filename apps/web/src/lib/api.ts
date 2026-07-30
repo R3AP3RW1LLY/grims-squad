@@ -357,6 +357,16 @@ export interface AdminAuditRow {
   actorName: string | null;
   targetType: string | null;
   targetId: string | null;
+  /**
+   * The target's Discord nickname, when the target is a member.
+   *
+   * The id stays alongside it: a display name is chosen by the member and can be changed to match
+   * somebody else's, so the stable identifier remains what actually identifies the row.
+   */
+  targetName: string | null;
+  /** What changed (INV-009). Stored since the beginning; only now sent to the page. */
+  before: unknown;
+  after: unknown;
   createdAt: string;
 }
 

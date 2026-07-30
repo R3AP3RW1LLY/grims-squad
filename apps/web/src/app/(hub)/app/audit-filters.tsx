@@ -11,6 +11,11 @@ export interface AuditRow {
   actorName: string | null;
   targetType: string | null;
   targetId: string | null;
+  /** The target's Discord nickname, when the target is a member. */
+  targetName: string | null;
+  /** What changed (INV-009). Stored all along; only now shown. */
+  before: unknown;
+  after: unknown;
   createdAt: string;
 }
 
@@ -193,7 +198,8 @@ export function AuditFilters({
               <th scope="col" className="py-2 pr-4">When (UTC)</th>
               <th scope="col" className="py-2 pr-4">Who</th>
               <th scope="col" className="py-2 pr-4">Action</th>
-              <th scope="col" className="py-2">Target</th>
+              <th scope="col" className="py-2 pr-4">Target</th>
+              <th scope="col" className="py-2">What changed</th>
             </tr>
           </thead>
           <tbody>
@@ -256,10 +262,30 @@ export function AuditFilters({
                 <td className="py-2.5 pr-4 align-top font-mono text-[var(--color-brand-cyan-bright)]">
                   {e.action}
                 </td>
-                <td className="py-2.5 align-top font-mono text-[var(--color-text-secondary)]">
-                  {e.targetId === null
-                    ? '—'
-                    : `${e.targetType ?? ''} ${e.targetId.slice(0, 8)}`.trim()}
+                <td className="py-2.5 pr-4 align-top text-[var(--color-text-secondary)]">
+                  {e.targetId === null ? (
+                    '—'
+                  ) : (
+                    <>
+                      {/*
+                        The NICKNAME when we have one — a target column reading
+                        `f096ede9` is a column nobody can read, which makes it a log nobody
+                        checks. The id stays underneath, because a display name is chosen by
+                        the member and can be changed to match somebody else's, so the stable
+                        identifier remains the thing that actually identifies the row.
+                      */}
+                      <span className="block text-[var(--color-text-primary)]">
+                        {e.targetName ?? e.targetType ?? 'unknown'}
+                      </span>
+                      <span className="block font-mono text-[11px]">
+                        {e.targetType === null ? '' : `${e.targetType} · `}
+                        {e.targetId.slice(0, 8)}
+                      </span>
+                    </>
+                  )}
+                </td>
+                <td className="py-2.5 align-top">
+                  <ChangeSummary before={e.before} after={e.after} />
                 </td>
               </tr>
             ))}
@@ -304,4 +330,67 @@ export function AuditFilters({
       )}
     </div>
   );
+}
+
+/**
+ * What actually changed, field by field.
+ *
+ * ★ THE COLUMN THAT WAS MISSING ★
+ *
+ * `before` and `after` were being selected from the database and thrown away in the mapping, so
+ * every audit line read "somebody did something to something" with the substance discarded. INV-009
+ * requires the change to be RECORDED; recording it and never showing it satisfies the letter and
+ * none of the purpose.
+ *
+ * ★ ONLY THE FIELDS THAT MOVED ★
+ *
+ * A role update writes the whole object on both sides, most of it identical. Dumping both would
+ * bury the one field that changed in twenty that did not — so this diffs them and shows only what
+ * differs, which is the question somebody reading an audit log is asking.
+ */
+function ChangeSummary({ before, after }: { readonly before: unknown; readonly after: unknown }) {
+  const a = before !== null && typeof before === 'object' ? (before as Record<string, unknown>) : {};
+  const b = after !== null && typeof after === 'object' ? (after as Record<string, unknown>) : {};
+
+  const keys = [...new Set([...Object.keys(a), ...Object.keys(b)])].filter(
+    (k) => JSON.stringify(a[k]) !== JSON.stringify(b[k]),
+  );
+
+  if (keys.length === 0) {
+    // A creation or deletion has one side only, and some actions carry no payload at all.
+    const only = before === null || before === undefined ? after : before;
+    if (only === null || only === undefined) return <span className="text-[var(--color-text-secondary)]">—</span>;
+    return (
+      <span className="font-mono text-[11px] text-[var(--color-text-secondary)]">
+        {truncate(JSON.stringify(only))}
+      </span>
+    );
+  }
+
+  return (
+    <ul className="list-none space-y-0.5 p-0 font-mono text-[11px]">
+      {keys.slice(0, 6).map((k) => (
+        <li key={k}>
+          <span className="text-[var(--color-text-secondary)]">{k}: </span>
+          <span className="text-[var(--color-brand-orange-bright)]">
+            {truncate(JSON.stringify(a[k]) ?? 'unset')}
+          </span>
+          <span className="text-[var(--color-text-secondary)]"> &rarr; </span>
+          <span className="text-[var(--color-semantic-success)]">
+            {truncate(JSON.stringify(b[k]) ?? 'unset')}
+          </span>
+        </li>
+      ))}
+      {keys.length > 6 && (
+        // Capped, because a row that wraps to fifteen lines makes the whole table unreadable and
+        // the remaining fields are one click away in the row's own record.
+        <li className="text-[var(--color-text-secondary)]">and {keys.length - 6} more</li>
+      )}
+    </ul>
+  );
+}
+
+/** Keeps one value from taking a whole screen. Permission masks are forty digits long. */
+function truncate(value: string, max = 48): string {
+  return value.length > max ? `${value.slice(0, max)}…` : value;
 }
