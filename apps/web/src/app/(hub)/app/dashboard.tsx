@@ -193,7 +193,32 @@ export function Dashboard({ data }: { data: AdminDashboard }) {
             />
           ) : (
             <Empty>Nobody has been on foot yet.</Empty>
-          )}        </Section>
+          )}
+        </Section>
+
+        <Section
+          fill
+          title="How the squadron is doing"
+          description="Credit balances, in bands, for members who have chosen to share them. Nobody is named and no figure is ever shown — only how many commanders sit in each range."
+        >
+          {game.creditBands.length > 0 ? (
+            <Donut
+              unit={
+                game.creditBands.reduce((a, b) => a + b.pilots, 0) === 1 ? 'commander' : 'commanders'
+              }
+              data={game.creditBands.map((b) => ({ label: b.band, value: b.pilots }))}
+            />
+          ) : (
+            /*
+             * One message for both causes, because it has to be true of both: nobody has opted in,
+             * or too few have for a band to be anonymous. Saying which would itself leak the count.
+             */
+            <Empty>
+              Not enough commanders share their balance yet. Turn it on in Commander management to
+              be counted.
+            </Empty>
+          )}
+        </Section>
 
         <Section
           fill

@@ -77,6 +77,12 @@ export interface DashboardData {
     readonly ships: ReadonlyArray<{ ship: string; pilots: number }>;
     /** What the squadron is WEARING. Same source, filtered the other way. */
     readonly suits: ReadonlyArray<{ suit: string; pilots: number }>;
+    /**
+     * How the squadron's wealth is spread, among those who opted in.
+     *
+     * EMPTY when too few people have opted in to be anonymous — see `MIN_CREDIT_COHORT`.
+     */
+    readonly creditBands: ReadonlyArray<{ band: string; pilots: number }>;
     /** Events per category, so it is visible WHAT is being collected. */
     readonly byType: ReadonlyArray<{ type: string; count: number }>;
   };
@@ -128,6 +134,7 @@ export class PrismaDashboardStore implements DashboardStore {
       sessions,
       playingNow,
       ships,
+      creditBands,
       byType,
       members,
       verified,
@@ -307,6 +314,43 @@ export class PrismaDashboardStore implements DashboardStore {
         ) latest
         WHERE ship IS NOT NULL
         GROUP BY ship ORDER BY pilots DESC, ship ASC
+      `,
+
+      /*
+       * ★ CREDITS, BANDED AND OPT-IN ★
+       *
+       * Squadron owner, 2026-07-30: a chart for "org wide credit balances or something where people
+       * allow people to view their balance, anonomyze the data".
+       *
+       * Three things make that safe rather than merely anonymous-looking:
+       *
+       *   - `show_credits` is an EXISTING opt-in that defaults to false. Nobody appears here who
+       *     has not switched it on, so this is not a new disclosure wearing a chart.
+       *   - Only a COUNT per band leaves the database. No names, no user ids, no figures — the
+       *     query cannot return an individual balance because it never selects one.
+       *   - Bands are wide and fixed. Quantiles would move with the population, so a member could
+       *     watch a boundary shift and learn something about a specific person.
+       *
+       * The minimum-cohort rule is applied in application code below, because "too few people to
+       * be anonymous" is a decision about disclosure rather than about SQL.
+       */
+      this.#db.$queryRaw<Array<{ band: string; pilots: bigint }>>`
+        SELECT band, COUNT(*)::bigint AS pilots FROM (
+          SELECT DISTINCT ON (t.user_id)
+            t.user_id,
+            CASE
+              WHEN (t.payload->>'Credits')::bigint <          10000000 THEN 'Under 10M'
+              WHEN (t.payload->>'Credits')::bigint <         100000000 THEN '10M – 100M'
+              WHEN (t.payload->>'Credits')::bigint <        1000000000 THEN '100M – 1bn'
+              WHEN (t.payload->>'Credits')::bigint <       10000000000 THEN '1bn – 10bn'
+              ELSE '10bn+'
+            END AS band
+          FROM telemetry_events t
+          JOIN privacy_settings p ON p.user_id = t.user_id AND p.show_credits = true
+          WHERE t.event_type = 'LoadGame' AND t.payload->>'Credits' IS NOT NULL
+          ORDER BY t.user_id, t.occurred_at DESC
+        ) latest
+        GROUP BY band
       `,
 
       this.#db.telemetryEvent.groupBy({
@@ -491,6 +535,7 @@ export class PrismaDashboardStore implements DashboardStore {
         suits: rollUp(ships, (raw) =>
           isSuit(raw) ? shipDisplayName(raw, null, { allowSuits: true }) : null,
         ).map((r) => ({ suit: r.name, pilots: r.pilots })),
+        creditBands: bandedCredits(creditBands),
         byType: byType.map((t) => ({ type: t.eventType, count: t._count._all })),
       },
       squadron: {
@@ -555,4 +600,38 @@ function rollUp(
     .map(([name, pilots]) => ({ name, pilots }))
     .sort((a, b) => b.pilots - a.pilots || a.name.localeCompare(b.name))
     .slice(0, 10);
+}
+
+/**
+ * The fewest opted-in members before a wealth distribution may be shown at all.
+ *
+ * ★ WHY A FLOOR EXISTS ★
+ *
+ * Banding hides an exact figure; it does not hide a person. With two members opted in, a chart
+ * reading "one in 100M – 1bn, one in 10bn+" tells anybody who knows which two they are exactly
+ * what each is worth — and it does so while looking anonymised, which is worse than showing
+ * nothing, because it invites trust it has not earned.
+ *
+ * Five is the point at which a band holding one person is no longer a statement about that person.
+ */
+export const MIN_CREDIT_COHORT = 5;
+
+/** Bands in a fixed order, or nothing at all when the cohort is too small to be anonymous. */
+function bandedCredits(
+  rows: ReadonlyArray<{ band: string; pilots: bigint }>,
+): Array<{ band: string; pilots: number }> {
+  const total = rows.reduce((acc, r) => acc + Number(r.pilots), 0);
+  if (total < MIN_CREDIT_COHORT) return [];
+
+  /*
+   * Fixed order, poorest first, and bands with nobody in them are DROPPED rather than shown as
+   * zero. An empty band is itself a statement — "nobody here is under ten million" — and on a
+   * chart about money that is the kind of thing people read into.
+   */
+  const ORDER = ['Under 10M', '10M – 100M', '100M – 1bn', '1bn – 10bn', '10bn+'];
+
+  return ORDER.map((band) => ({
+    band,
+    pilots: Number(rows.find((r) => r.band === band)?.pilots ?? 0),
+  })).filter((b) => b.pilots > 0);
 }

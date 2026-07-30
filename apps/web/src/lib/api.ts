@@ -401,6 +401,8 @@ export interface AdminDashboard {
     ships: Array<{ ship: string; pilots: number }>;
     /** What the squadron is wearing on foot. Same journal source as `ships`, filtered the other way. */
     suits: Array<{ suit: string; pilots: number }>;
+    /** Wealth distribution among members who opted in. Empty when too few to be anonymous. */
+    creditBands: Array<{ band: string; pilots: number }>;
     byType: Array<{ type: string; count: number }>;
   };
   squadron: {
