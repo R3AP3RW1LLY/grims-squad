@@ -110,7 +110,20 @@ linux:
   # manager argument, and Linux players of a Windows game are already used to
   # the format.
 
-# Auto-update is deliberately NOT configured yet. Shipping an updater before
-# there is a signed release and somewhere to publish it produces an app that
-# fails a silent check on every launch, and members would never know why.
-publish: null
+# Auto-update, through our own API.
+#
+# * A GENERIC PROVIDER, NOT GITHUB *
+#
+# electron-updater fetches `latest.yml` from this base and then the installer beside it. Our
+# release endpoint already serves assets by basename, so both requests land on infrastructure we
+# already run — no GitHub releases, no second place for builds to live, and nothing about the
+# update path that a member's network is more likely to block than the app itself.
+#
+# `latest.yml` is produced by electron-builder at pack time and must be uploaded to the release
+# bucket alongside the installer. Without it the updater finds nothing and silently reports no
+# update, which is the failure mode the old comment here was rightly worried about.
+publish:
+  provider: generic
+  url: https://45-63-35-93.sslip.io/v1/companion/download
+  # Not a channel we publish to; it just has to match what the client asks for.
+  channel: latest

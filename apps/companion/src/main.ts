@@ -21,6 +21,7 @@ import { Uploader } from './uploader.js';
 import { runWatchPass, type JournalFs, type WatchOutcome } from './watcher.js';
 import { accumulate } from './totals.js';
 import { isGameRunning, isActivelyPlaying } from './game-process.js';
+import { startAutoUpdate } from './auto-update.js';
 import {
   FRESH,
   onProofOfLife,
@@ -553,12 +554,29 @@ function push(): void {
   window?.webContents.send('state', state());
 }
 
+/** The version waiting to be installed, once one has downloaded. Null the rest of the time. */
+let pendingUpdate: string | null = null;
+let stopAutoUpdate: (() => void) | null = null;
+
+/**
+ * Applies a downloaded update.
+ *
+ * Wrapped so `auto-update.ts` stays free of Electron imports and can be unit tested — the rule
+ * about WHEN to install is the part worth testing, and it lives there.
+ */
+function autoUpdaterQuitAndInstall(): void {
+  // `isSilent`, `isForceRunAfter`: install without a wizard, and come back up sending afterwards.
+  void import('electron-updater').then(({ autoUpdater }) => autoUpdater.quitAndInstall(true, true));
+}
+
 function state(): Record<string, unknown> {
   return {
     paired: config.deviceToken !== '',
     tokenHint: redactToken(config.deviceToken),
     enabled: config.enabled,
     autoStart: config.autoStart,
+    /** Set once an update has downloaded and is waiting for the game to close. */
+    pendingUpdate,
     /*
      * Whether startup registration is even possible here. Linux desktops handle it through
      * .desktop files and Electron's support is unreliable, so the panel hides the switch rather
@@ -838,6 +856,10 @@ function showWindow(): void {
 let isQuitting = false;
 app.on('before-quit', () => {
   isQuitting = true;
+  // Stops the update timers. Without it they keep firing while the process is tearing down, and
+  // an update check that resolves after teardown throws into a context with nothing to catch it.
+  stopAutoUpdate?.();
+  stopAutoUpdate = null;
 });
 
 /*
@@ -1010,6 +1032,29 @@ if (!app.requestSingleInstanceLock()) {
      *
      * Polling still begins either way: the point of starting at login is to send, not to be seen.
      */
+    /*
+     * Auto-update. Downloads whenever, installs only once Elite is closed — see `auto-update.ts`.
+     *
+     * Started AFTER the tray and IPC exist, so `pendingUpdate` has somewhere to be displayed the
+     * moment an update lands rather than being dropped on the floor during boot.
+     */
+    stopAutoUpdate = startAutoUpdate({
+      gameRunning: async () => isGameRunning(platform(), listProcesses),
+      onPending: (version) => {
+        pendingUpdate = version;
+        push();
+        refreshTray();
+      },
+      install: () => {
+        /*
+         * `isQuitting` first, or the window-close handler hides to tray instead of letting the
+         * process go — and the installer would wait forever for an app that will not quit.
+         */
+        isQuitting = true;
+        autoUpdaterQuitAndInstall();
+      },
+    });
+
     const launchedByStartup =
       process.argv.includes('--hidden') || app.getLoginItemSettings().wasOpenedAsHidden;
 

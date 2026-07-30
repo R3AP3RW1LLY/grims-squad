@@ -154,6 +154,14 @@
         that you install it once and never think about it again, and an app you have to remember
         to launch is one that silently stops reporting the week you forget.
       -->
+      <!--
+        An update waiting on the game closing.
+
+        Said out loud because the alternative is an app that relaunches itself one day with no
+        explanation. It is not a prompt and there is nothing to press — just an answer to "why did
+        it restart", available before it happens rather than after.
+      -->
+      <p id="updatePending" hidden style="margin-top:10px;font-size:13px;color:var(--orange)"></p>
       <label class="row" id="autoStartRow" hidden style="margin-top:10px;font-size:13px">
         <span>Start with Windows, minimised to the tray</span>
         <input type="checkbox" id="autoStart" />
@@ -416,6 +424,10 @@
         $('toggle').textContent = s.enabled ? 'Pause' : 'Resume';
         // Hidden where the platform cannot honour it — a switch that does nothing is worse than
         // no switch, because somebody will set it and rely on it.
+        $('updatePending').hidden = !s.pendingUpdate;
+        $('updatePending').textContent = s.pendingUpdate
+          ? `Version ${s.pendingUpdate} is ready. It will install once you close Elite.`
+          : '';
         $('autoStartRow').hidden = !s.autoStartSupported;
         $('autoStart').checked = s.autoStart === true;
 
