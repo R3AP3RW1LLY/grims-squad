@@ -1,0 +1,14 @@
+-- May we send forum notifications as a Discord DM? (P2.4, INV-039 fan-out)
+--
+-- ★ DEFAULT FALSE, DELIBERATELY ★
+--
+-- A DM lands in somebody's private inbox. Inferring consent from "they linked Discord to sign in"
+-- would be putting words in their mouth: they linked it to authenticate, not to be messaged.
+--
+-- It also matches the protective defaults D15 set when the squadron confirmed it includes minors —
+-- the public activity ticker ships off, location consent carries extra warning copy, and
+-- unsolicited DMs are a named moderation topic in the officer handbook. Defaulting this on would
+-- cut against all three, and would do it to 107 people at once.
+--
+-- In-app notifications need no preference: they appear somewhere the member chose to visit.
+ALTER TABLE "users" ADD COLUMN "notify_forum_dm" BOOLEAN NOT NULL DEFAULT false;

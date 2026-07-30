@@ -265,10 +265,27 @@ describe('CategoryService', () => {
 describe('ThreadService', () => {
   let reindex: PendingReindexQueue;
   let svc: ThreadService;
+  let pruned: Array<{ threadId: string; toCategoryId: string }>;
 
   beforeEach(() => {
     reindex = new PendingReindexQueue();
-    svc = new ThreadService(new CategoryService(), reindex);
+    pruned = [];
+    /*
+     * A recording NotifyService. `move` now prunes subscriptions the destination board excludes
+     * (INV-039, second half), and it must do so in the SAME operation as the move — so the
+     * dependency is real rather than optional, and this stub asserts the call happens.
+     *
+     * Deliberately not the real service: its own behaviour is covered exhaustively in
+     * `notify.spec.ts`, and duplicating that here would mean two places to update when the rule
+     * changes.
+     */
+    const notify = {
+      pruneOnMove: async (_db: unknown, threadId: string, toCategoryId: string) => {
+        pruned.push({ threadId, toCategoryId });
+        return 0;
+      },
+    };
+    svc = new ThreadService(new CategoryService(), reindex, notify as never);
   });
 
   it('MANDATORY: threads in an invisible category are NOT FOUND', async () => {
@@ -344,6 +361,16 @@ describe('ThreadService', () => {
 
       expect(db.updated[0]).toMatchObject({ id: 't1', categoryId: 'off' });
       expect(reindex.requests).toEqual([{ kind: 'thread', id: 't1', reason: 'moved' }]);
+
+      /*
+       * ★ AND IT PRUNES SUBSCRIPTIONS (INV-039, SECOND HALF) ★
+       *
+       * Asserted in the same test as the reindex because they are two halves of one operation. A
+       * move that did one without the other leaves either stale search results or subscribers who
+       * can no longer open the thread they are following — and the second is a disclosure, since a
+       * notification carries the thread title.
+       */
+      expect(pruned).toEqual([{ threadId: 't1', toCategoryId: 'off' }]);
     });
 
     it('does NOT enqueue when the thread is already in that category', async () => {

@@ -2,6 +2,7 @@ import { AppError, ErrorCode, Permission } from '@grims/shared';
 import type { AclBoundClient } from '../authz/acl-db.service.js';
 import { assertSlug, satisfiesMask, type CategoryService } from './category.service.js';
 import type { ReindexQueue } from './reindex.port.js';
+import type { NotifyService } from './notify.service.js';
 
 /**
  * Threads — the conversations inside a category.
@@ -89,6 +90,12 @@ export class ThreadService {
   constructor(
     private readonly categories: CategoryService,
     private readonly reindex: ReindexQueue,
+    /*
+     * Injected so the prune happens in the SAME operation as the move. A separate job would leave a
+     * window in which a moved thread still had subscribers who cannot see it — short, and exactly
+     * the window a reply would land in.
+     */
+    private readonly notify: NotifyService,
   ) {}
 
   /**
@@ -305,7 +312,7 @@ export class ThreadService {
     threadId: string,
     toCategoryId: string,
     callerMask: bigint,
-  ): Promise<void> {
+  ): Promise<number> {
     if ((callerMask & Permission.FORUM_MODERATE) !== Permission.FORUM_MODERATE) {
       throw new AppError(ErrorCode.PERMISSION_DENIED, 'You cannot move threads.');
     }
@@ -328,14 +335,30 @@ export class ThreadService {
       throw new AppError(ErrorCode.RESOURCE_NOT_VISIBLE, 'Category not found.');
     }
 
-    if (thread.categoryId === target.id) return; // Nothing to do, and nothing to reindex.
+    if (thread.categoryId === target.id) return 0; // Nothing to do, and nothing to reindex.
 
     await db.forumThread.update({
       where: { id: thread.id },
       data: { categoryId: target.id },
     });
 
+    /*
+     * ★ THE SUBSCRIPTION PRUNE (INV-039, SECOND HALF) ★
+     *
+     * Moving a thread must remove subscriptions whose holders cannot see where it went. Done AFTER
+     * the update, deliberately: `pruneOnMove` reads the destination's viewPerm and the subscriber
+     * list, and doing it first would prune against a board the thread had not moved to yet — which
+     * is correct only until the update fails.
+     *
+     * The count is RETURNED rather than logged, so the caller can tell the moderator. A silent
+     * prune means somebody loses a subscription with no idea why they stopped hearing about a
+     * thread they were following.
+     */
+    const pruned = await this.notify.pruneOnMove(db, thread.id, target.id);
+
     await this.reindex.enqueue({ kind: 'thread', id: thread.id, reason: 'moved' });
+
+    return pruned;
   }
 }
 
