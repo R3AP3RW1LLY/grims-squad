@@ -26,12 +26,23 @@ export const metadata: Metadata = {
 };
 
 /*
- * Revalidated rather than static or per-request. The guides change when somebody edits
- * them, which is rarely — but a fully static page would keep serving an old guide until
- * the next deploy, and that is the page a new commander is following instruction by
- * instruction.
+ * ★ FORCED DYNAMIC, AND WHY ISR WAS WRONG HERE ★
+ *
+ * These pages first declared `export const revalidate = 300`, reasoning that guides change
+ * rarely. In production that 500'd with `DYNAMIC_SERVER_USAGE`, and the contradiction is real:
+ * the shared `get()` helper in `lib/api.ts` fetches with `cache: 'no-store'` — deliberately,
+ * because a cached response could show a member who has just opted OUT of the roster — and a
+ * `no-store` fetch inside a route that asks to be statically revalidated cannot be satisfied.
+ *
+ * Dev never surfaced it: `next dev` does not attempt static generation the same way, so the
+ * page rendered perfectly on localhost and failed on the first real request.
+ *
+ * Rendering per request is the right answer anyway. The API is on the same host, the query is
+ * one indexed read, and it means a guide edit is live immediately rather than up to five
+ * minutes later — which matters when somebody is following the steps and an officer is fixing
+ * a wrong one.
  */
-export const revalidate = 300;
+export const dynamic = 'force-dynamic';
 
 export default async function GuidesIndex() {
   const guides = await getPublicGuides();

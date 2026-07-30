@@ -15,13 +15,15 @@
  * the database that nothing ever sanitised, and the guides are the most-read posts on
  * the site. They get no exemption.
  *
- * ★ AUTHORED BY THE WEBMASTER ★
+ * ★ AUTHORED BY THE WEBMASTER, BY ROLE ★
  *
- * Squadron owner, 2026-07-29: "only the webmaster can author the joining guide." So
- * the author is resolved by looking for an account that actually holds SITE_CONFIG —
- * the permission the guides board now demands to post — rather than by taking the
- * first user in the table. If nobody holds it, this refuses rather than attributing
- * squadron documentation to an arbitrary account.
+ * Squadron owner, 2026-07-29: "only the webmaster can author the joining guide." So the
+ * author is the holder of the WEBMASTER ROLE, with SITE_CONFIG only as a fallback for a
+ * database where that role is unassigned — and the fallback announces itself.
+ *
+ * The first version looked only at SITE_CONFIG. That is indistinguishable from correct on a
+ * dev database with one user, and wrong on production, where three accounts hold it. See the
+ * note at the resolution site.
  *
  * Idempotent: re-running updates the existing posts in place, so fixing a typo is
  * `pnpm --filter @grims/api seed:guides` and not a hand-written UPDATE.
@@ -61,17 +63,42 @@ async function main(): Promise<void> {
       select: {
         id: true,
         handle: true,
-        userRoles: { select: { role: { select: { permMask: true } } } },
+        userRoles: { select: { role: { select: { key: true, permMask: true } } } },
       },
     });
 
-    const author = candidates.find((u) => {
-      const mask = u.userRoles.reduce(
-        (acc, ur) => acc | BigInt(ur.role.permMask.toFixed(0)),
-        0n,
+    /*
+     * ★ THE WEBMASTER BY NAME, NOT "WHOEVER HOLDS SITE_CONFIG FIRST" ★
+     *
+     * Owner: "only the webmaster can author the joining guide."
+     *
+     * The first version of this took the first active account holding SITE_CONFIG. On a
+     * dev database with one user that is the webmaster and the distinction never appears.
+     * On PRODUCTION three accounts hold it — the webmaster plus two admiral ranks — and
+     * the script picked a prime_legate, so the joining guide would have been published
+     * under the wrong name.
+     *
+     * Caught by dry-running against production before writing, which is the only reason
+     * this was ever visible.
+     *
+     * So the ROLE is looked for first and SITE_CONFIG is only a fallback, for a database
+     * where the webmaster role is unassigned. The fallback still says whose name it used.
+     */
+    const holdsWebmaster = (u: (typeof candidates)[number]): boolean =>
+      u.userRoles.some((ur) => ur.role.key === 'webmaster');
+
+    const effectiveMask = (u: (typeof candidates)[number]): bigint =>
+      u.userRoles.reduce((acc, ur) => acc | BigInt(ur.role.permMask.toFixed(0)), 0n);
+
+    const author =
+      candidates.find(holdsWebmaster) ??
+      candidates.find((u) => (effectiveMask(u) & SITE_CONFIG) === SITE_CONFIG);
+
+    if (author !== undefined && !holdsWebmaster(author)) {
+      console.warn(
+        `No account holds the webmaster role; falling back to ${author.handle}, who holds SITE_CONFIG.`,
       );
-      return (mask & SITE_CONFIG) === SITE_CONFIG;
-    });
+    }
 
     if (author === undefined) {
       throw new Error(
@@ -81,7 +108,7 @@ async function main(): Promise<void> {
       );
     }
 
-    console.log(`Authoring as ${author.handle} (holds SITE_CONFIG).`);
+    console.log(`Authoring as ${author.handle} (${holdsWebmaster(author) ? 'webmaster' : 'SITE_CONFIG fallback'}).`);
     if (dryRun) console.log('DRY RUN — nothing will be written.\n');
 
     for (const thread of GUIDE_THREADS) {
