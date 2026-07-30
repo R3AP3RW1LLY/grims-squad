@@ -11,6 +11,7 @@ import { ModerationService } from './moderation.service.js';
 import { RecruitmentService } from './recruitment.service.js';
 import { PendingReindexQueue } from './reindex.port.js';
 import { UploadService } from '../media/upload.service.js';
+import { MediaModule } from '../media/media.module.js';
 import { ScreeningService } from '../ai/screening.service.js';
 import { ALL_PERMISSIONS } from '@grims/shared';
 import { SignatureService } from './signature.service.js';
@@ -28,6 +29,15 @@ import { SignatureService } from './signature.service.js';
  * than discovered when RAG starts returning officer content to members.
  */
 @Module({
+  /*
+   * ★ MediaModule, FOR THE YOUTUBE THUMBNAIL FETCH ★
+   *
+   * `UploadService` lives there and is exported there; without this import Nest cannot resolve it
+   * and the API refuses to BOOT. Unit tests could not catch that — they construct `PostService`
+   * directly and never ask the container to wire it — so the break only appeared on the first real
+   * start after the thumbnail work. Worth naming: a green suite is not a booted app.
+   */
+  imports: [MediaModule],
   controllers: [ForumController],
   providers: [
     CategoryService,

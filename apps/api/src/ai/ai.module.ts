@@ -5,6 +5,8 @@ import { AiLog } from './ai-log.port.js';
 import { PrismaAiLog } from './ai-log.prisma.js';
 import { ScreeningService } from './screening.service.js';
 import { ReviewQueueService } from './review-queue.service.js';
+import { AiStreamService } from './ai-stream.service.js';
+import { AiController } from './ai.controller.js';
 
 /**
  * The AI, wired.
@@ -24,9 +26,16 @@ import { ReviewQueueService } from './review-queue.service.js';
 @Global()
 @Module({
   providers: [
+    AiStreamService,
     {
       provide: AiClient,
-      useFactory: () => new AiClient(aiConfigFrom(process.env)),
+      inject: [AiStreamService],
+      /*
+       * The stream is handed to the client so a failing model is VISIBLE while it fails, rather
+       * than only afterwards in `ai_calls`. Redaction happens inside the stream, not here — one
+       * funnel, so no future call site can forget.
+       */
+      useFactory: (stream: AiStreamService) => new AiClient(aiConfigFrom(process.env), fetch, stream),
     },
     {
       provide: AiLog,
@@ -40,6 +49,7 @@ import { ReviewQueueService } from './review-queue.service.js';
     },
     ReviewQueueService,
   ],
-  exports: [AiClient, AiLog, ScreeningService, ReviewQueueService],
+  controllers: [AiController],
+  exports: [AiClient, AiLog, ScreeningService, ReviewQueueService, AiStreamService],
 })
 export class AiModule {}

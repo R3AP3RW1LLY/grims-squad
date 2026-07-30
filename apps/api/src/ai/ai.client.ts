@@ -60,6 +60,12 @@ export class AiClient {
   constructor(
     private readonly config: AiConfig | null,
     private readonly fetchImpl: typeof fetch = fetch,
+    /*
+     * Optional, so the client is still constructible in a unit test that does not care about the
+     * admin stream. Every string that reaches it is redacted at the stream's own funnel — see
+     * `AiStreamService.emit` — rather than here, so a future call site cannot forget.
+     */
+    private readonly stream: { emit(line: { level: 'info' | 'warn' | 'error'; kind: string; message: string; tookMs?: number }): void } | null = null,
   ) {}
 
   /** Whether the AI is configured at all. Not whether it is reachable — only a call knows that. */
@@ -92,7 +98,15 @@ export class AiClient {
     );
 
     const tookMs = Date.now() - started;
-    if (raw === null) return { verdict: 'unavailable', categories: [], reason: null, tookMs };
+    if (raw === null) {
+      this.stream?.emit({
+        level: 'warn',
+        kind: 'screen',
+        message: 'No answer from the model — the post will be held for review.',
+        tookMs,
+      });
+      return { verdict: 'unavailable', categories: [], reason: null, tookMs };
+    }
 
     const parsed = parseScreenJson(raw);
     if (parsed === null) {
@@ -101,8 +115,25 @@ export class AiClient {
        * than as clear: an unparseable answer is not evidence that a post is fine, and defaulting
        * to "clear" would mean a confused model silently disables moderation.
        */
+      this.stream?.emit({
+        level: 'error',
+        kind: 'screen',
+        // The raw answer, redacted and truncated downstream. Seeing WHAT the model said instead of
+        // JSON is the difference between "swap the model" and an afternoon of guessing.
+        message: `Could not read the model's answer: ${raw}`,
+        tookMs,
+      });
       return { verdict: 'unavailable', categories: [], reason: null, tookMs };
     }
+
+    this.stream?.emit({
+      level: parsed.flagged ? 'warn' : 'info',
+      kind: 'screen',
+      message: parsed.flagged
+        ? `Held — ${parsed.categories.join(', ') || 'no category given'}`
+        : 'Cleared',
+      tookMs,
+    });
 
     return {
       verdict: parsed.flagged ? 'flagged' : 'clear',
@@ -219,4 +250,44 @@ export function parseScreenJson(
   const reason = typeof o['reason'] === 'string' && o['reason'].trim() !== '' ? o['reason'].trim().slice(0, 500) : null;
 
   return { flagged: o['flagged'], categories: [...new Set(categories)], reason };
+}
+
+/**
+ * Whether the model is answering right now.
+ *
+ * ★ WORKS IDENTICALLY ON LOCALHOST AND ON THE SERVER ★
+ *
+ * Squadron owner, 2026-07-30: "the AI must work on both Localhost and our actual server / website".
+ *
+ * It does, and the reason is worth stating: `AI_BASE_URL` is `http://127.0.0.1:11434/v1` in BOTH
+ * places. On a development machine that is Ollama running locally. On the Vultr box it is the
+ * near end of the SSH reverse tunnel, which forwards that port to the same Ollama on the owner's
+ * PC.
+ *
+ * So there is one configuration value, one code path, and no environment branching anywhere in
+ * this file — which is what makes "it worked locally" mean something.
+ */
+export async function aiHealth(
+  client: AiClient,
+  fetchImpl: typeof fetch = fetch,
+  config: AiConfig | null = aiConfigFrom(process.env),
+): Promise<{ reachable: boolean; model: string | null; tookMs: number }> {
+  if (config === null || !client.configured) return { reachable: false, model: null, tookMs: 0 };
+
+  const started = Date.now();
+  const abort = new AbortController();
+  // Short: this is a liveness question, and a health check that hangs is itself a fault.
+  const timer = setTimeout(() => abort.abort(), 4_000);
+
+  try {
+    const res = await fetchImpl(`${config.baseUrl}/models`, {
+      signal: abort.signal,
+      headers: config.apiKey === undefined ? {} : { authorization: `Bearer ${config.apiKey}` },
+    });
+    return { reachable: res.ok, model: config.model, tookMs: Date.now() - started };
+  } catch {
+    return { reachable: false, model: config.model, tookMs: Date.now() - started };
+  } finally {
+    clearTimeout(timer);
+  }
 }
