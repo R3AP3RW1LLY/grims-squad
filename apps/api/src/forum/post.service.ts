@@ -1,5 +1,6 @@
 import { AppError, ErrorCode, Permission } from '@grims/shared';
 import { withYouTubeThumbnails, type ThumbnailStore } from './youtube-thumbnail.js';
+import type { ScreeningService } from '../ai/screening.service.js';
 import type { AclBoundClient } from '../authz/acl-db.service.js';
 import { satisfiesMask } from './category.service.js';
 import { renderPostBody } from './sanitize.js';
@@ -58,6 +59,12 @@ export class PostService {
      * also what happens in production when YouTube is unreachable.
      */
     private readonly thumbnails: ThumbnailStore | null = null,
+    /*
+     * Optional for the same reason as the thumbnail store: a unit test of posting should not need
+     * an AI. Absent means posts publish immediately, which is exactly what happens today and what
+     * happens in any deployment where screening has not been configured.
+     */
+    private readonly screening: ScreeningService | null = null,
   ) {}
 
   /**
@@ -165,9 +172,34 @@ export class PostService {
     const mentions =
       'bodyDoc' in rendered ? mentionedUserIds(rendered.bodyDoc as never) : [];
 
+    /*
+     * ★ SCREENED BEFORE IT IS WRITTEN ★
+     *
+     * Squadron owner, 2026-07-30: "the ai must ingest and moderate all posts before they are
+     * visible / posted to the forum". Running this after the insert would create a window — however
+     * short — in which unscreened writing is readable, and the whole instruction is about there
+     * being no such window.
+     *
+     * Synchronous, which the owner chose: screening is a second or two on a 3060 Ti, about as long
+     * as saving a post already takes.
+     */
+    const screened =
+      this.screening === null
+        ? null
+        : await this.screening.screenPost(rendered.bodyMd, { userId: authorId, surface: 'web' });
+
     const post = await db.forumPost.create({
       data: {
         threadId: thread.id,
+        /*
+         * The column defaults to `held`, so an absent screener would hold everything. Stating it
+         * explicitly means "screening is not configured" publishes, and "screening said so" decides
+         * otherwise — see `ScreeningService.screenPost` for why those differ.
+         */
+        screenState: screened === null ? 'clear' : screened.state,
+        ...(screened === null || screened.state === 'clear'
+          ? {}
+          : { screenVerdict: screened.verdict as unknown as object }),
         ...(replyToId === undefined ? {} : { replyToId }),
         // From the SESSION, never a request field. There is no anonymous author to
         // represent — `authorId` is NOT NULL with a required relation to `users`.

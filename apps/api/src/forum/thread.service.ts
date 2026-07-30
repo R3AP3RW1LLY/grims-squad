@@ -360,7 +360,21 @@ export class ThreadService {
     const thread = await this.bySlug(db, categorySlug, threadSlug, callerMask);
 
     const rows = await db.forumPost.findMany({
-      where: { threadId: thread.id, deletedAt: null },
+      /*
+       * ★ HELD POSTS ARE INVISIBLE TO EVERYONE, INCLUDING THEIR AUTHOR ★
+       *
+       * Squadron owner, 2026-07-30: "the ai must ingest and moderate all posts before they are
+       * visible / posted to the forum". `screenState: 'clear'` is that rule, expressed where it
+       * cannot be forgotten — in the query, beside the soft-delete filter it resembles.
+       *
+       * Showing a member their OWN held post was the tempting exception and is the wrong one: they
+       * would see it in the thread, assume it published, and wonder why nobody replied for two
+       * days. Being told plainly that it is waiting is kinder than seeing a post that is not there.
+       *
+       * Officers reviewing held posts read them through the moderation queue, which queries this
+       * column the other way round on purpose.
+       */
+      where: { threadId: thread.id, deletedAt: null, screenState: 'clear' },
       orderBy: { createdAt: 'asc' },
       select: {
         id: true,

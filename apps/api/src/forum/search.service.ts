@@ -145,6 +145,12 @@ export class SearchService {
           -- Soft-deleted content is not searchable (INV-022): a deleted post that turned up in
           -- search would make the deletion cosmetic.
           AND p.deleted_at IS NULL
+          /*
+           * Held posts are not searchable either. A post invisible in its thread but findable by
+           * search is invisible in exactly one place and public in another — and search is where
+           * somebody would find it by accident, having never opened the thread at all.
+           */
+          AND p.screen_state = 'clear'
           AND t.deleted_at IS NULL
           -- ★ THE ACL, IN THE QUERY ★
           --

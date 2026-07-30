@@ -3,6 +3,16 @@ import { PrismaClient } from '@grims/db';
 import { SearchService, renderSnippet } from './search.service.js';
 import type { AclBoundClient } from '../authz/acl-db.service.js';
 
+/*
+ * ★ FIXTURE POSTS ARE EXPLICITLY CLEARED ★
+ *
+ * `forum_posts.screen_state` defaults to `held`, so a post inserted straight into the database —
+ * as these are — is invisible to search by design. That default is deliberate: if screening is
+ * ever skipped by a future code path, the post waits for a human rather than publishing unseen.
+ *
+ * These fixtures therefore say `clear` out loud. They are testing the ACL, not the screener.
+ */
+
 /**
  * Forum search (INV-024) — against the REAL database.
  *
@@ -92,7 +102,7 @@ beforeAll(async () => {
       title: 'A public thread',
       isPublic: true,
       posts: {
-        create: [{ authorId, bodyMd: `Nothing secret here, just ${PUBLIC_TOKEN}.`, bodyHtml: '<p>x</p>' }],
+        create: [{ screenState: 'clear' as const, authorId, bodyMd: `Nothing secret here, just ${PUBLIC_TOKEN}.`, bodyHtml: '<p>x</p>' }],
       },
     },
     select: { id: true },
@@ -106,7 +116,7 @@ beforeAll(async () => {
       slug: `srch-off-${Date.now()}`,
       title: 'Disciplinary matter',
       posts: {
-        create: [{ authorId, bodyMd: `The codeword is ${SECRET_TOKEN} and it is sensitive.`, bodyHtml: '<p>x</p>' }],
+        create: [{ screenState: 'clear' as const, authorId, bodyMd: `The codeword is ${SECRET_TOKEN} and it is sensitive.`, bodyHtml: '<p>x</p>' }],
       },
     },
     select: { id: true },
@@ -223,7 +233,7 @@ describe('the ACL is in the query, not applied afterwards', () => {
         slug: `srch-draft-${Date.now()}`,
         title: 'Unpublished draft',
         isPublic: false,
-        posts: { create: [{ authorId, bodyMd: `draft ${PUBLIC_TOKEN} content`, bodyHtml: '<p>x</p>' }] },
+        posts: { create: [{ screenState: 'clear' as const, authorId, bodyMd: `draft ${PUBLIC_TOKEN} content`, bodyHtml: '<p>x</p>' }] },
       },
       select: { id: true },
     });
@@ -250,7 +260,7 @@ describe('the ACL is in the query, not applied afterwards', () => {
         title: 'Deleted content',
         isPublic: true,
         posts: {
-          create: [{ authorId, bodyMd: `deleted ${SECRET_TOKEN} words`, bodyHtml: '<p>x</p>', deletedAt: new Date() }],
+          create: [{ screenState: 'clear' as const, authorId, bodyMd: `deleted ${SECRET_TOKEN} words`, bodyHtml: '<p>x</p>', deletedAt: new Date() }],
         },
       },
       select: { id: true },

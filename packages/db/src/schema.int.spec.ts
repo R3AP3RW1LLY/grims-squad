@@ -47,6 +47,10 @@ describe('P0.2 database schema', () => {
   // The count is hardcoded ON PURPOSE. Every schema addition has to come and
   // bump it, which is a two-second acknowledgement that a table was added —
   // versus a self-counting assertion that would let one appear unnoticed.
+  // 70 as of 2026-07-30: ai_calls — every call to the AI, kept for officer review. Visible to
+  // officers AND the webmaster, who is the AI developer and cannot debug a model whose output they
+  // cannot see. Members are told it is not private; a log people do not know about is a different
+  // thing from one they do.
   // 69 as of 2026-07-30: forum_signatures — the block under a member's posts. Its avatar column is
   // deliberately SEPARATE from users.avatar_stored_hash: the signature avatar shows on the forums
   // only and must never overwrite the Discord import, which would be silently undone by the next
@@ -85,8 +89,8 @@ describe('P0.2 database schema', () => {
        where table_schema = 'public' and table_type = 'BASE TABLE'
          and table_name not like '\\_prisma%'`,
     );
-    // 63 models in ssot/03-data/schema.prisma.
-    expect(Number(r[0]?.n)).toBe(69);
+    // 64 models in ssot/03-data/schema.prisma.
+    expect(Number(r[0]?.n)).toBe(70);
   });
 
   describe('hand-written DDL that Prisma cannot express', () => {

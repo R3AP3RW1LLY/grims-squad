@@ -384,6 +384,8 @@ model User {
   threads             ForumThread[]         @relation("ThreadAuthor")
   lastPostedThreads   ForumThread[]         @relation("ThreadLastPoster")
   posts               ForumPost[]
+  postsReviewed       ForumPost[]           @relation("PostReviewer")
+  aiCalls             AiCall[]
   reactions           ForumReaction[]
   subscriptions       ForumSubscription[]
   forumSignature      ForumSignature?
@@ -1177,6 +1179,31 @@ model ForumPost {
   editedAt   DateTime?                @map("edited_at") @db.Timestamptz(6)
   editCount  Int                      @default(0) @map("edit_count")
   isSolution Boolean                  @default(false) @map("is_solution")
+
+  /// Whether the AI screener has cleared this post for anybody to read.
+  ///
+  /// * SQUADRON OWNER, 2026-07-30: "the ai must ingest and moderate all posts before they are
+  /// visible / posted to the forum" *
+  ///
+  /// So a post is HELD by default in the sense that it is written with whatever the screener said,
+  /// and the read path filters on this column. Nothing unscreened is ever visible, including to the
+  /// author - a member who could see their own held post would assume it had published.
+  ///
+  /// `held` covers two different situations on purpose: the screener flagged it, or the screener
+  /// could not be reached. Both mean the same thing to a reader - a human has not looked yet - and
+  /// distinguishing them in the READ path would be a second rule to keep in step. The moderation
+  /// queue tells them apart from `screenVerdict` below.
+  screenState ScreenState @default(held) @map("screen_state")
+
+  /// What the screener concluded, for the officer reviewing it. NEVER shown to the author.
+  ///
+  /// Telling somebody which category fired teaches anybody determined exactly which wording gets
+  /// through, and they can retry freely. Owner's decision, 2026-07-30.
+  screenVerdict Json? @map("screen_verdict")
+
+  /// When a human released or removed it, and who.
+  reviewedAt DateTime? @map("reviewed_at") @db.Timestamptz(6)
+  reviewedBy String?   @map("reviewed_by") @db.Uuid
   createdAt  DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
   /// Soft delete only (INV-022).
   deletedAt  DateTime?                @map("deleted_at") @db.Timestamptz(6)
@@ -1186,6 +1213,7 @@ model ForumPost {
 
   thread    ForumThread     @relation(fields: [threadId], references: [id], onDelete: Cascade)
   author    User            @relation(fields: [authorId], references: [id])
+  reviewer  User?           @relation("PostReviewer", fields: [reviewedBy], references: [id], onDelete: SetNull)
   replyTo   ForumPost?      @relation("PostReplies", fields: [replyToId], references: [id], onDelete: SetNull)
   replies   ForumPost[]     @relation("PostReplies")
   reactions ForumReaction[]
@@ -1194,6 +1222,8 @@ model ForumPost {
   @@index([threadId, createdAt])
   @@index([authorId, createdAt])
   @@index([replyToId])
+  /// The moderation queue's only query: everything waiting, oldest first.
+  @@index([screenState, createdAt])
   @@map("forum_posts")
 }
 
@@ -1318,6 +1348,62 @@ model ForumSignature {
   published MediaUpload? @relation("SignaturePublished", fields: [bannerPublishedMediaId], references: [id], onDelete: SetNull)
 
   @@map("forum_signatures")
+}
+
+/// Whether a post has been cleared to be read.
+enum ScreenState {
+  /// Waiting for a human. Either the screener flagged it, or the screener could not be reached.
+  held
+  /// Cleared - by the screener, or by an officer releasing it.
+  clear
+  /// An officer decided it stays down. Distinct from a soft delete, which is the author removing it.
+  refused
+}
+
+/// Every call made to the AI, kept for review.
+///
+/// * SQUADRON OWNER, 2026-07-30 *
+///
+/// "Every conversation logged for officer review ... with option 4 it also need to be visible to
+/// the webmaster role! this is non-negotiable as the webmaster is the AI developer."
+///
+/// * WHY LOG AT ALL *
+///
+/// A model that starts answering badly is invisible otherwise: the member who got a wrong answer
+/// rarely reports it, they just act on it. This is how somebody notices it telling people the wrong
+/// joining steps - and how abuse of an unauthenticated endpoint pointed at a home GPU is spotted.
+///
+/// Members are told this is not private. A log people do not know about is a different thing from
+/// a log they do.
+model AiCall {
+  id     String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Null for an anonymous caller on the public recruiting or guides pages.
+  userId String?   @map("user_id") @db.Uuid
+  /// `screen`, `assistant` or `signature`.
+  kind   String
+  /// Where it came from: `web`, `discord`, `public`.
+  surface String
+
+  /// What was asked. Truncated at the service, because a whole forum post is not a useful log line.
+  prompt String
+  /// What came back. Null when the AI was unreachable, which is itself worth recording.
+  response String?
+
+  /// Whether this call was refused before it reached the model, and why - rate limit, or scope.
+  refusedReason String? @map("refused_reason")
+
+  /// Milliseconds. A tunnel degrading shows up here long before it fails outright.
+  tookMs Int? @map("took_ms")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  /// The review screen: newest first, optionally by kind.
+  @@index([createdAt])
+  @@index([kind, createdAt])
+  @@index([userId, createdAt])
+  @@map("ai_calls")
 }
 
 model ForumReaction {
