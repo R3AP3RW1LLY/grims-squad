@@ -46,6 +46,8 @@ const allowAll = () => ({ assertMayPost: async () => undefined }) as never;
 
 const MODERATOR = Permission.FORUM_MODERATE;
 const MEMBER_POST = Permission.FORUM_POST_MEMBER;
+/** What the webmaster and officers hold, and what a documentation board demands to post in. */
+const GUIDE_AUTHOR = Permission.FORUM_POST_GUIDE;
 /**
  * The first argument the mock was called with, typed.
  *
@@ -222,7 +224,9 @@ describe('editing a post', () => {
     authorId: 'author',
     bodyMd: 'original text',
     createdAt: new Date(Date.now() - 60 * 60 * 1000),
-    thread: { isLocked: false },
+    // `postPerm: null` — an ordinary board, not documentation. The guides set it to
+    // FORUM_POST_GUIDE, which is what makes them collectively maintainable.
+    thread: { isLocked: false, category: { postPerm: null } },
   };
 
   function editDb(over: Record<string, unknown> = {}) {
@@ -284,22 +288,32 @@ describe('editing a post', () => {
     });
   });
 
-  it('a moderator can edit anybody’s post', async () => {
+  it('MANDATORY: a MODERATOR cannot edit somebody else’s post either', async () => {
+    /*
+     * ★ THIS USED TO BE ALLOWED, AND WAS WRONG ★
+     *
+     * Squadron owner, 2026-07-30: "only the creator may edit their own post, moderation can block
+     * that post".
+     *
+     * A moderator editing a member's post produces words attributed to somebody who did not write
+     * them, under an "edited" marker that does not say who edited it — indistinguishable from the
+     * author having said it. Moderation removes, locks and hides. It does not rewrite.
+     */
     const svc = new PostService(recordingQueue(), allowAll());
     await expect(
       svc.edit(editDb(), 'p1', 'moderated', 'a-moderator', MODERATOR),
-    ).resolves.toMatchObject({ editCount: 1 });
+    ).rejects.toMatchObject({ code: ErrorCode.PERMISSION_DENIED });
   });
 
-  it('a locked thread stops the AUTHOR but not a moderator', async () => {
-    /*
-     * Asymmetric with posting, deliberately: locking ends the conversation, and letting an
-     * author keep rewriting a locked post reopens it silently. A moderator editing a locked
-     * post is usually removing something that should not be there.
-     */
+  it('a locked thread stops the author editing', async () => {
+    // Locking ends a conversation. An author who could keep rewriting a locked post reopens it
+    // silently, which defeats the point of the lock.
     const locked = editDb({
       forumPost: {
-        findFirst: async () => ({ ...existing, thread: { isLocked: true } }),
+        findFirst: async () => ({
+          ...existing,
+          thread: { isLocked: true, category: { postPerm: null } },
+        }),
         findUniqueOrThrow: async () => ({ id: 'p1', bodyHtml: '', editCount: 0 }),
         update: (a: unknown) => a,
       },
@@ -309,7 +323,67 @@ describe('editing a post', () => {
     await expect(svc.edit(locked, 'p1', 'x', 'author', MEMBER_POST)).rejects.toMatchObject({
       code: ErrorCode.VALIDATION_FAILED,
     });
-    await expect(svc.edit(locked, 'p1', 'x', 'a-mod', MODERATOR)).resolves.toBeDefined();
+  });
+
+  describe('documentation boards, which ARE collectively maintained', () => {
+    /*
+     * Squadron owner, 2026-07-30: "for the guides, i need to be able to edit this with the text
+     * editor as the webmaster, officers too! we need to get this done! as we need to add and
+     * update the processes etc".
+     *
+     * The guides are the squadron's joining instructions, not somebody's opinion. A process that
+     * changes and a guide nobody may correct becomes wrong, and then becomes a support burden.
+     */
+    const guideDb = (over: Record<string, unknown> = {}) =>
+      editDb({
+        forumPost: {
+          findFirst: async () => ({
+            ...existing,
+            authorId: 'the-webmaster',
+            // Locked, as the guides are: read-only to members.
+            thread: { isLocked: true, category: { postPerm: { toFixed: () => '128' } } },
+          }),
+          findUniqueOrThrow: async () => ({ id: 'p1', bodyHtml: '', editCount: 0 }),
+          update: (a: unknown) => a,
+          ...(over['forumPost'] as object | undefined),
+        },
+      });
+
+    it('MANDATORY: a guide author can edit a guide somebody else wrote', async () => {
+      const svc = new PostService(recordingQueue(), allowAll());
+      await expect(
+        svc.edit(guideDb(), 'p1', 'updated step 3', 'an-officer', GUIDE_AUTHOR),
+      ).resolves.toBeDefined();
+    });
+
+    it('MANDATORY: the board being locked does not stop them', async () => {
+      // The guides are locked ON PURPOSE. The lock cannot also be what stops them being kept up
+      // to date, or the feature contradicts itself.
+      const svc = new PostService(recordingQueue(), allowAll());
+      await expect(
+        svc.edit(guideDb(), 'p1', 'updated again', 'an-officer', GUIDE_AUTHOR),
+      ).resolves.toBeDefined();
+    });
+
+    it('MANDATORY: holding the guide bit does NOT let you edit ordinary posts', async () => {
+      /*
+       * Both halves of the rule are needed. Holding FORUM_POST_GUIDE is not a licence to rewrite
+       * the general board — the BOARD has to be documentation too.
+       */
+      const svc = new PostService(recordingQueue(), allowAll());
+      await expect(
+        svc.edit(editDb(), 'p1', 'x', 'an-officer', GUIDE_AUTHOR),
+      ).rejects.toMatchObject({ code: ErrorCode.PERMISSION_DENIED });
+    });
+
+    it('MANDATORY: a moderator without the guide bit cannot edit a guide', async () => {
+      // FORUM_MODERATE is not FORUM_POST_GUIDE. Officers hold both; the rule keys on the one
+      // that means "may write documentation".
+      const svc = new PostService(recordingQueue(), allowAll());
+      await expect(
+        svc.edit(guideDb(), 'p1', 'x', 'a-moderator', MODERATOR),
+      ).rejects.toMatchObject({ code: ErrorCode.PERMISSION_DENIED });
+    });
   });
 
   it('writes NO revision when the text is unchanged', async () => {

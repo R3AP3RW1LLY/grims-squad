@@ -6,6 +6,7 @@ import { renderPostBody } from './sanitize.js';
 import { validateDocument, renderDocument, documentToText } from './rich-doc.js';
 import type { NotifyService } from './notify.service.js';
 import { ALLOWED_REACTIONS, type ReactionCount } from './engage.service.js';
+import { canEditPost } from './post.service.js';
 
 /**
  * Threads — the conversations inside a category.
@@ -104,6 +105,13 @@ export interface PostView {
   readonly isSolution: boolean;
   /** Reaction tallies, already including whether the caller reacted. */
   readonly reactions: readonly ReactionCount[];
+  /**
+   * Whether THIS caller may rewrite this post.
+   *
+   * Server-decided, like `canMarkSolution`. It is what puts an Edit button on the guides for
+   * officers and the webmaster without the browser knowing why it may.
+   */
+  readonly canEdit: boolean;
 }
 
 export interface CreateThreadInput {
@@ -369,6 +377,7 @@ export class ThreadService {
         createdAt: true,
         isSolution: true,
         authorId: true,
+        thread: { select: { isLocked: true, category: { select: { postPerm: true } } } },
         author: { select: { handle: true, displayName: true, avatarStoredHash: true } },
         /*
          * The parent's AUTHOR, not its body. One join rather than a second query per post - a
@@ -433,6 +442,26 @@ export class ThreadService {
               },
             },
       reactions: tallyFor(tallies, mineByPost.get(p.id) ?? new Set(), p.id),
+      /*
+       * The author, or somebody who maintains a DOCUMENTATION board. Never a moderator on the
+       * strength of moderating: a moderator rewriting a member's post produces words attributed to
+       * somebody who did not write them. Moderation removes; it does not rewrite.
+       *
+       * Mirrors `PostService.canEdit` — the button has to agree with the rule, or the guides show
+       * an Edit control that always refuses.
+       */
+      canEdit: canEditPost(
+        {
+          authorId: p.authorId,
+          threadLocked: p.thread.isLocked,
+          categoryPostPerm:
+            p.thread.category.postPerm === null
+              ? null
+              : BigInt(p.thread.category.postPerm.toFixed(0)),
+        },
+        callerId,
+        callerMask,
+      ),
     }));
   }
 

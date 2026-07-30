@@ -467,6 +467,22 @@ export class ForumController {
   }
 
   /**
+   * The original source of a post, for the editor to start from.
+   *
+   * Fetched only when somebody presses Edit — see `PostService.source` for why it is not a field
+   * on the thread response.
+   */
+  @Get('posts/:postId/source')
+  async postSource(
+    @User() caller: CurrentUser | undefined,
+    @Param('postId') postId: string,
+  ): Promise<{ bodyDoc: unknown | null; bodyMd: string | null }> {
+    const c = requireSession(caller, 'Sign in to edit.');
+    const db = await this.acl.forCaller(c.userId);
+    return this.posts.source(db, postId, c.userId, await this.#mask(caller));
+  }
+
+  /**
    * Edits a post. PATCH, because it changes one field of an existing thing.
    */
   @Patch('posts/:postId')

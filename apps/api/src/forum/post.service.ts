@@ -204,6 +204,68 @@ export class PostService {
    * In a transaction so an edit can never land without its revision. A post whose previous
    * text was lost is not recoverable, and INV-022's promise is about recoverability.
    */
+  /**
+   * The ORIGINAL source of a post, for an editor to start from.
+   *
+   * ★ A SEPARATE REQUEST, NOT A FIELD ON THE READ PATH ★
+   *
+   * The obvious build adds `bodyDoc` to every post in the thread response. That ships the document
+   * tree AND the rendered HTML for every post to every reader — roughly doubling the page — so that
+   * the handful of people who might press Edit do not have to wait once.
+   *
+   * It is also the wrong place for `bodyMd`. That is the author's UNSANITISED input, and the rule
+   * the read path states is that it does not leave the server. Here it does, but only to somebody
+   * entitled to rewrite it, and only into an editor.
+   *
+   * ★ SAME PERMISSION AS THE EDIT ITSELF ★
+   *
+   * Author or moderator. Anything weaker would make this a way to read the raw Markdown of any
+   * post — which is not a disclosure of much, but is a disclosure nobody asked for, and the check
+   * costs one comparison.
+   *
+   * A locked thread is deliberately NOT refused here: a moderator may edit a locked post, so they
+   * must be able to load it. `edit` applies the lock rule at the point it matters.
+   */
+  async source(
+    db: AclBoundClient,
+    postId: string,
+    callerId: string,
+    callerMask: bigint,
+  ): Promise<{ bodyDoc: unknown | null; bodyMd: string | null }> {
+    const post = await db.forumPost.findFirst({
+      where: { id: postId, deletedAt: null },
+      select: {
+        authorId: true,
+        bodyMd: true,
+        bodyDoc: true,
+        thread: { select: { category: { select: { postPerm: true } } } },
+      },
+    });
+    if (post === null) {
+      throw new AppError(ErrorCode.RESOURCE_NOT_VISIBLE, 'Post not found.');
+    }
+
+    const maintainer = maintainsDocumentation(
+      post.thread.category.postPerm === null
+        ? null
+        : BigInt(post.thread.category.postPerm.toFixed(0)),
+      callerMask,
+    );
+    if (post.authorId !== callerId && !maintainer) {
+      throw new AppError(
+        ErrorCode.PERMISSION_DENIED,
+        'Only the person who wrote a post can edit it.',
+      );
+    }
+
+    /*
+     * A post written in Markdown has no document, and vice versa. Both are returned so the client
+     * can pick its editor rather than guess — a Markdown post opened in the rich editor would be
+     * silently converted, which is a lossy rewrite of somebody's text they never asked for.
+     */
+    return { bodyDoc: post.bodyDoc ?? null, bodyMd: post.bodyDoc === null ? post.bodyMd : null };
+  }
+
   async edit(
     db: AclBoundClient,
     postId: string,
@@ -213,25 +275,62 @@ export class PostService {
   ): Promise<PostWritten> {
     const post = await db.forumPost.findFirst({
       where: { id: postId, deletedAt: null },
-      select: { id: true, authorId: true, bodyMd: true, createdAt: true, thread: { select: { isLocked: true } } },
+      select: {
+        id: true,
+        authorId: true,
+        bodyMd: true,
+        createdAt: true,
+        thread: { select: { isLocked: true, category: { select: { postPerm: true } } } },
+      },
     });
     if (post === null) {
       throw new AppError(ErrorCode.RESOURCE_NOT_VISIBLE, 'Post not found.');
     }
 
+    /*
+     * ★ ONLY THE AUTHOR REWRITES THEIR OWN WORDS ★
+     *
+     * Squadron owner, 2026-07-30: "only the creator may edit their own post, moderation can block
+     * that post".
+     *
+     * This used to allow moderators, which is a different and worse thing than it sounds. A
+     * moderator editing a member's post produces text attributed to somebody who did not write it,
+     * with an "edited" marker that does not say by whom — indistinguishable from the author having
+     * said it. Moderation removes, locks and hides; it does not put words in people's mouths.
+     *
+     * ★ THE ONE EXCEPTION: DOCUMENTATION ★
+     *
+     * Same owner, same day: "for the guides, i need to be able to edit this with the text editor as
+     * the webmaster, officers too! we need to get this done! as we need to add and update the
+     * processes etc".
+     *
+     * The guides are not somebody's opinion, they are the squadron's joining instructions, and a
+     * process that changes with a guide nobody may correct becomes wrong and then becomes a support
+     * burden. So a board whose `post_perm` demands FORUM_POST_GUIDE is maintained collectively by
+     * everybody who holds that bit.
+     *
+     * Keyed on the CATEGORY'S PERMISSION rather than on its slug. A slug check would silently stop
+     * working the day somebody renames the board, and would have to be copied to every new
+     * documentation board. The permission is the thing that actually means "this is documentation".
+     */
     const isAuthor = post.authorId === editorId;
-    const isModerator = satisfiesMask(callerMask, Permission.FORUM_MODERATE);
-    if (!isAuthor && !isModerator) {
-      throw new AppError(ErrorCode.PERMISSION_DENIED, 'You can only edit your own posts.');
+    const maintainer = maintainsDocumentation(
+      post.thread.category.postPerm === null ? null : BigInt(post.thread.category.postPerm.toFixed(0)),
+      callerMask,
+    );
+    if (!isAuthor && !maintainer) {
+      throw new AppError(
+        ErrorCode.PERMISSION_DENIED,
+        'Only the person who wrote a post can edit it. Report it instead if there is a problem with it.',
+      );
     }
 
     /*
-     * A locked thread stops the AUTHOR editing but not a moderator. Different from posting,
-     * and the asymmetry is deliberate: locking a thread ends the conversation, and letting
-     * an author keep rewriting what is already locked reopens it silently. A moderator
-     * editing a locked post is usually removing something that should not be there.
+     * A locked thread stops the AUTHOR editing but not a documentation maintainer. The guides are
+     * locked ON PURPOSE — they are read-only to members — so the lock cannot also be what stops
+     * them being kept up to date.
      */
-    if (post.thread.isLocked && !isModerator) {
+    if (post.thread.isLocked && !maintainer) {
       throw new AppError(ErrorCode.VALIDATION_FAILED, 'This thread is locked.');
     }
 
@@ -463,4 +562,44 @@ export class PostService {
     }
     return rendered;
   }
+}
+
+/**
+ * Whether this caller maintains DOCUMENTATION in a board with this `post_perm`.
+ *
+ * A board that demands FORUM_POST_GUIDE to post in is a documentation board — that bit exists for
+ * exactly one purpose and is held by the webmaster and by officers. Anybody who may write the
+ * guides may also correct them, including somebody else's.
+ *
+ * Two conditions, and both are needed. Holding the bit is not enough (it would let a guide author
+ * edit posts on the general board); the board demanding it is not enough (it would let anybody who
+ * can see the guides rewrite them).
+ */
+function maintainsDocumentation(categoryPostPerm: bigint | null, callerMask: bigint): boolean {
+  if (categoryPostPerm === null) return false;
+  const documentation =
+    (categoryPostPerm & Permission.FORUM_POST_GUIDE) === Permission.FORUM_POST_GUIDE;
+  return documentation && satisfiesMask(callerMask, Permission.FORUM_POST_GUIDE);
+}
+
+/**
+ * Whether this caller may edit this post. Presentation only — `edit` re-checks.
+ *
+ * ★ A FREE FUNCTION, NOT A METHOD ★
+ *
+ * The thread read path needs the same answer for every post on a page, and it has no reason to
+ * hold a `PostService`. Exporting the rule keeps ONE definition of who may edit — the alternative
+ * was a copy in the projection, which is how a button and the endpoint behind it drift apart.
+ *
+ * Answered by the server for the reason `canMarkSolution` is: the browser is deliberately never
+ * told the permission mask, so capabilities are answered one question at a time.
+ */
+export function canEditPost(
+  post: { authorId: string; threadLocked: boolean; categoryPostPerm: bigint | null },
+  callerId: string | null,
+  callerMask: bigint,
+): boolean {
+  if (callerId === null) return false;
+  if (post.authorId === callerId) return !post.threadLocked;
+  return maintainsDocumentation(post.categoryPostPerm, callerMask);
 }

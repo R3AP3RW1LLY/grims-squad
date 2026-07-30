@@ -824,6 +824,8 @@ export interface HubPost {
   replyTo: { postId: string; author: { handle: string; displayName: string } } | null;
   isSolution: boolean;
   reactions: { emoji: string; count: number; mine: boolean }[];
+  /** Server-decided: whether this caller may rewrite this post. Re-checked on write. */
+  canEdit: boolean;
 }
 
 export interface ThreadGrant {

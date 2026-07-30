@@ -6,6 +6,7 @@ import type { HubPost } from '../../../../../lib/api';
 import { formatLocal } from '../../../../../lib/time';
 import { Avatar } from '../../../../../components/forum/identity';
 import { ReplyComposer } from './reply-composer';
+import { PostEditor } from './post-editor';
 import { apiCall } from '../../../../../lib/api-client';
 
 /**
@@ -182,6 +183,7 @@ function PostCard({
 }) {
   const [reactions, setReactions] = useState(post.reactions);
   const [solution, setSolution] = useState(post.isSolution);
+  const [editing, setEditing] = useState(false);
 
   async function react(emoji: string) {
     /*
@@ -265,12 +267,21 @@ function PostCard({
 
       <span id={`post-anchor-${post.id}`} className="sr-only" />
 
-      <div
-        ref={registerBody}
-        /* Same scoped prose styling as the public guides, on existing tokens. */
-        className="guide-prose"
-        dangerouslySetInnerHTML={{ __html: post.bodyHtml }}
-      />
+      {editing ? (
+        /*
+         * Replaces the body IN PLACE rather than opening a separate page. A guide is edited while
+         * reading it — "this step is out of date" happens with the step on screen, and sending
+         * somebody to another route to fix it loses the thing they were looking at.
+         */
+        <PostEditor postId={post.id} onCancel={() => setEditing(false)} />
+      ) : (
+        <div
+          ref={registerBody}
+          /* Same scoped prose styling as the public guides, on existing tokens. */
+          className="guide-prose"
+          dangerouslySetInnerHTML={{ __html: post.bodyHtml }}
+        />
+      )}
 
       <footer className="mt-4 flex flex-wrap items-center gap-2 border-t border-[var(--color-border-hairline)] pt-3">
         {reactions.map((r) => (
@@ -288,6 +299,16 @@ function PostCard({
             {r.emoji} {r.count}
           </button>
         ))}
+
+        {post.canEdit && !editing && (
+          <button
+            type="button"
+            onClick={() => setEditing(true)}
+            className="font-mono text-[11px] text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)]"
+          >
+            Edit
+          </button>
+        )}
 
         {canPost && (
           <span className="ml-auto flex gap-2">
