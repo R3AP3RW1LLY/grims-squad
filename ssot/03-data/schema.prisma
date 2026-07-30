@@ -400,6 +400,8 @@ model User {
 
   mediaUploads         MediaUpload[]      @relation("MediaUploader")
 
+  postRevisions        PostRevision[]     @relation("PostRevisionEditor")
+
   @@map("users")
 }
 
@@ -1120,6 +1122,20 @@ model PostRevision {
   editedBy String   @map("edited_by") @db.Uuid
 
   post ForumPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  /// Who made the edit.
+  ///
+  /// * ADDED 2026-07-29: THIS COLUMN HAD NO FOREIGN KEY AT ALL *
+  ///
+  /// `edited_by` existed as a bare uuid, so a revision could name an account that no longer
+  /// exists — and the edit history a moderator reads to decide whether a post was quietly
+  /// rewritten would show an id it could not resolve to a person. An audit trail that cannot
+  /// name the actor is not an audit trail.
+  ///
+  /// RESTRICT rather than Cascade, deliberately, matching ForumThreadGrant.grantedBy: deleting
+  /// the editor must not erase the record that they edited something. If an account genuinely
+  /// has to go, the revisions have to be dealt with explicitly rather than vanishing as a
+  /// side effect.
+  editor User @relation("PostRevisionEditor", fields: [editedBy], references: [id])
 
   @@index([postId, editedAt])
   @@map("post_revisions")

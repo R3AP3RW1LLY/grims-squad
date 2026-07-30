@@ -3,6 +3,7 @@ import { ForumController } from './forum.controller.js';
 import { CategoryService } from './category.service.js';
 import { ThreadService } from './thread.service.js';
 import { GrantService } from './grant.service.js';
+import { PostService } from './post.service.js';
 import { PendingReindexQueue } from './reindex.port.js';
 
 /**
@@ -28,6 +29,11 @@ import { PendingReindexQueue } from './reindex.port.js';
      */
     GrantService,
     { provide: PendingReindexQueue, useFactory: () => new PendingReindexQueue() },
+    {
+      provide: PostService,
+      inject: [PendingReindexQueue],
+      useFactory: (reindex: PendingReindexQueue) => new PostService(reindex),
+    },
     {
       provide: ThreadService,
       inject: [CategoryService, PendingReindexQueue],

@@ -93,6 +93,22 @@ const ALLOWED = new Map([
    * precisely what the brand guarantees and what BRAND_ENFORCED re-asserts below.
    */
   ['forum/grant.service.ts', 'takes AclBoundClient; the widening path, compiler-enforced'],
+  /*
+   * The post service — where INV-035 and INV-022 are enforced.
+   *
+   * Earns the exemption the same way: every method takes `AclBoundClient`, so a plain client
+   * is a compile error. Two extra properties are worth naming, because both are ABSENCES that
+   * only reading the file can confirm:
+   *
+   *   - `renderPostBody` is the only path from a request to a stored body (INV-035). Nothing
+   *     else in the service writes bodyHtml.
+   *   - there is no destructive delete anywhere in it (INV-022). `softDelete` sets a column.
+   *
+   * The BRAND_ENFORCED check below re-asserts the client type. The two absences are asserted
+   * in `post.spec.ts`, structurally, for the same reason: a behavioural test cannot show that
+   * something never happens.
+   */
+  ['forum/post.service.ts', 'takes AclBoundClient; compiler-enforced'],
 ]);
 
 /** Exemptions that rely on the brand rather than on being the enforcement point. */
@@ -107,6 +123,7 @@ const BRAND_ENFORCED = [
    * the officers' board hand out access to it.
    */
   'forum/grant.service.ts',
+  'forum/post.service.ts',
 ];
 
 describe('INV-002 — no ACL-bearing model is read through the plain client', () => {

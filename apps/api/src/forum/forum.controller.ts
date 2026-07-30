@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Delete, Body, Param, Query, Req, Inject } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Delete, Body, Param, Query, Req, Inject } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
 import { AppError, ErrorCode } from '@grims/shared';
 import { User, type CurrentUser } from '../auth/current-user.js';
@@ -9,6 +9,7 @@ import { PermissionService } from '../authz/permission.service.js';
 import { CategoryService, type CategoryView } from './category.service.js';
 import { ThreadService, type ThreadView, type PostView } from './thread.service.js';
 import { GrantService, type GrantView, type GranteeCandidate } from './grant.service.js';
+import { PostService, type RevisionView } from './post.service.js';
 
 /**
  * The forum's HTTP surface.
@@ -39,6 +40,7 @@ export class ForumController {
     @Inject(CategoryService) private readonly categories: CategoryService,
     @Inject(ThreadService) private readonly threads: ThreadService,
     @Inject(GrantService) private readonly grants: GrantService,
+    @Inject(PostService) private readonly posts: PostService,
   ) {}
 
   /**
@@ -259,6 +261,119 @@ export class ForumController {
       grants: await this.grants.revoke(db, threadId, userId, await this.#mask(caller)),
     };
   }
+
+  /*
+   * ★ POSTS — INV-035 AND INV-022 ★
+   *
+   * Every body goes through `renderPostBody` inside PostService, which is the only path to
+   * a stored body. Nothing here sanitises, and nothing here deletes: `softDelete` marks a
+   * row, and a reader can confirm the absence of a hard delete by searching that service.
+   */
+
+  @Post('threads/:threadId/posts')
+  async reply(
+    @User() caller: CurrentUser | undefined,
+    @Param('threadId') threadId: string,
+    @Body() body: unknown,
+    @Req() req: FastifyRequest,
+  ): Promise<{ id: string; bodyHtml: string; editCount: number }> {
+    const c = requireSession(caller, 'Sign in to reply.');
+    csrf(req);
+    const bodyMd = readBody(body);
+
+    const db = await this.acl.forCaller(c.userId);
+    return this.posts.create(db, threadId, bodyMd, c.userId, await this.#mask(caller));
+  }
+
+  /**
+   * Edits a post. PATCH, because it changes one field of an existing thing.
+   */
+  @Patch('posts/:postId')
+  async editPost(
+    @User() caller: CurrentUser | undefined,
+    @Param('postId') postId: string,
+    @Body() body: unknown,
+    @Req() req: FastifyRequest,
+  ): Promise<{ id: string; bodyHtml: string; editCount: number }> {
+    const c = requireSession(caller, 'Sign in to edit.');
+    csrf(req);
+    const bodyMd = readBody(body);
+
+    const db = await this.acl.forCaller(c.userId);
+    return this.posts.edit(db, postId, bodyMd, c.userId, await this.#mask(caller));
+  }
+
+  /**
+   * Deletes a post — soft, always (INV-022).
+   *
+   * DELETE is the honest verb for what the member is doing, even though the row survives.
+   * Naming the route `/soft-delete` would leak an implementation detail into a URL and
+   * invite somebody to look for the hard one.
+   */
+  @Delete('posts/:postId')
+  async deletePost(
+    @User() caller: CurrentUser | undefined,
+    @Param('postId') postId: string,
+    @Req() req: FastifyRequest,
+  ): Promise<{ id: string; deletedAt: string }> {
+    const c = requireSession(caller, 'Sign in to delete.');
+    csrf(req);
+
+    const db = await this.acl.forCaller(c.userId);
+    return this.posts.softDelete(db, postId, c.userId, await this.#mask(caller));
+  }
+
+  /**
+   * Restores a deleted post. Moderators only.
+   *
+   * The other half of "remains recoverable". An invariant promising recovery with no way to
+   * perform it is a promise about a database rather than about the product.
+   */
+  @Post('posts/:postId/restore')
+  async restorePost(
+    @User() caller: CurrentUser | undefined,
+    @Param('postId') postId: string,
+    @Req() req: FastifyRequest,
+  ): Promise<{ id: string }> {
+    const c = requireSession(caller, 'Sign in to restore.');
+    csrf(req);
+
+    const db = await this.acl.forCaller(c.userId);
+    return this.posts.restore(db, postId, await this.#mask(caller));
+  }
+
+  /** When a post was edited and by whom. Moderators only; never the old bodies. */
+  @Get('posts/:postId/history')
+  async postHistory(
+    @User() caller: CurrentUser | undefined,
+    @Param('postId') postId: string,
+  ): Promise<{ revisions: RevisionView[] }> {
+    const c = requireSession(caller, 'Sign in to read edit history.');
+    const db = await this.acl.forCaller(c.userId);
+    return { revisions: await this.posts.history(db, postId, await this.#mask(caller)) };
+  }
+}
+
+/**
+ * Refuses an anonymous caller before any work happens.
+ *
+ * Extracted because it was repeated at the top of nine handlers, and a repeated guard is
+ * one somebody eventually omits — which on a write route is the whole authorisation story.
+ * Returning the narrowed type means the compiler enforces that it was called: without it,
+ * `c.userId` does not typecheck.
+ */
+function requireSession(caller: CurrentUser | undefined, why: string): CurrentUser {
+  if (caller === undefined) throw new AppError(ErrorCode.UNAUTHENTICATED, why);
+  return caller;
+}
+
+/** Reads and validates a post body from a request. */
+function readBody(body: unknown): string {
+  const raw = (body as { bodyMd?: unknown } | null)?.bodyMd;
+  if (typeof raw !== 'string') {
+    throw new AppError(ErrorCode.VALIDATION_FAILED, 'Write something first.');
+  }
+  return raw;
 }
 
 function csrf(req: FastifyRequest): void {
