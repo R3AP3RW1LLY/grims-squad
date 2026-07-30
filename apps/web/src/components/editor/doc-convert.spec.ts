@@ -153,10 +153,39 @@ describe('editor state -> document', () => {
     expect(doc?.content[0]?.type).toBe('paragraph');
   });
 
+  it('keeps the three heading levels the toolbar offers', () => {
+    /*
+     * The toolbar says H1/H2/H3 and sets levels 2/3/4 — the post title owns the page's only real
+     * `<h1>`, so a body heading starts one level down.
+     */
+    for (const level of [2, 3, 4]) {
+      const doc = toDocument(
+        pm({ type: 'heading', attrs: { level }, content: [{ type: 'text', text: 'x' }] }),
+      );
+      expect(doc?.content[0]).toMatchObject({ type: 'heading', level });
+    }
+  });
+
   it('clamps a heading deeper than we model', () => {
-    // An h4 is clearly still meant to be a heading, so it becomes h3 rather than vanishing.
-    const doc = toDocument(pm({ type: 'heading', attrs: { level: 5 }, content: [{ type: 'text', text: 'x' }] }));
-    expect(doc?.content[0]).toMatchObject({ type: 'heading', level: 3 });
+    // An h5 is clearly still meant to be a heading, so it becomes the deepest we have rather
+    // than vanishing.
+    const doc = toDocument(
+      pm({ type: 'heading', attrs: { level: 5 }, content: [{ type: 'text', text: 'x' }] }),
+    );
+    expect(doc?.content[0]).toMatchObject({ type: 'heading', level: 4 });
+  });
+
+  it('carries heading alignment through', () => {
+    // Alignment that worked on paragraphs and silently did nothing on a heading is the kind of
+    // half-feature people report as "the buttons are broken".
+    const doc = toDocument(
+      pm({
+        type: 'heading',
+        attrs: { level: 2, textAlign: 'center' },
+        content: [{ type: 'text', text: 'x' }],
+      }),
+    );
+    expect(doc?.content[0]).toMatchObject({ type: 'heading', align: 'center' });
   });
 
   it('MANDATORY: returns null for an empty document', () => {

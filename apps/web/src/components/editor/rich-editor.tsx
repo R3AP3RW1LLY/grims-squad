@@ -5,6 +5,8 @@ import { useEditor, EditorContent, type Editor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Link from '@tiptap/extension-link';
 import Placeholder from '@tiptap/extension-placeholder';
+import Underline from '@tiptap/extension-underline';
+import TextAlign from '@tiptap/extension-text-align';
 import type { RichDocument } from '@grims/shared';
 import { FontFamily, Mention, SquadronImage, SquadronVideo } from './nodes';
 import { FONT_CATEGORY_LABELS, FONT_FAMILIES, FONT_SITE_DEFAULT } from '@grims/shared/fonts';
@@ -145,8 +147,23 @@ export function RichEditor({
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
-        // Our format models h2 and h3 only: the post title is the page's h1.
-        heading: { levels: [2, 3] },
+        /*
+         * Levels 2–4, shown in the toolbar as H1, H2 and H3.
+         *
+         * The post title is the page's only `<h1>`, so the biggest body heading is an `<h2>`
+         * styled to look like one. Nobody writing a post can tell; everybody navigating the page
+         * by heading can.
+         */
+        heading: { levels: [2, 3, 4] },
+      }),
+      Underline,
+      TextAlign.configure({
+        /*
+         * Headings align too. Alignment that worked on paragraphs and silently did nothing on a
+         * heading is the kind of half-feature people report as "the buttons are broken".
+         */
+        types: ['paragraph', 'heading'],
+        alignments: ['left', 'center', 'right'],
       }),
       Link.configure({
         openOnClick: false,
@@ -296,9 +313,56 @@ export function RichEditor({
         <ToolButton label="Italic" active={editor.isActive('italic')} disabled={disabled} onClick={() => editor.chain().focus().toggleItalic().run()}>
           <em>I</em>
         </ToolButton>
+        <ToolButton label="Underline" active={editor.isActive('underline')} disabled={disabled} onClick={() => editor.chain().focus().toggleUnderline().run()}>
+          <span className="underline">U</span>
+        </ToolButton>
         <ToolButton label="Strikethrough" active={editor.isActive('strike')} disabled={disabled} onClick={() => editor.chain().focus().toggleStrike().run()}>
           <span className="line-through">S</span>
         </ToolButton>
+
+        <span aria-hidden="true" className="mx-1 h-5 w-px bg-[var(--color-border-hairline)]" />
+
+        {/*
+          H1/H2/H3 are LABELS. They set heading levels 2, 3 and 4 — see the StarterKit config above
+          for why the body never emits a real h1.
+        */}
+        {([
+          { label: 'H1', level: 2 as const },
+          { label: 'H2', level: 3 as const },
+          { label: 'H3', level: 4 as const },
+        ]).map((h) => (
+          <ToolButton
+            key={h.label}
+            label={`Heading ${h.label.slice(1)}`}
+            active={editor.isActive('heading', { level: h.level })}
+            disabled={disabled}
+            onClick={() => editor.chain().focus().toggleHeading({ level: h.level }).run()}
+          >
+            {h.label}
+          </ToolButton>
+        ))}
+        <ToolButton
+          label="Paragraph"
+          active={editor.isActive('paragraph')}
+          disabled={disabled}
+          onClick={() => editor.chain().focus().setParagraph().run()}
+        >
+          &para;
+        </ToolButton>
+
+        <span aria-hidden="true" className="mx-1 h-5 w-px bg-[var(--color-border-hairline)]" />
+
+        {(['left', 'center', 'right'] as const).map((a) => (
+          <ToolButton
+            key={a}
+            label={`Align ${a}`}
+            active={editor.isActive({ textAlign: a })}
+            disabled={disabled}
+            onClick={() => editor.chain().focus().setTextAlign(a).run()}
+          >
+            {a === 'left' ? '≡' : a === 'center' ? '☲' : '≣'}
+          </ToolButton>
+        ))}
         <ToolButton label="Inline code" active={editor.isActive('code')} disabled={disabled} onClick={() => editor.chain().focus().toggleCode().run()}>
           <span className="font-mono">{'</>'}</span>
         </ToolButton>

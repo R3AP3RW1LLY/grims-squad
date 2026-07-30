@@ -32,7 +32,15 @@
  */
 
 /** Text styling. A closed set, so a mark nobody planned for cannot appear. */
-export type MarkType = 'bold' | 'italic' | 'strike' | 'code' | 'link' | 'mention' | 'font';
+export type MarkType =
+  | 'bold'
+  | 'italic'
+  | 'underline'
+  | 'strike'
+  | 'code'
+  | 'link'
+  | 'mention'
+  | 'font';
 
 export interface DocMark {
   readonly type: MarkType;
@@ -132,9 +140,24 @@ export interface ParagraphNode {
 
 export interface HeadingNode {
   readonly type: 'heading';
-  /** 2 and 3 only. A post's title is the page's h1; a body that could emit one would compete with it. */
-  readonly level: 2 | 3;
+  /**
+   * 2, 3 and 4 — shown in the toolbar as H1, H2 and H3.
+   *
+   * ★ THE LABEL AND THE TAG DELIBERATELY DIFFER ★
+   *
+   * Squadron owner, 2026-07-30, asked for "H1, H2, H3 and paragraph text". The post TITLE is
+   * already the page's `<h1>`, and a body that emitted a second one would give the page two
+   * competing answers to "what is this about" — which is what a screen reader's heading navigation
+   * and a search engine both read.
+   *
+   * So the toolbar says H1 and the biggest body heading is an `<h2>` styled to look like one.
+   * Nobody writing a post can tell the difference; everybody reading the page with assistive
+   * technology can.
+   */
+  readonly level: 2 | 3 | 4;
   readonly content?: readonly TextNode[];
+  /** Headings align too — an alignment that only worked on paragraphs would read as a bug. */
+  readonly align?: Alignment;
 }
 
 export interface ListItemNode {

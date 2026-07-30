@@ -103,6 +103,7 @@ function validateMarks(marks: unknown): readonly DocMark[] {
     .map((m): DocMark | null => {
     const type = (m as { type?: unknown })?.type;
     switch (type) {
+      case 'underline':
       case 'bold':
       case 'italic':
       case 'strike':
@@ -195,8 +196,19 @@ function validateBlock(raw: unknown, c: Counters, depth: number): BlockNode {
        * 2 and 3 only. The post's title is the page's h1, and a body that could emit another
        * would compete with it — bad for screen readers and for search.
        */
-      if (level !== 2 && level !== 3) fail('Headings can only be level 2 or 3.');
-      return { type: 'heading', level, content: validateText(node['content'], c) };
+      /*
+       * 2, 3 and 4 — the toolbar calls them H1, H2 and H3. The post title owns the page's only
+       * `<h1>`, so a body heading starts one level down; see the note on `HeadingNode`.
+       */
+      if (level !== 2 && level !== 3 && level !== 4) {
+        fail('Headings can only be level 2, 3 or 4.');
+      }
+      return {
+        type: 'heading',
+        level,
+        content: validateText(node['content'], c),
+        ...(isAlignment(node['align']) ? { align: node['align'] } : {}),
+      };
     }
     case 'bulletList':
     case 'orderedList': {
@@ -423,7 +435,7 @@ function renderBlock(b: BlockNode): string {
     case 'paragraph':
       return `<p${alignClass(b.align)}>${renderText(b.content ?? [])}</p>`;
     case 'heading':
-      return `<h${b.level}>${renderText(b.content ?? [])}</h${b.level}>`;
+      return `<h${b.level}${alignClass(b.align)}>${renderText(b.content ?? [])}</h${b.level}>`;
     case 'bulletList':
     case 'orderedList': {
       const tag = b.type === 'bulletList' ? 'ul' : 'ol';

@@ -45,6 +45,7 @@ function toText(nodes: PmNode[] | undefined): TextNode[] {
       const marks = (n.marks ?? [])
         .map((m) => {
           switch (m.type) {
+            case 'underline':
             case 'bold':
             case 'italic':
             case 'strike':
@@ -112,12 +113,18 @@ export function toDocument(root: PmNode): RichDocument | null {
       case 'heading': {
         const raw = node.attrs?.['level'];
         /*
-         * Clamped to 2 or 3. The server refuses anything else, and the post's title is the page's
-         * h1 — a body that could emit another would compete with it. Clamping rather than dropping
-         * because an h4 is clearly still meant to be a heading.
+         * Clamped to 2, 3 or 4 — the toolbar's H1, H2 and H3. The post's title is the page's only
+         * `<h1>`, so a body heading starts one level down; a deeper one is still clearly meant to
+         * be a heading, so it clamps rather than being dropped.
          */
-        const level = raw === 3 || raw === 4 || raw === 5 || raw === 6 ? 3 : 2;
-        blocks.push({ type: 'heading', level, content: toText(node.content) });
+        const level = raw === 4 || raw === 5 || raw === 6 ? 4 : raw === 3 ? 3 : 2;
+        const align = node.attrs?.['textAlign'];
+        blocks.push({
+          type: 'heading',
+          level,
+          ...(align === 'center' || align === 'right' ? { align } : {}),
+          content: toText(node.content),
+        });
         break;
       }
       case 'bulletList':
@@ -250,7 +257,13 @@ export function fromDocument(doc: RichDocument): PmNode {
           content: textOf(b.content),
         };
       case 'heading':
-        return { type: 'heading', attrs: { level: b.level }, content: textOf(b.content) };
+        return {
+          type: 'heading',
+          // `textAlign` is the attribute name TipTap's TextAlign extension uses, so it round-trips
+          // through the editor unchanged rather than being renamed in two places.
+          attrs: { level: b.level, textAlign: b.align ?? 'left' },
+          content: textOf(b.content),
+        };
       case 'bulletList':
       case 'orderedList':
         return {

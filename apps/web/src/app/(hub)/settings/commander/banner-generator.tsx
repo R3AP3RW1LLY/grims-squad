@@ -424,9 +424,19 @@ function RowEditor({
 
   return (
     <div className="space-y-3">
-      {entries.length === 0 && (
-        <p className="text-xs text-[var(--color-text-secondary)]">Nothing on this line yet.</p>
-      )}
+      {/*
+        ★ SAYS THE LINE HOLDS SEVERAL THINGS ★
+        
+        Squadron owner, 2026-07-30, asked to "allow multiple rows like we do on row 3" — the model
+        already did: any line packs as many layers as it is given, side by side. What it did not do
+        was SAY so, so the default banner having three items on line 3 and one on line 1 read as a
+        property of line 3 rather than as a choice.
+      */}
+      <p className="text-xs text-[var(--color-text-secondary)]">
+        {entries.length === 0
+          ? 'Nothing on this line yet — add as many pieces as you like; they sit side by side.'
+          : `${entries.length} ${entries.length === 1 ? 'piece' : 'pieces'} on this line, left to right. Add more below.`}
+      </p>
 
       {entries.map(({ layer, index }) => (
         <div
@@ -630,10 +640,14 @@ function RowEditor({
         >
           + BADGE
         </button>
-        {full && (
+        {full ? (
           <span className="self-center text-[11px] text-[var(--color-text-secondary)]">
-            That is {BANNER_LIMITS.maxLayers} layers &mdash; the most a banner this size stays
-            readable at.
+            That is {BANNER_LIMITS.maxLayers} pieces across all three lines &mdash; the most a
+            banner this size stays readable at.
+          </span>
+        ) : (
+          <span className="self-center text-[11px] text-[var(--color-text-secondary)]">
+            {BANNER_LIMITS.maxLayers - spec.layers.length} left
           </span>
         )}
       </div>

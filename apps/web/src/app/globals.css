@@ -804,3 +804,25 @@ body {
 .doc-font-black-ops-one { font-family: 'Black Ops One', system-ui, -apple-system, Segoe UI, sans-serif; }
 .doc-font-saira-stencil-one { font-family: 'Saira Stencil One', system-ui, -apple-system, Segoe UI, sans-serif; }
 .doc-font-wallpoet { font-family: 'Wallpoet', system-ui, -apple-system, Segoe UI, sans-serif; }
+
+/*
+ * Body headings inside a post.
+ *
+ * ★ THE TOOLBAR SAYS H1; THE MARKUP SAYS H2 ★
+ *
+ * The post TITLE is the page's only `<h1>`. A body that emitted another would give the page two
+ * competing answers to "what is this about" — which is exactly what a screen reader's heading
+ * navigation and a search engine read. So the biggest body heading is an `<h2>` sized to look like
+ * an H1, and the sizes below keep the visual hierarchy the labels promise.
+ */
+.guide-prose h2 { font-size: 1.6rem; line-height: 1.25; }
+.guide-prose h3 { font-size: 1.3rem; line-height: 1.3; }
+.guide-prose h4 { font-size: 1.1rem; line-height: 1.35; }
+
+/*
+ * Alignment, emitted as a class rather than an inline style — see `alignClass` in rich-doc.ts.
+ * The class names are `doc-center` and `doc-right`, which is what the renderer actually writes;
+ * a stylesheet guessing different names is a feature that silently does nothing.
+ */
+.guide-prose .doc-center { text-align: center; }
+.guide-prose .doc-right { text-align: right; }
