@@ -25,12 +25,16 @@
  * dev database with one user, and wrong on production, where three accounts hold it. See the
  * note at the resolution site.
  *
- * Idempotent: re-running updates the existing posts in place, so fixing a typo is
- * `pnpm --filter @grims/api seed:guides` and not a hand-written UPDATE.
+ * ★ CREATE-ONLY, BECAUSE THE WEB IS NOW THE SOURCE OF TRUTH ★
+ *
+ * Guides are edited in the browser (P2.3). So this BOOTSTRAPS a guide that does not exist and
+ * leaves alone one that does — running it can never destroy somebody's editing. `--force` overwrites
+ * deliberately, and says so on stdout before it does.
  *
  * Usage:
  *   pnpm --filter @grims/api seed:guides
  *   pnpm --filter @grims/api seed:guides -- --dry-run
+ *   pnpm --filter @grims/api seed:guides -- --force    # discards web edits
  */
 import { PrismaClient } from '@prisma/client';
 import { renderPostBody, looksDangerous } from '../src/forum/sanitize.js';
@@ -41,6 +45,11 @@ const SITE_CONFIG = 1n << 63n;
 
 async function main(): Promise<void> {
   const dryRun = process.argv.includes('--dry-run');
+  /*
+   * Overwrites a guide that already exists, discarding anything edited in the browser. Off by
+   * default — see the note at the update path.
+   */
+  const force = process.argv.includes('--force');
   const prisma = new PrismaClient();
 
   try {
@@ -178,12 +187,29 @@ async function main(): Promise<void> {
       }
 
       /*
-       * Update in place. The posts are replaced wholesale rather than diffed: they are
-       * generated from source, so there is no member content to preserve, and matching
-       * them up by position would silently reorder the guide if a step were inserted.
+       * ★ CREATE-ONLY. AN EXISTING GUIDE IS NEVER OVERWRITTEN ★
        *
-       * In a transaction so the guide is never briefly empty for a reader mid-run.
+       * Squadron owner, 2026-07-30, choosing how guides are maintained: a web editor, with the web
+       * as the source of truth.
+       *
+       * This used to replace the posts wholesale on every run, which was right while the file WAS
+       * the source of truth. It is now actively dangerous: an evening of edits in the browser would
+       * be destroyed by anybody running `seed:guides` afterwards, silently, with the only copy of
+       * that work being a revision history nobody thinks to look in.
+       *
+       * So the seeder BOOTSTRAPS and stops. It creates a guide that does not exist and leaves alone
+       * one that does — which means it is safe to run at any time, including from a deploy script.
+       *
+       * `--force` exists for the one legitimate case: re-seeding a guide that has been deleted or
+       * mangled, on purpose, by somebody who has decided to lose the web edits. It says so.
        */
+      if (!force) {
+        console.log(`    exists — left alone (use --force to overwrite web edits)`);
+        continue;
+      }
+
+      console.log(`    OVERWRITING an existing guide, discarding any edits made in the browser`);
+
       await prisma.$transaction([
         prisma.forumPost.deleteMany({ where: { threadId } }),
         prisma.forumThread.update({

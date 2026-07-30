@@ -11,6 +11,7 @@ import { ThreadService, type ThreadView, type PostView } from './thread.service.
 import { GrantService, type GrantView, type GranteeCandidate } from './grant.service.js';
 import { PostService, type RevisionView } from './post.service.js';
 import { EngageService, type ReactionCount, type SubscriptionLevel } from './engage.service.js';
+import { SearchService, renderSnippet, type SearchResult } from './search.service.js';
 
 /**
  * The forum's HTTP surface.
@@ -43,6 +44,7 @@ export class ForumController {
     @Inject(GrantService) private readonly grants: GrantService,
     @Inject(PostService) private readonly posts: PostService,
     @Inject(EngageService) private readonly engage: EngageService,
+    @Inject(SearchService) private readonly search: SearchService,
   ) {}
 
   /**
@@ -418,7 +420,50 @@ export class ForumController {
     const db = await this.acl.forCaller(c.userId);
     return this.engage.subscriptionFor(db, threadId, c.userId);
   }
+
+  /**
+   * Searches posts the caller can see (P2.5, INV-024).
+   *
+   * ★ @Public, AND THE FILTER IS STILL EXACT ★
+   *
+   * An anonymous visitor may search the public boards — the joining guides are the most useful thing
+   * on the site to somebody who has not joined, and making them unsearchable would be perverse.
+   *
+   * The caller's visible categories are resolved SERVER-SIDE from their session, never from the
+   * request, and passed into the query's WHERE clause. There is no post-filter step: an anonymous
+   * search for a term that appears only in the officers' board returns zero hits AND zero total,
+   * because the count is computed over the same filtered set.
+   */
+  @Public()
+  @Get('search')
+  async searchPosts(
+    @User() caller: CurrentUser | undefined,
+    @Query('q') q: string | undefined,
+    @Query('offset') offset: string | undefined,
+  ): Promise<{ result: SearchResult; snippets: string[] }> {
+    const db = await this.acl.forCaller(caller?.userId);
+    const visible = await this.acl.visibleCategoryIdsFor(caller?.userId);
+
+    const result = await this.search.search(
+      db,
+      q ?? '',
+      visible,
+      caller?.userId ?? null,
+      Number.parseInt(offset ?? '0', 10) || 0,
+    );
+
+    return {
+      result,
+      /*
+       * Snippets rendered HERE rather than in the client. `renderSnippet` escapes the member text
+       * and only then converts the markers to <mark> — an ordering that has to happen exactly once,
+       * so it happens on the server where there is one implementation of it.
+       */
+      snippets: result.hits.map((h) => renderSnippet(h.snippet)),
+    };
+  }
 }
+
 
 
 /**

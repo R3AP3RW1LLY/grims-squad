@@ -930,3 +930,30 @@ export const getAdminRolesGated = (): Promise<AdminRead<{ roles: AdminRoleRow[] 
 
 export const getAdminDashboardGated = (): Promise<AdminRead<AdminDashboard>> =>
   getAdmin('/v1/admin/dashboard');
+
+export interface ForumSearchHit {
+  postId: string;
+  threadId: string;
+  threadTitle: string;
+  threadSlug: string;
+  categorySlug: string;
+  authorHandle: string;
+  createdAt: string;
+  snippet: string;
+}
+
+/**
+ * Forum search (INV-024).
+ *
+ * `authed: true` forwards the session so the API resolves the real principal — the visible
+ * categories are derived server-side from it and applied inside the SQL. This function has no idea
+ * which boards exist and must not: a client that knew would be a second answer to the question the
+ * invariant says has exactly one.
+ */
+export const getForumSearch = (
+  query: string,
+): Promise<{
+  result: { hits: ForumSearchHit[]; total: number; query: string };
+  snippets: string[];
+} | null> =>
+  get(`/v1/forum/search?q=${encodeURIComponent(query)}`, { authed: true });

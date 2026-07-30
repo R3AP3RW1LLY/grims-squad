@@ -6,6 +6,7 @@ import { GrantService } from './grant.service.js';
 import { PostService } from './post.service.js';
 import { NotifyService } from './notify.service.js';
 import { EngageService } from './engage.service.js';
+import { SearchService } from './search.service.js';
 import { PendingReindexQueue } from './reindex.port.js';
 
 /**
@@ -38,6 +39,7 @@ import { PendingReindexQueue } from './reindex.port.js';
     },
     NotifyService,
     EngageService,
+    SearchService,
     {
       provide: ThreadService,
       inject: [CategoryService, PendingReindexQueue, NotifyService],

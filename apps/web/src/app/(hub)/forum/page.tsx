@@ -190,6 +190,15 @@ export default async function ForumPage() {
             out the board beside it. `auto-rows-min` would fix the row height and
             not the card, which is the wrong half of the problem.
           */
+          <>
+          <p className="mb-6">
+            <a
+              href="/forum/search"
+              className="font-mono text-xs tracking-[0.2em] text-[var(--color-brand-cyan-bright)] transition-colors hover:text-[var(--color-text-primary)]"
+            >
+              SEARCH THE BOARDS &rarr;
+            </a>
+          </p>
           <div className="grid grid-cols-1 items-start gap-6 md:grid-cols-2">
             {groups.map(({ parent, children }) => (
               <section
@@ -207,6 +216,7 @@ export default async function ForumPage() {
               </section>
             ))}
           </div>
+          </>
         )}
       </PageBody>
     </>
