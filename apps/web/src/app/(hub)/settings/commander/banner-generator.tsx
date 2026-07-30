@@ -1,21 +1,57 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
   BANNER,
-  BANNER_ANCHORS,
+  BANNER_ALIGNS,
   BANNER_BACKGROUNDS,
   BANNER_LIMITS,
+  BANNER_PALETTE,
+  BANNER_ROWS,
+  BANNER_SOURCE_LABELS,
   BANNER_TEXT_SOURCES,
+  HEX_COLOUR,
   defaultBannerSpec,
-  type BannerAnchor,
-  type BannerLayer,
-  type BannerSpec,
   signatureBBCode,
   signatureHtml,
   signatureMarkdown,
+  type BannerAlign,
+  type BannerLayer,
+  type BannerRow,
+  type BannerSpec,
+  type BannerTextSource,
 } from '@grims/shared/forum-signature';
-import { BannerRender, type BannerIdentity } from '../../../../components/forum/banner-render';
+
+/**
+ * Building a banner — the CONTROLS half.
+ *
+ * ★ THE PREVIEW LIVES IN THE OTHER COLUMN ★
+ *
+ * Squadron owner, 2026-07-30: "with the post header and banner generators always visible in
+ * realtime", and then "we need to utilize more of the page, can we make this two colums".
+ *
+ * So the preview moved OUT of this component and into `SignatureEditor`, which owns both columns.
+ * That is not just layout: there is now ONE preview of the whole signature — avatar, banner,
+ * tagline — rather than a banner preview here and a signature preview elsewhere, which were two
+ * views of the same thing that could disagree about what it looked like.
+ *
+ * `rasterise` still finds the SVG by id, so the download and the publish both draw exactly what is
+ * on screen.
+ *
+ * ★ THREE ROWS RATHER THAN FREE POSITIONING ★
+ *
+ * A layer says "my Combat rank", which reads "Harmless" today and "Elite V" later. A hand-placed
+ * layout tuned against the short one breaks against the long one, silently. Rows reflow: layers
+ * sharing a line pack side by side, so adding a fourth rank pushes the others along instead of
+ * landing on top of them.
+ */
+
+const BACKGROUND_LABEL: Record<string, string> = {
+  solid: 'Solid',
+  gradient: 'Gradient',
+  starfield: 'Starfield',
+  image: 'My image',
+};
 
 /** Reads the CSRF cookie. The name is `gs_csrf`, not `csrf` — see `image-uploader`. */
 function readCsrfCookie(): string {
@@ -26,61 +62,9 @@ function readCsrfCookie(): string {
   return '';
 }
 
-/**
- * Building a banner.
- *
- * ★ THE PREVIEW IS NOT A PREVIEW ★
- *
- * It is the real `BannerRender`, fed the real spec — the same component the forum uses and the same
- * one the PNG is rasterised from. Because it is live SVG rather than a redrawn picture, changing a
- * slider updates it in the same frame: there is no render pass to schedule, no round trip, and
- * nothing to debounce. That is what "realtime" costs here, which is nothing.
- *
- * The asynchronous part is the only part that genuinely is: an uploaded background is a network
- * fetch, so it appears when it arrives while everything else stays interactive.
- *
- * ★ WHY NOT DRAG-AND-DROP POSITIONING ★
- *
- * Because the text is not fixed. A layer says "my rank", and that renders as "Cadet" today and
- * "Chief Fleet Commander" after a promotion — a hand-placed layout tuned against the short one
- * breaks against the long one, silently, months later. Nine anchors keep every arrangement aligned
- * to the same grid whatever the words turn out to be.
- */
-
-const ANCHOR_LABEL: Record<BannerAnchor, string> = {
-  'top-left': '↖',
-  'top-center': '↑',
-  'top-right': '↗',
-  'middle-left': '←',
-  'middle-center': '•',
-  'middle-right': '→',
-  'bottom-left': '↙',
-  'bottom-center': '↓',
-  'bottom-right': '↘',
-};
-
-const SOURCE_LABEL: Record<string, string> = {
-  commander: 'My CMDR name',
-  rank: 'My rank',
-  squadron: 'Squadron name',
-  custom: 'My own words',
-};
-
-const BACKGROUND_LABEL: Record<string, string> = {
-  solid: 'Solid',
-  gradient: 'Gradient',
-  starfield: 'Starfield',
-  image: 'My image',
-};
-
-const PALETTE = ['dark', 'orange', 'cyan', 'gold', 'steel'] as const;
-const TEXT_PALETTE = ['light', 'dark', 'orange', 'cyan', 'gold', 'steel'] as const;
-
 export function BannerGenerator({
   spec,
   onChange,
-  who,
-  imageHref,
   onPickImage,
   busy,
   onPublish,
@@ -90,14 +74,9 @@ export function BannerGenerator({
 }: {
   readonly spec: BannerSpec | null;
   readonly onChange: (next: BannerSpec | null) => void;
-  readonly who: BannerIdentity;
-  /** The uploaded background, once it exists. Async — it appears when it arrives. */
-  readonly imageHref?: string;
   readonly onPickImage: (file: File) => void;
   readonly busy: boolean;
-  /** Stores the rasterised snapshot against the signature and returns its shareable URL. */
   readonly onPublish: (mediaId: string) => Promise<void>;
-  /** The absolute URL of the last published snapshot, or null. */
   readonly publishedUrl: string | null;
   readonly link: string | null;
   readonly tagline: string | null;
@@ -108,89 +87,92 @@ export function BannerGenerator({
   const [error, setError] = useState<string | null>(null);
 
   const active = spec !== null;
+  const current = spec ?? defaultBannerSpec();
 
   const set = useCallback(
-    (patch: Partial<BannerSpec>) => {
-      onChange({ ...(spec ?? defaultBannerSpec()), ...patch });
-    },
-    [spec, onChange],
+    (patch: Partial<BannerSpec>) => onChange({ ...current, ...patch }),
+    [current, onChange],
   );
 
   const setLayer = useCallback(
-    (index: number, patch: Partial<BannerLayer>) => {
-      const current = spec ?? defaultBannerSpec();
-      const layers = current.layers.map((l, i) =>
-        i === index ? ({ ...l, ...patch } as BannerLayer) : l,
-      );
-      onChange({ ...current, layers });
-    },
-    [spec, onChange],
+    (index: number, patch: Partial<BannerLayer>) =>
+      onChange({
+        ...current,
+        layers: current.layers.map((l, i) =>
+          i === index ? ({ ...l, ...patch } as BannerLayer) : l,
+        ),
+      }),
+    [current, onChange],
+  );
+
+  const removeLayer = useCallback(
+    (index: number) => onChange({ ...current, layers: current.layers.filter((_, i) => i !== index) }),
+    [current, onChange],
+  );
+
+  const addLayer = useCallback(
+    (layer: BannerLayer) => onChange({ ...current, layers: [...current.layers, layer] }),
+    [current, onChange],
   );
 
   /**
-   * Rasterises the live SVG to a PNG the member can keep.
+   * Rasterises the live SVG to a PNG.
    *
-   * ★ THE BROWSER DOES THE DRAWING, NOT THE SERVER ★
+   * ★ THE BROWSER DRAWS IT, NOT THE SERVER ★
    *
-   * The SVG on screen is serialised, drawn to a canvas at 2× for a crisp file, and exported. It
-   * therefore uses the same font rendering the member has been looking at all along.
-   *
-   * A server-side rasteriser would have used whatever fonts the container happened to have
-   * installed, and the first bug report would have been "the download does not match the preview" —
-   * with no good answer, because both would be behaving correctly.
+   * The SVG on screen is serialised, drawn to a canvas at 2×, and exported — so it uses the same
+   * font rendering the member has been looking at. A server-side rasteriser would use whatever
+   * fonts the container happened to have, and a download that differs from the preview is a bug
+   * nobody can diagnose from either end.
    */
   const rasterise = useCallback(async (): Promise<Blob> => {
     const node = document.getElementById('banner-preview')?.querySelector('svg');
     if (node === null || node === undefined) throw new Error('Nothing to render yet.');
 
-      const clone = node.cloneNode(true) as SVGSVGElement;
-      clone.setAttribute('width', String(BANNER.width));
-      clone.setAttribute('height', String(BANNER.height));
+    const clone = node.cloneNode(true) as SVGSVGElement;
+    clone.setAttribute('width', String(BANNER.width));
+    clone.setAttribute('height', String(BANNER.height));
 
-      /*
-       * Any <image> has to be INLINED as a data URI first. A canvas drawn from an SVG that
-       * references a URL — even a same-origin one — is tainted, and `toBlob` then throws a security
-       * error. This is the one part of the export that genuinely needs to be asynchronous.
-       */
-      const images = Array.from(clone.querySelectorAll('image'));
-      await Promise.all(
-        images.map(async (img) => {
-          const href = img.getAttribute('href') ?? img.getAttribute('xlink:href');
-          if (href === null || href.startsWith('data:')) return;
-          const res = await fetch(href, { credentials: 'same-origin' });
-          const blob = await res.blob();
-          const dataUri = await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(String(reader.result));
-            reader.onerror = () => reject(new Error('Could not read that image.'));
-            reader.readAsDataURL(blob);
-          });
-          img.setAttribute('href', dataUri);
-          img.removeAttribute('xlink:href');
-        }),
-      );
+    /*
+     * Any <image> has to be INLINED as a data URI first. A canvas drawn from an SVG that references
+     * a URL — even a same-origin one — is tainted, and `toBlob` then throws a security error. This
+     * is the one part of the export that genuinely needs to be asynchronous.
+     */
+    await Promise.all(
+      Array.from(clone.querySelectorAll('image')).map(async (img) => {
+        const href = img.getAttribute('href') ?? img.getAttribute('xlink:href');
+        if (href === null || href.startsWith('data:')) return;
+        const res = await fetch(href, { credentials: 'same-origin' });
+        const blob = await res.blob();
+        const dataUri = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result));
+          reader.onerror = () => reject(new Error('Could not read that image.'));
+          reader.readAsDataURL(blob);
+        });
+        img.setAttribute('href', dataUri);
+        img.removeAttribute('xlink:href');
+      }),
+    );
 
-      const svgText = new XMLSerializer().serializeToString(clone);
-      const svgUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgText)}`;
+    const svgText = new XMLSerializer().serializeToString(clone);
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error('Could not draw that banner.'));
+      el.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgText)}`;
+    });
 
-      const image = await new Promise<HTMLImageElement>((resolve, reject) => {
-        const el = new Image();
-        el.onload = () => resolve(el);
-        el.onerror = () => reject(new Error('Could not draw that banner.'));
-        el.src = svgUrl;
-      });
+    // 2× so it stays sharp on a high-density screen or scaled up a little.
+    const canvas = document.createElement('canvas');
+    canvas.width = BANNER.width * 2;
+    canvas.height = BANNER.height * 2;
+    const ctx = canvas.getContext('2d');
+    if (ctx === null) throw new Error('Your browser would not give us a canvas.');
+    ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
 
-      // 2× so it stays sharp if anybody views it on a high-density screen or scales it up a little.
-      const canvas = document.createElement('canvas');
-      canvas.width = BANNER.width * 2;
-      canvas.height = BANNER.height * 2;
-      const ctx = canvas.getContext('2d');
-      if (ctx === null) throw new Error('Your browser would not give us a canvas.');
-      ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
-
-      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
-      if (blob === null) throw new Error('Could not make a PNG out of that.');
-
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
+    if (blob === null) throw new Error('Could not make a PNG out of that.');
     return blob;
   }, []);
 
@@ -213,19 +195,6 @@ export function BannerGenerator({
     }
   }, [rasterise]);
 
-  /**
-   * Publishes the banner as a flat PNG so other forums can show it.
-   *
-   * ★ THE BROWSER RENDERS IT, THE SERVER ONLY STORES IT ★
-   *
-   * Exactly the same rasterisation as the download, so what gets published is what the member has
-   * been looking at. The alternative — the server re-rendering the spec — would use whatever fonts
-   * the container has, and a published banner that differs from the preview is a bug nobody can
-   * diagnose from either end.
-   *
-   * It goes through the ordinary upload endpoint, so it is hardened, size-capped and rate-limited
-   * like any other image rather than through a second path with its own rules.
-   */
   const publish = useCallback(async () => {
     setPublishing(true);
     setError(null);
@@ -249,35 +218,9 @@ export function BannerGenerator({
     }
   }, [rasterise, onPublish]);
 
-  const preview = useMemo(
-    () => (
-      <BannerRender
-        spec={spec ?? defaultBannerSpec()}
-        who={who}
-        width={BANNER.width}
-        className="max-w-full"
-        {...(imageHref === undefined ? {} : { imageHref })}
-      />
-    ),
-    [spec, who, imageHref],
-  );
-
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="font-mono text-xs tracking-[0.3em] text-[var(--color-text-secondary)]">
-          BANNER
-        </h2>
-        {/*
-          The size, in pixels, on the page — as asked. Stated as a fact about what gets made rather
-          than as a rule somebody has to satisfy, because for a BUILT banner it is not a rule at
-          all: the generator produces exactly this size every time.
-        */}
-        <span className="font-mono text-[11px] text-[var(--color-text-secondary)]">
-          {BANNER.width} × {BANNER.height} px
-        </span>
-      </div>
-
+    <div className="space-y-6">
+      {/* ── on / off ────────────────────────────────────────────────────── */}
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
@@ -311,256 +254,83 @@ export function BannerGenerator({
         </p>
       ) : (
         <>
-          {/* ── live preview ───────────────────────────────────────────── */}
-          <div
-            id="banner-preview"
-            className="overflow-x-auto rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel-sunken)] p-3"
-          >
-            {preview}
-          </div>
-
-          {/* ── background ─────────────────────────────────────────────── */}
-          <Field label="Background">
+          {/* ── background ───────────────────────────────────────────────── */}
+          <Section title="BACKGROUND">
             <div className="flex flex-wrap gap-2">
               {BANNER_BACKGROUNDS.map((b) => (
                 <Chip
                   key={b}
-                  active={(spec?.background ?? 'gradient') === b}
+                  active={current.background === b}
                   onClick={() => set({ background: b })}
                 >
                   {BACKGROUND_LABEL[b] ?? b}
                 </Chip>
               ))}
             </div>
-          </Field>
 
-          {spec?.background === 'image' ? (
-            <Field label={`Your image — at least ${BANNER.minUploadWidth} × ${BANNER.minUploadHeight} px`}>
-              <input
-                type="file"
-                accept="image/png,image/jpeg,image/webp"
-                disabled={busy}
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file !== undefined) onPickImage(file);
-                  e.target.value = '';
-                }}
-                className="text-sm text-[var(--color-text-secondary)] file:mr-3 file:rounded file:border file:border-[var(--color-border-hairline)] file:bg-[var(--color-surface-panel-sunken)] file:px-3 file:py-1.5 file:text-sm file:text-[var(--color-text-primary)]"
-              />
-            </Field>
-          ) : (
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Colour">
-                <div className="flex flex-wrap gap-2">
-                  {PALETTE.map((c) => (
-                    <Chip
-                      key={c}
-                      active={spec?.colourA === c}
-                      onClick={() => set({ colourA: c })}
-                    >
-                      {c}
-                    </Chip>
-                  ))}
-                </div>
-              </Field>
-              {spec?.background === 'gradient' && (
-                <Field label="Fading to">
-                  <div className="flex flex-wrap gap-2">
-                    {PALETTE.map((c) => (
-                      <Chip key={c} active={spec.colourB === c} onClick={() => set({ colourB: c })}>
-                        {c}
-                      </Chip>
-                    ))}
-                  </div>
-                </Field>
-              )}
-            </div>
-          )}
-
-          <Field label={`Darken the background — ${spec?.dim ?? 0}%`}>
-            {/*
-              Only useful over a picture, so it only appears over one. A slider that does nothing
-              visible is a control people fiddle with and then distrust.
-            */}
-            <input
-              type="range"
-              min={0}
-              max={BANNER_LIMITS.maxDim}
-              value={spec?.dim ?? 0}
-              onChange={(e) => set({ dim: Number(e.target.value) })}
-              className="w-full accent-[var(--color-brand-orange)]"
-            />
-          </Field>
-
-          {/* ── layers ─────────────────────────────────────────────────── */}
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="font-mono text-xs tracking-[0.3em] text-[var(--color-text-secondary)]">
-                LAYERS
-              </span>
-              <span className="flex gap-2">
-                <SmallButton
-                  disabled={(spec?.layers.length ?? 0) >= BANNER_LIMITS.maxLayers}
-                  onClick={() =>
-                    set({
-                      layers: [
-                        ...(spec?.layers ?? []),
-                        {
-                          kind: 'text',
-                          source: 'custom',
-                          text: 'o7',
-                          anchor: 'bottom-right',
-                          size: 14,
-                          bold: false,
-                          colour: 'light',
-                          mono: true,
-                        },
-                      ],
-                    })
-                  }
-                >
-                  + TEXT
-                </SmallButton>
-                <SmallButton
-                  disabled={(spec?.layers.length ?? 0) >= BANNER_LIMITS.maxLayers}
-                  onClick={() =>
-                    set({
-                      layers: [
-                        ...(spec?.layers ?? []),
-                        { kind: 'badge', badge: 'squadron', anchor: 'middle-right', size: 64 },
-                      ],
-                    })
-                  }
-                >
-                  + BADGE
-                </SmallButton>
-              </span>
-            </div>
-
-            {(spec?.layers ?? []).map((layer, i) => (
-              <div
-                key={i}
-                className="space-y-3 rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel)] p-3"
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <span className="font-mono text-[11px] text-[var(--color-text-secondary)]">
-                    {layer.kind === 'badge' ? 'BADGE' : 'TEXT'}
+            {current.background === 'image' ? (
+              <div className="mt-3 space-y-2">
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  disabled={busy}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file !== undefined) onPickImage(file);
+                    e.target.value = '';
+                  }}
+                  className="text-sm text-[var(--color-text-secondary)] file:mr-3 file:rounded file:border file:border-[var(--color-border-hairline)] file:bg-[var(--color-surface-panel-sunken)] file:px-3 file:py-1.5 file:text-sm file:text-[var(--color-text-primary)]"
+                />
+                <p className="text-xs text-[var(--color-text-secondary)]">
+                  At least{' '}
+                  <span className="font-mono text-[var(--color-text-primary)]">
+                    {BANNER.minUploadWidth} × {BANNER.minUploadHeight} px
                   </span>
-                  <SmallButton
-                    onClick={() =>
-                      set({ layers: (spec?.layers ?? []).filter((_, j) => j !== i) })
-                    }
-                  >
-                    REMOVE
-                  </SmallButton>
-                </div>
-
-                {layer.kind === 'text' && (
-                  <>
-                    <div className="flex flex-wrap gap-2">
-                      {BANNER_TEXT_SOURCES.map((src) => (
-                        <Chip
-                          key={src}
-                          active={layer.source === src}
-                          onClick={() => setLayer(i, { source: src })}
-                        >
-                          {SOURCE_LABEL[src] ?? src}
-                        </Chip>
-                      ))}
-                    </div>
-
-                    {layer.source === 'custom' && (
-                      <input
-                        type="text"
-                        value={layer.text ?? ''}
-                        maxLength={BANNER_LIMITS.maxCustomText}
-                        onChange={(e) => setLayer(i, { text: e.target.value })}
-                        aria-label="Banner text"
-                        className="w-full rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel-sunken)] px-3 py-1.5 text-sm text-[var(--color-text-primary)]"
-                      />
-                    )}
-
-                    <div className="flex flex-wrap gap-2">
-                      {TEXT_PALETTE.map((c) => (
-                        <Chip
-                          key={c}
-                          active={layer.colour === c}
-                          onClick={() => setLayer(i, { colour: c })}
-                        >
-                          {c}
-                        </Chip>
-                      ))}
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-3">
-                      <label className="flex items-center gap-2 text-xs text-[var(--color-text-primary)]">
-                        <input
-                          type="checkbox"
-                          checked={layer.bold}
-                          onChange={(e) => setLayer(i, { bold: e.target.checked })}
-                          className="size-4 accent-[var(--color-brand-orange)]"
-                        />
-                        Bold
-                      </label>
-                      <label className="flex items-center gap-2 text-xs text-[var(--color-text-primary)]">
-                        <input
-                          type="checkbox"
-                          checked={layer.mono}
-                          onChange={(e) => setLayer(i, { mono: e.target.checked })}
-                          className="size-4 accent-[var(--color-brand-orange)]"
-                        />
-                        Console style
-                      </label>
-                    </div>
-                  </>
-                )}
-
-                <label className="block text-xs text-[var(--color-text-secondary)]">
-                  Size — {layer.size}px
-                  <input
-                    type="range"
-                    min={
-                      layer.kind === 'badge'
-                        ? BANNER_LIMITS.minBadgeSize
-                        : BANNER_LIMITS.minTextSize
-                    }
-                    max={
-                      layer.kind === 'badge'
-                        ? BANNER_LIMITS.maxBadgeSize
-                        : BANNER_LIMITS.maxTextSize
-                    }
-                    value={layer.size}
-                    onChange={(e) => setLayer(i, { size: Number(e.target.value) })}
-                    className="mt-1 w-full accent-[var(--color-brand-orange)]"
-                  />
-                </label>
-
-                <div>
-                  <span className="mb-1 block text-xs text-[var(--color-text-secondary)]">
-                    Position
-                  </span>
-                  <div className="grid w-fit grid-cols-3 gap-1">
-                    {BANNER_ANCHORS.map((a) => (
-                      <button
-                        key={a}
-                        type="button"
-                        aria-label={a.replace('-', ' ')}
-                        aria-pressed={layer.anchor === a}
-                        onClick={() => setLayer(i, { anchor: a })}
-                        className={`size-8 rounded border text-sm transition-colors ${
-                          layer.anchor === a
-                            ? 'border-[var(--color-border-active)] bg-[var(--color-surface-panel-hover)] text-[var(--color-text-primary)]'
-                            : 'border-[var(--color-border-hairline)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
-                        }`}
-                      >
-                        {ANCHOR_LABEL[a]}
-                      </button>
-                    ))}
-                  </div>
-                </div>
+                  . Cropped to fill {BANNER.width} × {BANNER.height}.
+                </p>
               </div>
-            ))}
-          </div>
+            ) : (
+              <div className="mt-3 grid gap-4 sm:grid-cols-2">
+                <ColourPicker
+                  label={current.background === 'gradient' ? 'From' : 'Colour'}
+                  value={current.colourA}
+                  onChange={(v) => set({ colourA: v })}
+                />
+                {current.background === 'gradient' && (
+                  <ColourPicker
+                    label="To"
+                    value={current.colourB}
+                    onChange={(v) => set({ colourB: v })}
+                  />
+                )}
+              </div>
+            )}
+
+            <label className="mt-4 block text-xs text-[var(--color-text-secondary)]">
+              Darken the background — {current.dim}%
+              <input
+                type="range"
+                min={0}
+                max={BANNER_LIMITS.maxDim}
+                value={current.dim}
+                onChange={(e) => set({ dim: Number(e.target.value) })}
+                className="mt-1 w-full accent-[var(--color-brand-orange)]"
+              />
+            </label>
+          </Section>
+
+          {/* ── the three lines ──────────────────────────────────────────── */}
+          {BANNER_ROWS.map((row) => (
+            <Section key={row} title={`LINE ${row}`}>
+              <RowEditor
+                row={row}
+                spec={current}
+                onSetLayer={setLayer}
+                onRemove={removeLayer}
+                onAdd={addLayer}
+              />
+            </Section>
+          ))}
 
           {error !== null && (
             <p role="alert" className="text-sm text-[var(--color-brand-orange-bright)]">
@@ -604,12 +374,305 @@ export function BannerGenerator({
   );
 }
 
-function Field({ label, children }: { readonly label: string; readonly children: React.ReactNode }) {
+/* ------------------------------------------------------------- one line */
+
+function RowEditor({
+  row,
+  spec,
+  onSetLayer,
+  onRemove,
+  onAdd,
+}: {
+  readonly row: BannerRow;
+  readonly spec: BannerSpec;
+  readonly onSetLayer: (index: number, patch: Partial<BannerLayer>) => void;
+  readonly onRemove: (index: number) => void;
+  readonly onAdd: (layer: BannerLayer) => void;
+}) {
+  /*
+   * Indices into the FULL layer list, not into a filtered copy. Editing a filtered array and
+   * writing it back is how the wrong layer gets changed the moment somebody has two lines in use.
+   */
+  const entries = spec.layers
+    .map((layer, index) => ({ layer, index }))
+    .filter((e) => e.layer.row === row);
+
+  const full = spec.layers.length >= BANNER_LIMITS.maxLayers;
+
+  return (
+    <div className="space-y-3">
+      {entries.length === 0 && (
+        <p className="text-xs text-[var(--color-text-secondary)]">Nothing on this line yet.</p>
+      )}
+
+      {entries.map(({ layer, index }) => (
+        <div
+          key={index}
+          className="space-y-3 rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel)] p-3"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="font-mono text-[11px] text-[var(--color-text-secondary)]">
+              {layer.kind === 'badge' ? 'BADGE' : BANNER_SOURCE_LABELS[layer.source].toUpperCase()}
+            </span>
+            <span className="flex items-center gap-2">
+              {/* Moving between lines is a row change, so it belongs here rather than in a menu. */}
+              {BANNER_ROWS.filter((r) => r !== layer.row).map((r) => (
+                <button
+                  key={r}
+                  type="button"
+                  onClick={() => onSetLayer(index, { row: r })}
+                  className="font-mono text-[11px] text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)]"
+                >
+                  &rarr; LINE {r}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => onRemove(index)}
+                className="font-mono text-[11px] text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-brand-orange-bright)]"
+              >
+                REMOVE
+              </button>
+            </span>
+          </div>
+
+          {layer.kind === 'text' && (
+            <>
+              <label className="block text-xs text-[var(--color-text-secondary)]">
+                Shows
+                <select
+                  value={layer.source}
+                  onChange={(e) => onSetLayer(index, { source: e.target.value as BannerTextSource })}
+                  className="mt-1 w-full rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel-sunken)] px-2 py-1.5 text-sm text-[var(--color-text-primary)]"
+                >
+                  {BANNER_TEXT_SOURCES.map((s) => (
+                    <option key={s} value={s}>
+                      {BANNER_SOURCE_LABELS[s]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              {layer.source === 'custom' ? (
+                <input
+                  type="text"
+                  value={layer.text ?? ''}
+                  maxLength={BANNER_LIMITS.maxCustomText}
+                  onChange={(e) => onSetLayer(index, { text: e.target.value })}
+                  aria-label="Banner text"
+                  placeholder="Anything you like"
+                  className="w-full rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel-sunken)] px-2 py-1.5 text-sm text-[var(--color-text-primary)]"
+                />
+              ) : (
+                <input
+                  type="text"
+                  value={layer.label ?? ''}
+                  maxLength={BANNER_LIMITS.maxLabel}
+                  onChange={(e) => onSetLayer(index, { label: e.target.value })}
+                  aria-label="Label before the value"
+                  placeholder="Label before it, e.g. CMB"
+                  className="w-full rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel-sunken)] px-2 py-1.5 text-sm text-[var(--color-text-primary)]"
+                />
+              )}
+
+              <ColourPicker
+                label="Colour"
+                value={layer.colour}
+                onChange={(v) => onSetLayer(index, { colour: v })}
+              />
+
+              <div className="flex flex-wrap items-center gap-4">
+                <label className="flex items-center gap-2 text-xs text-[var(--color-text-primary)]">
+                  <input
+                    type="checkbox"
+                    checked={layer.bold}
+                    onChange={(e) => onSetLayer(index, { bold: e.target.checked })}
+                    className="size-4 accent-[var(--color-brand-orange)]"
+                  />
+                  Bold
+                </label>
+                <label className="flex items-center gap-2 text-xs text-[var(--color-text-primary)]">
+                  <input
+                    type="checkbox"
+                    checked={layer.mono}
+                    onChange={(e) => onSetLayer(index, { mono: e.target.checked })}
+                    className="size-4 accent-[var(--color-brand-orange)]"
+                  />
+                  Console style
+                </label>
+              </div>
+            </>
+          )}
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="block text-xs text-[var(--color-text-secondary)]">
+              Size &mdash; {layer.size}px
+              <input
+                type="range"
+                min={layer.kind === 'badge' ? BANNER_LIMITS.minBadgeSize : BANNER_LIMITS.minTextSize}
+                max={layer.kind === 'badge' ? BANNER_LIMITS.maxBadgeSize : BANNER_LIMITS.maxTextSize}
+                value={layer.size}
+                onChange={(e) => onSetLayer(index, { size: Number(e.target.value) })}
+                className="mt-1 w-full accent-[var(--color-brand-orange)]"
+              />
+            </label>
+            <div>
+              <span className="mb-1 block text-xs text-[var(--color-text-secondary)]">Side</span>
+              <div className="flex gap-1">
+                {BANNER_ALIGNS.map((a) => (
+                  <button
+                    key={a}
+                    type="button"
+                    aria-pressed={layer.align === a}
+                    onClick={() => onSetLayer(index, { align: a as BannerAlign })}
+                    className={`flex-1 rounded border px-2 py-1 text-xs capitalize transition-colors ${
+                      layer.align === a
+                        ? 'border-[var(--color-border-active)] bg-[var(--color-surface-panel-hover)] text-[var(--color-text-primary)]'
+                        : 'border-[var(--color-border-hairline)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
+                    }`}
+                  >
+                    {a}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      ))}
+
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          disabled={full}
+          onClick={() =>
+            onAdd({
+              kind: 'text',
+              source: 'custom',
+              text: 'o7',
+              row,
+              align: 'left',
+              size: 14,
+              bold: false,
+              colour: '#e8eef5',
+              mono: true,
+            })
+          }
+          className="rounded border border-[var(--color-border-hairline)] px-2.5 py-1 font-mono text-[11px] text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)] disabled:opacity-40"
+        >
+          + TEXT
+        </button>
+        <button
+          type="button"
+          disabled={full}
+          onClick={() => onAdd({ kind: 'badge', badge: 'squadron', row, align: 'right', size: 72 })}
+          className="rounded border border-[var(--color-border-hairline)] px-2.5 py-1 font-mono text-[11px] text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)] disabled:opacity-40"
+        >
+          + BADGE
+        </button>
+        {full && (
+          <span className="self-center text-[11px] text-[var(--color-text-secondary)]">
+            That is {BANNER_LIMITS.maxLayers} layers &mdash; the most a banner this size stays
+            readable at.
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------- controls */
+
+/**
+ * A colour, as a native picker plus a hex box plus swatches.
+ *
+ * ★ ALL THREE, BECAUSE THEY ANSWER DIFFERENT QUESTIONS ★
+ *
+ * Owner asked for "color pickers with hex code input". The swatches are the fast path for somebody
+ * who just wants squadron orange; the picker is for choosing by eye; the hex box is for somebody
+ * matching a colour they already have.
+ *
+ * The hex box keeps a DRAFT of what is typed and only commits a value that parses, so clearing it
+ * to retype does not blank the banner mid-keystroke. The border turns warm while the draft is not
+ * yet a colour, which is feedback rather than an error.
+ */
+function ColourPicker({
+  label,
+  value,
+  onChange,
+}: {
+  readonly label: string;
+  readonly value: string;
+  readonly onChange: (hex: string) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const shown = draft ?? value;
+
   return (
     <div>
-      <span className="mb-2 block text-xs text-[var(--color-text-secondary)]">{label}</span>
-      {children}
+      <span className="mb-1 block text-xs text-[var(--color-text-secondary)]">{label}</span>
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          type="color"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          aria-label={`${label} colour picker`}
+          className="size-8 cursor-pointer rounded border border-[var(--color-border-hairline)] bg-transparent"
+        />
+        <input
+          type="text"
+          value={shown}
+          spellCheck={false}
+          aria-label={`${label} hex code`}
+          onChange={(e) => {
+            const next = e.target.value;
+            setDraft(next);
+            if (HEX_COLOUR.test(next)) onChange(next.toLowerCase());
+          }}
+          onBlur={() => setDraft(null)}
+          className={`w-24 rounded border bg-[var(--color-surface-panel-sunken)] px-2 py-1 font-mono text-xs text-[var(--color-text-primary)] ${
+            HEX_COLOUR.test(shown)
+              ? 'border-[var(--color-border-hairline)]'
+              : 'border-[var(--color-brand-orange-bright)]'
+          }`}
+        />
+        <span className="flex flex-wrap gap-1">
+          {BANNER_PALETTE.map((c) => (
+            <button
+              key={c}
+              type="button"
+              aria-label={c}
+              onClick={() => {
+                setDraft(null);
+                onChange(c);
+              }}
+              style={{ backgroundColor: c }}
+              className={`size-5 rounded border transition-transform hover:scale-110 ${
+                value === c
+                  ? 'border-[var(--color-text-primary)]'
+                  : 'border-[var(--color-border-hairline)]'
+              }`}
+            />
+          ))}
+        </span>
+      </div>
     </div>
+  );
+}
+
+function Section({
+  title,
+  children,
+}: {
+  readonly title: string;
+  readonly children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel-sunken)] p-4">
+      <h3 className="mb-3 font-mono text-xs tracking-[0.3em] text-[var(--color-text-secondary)]">
+        {title}
+      </h3>
+      {children}
+    </section>
   );
 }
 
@@ -627,7 +690,7 @@ function Chip({
       type="button"
       aria-pressed={active}
       onClick={onClick}
-      className={`rounded border px-2.5 py-1 text-xs capitalize transition-colors ${
+      className={`rounded border px-2.5 py-1 text-xs transition-colors ${
         active
           ? 'border-[var(--color-border-active)] bg-[var(--color-surface-panel-hover)] text-[var(--color-text-primary)]'
           : 'border-[var(--color-border-hairline)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
@@ -638,39 +701,20 @@ function Chip({
   );
 }
 
-function SmallButton({
-  onClick,
-  disabled = false,
-  children,
-}: {
-  readonly onClick: () => void;
-  readonly disabled?: boolean;
-  readonly children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className="font-mono text-[11px] text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)] disabled:opacity-40"
-    >
-      {children}
-    </button>
-  );
-}
+/* --------------------------------------------------------- share codes */
 
 /**
  * The share codes, once a banner has been published.
  *
- * ★ WHY THIS IS A SEPARATE STEP AND NOT ALWAYS PRESENT ★
+ * ★ WHY PUBLISHING IS A SEPARATE STEP ★
  *
- * A signature on our own forum is live: a text layer saying "my rank" is resolved when it is drawn,
- * so a promotion updates every banner the member has ever posted. BBCode cannot do that — `[img]`
- * takes a URL and shows a picture.
+ * A signature here is live: a layer saying "my Combat rank" is resolved when it is drawn, so a
+ * promotion updates every banner the member has ever posted. BBCode cannot do that — `[img]` takes
+ * a URL and shows a picture.
  *
- * So sharing means freezing, and the copy says so. Somebody who is promoted and does not re-publish
- * has a correct banner here and a stale one on every other forum, and finding that out from a
- * squadmate is worse than reading it now.
+ * So sharing means freezing, and the copy says so. Somebody promoted who does not re-publish has a
+ * correct banner here and a stale one everywhere else, and finding that out from a squadmate is
+ * worse than reading it now.
  */
 function ShareCodes({
   publishedUrl,
@@ -688,9 +732,9 @@ function ShareCodes({
   if (publishedUrl === null) {
     return (
       <p className="text-sm leading-relaxed text-[var(--color-text-secondary)]">
-        Publish it to get a BBCode block you can paste into other forums. Your banner here stays
-        live and updates itself; a published copy is a snapshot, so re-publish after a promotion or
-        a redesign.
+        Publish it to get a BBCode block you can paste into other forums. Your banner here stays live
+        and updates itself; a published copy is a snapshot, so re-publish after a promotion or a
+        redesign.
       </p>
     );
   }
@@ -710,7 +754,12 @@ function ShareCodes({
       hint: 'Discord, GitHub, anywhere that speaks Markdown.',
       value: signatureMarkdown(share),
     },
-    { key: 'html', label: 'HTML', hint: 'Forums that accept raw HTML.', value: signatureHtml(share) },
+    {
+      key: 'html',
+      label: 'HTML',
+      hint: 'Forums that accept raw HTML.',
+      value: signatureHtml(share),
+    },
     { key: 'url', label: 'Image URL', hint: 'Just the picture.', value: publishedUrl },
   ];
 

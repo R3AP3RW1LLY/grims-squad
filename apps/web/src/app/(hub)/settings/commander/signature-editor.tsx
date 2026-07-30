@@ -20,7 +20,7 @@ import {
   type SignatureAccent,
   type SignatureView,
 } from '@grims/shared/forum-signature';
-import type { BannerSpec } from '@grims/shared/forum-signature';
+import { defaultBannerSpec, type BannerSpec } from '@grims/shared/forum-signature';
 import { apiCall } from '../../../../lib/api-client';
 import { SignatureBlock } from '../../../../components/forum/signature-block';
 import { BannerGenerator } from './banner-generator';
@@ -80,12 +80,7 @@ export function SignatureEditor({
 }) {
   const [sig, setSig] = useState<SignatureView | null>(null);
   const [saving, setSaving] = useState(false);
-  /*
-   * The uploaded background, resolved asynchronously. Held apart from the spec because the spec
-   * stores an ID and the renderer needs a PATH — and the path is known the moment the upload
-   * returns, whereas re-reading it from the saved signature would need a round trip.
-   */
-  const [backgroundHref, setBackgroundHref] = useState<string | undefined>(undefined);
+
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const avatarInput = useRef<HTMLInputElement>(null);
@@ -141,8 +136,16 @@ export function SignatureEditor({
        */
       if (slot === 'background') {
         // A background belongs to the SPEC, not to the signature's own banner slot.
-        const next: BannerSpec = { ...(sig?.bannerSpec ?? { version: 1, background: 'image', colourA: 'dark', colourB: 'orange', dim: 0, layers: [] }), background: 'image', imageMediaId: json.id };
-        setBackgroundHref(`/v1/media/uploads/${json.id}`);
+        /*
+         * `defaultBannerSpec()` rather than a hand-written literal. A literal here drifted from the
+         * contract the moment the spec version changed, and TypeScript only caught it because the
+         * version is a literal type — the colours would have gone through silently wrong.
+         */
+        const next: BannerSpec = {
+          ...(sig?.bannerSpec ?? defaultBannerSpec()),
+          background: 'image',
+          imageMediaId: json.id,
+        };
         await save({ bannerSpec: next });
       } else {
         await save(slot === 'avatar' ? { avatarMediaId: json.id } : { bannerMediaId: json.id });
@@ -194,31 +197,75 @@ export function SignatureEditor({
 
   const linkLooksWrong = sig.bannerLink !== null && !isAllowedSignatureLink(sig.bannerLink);
 
+  const avatar = sig.avatarUrl ?? discordAvatarUrl;
+
   return (
-    <div className="space-y-8">
-      {/* ── the live preview ─────────────────────────────────────────────── */}
-      <section>
+    /*
+     * ★ TWO COLUMNS: CONTROLS LEFT, PREVIEW RIGHT ★
+     *
+     * Squadron owner, 2026-07-30: "we need to utilize more of the page, can we make this two colums
+     * some how or lay this out better so it utilizes more of the page".
+     *
+     * The preview is STICKY in the right column, so it stays on screen through the whole form
+     * rather than scrolling away the moment somebody starts editing the thing it shows. Below
+     * `xl` the columns stack and the preview sits on top — on a phone there is no second column to
+     * put it in, and a preview underneath a long form is a preview nobody sees.
+     */
+    <div className="grid grid-cols-1 items-start gap-8 xl:grid-cols-[minmax(0,1fr)_28rem]">
+      {/* ── the preview ─────────────────────────────────────────────────── */}
+      <section className="order-first xl:order-last xl:sticky xl:top-24">
         <h2 className="mb-3 font-mono text-xs tracking-[0.3em] text-[var(--color-text-secondary)]">
-          PREVIEW
+          LIVE PREVIEW
         </h2>
-        <div className="rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel)] p-5">
-          <div className="flex items-center gap-3">
-            <img
-              src={sig.avatarUrl ?? discordAvatarUrl ?? ''}
-              alt=""
-              width={40}
-              height={40}
-              className="size-10 rounded-full object-cover"
-            />
-            <span className="text-sm text-[var(--color-text-primary)]">Your post</span>
+        <div className="rounded-lg border border-[var(--color-border-active)] bg-[var(--color-surface-panel)] p-4 shadow-lg">
+          {/*
+            ONE preview of the WHOLE signature — post header, banner, tagline — rather than a
+            banner preview in the generator and a signature preview here. Two views of the same
+            thing eventually disagree about what it looks like, and the member cannot tell which
+            one is lying.
+          */}
+          <div className="rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel-sunken)] p-4">
+            <div className="mb-3 flex items-center gap-3 border-b border-[var(--color-border-hairline)] pb-3">
+              {avatar === null ? (
+                <span className="flex size-10 items-center justify-center rounded-full bg-[var(--color-brand-orange)] text-sm font-semibold text-[var(--color-text-on-accent)]">
+                  {(who.commander ?? 'C').slice(0, 1).toUpperCase()}
+                </span>
+              ) : (
+                <img
+                  src={avatar}
+                  alt=""
+                  width={40}
+                  height={40}
+                  className="size-10 rounded-full object-cover"
+                />
+              )}
+              <span>
+                <span className="block text-sm text-[var(--color-text-primary)]">
+                  {who.commander ?? 'You'}
+                </span>
+                <span className="block font-mono text-[11px] text-[var(--color-text-secondary)]">
+                  just now
+                </span>
+              </span>
+            </div>
+
+            <p className="mb-3 text-sm text-[var(--color-text-secondary)]">
+              This is how a post of yours will look.
+            </p>
+
+            {/*
+              `id` is what `rasterise` looks for, so the PNG people download and publish is drawn
+              from exactly this element rather than from a second render of the same spec.
+            */}
+            <div id="banner-preview">
+              <SignatureBlock signature={sig} who={who} />
+            </div>
           </div>
-          <p className="mt-3 text-sm text-[var(--color-text-secondary)]">
-            This is roughly how a post of yours will look.
-          </p>
-          {/* The REAL component, not a copy of it. See the note at the top. */}
-          <SignatureBlock signature={sig} who={who} />
         </div>
       </section>
+
+      {/* ── the controls ────────────────────────────────────────────────── */}
+      <div className="min-w-0 space-y-8">
 
       {/* ── avatar ───────────────────────────────────────────────────────── */}
       <section className="space-y-3">
@@ -293,8 +340,6 @@ export function SignatureEditor({
         <BannerGenerator
           spec={sig.bannerSpec}
           onChange={(next) => patch({ bannerSpec: next })}
-          who={who}
-          {...(backgroundHref === undefined ? {} : { imageHref: backgroundHref })}
           onPickImage={(file) => void upload(file, 'background')}
           busy={saving}
           /*
@@ -432,16 +477,17 @@ export function SignatureEditor({
         </p>
       )}
 
-      <div className="flex items-center gap-3">
-        <button
-          type="button"
-          onClick={() => void save()}
-          disabled={saving}
-          className="rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel-sunken)] px-4 py-2 text-sm text-[var(--color-text-primary)] transition-colors hover:border-[var(--color-border-active)] disabled:opacity-50"
-        >
-          {saving ? 'Saving…' : 'Save signature'}
-        </button>
-        {saved && <span className="text-sm text-[var(--color-semantic-success)]">Saved.</span>}
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => void save()}
+            disabled={saving}
+            className="rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel-sunken)] px-4 py-2 text-sm text-[var(--color-text-primary)] transition-colors hover:border-[var(--color-border-active)] disabled:opacity-50"
+          >
+            {saving ? 'Saving…' : 'Save signature'}
+          </button>
+          {saved && <span className="text-sm text-[var(--color-semantic-success)]">Saved.</span>}
+        </div>
       </div>
     </div>
   );

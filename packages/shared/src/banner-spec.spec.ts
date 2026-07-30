@@ -23,10 +23,10 @@ import {
  */
 
 const base = {
-  version: 1 as const,
+  version: 2 as const,
   background: 'gradient' as const,
-  colourA: 'dark' as const,
-  colourB: 'orange' as const,
+  colourA: '#0b0f14',
+  colourB: '#ff7100',
   dim: 0,
   layers: [],
 };
@@ -68,13 +68,37 @@ describe('banner specs', () => {
       expect(() =>
         validateBannerSpec({
           ...base,
-          layers: [{ kind: 'badge', badge: 'somebody-elses-logo', anchor: 'top-left', size: 40 }],
+          layers: [{ kind: 'badge', badge: 'somebody-elses-logo', row: 1, size: 40 }],
         }),
       ).toThrow();
     });
 
     it('a version from a different editor', () => {
-      expect(() => validateBannerSpec({ ...base, version: 2 })).toThrow();
+      expect(() => validateBannerSpec({ ...base, version: 99 })).toThrow();
+    });
+
+    it('MANDATORY: reads a version 1 banner rather than refusing it', () => {
+      /*
+       * Version 1 shipped and members built banners with it. Refusing those would blank their
+       * signature with no explanation and no way back — the spec is the only copy, so "rebuild it"
+       * would mean "your work is gone". The nine anchors were three rows crossed with three
+       * alignments, and the palette names were always hex underneath.
+       */
+      const v1 = {
+        version: 1,
+        background: 'gradient',
+        colourA: 'dark',
+        colourB: 'orange',
+        dim: 0,
+        layers: [
+          { kind: 'text', source: 'rank', anchor: 'bottom-right', size: 14, colour: 'cyan' },
+        ],
+      };
+      const out = validateBannerSpec(v1);
+      expect(out.version).toBe(2);
+      expect(out.colourA).toBe('#0b0f14');
+      expect(out.layers[0]).toMatchObject({ row: 3, align: 'right', source: 'squadronRank' });
+      expect(out.layers[0]?.colour).toBe('#5cd9ff');
     });
 
     it('null, a string, and a number', () => {
@@ -88,7 +112,7 @@ describe('banner specs', () => {
         kind: 'text',
         source: 'custom',
         text: 'x',
-        anchor: 'top-left',
+        row: 1,
         size: 12,
       }));
       expect(() => validateBannerSpec({ ...base, layers: many })).toThrow();
@@ -99,7 +123,7 @@ describe('banner specs', () => {
     it('a text size past the maximum', () => {
       const out = validateBannerSpec({
         ...base,
-        layers: [{ kind: 'text', source: 'custom', text: 'x', anchor: 'top-left', size: 9999 }],
+        layers: [{ kind: 'text', source: 'custom', text: 'x', row: 1, size: 9999 }],
       });
       expect(out.layers[0]?.size).toBe(BANNER_LIMITS.maxTextSize);
     });
@@ -107,7 +131,7 @@ describe('banner specs', () => {
     it('a negative size', () => {
       const out = validateBannerSpec({
         ...base,
-        layers: [{ kind: 'text', source: 'custom', text: 'x', anchor: 'top-left', size: -40 }],
+        layers: [{ kind: 'text', source: 'custom', text: 'x', row: 1, size: -40 }],
       });
       expect(out.layers[0]?.size).toBe(BANNER_LIMITS.minTextSize);
     });
@@ -127,19 +151,19 @@ describe('banner specs', () => {
         ...base,
         dim: Number.NaN,
         layers: [
-          { kind: 'text', source: 'custom', text: 'x', anchor: 'top-left', size: 'big' },
+          { kind: 'text', source: 'custom', text: 'x', row: 1, size: 'big' },
         ],
       });
       expect(out.dim).toBe(0);
       expect(Number.isFinite(out.layers[0]?.size)).toBe(true);
     });
 
-    it('an anchor nobody defined falls back to a real one', () => {
+    it('a row or side nobody defined falls back to a real one', () => {
       const out = validateBannerSpec({
         ...base,
-        layers: [{ kind: 'text', source: 'custom', text: 'x', anchor: 'somewhere', size: 12 }],
+        layers: [{ kind: 'text', source: 'custom', text: 'x', row: 9, align: 'sideways', size: 12 }],
       });
-      expect(out.layers[0]?.anchor).toBe('middle-left');
+      expect(out.layers[0]).toMatchObject({ row: 2, align: 'left' });
     });
   });
 
@@ -148,7 +172,7 @@ describe('banner specs', () => {
       const out = validateBannerSpec({
         ...base,
         layers: [
-          { kind: 'text', source: 'custom', text: 'x'.repeat(500), anchor: 'top-left', size: 12 },
+          { kind: 'text', source: 'custom', text: 'x'.repeat(500), row: 1, size: 12 },
         ],
       });
       const layer = out.layers[0] as { text?: string };
@@ -164,7 +188,7 @@ describe('banner specs', () => {
       const out = validateBannerSpec({
         ...base,
         layers: [
-          { kind: 'text', source: 'rank', text: 'Cadet forever', anchor: 'top-left', size: 12 },
+          { kind: 'text', source: 'combat', text: 'Harmless forever', row: 1, size: 12 },
         ],
       });
       expect(out.layers[0]).not.toHaveProperty('text');
@@ -175,11 +199,11 @@ describe('banner specs', () => {
       // how a member ends up with invisible text on their own banner.
       const out = validateBannerSpec({
         ...base,
-        layers: [
-          { kind: 'text', source: 'custom', text: 'x', anchor: 'top-left', size: 12, colour: '#000' },
-        ],
+        layers: [{ kind: 'text', source: 'custom', text: 'x', row: 1, size: 12, colour: 'chartreuse' }],
       });
-      expect(out.layers[0]).toMatchObject({ colour: 'light' });
+      // Falls back to a legible default rather than reaching the renderer as an unvalidated CSS
+      // string. `#000` IS valid CSS but not our format — six digits, so the parser is unambiguous.
+      expect(out.layers[0]?.colour).toBe('#e8eef5');
     });
   });
 
@@ -210,7 +234,8 @@ describe('banner specs', () => {
   describe('the fixed size', () => {
     it('is 600 × 120 with a stated floor for uploads', () => {
       // Pinned so the number in the UI copy, the server message and the renderer cannot drift.
-      expect([BANNER.width, BANNER.height]).toEqual([600, 120]);
+      expect([BANNER.width, BANNER.height]).toEqual([600, 160]);
+      expect(BANNER.rows).toBe(3);
       expect(BANNER.minUploadWidth).toBeLessThan(BANNER.width);
       expect(BANNER.minUploadHeight).toBeLessThan(BANNER.height);
     });

@@ -96,6 +96,7 @@ export function PageBody({
   children,
   rail,
   lead,
+  wide,
 }: {
   children: React.ReactNode;
   rail?: React.ReactNode;
@@ -104,6 +105,20 @@ export function PageBody({
    * line is level with the top of the rail beside it.
    */
   lead?: string;
+  /**
+   * Drops the reading-width cap.
+   *
+   * ★ AN OPTION, NOT A DEFAULT, AND NOT A LOCAL OVERRIDE ★
+   *
+   * 68ch is right for prose: past that, the eye loses the start of the next line. It is wrong for
+   * a page that is a TOOL rather than a document — the signature maker is a live preview beside a
+   * column of controls, and squeezing that into a paragraph's width wastes most of the screen.
+   *
+   * Exposed here rather than letting the page wrap itself in its own container, because a page
+   * that re-centres itself is exactly what `hub-page.spec` exists to catch. Widening is a decision
+   * this component owns; the page only says which kind of page it is.
+   */
+  wide?: boolean;
 }) {
   const body = (
     <>
@@ -115,7 +130,7 @@ export function PageBody({
   );
 
   if (rail === undefined) {
-    return <div className="max-w-[68ch]">{body}</div>;
+    return <div className={wide === true ? '' : 'max-w-[68ch]'}>{body}</div>;
   }
 
   return (

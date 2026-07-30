@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { ErrorCode } from '@grims/shared';
+import { BANNER, BANNER_LIMITS } from '@grims/shared/forum-signature';
 import { SignatureService, toView } from './signature.service.js';
 
 /**
@@ -137,7 +138,11 @@ describe('forum signatures', () => {
     });
 
     it('accepts an upload at exactly the floor', async () => {
-      const db = client({ size: { width: 300, height: 60 } });
+      // Read from the contract rather than hardcoded: the floor moved with the banner height, and
+      // a literal here would have to be found and changed every time it does.
+      const db = client({
+        size: { width: BANNER.minUploadWidth, height: BANNER.minUploadHeight },
+      });
       await new SignatureService().save(db as never, 'me', { bannerMediaId: 'media-mine' });
       expect(db.upserts[0]).toMatchObject({ bannerMediaId: 'media-mine' });
     });
@@ -145,12 +150,16 @@ describe('forum signatures', () => {
     it('MANDATORY: refuses one below the floor, stating both numbers', async () => {
       // A refusal nobody can act on is worse than no refusal. The message has to say what was
       // needed AND what they sent, or the next attempt is another guess.
-      const db = client({ size: { width: 200, height: 40 } });
+      const db = client({
+        size: { width: BANNER.minUploadWidth - 100, height: BANNER.minUploadHeight - 20 },
+      });
       await expect(
         new SignatureService().save(db as never, 'me', { bannerMediaId: 'media-mine' }),
       ).rejects.toMatchObject({
         code: ErrorCode.VALIDATION_FAILED,
-        message: expect.stringContaining('200 × 40'),
+        message: expect.stringContaining(
+          `${BANNER.minUploadWidth - 100} × ${BANNER.minUploadHeight - 20}`,
+        ),
       });
     });
 
@@ -169,7 +178,7 @@ describe('forum signatures', () => {
       const db = client();
       await expect(
         new SignatureService().save(db as never, 'me', {
-          bannerSpec: { version: 1, background: 'chartreuse', layers: [] },
+          bannerSpec: { version: 2, background: 'chartreuse', layers: [] },
         }),
       ).rejects.toMatchObject({ code: ErrorCode.VALIDATION_FAILED });
     });
@@ -178,18 +187,16 @@ describe('forum signatures', () => {
       const db = client();
       await new SignatureService().save(db as never, 'me', {
         bannerSpec: {
-          version: 1,
+          version: 2,
           background: 'gradient',
-          colourA: 'dark',
-          colourB: 'orange',
+          colourA: '#0b0f14',
+          colourB: '#ff7100',
           dim: 0,
-          layers: [
-            { kind: 'text', source: 'custom', text: 'hi', anchor: 'middle-left', size: 9999 },
-          ],
+          layers: [{ kind: 'text', source: 'custom', text: 'hi', row: 2, size: 9999 }],
         },
       });
       const saved = db.upserts[0]?.['bannerSpec'] as { layers: Array<{ size: number }> };
-      expect(saved.layers[0]?.size).toBe(48);
+      expect(saved.layers[0]?.size).toBe(BANNER_LIMITS.maxTextSize);
     });
 
     it('null clears it, for somebody switching back to an uploaded banner', async () => {

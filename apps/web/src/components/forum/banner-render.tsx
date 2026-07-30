@@ -1,8 +1,11 @@
 import {
   BANNER,
-  type BannerAnchor,
+  BANNER_SOURCE_LABELS,
+  type BannerAlign,
   type BannerLayer,
+  type BannerRow,
   type BannerSpec,
+  type BannerTextSource,
 } from '@grims/shared/forum-signature';
 
 /**
@@ -11,73 +14,64 @@ import {
  * ★ ONE RENDERER, THREE USES ★
  *
  * This same component draws the live preview in the generator, the banner under every forum post,
- * and — via canvas — the PNG somebody downloads.
+ * and — via canvas — the PNG somebody downloads or publishes.
  *
- * That is the whole architectural decision. The obvious build has a CSS preview in the editor and
- * a separate server-side rasteriser for the file, and those two eventually disagree: somebody
- * designs a banner that looks right in settings and wrong under their posts, and cannot tell which
- * one lied to them. One function means there is nothing to disagree with.
+ * That is the architectural decision. The obvious build has a CSS preview in the editor and a
+ * separate server-side rasteriser for the file, and those two eventually disagree: somebody designs
+ * a banner that looks right in settings and wrong under their posts, and cannot tell which one
+ * lied. One function means there is nothing to disagree with.
  *
- * ★ SVG, NOT CANVAS OR DIVS ★
+ * ★ THREE ROWS, LAID OUT BY MEASUREMENT ★
  *
- * SVG is the only one of the three that is simultaneously a live DOM node (so the preview updates
- * instantly as a slider moves, with no redraw code), scalable (so it stays sharp on a retina
- * screen), and rasterisable by the browser into a PNG at any size.
+ * Layers belong to line 1, 2 or 3 and to a side. Several layers can share a line — three Elite
+ * ranks side by side is the normal case — so each row is packed left to right from its alignment
+ * point, with the widths ESTIMATED rather than measured.
  *
- * The download therefore uses the BROWSER's font rendering, which is the same rendering the member
- * has been looking at. A server-side rasteriser would have used whatever fonts the container
- * happened to have — and the first report would be "the download does not match the preview".
+ * Estimated because measurement is not available where this has to work: the forum renders on the
+ * server, where there is no DOM to measure text with. An estimate that is consistent everywhere
+ * beats a measurement that only one of the three consumers can take.
  *
  * ★ EVERY VALUE IS ESCAPED BY REACT ★
  *
- * Text layers carry member input. It is rendered as SVG `<text>` children, which React escapes
- * exactly as it does HTML. There is no string concatenation into markup anywhere in this file, and
- * there must never be: a hand-built SVG string is an injection surface wearing a different hat.
+ * Text layers carry member input, rendered as SVG `<text>` children, which React escapes exactly as
+ * it does HTML. There is no string concatenation into markup anywhere in this file and there must
+ * never be — a hand-built SVG string is an injection surface wearing a different hat.
  */
 
-/** Palette → real colour. The same tokens the rest of the site uses, resolved for SVG. */
-const COLOUR: Record<string, string> = {
-  orange: '#ff7100',
-  cyan: '#5cd9ff',
-  gold: '#ffc400',
-  steel: '#93a4b8',
-  light: '#e8eef5',
-  dark: '#0b0f14',
-};
-
-/** Anchor → x/y and the SVG text-anchor that goes with it. */
-function place(anchor: BannerAnchor, pad = 16): {
-  x: number;
-  y: number;
-  textAnchor: 'start' | 'middle' | 'end';
-  baseline: 'hanging' | 'middle' | 'auto';
-} {
-  const [vertical, horizontal] = anchor.split('-') as ['top' | 'middle' | 'bottom', 'left' | 'center' | 'right'];
-
-  const x = horizontal === 'left' ? pad : horizontal === 'center' ? BANNER.width / 2 : BANNER.width - pad;
-  const y = vertical === 'top' ? pad : vertical === 'middle' ? BANNER.height / 2 : BANNER.height - pad;
-
-  return {
-    x,
-    y,
-    textAnchor: horizontal === 'left' ? 'start' : horizontal === 'center' ? 'middle' : 'end',
-    baseline: vertical === 'top' ? 'hanging' : vertical === 'middle' ? 'middle' : 'auto',
-  };
+/** Everything a banner can say about somebody. Absent values render as nothing, never as a gap. */
+export interface BannerIdentity {
+  readonly commander: string | null;
+  readonly squadronRank: string | null;
+  readonly squadron: string;
+  readonly allegiance: string | null;
+  readonly ranks: Partial<Record<'combat' | 'trade' | 'explore' | 'soldier' | 'exobiologist' | 'cqc', string | null>>;
+  readonly ship: string | null;
+  readonly memberSince: string | null;
+  readonly lastPlayed: string | null;
 }
+
+/** A blank identity, so a caller with nothing to say still renders a banner. */
+export const EMPTY_IDENTITY: BannerIdentity = {
+  commander: null,
+  squadronRank: null,
+  squadron: 'GRIM’S SQUAD',
+  allegiance: null,
+  ranks: {},
+  ship: null,
+  memberSince: null,
+  lastPlayed: null,
+};
 
 /**
  * A deterministic starfield.
  *
  * ★ SEEDED, NOT RANDOM ★
  *
- * `Math.random()` here would produce a different sky on every render — the preview would shimmer
- * as sliders move, the server render would not match the client one, and React would report a
+ * `Math.random()` would produce a different sky on every render — the preview would shimmer as
+ * sliders move, the server render would not match the client one, and React would report a
  * hydration mismatch on every page with a banner on it.
- *
- * A tiny integer hash keyed on nothing but the index gives the same sky forever, which is what a
- * background is supposed to be.
  */
-function stars(count = 90): Array<{ cx: number; cy: number; r: number; o: number }> {
+function stars(count = 110): Array<{ cx: number; cy: number; r: number; o: number }> {
   const out: Array<{ cx: number; cy: number; r: number; o: number }> = [];
   let seed = 0x9e3779b9;
   const next = (): number => {
@@ -100,52 +94,80 @@ function stars(count = 90): Array<{ cx: number; cy: number; r: number; o: number
 
 const STARS = stars();
 
-export interface BannerIdentity {
-  readonly commander: string | null;
-  readonly rank: string | null;
-  readonly squadron: string;
+/** What a text layer says right now, resolved rather than stored. */
+export function textOf(
+  layer: Extract<BannerLayer, { kind: 'text' }>,
+  who: BannerIdentity,
+): string {
+  const value = ((): string | null => {
+    switch (layer.source) {
+      case 'commander':
+        return who.commander === null ? null : `CMDR ${who.commander}`;
+      case 'squadronRank':
+        return who.squadronRank;
+      case 'squadron':
+        return who.squadron;
+      case 'allegiance':
+        return who.allegiance;
+      case 'ship':
+        return who.ship;
+      case 'memberSince':
+        return who.memberSince;
+      case 'lastPlayed':
+        return who.lastPlayed;
+      case 'custom':
+        return layer.text ?? null;
+      default:
+        return who.ranks[layer.source as keyof BannerIdentity['ranks']] ?? null;
+    }
+  })();
+
+  if (value === null || value === '') return '';
+  // The label is a prefix, not a separate layer: they move together or the banner stops making sense.
+  return layer.label === undefined ? value : `${layer.label} ${value}`;
 }
 
-/** What a text layer actually says, resolved now rather than when it was saved. */
-function textOf(layer: Extract<BannerLayer, { kind: 'text' }>, who: BannerIdentity): string {
-  switch (layer.source) {
-    case 'commander':
-      // Falls back rather than rendering an empty layer — an unverified member still gets a banner.
-      return who.commander === null ? 'CMDR' : `CMDR ${who.commander}`;
-    case 'rank':
-      return who.rank ?? '';
-    case 'squadron':
-      return who.squadron;
-    default:
-      return layer.text ?? '';
-  }
+/**
+ * Roughly how wide a string renders.
+ *
+ * ★ AN ESTIMATE, ON PURPOSE ★
+ *
+ * The forum renders this on the SERVER, where there is no DOM and no way to measure text. A layout
+ * that measured in the browser and guessed on the server would put the same banner in two places
+ * and have them disagree — which is the exact failure this whole component exists to avoid.
+ *
+ * So both sides guess, identically. 0.58em per character is close for the UI sans at these sizes,
+ * and monospace with our tracking runs wider.
+ */
+function widthOf(text: string, size: number, mono: boolean): number {
+  return text.length * size * (mono ? 0.72 : 0.55);
 }
+
+const PAD = 18;
+/** Gap between two layers sharing a row. */
+const GAP = 12;
 
 export function BannerRender({
   spec,
-  who,
-  /** Rendered width. The viewBox keeps the geometry at 600×120 whatever this is. */
+  who = EMPTY_IDENTITY,
   width = BANNER.width,
   className,
-  /** Set for the download path, where the image must be inlined rather than fetched. */
   imageHref,
   badgeHref,
 }: {
   readonly spec: BannerSpec;
-  readonly who: BannerIdentity;
+  readonly who?: BannerIdentity;
+  /** Rendered width. The viewBox keeps the geometry at 600×160 whatever this is. */
   readonly width?: number;
   readonly className?: string;
   readonly imageHref?: string;
   readonly badgeHref?: string;
 }) {
-  const a = COLOUR[spec.colourA] ?? COLOUR.dark;
-  const b = COLOUR[spec.colourB] ?? COLOUR.orange;
-
   /*
    * A per-instance id for the gradient. Two banners on one page both defining `#bannerFill` would
    * make the second silently steal the first's fill — the classic SVG-in-a-list bug.
    */
-  const gradientId = `bg-${spec.colourA}-${spec.colourB}-${spec.background}`;
+  const gradientId = `bg-${spec.colourA.slice(1)}-${spec.colourB.slice(1)}`;
 
   const bg =
     spec.background === 'image' && (imageHref ?? '') !== '' ? (
@@ -159,16 +181,52 @@ export function BannerRender({
       />
     ) : spec.background === 'starfield' ? (
       <>
-        <rect x={0} y={0} width={BANNER.width} height={BANNER.height} fill={COLOUR.dark} />
+        <rect x={0} y={0} width={BANNER.width} height={BANNER.height} fill={spec.colourA} />
         {STARS.map((s, i) => (
           <circle key={i} cx={s.cx} cy={s.cy} r={s.r} fill="#ffffff" opacity={s.o} />
         ))}
       </>
     ) : spec.background === 'solid' ? (
-      <rect x={0} y={0} width={BANNER.width} height={BANNER.height} fill={a} />
+      <rect x={0} y={0} width={BANNER.width} height={BANNER.height} fill={spec.colourA} />
     ) : (
       <rect x={0} y={0} width={BANNER.width} height={BANNER.height} fill={`url(#${gradientId})`} />
     );
+
+  /*
+   * Rows are laid out independently, and each side of a row packs outward from its own edge. A
+   * badge is measured by its size, text by its estimated width, so a rank list and a badge sharing
+   * a line do not sit on top of each other.
+   */
+  const rowHeight = BANNER.height / BANNER.rows;
+
+  const placed: Array<{ layer: BannerLayer; x: number; y: number; anchor: 'start' | 'middle' | 'end' }> = [];
+
+  for (const row of [1, 2, 3] as BannerRow[]) {
+    for (const align of ['left', 'center', 'right'] as BannerAlign[]) {
+      const inRow = spec.layers.filter((l) => l.row === row && l.align === align);
+      if (inRow.length === 0) continue;
+
+      const sizes = inRow.map((l) =>
+        l.kind === 'badge' ? l.size : widthOf(textOf(l, who), l.size, l.mono),
+      );
+      const total = sizes.reduce((a, b) => a + b, 0) + GAP * (inRow.length - 1);
+
+      // Where the GROUP starts, so a centred group is centred as a whole rather than per layer.
+      let cursor =
+        align === 'left'
+          ? PAD
+          : align === 'center'
+            ? BANNER.width / 2 - total / 2
+            : BANNER.width - PAD - total;
+
+      const y = rowHeight * (row - 1) + rowHeight / 2;
+
+      inRow.forEach((layer, i) => {
+        placed.push({ layer, x: cursor, y, anchor: 'start' });
+        cursor += (sizes[i] ?? 0) + GAP;
+      });
+    }
+  }
 
   return (
     <svg
@@ -176,15 +234,15 @@ export function BannerRender({
       width={width}
       height={(width / BANNER.width) * BANNER.height}
       className={className}
-      /* Announced by its purpose, not by its contents — the text is decorative repetition here. */
+      /* Announced by its purpose — the text inside is decorative repetition of what is on the page. */
       role="img"
       aria-label="Signature banner"
       xmlns="http://www.w3.org/2000/svg"
     >
       <defs>
         <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0%" stopColor={a} />
-          <stop offset="100%" stopColor={b} />
+          <stop offset="0%" stopColor={spec.colourA} />
+          <stop offset="100%" stopColor={spec.colourB} />
         </linearGradient>
       </defs>
 
@@ -192,8 +250,7 @@ export function BannerRender({
 
       {/*
         The dimming veil sits between background and layers, so it darkens the picture WITHOUT
-        washing out the text on top. Applied to the whole rect rather than per-layer: a member
-        adjusting readability is thinking about the image, not about each caption.
+        washing out the text on top.
       */}
       {spec.dim > 0 && (
         <rect
@@ -206,25 +263,19 @@ export function BannerRender({
         />
       )}
 
-      {spec.layers.map((layer, i) => {
-        const p = place(layer.anchor);
-
+      {placed.map(({ layer, x, y }, i) => {
         if (layer.kind === 'badge') {
-          // Anchored so the badge is CENTRED on its point rather than hanging off it.
-          const half = layer.size / 2;
-          const bx = p.textAnchor === 'start' ? p.x : p.textAnchor === 'middle' ? p.x - half : p.x - layer.size;
-          const by = p.baseline === 'hanging' ? p.y : p.baseline === 'middle' ? p.y - half : p.y - layer.size;
           return (
             <image
               key={i}
               /*
-               * The transparent variant, so a badge on a gradient does not arrive inside a black
-               * square. 512px scaled down rather than the 64px asset scaled up — a badge at 96px
-               * from a 64px source is visibly soft on the exact screens people care about.
+               * The transparent variant, so a badge over a gradient does not arrive inside a black
+               * square. 512px scaled down rather than the 64px asset scaled up — a badge at 140px
+               * from a 64px source is visibly soft on exactly the screens people care about.
                */
               href={badgeHref ?? '/brand/badge-512-transparent.png'}
-              x={bx}
-              y={by}
+              x={x}
+              y={y - layer.size / 2}
               width={layer.size}
               height={layer.size}
               opacity={0.95}
@@ -233,30 +284,32 @@ export function BannerRender({
         }
 
         const value = textOf(layer, who);
+        // A source nobody has data for renders as NOTHING rather than as an empty slot.
         if (value === '') return null;
 
         return (
           <text
             key={i}
-            x={p.x}
-            y={p.y}
-            textAnchor={p.textAnchor}
-            dominantBaseline={p.baseline}
+            x={x}
+            y={y}
+            dominantBaseline="middle"
             fontSize={layer.size}
             fontWeight={layer.bold ? 700 : 400}
-            fill={COLOUR[layer.colour] ?? COLOUR.light}
+            fill={layer.colour}
             fontFamily={
               layer.mono
                 ? 'ui-monospace, SFMono-Regular, Menlo, monospace'
                 : 'system-ui, -apple-system, Segoe UI, sans-serif'
             }
-            letterSpacing={layer.mono ? layer.size * 0.18 : 0}
+            letterSpacing={layer.mono ? layer.size * 0.12 : 0}
             /*
-              A shadow, always. Text over a member-supplied screenshot is otherwise legible or not
-              depending on what they uploaded, and "my name disappeared" is a bug report we would
-              have no answer to.
+              A dark outline on every text layer, always.
+
+              The colour is a free hex value now — the owner asked for pickers and overruled the
+              closed palette — so light text over a light background is reachable in one click.
+              The outline means the worst case is text with a halo rather than text nobody can see.
             */
-            style={{ paintOrder: 'stroke', stroke: 'rgba(0,0,0,0.55)', strokeWidth: 3 }}
+            style={{ paintOrder: 'stroke', stroke: 'rgba(0,0,0,0.6)', strokeWidth: 3 }}
           >
             {value}
           </text>
@@ -264,4 +317,9 @@ export function BannerRender({
       })}
     </svg>
   );
+}
+
+/** The label the editor shows for a source. Re-exported so the form and the renderer agree. */
+export function sourceLabel(source: BannerTextSource): string {
+  return BANNER_SOURCE_LABELS[source];
 }

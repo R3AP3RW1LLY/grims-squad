@@ -1,5 +1,6 @@
 import type { SignatureView } from '@grims/shared';
-import { BannerRender, type BannerIdentity } from './banner-render';
+import { BANNER } from '@grims/shared/forum-signature';
+import { BannerRender, EMPTY_IDENTITY, type BannerIdentity } from './banner-render';
 
 /**
  * A member's signature, under their post.
@@ -74,8 +75,8 @@ export function SignatureBlock({
     bannerSpec !== null ? (
       <BannerRender
         spec={bannerSpec}
-        who={who ?? { commander: null, rank: null, squadron: 'GRIM’S SQUAD' }}
-        width={600}
+        who={who ?? EMPTY_IDENTITY}
+        width={BANNER.width}
         className="max-w-full rounded border"
         {...(bannerSpec.imageMediaId === undefined
           ? {}

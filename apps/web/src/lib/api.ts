@@ -766,8 +766,19 @@ export interface GuidePost {
   author: { handle: string; displayName: string };
 }
 
-export const getPublicGuides = async (): Promise<PublicGuide[]> => {
-  const res = await get<{ threads: PublicGuide[] }>('/v1/forum/categories/guides/threads');
+/**
+ * Published threads on a PUBLIC board.
+ *
+ * ★ TAKES THE BOARD, RATHER THAN ONE PER BOARD ★
+ *
+ * There are two public boards now — Guides and Recruiting — and there will be more. A second
+ * hardcoded fetcher would have been a second place for the "empty on failure" rule to live, and
+ * the second place is the one that eventually throws instead.
+ */
+export const getPublicBoardThreads = async (slug: string): Promise<PublicGuide[]> => {
+  const res = await get<{ threads: PublicGuide[] }>(
+    `/v1/forum/categories/${encodeURIComponent(slug)}/threads`,
+  );
   /*
    * An empty list on failure, not a thrown error. This feeds the site's navigation on
    * every page: if the API is briefly unreachable the header should render without a
@@ -777,10 +788,21 @@ export const getPublicGuides = async (): Promise<PublicGuide[]> => {
   return res?.threads ?? [];
 };
 
+/** Guides specifically — the navigation and the guides index both want exactly this. */
+export const getPublicGuides = (): Promise<PublicGuide[]> => getPublicBoardThreads('guides');
+
+export const getPublicBoardThread = (
+  board: string,
+  slug: string,
+): Promise<{ thread: PublicGuide; posts: GuidePost[] } | null> =>
+  get(
+    `/v1/forum/categories/${encodeURIComponent(board)}/threads/${encodeURIComponent(slug)}`,
+  );
+
 export const getPublicGuide = (
   slug: string,
 ): Promise<{ thread: PublicGuide; posts: GuidePost[] } | null> =>
-  get(`/v1/forum/categories/guides/threads/${encodeURIComponent(slug)}`);
+  getPublicBoardThread('guides', slug);
 
 /* ------------------------------------------------------- forum, authenticated */
 

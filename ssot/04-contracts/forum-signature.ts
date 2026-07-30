@@ -144,89 +144,155 @@ export interface SignatureView {
 /* ------------------------------------------------------------ the banner */
 
 /**
- * The banner: 600 × 120, and why it is one fixed size.
+ * The banner: 600 × 160, three lines.
  *
  * ★ SQUADRON OWNER, 2026-07-30 ★
  *
- * "for the banner, we want this to be generated and created in the signature genrator if they want
- * to make their own, or they can upload one, create size rules for it and enforce them show them on
- * the page in px" — and, asked which size and how strict: 600 × 120, with uploads auto-fitted.
+ * "the signature banner needs to have multiple lines, and must allow poeple to add way more content
+ * etc to them including their ingame ranks, experience, anything they want too really that we
+ * collect from them ... the signature must be 3 lines ... make this wildly configuable".
  *
- * ★ ONE SIZE, NOT A RANGE ★
+ * ★ WHY THREE ROWS AND NOT FREE POSITIONING ★
  *
- * A banner appears under every post in a thread, so a column of banners at differing heights makes
- * the page jitter as it scrolls. Fixing the size is what keeps a thread readable, and it is also
- * what lets the generator lay text out reliably — a layout engine that has to work at any aspect
- * ratio is one that looks wrong at most of them.
+ * The first version used nine anchor points, which gave three lines by accident and let two layers
+ * land on top of each other. Rows make it explicit: every layer belongs to line 1, 2 or 3, and
+ * layers sharing a line sit side by side rather than overlapping.
+ *
+ * That is also what makes "way more content" survivable. A banner listing six Elite ranks is a
+ * banner where the text is not fixed — "Elite V" and "Harmless" are different widths, and a layout
+ * tuned against one breaks against the other. Rows reflow; absolute coordinates do not.
+ *
+ * The height went from 120 to 160 for the same reason: three lines of readable text plus breathing
+ * room does not fit in 120, and cramming it produced banners nobody could read at a glance.
  */
 export const BANNER = {
   width: 600,
-  height: 120,
+  height: 160,
+  /** Three lines, as asked. Named rather than assumed so the renderer and the editor agree. */
+  rows: 3,
   /**
-   * The smallest upload worth accepting.
+   * The smallest upload worth accepting as a background.
    *
    * Below this, scaling up produces a blurred mess and the member blames us rather than their
-   * source file. Refused with the numbers stated, which is the only refusal anybody can act on.
+   * source file. Refused with both numbers stated, which is the only refusal anybody can act on.
    */
   minUploadWidth: 300,
-  minUploadHeight: 60,
+  minUploadHeight: 80,
 } as const;
 
 /** Backgrounds the generator can build without anybody uploading anything. */
 export const BANNER_BACKGROUNDS = ['solid', 'gradient', 'starfield', 'image'] as const;
 export type BannerBackground = (typeof BANNER_BACKGROUNDS)[number];
 
-/**
- * Where a layer sits.
- *
- * ★ NINE ANCHORS, NOT FREE COORDINATES ★
- *
- * Drag-anywhere positioning sounds more capable and produces worse banners: text half off the
- * edge, overlapping badges, and a layout that breaks the moment a rank name is longer than the one
- * it was positioned against. Anchors keep every arrangement aligned to the same grid, and a
- * promotion from "Cadet" to "Chief Fleet Commander" still lands somewhere sensible.
- */
-export const BANNER_ANCHORS = [
-  'top-left',
-  'top-center',
-  'top-right',
-  'middle-left',
-  'middle-center',
-  'middle-right',
-  'bottom-left',
-  'bottom-center',
-  'bottom-right',
-] as const;
-export type BannerAnchor = (typeof BANNER_ANCHORS)[number];
+/** Which of the three lines a layer sits on. */
+export const BANNER_ROWS = [1, 2, 3] as const;
+export type BannerRow = (typeof BANNER_ROWS)[number];
 
-/** What a text layer says. Resolved at render time so a rename or promotion updates the banner. */
-export const BANNER_TEXT_SOURCES = ['commander', 'rank', 'squadron', 'custom'] as const;
+/** Where on its line a layer sits. Layers sharing a row and an alignment flow left to right. */
+export const BANNER_ALIGNS = ['left', 'center', 'right'] as const;
+export type BannerAlign = (typeof BANNER_ALIGNS)[number];
+
+/**
+ * Everything a text layer can say.
+ *
+ * ★ SOURCES, NOT BAKED STRINGS ★
+ *
+ * Every one of these except `custom` is looked up when the banner is DRAWN. That is what lets
+ * somebody put their Combat rank on a banner and have it read "Deadly" the week after it read
+ * "Dangerous", without knowing they were supposed to come back and edit it.
+ *
+ * The list is deliberately everything we actually hold. "Anything they want, really, that we
+ * collect from them" was the instruction, and a source that resolves to nothing renders as nothing
+ * rather than as an empty box — so offering all of them costs nothing to somebody who has not
+ * verified their commander yet.
+ */
+export const BANNER_TEXT_SOURCES = [
+  'commander',
+  'squadronRank',
+  'squadron',
+  'allegiance',
+  'combat',
+  'trade',
+  'explore',
+  'soldier',
+  'exobiologist',
+  'cqc',
+  'ship',
+  'memberSince',
+  'lastPlayed',
+  'custom',
+] as const;
 export type BannerTextSource = (typeof BANNER_TEXT_SOURCES)[number];
+
+/** Human labels for the editor, and the prefix a layer can show before its value. */
+export const BANNER_SOURCE_LABELS: Record<BannerTextSource, string> = {
+  commander: 'CMDR name',
+  squadronRank: 'Squadron rank',
+  squadron: 'Squadron',
+  allegiance: 'Allegiance',
+  combat: 'Combat',
+  trade: 'Trade',
+  explore: 'Exploration',
+  soldier: 'Mercenary',
+  exobiologist: 'Exobiology',
+  cqc: 'CQC',
+  ship: 'Current ship',
+  memberSince: 'Member since',
+  lastPlayed: 'Last played',
+  custom: 'My own words',
+};
 
 /** Badges we hold ourselves. Never an arbitrary image — see `BannerBadgeLayer`. */
 export const BANNER_BADGES = ['squadron', 'rank'] as const;
 export type BannerBadge = (typeof BANNER_BADGES)[number];
 
+/**
+ * A colour on a banner.
+ *
+ * ★ FREE HEX, AS ASKED ★
+ *
+ * Squadron owner, 2026-07-30: "the colors should allow color pickers with hex code input etc, make
+ * this wildly configuable". The earlier closed palette was chosen so nobody could pick text that
+ * was illegible against their own background; that concern was raised and overruled, so this takes
+ * any `#rrggbb`.
+ *
+ * Two things keep the failure mode small rather than arguing with the decision. The renderer draws
+ * every text layer with a dark outline, so light text stays readable over a light background; and
+ * the editor keeps the squadron palette as one-click presets, so the easy path is still on-brand.
+ */
+export const HEX_COLOUR = /^#[0-9a-fA-F]{6}$/;
+
+/** The squadron palette, offered as presets rather than as the only choice. */
+export const BANNER_PALETTE = [
+  '#ff7100',
+  '#ff9d3f',
+  '#5cd9ff',
+  '#00c8ff',
+  '#3dff8f',
+  '#ffc400',
+  '#e8eef5',
+  '#93a4b8',
+  '#0b0f14',
+] as const;
+
 export interface BannerTextLayer {
   readonly kind: 'text';
-  /**
-   * `custom` uses `text`; everything else is looked up from the profile AT RENDER TIME.
-   *
-   * ★ RESOLVED LATE, ON PURPOSE ★
-   *
-   * Baking "CMDR Grim — Sector Overseer" into the stored banner means a promotion leaves every
-   * past banner claiming the old rank, and the member has to know to come back and rebuild it.
-   * Storing the SOURCE means the banner stays right forever without anybody maintaining it.
-   */
   readonly source: BannerTextSource;
   /** Only used when `source` is `custom`. Plain text, escaped at render. */
   readonly text?: string;
-  readonly anchor: BannerAnchor;
-  /** Bounded, so a layer cannot be sized past the banner and off the edge of the world. */
+  /**
+   * A word before the value, e.g. `COMBAT` before `Deadly`.
+   *
+   * Optional because a banner that labels everything reads like a form. Somebody putting one rank
+   * on line three wants "Deadly"; somebody putting three wants them told apart.
+   */
+  readonly label?: string;
+  readonly row: BannerRow;
+  readonly align: BannerAlign;
   readonly size: number;
   readonly bold: boolean;
-  /** A palette colour, never a hex value — same reasoning as the signature accent. */
-  readonly colour: SignatureAccent | 'light' | 'dark';
+  /** `#rrggbb`. */
+  readonly colour: string;
   /** Monospace with wide tracking: the console look the rest of the site uses for labels. */
   readonly mono: boolean;
 }
@@ -236,25 +302,26 @@ export interface BannerBadgeLayer {
   /**
    * ★ A NAMED BADGE, NOT AN IMAGE ID ★
    *
-   * The squadron mark and the rank insignia are OURS. Letting this carry an arbitrary media id
-   * would make a banner able to composite any uploaded image at any position — a second image
-   * pipeline with none of the fitting rules the background has.
+   * The squadron mark and rank insignia are OURS. Letting this carry an arbitrary media id would
+   * make a banner able to composite any uploaded image anywhere — a second image pipeline with
+   * none of the fitting rules the background has.
    */
   readonly badge: BannerBadge;
-  readonly anchor: BannerAnchor;
+  readonly row: BannerRow;
+  readonly align: BannerAlign;
   readonly size: number;
 }
 
 export type BannerLayer = BannerTextLayer | BannerBadgeLayer;
 
 export interface BannerSpec {
-  readonly version: 1;
+  readonly version: 2;
   readonly background: BannerBackground;
-  /** For `solid` and `gradient`. Palette names only. */
-  readonly colourA: SignatureAccent | 'dark';
-  readonly colourB: SignatureAccent | 'dark';
+  /** `#rrggbb`. Used by `solid` and, with `colourB`, by `gradient`. */
+  readonly colourA: string;
+  readonly colourB: string;
   /**
-   * For `image`: OUR media id, already fitted to 600 × 120 on upload.
+   * For `image`: OUR media id, already hardened on upload.
    *
    * There is no URL field, for the same reason the rich document has none — a banner cannot
    * reference a third-party host because there is nowhere to write one.
@@ -265,26 +332,28 @@ export interface BannerSpec {
   readonly layers: readonly BannerLayer[];
 }
 
-/** Hard limits. A banner is 600 × 120; nothing here needs to be generous. */
+/** Hard limits. Generous, because "wildly configurable" was the instruction. */
 export const BANNER_LIMITS = {
-  maxLayers: 8,
-  minTextSize: 10,
-  maxTextSize: 48,
+  /** Enough for three well-populated lines plus a badge, and short of a banner nobody can read. */
+  maxLayers: 18,
+  minTextSize: 8,
+  maxTextSize: 44,
   minBadgeSize: 16,
-  maxBadgeSize: 96,
-  maxCustomText: 48,
-  maxDim: 80,
+  maxBadgeSize: 140,
+  maxCustomText: 64,
+  maxLabel: 16,
+  maxDim: 85,
 } as const;
 
 /**
  * Validates a banner spec that arrived from a browser.
  *
- * ★ CLAMPS NUMBERS, REFUSES STRUCTURE ★
+ * ★ CLAMPS NUMBERS, REFUSES STRUCTURE, DROPS THE UNKNOWN ★
  *
- * Every numeric field is clamped rather than rejected: a size outside the range is a slider bug or
- * an older client, not an attack, and losing somebody's whole banner because one number is 49
- * would be a bad trade. Anything structurally wrong — an unknown layer kind, a background nobody
- * defined — is refused, because there is no sensible value to substitute.
+ * A size outside the range is a slider bug or an older client, not an attack, so it is clamped —
+ * losing somebody's whole banner over one number would be a bad trade. A background nobody defined
+ * has no sensible substitute, so it is refused. A colour that is not a hex value falls back rather
+ * than reaching the renderer, where an arbitrary string would become a CSS value nobody validated.
  */
 export function validateBannerSpec(raw: unknown): BannerSpec {
   const fail = (why: string): never => {
@@ -294,30 +363,37 @@ export function validateBannerSpec(raw: unknown): BannerSpec {
     const v = typeof n === 'number' && Number.isFinite(n) ? n : fallback;
     return Math.min(hi, Math.max(lo, Math.round(v)));
   };
+  const hex = (v: unknown, fallback: string): string =>
+    typeof v === 'string' && HEX_COLOUR.test(v) ? v.toLowerCase() : fallback;
 
   /*
-   * A direct `throw`, not `fail(...)`.
-   *
-   * TypeScript only narrows after a never-returning call when the callee is a function DECLARATION
-   * or an explicitly-annotated variable — a `const fail = (): never =>` does not narrow, so every
-   * later `o.` was an error on a possibly-null value. Throwing inline is clearer than annotating
-   * around the limitation.
+   * A direct `throw`, not `fail(...)`. TypeScript only narrows after a never-returning call when
+   * the callee is a function DECLARATION — a `const fail = (): never =>` does not narrow, so every
+   * later property access would be an error on a possibly-null value.
    */
   if (raw === null || typeof raw !== 'object') {
     throw new Error('That banner is not in a shape we recognise.');
   }
+  /*
+   * ★ VERSION 1 IS MIGRATED, NOT REFUSED ★
+   *
+   * Version 1 banners were 600 × 120 with nine anchor points and palette-name colours. Refusing
+   * them would blank the banner of everybody who built one before this change — so they are read,
+   * their anchors become rows, and their palette names become hex.
+   *
+   * Read off the RAW record rather than the narrowed one: `Partial<BannerSpec>` types `version` as
+   * `2 | undefined`, so comparing it to 1 is a compile error on a value that genuinely occurs.
+   */
+  const version = (raw as Record<string, unknown>)['version'];
+  if (version === 1) return migrateV1(raw as Record<string, unknown>);
+
   const o = raw as Partial<BannerSpec>;
-  if (o.version !== 1) fail('That banner was made by a different version of the editor.');
+  if (version !== 2) fail('That banner was made by a different version of the editor.');
 
   const background = o.background ?? 'gradient';
   if (!(BANNER_BACKGROUNDS as readonly string[]).includes(background)) {
     fail('That is not one of our backgrounds.');
   }
-
-  const colour = (v: unknown): SignatureAccent | 'dark' =>
-    v === 'dark' || (SIGNATURE_ACCENTS as readonly string[]).includes(v as string)
-      ? (v as SignatureAccent | 'dark')
-      : 'dark';
 
   const rawLayers = Array.isArray(o.layers) ? o.layers : [];
   if (rawLayers.length > BANNER_LIMITS.maxLayers) {
@@ -326,73 +402,72 @@ export function validateBannerSpec(raw: unknown): BannerSpec {
 
   const layers: BannerLayer[] = rawLayers.map((l): BannerLayer => {
     /*
-     * Typed as a loose record of unknowns rather than `Partial<TextLayer & BadgeLayer>`.
-     *
-     * That intersection collapses `kind` to `'text' & 'badge'`, which is `never` — so every field
-     * access after the narrowing became an error on a value TypeScript believed could not exist.
-     * A record of unknowns is also the honest description: this is untrusted input, and nothing is
-     * known about it until it is checked.
+     * A record of unknowns rather than `Partial<Text & Badge>`. That intersection collapses `kind`
+     * to `'text' & 'badge'`, which is `never` — every field access after narrowing became an error
+     * on a value TypeScript believed could not exist. This is also the honest description: nothing
+     * is known about untrusted input until it is checked.
      */
-    const layer = l as {
-      kind?: unknown;
-      badge?: unknown;
-      anchor?: unknown;
-      size?: unknown;
-      source?: unknown;
-      text?: unknown;
-      bold?: unknown;
-      colour?: unknown;
-      mono?: unknown;
-    };
-    const anchor = (BANNER_ANCHORS as readonly string[]).includes(layer.anchor as string)
-      ? (layer.anchor as BannerAnchor)
-      : 'middle-left';
+    const layer = l as Record<string, unknown>;
 
-    if (layer.kind === 'badge') {
-      if (!(BANNER_BADGES as readonly string[]).includes(layer.badge as string)) {
+    const row = (BANNER_ROWS as readonly number[]).includes(layer['row'] as number)
+      ? (layer['row'] as BannerRow)
+      : 2;
+    const align = (BANNER_ALIGNS as readonly string[]).includes(layer['align'] as string)
+      ? (layer['align'] as BannerAlign)
+      : 'left';
+
+    if (layer['kind'] === 'badge') {
+      if (!(BANNER_BADGES as readonly string[]).includes(layer['badge'] as string)) {
         fail('That is not one of our badges.');
       }
       return {
         kind: 'badge',
-        badge: layer.badge as BannerBadge,
-        anchor,
-        size: clamp(layer.size, BANNER_LIMITS.minBadgeSize, BANNER_LIMITS.maxBadgeSize, 48),
+        badge: layer['badge'] as BannerBadge,
+        row,
+        align,
+        size: clamp(layer['size'], BANNER_LIMITS.minBadgeSize, BANNER_LIMITS.maxBadgeSize, 48),
       };
     }
 
-    if (layer.kind !== 'text') fail('That is not one of our layer types.');
+    if (layer['kind'] !== 'text') fail('That is not one of our layer types.');
 
-    const source = (BANNER_TEXT_SOURCES as readonly string[]).includes(layer.source as string)
-      ? (layer.source as BannerTextSource)
+    const source = (BANNER_TEXT_SOURCES as readonly string[]).includes(layer['source'] as string)
+      ? (layer['source'] as BannerTextSource)
       : 'custom';
 
     const text =
-      typeof layer.text === 'string' ? layer.text.trim().slice(0, BANNER_LIMITS.maxCustomText) : '';
-
-    const textColour =
-      layer.colour === 'light' || layer.colour === 'dark'
-        ? layer.colour
-        : (SIGNATURE_ACCENTS as readonly string[]).includes(layer.colour as string)
-          ? (layer.colour as SignatureAccent)
-          : 'light';
+      typeof layer['text'] === 'string'
+        ? layer['text'].trim().slice(0, BANNER_LIMITS.maxCustomText)
+        : '';
+    const label =
+      typeof layer['label'] === 'string'
+        ? layer['label'].trim().slice(0, BANNER_LIMITS.maxLabel)
+        : '';
 
     return {
       kind: 'text',
       source,
+      /*
+       * Stored text is kept ONLY for `custom`. A `combat` layer that also carried text would leave
+       * an old rank sitting in the spec after a promotion, and whichever the renderer happened to
+       * prefer would decide whether the banner was right — not a decision worth having.
+       */
       ...(source === 'custom' ? { text } : {}),
-      anchor,
-      size: clamp(layer.size, BANNER_LIMITS.minTextSize, BANNER_LIMITS.maxTextSize, 18),
-      bold: layer.bold === true,
-      colour: textColour,
-      mono: layer.mono === true,
+      ...(label === '' ? {} : { label }),
+      row,
+      align,
+      size: clamp(layer['size'], BANNER_LIMITS.minTextSize, BANNER_LIMITS.maxTextSize, 18),
+      bold: layer['bold'] === true,
+      colour: hex(layer['colour'], '#e8eef5'),
+      mono: layer['mono'] === true,
     };
   });
 
   return {
-    version: 1,
+    version: 2,
     background: background as BannerBackground,
-    colourA: colour(o.colourA),
-    colourB: colour(o.colourB),
+    colourA: hex(o.colourA, '#0b0f14'),
+    colourB: hex(o.colourB, '#ff7100'),
     ...(typeof o.imageMediaId === 'string' && o.imageMediaId !== ''
       ? { imageMediaId: o.imageMediaId }
       : {}),
@@ -402,38 +477,130 @@ export function validateBannerSpec(raw: unknown): BannerSpec {
 }
 
 /**
+ * Reads a version 1 banner as a version 2 one.
+ *
+ * ★ WHY MIGRATE RATHER THAN REFUSE ★
+ *
+ * Version 1 shipped and members built banners with it. Refusing those would blank their signature
+ * with no explanation and no way back — the spec is the only copy, so "rebuild it" would mean
+ * "your work is gone".
+ *
+ * The mapping is mechanical: the nine anchors were three rows crossed with three alignments, and
+ * the palette names were always hex underneath.
+ */
+function migrateV1(raw: Record<string, unknown>): BannerSpec {
+  const NAMED: Record<string, string> = {
+    orange: '#ff7100',
+    cyan: '#5cd9ff',
+    gold: '#ffc400',
+    steel: '#93a4b8',
+    light: '#e8eef5',
+    dark: '#0b0f14',
+  };
+  const colour = (v: unknown, fallback: string): string =>
+    typeof v === 'string' ? (NAMED[v] ?? (HEX_COLOUR.test(v) ? v : fallback)) : fallback;
+
+  const OLD_SOURCE: Record<string, BannerTextSource> = {
+    commander: 'commander',
+    rank: 'squadronRank',
+    squadron: 'squadron',
+    custom: 'custom',
+  };
+
+  const layers = (Array.isArray(raw['layers']) ? raw['layers'] : []).map(
+    (l): Record<string, unknown> => {
+      const layer = l as Record<string, unknown>;
+      const anchor = typeof layer['anchor'] === 'string' ? layer['anchor'] : 'middle-left';
+      const [vertical, horizontal] = anchor.split('-');
+      return {
+        ...layer,
+        row: vertical === 'top' ? 1 : vertical === 'bottom' ? 3 : 2,
+        align: horizontal === 'center' ? 'center' : horizontal === 'right' ? 'right' : 'left',
+        source: OLD_SOURCE[String(layer['source'])] ?? 'custom',
+        colour: colour(layer['colour'], '#e8eef5'),
+      };
+    },
+  );
+
+  return validateBannerSpec({
+    version: 2,
+    background: raw['background'] ?? 'gradient',
+    colourA: colour(raw['colourA'], '#0b0f14'),
+    colourB: colour(raw['colourB'], '#ff7100'),
+    ...(typeof raw['imageMediaId'] === 'string' ? { imageMediaId: raw['imageMediaId'] } : {}),
+    dim: raw['dim'] ?? 0,
+    layers,
+  });
+}
+
+/**
  * A starting banner, so the generator is never a blank rectangle.
  *
- * An empty canvas is the hardest thing to hand somebody. This is a real banner on first open —
- * their name, their squadron, squadron colours — which they then change rather than build.
+ * An empty canvas is the hardest thing to hand somebody. This is a real, three-line banner on first
+ * open — their name, their ranks, their squadron — which they then change rather than build.
  */
 export function defaultBannerSpec(): BannerSpec {
   return {
-    version: 1,
+    version: 2,
     background: 'gradient',
-    colourA: 'dark',
-    colourB: 'orange',
+    colourA: '#0b0f14',
+    colourB: '#ff7100',
     dim: 0,
     layers: [
       {
         kind: 'text',
         source: 'commander',
-        anchor: 'middle-left',
-        size: 26,
+        row: 1,
+        align: 'left',
+        size: 28,
         bold: true,
-        colour: 'light',
+        colour: '#e8eef5',
         mono: false,
       },
       {
         kind: 'text',
-        source: 'squadron',
-        anchor: 'bottom-left',
-        size: 12,
+        source: 'squadronRank',
+        row: 2,
+        align: 'left',
+        size: 15,
         bold: false,
-        colour: 'orange',
+        colour: '#ff9d3f',
         mono: true,
       },
-      { kind: 'badge', badge: 'squadron', anchor: 'middle-right', size: 72 },
+      {
+        kind: 'text',
+        source: 'combat',
+        label: 'CMB',
+        row: 3,
+        align: 'left',
+        size: 12,
+        bold: false,
+        colour: '#93a4b8',
+        mono: true,
+      },
+      {
+        kind: 'text',
+        source: 'trade',
+        label: 'TRD',
+        row: 3,
+        align: 'left',
+        size: 12,
+        bold: false,
+        colour: '#93a4b8',
+        mono: true,
+      },
+      {
+        kind: 'text',
+        source: 'explore',
+        label: 'EXP',
+        row: 3,
+        align: 'left',
+        size: 12,
+        bold: false,
+        colour: '#93a4b8',
+        mono: true,
+      },
+      { kind: 'badge', badge: 'squadron', row: 2, align: 'right', size: 96 },
     ],
   };
 }

@@ -1,5 +1,6 @@
 import Image from 'next/image';
 import { MobileNav } from './mobile-nav';
+import { NavDropdown, type NavChild } from './nav-dropdown';
 /**
  * Persistent site chrome: background, navigation and footer.
  *
@@ -72,7 +73,9 @@ export function DeepField() {
 
 /* --------------------------------------------------------------------- nav */
 
-export const NAV_LINKS = [
+export const NAV_LINKS: ReadonlyArray<
+  { href: string; label: string } | { label: string; children: readonly NavChild[] }
+> = [
   { href: '/situation', label: 'Situation' },
   { href: '/market', label: 'Market' },
   { href: '/shipyard', label: 'Shipyard' },
@@ -92,7 +95,24 @@ export const NAV_LINKS = [
    * Placed before Comms so the reading order is "here is how to join" and then "here is
    * where members talk", which is the order a prospective member needs them in.
    */
-  { href: '/guides', label: 'Guides' },
+  /*
+   * ★ A DROPDOWN, ADDED 2026-07-30 ★
+   *
+   * Owner: "add a category to the forums called Recruiting ... add a dropdown to the public navbar
+   * and add Guides to it".
+   *
+   * Two public boards now exist, and both are aimed at the same reader: somebody deciding whether
+   * to join. Two sibling links would have spent two of the five nav slots on one audience, so they
+   * group under one — Recruiting first (why join), Guides second (how), which is the order that
+   * question gets asked in.
+   */
+  {
+    label: 'Join us',
+    children: [
+      { href: '/recruiting', label: 'Recruiting', hint: 'Who we are and who we are looking for' },
+      { href: '/guides', label: 'Guides', hint: 'How to join, step by step' },
+    ],
+  },
   { href: '/forum', label: 'Comms' },
 ] as const;
 
@@ -136,16 +156,22 @@ export function SiteNav() {
         </a>
 
         <ul className="ml-auto hidden list-none items-center gap-1 p-0 lg:flex">
-          {NAV_LINKS.map((l) => (
-            <li key={l.href}>
-              <a
-                href={l.href}
-                className="px-3 py-2 text-sm tracking-wide text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)]"
-              >
-                {l.label}
-              </a>
-            </li>
-          ))}
+          {NAV_LINKS.map((l) =>
+            'children' in l ? (
+              <li key={l.label}>
+                <NavDropdown label={l.label} children={l.children} />
+              </li>
+            ) : (
+              <li key={l.href}>
+                <a
+                  href={l.href}
+                  className="px-3 py-2 text-sm tracking-wide text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)]"
+                >
+                  {l.label}
+                </a>
+              </li>
+            ),
+          )}
         </ul>
 
         <div className="ml-auto flex items-center gap-2 lg:ml-0">
@@ -189,7 +215,16 @@ export function SiteNav() {
             </span>
           </a>
 
-          <MobileNav links={NAV_LINKS} />
+          {/*
+            FLATTENED for the phone. A dropdown inside a slide-out panel is a menu inside a menu:
+            two taps to reach a link that has room to simply be listed. The panel is already
+            vertical, so grouping costs nothing there.
+          */}
+          <MobileNav
+            links={NAV_LINKS.flatMap((l) =>
+              'children' in l ? l.children.map((c) => ({ href: c.href, label: c.label })) : [l],
+            )}
+          />
         </div>
       </nav>
     </header>
