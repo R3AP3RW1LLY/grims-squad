@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
-import { getPublicGuide, getPublicGuides } from '../../../../lib/api';
+import { getPublicGuide } from '../../../../lib/api';
 
 /**
  * One public guide.
@@ -22,17 +22,24 @@ import { getPublicGuide, getPublicGuides } from '../../../../lib/api';
  * consumers that inherits it rather than one that re-implements it.
  */
 
-export const revalidate = 300;
-
-export async function generateStaticParams() {
-  /*
-   * Pre-renders the guides that exist at build time. Fetched WITHOUT credentials, so
-   * only public ones are ever enumerated — a private draft cannot be pre-rendered into
-   * a static file, which would be a leak that survives the flag being turned off again.
-   */
-  const guides = await getPublicGuides();
-  return guides.map((g) => ({ slug: g.slug }));
-}
+/*
+ * ★ FORCED DYNAMIC, AND WHY ISR WAS WRONG HERE ★
+ *
+ * These pages first declared `export const revalidate = 300`, reasoning that guides change
+ * rarely. In production that 500'd with `DYNAMIC_SERVER_USAGE`, and the contradiction is real:
+ * the shared `get()` helper in `lib/api.ts` fetches with `cache: 'no-store'` — deliberately,
+ * because a cached response could show a member who has just opted OUT of the roster — and a
+ * `no-store` fetch inside a route that asks to be statically revalidated cannot be satisfied.
+ *
+ * Dev never surfaced it: `next dev` does not attempt static generation the same way, so the
+ * page rendered perfectly on localhost and failed on the first real request.
+ *
+ * Rendering per request is the right answer anyway. The API is on the same host, the query is
+ * one indexed read, and it means a guide edit is live immediately rather than up to five
+ * minutes later — which matters when somebody is following the steps and an officer is fixing
+ * a wrong one.
+ */
+export const dynamic = 'force-dynamic';
 
 export async function generateMetadata({
   params,
