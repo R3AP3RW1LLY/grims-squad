@@ -183,6 +183,56 @@ export const ALL_PERMISSIONS: PermissionMask = PERMISSION_NAMES.reduce<Permissio
   0n,
 );
 
+/**
+ * Permissions that are the SQUADRON'S VOICE, not a website function.
+ *
+ * ★ THE DISTINCTION THE WEBMASTER ROLE WAS MISSING ★
+ *
+ * Squadron owner, 2026-07-29: "webmaster should not be able to post to
+ * Announcements, as this is for officers! ... the webmasters are not admins by
+ * default in the squadron. they do need all website functions but not posting to
+ * the web app announcements."
+ *
+ * The webmaster held `ALL_PERMISSIONS`, so it could post an announcement in the
+ * squadron's name. That is a real conflation: running the website and speaking
+ * for the squadron are different authorities, and the codebase already said so
+ * elsewhere — `isOfficer` is a RANK question, and its comment notes the webmaster
+ * "holds every permission on the platform and no standing in the squadron at
+ * all". The mask had simply never been made to agree.
+ *
+ * ★ DELIBERATELY MINIMAL, AND THAT IS A CHOICE ★
+ *
+ * Only `FORUM_POST_OFFICER` — which its own comment describes as Announcements
+ * and the Squadron Log. Other candidates were considered and NOT included,
+ * because the same instruction says the webmaster needs every website function
+ * and stripping more would break support work the role exists for:
+ *
+ *   BGS_SET_ORDERS, OPS_CREATE, OPS_MANAGE, FLEET_APPROVE_DOCTRINE
+ *
+ * Those are arguably squadron authority too. Adding them is one line here, and
+ * it should be a decision somebody makes on purpose rather than a widening I
+ * inferred from an instruction about announcements.
+ *
+ * ★ HOW AN OFFICER-WEBMASTER GETS IT BACK ★
+ *
+ * `computeEffectiveMask` ORs every held role together, so a webmaster who ALSO
+ * holds an officer rank receives `FORUM_POST_OFFICER` from that rank and can post
+ * announcements. Exactly as asked: the capability follows squadron standing, and
+ * removing it from the webmaster role does not take it from an officer who
+ * happens to run the website.
+ */
+export const SQUADRON_VOICE_PERMISSIONS: PermissionMask = Permission.FORUM_POST_OFFICER;
+
+/**
+ * What the `webmaster` role actually carries.
+ *
+ * Every website function, minus the squadron's voice. Derived rather than typed
+ * out, so a permission added later is included automatically — the failure mode
+ * of a hand-written mask is a new capability the webmaster silently lacks, and
+ * nobody discovers it until support work fails.
+ */
+export const WEBMASTER_PERMISSIONS: PermissionMask = ALL_PERMISSIONS & ~SQUADRON_VOICE_PERMISSIONS;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // ROLE PRESETS
 //
