@@ -2,21 +2,31 @@
 _Last updated: 2026-07-29 by agent (deployed to production)_
 
 ## Current position
-Phase: **P1 — Identity & shell, EXIT CONDITIONAL** — every task built, deployed and
-        live-verified, and the adversarial panel has run (`10-quality/review-log.md`,
-        2026-07-29). **One `due:P1` invariant is not met: INV-002, the data-layer ACL,
-        is not applied anywhere.** Latent rather than live — every ACL-bearing table is
-        empty and belongs to a later phase — but the phase is not claimed complete on it.
-P0:     **8 of 8 DONE.** P0.7 (deploy) closed 2026-07-29 — production is live.
-Next:   **P2 — Forums**, whose FIRST task is the INV-002 gate below. The promotion dry run
+Phase: **P2 — Forums, IN_PROGRESS.** P1 closed 2026-07-29.
+
+        ★ THE PHASE LINE IS LOAD-BEARING, NOT PROSE. `tools/ssot-drift-check.ts` parses it.
+        `P2` makes every P0 and P1 invariant a HARD failure if untested, and `IN_PROGRESS`
+        keeps P2's own three outstanding-but-not-failing — because on the day a phase starts
+        none of its invariants can have tests yet, and a permanently red gate is a gate
+        somebody switches off. Removing `IN_PROGRESS` is what tightens it at P2 exit.
+
+        **P1 — Identity & shell: DONE (2026-07-29).** All 11 tasks plus P0.7, deployed and
+        live-verified. The adversarial panel ran against the DEPLOYED system and its one
+        blocking finding — INV-002, the unenforced data-layer ACL — was closed the same day.
+        18 due invariants, 18 covered.
+
+Next:   **P2 — Forums.** P2.0 existed to bind the ACL and is now **DONE ahead of the phase**,
+        so P2.1 (category and thread CRUD) can start against a client that already filters.
+        The promotion dry run
         has been run (2026-07-29): it reports nobody eligible, 3 of 107 members considered,
         and the earliest possible promotion is **1 September** — August is the first month
         that can qualify.
 
-★ **HARD P2 ENTRY GATE — INV-002.** `withPrincipal` must be applied to every read of an
-ACL-bearing model, and INV-002's test replaced with one that calls the APPLICATION's
-repository rather than the extension directly, BEFORE any P2 work writes a forum category.
-The extension is built and proven; it is simply not bound to anything.
+★ **THE P2 ENTRY GATE IS CLEARED.** INV-002 is enforced: `AclDbService` binds a principal
+resolved from the session, a static guard fails the build if anything reads an ACL-bearing
+model through the plain client, and removing the binding was PROVEN to fail 6 tests rather
+than assumed to. P2.1 starts against a client that already filters — the thing P2.0 was
+written to guarantee.
 
 ★ **THE REAL BOTTLENECK IS NOT SOFTWARE.** 107 guild members, 53 of whom sent a message
 this month, and **3 website accounts**. The promotion engine considers 3 people and 2 of
@@ -122,7 +132,8 @@ is worse than no gap table._
 | P1.8 | Frontier cAPI entirely | Blocked externally, and **superseded** by ADR-022. Ships as an upgrade, never a dependency. |
 | ~~ALL~~ | ~~Live verification~~ | **DONE 2026-07-29** — Discord, Inara and the whole stack verified in production. |
 | ~~ALL~~ | ~~Deploy~~ | **DONE 2026-07-29** — P0.7 closed. |
-| **P1 exit** | **The exit review itself** | Every task is built, deployed and verified. No adversarial review has been run against the deployed system, so P1 is `REVIEW` and not `DONE`. |
+| ~~P1 exit~~ | ~~The exit review itself~~ | **DONE 2026-07-29** — six gates against the deployed system; 3 findings, 3 refuted. |
+| ~~INV-002~~ | ~~The data-layer ACL is not applied~~ | **CLOSED 2026-07-29**, the same day it was found. |
 | **API** | **A second API replica** | One container means a ~12s gap on every deploy while it swaps. Web is unaffected (Caddy holds the old container until the new one is healthy). Nobody saw a 5xx, but "zero downtime" is not literally true for the API until there are two. |
 
 > **P0 IS NOW FORMALLY EXITED (2026-07-29).** Both criteria that required P0.7 are met:
@@ -144,8 +155,8 @@ Local dev: `docker compose -f infra/docker/compose.dev.yml up -d`, then `pnpm de
 | Phase | Name | Status | Completed |
 |-------|------|--------|-----------|
 | P0 | Foundations | **DONE** | 8 of 8 · 2026-07-29 |
-| P1 | Identity & shell | **EXIT CONDITIONAL** | All 11 tasks built, deployed, live-verified; panel run. Blocked from DONE by INV-002 (unenforced ACL), which is a P2 entry gate. |
-| P2 | Forums | NOT_STARTED | — |
+| P1 | Identity & shell | **DONE** | 2026-07-29. 11 tasks + P0.7, deployed and live-verified, panel run, INV-002 closed. |
+| P2 | Forums | **IN_PROGRESS** | P2.0 (bind the data-layer ACL) DONE 2026-07-29, ahead of the phase. |
 | P3 | Telemetry spine | NOT_STARTED | — |
 | P4 | BGS console | NOT_STARTED | — |
 | P5 | Ops & carriers | NOT_STARTED | — |

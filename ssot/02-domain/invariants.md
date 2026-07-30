@@ -18,21 +18,25 @@ Severity: `SEC` = security; violating it is a breach. `DATA` = data integrity; v
 **INV-002** `SEC` `due:P1` · A query executed on behalf of a user **MUST NOT** return rows from an ACL-bearing record whose `viewPerm` the user's mask does not satisfy — **enforced in the data layer, not the controller**.
 *Test:* call the repository directly (bypassing every controller and guard) as a Ring 0 principal and assert zero Ring 1 rows returned.
 
-> ⚠ **NOT ENFORCED AS OF 2026-07-29. THIS IS THE ONE P1 INVARIANT THAT IS NOT MET.**
-> Found by the P1 exit panel (finding P1-1). The extension exists and works —
-> `withPrincipal` has **zero callers in `apps/`**, so nothing applies it. Its test is an
-> INTEGRATION test that calls the extension directly, which proves it works when applied
-> and says nothing about whether it is.
+> ✅ **ENFORCED AS OF 2026-07-29.** Closed the same day it was found (panel finding P1-1).
 >
-> **Why this is latent rather than live:** all three ACL-bearing tables
-> (`forum_categories`, `knowledge_chunks`, `loadouts`) are empty in production and belong
-> to P2, P8 and P7. No endpoint serves them, so there is nothing to leak today.
+> `AclDbService` (`apps/api/src/authz/acl-db.service.ts`) is the enforcement point.
+> `forCaller(userId)` resolves the mask from the SESSION through `PermissionService`, resolves
+> the visible-id set, and returns a `withPrincipal`-bound client. `forSystem(reason)` is the
+> deliberate bypass for background work and requires a stated reason — there is no default.
 >
-> **HARD P2 ENTRY GATE.** The first forum category P2 creates would be served unfiltered.
-> `withPrincipal` must be applied to every read of an ACL-bearing model, and the test
-> replaced with one that calls the APPLICATION's repository rather than the extension,
-> BEFORE any P2 work that writes to those tables.
-
+> **Tested through the APPLICATION, not the extension.** The original test called
+> `withPrincipal` directly, which proved the extension works when applied and said nothing
+> about whether anything applied it — exactly how this came to be reported as covered while
+> unenforced. `acl-db.service.spec.ts` starts from the object a route actually holds.
+>
+> **Proven, not assumed:** removing the binding was tried, and 6 of 8 tests failed. A static
+> guard (`acl-usage.spec.ts`) fails the build if any file outside `AclDbService` reads an
+> ACL-bearing accessor, and was proven to fire by feeding it the offending shape.
+>
+> **Known scope limit:** the static guard covers `apps/api` only. The worker and bot hold their
+> own clients and legitimately operate across every member; a future worker job reading a gated
+> table would not be caught. Recorded rather than papered over.
 **INV-003** `SEC` `due:P8` · `knowledgeChunk.visibility` always equals the visibility of its source record **at time of query**. An ACL change on the source re-indexes or deletes its chunks before the source's next retrieval.
 *Test:* move a thread from a public to an officer category; assert no public-visibility chunk for it survives, and that a Ring 0 retrieval returns zero rows.
 

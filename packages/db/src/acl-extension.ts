@@ -141,11 +141,24 @@ const READ_OPS = new Set([
  * tells an outsider how many exist, which is a smaller leak than reading them
  * and a leak all the same.
  */
-export function withPrincipal<T extends { $extends: (args: unknown) => unknown }>(
-  prisma: T,
-  principal: AclPrincipal,
-): T {
-  return prisma.$extends({
+export function withPrincipal<T>(prisma: T, principal: AclPrincipal): T {
+  /*
+   * ★ THE CONSTRAINT USED TO BE `T extends { $extends: (args: unknown) => unknown }`
+   *   AND THE REAL CLIENT DID NOT SATISFY IT ★
+   *
+   * Prisma's `$extends` is an overloaded callable object, and a parameter typed
+   * `unknown` is not assignable to its specific argument type — so passing an
+   * actual `PrismaClient` failed to compile. The signature was only ever
+   * exercised by tests passing a hand-written stub, which satisfied it easily.
+   * That is a large part of why this function had no callers: the first person
+   * to try wiring it hit a type error and had nothing to compare against.
+   *
+   * `T` is now unconstrained and the narrowing happens HERE, once, where it can
+   * be explained — rather than as a cast at every call site, which is where a
+   * cast stops being read.
+   */
+  const extendable = prisma as unknown as { $extends: (args: unknown) => unknown };
+  return extendable.$extends({
     name: 'acl',
     query: {
       $allModels: {
@@ -215,10 +228,32 @@ export function assertAclModelsRegistered(schemaSource: string): void {
  * predicate matches nothing at all.
  */
 export async function resolveVisibleCategoryIds(
-  prisma: { forumCategory: { findMany: (a: unknown) => Promise<Array<{ id: string; viewPerm: { toFixed: (n: number) => string } | null }>> } },
+  /*
+   * ★ `unknown` RATHER THAN A HAND-WRITTEN SHAPE, FOR THE SAME REASON AS
+   *   `withPrincipal` ★
+   *
+   * This used to declare `{ forumCategory: { findMany: (a: unknown) => ... } }`,
+   * which a hand-written stub satisfies and a real `PrismaClient` does not —
+   * Prisma's `findMany` takes a specific args type, and `unknown` is not
+   * assignable to it. So this compiled against its test and not against the
+   * application, which is a large part of why it had no callers.
+   *
+   * Narrowed inside, once. The row shape IS asserted below rather than trusted:
+   * `viewPerm` arrives as a Prisma `Decimal` and the conversion goes through
+   * `toFixed(0)` because `Number(decimal)` would lose precision above 2^53 —
+   * and the mask is NUMERIC(40,0) precisely because it exceeds 64 bits.
+   */
+  prisma: unknown,
   mask: bigint,
 ): Promise<ReadonlySet<string>> {
-  const rows = await prisma.forumCategory.findMany({ select: { id: true, viewPerm: true } });
+  const db = prisma as {
+    forumCategory: {
+      findMany: (a: { select: { id: true; viewPerm: true } }) => Promise<
+        Array<{ id: string; viewPerm: { toFixed: (n: number) => string } | null }>
+      >;
+    };
+  };
+  const rows = await db.forumCategory.findMany({ select: { id: true, viewPerm: true } });
   const out = new Set<string>();
   for (const r of rows) {
     const required = r.viewPerm === null ? null : BigInt(r.viewPerm.toFixed(0));
