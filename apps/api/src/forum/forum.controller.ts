@@ -11,6 +11,8 @@ import { ThreadService, type ThreadView, type PostView } from './thread.service.
 import { GrantService, type GrantView, type GranteeCandidate } from './grant.service.js';
 import { PostService, type RevisionView } from './post.service.js';
 import { EngageService, type ReactionCount, type SubscriptionLevel } from './engage.service.js';
+import { NotifyService } from './notify.service.js';
+import { GatedDiscordDm, replyDmText } from './discord-dm.port.js';
 import { SearchService, renderSnippet, type SearchResult } from './search.service.js';
 import { ModerationService } from './moderation.service.js';
 
@@ -47,7 +49,61 @@ export class ForumController {
     @Inject(EngageService) private readonly engage: EngageService,
     @Inject(SearchService) private readonly search: SearchService,
     @Inject(ModerationService) private readonly moderation: ModerationService,
+    @Inject(NotifyService) private readonly notify: NotifyService,
   ) {}
+
+  /**
+   * The DM sender, built per request from the environment.
+   *
+   * ★ STILL GATED, AND THE GATE IS THE DEFAULT ★
+   *
+   * `DISCORD_DM_ALLOWLIST` unset means NOBODY is messaged and every attempt is recorded. A sender
+   * that defaulted to "everyone" and was narrowed by config would be one missing variable away from
+   * DMing 107 people.
+   */
+  #dmSender(): GatedDiscordDm {
+    return new GatedDiscordDm(
+      process.env['DISCORD_BOT_TOKEN'],
+      process.env['DISCORD_DM_ALLOWLIST'],
+    );
+  }
+
+  /**
+   * Notifies everybody who should hear about a new reply.
+   *
+   * ★ FAILURES HERE NEVER FAIL THE REPLY ★
+   *
+   * The member has already posted. Taking their request down because Discord was slow, or because a
+   * notification row could not be written, would lose their words to punish somebody else's outage.
+   * So this is wrapped and swallowed — deliberately, and it is the only place in the forum that
+   * swallows anything.
+   */
+  async #fanOut(
+    db: Awaited<ReturnType<AclDbService['forCaller']>>,
+    target: Parameters<NotifyService['recipientsFor']>[1],
+    threadTitle: string,
+  ): Promise<void> {
+    try {
+      const recipients = await this.notify.recipientsFor(db, target);
+      if (recipients.length === 0) return;
+
+      await this.notify.writeInApp(db, recipients, target);
+
+      const sender = this.#dmSender();
+      const base = process.env['PUBLIC_URL'] ?? 'https://45-63-35-93.sslip.io';
+      const link = `/forum/${target.categorySlug}/${target.threadSlug}`;
+
+      await Promise.all(
+        recipients
+          .filter((r) => r.wantsDiscordDm && r.discordId !== null)
+          .map((r) =>
+            sender.send(r.discordId as string, replyDmText(r.reason, threadTitle, link, base)),
+          ),
+      );
+    } catch {
+      // See the note above. The reply is already stored; nothing here is worth losing it over.
+    }
+  }
 
   /**
    * The caller's mask, for the decisions the data layer cannot make.
@@ -304,7 +360,42 @@ export class ForumController {
     const bodyMd = readBody(body);
 
     const db = await this.acl.forCaller(c.userId);
-    return this.posts.create(db, threadId, bodyMd, c.userId, await this.#mask(caller));
+    const replyToId = (body as { replyToId?: unknown } | null)?.replyToId;
+
+    const post = await this.posts.create(
+      db,
+      threadId,
+      bodyMd,
+      c.userId,
+      await this.#mask(caller),
+      typeof replyToId === 'string' ? replyToId : undefined,
+    );
+
+    /*
+     * The thread is re-read for its title and slug, THROUGH THE SERVICE. `create` deliberately does
+     * not return them — that would make a write path carry presentation data for a notification's
+     * benefit — and the controller does not query models itself, which is what the static ACL guard
+     * exists to keep true.
+     */
+    const thread = await this.threads.notificationTarget(db, threadId);
+
+    if (thread !== null) {
+      await this.#fanOut(
+        db,
+        {
+          threadId,
+          threadTitle: thread.title,
+          categorySlug: thread.categorySlug,
+          threadSlug: thread.slug,
+          actorId: c.userId,
+          replyToAuthorId: post.replyToAuthorId,
+          mentionedUserIds: post.mentions,
+        },
+        thread.title,
+      );
+    }
+
+    return { id: post.id, bodyHtml: post.bodyHtml, editCount: post.editCount };
   }
 
   /**

@@ -114,7 +114,6 @@ const ALLOWED = new Map([
   ['forum/search.service.ts', 'raw SQL; carries the ACL in its own WHERE clause (INV-024)'],
   ['forum/moderation.service.ts', 'takes AclBoundClient; compiler-enforced'],
   ['forum/recruitment.service.ts', 'takes AclBoundClient; compiler-enforced'],
-  ['forum/discord-bridge.ts', 'takes AclBoundClient; re-checks the board is public before bridging'],
 ]);
 
 /** Exemptions that rely on the brand rather than on being the enforcement point. */
@@ -135,7 +134,6 @@ const BRAND_ENFORCED = [
   'forum/search.service.ts',
   'forum/moderation.service.ts',
   'forum/recruitment.service.ts',
-  'forum/discord-bridge.ts',
 ];
 
 describe('INV-002 — no ACL-bearing model is read through the plain client', () => {

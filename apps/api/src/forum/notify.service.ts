@@ -38,11 +38,27 @@ import { satisfiesMask } from './category.service.js';
  * check is what actually holds.
  */
 
+/**
+ * Why somebody is being notified.
+ *
+ * ★ THE REASON TRAVELS WITH THE RECIPIENT ★
+ *
+ * Owner chose three separate opt-ins, because the volumes are different: being answered directly is
+ * rare and almost always wanted, while a busy watched thread can produce twenty messages in an
+ * evening. A single switch would force a choice between missing a direct reply and being flooded,
+ * and the choice people actually make is to turn everything off.
+ *
+ * So the reason is decided here, per recipient, and the preference consulted is the one that
+ * matches it.
+ */
+export type NotifyReason = 'direct_reply' | 'mention' | 'watched_thread';
+
 /** What a recipient needs, resolved once so the sender never re-reads. */
 export interface Recipient {
   readonly userId: string;
   readonly discordId: string | null;
-  /** In-app always; Discord only if they have an identity and opted in. */
+  readonly reason: NotifyReason;
+  /** In-app always; Discord only if they have an identity and opted in FOR THIS REASON. */
   readonly wantsDiscordDm: boolean;
 }
 
@@ -53,6 +69,10 @@ export interface FanOutTarget {
   readonly threadSlug: string;
   /** The post that caused this, so the actor is never notified about their own reply. */
   readonly actorId: string;
+  /** Who wrote the post being replied TO, if this is a direct reply. */
+  readonly replyToAuthorId?: string | null;
+  /** Members @mentioned in the new post, already validated by the document parser. */
+  readonly mentionedUserIds?: readonly string[];
 }
 
 export class NotifyService {
@@ -108,7 +128,9 @@ export class NotifyService {
             id: true,
             status: true,
             denyMask: true,
-            notifyForumDm: true,
+            notifyDmDirectReply: true,
+            notifyDmMention: true,
+            notifyDmWatched: true,
             userRoles: { select: { role: { select: { permMask: true } } } },
             discordIdentity: { select: { discordId: true } },
           },
@@ -116,11 +138,71 @@ export class NotifyService {
       },
     });
 
-    const out: Recipient[] = [];
-    for (const sub of subs) {
-      const u = sub.user;
+    /*
+     * ★ EVERY CANDIDATE, WITH THE REASON THEY QUALIFY UNDER ★
+     *
+     * Somebody can qualify more than once — the author of the post being replied to may also be
+     * watching the thread, and may also have been mentioned. They get ONE notification, under the
+     * STRONGEST reason, because three messages about one reply is how a member decides the bot is
+     * broken and mutes it.
+     *
+     * Strength order: a direct reply is addressed to you, a mention names you, a watched thread is
+     * something you asked about generally.
+     */
+    const candidates = new Map<string, NotifyReason>();
 
-      // Never notify somebody about their own reply.
+    const consider = (userId: string, reason: NotifyReason): void => {
+      const rank: Record<NotifyReason, number> = {
+        direct_reply: 3,
+        mention: 2,
+        watched_thread: 1,
+      };
+      const existing = candidates.get(userId);
+      if (existing === undefined || rank[reason] > rank[existing]) {
+        candidates.set(userId, reason);
+      }
+    };
+
+    if (typeof target.replyToAuthorId === 'string') {
+      consider(target.replyToAuthorId, 'direct_reply');
+    }
+    for (const id of target.mentionedUserIds ?? []) consider(id, 'mention');
+    for (const sub of subs) consider(sub.userId, 'watched_thread');
+
+    /*
+     * The people reached by a direct reply or a mention may not be subscribed at all, so their rows
+     * are not in `subs`. Fetched here rather than assumed.
+     */
+    const extraIds = [...candidates.keys()].filter(
+      (id) => !subs.some((s) => s.userId === id),
+    );
+    const extras =
+      extraIds.length === 0
+        ? []
+        : await db.user.findMany({
+            where: { id: { in: extraIds } },
+            select: {
+              id: true,
+              status: true,
+              denyMask: true,
+              notifyDmDirectReply: true,
+              notifyDmMention: true,
+              notifyDmWatched: true,
+              userRoles: { select: { role: { select: { permMask: true } } } },
+              discordIdentity: { select: { discordId: true } },
+            },
+          });
+
+    const byId = new Map(
+      [...subs.map((s) => s.user), ...extras].map((u) => [u.id, u] as const),
+    );
+
+    const out: Recipient[] = [];
+    for (const [userId, reason] of candidates) {
+      const u = byId.get(userId);
+      if (u === undefined) continue;
+
+      // Never notify somebody about their own reply, whatever the reason.
       if (u.id === target.actorId) continue;
 
       /*
@@ -148,15 +230,23 @@ export class NotifyService {
         continue;
       }
 
+      /*
+       * Discord requires BOTH a linked identity and an explicit opt-in FOR THIS REASON. Absent
+       * either, in-app only — a DM is a message into somebody's private inbox, and inferring
+       * consent from "they linked Discord to sign in" would be putting words in their mouth.
+       */
+      const optedIn =
+        reason === 'direct_reply'
+          ? u.notifyDmDirectReply
+          : reason === 'mention'
+            ? u.notifyDmMention
+            : u.notifyDmWatched;
+
       out.push({
         userId: u.id,
         discordId: u.discordIdentity?.discordId ?? null,
-        /*
-         * Discord requires BOTH a linked identity and an explicit opt-in. Absent either, in-app
-         * only — a DM is a message into somebody's private inbox, and inferring consent for that
-         * from "they linked Discord to sign in" would be putting words in their mouth.
-         */
-        wantsDiscordDm: u.notifyForumDm === true && u.discordIdentity !== null,
+        reason,
+        wantsDiscordDm: optedIn === true && u.discordIdentity !== null,
       });
     }
 
@@ -238,7 +328,12 @@ export class NotifyService {
       data: recipients.map((r) => ({
         userId: r.userId,
         channel: 'in_app' as const,
-        kind: 'forum_reply',
+        /*
+         * The REASON is the kind, so an in-app list can say "replied to you" rather than a
+         * uniform "new reply" — which is the difference between a notification somebody acts on
+         * and one they scroll past.
+         */
+        kind: `forum_${r.reason}`,
         title: target.threadTitle,
         body: null,
         link: `/forum/${target.categorySlug}/${target.threadSlug}`,

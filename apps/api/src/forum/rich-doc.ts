@@ -108,6 +108,27 @@ function validateMarks(marks: unknown): readonly DocMark[] {
         }
         return { type: 'link', href };
       }
+      case 'mention': {
+        /*
+         * ★ A UUID, VALIDATED — NOT A NAME TO BE MATCHED LATER ★
+         *
+         * The mention carries the id of the member being addressed, resolved once when the author
+         * picked them from the autocomplete. Scanning stored text for `@something` at render time
+         * would break every past mention when somebody renames, be ambiguous between similar
+         * display names forever, and run on every read of every post.
+         *
+         * The display TEXT is the text node itself, so the post still reads correctly even if that
+         * account is later deleted.
+         */
+        const userId = (m as { userId?: unknown }).userId;
+        if (
+          typeof userId !== 'string' ||
+          !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(userId)
+        ) {
+          fail('A mention in that post does not name anybody we recognise.');
+        }
+        return { type: 'mention', userId };
+      }
       default:
         fail(`Unsupported text style: ${String(type)}.`);
     }
@@ -312,11 +333,21 @@ function renderText(nodes: readonly TextNode[]): string {
        * listed them in. `code` wraps closest to the text, and a link wraps outermost so the
        * whole styled run is clickable.
        */
-      const order: DocMark['type'][] = ['code', 'strike', 'italic', 'bold', 'link'];
+      const order: DocMark['type'][] = ['code', 'strike', 'italic', 'bold', 'mention', 'link'];
       for (const type of order) {
         const mark = n.marks?.find((m) => m.type === type);
         if (mark === undefined) continue;
-        if (type === 'link') {
+        if (type === 'mention') {
+          /*
+           * Rendered as a link to the member's profile, carrying the id in a data attribute so the
+           * client can style or hover-card it without re-parsing the name.
+           *
+           * `esc` has already been applied to the text; the id came from a uuid pattern, so nothing
+           * here can carry markup. No `target="_blank"`: a mention points at our own site, and
+           * opening an internal link in a new tab is a small rudeness.
+           */
+          html = `<a class="doc-mention" data-mention="${esc(mark.userId ?? '')}" href="/members/${esc(mark.userId ?? '')}">${html}</a>`;
+        } else if (type === 'link') {
           /*
            * `rel` and `target` forced, exactly as the Markdown sanitiser does: a member cannot
            * clear `noopener`, which is what stops the opened page reaching `window.opener`.
@@ -429,4 +460,50 @@ export function documentToText(doc: RichDocument): string {
     }
   };
   return doc.content.map(walk).join('\n').replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Every member id mentioned in a document.
+ *
+ * ★ READ FROM THE VALIDATED TREE, NOT FROM THE HTML ★
+ *
+ * The alternative is scanning the rendered markup for `data-mention`, which would mean the
+ * notification logic depends on how the renderer happens to format an attribute today. The tree is
+ * the source of truth and the ids in it are already validated, so this cannot notify somebody whose
+ * id was never accepted.
+ *
+ * De-duplicated: mentioning the same person three times in a post is one notification, because it
+ * is one post.
+ */
+export function mentionedUserIds(doc: RichDocument): string[] {
+  const found = new Set<string>();
+
+  const fromText = (nodes: readonly TextNode[] | undefined): void => {
+    for (const t of nodes ?? []) {
+      for (const m of t.marks ?? []) {
+        if (m.type === 'mention' && typeof m.userId === 'string') found.add(m.userId);
+      }
+    }
+  };
+
+  const walk = (b: BlockNode): void => {
+    switch (b.type) {
+      case 'paragraph':
+      case 'heading':
+        fromText(b.content);
+        break;
+      case 'bulletList':
+      case 'orderedList':
+        for (const li of b.content ?? []) for (const p of li.content ?? []) walk(p);
+        break;
+      case 'blockquote':
+        for (const p of b.content ?? []) walk(p);
+        break;
+      default:
+        break;
+    }
+  };
+
+  for (const b of doc.content) walk(b);
+  return [...found];
 }

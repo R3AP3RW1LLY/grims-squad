@@ -2,7 +2,7 @@ import { AppError, ErrorCode, Permission } from '@grims/shared';
 import type { AclBoundClient } from '../authz/acl-db.service.js';
 import { satisfiesMask } from './category.service.js';
 import { renderPostBody } from './sanitize.js';
-import { validateDocument, renderDocument, documentToText } from './rich-doc.js';
+import { validateDocument, renderDocument, documentToText, mentionedUserIds } from './rich-doc.js';
 import type { ReindexQueue } from './reindex.port.js';
 import type { ModerationService } from './moderation.service.js';
 
@@ -72,7 +72,15 @@ export class PostService {
     body: string | { doc: unknown },
     authorId: string,
     callerMask: bigint,
-  ): Promise<PostWritten> {
+    /**
+     * The post being answered, for threaded replies.
+     *
+     * Optional: a top-level reply answers the thread rather than a person. When present it is what
+     * makes a "somebody replied to YOU" notification possible — the strongest signal the forum has,
+     * and one a flat reply list cannot express.
+     */
+    replyToId?: string,
+  ): Promise<PostWritten & { replyToAuthorId: string | null; mentions: string[] }> {
     const thread = await db.forumThread.findFirst({
       where: { id: threadId, deletedAt: null },
       select: {
@@ -123,9 +131,37 @@ export class PostService {
     const rendered =
       typeof body === 'string' ? this.#render(body) : this.#renderRich(body.doc);
 
+    /*
+     * ★ THE PARENT IS READ THROUGH THE BOUND CLIENT, AND MUST BE IN THIS THREAD ★
+     *
+     * Without the thread check, a `replyToId` from another thread would attach a reply to a post the
+     * reader cannot see from here — and would notify its author about a conversation they are not
+     * part of. Both are silent, and both look like a threading bug rather than a permission one.
+     */
+    let replyToAuthorId: string | null = null;
+    if (replyToId !== undefined) {
+      const parent = await db.forumPost.findFirst({
+        where: { id: replyToId, threadId: thread.id, deletedAt: null },
+        select: { id: true, authorId: true },
+      });
+      if (parent === null) {
+        throw new AppError(ErrorCode.VALIDATION_FAILED, 'That post is not in this thread.');
+      }
+      replyToAuthorId = parent.authorId;
+    }
+
+    /*
+     * Mentions are read from the VALIDATED document, not scanned out of the HTML — so the
+     * notification logic cannot depend on how the renderer formats an attribute today, and cannot
+     * notify an id that was never accepted.
+     */
+    const mentions =
+      'bodyDoc' in rendered ? mentionedUserIds(rendered.bodyDoc as never) : [];
+
     const post = await db.forumPost.create({
       data: {
         threadId: thread.id,
+        ...(replyToId === undefined ? {} : { replyToId }),
         // From the SESSION, never a request field. There is no anonymous author to
         // represent — `authorId` is NOT NULL with a required relation to `users`.
         authorId,
@@ -148,7 +184,12 @@ export class PostService {
 
     this.reindex.enqueue({ kind: 'post', id: post.id, reason: 'created' });
 
-    return post;
+    /*
+     * Returned rather than fanned out HERE. The service does not know the thread's slug or the site
+     * URL, and giving it those would make a write path depend on presentation. The controller has
+     * both and does the fan-out — which also keeps a slow Discord call off the transaction.
+     */
+    return { ...post, replyToAuthorId, mentions };
   }
 
   /**

@@ -149,20 +149,46 @@ export class GatedDiscordDm implements DiscordDmSender {
 }
 
 /**
- * Composes the message.
+ * Composes the message, per reason.
  *
- * ★ IT NAMES THE THREAD, NOT THE MEMBER WHO REPLIED ★
+ * ★ IT SAYS WHY THEY GOT IT, AND HOW TO STOP ★
  *
- * INV-048: a broadcast event never names a member. A DM is not a broadcast, but the habit is worth
- * keeping — and the title plus a link is what makes the notification useful. Who replied is visible
- * the moment they open it.
+ * A DM that does not explain itself is one people mute the bot over. Each reason gets its own first
+ * line, because "somebody replied to you" and "a thread you follow moved" call for different
+ * attention — and a member who cannot tell them apart will eventually silence both.
+ *
+ * It does NOT name the member who replied. INV-048 is about broadcast events and a DM is not one,
+ * but the habit is worth keeping: who replied is visible the moment they open it, and putting a
+ * name in a push notification is how a squabble starts on a phone screen.
  */
-export function replyDmText(threadTitle: string, link: string, baseUrl: string): string {
+export type DmReason = 'direct_reply' | 'mention' | 'watched_thread';
+
+export function replyDmText(
+  reason: DmReason,
+  threadTitle: string,
+  link: string,
+  baseUrl: string,
+): string {
+  const headline =
+    reason === 'direct_reply'
+      ? '**Somebody replied to your post**'
+      : reason === 'mention'
+        ? '**You were mentioned**'
+        : '**New reply in a thread you follow**';
+
+  const why =
+    reason === 'direct_reply'
+      ? '_You are getting this because somebody answered a post you wrote._'
+      : reason === 'mention'
+        ? '_You are getting this because somebody mentioned you._'
+        : '_You are getting this because you pressed Notify me on that thread._';
+
   return [
-    `**New reply:** ${threadTitle}`,
+    headline,
+    threadTitle,
     '',
     `${baseUrl}${link}`,
     '',
-    '_You are getting this because you are watching that thread. Turn these off in Settings._',
+    `${why} Turn these off in Settings.`,
   ].join('\n');
 }

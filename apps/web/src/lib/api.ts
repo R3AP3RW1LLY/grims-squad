@@ -957,3 +957,19 @@ export const getForumSearch = (
   snippets: string[];
 } | null> =>
   get(`/v1/forum/search?q=${encodeURIComponent(query)}`, { authed: true });
+
+/** The caller's follow state for one thread, for the Notify me button. */
+export const getThreadSubscription = (
+  threadId: string,
+): Promise<{ level: 'watching' | 'muted' | 'none' } | null> =>
+  get(`/v1/forum/threads/${encodeURIComponent(threadId)}/subscription`, { authed: true });
+
+export interface DmPreferences {
+  notifyDmDirectReply: boolean;
+  notifyDmMention: boolean;
+  notifyDmWatched: boolean;
+}
+
+/** Which Discord DMs this member has asked for. All default false — see the migration. */
+export const getDmPreferences = (): Promise<DmPreferences | null> =>
+  get('/v1/me/notifications', { authed: true });

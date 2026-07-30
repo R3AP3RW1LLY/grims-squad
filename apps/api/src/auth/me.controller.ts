@@ -202,6 +202,92 @@ export class MeController {
    * field here a member can set, and a broad PATCH would need a per-field
    * allowlist to stop it becoming a way to write `handle` or `status`.
    */
+  /**
+   * Which Discord DMs this member has asked for (P2.10).
+   *
+   * ★ THREE SWITCHES, NOT ONE ★
+   *
+   * The reasons have very different volumes: being answered directly is rare and almost always
+   * wanted, while a busy watched thread can produce twenty messages in an evening. A single switch
+   * forces a choice between missing a reply and being flooded, and the choice people actually make
+   * is to turn everything off.
+   */
+  @Get('me/notifications')
+  async notificationPrefs(@Req() req: FastifyRequest): Promise<{
+    notifyDmDirectReply: boolean;
+    notifyDmMention: boolean;
+    notifyDmWatched: boolean;
+    discordLinked: boolean;
+  }> {
+    const userId = req.user?.userId;
+    if (userId === undefined) throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
+
+    const me = await this.db.user.findUnique({
+      where: { id: userId },
+      select: {
+        notifyDmDirectReply: true,
+        notifyDmMention: true,
+        notifyDmWatched: true,
+        discordIdentity: { select: { discordId: true } },
+      },
+    });
+    if (me === null) throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
+
+    return {
+      notifyDmDirectReply: me.notifyDmDirectReply,
+      notifyDmMention: me.notifyDmMention,
+      notifyDmWatched: me.notifyDmWatched,
+      /*
+       * Reported so the settings page can say "link Discord first" rather than offering switches
+       * that would silently do nothing. A toggle that saves and then never delivers is worse than
+       * one that explains why it is unavailable.
+       */
+      discordLinked: me.discordIdentity !== null,
+    };
+  }
+
+  /** Changes them. Each is set independently; omitted keys are left alone. */
+  @Patch('me/notifications')
+  async setNotificationPrefs(
+    @Req() req: FastifyRequest,
+    @Body() body: unknown,
+  ): Promise<{ notifyDmDirectReply: boolean; notifyDmMention: boolean; notifyDmWatched: boolean }> {
+    const userId = req.user?.userId;
+    if (userId === undefined) throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
+
+    const cookies =
+      (req as unknown as { cookies?: Record<string, string | undefined> }).cookies ?? {};
+    verifyCsrf(req.method, readCsrfCookie(cookies), req.headers['x-csrf-token'] as string | undefined);
+
+    const raw = body as Record<string, unknown> | null;
+    /*
+     * Only booleans are accepted, and only for keys actually present. A PATCH that treated a
+     * missing key as `false` would turn off preferences the caller never mentioned — which is how
+     * a settings page with one toggle silently clears the other two.
+     */
+    const data: Record<string, boolean> = {};
+    for (const key of ['notifyDmDirectReply', 'notifyDmMention', 'notifyDmWatched'] as const) {
+      const value = raw?.[key];
+      if (typeof value === 'boolean') data[key] = value;
+    }
+
+    if (Object.keys(data).length === 0) {
+      throw new AppError(ErrorCode.VALIDATION_FAILED, 'Nothing to change.');
+    }
+
+    const updated = await this.db.user.update({
+      where: { id: userId },
+      data,
+      select: {
+        notifyDmDirectReply: true,
+        notifyDmMention: true,
+        notifyDmWatched: true,
+      },
+    });
+
+    return updated;
+  }
+
   @Patch('me/timezone')
   async setTimezone(
     @Req() req: FastifyRequest,

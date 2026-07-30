@@ -9,7 +9,6 @@ import { EngageService } from './engage.service.js';
 import { SearchService } from './search.service.js';
 import { ModerationService } from './moderation.service.js';
 import { RecruitmentService } from './recruitment.service.js';
-import { DiscordBridge, GatedBridgeSender, parseChannelMap } from './discord-bridge.js';
 import { PendingReindexQueue } from './reindex.port.js';
 
 /**
@@ -37,22 +36,6 @@ import { PendingReindexQueue } from './reindex.port.js';
     { provide: PendingReindexQueue, useFactory: () => new PendingReindexQueue() },
     ModerationService,
     RecruitmentService,
-    {
-      /*
-       * The bridge, wired to a sender that posts NOTHING while DISCORD_BRIDGE_CHANNELS is unset.
-       * Owner: "Build it, post NOTHING until you approve." Configuration widens it; the default is
-       * silence, so a missing variable cannot cause a post.
-       */
-      provide: DiscordBridge,
-      useFactory: () => {
-        const channels = parseChannelMap(process.env['DISCORD_BRIDGE_CHANNELS']);
-        return new DiscordBridge(
-          new GatedBridgeSender(process.env['DISCORD_BOT_TOKEN'], channels.values()),
-          channels,
-          process.env['PUBLIC_URL'] ?? 'https://45-63-35-93.sslip.io',
-        );
-      },
-    },
     {
       provide: PostService,
       inject: [PendingReindexQueue, ModerationService],

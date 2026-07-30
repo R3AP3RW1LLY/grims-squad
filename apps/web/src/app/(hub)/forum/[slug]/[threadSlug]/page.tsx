@@ -1,9 +1,17 @@
 import { notFound } from 'next/navigation';
 import { PageHeader, PageBody, Panel, RailStat } from '../../../../../components/hub-page';
-import { getHubThread, getHubThreads, getThreadGrants, getMe } from '../../../../../lib/api';
+import {
+  getHubThread,
+  getHubThreads,
+  getThreadGrants,
+  getMe,
+  getThreadSubscription,
+  getDmPreferences,
+} from '../../../../../lib/api';
 import { formatLocal } from '../../../../../lib/time';
 import { ThreadAccess } from './thread-access';
 import { ReplyComposer } from './reply-composer';
+import { NotifyMe } from './notify-me';
 import { ImageUploader } from '../../../../../components/image-uploader';
 import { YouTubeConsent } from '../../../../../components/editor/youtube-consent';
 
@@ -68,6 +76,17 @@ export default async function ThreadPage({
    */
   const board = await getHubThreads(slug);
 
+  /*
+   * The follow state and the DM preference, fetched together. Both are per-caller and neither is
+   * cacheable, so they ride alongside the thread read rather than being fetched by the button after
+   * it mounts — a button that renders "Notify me" and then flips to "Notifying you" is a button
+   * that looked wrong for a moment.
+   */
+  const [subscription, dmPrefs] = await Promise.all([
+    getThreadSubscription(thread.id),
+    getDmPreferences(),
+  ]);
+
   return (
     <>
       {/*
@@ -93,6 +112,14 @@ export default async function ThreadPage({
       <PageBody
         rail={
           <>
+            <Panel title="Follow">
+              <NotifyMe
+                threadId={thread.id}
+                initialLevel={subscription?.level ?? 'none'}
+                dmEnabled={dmPrefs?.notifyDmWatched ?? false}
+              />
+            </Panel>
+
             <Panel title="Thread">
               <RailStat label="Posts" value={String(thread.postCount)} />
               <RailStat

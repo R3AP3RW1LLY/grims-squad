@@ -32,12 +32,27 @@
  */
 
 /** Text styling. A closed set, so a mark nobody planned for cannot appear. */
-export type MarkType = 'bold' | 'italic' | 'strike' | 'code' | 'link';
+export type MarkType = 'bold' | 'italic' | 'strike' | 'code' | 'link' | 'mention';
 
 export interface DocMark {
   readonly type: MarkType;
   /** Only `link` carries anything, and only an href. */
   readonly href?: string;
+  /**
+   * Only `mention` carries this: the id of the member being addressed.
+   *
+   * ★ AN ID, NOT A PARSED NAME ★
+   *
+   * The obvious implementation scans stored text for `@something` at render time and tries to match
+   * it against the roster. That is wrong three ways: a member who renames breaks every past
+   * mention, two members with similar display names are ambiguous forever, and the scan runs on
+   * every read of every post.
+   *
+   * Resolving it ONCE, when the author picks somebody from the autocomplete, makes a mention a
+   * fact rather than a guess. The display text is stored alongside so the post still reads
+   * correctly if that account is later deleted.
+   */
+  readonly userId?: string;
 }
 
 export interface TextNode {

@@ -73,7 +73,9 @@ function stubDb(opts: {
               id: s.userId,
               status: s.status ?? 'active',
               denyMask: dec('0'),
-              notifyForumDm: s.notifyForumDm ?? false,
+              notifyDmDirectReply: s.notifyForumDm ?? false,
+              notifyDmMention: s.notifyForumDm ?? false,
+              notifyDmWatched: s.notifyForumDm ?? false,
               userRoles: s.roles.map((r) => ({ role: { permMask: dec(r) } })),
               discordIdentity:
                 s.discordId === undefined || s.discordId === null
@@ -407,22 +409,200 @@ describe('the DM allowlist', () => {
 
 describe('the DM text', () => {
   it('names the thread and links to it', () => {
-    const text = replyDmText('How to join', '/guides/how-to-join', 'https://45-63-35-93.sslip.io');
+    const text = replyDmText(
+      'watched_thread',
+      'How to join',
+      '/guides/how-to-join',
+      'https://45-63-35-93.sslip.io',
+    );
     expect(text).toContain('How to join');
     expect(text).toContain('https://45-63-35-93.sslip.io/guides/how-to-join');
   });
 
+  it('MANDATORY: each reason gets its OWN headline', () => {
+    /*
+     * "Somebody replied to you" and "a thread you follow moved" call for different attention. A
+     * member who cannot tell them apart from the notification bar will eventually silence both,
+     * which is how a notification system dies.
+     */
+    const of = (r: 'direct_reply' | 'mention' | 'watched_thread') =>
+      replyDmText(r, 'A thread', '/x', 'https://example.test');
+
+    expect(of('direct_reply')).toMatch(/replied to your post/i);
+    expect(of('mention')).toMatch(/mentioned/i);
+    expect(of('watched_thread')).toMatch(/thread you follow/i);
+
+    // And all three are distinct, so none is a copy-paste of another.
+    const all = [of('direct_reply'), of('mention'), of('watched_thread')];
+    expect(new Set(all).size).toBe(3);
+  });
+
   it('MANDATORY: does not name the member who replied (INV-048 habit)', () => {
-    // A DM is not a broadcast, but the habit is worth keeping — and who replied is visible the
-    // moment they open it.
-    const text = replyDmText('A thread', '/x', 'https://example.test');
-    expect(text).not.toMatch(/CMDR|replied by|from /i);
+    /*
+     * A DM is not a broadcast, but the habit is worth keeping — who replied is visible the moment
+     * they open it, and putting a name in a push notification is how a squabble starts on a phone
+     * screen.
+     */
+    for (const r of ['direct_reply', 'mention', 'watched_thread'] as const) {
+      const text = replyDmText(r, 'A thread', '/x', 'https://example.test');
+      expect(text, r).not.toMatch(/CMDR|replied by|from /i);
+    }
   });
 
   it('says why they received it and how to stop', () => {
     // A notification with no way to turn it off is the reason people mute bots entirely.
-    const text = replyDmText('A thread', '/x', 'https://example.test');
-    expect(text).toMatch(/watching/i);
-    expect(text).toMatch(/Settings/);
+    for (const r of ['direct_reply', 'mention', 'watched_thread'] as const) {
+      const text = replyDmText(r, 'A thread', '/x', 'https://example.test');
+      expect(text, r).toMatch(/You are getting this because/i);
+      expect(text, r).toMatch(/Settings/);
+    }
+  });
+});
+
+describe('the three reasons (P2.10)', () => {
+  /*
+   * Owner chose all three triggers and separate opt-ins for each: being answered directly is rare
+   * and almost always wanted, while a busy watched thread can produce twenty messages in an evening.
+   */
+  it('MANDATORY: a direct reply reaches the author even if they are NOT subscribed', async () => {
+    /*
+     * The author of a post being answered has often never pressed "notify me" — they wrote
+     * something and moved on. Requiring a subscription would mean the highest-signal notification
+     * in the system almost never fires.
+     */
+    const db = stubDb({ categoryViewPerm: null, subs: [] });
+    const withUser = { ...db } as Record<string, unknown>;
+    withUser['user'] = {
+      findMany: async () => [
+        {
+          id: 'author-1',
+          status: 'active',
+          denyMask: dec('0'),
+          notifyDmDirectReply: true,
+          notifyDmMention: false,
+          notifyDmWatched: false,
+          userRoles: [],
+          discordIdentity: { discordId: '123' },
+        },
+      ],
+    };
+
+    const recipients = await new NotifyService().recipientsFor(
+      withUser as unknown as AclBoundClient,
+      { ...target, replyToAuthorId: 'author-1' },
+    );
+
+    expect(recipients).toHaveLength(1);
+    expect(recipients[0]).toMatchObject({ userId: 'author-1', reason: 'direct_reply', wantsDiscordDm: true });
+  });
+
+  it('MANDATORY: ONE reply produces ONE notification, under the strongest reason', async () => {
+    /*
+     * ★ THE DEDUP THAT KEEPS THE BOT FROM BEING MUTED ★
+     *
+     * The author of the post being replied to may ALSO be watching the thread and may ALSO have
+     * been mentioned. Three messages about one reply is how a member decides the bot is broken.
+     *
+     * Strength order: a direct reply is addressed to you, a mention names you, a watched thread is
+     * something you asked about generally.
+     */
+    const db = stubDb({
+      categoryViewPerm: null,
+      subs: [{ userId: 'author-1', roles: [], discordId: '123', notifyForumDm: true }],
+    });
+
+    const recipients = await new NotifyService().recipientsFor(db, {
+      ...target,
+      replyToAuthorId: 'author-1',
+      mentionedUserIds: ['author-1'],
+    });
+
+    expect(recipients).toHaveLength(1);
+    expect(recipients[0]?.reason).toBe('direct_reply');
+  });
+
+  it('MANDATORY: each opt-in is consulted SEPARATELY', async () => {
+    /*
+     * Somebody who wants direct replies but not watched-thread noise must get exactly that. A single
+     * switch would force them to choose between missing a reply and being flooded, and the choice
+     * people actually make is to turn everything off.
+     */
+    const db = stubDb({ categoryViewPerm: null, subs: [] });
+    const withUser = { ...db } as Record<string, unknown>;
+    withUser['user'] = {
+      findMany: async () => [
+        {
+          id: 'picky',
+          status: 'active',
+          denyMask: dec('0'),
+          notifyDmDirectReply: true,
+          notifyDmMention: false,
+          notifyDmWatched: false,
+          userRoles: [],
+          discordIdentity: { discordId: '123' },
+        },
+      ],
+    };
+
+    const asReply = await new NotifyService().recipientsFor(withUser as unknown as AclBoundClient, {
+      ...target,
+      replyToAuthorId: 'picky',
+    });
+    expect(asReply[0]?.wantsDiscordDm, 'direct reply is opted in').toBe(true);
+
+    const asMention = await new NotifyService().recipientsFor(withUser as unknown as AclBoundClient, {
+      ...target,
+      mentionedUserIds: ['picky'],
+    });
+    // In-app still happens; the DM does not, because THAT switch is off.
+    expect(asMention[0]?.reason).toBe('mention');
+    expect(asMention[0]?.wantsDiscordDm, 'mention is NOT opted in').toBe(false);
+  });
+
+  it('MANDATORY: a mention still obeys the board ACL (INV-039)', async () => {
+    /*
+     * Mentioning somebody does not grant them sight of the board. Otherwise @mention would be a way
+     * to leak an officers' thread title to anybody, which is the whole thing INV-039 prevents —
+     * reached through a different door.
+     */
+    const db = stubDb({ categoryViewPerm: FORUM_VIEW_OFFICER, subs: [] });
+    const withUser = { ...db } as Record<string, unknown>;
+    withUser['user'] = {
+      findMany: async () => [
+        {
+          id: 'outsider',
+          status: 'active',
+          denyMask: dec('0'),
+          notifyDmDirectReply: true,
+          notifyDmMention: true,
+          notifyDmWatched: true,
+          userRoles: [{ role: { permMask: dec(FORUM_VIEW_MEMBER) } }],
+          discordIdentity: { discordId: '123' },
+        },
+      ],
+    };
+
+    const recipients = await new NotifyService().recipientsFor(
+      withUser as unknown as AclBoundClient,
+      { ...target, mentionedUserIds: ['outsider'] },
+    );
+
+    expect(recipients).toEqual([]);
+  });
+
+  it('the in-app row records WHICH reason', async () => {
+    // So a notification list can say "replied to you" rather than a uniform "new reply" — the
+    // difference between something acted on and something scrolled past.
+    const created: Array<{ kind?: string }> = [];
+    const db = stubDb({
+      categoryViewPerm: null,
+      subs: [{ userId: 'watcher', roles: [] }],
+      onCreateMany: (a) => created.push(...(a.data as Array<{ kind?: string }>)),
+    });
+
+    const svc = new NotifyService();
+    await svc.writeInApp(db, await svc.recipientsFor(db, target), target);
+
+    expect(created[0]?.kind).toBe('forum_watched_thread');
   });
 });

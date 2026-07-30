@@ -344,21 +344,30 @@ model User {
   /// Explicit per-user permission revocations, subtracted LAST. Deny always beats grant (INV-007).
   /// NUMERIC(40,0) because the mask exceeds 64 bits — SITE_CONFIG is 1n<<63n (ADR-005).
   denyMask    Decimal    @default(0) @map("deny_mask") @db.Decimal(40, 0)
-  /// May we send forum notifications as a Discord DM? (P2.4)
+  /// Discord DM notifications, one switch per REASON. (P2.4, extended P2.10)
   ///
-  /// * DEFAULT FALSE, AND THAT IS A PRODUCT DECISION *
+  /// * ALL DEFAULT FALSE, AND SEPARATELY *
   ///
-  /// A DM lands in somebody's private inbox. Inferring consent for that from "they linked Discord
-  /// to sign in" would be putting words in their mouth - they linked it to authenticate, not to be
-  /// messaged. So it is off until asked for.
+  /// A DM lands in somebody's private inbox. Inferring consent from "they linked Discord to sign
+  /// in" would be putting words in their mouth: they linked it to authenticate, not to be messaged.
+  /// It also matches the protective defaults D15 set when the squadron confirmed it includes minors.
   ///
-  /// It is also consistent with the protective defaults D15 set when the squadron confirmed it
-  /// includes minors: the public activity ticker ships off, location consent carries extra warning
-  /// copy, and unsolicited DMs are named in the officer handbook as a moderation topic. Defaulting
-  /// this to true would cut against all three.
+  /// * WHY THREE COLUMNS RATHER THAN ONE *
   ///
-  /// In-app notifications need no preference: they appear in a place the member chose to visit.
-  notifyForumDm Boolean  @default(false) @map("notify_forum_dm")
+  /// The three reasons have very different volumes, and a member who wants one rarely wants all
+  /// three. Being answered directly is rare and almost always wanted; a busy watched thread can
+  /// produce twenty messages in an evening. A single switch would force somebody to choose between
+  /// missing a direct reply and being flooded - and the choice they actually make is to turn
+  /// everything off, which is how notification systems die.
+  ///
+  /// In-app notifications need no preference at all: they appear somewhere the member chose to visit.
+  ///
+  /// Someone replied directly to a post this member wrote.
+  notifyDmDirectReply Boolean @default(false) @map("notify_dm_direct_reply")
+  /// Someone @mentioned this member in a post.
+  notifyDmMention     Boolean @default(false) @map("notify_dm_mention")
+  /// A new reply landed in a thread this member pressed "notify me" on.
+  notifyDmWatched     Boolean @default(false) @map("notify_dm_watched")
   createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 

@@ -370,6 +370,30 @@ export class ThreadService {
   }
 
   /**
+   * What a notification needs to name a thread: its title, and where it lives.
+   *
+   * ★ HERE RATHER THAN IN THE CONTROLLER ★
+   *
+   * The controller did this read directly and the static ACL guard caught it — correctly. It was
+   * using a bound client so it was safe, but the guard cannot see that, and an exemption for a
+   * CONTROLLER would be the wrong precedent: controllers are where a second, unbound read would
+   * eventually be added by somebody who saw the first one and copied it.
+   *
+   * Returns null for a thread the caller cannot see, so a notification cannot be composed for one.
+   */
+  async notificationTarget(
+    db: AclBoundClient,
+    threadId: string,
+  ): Promise<{ title: string; slug: string; categorySlug: string } | null> {
+    const thread = await db.forumThread.findFirst({
+      where: { id: threadId, deletedAt: null },
+      select: { title: true, slug: true, category: { select: { slug: true } } },
+    });
+    if (thread === null) return null;
+    return { title: thread.title, slug: thread.slug, categorySlug: thread.category.slug };
+  }
+
+  /**
    * Moves a thread to another category. Requires FORUM_MODERATE.
    *
    * ★ THE MOVE THAT CHANGES VISIBILITY IS WHY INV-003 EXISTS ★
