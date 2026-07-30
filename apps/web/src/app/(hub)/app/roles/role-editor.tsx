@@ -239,6 +239,13 @@ export function RoleEditor({ groups }: { groups: readonly RoleGroup[] }) {
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  /*
+   * True only after a save was refused for a STALE step-up. Not derived from the error
+   * string at render time — an error can be many things, and a code box appearing next to
+   * "you do not hold ROLE_MANAGE" would repeat the exact mistake this release fixes.
+   */
+  const [needsCode, setNeedsCode] = useState(false);
+  const [stepUpCode, setStepUpCode] = useState('');
 
   function choose(role: RoleRow) {
     setSelected(role);
@@ -282,9 +289,48 @@ export function RoleEditor({ groups }: { groups: readonly RoleGroup[] }) {
       });
       setSaved(`Saved. ${r.affected.length} member(s) affected.`);
       setPreview(null);
+      setNeedsCode(false);
+    } catch (e) {
+      /*
+       * ★ A FRESH-CODE REFUSAL IS ACTIONABLE, SO IT GETS AN ACTION ★
+       *
+       * Saving a mask is a tier-3 action: it needs a step-up confirmed within the last two
+       * minutes, not the general two-hour window. Reads pass on the long window, so the page
+       * renders normally and the ONLY thing that fails is the save.
+       *
+       * That used to surface as bare text — "This change needs a fresh authenticator code.
+       * Confirm it again to continue." — on a screen with no code box anywhere. The only way
+       * to satisfy it was to leave for /settings/security, confirm, come back, and redo the
+       * whole selection before the two minutes ran out. Told to confirm a code with nothing
+       * to type it into, the reasonable conclusion is that two-factor is broken.
+       *
+       * Now the prompt appears in place, and the editor's state survives it: the role, the
+       * checkboxes and the preview are all still there when the code is accepted.
+       */
+      const message = (e as Error).message;
+      setError(message);
+      if (/authenticator code/i.test(message)) setNeedsCode(true);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * Confirms a code without leaving the page, then retries the save.
+   *
+   * The retry is the point. Confirming and then asking the operator to click Save again
+   * would restart the two-minute clock against them for no reason.
+   */
+  async function confirmAndSave(code: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      await apiPost('/v1/auth/totp/verify', { code }, 'That code was not accepted.');
+      setNeedsCode(false);
+      setBusy(false);
+      await doSave();
     } catch (e) {
       setError((e as Error).message);
-    } finally {
       setBusy(false);
     }
   }
@@ -378,6 +424,59 @@ export function RoleEditor({ groups }: { groups: readonly RoleGroup[] }) {
               >
                 {error}
               </p>
+            )}
+
+            {/*
+              ★ THE CODE BOX APPEARS WHERE THE REFUSAL HAPPENED ★
+
+              Saving a mask needs a step-up confirmed in the last two minutes. Reads pass on
+              the two-hour window, so the page looks fine and only the save fails — and the
+              message said "confirm it again" on a screen with nowhere to do that.
+
+              Confirming here keeps the role, the checkboxes and the preview intact, and
+              retries the save straight away. The alternative was a round trip to
+              /settings/security and redoing the whole selection inside two minutes.
+            */}
+            {needsCode && (
+              <div className="mt-4 rounded border border-[var(--color-brand-cyan-bright)] px-4 py-4">
+                <label
+                  htmlFor="step-up-code"
+                  className="block text-sm text-[var(--color-text-primary)]"
+                >
+                  Confirm this change with your authenticator
+                </label>
+                <p className="mt-1 text-xs leading-relaxed text-[var(--color-text-secondary)]">
+                  Changing permissions needs a code from the last two minutes. Nothing you
+                  have selected is lost.
+                </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <input
+                    id="step-up-code"
+                    // `inputMode` + `autoComplete` so a phone shows a number pad and a
+                    // password manager can fill the code.
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    maxLength={6}
+                    value={stepUpCode}
+                    onChange={(e) => setStepUpCode(e.target.value.replace(/\D/g, ''))}
+                    disabled={busy}
+                    placeholder="123456"
+                    className="w-32 rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel)] px-3 py-2 font-mono tracking-[0.2em] text-[var(--color-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] disabled:opacity-60"
+                  />
+                  <button
+                    type="button"
+                    disabled={busy || stepUpCode.length !== 6}
+                    onClick={() => {
+                      const code = stepUpCode;
+                      setStepUpCode('');
+                      void confirmAndSave(code);
+                    }}
+                    className="rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel-sunken)] px-4 py-2 text-sm text-[var(--color-text-primary)] transition-colors hover:border-[var(--color-border-active)] disabled:opacity-50"
+                  >
+                    {busy ? 'Confirming…' : 'Confirm and save'}
+                  </button>
+                </div>
+              </div>
             )}
             {saved !== null && (
               <p className="mt-4 rounded border border-[var(--color-brand-cyan-bright)] px-4 py-3 text-sm text-[var(--color-brand-cyan-bright)]">

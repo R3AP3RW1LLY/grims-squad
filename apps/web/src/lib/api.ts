@@ -832,3 +832,101 @@ export const getThreadGrants = (
   threadId: string,
 ): Promise<{ grants: ThreadGrant[] } | null> =>
   get(`/v1/forum/threads/${encodeURIComponent(threadId)}/grants`, { authed: true });
+
+/* ------------------------------------------------- admin gating, with a REASON */
+
+/**
+ * Why an admin read was refused.
+ *
+ * ★ THE BUG THIS TYPE EXISTS TO KILL ★
+ *
+ * 2026-07-30, production: an officer with MEMBER_MANAGE but not ROLE_MANAGE opened
+ * /app/roles and was shown the two-factor code box. They entered a valid code. It was
+ * accepted — the API logged `POST /v1/auth/totp/verify 201` seven times — and the page
+ * reloaded straight back to the code box. Forever.
+ *
+ * The cause was `get()` collapsing every failure into `null`, and the page reading:
+ *
+ *     // Null means the API refused — which for these routes is the two-factor gate
+ *     if (roles === null) return <StepUp />;
+ *
+ * That comment was simply wrong. `null` also means "you do not hold ROLE_MANAGE" (the
+ * route is @CloakAsNotFound, so it answers 404) and "the API is unreachable". Presenting a
+ * PERMISSION problem as a 2FA problem creates a loop with no exit, and it made a working
+ * authenticator look broken — which is exactly how it was reported.
+ *
+ * So the reason is now carried rather than discarded, and each one gets its own screen.
+ */
+export type AdminRead<T> =
+  | { readonly state: 'ok'; readonly data: T }
+  /** 403 TWO_FACTOR_REQUIRED — a code will fix this. Show the challenge. */
+  | { readonly state: 'needs-step-up' }
+  /** 403/404 on a permission — a code will NOT fix this. Never show a code box. */
+  | { readonly state: 'forbidden' }
+  /** 401 — the session is gone. */
+  | { readonly state: 'signed-out' }
+  /** Anything else, including the API being down. */
+  | { readonly state: 'unavailable' };
+
+/**
+ * An authenticated GET that keeps the reason it failed.
+ *
+ * Deliberately separate from `get()` rather than changing it: `get()` returning null on
+ * failure is right for the ~30 public and member pages that render an empty state, and
+ * rewriting all of them to satisfy the admin console would be a large change with no
+ * benefit to any of them.
+ */
+async function getAdmin<T>(path: string): Promise<AdminRead<T>> {
+  try {
+    const jar = await cookies();
+    const cookieHeader = jar
+      .getAll()
+      .map((c) => `${c.name}=${c.value}`)
+      .join('; ');
+
+    const res = await fetch(`${SERVER_API}${path}`, {
+      headers: {
+        accept: 'application/json',
+        ...(cookieHeader === '' ? {} : { cookie: cookieHeader }),
+      },
+      cache: 'no-store',
+    });
+
+    if (res.ok) return { state: 'ok', data: (await res.json()) as T };
+    if (res.status === 401) return { state: 'signed-out' };
+
+    /*
+     * The API's own error code decides, not the status. A 403 is TWO_FACTOR_REQUIRED for
+     * the step-up gate and PERMISSION_DENIED for a missing permission, and those need
+     * opposite screens — so the body is read rather than guessed at from the number.
+     */
+    const code = await res
+      .json()
+      .then((b: unknown) => (b as { error?: { code?: string } })?.error?.code)
+      .catch(() => undefined);
+
+    if (code === 'TWO_FACTOR_REQUIRED') return { state: 'needs-step-up' };
+
+    /*
+     * RESOURCE_NOT_VISIBLE is the CLOAK (INV-024): the API refuses to confirm whether a
+     * thing exists. That is right for a member-supplied id and it is not a reason to show
+     * a code box here — the route is fixed and known to exist, so on the admin console the
+     * only thing a 404 can mean is "not yours".
+     *
+     * The cloak is NOT weakened to fix this. The API still answers 404; the web layer just
+     * stops mistaking it for a 2FA prompt.
+     */
+    if (code === 'PERMISSION_DENIED' || code === 'RESOURCE_NOT_VISIBLE' || res.status === 404) {
+      return { state: 'forbidden' };
+    }
+    return { state: 'unavailable' };
+  } catch {
+    return { state: 'unavailable' };
+  }
+}
+
+export const getAdminRolesGated = (): Promise<AdminRead<{ roles: AdminRoleRow[] }>> =>
+  getAdmin('/v1/admin/roles');
+
+export const getAdminDashboardGated = (): Promise<AdminRead<AdminDashboard>> =>
+  getAdmin('/v1/admin/dashboard');

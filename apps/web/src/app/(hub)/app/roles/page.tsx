@@ -1,9 +1,10 @@
 import type { Metadata } from 'next';
-import { getAdminRoles, getAdminMappings } from '../../../../lib/api';
+import { getAdminRolesGated, getAdminMappings } from '../../../../lib/api';
 import { RoleEditor } from './role-editor';
 import { MappingEditor } from './mapping-editor';
 import { groupRoles } from './role-groups';
 import { StepUp } from '../step-up';
+import { NoAccess, AdminUnavailable } from '../no-access';
 import { PageHeader, Section, StatGrid, StatTile } from '../../../../components/hub-page';
 import { PageTabs, resolveTab, type PageTab } from '../../../../components/page-tabs';
 
@@ -36,10 +37,27 @@ export default async function RolesPage({
   const params = await searchParams;
   const tab = resolveTab(TABS, params['tab']);
 
-  const [roles, mappings] = await Promise.all([getAdminRoles(), getAdminMappings()]);
-  // Null means the API refused — which for these routes is the two-factor gate,
-  // not a fault. A locked door should look like a locked door.
-  if (roles === null) return <StepUp />;
+  const [rolesRead, mappings] = await Promise.all([getAdminRolesGated(), getAdminMappings()]);
+
+  /*
+   * ★ THE REFUSAL IS NOW READ, NOT ASSUMED ★
+   *
+   * This used to be `if (roles === null) return <StepUp />`, with a comment asserting that
+   * for these routes a refusal "is the two-factor gate, not a fault". That was wrong, and
+   * on 2026-07-30 it cost an officer an evening: holding MEMBER_MANAGE but not ROLE_MANAGE,
+   * they were shown the code box, entered valid codes that the API accepted seven times,
+   * and were returned to the code box every time. No code can grant a permission.
+   *
+   * Each reason now gets the screen that matches it, and only ONE of them asks for a code.
+   */
+  if (rolesRead.state === 'needs-step-up') return <StepUp />;
+  if (rolesRead.state === 'forbidden') {
+    return <NoAccess what="the roles and permissions console" permission="ROLE_MANAGE" />;
+  }
+  if (rolesRead.state === 'signed-out') return <StepUp />;
+  if (rolesRead.state === 'unavailable') return <AdminUnavailable />;
+
+  const roles = rolesRead.data;
 
   const groups = groupRoles(roles.roles);
   const rows = mappings?.mappings ?? [];

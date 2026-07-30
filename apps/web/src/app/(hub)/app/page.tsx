@@ -4,9 +4,11 @@ import {
   getAdminActivity,
   getAdminAudit,
   getAdminDashboard,
+  getAdminDashboardGated,
   type AdminActivityRow,
 } from '../../../lib/api';
 import { StepUp } from './step-up';
+import { NoAccess, AdminUnavailable } from './no-access';
 import { AuditFilters } from './audit-filters';
 import { Dashboard } from './dashboard';
 import { PageHeader, Section, StatGrid, StatTile } from '../../../components/hub-page';
@@ -107,12 +109,35 @@ export default async function AdminPage({
     tab === 'audit' ? getAdminAudit() : Promise.resolve(null),
   ]);
 
-  // Whichever tab is showing, a null from its own read means the door is shut.
+  /*
+   * ★ WHY THE REASON IS PROBED SEPARATELY ★
+   *
+   * This used to be `locked = (data === null)` for whichever tab was showing, and every
+   * `locked` rendered the two-factor challenge. `null` covers three unrelated situations —
+   * not stepped up, not permitted, and the API being unreachable — and only the first is
+   * fixable with a code.
+   *
+   * On 2026-07-30 that sent an officer without MEMBER_MANAGE into an endless code prompt
+   * whose codes were all accepted. So when a tab's read comes back empty, one cheap gated
+   * request establishes WHY before choosing a screen.
+   *
+   * The extra request only happens on the failure path, so the ordinary case pays nothing.
+   */
   const locked =
     (tab === 'dashboard' && dashboard === null) ||
     (tab === 'activity' && activity === null) ||
     (tab === 'audit' && audit === null);
-  if (locked) return <StepUp />;
+
+  if (locked) {
+    const why = await getAdminDashboardGated();
+    if (why.state === 'forbidden') {
+      return <NoAccess what="the admin console" permission="MEMBER_MANAGE" />;
+    }
+    if (why.state === 'unavailable') return <AdminUnavailable />;
+    // 'needs-step-up', 'signed-out', or the probe succeeding while the tab's own read did
+    // not — a code is the reasonable thing to ask for.
+    return <StepUp />;
+  }
 
   return (
     <>
