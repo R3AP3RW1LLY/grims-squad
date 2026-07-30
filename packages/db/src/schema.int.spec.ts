@@ -47,6 +47,10 @@ describe('P0.2 database schema', () => {
   // The count is hardcoded ON PURPOSE. Every schema addition has to come and
   // bump it, which is a two-second acknowledgement that a table was added —
   // versus a self-counting assertion that would let one appear unnoticed.
+  // 68 as of 2026-07-30: forum_category_reads — when a member last looked at a board, for the
+  // "new posts" indicator on the category cards. Per BOARD rather than per thread: per-thread read
+  // state costs a row per member per thread and would become the largest table in the schema
+  // within a year, written on every page view, to drive a dot on a card.
   // 67 as of 2026-07-29: media_uploads — images a member uploaded, AFTER hardening. Every row
   // describes a file this application encoded rather than one that arrived: the upload is decoded
   // to pixels and re-encoded, so no EXIF, polyglot or appended payload survives. There is
@@ -77,8 +81,8 @@ describe('P0.2 database schema', () => {
        where table_schema = 'public' and table_type = 'BASE TABLE'
          and table_name not like '\\_prisma%'`,
     );
-    // 61 models in ssot/03-data/schema.prisma.
-    expect(Number(r[0]?.n)).toBe(67);
+    // 62 models in ssot/03-data/schema.prisma.
+    expect(Number(r[0]?.n)).toBe(68);
   });
 
   describe('hand-written DDL that Prisma cannot express', () => {
