@@ -10,6 +10,8 @@ import { SearchService } from './search.service.js';
 import { ModerationService } from './moderation.service.js';
 import { RecruitmentService } from './recruitment.service.js';
 import { PendingReindexQueue } from './reindex.port.js';
+import { UploadService } from '../media/upload.service.js';
+import { ALL_PERMISSIONS } from '@grims/shared';
 import { SignatureService } from './signature.service.js';
 
 /**
@@ -39,9 +41,27 @@ import { SignatureService } from './signature.service.js';
     RecruitmentService,
     {
       provide: PostService,
-      inject: [PendingReindexQueue, ModerationService],
-      useFactory: (reindex: PendingReindexQueue, moderation: ModerationService) =>
-        new PostService(reindex, moderation),
+      inject: [PendingReindexQueue, ModerationService, UploadService],
+      useFactory: (
+        reindex: PendingReindexQueue,
+        moderation: ModerationService,
+        uploads: UploadService,
+      ) =>
+        new PostService(reindex, moderation, {
+          /*
+           * YouTube thumbnails go through the ORDINARY upload pipeline, so they are hardened,
+           * re-encoded and EXIF-stripped like any other image — a file fetched from a third party
+           * is exactly the kind that should not bypass that.
+           *
+           * `UPLOAD_PERMISSION` is passed as satisfied because the fetch is OURS, not the
+           * member's: somebody without upload rights may still embed a video, and the thumbnail is
+           * the server acting rather than them.
+           */
+          store: async (uploaderId, bytes) => {
+            const result = await uploads.upload(uploaderId, ALL_PERMISSIONS, bytes);
+            return result.id;
+          },
+        }),
     },
     NotifyService,
     EngageService,

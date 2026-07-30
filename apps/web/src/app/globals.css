@@ -677,6 +677,25 @@ body {
   background: var(--color-surface-panel-sunken);
   overflow: hidden;
 }
+/*
+ * The video's own thumbnail, once we have fetched a copy.
+ *
+ * The `background-image` is set INLINE by the renderer, from our own media path — never
+ * i.ytimg.com, which would report every reader of the page to Google on load and undo the whole
+ * point of click-to-play. `img-src 'self'` would block it anyway.
+ */
+.guide-prose .doc-embed-thumbed {
+  background-size: cover;
+  background-position: center;
+}
+/*
+ * A scrim over the picture, so the title and the play ring stay legible on a bright frame. Applied
+ * only where there IS a picture: over the plain panel it would just make it muddy.
+ */
+.guide-prose .doc-embed-thumbed .doc-embed-play {
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.25), rgba(0, 0, 0, 0.6));
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+}
 .guide-prose .doc-embed-play {
   position: absolute;
   inset: 0;

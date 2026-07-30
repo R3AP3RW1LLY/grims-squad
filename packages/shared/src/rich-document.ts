@@ -130,6 +130,21 @@ export interface YouTubeNode {
   readonly type: 'youtube';
   readonly videoId: string;
   readonly title?: string;
+  /**
+   * OUR copy of the video's thumbnail, fetched server-side once at save time.
+   *
+   * ★ NOT A YOUTUBE URL, FOR THE SAME REASON THE IFRAME IS NOT EMBEDDED ★
+   *
+   * Pointing an `<img>` at i.ytimg.com would report every reader of the page to Google on load —
+   * before anybody decides to watch anything, and including anonymous visitors reading the public
+   * guides. That is precisely what the click-to-play placeholder exists to prevent, so a thumbnail
+   * that leaked it would quietly undo the feature it decorates.
+   *
+   * So the server fetches it once and stores it like any other upload, and this is our media id.
+   * Absent when the fetch failed or the video has no thumbnail — the post keeps the CSS
+   * placeholder it has always had, because losing a preview is not a reason to refuse a post.
+   */
+  readonly thumbMediaId?: string;
 }
 
 export interface ParagraphNode {

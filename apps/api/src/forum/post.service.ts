@@ -1,4 +1,5 @@
 import { AppError, ErrorCode, Permission } from '@grims/shared';
+import { withYouTubeThumbnails, type ThumbnailStore } from './youtube-thumbnail.js';
 import type { AclBoundClient } from '../authz/acl-db.service.js';
 import { satisfiesMask } from './category.service.js';
 import { renderPostBody } from './sanitize.js';
@@ -51,6 +52,12 @@ export class PostService {
      * sanction.
      */
     private readonly moderation: ModerationService,
+    /*
+     * Optional, so the service still constructs in every test that does not care about video
+     * previews. Absent means posts save exactly as before, with the CSS placeholder — which is
+     * also what happens in production when YouTube is unreachable.
+     */
+    private readonly thumbnails: ThumbnailStore | null = null,
   ) {}
 
   /**
@@ -129,7 +136,7 @@ export class PostService {
     await this.moderation.assertMayPost(db, authorId);
 
     const rendered =
-      typeof body === 'string' ? this.#render(body) : this.#renderRich(body.doc);
+      typeof body === 'string' ? this.#render(body) : await this.#renderRich(body.doc, authorId);
 
     /*
      * ★ THE PARENT IS READ THROUGH THE BOUND CLIENT, AND MUST BE IN THIS THREAD ★
@@ -383,7 +390,7 @@ export class PostService {
     }
 
     const rendered =
-      typeof body === 'string' ? this.#render(body) : this.#renderRich(body.doc);
+      typeof body === 'string' ? this.#render(body) : await this.#renderRich(body.doc, editorId);
     if (rendered.bodyMd === post.bodyMd) {
       /*
        * Nothing changed. Returning early rather than writing a revision: a history full of
@@ -577,8 +584,27 @@ export class PostService {
    * to the document's plain text — not markup — because search and notification previews want
    * words, and leaving it empty would make every rich post invisible to search.
    */
-  #renderRich(bodyDoc: unknown): { bodyMd: string; bodyHtml: string; bodyDoc: unknown } {
-    const doc = validateDocument(bodyDoc);
+  async #renderRich(
+    bodyDoc: unknown,
+    authorId: string,
+  ): Promise<{ bodyMd: string; bodyHtml: string; bodyDoc: unknown }> {
+    const validated = validateDocument(bodyDoc);
+
+    /*
+     * ★ THUMBNAILS ARE FETCHED BEFORE THE HTML IS BUILT ★
+     *
+     * The document is the source of truth and the HTML is derived from it, so the thumbnail id has
+     * to be in the document before rendering — otherwise the stored markup and the stored document
+     * would disagree, and an edit would silently drop the preview.
+     *
+     * A failure here returns the document unchanged rather than throwing: losing a preview is not
+     * a reason to refuse somebody's writing.
+     */
+    const doc =
+      this.thumbnails === null
+        ? validated
+        : await withYouTubeThumbnails(validated, authorId, this.thumbnails).catch(() => validated);
+
     const bodyHtml = renderDocument(doc);
     if (bodyHtml.trim() === '') {
       throw new AppError(ErrorCode.VALIDATION_FAILED, 'Write something first.');

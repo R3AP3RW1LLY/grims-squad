@@ -307,10 +307,21 @@ function validateBlock(raw: unknown, c: Counters, depth: number): BlockNode {
       if (title !== undefined && (typeof title !== 'string' || title.length > 300)) {
         fail('That video title is too long.');
       }
+      /*
+       * `thumbMediaId` is a uuid WE minted when the server fetched the thumbnail — it never comes
+       * from a client on first save. Validated anyway, because an edit round-trips the whole
+       * document through the browser, so on the second save it arrives from one.
+       */
+      const thumbMediaId = node['thumbMediaId'];
+      const thumbOk =
+        typeof thumbMediaId === 'string' &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(thumbMediaId);
+
       return {
         type: 'youtube',
         videoId,
         ...(typeof title === 'string' && title !== '' ? { title } : {}),
+        ...(thumbOk ? { thumbMediaId } : {}),
       };
     }
     case 'divider':
@@ -478,8 +489,21 @@ function renderBlock(b: BlockNode): string {
        * reader to Google on page load, which is the whole thing being avoided.
        */
       const label = b.title === undefined ? 'Play video' : esc(b.title);
+
+      /*
+       * The thumbnail, served from OUR origin. Built here from our own prefix and a validated
+       * uuid, exactly like an uploaded image — so this cannot become a foreign address, and a
+       * reader is not announced to Google merely for scrolling past a post.
+       *
+       * Absent when the fetch failed, in which case the CSS placeholder still renders.
+       */
+      const thumb =
+        b.thumbMediaId === undefined
+          ? ''
+          : ` style="background-image:url('${esc(`${MEDIA_PATH_PREFIX}${b.thumbMediaId}`)}')"`;
+
       return (
-        `<div class="doc-embed" data-youtube="${esc(b.videoId)}">` +
+        `<div class="doc-embed${b.thumbMediaId === undefined ? '' : ' doc-embed-thumbed'}" data-youtube="${esc(b.videoId)}"${thumb}>` +
         `<button type="button" class="doc-embed-play" data-youtube-play="${esc(b.videoId)}">` +
         `<span class="doc-embed-title">${label}</span>` +
         `<span class="doc-embed-hint">Click to load from YouTube</span>` +
