@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation';
 import { PageHeader, PageBody, Panel } from '../../../../../components/hub-page';
-import { getHubThreads } from '../../../../../lib/api';
+import { getHubThreads, getMe } from '../../../../../lib/api';
 import { ThreadComposer } from './thread-composer';
 
 /**
@@ -18,7 +18,11 @@ export const dynamic = 'force-dynamic';
 
 export default async function NewThreadPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const board = await getHubThreads(slug);
+  /*
+   * Both at once. The composer's preview shows the author's real name and picture, so it is what
+   * a reader will see rather than a placeholder somebody designs against.
+   */
+  const [board, me] = await Promise.all([getHubThreads(slug), getMe()]);
 
   // Absent, invisible, or the API being unreachable all answer identically (INV-024).
   if (board === null) notFound();
@@ -39,9 +43,16 @@ export default async function NewThreadPage({ params }: { params: Promise<{ slug
         }
       />
 
-      <PageBody>
+      {/* `wide`, because the composer is two columns — 68ch would put the preview under a fold. */}
+      <PageBody wide>
         {board.category.canPost ? (
-          <ThreadComposer categorySlug={slug} />
+          <ThreadComposer
+            categorySlug={slug}
+            author={{
+              displayName: me.user?.displayName ?? me.user?.handle ?? 'You',
+              avatarUrl: me.user?.avatarUrl ?? null,
+            }}
+          />
         ) : (
           <Panel tone="warning">
             <p className="text-[var(--color-text-primary)]">

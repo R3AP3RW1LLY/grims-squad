@@ -61,6 +61,19 @@ export interface RichEditorProps {
    * question and not one anybody has asked for.
    */
   readonly mentionThreadId?: string;
+  /**
+   * Renders the content with no toolbar and no editing, for use as a live PREVIEW.
+   *
+   * ★ THE PREVIEW IS THIS SAME COMPONENT, NOT A SECOND RENDERER ★
+   *
+   * A composer preview is usually built by writing a second function that turns the document into
+   * markup. That is a second renderer, and a second renderer disagrees with the first eventually —
+   * so somebody writes a post that looks one way while composing and another once posted.
+   *
+   * Feeding the same TipTap schema the same document guarantees identical output, because it is
+   * literally the same code path with the chrome hidden.
+   */
+  readonly preview?: boolean;
 }
 
 /** One toolbar button. Extracted because there are eleven of them and they must look identical. */
@@ -122,6 +135,7 @@ export function RichEditor({
   disabled = false,
   insert,
   mentionThreadId,
+  preview = false,
 }: RichEditorProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -158,7 +172,7 @@ export function RichEditor({
      * that is present-but-undefined is a different instruction from an absent one.
      */
     ...(initial === undefined ? {} : { content: fromDocument(initial) as never }),
-    editable: !disabled,
+    editable: !disabled && !preview,
     /*
      * Next.js renders this on the server first, and ProseMirror's output can differ from the
      * client's on the first pass. Without this React logs a hydration mismatch on every editor.
@@ -257,6 +271,15 @@ export function RichEditor({
   }
 
   const imageSelected = editor.isActive('squadronImage');
+
+  /*
+   * PREVIEW MODE: the content, and nothing else. No border, no toolbar, no minimum height — it is
+   * dropped inside post chrome that supplies all of those, and a bordered box inside a bordered
+   * post reads as a quote rather than as the post body.
+   */
+  if (preview) {
+    return <EditorContent editor={editor} className="guide-prose" />;
+  }
 
   return (
     <div className="rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel)]">

@@ -23,7 +23,14 @@ import { apiPost } from '../../../../../lib/api-client';
  * that exists while its body is still in flight — and a failure between them leaves an empty thread
  * on the board with the member's words lost in a form they have already navigated away from.
  */
-export function ThreadComposer({ categorySlug }: { readonly categorySlug: string }) {
+export function ThreadComposer({
+  categorySlug,
+  author,
+}: {
+  readonly categorySlug: string;
+  /** Whose post this will be, so the preview shows real chrome rather than a placeholder. */
+  readonly author: { displayName: string; avatarUrl: string | null };
+}) {
   const [title, setTitle] = useState('');
   const [doc, setDoc] = useState<RichDocument | null>(null);
   const [busy, setBusy] = useState(false);
@@ -52,7 +59,22 @@ export function ThreadComposer({ categorySlug }: { readonly categorySlug: string
   }
 
   return (
-    <div className="space-y-4">
+    /*
+     * ★ TWO COLUMNS: WRITE LEFT, SEE IT RIGHT ★
+     *
+     * Squadron owner, 2026-07-30: "make it 2 columns, on the left the editor, on the right a real
+     * time preview of the post".
+     *
+     * The preview is the SAME `RichEditor` in preview mode, fed the same document — not a second
+     * function that turns the document into markup. A second renderer disagrees with the first
+     * eventually, and the way that surfaces is somebody writing a post that looks one way while
+     * composing and another once posted.
+     *
+     * Below `xl` the columns stack, with the editor first: on a phone there is no second column,
+     * and a preview above the thing being written pushes the writing off screen.
+     */
+    <div className="grid grid-cols-1 items-start gap-8 xl:grid-cols-[minmax(0,1fr)_minmax(0,26rem)]">
+      <div className="min-w-0 space-y-4">
       <div>
         <label
           htmlFor="thread-title"
@@ -129,6 +151,60 @@ export function ThreadComposer({ categorySlug }: { readonly categorySlug: string
           CANCEL
         </a>
       </div>
+      </div>
+
+      {/* ── live preview ─────────────────────────────────────────────────── */}
+      <aside className="min-w-0 xl:sticky xl:top-24">
+        <h2 className="mb-2 font-mono text-xs tracking-[0.3em] text-[var(--color-text-secondary)]">
+          PREVIEW
+        </h2>
+        <div className="rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel)] p-5">
+          <header className="mb-4 flex items-center gap-3 border-b border-[var(--color-border-hairline)] pb-3">
+            {author.avatarUrl === null ? (
+              <span className="flex size-10 items-center justify-center rounded-full bg-[var(--color-brand-orange)] text-sm font-semibold text-[var(--color-text-on-accent)]">
+                {author.displayName.slice(0, 1).toUpperCase()}
+              </span>
+            ) : (
+              <img
+                src={author.avatarUrl}
+                alt=""
+                width={40}
+                height={40}
+                className="size-10 rounded-full object-cover"
+              />
+            )}
+            <span className="min-w-0">
+              <span className="block truncate text-sm text-[var(--color-text-primary)]">
+                {author.displayName}
+              </span>
+              <span className="block font-mono text-[11px] text-[var(--color-text-secondary)]">
+                just now
+              </span>
+            </span>
+          </header>
+
+          <h3 className="mb-3 text-lg leading-snug text-[var(--color-text-primary)]">
+            {title.trim() === '' ? (
+              <span className="text-[var(--color-text-secondary)]">Untitled</span>
+            ) : (
+              title
+            )}
+          </h3>
+
+          {doc === null ? (
+            <p className="text-sm text-[var(--color-text-secondary)]">
+              Nothing written yet. What you type appears here as it will look once posted.
+            </p>
+          ) : (
+            /*
+             * `key` on the document, so the preview editor ADOPTS each new version. Without it the
+             * preview keeps the content it mounted with and quietly stops updating — which looks
+             * exactly like a preview that works, until somebody notices it stopped ten edits ago.
+             */
+            <RichEditor key={JSON.stringify(doc)} initial={doc} onChange={() => undefined} preview />
+          )}
+        </div>
+      </aside>
     </div>
   );
 }

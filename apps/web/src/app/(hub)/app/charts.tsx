@@ -129,6 +129,43 @@ const TOOLTIP_ITEM_STYLE = { color: BRAND.void } as const;
 /** The label row (the x-axis value). Slightly muted so it reads as a heading, not as data. */
 const TOOLTIP_LABEL_STYLE = { color: BRAND.void, fontWeight: 600 } as const;
 
+/**
+ * The DARK tooltip, for the charts where the row colour carries meaning.
+ *
+ * ★ TWO TOOLTIP TREATMENTS, ON PURPOSE ★
+ *
+ * Squadron owner, 2026-07-30: on Who showed up, What the squadron flies and Journal telemetry,
+ * "make the tool tip text match the corresponding data point it represents please give it the old
+ * background color too keep the others not mentioned here the same colors they currently are".
+ *
+ * Those three are MULTI-SERIES: several lines on one chart, or a ring of coloured segments. There,
+ * the colour of a tooltip row is the thing that tells you which series it belongs to — so the row
+ * has to keep its series colour, and the surface has to be dark for those colours to be legible on.
+ *
+ * The bar charts are single-series. Nothing is distinguished by colour, so they keep the light
+ * treatment, which reads better against a dark chart because it floats clearly above it.
+ *
+ * A border in the brand orange and a shadow, so it still reads as ABOVE the chart rather than as
+ * part of it — which was the original complaint, and is fixed by separation rather than by
+ * inverting the surface.
+ */
+const TOOLTIP_DARK = {
+  backgroundColor: BRAND.panelRaised,
+  border: `1px solid ${BRAND.orange}`,
+  borderRadius: 4,
+  fontSize: 12,
+  color: BRAND.text,
+  boxShadow: '0 4px 14px rgba(0, 0, 0, 0.55)',
+} as const;
+
+/**
+ * The label row on a dark tooltip.
+ *
+ * NOT paired with an `itemStyle`: leaving item styling to Recharts is what keeps each row in its
+ * own SERIES colour, which is the entire point of the dark treatment.
+ */
+const TOOLTIP_DARK_LABEL_STYLE = { color: BRAND.text, fontWeight: 600 } as const;
+
 /* ----------------------------------------------------------- activity chart */
 
 export interface HeatDay {
@@ -220,9 +257,8 @@ export function ActivityChart({ days, monthLabel }: { days: HeatDay[]; monthLabe
             width={28}
           />
           <Tooltip
-            contentStyle={TOOLTIP_STYLE}
-            itemStyle={TOOLTIP_ITEM_STYLE}
-            labelStyle={TOOLTIP_LABEL_STYLE}
+            contentStyle={TOOLTIP_DARK}
+            labelStyle={TOOLTIP_DARK_LABEL_STYLE}
             cursor={{ stroke: BRAND.orange, strokeWidth: 1, strokeDasharray: '3 3' }}
             labelFormatter={(d) => `${String(d)} ${monthLabel}`}
             /*
@@ -487,9 +523,8 @@ export function Donut({ data, unit }: { data: Datum[]; unit: string }) {
               ))}
             </Pie>
             <Tooltip
-              contentStyle={TOOLTIP_STYLE}
-              itemStyle={TOOLTIP_ITEM_STYLE}
-              labelStyle={TOOLTIP_LABEL_STYLE}
+              contentStyle={TOOLTIP_DARK}
+              labelStyle={TOOLTIP_DARK_LABEL_STYLE}
               formatter={(v, n) => [`${Number(v).toLocaleString('en-GB')} ${unit}`, n]}
             />
           </PieChart>
