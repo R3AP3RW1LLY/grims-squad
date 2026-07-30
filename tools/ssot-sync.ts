@@ -26,6 +26,7 @@ const COPIES: ReadonlyArray<{ source: string; copy: string }> = [
   },
   { source: 'ssot/04-contracts/fonts.ts', copy: 'packages/shared/src/fonts.ts' },
   { source: 'ssot/04-contracts/ship-names.ts', copy: 'packages/shared/src/ship-names.ts' },
+  { source: 'ssot/04-contracts/ai.ts', copy: 'packages/shared/src/ai.ts' },
 ];
 
 const green = (s: string) => `\x1b[32m${s}\x1b[0m`;
