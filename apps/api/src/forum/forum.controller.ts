@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, Query, Req, Inject } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Query, Req, Inject } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
 import { AppError, ErrorCode } from '@grims/shared';
 import { User, type CurrentUser } from '../auth/current-user.js';
@@ -10,6 +10,7 @@ import { CategoryService, type CategoryView } from './category.service.js';
 import { ThreadService, type ThreadView, type PostView } from './thread.service.js';
 import { GrantService, type GrantView, type GranteeCandidate } from './grant.service.js';
 import { PostService, type RevisionView } from './post.service.js';
+import { EngageService, type ReactionCount, type SubscriptionLevel } from './engage.service.js';
 
 /**
  * The forum's HTTP surface.
@@ -41,6 +42,7 @@ export class ForumController {
     @Inject(ThreadService) private readonly threads: ThreadService,
     @Inject(GrantService) private readonly grants: GrantService,
     @Inject(PostService) private readonly posts: PostService,
+    @Inject(EngageService) private readonly engage: EngageService,
   ) {}
 
   /**
@@ -352,7 +354,72 @@ export class ForumController {
     const db = await this.acl.forCaller(c.userId);
     return { revisions: await this.posts.history(db, postId, await this.#mask(caller)) };
   }
+
+  /*
+   * ★ REACTIONS AND SUBSCRIPTIONS (P2.4) ★
+   *
+   * Neither needs a permission of its own: if you can SEE a thread you can react and follow, and if
+   * you cannot the service's own read returns 404 and there is nothing to act on. Deliberately
+   * weaker than posting, which needs the category's post_perm — reading and following are the same
+   * capability, speaking is a different one.
+   */
+
+  @Post('posts/:postId/reactions')
+  async react(
+    @User() caller: CurrentUser | undefined,
+    @Param('postId') postId: string,
+    @Body() body: unknown,
+    @Req() req: FastifyRequest,
+  ): Promise<{ reactions: ReactionCount[] }> {
+    const c = requireSession(caller, 'Sign in to react.');
+    csrf(req);
+
+    const emoji = (body as { emoji?: unknown } | null)?.emoji;
+    if (typeof emoji !== 'string') {
+      throw new AppError(ErrorCode.VALIDATION_FAILED, 'Which reaction?');
+    }
+
+    const db = await this.acl.forCaller(c.userId);
+    return { reactions: await this.engage.toggleReaction(db, postId, emoji, c.userId) };
+  }
+
+  /**
+   * Follows or unfollows a thread.
+   *
+   * PUT rather than POST: the caller states the desired STATE — watching, muted or none — rather
+   * than an action, so sending it twice is not a second event. That matters for a button somebody
+   * can double-click.
+   */
+  @Put('threads/:threadId/subscription')
+  async subscribe(
+    @User() caller: CurrentUser | undefined,
+    @Param('threadId') threadId: string,
+    @Body() body: unknown,
+    @Req() req: FastifyRequest,
+  ): Promise<{ level: SubscriptionLevel | 'none' }> {
+    const c = requireSession(caller, 'Sign in to follow a thread.');
+    csrf(req);
+
+    const level = (body as { level?: unknown } | null)?.level;
+    if (level !== 'watching' && level !== 'muted' && level !== 'none') {
+      throw new AppError(ErrorCode.VALIDATION_FAILED, 'Follow, mute, or neither.');
+    }
+
+    const db = await this.acl.forCaller(c.userId);
+    return this.engage.setThreadSubscription(db, threadId, c.userId, level);
+  }
+
+  @Get('threads/:threadId/subscription')
+  async mySubscription(
+    @User() caller: CurrentUser | undefined,
+    @Param('threadId') threadId: string,
+  ): Promise<{ level: SubscriptionLevel | 'none' }> {
+    const c = requireSession(caller, 'Sign in to see whether you follow this.');
+    const db = await this.acl.forCaller(c.userId);
+    return this.engage.subscriptionFor(db, threadId, c.userId);
+  }
 }
+
 
 /**
  * Refuses an anonymous caller before any work happens.

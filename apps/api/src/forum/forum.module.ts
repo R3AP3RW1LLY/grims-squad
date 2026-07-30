@@ -5,6 +5,7 @@ import { ThreadService } from './thread.service.js';
 import { GrantService } from './grant.service.js';
 import { PostService } from './post.service.js';
 import { NotifyService } from './notify.service.js';
+import { EngageService } from './engage.service.js';
 import { PendingReindexQueue } from './reindex.port.js';
 
 /**
@@ -36,6 +37,7 @@ import { PendingReindexQueue } from './reindex.port.js';
       useFactory: (reindex: PendingReindexQueue) => new PostService(reindex),
     },
     NotifyService,
+    EngageService,
     {
       provide: ThreadService,
       inject: [CategoryService, PendingReindexQueue, NotifyService],

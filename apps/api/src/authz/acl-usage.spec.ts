@@ -109,6 +109,8 @@ const ALLOWED = new Map([
    * something never happens.
    */
   ['forum/post.service.ts', 'takes AclBoundClient; compiler-enforced'],
+  ['forum/notify.service.ts', 'takes AclBoundClient; fan-out re-checks per recipient (INV-039)'],
+  ['forum/engage.service.ts', 'takes AclBoundClient; compiler-enforced'],
 ]);
 
 /** Exemptions that rely on the brand rather than on being the enforcement point. */
@@ -124,6 +126,8 @@ const BRAND_ENFORCED = [
    */
   'forum/grant.service.ts',
   'forum/post.service.ts',
+  'forum/notify.service.ts',
+  'forum/engage.service.ts',
 ];
 
 describe('INV-002 — no ACL-bearing model is read through the plain client', () => {
