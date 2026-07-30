@@ -2,6 +2,8 @@ import { AppError, ErrorCode, Permission } from '@grims/shared';
 import type { AclBoundClient } from '../authz/acl-db.service.js';
 import { assertSlug, satisfiesMask, type CategoryService } from './category.service.js';
 import type { ReindexQueue } from './reindex.port.js';
+import { renderPostBody } from './sanitize.js';
+import { validateDocument, renderDocument, documentToText } from './rich-doc.js';
 import type { NotifyService } from './notify.service.js';
 
 /**
@@ -58,6 +60,20 @@ export interface CreateThreadInput {
   readonly categoryId: string;
   readonly title: string;
   readonly slug?: string;
+  /**
+   * The OPENING POST. Markdown, or a rich document from the editor.
+   *
+   * ★ REQUIRED, AND IT WAS NOT ★
+   *
+   * `create` originally took a title alone and produced a thread with no posts — a row that renders
+   * as an empty page nobody can reply to usefully. It was invisible because nothing in the UI
+   * called it: there was no "new thread" screen at all, which is how a thread with no body survived
+   * review.
+   *
+   * A thread IS its opening post. Making the body part of creation means the two cannot exist
+   * apart, rather than relying on a caller to remember a second request that might fail.
+   */
+  readonly body: string | { doc: unknown };
 }
 
 /**
@@ -87,6 +103,33 @@ export function slugify(title: string): string {
 }
 
 export class ThreadService {
+  /**
+   * Renders an opening post, by exactly the same rules a reply follows.
+   *
+   * Deliberately the same two functions `PostService` uses — `renderPostBody` for Markdown,
+   * `validateDocument` + `renderDocument` for a rich document. A separate implementation here would
+   * be a second sanitiser, and the second one is the one that gets it wrong.
+   */
+  private renderBody(body: string | { doc: unknown }): {
+    bodyMd: string;
+    bodyHtml: string;
+    bodyDoc?: unknown;
+  } {
+    if (typeof body === 'string') {
+      const rendered = renderPostBody(body);
+      if (rendered.bodyHtml.trim() === '') {
+        throw new AppError(ErrorCode.VALIDATION_FAILED, 'Write something first.');
+      }
+      return rendered;
+    }
+    const doc = validateDocument(body.doc);
+    const bodyHtml = renderDocument(doc);
+    if (bodyHtml.trim() === '') {
+      throw new AppError(ErrorCode.VALIDATION_FAILED, 'Write something first.');
+    }
+    return { bodyMd: documentToText(doc), bodyHtml, bodyDoc: doc };
+  }
+
   constructor(
     private readonly categories: CategoryService,
     private readonly reindex: ReindexQueue,
@@ -282,8 +325,40 @@ export class ThreadService {
     const slug = input.slug ?? slugify(title);
     assertSlug(slug);
 
+    /*
+     * Rendered BEFORE the write, so a body that cannot be stored fails without leaving a titled
+     * thread with nothing in it. The same reasoning as the post service: the expensive, refusable
+     * work happens before anything is persisted.
+     */
+    const rendered = this.renderBody(input.body);
+
     const created = await db.forumThread.create({
-      data: { categoryId: category.id, authorId, slug, title },
+      data: {
+        categoryId: category.id,
+        authorId,
+        slug,
+        title,
+        // The counters are set here rather than by a follow-up update: a thread that briefly claims
+        // zero posts is a thread a board listing can render as empty.
+        postCount: 1,
+        lastPostAt: new Date(),
+        lastPostBy: authorId,
+        /*
+         * The opening post, created in the SAME statement. Prisma nests this into one transaction,
+         * so a thread cannot exist without its first post — which is the invariant the old
+         * title-only signature quietly broke.
+         */
+        posts: {
+          create: [
+            {
+              authorId,
+              bodyMd: rendered.bodyMd,
+              bodyHtml: rendered.bodyHtml,
+              ...('bodyDoc' in rendered ? { bodyDoc: rendered.bodyDoc as object } : {}),
+            },
+          ],
+        },
+      },
       select: { id: true, slug: true },
     });
 

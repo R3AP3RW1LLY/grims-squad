@@ -137,13 +137,29 @@ export class ForumController {
       throw new AppError(ErrorCode.VALIDATION_FAILED, 'A title is required.');
     }
 
+    /*
+     * The opening post, read by the same helper a reply uses — so a thread is started with the
+     * editor exactly as a reply is written, and there is one place that decides what a body may be.
+     *
+     * This used to be absent entirely: a thread was created with a title and no posts. Nothing
+     * called it, because there was no "new thread" screen, so an empty thread was never seen.
+     */
+    const openingPost = readBody(body);
+
     const db = await this.acl.forCaller(caller.userId);
     const mask = await this.#mask(caller);
     const category = await this.categories.bySlug(db, slug, mask);
 
+    /*
+     * A muted member cannot start a thread either. Checked here as well as on replies, because
+     * `create` is a different write path — and a sanction that stops one and not the other is a
+     * sanction with a hole in it.
+     */
+    await this.moderation.assertMayPost(db, caller.userId);
+
     return this.threads.create(
       db,
-      { categoryId: category.id, title },
+      { categoryId: category.id, title, body: openingPost },
       caller.userId,
       mask,
     );

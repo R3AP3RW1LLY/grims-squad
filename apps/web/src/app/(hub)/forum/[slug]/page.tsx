@@ -37,12 +37,27 @@ export default async function BoardPage({ params }: { params: Promise<{ slug: st
          */
         {...(category.description === null ? {} : { subtitle: category.description })}
         action={
-          <a
-            href="/forum"
-            className="font-mono text-xs tracking-[0.2em] text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)]"
-          >
-            &larr; ALL BOARDS
-          </a>
+          <span className="flex items-center gap-4">
+            {/*
+              Shown only to somebody who can actually post here. A "New thread" button that always
+              appeared and then refused would be worse than none — it invites writing a post before
+              telling you it cannot be posted.
+            */}
+            {category.canPost && (
+              <a
+                href={`/forum/${slug}/new`}
+                className="rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel-sunken)] px-3 py-1.5 text-xs text-[var(--color-text-primary)] transition-colors hover:border-[var(--color-border-active)]"
+              >
+                New thread
+              </a>
+            )}
+            <a
+              href="/forum"
+              className="font-mono text-xs tracking-[0.2em] text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)]"
+            >
+              &larr; ALL BOARDS
+            </a>
+          </span>
         }
       />
 
@@ -67,6 +82,20 @@ export default async function BoardPage({ params }: { params: Promise<{ slug: st
                 ? 'Be the first to start a thread.'
                 : 'When somebody posts, it will show up here.'}
             </p>
+            {category.canPost && (
+              <p className="mt-4">
+                {/*
+                  The empty state OFFERS the action rather than describing it. "Be the first" with
+                  nothing to click is an instruction with no verb.
+                */}
+                <a
+                  href={`/forum/${slug}/new`}
+                  className="rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel-sunken)] px-3 py-1.5 text-sm text-[var(--color-text-primary)] transition-colors hover:border-[var(--color-border-active)]"
+                >
+                  Start the first thread
+                </a>
+              </p>
+            )}
           </Panel>
         ) : (
           <div className="space-y-8">

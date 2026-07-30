@@ -298,22 +298,40 @@ describe('ThreadService', () => {
   it('MANDATORY: refuses to post without the category post permission', async () => {
     const db = boundClient(TREE, 0n);
     await expect(
-      svc.create(db as never, { categoryId: 'pub', title: 'Hello there' }, 'author-1', 0n),
+      svc.create(db as never, { categoryId: 'pub', title: 'Hello there', body: 'The opening post.' }, 'author-1', 0n),
     ).rejects.toMatchObject({ code: ErrorCode.PERMISSION_DENIED });
   });
 
   it('refuses to post in a locked category', async () => {
     const db = boundClient([{ ...TREE[0]!, isLocked: true }], POST_MEMBER);
     await expect(
-      svc.create(db as never, { categoryId: 'pub', title: 'Hello there' }, 'a', POST_MEMBER),
+      svc.create(db as never, { categoryId: 'pub', title: 'Hello there', body: 'The opening post.' }, 'a', POST_MEMBER),
     ).rejects.toMatchObject({ code: ErrorCode.PERMISSION_DENIED });
+  });
+
+  it('MANDATORY: a thread is created WITH its opening post', async () => {
+    /*
+     * ★ THE GAP THIS TEST EXISTS FOR ★
+     *
+     * `create` originally took a title alone and produced a thread with NO posts — a row that
+     * renders as an empty page. It survived review because nothing called it: there was no "new
+     * thread" screen at all, so an empty thread was never seen.
+     *
+     * The owner found it by trying to write a post and discovering there was nowhere to do it.
+     */
+    const db = boundClient(TREE, POST_MEMBER);
+    await svc.create(db as never, { categoryId: 'pub', title: 'Hello there', body: 'Opening words.' }, 'author-1', POST_MEMBER);
+
+    const row = db.threads.find((t) => t['id'] === 'new-thread');
+    expect(row?.['postCount'], 'a new thread has one post').toBe(1);
+    expect(row?.['posts'], 'the opening post is created with it').toBeDefined();
   });
 
   it('MANDATORY: the author is the session user, never a request field', async () => {
     const db = boundClient(TREE, POST_MEMBER);
     await svc.create(
       db as never,
-      { categoryId: 'pub', title: 'Wing ops tonight' },
+      { categoryId: 'pub', title: 'Wing ops tonight', body: 'The opening post.' },
       'session-user',
       POST_MEMBER,
     );
@@ -324,7 +342,7 @@ describe('ThreadService', () => {
     const db = boundClient(TREE, POST_MEMBER);
     for (const title of ['ab', 'x'.repeat(201)]) {
       await expect(
-        svc.create(db as never, { categoryId: 'pub', title }, 'a', POST_MEMBER),
+        svc.create(db as never, { categoryId: 'pub', title, body: 'Opening words.' }, 'a', POST_MEMBER),
       ).rejects.toMatchObject({ code: ErrorCode.VALIDATION_FAILED });
     }
   });
@@ -332,7 +350,7 @@ describe('ThreadService', () => {
   it('cannot post into a category it cannot see', async () => {
     const db = boundClient(TREE, POST_MEMBER);
     await expect(
-      svc.create(db as never, { categoryId: 'off', title: 'Sneaking in' }, 'a', POST_MEMBER),
+      svc.create(db as never, { categoryId: 'off', title: 'Sneaking in', body: 'The opening post.' }, 'a', POST_MEMBER),
     ).rejects.toMatchObject({ code: ErrorCode.RESOURCE_NOT_VISIBLE });
   });
 
@@ -396,7 +414,7 @@ describe('ThreadService', () => {
 
   it('creating a thread enqueues a reindex too', async () => {
     const db = boundClient(TREE, POST_MEMBER);
-    await svc.create(db as never, { categoryId: 'pub', title: 'New thread' }, 'a', POST_MEMBER);
+    await svc.create(db as never, { categoryId: 'pub', title: 'New thread', body: 'The opening post.' }, 'a', POST_MEMBER);
     expect(reindex.requests).toEqual([
       { kind: 'thread', id: 'new-thread', reason: 'created' },
     ]);
