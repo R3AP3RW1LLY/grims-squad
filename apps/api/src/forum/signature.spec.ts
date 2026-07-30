@@ -16,8 +16,16 @@ import { SignatureService, toView } from './signature.service.js';
  * ever happens, recorded at the client rather than inferred.
  */
 
-function client(opts: { existing?: Record<string, unknown> | null; uploads?: readonly string[] } = {}) {
+function client(
+  opts: {
+    existing?: Record<string, unknown> | null;
+    uploads?: readonly string[];
+    /** Dimensions the fake reports for an owned upload. Banner rules key on these. */
+    size?: { width: number; height: number };
+  } = {},
+) {
   const uploads = opts.uploads ?? ['media-mine'];
+  const size = opts.size ?? { width: 1200, height: 400 };
   /** Every model touched, so a write to `user` can be asserted never to occur. */
   const touched: string[] = [];
   const upserts: Array<Record<string, unknown>> = [];
@@ -54,7 +62,9 @@ function client(opts: { existing?: Record<string, unknown> | null; uploads?: rea
     mediaUpload: {
       findFirst: async ({ where }: { where: { id: string; uploaderId: string } }) => {
         touched.push('mediaUpload.findFirst');
-        return uploads.includes(where.id) && where.uploaderId === 'me' ? { id: where.id } : null;
+        return uploads.includes(where.id) && where.uploaderId === 'me'
+          ? { id: where.id, ...size }
+          : null;
       },
     },
     /*
@@ -111,6 +121,81 @@ describe('forum signatures', () => {
       await expect(
         new SignatureService().save(db as never, 'me', { bannerMediaId: 'media-theirs' }),
       ).rejects.toMatchObject({ code: ErrorCode.VALIDATION_FAILED });
+    });
+  });
+
+  describe('banner uploads have a size floor, not an exact size', () => {
+    /*
+     * The renderer crops to fill at 600 × 120, so anything LARGER fits without being re-encoded.
+     * What cropping cannot fix is an image too small to fill the space — scaling up blurs it, and
+     * the member blames us rather than their source file.
+     */
+    it('accepts an upload larger than the banner', async () => {
+      const db = client({ size: { width: 1920, height: 1080 } });
+      await new SignatureService().save(db as never, 'me', { bannerMediaId: 'media-mine' });
+      expect(db.upserts[0]).toMatchObject({ bannerMediaId: 'media-mine' });
+    });
+
+    it('accepts an upload at exactly the floor', async () => {
+      const db = client({ size: { width: 300, height: 60 } });
+      await new SignatureService().save(db as never, 'me', { bannerMediaId: 'media-mine' });
+      expect(db.upserts[0]).toMatchObject({ bannerMediaId: 'media-mine' });
+    });
+
+    it('MANDATORY: refuses one below the floor, stating both numbers', async () => {
+      // A refusal nobody can act on is worse than no refusal. The message has to say what was
+      // needed AND what they sent, or the next attempt is another guess.
+      const db = client({ size: { width: 200, height: 40 } });
+      await expect(
+        new SignatureService().save(db as never, 'me', { bannerMediaId: 'media-mine' }),
+      ).rejects.toMatchObject({
+        code: ErrorCode.VALIDATION_FAILED,
+        message: expect.stringContaining('200 × 40'),
+      });
+    });
+
+    it('MANDATORY: the floor applies to banners only, never to avatars', async () => {
+      // An avatar is a circle 40px across. Holding it to a banner's floor would refuse perfectly
+      // good pictures for failing a rule about a different thing.
+      const db = client({ size: { width: 64, height: 64 } });
+      await new SignatureService().save(db as never, 'me', { avatarMediaId: 'media-mine' });
+      expect(db.upserts[0]).toMatchObject({ avatarMediaId: 'media-mine' });
+    });
+  });
+
+  describe('the built banner spec', () => {
+    it('MANDATORY: is validated even though our own editor produced it', async () => {
+      // The editor is JavaScript in a browser: what arrives is whatever the browser sent.
+      const db = client();
+      await expect(
+        new SignatureService().save(db as never, 'me', {
+          bannerSpec: { version: 1, background: 'chartreuse', layers: [] },
+        }),
+      ).rejects.toMatchObject({ code: ErrorCode.VALIDATION_FAILED });
+    });
+
+    it('clamps an out-of-range size rather than losing the whole banner', async () => {
+      const db = client();
+      await new SignatureService().save(db as never, 'me', {
+        bannerSpec: {
+          version: 1,
+          background: 'gradient',
+          colourA: 'dark',
+          colourB: 'orange',
+          dim: 0,
+          layers: [
+            { kind: 'text', source: 'custom', text: 'hi', anchor: 'middle-left', size: 9999 },
+          ],
+        },
+      });
+      const saved = db.upserts[0]?.['bannerSpec'] as { layers: Array<{ size: number }> };
+      expect(saved.layers[0]?.size).toBe(48);
+    });
+
+    it('null clears it, for somebody switching back to an uploaded banner', async () => {
+      const db = client();
+      await new SignatureService().save(db as never, 'me', { bannerSpec: null });
+      expect(db.upserts[0]).toMatchObject({ bannerSpec: null });
     });
   });
 

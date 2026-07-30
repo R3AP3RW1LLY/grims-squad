@@ -1255,7 +1255,23 @@ model ForumSignature {
   tagline String?
 
   /// The banner image, and where it points.
+  ///
+  /// Set when they UPLOADED a finished banner. Mutually exclusive with `bannerSpec` in practice:
+  /// a banner is either something they made here or something they brought.
   bannerMediaId String? @map("banner_media_id") @db.Uuid
+
+  /// The banner they BUILT, as a layer spec rather than a rendered image.
+  ///
+  /// * WHY A SPEC AND NOT A PNG *
+  ///
+  /// Storing the output would freeze it. Text layers name a SOURCE - commander, rank, squadron -
+  /// which is resolved when the banner is drawn, so a promotion or a rename updates every banner
+  /// automatically. A stored image would leave a member advertising a rank they no longer hold
+  /// until they remembered to come back and rebuild it.
+  ///
+  /// It is also what makes the editor honest: the preview renders this spec with the same code the
+  /// forum uses, so there is one renderer and nothing to disagree with.
+  bannerSpec Json? @map("banner_spec")
 
   /// * A HOST ALLOWLIST, NOT A FREE URL *
   ///

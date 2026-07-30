@@ -1,4 +1,5 @@
 import type { SignatureView } from '@grims/shared';
+import { BannerRender, type BannerIdentity } from './banner-render';
 
 /**
  * A member's signature, under their post.
@@ -40,16 +41,47 @@ const ACCENT: Record<SignatureView['accent'], string> = {
   steel: 'var(--color-text-secondary)',
 };
 
-export function SignatureBlock({ signature }: { readonly signature: SignatureView }) {
-  const { tagline, bannerUrl, bannerLink, bannerLabel } = signature;
+export function SignatureBlock({
+  signature,
+  who,
+}: {
+  readonly signature: SignatureView;
+  /**
+   * Whose banner this is, for text layers that name a SOURCE rather than fixed words.
+   *
+   * Optional because most callers have no reason to know — a signature with no built banner does
+   * not need it, and defaulting keeps every existing call site working.
+   */
+  readonly who?: BannerIdentity;
+}) {
+  const { tagline, bannerUrl, bannerLink, bannerLabel, bannerSpec } = signature;
 
   // Nothing worth a divider. An empty signature block is a horizontal rule that means nothing.
-  if (tagline === null && bannerUrl === null && bannerLink === null) return null;
+  if (tagline === null && bannerUrl === null && bannerLink === null && bannerSpec === null) {
+    return null;
+  }
 
   const accent = ACCENT[signature.accent] ?? ACCENT.orange;
 
+  /*
+   * A BUILT banner wins over an uploaded one.
+   *
+   * Both columns can hold a value — somebody uploads an image, then builds one instead, and the
+   * old upload is still referenced. Preferring the spec means the thing they last worked on is the
+   * thing that shows, rather than whichever branch happened to be checked first.
+   */
   const banner =
-    bannerUrl === null ? null : (
+    bannerSpec !== null ? (
+      <BannerRender
+        spec={bannerSpec}
+        who={who ?? { commander: null, rank: null, squadron: 'GRIM’S SQUAD' }}
+        width={600}
+        className="max-w-full rounded border"
+        {...(bannerSpec.imageMediaId === undefined
+          ? {}
+          : { imageHref: `/v1/media/uploads/${bannerSpec.imageMediaId}` })}
+      />
+    ) : bannerUrl === null ? null : (
       <img
         src={bannerUrl}
         /*

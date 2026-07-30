@@ -135,7 +135,19 @@ export default async function CommanderPage({
       */}
       {tab === 'signature' ? (
         <PageBody lead="How you appear on the forums. None of this changes your Discord photo.">
-          <SignatureEditor discordAvatarUrl={me.user?.avatarUrl ?? null} />
+          <SignatureEditor
+            discordAvatarUrl={me.user?.avatarUrl ?? null}
+            /*
+             * Real values, so the banner preview shows THEIR name and rank on first paint. A
+             * generator that shows placeholders until a request lands is one people design
+             * against the placeholder and then find looks wrong with their own details in it.
+             */
+            who={{
+              commander: verified,
+              rank: me.user?.rank ?? null,
+              squadron: 'GRIM’S SQUAD',
+            }}
+          />
         </PageBody>
       ) : tab === 'security' ? (
         <SecurityBody />

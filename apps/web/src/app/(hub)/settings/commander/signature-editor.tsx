@@ -20,8 +20,11 @@ import {
   type SignatureAccent,
   type SignatureView,
 } from '@grims/shared/forum-signature';
+import type { BannerSpec } from '@grims/shared/forum-signature';
 import { apiCall } from '../../../../lib/api-client';
 import { SignatureBlock } from '../../../../components/forum/signature-block';
+import { BannerGenerator } from './banner-generator';
+import type { BannerIdentity } from '../../../../components/forum/banner-render';
 
 /**
  * Building your forum signature.
@@ -62,12 +65,27 @@ const ACCENT_LABEL: Record<SignatureAccent, string> = {
 
 export function SignatureEditor({
   discordAvatarUrl,
+  who,
 }: {
   /** Their Discord picture, which is the default and stays the default until they change it. */
   readonly discordAvatarUrl: string | null;
+  /**
+   * Real profile values for the banner's text layers.
+   *
+   * Passed in rather than fetched here so the preview shows THEIR name and rank from the first
+   * paint. A generator that shows placeholder text until a request lands is one people design
+   * against the placeholder.
+   */
+  readonly who: BannerIdentity;
 }) {
   const [sig, setSig] = useState<SignatureView | null>(null);
   const [saving, setSaving] = useState(false);
+  /*
+   * The uploaded background, resolved asynchronously. Held apart from the spec because the spec
+   * stores an ID and the renderer needs a PATH — and the path is known the moment the upload
+   * returns, whereas re-reading it from the saved signature would need a round trip.
+   */
+  const [backgroundHref, setBackgroundHref] = useState<string | undefined>(undefined);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const avatarInput = useRef<HTMLInputElement>(null);
@@ -92,7 +110,7 @@ export function SignatureEditor({
     setSaved(false);
   }
 
-  async function upload(file: File, slot: 'avatar' | 'banner') {
+  async function upload(file: File, slot: 'avatar' | 'banner' | 'background') {
     setError(null);
     if (file.size > MAX_BYTES) {
       setError(
@@ -121,7 +139,14 @@ export function SignatureEditor({
        * exists on our storage; leaving it referenced only by unsaved browser state is how it
        * becomes an orphan the moment they close the tab.
        */
-      await save(slot === 'avatar' ? { avatarMediaId: json.id } : { bannerMediaId: json.id });
+      if (slot === 'background') {
+        // A background belongs to the SPEC, not to the signature's own banner slot.
+        const next: BannerSpec = { ...(sig?.bannerSpec ?? { version: 1, background: 'image', colourA: 'dark', colourB: 'orange', dim: 0, layers: [] }), background: 'image', imageMediaId: json.id };
+        setBackgroundHref(`/v1/media/uploads/${json.id}`);
+        await save({ bannerSpec: next });
+      } else {
+        await save(slot === 'avatar' ? { avatarMediaId: json.id } : { bannerMediaId: json.id });
+      }
     } catch {
       setError('Could not reach the server. Check your connection and try again.');
     } finally {
@@ -143,6 +168,7 @@ export function SignatureEditor({
           bannerUrl: sig.bannerLink,
           bannerLabel: sig.bannerLabel,
           accent: sig.accent,
+          bannerSpec: sig.bannerSpec,
           showRank: sig.showRank,
           showCommander: sig.showCommander,
           enabled: sig.enabled,
@@ -190,7 +216,7 @@ export function SignatureEditor({
             This is roughly how a post of yours will look.
           </p>
           {/* The REAL component, not a copy of it. See the note at the top. */}
-          <SignatureBlock signature={sig} />
+          <SignatureBlock signature={sig} who={who} />
         </div>
       </section>
 
@@ -262,11 +288,22 @@ export function SignatureEditor({
         </p>
       </section>
 
-      {/* ── banner ───────────────────────────────────────────────────────── */}
-      <section className="space-y-3">
-        <h2 className="font-mono text-xs tracking-[0.3em] text-[var(--color-text-secondary)]">
-          BANNER
-        </h2>
+      {/* ── banner: build one, or bring one ──────────────────────────────── */}
+      <section className="space-y-4">
+        <BannerGenerator
+          spec={sig.bannerSpec}
+          onChange={(next) => patch({ bannerSpec: next })}
+          who={who}
+          {...(backgroundHref === undefined ? {} : { imageHref: backgroundHref })}
+          onPickImage={(file) => void upload(file, 'background')}
+          busy={saving}
+        />
+
+        <p className="text-sm leading-relaxed text-[var(--color-text-secondary)]">
+          Or upload a finished banner. It needs to be at least{' '}
+          <span className="font-mono text-[var(--color-text-primary)]">300 × 60 px</span>; anything
+          larger is cropped to fit <span className="font-mono text-[var(--color-text-primary)]">600 × 120 px</span>.
+        </p>
         <input
           ref={bannerInput}
           type="file"
