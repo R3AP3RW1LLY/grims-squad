@@ -12,7 +12,8 @@
     "clean": "rm -rf dist *.tsbuildinfo",
     "dev": "tsx watch --env-file-if-exists=.env src/main.ts",
     "start": "node dist/main.js",
-    "seed:guides": "tsx --env-file-if-exists=.env scripts/seed-guides.ts"
+    "seed:guides": "tsx --env-file-if-exists=.env scripts/seed-guides.ts",
+    "verify:uploads": "tsx --env-file-if-exists=.env scripts/verify-upload-chain.ts"
   },
   "devDependencies": {
     "@grims/config": "workspace:*",

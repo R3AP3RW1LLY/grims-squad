@@ -71,10 +71,49 @@ export function s3ConfigFrom(env: NodeJS.ProcessEnv): S3Config | null {
     );
   }
 
+  const bucket = values[2] as string;
+
+  /*
+   * ★ MEDIA MUST NOT SHARE A BUCKET WITH DATABASE BACKUPS ★
+   *
+   * Squadron owner: "WE WANT A NEW Storage i do not want this to be saved with backups!"
+   *
+   * `backup-db.sh` already reads its own `BACKUP_S3_BUCKET` — it used to read `S3_BUCKET`
+   * and was changed for exactly this reason. So the separation exists, and until now it
+   * existed only as a CONVENTION: two variables that happen to be set to different
+   * values, with nothing objecting if somebody set them the same.
+   *
+   * That is the kind of constraint that survives right up until a hurried edit to a
+   * `.env` on a Sunday. It is one comparison to enforce, and enforcing it converts a
+   * thing-we-remember into a thing-that-cannot-happen.
+   *
+   * ★ WHY THIS IS WORTH REFUSING TO START OVER ★
+   *
+   * Sharing the bucket is not merely untidy. Member-uploaded screenshots would sit in the
+   * same keyspace as encrypted database dumps, which means:
+   *
+   *   - a retention or lifecycle rule written for one silently applies to the other;
+   *   - a bulk delete of old media can reach a backup;
+   *   - restoring or re-syncing backups can overwrite media;
+   *   - any future decision to make media publicly readable would be made about a bucket
+   *     containing the entire database.
+   *
+   * The last one is the reason this throws rather than warns. A warning at boot is a line
+   * in a log nobody reads, and the failure it precedes is unrecoverable.
+   */
+  const backupBucket = env['BACKUP_S3_BUCKET']?.trim() ?? '';
+  if (backupBucket !== '' && !isPlaceholder(backupBucket) && backupBucket === bucket) {
+    throw new Error(
+      `S3_BUCKET and BACKUP_S3_BUCKET are both "${bucket}". Media must not share storage ` +
+        `with database backups: a lifecycle rule or bulk delete written for one would ` +
+        `reach the other. Create a separate bucket for uploads and point S3_BUCKET at it.`,
+    );
+  }
+
   return {
     endpoint: values[0] as string,
     region: values[1] as string,
-    bucket: values[2] as string,
+    bucket,
     accessKeyId: values[3] as string,
     secretAccessKey: values[4] as string,
   };

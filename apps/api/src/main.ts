@@ -43,6 +43,41 @@ async function bootstrap(): Promise<void> {
   await app.register(fastifyCookie);
 
   /*
+   * ★ RAW IMAGE BODIES, AND WHY NOT MULTIPART ★
+   *
+   * Image uploads POST the file as the request BODY, with the image content type. The
+   * obvious alternative is @fastify/multipart, and it was deliberately not used:
+   *
+   *   - Multipart is a parser. It is another dependency parsing attacker-controlled input
+   *     before any of our code runs, to solve a problem we do not have — there is exactly
+   *     one part, and no form fields alongside it.
+   *   - Multipart carries a FILENAME. Nothing in the upload path reads one, because both
+   *     the name and the declared type are attacker-controlled and neither is needed:
+   *     the storage key is minted from our own row id, and the format comes from decoding
+   *     the bytes. Not accepting a filename at all is stronger than remembering never to
+   *     trust it.
+   *
+   * The parser below hands the route a Buffer and does nothing else. `bodyLimit` is
+   * enforced by Fastify BEFORE the body is fully read, so an oversized upload is refused
+   * at the socket rather than after being buffered into memory — which the byte check in
+   * `hardenImage` cannot do, since by then it already exists.
+   *
+   * The declared content type still decides nothing: it selects this parser, and
+   * `hardenImage` then determines the real format by decoding. A PNG announced as
+   * image/jpeg is stored correctly as a PNG.
+   */
+  const RAW_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'application/octet-stream'];
+  for (const type of RAW_IMAGE_TYPES) {
+    app.getHttpAdapter().getInstance().addContentTypeParser(
+      type,
+      { parseAs: 'buffer', bodyLimit: 8 * 1024 * 1024 },
+      (_req: unknown, body: Buffer, done: (err: Error | null, body?: Buffer) => void) => {
+        done(null, body);
+      },
+    );
+  }
+
+  /*
    * ★ RED-TEAM FINDING, 2026-07-27 — the API had NO rate limiting at all. ★
    *
    * TOTP had its own lockout, which was the loudest case and hid the general

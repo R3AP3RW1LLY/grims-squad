@@ -47,6 +47,10 @@ describe('P0.2 database schema', () => {
   // The count is hardcoded ON PURPOSE. Every schema addition has to come and
   // bump it, which is a two-second acknowledgement that a table was added —
   // versus a self-counting assertion that would let one appear unnoticed.
+  // 67 as of 2026-07-29: media_uploads — images a member uploaded, AFTER hardening. Every row
+  // describes a file this application encoded rather than one that arrived: the upload is decoded
+  // to pixels and re-encoded, so no EXIF, polyglot or appended payload survives. There is
+  // deliberately no original-filename column.
   // 66 as of 2026-07-29: forum_thread_grants — per-thread read access for a NAMED
   // user, so an admin can let one non-officer into one officers' thread without
   // opening the board. It is the only thing in the forum that WIDENS access past a
@@ -73,8 +77,8 @@ describe('P0.2 database schema', () => {
        where table_schema = 'public' and table_type = 'BASE TABLE'
          and table_name not like '\\_prisma%'`,
     );
-    // 60 models in ssot/03-data/schema.prisma.
-    expect(Number(r[0]?.n)).toBe(66);
+    // 61 models in ssot/03-data/schema.prisma.
+    expect(Number(r[0]?.n)).toBe(67);
   });
 
   describe('hand-written DDL that Prisma cannot express', () => {
