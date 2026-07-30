@@ -48,6 +48,7 @@ export const BRAND = {
   hairline: 'rgba(255, 113, 0, 0.18)',
   text: '#e8eef5',
   textSecondary: '#93a4b8',
+  void: '#05070a',
 } as const;
 
 /**
@@ -74,13 +75,45 @@ export const SERIES = [
   BRAND.orangeDim,
 ] as const;
 
+/**
+ * The hover tooltip on every chart.
+ *
+ * ★ LIGHT ON DARK, NOT DARK ON DARK ★
+ *
+ * Squadron owner, 2026-07-30: "the tool tip color is a dark color, the dark colors are hard to
+ * read, can we lighten this up".
+ *
+ * It used to be `panelRaised` (#121820) — a panel colour, one shade off the panel BEHIND it. That
+ * is the actual problem: a tooltip has to read as floating ABOVE the chart, and a surface within a
+ * few percent of its background reads as part of it, with the numbers competing against gridlines
+ * and bars showing through the edges.
+ *
+ * So it inverts: the near-white text token becomes the surface, and the void token becomes the
+ * ink. Both are existing tokens and the pairing is already used elsewhere for accent-filled chips,
+ * so this stays inside the palette rather than introducing a colour.
+ *
+ * ★ THE ITEM COLOUR HAS TO BE OVERRIDDEN, AND THAT IS THE SUBTLE PART ★
+ *
+ * Recharts colours each tooltip row with its SERIES colour by default. Those are chosen to be
+ * legible on a near-black chart — cyan-bright (#5cd9ff) and success (#3dff8f) on near-white are
+ * close to invisible. Inverting the surface without also pinning `itemStyle` would have swapped one
+ * unreadable tooltip for a worse one, and only on the coloured charts.
+ */
 const TOOLTIP_STYLE = {
-  backgroundColor: BRAND.panelRaised,
-  border: `1px solid ${BRAND.hairline}`,
+  backgroundColor: BRAND.text,
+  border: `1px solid ${BRAND.orange}`,
   borderRadius: 4,
   fontSize: 12,
-  color: BRAND.text,
+  color: BRAND.void,
+  // Lifts it off the chart. Without a shadow an inverted box looks pasted on rather than floating.
+  boxShadow: '0 4px 14px rgba(0, 0, 0, 0.55)',
 } as const;
+
+/** Forces every row's text to the dark ink — see the note above on series colours. */
+const TOOLTIP_ITEM_STYLE = { color: BRAND.void } as const;
+
+/** The label row (the x-axis value). Slightly muted so it reads as a heading, not as data. */
+const TOOLTIP_LABEL_STYLE = { color: BRAND.void, fontWeight: 600 } as const;
 
 /* ----------------------------------------------------------- activity chart */
 
@@ -170,6 +203,8 @@ export function ActivityChart({ days, monthLabel }: { days: HeatDay[]; monthLabe
           />
           <Tooltip
             contentStyle={TOOLTIP_STYLE}
+            itemStyle={TOOLTIP_ITEM_STYLE}
+            labelStyle={TOOLTIP_LABEL_STYLE}
             cursor={{ stroke: BRAND.orange, strokeWidth: 1, strokeDasharray: '3 3' }}
             labelFormatter={(d) => `${String(d)} ${monthLabel}`}
             /*
@@ -326,6 +361,8 @@ export function RankedBars({
         />
         <Tooltip
           contentStyle={TOOLTIP_STYLE}
+          itemStyle={TOOLTIP_ITEM_STYLE}
+          labelStyle={TOOLTIP_LABEL_STYLE}
           // The default hover fill is a pale grey box that looks like a
           // rendering artefact on a dark panel.
           cursor={{ fill: 'rgba(255,113,0,0.08)' }}
@@ -372,6 +409,8 @@ export function Donut({ data, unit }: { data: Datum[]; unit: string }) {
             </Pie>
             <Tooltip
               contentStyle={TOOLTIP_STYLE}
+              itemStyle={TOOLTIP_ITEM_STYLE}
+              labelStyle={TOOLTIP_LABEL_STYLE}
               formatter={(v, n) => [`${Number(v).toLocaleString('en-GB')} ${unit}`, n]}
             />
           </PieChart>
