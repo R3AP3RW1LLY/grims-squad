@@ -109,7 +109,24 @@ export function buildCsp({ nonce, dev }: CspOptions): string {
      *                         script sources — at somebody else's server.
      */
     `frame-ancestors 'none'`,
-    `frame-src 'none'`,
+
+    /*
+     * ★ THE ONE NARROW ALLOWANCE, AND WHY IT IS NARROW ★
+     *
+     * `frame-src` was `'none'` and stayed that way for everything except a video a reader has
+     * explicitly clicked (P2.3). The stored HTML contains NO iframe: it holds a placeholder, and
+     * `YouTubeConsent` creates the frame on click.
+     *
+     * So for any reader who does not click, this directive is never exercised — no request to
+     * Google, nothing reported about who read the page. That matters more than usual here: this
+     * squadron includes minors (D15), and the protective defaults that decision set are the reason
+     * click-to-play was chosen over an inline player.
+     *
+     * `youtube-nocookie.com` ONLY. Not `youtube.com`, not a wildcard — the nocookie host serves the
+     * same player without setting tracking cookies on first load, and naming exactly one host means
+     * this cannot become a general "allow embeds" hole later.
+     */
+    `frame-src https://www.youtube-nocookie.com`,
     `object-src 'none'`,
     `base-uri 'self'`,
 

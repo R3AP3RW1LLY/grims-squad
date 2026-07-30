@@ -622,3 +622,108 @@ body {
   color: var(--color-text-primary);
   background: var(--color-surface-panel-sunken);
 }
+
+/* ------------------------------------------------ rich document blocks (P2.3)
+   Image placement and video placeholders. Extends `.guide-prose`, so a rich post
+   and a Markdown guide look the same — which is the point: the editor changed how
+   content is authored, not how the site looks. */
+.guide-prose .doc-center { text-align: center; }
+.guide-prose .doc-right { text-align: right; }
+
+.guide-prose .doc-figure {
+  /* `margin-inline` does the alignment, not `float`. A float pulls following text
+     around the image and reflows unpredictably at narrow widths; a block with auto
+     margins sits where it is told at every size. */
+  margin-block: 1.5rem;
+  /* Never wider than the column, whatever width the author chose. Without this a
+     100%-width figure inside a padded container overflows horizontally. */
+  max-width: 100%;
+}
+.guide-prose .doc-figure.doc-left { margin-inline: 0 auto; }
+.guide-prose .doc-figure.doc-center { margin-inline: auto; }
+.guide-prose .doc-figure.doc-right { margin-inline: auto 0; }
+
+.guide-prose .doc-figure img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--color-border-hairline);
+  border-radius: 4px;
+}
+.guide-prose .doc-figure figcaption {
+  margin-top: 0.5rem;
+  font-size: 0.8125rem;
+  color: var(--color-text-secondary);
+  text-align: center;
+}
+
+/* The video placeholder. Deliberately draws its own 16:9 box rather than loading a
+   thumbnail from Google — fetching one would report the reader on page load, which
+   is exactly what click-to-play exists to prevent. */
+.guide-prose .doc-embed {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  margin-block: 1.5rem;
+  border: 1px solid var(--color-border-hairline);
+  border-radius: 4px;
+  background: var(--color-surface-panel-sunken);
+  overflow: hidden;
+}
+.guide-prose .doc-embed-play {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  width: 100%;
+  cursor: pointer;
+  background: none;
+  border: 0;
+  color: var(--color-text-primary);
+}
+.guide-prose .doc-embed-play::before {
+  content: '';
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: 50%;
+  border: 2px solid var(--color-brand-orange);
+  /* A play triangle drawn in CSS. No image request, no third-party asset. */
+  background:
+    conic-gradient(from -30deg at 60% 50%, var(--color-brand-orange) 0 60deg, transparent 60deg)
+    no-repeat;
+}
+.guide-prose .doc-embed-play:hover::before { border-color: var(--color-brand-orange-bright); }
+.guide-prose .doc-embed-title { font-size: 0.9375rem; }
+.guide-prose .doc-embed-hint {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+  color: var(--color-text-secondary);
+}
+.guide-prose .doc-embed-frame { width: 100%; height: 100%; border: 0; display: block; }
+
+/* In the EDITOR, a video is a static placeholder — no player. Loading one would
+   report the AUTHOR to Google every time they opened the editor, which is the same
+   problem click-to-play solves for readers. */
+.guide-prose .doc-embed-editing {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-secondary);
+}
+
+/* A selected atom node (image or video) inside the editor. */
+.ProseMirror .ProseMirror-selectednode {
+  outline: 2px solid var(--color-border-focus);
+  outline-offset: 2px;
+}
+/* The placeholder text on an empty editor. */
+.ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+  color: var(--color-text-secondary);
+}

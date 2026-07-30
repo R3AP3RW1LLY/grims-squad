@@ -1,9 +1,11 @@
 import { notFound } from 'next/navigation';
 import { PageHeader, PageBody, Panel, RailStat } from '../../../../../components/hub-page';
-import { getHubThread, getThreadGrants, getMe } from '../../../../../lib/api';
+import { getHubThread, getHubThreads, getThreadGrants, getMe } from '../../../../../lib/api';
 import { formatLocal } from '../../../../../lib/time';
 import { ThreadAccess } from './thread-access';
+import { ReplyComposer } from './reply-composer';
 import { ImageUploader } from '../../../../../components/image-uploader';
+import { YouTubeConsent } from '../../../../../components/editor/youtube-consent';
 
 /**
  * One thread, with its posts.
@@ -58,8 +60,22 @@ export default async function ThreadPage({
   const me = await getMe();
   const viewerTz = me.user?.timezone ?? 'UTC';
 
+  /*
+   * The category, for `canPost`. Fetched separately rather than added to the thread response: the
+   * thread endpoint is @Public and shared with anonymous readers, and posting permission is a
+   * question about the CALLER — mixing it in would make a cacheable public response depend on who
+   * asked. Two cheap reads on a page that already does two.
+   */
+  const board = await getHubThreads(slug);
+
   return (
     <>
+      {/*
+        Turns a stored video placeholder into a player, but only on a click. The stored HTML
+        contains no iframe at all — see `youtube-consent`. Renders nothing itself.
+      */}
+      <YouTubeConsent />
+
       <PageHeader
         eyebrow="FORUM"
         title={thread.title}
@@ -149,6 +165,13 @@ export default async function ThreadPage({
             </article>
           ))}
         </div>
+
+        {/*
+          The composer decides for itself whether to render controls — a locked thread or no
+          posting permission gets an explanation instead of a disabled box. `canPost` comes from
+          the server and is re-checked there on submit, so this is presentation only.
+        */}
+        <ReplyComposer threadId={thread.id} locked={thread.isLocked} canPost={board?.category.canPost ?? false} />
       </PageBody>
     </>
   );
