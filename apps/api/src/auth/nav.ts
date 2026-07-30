@@ -49,6 +49,23 @@ const NAV: readonly NavDefinition[] = [
     requires: null,
   },
   {
+    href: '/forum',
+    label: 'Forum',
+    section: 'squadron',
+    blurb: 'The boards. Where the squadron talks when it is not in Discord.',
+    /*
+     * FORUM_VIEW_MEMBER, not null.
+     *
+     * Squadron owner, 2026-07-29: "all forum users must be in our discord." The
+     * nav entry follows the same rule as the content — somebody who cannot see a
+     * single category should not be shown a door that opens onto nothing.
+     *
+     * Per-category `viewPerm` still governs what is behind it, so a future
+     * public-readable category is a data change rather than a code one.
+     */
+    requires: Permission.FORUM_VIEW_MEMBER,
+  },
+  {
     href: '/roster',
     label: 'Roster',
     section: 'squadron',

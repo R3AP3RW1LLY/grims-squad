@@ -167,3 +167,39 @@ object back with `head-object` and compares; anything but an exact match is fata
 
 The general rule: a job that reports success must verify the thing it claims to
 have produced, at the place it claims to have produced it.
+
+## D34 — every forum user must be in the squadron's Discord
+**Squadron owner's decision, 2026-07-29**, after weighing public posting and a custom captcha.
+
+Considered: letting the general public post behind a captcha, with a bespoke
+captcha built in-house. Both were declined in favour of Discord membership as the
+requirement, and the reasoning is worth keeping because it will be asked again.
+
+**It is enforced structurally, not by a check.** `ForumThread.authorId` and
+`ForumPost.authorId` are NOT NULL with a required relation to `users`, and the only
+way to hold a user row is Discord OAuth against the guild. There is no
+representation for an anonymous author, so there is no code path that could forget
+to guard one. Anonymous posting would have needed a schema change — a nullable
+author or a synthetic guest — and with it a second answer for moderation,
+notifications and the ACL.
+
+**Why not the custom captcha.** Turnstile is already the decided mechanism, in
+ADR-010, `00-charter/constraints.md`, `02-domain/user-journeys.md`,
+`04-contracts/openapi.yaml` and P2.7's acceptance — five places, and it protects
+the PUBLIC APPLICATION FORM, which is how a member of the public is already
+designed to reach us. A home-rolled captcha would replace a working decision with
+one that commodity vision models defeat, and would carry the accessibility burden
+that Turnstile already solves.
+
+**The safeguarding reason, which outranks the rest.** The squadron includes minors
+(D15), and `00-charter/constraints.md` makes protective defaults binding rather
+than advisory. Anonymous posting into a space shared with minors is precisely what
+those defaults exist to prevent.
+
+**What the public CAN still do.** Apply, through the Turnstile-protected form that
+creates an application thread (P2.7) — the designed public entry point. And read
+any category whose `viewPerm` is null. That capability is retained deliberately:
+the schema has always supported a public-readable category, and removing it would
+be a schema change made on an inference rather than an instruction. Every category
+seeded today requires `FORUM_VIEW_MEMBER`, so the board is members-only in
+practice while a public board remains one row away.
