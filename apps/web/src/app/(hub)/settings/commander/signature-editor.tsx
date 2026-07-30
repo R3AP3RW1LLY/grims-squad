@@ -1,15 +1,25 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+/*
+ * ★ THE SUBPATH, NOT THE BARREL ★
+ *
+ * `@grims/shared` re-exports `nonce.service`, which imports `node:crypto`. That is harmless in a
+ * server component and fatal here: this is a CLIENT component importing VALUES, so the whole
+ * barrel is pulled into the browser bundle and webpack fails on the `node:` scheme.
+ *
+ * It surfaces as a 500 on unrelated pages — the whole hub went down for a bad import in one
+ * settings tab — which is why the path is deliberate rather than incidental.
+ */
 import {
   SIGNATURE_ACCENTS,
   SIGNATURE_LABEL_MAX,
   SIGNATURE_TAGLINE_MAX,
-  isAllowedSignatureLink,
   SIGNATURE_LINK_HOSTS,
+  isAllowedSignatureLink,
   type SignatureAccent,
   type SignatureView,
-} from '@grims/shared';
+} from '@grims/shared/forum-signature';
 import { apiCall } from '../../../../lib/api-client';
 import { SignatureBlock } from '../../../../components/forum/signature-block';
 

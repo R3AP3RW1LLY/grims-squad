@@ -11,6 +11,10 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./forum-signature": {
+      "types": "./dist/forum-signature.d.ts",
+      "default": "./dist/forum-signature.js"
+    },
     "./server": {
       "types": "./dist/server/index.d.ts",
       "default": "./dist/server/index.js"
