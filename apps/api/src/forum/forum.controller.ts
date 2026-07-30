@@ -354,7 +354,7 @@ export class ForumController {
   async mySignature(@User() caller: CurrentUser | undefined): Promise<{ signature: SignatureView }> {
     const c = requireSession(caller, 'Sign in first.');
     const db = await this.acl.forCaller(c.userId);
-    return { signature: await this.signatures.mine(db, c.userId) };
+    return { signature: await this.signatures.mine(db, c.userId, publicOrigin()) };
   }
 
   /** Saves part of the caller's signature. PUT, because saving the same thing twice is one result. */
@@ -367,7 +367,14 @@ export class ForumController {
     const c = requireSession(caller, 'Sign in first.');
     csrf(req);
     const db = await this.acl.forCaller(c.userId);
-    return { signature: await this.signatures.save(db, c.userId, (body ?? {}) as SignatureInput) };
+    return {
+      signature: await this.signatures.save(
+        db,
+        c.userId,
+        (body ?? {}) as SignatureInput,
+        publicOrigin(),
+      ),
+    };
   }
 
   /**
@@ -869,4 +876,14 @@ function readBody(body: unknown): string | { doc: unknown } {
 function csrf(req: FastifyRequest): void {
   const cookies = (req as unknown as { cookies?: Record<string, string | undefined> }).cookies ?? {};
   verifyCsrf(req.method, readCsrfCookie(cookies), req.headers['x-csrf-token'] as string | undefined);
+}
+
+/**
+ * The origin members share links from.
+ *
+ * Same source and same fallback as the notification links, deliberately: two places deriving the
+ * public address separately is how a DM and a signature end up pointing at different hosts.
+ */
+function publicOrigin(): string {
+  return process.env['PUBLIC_URL'] ?? 'https://45-63-35-93.sslip.io';
 }

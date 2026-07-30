@@ -101,6 +101,14 @@ export interface SignatureInput {
   readonly avatarMediaId?: string | null;
   /** The generated banner, when they built one rather than uploading a finished image. */
   readonly bannerSpec?: unknown;
+  /**
+   * A flat PNG of the banner, rasterised by the browser and stored, for sharing off-site.
+   *
+   * Separate from `bannerMediaId` on purpose: that is a banner they UPLOADED, this is a snapshot of
+   * one they BUILT. Conflating them would mean publishing a built banner silently replaced their
+   * uploaded one, and un-publishing would take it with it.
+   */
+  readonly bannerPublishedMediaId?: string | null;
   readonly tagline?: string | null;
   readonly bannerMediaId?: string | null;
   readonly bannerUrl?: string | null;
@@ -116,6 +124,13 @@ export interface SignatureView {
   readonly avatarUrl: string | null;
   /** Null when they uploaded a finished image instead of building one. */
   readonly bannerSpec: BannerSpec | null;
+  /**
+   * ABSOLUTE url of the published snapshot, or null.
+   *
+   * Absolute because it is meant to leave this site — a relative path is meaningless the moment it
+   * is pasted anywhere else.
+   */
+  readonly publishedBannerUrl: string | null;
   readonly tagline: string | null;
   readonly bannerUrl: string | null;
   readonly bannerLink: string | null;
@@ -421,4 +436,121 @@ export function defaultBannerSpec(): BannerSpec {
       { kind: 'badge', badge: 'squadron', anchor: 'middle-right', size: 72 },
     ],
   };
+}
+
+/* ------------------------------------------------- sharing it elsewhere */
+
+/**
+ * Signature markup for OTHER forums.
+ *
+ * ★ SQUADRON OWNER, 2026-07-30 ★
+ *
+ * "can we add a Signature BBCode so we can share this to other forums to our signatures / banners
+ * etc?"
+ *
+ * ★ WHY THIS NEEDS A PUBLISHED IMAGE, AND WHAT THAT COSTS ★
+ *
+ * BBCode has no way to describe a banner. `[img]` takes a URL and nothing else — so an external
+ * forum can only ever show a FLAT IMAGE at a public address. Everything the on-site banner does
+ * that a picture cannot (resolving "my rank" when it is drawn, so a promotion updates every banner
+ * automatically) stops at our own boundary.
+ *
+ * So sharing means publishing: the browser rasterises the live banner exactly as it appears, that
+ * PNG is stored like any other upload, and the BBCode points at it. The consequence is worth
+ * stating plainly rather than discovering — a published banner is a SNAPSHOT. Get promoted, and the
+ * copy on our forum updates itself while the one pasted into another forum still says Cadet until
+ * it is published again.
+ *
+ * ★ AND WHY THE URL IS ABSOLUTE ★
+ *
+ * A relative path is meaningless once it leaves this site. That means the base URL becomes part of
+ * something we hand to third parties and cannot recall: every copy pasted elsewhere keeps pointing
+ * at whatever address it was generated with. Moving domains breaks them until each member updates
+ * their signature on each forum — one place per forum, not per post, so it is recoverable, but it
+ * is a real cost and belongs in the copy on the page, not only here.
+ */
+
+/** Escapes a value being placed inside a BBCode tag attribute. */
+function bbSafe(value: string): string {
+  /*
+   * `]` and `[` are the only characters that can break OUT of a tag and start another. A URL
+   * containing one is almost certainly hostile or broken; either way it is stripped rather than
+   * escaped, because BBCode has no escape syntax to escape it WITH.
+   *
+   * Newlines go too: a linebreak inside `[url=...]` splits the tag and the remainder renders as
+   * literal text on somebody else's forum.
+   */
+  return value.replace(/[[\]\r\n]/g, '').trim();
+}
+
+export interface SignatureShare {
+  /** Absolute URL of the published banner image. */
+  readonly bannerUrl: string;
+  /** Where the banner points, if anywhere. Already allowlist-checked when it was saved. */
+  readonly link: string | null;
+  readonly tagline: string | null;
+}
+
+/**
+ * BBCode for a signature — the format almost every forum outside this one speaks.
+ *
+ * Wrapped in `[url]` only when there is somewhere to go. A `[url=]` with an empty target renders
+ * as a dead link on some forums and as literal text on others, and neither is what anybody wanted.
+ */
+export function signatureBBCode(share: SignatureShare): string {
+  const img = `[img]${bbSafe(share.bannerUrl)}[/img]`;
+  const link = share.link === null ? '' : bbSafe(share.link);
+
+  const banner = link === '' ? img : `[url=${link}]${img}[/url]`;
+
+  const tagline = share.tagline === null ? '' : bbSafe(share.tagline);
+
+  // The tagline goes BELOW the banner, matching how it reads on our own forum.
+  return tagline === '' ? banner : `${banner}\n${tagline}`;
+}
+
+/**
+ * The same thing in Markdown, for the places that use it.
+ *
+ * Included because it is the same three values rearranged, and because "other forums" in practice
+ * also means Discord, GitHub and anywhere else a member pastes a signature. Offering only BBCode
+ * would send somebody to hand-convert it and get the nesting wrong.
+ */
+export function signatureMarkdown(share: SignatureShare): string {
+  const alt = share.tagline ?? 'Signature';
+  const img = `![${alt.replace(/[[\]]/g, '')}](${share.bannerUrl})`;
+  const banner = share.link === null ? img : `[${img}](${share.link})`;
+
+  /*
+   * ★ THE TAGLINE IS ESCAPED TOO, NOT ONLY THE ALT TEXT ★
+   *
+   * The first version escaped the alt text and appended the tagline raw, so a tagline containing
+   * `[free ships](somewhere)` stayed live and became a real LINK on the target forum. Not a
+   * security hole — it is the member's own signature going into their own post — but a surprise,
+   * and the whole point of generating this is that what they see here is what they get there.
+   *
+   * Brackets only. Escaping every Markdown metacharacter would fill an ordinary tagline with
+   * backslashes to prevent a problem that punctuation does not cause.
+   */
+  const tagline = share.tagline === null ? null : share.tagline.replace(/([[\]])/g, '\\$1');
+  return tagline === null ? banner : `${banner}\n\n${tagline}`;
+}
+
+/** Plain HTML, for forums that accept it. Attributes are quoted and the URL is escaped. */
+export function signatureHtml(share: SignatureShare): string {
+  const esc = (v: string): string =>
+    v
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+
+  const img = `<img src="${esc(share.bannerUrl)}" alt="${esc(share.tagline ?? 'Signature')}" width="600" height="120">`;
+  /*
+   * `rel="noopener noreferrer"` even here. It is markup we are handing somebody to paste on a site
+   * we do not control, and shipping a link without it teaches the habit by example.
+   */
+  return share.link === null
+    ? img
+    : `<a href="${esc(share.link)}" rel="noopener noreferrer">${img}</a>`;
 }

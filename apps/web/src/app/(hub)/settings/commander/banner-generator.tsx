@@ -11,8 +11,20 @@ import {
   type BannerAnchor,
   type BannerLayer,
   type BannerSpec,
+  signatureBBCode,
+  signatureHtml,
+  signatureMarkdown,
 } from '@grims/shared/forum-signature';
 import { BannerRender, type BannerIdentity } from '../../../../components/forum/banner-render';
+
+/** Reads the CSRF cookie. The name is `gs_csrf`, not `csrf` — see `image-uploader`. */
+function readCsrfCookie(): string {
+  for (const name of ['__Host-gs_csrf', 'gs_csrf']) {
+    const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`));
+    if (match?.[1] !== undefined) return decodeURIComponent(match[1]);
+  }
+  return '';
+}
 
 /**
  * Building a banner.
@@ -71,6 +83,10 @@ export function BannerGenerator({
   imageHref,
   onPickImage,
   busy,
+  onPublish,
+  publishedUrl,
+  link,
+  tagline,
 }: {
   readonly spec: BannerSpec | null;
   readonly onChange: (next: BannerSpec | null) => void;
@@ -79,8 +95,16 @@ export function BannerGenerator({
   readonly imageHref?: string;
   readonly onPickImage: (file: File) => void;
   readonly busy: boolean;
+  /** Stores the rasterised snapshot against the signature and returns its shareable URL. */
+  readonly onPublish: (mediaId: string) => Promise<void>;
+  /** The absolute URL of the last published snapshot, or null. */
+  readonly publishedUrl: string | null;
+  readonly link: string | null;
+  readonly tagline: string | null;
 }) {
   const [downloading, setDownloading] = useState(false);
+  const [publishing, setPublishing] = useState(false);
+  const [copied, setCopied] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const active = spec !== null;
@@ -115,12 +139,9 @@ export function BannerGenerator({
    * installed, and the first bug report would have been "the download does not match the preview" —
    * with no good answer, because both would be behaving correctly.
    */
-  const download = useCallback(async () => {
-    setDownloading(true);
-    setError(null);
-    try {
-      const node = document.getElementById('banner-preview')?.querySelector('svg');
-      if (node === null || node === undefined) throw new Error('Nothing to download yet.');
+  const rasterise = useCallback(async (): Promise<Blob> => {
+    const node = document.getElementById('banner-preview')?.querySelector('svg');
+    if (node === null || node === undefined) throw new Error('Nothing to render yet.');
 
       const clone = node.cloneNode(true) as SVGSVGElement;
       clone.setAttribute('width', String(BANNER.width));
@@ -170,6 +191,14 @@ export function BannerGenerator({
       const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'));
       if (blob === null) throw new Error('Could not make a PNG out of that.');
 
+    return blob;
+  }, []);
+
+  const download = useCallback(async () => {
+    setDownloading(true);
+    setError(null);
+    try {
+      const blob = await rasterise();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -182,7 +211,43 @@ export function BannerGenerator({
     } finally {
       setDownloading(false);
     }
-  }, []);
+  }, [rasterise]);
+
+  /**
+   * Publishes the banner as a flat PNG so other forums can show it.
+   *
+   * ★ THE BROWSER RENDERS IT, THE SERVER ONLY STORES IT ★
+   *
+   * Exactly the same rasterisation as the download, so what gets published is what the member has
+   * been looking at. The alternative — the server re-rendering the spec — would use whatever fonts
+   * the container has, and a published banner that differs from the preview is a bug nobody can
+   * diagnose from either end.
+   *
+   * It goes through the ordinary upload endpoint, so it is hardened, size-capped and rate-limited
+   * like any other image rather than through a second path with its own rules.
+   */
+  const publish = useCallback(async () => {
+    setPublishing(true);
+    setError(null);
+    try {
+      const blob = await rasterise();
+      const res = await fetch('/v1/media/uploads', {
+        method: 'POST',
+        body: blob,
+        headers: { 'content-type': 'image/png', 'x-csrf-token': readCsrfCookie() },
+        credentials: 'same-origin',
+      });
+      const json = (await res.json()) as { id?: string; error?: { message?: string } };
+      if (!res.ok || typeof json.id !== 'string') {
+        throw new Error(json.error?.message ?? 'That did not upload.');
+      }
+      await onPublish(json.id);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setPublishing(false);
+    }
+  }, [rasterise, onPublish]);
 
   const preview = useMemo(
     () => (
@@ -503,14 +568,36 @@ export function BannerGenerator({
             </p>
           )}
 
-          <button
-            type="button"
-            onClick={() => void download()}
-            disabled={downloading}
-            className="rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel-sunken)] px-3 py-1.5 text-sm text-[var(--color-text-primary)] transition-colors hover:border-[var(--color-border-active)] disabled:opacity-50"
-          >
-            {downloading ? 'Making the file…' : 'Download PNG'}
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => void download()}
+              disabled={downloading}
+              className="rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel-sunken)] px-3 py-1.5 text-sm text-[var(--color-text-primary)] transition-colors hover:border-[var(--color-border-active)] disabled:opacity-50"
+            >
+              {downloading ? 'Making the file…' : 'Download PNG'}
+            </button>
+            <button
+              type="button"
+              onClick={() => void publish()}
+              disabled={publishing}
+              className="rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel-sunken)] px-3 py-1.5 text-sm text-[var(--color-text-primary)] transition-colors hover:border-[var(--color-border-active)] disabled:opacity-50"
+            >
+              {publishing
+                ? 'Publishing…'
+                : publishedUrl === null
+                  ? 'Publish for other forums'
+                  : 'Publish my changes'}
+            </button>
+          </div>
+
+          <ShareCodes
+            publishedUrl={publishedUrl}
+            link={link}
+            tagline={tagline}
+            copied={copied}
+            onCopied={setCopied}
+          />
         </>
       )}
     </div>
@@ -569,5 +656,109 @@ function SmallButton({
     >
       {children}
     </button>
+  );
+}
+
+/**
+ * The share codes, once a banner has been published.
+ *
+ * ★ WHY THIS IS A SEPARATE STEP AND NOT ALWAYS PRESENT ★
+ *
+ * A signature on our own forum is live: a text layer saying "my rank" is resolved when it is drawn,
+ * so a promotion updates every banner the member has ever posted. BBCode cannot do that — `[img]`
+ * takes a URL and shows a picture.
+ *
+ * So sharing means freezing, and the copy says so. Somebody who is promoted and does not re-publish
+ * has a correct banner here and a stale one on every other forum, and finding that out from a
+ * squadmate is worse than reading it now.
+ */
+function ShareCodes({
+  publishedUrl,
+  link,
+  tagline,
+  copied,
+  onCopied,
+}: {
+  readonly publishedUrl: string | null;
+  readonly link: string | null;
+  readonly tagline: string | null;
+  readonly copied: string | null;
+  readonly onCopied: (which: string | null) => void;
+}) {
+  if (publishedUrl === null) {
+    return (
+      <p className="text-sm leading-relaxed text-[var(--color-text-secondary)]">
+        Publish it to get a BBCode block you can paste into other forums. Your banner here stays
+        live and updates itself; a published copy is a snapshot, so re-publish after a promotion or
+        a redesign.
+      </p>
+    );
+  }
+
+  const share = { bannerUrl: publishedUrl, link, tagline };
+
+  const blocks: ReadonlyArray<{ key: string; label: string; hint: string; value: string }> = [
+    {
+      key: 'bbcode',
+      label: 'BBCode',
+      hint: 'Most forums — paste into your signature box.',
+      value: signatureBBCode(share),
+    },
+    {
+      key: 'markdown',
+      label: 'Markdown',
+      hint: 'Discord, GitHub, anywhere that speaks Markdown.',
+      value: signatureMarkdown(share),
+    },
+    { key: 'html', label: 'HTML', hint: 'Forums that accept raw HTML.', value: signatureHtml(share) },
+    { key: 'url', label: 'Image URL', hint: 'Just the picture.', value: publishedUrl },
+  ];
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h3 className="font-mono text-xs tracking-[0.3em] text-[var(--color-text-secondary)]">
+          SHARE IT ELSEWHERE
+        </h3>
+        <p className="mt-1 text-xs leading-relaxed text-[var(--color-text-secondary)]">
+          This is a snapshot taken when you published. Your banner here keeps updating on its own —
+          the copy on another forum will not, so publish again after a promotion or a redesign.
+        </p>
+      </div>
+
+      {blocks.map((b) => (
+        <div key={b.key}>
+          <div className="mb-1 flex items-baseline justify-between gap-3">
+            <span className="text-xs text-[var(--color-text-primary)]">{b.label}</span>
+            <button
+              type="button"
+              onClick={() => {
+                void navigator.clipboard.writeText(b.value).then(
+                  () => onCopied(b.key),
+                  // Clipboard access can be refused. Saying nothing would look like a dead button.
+                  () => onCopied(`${b.key}:failed`),
+                );
+              }}
+              className="font-mono text-[11px] text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)]"
+            >
+              {copied === b.key
+                ? 'COPIED'
+                : copied === `${b.key}:failed`
+                  ? 'SELECT AND COPY'
+                  : 'COPY'}
+            </button>
+          </div>
+          <textarea
+            readOnly
+            rows={b.key === 'url' ? 1 : 2}
+            value={b.value}
+            aria-label={`${b.label} for your signature`}
+            onFocus={(e) => e.currentTarget.select()}
+            className="w-full rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel-sunken)] px-3 py-2 font-mono text-[11px] text-[var(--color-text-primary)]"
+          />
+          <p className="mt-1 text-[11px] text-[var(--color-text-secondary)]">{b.hint}</p>
+        </div>
+      ))}
+    </div>
   );
 }

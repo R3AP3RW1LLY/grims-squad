@@ -1110,6 +1110,7 @@ model MediaUpload {
   /// signature intact and merely picture-less rather than taking the member's whole block with it.
   signatureAvatars ForumSignature[] @relation("SignatureAvatar")
   signatureBanners ForumSignature[] @relation("SignatureBanner")
+  signaturePublished ForumSignature[] @relation("SignaturePublished")
 
   /// "What has this member uploaded, newest first" - the quota and moderation query.
   @@index([uploaderId, createdAt])
@@ -1273,6 +1274,19 @@ model ForumSignature {
   /// forum uses, so there is one renderer and nothing to disagree with.
   bannerSpec Json? @map("banner_spec")
 
+  /// A flat PNG of the built banner, for pasting into OTHER forums as BBCode.
+  ///
+  /// * WHY A SNAPSHOT EXISTS AT ALL *
+  ///
+  /// BBCode cannot describe a banner - `[img]` takes a URL and nothing else. So sharing off-site
+  /// means publishing a picture, and a picture cannot resolve "my rank" the way the live banner
+  /// does. Get promoted and the on-site banner updates itself while the published copy does not,
+  /// until it is published again. That is inherent to the format, not a shortcut.
+  ///
+  /// Separate from `bannerMediaId`, which is a banner they UPLOADED. Conflating them would mean
+  /// publishing silently replaced an uploaded banner.
+  bannerPublishedMediaId String? @map("banner_published_media_id") @db.Uuid
+
   /// * A HOST ALLOWLIST, NOT A FREE URL *
   ///
   /// Owner asked for a banner "that links to inara commander profile or something of that nature
@@ -1301,6 +1315,7 @@ model ForumSignature {
   user   User         @relation(fields: [userId], references: [id], onDelete: Cascade)
   avatar MediaUpload? @relation("SignatureAvatar", fields: [avatarMediaId], references: [id], onDelete: SetNull)
   banner MediaUpload? @relation("SignatureBanner", fields: [bannerMediaId], references: [id], onDelete: SetNull)
+  published MediaUpload? @relation("SignaturePublished", fields: [bannerPublishedMediaId], references: [id], onDelete: SetNull)
 
   @@map("forum_signatures")
 }

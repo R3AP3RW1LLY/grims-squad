@@ -297,6 +297,17 @@ export function SignatureEditor({
           {...(backgroundHref === undefined ? {} : { imageHref: backgroundHref })}
           onPickImage={(file) => void upload(file, 'background')}
           busy={saving}
+          /*
+           * The publish step stores the rasterised snapshot against the signature. Done here rather
+           * than inside the generator so there is ONE place that talks to the signature endpoint —
+           * the generator knows how to draw a banner, not how this account saves things.
+           */
+          onPublish={async (mediaId) => {
+            await save({ bannerPublishedMediaId: mediaId });
+          }}
+          publishedUrl={sig.publishedBannerUrl}
+          link={sig.bannerLink}
+          tagline={sig.tagline}
         />
 
         <p className="text-sm leading-relaxed text-[var(--color-text-secondary)]">

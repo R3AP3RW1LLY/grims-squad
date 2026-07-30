@@ -39,9 +39,9 @@ export class SignatureService {
    * Absent is a real answer, not an error: a member who has never opened the tab has no row, and
    * their signature is the default built from their Discord avatar.
    */
-  async mine(db: AclBoundClient, userId: string): Promise<SignatureView> {
+  async mine(db: AclBoundClient, userId: string, publicUrl = ''): Promise<SignatureView> {
     const row = await db.forumSignature.findUnique({ where: { userId } });
-    return toView(row, null);
+    return toView(row, null, publicUrl);
   }
 
   /**
@@ -53,7 +53,13 @@ export class SignatureService {
    * client that forgot a field silently cleared it — and the field most often forgotten would be
    * the avatar, which is the one thing a member would notice and be unable to explain.
    */
-  async save(db: AclBoundClient, userId: string, input: SignatureInput): Promise<SignatureView> {
+  async save(
+    db: AclBoundClient,
+    userId: string,
+    input: SignatureInput,
+    /** Origin for the shareable URL. Empty means "do not offer one" — see `toView`. */
+    publicUrl = '',
+  ): Promise<SignatureView> {
     const patch: Record<string, unknown> = {};
 
     if (input.tagline !== undefined) {
@@ -117,6 +123,22 @@ export class SignatureService {
     if (input.bannerMediaId !== undefined) {
       patch['bannerMediaId'] = await this.#ownedUpload(db, input.bannerMediaId, userId, 'banner');
     }
+    if (input.bannerPublishedMediaId !== undefined) {
+      /*
+       * The published snapshot. Checked for ownership like every other media id — it arrives from
+       * a browser, and without the check a member could publish somebody else's image as their own
+       * signature on every forum they post to.
+       *
+       * No size floor: this one is rasterised BY US at exactly 600 x 120 (x2), so a dimension rule
+       * would only ever fire on a client that had been tampered with, and the ownership check
+       * already covers that case.
+       */
+      patch['bannerPublishedMediaId'] = await this.#ownedUpload(
+        db,
+        input.bannerPublishedMediaId,
+        userId,
+      );
+    }
 
     const row = await db.forumSignature.upsert({
       where: { userId },
@@ -124,7 +146,7 @@ export class SignatureService {
       update: patch,
     });
 
-    return toView(row, null);
+    return toView(row, null, publicUrl);
   }
 
   /**
@@ -208,6 +230,7 @@ export function toView(
   row: {
     avatarMediaId: string | null;
     bannerSpec: unknown;
+    bannerPublishedMediaId: string | null;
     tagline: string | null;
     bannerMediaId: string | null;
     bannerUrl: string | null;
@@ -218,11 +241,19 @@ export function toView(
     enabled: boolean;
   } | null,
   discordAvatarUrl: string | null,
+  /**
+   * Absolute origin for the shareable banner URL.
+   *
+   * Passed in rather than read from the environment here, so this function stays pure and testable
+   * — and so a caller that has no business handing out an off-site URL simply does not supply one.
+   */
+  publicUrl = '',
 ): SignatureView {
   if (row === null) {
     return {
       avatarUrl: discordAvatarUrl,
       bannerSpec: null,
+      publishedBannerUrl: null,
       tagline: null,
       bannerUrl: null,
       bannerLink: null,
@@ -247,6 +278,15 @@ export function toView(
      * Anything unreadable becomes null, which renders as no banner rather than a broken one.
      */
     bannerSpec: safeSpec(row.bannerSpec),
+    /*
+     * ABSOLUTE, because it is meant to leave the site. Null when nothing has been published or
+     * when no origin was supplied — never a bare path, which would be a broken image the moment it
+     * was pasted anywhere.
+     */
+    publishedBannerUrl:
+      row.bannerPublishedMediaId === null || publicUrl === ''
+        ? null
+        : `${publicUrl.replace(/\/+$/, '')}/v1/media/uploads/${row.bannerPublishedMediaId}`,
     tagline: row.tagline,
     bannerUrl: row.bannerMediaId === null ? null : `/v1/media/uploads/${row.bannerMediaId}`,
     bannerLink: row.bannerUrl,
