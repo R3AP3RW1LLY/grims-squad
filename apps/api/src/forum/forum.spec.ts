@@ -70,8 +70,26 @@ function boundClient(
           postPerm: dec(r.postPerm),
           viewPerm: dec(r.viewPerm),
         })),
-      findUnique: async ({ where }: { where: { id: string } }) => {
-        const r = visible.find((x) => x.id === where.id);
+      /*
+       * ★ findFirst, MATCHING THE REAL CLIENT ★
+       *
+       * This fake used to offer `findUnique`, and the services used it. That combination hid a
+       * production defect for weeks: the real ACL extension merges its predicate as
+       * `{ AND: [ {id}, {id: {in: [...]}} ] }`, which is a legal filter and an ILLEGAL unique
+       * input — so every call Prisma saw threw a validation error while this fake happily
+       * answered. A fake that accepts what the real thing rejects is worse than no fake.
+       *
+       * The `where` is read loosely for the same reason: the real one arrives wrapped in `AND`,
+       * so a fake that only understood `{ id }` would go on lying about a different shape.
+       */
+      findFirst: async ({ where }: { where: Record<string, unknown> }) => {
+        const id =
+          typeof where['id'] === 'string'
+            ? where['id']
+            : ((where['AND'] as Array<Record<string, unknown>> | undefined)?.find(
+                (w) => typeof w['id'] === 'string',
+              )?.['id'] as string | undefined);
+        const r = visible.find((x) => x.id === id);
         return r === undefined
           ? null
           : {
@@ -88,9 +106,15 @@ function boundClient(
     },
     forumThread: {
       findMany: async () => [],
-      findFirst: async () => null,
-      findUnique: async ({ where }: { where: { id: string } }) =>
-        threads.find((t) => t['id'] === where.id) ?? null,
+      findFirst: async ({ where }: { where?: Record<string, unknown> } = {}) => {
+        const id =
+          typeof where?.['id'] === 'string'
+            ? (where['id'] as string)
+            : ((where?.['AND'] as Array<Record<string, unknown>> | undefined)?.find(
+                (w) => typeof w['id'] === 'string',
+              )?.['id'] as string | undefined);
+        return id === undefined ? null : (threads.find((t) => t['id'] === id) ?? null);
+      },
       create: async ({ data }: { data: Record<string, unknown> }) => {
         threads.push({ ...data, id: 'new-thread' });
         return { id: 'new-thread', slug: data['slug'] };

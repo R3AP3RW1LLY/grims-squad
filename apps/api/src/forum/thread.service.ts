@@ -553,7 +553,20 @@ export class ThreadService {
      * Read through the BOUND client, so a category the caller cannot see is not
      * found — rather than found and then refused, which would confirm it exists.
      */
-    const category = await db.forumCategory.findUnique({
+    /*
+     * ★ findFirst, NEVER findUnique, ON AN ACL-BOUND MODEL ★
+     *
+     * `findUnique` takes a `WhereUniqueInput`, which must carry a unique field at the TOP level.
+     * The ACL extension merges its predicate in as `{ AND: [ {id}, {id: {in: [...]}} ] }` — a
+     * perfectly good filter and an illegal unique input — so Prisma threw a validation error and
+     * EVERY thread creation 500'd, whatever the post contained.
+     *
+     * `findFirst` accepts an arbitrary filter, so the merged predicate is valid and a category the
+     * caller cannot see comes back null exactly as intended rather than blowing up. The fake used
+     * in unit tests implements `findUnique` loosely and never enforced Prisma's rule, which is how
+     * this reached production-shaped code with a green suite.
+     */
+    const category = await db.forumCategory.findFirst({
       where: { id: input.categoryId },
       select: { id: true, isLocked: true, postPerm: true },
     });
@@ -667,7 +680,7 @@ export class ThreadService {
 
     // Both ends read through the bound client: a moderator cannot move a thread
     // out of, or into, a branch they cannot see.
-    const thread = await db.forumThread.findUnique({
+    const thread = await db.forumThread.findFirst({
       where: { id: threadId },
       select: { id: true, categoryId: true },
     });
@@ -675,7 +688,7 @@ export class ThreadService {
       throw new AppError(ErrorCode.RESOURCE_NOT_VISIBLE, 'Thread not found.');
     }
 
-    const target = await db.forumCategory.findUnique({
+    const target = await db.forumCategory.findFirst({
       where: { id: toCategoryId },
       select: { id: true },
     });

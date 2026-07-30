@@ -185,6 +185,30 @@ export class PostService {
     this.reindex.enqueue({ kind: 'post', id: post.id, reason: 'created' });
 
     /*
+     * ★ THE FORUM ACTIVITY COUNTER NOTHING WAS WRITING ★
+     *
+     * Squadron owner, 2026-07-30: "/app is not tracking forum posts and pebblemerchant i know has
+     * 2 posts that have been published by him".
+     *
+     * `member_activity_days.forum_post_count` was READ in three places — the admin roster, the
+     * dashboard totals, and the activity chart's forum line — and written in NONE. Discord messages
+     * and voice joins come from the bot, which owns that table; forum posts happen on the website,
+     * and nobody ever taught this path to record one. So the column was structurally zero and every
+     * reader of it was faithfully reporting nothing.
+     *
+     * ★ KEYED ON THE DISCORD SNOWFLAKE, WHICH IS WHY THIS IS NOT A ONE-LINER ★
+     *
+     * That table is keyed on `discord_id`, not on our user id, because it covers every guild member
+     * whether or not they have ever signed in. A poster therefore has to be resolved through their
+     * linked Discord identity — and somebody with no linked identity simply is not counted, which
+     * is correct: they have no row in a table that is keyed by a snowflake they do not have.
+     *
+     * Fire-and-forget, like the view counter. An activity statistic is not worth failing a post
+     * over, and the member has already written the thing.
+     */
+    void this.#countForumPost(db, authorId).catch(() => undefined);
+
+    /*
      * Returned rather than fanned out HERE. The service does not know the thread's slug or the site
      * URL, and giving it those would make a write path depend on presentation. The controller has
      * both and does the fan-out — which also keeps a slow Discord call off the transaction.
@@ -264,6 +288,30 @@ export class PostService {
      * silently converted, which is a lossy rewrite of somebody's text they never asked for.
      */
     return { bodyDoc: post.bodyDoc ?? null, bodyMd: post.bodyDoc === null ? post.bodyMd : null };
+  }
+
+  /**
+   * Records one forum post against today's activity row.
+   *
+   * UTC day, matching how the bot writes the same table and how promotions count a month. Using
+   * the server's local day would put a host in a negative offset one day out at every month
+   * boundary, and the figure a member reads would disagree with the one the promotion job used.
+   */
+  async #countForumPost(db: AclBoundClient, authorId: string): Promise<void> {
+    const identity = await db.discordIdentity.findFirst({
+      where: { userId: authorId },
+      select: { discordId: true },
+    });
+    if (identity === null) return;
+
+    const now = new Date();
+    const day = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+
+    await db.memberActivityDay.upsert({
+      where: { discordId_day: { discordId: identity.discordId, day } },
+      create: { discordId: identity.discordId, day, forumPostCount: 1 },
+      update: { forumPostCount: { increment: 1 } },
+    });
   }
 
   async edit(

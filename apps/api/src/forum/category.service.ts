@@ -303,7 +303,7 @@ export class CategoryService {
   async #parentViewPerm(db: AclBoundClient, parentId: string | null): Promise<bigint | null> {
     if (parentId === null) return null;
 
-    const parent = await db.forumCategory.findUnique({
+    const parent = await db.forumCategory.findFirst({
       where: { id: parentId },
       select: { viewPerm: true },
     });

@@ -78,7 +78,11 @@ const openThread = {
   category: { postPerm: { toFixed: () => '8' }, isLocked: false },
 };
 
+/** Captures the activity upsert, so the forum-post counter can be asserted rather than assumed. */
+const activityUpsert = vi.fn(async () => ({}));
+
 function createDb(over: Record<string, unknown> = {}) {
+  activityUpsert.mockClear();
   return stub({
     forumThread: {
       findFirst: async () => openThread,
@@ -87,11 +91,74 @@ function createDb(over: Record<string, unknown> = {}) {
     forumPost: {
       create: vi.fn(async () => ({ id: 'p1', bodyHtml: '<p>hi</p>', editCount: 0 })),
     },
+    /*
+     * Present so the activity counter can actually run. It is fire-and-forget with a swallowed
+     * rejection — which is right for a statistic and dangerous for a test, because a MISSING model
+     * on this fake would make the counter throw, be swallowed, and pass silently. That is precisely
+     * how `forum_post_count` came to be read in three places and written in none.
+     */
+    discordIdentity: { findFirst: async () => ({ discordId: '1262447044337864850' }) },
+    memberActivityDay: { upsert: activityUpsert },
     ...over,
   });
 }
 
 describe('creating a post', () => {
+  describe('forum activity counting', () => {
+    /*
+     * Squadron owner, 2026-07-30: "/app is not tracking forum posts and pebblemerchant i know has
+     * 2 posts that have been published by him".
+     *
+     * `member_activity_days.forum_post_count` was read by the admin roster, the dashboard totals
+     * and the activity chart's forum line, and written by nothing at all — so it was structurally
+     * zero and every reader faithfully reported nothing.
+     */
+    it('MANDATORY: a new post is counted against today', async () => {
+      const db = createDb();
+      const svc = new PostService(recordingQueue(), allowAll());
+      await svc.create(db, 't1', 'hello', 'author', MEMBER_POST);
+      await Promise.resolve();
+
+      expect(activityUpsert).toHaveBeenCalledOnce();
+      const args = firstArg<{
+        where: { discordId_day: { discordId: string; day: Date } };
+        create: { forumPostCount: number };
+        update: { forumPostCount: { increment: number } };
+      }>(activityUpsert, 'activity upsert');
+
+      expect(args.create.forumPostCount).toBe(1);
+      expect(args.update.forumPostCount).toEqual({ increment: 1 });
+      // Midnight UTC, matching how the bot writes this table and how promotions count a month.
+      expect(args.where.discordId_day.day.toISOString()).toMatch(/T00:00:00\.000Z$/);
+    });
+
+    it('MANDATORY: a poster with no linked Discord identity is not counted', async () => {
+      /*
+       * The table is keyed on a Discord snowflake, so somebody without one has no row to write.
+       * Skipping is correct; inventing a key would corrupt a table the bot also owns.
+       */
+      const db = createDb({ discordIdentity: { findFirst: async () => null } });
+      const svc = new PostService(recordingQueue(), allowAll());
+      await svc.create(db, 't1', 'hello', 'author', MEMBER_POST);
+      await Promise.resolve();
+
+      expect(activityUpsert).not.toHaveBeenCalled();
+    });
+
+    it('MANDATORY: a failing counter does not fail the post', async () => {
+      // An activity statistic is not worth losing somebody's writing over.
+      const db = createDb({
+        memberActivityDay: {
+          upsert: async () => {
+            throw new Error('database on fire');
+          },
+        },
+      });
+      const svc = new PostService(recordingQueue(), allowAll());
+      await expect(svc.create(db, 't1', 'hello', 'author', MEMBER_POST)).resolves.toBeDefined();
+    });
+  });
+
   it('MANDATORY @INV-035: the body is sanitised before it is stored', async () => {
     /*
      * Asserted on what would be WRITTEN, not on what is returned — the invariant is about
