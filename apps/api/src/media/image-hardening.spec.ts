@@ -53,10 +53,16 @@ describe('EXIF and location metadata', () => {
      * bytes merely moved.
      */
     const src = await sharp({ create: { width: 8, height: 8, channels: 3, background: '#fff' } })
+      /*
+       * Cast, because sharp's `Exif` type does not declare a GPS block — while libvips writes
+       * one perfectly well. GPS is the whole point of this fixture: it is the tag that turns a
+       * posted screenshot into a member's home address, so weakening the fixture to satisfy the
+       * type would remove the reason the test exists.
+       */
       .withExif({
         IFD0: { Copyright: 'CMDR Test', Make: 'TestPhone' },
         GPS: { GPSLatitudeRef: 'N', GPSLongitudeRef: 'W' },
-      })
+      } as unknown as Parameters<ReturnType<typeof sharp>['withExif']>[0])
       .jpeg()
       .toBuffer();
 

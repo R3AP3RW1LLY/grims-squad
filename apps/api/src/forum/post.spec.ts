@@ -34,6 +34,28 @@ const stub = (over: Record<string, unknown>): AclBoundClient => over as unknown 
 
 const MODERATOR = Permission.FORUM_MODERATE;
 const MEMBER_POST = Permission.FORUM_POST_MEMBER;
+/**
+ * The first argument the mock was called with, typed.
+ *
+ * WHY THIS EXISTS
+ *
+ * Indexing mock.calls at zero and casting fails the STRICT typecheck: a vi.fn with no declared
+ * parameters infers an empty tuple, so index 0 does not exist on it (TS2493).
+ *
+ * It was invisible locally because tsc -p tsconfig.json EXCLUDES specs. CI runs the package
+ * typecheck script, which includes tsconfig.spec.json. The lesson is the command, not the cast:
+ * run pnpm --filter @grims/api typecheck.
+ *
+ * This also fails BETTER: the old form silently produced undefined when a mock had not been
+ * called, so the assertion failed on a missing property rather than saying the call never
+ * happened.
+ */
+function firstArg<T>(fn: { mock: { calls: unknown[][] } }, what = 'the mock'): T {
+  const call = fn.mock.calls[0];
+  if (call === undefined) throw new Error(`expected ${what} to have been called, but it was not`);
+  return call[0] as T;
+}
+
 
 /** A live thread in a members' board. */
 const openThread = {
@@ -68,7 +90,7 @@ describe('creating a post', () => {
 
     await svc.create(db, 't1', '<script>alert(1)</script> hello', 'u1', MEMBER_POST);
 
-    const written = create.mock.calls[0]?.[0] as { data: { bodyHtml: string; bodyMd: string } };
+    const written = firstArg<{ data: { bodyHtml: string; bodyMd: string } }>(create, 'create');
     expect(written.data.bodyHtml).not.toMatch(/<\s*script/i);
     // And the member's original text is kept verbatim, so an edit starts from what they wrote.
     expect(written.data.bodyMd).toContain('<script>');
@@ -81,7 +103,7 @@ describe('creating a post', () => {
 
     await svc.create(db, 't1', 'hello', 'session-user', MEMBER_POST);
 
-    const written = create.mock.calls[0]?.[0] as { data: { authorId: string } };
+    const written = firstArg<{ data: { authorId: string } }>(create, 'create');
     expect(written.data.authorId).toBe('session-user');
   });
 
@@ -167,7 +189,7 @@ describe('creating a post', () => {
       MEMBER_POST,
     );
 
-    const written = create.mock.calls[0]?.[0] as { data: { bodyHtml: string } };
+    const written = firstArg<{ data: { bodyHtml: string } }>(create, 'create');
     expect(written.data.bodyHtml).not.toMatch(/<\s*iframe/i);
     expect(written.data.bodyHtml).toContain('&lt;iframe');
   });
@@ -223,7 +245,7 @@ describe('editing a post', () => {
 
     await svc.edit(db, 'p1', 'completely new text', 'author', MEMBER_POST);
 
-    const args = revisionCreate.mock.calls[0]?.[0] as { data: { bodyMd: string; editedBy: string } };
+    const args = firstArg<{ data: { bodyMd: string; editedBy: string } }>(revisionCreate, 'revisionCreate');
     expect(args.data.bodyMd).toBe('original text');
     expect(args.data.editedBy).toBe('author');
   });
@@ -240,7 +262,7 @@ describe('editing a post', () => {
     await svc.edit(db, 'p1', 'new text', 'author', MEMBER_POST);
 
     expect(transaction).toHaveBeenCalledOnce();
-    expect(transaction.mock.calls[0]?.[0]).toHaveLength(2);
+    expect(firstArg<unknown[]>(transaction, 'transaction')).toHaveLength(2);
   });
 
   it('MANDATORY: a stranger cannot edit somebody else’s post', async () => {
@@ -311,7 +333,7 @@ describe('editing a post', () => {
 
     await new PostService(recordingQueue()).edit(fresh, 'p1', 'quick fix', 'author', MEMBER_POST);
 
-    const ops = transaction.mock.calls[0]?.[0] as unknown[];
+    const ops = firstArg<unknown[]>(transaction, 'transaction');
     // Two operations either way: the revision is NOT skipped.
     expect(ops).toHaveLength(2);
   });
@@ -341,7 +363,7 @@ describe('deleting a post', () => {
     const out = await new PostService(recordingQueue()).softDelete(db, 'p1', 'author', MEMBER_POST);
 
     expect(out.deletedAt).toBeTruthy();
-    const args = update.mock.calls[0]?.[0] as { data: { deletedAt: Date } };
+    const args = firstArg<{ data: { deletedAt: Date } }>(update, 'update');
     expect(args.data.deletedAt).toBeInstanceOf(Date);
   });
 
@@ -355,7 +377,7 @@ describe('deleting a post', () => {
 
     await new PostService(recordingQueue()).softDelete(db, 'p1', 'author', MEMBER_POST);
 
-    const args = threadUpdate.mock.calls[0]?.[0] as { data: { postCount: { decrement: number } } };
+    const args = firstArg<{ data: { postCount: { decrement: number } } }>(threadUpdate, 'threadUpdate');
     expect(args.data.postCount.decrement).toBe(1);
   });
 
@@ -415,7 +437,7 @@ describe('restoring — the other half of "remains recoverable"', () => {
     const findFirst = vi.fn(async () => ({ id: 'p1', threadId: 't1' }));
     await new PostService(recordingQueue()).restore(restoreDb({ forumPost: { findFirst, update: (a: unknown) => a } }), 'p1', MODERATOR);
 
-    const args = findFirst.mock.calls[0]?.[0] as { where: { deletedAt: unknown } };
+    const args = firstArg<{ where: { deletedAt: unknown } }>(findFirst, 'findFirst');
     expect(args.where.deletedAt).toEqual({ not: null });
   });
 

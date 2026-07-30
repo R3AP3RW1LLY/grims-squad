@@ -79,6 +79,28 @@ function dbStub(opts: DbStubOptions = {}) {
 }
 
 const MEMBER = Permission.FORUM_POST_MEMBER;
+/**
+ * The first argument the mock was called with, typed.
+ *
+ * WHY THIS EXISTS
+ *
+ * Indexing mock.calls at zero and casting fails the STRICT typecheck: a vi.fn with no declared
+ * parameters infers an empty tuple, so index 0 does not exist on it (TS2493).
+ *
+ * It was invisible locally because tsc -p tsconfig.json EXCLUDES specs. CI runs the package
+ * typecheck script, which includes tsconfig.spec.json. The lesson is the command, not the cast:
+ * run pnpm --filter @grims/api typecheck.
+ *
+ * This also fails BETTER: the old form silently produced undefined when a mock had not been
+ * called, so the assertion failed on a missing property rather than saying the call never
+ * happened.
+ */
+function firstArg<T>(fn: { mock: { calls: unknown[][] } }, what = 'the mock'): T {
+  const call = fn.mock.calls[0];
+  if (call === undefined) throw new Error(`expected ${what} to have been called, but it was not`);
+  return call[0] as T;
+}
+
 
 describe('who may upload', () => {
   it('MANDATORY: a mask without FORUM_POST_MEMBER is refused', async () => {
@@ -159,10 +181,11 @@ describe('the quota', () => {
     const before = Date.now();
     await svc.upload('u1', MEMBER, await png());
 
-    const where = raw.mediaUpload.count.mock.calls[0]?.[0] as
-      | { where: { createdAt: { gte: Date } } }
-      | undefined;
-    const gte = where?.where.createdAt.gte;
+    const where = firstArg<{ where: { createdAt: { gte: Date } } }>(
+      raw.mediaUpload.count,
+      'the quota count',
+    );
+    const gte = where.where.createdAt.gte;
 
     expect(gte).toBeInstanceOf(Date);
     // ~24h before now, not midnight.

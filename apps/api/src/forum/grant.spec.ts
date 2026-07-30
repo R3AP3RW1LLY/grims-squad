@@ -31,6 +31,28 @@ function stubDb(over: Record<string, unknown>): AclBoundClient {
 
 const MODERATOR = Permission.FORUM_MODERATE;
 const THREAD = 'thread-1';
+/**
+ * The first argument the mock was called with, typed.
+ *
+ * WHY THIS EXISTS
+ *
+ * Indexing mock.calls at zero and casting fails the STRICT typecheck: a vi.fn with no declared
+ * parameters infers an empty tuple, so index 0 does not exist on it (TS2493).
+ *
+ * It was invisible locally because tsc -p tsconfig.json EXCLUDES specs. CI runs the package
+ * typecheck script, which includes tsconfig.spec.json. The lesson is the command, not the cast:
+ * run pnpm --filter @grims/api typecheck.
+ *
+ * This also fails BETTER: the old form silently produced undefined when a mock had not been
+ * called, so the assertion failed on a missing property rather than saying the call never
+ * happened.
+ */
+function firstArg<T>(fn: { mock: { calls: unknown[][] } }, what = 'the mock'): T {
+  const call = fn.mock.calls[0];
+  if (call === undefined) throw new Error(`expected ${what} to have been called, but it was not`);
+  return call[0] as T;
+}
+
 
 /** A thread the granter CAN see, sitting in an officers-only category. */
 const visibleOfficerThread = {
@@ -179,7 +201,7 @@ describe('the multi-select contract', () => {
     await svc.grant(db, THREAD, ['a', 'b', 'c'], 'mod-1', MODERATOR, 'helping with BGS');
 
     expect(transaction).toHaveBeenCalledOnce();
-    expect(transaction.mock.calls[0]?.[0]).toHaveLength(3);
+    expect(firstArg<unknown[]>(transaction, 'transaction')).toHaveLength(3);
   });
 
   it('de-duplicates a list the UI sent twice', async () => {
@@ -196,7 +218,7 @@ describe('the multi-select contract', () => {
 
     // One row, not three — and the active-account check saw one id, so a stub
     // returning one active user is consistent rather than accidentally passing.
-    expect(transaction.mock.calls[0]?.[0]).toHaveLength(1);
+    expect(firstArg<unknown[]>(transaction, 'transaction')).toHaveLength(1);
   });
 
   it('MANDATORY: refuses an empty list rather than silently doing nothing', async () => {
