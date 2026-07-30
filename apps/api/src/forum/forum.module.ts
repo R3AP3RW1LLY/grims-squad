@@ -10,6 +10,7 @@ import { SearchService } from './search.service.js';
 import { ModerationService } from './moderation.service.js';
 import { RecruitmentService } from './recruitment.service.js';
 import { PendingReindexQueue } from './reindex.port.js';
+import { SignatureService } from './signature.service.js';
 
 /**
  * The forum.
@@ -44,6 +45,7 @@ import { PendingReindexQueue } from './reindex.port.js';
     },
     NotifyService,
     EngageService,
+    SignatureService,
     SearchService,
     {
       provide: ThreadService,

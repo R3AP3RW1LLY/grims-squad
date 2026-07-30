@@ -47,6 +47,10 @@ describe('P0.2 database schema', () => {
   // The count is hardcoded ON PURPOSE. Every schema addition has to come and
   // bump it, which is a two-second acknowledgement that a table was added —
   // versus a self-counting assertion that would let one appear unnoticed.
+  // 69 as of 2026-07-30: forum_signatures — the block under a member's posts. Its avatar column is
+  // deliberately SEPARATE from users.avatar_stored_hash: the signature avatar shows on the forums
+  // only and must never overwrite the Discord import, which would be silently undone by the next
+  // sync while the member watched their picture change on its own.
   // 68 as of 2026-07-30: forum_category_reads — when a member last looked at a board, for the
   // "new posts" indicator on the category cards. Per BOARD rather than per thread: per-thread read
   // state costs a row per member per thread and would become the largest table in the schema
@@ -81,8 +85,8 @@ describe('P0.2 database schema', () => {
        where table_schema = 'public' and table_type = 'BASE TABLE'
          and table_name not like '\\_prisma%'`,
     );
-    // 62 models in ssot/03-data/schema.prisma.
-    expect(Number(r[0]?.n)).toBe(68);
+    // 63 models in ssot/03-data/schema.prisma.
+    expect(Number(r[0]?.n)).toBe(69);
   });
 
   describe('hand-written DDL that Prisma cannot express', () => {

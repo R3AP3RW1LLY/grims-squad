@@ -1,4 +1,5 @@
 import { cookies } from 'next/headers';
+import type { SignatureView } from '@grims/shared';
 
 /**
  * Server-side calls into our own API.
@@ -815,6 +816,8 @@ export interface HubThread {
 
 export interface HubPost {
   id: string;
+  /** Keys the signature map on the thread response. */
+  authorId: string;
   bodyHtml: string;
   createdAt: string;
   editedAt: string | null;
@@ -852,7 +855,16 @@ export const getHubThreads = (
 export const getHubThread = (
   slug: string,
   threadSlug: string,
-): Promise<{ thread: HubThread; posts: HubPost[] } | null> =>
+): Promise<{
+  thread: HubThread;
+  posts: HubPost[];
+  /**
+   * Keyed by author id, NOT attached per post — a thread with forty replies from twelve people
+   * has twelve signatures, and repeating each one per post makes the response grow with the
+   * conversation rather than with the number of people in it.
+   */
+  signatures: Record<string, SignatureView>;
+} | null> =>
   get(
     `/v1/forum/categories/${encodeURIComponent(slug)}/threads/${encodeURIComponent(threadSlug)}`,
     { authed: true },

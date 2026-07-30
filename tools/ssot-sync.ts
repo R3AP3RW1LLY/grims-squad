@@ -20,6 +20,10 @@ const COPIES: ReadonlyArray<{ source: string; copy: string }> = [
   { source: 'ssot/03-data/schema.prisma', copy: 'packages/db/prisma/schema.prisma' },
   { source: 'ssot/04-contracts/permissions.ts', copy: 'packages/shared/src/permissions.ts' },
   { source: 'ssot/04-contracts/rich-document.ts', copy: 'packages/shared/src/rich-document.ts' },
+  {
+    source: 'ssot/04-contracts/forum-signature.ts',
+    copy: 'packages/shared/src/forum-signature.ts',
+  },
 ];
 
 const green = (s: string) => `\x1b[32m${s}\x1b[0m`;

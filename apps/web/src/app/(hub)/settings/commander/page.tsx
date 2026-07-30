@@ -14,6 +14,7 @@ import {
   CouldNotLoad,
 } from '../../../../components/hub-page';
 import { PageTabs, resolveTab, type PageTab } from '../../../../components/page-tabs';
+import { SignatureEditor } from './signature-editor';
 import { PrivacyControls, sharedFields } from '../privacy/body';
 import { appVersionSummary } from '../../../../components/update-banner-rules';
 import { getMyPrivacy, getUpdateStatus } from '../../../../lib/api';
@@ -63,6 +64,13 @@ const TABS: readonly PageTab[] = [
    * now holds the same controls rather than on a 404.
    */
   { key: 'security', label: 'Security' },
+  /*
+   * Squadron owner, 2026-07-30: "this should be built in a new tab on the commander profile page".
+   *
+   * Placed before Account rather than last: Account holds the things you touch once (export,
+   * delete), and a tab people will actually visit should not sit behind them.
+   */
+  { key: 'signature', label: 'Forum signature' },
   { key: 'account', label: 'Account' },
 ];
 
@@ -125,7 +133,11 @@ export default async function CommanderPage({
         only the first two tabs need — cannot blank a privacy screen that never
         depended on it.
       */}
-      {tab === 'security' ? (
+      {tab === 'signature' ? (
+        <PageBody lead="How you appear on the forums. None of this changes your Discord photo.">
+          <SignatureEditor discordAvatarUrl={me.user?.avatarUrl ?? null} />
+        </PageBody>
+      ) : tab === 'security' ? (
         <SecurityBody />
       ) : tab === 'account' ? (
         <AccountBody />

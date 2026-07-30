@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Query, Req, Inject } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
 import { AppError, ErrorCode } from '@grims/shared';
+import type { SignatureInput, SignatureView } from '@grims/shared';
 import { User, type CurrentUser } from '../auth/current-user.js';
 import { Public } from '../auth/auth.guard.js';
 import { verifyCsrf, readCsrfCookie } from '../common/csrf.js';
@@ -15,6 +16,7 @@ import { NotifyService } from './notify.service.js';
 import { GatedDiscordDm, replyDmText } from './discord-dm.port.js';
 import { SearchService, renderSnippet, type SearchResult } from './search.service.js';
 import { ModerationService } from './moderation.service.js';
+import { SignatureService } from './signature.service.js';
 
 /**
  * The forum's HTTP surface.
@@ -50,6 +52,7 @@ export class ForumController {
     @Inject(SearchService) private readonly search: SearchService,
     @Inject(ModerationService) private readonly moderation: ModerationService,
     @Inject(NotifyService) private readonly notify: NotifyService,
+    @Inject(SignatureService) private readonly signatures: SignatureService,
   ) {}
 
   /**
@@ -163,7 +166,11 @@ export class ForumController {
     @User() caller: CurrentUser | undefined,
     @Param('slug') slug: string,
     @Param('threadSlug') threadSlug: string,
-  ): Promise<{ thread: ThreadView; posts: PostView[] }> {
+  ): Promise<{
+    thread: ThreadView;
+    posts: PostView[];
+    signatures: Record<string, SignatureView>;
+  }> {
     const db = await this.acl.forCaller(caller?.userId);
     const mask = await this.#mask(caller);
     /*
@@ -187,7 +194,19 @@ export class ForumController {
      */
     void this.threads.recordView(db, thread.id);
 
-    return { thread, posts };
+    /*
+     * ★ SIGNATURES KEYED BY AUTHOR, NOT ATTACHED PER POST ★
+     *
+     * A thread with forty replies from twelve people has twelve signatures. Attaching one to each
+     * post would send the same block twelve times over and make the response grow with the
+     * conversation rather than with the number of people in it.
+     *
+     * Deduplicated before the query, so this is ONE read however long the thread is.
+     */
+    const authorIds = [...new Set(posts.map((p) => p.authorId))];
+    const signatures = await this.signatures.forUsers(db, authorIds);
+
+    return { thread, posts, signatures: Object.fromEntries(signatures) };
   }
 
   /**
@@ -320,6 +339,35 @@ export class ForumController {
     return {
       candidates: await this.grants.search(db, threadId, q ?? '', await this.#mask(caller)),
     };
+  }
+
+  /**
+   * The caller's own forum signature.
+   *
+   * ★ ALWAYS THE CALLER'S — THERE IS NO `:userId` HERE ★
+   *
+   * Somebody else's signature arrives with their posts, already rendered. An endpoint that took a
+   * user id would be a second, unnecessary way to read one, and the first thing anybody would try
+   * is passing an id that is not theirs.
+   */
+  @Get('signature')
+  async mySignature(@User() caller: CurrentUser | undefined): Promise<{ signature: SignatureView }> {
+    const c = requireSession(caller, 'Sign in first.');
+    const db = await this.acl.forCaller(c.userId);
+    return { signature: await this.signatures.mine(db, c.userId) };
+  }
+
+  /** Saves part of the caller's signature. PUT, because saving the same thing twice is one result. */
+  @Put('signature')
+  async saveSignature(
+    @User() caller: CurrentUser | undefined,
+    @Body() body: unknown,
+    @Req() req: FastifyRequest,
+  ): Promise<{ signature: SignatureView }> {
+    const c = requireSession(caller, 'Sign in first.');
+    csrf(req);
+    const db = await this.acl.forCaller(c.userId);
+    return { signature: await this.signatures.save(db, c.userId, (body ?? {}) as SignatureInput) };
   }
 
   /**

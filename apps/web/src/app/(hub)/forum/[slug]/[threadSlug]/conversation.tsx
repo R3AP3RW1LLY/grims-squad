@@ -1,12 +1,13 @@
 'use client';
 
 import { useCallback, useMemo, useRef, useState } from 'react';
-import type { RichDocument } from '@grims/shared';
+import type { RichDocument, SignatureView } from '@grims/shared';
 import type { HubPost } from '../../../../../lib/api';
 import { formatLocal } from '../../../../../lib/time';
 import { Avatar } from '../../../../../components/forum/identity';
 import { ReplyComposer } from './reply-composer';
 import { PostEditor } from './post-editor';
+import { SignatureBlock } from '../../../../../components/forum/signature-block';
 import { apiCall } from '../../../../../lib/api-client';
 
 /**
@@ -42,6 +43,7 @@ export function Conversation({
   canMarkSolution,
   boardSlug,
   threadSlug,
+  signatures,
 }: {
   readonly posts: readonly HubPost[];
   readonly viewerTz: string;
@@ -52,6 +54,8 @@ export function Conversation({
   readonly canMarkSolution: boolean;
   readonly boardSlug: string;
   readonly threadSlug: string;
+  /** Keyed by author id. Absent means the member has none, or turned theirs off. */
+  readonly signatures: Record<string, SignatureView>;
 }) {
   const [replyTo, setReplyTo] = useState<{ postId: string; displayName: string } | null>(null);
   const [insert, setInsert] = useState<{ nonce: number; doc: RichDocument } | undefined>(undefined);
@@ -120,6 +124,9 @@ export function Conversation({
             onReply={setReplyTo}
             onQuote={quote}
             registerBody={() => undefined}
+            {...(signatures[solution.authorId] === undefined
+              ? {}
+              : { signature: signatures[solution.authorId] })}
             /* A copy, floated for scanning. The original stays in sequence below. */
             floated
           />
@@ -140,6 +147,9 @@ export function Conversation({
             onReply={setReplyTo}
             onQuote={quote}
             registerBody={(el) => bodies.current.set(post.id, el)}
+            {...(signatures[post.authorId] === undefined
+              ? {}
+              : { signature: signatures[post.authorId] })}
           />
         ))}
       </div>
@@ -167,6 +177,7 @@ function PostCard({
   onReply,
   onQuote,
   registerBody,
+  signature,
   floated = false,
 }: {
   readonly post: HubPost;
@@ -179,6 +190,7 @@ function PostCard({
   readonly onReply: (r: { postId: string; displayName: string }) => void;
   readonly onQuote: (p: HubPost) => void;
   readonly registerBody: (el: HTMLDivElement | null) => void;
+  readonly signature?: SignatureView;
   readonly floated?: boolean;
 }) {
   const [reactions, setReactions] = useState(post.reactions);
@@ -239,7 +251,19 @@ function PostCard({
     >
       <header className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-border-hairline)] pb-3">
         <span className="flex items-center gap-3">
-          <Avatar identity={post.author} size="md" />
+          {/*
+            The SIGNATURE avatar wins on the forum, which is the whole point of it existing:
+            "the avatar upload should only be displayed on the forums and not replace their global
+            avatar that discord imports". Falls back to the Discord one, which is the default.
+          */}
+          <Avatar
+            identity={
+              signature?.avatarUrl === undefined || signature.avatarUrl === null
+                ? post.author
+                : { ...post.author, avatarUrl: signature.avatarUrl }
+            }
+            size="md"
+          />
           <span>
             <span className="block text-sm text-[var(--color-text-primary)]">
               {post.author.displayName}
@@ -282,6 +306,8 @@ function PostCard({
           dangerouslySetInnerHTML={{ __html: post.bodyHtml }}
         />
       )}
+
+      {signature !== undefined && !editing && <SignatureBlock signature={signature} />}
 
       <footer className="mt-4 flex flex-wrap items-center gap-2 border-t border-[var(--color-border-hairline)] pt-3">
         {reactions.map((r) => (

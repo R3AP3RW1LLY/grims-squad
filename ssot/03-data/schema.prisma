@@ -386,6 +386,7 @@ model User {
   posts               ForumPost[]
   reactions           ForumReaction[]
   subscriptions       ForumSubscription[]
+  forumSignature      ForumSignature?
   reportsFiled        ContentReport[]       @relation("ReportReporter")
   reportsResolved     ContentReport[]       @relation("ReportResolver")
   moderationActions   ModerationAction[]    @relation("ModerationActor")
@@ -1105,6 +1106,11 @@ model MediaUpload {
 
   uploader User @relation("MediaUploader", fields: [uploaderId], references: [id], onDelete: Cascade)
 
+  /// Back-relations for signature images. `SetNull` on both, so deleting an upload leaves the
+  /// signature intact and merely picture-less rather than taking the member's whole block with it.
+  signatureAvatars ForumSignature[] @relation("SignatureAvatar")
+  signatureBanners ForumSignature[] @relation("SignatureBanner")
+
   /// "What has this member uploaded, newest first" - the quota and moderation query.
   @@index([uploaderId, createdAt])
   @@map("media_uploads")
@@ -1219,6 +1225,70 @@ model PostRevision {
 }
 
 /// Per-post emoji reaction.
+/// A member's forum signature - the block under their posts.
+///
+/// * WHY THE AVATAR HERE IS NOT THE AVATAR ON `User` *
+///
+/// Squadron owner, 2026-07-30: "allow users to upload a signature avatar if they want to customize
+/// it ... the avatar upload should only be displayed on the forums and not replace their global
+/// avatar that discord imports".
+///
+/// So this is a SEPARATE column, and `User.avatarStoredHash` is never written by anything in this
+/// file. The obvious implementation - "let them upload an avatar" - would have overwritten the
+/// Discord import, and the next Discord sync would have silently overwritten it back. A member
+/// would watch their picture change on its own and have no way to describe the bug.
+///
+/// * ONE ROW PER MEMBER, CREATED ON FIRST SAVE *
+///
+/// `userId` is the primary key rather than a `signatureId` with a unique index: a member has one
+/// signature or none, and a table that can physically hold two is a table that eventually does.
+/// Absent means "has not made one", which renders as the default built from their Discord avatar.
+model ForumSignature {
+  userId String @id @map("user_id") @db.Uuid
+
+  /// Forum-only avatar. Null means "use the Discord one", which is the default and stays true
+  /// forever if they never touch this.
+  avatarMediaId String? @map("avatar_media_id") @db.Uuid
+
+  /// One line under the name. Length-capped in the contract, not here, so the limit is stated in
+  /// one place that both the API and the editor read.
+  tagline String?
+
+  /// The banner image, and where it points.
+  bannerMediaId String? @map("banner_media_id") @db.Uuid
+
+  /// * A HOST ALLOWLIST, NOT A FREE URL *
+  ///
+  /// Owner asked for a banner "that links to inara commander profile or something of that nature
+  /// or a stream channel if they are a streamer". That is a small, nameable set of destinations.
+  ///
+  /// An arbitrary URL under every post a member writes is advertising space with a hundred
+  /// impressions a day, and the first time somebody links somewhere unpleasant it is a moderation
+  /// problem on every page they have ever posted on. The allowlist lives in the contract; this
+  /// column holds what passed it.
+  bannerUrl   String? @map("banner_url")
+  /// What the link says, for readers who cannot see the image.
+  bannerLabel String? @map("banner_label")
+
+  /// Which brand accent to use. A closed set in the contract - free-form colour would let a
+  /// member render unreadable text on our own background.
+  accent String @default("orange")
+
+  showRank      Boolean @default(true) @map("show_rank")
+  showCommander Boolean @default(true) @map("show_commander")
+  /// Turned off without deleting, so switching it back does not mean rebuilding it.
+  enabled       Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user   User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  avatar MediaUpload? @relation("SignatureAvatar", fields: [avatarMediaId], references: [id], onDelete: SetNull)
+  banner MediaUpload? @relation("SignatureBanner", fields: [bannerMediaId], references: [id], onDelete: SetNull)
+
+  @@map("forum_signatures")
+}
+
 model ForumReaction {
   postId String @map("post_id") @db.Uuid
   userId String @map("user_id") @db.Uuid

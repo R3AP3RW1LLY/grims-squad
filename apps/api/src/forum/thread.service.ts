@@ -81,6 +81,8 @@ export interface ThreadView {
  */
 export interface PostView {
   readonly id: string;
+  /** The author's id — what the signature map is keyed on. */
+  readonly authorId: string;
   readonly bodyHtml: string;
   readonly editedAt: string | null;
   readonly editCount: number;
@@ -421,6 +423,7 @@ export class ThreadService {
 
     return rows.map((p) => ({
       id: p.id,
+      authorId: p.authorId,
       bodyHtml: p.bodyHtml,
       editedAt: p.editedAt?.toISOString() ?? null,
       editCount: p.editCount,
