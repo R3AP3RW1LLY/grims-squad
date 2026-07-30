@@ -5,6 +5,7 @@ import type { ReindexQueue } from './reindex.port.js';
 import { renderPostBody } from './sanitize.js';
 import { validateDocument, renderDocument, documentToText } from './rich-doc.js';
 import type { NotifyService } from './notify.service.js';
+import { ALLOWED_REACTIONS, type ReactionCount } from './engage.service.js';
 
 /**
  * Threads — the conversations inside a category.
@@ -54,6 +55,20 @@ export interface ThreadView {
    * not happened, which is precisely what somebody scanning a board is trying to judge.
    */
   readonly lastPoster: { handle: string; displayName: string; avatarUrl: string | null } | null;
+  /**
+   * Whether THIS caller may mark a reply as the answer.
+   *
+   * ★ ANSWERED BY THE SERVER, NOT DERIVED IN THE BROWSER ★
+   *
+   * The obvious client-side version compares the signed-in handle to the thread author's, which
+   * gets the common case right and silently excludes moderators — and would have to be corrected
+   * in every component that draws the button. Worse, it is a copy of an authorisation rule living
+   * somewhere a member can edit. `/me` deliberately does not ship the permission mask, and this is
+   * why: capabilities are answered one question at a time, by the side that owns the rule.
+   *
+   * Presentation only. `markSolution` re-checks.
+   */
+  readonly canMarkSolution: boolean;
 }
 
 /**
@@ -69,7 +84,26 @@ export interface PostView {
   readonly editedAt: string | null;
   readonly editCount: number;
   readonly createdAt: string;
-  readonly author: { handle: string; displayName: string };
+  readonly author: { handle: string; displayName: string; avatarUrl: string | null };
+  /**
+   * The post this one answers, when it answers a particular one.
+   *
+   * * WHO AND WHERE, NEVER WHAT *
+   *
+   * An excerpt of the parent would be the obvious thing to include and is the wrong thing. The only
+   * text we hold that is not already rendered is `bodyMd`, which is the author's UNSANITISED input
+   * - and the rule this file already states is that it does not leave the server. An "excerpt"
+   * field would be exactly the future consumer that eventually renders it.
+   *
+   * So this carries an id and a name: enough for "In reply to Grim" with a link that jumps to the
+   * post, which is what a reader wants anyway. QUOTING is a compose-time action and happens in the
+   * browser, from text already on the page.
+   */
+  readonly replyTo: { postId: string; author: { handle: string; displayName: string } } | null;
+  /** Marked as the answer. At most one per thread - see `markSolution`. */
+  readonly isSolution: boolean;
+  /** Reaction tallies, already including whether the caller reacted. */
+  readonly reactions: readonly ReactionCount[];
 }
 
 export interface CreateThreadInput {
@@ -213,6 +247,8 @@ export class ThreadService {
     categorySlug: string,
     threadSlug: string,
     callerMask: bigint,
+    /** Null when signed out — nobody is the author, so no capability is granted. */
+    callerId: string | null = null,
   ): Promise<ThreadView> {
     const category = await this.categories.bySlug(db, categorySlug, callerMask);
 
@@ -243,25 +279,42 @@ export class ThreadService {
       throw new AppError(ErrorCode.RESOURCE_NOT_VISIBLE, 'Thread not found.');
     }
 
-    /*
-     * ★ THE VIEW COUNT IS BUMPED HERE, AFTER THE ACL CHECK, AND NOT AWAITED ★
-     *
-     * After, because a counter that moves for a thread the caller could not read would leak that
-     * the thread exists — the same disclosure the 404 above is written to avoid, arriving through
-     * a number instead of a status code.
-     *
-     * Not awaited, because a view count is the least important thing on the page and a reader
-     * should not wait on a write to see a post. A failure is swallowed for the same reason: the
-     * thread renders, and the count is approximate, which is what a view count has always been.
-     *
-     * It counts VIEWS, not viewers — a refresh counts again. Deduplicating would mean a row per
-     * member per thread, which is the table this project already declined to create for read state.
-     */
-    void db.forumThread
-      .update({ where: { id: row.id }, data: { viewCount: { increment: 1 } } })
-      .catch(() => undefined);
+    return {
+      ...toView(row),
+      canMarkSolution:
+        callerId !== null &&
+        (row.authorId === callerId ||
+          (callerMask & Permission.FORUM_MODERATE) === Permission.FORUM_MODERATE),
+    };
+  }
 
-    return toView(row);
+  /**
+   * Records that somebody looked at a thread.
+   *
+   * ★ WHY THIS IS NOT INSIDE `bySlug` ★
+   *
+   * It was, and it double-counted. `postsFor` resolves the thread through `bySlug` as its ACL step,
+   * so one page view produced two increments — and `markSolution` does the same, meaning marking an
+   * answer counted as reading the thread. A lookup helper is the wrong place to decide that a HUMAN
+   * looked at something; only a route knows that.
+   *
+   * ★ THE CALLER MUST HAVE ALREADY READ THE THREAD ★
+   *
+   * This takes an id that can only have come from a successful `bySlug`, and the controller calls
+   * it after that resolves. A counter that moved on a refused read would be an oracle for whether
+   * a private thread exists — the disclosure the uniform 404 exists to prevent, arriving through a
+   * number instead of a status code.
+   *
+   * Not awaited by callers, and failure is swallowed: a view count is the least important thing on
+   * the page, and a reader should not wait on it or lose the page to it.
+   *
+   * It counts VIEWS, not viewers — a refresh counts again. Deduplicating would mean a row per
+   * member per thread, which is the table this project already declined to create for read state.
+   */
+  async recordView(db: AclBoundClient, threadId: string): Promise<void> {
+    await db.forumThread
+      .update({ where: { id: threadId }, data: { viewCount: { increment: 1 } } })
+      .catch(() => undefined);
   }
 
   /**
@@ -291,6 +344,8 @@ export class ThreadService {
     categorySlug: string,
     threadSlug: string,
     callerMask: bigint,
+    /** Null for a signed-out reader: their own reaction state is absent, not false. */
+    callerId: string | null = null,
   ): Promise<PostView[]> {
     const thread = await this.bySlug(db, categorySlug, threadSlug, callerMask);
 
@@ -312,9 +367,48 @@ export class ThreadService {
         editedAt: true,
         editCount: true,
         createdAt: true,
-        author: { select: { handle: true, displayName: true } },
+        isSolution: true,
+        authorId: true,
+        author: { select: { handle: true, displayName: true, avatarStoredHash: true } },
+        /*
+         * The parent's AUTHOR, not its body. One join rather than a second query per post - a
+         * thread with sixty replies would otherwise issue sixty-one reads to render one page.
+         */
+        replyTo: {
+          select: { id: true, author: { select: { handle: true, displayName: true } } },
+        },
       },
     });
+
+    /*
+     * * ONE GROUPED QUERY FOR THE WHOLE THREAD'S REACTIONS *
+     *
+     * The per-post `reactionsFor` is right for a toggle response and wrong here: called in a loop
+     * it is two queries per post. This is two for the page, whatever its length.
+     */
+    const postIds = rows.map((p) => p.id);
+    const [tallies, mine] = await Promise.all([
+      postIds.length === 0
+        ? Promise.resolve([])
+        : db.forumReaction.groupBy({
+            by: ['postId', 'emoji'],
+            where: { postId: { in: postIds } },
+            _count: { emoji: true },
+          }),
+      postIds.length === 0 || callerId === null
+        ? Promise.resolve([])
+        : db.forumReaction.findMany({
+            where: { postId: { in: postIds }, userId: callerId },
+            select: { postId: true, emoji: true },
+          }),
+    ]);
+
+    const mineByPost = new Map<string, Set<string>>();
+    for (const r of mine) {
+      const set = mineByPost.get(r.postId) ?? new Set<string>();
+      set.add(r.emoji);
+      mineByPost.set(r.postId, set);
+    }
 
     return rows.map((p) => ({
       id: p.id,
@@ -322,11 +416,87 @@ export class ThreadService {
       editedAt: p.editedAt?.toISOString() ?? null,
       editCount: p.editCount,
       createdAt: p.createdAt.toISOString(),
+      isSolution: p.isSolution,
       author: {
         handle: p.author.handle,
         displayName: p.author.displayName ?? p.author.handle,
+        avatarUrl: avatarPath(p.authorId, p.author.avatarStoredHash),
       },
+      replyTo:
+        p.replyTo === null
+          ? null
+          : {
+              postId: p.replyTo.id,
+              author: {
+                handle: p.replyTo.author.handle,
+                displayName: p.replyTo.author.displayName ?? p.replyTo.author.handle,
+              },
+            },
+      reactions: tallyFor(tallies, mineByPost.get(p.id) ?? new Set(), p.id),
     }));
+  }
+
+  /**
+   * Marks one reply as the answer, or clears the mark.
+   *
+   * * WHO MAY DO THIS *
+   *
+   * The person who ASKED, or a moderator. Not the author of the reply - otherwise marking your own
+   * post as the answer is a button, and on a board this size that is a small status game nobody
+   * needs. The member who started the thread is the one who knows whether it was answered.
+   *
+   * * AT MOST ONE PER THREAD, ENFORCED BY CLEARING FIRST *
+   *
+   * Two "answers" is the same as none - a reader scrolling for the marker finds two and has to
+   * read both anyway. Clear-then-set runs in a transaction so a failure cannot leave a thread with
+   * zero marks when it had one.
+   */
+  async markSolution(
+    db: AclBoundClient,
+    categorySlug: string,
+    threadSlug: string,
+    postId: string,
+    caller: { userId: string; mask: bigint },
+    /** Defaults to MARKING. Un-marking is the deliberate act and reads better written out. */
+    solution = true,
+  ): Promise<void> {
+    const thread = await this.bySlug(db, categorySlug, threadSlug, caller.mask);
+
+    const threadRow = await db.forumThread.findFirst({
+      where: { id: thread.id },
+      select: { authorId: true },
+    });
+
+    const moderates = (caller.mask & Permission.FORUM_MODERATE) === Permission.FORUM_MODERATE;
+    if (threadRow?.authorId !== caller.userId && !moderates) {
+      throw new AppError(
+        ErrorCode.PERMISSION_DENIED,
+        'Only the member who started the thread, or a moderator, can mark the answer.',
+      );
+    }
+
+    /*
+     * Scoped to THIS thread. Without `threadId` a caller could pass any post id they can see and
+     * mark it as the answer to a different thread - the same class of mistake the reply-target
+     * check in `PostService` exists to prevent.
+     */
+    const post = await db.forumPost.findFirst({
+      where: { id: postId, threadId: thread.id, deletedAt: null },
+      select: { id: true },
+    });
+    if (post === null) {
+      throw new AppError(ErrorCode.RESOURCE_NOT_VISIBLE, 'Post not found.');
+    }
+
+    await db.$transaction([
+      db.forumPost.updateMany({
+        where: { threadId: thread.id, isSolution: true },
+        data: { isSolution: false },
+      }),
+      ...(solution
+        ? [db.forumPost.update({ where: { id: post.id }, data: { isSolution: true } })]
+        : []),
+    ]);
   }
 
   /**
@@ -515,6 +685,19 @@ export class ThreadService {
  * avatar HASH, not an address. Emitting that field directly is the mistake this helper exists to
  * make impossible; the profile serializer carries the same note for the same reason.
  */
+/** Turns the thread-wide reaction rollup into one post's tallies, in the fixed display order. */
+function tallyFor(
+  tallies: ReadonlyArray<{ postId: string; emoji: string; _count: { emoji: number } }>,
+  mine: ReadonlySet<string>,
+  postId: string,
+): ReactionCount[] {
+  return ALLOWED_REACTIONS.map((emoji) => ({
+    emoji,
+    count: tallies.find((t) => t.postId === postId && t.emoji === emoji)?._count.emoji ?? 0,
+    mine: mine.has(emoji),
+  })).filter((r) => r.count > 0 || r.mine);
+}
+
 function avatarPath(userId: string, storedHash: string | null): string | null {
   return storedHash === null ? null : `/v1/media/avatars/${userId}`;
 }
@@ -577,5 +760,11 @@ function toView(r: {
       avatarUrl: avatarPath(r.authorId, r.author.avatarStoredHash),
     },
     lastPoster: distinctLastPoster,
+    /*
+     * FALSE from the list projection, always. Nobody marks an answer from a board index, and
+     * computing it per row would mean carrying the caller's identity into a function whose whole
+     * job is shaping a row. `bySlug` overrides it for the one page that draws the button.
+     */
+    canMarkSolution: false,
   };
 }

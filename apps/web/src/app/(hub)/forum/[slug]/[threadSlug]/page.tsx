@@ -10,7 +10,7 @@ import {
 } from '../../../../../lib/api';
 import { formatLocal } from '../../../../../lib/time';
 import { ThreadAccess } from './thread-access';
-import { ReplyComposer } from './reply-composer';
+import { Conversation } from './conversation';
 import { NotifyMe } from './notify-me';
 import { ImageUploader } from '../../../../../components/image-uploader';
 import { YouTubeConsent } from '../../../../../components/editor/youtube-consent';
@@ -162,43 +162,23 @@ export default async function ThreadPage({
           </div>
         )}
 
-        <div className="space-y-8">
-          {posts.map((post, i) => (
-            <article
-              key={post.id}
-              id={`post-${i + 1}`}
-              className="scroll-mt-24 rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel)] p-5"
-            >
-              <header className="mb-4 flex flex-wrap items-baseline justify-between gap-2 border-b border-[var(--color-border-hairline)] pb-3">
-                <p className="text-sm text-[var(--color-text-primary)]">
-                  {post.author.displayName}
-                </p>
-                <p className="font-mono text-[11px] text-[var(--color-text-secondary)]">
-                  {formatLocal(post.createdAt, viewerTz)}
-                  {/*
-                    Shown only when the server set `editedAt`. The grace window means a typo
-                    fixed moments after posting is not flagged — a forum that flags that
-                    teaches members to post twice instead of editing.
-                  */}
-                  {post.editedAt !== null && ' · edited'}
-                </p>
-              </header>
-
-              <div
-                /* Same scoped prose styling as the public guides, on existing tokens. */
-                className="guide-prose"
-                dangerouslySetInnerHTML={{ __html: post.bodyHtml }}
-              />
-            </article>
-          ))}
-        </div>
-
         {/*
-          The composer decides for itself whether to render controls — a locked thread or no
-          posting permission gets an explanation instead of a disabled box. `canPost` comes from
-          the server and is re-checked there on submit, so this is presentation only.
+          Posts and composer together, as one client island. "Reply to this post" and "Quote this
+          post" are messages from a post TO the composer, and splitting them would mean inventing a
+          channel for something React already models as state. The bodies are still the server's
+          pre-sanitised HTML, unchanged.
         */}
-        <ReplyComposer threadId={thread.id} locked={thread.isLocked} canPost={board?.category.canPost ?? false} />
+        <Conversation
+          posts={posts}
+          viewerTz={viewerTz}
+          threadId={thread.id}
+          locked={thread.isLocked}
+          canPost={board?.category.canPost ?? false}
+          /* Server-decided. See `ThreadView.canMarkSolution` for why it is not computed here. */
+          canMarkSolution={thread.canMarkSolution}
+          boardSlug={slug}
+          threadSlug={threadSlug}
+        />
       </PageBody>
     </>
   );

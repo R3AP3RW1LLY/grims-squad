@@ -25,10 +25,23 @@ export function ReplyComposer({
   threadId,
   locked,
   canPost,
+  replyTo = null,
+  onClearReplyTo,
+  insert,
 }: {
   readonly threadId: string;
   readonly locked: boolean;
   readonly canPost: boolean;
+  /**
+   * The post being answered, when the reader picked one.
+   *
+   * A reply with no target is still a reply to the THREAD — that is the common case and needs no
+   * ceremony. Naming a target only matters when a thread has several conversations in it, which
+   * is exactly when a reader cannot tell what a bare reply is answering.
+   */
+  readonly replyTo?: { postId: string; displayName: string } | null;
+  readonly onClearReplyTo?: () => void;
+  readonly insert?: { nonce: number; doc: RichDocument };
 }) {
   const [doc, setDoc] = useState<RichDocument | null>(null);
   const [busy, setBusy] = useState(false);
@@ -65,7 +78,15 @@ export function ReplyComposer({
     setBusy(true);
     setError(null);
     try {
-      await apiPost(`/v1/forum/threads/${encodeURIComponent(threadId)}/posts`, { bodyDoc: doc });
+      await apiPost(`/v1/forum/threads/${encodeURIComponent(threadId)}/posts`, {
+        bodyDoc: doc,
+        /*
+         * Omitted, not sent as null, when replying to the thread at large. The server treats an
+         * absent target as "the thread"; sending null would make it validate a field that means
+         * the same thing as not sending one.
+         */
+        ...(replyTo === null ? {} : { replyToId: replyTo.postId }),
+      });
       /*
        * A full reload rather than appending the new post to local state. The server generated the
        * HTML, so it is the authority on what the reply looks like — rendering our own guess would
@@ -85,10 +106,31 @@ export function ReplyComposer({
         REPLY
       </h2>
 
+      {replyTo !== null && (
+        /*
+         * Shown WITH a way out. A reply target set by a click three screens up is invisible by the
+         * time somebody starts typing, and a reply that silently threads under the wrong post is
+         * how a conversation stops making sense.
+         */
+        <div className="mb-3 flex items-center justify-between gap-3 rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel-sunken)] px-3 py-2">
+          <span className="text-xs text-[var(--color-text-secondary)]">
+            Replying to <span className="text-[var(--color-text-primary)]">{replyTo.displayName}</span>
+          </span>
+          <button
+            type="button"
+            onClick={onClearReplyTo}
+            className="font-mono text-[11px] text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)]"
+          >
+            CLEAR
+          </button>
+        </div>
+      )}
+
       <RichEditor
         onChange={setDoc}
         disabled={busy}
         placeholder="Write a reply. Use the toolbar for headings, images and video."
+        {...(insert === undefined ? {} : { insert })}
       />
 
       {error !== null && (

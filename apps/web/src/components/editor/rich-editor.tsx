@@ -37,6 +37,20 @@ export interface RichEditorProps {
   readonly onChange: (doc: RichDocument | null) => void;
   readonly placeholder?: string;
   readonly disabled?: boolean;
+  /**
+   * Content to append at the caret, when `nonce` changes.
+   *
+   * ★ A NONCE, NOT THE DOCUMENT ITSELF ★
+   *
+   * Quoting is an EVENT — "put this in my reply, now" — and events do not survive being modelled
+   * as state. Watching the document for changes would re-insert the same quote on every unrelated
+   * re-render; watching a counter fires exactly once per press, which is what the reader asked
+   * for by clicking Quote.
+   *
+   * Append rather than replace, so quoting two posts in one reply works and nothing already typed
+   * is destroyed.
+   */
+  readonly insert?: { nonce: number; doc: RichDocument };
 }
 
 /** One toolbar button. Extracted because there are eleven of them and they must look identical. */
@@ -91,7 +105,13 @@ function readCsrf(): string {
   return '';
 }
 
-export function RichEditor({ initial, onChange, placeholder, disabled = false }: RichEditorProps) {
+export function RichEditor({
+  initial,
+  onChange,
+  placeholder,
+  disabled = false,
+  insert,
+}: RichEditorProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -150,6 +170,25 @@ export function RichEditor({ initial, onChange, placeholder, disabled = false }:
     adopted.current = key;
     editor.commands.setContent(fromDocument(initial) as never);
   }, [editor, initial]);
+
+  /*
+   * Appends quoted content when the nonce moves. The first render is deliberately skipped: an
+   * editor that mounts with a pending nonce would otherwise insert the quote before the member
+   * asked, and "Reply" and "Quote" would become the same button.
+   */
+  const lastInsert = useRef<number | null>(insert?.nonce ?? null);
+  useEffect(() => {
+    if (editor === null || insert === undefined) return;
+    // Seeded from whatever was present at MOUNT, so an editor that mounts with a nonce already
+    // set does not insert it. A `null` seed means nothing was pending, and any nonce is new.
+    if (lastInsert.current === insert.nonce) return;
+    lastInsert.current = insert.nonce;
+    editor
+      .chain()
+      .focus('end')
+      .insertContent(fromDocument(insert.doc) as never)
+      .run();
+  }, [editor, insert]);
 
   const upload = useCallback(
     async (file: File) => {

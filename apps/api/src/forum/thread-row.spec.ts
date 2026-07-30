@@ -67,6 +67,9 @@ function clientWith(
     forumCategoryRead: {
       findMany: async () => [],
     },
+    // Present so `postsFor` can run end to end; the posts themselves are not what these test.
+    forumPost: { findMany: async () => [] },
+    forumReaction: { groupBy: async () => [], findMany: async () => [] },
     forumThread: {
       findFirst: async () => thread,
       findMany: async () => (thread === null ? [] : [thread]),
@@ -190,24 +193,33 @@ describe('what a board row discloses', () => {
   });
 
   describe('the view counter', () => {
-    it('MANDATORY: does not move when the thread was not visible', async () => {
-      /*
-       * THE DISCLOSURE TEST. `findFirst` returning null is how an invisible thread and an absent
-       * one both arrive. If the increment ran before that check — or ran regardless — the counter
-       * would answer "does this thread exist" for anybody willing to watch it.
-       */
-      const db = clientWith(null);
-      await expect(svc().bySlug(db as never, 'general', 'secret', 0n)).rejects.toMatchObject({
-        code: expect.any(String),
-      });
+    /*
+     * ★ COUNTED BY THE ROUTE, NOT BY THE LOOKUP ★
+     *
+     * The increment used to live inside `bySlug` and double-counted every page view, because
+     * `postsFor` resolves the thread through `bySlug` as its ACL step — and `markSolution` does
+     * too, so marking an answer counted as reading. `recordView` is separate for that reason, and
+     * these tests pin both halves: the lookup does not count, and the counter does not run for a
+     * thread the caller could not read.
+     */
+    it('MANDATORY: reading a thread does not itself count a view', async () => {
+      const db = clientWith(row());
+      await svc().bySlug(db as never, 'general', 'a-thread', 0n);
+      await Promise.resolve();
       expect(db.updates).toHaveLength(0);
     });
 
-    it('increments by one for a thread that was returned', async () => {
+    it('MANDATORY: fetching the posts does not count a second view', async () => {
+      // The regression that prompted the split: one page view produced two increments.
       const db = clientWith(row());
-      await svc().bySlug(db as never, 'general', 'a-thread', 0n);
-      // Awaited indirectly: the update is fire-and-forget, so yield once before asserting.
+      await svc().postsFor(db as never, 'general', 'a-thread', 0n, null);
       await Promise.resolve();
+      expect(db.updates).toHaveLength(0);
+    });
+
+    it('increments by exactly one when the route records a view', async () => {
+      const db = clientWith(row());
+      await svc().recordView(db as never, 't1');
 
       expect(db.updates).toHaveLength(1);
       expect(db.updates[0]).toMatchObject({
@@ -216,26 +228,21 @@ describe('what a board row discloses', () => {
       });
     });
 
-    it('MANDATORY: a failing counter does not fail the read', async () => {
+    it('MANDATORY: a failing counter does not throw', async () => {
       /*
-       * A view count is the least important thing on the page. If the write fails — a lock, a
-       * replica lag, a dead connection — the member must still get their thread. An unhandled
-       * rejection here would also take the process down, which is a spectacular way to lose a
-       * forum over a number nobody checks.
+       * A view count is the least important thing on the page. If the write fails — a lock, replica
+       * lag, a dead connection — the member must still get their thread. The controller does not
+       * await this, so a rejection would also be an unhandled one, which is a spectacular way to
+       * lose a forum over a number nobody checks.
        */
       const db = clientWith(row());
       db.forumThread.update = async () => {
         throw new Error('database on fire');
       };
-
-      const view = await svc().bySlug(db as never, 'general', 'a-thread', 0n);
-      await Promise.resolve();
-      expect(view.title).toBe('A thread');
+      await expect(svc().recordView(db as never, 't1')).resolves.toBeUndefined();
     });
 
-    it('reports the count it read, not the count after the bump', async () => {
-      // The increment is asynchronous, so the number shown is the one at read time. Pinned so
-      // nobody "fixes" it into a second read that would double the cost of every page view.
+    it('reports the count it read, not the count after any bump', async () => {
       const view = await svc().bySlug(
         clientWith(row({ viewCount: 7 })) as never,
         'general',

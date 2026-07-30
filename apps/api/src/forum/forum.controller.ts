@@ -177,10 +177,43 @@ export class ForumController {
      * the posts read being independently safe if it is ever called from anywhere else.
      */
     const [thread, posts] = await Promise.all([
-      this.threads.bySlug(db, slug, threadSlug, mask),
-      this.threads.postsFor(db, slug, threadSlug, mask),
+      this.threads.bySlug(db, slug, threadSlug, mask, caller?.userId ?? null),
+      this.threads.postsFor(db, slug, threadSlug, mask, caller?.userId ?? null),
     ]);
+    /*
+     * Counted ONCE, here, after both reads succeeded — not inside `bySlug`, which runs three times
+     * across this request and its internals. Deliberately not awaited: the reader gets their thread
+     * without waiting on a counter, and a failure loses a number rather than a page.
+     */
+    void this.threads.recordView(db, thread.id);
+
     return { thread, posts };
+  }
+
+  /**
+   * Marks a reply as the answer, or clears the mark.
+   *
+   * PUT rather than POST: setting the answer twice must leave one answer, and an idempotent verb
+   * says so at the protocol level rather than in a comment. The body carries the desired STATE,
+   * which is also what makes un-marking the same call rather than a second endpoint.
+   */
+  @Put('categories/:slug/threads/:threadSlug/posts/:postId/solution')
+  async solution(
+    @User() caller: CurrentUser | undefined,
+    @Param('slug') slug: string,
+    @Param('threadSlug') threadSlug: string,
+    @Param('postId') postId: string,
+    @Body() body: unknown,
+  ): Promise<{ ok: true }> {
+    if (caller === undefined) {
+      throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
+    }
+    const db = await this.acl.forCaller(caller.userId);
+    const mask = await this.#mask(caller);
+    const solution = (body as { solution?: unknown } | null)?.solution !== false;
+
+    await this.threads.markSolution(db, slug, threadSlug, postId, { userId: caller.userId, mask }, solution);
+    return { ok: true };
   }
 
   /**

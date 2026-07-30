@@ -799,6 +799,8 @@ export interface HubThread {
   author: ForumIdentity;
   /** Null when nobody has replied, so a quiet thread cannot be made to look busy. */
   lastPoster: ForumIdentity | null;
+  /** Server-decided: whether this caller may mark a reply as the answer. Re-checked on write. */
+  canMarkSolution: boolean;
 }
 
 export interface HubPost {
@@ -807,7 +809,11 @@ export interface HubPost {
   createdAt: string;
   editedAt: string | null;
   editCount: number;
-  author: { handle: string; displayName: string };
+  author: ForumIdentity;
+  /** The post this answers, when it answers one in particular. Who and where, never what. */
+  replyTo: { postId: string; author: { handle: string; displayName: string } } | null;
+  isSolution: boolean;
+  reactions: { emoji: string; count: number; mine: boolean }[];
 }
 
 export interface ThreadGrant {
