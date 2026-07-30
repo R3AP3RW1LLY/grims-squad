@@ -36,6 +36,10 @@ export interface DashboardData {
     readonly trackedMembers: number;
     /** Messages per day of the month, index 0 = the 1st. */
     readonly daily: readonly number[];
+    /** Voice joins per day. Separate from messages — see the query. */
+    readonly dailyVoice: readonly number[];
+    /** Forum posts per day. */
+    readonly dailyForum: readonly number[];
     /** Distinct members active on each day, index 0 = the 1st. */
     readonly dailyMembers: readonly number[];
     readonly top: ReadonlyArray<{
@@ -200,11 +204,30 @@ export class PrismaDashboardStore implements DashboardStore {
        * day) and distinct members (how many people showed up). They answer
        * different questions and one loud member should not look like a crowd.
        */
-      this.#db.$queryRaw<Array<{ day: number; msgs: bigint; members: bigint }>>`
+      /*
+       * ★ THREE SUMS, NOT ONE ★
+       *
+       * Squadron owner, 2026-07-30: "add another data set to the activity graph ... for forum
+       * activity ... for discord activity in this chart, seperate message activity and voice
+       * activity".
+       *
+       * This used to add all three columns together into a single "Actions" line, which answers
+       * "was it busy" and nothing else. A quiet week of chat with a big voice night looked
+       * identical to a steady week of typing — and the two call for completely different
+       * reactions from whoever is reading the chart.
+       *
+       * Still ONE query. Three separate ones over the same rows for the same window would be
+       * three scans to produce three columns the first scan already had.
+       */
+      this.#db.$queryRaw<
+        Array<{ day: number; msgs: bigint; voice: bigint; forum: bigint; members: bigint }>
+      >`
         SELECT
-          EXTRACT(DAY FROM day)::int                                   AS day,
-          SUM(message_count + forum_post_count + voice_join_count)::bigint AS msgs,
-          COUNT(DISTINCT discord_id)::bigint                           AS members
+          EXTRACT(DAY FROM day)::int          AS day,
+          SUM(message_count)::bigint          AS msgs,
+          SUM(voice_join_count)::bigint       AS voice,
+          SUM(forum_post_count)::bigint       AS forum,
+          COUNT(DISTINCT discord_id)::bigint  AS members
         FROM member_activity_days
         WHERE day >= ${month}::date AND day < ${nextMonth}::date
         GROUP BY 1 ORDER BY 1
@@ -355,6 +378,12 @@ export class PrismaDashboardStore implements DashboardStore {
       Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0),
     ).getUTCDate();
     const dailyArray = Array.from({ length: daysInMonth }, () => 0);
+    /*
+     * Zero-filled like the rest. A day with no voice activity produces no ROW, and a line that
+     * skipped those days would draw straight through a quiet weekend as though it had been busy.
+     */
+    const dailyVoice = Array.from({ length: daysInMonth }, () => 0);
+    const dailyForum = Array.from({ length: daysInMonth }, () => 0);
     const dailyMembers = Array.from({ length: daysInMonth }, () => 0);
     /*
      * Elite sign-ins, filled from its own query.
@@ -375,6 +404,8 @@ export class PrismaDashboardStore implements DashboardStore {
       const slot = row.day - 1;
       if (slot < 0 || slot >= dailyArray.length) continue;
       dailyArray[slot] = Number(row.msgs);
+      dailyVoice[slot] = Number(row.voice);
+      dailyForum[slot] = Number(row.forum);
       dailyMembers[slot] = Number(row.members);
     }
 
@@ -394,6 +425,8 @@ export class PrismaDashboardStore implements DashboardStore {
         ).length,
         trackedMembers: trackedMembers.length,
         daily: dailyArray,
+        dailyVoice,
+        dailyForum,
         dailyMembers,
         top: activity.slice(0, 10).map((r) => {
           const guild = byDiscordId.get(r.discordId);

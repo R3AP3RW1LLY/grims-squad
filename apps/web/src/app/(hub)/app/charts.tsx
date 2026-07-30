@@ -49,6 +49,20 @@ export const BRAND = {
   text: '#e8eef5',
   textSecondary: '#93a4b8',
   void: '#05070a',
+  /*
+   * ★ TWO COLOURS ADDED FOR THE SPLIT ACTIVITY SERIES — owner, 2026-07-30 ★
+   *
+   * "make this line purple" for forum activity, and for voice "choose a seperate color for the
+   * voice activity that doesnt match other colors used".
+   *
+   * Both were picked against the EXISTING palette rather than in isolation: orange, orangeBright,
+   * orangeDim, cyan, cyanBright, success green, warning gold and hostile salmon are all already in
+   * play. Violet and magenta are the two hue regions nothing else occupies, and they are far
+   * enough apart from each other to stay distinguishable at a 2px stroke — which is the only width
+   * anybody will actually see them at.
+   */
+  violet: '#a97bff',
+  magenta: '#ff4fd8',
 } as const;
 
 /**
@@ -131,6 +145,10 @@ export interface HeatDay {
    * only one of those is a problem an officer can do anything about.
    */
   readonly signIns: number;
+  /** Voice channel joins that day. Separate from messages — see the note on the series. */
+  readonly voice: number;
+  /** Forum posts that day. */
+  readonly forum: number;
   /** 0 = Sunday, matching Date.getUTCDay(). Retained for weekend shading. */
   readonly weekday: number;
 }
@@ -215,7 +233,13 @@ export function ActivityChart({ days, monthLabel }: { days: HeatDay[]; monthLabe
             */
             formatter={(v, n) => [
               Number(v).toLocaleString('en-GB'),
-              { messages: 'Actions', members: 'Members', signIns: 'Elite sign-ins' }[String(n)] ??
+              {
+                messages: 'Discord messages',
+                voice: 'Voice joins',
+                forum: 'Forum posts',
+                members: 'Members',
+                signIns: 'Elite sign-ins',
+              }[String(n)] ??
                 String(n),
             ]}
           />
@@ -223,15 +247,54 @@ export function ActivityChart({ days, monthLabel }: { days: HeatDay[]; monthLabe
             yAxisId="actions"
             type="monotone"
             dataKey="messages"
-            stroke={BRAND.cyanBright}
+            /*
+             * ORANGE, per the owner: "keep the message color orange". It was cyan, and the member
+             * line was orange — so the colour they associated with messages was on the wrong
+             * series. The member line moves to gold below rather than staying orange, because two
+             * orange lines on one chart is worse than either arrangement.
+             */
+            stroke={BRAND.orange}
             strokeWidth={2}
             fill="url(#actionsFill)"
+          />
+          {/*
+            ★ VOICE, SPLIT OUT OF THE OLD COMBINED FIGURE ★
+
+            On the ACTIONS axis with messages, because they are the same kind of quantity and the
+            whole point of splitting them is to compare them. A quiet week of chat with a big voice
+            night used to look identical to a steady week of typing.
+          */}
+          <Line
+            yAxisId="actions"
+            type="monotone"
+            dataKey="voice"
+            stroke={BRAND.magenta}
+            strokeWidth={2}
+            dot={false}
+          />
+          {/*
+            ★ FORUM ACTIVITY — purple, as asked ★
+
+            Also on the actions axis. Forum posts are counted in ones and twos next to hundreds of
+            messages, so this will usually sit near the floor — which is honest. Giving it its own
+            axis would inflate three posts into a mountain and imply the forum is as busy as
+            Discord.
+          */}
+          <Line
+            yAxisId="actions"
+            type="monotone"
+            dataKey="forum"
+            stroke={BRAND.violet}
+            strokeWidth={2}
+            dot={false}
           />
           <Line
             yAxisId="members"
             type="monotone"
             dataKey="members"
-            stroke={BRAND.orange}
+            // Moved off orange, which now belongs to messages. Gold is the nearest unused warm
+            // tone, so the chart still reads the same way at a glance.
+            stroke={BRAND.warning}
             strokeWidth={2}
             dot={false}
           />
@@ -260,15 +323,31 @@ export function ActivityChart({ days, monthLabel }: { days: HeatDay[]; monthLabe
           <span
             aria-hidden="true"
             className="h-0.5 w-5 rounded"
-            style={{ backgroundColor: BRAND.cyanBright }}
+            style={{ backgroundColor: BRAND.orange }}
           />
-          <span className="text-[var(--color-text-secondary)]">Actions</span>
+          <span className="text-[var(--color-text-secondary)]">Discord messages</span>
         </span>
         <span className="flex items-center gap-2">
           <span
             aria-hidden="true"
             className="h-0.5 w-5 rounded"
-            style={{ backgroundColor: BRAND.orange }}
+            style={{ backgroundColor: BRAND.magenta }}
+          />
+          <span className="text-[var(--color-text-secondary)]">Voice joins</span>
+        </span>
+        <span className="flex items-center gap-2">
+          <span
+            aria-hidden="true"
+            className="h-0.5 w-5 rounded"
+            style={{ backgroundColor: BRAND.violet }}
+          />
+          <span className="text-[var(--color-text-secondary)]">Forum posts</span>
+        </span>
+        <span className="flex items-center gap-2">
+          <span
+            aria-hidden="true"
+            className="h-0.5 w-5 rounded"
+            style={{ backgroundColor: BRAND.warning }}
           />
           <span className="text-[var(--color-text-secondary)]">Members active</span>
         </span>

@@ -376,6 +376,10 @@ export interface AdminDashboard {
     /** Messages per day of the month, index 0 = the 1st. */
     daily: number[];
     /** Distinct members active on each day, index 0 = the 1st. */
+    /** Voice joins per day, split out of the old combined "actions" figure. */
+    dailyVoice: number[];
+    /** Forum posts per day. */
+    dailyForum: number[];
     dailyMembers: number[];
     top: Array<{ name: string; messages: number; voice: number; cmdrName: string | null }>;
   };

@@ -73,6 +73,10 @@ export function Dashboard({ data }: { data: AdminDashboard }) {
     day: i + 1,
     messages,
     members: discord.dailyMembers[i] ?? 0,
+    // `?? 0` for the same reason as sign-ins below: a shorter array must draw a zero rather
+    // than break the line.
+    voice: discord.dailyVoice[i] ?? 0,
+    forum: discord.dailyForum[i] ?? 0,
     /*
      * From `game`, not `discord` — it is a journal fact (`LoadGame`), and the
      * two arrive as separate arrays covering the same days. `?? 0` because a
