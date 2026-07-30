@@ -6,7 +6,8 @@ import StarterKit from '@tiptap/starter-kit';
 import Link from '@tiptap/extension-link';
 import Placeholder from '@tiptap/extension-placeholder';
 import type { RichDocument } from '@grims/shared';
-import { Mention, SquadronImage, SquadronVideo } from './nodes';
+import { FontFamily, Mention, SquadronImage, SquadronVideo } from './nodes';
+import { FONT_CATEGORY_LABELS, FONT_FAMILIES, FONT_SITE_DEFAULT } from '@grims/shared/fonts';
 import { MentionAutocomplete } from './mention-autocomplete';
 import { toDocument, fromDocument, parseYouTubeId } from './doc-convert';
 
@@ -161,6 +162,7 @@ export function RichEditor({
       SquadronImage,
       SquadronVideo,
       Mention,
+      FontFamily,
     ],
     /*
      * SPREAD, not `content: initial === undefined ? undefined : …`.
@@ -347,6 +349,38 @@ export function RichEditor({
         >
           Link
         </ToolButton>
+
+        {/*
+          The font picker. A `select` rather than a menu of styled buttons: thirty families is a
+          list, and a native select gets keyboard search, scrolling and mobile handling for free.
+        */}
+        <select
+          aria-label="Font"
+          disabled={disabled}
+          value={(editor.getAttributes('font')['font'] as string | undefined) ?? FONT_SITE_DEFAULT}
+          onChange={(e) => {
+            const id = e.target.value;
+            /*
+             * Applied to the SELECTION, or to whatever is typed next when nothing is selected —
+             * which is how every other mark in this toolbar behaves, so the font should not be the
+             * one control that needs text highlighted first.
+             */
+            if (id === FONT_SITE_DEFAULT) editor.chain().focus().unsetMark('font').run();
+            else editor.chain().focus().setMark('font', { font: id }).run();
+          }}
+          className="rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel-sunken)] px-2 py-1 text-xs text-[var(--color-text-primary)] disabled:opacity-40"
+        >
+          <option value={FONT_SITE_DEFAULT}>Font</option>
+          {(['display', 'sans', 'serif', 'mono', 'stencil'] as const).map((cat) => (
+            <optgroup key={cat} label={FONT_CATEGORY_LABELS[cat]}>
+              {FONT_FAMILIES.filter((f) => f.category === cat).map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.name}
+                </option>
+              ))}
+            </optgroup>
+          ))}
+        </select>
 
         <ToolButton label="Insert image" disabled={disabled || busy} onClick={() => fileInput.current?.click()}>
           {busy ? 'Uploading…' : 'Image'}

@@ -146,3 +146,38 @@ export const Mention = Mark.create({
     ];
   },
 });
+
+/**
+ * A font applied to a run of text.
+ *
+ * ★ A MARK, SO TWO FONTS CAN SHARE A PARAGRAPH ★
+ *
+ * Squadron owner, 2026-07-30: commanders may "use multiple fonts if they want too". A font stored
+ * on the POST would allow exactly one; a mark on a run allows a heading in Orbitron and a note in
+ * Share Tech Mono in the same sentence.
+ *
+ * ★ THE ATTRIBUTE IS AN ID, RESOLVED WHEN RENDERED ★
+ *
+ * `renderHTML` here is only what the EDITOR shows. The stored document keeps the id, and the
+ * server builds the CSS from its own catalogue — so nothing a member types can reach a style
+ * attribute, which is the one place a font value would otherwise accept arbitrary text.
+ */
+export const FontFamily = Mark.create({
+  name: 'font',
+
+  addAttributes() {
+    return {
+      font: { default: '' },
+    };
+  },
+
+  renderHTML({ HTMLAttributes }) {
+    const id = (HTMLAttributes as unknown as { font?: string }).font ?? '';
+    /*
+     * `data-font` rather than an inline style built here: the editor stylesheet maps the id to a
+     * family, so the editor and the server both resolve the same id through their own catalogue
+     * rather than one of them inventing CSS.
+     */
+    return ['span', mergeAttributes({ 'data-font': id, class: `doc-font doc-font-${id}` }), 0];
+  },
+});

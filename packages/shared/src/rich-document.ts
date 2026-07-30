@@ -32,7 +32,7 @@
  */
 
 /** Text styling. A closed set, so a mark nobody planned for cannot appear. */
-export type MarkType = 'bold' | 'italic' | 'strike' | 'code' | 'link' | 'mention';
+export type MarkType = 'bold' | 'italic' | 'strike' | 'code' | 'link' | 'mention' | 'font';
 
 export interface DocMark {
   readonly type: MarkType;
@@ -53,6 +53,22 @@ export interface DocMark {
    * correctly if that account is later deleted.
    */
   readonly userId?: string;
+  /**
+   * Only `font` carries this: an id from the font catalogue.
+   *
+   * ★ AN ID, NEVER A CSS VALUE ★
+   *
+   * Squadron owner, 2026-07-30: commanders pick a font "they can use in their forum posts and
+   * signatures", and may "use multiple fonts if they want too" — so this is a MARK on a run of
+   * text rather than a property of the post, which is what makes two fonts in one paragraph
+   * possible at all.
+   *
+   * Storing the id and resolving it at render is the whole safety story. A stored `font-family`
+   * would be member-authored text reaching a `style` attribute, and a font stack is one of the very
+   * few CSS values that accepts arbitrary content — so an unknown id renders as the site font
+   * rather than as whatever the string happened to say.
+   */
+  readonly font?: string;
 }
 
 export interface TextNode {

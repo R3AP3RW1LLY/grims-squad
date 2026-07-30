@@ -760,3 +760,47 @@ body {
 .guide-prose .doc-mention:hover {
   background: color-mix(in srgb, var(--color-brand-cyan-bright) 20%, transparent);
 }
+
+/*
+ * Commander-chosen fonts inside a post body.
+ *
+ * ★ A CLASS PER FAMILY, NOT AN INLINE STYLE ★
+ *
+ * The document stores a font ID and the renderer emits `doc-font-<id>`. Mapping that to a family
+ * HERE means no member-supplied value ever reaches a `style` attribute — a font stack is one of
+ * the very few CSS values that happily accepts arbitrary text, and an id that matches no class
+ * below simply inherits the site face.
+ *
+ * Generated from ssot/04-contracts/fonts.ts; regenerate alongside `pnpm fonts:fetch`.
+ */
+.doc-font-orbitron { font-family: 'Orbitron', system-ui, -apple-system, Segoe UI, sans-serif; }
+.doc-font-michroma { font-family: 'Michroma', system-ui, -apple-system, Segoe UI, sans-serif; }
+.doc-font-audiowide { font-family: 'Audiowide', system-ui, -apple-system, Segoe UI, sans-serif; }
+.doc-font-chakra-petch { font-family: 'Chakra Petch', system-ui, -apple-system, Segoe UI, sans-serif; }
+.doc-font-syncopate { font-family: 'Syncopate', system-ui, -apple-system, Segoe UI, sans-serif; }
+.doc-font-bruno-ace { font-family: 'Bruno Ace', system-ui, -apple-system, Segoe UI, sans-serif; }
+.doc-font-turret-road { font-family: 'Turret Road', system-ui, -apple-system, Segoe UI, sans-serif; }
+.doc-font-russo-one { font-family: 'Russo One', system-ui, -apple-system, Segoe UI, sans-serif; }
+.doc-font-inter { font-family: 'Inter', system-ui, -apple-system, Segoe UI, sans-serif; }
+.doc-font-rajdhani { font-family: 'Rajdhani', system-ui, -apple-system, Segoe UI, sans-serif; }
+.doc-font-exo-2 { font-family: 'Exo 2', system-ui, -apple-system, Segoe UI, sans-serif; }
+.doc-font-titillium-web { font-family: 'Titillium Web', system-ui, -apple-system, Segoe UI, sans-serif; }
+.doc-font-barlow { font-family: 'Barlow', system-ui, -apple-system, Segoe UI, sans-serif; }
+.doc-font-oswald { font-family: 'Oswald', system-ui, -apple-system, Segoe UI, sans-serif; }
+.doc-font-roboto-condensed { font-family: 'Roboto Condensed', system-ui, -apple-system, Segoe UI, sans-serif; }
+.doc-font-archivo { font-family: 'Archivo', system-ui, -apple-system, Segoe UI, sans-serif; }
+.doc-font-manrope { font-family: 'Manrope', system-ui, -apple-system, Segoe UI, sans-serif; }
+.doc-font-saira { font-family: 'Saira', system-ui, -apple-system, Segoe UI, sans-serif; }
+.doc-font-work-sans { font-family: 'Work Sans', system-ui, -apple-system, Segoe UI, sans-serif; }
+.doc-font-spectral { font-family: 'Spectral', Georgia, serif; }
+.doc-font-bitter { font-family: 'Bitter', Georgia, serif; }
+.doc-font-zilla-slab { font-family: 'Zilla Slab', Georgia, serif; }
+.doc-font-cormorant-garamond { font-family: 'Cormorant Garamond', Georgia, serif; }
+.doc-font-jetbrains-mono { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace; }
+.doc-font-share-tech-mono { font-family: 'Share Tech Mono', ui-monospace, SFMono-Regular, Menlo, monospace; }
+.doc-font-ibm-plex-mono { font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace; }
+.doc-font-space-mono { font-family: 'Space Mono', ui-monospace, SFMono-Regular, Menlo, monospace; }
+.doc-font-fira-code { font-family: 'Fira Code', ui-monospace, SFMono-Regular, Menlo, monospace; }
+.doc-font-black-ops-one { font-family: 'Black Ops One', system-ui, -apple-system, Segoe UI, sans-serif; }
+.doc-font-saira-stencil-one { font-family: 'Saira Stencil One', system-ui, -apple-system, Segoe UI, sans-serif; }
+.doc-font-wallpoet { font-family: 'Wallpoet', system-ui, -apple-system, Segoe UI, sans-serif; }

@@ -8,6 +8,7 @@ import {
   type RichDocument,
   type TextNode,
 } from '@grims/shared';
+import { FONT_SITE_DEFAULT, isKnownFont } from '@grims/shared';
 import { AppError, ErrorCode } from '@grims/shared';
 import { MEDIA_PATH_PREFIX } from './sanitize.js';
 
@@ -93,7 +94,13 @@ function validateMarks(marks: unknown): readonly DocMark[] {
   if (!Array.isArray(marks)) fail('A text run had a malformed mark list.');
   if (marks.length > 8) fail('That text has too many styles applied at once.');
 
-  return marks.map((m) => {
+  /*
+   * `.filter(...)` because a mark handler may return null to DROP a mark rather than reject the
+   * post — a font we no longer serve is decoration we can lose, not a reason to refuse somebody's
+   * paragraph. Every other handler either returns a mark or throws.
+   */
+  return marks
+    .map((m): DocMark | null => {
     const type = (m as { type?: unknown })?.type;
     switch (type) {
       case 'bold':
@@ -129,10 +136,25 @@ function validateMarks(marks: unknown): readonly DocMark[] {
         }
         return { type: 'mention', userId };
       }
+      case 'font': {
+        /*
+         * ★ CHECKED AGAINST THE CATALOGUE, AND DROPPED IF UNKNOWN ★
+         *
+         * Returning null removes the mark rather than rejecting the post. A font we no longer serve
+         * is not a reason to refuse somebody's paragraph — the text is the content, the font is
+         * decoration, and losing the decoration is the proportionate outcome.
+         */
+        const font = (m as { font?: unknown }).font;
+        if (typeof font !== 'string' || !isKnownFont(font) || font === FONT_SITE_DEFAULT) {
+          return null;
+        }
+        return { type: 'font', font };
+      }
       default:
         fail(`Unsupported text style: ${String(type)}.`);
     }
-  });
+    })
+    .filter((m): m is DocMark => m !== null);
 }
 
 function validateText(nodes: unknown, c: Counters): readonly TextNode[] {
@@ -333,11 +355,34 @@ function renderText(nodes: readonly TextNode[]): string {
        * listed them in. `code` wraps closest to the text, and a link wraps outermost so the
        * whole styled run is clickable.
        */
-      const order: DocMark['type'][] = ['code', 'strike', 'italic', 'bold', 'mention', 'link'];
+      /*
+       * `font` is OUTERMOST, so it wraps every other mark on the run rather than being nested
+       * inside one — a bold word inside a font span inherits the family, while a font span inside
+       * a `<strong>` would only cover part of it once marks are split.
+       */
+      const order: DocMark['type'][] = ['code', 'strike', 'italic', 'bold', 'mention', 'link', 'font'];
       for (const type of order) {
         const mark = n.marks?.find((m) => m.type === type);
         if (mark === undefined) continue;
-        if (type === 'mention') {
+        if (type === 'font') {
+          /*
+           * ★ THE STACK IS BUILT FROM THE ID, NOT FROM STORED TEXT ★
+           *
+           * `fontStack` resolves against the catalogue, so what reaches the style attribute is a
+           * value WE wrote — never a string the member supplied. `esc` is applied anyway, because
+           * a guarantee that depends on one function staying correct is worth a second layer that
+           * costs nothing.
+           */
+          /*
+           * A CLASS, not an inline style. The stylesheet maps `doc-font-<id>` to a family, so no
+           * member-supplied value ever reaches a style attribute — and an id matching no class
+           * simply inherits the site face rather than rendering something nobody validated.
+           *
+           * `esc` on top, because a guarantee that rests on one function staying correct is worth
+           * a second layer that costs nothing.
+           */
+          html = `<span class="doc-font doc-font-${esc(mark.font ?? '')}">${html}</span>`;
+        } else if (type === 'mention') {
           /*
            * Rendered as a link to the member's profile, carrying the id in a data attribute so the
            * client can style or hover-card it without re-parsing the name.

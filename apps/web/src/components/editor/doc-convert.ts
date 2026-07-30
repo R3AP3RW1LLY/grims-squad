@@ -54,6 +54,16 @@ function toText(nodes: PmNode[] | undefined): TextNode[] {
               const href = m.attrs?.['href'];
               return typeof href === 'string' ? ({ type: 'link', href } as const) : null;
             }
+            case 'font': {
+              /*
+               * An ID from the catalogue. Dropped when absent rather than carried as an empty
+               * string — a mark meaning "no font" is a mark that renders a span for nothing.
+               */
+              const font = m.attrs?.['font'];
+              return typeof font === 'string' && font !== ''
+                ? ({ type: 'font', font } as const)
+                : null;
+            }
             case 'mention': {
               /*
                * Dropped when the id is missing, rather than saved as a mention of nobody. A mark
@@ -223,7 +233,9 @@ export function fromDocument(doc: RichDocument): PmNode {
         ? { type: 'link', attrs: { href: m.href } }
         : m.type === 'mention'
           ? { type: 'mention', attrs: { userId: m.userId } }
-          : { type: m.type },
+          : m.type === 'font'
+            ? { type: 'font', attrs: { font: m.font } }
+            : { type: m.type },
     );
 
   const textOf = (nodes: readonly TextNode[] | undefined): PmNode[] =>
