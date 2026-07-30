@@ -21,6 +21,15 @@ import { Uploader } from './uploader.js';
 import { runWatchPass, type JournalFs, type WatchOutcome } from './watcher.js';
 import { accumulate } from './totals.js';
 import { isGameRunning, isActivelyPlaying } from './game-process.js';
+import {
+  FRESH,
+  onProofOfLife,
+  onSuccess,
+  onUnauthorised,
+  shouldSkip,
+  statusLine,
+  type BackoffState,
+} from './upload-backoff.js';
 import { fetchHubSettings, type HubSettings } from './hub-settings.js';
 import { updateAvailable } from './update-check.js';
 import { searchForJournalDir, searchRootsFor, type SearchFs } from './journal-search.js';
@@ -55,6 +64,13 @@ const ours = (...parts: string[]): string => join(app.getAppPath(), 'dist', ...p
 
 /** How often to look for new journal lines. */
 const POLL_MS = 20_000;
+
+/*
+ * Upload backoff state. The RULES live in `upload-backoff.ts` so they can be unit tested — the
+ * Electron main process imports `electron` and cannot be, which is exactly where the original
+ * "give up on the first 401" assumption survived unchallenged for as long as it did.
+ */
+let backoff: BackoffState = FRESH;
 
 let tray: Tray | null = null;
 let window: BrowserWindow | null = null;
@@ -293,6 +309,41 @@ async function tick(): Promise<void> {
    */
   void refreshHubSettings();
 
+  /*
+   * ★ BACKING OFF, NOT STOPPING ★
+   *
+   * The timer keeps running at its normal cadence; this pass simply skips the upload while a
+   * backoff is in force. That matters more than it looks: the settings poll above still runs, so
+   * the moment it succeeds `credentialProvenAlive()` clears the backoff and the very next pass
+   * sends. A cleared interval could never have done that — which is precisely how the app sat
+   * silent for thirteen hours with a perfectly good token.
+   */
+  if (shouldSkip(backoff, Date.now())) {
+    /*
+     * ★ SAY SO, LOUDLY ★
+     *
+     * Silence was the failure mode that actually hurt: the old code stopped uploading and went on
+     * looking connected and healthy for thirteen hours, and the first anyone knew was the roster
+     * showing members offline while they were in game. A skipped pass now writes a real error into
+     * the outcome the window and the tray both read.
+     */
+    lastOutcome = {
+      gameRunning: lastOutcome?.gameRunning ?? false,
+      filesRead: 0,
+      newFilesRead: 0,
+      txBytes: 0,
+      rxBytes: 0,
+      sent: 0,
+      duplicates: 0,
+      refused: {},
+      unauthorised: true,
+      error: statusLine(backoff, Date.now()) ?? 'Not sending — retrying shortly.',
+    };
+    push();
+    refreshTray();
+    return;
+  }
+
   const dir = await findJournalDir();
   if (dir === null) {
     lastOutcome = {
@@ -414,11 +465,26 @@ async function tick(): Promise<void> {
 
     if (outcome.unauthorised) {
       /*
-       * The token is dead and will not recover. Stop polling rather than
-       * retrying every twenty seconds forever — the member has to act, and the
-       * window now says so.
+       * ★ ONE 401 IS NOT A DEAD TOKEN — THIS COST THIRTEEN HOURS OF TELEMETRY ★
+       *
+       * This used to call `stopPolling()` on the first unauthorised response, on the reasoning
+       * that "the token is dead and will not recover". On 2026-07-30 that assumption was wrong in
+       * production: uploads stopped at 07:00 UTC and never resumed, while the settings poll kept
+       * authenticating with THE SAME TOKEN every five minutes and returning 200 for thirteen
+       * hours. The token was fine. A transient refusal — a deploy, a restart, a blip — is
+       * indistinguishable here from a revoked one, and the app treated both as terminal.
+       *
+       * Worse, it failed INVISIBLY: the settings timer survived, so the app looked connected and
+       * healthy the entire time it was sending nothing.
+       *
+       * `device_tokens` has no expiry column. A token is valid until somebody revokes it, so
+       * "gave up" is almost never the right conclusion — and when it IS right, backing off costs
+       * one request every half hour rather than a member's whole session.
        */
-      stopPolling();
+      backoff = onUnauthorised(backoff, Date.now());
+    } else {
+      // Any successful pass clears it: whatever the condition was, it has passed.
+      backoff = onSuccess();
     }
   } catch (error) {
     lastOutcome = {
@@ -582,6 +648,12 @@ async function refreshHubSettings(force = false): Promise<void> {
   if (result.ok) {
     hubSettings = result.settings;
     hubError = null;
+    /*
+     * This call authenticated with the same token the uploader uses. Whatever refused an upload
+     * earlier, the credential is provably alive NOW — so any backoff is based on a conclusion that
+     * has since been disproved, and holding to it would keep the member silent for no reason.
+     */
+    backoff = onProofOfLife();
   } else {
     /*
      * The last good answer is KEPT on a failure. A dropped connection is not
