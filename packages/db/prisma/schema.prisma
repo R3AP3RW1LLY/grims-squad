@@ -1088,8 +1088,29 @@ model ForumPost {
   authorId   String                   @map("author_id") @db.Uuid
   replyToId  String?                  @map("reply_to_id") @db.Uuid
   bodyMd     String                   @map("body_md")
-  /// Sanitized SERVER-SIDE with DOMPurify before storage, served under a strict CSP (INV-035).
+  /// Sanitized SERVER-SIDE before storage, served under a strict CSP (INV-035).
+  ///
+  /// For a RICH post this is GENERATED from body_doc and is never accepted from a client.
   bodyHtml   String                   @map("body_html")
+  /// The rich document (P2.3), when the post was written in the rich editor.
+  ///
+  /// * WHY BOTH THIS AND body_html EXIST *
+  ///
+  /// This is the SOURCE OF TRUTH; body_html is derived from it on the server. Keeping both means
+  /// reading a post is one column with no render step, while EDITING starts from the exact tree
+  /// the author built - so a round trip through the editor cannot degrade their layout.
+  ///
+  /// * WHY NOT REPLACE body_md *
+  ///
+  /// Markdown posts still exist and are still valid: replies, the seeded guides, anything written
+  /// before P2.3. A migration that rewrote them all into documents would be a lossy transform of
+  /// every post on the site, run once, with no way back. Null here means "written as Markdown",
+  /// which is a fact worth keeping rather than erasing.
+  ///
+  /// Validated against a closed set of eleven node types before storage. There is no node type
+  /// that can carry raw HTML, and images carry OUR upload id rather than a URL - so a document
+  /// cannot reference a third-party host at all.
+  bodyDoc    Json?                    @map("body_doc")
   editedAt   DateTime?                @map("edited_at") @db.Timestamptz(6)
   editCount  Int                      @default(0) @map("edit_count")
   isSolution Boolean                  @default(false) @map("is_solution")

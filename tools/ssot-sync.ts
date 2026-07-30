@@ -19,6 +19,7 @@ const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const COPIES: ReadonlyArray<{ source: string; copy: string }> = [
   { source: 'ssot/03-data/schema.prisma', copy: 'packages/db/prisma/schema.prisma' },
   { source: 'ssot/04-contracts/permissions.ts', copy: 'packages/shared/src/permissions.ts' },
+  { source: 'ssot/04-contracts/rich-document.ts', copy: 'packages/shared/src/rich-document.ts' },
 ];
 
 const green = (s: string) => `\x1b[32m${s}\x1b[0m`;

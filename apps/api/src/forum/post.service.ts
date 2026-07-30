@@ -2,6 +2,7 @@ import { AppError, ErrorCode, Permission } from '@grims/shared';
 import type { AclBoundClient } from '../authz/acl-db.service.js';
 import { satisfiesMask } from './category.service.js';
 import { renderPostBody } from './sanitize.js';
+import { validateDocument, renderDocument, documentToText } from './rich-doc.js';
 import type { ReindexQueue } from './reindex.port.js';
 
 /**
@@ -54,7 +55,12 @@ export class PostService {
   async create(
     db: AclBoundClient,
     threadId: string,
-    bodyMd: string,
+    /*
+     * EITHER a Markdown string OR a rich document. One shape, two forms, decided by which the
+     * client sent — rather than two near-identical methods that would drift apart on the
+     * permission and lock checks, which are the parts that matter.
+     */
+    body: string | { doc: unknown },
     authorId: string,
     callerMask: bigint,
   ): Promise<PostWritten> {
@@ -93,7 +99,8 @@ export class PostService {
       throw new AppError(ErrorCode.PERMISSION_DENIED, 'You cannot post in this board.');
     }
 
-    const rendered = this.#render(bodyMd);
+    const rendered =
+      typeof body === 'string' ? this.#render(body) : this.#renderRich(body.doc);
 
     const post = await db.forumPost.create({
       data: {
@@ -103,6 +110,8 @@ export class PostService {
         authorId,
         bodyMd: rendered.bodyMd,
         bodyHtml: rendered.bodyHtml,
+        // Null for a Markdown post, which is how a reader later knows which editor made it.
+        ...('bodyDoc' in rendered ? { bodyDoc: rendered.bodyDoc as object } : {}),
       },
       select: { id: true, bodyHtml: true, editCount: true },
     });
@@ -136,7 +145,7 @@ export class PostService {
   async edit(
     db: AclBoundClient,
     postId: string,
-    bodyMd: string,
+    body: string | { doc: unknown },
     editorId: string,
     callerMask: bigint,
   ): Promise<PostWritten> {
@@ -164,7 +173,8 @@ export class PostService {
       throw new AppError(ErrorCode.VALIDATION_FAILED, 'This thread is locked.');
     }
 
-    const rendered = this.#render(bodyMd);
+    const rendered =
+      typeof body === 'string' ? this.#render(body) : this.#renderRich(body.doc);
     if (rendered.bodyMd === post.bodyMd) {
       /*
        * Nothing changed. Returning early rather than writing a revision: a history full of
@@ -190,6 +200,7 @@ export class PostService {
         data: {
           bodyMd: rendered.bodyMd,
           bodyHtml: rendered.bodyHtml,
+          ...('bodyDoc' in rendered ? { bodyDoc: rendered.bodyDoc as object } : {}),
           /*
            * The revision is written either way; this only governs the visible "edited"
            * marker. See GRACE_MS — flagging a typo fixed ten seconds later teaches members
@@ -345,6 +356,25 @@ export class PostService {
       editedAt: r.editedAt.toISOString(),
       editedByHandle: r.editor.handle,
     }));
+  }
+
+  /**
+   * A RICH body: validate the document, then generate the HTML ourselves.
+   *
+   * ★ THE CLIENT NEVER SUPPLIES HTML FOR A RICH POST ★
+   *
+   * `renderDocument` takes `RichDocument`, a type obtainable only from `validateDocument`, so
+   * rendering something unvalidated is a compile error rather than a discipline. `bodyMd` is set
+   * to the document's plain text — not markup — because search and notification previews want
+   * words, and leaving it empty would make every rich post invisible to search.
+   */
+  #renderRich(bodyDoc: unknown): { bodyMd: string; bodyHtml: string; bodyDoc: unknown } {
+    const doc = validateDocument(bodyDoc);
+    const bodyHtml = renderDocument(doc);
+    if (bodyHtml.trim() === '') {
+      throw new AppError(ErrorCode.VALIDATION_FAILED, 'Write something first.');
+    }
+    return { bodyMd: documentToText(doc), bodyHtml, bodyDoc: doc };
   }
 
   /** Sanitises, and refuses a body that came to nothing. */

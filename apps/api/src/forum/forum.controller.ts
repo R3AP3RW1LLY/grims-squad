@@ -367,13 +367,27 @@ function requireSession(caller: CurrentUser | undefined, why: string): CurrentUs
   return caller;
 }
 
-/** Reads and validates a post body from a request. */
-function readBody(body: unknown): string {
-  const raw = (body as { bodyMd?: unknown } | null)?.bodyMd;
-  if (typeof raw !== 'string') {
-    throw new AppError(ErrorCode.VALIDATION_FAILED, 'Write something first.');
+/**
+ * Reads a post body — either Markdown or a rich document.
+ *
+ * ★ THE CLIENT CHOOSES THE FORM, NOT THE SAFETY ★
+ *
+ * `bodyDoc` takes precedence when both arrive, because a client that sent both is the rich
+ * editor also supplying a plain-text fallback, and the document is the higher-fidelity one.
+ *
+ * Nothing is validated here beyond the shape of the envelope: the document is checked by
+ * `validateDocument` inside the service, which is the single place that decides what a document
+ * may contain. A second, looser check here would be a second answer to that question.
+ */
+function readBody(body: unknown): string | { doc: unknown } {
+  const raw = body as { bodyMd?: unknown; bodyDoc?: unknown } | null;
+
+  if (raw?.bodyDoc !== undefined && raw.bodyDoc !== null) {
+    return { doc: raw.bodyDoc };
   }
-  return raw;
+  if (typeof raw?.bodyMd === 'string') return raw.bodyMd;
+
+  throw new AppError(ErrorCode.VALIDATION_FAILED, 'Write something first.');
 }
 
 function csrf(req: FastifyRequest): void {
