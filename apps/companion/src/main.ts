@@ -511,6 +511,37 @@ function startPolling(): void {
   void tick();
 }
 
+/**
+ * Registers or removes the app from Windows startup.
+ *
+ * ★ ONLY ONCE THEY HAVE OPTED IN ★
+ *
+ * Gated on `enabled` as well as `autoStart`, so an app that has been installed but never given
+ * permission to send does not quietly add itself to the member's startup. Being installed is not
+ * consent, and neither is being opened once.
+ *
+ * ★ MINIMISED, AND THAT IS THE POINT ★
+ *
+ * `--hidden` means it starts to the tray rather than throwing a window in somebody's face every
+ * time they boot. An app that demands attention at login is an app that gets removed from startup.
+ *
+ * Called on every relevant change rather than once: Electron writes the registry entry, and the
+ * member may toggle either switch at any time.
+ */
+function applyAutoStart(): void {
+  // Windows and macOS only. Linux desktops handle this through .desktop files and Electron's
+  // support there is unreliable — better to do nothing than to write something that misbehaves.
+  if (process.platform !== 'win32' && process.platform !== 'darwin') return;
+
+  const shouldStart = config.autoStart && config.enabled && config.deviceToken !== '';
+
+  app.setLoginItemSettings({
+    openAtLogin: shouldStart,
+    openAsHidden: true,
+    args: ['--hidden'],
+  });
+}
+
 function stopPolling(): void {
   if (timer === null) return;
   clearInterval(timer);
@@ -527,6 +558,13 @@ function state(): Record<string, unknown> {
     paired: config.deviceToken !== '',
     tokenHint: redactToken(config.deviceToken),
     enabled: config.enabled,
+    autoStart: config.autoStart,
+    /*
+     * Whether startup registration is even possible here. Linux desktops handle it through
+     * .desktop files and Electron's support is unreliable, so the panel hides the switch rather
+     * than offering one that quietly does nothing.
+     */
+    autoStartSupported: process.platform === 'win32' || process.platform === 'darwin',
     apiBaseUrl: apiBaseUrlFor(config, process.env),
     journalPathOverride: config.journalPathOverride,
     running: timer !== null,
@@ -817,6 +855,7 @@ if (!app.requestSingleInstanceLock()) {
 
   void app.whenReady().then(() => {
     config = loadConfig(app.getPath('userData'));
+    applyAutoStart();
 
     /*
      * The tray icon.
@@ -877,14 +916,26 @@ if (!app.requestSingleInstanceLock()) {
        */
       config = { ...config, deviceToken: '' };
       saveConfig(app.getPath('userData'), config);
+      // Unpaired means no startup entry: there is nothing for it to do at login.
+      applyAutoStart();
       stopPolling();
       refreshTray();
+      return { ok: true };
+    });
+
+    ipcMain.handle('setAutoStart', (_e, autoStart: unknown) => {
+      config = { ...config, autoStart: autoStart === true };
+      saveConfig(app.getPath('userData'), config);
+      applyAutoStart();
+      push();
       return { ok: true };
     });
 
     ipcMain.handle('setEnabled', (_e, enabled: unknown) => {
       config = { ...config, enabled: enabled === true };
       saveConfig(app.getPath('userData'), config);
+      // Startup registration follows consent — see `applyAutoStart`.
+      applyAutoStart();
       if (config.enabled) startPolling();
       else stopPolling();
       refreshTray();
@@ -950,7 +1001,19 @@ if (!app.requestSingleInstanceLock()) {
       return { ok: true, dir, file: newest, events: events.slice(0, 40) };
     });
 
-    showWindow();
+    /*
+     * ★ STARTED BY WINDOWS MEANS STAY IN THE TRAY ★
+     *
+     * `--hidden` is passed by the login-item registration. Without honouring it, the app that
+     * starts itself every boot also throws a window in the member's face every boot — which is how
+     * an auto-starting app gets removed from startup within a week.
+     *
+     * Polling still begins either way: the point of starting at login is to send, not to be seen.
+     */
+    const launchedByStartup =
+      process.argv.includes('--hidden') || app.getLoginItemSettings().wasOpenedAsHidden;
+
+    if (!launchedByStartup) showWindow();
     if (config.enabled && config.deviceToken !== '') startPolling();
   });
 }

@@ -29,6 +29,7 @@ contextBridge.exposeInMainWorld('companion', {
   pair: (token: string) => ipcRenderer.invoke('pair', token),
   unpair: () => ipcRenderer.invoke('unpair'),
   setEnabled: (enabled: boolean) => ipcRenderer.invoke('setEnabled', enabled),
+  setAutoStart: (autoStart: boolean) => ipcRenderer.invoke('setAutoStart', autoStart),
   openHub: () => ipcRenderer.invoke('openHub'),
   chooseJournalFolder: () => ipcRenderer.invoke('chooseJournalFolder'),
   /** Searches the disk again — the game may have been installed since. */

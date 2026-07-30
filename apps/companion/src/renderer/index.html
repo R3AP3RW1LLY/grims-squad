@@ -148,6 +148,17 @@
         <button class="ghost" id="toggle" hidden>Pause</button>
       </div>
       <!--
+        Start with Windows.
+
+        A choice rather than something done to them, but on by default: the point of this app is
+        that you install it once and never think about it again, and an app you have to remember
+        to launch is one that silently stops reporting the week you forget.
+      -->
+      <label class="row" id="autoStartRow" hidden style="margin-top:10px;font-size:13px">
+        <span>Start with Windows, minimised to the tray</span>
+        <input type="checkbox" id="autoStart" />
+      </label>
+      <!--
         ★ LIFETIME, NOT THE LAST PASS ★
 
         These were per-pass. The app polls every twenty seconds and the game
@@ -403,6 +414,10 @@
 
         $('toggle').hidden = !s.paired;
         $('toggle').textContent = s.enabled ? 'Pause' : 'Resume';
+        // Hidden where the platform cannot honour it — a switch that does nothing is worse than
+        // no switch, because somebody will set it and rely on it.
+        $('autoStartRow').hidden = !s.autoStartSupported;
+        $('autoStart').checked = s.autoStart === true;
 
         /*
           Shown as soon as the app is paired, NOT only once a pass has run.
@@ -492,6 +507,10 @@
       $('toggle').onclick = async () => {
         const s = await api.getState();
         await api.setEnabled(!s.enabled);
+        render(await api.getState());
+      };
+      $('autoStart').onchange = async () => {
+        await api.setAutoStart($('autoStart').checked);
         render(await api.getState());
       };
       $('refreshSettings').onclick = async () => {

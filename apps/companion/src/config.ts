@@ -52,6 +52,20 @@ export interface CompanionConfig {
   /** True once the search has run and found nothing, so it is not repeated every launch. */
   searchedAndFoundNothing: boolean;
   /**
+   * Start with Windows, minimised to the tray.
+   *
+   * ★ WHY THIS DEFAULTS ON, WHEN `enabled` DEFAULTS OFF ★
+   *
+   * They are different questions. `enabled` asks "may we send anything at all", and being
+   * installed is not consent — so it stays off until asked. This asks "when you have said yes,
+   * should you have to remember to launch it", and the honest answer is no: the whole point is an
+   * app you install once and never think about again.
+   *
+   * It is still only ACTED ON once the member has paired and enabled sending, so an app that has
+   * never been given permission does not quietly add itself to startup.
+   */
+  autoStart: boolean;
+  /**
    * What this machine has done, for as long as it has been paired.
    *
    * ★ WHY THE APP KEEPS ITS OWN TALLY AT ALL ★
@@ -112,6 +126,7 @@ export const DEFAULT_CONFIG: CompanionConfig = {
   enabled: false,
   discoveredJournalPath: null,
   searchedAndFoundNothing: false,
+  autoStart: true,
   totals: EMPTY_TOTALS,
 };
 
@@ -148,6 +163,12 @@ export function loadConfig(userDataDir: string): CompanionConfig {
       discoveredJournalPath:
         typeof parsed.discoveredJournalPath === 'string' ? parsed.discoveredJournalPath : null,
       searchedAndFoundNothing: parsed.searchedAndFoundNothing === true,
+      /*
+       * `!== false`, not `=== true`. This one defaults ON, so an older config written before the
+       * field existed must read as on rather than silently opting everybody out of the behaviour
+       * they were promised.
+       */
+      autoStart: parsed.autoStart !== false,
       totals: readTotals(parsed.totals),
     };
   } catch {
