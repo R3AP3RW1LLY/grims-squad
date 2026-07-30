@@ -315,6 +315,15 @@ export interface BannerTextLayer {
 export interface BannerBadgeLayer {
   readonly kind: 'badge';
   /**
+   * Their OWN badge image, instead of the squadron mark.
+   *
+   * Squadron owner, 2026-07-30: "the ability to add their own badge instead of the default".
+   *
+   * OUR media id, so the same rule as the background holds — there is no field in which a foreign
+   * host could be written. Absent means the named `badge` below is used.
+   */
+  readonly mediaId?: string;
+  /**
    * ★ A NAMED BADGE, NOT AN IMAGE ID ★
    *
    * The squadron mark and rank insignia are OURS. Letting this carry an arbitrary media id would
@@ -344,6 +353,30 @@ export interface BannerSpec {
   readonly imageMediaId?: string;
   /** How much to dim the background so text stays readable on top of it. Percent. */
   readonly dim: number;
+  /**
+   * Extra gradient stops, between `colourA` and `colourB`.
+   *
+   * Owner: "ability to add more colors to the gradient". Kept separate from the two ends rather
+   * than replacing them with an array, so every banner ever saved still reads correctly — a
+   * two-colour gradient is the same thing with no middle stops.
+   */
+  readonly stops?: readonly string[];
+  /**
+   * Gradient angle in degrees. 0 is left-to-right.
+   *
+   * Owner: "ability to widen or narrow the gradient" — which is really two controls. This one
+   * turns it; `spread` below tightens it.
+   */
+  readonly angle?: number;
+  /**
+   * How much of the banner the transition occupies, as a percentage.
+   *
+   * 100 spreads it edge to edge; 20 makes a narrow band with flat colour either side. This is what
+   * "widen or narrow" asks for, and it is the difference between a wash and a deliberate stripe.
+   */
+  readonly spread?: number;
+  /** Corner radius in pixels. Owner asked for rounded corners; 0 keeps the old square banner. */
+  readonly radius?: number;
   readonly layers: readonly BannerLayer[];
 }
 
@@ -358,6 +391,11 @@ export const BANNER_LIMITS = {
   maxCustomText: 64,
   maxLabel: 16,
   maxDim: 85,
+  /** Middle gradient stops. Four plus the two ends is already more colours than a banner needs. */
+  maxStops: 4,
+  maxRadius: 40,
+  minSpread: 10,
+  maxSpread: 100,
 } as const;
 
 /**
@@ -438,6 +476,9 @@ export function validateBannerSpec(raw: unknown): BannerSpec {
       return {
         kind: 'badge',
         badge: layer['badge'] as BannerBadge,
+        ...(typeof layer['mediaId'] === 'string' && layer['mediaId'] !== ''
+          ? { mediaId: layer['mediaId'] }
+          : {}),
         row,
         align,
         size: clamp(layer['size'], BANNER_LIMITS.minBadgeSize, BANNER_LIMITS.maxBadgeSize, 48),
@@ -495,6 +536,22 @@ export function validateBannerSpec(raw: unknown): BannerSpec {
       ? { imageMediaId: o.imageMediaId }
       : {}),
     dim: clamp(o.dim, 0, BANNER_LIMITS.maxDim, 0),
+    /*
+     * Every stop hex-checked and the list capped. An unparseable colour is DROPPED rather than
+     * defaulted — a stop nobody chose appearing in the middle of a gradient is more confusing than
+     * one that simply is not there.
+     */
+    ...(Array.isArray(o.stops)
+      ? {
+          stops: o.stops
+            .filter((v): v is string => typeof v === 'string' && HEX_COLOUR.test(v))
+            .slice(0, BANNER_LIMITS.maxStops)
+            .map((v) => v.toLowerCase()),
+        }
+      : {}),
+    angle: clamp(o.angle, 0, 360, 0),
+    spread: clamp(o.spread, BANNER_LIMITS.minSpread, BANNER_LIMITS.maxSpread, 100),
+    radius: clamp(o.radius, 0, BANNER_LIMITS.maxRadius, 12),
     layers,
   };
 }
@@ -569,6 +626,9 @@ export function defaultBannerSpec(): BannerSpec {
     colourA: '#0b0f14',
     colourB: '#ff7100',
     dim: 0,
+    angle: 0,
+    spread: 100,
+    radius: 12,
     layers: [
       {
         kind: 'text',

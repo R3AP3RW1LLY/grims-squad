@@ -77,7 +77,7 @@ export function SignatureBlock({
         spec={bannerSpec}
         who={who ?? EMPTY_IDENTITY}
         width={BANNER.width}
-        className="max-w-full rounded border"
+        className="max-w-full"
         {...(bannerSpec.imageMediaId === undefined
           ? {}
           : { imageHref: `/v1/media/uploads/${bannerSpec.imageMediaId}` })}
@@ -99,16 +99,35 @@ export function SignatureBlock({
 
   return (
     <div
-      className="mt-4 border-t pt-3"
-      style={{ borderColor: 'var(--color-border-hairline)' }}
+      /*
+       * ★ ROOM TO BREATHE ★
+       *
+       * Squadron owner, 2026-07-30: the finished product "looks sloppy and thrown together".
+       *
+       * It was a hairline and 12px of padding wrapped around a 600px banner, so the banner ran to
+       * the edges of a block that had no edges of its own — which reads as something that fell out
+       * of the post rather than something placed under it. A panel with real padding, its own
+       * surface and a rounded corner makes it a deliberate object.
+       */
+      className="mt-6 overflow-hidden rounded-lg border p-4"
+      style={{
+        borderColor: 'var(--color-border-hairline)',
+        background: 'var(--color-surface-panel-sunken)',
+      }}
       /*
        * Marked as complementary content so a screen reader can skip it. Twelve repetitions of the
        * same block between posts is exhausting to listen through.
        */
       aria-label="Signature"
     >
+      {/* Column, so the banner leads and the tagline follows it whatever order they appear in. */}
+      <div className="flex flex-col">
       {tagline !== null && (
-        <p className="text-xs italic leading-relaxed text-[var(--color-text-secondary)]">
+        /*
+         * Below the banner, not above it. The banner is the thing; a caption over the top of it
+         * reads as a heading for the post rather than as a note from its author.
+         */
+        <p className="order-last mt-3 text-xs italic leading-relaxed text-[var(--color-text-secondary)]">
           {tagline}
         </p>
       )}
@@ -149,6 +168,7 @@ export function SignatureBlock({
           </a>
         </p>
       )}
+      </div>
     </div>
   );
 }

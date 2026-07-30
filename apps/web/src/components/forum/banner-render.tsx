@@ -45,7 +45,12 @@ export interface BannerIdentity {
   readonly squadronRank: string | null;
   readonly squadron: string;
   readonly allegiance: string | null;
-  readonly ranks: Partial<Record<'combat' | 'trade' | 'explore' | 'soldier' | 'exobiologist' | 'cqc', string | null>>;
+  /*
+   * A loose record rather than a closed key set. The API fills it from stored Inara ranks, whose
+   * ladder keys are data rather than a compile-time union — and a missing key resolves to nothing,
+   * which is the same outcome as a key we do not recognise.
+   */
+  readonly ranks: Record<string, string | null>;
   readonly ship: string | null;
   readonly memberSince: string | null;
   readonly lastPlayed: string | null;
@@ -153,9 +158,16 @@ function widthOf(text: string, size: number, mono: boolean): number {
  * few percent out shifts a layer rather than clipping it, and the packing still never overlaps.
  */
 
-const PAD = 18;
+/*
+ * Margins, widened from 18. Owner: the finished product "looks sloppy and thrown together ...
+ * they need to render in a higher quality, with margins".
+ *
+ * A banner is 600 wide and read at a glance under a post; text starting 18px from the edge reads
+ * as text that ran out of room. 28 gives it somewhere to sit.
+ */
+const PAD = 28;
 /** Gap between two layers sharing a row. */
-const GAP = 12;
+const GAP = 16;
 
 export function BannerRender({
   spec,
@@ -177,7 +189,44 @@ export function BannerRender({
    * A per-instance id for the gradient. Two banners on one page both defining `#bannerFill` would
    * make the second silently steal the first's fill — the classic SVG-in-a-list bug.
    */
-  const gradientId = `bg-${spec.colourA.slice(1)}-${spec.colourB.slice(1)}`;
+  const stops = spec.stops ?? [];
+  const spread = spec.spread ?? 100;
+  const radius = spec.radius ?? 0;
+
+  /*
+   * A per-instance id covering every value the gradient depends on. Two banners on one page both
+   * defining `#bannerFill` would make the second silently steal the first's — the classic
+   * SVG-in-a-list bug — and an id that ignored the stops would do the same between two banners
+   * that share their end colours.
+   */
+  const gradientId = `bg-${[spec.colourA, spec.colourB, ...stops, spec.angle ?? 0, spread]
+    .join('-')
+    .replace(/#/g, '')}`;
+
+  /*
+   * ★ SPREAD IS THE TRANSITION WIDTH, NOT THE GRADIENT WIDTH ★
+   *
+   * Owner asked to "widen or narrow the gradient". Scaling the gradient itself would just move
+   * where it ends; what they want is control over how ABRUPT it is. So the stops are packed into a
+   * band of `spread` percent centred on the middle, leaving flat colour either side — 100 is the
+   * old edge-to-edge wash, 20 is a deliberate stripe.
+   */
+  const band = (i: number, count: number): number => {
+    const start = (100 - spread) / 2;
+    return count <= 1 ? start : start + (spread * i) / (count - 1);
+  };
+  const ramp = [spec.colourA, ...stops, spec.colourB];
+
+  /* The gradient direction, as a unit vector — SVG wants x1/y1/x2/y2 rather than an angle. */
+  const rad = ((spec.angle ?? 0) * Math.PI) / 180;
+  const gx = Math.cos(rad);
+  const gy = Math.sin(rad);
+
+  /*
+   * Rounded corners are a CLIP, applied to everything. Putting a radius only on the background
+   * rect would leave a full-bleed image and any layer near an edge poking out of the corners.
+   */
+  const clipId = `clip-${radius}`;
 
   const bg =
     spec.background === 'image' && (imageHref ?? '') !== '' ? (
@@ -248,15 +297,41 @@ export function BannerRender({
       role="img"
       aria-label="Signature banner"
       xmlns="http://www.w3.org/2000/svg"
+      /*
+       * The whole banner is clipped to the corner radius, so nothing — background, image, or a
+       * layer sitting near an edge — pokes out of a rounded corner.
+       */
+      style={{ borderRadius: radius }}
     >
       <defs>
-        <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="0">
+        <linearGradient
+          id={gradientId}
+          x1={`${50 - gx * 50}%`}
+          y1={`${50 - gy * 50}%`}
+          x2={`${50 + gx * 50}%`}
+          y2={`${50 + gy * 50}%`}
+        >
+          {/* Flat colour up to the band, the ramp inside it, flat colour after. */}
           <stop offset="0%" stopColor={spec.colourA} />
+          {ramp.map((c, i) => (
+            <stop key={i} offset={`${band(i, ramp.length)}%`} stopColor={c} />
+          ))}
           <stop offset="100%" stopColor={spec.colourB} />
         </linearGradient>
+
+        <clipPath id={clipId}>
+          <rect
+            x={0}
+            y={0}
+            width={BANNER.width}
+            height={BANNER.height}
+            rx={radius}
+            ry={radius}
+          />
+        </clipPath>
       </defs>
 
-      {bg}
+      <g clipPath={`url(#${clipId})`}>{bg}</g>
 
       {/*
         The dimming veil sits between background and layers, so it darkens the picture WITHOUT
@@ -283,7 +358,17 @@ export function BannerRender({
                * square. 512px scaled down rather than the 64px asset scaled up — a badge at 140px
                * from a 64px source is visibly soft on exactly the screens people care about.
                */
-              href={badgeHref ?? '/brand/badge-512-transparent.png'}
+              /*
+               * Their own badge when they uploaded one, otherwise ours. The transparent variant,
+               * so a badge over a gradient does not arrive inside a black square — and 512px
+               * scaled down rather than the 64px asset scaled up, which is visibly soft at 140px
+               * on exactly the screens people care about.
+               */
+              href={
+                layer.mediaId === undefined
+                  ? (badgeHref ?? '/brand/badge-512-transparent.png')
+                  : `/v1/media/uploads/${layer.mediaId}`
+              }
               x={x}
               y={y - layer.size / 2}
               width={layer.size}

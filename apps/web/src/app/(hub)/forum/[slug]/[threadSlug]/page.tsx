@@ -51,7 +51,7 @@ export default async function ThreadPage({
    */
   if (data === null) notFound();
 
-  const { thread, posts, signatures } = data;
+  const { thread, posts, signatures, identities } = data;
   const access = await getThreadGrants(thread.id);
 
   /*
@@ -179,6 +179,7 @@ export default async function ThreadPage({
           boardSlug={slug}
           threadSlug={threadSlug}
           signatures={signatures}
+          identities={identities}
         />
       </PageBody>
     </>

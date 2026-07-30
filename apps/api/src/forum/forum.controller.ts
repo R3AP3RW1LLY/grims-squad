@@ -2,6 +2,17 @@ import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Query, Req, Inj
 import type { FastifyRequest } from 'fastify';
 import { AppError, ErrorCode } from '@grims/shared';
 import type { SignatureInput, SignatureView } from '@grims/shared';
+import type { BannerIdentity } from './banner-identity.js';
+
+/*
+ * Facts about THIS squadron, in one place.
+ *
+ * Hardcoded rather than configured because they are not settings — a second squadron running this
+ * code would fork it, and a config key nobody ever changes is a config key that goes stale while
+ * looking authoritative.
+ */
+const SQUADRON_NAME = 'GRIM’S SQUAD';
+const SQUADRON_ALLEGIANCE = 'Blood Brothers from Alrai';
 import { User, type CurrentUser } from '../auth/current-user.js';
 import { Public } from '../auth/auth.guard.js';
 import { verifyCsrf, readCsrfCookie } from '../common/csrf.js';
@@ -170,6 +181,7 @@ export class ForumController {
     thread: ThreadView;
     posts: PostView[];
     signatures: Record<string, SignatureView>;
+    identities: Record<string, BannerIdentity>;
   }> {
     const db = await this.acl.forCaller(caller?.userId);
     const mask = await this.#mask(caller);
@@ -204,9 +216,25 @@ export class ForumController {
      * Deduplicated before the query, so this is ONE read however long the thread is.
      */
     const authorIds = [...new Set(posts.map((p) => p.authorId))];
-    const signatures = await this.signatures.forUsers(db, authorIds);
+    const [signatures, identities] = await Promise.all([
+      this.signatures.forUsers(db, authorIds),
+      /*
+       * ★ WITHOUT THIS, EVERY SOURCED LAYER RENDERS AS NOTHING ★
+       *
+       * A banner text layer stores a SOURCE — "my Combat rank" — resolved when it is drawn. The
+       * generator passed the renderer a real identity, so everything appeared there; this endpoint
+       * passed none, so the same banner drew correctly against an empty person and looked like a
+       * feature that did not work.
+       */
+      this.signatures.identitiesFor(db, authorIds, SQUADRON_NAME, SQUADRON_ALLEGIANCE),
+    ]);
 
-    return { thread, posts, signatures: Object.fromEntries(signatures) };
+    return {
+      thread,
+      posts,
+      signatures: Object.fromEntries(signatures),
+      identities: Object.fromEntries(identities),
+    };
   }
 
   /**

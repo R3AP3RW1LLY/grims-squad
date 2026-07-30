@@ -8,6 +8,7 @@ import { Avatar } from '../../../../../components/forum/identity';
 import { ReplyComposer } from './reply-composer';
 import { PostEditor } from './post-editor';
 import { SignatureBlock } from '../../../../../components/forum/signature-block';
+import type { BannerIdentity } from '../../../../../components/forum/banner-render';
 import { apiCall } from '../../../../../lib/api-client';
 
 /**
@@ -44,6 +45,7 @@ export function Conversation({
   boardSlug,
   threadSlug,
   signatures,
+  identities,
 }: {
   readonly posts: readonly HubPost[];
   readonly viewerTz: string;
@@ -56,6 +58,8 @@ export function Conversation({
   readonly threadSlug: string;
   /** Keyed by author id. Absent means the member has none, or turned theirs off. */
   readonly signatures: Record<string, SignatureView>;
+  /** What each author's banner layers resolve to. Without it every sourced layer draws empty. */
+  readonly identities: Record<string, BannerIdentity>;
 }) {
   const [replyTo, setReplyTo] = useState<{ postId: string; displayName: string } | null>(null);
   const [insert, setInsert] = useState<{ nonce: number; doc: RichDocument } | undefined>(undefined);
@@ -127,6 +131,9 @@ export function Conversation({
             {...(signatures[solution.authorId] === undefined
               ? {}
               : { signature: signatures[solution.authorId] })}
+            {...(identities[solution.authorId] === undefined
+              ? {}
+              : { identity: identities[solution.authorId] })}
             /* A copy, floated for scanning. The original stays in sequence below. */
             floated
           />
@@ -150,6 +157,9 @@ export function Conversation({
             {...(signatures[post.authorId] === undefined
               ? {}
               : { signature: signatures[post.authorId] })}
+            {...(identities[post.authorId] === undefined
+              ? {}
+              : { identity: identities[post.authorId] })}
           />
         ))}
       </div>
@@ -178,6 +188,7 @@ function PostCard({
   onQuote,
   registerBody,
   signature,
+  identity,
   floated = false,
 }: {
   readonly post: HubPost;
@@ -191,6 +202,7 @@ function PostCard({
   readonly onQuote: (p: HubPost) => void;
   readonly registerBody: (el: HTMLDivElement | null) => void;
   readonly signature?: SignatureView;
+  readonly identity?: BannerIdentity;
   readonly floated?: boolean;
 }) {
   const [reactions, setReactions] = useState(post.reactions);
@@ -307,7 +319,9 @@ function PostCard({
         />
       )}
 
-      {signature !== undefined && !editing && <SignatureBlock signature={signature} />}
+      {signature !== undefined && !editing && (
+        <SignatureBlock signature={signature} {...(identity === undefined ? {} : { who: identity })} />
+      )}
 
       <footer className="mt-4 flex flex-wrap items-center gap-2 border-t border-[var(--color-border-hairline)] pt-3">
         {reactions.map((r) => (

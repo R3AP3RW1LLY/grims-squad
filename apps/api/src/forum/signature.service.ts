@@ -12,6 +12,7 @@ import {
   type SignatureView,
 } from '@grims/shared';
 import type { AclBoundClient } from '../authz/acl-db.service.js';
+import type { BannerIdentity } from './banner-identity.js';
 
 /**
  * Forum signatures.
@@ -169,6 +170,100 @@ export class SignatureService {
     });
 
     return new Map(rows.map((r) => [r.userId, toView(r, null)]));
+  }
+
+  /**
+   * What each author's banner text layers resolve to.
+   *
+   * ★ THE BUG THIS EXISTS TO FIX ★
+   *
+   * Squadron owner, 2026-07-30: "most of the content visible in the builder does not actually
+   * publish to the signature visible on the forum".
+   *
+   * Exactly right, and the cause was structural rather than cosmetic. A text layer stores a SOURCE
+   * — "my Combat rank" — resolved when the banner is drawn. The generator handed the renderer a
+   * real identity, so everything appeared; the forum handed it nothing, so every sourced layer
+   * resolved to an empty string and rendered as nothing at all. The banner was not truncated, it
+   * was correct against an empty person.
+   *
+   * ★ THREE BATCHED READS FOR A WHOLE THREAD ★
+   *
+   * Keyed on the deduplicated author list, so a forty-reply thread from twelve people is three
+   * queries, not thirty-six. Per-author resolution is the version that looks fine on a test thread
+   * and falls over on a real one.
+   */
+  async identitiesFor(
+    db: AclBoundClient,
+    userIds: readonly string[],
+    squadron: string,
+    allegiance: string,
+  ): Promise<Map<string, BannerIdentity>> {
+    if (userIds.length === 0) return new Map();
+    const ids = [...userIds];
+
+    const [users, verifications, profiles] = await Promise.all([
+      db.user.findMany({
+        where: { id: { in: ids } },
+        select: {
+          id: true,
+          handle: true,
+          displayName: true,
+          userRoles: { select: { role: { select: { name: true, rankOrder: true } } } },
+        },
+      }),
+      /*
+       * The ACTIVE verification only. A revoked one is a claim we withdrew, and a banner is the
+       * last place it should keep appearing.
+       */
+      db.cmdrVerification.findMany({
+        where: { userId: { in: ids }, revokedAt: null },
+        select: { userId: true, cmdrName: true },
+      }),
+      db.inaraCommanderProfile.findMany({
+        where: { userId: { in: ids }, isFound: true },
+        select: { userId: true, ranks: true },
+      }),
+    ]);
+
+    const cmdrByUser = new Map(verifications.map((v) => [v.userId, v.cmdrName]));
+    const ranksByUser = new Map(
+      profiles.map((p) => [
+        p.userId,
+        Object.fromEntries(
+          (Array.isArray(p.ranks) ? p.ranks : []).map((r) => {
+            const row = r as { key?: unknown; name?: unknown };
+            return [String(row.key ?? '').toLowerCase(), typeof row.name === 'string' ? row.name : null];
+          }),
+        ),
+      ]),
+    );
+
+    return new Map(
+      users.map((u) => {
+        /*
+         * The HIGHEST rank they hold, by `rankOrder`. A member holds several roles and picking the
+         * first would show whichever the database happened to return — usually the base one, which
+         * is how an admiral ends up captioned "Squadron Leader".
+         */
+        const rank = u.userRoles
+          .map((ur) => ur.role)
+          .sort((a, b) => b.rankOrder - a.rankOrder)[0];
+
+        return [
+          u.id,
+          {
+            commander: cmdrByUser.get(u.id) ?? null,
+            squadronRank: rank?.name ?? null,
+            squadron,
+            allegiance,
+            ranks: ranksByUser.get(u.id) ?? {},
+            ship: null,
+            memberSince: null,
+            lastPlayed: null,
+          },
+        ];
+      }),
+    );
   }
 
   /**

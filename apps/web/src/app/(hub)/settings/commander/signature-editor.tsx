@@ -160,6 +160,50 @@ export function SignatureEditor({
     }
   }
 
+  /** Uploads a badge image and points one banner layer at it. */
+  async function uploadBadge(index: number, file: File) {
+    if (sig === null) return;
+    setSaving(true);
+    setError(null);
+    try {
+      if (file.size > MAX_BYTES) {
+        throw new Error(
+          `That file is ${(file.size / 1024 / 1024).toFixed(1)}MB. The limit is 8MB.`,
+        );
+      }
+      const res = await fetch('/v1/media/uploads', {
+        method: 'POST',
+        body: file,
+        headers: {
+          'content-type': file.type === '' ? 'application/octet-stream' : file.type,
+          'x-csrf-token': readCsrf(),
+        },
+        credentials: 'same-origin',
+      });
+      const json = (await res.json()) as { id?: string; error?: { message?: string } };
+      if (!res.ok || typeof json.id !== 'string') {
+        throw new Error(json.error?.message ?? 'That upload did not work.');
+      }
+
+      const spec = sig.bannerSpec;
+      if (spec === null) return;
+      /*
+       * Saved immediately, like every other upload here. A file that exists on our storage but is
+       * referenced only by unsaved browser state becomes an orphan the moment the tab closes.
+       */
+      await save({
+        bannerSpec: {
+          ...spec,
+          layers: spec.layers.map((l, i) => (i === index ? { ...l, mediaId: json.id } : l)),
+        },
+      });
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function save(extra: Record<string, unknown> = {}) {
     if (sig === null) return;
     setSaving(true);
@@ -341,6 +385,11 @@ export function SignatureEditor({
           spec={sig.bannerSpec}
           onChange={(next) => patch({ bannerSpec: next })}
           onPickImage={(file) => void upload(file, 'background')}
+          /*
+           * A badge upload attaches to ONE layer, so it needs the index. Uploaded through the
+           * ordinary media endpoint like every other image, then written into that layer.
+           */
+          onPickBadge={(index, file) => void uploadBadge(index, file)}
           busy={saving}
           /*
            * The publish step stores the rasterised snapshot against the signature. Done here rather

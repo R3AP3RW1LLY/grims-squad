@@ -1,5 +1,6 @@
 import { cookies } from 'next/headers';
 import type { SignatureView } from '@grims/shared';
+import type { BannerIdentity } from '../components/forum/banner-render';
 
 /**
  * Server-side calls into our own API.
@@ -890,6 +891,14 @@ export const getHubThread = (
    * conversation rather than with the number of people in it.
    */
   signatures: Record<string, SignatureView>;
+  /**
+   * What each author's banner text layers resolve to.
+   *
+   * Sent alongside the signatures rather than baked into them: a signature is a design, an identity
+   * is a fact about a person, and freezing the second into the first is what would make a promotion
+   * stop updating every banner its author has ever posted.
+   */
+  identities: Record<string, BannerIdentity>;
 } | null> =>
   get(
     `/v1/forum/categories/${encodeURIComponent(slug)}/threads/${encodeURIComponent(threadSlug)}`,

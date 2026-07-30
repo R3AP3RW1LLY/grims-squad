@@ -72,6 +72,7 @@ export function BannerGenerator({
   spec,
   onChange,
   onPickImage,
+  onPickBadge,
   busy,
   onPublish,
   publishedUrl,
@@ -81,6 +82,8 @@ export function BannerGenerator({
   readonly spec: BannerSpec | null;
   readonly onChange: (next: BannerSpec | null) => void;
   readonly onPickImage: (file: File) => void;
+  /** Uploads a badge image and attaches it to one layer. */
+  readonly onPickBadge: (index: number, file: File) => void;
   readonly busy: boolean;
   readonly onPublish: (mediaId: string) => Promise<void>;
   readonly publishedUrl: string | null;
@@ -186,10 +189,15 @@ export function BannerGenerator({
       el.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgText)}`;
     });
 
-    // 2× so it stays sharp on a high-density screen or scaled up a little.
+    /*
+     * 3×, not 2×. Owner: banners "need to render in a higher quality". At 2× a 600px banner is
+     * 1200px, which is exactly native on a retina screen with nothing left over — anybody scaling
+     * it up, or a forum rendering it larger, sees the softness immediately. 3× costs a few hundred
+     * KB once and removes the complaint.
+     */
     const canvas = document.createElement('canvas');
-    canvas.width = BANNER.width * 2;
-    canvas.height = BANNER.height * 2;
+    canvas.width = BANNER.width * 3;
+    canvas.height = BANNER.height * 3;
     const ctx = canvas.getContext('2d');
     if (ctx === null) throw new Error('Your browser would not give us a canvas.');
     ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
@@ -329,6 +337,89 @@ export function BannerGenerator({
               </div>
             )}
 
+            {current.background === 'gradient' && (
+              <div className="mt-4 space-y-3">
+                <div>
+                  <span className="mb-1 block text-xs text-[var(--color-text-secondary)]">
+                    Extra colours in between
+                  </span>
+                  <div className="flex flex-wrap items-end gap-3">
+                    {(current.stops ?? []).map((c, i) => (
+                      <span key={i} className="flex items-end gap-1">
+                        <ColourPicker
+                          label={`Stop ${i + 1}`}
+                          value={c}
+                          onChange={(v) =>
+                            set({
+                              stops: (current.stops ?? []).map((old, j) => (j === i ? v : old)),
+                            })
+                          }
+                        />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            set({ stops: (current.stops ?? []).filter((_, j) => j !== i) })
+                          }
+                          className="pb-1 font-mono text-[11px] text-[var(--color-text-secondary)] hover:text-[var(--color-brand-orange-bright)]"
+                        >
+                          REMOVE
+                        </button>
+                      </span>
+                    ))}
+                    {(current.stops ?? []).length < BANNER_LIMITS.maxStops && (
+                      <button
+                        type="button"
+                        onClick={() => set({ stops: [...(current.stops ?? []), '#5cd9ff'] })}
+                        className="rounded border border-[var(--color-border-hairline)] px-2.5 py-1 font-mono text-[11px] text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)]"
+                      >
+                        + COLOUR
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <label className="block text-xs text-[var(--color-text-secondary)]">
+                  Angle &mdash; {current.angle ?? 0} degrees
+                  <input
+                    type="range"
+                    min={0}
+                    max={360}
+                    value={current.angle ?? 0}
+                    onChange={(e) => set({ angle: Number(e.target.value) })}
+                    className="mt-1 w-full accent-[var(--color-brand-orange)]"
+                  />
+                </label>
+
+                <label className="block text-xs text-[var(--color-text-secondary)]">
+                  {/*
+                    How ABRUPT the fade is, not how wide the gradient is. At 100 it washes edge to
+                    edge; at 20 it is a band with flat colour either side.
+                  */}
+                  Spread &mdash; {current.spread ?? 100}%
+                  <input
+                    type="range"
+                    min={BANNER_LIMITS.minSpread}
+                    max={BANNER_LIMITS.maxSpread}
+                    value={current.spread ?? 100}
+                    onChange={(e) => set({ spread: Number(e.target.value) })}
+                    className="mt-1 w-full accent-[var(--color-brand-orange)]"
+                  />
+                </label>
+              </div>
+            )}
+
+            <label className="mt-4 block text-xs text-[var(--color-text-secondary)]">
+              Rounded corners &mdash; {current.radius ?? 0}px
+              <input
+                type="range"
+                min={0}
+                max={BANNER_LIMITS.maxRadius}
+                value={current.radius ?? 0}
+                onChange={(e) => set({ radius: Number(e.target.value) })}
+                className="mt-1 w-full accent-[var(--color-brand-orange)]"
+              />
+            </label>
+
             <label className="mt-4 block text-xs text-[var(--color-text-secondary)]">
               Darken the background — {current.dim}%
               <input
@@ -351,6 +442,7 @@ export function BannerGenerator({
                 onSetLayer={setLayer}
                 onRemove={removeLayer}
                 onAdd={addLayer}
+                onPickBadge={onPickBadge}
               />
             </Section>
           ))}
@@ -405,12 +497,14 @@ function RowEditor({
   onSetLayer,
   onRemove,
   onAdd,
+  onPickBadge,
 }: {
   readonly row: BannerRow;
   readonly spec: BannerSpec;
   readonly onSetLayer: (index: number, patch: Record<string, unknown>) => void;
   readonly onRemove: (index: number) => void;
   readonly onAdd: (layer: BannerLayer) => void;
+  readonly onPickBadge: (index: number, file: File) => void;
 }) {
   /*
    * Indices into the FULL layer list, not into a filtered copy. Editing a filtered array and
@@ -573,6 +667,41 @@ function RowEditor({
                 </label>
               </div>
             </>
+          )}
+
+          {layer.kind === 'badge' && (
+            <div className="space-y-2">
+              <span className="block text-xs text-[var(--color-text-secondary)]">
+                {layer.mediaId === undefined
+                  ? 'Using the squadron badge. Upload your own to replace it.'
+                  : 'Using your own badge.'}
+              </span>
+              <div className="flex flex-wrap items-center gap-3">
+                <input
+                  type="file"
+                  accept="image/png,image/webp"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file !== undefined) onPickBadge(index, file);
+                    e.target.value = '';
+                  }}
+                  className="text-xs text-[var(--color-text-secondary)] file:mr-2 file:rounded file:border file:border-[var(--color-border-hairline)] file:bg-[var(--color-surface-panel-sunken)] file:px-2 file:py-1 file:text-xs file:text-[var(--color-text-primary)]"
+                />
+                {layer.mediaId !== undefined && (
+                  <button
+                    type="button"
+                    onClick={() => onSetLayer(index, { mediaId: null })}
+                    className="font-mono text-[11px] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+                  >
+                    USE THE SQUADRON BADGE
+                  </button>
+                )}
+              </div>
+              <p className="text-[11px] text-[var(--color-text-secondary)]">
+                {/* PNG or WebP so transparency survives — a JPEG badge arrives in a white box. */}
+                PNG or WebP with a transparent background works best.
+              </p>
+            </div>
           )}
 
           <div className="grid gap-3 sm:grid-cols-2">
