@@ -1,0 +1,39 @@
+-- Only the webmaster authors the joining guide.
+--
+-- Squadron owner, 2026-07-29: "only the webmaster can author the joining guide."
+--
+-- ★ THE BOARD WAS UNPOSTABLE BY THE WEBMASTER, WHICH IS WORSE THAN WRONG ★
+--
+-- The guides board was seeded with post_perm = 64 (FORUM_POST_OFFICER) by
+-- 20260729221000. Earlier the same day, 20260729200000 and 20260729222000 removed
+-- FORUM_POST_OFFICER and FORUM_VIEW_OFFICER from the webmaster role, because posting in the
+-- squadron's name is squadron standing rather than a website function.
+--
+-- Those two changes are individually right and together left the guides board postable only by
+-- officers — precisely the wrong set. The person who maintains the website could not edit the
+-- website's own documentation.
+--
+-- ★ SITE_CONFIG IS THE HONEST GATE ★
+--
+-- post_perm becomes SITE_CONFIG (bit 63, value 9223372036854775808): "may change what the site
+-- says". A joining guide is website documentation, not squadron speech — which is exactly why
+-- FORUM_POST_OFFICER was the wrong bit for it even before the webmaster lost that bit.
+--
+-- ★ WHO THIS ACTUALLY INCLUDES — STATED RATHER THAN IMPLIED ★
+--
+-- SITE_CONFIG is currently held by three roles: webmaster, galactic_admiral and prime_legate.
+-- The last two are the top of the ladder — the owner's own roles — so in practice this is "the
+-- webmaster and the squadron's own leadership", not the webmaster alone.
+--
+-- No permission bit today means "webmaster and nobody else", and inventing one to achieve literal
+-- exclusivity would be a new invariant surface added on an inference. If the two admiral ranks
+-- should NOT be able to author guides, that wants a dedicated permission and is a deliberate
+-- decision rather than something to assume here.
+--
+-- Ordinary officers can no longer post in guides. That is the point of the change.
+--
+-- Arithmetic guard rather than a blind assignment: idempotent, and it will not overwrite a value
+-- somebody has since set deliberately in the role editor.
+UPDATE forum_categories
+SET post_perm = 9223372036854775808
+WHERE slug = 'guides' AND post_perm = 64;

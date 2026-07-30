@@ -1,3 +1,4 @@
+import { buildCsp, newNonce } from './lib/csp';
 import { NextResponse, type NextRequest } from 'next/server';
 
 /**
@@ -143,9 +144,42 @@ export async function middleware(request: NextRequest) {
   const headers = new Headers(request.headers);
   headers.set('x-pathname', request.nextUrl.pathname);
 
+  /*
+   * ★ CSP, SET IN BOTH DIRECTIONS ON PURPOSE ★
+   *
+   * The nonce goes on the REQUEST headers as well as the response, because that is how
+   * Next.js learns it: the framework parses the nonce out of the request's CSP header and
+   * stamps it onto every script tag it emits. Set it only on the response and the header is
+   * strict, Next's own scripts have no nonce, and the entire application fails to hydrate —
+   * with a console full of CSP violations pointing at framework files rather than at this
+   * line.
+   *
+   * `x-nonce` is set too, so a server component that needs to nonce an inline script can
+   * read it from `headers()` without re-parsing the policy.
+   */
+  const nonce = newNonce();
+  const csp = buildCsp({ nonce, dev: process.env.NODE_ENV === 'development' });
+  headers.set('x-nonce', nonce);
+  headers.set('content-security-policy', csp);
+
   const refreshed = await silentlyRefresh(request);
 
   const response = NextResponse.next({ request: { headers } });
+  response.headers.set('content-security-policy', csp);
+
+  /*
+   * Companions to the CSP rather than duplicates of it.
+   *
+   * nosniff        stops a browser second-guessing a declared content type.
+   * referrer       same-origin only, so following a link out of the hub does not tell the
+   *                destination which page a member was on — thread titles are informative.
+   * X-Frame-Options is deliberately ALSO set. `frame-ancestors` supersedes it in every
+   *                current browser, and it costs one header to remain correct in anything
+   *                that only understands the older one.
+   */
+  response.headers.set('x-content-type-options', 'nosniff');
+  response.headers.set('referrer-policy', 'strict-origin-when-cross-origin');
+  response.headers.set('x-frame-options', 'DENY');
 
   /*
    * The rotated cookies are copied onto the response so the BROWSER keeps them.

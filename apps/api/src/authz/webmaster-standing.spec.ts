@@ -3,6 +3,7 @@ import {
   Permission,
   ALL_PERMISSIONS,
   WEBMASTER_PERMISSIONS,
+  SQUADRON_STANDING_PERMISSIONS,
   SQUADRON_VOICE_PERMISSIONS,
   computeEffectiveMask,
 } from '@grims/shared';
@@ -44,7 +45,7 @@ describe('the webmaster role', () => {
      * automatically, which a hand-written list would not be.
      */
      const missing = ALL_PERMISSIONS & ~WEBMASTER_PERMISSIONS;
-     expect(missing).toBe(SQUADRON_VOICE_PERMISSIONS);
+     expect(missing).toBe(SQUADRON_STANDING_PERMISSIONS);
   });
 
   it('can still post in the members boards', () => {
@@ -65,10 +66,49 @@ describe('the webmaster role', () => {
     }
   });
 
-  it('can still SEE the officer boards, even though it cannot post', () => {
-    // Support means being able to look at what somebody is reporting a problem
-    // with. Viewing and speaking are different things.
-    expect(satisfiesMask(WEBMASTER_PERMISSIONS, Permission.FORUM_VIEW_OFFICER)).toBe(true);
+  it('MANDATORY: cannot SEE the officers board either', () => {
+    /*
+     * ★ THIS TEST ASSERTED THE OPPOSITE YESTERDAY, AND WAS RIGHT TO ★
+     *
+     * It read "can still SEE the officer boards, even though it cannot post",
+     * arguing that support means being able to look at what somebody is reporting a
+     * problem with. That was a reasonable reading of the first instruction, which
+     * was only ever about POSTING.
+     *
+     * The second instruction settled it — "officers category should only be visible
+     * to officers ... allow the webmaster to see this in development env only
+     * please!" — so viewing is squadron standing too, and the support argument is
+     * answered by the DEV grant rather than by a production capability.
+     *
+     * Kept as a rewrite rather than a deletion: the reversal is the interesting
+     * part, and a reader who wonders why running the website does not include
+     * reading the officers' board should find the answer here.
+     */
+    expect(satisfiesMask(WEBMASTER_PERMISSIONS, Permission.FORUM_VIEW_OFFICER)).toBe(false);
+  });
+
+  it('MANDATORY: no environment branch decides this', () => {
+    /*
+     * The instruction says "development env only", and the tempting implementation
+     * is `if (process.env.NODE_ENV === 'development')` inside the visibility check.
+     * That would mean the authorisation path taken in production is one development
+     * never runs — the worst possible place for that to be true, and invisible in
+     * every local test.
+     *
+     * So the mask is IDENTICAL in every environment and dev simply carries an extra
+     * grant, added as data by `pnpm --filter @grims/db dev:grant-officer-view`.
+     * This asserts the constant does not vary, which is the property that lets the
+     * rest of the suite mean anything.
+     */
+    const saved = process.env.NODE_ENV;
+    try {
+      for (const env of ['development', 'test', 'production', undefined]) {
+        process.env.NODE_ENV = env as string;
+        expect(satisfiesMask(WEBMASTER_PERMISSIONS, Permission.FORUM_VIEW_OFFICER), env).toBe(false);
+      }
+    } finally {
+      process.env.NODE_ENV = saved;
+    }
   });
 });
 
@@ -103,23 +143,35 @@ describe('a webmaster who is ALSO an officer', () => {
   });
 });
 
-describe('the squadron-voice set', () => {
-  it('is deliberately minimal, and says so', () => {
+describe('the squadron-standing set', () => {
+  it('is exactly the squadron’s voice and its private room', () => {
     /*
-     * Only FORUM_POST_OFFICER. Other candidates — BGS_SET_ORDERS, OPS_CREATE,
-     * OPS_MANAGE, FLEET_APPROVE_DOCTRINE — are arguably squadron authority too,
-     * and were NOT included because the same instruction says the webmaster needs
-     * every website function. Widening this should be somebody's decision rather
-     * than an inference from an instruction about announcements.
+     * Two bits, pinned so that widening the set is a visible edit to this test:
      *
-     * Pinned so that widening it is a visible edit to this test.
+     *   FORUM_POST_OFFICER  Announcements and the Squadron Log — speaking for the
+     *                       squadron.
+     *   FORUM_VIEW_OFFICER  the officers' board — reading its private room.
+     *
+     * Other candidates — BGS_SET_ORDERS, OPS_CREATE, OPS_MANAGE,
+     * FLEET_APPROVE_DOCTRINE — are arguably squadron authority too, and are NOT
+     * included because the same instruction says the webmaster needs every website
+     * function. Widening this should be somebody's decision rather than an
+     * inference.
      */
-    expect(SQUADRON_VOICE_PERMISSIONS).toBe(Permission.FORUM_POST_OFFICER);
+    expect(SQUADRON_STANDING_PERMISSIONS).toBe(
+      Permission.FORUM_POST_OFFICER | Permission.FORUM_VIEW_OFFICER,
+    );
   });
 
   it('is a subset of ALL_PERMISSIONS', () => {
     // A bit outside ALL_PERMISSIONS would be silently unreachable, and the
     // subtraction would be a no-op nobody noticed.
-    expect(SQUADRON_VOICE_PERMISSIONS & ~ALL_PERMISSIONS).toBe(0n);
+    expect(SQUADRON_STANDING_PERMISSIONS & ~ALL_PERMISSIONS).toBe(0n);
+  });
+
+  it('is still reachable under its old name, which callers may hold', () => {
+    // Renamed from SQUADRON_VOICE_PERMISSIONS when it grew past "voice". The alias
+    // exists so nothing breaks silently; asserted so the two cannot drift apart.
+    expect(SQUADRON_VOICE_PERMISSIONS).toBe(SQUADRON_STANDING_PERMISSIONS);
   });
 });

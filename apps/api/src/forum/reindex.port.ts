@@ -27,15 +27,29 @@
  */
 
 export interface ReindexRequest {
-  /** What changed. `thread` covers its posts — chunks are indexed per post. */
-  readonly kind: 'thread';
+  /**
+   * What changed.
+   *
+   * `thread` is a whole-thread event: a move changes the visibility of every chunk under
+   * it at once. `post` is a single body changing, which is the common case and a far
+   * cheaper unit of work — re-indexing an entire thread because somebody fixed a typo in
+   * one reply would be wasteful at P8's scale.
+   *
+   * Both exist because both are real. A P8 consumer handling only `thread` would silently
+   * discard every edit.
+   */
+  readonly kind: 'thread' | 'post';
   readonly id: string;
   /**
    * Why, so a P8 consumer can decide between re-index and delete without
    * re-deriving it. A move to a more restrictive category may mean DELETING
    * public-visibility chunks rather than rewriting them.
+   *
+   * `deleted` and `restored` are a pair, and the second is not optional: a restored post
+   * whose chunks were deleted is invisible to search forever, which is the kind of bug
+   * nobody reports because nobody knows the content is missing.
    */
-  readonly reason: 'moved' | 'created' | 'updated' | 'deleted';
+  readonly reason: 'moved' | 'created' | 'updated' | 'edited' | 'deleted' | 'restored';
 }
 
 export interface ReindexQueue {

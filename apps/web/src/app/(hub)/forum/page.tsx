@@ -178,7 +178,19 @@ export default async function ForumPage() {
             </p>
           </Panel>
         ) : (
-          <div className="space-y-8">
+          /*
+            ★ TWO COLUMNS, BECAUSE ONE WASTED THE PAGE ★
+
+            A stack of full-width cards left most of the row empty — a board name
+            and a post count do not need 900px. Two columns from `md` up, one
+            below, which is the same responsive step the dashboard panels use.
+
+            `items-start` matters: without it the grid stretches every card in a
+            row to the tallest one, so a board with a long description would pad
+            out the board beside it. `auto-rows-min` would fix the row height and
+            not the card, which is the wrong half of the problem.
+          */
+          <div className="grid grid-cols-1 items-start gap-6 md:grid-cols-2">
             {groups.map(({ parent, children }) => (
               <section
                 key={parent.id}

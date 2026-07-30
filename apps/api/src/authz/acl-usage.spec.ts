@@ -80,10 +80,51 @@ const ALLOWED = new Map([
   ['authz/acl-db.service.ts', 'the enforcement point — mints the bound client'],
   ['forum/category.service.ts', 'takes AclBoundClient; compiler-enforced'],
   ['forum/thread.service.ts', 'takes AclBoundClient; compiler-enforced'],
+  /*
+   * The grant service — the only code that WIDENS access past a category ACL, so
+   * this is the exemption to scrutinise hardest.
+   *
+   * It earns it the same way the other two do: every method takes `AclBoundClient`,
+   * so a plain client is a compile error rather than a review question. What it adds
+   * on top is that its central safety rule is expressed as a QUERY rather than as a
+   * check — `#visibleThread` reads the thread through the granter's own bound client,
+   * so a moderator who cannot see the officers' board gets `null` and cannot grant
+   * access to it. That rule only holds while the client stays bound, which is
+   * precisely what the brand guarantees and what BRAND_ENFORCED re-asserts below.
+   */
+  ['forum/grant.service.ts', 'takes AclBoundClient; the widening path, compiler-enforced'],
+  /*
+   * The post service — where INV-035 and INV-022 are enforced.
+   *
+   * Earns the exemption the same way: every method takes `AclBoundClient`, so a plain client
+   * is a compile error. Two extra properties are worth naming, because both are ABSENCES that
+   * only reading the file can confirm:
+   *
+   *   - `renderPostBody` is the only path from a request to a stored body (INV-035). Nothing
+   *     else in the service writes bodyHtml.
+   *   - there is no destructive delete anywhere in it (INV-022). `softDelete` sets a column.
+   *
+   * The BRAND_ENFORCED check below re-asserts the client type. The two absences are asserted
+   * in `post.spec.ts`, structurally, for the same reason: a behavioural test cannot show that
+   * something never happens.
+   */
+  ['forum/post.service.ts', 'takes AclBoundClient; compiler-enforced'],
 ]);
 
 /** Exemptions that rely on the brand rather than on being the enforcement point. */
-const BRAND_ENFORCED = ['forum/category.service.ts', 'forum/thread.service.ts'];
+const BRAND_ENFORCED = [
+  'forum/category.service.ts',
+  'forum/thread.service.ts',
+  /*
+   * The grant service. It is the ONLY thing in the codebase that widens access past
+   * a category ACL, so the brand matters more here than anywhere else: its safety
+   * rests entirely on reading the thread through the GRANTER'S OWN bound client, and
+   * a plain client slipped into that parameter would let a moderator who cannot see
+   * the officers' board hand out access to it.
+   */
+  'forum/grant.service.ts',
+  'forum/post.service.ts',
+];
 
 describe('INV-002 — no ACL-bearing model is read through the plain client', () => {
   const files = sourceFiles(API_SRC);

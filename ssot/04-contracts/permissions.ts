@@ -48,6 +48,36 @@ export const Permission = {
    * without announcement rights.
    */
   FORUM_POST_OFFICER: 1n << 6n,
+  /**
+   * Ring 2. Author the GUIDES board — the site's own documentation.
+   *
+   * ★ WHY THIS NEEDED ITS OWN BIT ★
+   *
+   * Squadron owner, 2026-07-29, in two instructions a few hours apart: "only the webmaster
+   * can author the joining guide", then — when told SITE_CONFIG also covers the two admiral
+   * ranks — "widen to officers too".
+   *
+   * That wants "officers AND the webmaster", and NEITHER existing bit can express it:
+   *
+   *   FORUM_POST_OFFICER  officers hold it; the webmaster deliberately does NOT, because
+   *                       posting in the squadron's name is squadron standing.
+   *   SITE_CONFIG         the webmaster holds it; ordinary officers do not.
+   *
+   * And a category's `post_perm` is checked with AND semantics — `(mask & required) ===
+   * required` — so it cannot mean "either of these". Setting it to one bit locks the other
+   * group out, which is exactly the bug that left the site's own documentation editable
+   * only by officers while the webmaster maintained it.
+   *
+   * So this is the bit both groups hold. It is granted to the officer ranks and, being
+   * outside SQUADRON_STANDING_PERMISSIONS, is held by the webmaster automatically.
+   *
+   * ★ NOT SQUADRON STANDING ★
+   *
+   * Deliberately excluded from SQUADRON_STANDING_PERMISSIONS. A joining guide is website
+   * documentation, not the squadron speaking — which is the same distinction that made
+   * FORUM_POST_OFFICER the wrong bit for the guides board in the first place.
+   */
+  FORUM_POST_GUIDE: 1n << 7n,
 
   // ── Operations ───────────────────────────────────────────────────────────
   /** Ring 1. See the operations board and calendar. */
@@ -184,54 +214,61 @@ export const ALL_PERMISSIONS: PermissionMask = PERMISSION_NAMES.reduce<Permissio
 );
 
 /**
- * Permissions that are the SQUADRON'S VOICE, not a website function.
+ * Permissions that belong to SQUADRON STANDING, not to running the website.
  *
  * ★ THE DISTINCTION THE WEBMASTER ROLE WAS MISSING ★
  *
- * Squadron owner, 2026-07-29: "webmaster should not be able to post to
- * Announcements, as this is for officers! ... the webmasters are not admins by
- * default in the squadron. they do need all website functions but not posting to
- * the web app announcements."
+ * Squadron owner, 2026-07-29, in two instructions:
  *
- * The webmaster held `ALL_PERMISSIONS`, so it could post an announcement in the
- * squadron's name. That is a real conflation: running the website and speaking
- * for the squadron are different authorities, and the codebase already said so
- * elsewhere — `isOfficer` is a RANK question, and its comment notes the webmaster
- * "holds every permission on the platform and no standing in the squadron at
- * all". The mask had simply never been made to agree.
+ *   "webmaster should not be able to post to Announcements, as this is for
+ *    officers! ... they do need all website functions but not posting to the web
+ *    app announcements."
  *
- * ★ DELIBERATELY MINIMAL, AND THAT IS A CHOICE ★
+ *   "officers category should only be visible to officers ... allow the webmaster
+ *    to see this in development env only please!"
  *
- * Only `FORUM_POST_OFFICER` — which its own comment describes as Announcements
- * and the Squadron Log. Other candidates were considered and NOT included,
- * because the same instruction says the webmaster needs every website function
- * and stripping more would break support work the role exists for:
+ * The webmaster held `ALL_PERMISSIONS`, so whoever ran the website could both post
+ * in the squadron's name and read the officers' board. The codebase already drew
+ * this line elsewhere — `isOfficer` is a RANK question, and its comment notes the
+ * webmaster "holds every permission on the platform and no standing in the
+ * squadron at all". The mask had simply never been made to agree.
  *
- *   BGS_SET_ORDERS, OPS_CREATE, OPS_MANAGE, FLEET_APPROVE_DOCTRINE
+ *   FORUM_POST_OFFICER  Announcements and the Squadron Log — the squadron's voice.
+ *   FORUM_VIEW_OFFICER  the officers' board — the squadron's private room.
  *
- * Those are arguably squadron authority too. Adding them is one line here, and
- * it should be a decision somebody makes on purpose rather than a widening I
- * inferred from an instruction about announcements.
+ * ★ HOW "DEV ONLY" IS ACHIEVED WITHOUT AN ENV BRANCH ★
  *
- * ★ HOW AN OFFICER-WEBMASTER GETS IT BACK ★
+ * There is deliberately NO `if (NODE_ENV === 'development')` anywhere in the
+ * permission path. An environment branch inside an authorisation decision means
+ * production runs a code path development never exercises, which is the worst
+ * possible place for that to be true.
  *
- * `computeEffectiveMask` ORs every held role together, so a webmaster who ALSO
- * holds an officer rank receives `FORUM_POST_OFFICER` from that rank and can post
- * announcements. Exactly as asked: the capability follows squadron standing, and
- * removing it from the webmaster role does not take it from an officer who
- * happens to run the website.
+ * Instead the mask is the same everywhere and DEV SIMPLY HAS AN EXTRA GRANT:
+ * `pnpm --filter @grims/db dev:grant-officer-view` adds it as data on a
+ * developer's machine. Production is correct by default rather than by remembering
+ * to set something, and the difference between environments is visible in the
+ * database rather than hidden in a conditional.
+ *
+ * ★ WHAT IS DELIBERATELY NOT HERE ★
+ *
+ * BGS_SET_ORDERS, OPS_CREATE, OPS_MANAGE, FLEET_APPROVE_DOCTRINE. Arguably
+ * squadron authority too, and excluded because the same instruction says the
+ * webmaster needs every website function. Widening this should be a decision
+ * somebody makes rather than something inferred.
  */
-export const SQUADRON_VOICE_PERMISSIONS: PermissionMask = Permission.FORUM_POST_OFFICER;
+export const SQUADRON_STANDING_PERMISSIONS: PermissionMask =
+  Permission.FORUM_POST_OFFICER | Permission.FORUM_VIEW_OFFICER;
 
 /**
- * What the `webmaster` role actually carries.
+ * Retained under the old name so nothing that imported it breaks silently.
  *
- * Every website function, minus the squadron's voice. Derived rather than typed
- * out, so a permission added later is included automatically — the failure mode
- * of a hand-written mask is a new capability the webmaster silently lacks, and
- * nobody discovers it until support work fails.
+ * @deprecated Use `SQUADRON_STANDING_PERMISSIONS`. The set grew beyond "voice"
+ * when the officers' board became webmaster-invisible, and a name that no longer
+ * describes its contents is worse than a rename.
  */
-export const WEBMASTER_PERMISSIONS: PermissionMask = ALL_PERMISSIONS & ~SQUADRON_VOICE_PERMISSIONS;
+export const SQUADRON_VOICE_PERMISSIONS: PermissionMask = SQUADRON_STANDING_PERMISSIONS;
+
+export const WEBMASTER_PERMISSIONS: PermissionMask = ALL_PERMISSIONS & ~SQUADRON_STANDING_PERMISSIONS;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ROLE PRESETS
@@ -277,6 +314,15 @@ const OFFICER: PermissionMask =
   WING_LEAD |
   P.FORUM_VIEW_OFFICER |
   P.FORUM_POST_OFFICER |
+  /*
+   * Authoring the guides board. Owner, 2026-07-29: "widen to officers too" — after first
+   * saying only the webmaster should author the joining guide, and being told SITE_CONFIG
+   * would also cover the two admiral ranks.
+   *
+   * A separate bit from FORUM_POST_OFFICER because the WEBMASTER needs this one too, and
+   * deliberately does not have that one. See the note on FORUM_POST_GUIDE.
+   */
+  P.FORUM_POST_GUIDE |
   P.FORUM_MODERATE |
   P.OPS_MANAGE |
   P.CARRIER_MANAGE |

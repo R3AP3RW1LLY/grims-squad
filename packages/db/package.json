@@ -23,7 +23,8 @@
     "test": "vitest run",
     "test:unit": "vitest run --exclude \"**/*.int.spec.ts\" --passWithNoTests",
     "clean": "rm -rf dist *.tsbuildinfo",
-    "grant-role": "tsx --env-file-if-exists=../../apps/api/.env scripts/grant-role.ts"
+    "grant-role": "tsx --env-file-if-exists=../../apps/api/.env scripts/grant-role.ts",
+    "dev:grant-officer-view": "tsx --env-file-if-exists=../../apps/api/.env scripts/dev-grant-officer-view.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.19.0",

@@ -75,6 +75,8 @@ export const DESCRIBES: Readonly<Record<string, string>> = {
     'Read the officer categories: Command Deck, Applications, Member Concerns.',
   FORUM_POST_OFFICER:
     'Post in the officer categories, and in public ones only officers may post to — Announcements and the Squadron Log.',
+  FORUM_POST_GUIDE:
+    'Write and edit the Guides board — the joining guide and other site documentation. Held by officers AND by the webmaster, which is why it is a separate permission from posting in officer categories.',
   FORUM_MODERATE:
     'Lock, pin, move, delete and restore threads, and warn, mute or ban members. Every action is audited.',
   OPS_VIEW:
@@ -144,6 +146,7 @@ const PERMISSION_GROUPS: readonly PermissionGroup[] = [
       ['FORUM_POST_MEMBER', 3],
       ['FORUM_VIEW_OFFICER', 4],
       ['FORUM_POST_OFFICER', 6],
+      ['FORUM_POST_GUIDE', 7],
       ['FORUM_MODERATE', 5],
     ],
   },

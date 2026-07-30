@@ -62,6 +62,33 @@ export const ACL_MODELS = {
   ForumCategory: 'viewPerm',
   KnowledgeChunk: 'viewPerm',
   Loadout: 'visibility',
+  /*
+   * ForumThread carries no ACL COLUMN of its own — it inherits its category's, and
+   * is listed here because two things now modify that inheritance in both
+   * directions:
+   *
+   *   isPublic         NARROWS. An anonymous visitor needs the category public AND
+   *                    the thread published.
+   *   ForumThreadGrant WIDENS. A named user sees one thread inside a category they
+   *                    cannot otherwise see.
+   *
+   * The value below names the inheritance rather than a column, because there is no
+   * column to name. Nothing reads these values — `predicateFor` switches on the KEY
+   * — so an honest description beats a plausible-looking column that does not exist.
+   */
+  ForumThread: 'categoryId (inherited) + isPublic + ForumThreadGrant',
+  /*
+   * The grant rows themselves. Registered because WHO can read a thread is
+   * information about that thread: a list of five officers' handles against a thread
+   * id tells an outsider the thread exists and who is discussing it, without ever
+   * reading a word of it.
+   *
+   * `GrantService.list` already gates on thread visibility before selecting these,
+   * so nothing today is exposed. This is here for the route that does not exist yet
+   * — the audit screen, the moderation export, the AI tool — because "the caller
+   * checked first" is precisely the guarantee INV-002 declines to rely on.
+   */
+  ForumThreadGrant: 'inherited from thread',
 } as const;
 
 export type AclModel = keyof typeof ACL_MODELS;
@@ -110,6 +137,92 @@ function predicateFor(model: AclModel, p: AclPrincipal): object {
         return { id: { in: [] } };
       }
       return { id: { in: [...allowed] } };
+    }
+    case 'ForumThreadGrant': {
+      /*
+       * Reuses the ForumThread predicate through a relation filter, rather than
+       * restating it.
+       *
+       * ★ REUSED, NOT REIMPLEMENTED, DELIBERATELY ★
+       *
+       * A second copy of "which threads can this principal see" would be a second
+       * thing to keep in step, and the copy that drifts is always the one nobody is
+       * looking at. Nesting the same object under `thread` means a change to thread
+       * visibility applies here automatically — including the fail-closed branch.
+       *
+       * Note the recursion is one level and terminates: ForumThread's own case never
+       * refers back to ForumThreadGrant as a MODEL, only to its `grants` relation.
+       */
+      return { thread: predicateFor('ForumThread', p) };
+    }
+    case 'ForumThread': {
+      /*
+       * ★ NO ID SET, AND THAT IS THE IMPORTANT PART ★
+       *
+       * ForumCategory resolves to a set of ids because its ACL is a bitmask in a
+       * NUMERIC column and neither Prisma nor Postgres can express a bitwise
+       * predicate. Threads must NOT be handled that way: categories number in the
+       * tens, threads grow without limit, and materialising every visible thread id
+       * on every request would get slower for the rest of the project's life.
+       *
+       * It does not need to. The bitwise work was already done when the category
+       * set was resolved, so the thread predicate is expressible as ordinary SQL —
+       * an `IN` over the visible categories, plus an `EXISTS` over the grant table.
+       * Both are indexed (`forum_threads_category_id…`, `forum_thread_grants_user_id_idx`).
+       *
+       * ★ FAIL CLOSED FIRST ★
+       */
+      const cats = p.visibleIds?.['ForumCategory'];
+      if (cats === undefined) {
+        // No resolved category set means we cannot prove anything about any thread.
+        // Returning `{}` here would match every thread in the forum.
+        return { id: { in: [] } };
+      }
+      const visibleCats = [...cats];
+
+      if (p.userId === null) {
+        /*
+         * ★ ANONYMOUS: BOTH CONDITIONS, NEVER EITHER ★
+         *
+         * The category must be publicly viewable AND the thread published. Written
+         * as a single object — an implicit AND — rather than an `AND: [...]`, so
+         * there is no shape here that could be mistaken for the `OR` below.
+         *
+         * This is the narrowing direction, and it is why `isPublic` cannot leak an
+         * officers' thread: `visibleCats` for an anonymous principal contains only
+         * categories whose viewPerm is NULL, so ticking `isPublic` on a thread in a
+         * gated category widens nothing at all.
+         *
+         * Note there is no grant clause. A grant names a USER, and an anonymous
+         * caller is not one — checking grants here would mean trusting an
+         * unauthenticated request to tell us who it is.
+         */
+        return { categoryId: { in: visibleCats }, isPublic: true };
+      }
+
+      /*
+       * ★ SIGNED IN: INHERITED ACCESS *OR* AN EXPLICIT GRANT ★
+       *
+       * `isPublic` deliberately plays no part. It governs the OPEN INTERNET, not
+       * members — a member who can see the board can read its drafts, which is what
+       * a members' board is for. Applying it here would hide every unpublished guide
+       * from the people writing them.
+       */
+      return {
+        OR: [
+          { categoryId: { in: visibleCats } },
+          /*
+           * The widening clause. `some` compiles to an EXISTS correlated subquery,
+           * so this costs an index probe rather than a join fan-out, and a thread
+           * with fifty grants still returns once.
+           *
+           * Scoped to `p.userId` and nothing else: a grant is per-person, so there
+           * is no aggregate here that could accidentally match a thread granted to
+           * somebody else.
+           */
+          { grants: { some: { userId: p.userId } } },
+        ],
+      };
     }
     case 'Loadout': {
       // Ownership is part of the ACL, not a separate check bolted on top: a

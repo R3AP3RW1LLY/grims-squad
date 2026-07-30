@@ -37,6 +37,22 @@ export interface ThreadView {
   readonly author: { handle: string; displayName: string };
 }
 
+/**
+ * One post as a reader sees it.
+ *
+ * `bodyHtml` is pre-sanitised (INV-035), which is what makes it safe to embed without
+ * escaping. There is deliberately no `bodyMd` field: the author's raw Markdown exists
+ * so an edit can start from their text, and it has no business on a read path.
+ */
+export interface PostView {
+  readonly id: string;
+  readonly bodyHtml: string;
+  readonly editedAt: string | null;
+  readonly editCount: number;
+  readonly createdAt: string;
+  readonly author: { handle: string; displayName: string };
+}
+
 export interface CreateThreadInput {
   readonly categoryId: string;
   readonly title: string;
@@ -149,6 +165,71 @@ export class ThreadService {
       throw new AppError(ErrorCode.RESOURCE_NOT_VISIBLE, 'Thread not found.');
     }
     return toView(row);
+  }
+
+  /**
+   * The posts in a thread, oldest first.
+   *
+   * ★ THE THREAD IS RESOLVED THROUGH `bySlug` FIRST, AND THAT IS THE ACL STEP ★
+   *
+   * ForumPost is deliberately NOT an ACL-bearing model. Registering it would mean a
+   * per-post predicate on a table that grows without limit, when a post's visibility
+   * is entirely determined by its thread's — there is no such thing as a post you may
+   * read inside a thread you may not.
+   *
+   * So visibility is enforced by reaching the posts only THROUGH a thread that came
+   * back from `bySlug`, which 404s when the thread is invisible, soft-deleted or
+   * absent. A future caller that queries `forumPost` by `threadId` directly would
+   * bypass this — which is why the thread id it would need can only be obtained from
+   * a call that already checked.
+   *
+   * ★ ORDERED OLDEST FIRST, UNLIKE THE THREAD LIST ★
+   *
+   * Thread lists are newest-activity-first because you want the live conversation.
+   * Posts inside a thread are chronological because they are a sequence — and for the
+   * joining guide, step 1 must precede step 2.
+   */
+  async postsFor(
+    db: AclBoundClient,
+    categorySlug: string,
+    threadSlug: string,
+    callerMask: bigint,
+  ): Promise<PostView[]> {
+    const thread = await this.bySlug(db, categorySlug, threadSlug, callerMask);
+
+    const rows = await db.forumPost.findMany({
+      where: { threadId: thread.id, deletedAt: null },
+      orderBy: { createdAt: 'asc' },
+      select: {
+        id: true,
+        /*
+         * `bodyHtml` only — never `bodyMd`.
+         *
+         * The HTML is what was sanitised before storage (INV-035). The Markdown is the
+         * author's original text, kept so an EDIT starts from what they wrote, and
+         * shipping it to a reader would put unsanitised input on the wire where some
+         * future consumer would eventually render it. A read endpoint has no use for
+         * it.
+         */
+        bodyHtml: true,
+        editedAt: true,
+        editCount: true,
+        createdAt: true,
+        author: { select: { handle: true, displayName: true } },
+      },
+    });
+
+    return rows.map((p) => ({
+      id: p.id,
+      bodyHtml: p.bodyHtml,
+      editedAt: p.editedAt?.toISOString() ?? null,
+      editCount: p.editCount,
+      createdAt: p.createdAt.toISOString(),
+      author: {
+        handle: p.author.handle,
+        displayName: p.author.displayName ?? p.author.handle,
+      },
+    }));
   }
 
   /**

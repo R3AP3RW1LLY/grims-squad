@@ -395,6 +395,13 @@ model User {
 
   @@index([status])
   @@index([lastSeenAt])
+  threadGrantsReceived ForumThreadGrant[] @relation("ThreadGrantee")
+  threadGrantsIssued   ForumThreadGrant[] @relation("ThreadGranter")
+
+  mediaUploads         MediaUpload[]      @relation("MediaUploader")
+
+  postRevisions        PostRevision[]     @relation("PostRevisionEditor")
+
   @@map("users")
 }
 
@@ -939,6 +946,26 @@ model ForumThread {
   /// For kind=question: the post marked as the accepted answer.
   answerPostId String?    @map("answer_post_id") @db.Uuid
   tags         String[]   @default([])
+  /// Published for the open internet. Defaults to FALSE — see the note below.
+  ///
+  /// ★ IT CAN ONLY EVER NARROW, NEVER WIDEN ★
+  ///
+  /// Squadron owner, 2026-07-29: guides need an option to be publicly visible, and public ones
+  /// should appear in the public site's navigation.
+  ///
+  /// A thread is readable by an anonymous visitor only when BOTH its category is publicly
+  /// viewable (`view_perm IS NULL`) AND this flag is true. So the flag cannot expose a thread
+  /// that sits in a members-only or officers-only category — the category ACL still decides the
+  /// ceiling, and this only decides whether a thread reaches it.
+  ///
+  /// Designed that way round deliberately. A per-thread flag that could OVERRIDE its category
+  /// would mean the category list was filtered correctly while a direct URL was not, which is the
+  /// same trap `isAtLeastAsRestrictive` exists to close one level up. It also means an officer
+  /// cannot publish an officers-board thread to the internet by ticking one box.
+  ///
+  /// Default FALSE so a guide is drafted in private and published on purpose. The reverse default
+  /// would publish every draft the moment it was created.
+  isPublic     Boolean    @default(false) @map("is_public")
   viewCount    Int        @default(0) @map("view_count")
   postCount    Int        @default(0) @map("post_count")
   lastPostAt   DateTime?  @map("last_post_at") @db.Timestamptz(6)
@@ -954,14 +981,107 @@ model ForumThread {
   subscriptions ForumSubscription[]
   application   Application?
   operation     Operation?
+  grants        ForumThreadGrant[]
 
   @@unique([categoryId, slug])
   @@index([authorId])
   @@index([categoryId, isPinned, lastPostAt])
+  @@index([isPublic])
   @@map("forum_threads")
 }
 
 /// A message. Stores markdown AND pre-rendered sanitized HTML so sanitisation cannot be skipped at read time.
+/// Per-thread access for a NAMED USER who cannot see the thread's category.
+///
+/// ★ WHY A GRANT TABLE AND NOT A WIDER PERMISSION ★
+///
+/// Squadron owner, 2026-07-29: "officers category should only be visible to officers.
+/// non-officers should not have the ability to view unless permission to a specific user is
+/// provided this should be done from a dropdown on the post that allows an admin to allow access
+/// to one or more users."
+///
+/// The alternative — inventing a role, or clearing the board's `view_perm` — would grant access to
+/// EVERY thread on the board, and would persist after the one conversation that needed it. A grant
+/// is scoped to one thread and one person, and revoking it is deleting a row.
+///
+/// ★ IT WIDENS, WHICH IS THE OPPOSITE OF `is_public` ★
+///
+/// `ForumThread.is_public` can only ever NARROW: a thread reaches the open internet only if its
+/// category is public too. This table deliberately does the reverse — it lets a named individual
+/// past a category ACL they do not satisfy. That asymmetry is intentional and is the whole reason
+/// this is a table of explicit rows rather than a flag:
+///
+///   - every grant names WHO issued it (`granted_by`) and WHEN, so the widening is attributable;
+///   - it cannot be set in bulk or inferred from a mask;
+///   - `ON DELETE CASCADE` from the thread means a deleted thread cannot leave live grants behind.
+///
+/// A grant conveys READ ONLY. Posting is still decided by the category's `post_perm`, so somebody
+/// invited to read an officers' thread cannot reply in it. Being shown something is not the same as
+/// being given a voice in it, and conflating the two is how "let them look" becomes membership.
+model ForumThreadGrant {
+  threadId  String   @map("thread_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  /// The admin who issued it. Never nullable: an unattributable grant is one nobody can review.
+  grantedBy String   @map("granted_by") @db.Uuid
+  grantedAt DateTime @default(now()) @map("granted_at") @db.Timestamptz(6)
+  /// Free text, for the next person auditing the board. Not shown to the grantee.
+  reason    String?
+
+  thread  ForumThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+  user    User        @relation("ThreadGrantee", fields: [userId], references: [id], onDelete: Cascade)
+  granter User        @relation("ThreadGranter", fields: [grantedBy], references: [id])
+
+  /// Composite PK, so the same person cannot be granted the same thread twice.
+  @@id([threadId, userId])
+  /// The hot path: "which extra threads may this user see", resolved once per request.
+  @@index([userId])
+  @@map("forum_thread_grants")
+}
+
+/// An image a member uploaded, after hardening.
+///
+/// Squadron owner, 2026-07-29, choosing to pull uploads forward so the joining guides can carry
+/// real screenshots rather than placeholder text.
+///
+/// * WHAT IS STORED IS NOT WHAT ARRIVED *
+///
+/// Every row here describes a file this application ENCODED, not one a member sent. The upload is
+/// decoded to pixels and re-encoded (`image-hardening.ts`), so `content_type`, `width`, `height`
+/// and `bytes` all describe our output. Nothing records the original filename or declared type,
+/// deliberately: both are attacker-controlled strings, neither is needed to serve the image, and
+/// storing them invites a future feature to trust them.
+///
+/// * THE ID IS THE URL *
+///
+/// `id` appears directly in `/v1/media/uploads/<id>`, which the sanitiser validates against a
+/// strict pattern before allowing an `<img>` to reference it. A UUID satisfies that pattern and is
+/// unguessable, which matters because these are served to anyone who can read the post.
+///
+/// * OWNERSHIP IS KEPT, BUT ACCESS IS NOT INHERITED FROM IT *
+///
+/// `uploader_id` exists for attribution and for a quota later. It deliberately does NOT gate
+/// reading: an image referenced by a public guide must be readable by anonymous visitors, and an
+/// image in an officers' thread is protected by that thread rather than by this row. Tying
+/// visibility to the uploader would make a guide's screenshots vanish when its author left.
+model MediaUpload {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  uploaderId  String   @map("uploader_id") @db.Uuid
+  /// Object storage key. Ours, never derived from anything the client sent.
+  storageKey  String   @unique @map("storage_key")
+  /// The type WE encoded. Only ever image/png, image/jpeg or image/webp.
+  contentType String   @map("content_type")
+  bytes       Int
+  width       Int
+  height      Int
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  uploader User @relation("MediaUploader", fields: [uploaderId], references: [id], onDelete: Cascade)
+
+  /// "What has this member uploaded, newest first" - the quota and moderation query.
+  @@index([uploaderId, createdAt])
+  @@map("media_uploads")
+}
+
 model ForumPost {
   id         String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   threadId   String                   @map("thread_id") @db.Uuid
@@ -1002,6 +1122,20 @@ model PostRevision {
   editedBy String   @map("edited_by") @db.Uuid
 
   post ForumPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  /// Who made the edit.
+  ///
+  /// * ADDED 2026-07-29: THIS COLUMN HAD NO FOREIGN KEY AT ALL *
+  ///
+  /// `edited_by` existed as a bare uuid, so a revision could name an account that no longer
+  /// exists — and the edit history a moderator reads to decide whether a post was quietly
+  /// rewritten would show an id it could not resolve to a person. An audit trail that cannot
+  /// name the actor is not an audit trail.
+  ///
+  /// RESTRICT rather than Cascade, deliberately, matching ForumThreadGrant.grantedBy: deleting
+  /// the editor must not erase the record that they edited something. If an account genuinely
+  /// has to go, the revisions have to be dealt with explicitly rather than vanishing as a
+  /// side effect.
+  editor User @relation("PostRevisionEditor", fields: [editedBy], references: [id])
 
   @@index([postId, editedAt])
   @@map("post_revisions")

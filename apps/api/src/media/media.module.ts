@@ -8,6 +8,7 @@ import { PrismaAvatarStore } from './media.store.prisma.js';
 import { s3ConfigFrom, type ObjectStore } from './object-store.js';
 import { S3ObjectStore, FileObjectStore } from './object-store.drivers.js';
 import { AVATAR_SERVICE, OBJECT_STORE } from './media.tokens.js';
+import { UploadService } from './upload.service.js';
 
 /**
  * Object storage and the things stored in it.
@@ -38,12 +39,23 @@ import { AVATAR_SERVICE, OBJECT_STORE } from './media.tokens.js';
       },
     },
     {
+      /*
+       * Takes the plain PrismaClient, not an AclBoundClient. `media_uploads` carries no
+       * ACL column and is not an ACL-bearing model: an image's visibility follows the post
+       * that references it, and the reasoning for not resolving that per request is on
+       * `UploadService.serve`.
+       */
+      provide: UploadService,
+      inject: [OBJECT_STORE, PrismaClient],
+      useFactory: (objects: ObjectStore, db: PrismaClient) => new UploadService(objects, db),
+    },
+    {
       provide: AVATAR_SERVICE,
       inject: [OBJECT_STORE, PrismaClient],
       useFactory: (objects: ObjectStore, db: PrismaClient) =>
         new AvatarService(objects, new PrismaAvatarStore(db)),
     },
   ],
-  exports: [AVATAR_SERVICE],
+  exports: [AVATAR_SERVICE, UploadService],
 })
 export class MediaModule {}

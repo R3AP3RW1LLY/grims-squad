@@ -47,6 +47,15 @@ describe('P0.2 database schema', () => {
   // The count is hardcoded ON PURPOSE. Every schema addition has to come and
   // bump it, which is a two-second acknowledgement that a table was added —
   // versus a self-counting assertion that would let one appear unnoticed.
+  // 67 as of 2026-07-29: media_uploads — images a member uploaded, AFTER hardening. Every row
+  // describes a file this application encoded rather than one that arrived: the upload is decoded
+  // to pixels and re-encoded, so no EXIF, polyglot or appended payload survives. There is
+  // deliberately no original-filename column.
+  // 66 as of 2026-07-29: forum_thread_grants — per-thread read access for a NAMED
+  // user, so an admin can let one non-officer into one officers' thread without
+  // opening the board. It is the only thing in the forum that WIDENS access past a
+  // category ACL, which is why it is a table of attributable rows (granted_by,
+  // granted_at) rather than a flag.
   // 65 as of 2026-07-28: member_activity_days. The monthly table carries one
   // last_activity_at, so a daily chart built from it counts each member on the
   // ONE day they were last seen — a member active on the 5th and the 20th
@@ -68,8 +77,8 @@ describe('P0.2 database schema', () => {
        where table_schema = 'public' and table_type = 'BASE TABLE'
          and table_name not like '\\_prisma%'`,
     );
-    // 59 models in ssot/03-data/schema.prisma.
-    expect(Number(r[0]?.n)).toBe(65);
+    // 61 models in ssot/03-data/schema.prisma.
+    expect(Number(r[0]?.n)).toBe(67);
   });
 
   describe('hand-written DDL that Prisma cannot express', () => {
@@ -228,12 +237,23 @@ describe('seeded roles', () => {
    * as of P1.3. Written out here rather than imported so this spec keeps its
    * only dependency on `pg` — and so a change to the contract has to be
    * mirrored deliberately rather than tracking silently.
-   *   FORUM 0-6 · OPS 10-13 · FLEET 20-24 · BGS 30-32 · TRADE 40-42
+   *   FORUM 0-7 · OPS 10-13 · FLEET 20-24 · BGS 30-32 · TRADE 40-42
    *   AI 50-53 · ADMIN 60-63 · TELEMETRY 70
+   *
+   * ★ BIT 7 ADDED 2026-07-29: FORUM_POST_GUIDE ★
+   *
+   * "Written out here rather than imported ... so a change to the contract has to be
+   * mirrored deliberately rather than tracking silently" — and that is exactly what
+   * happened. Adding FORUM_POST_GUIDE to the SSOT failed this test with a mask 128
+   * larger than the list, which is the deliberate mirroring working as designed.
+   *
+   * Worth recording because the failure LOOKED like a stale build: the value the test
+   * wanted was the old ALL_PERMISSIONS, the dist had already been rebuilt correctly, and
+   * clearing the vitest cache changed nothing. The list is local by design.
    */
   const ALL_PERMISSIONS = [
-    0, 1, 2, 3, 4, 5, 6, 10, 11, 12, 13, 20, 21, 22, 23, 24, 30, 31, 32, 40, 41, 42, 50, 51, 52,
-    53, 60, 61, 62, 63, 70,
+    0, 1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 13, 20, 21, 22, 23, 24, 30, 31, 32, 40, 41, 42, 50, 51,
+    52, 53, 60, 61, 62, 63, 70,
   ].reduce((acc, bit) => acc | (1n << BigInt(bit)), 0n);
 
   /**
@@ -256,20 +276,54 @@ describe('seeded roles', () => {
    * Expressed as a subtraction from the full set rather than a new literal, so it
    * still fails on a precision fault rather than merely on the wrong total.
    */
-  it('webmaster carries every website permission EXCEPT the squadron voice @INV-006', async () => {
+  it('webmaster carries every website permission EXCEPT squadron standing @INV-006', async () => {
     const FORUM_POST_OFFICER = 1n << 6n;
-    const expected = ALL_PERMISSIONS & ~FORUM_POST_OFFICER;
+    const FORUM_VIEW_OFFICER = 1n << 4n;
+    const SQUADRON_STANDING = FORUM_POST_OFFICER | FORUM_VIEW_OFFICER;
 
     const r = await rows<{ perm_mask: string; is_hierarchical: boolean }>(
       `select perm_mask::text, is_hierarchical from roles where key = 'webmaster'`,
     );
     expect(r).toHaveLength(1);
-    expect(BigInt(r[0]!.perm_mask)).toBe(expected);
+    const stored = BigInt(r[0]!.perm_mask);
 
-    // Stated separately so the reason is legible: this is the ONE bit withheld.
-    expect(BigInt(r[0]!.perm_mask) & FORUM_POST_OFFICER).toBe(0n);
-    // And nothing else was lost in the process.
-    expect(ALL_PERMISSIONS & ~BigInt(r[0]!.perm_mask)).toBe(FORUM_POST_OFFICER);
+    /*
+     * ★ FORUM_VIEW_OFFICER IS MASKED OFF BEFORE COMPARING, AND THAT IS NOT A FUDGE ★
+     *
+     * This test reads the LIVE database, and FORUM_VIEW_OFFICER is the one bit whose
+     * value legitimately differs between machines. Owner, 2026-07-29: "allow the
+     * webmaster to see this in development env only please!" — implemented as an
+     * explicit data grant (`pnpm --filter @grims/db dev:grant-officer-view`) rather
+     * than an `if (NODE_ENV)` in an authz path.
+     *
+     * So a developer who has run that script has the bit set and CI does not. Asserting
+     * the exact stored mask therefore passes in one place and fails in the other, which
+     * is what happened when this bit was added: the test failed locally for a
+     * completely correct database.
+     *
+     * Masking it off keeps EVERY OTHER BIT exact — still a subtraction from
+     * ALL_PERMISSIONS, so it still catches a numeric-precision fault (the reason this
+     * test exists) rather than merely a wrong total. The dev-grantable bit is then
+     * asserted separately below, as the property that is true in both environments.
+     */
+    expect(stored & ~FORUM_VIEW_OFFICER).toBe(ALL_PERMISSIONS & ~SQUADRON_STANDING);
+
+    /*
+     * FORUM_POST_OFFICER is withheld EVERYWHERE, in every environment, and nothing
+     * grants it back — there is no dev script for this one. Speaking in the squadron's
+     * name is squadron standing, and running the website is not.
+     */
+    expect(stored & FORUM_POST_OFFICER).toBe(0n);
+
+    /*
+     * Nothing else was lost. The difference from the full set is squadron standing and
+     * nothing more — allowing for the dev grant having returned the view bit.
+     */
+    expect(ALL_PERMISSIONS & ~stored & ~FORUM_VIEW_OFFICER).toBe(FORUM_POST_OFFICER);
+
+    // And the guides bit IS held: the webmaster maintains the site's own documentation.
+    // Owner: "widen to officers too" — a bit officers and the webmaster share.
+    expect(stored & (1n << 7n)).toBe(1n << 7n);
 
     // An orthogonal tag, not a squadron rank.
     expect(r[0]!.is_hierarchical).toBe(false);

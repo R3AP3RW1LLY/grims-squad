@@ -141,13 +141,38 @@ describe('the rules are actually applied', () => {
         }
         if (!path.endsWith('.tsx') || path.endsWith('.spec.tsx')) continue;
 
-        const source = readFileSync(path, 'utf8');
+        /*
+         * ★ COMMENTS STRIPPED FIRST ★
+         *
+         * Added 2026-07-29, after this guard flagged a page that had no such call in it —
+         * only a COMMENT explaining that the page used to, and why that was wrong. The fix
+         * was correct and the guard rejected the explanation of the fix.
+         *
+         * A check that fires on prose describing the bug it prevents is a check that gets
+         * silenced, or that teaches people not to write the comment. Both are worse than
+         * the bug. `acl-usage.spec.ts` already learned this and strips comments for the
+         * same reason.
+         */
+        const source = readFileSync(path, 'utf8')
+          .replace(/\/\*[\s\S]*?\*\//g, '')
+          .replace(/\/\/[^\n]*/g, '');
         /*
          * A DATE formatted with no arguments is the browser-default one.
          * Anchored on `new Date(...)` so a number being formatted for
          * readability — `total.toLocaleString('en-GB')` — is not swept up.
+         *
+         * ★ A BLIND SPOT FOUND 2026-07-29 WHILE PROBING THIS GUARD ★
+         *
+         * The argument pattern was `[^)]*`, which cannot match an argument that itself
+         * contains parentheses — so `new Date(Date.now()).toLocaleString()` sailed straight
+         * through. Discovered by accident: an injected probe was NOT caught, and the first
+         * assumption was that comment-stripping had broken the guard. It had not; the regex
+         * had never handled that form.
+         *
+         * `[^;]*?` with a lazy quantifier matches across nested calls while still stopping at
+         * a statement boundary, so it cannot run away across a whole file.
          */
-        if (/new Date\([^)]*\)\.toLocale(String|TimeString|DateString)\(\)/.test(source)) {
+        if (/new Date\([^;]*?\)\.toLocale(String|TimeString|DateString)\(\)/.test(source)) {
           offenders.push(path.slice(SRC.length + 1));
         }
       }

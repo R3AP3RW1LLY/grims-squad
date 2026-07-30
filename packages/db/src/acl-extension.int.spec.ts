@@ -201,9 +201,23 @@ describe('registration completeness', () => {
     expect(() => assertAclModelsRegistered(fake)).toThrow(/Sneaky/);
   });
 
-  it('registers the three models that carry ACLs today', () => {
+  it('registers every ACL-governed model, including the one with no ACL column', () => {
+    /*
+     * Pinned as an exact list so that adding a model to the schema without adding
+     * it here is a failing test rather than a silent hole.
+     *
+     * ForumThread is the odd one out: it has no ACL column at all, so
+     * `assertAclModelsRegistered` — which looks for `viewPerm`/`visibility` in the
+     * model body — would never have flagged its absence. It is governed anyway,
+     * because `isPublic` narrows its category's ACL for anonymous visitors and
+     * ForumThreadGrant widens it for named users. That combination is exactly the
+     * kind of thing a column scanner cannot see, which is why this list is
+     * hand-maintained as well.
+     */
     expect(Object.keys(ACL_MODELS).sort()).toEqual([
       'ForumCategory',
+      'ForumThread',
+      'ForumThreadGrant',
       'KnowledgeChunk',
       'Loadout',
     ]);
