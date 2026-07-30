@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { ErrorCode, Permission } from '@grims/shared';
 import { PostService } from './post.service.js';
 import type { AclBoundClient } from '../authz/acl-db.service.js';
@@ -200,7 +201,7 @@ describe('editing a post', () => {
         update: (a: unknown) => a,
       },
       postRevision: { create: (a: unknown) => a },
-      $transaction: vi.fn(async (ops: unknown[]) => [
+      $transaction: vi.fn(async () => [
         {},
         { id: 'p1', bodyHtml: '<p>new</p>', editCount: 1 },
       ]),
@@ -465,7 +466,6 @@ describe('the two ABSENCES the invariants rest on', () => {
    * structural, and labelled as such.
    */
   const source = (): string => {
-    const { readFileSync } = require('node:fs') as typeof import('node:fs');
     const raw = readFileSync(new URL('./post.service.ts', import.meta.url), 'utf8');
     // Comments stripped, so the file's own documentation cannot satisfy the assertion.
     return raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');

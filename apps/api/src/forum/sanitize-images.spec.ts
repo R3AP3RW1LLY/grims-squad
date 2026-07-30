@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { renderPostBody, looksDangerous, isOwnMediaSrc, MEDIA_PATH_PREFIX } from './sanitize.js';
 
 /**
@@ -135,7 +136,6 @@ describe('isOwnMediaSrc — the whole boundary', () => {
      * If somebody widens this to allow subdirectories or a query string — both plausible
      * requests — this test fails and points at the guards that then have to carry weight.
      */
-    const { readFileSync } = require('node:fs') as typeof import('node:fs');
     const src = readFileSync(new URL('./sanitize.ts', import.meta.url), 'utf8');
 
     const line = src.split('\n').find((l) => l.includes('const MEDIA_ID'));
@@ -267,7 +267,6 @@ describe('rendering an image in a post', () => {
      * checking the allowlist itself — because "unreachable today" is not a guarantee, and
      * the two layers exist precisely so neither has to be.
      */
-    const { readFileSync } = require('node:fs') as typeof import('node:fs');
     const src = readFileSync(new URL('./sanitize.ts', import.meta.url), 'utf8');
     const imgLine = src.split('\n').find((l) => l.trimStart().startsWith('img: ['));
 

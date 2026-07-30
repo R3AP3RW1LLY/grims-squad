@@ -120,6 +120,19 @@ export const MEDIA_PATH_PREFIX = '/v1/media/uploads/';
  * leading one of these would leave a `src` failing `startsWith` while a browser trims it
  * and fetches the URL anyway — the classic way a prefix check is bypassed.
  */
+/*
+ * `no-control-regex` disabled, with the reason.
+ *
+ * The rule exists to catch control characters that got into a pattern BY ACCIDENT — which is
+ * a real hazard and one this very line demonstrated: an earlier version contained a literal
+ * NUL and DEL byte rather than escape sequences, and `grep` reported the file as binary.
+ *
+ * Here the class is the entire point. NUL through space plus DEL is exactly the set a browser
+ * strips or normalises before fetching a URL, which is the bypass this check exists to refuse.
+ * Rewriting it as a character-code loop to satisfy the linter would make the intent harder to
+ * read for no gain in safety.
+ */
+// eslint-disable-next-line no-control-regex
 const CONTROL_CHARS = /[\x00-\x20\x7f]/;
 
 /**

@@ -759,3 +759,76 @@ export const getPublicGuide = (
   slug: string,
 ): Promise<{ thread: PublicGuide; posts: GuidePost[] } | null> =>
   get(`/v1/forum/categories/guides/threads/${encodeURIComponent(slug)}`);
+
+/* ------------------------------------------------------- forum, authenticated */
+
+export interface HubCategory {
+  id: string;
+  slug: string;
+  name: string;
+  description: string | null;
+  canPost: boolean;
+}
+
+export interface HubThread {
+  id: string;
+  slug: string;
+  title: string;
+  isPinned: boolean;
+  isLocked: boolean;
+  postCount: number;
+  lastPostAt: string | null;
+  createdAt: string;
+  author: { handle: string; displayName: string };
+}
+
+export interface HubPost {
+  id: string;
+  bodyHtml: string;
+  createdAt: string;
+  editedAt: string | null;
+  editCount: number;
+  author: { handle: string; displayName: string };
+}
+
+export interface ThreadGrant {
+  userId: string;
+  handle: string;
+  displayName: string | null;
+  grantedAt: string;
+  grantedByHandle: string;
+  reason: string | null;
+}
+
+/**
+ * A category and its threads, as the signed-in caller sees them.
+ *
+ * `authed: true` forwards the session cookie, so the API resolves the real principal and the
+ * ACL decides what comes back. Everything visibility-related is settled server-side — this
+ * function has no idea which boards exist and must not.
+ */
+export const getHubThreads = (
+  slug: string,
+): Promise<{ category: HubCategory; threads: HubThread[] } | null> =>
+  get(`/v1/forum/categories/${encodeURIComponent(slug)}/threads`, { authed: true });
+
+export const getHubThread = (
+  slug: string,
+  threadSlug: string,
+): Promise<{ thread: HubThread; posts: HubPost[] } | null> =>
+  get(
+    `/v1/forum/categories/${encodeURIComponent(slug)}/threads/${encodeURIComponent(threadSlug)}`,
+    { authed: true },
+  );
+
+/**
+ * Existing per-thread access grants.
+ *
+ * Returns null rather than throwing for a caller who may not manage access — the page then
+ * simply does not render the panel, which is the correct outcome for somebody who should not
+ * know the feature is there.
+ */
+export const getThreadGrants = (
+  threadId: string,
+): Promise<{ grants: ThreadGrant[] } | null> =>
+  get(`/v1/forum/threads/${encodeURIComponent(threadId)}/grants`, { authed: true });
