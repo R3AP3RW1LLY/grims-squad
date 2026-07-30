@@ -1,3 +1,5 @@
+import { FONT_SITE_DEFAULT, isKnownFont } from './fonts.js';
+
 /**
  * Forum signatures (P2 — the block under a member's posts).
  *
@@ -295,6 +297,19 @@ export interface BannerTextLayer {
   readonly colour: string;
   /** Monospace with wide tracking: the console look the rest of the site uses for labels. */
   readonly mono: boolean;
+  /**
+   * A font from the catalogue, PER LAYER.
+   *
+   * Squadron owner, 2026-07-30: "in posts and banners they should be able to use multiple fonts if
+   * they want too". So this is on the layer rather than on the banner — a name in Orbitron above a
+   * rank list in Share Tech Mono is the normal case, not an edge one.
+   *
+   * An ID, never a CSS value. A stored font stack would be member-authored text reaching a `style`
+   * attribute, and a font stack is one of the few CSS values that happily accepts anything.
+   * Omitted means the layer follows `mono` and the site face, which is what every existing banner
+   * does.
+   */
+  readonly font?: string;
 }
 
 export interface BannerBadgeLayer {
@@ -460,6 +475,14 @@ export function validateBannerSpec(raw: unknown): BannerSpec {
       bold: layer['bold'] === true,
       colour: hex(layer['colour'], '#e8eef5'),
       mono: layer['mono'] === true,
+      /*
+       * Checked against the catalogue, so an id we do not serve is DROPPED rather than stored. An
+       * unknown id would resolve to `inherit` at render time anyway, but storing it would leave a
+       * banner quietly referencing a font that never existed.
+       */
+      ...(typeof layer['font'] === 'string' && isKnownFont(layer['font']) && layer['font'] !== FONT_SITE_DEFAULT
+        ? { font: layer['font'] }
+        : {}),
     };
   });
 

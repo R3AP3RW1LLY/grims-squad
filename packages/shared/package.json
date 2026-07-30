@@ -15,6 +15,10 @@
       "types": "./dist/forum-signature.d.ts",
       "default": "./dist/forum-signature.js"
     },
+    "./fonts": {
+      "types": "./dist/fonts.d.ts",
+      "default": "./dist/fonts.js"
+    },
     "./server": {
       "types": "./dist/server/index.d.ts",
       "default": "./dist/server/index.js"

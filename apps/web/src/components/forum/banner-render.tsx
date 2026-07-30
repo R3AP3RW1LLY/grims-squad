@@ -7,6 +7,7 @@ import {
   type BannerSpec,
   type BannerTextSource,
 } from '@grims/shared/forum-signature';
+import { fontStack } from '@grims/shared/fonts';
 
 /**
  * The banner, drawn.
@@ -143,6 +144,15 @@ function widthOf(text: string, size: number, mono: boolean): number {
   return text.length * size * (mono ? 0.72 : 0.55);
 }
 
+/*
+ * ★ THE ESTIMATE IS DELIBERATELY NOT PER-FONT ★
+ *
+ * A display face is wider than a condensed sans, so a truly accurate estimate would need a table
+ * of average character widths per family — thirty numbers that would have to be measured and would
+ * drift the moment a family is added. The banner is 600px wide with generous padding, so being a
+ * few percent out shifts a layer rather than clipping it, and the packing still never overlaps.
+ */
+
 const PAD = 18;
 /** Gap between two layers sharing a row. */
 const GAP = 12;
@@ -207,7 +217,7 @@ export function BannerRender({
       if (inRow.length === 0) continue;
 
       const sizes = inRow.map((l) =>
-        l.kind === 'badge' ? l.size : widthOf(textOf(l, who), l.size, l.mono),
+        l.kind === 'badge' ? l.size : widthOf(textOf(l, who), l.size, l.mono || l.font !== undefined),
       );
       const total = sizes.reduce((a, b) => a + b, 0) + GAP * (inRow.length - 1);
 
@@ -296,10 +306,17 @@ export function BannerRender({
             fontSize={layer.size}
             fontWeight={layer.bold ? 700 : 400}
             fill={layer.colour}
+            /*
+             * The layer's own font when it has one, otherwise the mono/sans default. `fontStack`
+             * resolves an ID against the catalogue, so an unknown value renders as `inherit`
+             * rather than as whatever string happened to be stored.
+             */
             fontFamily={
-              layer.mono
-                ? 'ui-monospace, SFMono-Regular, Menlo, monospace'
-                : 'system-ui, -apple-system, Segoe UI, sans-serif'
+              layer.font === undefined
+                ? layer.mono
+                  ? 'ui-monospace, SFMono-Regular, Menlo, monospace'
+                  : 'system-ui, -apple-system, Segoe UI, sans-serif'
+                : fontStack(layer.font)
             }
             letterSpacing={layer.mono ? layer.size * 0.12 : 0}
             /*

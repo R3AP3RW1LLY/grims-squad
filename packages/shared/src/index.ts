@@ -3,6 +3,7 @@
 export * from './permissions.js';
 export * from './rich-document.js';
 export * from './forum-signature.js';
+export * from './fonts.js';
 export * from './errors.js';
 export * from './dto/common.js';
 export * from './redirect.js';

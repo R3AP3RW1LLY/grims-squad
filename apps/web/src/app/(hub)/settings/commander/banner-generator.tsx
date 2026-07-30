@@ -21,6 +21,12 @@ import {
   type BannerSpec,
   type BannerTextSource,
 } from '@grims/shared/forum-signature';
+import {
+  FONT_CATEGORY_LABELS,
+  FONT_FAMILIES,
+  FONT_SITE_DEFAULT,
+  fontStack,
+} from '@grims/shared/fonts';
 
 /**
  * Building a banner — the CONTROLS half.
@@ -94,13 +100,30 @@ export function BannerGenerator({
     [current, onChange],
   );
 
+  /**
+   * Applies a patch to one layer.
+   *
+   * ★ `null` REMOVES A KEY; `undefined` CANNOT ★
+   *
+   * `exactOptionalPropertyTypes` is on, which distinguishes "absent" from "present and undefined" —
+   * so `{ font: undefined }` is a type error against an optional `font?: string`, and spreading it
+   * would store the key with an undefined value anyway. Passing `null` and DELETING the key is the
+   * only way to express "back to the default" without widening every optional field to accept
+   * undefined, which would let the same mistake through everywhere else.
+   */
   const setLayer = useCallback(
-    (index: number, patch: Partial<BannerLayer>) =>
+    (index: number, patch: Record<string, unknown>) =>
       onChange({
         ...current,
-        layers: current.layers.map((l, i) =>
-          i === index ? ({ ...l, ...patch } as BannerLayer) : l,
-        ),
+        layers: current.layers.map((l, i) => {
+          if (i !== index) return l;
+          const next: Record<string, unknown> = { ...l };
+          for (const [key, value] of Object.entries(patch)) {
+            if (value === null) delete next[key];
+            else next[key] = value;
+          }
+          return next as unknown as BannerLayer;
+        }),
       }),
     [current, onChange],
   );
@@ -385,7 +408,7 @@ function RowEditor({
 }: {
   readonly row: BannerRow;
   readonly spec: BannerSpec;
-  readonly onSetLayer: (index: number, patch: Partial<BannerLayer>) => void;
+  readonly onSetLayer: (index: number, patch: Record<string, unknown>) => void;
   readonly onRemove: (index: number) => void;
   readonly onAdd: (layer: BannerLayer) => void;
 }) {
@@ -480,6 +503,44 @@ function RowEditor({
                 value={layer.colour}
                 onChange={(v) => onSetLayer(index, { colour: v })}
               />
+
+              <label className="block text-xs text-[var(--color-text-secondary)]">
+                Font
+                <select
+                  value={layer.font ?? FONT_SITE_DEFAULT}
+                  onChange={(e) =>
+                    onSetLayer(
+                      index,
+                      e.target.value === FONT_SITE_DEFAULT
+                        ? { font: null }
+                        : { font: e.target.value },
+                    )
+                  }
+                  /*
+                   * The control renders IN the chosen font, so picking is a matter of looking
+                   * rather than of recognising thirty names. The options do too, where the browser
+                   * allows it — Firefox styles them, Chrome does not, and neither is worth a
+                   * custom listbox for a settings page.
+                   */
+                  style={
+                    layer.font === undefined
+                      ? undefined
+                      : { fontFamily: fontStack(layer.font) }
+                  }
+                  className="mt-1 w-full rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel-sunken)] px-2 py-1.5 text-sm text-[var(--color-text-primary)]"
+                >
+                  <option value={FONT_SITE_DEFAULT}>Site font</option>
+                  {(['display', 'sans', 'serif', 'mono', 'stencil'] as const).map((cat) => (
+                    <optgroup key={cat} label={FONT_CATEGORY_LABELS[cat]}>
+                      {FONT_FAMILIES.filter((f) => f.category === cat).map((f) => (
+                        <option key={f.id} value={f.id} style={{ fontFamily: fontStack(f.id) }}>
+                          {f.name}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ))}
+                </select>
+              </label>
 
               <div className="flex flex-wrap items-center gap-4">
                 <label className="flex items-center gap-2 text-xs text-[var(--color-text-primary)]">
