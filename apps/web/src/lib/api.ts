@@ -674,3 +674,34 @@ export interface UpdateStatus {
 
 export const getUpdateStatus = (): Promise<UpdateStatus | null> =>
   get<UpdateStatus>('/v1/companion/update-status', { authed: true });
+
+/** A forum category, as the signed-in caller is allowed to see it. */
+export interface ForumCategory {
+  id: string;
+  parentId: string | null;
+  slug: string;
+  name: string;
+  description: string | null;
+  position: number;
+  isLocked: boolean;
+  /**
+   * Whether THIS member may start a thread here.
+   *
+   * A boolean, deliberately. The raw `postPerm` mask never leaves the server —
+   * sending it would tell a member exactly which permission bit they are missing,
+   * which is a map of the permission model handed to anybody who opens the
+   * network tab.
+   */
+  canPost: boolean;
+}
+
+/**
+ * The categories this caller can see.
+ *
+ * Returns null when the API could not be reached — the page renders its empty
+ * state rather than a 500. An EMPTY ARRAY is a different answer and a real one:
+ * it means the caller is entitled to see no categories, which for a signed-out
+ * visitor is the correct result while every category is members-only.
+ */
+export const getForumCategories = (): Promise<{ categories: ForumCategory[] } | null> =>
+  get<{ categories: ForumCategory[] }>('/v1/forum/categories', { authed: true });

@@ -37,6 +37,29 @@ import type { PermissionService } from './permission.service.js';
  * what `acl-usage.spec.ts` exists to prevent, statically, for code that does not
  * exist yet.
  */
+/**
+ * A Prisma client that provably went through `AclDbService`.
+ *
+ * ★ WHY A BRANDED TYPE AND NOT JUST A CONVENTION ★
+ *
+ * `acl-usage.spec.ts` catches an ACL-bearing model read through an INJECTED
+ * client, statically, by name. It cannot tell whether a client received as a
+ * PARAMETER is bound — and a service that takes `db: PrismaClient` and reads
+ * `db.forumCategory` looks identical whether the caller passed a bound client or
+ * the plain one.
+ *
+ * So the type carries the proof. A function declaring `db: AclBoundClient` cannot
+ * be handed a raw `PrismaClient` — that is a compile error, not a review
+ * comment. The brand is phantom: nothing is added at runtime, and the only way to
+ * obtain one is from a method on this class.
+ *
+ * The static guard and this are complementary. The brand stops the wrong client
+ * being PASSED; the guard stops an ACL model being read from an injected client
+ * with no parameter involved at all.
+ */
+declare const aclBound: unique symbol;
+export type AclBoundClient = PrismaClient & { readonly [aclBound]: true };
+
 export class AclDbService {
   constructor(
     private readonly prisma: PrismaClient,
@@ -50,7 +73,7 @@ export class AclDbService {
    * principal (`ANONYMOUS`, mask 0) and not an error. A public category has
    * `viewPerm = null` and stays visible; everything else does not.
    */
-  async forCaller(userId: string | undefined): Promise<PrismaClient> {
+  async forCaller(userId: string | undefined): Promise<AclBoundClient> {
     if (userId === undefined) return this.#bind(ANONYMOUS);
 
     /*
@@ -77,7 +100,7 @@ export class AclDbService {
    * so a bypass cannot be introduced without writing down why. There is no
    * default value on purpose.
    */
-  forSystem(reason: string): PrismaClient {
+  forSystem(reason: string): AclBoundClient {
     if (reason.trim() === '') {
       // A blank reason means somebody reached for this without thinking about
       // it, which is the only way this method becomes dangerous.
@@ -90,7 +113,7 @@ export class AclDbService {
      * everything. Making this async to match would promise a database round trip
      * that does not happen.
      */
-    return withPrincipal(this.prisma, { userId: null, mask: 0n, systemBypass: true });
+    return withPrincipal(this.prisma, { userId: null, mask: 0n, systemBypass: true }) as AclBoundClient;
   }
 
   /**
@@ -114,11 +137,15 @@ export class AclDbService {
    * until P8 gives it Postgres row-level security. A chunk table that returns
    * nothing is a P8 problem; one that returns everything is a breach.
    */
-  async #bind(base: AclPrincipal): Promise<PrismaClient> {
+  async #bind(base: AclPrincipal): Promise<AclBoundClient> {
     const visibleIds = {
       ForumCategory: await resolveVisibleCategoryIds(this.prisma, base.mask),
     };
 
-    return withPrincipal(this.prisma, { ...base, visibleIds });
+    /*
+     * The single cast that mints the brand. Everything downstream is checked by
+     * the compiler from here, which is why this is the only one.
+     */
+    return withPrincipal(this.prisma, { ...base, visibleIds }) as AclBoundClient;
   }
 }

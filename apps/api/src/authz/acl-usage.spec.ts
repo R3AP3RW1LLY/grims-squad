@@ -56,14 +56,34 @@ function sourceFiles(dir: string, out: string[] = []): string[] {
 }
 
 /**
- * Files allowed to name an ACL accessor.
+ * Files allowed to name an ACL accessor, and why each one is.
  *
- * `acl-db.service.ts` is the enforcement point: it MUST read
- * `forumCategory` to resolve the visible set, and that read is the one place the
- * unfiltered client is correct. Listed by exact filename rather than a pattern,
- * so a new exemption is a visible edit to this list.
+ * ★ AN EXEMPTION IS ONLY LEGITIMATE IF SOMETHING ELSE ENFORCES IT ★
+ *
+ * Listed by exact filename with a reason, rather than a pattern, so adding one is
+ * a visible edit somebody has to justify.
+ *
+ * `acl-db.service.ts` is the enforcement point: it MUST read `forumCategory`
+ * unfiltered to resolve the visible set, and that is the one place the plain
+ * client is correct.
+ *
+ * The forum services are exempt because the COMPILER enforces them instead. They
+ * declare `db: AclBoundClient` — a phantom-branded type that can only be obtained
+ * from `AclDbService` — so handing them a raw `PrismaClient` is a type error
+ * rather than a review comment. That is strictly stronger than this regex, which
+ * cannot tell a bound client passed as a parameter from an unbound one.
+ *
+ * The test below asserts each exemption actually carries that brand, so an
+ * exemption cannot be added without earning it.
  */
-const ALLOWED = new Set(['authz/acl-db.service.ts']);
+const ALLOWED = new Map([
+  ['authz/acl-db.service.ts', 'the enforcement point — mints the bound client'],
+  ['forum/category.service.ts', 'takes AclBoundClient; compiler-enforced'],
+  ['forum/thread.service.ts', 'takes AclBoundClient; compiler-enforced'],
+]);
+
+/** Exemptions that rely on the brand rather than on being the enforcement point. */
+const BRAND_ENFORCED = ['forum/category.service.ts', 'forum/thread.service.ts'];
 
 describe('INV-002 — no ACL-bearing model is read through the plain client', () => {
   const files = sourceFiles(API_SRC);
@@ -113,6 +133,23 @@ describe('INV-002 — no ACL-bearing model is read through the plain client', ()
      * with the reason written down. It is not to add the file to ALLOWED.
      */
     expect(offenders).toEqual([]);
+  });
+
+  /*
+   * ★ EVERY BRAND-BASED EXEMPTION MUST ACTUALLY CARRY THE BRAND ★
+   *
+   * Otherwise the exemption list becomes the hole: a file added to it for
+   * convenience would be silently unguarded by both mechanisms at once.
+   */
+  it('MANDATORY @INV-002: each exempt forum service demands a BOUND client', () => {
+    for (const rel of BRAND_ENFORCED) {
+      const src = readFileSync(join(API_SRC, rel), 'utf8');
+      expect(src, `${rel} must import the branded type`).toContain('AclBoundClient');
+      // And must NOT accept a plain client, which would defeat the point.
+      expect(src, `${rel} must not accept a plain PrismaClient`).not.toMatch(
+        /db:\s*PrismaClient/,
+      );
+    }
   });
 
   /*
