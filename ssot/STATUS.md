@@ -2,11 +2,19 @@
 _Last updated: 2026-07-29 by agent (deployed to production)_
 
 ## Current position
-Phase: **P1 — Identity & shell, DONE** (2026-07-29). Every task built, deployed and
-        live-verified; the adversarial panel has run (`10-quality/review-log.md`); and its
-        one blocking finding — INV-002, the unenforced data-layer ACL — was **closed the
-        same day**. All 18 due invariants are enforced and covered.
-P0:     **8 of 8 DONE.** P0.7 (deploy) closed 2026-07-29 — production is live.
+Phase: **P2 — Forums, IN_PROGRESS.** P1 closed 2026-07-29.
+
+        ★ THE PHASE LINE IS LOAD-BEARING, NOT PROSE. `tools/ssot-drift-check.ts` parses it.
+        `P2` makes every P0 and P1 invariant a HARD failure if untested, and `IN_PROGRESS`
+        keeps P2's own three outstanding-but-not-failing — because on the day a phase starts
+        none of its invariants can have tests yet, and a permanently red gate is a gate
+        somebody switches off. Removing `IN_PROGRESS` is what tightens it at P2 exit.
+
+        **P1 — Identity & shell: DONE (2026-07-29).** All 11 tasks plus P0.7, deployed and
+        live-verified. The adversarial panel ran against the DEPLOYED system and its one
+        blocking finding — INV-002, the unenforced data-layer ACL — was closed the same day.
+        18 due invariants, 18 covered.
+
 Next:   **P2 — Forums.** P2.0 existed to bind the ACL and is now **DONE ahead of the phase**,
         so P2.1 (category and thread CRUD) can start against a client that already filters.
         The promotion dry run
