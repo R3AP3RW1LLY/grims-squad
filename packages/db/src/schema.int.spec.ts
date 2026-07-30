@@ -236,20 +236,62 @@ describe('seeded roles', () => {
     53, 60, 61, 62, 63, 70,
   ].reduce((acc, bit) => acc | (1n << BigInt(bit)), 0n);
 
-  it('webmaster carries exactly ALL_PERMISSIONS, bit for bit @INV-006', async () => {
-    // This test caught a real defect. The migration originally computed the mask
-    // as (2^0 + 2^1 + ... + 2^70). Postgres `^` returns DOUBLE PRECISION, so the
-    // high bits lost precision before the cast to numeric(40,0) and the row was
-    // seeded as 1197902339489250000000 instead of 1197902339489246755967 —
-    // setting bits nobody intended and clearing ones that were, silently, in the
-    // single most powerful role in the system.
+  /**
+   * ★ THE CONTRACT CHANGED ON 2026-07-29, AND THE PRECISION PROPERTY DID NOT ★
+   *
+   * This asserted `ALL_PERMISSIONS` exactly. The squadron owner then drew a line
+   * the codebase had not: "webmaster should not be able to post to Announcements,
+   * as this is for officers ... they do need all website functions but not posting
+   * to the web app announcements."
+   *
+   * So the expected value is now ALL_PERMISSIONS minus FORUM_POST_OFFICER. What
+   * this test EXISTS for is unchanged and still asserted bit-for-bit: it caught a
+   * real defect where the migration computed the mask as (2^0 + 2^1 + ... + 2^70),
+   * and Postgres `^` returns DOUBLE PRECISION — so the high bits lost precision
+   * before the cast to numeric(40,0) and the row was seeded as
+   * 1197902339489250000000 instead of 1197902339489246755967, setting bits nobody
+   * intended and clearing ones that were, silently, in the most powerful role in
+   * the system.
+   *
+   * Expressed as a subtraction from the full set rather than a new literal, so it
+   * still fails on a precision fault rather than merely on the wrong total.
+   */
+  it('webmaster carries every website permission EXCEPT the squadron voice @INV-006', async () => {
+    const FORUM_POST_OFFICER = 1n << 6n;
+    const expected = ALL_PERMISSIONS & ~FORUM_POST_OFFICER;
+
     const r = await rows<{ perm_mask: string; is_hierarchical: boolean }>(
       `select perm_mask::text, is_hierarchical from roles where key = 'webmaster'`,
     );
     expect(r).toHaveLength(1);
-    expect(BigInt(r[0]!.perm_mask)).toBe(ALL_PERMISSIONS);
+    expect(BigInt(r[0]!.perm_mask)).toBe(expected);
+
+    // Stated separately so the reason is legible: this is the ONE bit withheld.
+    expect(BigInt(r[0]!.perm_mask) & FORUM_POST_OFFICER).toBe(0n);
+    // And nothing else was lost in the process.
+    expect(ALL_PERMISSIONS & ~BigInt(r[0]!.perm_mask)).toBe(FORUM_POST_OFFICER);
+
     // An orthogonal tag, not a squadron rank.
     expect(r[0]!.is_hierarchical).toBe(false);
+  });
+
+  /**
+   * Posting in an officer board requires a POST permission, not a VIEW one.
+   *
+   * Caught while verifying the change above: the officers board was seeded with
+   * `post_perm = FORUM_VIEW_OFFICER`, so anybody who could SEE it could post in
+   * it — which is precisely what having a separate post permission is for.
+   */
+  it('the officers board gates posting on FORUM_POST_OFFICER, not a view bit', async () => {
+    const r = await rows<{ post_perm: string | null; view_perm: string | null }>(
+      `select post_perm::text, view_perm::text from forum_categories where slug = 'officers'`,
+    );
+    // Skipped rather than failed when the board has not been seeded in this
+    // database — the assertion is about its shape, not about it existing.
+    if (r.length === 0) return;
+
+    expect(BigInt(r[0]!.post_perm ?? '0')).toBe(1n << 6n); // FORUM_POST_OFFICER
+    expect(BigInt(r[0]!.view_perm ?? '0')).toBe(1n << 4n); // FORUM_VIEW_OFFICER
   });
 
   it('webmaster is mapped to NO Discord role', async () => {
