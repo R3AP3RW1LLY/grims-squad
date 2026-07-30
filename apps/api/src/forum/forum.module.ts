@@ -11,6 +11,7 @@ import { ModerationService } from './moderation.service.js';
 import { RecruitmentService } from './recruitment.service.js';
 import { PendingReindexQueue } from './reindex.port.js';
 import { UploadService } from '../media/upload.service.js';
+import { ScreeningService } from '../ai/screening.service.js';
 import { ALL_PERMISSIONS } from '@grims/shared';
 import { SignatureService } from './signature.service.js';
 
@@ -41,11 +42,12 @@ import { SignatureService } from './signature.service.js';
     RecruitmentService,
     {
       provide: PostService,
-      inject: [PendingReindexQueue, ModerationService, UploadService],
+      inject: [PendingReindexQueue, ModerationService, UploadService, ScreeningService],
       useFactory: (
         reindex: PendingReindexQueue,
         moderation: ModerationService,
         uploads: UploadService,
+        screening: ScreeningService,
       ) =>
         new PostService(reindex, moderation, {
           /*
@@ -61,7 +63,14 @@ import { SignatureService } from './signature.service.js';
             const result = await uploads.upload(uploaderId, ALL_PERMISSIONS, bytes);
             return result.id;
           },
-        }),
+        },
+        /*
+         * Screening runs BEFORE a post is written — see `PostService.create`. Injected here rather
+         * than resolved inside the service so the dependency is visible in the wiring: a post now
+         * depends on the AI, and that should be obvious to whoever reads this file next.
+         */
+        screening,
+        ),
     },
     NotifyService,
     EngageService,

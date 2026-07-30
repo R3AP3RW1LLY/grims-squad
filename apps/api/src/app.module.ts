@@ -11,13 +11,14 @@ import { PublicModule } from './public/public.module.js';
 import { TelemetryModule } from './telemetry/telemetry.module.js';
 import { CompanionModule } from './companion/companion.module.js';
 import { ForumModule } from './forum/forum.module.js';
+import { AiModule } from './ai/ai.module.js';
 import { LiveModule } from './live/live.module.js';
 import { MediaModule } from './media/media.module.js';
 import { AuthGuard } from './auth/auth.guard.js';
 import { RequiresPermissionGuard } from './authz/requires-permission.guard.js';
 
 @Module({
-  imports: [DatabaseModule, AuthzModule, AuthModule, MembersModule, CmdrModule, AdminModule, PublicModule, TelemetryModule, MediaModule, CompanionModule, LiveModule, ForumModule],
+  imports: [DatabaseModule, AuthzModule, AuthModule, MembersModule, CmdrModule, AdminModule, PublicModule, TelemetryModule, MediaModule, CompanionModule, LiveModule, AiModule, ForumModule],
   controllers: [HealthController],
   providers: [
     /*

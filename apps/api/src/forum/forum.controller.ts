@@ -28,6 +28,7 @@ import { GatedDiscordDm, replyDmText } from './discord-dm.port.js';
 import { SearchService, renderSnippet, type SearchResult } from './search.service.js';
 import { ModerationService } from './moderation.service.js';
 import { SignatureService } from './signature.service.js';
+import { ReviewQueueService, type HeldPost } from '../ai/review-queue.service.js';
 
 /**
  * The forum's HTTP surface.
@@ -64,6 +65,7 @@ export class ForumController {
     @Inject(ModerationService) private readonly moderation: ModerationService,
     @Inject(NotifyService) private readonly notify: NotifyService,
     @Inject(SignatureService) private readonly signatures: SignatureService,
+    @Inject(ReviewQueueService) private readonly review: ReviewQueueService,
   ) {}
 
   /**
@@ -367,6 +369,55 @@ export class ForumController {
     return {
       candidates: await this.grants.search(db, threadId, q ?? '', await this.#mask(caller)),
     };
+  }
+
+  /**
+   * Posts waiting for a human, oldest first.
+   *
+   * Requires AI_REVIEW — narrower than AI_TOOLS_ADMIN, and held by officers and by the webmaster.
+   */
+  @Get('review/held')
+  async heldPosts(
+    @User() caller: CurrentUser | undefined,
+  ): Promise<{ posts: HeldPost[]; total: number }> {
+    const c = requireSession(caller, 'Sign in first.');
+    const db = await this.acl.forCaller(c.userId);
+    const mask = await this.#mask(caller);
+
+    const [posts, total] = await Promise.all([
+      this.review.held(db, mask),
+      this.review.heldCount(db, mask),
+    ]);
+    return { posts, total };
+  }
+
+  /**
+   * Releases a held post, or refuses it.
+   *
+   * PUT with the decision in the body rather than two routes: deciding the same post twice must
+   * settle on one state, and an idempotent verb says so at the protocol level.
+   */
+  @Put('review/held/:postId')
+  async decideHeld(
+    @User() caller: CurrentUser | undefined,
+    @Param('postId') postId: string,
+    @Body() body: unknown,
+    @Req() req: FastifyRequest,
+  ): Promise<{ ok: true }> {
+    const c = requireSession(caller, 'Sign in first.');
+    csrf(req);
+
+    const decision = (body as { decision?: unknown } | null)?.decision;
+    if (decision !== 'release' && decision !== 'refuse') {
+      throw new AppError(ErrorCode.VALIDATION_FAILED, 'Say whether to release or refuse it.');
+    }
+
+    const db = await this.acl.forCaller(c.userId);
+    await this.review.decide(db, postId, decision, {
+      userId: c.userId,
+      mask: await this.#mask(caller),
+    });
+    return { ok: true };
   }
 
   /**

@@ -136,6 +136,27 @@ export const Permission = {
   AI_TOOLS_WRITE: 1n << 52n,
   /** Ring 2+. AI administration: kill switches, quota overrides, cross-member conversation review. */
   AI_TOOLS_ADMIN: 1n << 53n,
+  /**
+   * Ring 2. Read the AI call log, and work the screening queue.
+   *
+   * ★ NARROWER THAN AI_TOOLS_ADMIN, ON PURPOSE ★
+   *
+   * Squadron owner, 2026-07-30: every AI conversation is "logged for officer review ... it also
+   * need to be visible to the webmaster role! this is non-negotiable as the webmaster is the AI
+   * developer."
+   *
+   * `AI_TOOLS_ADMIN` would satisfy that and also hand every officer the kill switches and quota
+   * overrides, which is a great deal more than reading a log. Reviewing what the model said and
+   * being able to turn it off are different jobs, and only one of them was asked for.
+   *
+   * ★ THE WEBMASTER GETS THIS AUTOMATICALLY ★
+   *
+   * Deliberately NOT in SQUADRON_STANDING_PERMISSIONS, so `ALL_PERMISSIONS & ~SQUADRON_STANDING`
+   * includes it. That is the whole mechanism: the webmaster holds everything except the two bits
+   * that mean "speaks for the squadron", and debugging a model whose output you cannot see is not
+   * speaking for anybody.
+   */
+  AI_REVIEW: 1n << 54n,
 
   // ── Admin ────────────────────────────────────────────────────────────────
   /** Ring 2. Member management: search, filter, notes, probation, activity flags, deactivation. */
@@ -324,6 +345,11 @@ const OFFICER: PermissionMask =
    */
   P.FORUM_POST_GUIDE |
   P.FORUM_MODERATE |
+  /*
+   * Reading the AI log and working the screening queue. Officers are who the owner named as the
+   * reviewers, and a queue nobody can open is a queue that fills up.
+   */
+  P.AI_REVIEW |
   P.OPS_MANAGE |
   P.CARRIER_MANAGE |
   P.FLEET_APPROVE_DOCTRINE |

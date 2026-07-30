@@ -117,6 +117,8 @@ export const DESCRIBES: Readonly<Record<string, string>> = {
     'Let the assistant ATTEMPT changes. It does not grant the change itself: the underlying permission still applies and confirmation is still required.',
   AI_TOOLS_ADMIN:
     'Assistant administration: kill switches, quota overrides, and reading other members’ conversations.',
+  AI_REVIEW:
+    'Work the screening queue — release or refuse posts the AI held — and read the log of what the AI was asked and what it answered.',
   MEMBER_MANAGE:
     'Search and filter members, keep notes, set probation and activity flags, and deactivate accounts.',
   AUDIT_VIEW:
@@ -192,6 +194,7 @@ const PERMISSION_GROUPS: readonly PermissionGroup[] = [
       ['AI_TOOLS_READ', 51],
       ['AI_TOOLS_WRITE', 52],
       ['AI_TOOLS_ADMIN', 53],
+      ['AI_REVIEW', 54],
     ],
   },
   {
