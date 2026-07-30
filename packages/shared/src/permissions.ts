@@ -48,6 +48,36 @@ export const Permission = {
    * without announcement rights.
    */
   FORUM_POST_OFFICER: 1n << 6n,
+  /**
+   * Ring 2. Author the GUIDES board — the site's own documentation.
+   *
+   * ★ WHY THIS NEEDED ITS OWN BIT ★
+   *
+   * Squadron owner, 2026-07-29, in two instructions a few hours apart: "only the webmaster
+   * can author the joining guide", then — when told SITE_CONFIG also covers the two admiral
+   * ranks — "widen to officers too".
+   *
+   * That wants "officers AND the webmaster", and NEITHER existing bit can express it:
+   *
+   *   FORUM_POST_OFFICER  officers hold it; the webmaster deliberately does NOT, because
+   *                       posting in the squadron's name is squadron standing.
+   *   SITE_CONFIG         the webmaster holds it; ordinary officers do not.
+   *
+   * And a category's `post_perm` is checked with AND semantics — `(mask & required) ===
+   * required` — so it cannot mean "either of these". Setting it to one bit locks the other
+   * group out, which is exactly the bug that left the site's own documentation editable
+   * only by officers while the webmaster maintained it.
+   *
+   * So this is the bit both groups hold. It is granted to the officer ranks and, being
+   * outside SQUADRON_STANDING_PERMISSIONS, is held by the webmaster automatically.
+   *
+   * ★ NOT SQUADRON STANDING ★
+   *
+   * Deliberately excluded from SQUADRON_STANDING_PERMISSIONS. A joining guide is website
+   * documentation, not the squadron speaking — which is the same distinction that made
+   * FORUM_POST_OFFICER the wrong bit for the guides board in the first place.
+   */
+  FORUM_POST_GUIDE: 1n << 7n,
 
   // ── Operations ───────────────────────────────────────────────────────────
   /** Ring 1. See the operations board and calendar. */
@@ -284,6 +314,15 @@ const OFFICER: PermissionMask =
   WING_LEAD |
   P.FORUM_VIEW_OFFICER |
   P.FORUM_POST_OFFICER |
+  /*
+   * Authoring the guides board. Owner, 2026-07-29: "widen to officers too" — after first
+   * saying only the webmaster should author the joining guide, and being told SITE_CONFIG
+   * would also cover the two admiral ranks.
+   *
+   * A separate bit from FORUM_POST_OFFICER because the WEBMASTER needs this one too, and
+   * deliberately does not have that one. See the note on FORUM_POST_GUIDE.
+   */
+  P.FORUM_POST_GUIDE |
   P.FORUM_MODERATE |
   P.OPS_MANAGE |
   P.CARRIER_MANAGE |

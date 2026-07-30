@@ -55,14 +55,31 @@ const md = new MarkdownIt('default', {
  * anything not listed is dropped rather than escaped, because a post full of
  * visible `&lt;div&gt;` is a worse outcome than a post without the div.
  *
+ * ★ `img` IS NOW ALLOWED, BUT ONLY POINTING AT US ★
+ *
+ * It was omitted deliberately, on the grounds that a REMOTE image lets a post leak
+ * every reader's IP address to a third-party host — a privacy failure rather than an
+ * XSS one, and exactly the sort of thing that ships by accident inside a feature
+ * nobody thought was about privacy.
+ *
+ * That reasoning still stands, so the tag is allowed and the SOURCE is not. `src` must
+ * be a relative path under our own media route (see `isOwnMediaSrc`). An absolute URL is
+ * rejected even if it points at our own domain, because "is this our domain" is a
+ * question with a long history of wrong answers — `https://ourhost.example.evil.test`,
+ * userinfo tricks, and encoded hosts. A relative path cannot name another host at all,
+ * which makes the check a syntactic one rather than a judgement.
+ *
+ * Every such image has been through `hardenImage`: decoded and re-encoded from pixels,
+ * so no EXIF, no polyglot, no appended payload survives. The allowlist here and that
+ * pipeline are two halves of one guarantee — this decides WHERE an image may come from,
+ * and that decides WHAT the bytes are.
+ *
  * Notable omissions and why:
- *   - `img`  uploads arrive at P2.3 with their own EXIF and polyglot handling.
- *            Allowing remote images now would let a post leak every reader's IP
- *            to a third-party host, which is a privacy problem rather than an XSS
- *            one and is exactly the kind of thing that ships by accident.
  *   - `svg`  a whole XSS surface of its own (foreignObject, animate, use+xlink).
  *   - `style`/`class`  a post must not be able to restyle the page around it.
  *   - `iframe`, `object`, `embed`, `form`, `input`  nothing a forum post needs.
+ *   - `srcset`/`sizes` on img: a second place to put a URL, and one that parsers
+ *            disagree about. One attribute to validate is better than three.
  */
 const ALLOWED_TAGS = [
   'p', 'br', 'hr',
@@ -72,7 +89,140 @@ const ALLOWED_TAGS = [
   'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
   'a',
   'table', 'thead', 'tbody', 'tr', 'th', 'td',
+  'img',
+  'figure', 'figcaption',
 ];
+
+/**
+ * The one place an image may come from: our own media route.
+ *
+ * Exported so the tests can drive it directly, and so nothing else has to reimplement
+ * the rule.
+ */
+export const MEDIA_PATH_PREFIX = '/v1/media/uploads/';
+
+/**
+ * Anything a browser might strip or normalise before fetching a URL.
+ *
+ * ★ WRITTEN WITH \x ESCAPES, AND THAT IS NOT A STYLE CHOICE ★
+ *
+ * The first version of this check spelled the class with the characters themselves. The
+ * result was a source file containing a literal NUL byte and a literal DEL byte — `grep`
+ * reported "binary file matches", and the Edit tool could not address the line because
+ * the bytes are not typeable. Three separate attempts to patch it read as no-ops.
+ *
+ * This is the third time on this branch that literal control characters have got into a
+ * regex through a shell heredoc (a `\b` became a backspace in `looksDangerous`; a `\s`
+ * collapsed to `s` in a built pattern). The lesson has been consistent: escape sequences
+ * in a regex LITERAL, never characters that a shell, editor or diff can silently eat.
+ *
+ * NUL through space covers every whitespace and C0 control character; \x7f is DEL. A
+ * leading one of these would leave a `src` failing `startsWith` while a browser trims it
+ * and fetches the URL anyway — the classic way a prefix check is bypassed.
+ */
+const CONTROL_CHARS = /[\x00-\x20\x7f]/;
+
+/**
+ * Is this `src` a path to an image WE stored?
+ *
+ * ★ SYNTACTIC, NOT A JUDGEMENT ABOUT HOSTS ★
+ *
+ * The tempting version parses the URL and asks "is the host ours". That question has a
+ * long history of wrong answers, and every one of them is a way to make a post fetch
+ * from somewhere else:
+ *
+ *   https://ourhost.example.evil.test/x      suffix that merely starts with our name
+ *   https://evil.test\@ourhost.example/x     userinfo, where parsers disagree
+ *   https://ourhost.example@evil.test/x      the real host is the one after the @
+ *   //evil.test/x                            protocol-relative, inherits our scheme
+ *   https://ourhost%2eexample.evil.test/x    percent-encoded host
+ *
+ * So no host comparison happens at all. The `src` must be a RELATIVE PATH beginning with
+ * our media prefix — and a relative path is structurally incapable of naming another
+ * origin. There is no clever input that makes `/v1/media/uploads/…` point at somebody
+ * else's server.
+ *
+ * The cost is that a legitimate absolute URL to our own domain is refused. That is fine:
+ * nothing generates one, the upload endpoint returns a relative path, and refusing a
+ * valid-but-unnecessary form is much cheaper than getting host comparison right.
+ */
+export function isOwnMediaSrc(src: string): boolean {
+  /*
+   * Whitespace first. A leading space, tab, newline or NUL would leave the string
+   * failing `startsWith` while browsers strip it and fetch the URL anyway — the classic
+   * way a prefix check is bypassed. Control characters are rejected outright rather than
+   * trimmed, because "what does a browser do with this byte" is exactly the question
+   * this function exists to avoid asking.
+   */
+  if (src === '' || CONTROL_CHARS.test(src)) return false;
+
+  // Must be same-origin-relative. A protocol-relative `//host/...` is not.
+  if (!src.startsWith(MEDIA_PATH_PREFIX)) return false;
+
+  /*
+   * No traversal. `/v1/media/uploads/../../etc/passwd` satisfies the prefix and is not
+   * a media path — and while the serve endpoint validates its own id, a stored `src`
+   * that only LOOKS contained is a trap for the next person who reads it and assumes
+   * containment.
+   */
+  if (src.includes('..')) return false;
+
+  // No backslashes: some parsers treat them as path separators, some do not.
+  if (src.includes('\\')) return false;
+
+  /*
+   * The remainder must be a plain identifier — the shape the upload endpoint mints.
+   * A query string or fragment is refused rather than stripped: neither has any meaning
+   * here, so their presence means the string did not come from us.
+   */
+  const rest = src.slice(MEDIA_PATH_PREFIX.length);
+  return MEDIA_ID.test(rest);
+}
+
+/**
+ * The id shape the upload endpoint mints — and THE LOAD-BEARING CHECK IN THIS FILE.
+ *
+ * ★ MEASURED, NOT ASSUMED ★
+ *
+ * The four guards above were written as layered defences. They are not: this pattern
+ * alone rejects every payload the others catch. Verified by running each guard in
+ * isolation over the bypass list:
+ *
+ *   "\x00/v1/media/uploads/x.png"              CONTROL, PREFIX, ID
+ *   " /v1/media/uploads/x.png"                 CONTROL, PREFIX, ID
+ *   "https://evil.test/v1/media/uploads/x.png"         PREFIX, ID
+ *   "//evil.test/v1/media/uploads/x.png"               PREFIX, ID
+ *   "/v1/media/uploads/../../etc/passwd"                   .., ID
+ *   "/v1/media/uploads/x.png?a=1"                             ID
+ *   "/v1/media/uploads/a/b.png"                               ID
+ *   "javascript:alert(1)"                              PREFIX, ID
+ *
+ * ID is in every row. Nothing reaches it that it does not stop.
+ *
+ * That was worth finding out, because a mutation test proved the point the other way:
+ * deleting the control-character check, deleting the traversal check, and weakening
+ * `startsWith` to `includes` each left the whole image suite GREEN. Not because the
+ * suite is weak, but because those checks were never what rejected the payloads. A
+ * comment claiming each one holds a distinct line would have been believed by the next
+ * reader and by me.
+ *
+ * ★ SO WHY KEEP THE OTHERS ★
+ *
+ * Because "redundant" is a statement about today's pattern, not tomorrow's. The moment
+ * somebody widens this to allow a subdirectory or a version query — both reasonable
+ * requests — ID stops being sufficient and the prefix and traversal checks start
+ * carrying weight. They cost three comparisons. The mistake was describing them as the
+ * defence, not including them.
+ *
+ * ★ WHAT MAKES THE PATTERN SAFE ★
+ *
+ *   ^ and $        anchored at both ends, so nothing can be appended or prepended. An
+ *                  unanchored version would match our id ANYWHERE in a hostile string.
+ *   no / \ : ? #   cannot become a path, a scheme, a query or a fragment.
+ *   no . first     so an id can never be `.` or `..`.
+ *   {0,127}        bounded, so a src cannot be used to store unbounded text.
+ */
+const MEDIA_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
 /**
  * Protocols a link may use.
@@ -114,6 +264,17 @@ export function renderPostBody(bodyMd: string): Rendered {
        * A member cannot supply either: the transform overwrites whatever arrived.
        */
       a: ['href', 'title', 'rel', 'target'],
+      /*
+       * `src` and `alt` only — plus the dimensions and `loading`, which `transformTags`
+       * SETS rather than accepts. As with the anchor's `rel`, they must be listed here
+       * because sanitize-html applies this allowlist AFTER the transform runs, so
+       * omitting them would silently discard what the transform had just added.
+       *
+       * Deliberately NOT allowed: `srcset`, `sizes` (a second place to hide a URL, and
+       * one parsers disagree about), `onerror` and friends (covered by the tag-level
+       * rules, listed here for the reader), `style`, `usemap`.
+       */
+      img: ['src', 'alt', 'loading', 'decoding', 'width', 'height'],
       code: ['class'],
       th: ['align'],
       td: ['align'],
@@ -140,6 +301,46 @@ export function renderPostBody(bodyMd: string): Rendered {
         tagName,
         attribs: { ...attribs, rel: 'noopener noreferrer nofollow ugc', target: '_blank' },
       }),
+      /*
+       * ★ AN IMAGE THAT IS NOT OURS IS NOT AN IMAGE ★
+       *
+       * A `src` that fails `isOwnMediaSrc` is not merely stripped — the whole element is
+       * turned into a `<span>` carrying the alt text. Three reasons:
+       *
+       *   - An `<img>` with no `src` is a broken-image icon, which reads as "the site
+       *     lost my picture" rather than "that link was refused".
+       *   - The alt text is the author's own words about what was there, so keeping it
+       *     preserves the meaning of the sentence around it.
+       *   - It is visible. A silently vanished image is a bug report; a line of text
+       *     saying what was refused is an explanation.
+       */
+      img: (tagName, attribs) => {
+        const src = typeof attribs['src'] === 'string' ? attribs['src'] : '';
+        const alt = typeof attribs['alt'] === 'string' ? attribs['alt'] : '';
+
+        if (!isOwnMediaSrc(src)) {
+          return {
+            tagName: 'span',
+            attribs: {},
+            text: alt === '' ? '[image removed: not hosted here]' : `[image: ${alt}]`,
+          };
+        }
+
+        return {
+          tagName,
+          attribs: {
+            src,
+            alt,
+            /*
+             * `loading="lazy"` and `decoding="async"` are set rather than accepted: a
+             * guide with a dozen screenshots should not block first paint on all of
+             * them, and this is a property of the stored HTML so every consumer gets it.
+             */
+            loading: 'lazy',
+            decoding: 'async',
+          },
+        };
+      },
     },
   });
 
