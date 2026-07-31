@@ -95,7 +95,7 @@ export class AdminGateGuard implements CanActivate {
       );
     }
 
-    if (!twoFactorFreshInSession(req)) {
+    if (!twoFactorFreshInSession(req) || !withinAbsoluteWindow(req)) {
       throw new AppError(
         ErrorCode.TWO_FACTOR_REQUIRED,
         'Confirm your authenticator code to continue.',
@@ -108,54 +108,147 @@ export class AdminGateGuard implements CanActivate {
       ctx.getHandler(),
       ctx.getClass(),
     ]);
-    if (needsFresh === true && !twoFactorFreshInSession(req, new Date(), FRESH_STEP_UP_TTL_MS)) {
+    if (needsFresh === true && !freshCodeEntered(req)) {
       throw new AppError(
         ErrorCode.TWO_FACTOR_REQUIRED,
         'This change needs a fresh authenticator code. Confirm it again to continue.',
       );
     }
 
+    /*
+     * ★ THIS IS WHAT MAKES THE WINDOW SLIDE ★
+     *
+     * Re-stamped on every request that gets through, so eight hours means eight hours of INACTIVITY
+     * rather than eight hours from entering a code. `issuedAt` is carried forward untouched, which
+     * is what keeps the absolute ceiling meaningful — otherwise activity would extend the session
+     * indefinitely and the ceiling would never be reached.
+     */
+    stampActivity(ctx, req);
+
     return true;
   }
 }
 
 /**
- * How long a step-up lasts before the console asks again.
+ * How long a step-up lasts before the console asks again — SLIDING, on activity.
  *
- * ★ TWO HOURS IS A CEILING, NOT A TARGET ★
+ * ★ SQUADRON OWNER, 2026-07-31 ★
  *
- * Raised from fifteen minutes on the squadron owner's instruction. Worth being
- * clear about the trade rather than burying it: a longer window means a
- * stepped-up session left open on an unattended machine stays privileged for
- * longer, and that is the cost being accepted.
+ * "we need to greatly increase the admin 2FA timeout ... can we make the 2FA timeout every 8 hours
+ * unless activity is detected?"
  *
- * What makes it defensible is the tier below. The actions that can do lasting
- * damage — granting roles, changing site config, resetting somebody's second
- * factor — do NOT run on this window; they require a challenge from the last
- * two minutes. So two hours buys convenience for reading and routine work, and
- * buys nothing at all for the operations that matter most.
+ * So this is now eight hours of INACTIVITY rather than eight hours from the code being entered.
+ * Every admin request that passes this gate pushes the window forward, so somebody working through
+ * a long session is never interrupted, and a session abandoned at a desk still expires.
+ *
+ * ★ AND WHY THERE IS AN ABSOLUTE CAP AS WELL ★
+ *
+ * A purely sliding window never ends: a browser tab left open on a polling admin page would renew
+ * itself forever, and the second factor would effectively stop applying to the one machine most
+ * likely to be walked away from. `STEP_UP_ABSOLUTE_MS` is the backstop — past it a fresh code is
+ * required however busy the session has been.
  */
-export const STEP_UP_TTL_MS = 2 * 60 * 60_000;
+export const STEP_UP_TTL_MS = 8 * 60 * 60_000;
+
+/**
+ * The longest a single step-up can live, however much activity there is.
+ *
+ * Twenty-four hours. Long enough that nobody meets it during a normal day at the console, short
+ * enough that "I entered a code yesterday" is never a reason the admin tools are open today.
+ */
+export const STEP_UP_ABSOLUTE_MS = 24 * 60 * 60_000;
 
 /**
  * The window for a TIER-3 action: granting roles, site config, AI kill switches.
  *
- * Two minutes, and deliberately NOT raised alongside the general window above.
- * Long enough to preview a permission change and then save it, short enough
- * that a stepped-up session left unattended is not a standing authorisation to
- * grant anybody anything.
+ * ★ RAISED FROM TWO MINUTES TO FIFTEEN, ON THE OWNER'S INSTRUCTION ★
  *
- * This is what makes a two-hour general window survivable: the longer window
- * covers reading and routine work, and the actions that can do lasting damage
- * still ask again.
+ * Squadron owner, 2026-07-31, after being shown the trade. Two minutes meant re-entering a code
+ * between each change while working through a batch of role edits, which is the kind of friction
+ * that gets a control switched off entirely.
+ *
+ * The cost, stated plainly because it is real: a stepped-up session left unattended can grant
+ * permissions for a quarter of an hour rather than two minutes.
+ *
+ * What keeps this defensible is that it is still SEPARATE from the eight-hour general window, and
+ * does NOT slide. Fifteen minutes from the last code entered, not from the last click.
  */
-export const FRESH_STEP_UP_TTL_MS = 2 * 60_000;
+export const FRESH_STEP_UP_TTL_MS = 15 * 60_000;
 
 declare module 'fastify' {
   interface FastifyRequest {
-    /** Set by the session layer from the step-up cookie. */
+    /** Last admin activity, from the step-up cookie. The SLIDING half. */
     twoFactorAt?: Date;
+    /** When a code was actually entered. Never moves — the absolute ceiling is measured from it. */
+    twoFactorIssuedAt?: Date;
   }
+}
+
+/**
+ * Was a CODE entered recently — not merely activity seen?
+ *
+ * Tier-3 deliberately measures from `issuedAt`, so clicking around the console does not keep the
+ * dangerous window open. Fifteen minutes from typing a code, and no amount of browsing extends it.
+ *
+ * Falls back to the sliding stamp only for pre-existing cookies that carry no `issuedAt`.
+ */
+function freshCodeEntered(req: FastifyRequest, now: Date = new Date()): boolean {
+  const issued = req.twoFactorIssuedAt ?? req.twoFactorAt;
+  if (issued === undefined) return false;
+  const age = now.getTime() - issued.getTime();
+  return age >= 0 && age < FRESH_STEP_UP_TTL_MS;
+}
+
+/**
+ * Pushes the sliding half of the step-up cookie forward.
+ *
+ * Best-effort: a response that has already been sent, or a route using a raw reply, must never turn
+ * a successful admin action into a failure because a convenience cookie could not be rewritten.
+ */
+function stampActivity(ctx: ExecutionContext, req: FastifyRequest): void {
+  try {
+    const reply = ctx.switchToHttp().getResponse<{
+      setCookie?: (name: string, value: string, options?: Record<string, unknown>) => unknown;
+    }>();
+    if (typeof reply.setCookie !== 'function') return;
+
+    const issued = req.twoFactorIssuedAt ?? req.twoFactorAt;
+    if (issued === undefined) return;
+
+    const secure = process.env['NODE_ENV'] === 'production';
+    reply.setCookie(`${secure ? '__Host-' : ''}gs_2fa`, `${issued.getTime()}.${Date.now()}`, {
+      httpOnly: true,
+      secure,
+      // Strict, like the original: nothing navigates cross-site into an admin action.
+      sameSite: 'strict',
+      path: '/',
+      maxAge: Math.floor(STEP_UP_ABSOLUTE_MS / 1000),
+    });
+  } catch {
+    // See above — this is a convenience, not a control.
+  }
+}
+
+/**
+ * Has this step-up outlived its absolute ceiling, regardless of activity?
+ *
+ * The sliding window alone never ends — a tab left open on a polling admin page renews itself
+ * forever, and the second factor stops applying to precisely the machine most likely to have been
+ * walked away from. This is measured from when a CODE was entered and nothing moves it.
+ *
+ * A session from before the sliding change carries no `issuedAt`; those are allowed through on the
+ * sliding check alone rather than being signed out mid-shift for no gain.
+ */
+export function withinAbsoluteWindow(
+  req: FastifyRequest,
+  now: Date = new Date(),
+  windowMs: number = STEP_UP_ABSOLUTE_MS,
+): boolean {
+  const issued = req.twoFactorIssuedAt;
+  if (issued === undefined) return true;
+  const age = now.getTime() - issued.getTime();
+  // Same both-bounds rule as below: a future timestamp must not pass forever.
+  return age >= 0 && age < windowMs;
 }
 
 /**

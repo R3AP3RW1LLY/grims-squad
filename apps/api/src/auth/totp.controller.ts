@@ -4,7 +4,7 @@ import { AppError, ErrorCode } from '@grims/shared';
 import { User, type CurrentUser } from './current-user.js';
 import { verifyCsrf, readCsrfCookie } from '../common/csrf.js';
 import { TotpService } from './totp.service.js';
-import { STEP_UP_TTL_MS } from './admin-gate.guard.js';
+import { STEP_UP_ABSOLUTE_MS } from './admin-gate.guard.js';
 
 const IS_SECURE = process.env['NODE_ENV'] === 'production';
 const STEP_UP_COOKIE = `${IS_SECURE ? '__Host-' : ''}gs_2fa`;
@@ -92,7 +92,13 @@ export class TotpController {
   }
 
   #setStepUp(reply: FastifyReply): void {
-    (reply as unknown as CookieJar).setCookie(STEP_UP_COOKIE, String(Date.now()), {
+    /*
+     * `<issuedAt>.<lastSeenAt>`, both the same at the moment a code is entered. The first never
+     * moves and bounds the session absolutely; the second slides with activity. See
+     * admin-gate.guard.ts.
+     */
+    const now = Date.now();
+    (reply as unknown as CookieJar).setCookie(STEP_UP_COOKIE, `${now}.${now}`, {
       httpOnly: true,
       secure: IS_SECURE,
       // Strict, unlike the session cookie. Nothing navigates cross-site into an
@@ -100,7 +106,7 @@ export class TotpController {
       // navigation — and this is the cookie that opens the console.
       sameSite: 'strict',
       path: '/',
-      maxAge: Math.floor(STEP_UP_TTL_MS / 1000),
+      maxAge: Math.floor(STEP_UP_ABSOLUTE_MS / 1000),
     });
   }
 }

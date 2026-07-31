@@ -68,10 +68,23 @@ export class AuthGuard implements CanActivate {
      * a timestamp we set ourselves in an httpOnly cookie; freshness is judged
      * downstream, and a malformed value simply means "not stepped up".
      */
+    /*
+     * `<issuedAt>.<lastSeenAt>` — two timestamps, because the window now SLIDES on activity while
+     * still having an absolute ceiling. `issuedAt` is when a code was actually entered and never
+     * moves; `lastSeenAt` moves with every admin request.
+     *
+     * A single number is still accepted: cookies minted before this change carry one, and treating
+     * those sessions as expired would sign every officer out mid-shift for no security gain.
+     */
     const stepUpRaw = cookies[`${secure ? '__Host-' : ''}gs_2fa`];
     if (typeof stepUpRaw === 'string') {
-      const ms = Number(stepUpRaw);
-      if (Number.isFinite(ms) && ms > 0) req.twoFactorAt = new Date(ms);
+      const [issuedRaw, seenRaw] = stepUpRaw.split('.');
+      const issued = Number(issuedRaw);
+      const seen = seenRaw === undefined ? issued : Number(seenRaw);
+      if (Number.isFinite(issued) && issued > 0) {
+        req.twoFactorIssuedAt = new Date(issued);
+        req.twoFactorAt = new Date(Number.isFinite(seen) && seen > 0 ? seen : issued);
+      }
     }
 
     if (isPublic === true) return true;

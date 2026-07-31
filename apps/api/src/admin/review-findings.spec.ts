@@ -107,15 +107,20 @@ describe('tier-3 actions require a FRESH step-up', () => {
   });
 
   it('the fresh window is much shorter than the ordinary one', () => {
+    // Both raised 2026-07-31 on the owner's instruction: 2h -> 8h general, 2min -> 15min tier-3.
+    // The RATIO is the property that matters and it is asserted, not just the value.
     expect(FRESH_STEP_UP_TTL_MS).toBeLessThan(STEP_UP_TTL_MS);
-    expect(FRESH_STEP_UP_TTL_MS).toBe(2 * 60_000);
+    expect(FRESH_STEP_UP_TTL_MS).toBe(15 * 60_000);
+    expect(STEP_UP_TTL_MS / FRESH_STEP_UP_TTL_MS).toBeGreaterThanOrEqual(8);
   });
 
   it('MANDATORY: a step-up old enough for the console is NOT fresh enough for tier 3', () => {
     // The exact gap the finding was about: valid for /app, refused for a grant.
     const now = new Date('2026-07-27T12:00:00Z');
-    const fiveMinutesAgo = new Date(now.getTime() - 5 * 60_000);
-    const req = { twoFactorAt: fiveMinutesAgo } as never;
+    // Twenty minutes, since tier-3 moved from two minutes to fifteen. The POINT of this test is the
+    // gap between the two windows, so the value has to sit inside one and outside the other.
+    const twentyMinutesAgo = new Date(now.getTime() - 20 * 60_000);
+    const req = { twoFactorAt: twentyMinutesAgo } as never;
 
     expect(twoFactorFreshInSession(req, now)).toBe(true);
     expect(twoFactorFreshInSession(req, now, FRESH_STEP_UP_TTL_MS)).toBe(false);
@@ -135,7 +140,9 @@ describe('tier-3 actions require a FRESH step-up', () => {
         switchToHttp: () => ({ getRequest: () => req }),
       }) as never;
 
-    const stale = new Date(Date.now() - 5 * 60_000);
+    // Twenty minutes: past the fifteen-minute tier-3 window, well inside the eight-hour general
+    // one — so this asserts the tier-3 gate specifically, not merely an expired session.
+    const stale = new Date(Date.now() - 20 * 60_000);
     await expect(
       guard.canActivate(ctx({ user: { userId: 'u1' }, twoFactorAt: stale })),
     ).rejects.toThrow(/fresh/i);

@@ -3,6 +3,7 @@ import { Reflector } from '@nestjs/core';
 import {
   AdminGateGuard,
   twoFactorFreshInSession,
+  STEP_UP_ABSOLUTE_MS,
   STEP_UP_TTL_MS,
   FRESH_STEP_UP_TTL_MS,
 } from './admin-gate.guard.js';
@@ -121,29 +122,47 @@ describe('step-up freshness', () => {
     expect(twoFactorFreshInSession({ twoFactorAt: future } as never, NOW)).toBe(false);
   });
 
-  it('MANDATORY: the window is two hours, and no longer', () => {
+  it('MANDATORY: the general window is eight hours of INACTIVITY', () => {
     /*
-     * Raised from fifteen minutes on the squadron owner's instruction. Pinned
-     * as a CEILING: the cost of a longer window is that a stepped-up session
-     * left open on an unattended machine stays privileged for longer, and that
-     * cost was accepted deliberately rather than drifting upward later.
+     * Squadron owner, 2026-07-31: "can we make the 2FA timeout every 8 hours unless activity is
+     * detected?"
+     *
+     * Raised from two hours, and the meaning changed with it: this is now measured from the last
+     * admin request rather than from entering a code, so a long shift is never interrupted.
      */
-    expect(STEP_UP_TTL_MS).toBe(2 * 60 * 60_000);
+    expect(STEP_UP_TTL_MS).toBe(8 * 60 * 60_000);
   });
 
-  it('MANDATORY: the TIER-3 window was NOT raised with it', () => {
+  it('MANDATORY: a sliding window still has an absolute ceiling', () => {
     /*
-     * ★ WHAT MAKES TWO HOURS SURVIVABLE ★
+     * ★ WITHOUT THIS, THE SECOND FACTOR STOPS APPLYING ★
      *
-     * Granting roles, changing site config and resetting somebody's second
-     * factor still require a challenge from the last two minutes. So the longer
-     * window buys convenience for reading and routine work, and buys nothing
-     * for the operations that can do lasting damage.
-     *
-     * If these two ever converge, the reasoning above stops holding — which is
-     * why they are asserted together.
+     * A purely sliding window never ends. A browser tab left open on a polling admin page renews
+     * itself indefinitely, so the machine MOST likely to have been walked away from is the one that
+     * stays privileged forever. The ceiling is measured from when a code was entered and nothing
+     * moves it.
      */
-    expect(FRESH_STEP_UP_TTL_MS).toBe(2 * 60_000);
+    expect(STEP_UP_ABSOLUTE_MS).toBe(24 * 60 * 60_000);
+    expect(STEP_UP_ABSOLUTE_MS).toBeGreaterThan(STEP_UP_TTL_MS);
+  });
+
+  it('MANDATORY: tier-3 is fifteen minutes, and does NOT slide', () => {
+    /*
+     * ★ RAISED FROM TWO MINUTES ON THE OWNER'S INSTRUCTION, WITH THE COST STATED ★
+     *
+     * Squadron owner, 2026-07-31, after being shown the trade. Two minutes meant re-entering a code
+     * between each change while working through a batch of role edits — the kind of friction that
+     * gets a control switched off entirely.
+     *
+     * The cost is real: a stepped-up session left unattended can grant permissions for a quarter of
+     * an hour rather than two minutes.
+     *
+     * What keeps it defensible is that tier-3 measures from the CODE, not from activity. Clicking
+     * around the console extends the eight-hour window and does nothing for this one. If these ever
+     * converge, or if this ever starts sliding, the reasoning collapses — which is why they are
+     * asserted together.
+     */
+    expect(FRESH_STEP_UP_TTL_MS).toBe(15 * 60_000);
     expect(FRESH_STEP_UP_TTL_MS).toBeLessThan(STEP_UP_TTL_MS);
   });
 });
