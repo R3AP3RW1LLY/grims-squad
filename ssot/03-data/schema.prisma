@@ -1478,6 +1478,74 @@ model ScreenDecision {
   @@map("screen_decisions")
 }
 
+/// One ingested fact, from any source.
+///
+/// ★ ONE TABLE, NOT SEVEN ★
+///
+/// Ships, systems, stations and blueprints have wildly different shapes, and a table each would mean
+/// a migration every time a source is added — plus seven places for the assistant's lookup to know
+/// about. The shared columns are the ones every source has (what it is, what it is called, where it
+/// came from, when we learned it) and `data` carries the rest.
+///
+/// The cost is honest: `data` is not type-checked by the database. The ingest for each source is
+/// where its shape is enforced, and the retrieval layer treats anything in here as untrusted.
+model KnowledgeItem {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  /// `journal`, `coriolis`, `galaxy`, `eddn`, `inara`, `reference`, `forum`.
+  source String
+  /// `ship`, `module`, `blueprint`, `system`, `station`, `commander`, `article`.
+  kind   String
+
+  /// The natural key WITHIN a source — a system name, a ship id, a wiki slug. With `source` and
+  /// `kind` this is what makes re-ingesting an update rather than a duplicate.
+  extKey String @map("ext_key")
+
+  /// What a human calls it. Indexed for the exact and fuzzy name lookups that answer most questions.
+  name String
+
+  /// Everything else, shaped by the source.
+  data Json
+
+  /// Prose, for sources stored as vectors. Null for structured rows, which are looked up instead.
+  /// Kept separate from `data` so the embedder never has to guess which field to read.
+  text String?
+
+  /// nomic-embed-text, 768 dims. Added by the migration as `vector(768)` with an HNSW index —
+  /// Prisma has no native type, and a generated diff would drop it.
+  /// embedding vector(768)
+
+  /// 3D position, for `cube`-based nearest-neighbour on systems. Also migration-only.
+  /// coords cube
+
+  ingestedAt DateTime @default(now()) @map("ingested_at") @db.Timestamptz(6)
+
+  @@unique([source, kind, extKey])
+  @@index([source, kind])
+  @@index([name])
+  @@map("knowledge_items")
+}
+
+/// One ingestion run, so the training page can say what happened and when.
+///
+/// Records FAILURES as well as successes. A source that is quietly broken looks identical to one
+/// that has never been ingested, and both look like "nothing to see" on a status page.
+model KnowledgeIngest {
+  id     String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  source String
+
+  startedAt  DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
+  finishedAt DateTime? @map("finished_at") @db.Timestamptz(6)
+
+  /// Rows written. Null while running.
+  rows Int?
+  /// Null on success. The message an officer reads on the training page.
+  error String?
+
+  @@index([source, startedAt])
+  @@map("knowledge_ingests")
+}
+
 model ForumReaction {
   postId String @map("post_id") @db.Uuid
   userId String @map("user_id") @db.Uuid

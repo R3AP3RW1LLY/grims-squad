@@ -92,7 +92,7 @@ describe('P0.2 database schema', () => {
     // 71 tables: 70 Prisma models plus screen_decisions, added 2026-07-31 for the screening
     // feedback loop. Its vector column is hand-written in the migration because Prisma has no
     // native pgvector type and would drop it on every generated diff.
-    expect(Number(r[0]?.n)).toBe(71);
+    expect(Number(r[0]?.n)).toBe(73);
   });
 
   describe('hand-written DDL that Prisma cannot express', () => {
