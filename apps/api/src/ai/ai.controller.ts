@@ -8,12 +8,26 @@ import { AiStreamService, type AiLogLine } from './ai-stream.service.js';
 import { AiClient, aiHealth } from './ai.client.js';
 import { ImageClient } from './image.client.js';
 
-/** Each runtime reported on its own, because they run on different cards and fail independently. */
+/**
+ * Each runtime reported on its own, because they run on different cards and fail independently.
+ *
+ * ★ NO MODEL IDENTIFIER LEAVES THIS ROUTE ★
+ *
+ * Squadron owner, 2026-07-31: "please only refer to our AI as GMSD AI ... dont mention any 3rd
+ * party AI models in this app or website".
+ *
+ * This response used to carry `model`, and the moderation tab rendered it faithfully — so an
+ * officer opening the admin area read the raw model name off an environment variable. Nobody had
+ * typed it anywhere; it simply travelled.
+ *
+ * The field is GONE rather than blanked, so a future edit cannot reintroduce it by populating
+ * something that already exists. `aiHealth()` still resolves the model internally to make the
+ * request; it is dropped here, at the boundary, which is the only place the guarantee holds.
+ */
 export interface AiHealth {
   readonly text: {
     readonly configured: boolean;
     readonly reachable: boolean;
-    readonly model: string | null;
     readonly tookMs: number;
   };
   readonly image: {
@@ -75,7 +89,8 @@ export class AiController {
     const [text, image] = await Promise.all([aiHealth(this.ai), this.images.health()]);
 
     return {
-      text: { configured: this.ai.configured, ...text },
+      // `model` is deliberately destructured away and not spread. See AiHealth.
+      text: { configured: this.ai.configured, reachable: text.reachable, tookMs: text.tookMs },
       image: { configured: this.images.configured, ...image },
     };
   }

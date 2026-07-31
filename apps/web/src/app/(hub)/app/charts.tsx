@@ -1,7 +1,6 @@
 'use client';
 
 import {
-  Area,
   Bar,
   BarChart,
   CartesianGrid,
@@ -220,17 +219,6 @@ export function ActivityChart({ days, monthLabel }: { days: HeatDay[]; monthLabe
     <div>
       <ResponsiveContainer width="100%" height={200}>
         <ComposedChart data={days} margin={{ top: 8, right: 8, bottom: 0, left: -20 }}>
-          <defs>
-            {/*
-              A gradient, not a flat fill. At 200px tall a solid block hides the
-              line crossing it; fading to nothing keeps both readable.
-            */}
-            <linearGradient id="actionsFill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={BRAND.cyan} stopOpacity={0.5} />
-              <stop offset="100%" stopColor={BRAND.cyan} stopOpacity={0.02} />
-            </linearGradient>
-          </defs>
-
           <CartesianGrid stroke="rgba(147,164,184,0.08)" vertical={false} />
           <XAxis
             dataKey="day"
@@ -279,7 +267,20 @@ export function ActivityChart({ days, monthLabel }: { days: HeatDay[]; monthLabe
                 String(n),
             ]}
           />
-          <Area
+          {/*
+            ★ A LINE, NOT AN AREA ★
+
+            Squadron owner, 2026-07-31: "the discord orange line, with the blue filling, lets remove
+            the blue filling, use lines only please."
+
+            It was an Area with an orange stroke over a CYAN gradient — so the fill did not even
+            match its own line, and on a chart that now carries four series it read as a coloured
+            region behind three unrelated lines rather than as one of them.
+
+            Lines only also makes the four series directly comparable, which is the entire point of
+            having split messages, voice, forum and members apart.
+          */}
+          <Line
             yAxisId="actions"
             type="monotone"
             dataKey="messages"
@@ -291,7 +292,7 @@ export function ActivityChart({ days, monthLabel }: { days: HeatDay[]; monthLabe
              */
             stroke={BRAND.orange}
             strokeWidth={2}
-            fill="url(#actionsFill)"
+            dot={false}
           />
           {/*
             ★ VOICE, SPLIT OUT OF THE OLD COMBINED FIGURE ★

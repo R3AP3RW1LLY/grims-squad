@@ -33,6 +33,32 @@
  * silent, and "unavailable" is a first-class answer rather than an exception nobody handles.
  */
 
+/**
+ * What the AI is called, everywhere a person can see it.
+ *
+ * ★ SQUADRON OWNER, 2026-07-31 ★
+ *
+ * "please only refer to our AI as GMSD AI please dont mention any 3rd party AI models in this app
+ * or website please! this is very important!"
+ *
+ * ★ WHY THIS IS A CONSTANT AND NOT A STYLE NOTE ★
+ *
+ * The leak that prompted it was not prose somebody typed — it was `GET /v1/ai/health` returning the
+ * configured model name, which the moderation tab then rendered faithfully. Nobody wrote
+ * "qwen2.5:7b" anywhere; the value simply travelled from an environment variable to a screen.
+ *
+ * So the rule is enforced at the BOUNDARY: no route returns a model identifier, and every surface
+ * that names the service uses this constant. A convention would have been re-broken by the next
+ * person who added a status field.
+ *
+ * ★ WHAT STAYS ★
+ *
+ * Model filenames in config, and node names in the image graphs, are how we talk to the runtime —
+ * they are wiring, not copy, and renaming them would simply stop the thing working. The rule is
+ * about what a member or officer READS, and none of those reach a screen.
+ */
+export const AI_NAME = 'GMSD AI';
+
 /** What screening concluded about a piece of writing. */
 export type ScreenVerdict = 'clear' | 'flagged' | 'unavailable';
 

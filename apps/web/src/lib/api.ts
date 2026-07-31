@@ -481,7 +481,8 @@ export const getHeldPosts = (): Promise<{ posts: HeldPostRow[]; total: number } 
  * text up and image busy. One combined "AI: ok" would be wrong most evenings.
  */
 export const getAiHealth = (): Promise<{
-  text: { configured: boolean; reachable: boolean; model: string | null; tookMs: number };
+  /* No model identifier: the API deliberately does not return one. See AI_NAME. */
+  text: { configured: boolean; reachable: boolean; tookMs: number };
   image: { configured: boolean; reachable: boolean; tookMs: number };
 } | null> => get('/v1/ai/health', { authed: true });
 

@@ -192,7 +192,7 @@ export class StudioClient {
       this.stream?.emit({
         level: 'error',
         kind: 'studio',
-        message: `ComfyUI would not accept the ${req.op} job — check the models are installed.`,
+        message: `The artwork service would not accept the ${req.op} job — check it is set up.`,
         tookMs: Date.now() - started,
       });
       return null;

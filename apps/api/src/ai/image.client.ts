@@ -134,7 +134,7 @@ export class ImageClient {
       this.stream?.emit({
         level: 'error',
         kind: 'image',
-        message: 'ComfyUI would not accept the job — is it running?',
+        message: 'The artwork service would not accept the job — is it running?',
         tookMs: Date.now() - started,
       });
       return null;
@@ -148,7 +148,7 @@ export class ImageClient {
         message:
           waited.failure === 'timeout'
             ? 'Generation timed out. The GPU is likely busy with the game.'
-            : 'Generation finished with no image — check the ComfyUI window.',
+            : 'Generation finished with no image. Out of memory is the usual cause.',
         tookMs: Date.now() - started,
       });
       return null;

@@ -2,6 +2,13 @@
 
 import { useState } from 'react';
 import { apiPut } from '../../../lib/api-client';
+/*
+ * The SUBPATH, not the barrel. A client component importing '@grims/shared' pulls the whole index,
+ * which reaches `node:crypto` and 500s every hub page — a bug this codebase has already shipped
+ * once. `client-imports.spec.ts` catches it, and caught it again here. `ai.ts` imports nothing, so
+ * the subpath is safe to reach from a browser bundle.
+ */
+import { AI_NAME } from '@grims/shared/ai';
 import type { HeldPostRow } from '../../../lib/api';
 import { AiLogPanel } from './ai-log';
 
@@ -33,7 +40,7 @@ interface Props {
   readonly initial: readonly HeldPostRow[];
   readonly total: number;
   readonly health: {
-    text: { configured: boolean; reachable: boolean; model: string | null };
+    text: { configured: boolean; reachable: boolean };
     image: { configured: boolean; reachable: boolean };
   } | null;
 }
@@ -159,18 +166,23 @@ export function Moderation({ initial, total, health }: Props) {
 function Health({ health }: { health: Props['health'] }) {
   if (health === null) return null;
 
+  /*
+   * Named by what they DO, not by what runs them. Squadron owner, 2026-07-31: the AI is GMSD AI and
+   * nothing else is named. An officer needs to know which capability is down, which these say; the
+   * model behind it tells them nothing they can act on.
+   */
   const rows = [
-    { label: 'Screening & assistant', s: health.text, extra: health.text.model },
-    { label: 'Artwork', s: health.image, extra: null },
+    { label: 'Screening & assistant', s: health.text },
+    { label: 'Artwork', s: health.image },
   ];
 
   return (
     <section className="rounded border border-[var(--color-border-hairline)] p-5">
       <h3 className="font-mono text-[11px] uppercase tracking-[0.24em] text-[var(--color-text-secondary)]">
-        AI services
+        {AI_NAME}
       </h3>
       <ul className="mt-3 space-y-2">
-        {rows.map(({ label, s, extra }) => (
+        {rows.map(({ label, s }) => (
           <li key={label} className="flex items-baseline gap-3 text-sm">
             <span
               aria-hidden="true"
@@ -185,7 +197,6 @@ function Health({ health }: { health: Props['health'] }) {
             <span className="text-[var(--color-text-primary)]">{label}</span>
             <span className="text-[var(--color-text-secondary)]">
               {!s.configured ? 'not switched on' : s.reachable ? 'answering' : 'not reachable'}
-              {extra !== null && extra !== '' && s.reachable ? ` — ${extra}` : ''}
             </span>
           </li>
         ))}
