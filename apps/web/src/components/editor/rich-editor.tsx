@@ -143,6 +143,12 @@ export function RichEditor({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  /*
+   * `handlePaste` is defined inside the useEditor options, so it cannot close over `editor` — the
+   * variable does not exist yet. A ref assigned immediately afterwards is the usual way round it,
+   * and is safe because the handler only ever runs after the editor has mounted.
+   */
+  const editorRef = useRef<Editor | null>(null);
 
   const editor = useEditor({
     extensions: [
@@ -167,7 +173,18 @@ export function RichEditor({
       }),
       Link.configure({
         openOnClick: false,
-        autolink: false,
+        /*
+         * ★ ON, AND IT WAS THE BUG ★
+         *
+         * Squadron owner, 2026-07-31: "youtube videos are still not linking or working at all when
+         * adding via links".
+         *
+         * With this false, pasting or typing a URL produced PLAIN TEXT — not a video, and not even
+         * a clickable link. The only way to embed was a toolbar button behind a window.prompt,
+         * which nobody finds, and the only way to make a link was to select text and use the link
+         * control. Every natural action produced nothing, which is exactly what was reported.
+         */
+        autolink: true,
         /*
          * The schemes the server accepts. Configured here as well so a rejected link is refused
          * while typing rather than at save time — the server remains the authority, this is just
@@ -190,6 +207,36 @@ export function RichEditor({
      * flag has caught the same reflex in this project, and it is right every time: an option
      * that is present-but-undefined is a different instruction from an absent one.
      */
+    /*
+     * ★ PASTING A YOUTUBE LINK EMBEDS IT ★
+     *
+     * This is what "adding via links" means to somebody writing a post: copy the URL from YouTube,
+     * paste it, get a video. Before this there was no paste handling at all, so the link landed as
+     * text and the author had to discover a toolbar button that opens a browser prompt.
+     *
+     * ★ ONLY WHEN THE PASTE IS THE LINK AND NOTHING ELSE ★
+     *
+     * Pasting a paragraph that happens to mention a video must not silently swallow the paragraph
+     * and replace it with an embed. So the whole clipboard text has to be one recognised YouTube
+     * URL — anything else falls through to the normal paste, which now autolinks it.
+     */
+    editorProps: {
+      handlePaste: (_view, event) => {
+        const text = event.clipboardData?.getData('text/plain')?.trim() ?? '';
+        if (text === '' || /\s/.test(text)) return false;
+
+        const videoId = parseYouTubeId(text);
+        if (videoId === null) return false;
+
+        editorRef.current
+          ?.chain()
+          .focus()
+          .insertContent({ type: 'squadronVideo', attrs: { videoId, title: '' } })
+          .run();
+        // Handled: stop ProseMirror inserting the raw URL as well.
+        return true;
+      },
+    },
     ...(initial === undefined ? {} : { content: fromDocument(initial) as never }),
     editable: !disabled && !preview,
     /*
@@ -201,6 +248,9 @@ export function RichEditor({
       onChange(toDocument(e.getJSON() as never));
     },
   });
+
+  // Kept current for `handlePaste`, which cannot close over `editor` — see the ref's declaration.
+  editorRef.current = editor;
 
   /*
    * Adopts a NEW `initial` when the parent supplies one — e.g. after loading an existing post.
