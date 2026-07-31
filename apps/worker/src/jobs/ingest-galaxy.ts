@@ -27,6 +27,8 @@ export interface SystemRow {
   readonly data: Record<string, unknown>;
   /** Galactic position, for the `cube` index. Stations inherit their system's. */
   readonly coords: { x: number; y: number; z: number } | null;
+  /** A sentence describing the row. Embedded, and what the assistant reads. */
+  readonly text: string;
 }
 
 interface RawSystem {
@@ -92,6 +94,16 @@ export function parseSystemLine(line: string): SystemRow[] | null {
         controllingFaction: raw.controllingFaction?.name ?? null,
       },
       coords,
+      /*
+       * ★ A SENTENCE, SO THE ROW CAN BE EMBEDDED AND READ ★
+       *
+       * Structured rows carried no text at all, which meant they could not be embedded — and when
+       * the assistant did retrieve one it was handed raw JSON and paraphrased a data structure.
+       *
+       * Written at INGEST rather than at query time so it is embedded and retrieved as the same
+       * words. A summary generated per request would drift from the vector that found it.
+       */
+      text: describeSystem(name, raw),
     },
   ];
 
@@ -164,10 +176,55 @@ export function parseSystemLine(line: string): SystemRow[] | null {
         updatedAt: s.updateTime ?? null,
       },
       coords,
+      text: describeStation(sName, name, s),
     });
   }
 
   return rows;
+}
+
+/** One system, as a sentence. Only what somebody would actually ask about. */
+function describeSystem(name: string, raw: RawSystem): string {
+  const bits = [`${name} is a star system`];
+  if (typeof raw.allegiance === 'string') bits.push(`aligned to ${raw.allegiance}`);
+  if (typeof raw.government === 'string') bits.push(`under ${raw.government} government`);
+  if (typeof raw.primaryEconomy === 'string') bits.push(`with a ${raw.primaryEconomy} economy`);
+  if (typeof raw.security === 'string') bits.push(`and ${raw.security} security`);
+
+  const parts = [`${bits.join(', ')}.`];
+  if (typeof raw.population === 'number' && raw.population > 0) {
+    parts.push(`Population ${raw.population.toLocaleString()}.`);
+  }
+  if (typeof raw.controllingFaction?.name === 'string') {
+    parts.push(`Controlled by ${raw.controllingFaction.name}.`);
+  }
+  const stations = Array.isArray(raw.stations) ? raw.stations.length : 0;
+  if (stations > 0) parts.push(`${stations} station${stations === 1 ? '' : 's'}.`);
+  return parts.join(' ');
+}
+
+/** One station, as a sentence. The pad size is first because it decides whether you can go. */
+function describeStation(
+  station: string,
+  system: string,
+  s: { type?: unknown; landingPads?: unknown; services?: unknown; primaryEconomy?: unknown; distanceToArrival?: unknown },
+): string {
+  const parts = [`${station} is a ${typeof s.type === 'string' ? s.type : 'station'} in ${system}.`];
+
+  const pads = s.landingPads as { large?: unknown } | undefined;
+  const large = typeof pads?.large === 'number' ? pads.large : 0;
+  // Named either way. "No large pad" is the answer to a question people ask constantly, and its
+  // absence from the text would make the row useless for exactly that question.
+  parts.push(large > 0 ? `It has ${large} large landing pad${large === 1 ? '' : 's'}.` : 'It has no large landing pad.');
+
+  if (typeof s.primaryEconomy === 'string') parts.push(`Economy: ${s.primaryEconomy}.`);
+  if (typeof s.distanceToArrival === 'number') {
+    parts.push(`${Math.round(s.distanceToArrival).toLocaleString()} ls from arrival.`);
+  }
+  if (Array.isArray(s.services) && s.services.length > 0) {
+    parts.push(`Services: ${s.services.filter((x) => typeof x === 'string').join(', ')}.`);
+  }
+  return parts.join(' ');
 }
 
 /**

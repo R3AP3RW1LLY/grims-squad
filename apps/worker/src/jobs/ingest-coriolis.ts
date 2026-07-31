@@ -25,6 +25,8 @@ export interface KnowledgeRow {
   readonly extKey: string;
   readonly name: string;
   readonly data: unknown;
+  /** A sentence describing the row. Embedded, and what the assistant reads. */
+  readonly text: string;
 }
 
 /**
@@ -52,7 +54,14 @@ export function readCoriolis(root: string): KnowledgeRow[] {
       for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
         const ship = value as { properties?: { name?: unknown } };
         const name = typeof ship.properties?.name === 'string' ? ship.properties.name : key;
-        rows.push({ source: 'coriolis', kind: 'ship', extKey: key, name, data: value });
+        rows.push({
+          source: 'coriolis',
+          kind: 'ship',
+          extKey: key,
+          name,
+          data: value,
+          text: describeShip(name, value),
+        });
       }
     }
   }
@@ -74,6 +83,7 @@ export function readCoriolis(root: string): KnowledgeRow[] {
 
         for (const [variant, value] of Object.entries(parsed as Record<string, unknown>)) {
           rows.push({
+            text: `${prettyName(base)} is a ${group} module for Elite Dangerous ships (variant ${variant}).`,
             source: 'coriolis',
             kind: 'module',
             // Group included: `frame_shift_drive` exists under more than one group in principle, and
@@ -100,11 +110,47 @@ export function readCoriolis(root: string): KnowledgeRow[] {
         extKey: key,
         name: prettyName(key),
         data: value,
+        text:
+          `${prettyName(key)} is an engineering blueprint. It modifies a module's statistics at ` +
+          `grades 1 to 5; higher grades give a larger effect and need rarer materials.`,
       });
     }
   }
 
   return rows;
+}
+
+/**
+ * One ship, as a sentence.
+ *
+ * ★ WRITTEN AT INGEST SO IT CAN BE EMBEDDED ★
+ *
+ * Structured rows carried no text, so nothing could embed them and the assistant was handed raw
+ * JSON when it retrieved one. The numbers people actually ask about — pads, jump range, hardpoints
+ * — belong in words a vector search can match.
+ */
+function describeShip(name: string, value: unknown): string {
+  const ship = value as { properties?: Record<string, unknown> };
+  const p = ship.properties ?? {};
+  const bits = [`${name} is a ship in Elite Dangerous`];
+
+  const num = (k: string): number | null => (typeof p[k] === 'number' ? (p[k] as number) : null);
+  const cls = num('class');
+  if (cls !== null) {
+    // Landing pad size is the single most consequential fact about a hull.
+    bits.push(`It needs a ${cls === 1 ? 'small' : cls === 2 ? 'medium' : 'large'} landing pad`);
+  }
+  const hardpoints = num('hardpoints');
+  if (hardpoints !== null) bits.push(`with ${hardpoints} hardpoints`);
+  const mass = num('hullMass');
+  if (mass !== null) bits.push(`and a hull mass of ${mass} tonnes`);
+
+  const parts = [`${bits.join(', ')}.`];
+  const cost = num('cost');
+  if (cost !== null) parts.push(`It costs about ${cost.toLocaleString()} credits.`);
+  const speed = num('speed');
+  if (speed !== null) parts.push(`Top speed ${speed} m/s.`);
+  return parts.join(' ');
 }
 
 /** `frame_shift_drive` -> `Frame Shift Drive`. What a member would type and read. */

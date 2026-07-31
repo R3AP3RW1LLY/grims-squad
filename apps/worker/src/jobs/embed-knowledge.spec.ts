@@ -40,16 +40,19 @@ function fakeDb(rows: Array<{ id: string; text: string }>) {
 const vector = (fill = 0.5) => new Array(EMBED_DIMS).fill(fill);
 
 describe('what gets embedded', () => {
-  it('MANDATORY: asks only for sources the contract marks as vector', async () => {
+  it('MANDATORY: embeds every source the contract marks, which is now all of them', async () => {
     /*
-     * ★ THE THREE-WEEK MISTAKE THIS PREVENTS ★
+     * ★ THIS TEST USED TO ASSERT THE OPPOSITE ★
      *
-     * Embedding 448,676 systems would take roughly three weeks on this hardware and produce a
-     * WORSE assistant: asked about "Deciat" a vector search returns Deciak and Decius, because they
-     * sit near it in embedding space. "Which stations in Deciat have a large pad" has one correct
-     * answer and an index built for similarity cannot give it.
+     * It required the galaxy to be EXCLUDED, on the grounds that embedding 448,676 systems would
+     * take "roughly three weeks". Measured on the actual card: 104/s at concurrency 8, so just over
+     * an hour. The figure was inherited and never checked, and it shaped the design.
      *
-     * The source list is DERIVED from STORAGE_KIND rather than written out, so this cannot drift.
+     * What has NOT changed is that embedding is added rather than substituted — "which stations in
+     * Deciat have a large pad" is still an exact lookup, because a similarity search answers it
+     * with Deciak. `STORAGE_KIND` says `both` for those sources and that is the point of the word.
+     *
+     * The list is DERIVED from the contract rather than written out here, so it cannot drift.
      */
     const { db } = fakeDb([]);
     await embedKnowledge(db, { embed: async () => vector() });
@@ -57,14 +60,26 @@ describe('what gets embedded', () => {
     const call = (db.$queryRawUnsafe as unknown as { mock: { calls: unknown[][] } }).mock.calls[0];
     const sources = call?.[1] as string[];
 
-    expect(sources).toContain('forum');
-    expect(sources).toContain('reference');
-    expect(sources).not.toContain('galaxy');
-    expect(sources).not.toContain('coriolis');
+    for (const s of ['forum', 'reference', 'galaxy', 'coriolis', 'journal', 'inara']) {
+      expect(sources, s).toContain(s);
+    }
 
-    // And the contract still says so, in case somebody flips one.
-    expect(STORAGE_KIND.galaxy).toBe('lookup');
+    // Indexed AND embedded — not one instead of the other.
+    expect(STORAGE_KIND.galaxy).toBe('both');
     expect(STORAGE_KIND.forum).toBe('vector');
+  });
+
+  it('embeds only the source it was asked for', async () => {
+    /*
+     * The cadences differ by orders of magnitude — the forum every five minutes, the galaxy after
+     * its nightly import. One job sweeping everything on the fastest schedule would re-scan 448,676
+     * rows every five minutes to find nothing.
+     */
+    const { db } = fakeDb([]);
+    await embedKnowledge(db, { embed: async () => vector() }, { sources: ['forum'] });
+
+    const call = (db.$queryRawUnsafe as unknown as { mock: { calls: unknown[][] } }).mock.calls[0];
+    expect(call?.[1]).toEqual(['forum']);
   });
 
   it('writes a pgvector literal', async () => {

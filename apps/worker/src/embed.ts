@@ -1,5 +1,5 @@
 import { PrismaClient } from '@grims/db';
-import { EMBED_DIMS } from '@grims/shared';
+import { EMBED_DIMS, type KnowledgeSource } from '@grims/shared';
 import { embedKnowledge, describeEmbedRun, type Embedder } from './jobs/embed-knowledge.js';
 
 /**
@@ -84,7 +84,20 @@ async function main(): Promise<void> {
 
   const db = new PrismaClient();
   try {
-    const report = await embedKnowledge(db, new OllamaEmbedder(root));
+    /*
+     * Sources named on the command line, so each cadence gets its own cron entry:
+     *
+     *   embed.js forum      every 5 minutes   — somebody answers and walks away
+     *   embed.js journal    every 3 minutes   — where the squadron is RIGHT NOW
+     *   embed.js inara      daily             — the roster changes when somebody joins
+     *   embed.js            everything        — after the nightly galaxy import
+     */
+    const only = process.argv.slice(2).filter((a) => a !== '') as KnowledgeSource[];
+    const report = await embedKnowledge(
+      db,
+      new OllamaEmbedder(root),
+      only.length > 0 ? { sources: only } : {},
+    );
     console.log(describeEmbedRun(report));
     /*
      * A run where EVERY row failed is a broken model, not a quiet night — most likely the tunnel is

@@ -15,17 +15,38 @@ CRON_TZ=UTC
 # Nickname + commander reconciliation. After the Inara sync, so it acts on fresh names.
 40 5 * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/daily-audit.js >> /var/log/grims-worker.log 2>&1
 
-# Embedding prose knowledge. The ONE job here that uses the GPU — everything else in the ingest
-# pipeline is a database write, which is why the card is idle during a galaxy import.
+# ── Embedding ────────────────────────────────────────────────────────────────
 #
-# 06:00, after the 05:50 Inara ingest and before the 06:10 role sync. It embeds forum answers and
-# reference text; structured sources are looked up, never embedded (see STORAGE_KIND — embedding
-# 448,676 systems would take about three weeks and answer WORSE, returning Deciak when asked about
-# Deciat).
+# The ONLY jobs here that use the GPU. Everything else in the pipeline is a database write, which is
+# why the card is idle during a galaxy import.
 #
-# Resumable by construction: the work remaining is "prose rows with no vector", so a run that dies
-# half way leaves the rest for the next one and re-running is always safe.
-0 6 * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/embed.js >> /var/log/grims-worker.log 2>&1
+# EVERY source is embedded now. The earlier design embedded prose only, because the galaxy was
+# believed to take "roughly three weeks" — measured on the actual card it is 104 rows/second at
+# concurrency 8, so just over an hour, once, then only what changed. Embedding is ADDED, never
+# substituted: "which stations in Deciat have a large pad" is still an exact lookup, because a
+# similarity search answers that with Deciak.
+#
+# Cadences set by the squadron owner, 2026-08-01, and they follow how fast each source produces text
+# somebody might immediately ask about — not how expensive it is. A sweep with nothing to do is one
+# indexed query returning no rows.
+
+# Forum answers — every 5 minutes. Somebody answers a question and walks away; the next member to
+# ask should get that answer rather than being told nobody has covered it.
+*/5 * * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/embed.js forum >> /var/log/grims-worker.log 2>&1
+
+# Squadron flight logs — every 3 minutes. "Has anyone been to X" while a wing is actually there
+# should answer yes.
+*/3 * * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/embed.js journal >> /var/log/grims-worker.log 2>&1
+
+# The roster — daily, at 06:05, just after its own ingest. It changes when somebody joins or is
+# promoted, and neither happens by the minute.
+5 6 * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/embed.js inara >> /var/log/grims-worker.log 2>&1
+
+# Everything else — 06:20, after the 03:20 galaxy import and the 06:05 roster sweep. This is the one
+# that carries the galaxy and Coriolis, and the only one that is ever long. Resumable by
+# construction: the work remaining IS "rows with no vector", so a run that dies leaves the rest for
+# tomorrow and re-running is never redundant.
+20 6 * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/embed.js >> /var/log/grims-worker.log 2>&1
 
 # Nightly reputation: experience for days flown, and badges for the totals that adds to.
 #

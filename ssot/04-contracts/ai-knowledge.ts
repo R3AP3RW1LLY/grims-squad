@@ -52,29 +52,98 @@ export const KNOWLEDGE_SOURCES = [
 export type KnowledgeSource = (typeof KNOWLEDGE_SOURCES)[number];
 
 /**
- * How each source is stored, and it is not the same for all of them.
+ * How each source is stored, and how often its vectors are refreshed.
  *
- * ★ THE DECISION THAT SAVES THREE WEEKS OF GPU ★
+ * ★ EVERYTHING IS EMBEDDED NOW — SQUADRON OWNER, 2026-08-01 ★
  *
- * Embedding every system in the galaxy would take roughly three weeks on this hardware and produce
- * a WORSE result: asked about "Deciat" it would retrieve systems whose names sound similar — Deciat,
- * Decius, Deciak — rather than facts about Deciat.
+ * "i also think we should be embedding all info collected from ingested sources should we not?"
  *
- * Structured data is looked up. Prose is embedded. The rule is simply which question the data can
- * answer:
+ * Yes. The previous answer was no, and it rested on a number that turned out to be wrong.
  *
- *   'lookup'  exact match, spatial search, attribute filter. SQL and pgvector's cube extension.
- *   'vector'  "what does this MEAN" — guides, lore, explanations, forum answers.
+ * ★ THE CORRECTION ★
+ *
+ * This file used to say embedding the galaxy would take "roughly three weeks on this hardware".
+ * Measured on the actual card rather than assumed:
+ *
+ *     concurrency  1:  22/s  ->  448,676 rows in 5.8h
+ *     concurrency  4:  61/s  ->  2.0h
+ *     concurrency  8: 104/s  ->  1.2h
+ *     concurrency 16: 112/s  ->  1.1h
+ *
+ * Just over an hour, once, and then only what changed. Three weeks would have been a real reason
+ * not to; an hour is not a reason for anything. The estimate was inherited and never checked, and
+ * it shaped the whole design.
+ *
+ * ★ WHAT HAS NOT CHANGED ★
+ *
+ * Embedding is ADDED, never substituted. "Which stations in Deciat have a large pad" is still
+ * answered by an exact lookup on an index, because a similarity search returns Deciak and Decius —
+ * systems that sit near Deciat in embedding space and have nothing to do with the question.
+ *
+ * What vectors add is the question lookup cannot take at all: "somewhere quiet with good mining and
+ * a large pad". No column holds that. So `both` means indexed AND embedded, and the retrieval layer
+ * picks by the shape of the question — see KnowledgeService.
  */
-export const STORAGE_KIND = {
-  journal: 'lookup',
-  coriolis: 'lookup',
-  galaxy: 'lookup',
-  eddn: 'lookup',
-  inara: 'lookup',
+export const STORAGE_KIND: Record<KnowledgeSource, 'lookup' | 'vector' | 'both'> = {
+  journal: 'both',
+  coriolis: 'both',
+  galaxy: 'both',
+  eddn: 'both',
+  inara: 'both',
+  /** Prose. There is nothing to look these up BY except their meaning. */
   reference: 'vector',
   forum: 'vector',
-} as const satisfies Record<KnowledgeSource, 'lookup' | 'vector'>;
+};
+
+/** Every source whose text should carry a vector. Derived, so it can never drift from the table. */
+export const EMBEDDED_SOURCES: KnowledgeSource[] = (
+  Object.keys(STORAGE_KIND) as KnowledgeSource[]
+).filter((s) => STORAGE_KIND[s] !== 'lookup');
+
+/**
+ * How often each source's NEW rows are swept up for embedding, in minutes.
+ *
+ * ★ SET BY THE SQUADRON OWNER, 2026-08-01 ★
+ *
+ * "forum embedding should happen every 5 minutes ... inara is a daily embed, and journal should
+ * embed every 2-3 minutes or in real time should it not?"
+ *
+ * These follow how fast each source produces text somebody might immediately ask about — not how
+ * expensive it is. A sweep with nothing to do is one indexed query that returns no rows.
+ */
+export const EMBED_EVERY_MINUTES: Record<KnowledgeSource, number> = {
+  /*
+   * Somebody answers a question and walks away. The next member to ask should get that answer, not
+   * be told nobody has covered it — five minutes is the difference between the forum feeling like
+   * part of the assistant and feeling like an archive.
+   */
+  forum: 5,
+  /*
+   * Where the squadron has just been. Three minutes: a member asking "has anyone been to X" while
+   * a wing is actually there should hear yes.
+   */
+  journal: 3,
+  /** Prices move constantly, and a stale vector describes a market that no longer exists. */
+  eddn: 5,
+  /** The roster changes when somebody joins or is promoted. Daily is plainly enough. */
+  inara: 1_440,
+  /** Both follow their ingest — there is nothing new between runs, so a sweep would find nothing. */
+  galaxy: 1_440,
+  coriolis: 180,
+  /** Guides change when somebody writes one. */
+  reference: 60,
+};
+
+/**
+ * How many embeddings to have in flight at once.
+ *
+ * ★ EIGHT, NOT SIXTEEN, AND THE MEASUREMENT SAYS WHY ★
+ *
+ * 8 gives 104/s and 16 gives 112/s — seven per cent more for twice the queue depth. The card is
+ * also serving post screening, and a member waiting to post is a person while this is a background
+ * sweep. Eight takes nearly all the throughput and leaves the model responsive.
+ */
+export const EMBED_CONCURRENCY = 8;
 
 /**
  * How often each source is worth refreshing, in hours.

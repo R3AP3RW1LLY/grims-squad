@@ -1,5 +1,11 @@
 import type { PrismaClient } from '@grims/db';
-import { EMBED_DIMS, EMBED_MODEL, STORAGE_KIND, type KnowledgeSource } from '@grims/shared';
+import {
+  EMBED_DIMS,
+  EMBED_MODEL,
+  EMBED_CONCURRENCY,
+  EMBEDDED_SOURCES,
+  type KnowledgeSource,
+} from '@grims/shared';
 
 /**
  * Turning prose knowledge into vectors.
@@ -12,29 +18,31 @@ import { EMBED_DIMS, EMBED_MODEL, STORAGE_KIND, type KnowledgeSource } from '@gr
  * Half right, and the half that is right had never been built — which is why nothing has ever
  * embedded anything. This is that job.
  *
- * ★ WHY THE GALAXY IMPORT LEAVES THE GPU IDLE, AND SHOULD ★
+ * ★ EVERYTHING IS EMBEDDED NOW, AND THE REASON IT WAS NOT WAS A BAD NUMBER ★
  *
- * `STORAGE_KIND` splits the sources: structured data is LOOKED UP, prose is EMBEDDED. Importing
- * 448,676 systems is a database write and nothing else, so a silent GPU during it is correct.
+ * The first version embedded prose only, because embedding the galaxy was believed to take "roughly
+ * three weeks on this hardware". Measured rather than assumed: 104 embeddings a second at
+ * concurrency 8, so 448,676 rows take just over an hour — once, and then only what changed.
  *
- * Embedding them would take roughly three weeks on this hardware and produce a WORSE assistant.
- * Asked about "Deciat" a vector search returns systems whose names sit near it in embedding space —
- * Deciat, Deciak, Decius — rather than facts about Deciat. "Which stations in Deciat have a large
- * pad" has one correct answer, and an index built for similarity cannot give it.
+ * Three weeks would have been a real reason. An hour is not a reason for anything, and the figure
+ * was inherited without ever being checked.
  *
- * ★ WHAT IS WORTH EMBEDDING ★
+ * ★ EMBEDDING IS ADDED, NEVER SUBSTITUTED ★
  *
- * Text where the QUESTION is about meaning rather than about a name: a forum answer, a guide, an
- * explanation of how engineering works. Nobody looks those up by exact title — they ask "how do I
- * get more jump range", and the answer is a post that never uses those words.
+ * "Which stations in Deciat have a large pad" is still an exact lookup on an index. A similarity
+ * search answers it with Deciak and Decius — systems near Deciat in embedding space that have
+ * nothing to do with the question.
  *
- * That is a few thousand rows at most, and it is where the card earns its keep.
+ * What vectors add is the question lookup cannot take at all: "somewhere quiet with good mining and
+ * a large pad". No column holds that. Both paths exist and the retrieval layer picks by the shape
+ * of the question.
  */
 
-/** Sources whose text is meant to be searched by meaning. Derived, never a second list. */
-const VECTOR_SOURCES: KnowledgeSource[] = (
-  Object.keys(STORAGE_KIND) as KnowledgeSource[]
-).filter((s) => STORAGE_KIND[s] === 'vector');
+/*
+ * Every source that carries a vector. Derived from the contract so it cannot drift — and it is now
+ * ALL of them, because the estimate that said otherwise was wrong by a factor of about three
+ * hundred. See STORAGE_KIND.
+ */
 
 /** Something that can turn text into a vector. The API's `EmbedClient` satisfies this. */
 export interface Embedder {
@@ -52,11 +60,11 @@ export interface EmbedReport {
 /**
  * How many rows to claim per pass.
  *
- * Small on purpose. Each row is a round trip to a model on somebody's desktop, over an SSH tunnel
- * that may not be up — so a pass should be short enough that killing it loses very little, and the
- * work is resumable because progress is the `embedding` column itself.
+ * Enough to keep eight requests in flight without re-querying constantly, small enough that killing
+ * a run loses almost nothing. The work is resumable regardless, because progress IS the `embedding`
+ * column — there is no cursor to lose.
  */
-const BATCH = 32;
+const BATCH = 256;
 
 /**
  * Embeds everything that needs it.
@@ -70,8 +78,16 @@ const BATCH = 32;
 export async function embedKnowledge(
   db: PrismaClient,
   embedder: Embedder,
-  limit = 2_000,
+  options: { limit?: number; sources?: readonly KnowledgeSource[] } = {},
 ): Promise<EmbedReport> {
+  const limit = options.limit ?? 50_000;
+  /*
+   * A subset when the caller names one — the schedules differ wildly. The forum is swept every five
+   * minutes because somebody answers a question and walks away; the galaxy is swept after its
+   * nightly import because nothing new appears in between. One job doing everything on the fastest
+   * cadence would re-scan 448,676 rows every five minutes to find nothing.
+   */
+  const VECTOR_SOURCES = options.sources ?? EMBEDDED_SOURCES;
   const pendingRows = await db.$queryRawUnsafe<Array<{ n: bigint }>>(
     `SELECT COUNT(*)::bigint AS n
        FROM knowledge_items
@@ -101,39 +117,57 @@ export async function embedKnowledge(
 
     if (rows.length === 0) break;
 
-    for (const row of rows) {
-      const vector = await embedder.embed(row.text);
+    /*
+     * ★ EMBEDDED IN PARALLEL, MEASURED ON THE ACTUAL CARD ★
+     *
+     *     concurrency  1:  22/s        concurrency  8: 104/s
+     *     concurrency  4:  61/s        concurrency 16: 112/s
+     *
+     * One at a time makes the whole galaxy a six-hour job; eight makes it just over an hour.
+     * Sixteen is seven per cent faster than eight and doubles the queue depth — and the same card
+     * screens forum posts, where a member is WAITING. Eight takes nearly all the throughput and
+     * leaves the model responsive.
+     */
+    for (let i = 0; i < rows.length; i += EMBED_CONCURRENCY) {
+      const slice = rows.slice(i, i + EMBED_CONCURRENCY);
+      const vectors = await Promise.all(slice.map((r) => embedder.embed(r.text)));
 
-      /*
-       * ★ A REFUSAL MARKS THE ROW, IT DOES NOT RETRY FOREVER ★
-       *
-       * Without this the loop re-selects the same failing row every pass and never advances — the
-       * classic queue livelock. A zero vector is written so the row leaves the pending set, and it
-       * is distinguishable from a real one (nothing else is all zeros) if anybody wants to find and
-       * re-embed them later.
-       */
-      if (vector === null || vector.length !== EMBED_DIMS) {
-        failed += 1;
+      for (let j = 0; j < slice.length; j += 1) {
+        const row = slice[j];
+        const vector = vectors[j];
+        if (row === undefined) continue;
+
+        /*
+         * ★ A REFUSAL MARKS THE ROW, IT DOES NOT RETRY FOREVER ★
+         *
+         * Without this the loop re-selects the same failing row every pass and never advances — the
+         * classic queue livelock. A zero vector is written so the row leaves the pending set, and it
+         * is distinguishable from a real one (nothing else is all zeros) if anybody wants to find
+         * and re-embed them later.
+         */
+        if (vector === null || vector === undefined || vector.length !== EMBED_DIMS) {
+          failed += 1;
+          await db.$executeRawUnsafe(
+            `UPDATE knowledge_items SET embedding = $2::vector WHERE id = $1::uuid`,
+            row.id,
+            `[${new Array(EMBED_DIMS).fill(0).join(',')}]`,
+          );
+          continue;
+        }
+
+        /*
+         * pgvector's literal format is `[1,2,3]`, bound as a parameter and cast. Prisma has no
+         * vector type, so this is raw — and it is a PARAMETER rather than interpolation even though
+         * the content is numbers we generated, because the day somebody passes text through here is
+         * the day interpolation becomes an injection.
+         */
         await db.$executeRawUnsafe(
           `UPDATE knowledge_items SET embedding = $2::vector WHERE id = $1::uuid`,
           row.id,
-          `[${new Array(EMBED_DIMS).fill(0).join(',')}]`,
+          `[${vector.join(',')}]`,
         );
-        continue;
+        embedded += 1;
       }
-
-      /*
-       * pgvector's literal format is `[1,2,3]`, bound as a parameter and cast. Prisma has no vector
-       * type, so this is raw — and it is a PARAMETER rather than interpolation even though the
-       * content is numbers we generated, because the day somebody passes text through here is the
-       * day interpolation becomes an injection.
-       */
-      await db.$executeRawUnsafe(
-        `UPDATE knowledge_items SET embedding = $2::vector WHERE id = $1::uuid`,
-        row.id,
-        `[${vector.join(',')}]`,
-      );
-      embedded += 1;
     }
   }
 
