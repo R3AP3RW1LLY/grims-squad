@@ -1712,10 +1712,27 @@ model KnowledgeIngest {
   startedAt  DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
   finishedAt DateTime? @map("finished_at") @db.Timestamptz(6)
 
-  /// Rows written. Null while running.
-  rows Int?
+  /// Rows written so far. Zero while running and nothing written yet - NOT null.
+  ///
+  /// * NULL IS WHY THE COUNTDOWN SAID "estimating..." FOR EVER *
+  ///
+  /// It used to be null until the run finished, and null cannot be told apart from "no progress
+  /// reported yet". The training page had nothing to divide by and nothing to draw, so a live
+  /// import rendered exactly like a dead one. Zero is a real answer with a short shelf life.
+  rows Int? @default(0)
   /// Null on success. The message an officer reads on the training page.
   error String?
+
+  /// When this run last reported progress.
+  ///
+  /// * THE DIFFERENCE BETWEEN SLOW AND DEAD *
+  ///
+  /// Judged on `started_at` alone, those two are the same reading - so the stall threshold had to
+  /// clear the slowest job imaginable, and a crashed import claimed to be training for six hours.
+  ///
+  /// A living job touches this every batch. A run that has written nothing for fifteen minutes is
+  /// dead whether it started ten minutes or ten hours ago, which is precise rather than cautious.
+  progressAt DateTime? @map("progress_at") @db.Timestamptz(6)
 
   @@index([source, startedAt])
   @@map("knowledge_ingests")

@@ -101,12 +101,23 @@ describe('the next cycle', () => {
 });
 
 describe('unfinished means two different things', () => {
-  it('reports a recent unfinished run as running', async () => {
-    // Started twenty minutes ago and still going. The galaxy import legitimately takes a while.
+  it('reports a run that is still writing as running, however long it has been going', async () => {
+    /*
+     * Started two hours ago and wrote a batch a minute ago. Judged on START it would look
+     * suspicious; judged on PROGRESS it is obviously alive — which is the whole change.
+     */
     const svc = new TrainingStatusService(
       fakeDb(
         [],
-        [{ source: 'galaxy', last_at: null, error: null, started_at: new Date('2026-08-01T11:40:00Z') }],
+        [
+          {
+            source: 'galaxy',
+            last_at: null,
+            error: null,
+            started_at: new Date('2026-08-01T10:00:00Z'),
+            progress_at: new Date('2026-08-01T11:59:00Z'),
+          },
+        ],
       ),
     );
 
@@ -116,30 +127,39 @@ describe('unfinished means two different things', () => {
     expect(galaxy?.lastError).toBeNull();
   });
 
-  it('MANDATORY: reports an OLD unfinished run as stalled, not as running', async () => {
+  it('MANDATORY: reports a SILENT run as stalled, however recently it started', async () => {
     /*
      * ★ THE BUG THIS EXISTS FOR ★
      *
-     * "Running = started and never finished" was the original rule, on the reasoning that a crashed
-     * job is still unfinished and saying so beats claiming a completion that never happened. Right
-     * about the ambiguity, wrong about the remedy: the row never goes away, so the page said
-     * "Training now" forever. Reported by the squadron owner with two sources showing it and
-     * nothing running anywhere.
+     * The first rule was "started and never finished", which never stopped being true, so the page
+     * said "Training now" for ever. The second was "started over six hours ago" — better, and still
+     * measured from the wrong end: with no evidence of work, slow and dead read identically, so the
+     * threshold had to clear the slowest job imaginable and a crashed import claimed to be training
+     * for the rest of the day.
      *
-     * A stall is the state most in need of a human — it is invisible in every log, because nothing
-     * errored. So it is reported AS an error, with the message the dead job never wrote.
+     * Measured from the last BATCH, it takes fifteen minutes to be certain. This run started only
+     * twenty minutes ago — recent by any start-based rule — and has written nothing for eighteen.
+     * It is dead.
      */
     const svc = new TrainingStatusService(
       fakeDb(
         [],
-        [{ source: 'galaxy', last_at: null, error: null, started_at: new Date('2026-07-30T11:00:00Z') }],
+        [
+          {
+            source: 'galaxy',
+            last_at: null,
+            error: null,
+            started_at: new Date('2026-08-01T11:40:00Z'),
+            progress_at: new Date('2026-08-01T11:42:00Z'),
+          },
+        ],
       ),
     );
 
     const galaxy = (await svc.status(NOW)).find((r) => r.source === 'galaxy');
 
     expect(galaxy?.ingesting).toBe(false);
-    expect(galaxy?.lastError).toContain('never finished');
+    expect(galaxy?.lastError).toContain('No progress');
   });
 
   it('keeps the previous failure alongside a stall', async () => {
@@ -154,6 +174,7 @@ describe('unfinished means two different things', () => {
             last_at: new Date('2026-07-29T05:00:00Z'),
             error: 'HTTP 401',
             started_at: new Date('2026-07-30T05:00:00Z'),
+            progress_at: new Date('2026-07-30T05:00:00Z'),
           },
         ],
       ),
@@ -161,7 +182,7 @@ describe('unfinished means two different things', () => {
 
     const inara = (await svc.status(NOW)).find((r) => r.source === 'inara');
 
-    expect(inara?.lastError).toContain('never finished');
+    expect(inara?.lastError).toContain('No progress');
     expect(inara?.lastError).toContain('HTTP 401');
   });
 });

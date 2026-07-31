@@ -8,13 +8,24 @@ import { writeBatch } from './knowledge-writer.js';
  * would normally guarantee have to be asserted here instead.
  */
 
-function fakeDb() {
+function fakeDb(outcome?: Array<{ inserted: boolean }>) {
   const executed: Array<{ sql: string; params: unknown[] }> = [];
   const db = {
     $executeRawUnsafe: vi.fn(async (sql: string, ...params: unknown[]) => {
       executed.push({ sql, params });
       return 1;
     }),
+    /*
+     * The upsert reads rows back now — `RETURNING (xmax = 0)` is how Postgres reports which rows it
+     * created rather than updated, and the audit log's "new versus updated" depends on it. Recorded
+     * in the same list, because these tests are about the SQL that gets built and that is the same
+     * question whichever call carries it.
+     */
+    $queryRawUnsafe: vi.fn(async (sql: string, ...params: unknown[]) => {
+      executed.push({ sql, params });
+      return outcome ?? [];
+    }),
+    auditLog: { create: vi.fn(async () => ({})) },
   } as never;
   return { db, executed };
 }
@@ -99,10 +110,28 @@ describe('batching', () => {
     expect(executed[0]?.sql.match(/\(\$/g)).toHaveLength(3);
   });
 
-  it('an empty batch touches the database at all', async () => {
+  it('an empty batch never touches the database', async () => {
     const { db, executed } = fakeDb();
-    expect(await writeBatch(db, [])).toBe(0);
+    expect(await writeBatch(db, [])).toEqual({ inserted: 0, updated: 0 });
     expect(executed).toHaveLength(0);
+  });
+
+  it('MANDATORY: separates rows it created from rows it refreshed', async () => {
+    /*
+     * ★ WHAT THE AUDIT LOG REPORTS AS "new / updated" ★
+     *
+     * Squadron owner asked for that split. There is no count for it in an upsert — the command tag
+     * reports only the total — so the statement reads `(xmax = 0)` back per row: zero for a version
+     * this statement created, non-zero for one it replaced.
+     *
+     * Without the split, an import of 448,676 rows reads identically whether a game update added a
+     * thousand stations or nothing moved at all.
+     */
+    const { db } = fakeDb([{ inserted: true }, { inserted: false }, { inserted: false }]);
+
+    expect(await writeBatch(db, [row({ extKey: '1' }), row({ extKey: '2' }), row({ extKey: '3' })])).toEqual(
+      { inserted: 1, updated: 2 },
+    );
   });
 
   it('rows without coordinates are still written', async () => {

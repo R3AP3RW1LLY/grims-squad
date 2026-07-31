@@ -24,13 +24,19 @@ import {
  * said so.
  */
 /**
- * How long an unfinished run may sit before it is called dead rather than busy.
+ * How long a run may go WITHOUT REPORTING PROGRESS before it is called dead rather than busy.
  *
- * The galaxy import is the longest job here and finishes well inside an hour on the full dump.
- * Six hours is generous enough that a slow night is never mistaken for a corpse, and short enough
- * that a job killed overnight is flagged by morning.
+ * ★ MEASURED FROM THE LAST BATCH, NOT FROM THE START ★
+ *
+ * This was six hours, measured from `started_at`, because that was the only evidence available —
+ * and with no sign of work, "slow" and "dead" read identically, so the threshold had to clear the
+ * slowest job imaginable. A crashed import then claimed to be training for the rest of the day.
+ *
+ * Every job now stamps `progress_at` on every batch. Fifteen minutes without one is dead whatever
+ * the job is: the galaxy writes a batch every few seconds, and the shortest sources finish in under
+ * a second. Nothing legitimate is silent for a quarter of an hour.
  */
-const STALL_AFTER_MS = 6 * 60 * 60 * 1000;
+const STALL_AFTER_MS = 15 * 60 * 1000;
 
 @Injectable()
 export class TrainingStatusService {
@@ -54,6 +60,7 @@ export class TrainingStatusService {
           started_at: Date | null;
           rows_so_far: bigint | null;
           expected_rows: bigint | null;
+          progress_at: Date | null;
         }>
       >(
         `SELECT s.source,
@@ -61,7 +68,8 @@ export class TrainingStatusService {
                 l.error,
                 r.started_at,
                 -- What the run in progress has written. Updated at batch boundaries by the job.
-                r.rows      AS rows_so_far,
+                r.rows        AS rows_so_far,
+                r.progress_at AS progress_at,
                 -- Last SUCCESSFUL total: the only honest basis for "how much longer".
                 l.rows      AS expected_rows
            FROM (SELECT DISTINCT source FROM knowledge_ingests) s
@@ -88,7 +96,7 @@ export class TrainingStatusService {
             * for a corpse.
             */
            LEFT JOIN LATERAL (
-                  SELECT started_at, rows FROM knowledge_ingests
+                  SELECT started_at, rows, progress_at FROM knowledge_ingests
                    WHERE source = s.source AND finished_at IS NULL
                    ORDER BY started_at DESC LIMIT 1) r ON true`,
       ),
@@ -110,9 +118,16 @@ export class TrainingStatusService {
        *                                    in every log because nothing errored.
        */
       const startedAt = run?.started_at ?? null;
-      const age = startedAt === null ? null : now.getTime() - startedAt.getTime();
-      const ingesting = age !== null && age < STALL_AFTER_MS;
-      const stalled = age !== null && age >= STALL_AFTER_MS;
+      /*
+       * Silence is measured from the last BATCH, falling back to the start for a run that predates
+       * progress reporting. A job that is working is never silent for long; one that is not says so
+       * within fifteen minutes instead of six hours.
+       */
+      const lastSign = run?.progress_at ?? startedAt;
+      const silentFor = lastSign === null ? null : now.getTime() - lastSign.getTime();
+      const ingesting = silentFor !== null && silentFor < STALL_AFTER_MS;
+      const stalled = silentFor !== null && silentFor >= STALL_AFTER_MS;
+      const ranFor = startedAt === null ? 0 : now.getTime() - startedAt.getTime();
 
       return {
         source: source as KnowledgeSource,
@@ -139,8 +154,9 @@ export class TrainingStatusService {
          * a source that failed and then stalled has two things wrong with it.
          */
         lastError: stalled
-          ? `Started ${Math.round((age ?? 0) / 3_600_000)}h ago and never finished — the job was ` +
-            `killed or crashed.${run?.error === undefined || run.error === null ? '' : ` Previously: ${run.error.slice(0, 200)}`}`
+          ? `No progress for ${Math.round((silentFor ?? 0) / 60_000)} minutes — the job was killed ` +
+            `or crashed after running ${Math.round(ranFor / 60_000)} minutes.` +
+            `${run?.error === undefined || run.error === null ? '' : ` Previously: ${run.error.slice(0, 200)}`}`
           : run?.error === undefined || run.error === null
             ? null
             : run.error.slice(0, 300),

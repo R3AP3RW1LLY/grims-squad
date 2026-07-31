@@ -65,11 +65,17 @@ async function ingestCoriolis(db: PrismaClient): Promise<void> {
     }
 
     const rows = readCoriolis(CORIOLIS_DIR);
-    let written = 0;
+    const tally = { inserted: 0, updated: 0 };
     for (let i = 0; i < rows.length; i += BATCH) {
-      written += await writeBatch(db, rows.slice(i, i + BATCH));
+      const batch = await writeBatch(db, rows.slice(i, i + BATCH));
+      tally.inserted += batch.inserted;
+      tally.updated += batch.updated;
+      // Every source reports, not just the galaxy — otherwise a short job that DOES stall looks
+      // identical to one that finished, and the page has nothing to show while it runs.
+      await progressIngest(db, run, tally.inserted + tally.updated);
     }
-    await finishIngest(db, run, { rows: written });
+    const written = tally.inserted + tally.updated;
+    await finishIngest(db, run, { rows: written, ...tally, source: 'coriolis' });
     console.log(`coriolis: ${written} rows`);
   } catch (e) {
     /*
@@ -92,28 +98,45 @@ async function ingestGalaxy(db: PrismaClient): Promise<void> {
   try {
     let written = 0;
     let lastLogged = 0;
+    const tally = { inserted: 0, updated: 0 };
 
     const stats = await streamGalaxy(
       GALAXY_FILE,
       async (batch) => {
-        written += await writeBatch(db, batch);
+        const result = await writeBatch(db, batch);
+        tally.inserted += result.inserted;
+        tally.updated += result.updated;
+        written = tally.inserted + tally.updated;
         /*
          * Progress every 100k rows. The full dump is tens of millions and takes a long time; a job
          * that prints nothing for an hour is indistinguishable from one that has hung, and somebody
          * will kill it.
          */
+        /*
+         * ★ REPORTED EVERY BATCH, LOGGED EVERY 100k ★
+         *
+         * These were the same interval, and that made the countdown useless: nothing to divide by
+         * for the first hundred thousand rows, so it read "estimating…" for the opening minutes of
+         * every import — which is exactly when somebody is watching it.
+         *
+         * The galaxy writes 448,676 rows in batches of 2,000, so this is around 224 extra UPDATEs
+         * across the whole run. The log stays coarse because a console line every two thousand rows
+         * is noise nobody reads.
+         */
+        await progressIngest(db, run, written);
         if (written - lastLogged >= 100_000) {
           lastLogged = written;
           console.log(`galaxy: ${written} rows...`);
-          // What the training page's progress bar and countdown read. See progressIngest.
-          await progressIngest(db, run, written);
         }
       },
       BATCH,
     );
 
-    await finishIngest(db, run, { rows: written });
-    console.log(`galaxy: ${written} rows (${stats.systems} systems, ${stats.stations} stations)`);
+    await finishIngest(db, run, { rows: written, ...tally, source: 'galaxy' });
+    console.log(
+      `galaxy: ${written} rows (${tally.inserted} new, ${tally.updated} updated; ` +
+        `${stats.systems} systems, ${stats.stations} stations)`,
+    );
 
     /*
      * ★ FLATTEN AFTER EVERY GALAXY INGEST ★
@@ -157,11 +180,17 @@ async function ingestInara(db: PrismaClient): Promise<void> {
       return;
     }
 
-    let written = 0;
+    const tally = { inserted: 0, updated: 0 };
     for (let i = 0; i < rows.length; i += BATCH) {
-      written += await writeBatch(db, rows.slice(i, i + BATCH));
+      const batch = await writeBatch(db, rows.slice(i, i + BATCH));
+      tally.inserted += batch.inserted;
+      tally.updated += batch.updated;
+      // Every source reports, not just the galaxy — otherwise a short job that DOES stall looks
+      // identical to one that finished, and the page has nothing to show while it runs.
+      await progressIngest(db, run, tally.inserted + tally.updated);
     }
-    await finishIngest(db, run, { rows: written });
+    const written = tally.inserted + tally.updated;
+    await finishIngest(db, run, { rows: written, ...tally, source: 'inara' });
     console.log(`inara: ${written} rows (${members} commanders)`);
   } catch (e) {
     await finishIngest(db, run, { error: e instanceof Error ? e.message : String(e) });
@@ -180,11 +209,17 @@ async function ingestJournal(db: PrismaClient): Promise<void> {
   try {
     const { rows, systems, stations } = await readJournalKnowledge(db);
 
-    let written = 0;
+    const tally = { inserted: 0, updated: 0 };
     for (let i = 0; i < rows.length; i += BATCH) {
-      written += await writeBatch(db, rows.slice(i, i + BATCH));
+      const batch = await writeBatch(db, rows.slice(i, i + BATCH));
+      tally.inserted += batch.inserted;
+      tally.updated += batch.updated;
+      // Every source reports, not just the galaxy — otherwise a short job that DOES stall looks
+      // identical to one that finished, and the page has nothing to show while it runs.
+      await progressIngest(db, run, tally.inserted + tally.updated);
     }
-    await finishIngest(db, run, { rows: written });
+    const written = tally.inserted + tally.updated;
+    await finishIngest(db, run, { rows: written, ...tally, source: 'journal' });
     console.log(`journal: ${written} rows (${systems} systems, ${stations} stations visited)`);
   } catch (e) {
     await finishIngest(db, run, { error: e instanceof Error ? e.message : String(e) });
@@ -202,11 +237,17 @@ async function ingestForum(db: PrismaClient): Promise<void> {
   try {
     const { rows, accepted, upvoted } = await readForumKnowledge(db);
 
-    let written = 0;
+    const tally = { inserted: 0, updated: 0 };
     for (let i = 0; i < rows.length; i += BATCH) {
-      written += await writeBatch(db, rows.slice(i, i + BATCH));
+      const batch = await writeBatch(db, rows.slice(i, i + BATCH));
+      tally.inserted += batch.inserted;
+      tally.updated += batch.updated;
+      // Every source reports, not just the galaxy — otherwise a short job that DOES stall looks
+      // identical to one that finished, and the page has nothing to show while it runs.
+      await progressIngest(db, run, tally.inserted + tally.updated);
     }
-    await finishIngest(db, run, { rows: written });
+    const written = tally.inserted + tally.updated;
+    await finishIngest(db, run, { rows: written, ...tally, source: 'forum' });
     console.log(`forum: ${written} rows (${accepted} accepted answers, ${upvoted} highly-rated)`);
   } catch (e) {
     await finishIngest(db, run, { error: e instanceof Error ? e.message : String(e) });

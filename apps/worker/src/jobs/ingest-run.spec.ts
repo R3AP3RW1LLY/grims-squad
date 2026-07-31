@@ -48,7 +48,12 @@ live('real ingest', () => {
       const rows = readCoriolis(CORIOLIS);
       const id = await beginIngest(db, 'coriolis');
       let written = 0;
-      for (let i = 0; i < rows.length; i += 500) written += await writeBatch(db, rows.slice(i, i + 500));
+      for (let i = 0; i < rows.length; i += 500) {
+        // writeBatch separates new from updated now — see BatchResult. The total is what this
+        // assertion cares about; the split is asserted below, where it is the point.
+        const r = await writeBatch(db, rows.slice(i, i + 500));
+        written += r.inserted + r.updated;
+      }
       await finishIngest(db, id, { rows: written });
 
       const first = await db.$queryRawUnsafe<Array<{ n: bigint }>>(
@@ -57,8 +62,22 @@ live('real ingest', () => {
       console.log('  coriolis rows:', Number(first[0]?.n));
       expect(Number(first[0]?.n)).toBeGreaterThan(200);
 
-      // ★ THE POINT: a second run must UPDATE, not duplicate. Spansh rebuilds nightly.
-      for (let i = 0; i < rows.length; i += 500) await writeBatch(db, rows.slice(i, i + 500));
+      /*
+       * ★ THE POINT: a second run must UPDATE, not duplicate. Spansh rebuilds nightly. ★
+       *
+       * And now it can be asserted DIRECTLY rather than inferred from the count not changing:
+       * every row of the second pass must report as an update, because every one of them already
+       * exists. That is the `xmax = 0` split the audit log reports as "new versus updated".
+       */
+      let secondInserted = 0;
+      let secondUpdated = 0;
+      for (let i = 0; i < rows.length; i += 500) {
+        const r = await writeBatch(db, rows.slice(i, i + 500));
+        secondInserted += r.inserted;
+        secondUpdated += r.updated;
+      }
+      expect(secondInserted).toBe(0);
+      expect(secondUpdated).toBeGreaterThan(200);
       const second = await db.$queryRawUnsafe<Array<{ n: bigint }>>(
         `SELECT COUNT(*)::bigint AS n FROM knowledge_items WHERE source='coriolis'`,
       );
@@ -78,7 +97,8 @@ live('real ingest', () => {
       const id = await beginIngest(db, 'galaxy');
       let written = 0;
       await streamGalaxy(GALAXY, async (batch) => {
-        written += await writeBatch(db, batch);
+        const r = await writeBatch(db, batch);
+        written += r.inserted + r.updated;
         if (written > 6_000) throw new Error('STOP');
       }, 2_000).catch((e: Error) => { if (e.message !== 'STOP') throw e; });
       await finishIngest(db, id, { rows: written });
