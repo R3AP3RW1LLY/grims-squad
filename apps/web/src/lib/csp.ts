@@ -77,14 +77,35 @@ export function buildCsp({ nonce, dev }: CspOptions): string {
     `style-src-attr 'unsafe-inline'`,
 
     /*
-     * Images: our own origin, plus data: for the few inline SVG icons.
+     * Images: our own origin, data: for the few inline SVG icons, and blob: for previews.
      *
      * NO remote hosts. Member-uploaded images are served from our own API, and Discord
      * avatars are copied onto our storage rather than hotlinked — deliberately, so
      * rendering the roster does not tell Discord which members are being looked at. A
      * permissive img-src would quietly undo that.
+     *
+     * ★ blob: ADDED 2026-08-01, AND THE BUG THAT FOUND IT ★
+     *
+     * Reported as "every time i try to upload a .jpg i get an error that says that file could not
+     * be read as an image." It was not about .jpg at all — PNG and WebP failed identically. Help
+     * Train the Bot shows a preview of the chosen file before sending it, built with
+     * `URL.createObjectURL`, which produces a `blob:` URL.
+     *
+     * `'self'` does NOT cover blob:. It is its own scheme and needs naming. So the browser refused
+     * the preview, the `<img>` fired `onerror`, and the uploader reported the only thing it could
+     * see: that the image would not decode. The file was always fine.
+     *
+     * ★ WHY THIS DOES NOT WEAKEN WHAT THE DIRECTIVE PROTECTS ★
+     *
+     * A blob: URL is minted by OUR script from bytes already in the page, and it is opaque to
+     * everybody else — there is no host to contact and nothing leaves the browser. The property
+     * this directive exists for is "rendering a page does not tell a third party what is being
+     * looked at", and a blob URL cannot tell anybody anything.
+     *
+     * Injected content cannot create one either: doing so needs script execution, which is
+     * nonce-gated above.
      */
-    `img-src 'self' data:`,
+    `img-src 'self' data: blob:`,
 
     // Fonts are self-hosted. A CDN here would leak a request per visitor to a third party.
     `font-src 'self'`,

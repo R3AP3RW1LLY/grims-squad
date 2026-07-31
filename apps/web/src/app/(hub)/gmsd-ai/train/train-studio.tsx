@@ -89,24 +89,37 @@ export function TrainStudio({
     }
 
     /*
-     * Dimensions read from the decoded image rather than trusted from anywhere.
+     * ★ DIMENSIONS FROM createImageBitmap, NOT FROM AN <img> ★
+     *
+     * This used to load the file into an `Image` and read `naturalWidth`. That works, and it made
+     * the size check depend on the CONTENT SECURITY POLICY: an `<img>` pointed at a blob: URL is
+     * subject to `img-src`, and ours did not name blob:. Every file — PNG, JPEG, WebP alike —
+     * failed to load and was reported as "could not be read as an image", which sent the owner
+     * looking for a problem with their .jpg files that did not exist.
+     *
+     * `createImageBitmap` decodes the Blob directly. No URL, no element, no policy involved. The
+     * CSP is fixed as well (see csp.ts), but the check no longer depends on it having been.
      *
      * Below MIN_TRAINING_EDGE the detail that makes a hull recognisable is simply not in the file,
      * and no amount of upscaling puts it back. Refusing here saves the member the upload.
      */
-    const previewUrl = URL.createObjectURL(file);
-    const size = await new Promise<{ w: number; h: number } | null>((resolve) => {
-      const img = new Image();
-      img.onload = () => resolve({ w: img.naturalWidth, h: img.naturalHeight });
-      img.onerror = () => resolve(null);
-      img.src = previewUrl;
-    });
+    const size = await createImageBitmap(file).then(
+      (bmp) => {
+        const dims = { w: bmp.width, h: bmp.height };
+        // Released explicitly: a decoded 4K bitmap is ~33MB, and choosing several files in a row
+        // without this walks the tab into a memory ceiling.
+        bmp.close();
+        return dims;
+      },
+      () => null,
+    );
 
     if (size === null) {
-      URL.revokeObjectURL(previewUrl);
-      setError('That file could not be read as an image.');
+      setError('That file could not be decoded as an image. It may be corrupt.');
       return;
     }
+
+    const previewUrl = URL.createObjectURL(file);
 
     if (Math.max(size.w, size.h) < MIN_TRAINING_EDGE) {
       URL.revokeObjectURL(previewUrl);
@@ -208,7 +221,11 @@ export function TrainStudio({
         ) : (
           <div className="grid gap-5 lg:grid-cols-[minmax(0,20rem)_1fr]">
             <div>
-              {/* eslint-disable-next-line @next/next/no-img-element -- an object URL has no remote host to optimise */}
+              {/*
+                A plain <img>, not next/image: the source is an object URL for a file that has not
+                left the browser. There is no remote host to optimise and no URL the optimiser
+                could fetch.
+              */}
               <img
                 src={draft.previewUrl}
                 alt=""

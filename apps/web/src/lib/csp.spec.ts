@@ -72,7 +72,14 @@ describe('the production policy', () => {
      */
     const img = directive(prod(), 'img-src');
 
-    expect(img).toBe("img-src 'self' data:");
+    /*
+     * blob: added 2026-08-01 for client-side image previews. It is not a remote host — the URL is
+     * minted by our own script from bytes already in the page and is opaque to everybody else — so
+     * the property this asserts, that rendering a page tells no third party what is being looked
+     * at, is unchanged. Named explicitly rather than matched loosely, so a future widening to a
+     * real host still fails here.
+     */
+    expect(img).toBe("img-src 'self' data: blob:");
     expect(img).not.toContain('http');
     expect(img).not.toContain('*');
   });

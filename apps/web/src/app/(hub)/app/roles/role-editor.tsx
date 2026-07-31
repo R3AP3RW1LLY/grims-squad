@@ -192,13 +192,35 @@ const PERMISSION_GROUPS: readonly PermissionGroup[] = [
     ],
   },
   {
-    title: 'Assistant',
+    /*
+     * ★ 'GMSD AI', NOT 'Assistant' — squadron owner, 2026-08-01 ★
+     *
+     * "give AI its own category! we can assign to each rank please!"
+     *
+     * The permissions were already one group and had been since P1. The group was called
+     * "Assistant", which is not what anybody on this platform calls it: the sidebar says GMSD AI,
+     * the admin page says AI training, the owner says AI. A heading nobody searching for "AI"
+     * would read as AI is a heading that looks missing — which is exactly how it was reported.
+     */
+    title: 'GMSD AI',
+    note: 'What each rank may do with the assistant — including whether they can send screenshots on Help Train the Bot, and whether they can approve what other people send.',
     items: [
       ['AI_CHAT', 50],
       ['AI_TOOLS_READ', 51],
       ['AI_TOOLS_WRITE', 52],
       ['AI_TOOLS_ADMIN', 53],
       ['AI_REVIEW', 54],
+      /*
+       * The two that govern Help Train the Bot, and they are deliberately separate:
+       *
+       *   AI_TRAIN_SUBMIT  turns the PAGE on for a rank. Off means the sidebar entry is gone —
+       *                    `navFor` gates on this exact bit, so nobody is shown a door that
+       *                    refuses them.
+       *   AI_TRAINING      approve or reject what other people send, and read the training status.
+       *
+       * One bit for both would mean the only way to stop a rank submitting is to take away its
+       * ability to review, and the only way to let a rank review is to let it submit.
+       */
       ['AI_TRAINING', 55],
       ['AI_TRAIN_SUBMIT', 56],
     ],
