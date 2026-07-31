@@ -43,7 +43,18 @@ export async function rebuildMarketEntries(db: PrismaClient): Promise<number> {
        */
       await tx.$executeRawUnsafe(`TRUNCATE TABLE market_entries`);
 
-      await tx.$executeRawUnsafe(`
+      /*
+       * ★ THE INSERT'S OWN ROW COUNT, NOT A COUNT(*) AFTERWARDS ★
+       *
+       * This ended with `SELECT COUNT(*) FROM market_entries` — a full scan of twenty-seven
+       * million rows, run INSIDE the transaction, while still holding the ACCESS EXCLUSIVE lock
+       * that TRUNCATE took. Every reader of the table waits for it, and it exists only to report a
+       * number Postgres had already returned.
+       *
+       * Watched happen: the insert completed and the rebuild kept the table locked for minutes
+       * afterwards, counting rows it had just written.
+       */
+      return tx.$executeRawUnsafe(`
         INSERT INTO market_entries (
           station_key, station_name, system_name, station_type, coords, large_pads,
           commodity, category, buy_price, sell_price, supply, demand, market_seen_at)
@@ -77,11 +88,6 @@ export async function rebuildMarketEntries(db: PrismaClient): Promise<number> {
            */
           AND (COALESCE((c->>'supply')::int, 0) > 0 OR COALESCE((c->>'demand')::int, 0) > 0)
       `);
-
-      const rows = await tx.$queryRawUnsafe<Array<{ n: bigint }>>(
-        `SELECT COUNT(*)::bigint AS n FROM market_entries`,
-      );
-      return Number(rows[0]?.n ?? 0);
     },
     // The galaxy is tens of millions of rows; the default 5s transaction timeout is nowhere near.
     { timeout: 30 * 60_000, maxWait: 60_000 },

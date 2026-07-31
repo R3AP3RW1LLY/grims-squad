@@ -5,6 +5,7 @@ import { streamGalaxy } from './jobs/ingest-galaxy.js';
 import { writeBatch, beginIngest, finishIngest } from './jobs/knowledge-writer.js';
 import { rebuildMarketEntries } from './jobs/market-flatten.js';
 import { readInaraKnowledge } from './jobs/ingest-inara.js';
+import { readJournalKnowledge } from './jobs/ingest-journal.js';
 
 /**
  * Ingests what GMSD AI knows about Elite Dangerous.
@@ -142,6 +143,29 @@ async function ingestInara(db: PrismaClient): Promise<void> {
   }
 }
 
+/**
+ * Where the squadron has actually been, from our own telemetry.
+ *
+ * Cheap — it is an aggregate over a table we already hold, with no network at all — so it rides
+ * with the nightly ingest rather than earning a cron line of its own.
+ */
+async function ingestJournal(db: PrismaClient): Promise<void> {
+  const run = await beginIngest(db, 'journal');
+  try {
+    const { rows, systems, stations } = await readJournalKnowledge(db);
+
+    let written = 0;
+    for (let i = 0; i < rows.length; i += BATCH) {
+      written += await writeBatch(db, rows.slice(i, i + BATCH));
+    }
+    await finishIngest(db, run, { rows: written });
+    console.log(`journal: ${written} rows (${systems} systems, ${stations} stations visited)`);
+  } catch (e) {
+    await finishIngest(db, run, { error: e instanceof Error ? e.message : String(e) });
+    throw e;
+  }
+}
+
 async function main(): Promise<void> {
   /*
    * ★ SEVERAL NAMES, NOT ONE ★
@@ -161,6 +185,7 @@ async function main(): Promise<void> {
       ['coriolis', ingestCoriolis],
       ['galaxy', ingestGalaxy],
       ['inara', ingestInara],
+      ['journal', ingestJournal],
     ] as const) {
       if (only.length > 0 && !only.includes(name)) continue;
       try {
