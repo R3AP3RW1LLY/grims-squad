@@ -121,6 +121,8 @@ export const DESCRIBES: Readonly<Record<string, string>> = {
     'Work the screening queue — release or refuse posts the AI held — and read the log of what the AI was asked and what it answered.',
   AI_TRAINING:
     'See what the assistant has learned and when it next will, and approve the screenshots members submit for it to train on.',
+  AI_TRAIN_SUBMIT:
+    'Offer their own screenshots on Help Train the Bot. On for every member — switch it off for somebody flooding the pool, without touching anything else they can do.',
   MEMBER_MANAGE:
     'Search and filter members, keep notes, set probation and activity flags, and deactivate accounts.',
   AUDIT_VIEW:
@@ -198,6 +200,7 @@ const PERMISSION_GROUPS: readonly PermissionGroup[] = [
       ['AI_TOOLS_ADMIN', 53],
       ['AI_REVIEW', 54],
       ['AI_TRAINING', 55],
+      ['AI_TRAIN_SUBMIT', 56],
     ],
   },
   {

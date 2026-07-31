@@ -26,6 +26,7 @@ import {
   Cog6ToothIcon,
   KeyIcon,
   AcademicCapIcon,
+  SparklesIcon,
 } from '@heroicons/react/24/outline';
 import { ChevronDownIcon } from '@heroicons/react/20/solid';
 import type { MeResponse, NavItem } from '../lib/api';
@@ -76,15 +77,19 @@ const ICONS: Record<string, typeof HomeIcon> = {
   '/app': ShieldCheckIcon,
   '/app/roles': KeyIcon,
   '/app/training': AcademicCapIcon,
+  '/gmsd-ai/train': SparklesIcon,
 };
 
 const SECTION_LABELS: Record<NavItem['section'], string> = {
   squadron: 'Squadron',
   personal: 'Your account',
+  ai: 'GMSD AI',
   admin: 'Administration',
 };
 
-const ORDER: NavItem['section'][] = ['squadron', 'personal', 'admin'];
+// GMSD AI sits between the member's own account and the admin area: it is not administration —
+// every member can contribute — but it is not part of the squadron's day-to-day either.
+const ORDER: NavItem['section'][] = ['squadron', 'personal', 'ai', 'admin'];
 
 function cx(...classes: (string | false | undefined)[]): string {
   return classes.filter(Boolean).join(' ');

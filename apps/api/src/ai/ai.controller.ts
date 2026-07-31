@@ -1,6 +1,6 @@
-import { Controller, Get, Inject, Res } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Param, Inject, Res } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
-import { AppError, ErrorCode, Permission, type SourceStatus } from '@grims/shared';
+import { AppError, ErrorCode, Permission, type SourceStatus, type CategoryProgress } from '@grims/shared';
 import { User, type CurrentUser } from '../auth/current-user.js';
 import { PermissionService } from '../authz/permission.service.js';
 import { satisfiesMask } from '../forum/category.service.js';
@@ -8,6 +8,7 @@ import { AiStreamService, type AiLogLine } from './ai-stream.service.js';
 import { AiClient, aiHealth } from './ai.client.js';
 import { ImageClient } from './image.client.js';
 import { TrainingStatusService } from './training.service.js';
+import { CorpusService, type SubmissionView } from './corpus.service.js';
 
 /**
  * Each runtime reported on its own, because they run on different cards and fail independently.
@@ -62,6 +63,7 @@ export class AiController {
     @Inject(ImageClient) private readonly images: ImageClient,
     @Inject(PermissionService) private readonly permissions: PermissionService,
     @Inject(TrainingStatusService) private readonly trainingStatus: TrainingStatusService,
+    @Inject(CorpusService) private readonly corpusService: CorpusService,
   ) {}
 
   /**
@@ -174,6 +176,89 @@ export class AiController {
     }
 
     return { sources: await this.trainingStatus.status() };
+  }
+
+  /**
+   * Help Train the Bot: where every category stands, and what this member has sent.
+   *
+   * ★ ONE ROUND TRIP FOR THE WHOLE PAGE ★
+   *
+   * The bars and the member's own list are always drawn together, and two endpoints would mean the
+   * page renders in two stages with the second one arriving late — which for a progress bar reads
+   * as the number changing on its own.
+   *
+   * ★ PROGRESS IS NOT GATED, SUBMITTING IS ★
+   *
+   * Anybody signed in may see how the collection is going. Whether they can add to it is
+   * `AI_TRAIN_SUBMIT`, checked in the service, and the page uses `canSubmit` to say so plainly
+   * rather than offering a form that will refuse them.
+   */
+  @Get('corpus')
+  async corpus(@User() caller: CurrentUser | undefined): Promise<{
+    categories: CategoryProgress[];
+    mine: SubmissionView[];
+    canSubmit: boolean;
+  }> {
+    if (caller === undefined) {
+      throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
+    }
+    const mask = await this.permissions.effectiveMask(caller.userId);
+
+    const [categories, mine] = await Promise.all([
+      this.corpusService.progress(),
+      this.corpusService.mine(caller.userId),
+    ]);
+
+    return {
+      categories,
+      mine,
+      canSubmit: (mask & Permission.AI_TRAIN_SUBMIT) === Permission.AI_TRAIN_SUBMIT,
+    };
+  }
+
+  /**
+   * Offers an already-uploaded image for training.
+   *
+   * The bytes went through `/v1/media/uploads` — quota, decode, re-encode, storage. This is the
+   * OFFER, and it carries the description that makes the image worth anything.
+   */
+  @Post('corpus')
+  async offer(
+    @User() caller: CurrentUser | undefined,
+    @Body() body: unknown,
+  ): Promise<{ id: string }> {
+    if (caller === undefined) {
+      throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
+    }
+    const b = (body ?? {}) as Record<string, unknown>;
+
+    const uploadId = typeof b['uploadId'] === 'string' ? b['uploadId'] : '';
+    const category = typeof b['category'] === 'string' ? b['category'] : '';
+    const description = typeof b['description'] === 'string' ? b['description'] : '';
+    if (uploadId === '') {
+      throw new AppError(ErrorCode.VALIDATION_FAILED, 'Upload the image first.');
+    }
+
+    const mask = await this.permissions.effectiveMask(caller.userId);
+    return this.corpusService.submit(caller.userId, mask, {
+      uploadId,
+      category,
+      description,
+      ...(typeof b['notes'] === 'string' ? { notes: b['notes'] } : {}),
+    });
+  }
+
+  /** A member changing their mind. Always available, never needs a reason. */
+  @Delete('corpus/:id')
+  async withdraw(
+    @User() caller: CurrentUser | undefined,
+    @Param('id') id: string,
+  ): Promise<{ ok: true }> {
+    if (caller === undefined) {
+      throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
+    }
+    await this.corpusService.withdraw(caller.userId, id);
+    return { ok: true };
   }
 
   async #assertMayReview(caller: CurrentUser | undefined): Promise<void> {

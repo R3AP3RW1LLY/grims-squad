@@ -436,6 +436,11 @@ model User {
   xpEvents             XpEvent[]
   badges               MemberBadge[]
 
+  /// Screenshots offered for training, and screenshots reviewed. Two relations because the
+  /// submitter and the reviewer are different people and both need to be findable.
+  trainingSubmissions  TrainingImage[] @relation("TrainingSubmitter")
+  trainingReviews      TrainingImage[] @relation("TrainingReviewer")
+
   @@map("users")
 
   /// Screening decisions this member made as a moderator.
@@ -1138,9 +1143,79 @@ model MediaUpload {
   signatureBanners ForumSignature[] @relation("SignatureBanner")
   signaturePublished ForumSignature[] @relation("SignaturePublished")
 
+  /// Training submissions built on this upload.
+  trainingImages TrainingImage[]
+
   /// "What has this member uploaded, newest first" - the quota and moderation query.
   @@index([uploaderId, createdAt])
   @@map("media_uploads")
+}
+
+/// A screenshot a member has offered for training GMSD AI's image models (P2).
+///
+/// * SQUADRON OWNER, 2026-08-01: "Help Train the Bot" *
+///
+/// * WHY THIS IS A SEPARATE ROW AND NOT A FLAG ON media_uploads *
+///
+/// An upload is a FILE. This is an OFFER, and it carries things a file does not: which concept it
+/// is meant to teach, what the member says is in it, whether an officer has accepted it, and
+/// whether the member has since changed their mind. The same image can be uploaded for a forum post
+/// and never offered here; offering it is a decision, and decisions want their own row with their
+/// own timestamps.
+///
+/// It also means withdrawing consent deletes THIS row and leaves the member's image where it was.
+model TrainingImage {
+  id       String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  uploadId String @map("upload_id") @db.Uuid
+  userId   String @map("user_id") @db.Uuid
+
+  /// A key of TRAINING_CATEGORIES. Not free text: a LoRA is trained per concept, and a category
+  /// somebody invented is an image that will never be part of any training run.
+  category String
+
+  /// What the member says is in it.
+  ///
+  /// * THE ENTIRE VALUE OF THE UPLOAD *
+  ///
+  /// A thousand unlabelled screenshots teach a model nothing; a hundred labelled
+  /// "Krait Mk II, exterior, docked at an orbis starport, night side" teach it to draw a Krait.
+  /// An image captioned "cool shot" is worse than no image, because it dilutes the ones that are
+  /// labelled properly. Minimum length is enforced in the contract, not here - see
+  /// MIN_DESCRIPTION_CHARS.
+  description String
+
+  /// The ship in frame, when it is known. Usually DERIVED from the member's journal around the
+  /// upload time rather than asked - see SHIP_INFERENCE_WINDOW_MS. Null is honest; a guess is not.
+  shipType String? @map("ship_type")
+
+  /// Anything else worth recording: the system, the station, the time of day, what was happening.
+  /// Free text, optional, and appended to the caption at training time.
+  notes String?
+
+  /// pending | approved | rejected | withdrawn. See CORPUS_STATES.
+  state String @default("pending")
+
+  /// Why an officer refused it. Shown to the member, because a rejection with no reason teaches
+  /// them nothing and they will submit the same thing again.
+  reviewNote String?   @map("review_note")
+  reviewedBy String?   @map("reviewed_by") @db.Uuid
+  reviewedAt DateTime? @map("reviewed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  upload   MediaUpload @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+  user     User        @relation("TrainingSubmitter", fields: [userId], references: [id], onDelete: Cascade)
+  reviewer User?       @relation("TrainingReviewer", fields: [reviewedBy], references: [id], onDelete: SetNull)
+
+  /// The progress query: how many approved and pending per category.
+  @@index([category, state])
+  /// "What have I submitted", newest first.
+  @@index([userId, createdAt])
+  /// The review queue: everything waiting, oldest first.
+  @@index([state, createdAt])
+  /// One offer per image. Submitting the same upload twice is a mistake, not two contributions.
+  @@unique([uploadId])
+  @@map("training_images")
 }
 
 /// When a member last looked at a board, for "new posts" indicators.

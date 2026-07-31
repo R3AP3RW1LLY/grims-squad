@@ -21,7 +21,15 @@ export interface NavItem {
   readonly href: string;
   readonly label: string;
   /** Groups items under a heading in the sidebar. */
-  readonly section: 'squadron' | 'personal' | 'admin';
+  /*
+   * ★ 'ai' ADDED 2026-08-01, ON THE OWNER'S INSTRUCTION ★
+   *
+   * "a new side bar category called GMSD AI." Deliberately NOT folded into `squadron`: what the
+   * assistant knows and how members feed it is its own thing, and burying "Help Train the Bot"
+   * among the roster and the ops board is how nobody finds it — which for a collection drive is
+   * the same as it not existing.
+   */
+  readonly section: 'squadron' | 'personal' | 'ai' | 'admin';
   /** A one-line description, for the dashboard cards. */
   readonly blurb: string;
 }
@@ -119,6 +127,19 @@ const NAV: readonly NavDefinition[] = [
    * The companion app stays: it is not a setting, it is software somebody
    * downloads, and burying it three tabs deep is how nobody finds it.
    */
+
+  // ---- GMSD AI -------------------------------------------------------------
+  {
+    href: '/gmsd-ai/train',
+    label: 'Help Train the Bot',
+    section: 'ai',
+    blurb: 'Send screenshots that teach GMSD AI to draw Elite.',
+    /*
+     * Gated on being able to SUBMIT, not on holding AI_TRAINING. A page whose only action is
+     * refused is worse than no page — it advertises a feature and then says no.
+     */
+    requires: Permission.AI_TRAIN_SUBMIT,
+  },
 
   // ---- admin ---------------------------------------------------------------
   {

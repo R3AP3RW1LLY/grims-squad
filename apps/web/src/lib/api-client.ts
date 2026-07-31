@@ -92,6 +92,19 @@ function tryRefresh(): Promise<boolean> {
 export interface ApiCallOptions {
   /** Sent as JSON. Omit entirely when the endpoint takes no body. */
   readonly body?: unknown;
+  /**
+   * Sent AS IS, with `contentType`.
+   *
+   * ★ WHY IMAGE UPLOADS COME THROUGH HERE RATHER THAN CALLING fetch ★
+   *
+   * The upload route posts the file as the request body with an image content type — no multipart,
+   * no form fields (see the note in main.ts). That used to mean a bare `fetch` at each call site,
+   * which quietly skipped the two things this function exists for: the CSRF header, and the
+   * refresh-and-retry that a 401 needs. An upload that failed because the access token had aged out
+   * simply failed, and the member saw "that did not go through" on a perfectly good file.
+   */
+  readonly rawBody?: Blob;
+  readonly contentType?: string;
   /** Shown if the server does not supply a better one. */
   readonly fallbackMessage?: string;
 }
@@ -114,6 +127,11 @@ export async function apiCall<T>(
   const headers: Record<string, string> = {};
 
   if (options.body !== undefined) headers['content-type'] = 'application/json';
+  // A raw body declares its own type. The server still decides the real format by DECODING the
+  // bytes — this only selects the parser (see RAW_IMAGE_TYPES in main.ts).
+  if (options.rawBody !== undefined && options.contentType !== undefined) {
+    headers['content-type'] = options.contentType;
+  }
   if (MUTATING.has(upper)) headers['x-csrf-token'] = readCsrf();
 
   const init: RequestInit = {
@@ -123,6 +141,7 @@ export async function apiCall<T>(
     headers,
   };
   if (options.body !== undefined) init.body = JSON.stringify(options.body);
+  if (options.rawBody !== undefined) init.body = options.rawBody;
 
   let res = await fetch(path, init);
 

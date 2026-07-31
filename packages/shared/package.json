@@ -26,6 +26,10 @@
     "./ai": {
       "types": "./dist/ai.d.ts",
       "default": "./dist/ai.js"
+    },
+    "./ai-corpus": {
+      "types": "./dist/ai-corpus.d.ts",
+      "default": "./dist/ai-corpus.js"
     }
   },
   "scripts": {

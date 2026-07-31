@@ -177,6 +177,25 @@ export const Permission = {
    * for the squadron.
    */
   AI_TRAINING: 1n << 55n,
+  /**
+   * Ring 1. Offer screenshots for GMSD AI to train on — "Help Train the Bot".
+   *
+   * ★ SEPARATE FROM AI_TRAINING, ON THE OWNER'S INSTRUCTION ★
+   *
+   * Squadron owner, 2026-08-01: "Ai Training also needs permissions that we can add to each role
+   * please ... so we can enable / disable it as we need to."
+   *
+   * Submitting and approving are different jobs held by different people. One bit covering both
+   * would mean the only way to stop somebody submitting is to take away their ability to review,
+   * and the only way to let somebody review is to let everybody submit.
+   *
+   * ★ AND WHY A BIT AT ALL, WHEN EVERY MEMBER GETS IT ★
+   *
+   * Because a member who floods the pool with junk is a real problem with no other remedy. Removing
+   * this from one role — or from one person, via their role — stops it without touching anything
+   * else they can do. It is the sanction that exists so the feature can stay open by default.
+   */
+  AI_TRAIN_SUBMIT: 1n << 56n,
 
   // ── Admin ────────────────────────────────────────────────────────────────
   /** Ring 2. Member management: search, filter, notes, probation, activity flags, deactivation. */
@@ -345,6 +364,12 @@ const MEMBER: PermissionMask =
   P.AI_CHAT |
   P.AI_TOOLS_READ |
   P.AI_TOOLS_WRITE |
+  /*
+   * Every member may contribute screenshots. The whole point of "Help Train the Bot" is that the
+   * pool fills from people playing the game, and a collection drive nobody is allowed to join
+   * collects nothing. Removable per role when somebody abuses it — see AI_TRAIN_SUBMIT.
+   */
+  P.AI_TRAIN_SUBMIT |
   P.TELEMETRY_WRITE;
 
 /** Member plus the ability to create and run operations. */

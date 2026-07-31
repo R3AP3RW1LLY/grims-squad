@@ -123,8 +123,14 @@ describe('the admin area', () => {
   });
 
   it('somebody holding everything sees every section', () => {
+    /*
+     * 'ai' added 2026-08-01 — the GMSD AI group, holding Help Train the Bot. Listed here rather
+     * than derived, so a new section has to be acknowledged: an unrecognised heading in the
+     * sidebar renders with no label at all if `SECTION_LABELS` is not updated alongside it, and
+     * that is a blank gap rather than an error.
+     */
     const sections = new Set(navFor(ALL_PERMISSIONS).map((i) => i.section));
-    expect([...sections].sort()).toEqual(['admin', 'personal', 'squadron']);
+    expect([...sections].sort()).toEqual(['admin', 'ai', 'personal', 'squadron']);
   });
 });
 

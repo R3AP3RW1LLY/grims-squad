@@ -641,7 +641,9 @@ export const getInaraStatus = (): Promise<InaraStatus | null> =>
 export interface NavItem {
   href: string;
   label: string;
-  section: 'squadron' | 'personal' | 'admin';
+  // 'ai' added 2026-08-01 — the GMSD AI sidebar group. Mirrors NavItem in the API's nav.ts; the
+  // API decides which items a member gets, this only names the headings.
+  section: 'squadron' | 'personal' | 'ai' | 'admin';
   blurb: string;
 }
 
@@ -1100,6 +1102,34 @@ export interface TrainingSource {
 
 export const getAiTrainingGated = (): Promise<AdminRead<{ sources: TrainingSource[] }>> =>
   getAdmin('/v1/ai/training');
+
+/** One screenshot a member has offered for training. */
+export interface TrainingSubmission {
+  id: string;
+  uploadId: string;
+  category: string;
+  description: string;
+  state: string;
+  reviewNote: string | null;
+  createdAt: string;
+}
+
+/**
+ * Help Train the Bot.
+ *
+ * ★ CategoryProgress COMES FROM THE SHARED CONTRACT, NOT REDECLARED HERE ★
+ *
+ * The progress shape is a rule about training — how many images a concept needs before a LoRA
+ * learns it rather than memorises it — and a second copy in the web layer is a second place for
+ * those numbers to be wrong.
+ */
+export const getAiCorpusGated = (): Promise<
+  AdminRead<{
+    categories: import('@grims/shared').CategoryProgress[];
+    mine: TrainingSubmission[];
+    canSubmit: boolean;
+  }>
+> => getAdmin('/v1/ai/corpus');
 
 export interface ForumSearchHit {
   postId: string;

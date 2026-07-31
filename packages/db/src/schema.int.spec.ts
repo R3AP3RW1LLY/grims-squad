@@ -104,7 +104,11 @@ describe('P0.2 database schema', () => {
     // xp_events is a LEDGER rather than a counter on users: a number that only goes up cannot say
     // why somebody has 340, cannot be corrected, and cannot be audited if anything ever
     // double-awards.
-    expect(Number(r[0]?.n)).toBe(77);
+    //
+    // 78 as of 2026-08-01: training_images. "Help Train the Bot" — members offering screenshots for
+    // the image models. A separate row from media_uploads because an upload is a FILE and this is an
+    // OFFER: which concept it teaches, what the member says is in it, and whether they still consent.
+    expect(Number(r[0]?.n)).toBe(78);
   });
 
   describe('hand-written DDL that Prisma cannot express', () => {
@@ -277,9 +281,24 @@ describe('seeded roles', () => {
    * wanted was the old ALL_PERMISSIONS, the dist had already been rebuilt correctly, and
    * clearing the vitest cache changed nothing. The list is local by design.
    */
+  /*
+   * ★ BITS 55 AND 56 ADDED 2026-08-01: AI_TRAINING, AI_TRAIN_SUBMIT ★
+   *
+   * The deliberate mirroring working again, and worth recording because it failed in BOTH
+   * directions within one session:
+   *
+   *   First the stored mask was SMALLER than this list — the roles had not been granted the new
+   *   bits, because adding a permission to the contract does not touch the database. That needed a
+   *   migration.
+   *
+   *   Then it was LARGER — the migration had run and this list had not been updated.
+   *
+   * Neither failure is a stale build, and both look like one. The list is local by design; see the
+   * note above.
+   */
   const ALL_PERMISSIONS = [
     0, 1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 13, 20, 21, 22, 23, 24, 30, 31, 32, 40, 41, 42, 50, 51,
-    52, 53, 54, 60, 61, 62, 63, 70,
+    52, 53, 54, 55, 56, 60, 61, 62, 63, 70,
   ].reduce((acc, bit) => acc | (1n << BigInt(bit)), 0n);
 
   /**

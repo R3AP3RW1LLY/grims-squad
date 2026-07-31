@@ -180,3 +180,172 @@ export const CORPUS_PREFIX = 'corpus/';
 export function corpusKey(sha256: string): string {
   return `${CORPUS_PREFIX}${sha256}.png`;
 }
+
+// ── The member-facing collection drive ──────────────────────────────────────
+//
+// ★ SQUADRON OWNER, 2026-08-01 ★
+//
+// "a new side bar category called GMSD AI ... name it Help Train the Bot ... this should have a
+// category based uploader, a material progression bar that shows how many images are required in
+// the pool to properly train that category and what were at in collecting those images for each
+// category, each image should have a slot for text description etc."
+//
+// ★ WHY CATEGORIES AND NOT ONE BIG PILE ★
+//
+// A LoRA is trained per CONCEPT. Two thousand mixed screenshots teach a model to draw an average
+// of everything — a smeared hull in a smeared station. Sixty of one ship teach it that ship. So the
+// pool is divided the way training divides it, and the progress bar is per category because that is
+// the only number that means anything: "we have 2,000 images" is not progress towards anything.
+
+/**
+ * What we are collecting, and how much of each.
+ *
+ * ★ THE TARGETS ARE NOT ARBITRARY ★
+ *
+ * Below `min` a LoRA memorises individual screenshots and reproduces them with artefacts instead of
+ * learning the concept. `ideal` is where it becomes reliable. Both come from MIN_IMAGES_PER_SHIP —
+ * the categories that are harder to vary need more, because twenty near-identical dock shots are
+ * worth about six.
+ */
+export interface TrainingCategory {
+  readonly key: string;
+  readonly label: string;
+  /** Shown under the label. Says what a GOOD submission looks like, not what the category is. */
+  readonly guidance: string;
+  readonly min: number;
+  readonly ideal: number;
+}
+
+export const TRAINING_CATEGORIES: readonly TrainingCategory[] = [
+  {
+    key: 'ship-exterior',
+    label: 'Ship exteriors',
+    guidance:
+      'The whole ship in frame, from outside. Vary the angle and the lighting — twenty shots of the same ship on the same pad from the same side teach less than six taken properly.',
+    min: 20,
+    ideal: 60,
+  },
+  {
+    key: 'ship-cockpit',
+    label: 'Cockpits and interiors',
+    guidance: 'From the pilot seat or inside the ship. HUD is fine; a full-screen menu is not.',
+    min: 20,
+    ideal: 50,
+  },
+  {
+    key: 'station',
+    label: 'Stations and ports',
+    guidance:
+      'Approach, the mail slot, the interior bays, surface ports. Include the type in your description if you know it.',
+    min: 30,
+    ideal: 80,
+  },
+  {
+    key: 'planet-surface',
+    label: 'Planetary surfaces',
+    guidance: 'Landed or low altitude. Terrain, canyons, ice, lava — say which planet if you know.',
+    min: 30,
+    ideal: 80,
+  },
+  {
+    key: 'space',
+    label: 'Deep space and phenomena',
+    guidance: 'Nebulae, rings, neutron jets, black holes, notable stars. No ship needed.',
+    min: 30,
+    ideal: 80,
+  },
+  {
+    key: 'combat',
+    label: 'Combat',
+    guidance: 'Weapons firing, shields taking hits, conflict zones, interdictions.',
+    min: 25,
+    ideal: 60,
+  },
+  {
+    key: 'srv-onfoot',
+    label: 'SRV and on foot',
+    guidance: 'Surface vehicles, suits, settlements from the ground.',
+    min: 25,
+    ideal: 60,
+  },
+] as const;
+
+/** Look one up. Null for anything not in the list — a caller may not invent a category. */
+export function trainingCategory(key: string): TrainingCategory | null {
+  return TRAINING_CATEGORIES.find((c) => c.key === key) ?? null;
+}
+
+/**
+ * What the uploader accepts.
+ *
+ * ★ NARROWER THAN WHAT WE CAN STORE, DELIBERATELY ★
+ *
+ * The media pipeline handles GIF too. Training does not want it: an animated frame grab is
+ * low-resolution, palette-limited and usually interlaced with motion, and it teaches the model
+ * compression artefacts. Accepting a format we will silently never train on wastes a member's time
+ * and their upload.
+ */
+export const TRAINING_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'] as const;
+
+/** Said to the member, in the words they need rather than as a MIME list. */
+export const TRAINING_TYPES_NOTE = 'PNG, JPEG or WebP, at least 1280px on the long edge.';
+
+/**
+ * How long a description has to be.
+ *
+ * ★ THE DESCRIPTION IS THE ENTIRE VALUE OF THE UPLOAD ★
+ *
+ * A thousand unlabelled screenshots teach a model nothing. A hundred labelled "Krait Mk II,
+ * exterior, docked at an orbis starport, night side" teach it to draw a Krait Mk II. An image with
+ * "cool shot" attached is worse than no image, because it dilutes the ones that are labelled.
+ *
+ * Twenty characters is low enough not to be a chore and high enough to exclude "nice".
+ */
+export const MIN_DESCRIPTION_CHARS = 20;
+export const MAX_DESCRIPTION_CHARS = 500;
+
+/** Where a category stands. What the progress bar draws. */
+export interface CategoryProgress {
+  readonly key: string;
+  readonly label: string;
+  readonly guidance: string;
+  /** Approved and usable for training. */
+  readonly approved: number;
+  /** Submitted, awaiting an officer. Shown separately — see below. */
+  readonly pending: number;
+  readonly min: number;
+  readonly ideal: number;
+  /** 0-1 against `min`. Clamped, so a finished category does not draw past the end of its bar. */
+  readonly fraction: number;
+  /** True once `min` is met — the category can be trained, even if more would help. */
+  readonly trainable: boolean;
+}
+
+/**
+ * Turns counts into what the page draws.
+ *
+ * ★ PENDING IS COUNTED SEPARATELY AND NEVER TOWARDS THE BAR ★
+ *
+ * A member who uploads thirty images should not see the bar fill and then empty again when an
+ * officer rejects half of them. The bar tracks what is actually usable; pending is shown beside it
+ * as "awaiting review", which is honest about both.
+ */
+export function categoryProgress(
+  key: string,
+  counts: { approved: number; pending: number },
+): CategoryProgress | null {
+  const c = trainingCategory(key);
+  if (c === null) return null;
+
+  return {
+    key: c.key,
+    label: c.label,
+    guidance: c.guidance,
+    approved: counts.approved,
+    pending: counts.pending,
+    min: c.min,
+    ideal: c.ideal,
+    fraction: Math.min(1, counts.approved / c.min),
+    trainable: counts.approved >= c.min,
+  };
+}

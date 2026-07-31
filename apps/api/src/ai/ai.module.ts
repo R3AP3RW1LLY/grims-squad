@@ -16,6 +16,7 @@ import { AiStreamService } from './ai-stream.service.js';
 import { AiController } from './ai.controller.js';
 import { TrainingStatusService } from './training.service.js';
 import { KnowledgeService } from './knowledge.service.js';
+import { CorpusService } from './corpus.service.js';
 import { ArtworkController } from './artwork.controller.js';
 
 /**
@@ -203,6 +204,8 @@ export class ModelWarmer implements OnModuleInit, OnModuleDestroy {
      * instead of inventing a station.
      */
     KnowledgeService,
+    // Help Train the Bot. Never touches bytes — the media pipeline does that.
+    CorpusService,
     ModelWarmer,
   ],
   controllers: [AiController, ArtworkController],

@@ -35,7 +35,23 @@ import { UploadService } from './upload.service.js';
           'S3 is not configured; storing uploads on local disk. Fine for development, ' +
             'wrong for production — files are lost on redeploy.',
         );
-        return new FileObjectStore(join(process.cwd(), '.local-storage'));
+        /*
+         * ★ MEDIA_LOCAL_ROOT — squadron owner, 2026-08-01 ★
+         *
+         * "for localhost testing they should be saved on the F Drive please. or D drive."
+         *
+         * Overridable rather than hardcoded to a drive letter: this same code path runs on the
+         * Linux server whenever S3 is unconfigured, and `D:/` there is a directory called "D:"
+         * sitting in the repo root — which would look like it worked.
+         *
+         * The old default stays as the fallback. Changing it outright would orphan every image
+         * already under `.local-storage` on a machine that had been running for weeks, and they
+         * would come back as broken pictures rather than as an error anybody could act on.
+         */
+        const root = process.env['MEDIA_LOCAL_ROOT']?.trim();
+        return new FileObjectStore(
+          root === undefined || root === '' ? join(process.cwd(), '.local-storage') : root,
+        );
       },
     },
     {
