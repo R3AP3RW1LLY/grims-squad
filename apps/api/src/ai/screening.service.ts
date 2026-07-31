@@ -1,4 +1,4 @@
-import type { ScreenResult } from '@grims/shared';
+import type { ScreenDecision, ScreenResult } from '@grims/shared';
 import type { AiClient } from './ai.client.js';
 import type { AiLog } from './ai-log.port.js';
 
@@ -40,6 +40,12 @@ export class ScreeningService {
   constructor(
     private readonly ai: AiClient,
     private readonly log: AiLog,
+    /*
+     * Optional. Without it screening behaves exactly as it did before the feedback loop existed —
+     * which is what a unit test wants, and what a fresh install gets until officers have judged
+     * anything.
+     */
+    private readonly decisions: { similar(text: string): Promise<ScreenDecision[]> } | null = null,
   ) {}
 
   /**
@@ -67,7 +73,13 @@ export class ScreeningService {
       };
     }
 
-    const verdict = await this.ai.screen(text);
+    /*
+     * Precedent first, then the verdict. Retrieval is a few milliseconds against an HNSW index and
+     * returns nothing at all when the decision store is empty or the embedding model is down, so
+     * the cost on the post path is real but small and the failure mode is "screen as before".
+     */
+    const precedent = this.decisions === null ? [] : await this.decisions.similar(text);
+    const verdict = await this.ai.screen(text, precedent);
 
     /*
      * Logged before the decision is returned, and never awaited into the failure path: a post must

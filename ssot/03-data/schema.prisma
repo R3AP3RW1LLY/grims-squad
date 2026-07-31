@@ -432,6 +432,9 @@ model User {
   forumReads           ForumCategoryRead[]
 
   @@map("users")
+
+  /// Screening decisions this member made as a moderator.
+  screenDecisions ScreenDecision[]
 }
 
 /// 1:1 link to a Discord account. `guildRoles` is the input to the entire authorization model.
@@ -1225,6 +1228,9 @@ model ForumPost {
   /// The moderation queue's only query: everything waiting, oldest first.
   @@index([screenState, createdAt])
   @@map("forum_posts")
+
+  /// Decisions taught by this post. Kept if the post is deleted — see ScreenDecision.
+  screenDecisions ScreenDecision[]
 }
 
 /// Edit history. Retained so moderation can see what a post said before it was changed.
@@ -1404,6 +1410,56 @@ model AiCall {
   @@index([kind, createdAt])
   @@index([userId, createdAt])
   @@map("ai_calls")
+}
+
+/// A post a human judged, kept so the screener can learn from precedent.
+///
+/// ★ THE LABEL IS THE HUMAN'S, NEVER THE MODEL'S ★
+///
+/// `should_flag` is what a person concluded. `model_flagged` is what the screener said at the time,
+/// and is used ONLY to measure drift - never as a label, or the model would be learning from itself
+/// and any early mistake would compound forever.
+///
+/// ★ BOTH DIRECTIONS, DELIBERATELY ★
+///
+/// A moderator only ever sees posts the model FLAGGED, so a review can only ever say "you
+/// over-flagged". Reports are the only source of "you under-flagged" - the direction that matters,
+/// and the one the review queue structurally cannot see. Without reports this table would teach the
+/// screener to flag less and less while appearing to improve.
+model ScreenDecision {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  /// The post this came from, kept nullable so a deleted post does not erase the lesson it taught.
+  postId String? @map("post_id") @db.Uuid
+
+  /// The text that was judged. Stored rather than joined: the post may be edited or removed, and an
+  /// example that changes under you is not an example.
+  text String
+
+  /// What the HUMAN decided. This is the label.
+  shouldFlag Boolean @map("should_flag")
+  /// What the screener said at the time. For drift only.
+  modelFlagged Boolean @map("model_flagged")
+
+  /// `review` (a moderator decided) or `report` (a member reported a published post).
+  source String
+
+  /// Who decided. Null for a report that no officer has upheld yet.
+  decidedBy String?   @map("decided_by") @db.Uuid
+  decidedAt DateTime? @map("decided_at") @db.Timestamptz(6)
+
+  /// nomic-embed-text, 768 dimensions. Added by the migration as a `vector(768)` column with an
+  /// HNSW index - Prisma has no native type for it.
+  /// embedding vector(768)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  post    ForumPost? @relation(fields: [postId], references: [id], onDelete: SetNull)
+  decider User?      @relation(fields: [decidedBy], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([source, createdAt])
+  @@map("screen_decisions")
 }
 
 model ForumReaction {

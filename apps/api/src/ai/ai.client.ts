@@ -1,6 +1,8 @@
 import {
   ASSISTANT_TIMEOUT_MS,
   MODEL_KEEP_ALIVE,
+  fewshotBlock,
+  type ScreenDecision,
   SCREEN_CATEGORIES,
   SCREEN_SYSTEM_PROMPT,
   SCREEN_TIMEOUT_MS,
@@ -81,12 +83,22 @@ export class AiClient {
    * that could not be parsed. The caller treats all of those the same way, because from a member's
    * point of view they are the same thing: nobody has looked at this yet.
    */
-  async screen(text: string): Promise<ScreenResult> {
+  async screen(text: string, precedent: readonly ScreenDecision[] = []): Promise<ScreenResult> {
     const started = Date.now();
 
+    /*
+     * ★ PRECEDENT, APPENDED TO THE SYSTEM PROMPT ★
+     *
+     * Past decisions by this squadron's officers on SIMILAR posts. Empty is the normal case and the
+     * safe one — on a new install, or when the embedding model is unreachable, this is exactly the
+     * prompt it has always been.
+     *
+     * Appended rather than interleaved as chat turns: examples presented as a conversation invite
+     * the model to continue the conversation, and what is wanted is a rule, not a dialogue.
+     */
     const raw = await this.#complete(
       [
-        { role: 'system', content: SCREEN_SYSTEM_PROMPT },
+        { role: 'system', content: SCREEN_SYSTEM_PROMPT + fewshotBlock(precedent) },
         { role: 'user', content: text },
       ],
       SCREEN_TIMEOUT_MS,

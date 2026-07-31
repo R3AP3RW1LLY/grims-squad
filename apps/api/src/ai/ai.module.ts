@@ -2,6 +2,8 @@ import { Global, Module, type OnModuleDestroy, type OnModuleInit, Inject, Inject
 import { PrismaClient } from '@prisma/client';
 import { MODEL_WARM_INTERVAL_MS } from '@grims/shared';
 import { AiClient, aiConfigFrom } from './ai.client.js';
+import { EmbedClient, embedRootFrom } from './embed.client.js';
+import { DecisionStore } from './decision.store.js';
 import { ImageClient, imageConfigFrom } from './image.client.js';
 import { AiLog } from './ai-log.port.js';
 import { PrismaAiLog } from './ai-log.prisma.js';
@@ -145,6 +147,20 @@ export class ModelWarmer implements OnModuleInit, OnModuleDestroy {
         new ImageClient(imageConfigFrom(process.env), fetch, stream),
     },
     {
+      provide: EmbedClient,
+      useFactory: () => new EmbedClient(embedRootFrom(process.env)),
+    },
+    {
+      provide: DecisionStore,
+      inject: [PrismaClient, EmbedClient],
+      /*
+       * The plain client, not an AclBoundClient. `screen_decisions` carries no ACL column: a
+       * decision is squadron policy rather than somebody's content, and screening reads it on behalf
+       * of the system rather than of the member posting.
+       */
+      useFactory: (db: PrismaClient, embed: EmbedClient) => new DecisionStore(db, embed),
+    },
+    {
       provide: AiLog,
       inject: [PrismaClient],
       useFactory: (db: PrismaClient) => new PrismaAiLog(db),
@@ -156,8 +172,9 @@ export class ModelWarmer implements OnModuleInit, OnModuleDestroy {
     },
     {
       provide: ScreeningService,
-      inject: [AiClient, AiLog],
-      useFactory: (ai: AiClient, log: AiLog) => new ScreeningService(ai, log),
+      inject: [AiClient, AiLog, DecisionStore],
+      useFactory: (ai: AiClient, log: AiLog, decisions: DecisionStore) =>
+        new ScreeningService(ai, log, decisions),
     },
     {
       provide: ArtworkService,
@@ -165,12 +182,18 @@ export class ModelWarmer implements OnModuleInit, OnModuleDestroy {
       useFactory: (images: ImageClient, log: AiLog, quota: ArtworkQuota, stream: AiStreamService) =>
         new ArtworkService(images, log, quota, stream),
     },
-    ReviewQueueService,
+    {
+      provide: ReviewQueueService,
+      inject: [DecisionStore],
+      useFactory: (decisions: DecisionStore) => new ReviewQueueService(decisions),
+    },
     ModelWarmer,
   ],
   controllers: [AiController, ArtworkController],
   exports: [
     AiClient,
+    DecisionStore,
+    EmbedClient,
     ImageClient,
     AiLog,
     ScreeningService,

@@ -43,6 +43,24 @@ export interface HeldPost {
 }
 
 export class ReviewQueueService {
+  constructor(
+    /*
+     * Optional. Without it the queue works exactly as before and simply learns nothing — which is
+     * what every unit test of moderation wants, and what a deployment without an embedding model
+     * gets.
+     */
+    private readonly decisions: {
+      record(entry: {
+        postId: string | null;
+        text: string;
+        shouldFlag: boolean;
+        modelFlagged: boolean;
+        source: 'review' | 'report';
+        decidedBy: string | null;
+      }): Promise<void>;
+    } | null = null,
+  ) {}
+
   /**
    * Everything waiting, oldest first.
    *
@@ -130,7 +148,9 @@ export class ReviewQueueService {
 
     const post = await db.forumPost.findFirst({
       where: { id: postId, screenState: 'held', deletedAt: null },
-      select: { id: true },
+      // The body and the verdict come back too: this decision becomes a labelled example, and the
+      // example needs the text that was judged and what the model said about it.
+      select: { id: true, bodyMd: true, screenVerdict: true },
     });
     if (post === null) {
       /*
@@ -149,6 +169,33 @@ export class ReviewQueueService {
         reviewedBy: reviewer.userId,
       },
     });
+
+    /*
+     * ★ THE DECISION IS THE LESSON ★
+     *
+     * Squadron owner, 2026-07-31: "can we train the model based on wither a moderator passes a post
+     * in review or dismisses it?"
+     *
+     * `release` means the model was wrong to flag; `refuse` means it was right. Recorded as a
+     * labelled example so a similar post later carries this officer's judgement as precedent.
+     *
+     * Not awaited into the failure path: the moderation decision has already been written and must
+     * stand whether or not we manage to learn from it. Losing an example is a smaller harm than
+     * failing a decision an officer has made.
+     */
+    void this.decisions
+      ?.record({
+        postId: post.id,
+        text: post.bodyMd,
+        // What the HUMAN concluded. Refusing means it should have been held.
+        shouldFlag: decision === 'refuse',
+        // Always true here: only flagged or unavailable posts reach this queue. Kept explicit so
+        // the drift figures can tell reviews apart from reports.
+        modelFlagged: true,
+        source: 'review',
+        decidedBy: reviewer.userId,
+      })
+      .catch(() => undefined);
   }
 
   /**
