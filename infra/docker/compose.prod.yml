@@ -88,6 +88,26 @@ services:
       dockerfile: infra/docker/Dockerfile.api
     restart: unless-stopped
     env_file: [/srv/grims/.env]
+    # ── Reaching GMSD AI, which lives on the owner's PC ──────────────────────
+    #
+    # A reverse SSH tunnel binds the model endpoints to the SERVER's loopback
+    # (see tools/gmsd-tunnel.cmd). A container has its own network namespace, so
+    # `127.0.0.1` inside here is the container itself — the tunnel is invisible
+    # from in here without this line.
+    #
+    # `host-gateway` resolves to the docker host, so AI_BASE_URL in production is
+    # `http://host.docker.internal:11434/v1`.
+    #
+    # WORTH CORRECTING A CLAIM MADE EARLIER: the AI contract said this value was
+    # identical on a laptop and on the server, "one value, one code path". That
+    # was true only while nothing had to cross a container boundary. It differs by
+    # HOST and by nothing else — same scheme, same ports, same paths — and the
+    # code still has no environment branching in it.
+    #
+    # The tunnel deliberately does NOT bind 0.0.0.0. Publishing an unauthenticated
+    # model endpoint to the internet is the one mistake that would matter here.
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
     environment:
       NODE_ENV: production
       API_PORT: 5001
