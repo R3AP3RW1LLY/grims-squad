@@ -17,3 +17,8 @@ CRON_TZ=UTC
 
 # Discord role reconciliation.
 10 6 * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/role-sync.js >> /var/log/grims-worker.log 2>&1
+
+# Elite Dangerous knowledge ingest. Coriolis changes only with a game update; Spansh rebuilds
+# nightly. 03:20 UTC — off-peak, and BEFORE the 04:17 janitor so a long import is never competing
+# with a prune for disk.
+20 3 * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/ingest-knowledge.js >> /var/log/grims-worker.log 2>&1
