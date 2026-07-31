@@ -240,8 +240,22 @@ describe('the rank prefix', () => {
    * name, which is what people are called in game and in voice. A truncated
    * name is a different person's name.
    */
-  it('MANDATORY: puts the rank in front of the commander name', () => {
-    expect(composeNickname('Sector Overseer', 'Tychicus')).toBe('Sector Overseer - Tychicus');
+  it('MANDATORY: the rank is NOT in the nickname', () => {
+    /*
+     * ★ REVERSED 2026-07-31, ON THE OWNER'S INSTRUCTION ★
+     *
+     * "right now when we verify members, we are adding the rank prefix to their discord username,
+     * we need to stop this and only show their Inara Commander name please."
+     *
+     * The rank is already visible in Discord — it is the role, in colour, in the member list — so
+     * the prefix said the same thing twice and spent most of the 32-character budget doing it.
+     *
+     * Asserted as an ABSENCE rather than deleted, because "put the rank back" is a reasonable-
+     * sounding change for somebody who never saw this instruction.
+     */
+    expect(composeNickname('Sector Overseer', 'Tychicus')).toBe('Tychicus');
+    expect(composeNickname('Prime Legate', 'GRIM')).not.toContain('Prime Legate');
+    expect(composeNickname('Prime Legate', 'GRIM')).not.toContain(' - ');
   });
 
   it('uses the name alone when there is no rank', () => {
@@ -261,12 +275,13 @@ describe('the rank prefix', () => {
     expect(out.length).toBeLessThanOrEqual(32);
   });
 
-  it('keeps the rank when it fits exactly', () => {
-    // 32 characters on the nose. An off-by-one here would silently drop the
-    // rank for a whole band of name lengths and look like a rule nobody wrote.
-    const out = composeNickname('Prime Legate', 'Aurelian Voss Xyz');
-    expect(out).toBe('Prime Legate - Aurelian Voss Xyz');
-    expect(out).toHaveLength(32);
+  it('a long rank no longer eats the budget', () => {
+    /*
+     * This used to assert that "Prime Legate - Aurelian Voss Xyz" fitted in exactly 32 characters.
+     * With the rank gone the whole budget belongs to the commander name, which is the point: the
+     * name is the identity, and it is what people are called in game and in voice.
+     */
+    expect(composeNickname('Prime Legate', 'Aurelian Voss Xyz')).toBe('Aurelian Voss Xyz');
   });
 
   it('still truncates a commander name that is too long on its own', () => {

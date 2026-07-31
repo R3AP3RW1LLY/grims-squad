@@ -1,41 +1,45 @@
 /**
- * The Discord nickname a verified member wears: `RANK - COMMANDER`.
+ * The Discord nickname a verified member wears: their COMMANDER NAME, and nothing else.
+ *
+ * ★ THE RANK PREFIX WAS REMOVED, 2026-07-31 ★
+ *
+ * Squadron owner: "right now when we verify members, we are adding the rank prefix to their discord
+ * username, we need to stop this and only show their Inara Commander name please."
+ *
+ * It used to build `RANK - COMMANDER`. The rank is already visible in Discord — it is the role, in
+ * colour, in the member list — so putting it in the nickname said the same thing twice and spent
+ * most of Discord's 32 characters doing it. What people actually want to see is who somebody is in
+ * game.
+ *
+ * ★ WHY THIS FUNCTION STILL TAKES A RANK ★
+ *
+ * So that every caller does not have to change, and so the reason is recorded in one place rather
+ * than deleted from all of them. The argument is accepted and deliberately ignored — see the note
+ * on the parameter.
  *
  * ★ WHY THIS LIVES IN SHARED ★
  *
- * Three things need the same answer: the website when it verifies somebody, the
- * settings page when it shows them what their nickname will be, and the daily
- * worker sweep when it puts back a nickname somebody changed by hand. Three
- * copies of a truncation rule would drift, and the drift would be a member
- * whose name the site displays one way and the guild another.
+ * Three things need the same answer: the website when it verifies somebody, the settings page when
+ * it previews their nickname, and the daily worker sweep that puts back a nickname somebody changed
+ * by hand. Three copies of this rule would drift, and the drift would be a member whose name the
+ * site displays one way and the guild another.
  */
 
 /** Discord's hard ceiling on a nickname. */
 export const MAX_NICK = 32;
 
 /**
- * Builds the nickname: `RANK - COMMANDER`.
+ * Builds the nickname: just the commander name.
  *
- * ★ WHEN IT DOES NOT FIT, THE RANK GOES — NEVER THE NAME ★
+ * `rank` is accepted and ignored. Kept in the signature because the rank is still resolved for the
+ * settings preview and the roster, and because a parameter that is visibly unused — with this note
+ * attached — is a clearer record of a deliberate decision than a silently deleted one.
  *
- * Discord allows 32 characters and "Chief Fleet Commander - PEBBLEMERCAHNT" is
- * thirty-eight. Something has to give, and it must not be the commander name:
- * the name is the identity, it is what people are called in game and in voice,
- * and a truncated one is a different person's name.
- *
- * Truncating the RANK instead was considered and rejected — "Chief Fleet Comma"
- * is not a rank, and a nickname that looks corrupted invites somebody to fix it
- * by hand, which the next sync would then overwrite.
- *
- * So the rank is dropped whole, and a long-named Chief Fleet Commander simply
- * appears under their commander name.
+ * Still truncated to Discord's limit. A commander name longer than 32 characters is not something
+ * this function can solve, and a rejected API call would leave the member with no nickname at all.
  */
-export function composeNickname(rank: string | null, cmdrName: string): string {
-  const name = cmdrName.trim();
-  if (rank === null || rank.trim() === '') return name.slice(0, MAX_NICK);
-
-  const full = `${rank.trim()} - ${name}`;
-  return full.length <= MAX_NICK ? full : name.slice(0, MAX_NICK);
+export function composeNickname(_rank: string | null, cmdrName: string): string {
+  return cmdrName.trim().slice(0, MAX_NICK);
 }
 
 /**

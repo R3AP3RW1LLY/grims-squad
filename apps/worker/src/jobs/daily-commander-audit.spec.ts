@@ -26,7 +26,8 @@ const cmdr = (over: Partial<AuditableCommander> = {}): AuditableCommander => ({
   cmdrName: 'PEBBLE',
   discordId: 'd1',
   apiKey: 'key-1',
-  currentNick: 'Cadet - PEBBLE',
+  // The commander name alone. The rank prefix was dropped 2026-07-31 — see composeNickname.
+  currentNick: 'PEBBLE',
   rank: 'Cadet',
   ...over,
 });
@@ -145,7 +146,8 @@ describe('nicknames', () => {
     const report = await h.run();
 
     expect(report.nicknamesFixed).toBe(1);
-    expect(h.nicks[0]).toMatchObject({ discordId: 'd1', nickname: 'Cadet - PEBBLE' });
+    // The commander name alone — the rank prefix was dropped 2026-07-31.
+    expect(h.nicks[0]).toMatchObject({ discordId: 'd1', nickname: 'PEBBLE' });
   });
 
   it('MANDATORY: leaves a correct nickname alone', async () => {
@@ -162,7 +164,7 @@ describe('nicknames', () => {
   });
 
   it('ignores case, because Elite does', async () => {
-    const h = harness([cmdr({ currentNick: 'cadet - pebble' })], { 'key-1': OURS });
+    const h = harness([cmdr({ currentNick: 'pebble' })], { 'key-1': OURS });
     expect((await h.run()).nicknamesFixed).toBe(0);
   });
 
