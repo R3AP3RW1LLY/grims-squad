@@ -17,6 +17,7 @@ import { AiController } from './ai.controller.js';
 import { TrainingStatusService } from './training.service.js';
 import { KnowledgeService } from './knowledge.service.js';
 import { CorpusService } from './corpus.service.js';
+import { JobLogListener } from './job-log.listener.js';
 import { ArtworkController } from './artwork.controller.js';
 
 /**
@@ -206,6 +207,11 @@ export class ModelWarmer implements OnModuleInit, OnModuleDestroy {
     KnowledgeService,
     // Help Train the Bot. Never touches bytes — the media pipeline does that.
     CorpusService,
+    /*
+     * Brings the worker's ingest and embed activity onto the live log. The jobs run in a container
+     * that exits when it is done, so they announce over Postgres NOTIFY and this forwards.
+     */
+    JobLogListener,
     ModelWarmer,
   ],
   controllers: [AiController, ArtworkController],

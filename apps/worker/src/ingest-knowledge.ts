@@ -8,6 +8,7 @@ import { rebuildMarketEntries } from './jobs/market-flatten.js';
 import { readInaraKnowledge } from './jobs/ingest-inara.js';
 import { readJournalKnowledge } from './jobs/ingest-journal.js';
 import { readForumKnowledge } from './jobs/ingest-forum.js';
+import { announce } from './jobs/job-log.js';
 
 /**
  * Ingests what GMSD AI knows about Elite Dangerous.
@@ -77,6 +78,11 @@ async function ingestCoriolis(db: PrismaClient): Promise<void> {
     const written = tally.inserted + tally.updated;
     await finishIngest(db, run, { rows: written, ...tally, source: 'coriolis' });
     console.log(`coriolis: ${written} rows`);
+    await announce(db, {
+      level: 'info',
+      kind: 'ingest',
+      message: `coriolis: ${tally.inserted} new, ${tally.updated} updated`,
+    });
   } catch (e) {
     /*
      * Recorded, then rethrown to the caller's per-source handler. A failure that is only logged
@@ -137,6 +143,13 @@ async function ingestGalaxy(db: PrismaClient): Promise<void> {
       `galaxy: ${written} rows (${tally.inserted} new, ${tally.updated} updated; ` +
         `${stats.systems} systems, ${stats.stations} stations)`,
     );
+    await announce(db, {
+      level: 'info',
+      kind: 'ingest',
+      message:
+        `galaxy: ${tally.inserted.toLocaleString()} new, ${tally.updated.toLocaleString()} updated ` +
+        `(${stats.systems.toLocaleString()} systems, ${stats.stations.toLocaleString()} stations)`,
+    });
 
     /*
      * ★ FLATTEN AFTER EVERY GALAXY INGEST ★
@@ -278,12 +291,34 @@ async function main(): Promise<void> {
       ['forum', ingestForum],
     ] as const) {
       if (only.length > 0 && !only.includes(name)) continue;
+
+      /*
+       * Announced around the whole source rather than inside each job, so every one gets the same
+       * treatment without five copies of the same two lines — and so a job that throws before its
+       * own logging still reports a start and a failure.
+       */
+      const startedAt = Date.now();
+      await announce(db, { level: 'info', kind: 'ingest', message: `${name}: started` });
+
       try {
         await run(db);
+        await announce(db, {
+          level: 'info',
+          kind: 'ingest',
+          message: `${name}: finished`,
+          tookMs: Date.now() - startedAt,
+        });
       } catch (e) {
         // Caught per source, deliberately: one broken source must not take the others with it.
-        failures.push(`${name}: ${e instanceof Error ? e.message : String(e)}`);
-        console.error(`${name}: FAILED — ${e instanceof Error ? e.message : String(e)}`);
+        const message = e instanceof Error ? e.message : String(e);
+        failures.push(`${name}: ${message}`);
+        console.error(`${name}: FAILED — ${message}`);
+        await announce(db, {
+          level: 'error',
+          kind: 'ingest',
+          message: `${name}: FAILED — ${message}`,
+          tookMs: Date.now() - startedAt,
+        });
       }
     }
   } finally {

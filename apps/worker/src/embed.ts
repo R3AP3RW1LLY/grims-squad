@@ -1,6 +1,7 @@
 import { PrismaClient } from '@grims/db';
 import { EMBED_DIMS, type KnowledgeSource } from '@grims/shared';
 import { embedKnowledge, describeEmbedRun, type Embedder } from './jobs/embed-knowledge.js';
+import { announce } from './jobs/job-log.js';
 
 /**
  * Embedding prose knowledge, on a schedule.
@@ -93,12 +94,32 @@ async function main(): Promise<void> {
      *   embed.js            everything        — after the nightly galaxy import
      */
     const only = process.argv.slice(2).filter((a) => a !== '') as KnowledgeSource[];
+    const label = only.length > 0 ? only.join(', ') : 'all sources';
+    const startedAt = Date.now();
+
     const report = await embedKnowledge(
       db,
       new OllamaEmbedder(root),
       only.length > 0 ? { sources: only } : {},
     );
     console.log(describeEmbedRun(report));
+
+    /*
+     * A sweep that found nothing is NOT announced.
+     *
+     * The forum is swept every five minutes and the journal every three. Announcing each of those
+     * would put roughly six hundred "nothing to do" lines a day on a log whose entire value is that
+     * an officer can look at it and see what happened — the real events would be buried in noise
+     * they would learn to scroll past.
+     */
+    if (report.pending > 0) {
+      await announce(db, {
+        level: report.embedded === 0 && report.failed > 0 ? 'error' : 'info',
+        kind: 'embed',
+        message: `${label}: ${report.embedded} embedded${report.failed > 0 ? `, ${report.failed} failed` : ''}`,
+        tookMs: Date.now() - startedAt,
+      });
+    }
     /*
      * A run where EVERY row failed is a broken model, not a quiet night — most likely the tunnel is
      * down. Non-zero so cron mails it, because the symptom otherwise is an assistant that quietly
