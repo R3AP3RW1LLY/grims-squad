@@ -1,12 +1,13 @@
 import { Controller, Get, Inject, Res } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
-import { AppError, ErrorCode, Permission } from '@grims/shared';
+import { AppError, ErrorCode, Permission, type SourceStatus } from '@grims/shared';
 import { User, type CurrentUser } from '../auth/current-user.js';
 import { PermissionService } from '../authz/permission.service.js';
 import { satisfiesMask } from '../forum/category.service.js';
 import { AiStreamService, type AiLogLine } from './ai-stream.service.js';
 import { AiClient, aiHealth } from './ai.client.js';
 import { ImageClient } from './image.client.js';
+import { TrainingStatusService } from './training.service.js';
 
 /**
  * Each runtime reported on its own, because they run on different cards and fail independently.
@@ -60,6 +61,7 @@ export class AiController {
     @Inject(AiClient) private readonly ai: AiClient,
     @Inject(ImageClient) private readonly images: ImageClient,
     @Inject(PermissionService) private readonly permissions: PermissionService,
+    @Inject(TrainingStatusService) private readonly trainingStatus: TrainingStatusService,
   ) {}
 
   /**
@@ -149,6 +151,29 @@ export class AiController {
       clearInterval(heartbeat);
       unsubscribe();
     });
+  }
+
+  /**
+   * What the assistant knows, per source.
+   *
+   * ★ GATED ON AI_TRAINING, NOT AI_REVIEW ★
+   *
+   * Reading a log and curating what the AI learns are different jobs. Officers hold both; the
+   * separation matters because the training permission is also what will approve members'
+   * screenshots, and that is a job worth handing to people who know Elite rather than to whoever
+   * happens to administer the platform.
+   */
+  @Get('training')
+  async training(@User() caller: CurrentUser | undefined): Promise<{ sources: SourceStatus[] }> {
+    if (caller === undefined) {
+      throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
+    }
+    const mask = await this.permissions.effectiveMask(caller.userId);
+    if (!satisfiesMask(mask, Permission.AI_TRAINING)) {
+      throw new AppError(ErrorCode.PERMISSION_DENIED, 'You cannot see the AI training status.');
+    }
+
+    return { sources: await this.trainingStatus.status() };
   }
 
   async #assertMayReview(caller: CurrentUser | undefined): Promise<void> {

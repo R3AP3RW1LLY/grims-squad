@@ -157,6 +157,26 @@ export const Permission = {
    * speaking for anybody.
    */
   AI_REVIEW: 1n << 54n,
+  /**
+   * Ring 2. Watch what GMSD AI is learning, and approve what goes into it.
+   *
+   * ★ WHY THIS IS NOT AI_TOOLS_ADMIN EITHER ★
+   *
+   * Squadron owner, 2026-07-30: any member may submit screenshots for the image models, and
+   * "webmaster + AI_TRAINING holders approve". That is a curation job — looking at a picture and
+   * deciding whether it belongs — and it wants to be handed to the members who know Elite, not to
+   * whoever also happens to hold the kill switches.
+   *
+   * It also gates the training page itself: ingestion sources, what has been trained, what is
+   * training now, and when the next cycle runs. Reading that is not administering anything.
+   *
+   * ★ THE WEBMASTER GETS THIS AUTOMATICALLY ★
+   *
+   * Same mechanism as `AI_REVIEW`: kept out of `SQUADRON_STANDING_PERMISSIONS`, so the webmaster's
+   * `ALL_PERMISSIONS & ~SQUADRON_STANDING` includes it. Approving a training image is not speaking
+   * for the squadron.
+   */
+  AI_TRAINING: 1n << 55n,
 
   // ── Admin ────────────────────────────────────────────────────────────────
   /** Ring 2. Member management: search, filter, notes, probation, activity flags, deactivation. */
@@ -350,6 +370,13 @@ const OFFICER: PermissionMask =
    * reviewers, and a queue nobody can open is a queue that fills up.
    */
   P.AI_REVIEW |
+  /*
+   * Watching what the AI is learning, and approving the screenshots members submit for it.
+   * Officers get it for the same reason they get AI_REVIEW: a queue nobody can open fills up,
+   * and judging whether a picture of a Krait belongs in a training set is a job for people who
+   * fly them.
+   */
+  P.AI_TRAINING |
   P.OPS_MANAGE |
   P.CARRIER_MANAGE |
   P.FLEET_APPROVE_DOCTRINE |

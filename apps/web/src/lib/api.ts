@@ -1068,6 +1068,25 @@ export const getAdminRolesGated = (): Promise<AdminRead<{ roles: AdminRoleRow[] 
 export const getAdminDashboardGated = (): Promise<AdminRead<AdminDashboard>> =>
   getAdmin('/v1/admin/dashboard');
 
+/**
+ * What GMSD AI has learned, per source.
+ *
+ * Dates arrive as ISO strings over the wire — the shared `SourceStatus` types them as `Date`
+ * because that is what the service produces, and pretending JSON preserved that would be a lie
+ * the first time anything called a method on one.
+ */
+export interface TrainingSource {
+  source: string;
+  rows: number;
+  lastIngestedAt: string | null;
+  ingesting: boolean;
+  nextInHours: number | null;
+  lastError: string | null;
+}
+
+export const getAiTrainingGated = (): Promise<AdminRead<{ sources: TrainingSource[] }>> =>
+  getAdmin('/v1/ai/training');
+
 export interface ForumSearchHit {
   postId: string;
   threadId: string;

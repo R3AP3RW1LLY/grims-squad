@@ -154,6 +154,25 @@ const NAV: readonly NavDefinition[] = [
     blurb: 'Who holds what, and what each role grants.',
     requires: Permission.ROLE_MANAGE,
   },
+  /*
+   * ★ ITS OWN PAGE, NOT A TAB — squadron owner, 2026-07-30 ★
+   *
+   * "include the AI training page in the Administration Category as a new page,
+   * show the ingestion categories, if it has been trained, if it is training,
+   * and when the next ingestion cycle will be in hours."
+   *
+   * The admin console's tabs are all about MEMBERS. This is about what the
+   * assistant knows and when it last learned it, which is a different question
+   * asked by different people — and it is the surface that answers "why did the
+   * AI not know that", which otherwise has no answer anybody can look up.
+   */
+  {
+    href: '/app/training',
+    label: 'AI training',
+    section: 'admin',
+    blurb: 'What GMSD AI has learned, what it is learning, and when it next will.',
+    requires: Permission.AI_TRAINING,
+  },
 ];
 
 /** The destinations this mask can reach, in render order. */

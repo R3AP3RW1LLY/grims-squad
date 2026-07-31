@@ -25,6 +25,7 @@ import {
   LockClosedIcon,
   Cog6ToothIcon,
   KeyIcon,
+  AcademicCapIcon,
 } from '@heroicons/react/24/outline';
 import { ChevronDownIcon } from '@heroicons/react/20/solid';
 import type { MeResponse, NavItem } from '../lib/api';
@@ -74,6 +75,7 @@ const ICONS: Record<string, typeof HomeIcon> = {
   '/settings/account': Cog6ToothIcon,
   '/app': ShieldCheckIcon,
   '/app/roles': KeyIcon,
+  '/app/training': AcademicCapIcon,
 };
 
 const SECTION_LABELS: Record<NavItem['section'], string> = {

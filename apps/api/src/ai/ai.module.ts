@@ -14,6 +14,7 @@ import { PrismaArtworkQuota } from './artwork-quota.prisma.js';
 import { ReviewQueueService } from './review-queue.service.js';
 import { AiStreamService } from './ai-stream.service.js';
 import { AiController } from './ai.controller.js';
+import { TrainingStatusService } from './training.service.js';
 import { ArtworkController } from './artwork.controller.js';
 
 /**
@@ -193,6 +194,8 @@ export class ModelWarmer implements OnModuleInit, OnModuleDestroy {
       inject: [DecisionStore],
       useFactory: (decisions: DecisionStore) => new ReportService(decisions),
     },
+    // Reads the knowledge tables directly; no client, no stream, nothing to configure.
+    TrainingStatusService,
     ModelWarmer,
   ],
   controllers: [AiController, ArtworkController],
