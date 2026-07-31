@@ -90,15 +90,37 @@ REM                   model pipeline run in the ~7GB the game leaves behind.
 REM                   Without it, generating while flying is an out-of-memory
 REM                   crash -- and it would crash the GAME, not just this.
 REM
-REM  --cache-none     Frees models after each generation instead of holding them
-REM                   resident. Measured: ~5.7GB idle with this, ~6.8GB without,
-REM                   and it costs about six seconds per image.
+REM  * --cache-none WAS HERE AND IS DELIBERATELY GONE *
 REM
-REM                   That is a worse trade than it looks and it is still the
-REM                   right one. Six seconds on a ~25s generation is real, but
-REM                   the gigabyte it returns is a gigabyte the game gets on
-REM                   every evening somebody is NOT generating banners -- which
-REM                   is nearly all of them.
+REM  Squadron owner, 2026-07-31, choosing speed over gaming headroom after being
+REM  shown the trade.
+REM
+REM  It freed the models after every generation, which handed ~5.7GB back to the
+REM  game between jobs. The cost was that EVERY request paid a cold load:
+REM
+REM    models resident   ~8s per image
+REM    models evicted    ~25s per image
+REM
+REM  MEASURED AFTER THE CHANGE, AND THE RESULT WAS BETTER THAN THE TRADE OFFERED
+REM
+REM    before (--cache-none)   ~25s per image
+REM    after                   ~12s per image
+REM    VRAM held between jobs   NONE -- still ~2.2GB, which is the desktop
+REM
+REM  The prediction was "~8s, costs 5.7GB of the game's card". That was wrong,
+REM  and the reason is --lowvram: it STREAMS weights from system RAM by design,
+REM  so they never sit in VRAM whatever the cache setting is. Removing
+REM  --cache-none stopped the reload from DISK, which was the thirteen seconds.
+REM
+REM  So the weights now live in system RAM -- 60GB of 128GB in use -- and the
+REM  5070 Ti stays free for Elite Dangerous. Twice as fast at no cost to the game.
+REM
+REM  Going further to --normalvram would put ~5.7GB into VRAM for perhaps another
+REM  four seconds. Not taken: that IS the trade that costs the game, and it buys
+REM  a third of what removing --cache-none already gave.
+REM
+REM  texture load, this is the first thing to put back -- add --cache-none to the
+REM  arguments below and artwork returns to ~25s with the card free again.
 REM
 REM  --preview-method none
 REM                   No live denoising preview. Nobody is watching the ComfyUI
@@ -118,6 +140,5 @@ venv\Scripts\python.exe main.py ^
   --listen 127.0.0.1 ^
   --port 8188 ^
   --lowvram ^
-  --cache-none ^
   --preview-method none ^
   --disable-auto-launch
