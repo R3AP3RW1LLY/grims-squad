@@ -1098,6 +1098,10 @@ export interface TrainingSource {
   ingesting: boolean;
   nextInHours: number | null;
   lastError: string | null;
+  /** Only while something is running — what the live bar and countdown are computed from. */
+  startedAt: string | null;
+  rowsSoFar: number | null;
+  expectedRows: number | null;
 }
 
 export const getAiTrainingGated = (): Promise<AdminRead<{ sources: TrainingSource[] }>> =>

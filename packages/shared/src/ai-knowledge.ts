@@ -87,8 +87,20 @@ export const STORAGE_KIND = {
 export const REFRESH_HOURS: Record<KnowledgeSource, number> = {
   /** Continuous — it arrives as members fly. The number is nominal. */
   journal: 1,
-  /** Changes only when Frontier ships a game update. Weekly is generous. */
-  coriolis: 168,
+  /*
+   * ★ THREE HOURS — squadron owner, 2026-08-01 ★
+   *
+   * "why is this so long ... can we not do this on like a 2-3 hour schedule?"
+   *
+   * It was weekly, on the reasoning that coriolis-data changes only when Frontier ships a game
+   * update. That reasoning was about the DATA and the schedule is about when we LOOK, and those
+   * are different questions: looking weekly means a game update can be six days old before the
+   * assistant knows a module exists.
+   *
+   * Affordable because the job asks GitHub for one commit id and stops when it matches — a single
+   * small request, eight times a day. It downloads only when upstream actually moved.
+   */
+  coriolis: 3,
   /** Spansh rebuilds nightly; systems do not move. */
   galaxy: 24,
   /** Markets move hourly, and a stale price is worse than no price. */
@@ -119,6 +131,67 @@ export interface SourceStatus {
   readonly nextInHours: number | null;
   /** Set when the last attempt failed. A source that is quietly broken looks identical to a fresh one. */
   readonly lastError: string | null;
+
+  /**
+   * When the run currently in progress began. Null when nothing is running.
+   *
+   * Sent as the START rather than as an elapsed number, so the page can tick a clock locally
+   * between refreshes instead of showing a duration that freezes for thirty seconds at a time.
+   */
+  readonly startedAt: Date | null;
+  /** Rows written so far by the run in progress. See `progressIngest`. */
+  readonly rowsSoFar: number | null;
+  /**
+   * What this source held after its last SUCCESSFUL run, and therefore roughly what to expect.
+   *
+   * ★ THE ONLY HONEST BASIS FOR AN ESTIMATE ★
+   *
+   * There is no way to know how many rows an import will produce before it produces them — the
+   * galaxy dump is a 4GB stream and its length is not in a header. Last time's total is the best
+   * available guess, it is usually within a per cent, and on a FIRST run it is null — which is why
+   * `etaSeconds` returns null rather than inventing a number nobody could stand behind.
+   */
+  readonly expectedRows: number | null;
+}
+
+/**
+ * How much longer a running ingest has, in seconds.
+ *
+ * ★ IT ADJUSTS, BECAUSE IT IS RECOMPUTED FROM THE OBSERVED RATE ★
+ *
+ * Squadron owner: "an estimate that adjusts as it goes so its always showing an accurate time."
+ *
+ * Rate is measured over the whole run rather than the last interval. A window would react faster to
+ * a slowdown and would also swing wildly — the galaxy import writes at very different speeds
+ * through the dump, and a countdown that jumps between four minutes and forty is worse than one
+ * that drifts.
+ *
+ * Null when it cannot be known: nothing running, no previous total to compare against, or too
+ * little progress to divide by. A missing estimate is honest; a made-up one gets believed.
+ */
+export function etaSeconds(input: {
+  startedAt: Date | null;
+  rowsSoFar: number | null;
+  expectedRows: number | null;
+  now: Date;
+}): number | null {
+  const { startedAt, rowsSoFar, expectedRows, now } = input;
+  if (startedAt === null || rowsSoFar === null || expectedRows === null) return null;
+  if (rowsSoFar <= 0 || expectedRows <= rowsSoFar) return null;
+
+  const elapsedMs = now.getTime() - startedAt.getTime();
+  // Under a second there is no rate worth dividing by, and the first estimate would read as hours.
+  if (elapsedMs < 1_000) return null;
+
+  const rowsPerMs = rowsSoFar / elapsedMs;
+  return Math.round((expectedRows - rowsSoFar) / rowsPerMs / 1000);
+}
+
+/** 0-1 through a running ingest, or null when there is nothing to measure against. */
+export function ingestFraction(rowsSoFar: number | null, expectedRows: number | null): number | null {
+  if (rowsSoFar === null || expectedRows === null || expectedRows <= 0) return null;
+  // Clamped: last time's total is a guess, and a bar that runs past its end looks broken.
+  return Math.min(1, rowsSoFar / expectedRows);
 }
 
 /** Hours until a source is next due. Null when it has never run. */

@@ -1,8 +1,9 @@
 import { existsSync } from 'node:fs';
 import { PrismaClient } from '@grims/db';
 import { readCoriolis } from './jobs/ingest-coriolis.js';
+import { refreshCoriolis } from './jobs/coriolis-refresh.js';
 import { streamGalaxy } from './jobs/ingest-galaxy.js';
-import { writeBatch, beginIngest, finishIngest } from './jobs/knowledge-writer.js';
+import { writeBatch, beginIngest, finishIngest, progressIngest } from './jobs/knowledge-writer.js';
 import { rebuildMarketEntries } from './jobs/market-flatten.js';
 import { readInaraKnowledge } from './jobs/ingest-inara.js';
 import { readJournalKnowledge } from './jobs/ingest-journal.js';
@@ -34,13 +35,35 @@ const GALAXY_FILE = process.env['KNOWLEDGE_GALAXY_FILE'] ?? 'D:/ai/knowledge/gal
 const BATCH = 2_000;
 
 async function ingestCoriolis(db: PrismaClient): Promise<void> {
-  if (!existsSync(CORIOLIS_DIR)) {
-    console.log(`coriolis: skipped, no checkout at ${CORIOLIS_DIR}`);
-    return;
-  }
-
   const run = await beginIngest(db, 'coriolis');
   try {
+    /*
+     * ★ PULL FIRST, THEN READ ★
+     *
+     * This used to read a folder somebody had downloaded by hand. Running more often could not
+     * have made it fresher — the checkout was the ceiling, not the schedule. (The copy in place
+     * turned out to be current, not stale; the point stands anyway, because staying current
+     * depended entirely on a human remembering.)
+     *
+     * Almost always one small request that finds nothing new. See refreshCoriolis.
+     */
+    const upstream = await refreshCoriolis(CORIOLIS_DIR);
+    if (upstream.changed) console.log(`coriolis: updated to ${upstream.head?.slice(0, 7)}`);
+    else if (upstream.skipped !== null) console.log(`coriolis: using the local copy — ${upstream.skipped}`);
+
+    if (!existsSync(CORIOLIS_DIR)) {
+      /*
+       * No checkout AND upstream unreachable. Recorded as a FAILURE rather than skipped: a source
+       * that cannot get its data is broken, and "skipped" on the training page reads as a choice
+       * somebody made.
+       */
+      await finishIngest(db, run, {
+        error: `no checkout at ${CORIOLIS_DIR} and could not download one — ${upstream.skipped ?? 'unknown'}`,
+      });
+      console.log(`coriolis: FAILED — no data available`);
+      return;
+    }
+
     const rows = readCoriolis(CORIOLIS_DIR);
     let written = 0;
     for (let i = 0; i < rows.length; i += BATCH) {
@@ -82,6 +105,8 @@ async function ingestGalaxy(db: PrismaClient): Promise<void> {
         if (written - lastLogged >= 100_000) {
           lastLogged = written;
           console.log(`galaxy: ${written} rows...`);
+          // What the training page's progress bar and countdown read. See progressIngest.
+          await progressIngest(db, run, written);
         }
       },
       BATCH,

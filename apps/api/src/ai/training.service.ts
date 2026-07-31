@@ -47,17 +47,28 @@ export class TrainingStatusService {
         `SELECT source, COUNT(*)::bigint AS n FROM knowledge_items GROUP BY source`,
       ),
       this.db.$queryRawUnsafe<
-        Array<{ source: string; last_at: Date | null; error: string | null; started_at: Date | null }>
+        Array<{
+          source: string;
+          last_at: Date | null;
+          error: string | null;
+          started_at: Date | null;
+          rows_so_far: bigint | null;
+          expected_rows: bigint | null;
+        }>
       >(
         `SELECT s.source,
                 l.finished_at              AS last_at,
                 l.error,
-                r.started_at
+                r.started_at,
+                -- What the run in progress has written. Updated at batch boundaries by the job.
+                r.rows      AS rows_so_far,
+                -- Last SUCCESSFUL total: the only honest basis for "how much longer".
+                l.rows      AS expected_rows
            FROM (SELECT DISTINCT source FROM knowledge_ingests) s
            -- The most recent FINISHED run, which is what "last trained" means to a reader.
            LEFT JOIN LATERAL (
-                  SELECT finished_at, error FROM knowledge_ingests
-                   WHERE source = s.source AND finished_at IS NOT NULL
+                  SELECT finished_at, error, rows FROM knowledge_ingests
+                   WHERE source = s.source AND finished_at IS NOT NULL AND error IS NULL
                    ORDER BY finished_at DESC LIMIT 1) l ON true
            /*
             * ★ RUNNING MEANS RECENTLY STARTED AND STILL UNFINISHED ★
@@ -77,7 +88,7 @@ export class TrainingStatusService {
             * for a corpse.
             */
            LEFT JOIN LATERAL (
-                  SELECT started_at FROM knowledge_ingests
+                  SELECT started_at, rows FROM knowledge_ingests
                    WHERE source = s.source AND finished_at IS NULL
                    ORDER BY started_at DESC LIMIT 1) r ON true`,
       ),
@@ -109,6 +120,14 @@ export class TrainingStatusService {
         lastIngestedAt: lastAt,
         ingesting,
         nextInHours: nextInHours(source, lastAt, now),
+        /*
+         * Only meaningful while something is running. Reported as null otherwise rather than as
+         * zero — the page distinguishes "nothing to show" from "no progress yet", and a zero would
+         * draw an empty bar for an idle source.
+         */
+        startedAt: ingesting ? startedAt : null,
+        rowsSoFar: ingesting && run?.rows_so_far != null ? Number(run.rows_so_far) : null,
+        expectedRows: run?.expected_rows == null ? null : Number(run.expected_rows),
         /*
          * Bounded, and bounded HERE rather than at render time. A stack trace in a status column
          * is unreadable on the page that shows it, and a page that has to trim its own data is one

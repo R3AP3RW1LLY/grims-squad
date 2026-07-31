@@ -8,6 +8,7 @@ import { StepUp } from '../step-up';
 import { NoAccess, AdminUnavailable } from '../no-access';
 import { PageHeader, PageBody, Section, StatGrid, StatTile } from '../../../../components/hub-page';
 import { LiveRefresh } from './live';
+import { IngestProgress } from './progress';
 
 export const metadata: Metadata = {
   title: "AI training — Grim's Squad",
@@ -145,6 +146,17 @@ function SourceRow({ source: s }: { source: TrainingSource }) {
       </td>
       <td className="py-3 pr-4">
         <State source={s} />
+        {/*
+          The live bar sits UNDER the pill rather than in the next cell, so the countdown reads as
+          part of "Training now" rather than as a competing answer to "next cycle".
+        */}
+        {s.ingesting && (
+          <IngestProgress
+            startedAt={s.startedAt}
+            rowsSoFar={s.rowsSoFar}
+            expectedRows={s.expectedRows}
+          />
+        )}
       </td>
       <td className="py-3 text-right font-mono tabular-nums text-[var(--color-text-secondary)]">
         {nextLabel(s)}
