@@ -278,6 +278,32 @@ export const TRAINING_CATEGORIES: readonly TrainingCategory[] = [
     min: 60,
     ideal: 120,
   },
+  {
+    key: 'scenery',
+    label: 'Scenery and vistas',
+    guidance:
+      'The shots you kept because they looked good. Landscapes, horizons, light on a hull, a station against a ringed planet — composition rather than subject.',
+    min: 60,
+    ideal: 120,
+  },
+  {
+    /*
+     * ★ THE CATCH-ALL, AND WHY IT IS LAST ★
+     *
+     * Every collection drive needs one. Without it a member with a good shot that fits nothing —
+     * a thargoid, a galnet screen, a wing of ships in formation — either files it wrongly or does
+     * not send it, and the first is worse: a mislabelled image teaches the model the wrong concept.
+     *
+     * It is LAST in the list so it is never the default selection. A catch-all offered first
+     * becomes where everything goes, and then it is not a category, it is a shrug.
+     */
+    key: 'misc',
+    label: 'Miscellaneous',
+    guidance:
+      'Anything that does not fit the others and is still worth having. Say clearly what it is — this one leans hardest on the description.',
+    min: 60,
+    ideal: 120,
+  },
 ] as const;
 
 /** Look one up. Null for anything not in the list — a caller may not invent a category. */

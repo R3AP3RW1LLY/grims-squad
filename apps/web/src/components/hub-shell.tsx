@@ -87,9 +87,20 @@ const SECTION_LABELS: Record<NavItem['section'], string> = {
   admin: 'Administration',
 };
 
-// GMSD AI sits between the member's own account and the admin area: it is not administration —
-// every member can contribute — but it is not part of the squadron's day-to-day either.
-const ORDER: NavItem['section'][] = ['squadron', 'personal', 'ai', 'admin'];
+/*
+ * ★ ORDER SET BY THE SQUADRON OWNER, 2026-08-01 ★
+ *
+ * "move the GMSD AI Category above the Your Account Category, and move Your Account category under
+ * Administraion Category."
+ *
+ * Squadron, then GMSD AI, then Administration, then Your account.
+ *
+ * It puts the member's OWN settings last, which reads as odd until you look at how the sidebar is
+ * actually used: squadron pages are daily, GMSD AI is something the owner wants people to see and
+ * use, administration is a job, and your own account is a place you visit twice a year. Frequency
+ * of use, descending — with the thing being promoted second, where it cannot be missed.
+ */
+const ORDER: NavItem['section'][] = ['squadron', 'ai', 'admin', 'personal'];
 
 function cx(...classes: (string | false | undefined)[]): string {
   return classes.filter(Boolean).join(' ');

@@ -18,9 +18,32 @@ const CORIOLIS = 'D:/ai/knowledge/coriolis-data-master';
 const GALAXY = 'D:/ai/knowledge/galaxy_populated.json.gz';
 const live = process.env['DATABASE_URL'] !== undefined && existsSync(CORIOLIS) ? describe : describe.skip;
 
+/**
+ * Removes the ingest RUNS this file created.
+ *
+ * ★ THE TRAINING PAGE READS THIS TABLE, AND THE TEST WAS LYING TO IT ★
+ *
+ * Reported by the squadron owner: two sources showing "Training now" with nothing running, and a
+ * galaxy row count of 6,006 for a source holding 448,676. Both came from here. This test writes
+ * REAL `knowledge_ingests` rows against the REAL development database — that is the point of it,
+ * and it is why it can prove things a fake cannot — but it never cleaned them up, so every
+ * `pnpm test` left an ingest history entry describing a partial import that no job had performed.
+ *
+ * The knowledge_items are deliberately LEFT: they are correct rows, and deleting them would make
+ * this test destructive to a developer's working data. It is only the RUN LOG that is a lie, and
+ * only the run log that is removed.
+ */
+async function forgetRuns(db: PrismaClient, since: Date): Promise<void> {
+  await db.$executeRawUnsafe(
+    `DELETE FROM knowledge_ingests WHERE started_at >= $1 AND source IN ('coriolis','galaxy')`,
+    since,
+  );
+}
+
 live('real ingest', () => {
   it('writes ships, modules and blueprints, then re-runs without duplicating', async () => {
     const db = new PrismaClient();
+    const startedAt = new Date();
     try {
       const rows = readCoriolis(CORIOLIS);
       const id = await beginIngest(db, 'coriolis');
@@ -41,6 +64,8 @@ live('real ingest', () => {
       );
       expect(Number(second[0]?.n)).toBe(Number(first[0]?.n));
     } finally {
+      // See forgetRuns. The rows this wrote are real; the RUN LOG entry is not.
+      await forgetRuns(db, startedAt).catch(() => undefined);
       await db.$disconnect();
     }
   }, 180_000);
@@ -48,6 +73,7 @@ live('real ingest', () => {
   it('writes real galaxy systems with usable coordinates', async () => {
     if (!existsSync(GALAXY)) return;
     const db = new PrismaClient();
+    const startedAt = new Date();
     try {
       const id = await beginIngest(db, 'galaxy');
       let written = 0;
@@ -67,6 +93,9 @@ live('real ingest', () => {
       console.log('  nearest to Sol:', near.map((r) => `${r.name} ${r.ly}ly`).join(', '));
       expect(near.length).toBeGreaterThan(0);
     } finally {
+      // See forgetRuns. This test imports a PARTIAL galaxy on purpose — leaving its run in the log
+      // told the training page the galaxy source held 6,006 rows when it holds 448,676.
+      await forgetRuns(db, startedAt).catch(() => undefined);
       await db.$disconnect();
     }
   }, 300_000);

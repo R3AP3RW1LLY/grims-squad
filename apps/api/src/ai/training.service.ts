@@ -23,6 +23,15 @@ import {
  * platform were fully written, fully tested, and had never once executed, and nothing anywhere
  * said so.
  */
+/**
+ * How long an unfinished run may sit before it is called dead rather than busy.
+ *
+ * The galaxy import is the longest job here and finishes well inside an hour on the full dump.
+ * Six hours is generous enough that a slow night is never mistaken for a corpse, and short enough
+ * that a job killed overnight is flagged by morning.
+ */
+const STALL_AFTER_MS = 6 * 60 * 60 * 1000;
+
 @Injectable()
 export class TrainingStatusService {
   constructor(@Inject(PrismaClient) private readonly db: PrismaClient) {}
@@ -38,24 +47,39 @@ export class TrainingStatusService {
         `SELECT source, COUNT(*)::bigint AS n FROM knowledge_items GROUP BY source`,
       ),
       this.db.$queryRawUnsafe<
-        Array<{ source: string; last_at: Date | null; error: string | null; running: boolean }>
+        Array<{ source: string; last_at: Date | null; error: string | null; started_at: Date | null }>
       >(
         `SELECT s.source,
                 l.finished_at              AS last_at,
                 l.error,
-                COALESCE(r.running, false) AS running
+                r.started_at
            FROM (SELECT DISTINCT source FROM knowledge_ingests) s
            -- The most recent FINISHED run, which is what "last trained" means to a reader.
            LEFT JOIN LATERAL (
                   SELECT finished_at, error FROM knowledge_ingests
                    WHERE source = s.source AND finished_at IS NOT NULL
                    ORDER BY finished_at DESC LIMIT 1) l ON true
-           -- Running = started and never finished. Also true of a job that CRASHED, which is
-           -- correct and deliberate: it is still unfinished, and saying so beats reporting a
-           -- completion that never happened.
+           /*
+            * ★ RUNNING MEANS RECENTLY STARTED AND STILL UNFINISHED ★
+            *
+            * This was "started and never finished", full stop, on the reasoning that a crashed job
+            * IS still unfinished and saying so beats reporting a completion that never happened.
+            *
+            * That reasoning was right about the ambiguity and wrong about the remedy. A job killed
+            * three days ago leaves its row forever, and the page then says "Training now" forever —
+            * which is a WORSE lie than the one it replaced, because it is reassuring. Reported by
+            * the owner: two sources reading "Training now" with nothing running anywhere.
+            *
+            * A window instead. Inside it, unfinished means running. Outside it, unfinished means
+            * the job died — reported as a stall below, which is the state that actually needs
+            * somebody. The galaxy import is the longest job here and takes well under an hour even
+            * on the full dump; six hours is generous enough that a slow night is never mistaken
+            * for a corpse.
+            */
            LEFT JOIN LATERAL (
-                  SELECT true AS running FROM knowledge_ingests
-                   WHERE source = s.source AND finished_at IS NULL LIMIT 1) r ON true`,
+                  SELECT started_at FROM knowledge_ingests
+                   WHERE source = s.source AND finished_at IS NULL
+                   ORDER BY started_at DESC LIMIT 1) r ON true`,
       ),
     ]);
 
@@ -66,18 +90,41 @@ export class TrainingStatusService {
       const run = runBySource.get(source);
       const lastAt = run?.last_at ?? null;
 
+      /*
+       * ★ THREE STATES OUT OF ONE UNFINISHED ROW ★
+       *
+       * Started recently and unfinished -> running.
+       * Started long ago and unfinished -> STALLED. The job died without recording why, and that
+       *                                    is the state most in need of a human — it is invisible
+       *                                    in every log because nothing errored.
+       */
+      const startedAt = run?.started_at ?? null;
+      const age = startedAt === null ? null : now.getTime() - startedAt.getTime();
+      const ingesting = age !== null && age < STALL_AFTER_MS;
+      const stalled = age !== null && age >= STALL_AFTER_MS;
+
       return {
         source: source as KnowledgeSource,
         rows: rowsBySource.get(source) ?? 0,
         lastIngestedAt: lastAt,
-        ingesting: run?.running ?? false,
+        ingesting,
         nextInHours: nextInHours(source, lastAt, now),
         /*
          * Bounded, and bounded HERE rather than at render time. A stack trace in a status column
          * is unreadable on the page that shows it, and a page that has to trim its own data is one
          * that will eventually forget to.
          */
-        lastError: run?.error === undefined || run.error === null ? null : run.error.slice(0, 300),
+        /*
+         * A stall is REPORTED AS THE ERROR, because to a reader it is one — and because the run
+         * that died left no message of its own. Anything the previous run said is kept alongside:
+         * a source that failed and then stalled has two things wrong with it.
+         */
+        lastError: stalled
+          ? `Started ${Math.round((age ?? 0) / 3_600_000)}h ago and never finished — the job was ` +
+            `killed or crashed.${run?.error === undefined || run.error === null ? '' : ` Previously: ${run.error.slice(0, 200)}`}`
+          : run?.error === undefined || run.error === null
+            ? null
+            : run.error.slice(0, 300),
       };
     });
   }

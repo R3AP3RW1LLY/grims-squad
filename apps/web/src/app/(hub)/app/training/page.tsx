@@ -7,6 +7,7 @@ import { getAiTrainingGated, type TrainingSource } from '../../../../lib/api';
 import { StepUp } from '../step-up';
 import { NoAccess, AdminUnavailable } from '../no-access';
 import { PageHeader, PageBody, Section, StatGrid, StatTile } from '../../../../components/hub-page';
+import { LiveRefresh } from './live';
 
 export const metadata: Metadata = {
   title: "AI training — Grim's Squad",
@@ -49,6 +50,8 @@ export default async function TrainingPage() {
   const trained = sources.filter((s) => s.rows > 0).length;
   const running = sources.filter((s) => s.ingesting);
   const overdue = sources.filter((s) => s.nextInHours !== null && s.nextInHours < 0);
+  // A stall reports itself through lastError while not being `ingesting` — see the service.
+  const stalled = sources.filter((s) => !s.ingesting && s.lastError !== null);
 
   return (
     <>
@@ -57,6 +60,8 @@ export default async function TrainingPage() {
         title="AI training"
         subtitle="What GMSD AI has learned, and when it next learns more"
       />
+
+      <LiveRefresh />
 
       <PageBody
         wide
@@ -71,9 +76,20 @@ export default async function TrainingPage() {
             tone={running.length > 0 ? 'accent' : 'default'}
           />
           <StatTile
-            label="Overdue"
-            value={overdue.length === 0 ? 'None' : String(overdue.length)}
-            tone={overdue.length > 0 ? 'warn' : 'default'}
+            label={stalled.length > 0 ? 'Needs attention' : 'Overdue'}
+            /*
+             * A STALL outranks being overdue. Overdue means a schedule has slipped and will catch
+             * up on its own; stalled means a job died and never will. Showing the smaller number
+             * when the larger problem exists is how the larger problem gets missed.
+             */
+            value={
+              stalled.length > 0
+                ? `${stalled.length} stalled`
+                : overdue.length === 0
+                  ? 'None'
+                  : String(overdue.length)
+            }
+            tone={stalled.length > 0 || overdue.length > 0 ? 'warn' : 'default'}
           />
         </StatGrid>
 
@@ -146,7 +162,15 @@ function SourceRow({ source: s }: { source: TrainingSource }) {
  */
 function State({ source: s }: { source: TrainingSource }) {
   if (s.ingesting) return <Pill tone="accent">Training now</Pill>;
-  if (s.lastError !== null) return <Pill tone="danger">Last run failed</Pill>;
+  /*
+   * A stall arrives as an error, and reads as one — the service turns "started six hours ago and
+   * never finished" into a message, because the job that died left none of its own. Distinguished
+   * from an ordinary failure by its wording rather than by a second flag: both mean somebody has
+   * to look, and one pill saying so is clearer than two that need telling apart.
+   */
+  if (s.lastError !== null) {
+    return <Pill tone="danger">{s.lastError.startsWith('Started') ? 'Stalled' : 'Last run failed'}</Pill>;
+  }
   if (s.lastIngestedAt === null) return <Pill tone="muted">Never run</Pill>;
   return <Pill tone="ok">Trained</Pill>;
 }

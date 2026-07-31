@@ -54,7 +54,7 @@ describe('every source is accounted for', () => {
     const svc = new TrainingStatusService(
       fakeDb(
         [],
-        [{ source: 'inara', last_at: new Date('2026-08-01T05:00:00Z'), error: 'HTTP 401', running: false }],
+        [{ source: 'inara', last_at: new Date('2026-08-01T05:00:00Z'), error: 'HTTP 401', started_at: null }],
       ),
     );
 
@@ -75,7 +75,7 @@ describe('the next cycle', () => {
     const svc = new TrainingStatusService(
       fakeDb(
         [{ source: 'galaxy', n: 448_893n }],
-        [{ source: 'galaxy', last_at: new Date('2026-08-01T07:00:00Z'), error: null, running: false }],
+        [{ source: 'galaxy', last_at: new Date('2026-08-01T07:00:00Z'), error: null, started_at: null }],
       ),
     );
 
@@ -91,7 +91,7 @@ describe('the next cycle', () => {
      * the first behind the second.
      */
     const svc = new TrainingStatusService(
-      fakeDb([], [{ source: 'galaxy', last_at: new Date('2026-07-31T08:00:00Z'), error: null, running: false }]),
+      fakeDb([], [{ source: 'galaxy', last_at: new Date('2026-07-31T08:00:00Z'), error: null, started_at: null }]),
     );
 
     const galaxy = (await svc.status(NOW)).find((r) => r.source === 'galaxy');
@@ -100,26 +100,76 @@ describe('the next cycle', () => {
   });
 });
 
-describe('a job that crashed still reads as unfinished', () => {
-  it('reports running when a run was started and never finished', async () => {
-    /*
-     * Deliberate. A crashed job IS still unfinished, and saying so is more useful than reporting a
-     * completion that never happened — the one status that tells an officer nothing.
-     */
+describe('unfinished means two different things', () => {
+  it('reports a recent unfinished run as running', async () => {
+    // Started twenty minutes ago and still going. The galaxy import legitimately takes a while.
     const svc = new TrainingStatusService(
-      fakeDb([], [{ source: 'galaxy', last_at: null, error: null, running: true }]),
+      fakeDb(
+        [],
+        [{ source: 'galaxy', last_at: null, error: null, started_at: new Date('2026-08-01T11:40:00Z') }],
+      ),
     );
 
     const galaxy = (await svc.status(NOW)).find((r) => r.source === 'galaxy');
 
     expect(galaxy?.ingesting).toBe(true);
+    expect(galaxy?.lastError).toBeNull();
+  });
+
+  it('MANDATORY: reports an OLD unfinished run as stalled, not as running', async () => {
+    /*
+     * ★ THE BUG THIS EXISTS FOR ★
+     *
+     * "Running = started and never finished" was the original rule, on the reasoning that a crashed
+     * job is still unfinished and saying so beats claiming a completion that never happened. Right
+     * about the ambiguity, wrong about the remedy: the row never goes away, so the page said
+     * "Training now" forever. Reported by the squadron owner with two sources showing it and
+     * nothing running anywhere.
+     *
+     * A stall is the state most in need of a human — it is invisible in every log, because nothing
+     * errored. So it is reported AS an error, with the message the dead job never wrote.
+     */
+    const svc = new TrainingStatusService(
+      fakeDb(
+        [],
+        [{ source: 'galaxy', last_at: null, error: null, started_at: new Date('2026-07-30T11:00:00Z') }],
+      ),
+    );
+
+    const galaxy = (await svc.status(NOW)).find((r) => r.source === 'galaxy');
+
+    expect(galaxy?.ingesting).toBe(false);
+    expect(galaxy?.lastError).toContain('never finished');
+  });
+
+  it('keeps the previous failure alongside a stall', async () => {
+    // A source that failed and then stalled has two things wrong with it, and an officer chasing
+    // the second needs the first.
+    const svc = new TrainingStatusService(
+      fakeDb(
+        [],
+        [
+          {
+            source: 'inara',
+            last_at: new Date('2026-07-29T05:00:00Z'),
+            error: 'HTTP 401',
+            started_at: new Date('2026-07-30T05:00:00Z'),
+          },
+        ],
+      ),
+    );
+
+    const inara = (await svc.status(NOW)).find((r) => r.source === 'inara');
+
+    expect(inara?.lastError).toContain('never finished');
+    expect(inara?.lastError).toContain('HTTP 401');
   });
 });
 
 describe('an error never arrives unbounded', () => {
   it('trims a stack trace to something a table cell can hold', async () => {
     const svc = new TrainingStatusService(
-      fakeDb([], [{ source: 'galaxy', last_at: NOW, error: 'x'.repeat(5_000), running: false }]),
+      fakeDb([], [{ source: 'galaxy', last_at: NOW, error: 'x'.repeat(5_000), started_at: null }]),
     );
 
     const galaxy = (await svc.status(NOW)).find((r) => r.source === 'galaxy');
