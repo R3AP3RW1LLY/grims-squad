@@ -57,10 +57,35 @@ export function YouTubeConsent() {
       frame.loading = 'lazy';
       frame.allow = 'accelerometer; encrypted-media; gyroscope; picture-in-picture; fullscreen';
       /*
-       * Sandboxed. `allow-same-origin` is absent, so the frame cannot reach our origin, and
-       * `allow-top-navigation` is absent, so it cannot navigate the page out from under a reader.
+       * ★ allow-same-origin IS REQUIRED, AND LEAVING IT OUT BROKE PLAYBACK ★
+       *
+       * Squadron owner, 2026-07-31: "when i click a video to play, it just shows a stale black
+       * screen it does not actually play the video".
+       *
+       * That was this line. Without `allow-same-origin` the browser gives the frame an OPAQUE
+       * origin, so the player cannot reach its own storage or its own origin's resources — it
+       * fails during start-up and renders a black rectangle. Nothing errors on our side, because
+       * nothing on our side went wrong.
+       *
+       * ★ THE ORIGINAL COMMENT HERE WAS WRONG, SO IT IS WORTH CORRECTING PROPERLY ★
+       *
+       * It claimed omitting the flag stopped the frame "reaching our origin". It does not do that
+       * and never did. `allow-same-origin` means the framed document keeps ITS OWN origin —
+       * youtube-nocookie.com — and the same-origin policy still stands between that and us. A
+       * cross-origin frame cannot touch our DOM either way.
+       *
+       * The real hazard with `allow-scripts allow-same-origin` is a SAME-ORIGIN frame, which could
+       * then reach into its own sandbox attribute and remove it. This frame is cross-origin by
+       * construction: the URL is built from a validated 11-character id and a fixed host, so there
+       * is no input that could make it point at us.
+       *
+       * `allow-top-navigation` remains absent, which is the flag that actually matters here — it is
+       * what stops an embed navigating the page out from under a reader.
        */
-      frame.setAttribute('sandbox', 'allow-scripts allow-presentation allow-popups');
+      frame.setAttribute(
+        'sandbox',
+        'allow-scripts allow-same-origin allow-presentation allow-popups',
+      );
       frame.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
       frame.className = 'doc-embed-frame';
 

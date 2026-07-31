@@ -67,11 +67,27 @@ set OLLAMA_HOST=127.0.0.1:11434
 
 REM How long a model stays resident after its last request.
 REM
-REM Five minutes, not the default. Screening runs in bursts when people post, and
-REM the image model needs the same 12GB when somebody generates a banner -- a
-REM text model camped on the card for thirty minutes would make every artwork
-REM request wait for an eviction it could have avoided.
-set OLLAMA_KEEP_ALIVE=5m
+REM  * NEVER UNLOAD -- AND THE FIVE MINUTES HERE BEFORE WAS A REAL BUG *
+REM
+REM  This was 5m, and the reasoning was sound AT THE TIME: text and image shared
+REM  one card, so a text model camped on it made every artwork request wait for
+REM  an eviction.
+REM
+REM  That stopped being true the moment image generation moved to the 5070 Ti.
+REM  Nothing else uses the 3060 now. The reasoning was never revisited, and the
+REM  cost was measured on 2026-07-31:
+REM
+REM    model resident, screening a post   0.22s
+REM    model evicted, same request        8.70s
+REM    screening timeout                  8.00s
+REM
+REM  Posting is bursty and infrequent, so after any five-minute gap the model was
+REM  ALWAYS cold -- and a cold call missed the timeout by seven tenths of a
+REM  second. Every post after a quiet spell was held for review, and the log said
+REM  "No answer from the model" as though the GPU were broken.
+REM
+REM  -1 means never unload. It costs ~5GB of a 12GB card that has no other job.
+set OLLAMA_KEEP_ALIVE=-1
 
 REM One model resident at a time, and one request at a time.
 REM

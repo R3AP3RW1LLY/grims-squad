@@ -1,5 +1,6 @@
-import { Global, Module } from '@nestjs/common';
+import { Global, Module, type OnModuleDestroy, type OnModuleInit, Inject, Injectable } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
+import { MODEL_WARM_INTERVAL_MS } from '@grims/shared';
 import { AiClient, aiConfigFrom } from './ai.client.js';
 import { ImageClient, imageConfigFrom } from './image.client.js';
 import { AiLog } from './ai-log.port.js';
@@ -27,6 +28,51 @@ import { ArtworkController } from './artwork.controller.js';
  * itself unconfigured. Nothing here throws on a missing model — the site runs today with no AI at
  * all, and it must keep running whenever the owner's machine is off.
  */
+/**
+ * Keeps the text model loaded.
+ *
+ * ★ THE BUG THIS EXISTS FOR ★
+ *
+ * Measured 2026-07-31: screening takes 0.22s with the model resident and 8.70s without. The model
+ * was unloading after five minutes idle, so every post after a quiet spell paid the cold load and
+ * missed the timeout — the member's post was held for review and the admin log read "No answer from
+ * the model", which looks like a broken GPU rather than a model that had simply gone to sleep.
+ *
+ * ★ WHY A HEARTBEAT AND NOT JUST keep_alive ★
+ *
+ * Every request already carries `keep_alive: -1`. That covers a model that is loaded and idling. It
+ * does not cover the model server being restarted, the machine waking from sleep, or another model
+ * evicting ours — and in each of those the person who discovers it is the next member to post.
+ *
+ * ★ NOTHING HERE CAN FAIL A BOOT ★
+ *
+ * The warm-up is fired and not awaited, and its errors are swallowed. The model being unreachable is
+ * an ordinary state — the machine may simply be off — and the API must start regardless. Whether it
+ * is actually answering is the health route's question, not startup's.
+ */
+@Injectable()
+export class ModelWarmer implements OnModuleInit, OnModuleDestroy {
+  #timer: NodeJS.Timeout | null = null;
+
+  constructor(@Inject(AiClient) private readonly ai: AiClient) {}
+
+  onModuleInit(): void {
+    if (!this.ai.configured) return;
+
+    void this.ai.warm().catch(() => undefined);
+
+    this.#timer = setInterval(() => {
+      void this.ai.warm().catch(() => undefined);
+    }, MODEL_WARM_INTERVAL_MS);
+    // Does not hold the process open: a heartbeat must never be the reason a container will not exit.
+    this.#timer.unref?.();
+  }
+
+  onModuleDestroy(): void {
+    if (this.#timer !== null) clearInterval(this.#timer);
+  }
+}
+
 @Global()
 @Module({
   providers: [
@@ -75,6 +121,7 @@ import { ArtworkController } from './artwork.controller.js';
         new ArtworkService(images, log, quota, stream),
     },
     ReviewQueueService,
+    ModelWarmer,
   ],
   controllers: [AiController, ArtworkController],
   exports: [

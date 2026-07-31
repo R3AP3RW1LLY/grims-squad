@@ -26,11 +26,13 @@
  *   RTX 5070 Ti (16GB)  ComfyUI — banner artwork. This is ALSO the card Elite Dangerous runs on,
  *                       so image work is throttled to leave the game alone. See ai-image.ts.
  *
- * The split is the reason screening can afford an eight-second timeout: it never queues behind a
- * banner being generated, because they are not on the same GPU.
+ * The split is why screening never queues behind a banner being generated — they are not on the
+ * same GPU — and it is also why the text model is now pinned in memory permanently. Nothing else
+ * wants that card. See SCREEN_TIMEOUT_MS for the bug that came from not revisiting this when the
+ * split happened.
  *
- * Every decision below follows from that. Timeouts are short, failure is explicit rather than
- * silent, and "unavailable" is a first-class answer rather than an exception nobody handles.
+ * Every decision below follows from that. Failure is explicit rather than silent, and "unavailable"
+ * is a first-class answer rather than an exception nobody handles.
  */
 
 /**
@@ -112,14 +114,58 @@ export interface ScreenResult {
  *
  * ★ WHY SO SHORT ★
  *
- * Screening is synchronous: the member is watching a button. A 7B model on a 3060 Ti answers a
- * short classification in one to three seconds, so anything past eight has gone wrong — the GPU is
- * busy generating banner artwork, the tunnel is stalling, or the machine is asleep.
+ * Screening is synchronous: the member is watching a button. With the model resident this takes
+ * about a fifth of a second, so twenty is enormous — deliberately.
  *
- * Waiting longer does not produce an answer, it produces a member who thinks the site is broken.
- * Timing out into "held for review" is both faster and more honest.
+ * ★ IT WAS EIGHT, AND EIGHT WAS WRONG BY SEVEN TENTHS OF A SECOND ★
+ *
+ * Measured 2026-07-31, on the machine this actually runs on:
+ *
+ *   model resident    0.22s
+ *   model evicted     8.70s
+ *   the old timeout   8.00s
+ *
+ * The model was being evicted after five minutes idle, so every post after a quiet spell paid the
+ * cold load — and missed by a hair. Members saw their posts held for review; the log said "No
+ * answer from the model", which reads like a broken GPU rather than a timeout set slightly too
+ * tight.
+ *
+ * Both halves are fixed: the model no longer unloads (MODEL_KEEP_ALIVE, and a heartbeat), and this
+ * is now generous enough to survive a genuine cold start rather than converting it into a held
+ * post. In the normal case nobody waits anywhere near it.
+ *
+ * It is still bounded, because an unbounded wait is a member who thinks the site has frozen.
  */
-export const SCREEN_TIMEOUT_MS = 8_000;
+export const SCREEN_TIMEOUT_MS = 20_000;
+
+/**
+ * Keeps the model resident, sent with every request.
+ *
+ * ★ WHY THIS IS IN THE REQUEST AND NOT LEFT TO THE SERVER'S CONFIG ★
+ *
+ * `tools/start-ai.cmd` also sets this, and that file is one machine's launcher — production reaches
+ * the SAME model server through a tunnel, and a future instance may be started by hand, by a
+ * service manager, or by somebody who has never read that file. Sending it per request means the
+ * guarantee travels with the call instead of depending on how the process happened to be launched.
+ *
+ * -1 means never unload. See SCREEN_TIMEOUT_MS above for what evicting it cost.
+ */
+export const MODEL_KEEP_ALIVE = -1;
+
+/**
+ * How often to poke the model so it stays loaded.
+ *
+ * ★ A HEARTBEAT, BECAUSE KEEP-ALIVE IS NOT A GUARANTEE ★
+ *
+ * `MODEL_KEEP_ALIVE` covers the ordinary case. It does not cover the model server being restarted,
+ * the machine waking from sleep, or somebody running another model that evicts ours. Any of those
+ * leaves the next member to post paying the cold load — which is the exact failure this whole
+ * section exists to prevent.
+ *
+ * Four minutes: frequent enough that nothing realistically evicts the model between pokes, rare
+ * enough to be invisible. The poke is a single token, so it costs nothing.
+ */
+export const MODEL_WARM_INTERVAL_MS = 4 * 60_000;
 
 /** Assistant replies may run longer — somebody asking a question expects to wait a moment. */
 export const ASSISTANT_TIMEOUT_MS = 30_000;

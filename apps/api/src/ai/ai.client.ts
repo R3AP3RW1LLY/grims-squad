@@ -1,5 +1,6 @@
 import {
   ASSISTANT_TIMEOUT_MS,
+  MODEL_KEEP_ALIVE,
   SCREEN_CATEGORIES,
   SCREEN_SYSTEM_PROMPT,
   SCREEN_TIMEOUT_MS,
@@ -143,6 +144,79 @@ export class AiClient {
     };
   }
 
+  /**
+   * Loads the model and holds it there. Safe to call repeatedly.
+   *
+   * ★ WHY ANYTHING CALLS THIS AT ALL ★
+   *
+   * A cold model answers in 8.7 seconds; a resident one in 0.22. Screening happens while a member
+   * watches a button, so the difference decides whether their post publishes or is held for review.
+   *
+   * `keep_alive` on each request covers the ordinary case. This covers the rest: the model server
+   * restarting, the machine waking from sleep, or another model evicting ours. Called at boot and
+   * on a heartbeat, so the first member to post after a quiet night is not the one who pays.
+   *
+   * Deliberately silent about failure — the model being unreachable is normal and is reported by
+   * the health route, not by a warmup throwing into application startup.
+   */
+  async warm(): Promise<boolean> {
+    if (this.config === null) return false;
+
+    /*
+     * Two steps, and both are needed.
+     *
+     * The pin is runtime-specific and may do nothing. The completion is portable and always works,
+     * because loading a model is what answering a question requires — which is also why this
+     * doubles as the heartbeat on runtimes that have no pin at all.
+     */
+    await this.#pin();
+
+    // One token. Enough to force the load, small enough to cost nothing every four minutes.
+    const answer = await this.#complete([{ role: 'user', content: 'ok' }], SCREEN_TIMEOUT_MS, 0);
+    return answer !== null;
+  }
+
+  /**
+   * Asks the runtime to hold the model in memory indefinitely.
+   *
+   * ★ WHY THIS TALKS TO A NON-STANDARD ENDPOINT ★
+   *
+   * Everything else in this file speaks the OpenAI chat protocol on purpose, so the runtime is
+   * swappable. This one call is not portable, and the measurement is the reason: the compatibility
+   * layer silently DROPS `keep_alive`, while the native endpoint honours it. Portability that
+   * leaves the model unloaded is portability that holds members' posts for review.
+   *
+   * Failure is ignored completely. A runtime without this endpoint returns 404, which is a correct
+   * answer to a question it does not implement — and the completion in `warm()` loads the model
+   * anyway. This is an optimisation, not a requirement.
+   */
+  async #pin(): Promise<void> {
+    if (this.config === null) return;
+
+    // `/v1` is the compatibility prefix; the native API sits beside it at the root.
+    const root = this.config.baseUrl.replace(/\/v1$/, '');
+    const abort = new AbortController();
+    const timer = setTimeout(() => abort.abort(), SCREEN_TIMEOUT_MS);
+
+    try {
+      await this.fetchImpl(`${root}/api/generate`, {
+        method: 'POST',
+        signal: abort.signal,
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model: this.config.model,
+          prompt: 'ok',
+          stream: false,
+          keep_alive: MODEL_KEEP_ALIVE,
+        }),
+      });
+    } catch {
+      // Unreachable, unsupported, or timed out. All fine — see the note above.
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   /** Asks the assistant. Null when the AI is unreachable, so the caller can say so plainly. */
   async ask(
     systemPrompt: string,
@@ -187,6 +261,19 @@ export class AiClient {
           temperature,
           // Bounded, so a model that starts rambling cannot hold the connection open to the timeout.
           max_tokens: 512,
+          /*
+           * ★ SENT, BUT KNOWN TO BE IGNORED BY THE RUNTIME WE ACTUALLY USE ★
+           *
+           * Measured 2026-07-31: sending this to the OpenAI-compatible `/v1/chat/completions` path
+           * leaves the model expiring in five minutes, while the runtime's NATIVE endpoint honours
+           * it and pushes expiry three centuries out. The compatibility layer simply drops the
+           * field.
+           *
+           * It stays because other runtimes do accept it and it costs nothing — but it is NOT what
+           * keeps the model resident here. `warm()` is. Recorded plainly so nobody later concludes
+           * this line is doing the job and removes the thing that is.
+           */
+          keep_alive: MODEL_KEEP_ALIVE,
         }),
       });
 
