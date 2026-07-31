@@ -96,8 +96,21 @@ export class PrismaIngestStore implements IngestStore {
       payload: Record<string, unknown>;
       eventKey: string;
     }>,
-  ): Promise<number> {
-    const result = await this.#db.telemetryEvent.createMany({
+  ): Promise<readonly string[]> {
+    /*
+     * `createManyAndReturn` rather than `createMany`.
+     *
+     * The count alone was enough while this only fed the upload response. It is
+     * not enough for live market updates: a retried batch resends events that
+     * are already stored, and a `MarketBuy` applied per ARRIVAL would subtract
+     * the same cargo from a station twice. The keys say which rows were
+     * genuinely new; a count cannot.
+     *
+     * `skipDuplicates` still does the work in the DATABASE, so two devices
+     * racing the same journal still costs a harmless duplicate rather than a
+     * lost event.
+     */
+    const created = await this.#db.telemetryEvent.createManyAndReturn({
       data: rows.map((r) => ({
         userId: r.userId,
         deviceTokenId: r.deviceTokenId,
@@ -108,8 +121,11 @@ export class PrismaIngestStore implements IngestStore {
         eventKey: r.eventKey,
       })),
       skipDuplicates: true,
+      // Only the key is read back. Selecting the rows would return every stored
+      // payload to a caller that discards them.
+      select: { eventKey: true },
     });
-    return result.count;
+    return created.map((c) => c.eventKey);
   }
 
   /**

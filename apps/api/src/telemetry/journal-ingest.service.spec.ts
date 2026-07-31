@@ -61,15 +61,18 @@ class FakeStore implements IngestStore {
     this.playingAt = at;
   }
 
-  async insertIgnoringDuplicates(rows: readonly Row[]): Promise<number> {
-    let n = 0;
+  // Returns the keys it actually took, mirroring `skipDuplicates` in Postgres.
+  // The service needs to know WHICH rows were new, not just how many — see the
+  // market-delta tests below for why a count is not enough.
+  async insertIgnoringDuplicates(rows: readonly Row[]): Promise<readonly string[]> {
+    const keys: string[] = [];
     for (const r of rows) {
       if (this.seenKeys.has(r.eventKey)) continue;
       this.seenKeys.add(r.eventKey);
       this.inserted.push(r);
-      n += 1;
+      keys.push(r.eventKey);
     }
-    return n;
+    return keys;
   }
   async markGameActivityObserved(userId: string, month: Date): Promise<void> {
     this.observed.push({ userId, month: month.toISOString() });

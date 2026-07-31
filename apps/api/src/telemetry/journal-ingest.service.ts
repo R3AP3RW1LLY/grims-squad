@@ -38,8 +38,33 @@ export interface IncomingEvent {
   readonly data: Record<string, unknown>;
 }
 
+/**
+ * Applies a market event to the shared station price table.
+ *
+ * ★ SEPARATE FROM THE STORE, BECAUSE IT IS A DIFFERENT SUBJECT ★
+ *
+ * `IngestStore` writes what a MEMBER did. This writes what a STATION currently
+ * sells — one row per station-commodity, shared by the whole squadron, read by
+ * route-finding. Passing it in rather than reaching for a client keeps this
+ * service testable without a database and lets the market side be absent
+ * entirely, which is what the unit tests use.
+ */
+export interface MarketUpdater {
+  apply(event: Record<string, unknown> & { event: string }): Promise<number>;
+}
+
 export interface IngestStore {
-  /** Inserts, ignoring anything whose eventKey is already present. */
+  /**
+   * Inserts, ignoring anything whose eventKey is already present.
+   *
+   * ★ RETURNS THE KEYS ACTUALLY INSERTED, NOT A COUNT ★
+   *
+   * It used to return the count, which was enough for the response and NOT
+   * enough for live market updates: a `MarketBuy` of 794 tonnes that arrives
+   * twice — which the companion does whenever an upload is retried — must not
+   * subtract 794 twice. Only a genuinely new row may move a station's stock,
+   * and only the keys can say which rows those were.
+   */
   insertIgnoringDuplicates(
     rows: ReadonlyArray<{
       userId: string;
@@ -50,7 +75,7 @@ export interface IngestStore {
       payload: Record<string, unknown>;
       eventKey: string;
     }>,
-  ): Promise<number>;
+  ): Promise<readonly string[]>;
   /** Marks the member's month as having an observed Elite session. */
   markGameActivityObserved(userId: string, month: Date, at: Date): Promise<void>;
   /** The telemetry categories this member has opted into. Empty by default. */
@@ -162,8 +187,20 @@ export function eventKeyFor(input: {
 
 type Row = Parameters<IngestStore['insertIgnoringDuplicates']>[0][number];
 
+/**
+ * The events that move a station's market, and how.
+ *
+ * `Market` is a full snapshot and is safe to apply twice; the other two are
+ * deltas and are not. See `newOnly` at the call site.
+ */
+const MARKET_EVENTS = new Set(['Market', 'MarketBuy', 'MarketSell']);
+
 export class JournalIngestService {
-  constructor(private readonly store: IngestStore) {}
+  constructor(
+    private readonly store: IngestStore,
+    /** Absent in unit tests, and in any deployment without the knowledge store. */
+    private readonly market: MarketUpdater | null = null,
+  ) {}
 
   /** How much this member has contributed in total. See `IngestStore`. */
   async contribution(userId: string): Promise<{ storedEvents: number; firstEventAt: Date | null }> {
@@ -233,6 +270,14 @@ export class JournalIngestService {
 
     const rows: Row[] = [];
     const sessionMonths = new Set<number>();
+    /*
+     * Market events, held with their key so they can be matched against what was
+     * actually inserted. The RAW data is kept rather than the filtered payload:
+     * `Market` carries the station's whole price list and `pickAllowedFields`
+     * deliberately drops it, because that list belongs in `market_entries` and
+     * not in a hundred and seven copies of a member's telemetry.
+     */
+    const marketEvents: Array<{ key: string; raw: Record<string, unknown> & { event: string } }> = [];
     const refused: Record<string, number> = {};
     let rejected = 0;
 
@@ -278,6 +323,9 @@ export class JournalIngestService {
       // even if it arrives.
       const payload = pickAllowedFields(e.name as JournalEventName, e.data);
 
+      // Ours, not the caller's. See eventKeyFor.
+      const eventKey = eventKeyFor({ deviceTokenId, occurredAt, eventType: e.name, payload });
+
       rows.push({
         userId,
         deviceTokenId,
@@ -285,16 +333,54 @@ export class JournalIngestService {
         eventType: e.name,
         occurredAt,
         payload,
-        // Ours, not the caller's. See eventKeyFor.
-        eventKey: eventKeyFor({ deviceTokenId, occurredAt, eventType: e.name, payload }),
+        eventKey,
       });
+
+      /*
+       * Collected AFTER the opt-out gates, deliberately.
+       *
+       * A member who has switched off `trade` has said we may not have their
+       * hauling, and quietly using it anyway because the result is anonymous
+       * would make the setting a lie. Their trades simply do not reach the
+       * market table — and the nightly dump still covers those stations.
+       */
+      if (this.market !== null && MARKET_EVENTS.has(e.name)) {
+        marketEvents.push({ key: eventKey, raw: { ...e.data, event: e.name } });
+      }
 
       // LoadGame is the one that proves they played. Collected per month so a
       // batch spanning a month boundary marks both.
       if (e.name === 'LoadGame') sessionMonths.add(monthKeyOf(occurredAt).getTime());
     }
 
-    const accepted = rows.length === 0 ? 0 : await this.store.insertIgnoringDuplicates(rows);
+    const insertedKeys = rows.length === 0 ? [] : await this.store.insertIgnoringDuplicates(rows);
+    const accepted = insertedKeys.length;
+
+    /*
+     * ★ LIVE MARKET UPDATES, AND ONLY FROM EVENTS THAT WERE GENUINELY NEW ★
+     *
+     * The companion retries a failed batch, so the same MarketBuy can arrive
+     * more than once. Applying a delta per ARRIVAL rather than per new row
+     * would subtract the same 794 tonnes twice and report a station as empty
+     * that is not — worse than the stale figure this replaces.
+     *
+     * `Market` is filtered the same way even though a snapshot is idempotent: a
+     * re-sent one is an OLD snapshot, and replaying it over a newer reading
+     * would move the table backwards.
+     */
+    if (this.market !== null && marketEvents.length > 0) {
+      const isNew = new Set(insertedKeys);
+      for (const m of marketEvents) {
+        if (!isNew.has(m.key)) continue;
+        /*
+         * Awaited but never allowed to throw. A member's upload must succeed
+         * whether or not we could place their market — the events are stored
+         * either way, and a station we have not ingested yet is a normal
+         * result rather than a failure.
+         */
+        await this.market.apply(m.raw).catch(() => 0);
+      }
+    }
 
     /*
      * Activity is marked from every observed month, not only from newly

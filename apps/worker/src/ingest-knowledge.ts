@@ -3,6 +3,7 @@ import { PrismaClient } from '@grims/db';
 import { readCoriolis } from './jobs/ingest-coriolis.js';
 import { streamGalaxy } from './jobs/ingest-galaxy.js';
 import { writeBatch, beginIngest, finishIngest } from './jobs/knowledge-writer.js';
+import { rebuildMarketEntries } from './jobs/market-flatten.js';
 
 /**
  * Ingests what GMSD AI knows about Elite Dangerous.
@@ -85,6 +86,17 @@ async function ingestGalaxy(db: PrismaClient): Promise<void> {
 
     await finishIngest(db, run, { rows: written });
     console.log(`galaxy: ${written} rows (${stats.systems} systems, ${stats.stations} stations)`);
+
+    /*
+     * ★ FLATTEN AFTER EVERY GALAXY INGEST ★
+     *
+     * market_entries is derived from what was just written, so it is stale the moment the ingest
+     * finishes. Rebuilding it here — rather than on its own schedule — means the two can never
+     * disagree, which is the failure that would have members routed to prices that no longer exist
+     * while the station page showed the correct ones.
+     */
+    const flat = await rebuildMarketEntries(db);
+    console.log(`markets: ${flat} rows flattened for route-finding`);
   } catch (e) {
     await finishIngest(db, run, { error: e instanceof Error ? e.message : String(e) });
     throw e;

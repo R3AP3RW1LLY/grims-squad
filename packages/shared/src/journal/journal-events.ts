@@ -76,6 +76,20 @@ export const JOURNAL_EVENTS = {
   /** Cargo bought and sold, with the commodity and the station. */
   MarketBuy: 'trade',
   MarketSell: 'trade',
+  /**
+   * Opening a station's commodity screen.
+   *
+   * ★ THE MOST VALUABLE EVENT IN THE JOURNAL, AND WE WERE NOT READING IT ★
+   *
+   * It carries the station's ENTIRE commodity list — every price, stock and
+   * demand figure — as the game showed it seconds ago. The nightly galaxy dump
+   * gives the same thing up to twenty-four hours late, and the routes worth
+   * flying are the ones that go stale fastest.
+   *
+   * What is stored from it is only which station was opened; the prices go to
+   * `market_entries` where route-finding reads them. See EVENT_FIELDS.
+   */
+  Market: 'trade',
   /** Mined and refined, which the trade board counts separately. */
   MiningRefined: 'trade',
 
@@ -167,6 +181,22 @@ export const EVENT_FIELDS: Record<JournalEventName, readonly string[]> = {
 
   MarketBuy: ['Type', 'Type_Localised', 'Count', 'TotalCost', 'MarketID'],
   MarketSell: ['Type', 'Type_Localised', 'Count', 'TotalSale', 'MarketID'],
+  /*
+   * ★ DELIBERATELY NOT `Items` ★
+   *
+   * The event's item list is the whole point of reading it, and it is still not
+   * stored HERE. A commodity market is around a hundred entries; keeping the
+   * array would write a copy of one station's price list into a member's own
+   * telemetry every time they opened a market screen, for a hundred and seven
+   * members, forever — and it would be about a STATION rather than about them,
+   * which is not what this table is for.
+   *
+   * The prices are applied to `market_entries` instead, where one row per
+   * station-commodity is shared by everybody and route-finding can index it.
+   * What survives here is the fact that they docked and looked, which is the
+   * part that is genuinely about the member.
+   */
+  Market: ['MarketID', 'StationName', 'StarSystem'],
   MiningRefined: ['Type', 'Type_Localised'],
 
   MultiSellExplorationData: ['TotalEarnings', 'BaseValue', 'Bonus', 'Discovered'],

@@ -134,6 +134,17 @@ export function parseSystemLine(line: string): SystemRow[] | null {
       data: {
         system: name,
         systemId64: id64,
+        /*
+         * ★ THE MARKET ID, AND WITHOUT IT LIVE UPDATES ARE IMPOSSIBLE ★
+         *
+         * A journal event carries `MarketID` and nothing else that identifies where it happened — no
+         * station name, no system. Without this stored alongside, a member's MarketBuy cannot be
+         * matched to the row it should decrement, and every price stays as stale as the last dump.
+         *
+         * It was omitted on the first pass, and the omission was invisible: the data looked complete
+         * right up until something tried to correlate against it.
+         */
+        marketId: typeof s.id === 'number' ? s.id : null,
         type: s.type ?? null,
         landingPads: s.landingPads ?? null,
         services: s.services ?? null,

@@ -104,6 +104,9 @@ describe('the event allowlist', () => {
       'FSDJump',
       'FactionKillBond',
       'Location',
+      // Added 2026-08-01 for live market prices. Optional, under `trade`: a
+      // member who declines trade telemetry does not feed the price table.
+      'Market',
       'MarketBuy',
       'MarketSell',
       'MiningRefined',

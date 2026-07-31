@@ -92,7 +92,13 @@ describe('P0.2 database schema', () => {
     // 71 tables: 70 Prisma models plus screen_decisions, added 2026-07-31 for the screening
     // feedback loop. Its vector column is hand-written in the migration because Prisma has no
     // native pgvector type and would drop it on every generated diff.
-    expect(Number(r[0]?.n)).toBe(73);
+    //
+    // 74 as of 2026-08-01: market_entries, one row per station-commodity, flattened out of the
+    // galaxy dump's nested JSON. Route-finding across a hundred thousand markets was a four-way
+    // self-join over jsonb that exhausted the disk and took Postgres down with it; the same
+    // question against this table is an indexed lookup. Hand-written too — its `cube` column has
+    // no Prisma type either.
+    expect(Number(r[0]?.n)).toBe(74);
   });
 
   describe('hand-written DDL that Prisma cannot express', () => {

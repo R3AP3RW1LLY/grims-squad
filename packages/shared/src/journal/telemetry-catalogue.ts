@@ -149,6 +149,18 @@ export const TELEMETRY_CATALOGUE: readonly CatalogueGroup[] = [
     purpose: 'Cargo moved and ore refined, for the trade leaderboard.',
     required: false,
     entries: [
+      {
+        event: 'Market',
+        label: 'Market screens you open',
+        /*
+         * Written plainly, and it says what the squadron gets as well as what
+         * we keep. A member reading this is deciding whether to leave it on;
+         * "the station's prices" without "shared with everyone" would be true
+         * and still misleading.
+         */
+        reveals:
+          'Which station you opened the commodity market at. The prices on that screen are shared with the squadron so route-finding works from what someone actually saw rather than from last night — your name is not attached to them.',
+      },
       { event: 'MarketBuy', label: 'Cargo bought', reveals: 'The commodity, the quantity and the station.' },
       { event: 'MarketSell', label: 'Cargo sold', reveals: 'The commodity, the quantity, the station and the price.' },
       { event: 'MiningRefined', label: 'Ore refined', reveals: 'What you refined while mining.' },

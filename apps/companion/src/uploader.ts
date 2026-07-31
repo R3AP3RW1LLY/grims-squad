@@ -59,8 +59,62 @@ export interface UploadResult {
   readonly rxBytes: number;
 }
 
-/** Batches are capped so one long session cannot post a ten-megabyte body. */
+/** Events per request, so one long session cannot post an enormous body. */
 export const MAX_BATCH = 200;
+
+/**
+ * Bytes per request.
+ *
+ * ★ WHY A COUNT WAS NOT ENOUGH ★
+ *
+ * Two hundred events is a small body for most of the journal and a very large
+ * one for `Market`, which carries a station's entire commodity list — around
+ * twenty-five kilobytes each. Two hundred of those is five megabytes against a
+ * server that accepts one, and the response would be a 413 that failed the
+ * whole batch including the ordinary events travelling with it.
+ *
+ * Sized well under the hub's limit rather than at it: the flags and the JSON
+ * envelope ride along too, and a budget that only just fits is one that stops
+ * fitting the first time anything is added.
+ */
+export const MAX_BATCH_BYTES = 700 * 1024;
+
+/**
+ * Splits events into requests that respect BOTH limits.
+ *
+ * ★ THE LOSS THIS ENDS ★
+ *
+ * This used to be `events.slice(0, MAX_BATCH)` — one request, and the rest
+ * silently discarded. The watcher advances its file offset on a successful
+ * send, so event two hundred and one was not retried later; it was gone, and
+ * nothing on either side recorded that it had existed. A member returning after
+ * a long session, which is exactly when a chunk is large, lost the most.
+ *
+ * An oversized single event still gets its own request rather than being
+ * dropped. It may be refused by the hub, and being refused is recoverable in a
+ * way that vanishing is not.
+ */
+export function batchEvents(events: readonly ParsedEvent[]): ParsedEvent[][] {
+  if (events.length === 0) return [[]];
+
+  const batches: ParsedEvent[][] = [];
+  let current: ParsedEvent[] = [];
+  let bytes = 0;
+
+  for (const e of events) {
+    const size = Buffer.byteLength(JSON.stringify(e), 'utf8');
+    if (current.length > 0 && (current.length >= MAX_BATCH || bytes + size > MAX_BATCH_BYTES)) {
+      batches.push(current);
+      current = [];
+      bytes = 0;
+    }
+    current.push(e);
+    bytes += size;
+  }
+
+  if (current.length > 0) batches.push(current);
+  return batches;
+}
 
 export interface UploaderOptions {
   readonly apiBaseUrl: string;
@@ -72,7 +126,66 @@ export interface UploaderOptions {
 export class Uploader {
   constructor(private readonly opts: UploaderOptions) {}
 
+  /**
+   * Sends every event, in as many requests as the limits require.
+   *
+   * ★ STOPS AT THE FIRST FAILURE, AND THAT IS DELIBERATE ★
+   *
+   * A partial success reports `ok: false`, so the watcher leaves its offset
+   * alone and reads the same window again next pass. The batches that DID land
+   * are re-sent and the hub discards them on the event key — which is precisely
+   * what that key is for, and why retrying is safe rather than double-counting.
+   *
+   * The alternative — advancing past whatever happened to succeed — needs the
+   * offset to track a position inside a chunk, and gets it wrong exactly once
+   * before losing events for good.
+   */
   async send(
+    events: readonly ParsedEvent[],
+    options: { gameRunning?: boolean; gameStopped?: boolean } = {},
+  ): Promise<UploadResult> {
+    const batches = batchEvents(events);
+    if (batches.length <= 1) return this.#sendOne(events, options);
+
+    let acc: UploadResult = {
+      ok: true,
+      accepted: 0,
+      duplicates: 0,
+      unauthorised: false,
+      refused: {},
+      error: null,
+      txBytes: 0,
+      rxBytes: 0,
+    };
+
+    for (const batch of batches) {
+      /*
+       * The flags ride on every request rather than only the first. Both are
+       * idempotent stamps on the server — "they are playing", "they stopped" —
+       * and putting them on one request would mean a member's presence depended
+       * on which chunk happened to succeed.
+       */
+      const r = await this.#sendOne(batch, options);
+
+      acc = {
+        ok: r.ok,
+        accepted: acc.accepted + r.accepted,
+        duplicates: acc.duplicates + r.duplicates,
+        unauthorised: r.unauthorised,
+        refused: mergeCounts(acc.refused, r.refused),
+        error: r.error,
+        // Counted across every request, including the one that failed.
+        txBytes: acc.txBytes + r.txBytes,
+        rxBytes: acc.rxBytes + r.rxBytes,
+      };
+
+      if (!r.ok) break;
+    }
+
+    return acc;
+  }
+
+  async #sendOne(
     events: readonly ParsedEvent[],
     options: { gameRunning?: boolean; gameStopped?: boolean } = {},
   ): Promise<UploadResult> {
@@ -112,6 +225,8 @@ export class Uploader {
      * with an accent in it is more bytes than characters.
      */
     const payload = JSON.stringify({
+      // Already sized by `batchEvents`. The cap stays as a floor under a caller
+      // that reaches this directly, but it is no longer where events go missing.
       events: events.slice(0, MAX_BATCH),
       gameRunning,
       ...(gameStopped ? { gameStopped: true } : {}),
@@ -212,4 +327,14 @@ export class Uploader {
       clearTimeout(timer);
     }
   }
+}
+
+/** Adds two refusal tallies together, so a split upload reports one total. */
+function mergeCounts(
+  a: Record<string, number>,
+  b: Record<string, number>,
+): Record<string, number> {
+  const out = { ...a };
+  for (const [k, v] of Object.entries(b)) out[k] = (out[k] ?? 0) + v;
+  return out;
 }
