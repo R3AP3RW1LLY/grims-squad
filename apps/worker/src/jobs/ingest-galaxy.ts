@@ -106,7 +106,12 @@ export function parseSystemLine(line: string): SystemRow[] | null {
    * position IS its system's for every question anybody asks.
    */
   for (const station of Array.isArray(raw.stations) ? raw.stations : []) {
-    const s = station as { id?: unknown; name?: unknown; type?: unknown; landingPads?: unknown; services?: unknown };
+    const s = station as {
+      id?: unknown; name?: unknown; type?: unknown; landingPads?: unknown; services?: unknown;
+      market?: { commodities?: unknown; updateTime?: unknown };
+      economies?: unknown; primaryEconomy?: unknown; government?: unknown;
+      controllingFaction?: unknown; distanceToArrival?: unknown; updateTime?: unknown;
+    };
     const sName = typeof s.name === 'string' ? s.name : null;
     if (sName === null) continue;
 
@@ -116,12 +121,36 @@ export function parseSystemLine(line: string): SystemRow[] | null {
       // Namespaced by system: station names repeat across the galaxy constantly.
       extKey: `${id64}/${sName}`,
       name: sName,
+      /*
+       * ★ THE MARKET IS KEPT, AND IT WAS NOT AT FIRST ★
+       *
+       * The first pass stored only type, pads and services — and threw away the commodity list that
+       * was sitting in the same object. "Where can I sell Painite" and "what does this station buy"
+       * are among the most common questions anybody asks about Elite, and answering them needed no
+       * new download at all: the data had already been fetched and discarded.
+       *
+       * It is the bulk of the row. That is the cost of being able to answer the question.
+       */
       data: {
         system: name,
         systemId64: id64,
         type: s.type ?? null,
         landingPads: s.landingPads ?? null,
         services: s.services ?? null,
+        economy: s.primaryEconomy ?? null,
+        economies: s.economies ?? null,
+        government: s.government ?? null,
+        controllingFaction: s.controllingFaction ?? null,
+        /** Light seconds from the arrival point. The difference between a good and a useless run. */
+        distanceToArrival: s.distanceToArrival ?? null,
+        /*
+         * Prices, demand and supply per commodity, plus when the market was last SEEN — which is
+         * not when we ingested it. A price nobody has reported for a month should be treated
+         * differently from one seen an hour ago, and only this field can tell them apart.
+         */
+        market: s.market?.commodities ?? null,
+        marketUpdatedAt: s.market?.updateTime ?? null,
+        updatedAt: s.updateTime ?? null,
       },
       coords,
     });
