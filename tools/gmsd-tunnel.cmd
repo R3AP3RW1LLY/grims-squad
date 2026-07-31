@@ -53,27 +53,13 @@ if not exist "%KEY%" (
   exit /b 1
 )
 
+REM  Starting backoff. Doubles on each consecutive failure, capped at five minutes.
+REM  See the note further down for the lockout that made this necessary.
+set DELAY=5
+
 :loop
 echo [%date% %time%] connecting...
 
-REM  -N            no remote command; this is a tunnel, not a session
-REM  -T            no pty, matching the restricted key
-REM  -R            the two forwards. 127.0.0.1 on the SERVER side, so the model
-REM                endpoints are reachable only from the server itself and never
-REM                published to the internet.
-REM
-REM  ServerAliveInterval / CountMax
-REM                THIS is what makes the tunnel survive a home connection. Without
-REM                it a dropped link leaves this process believing it is connected
-REM                forever, and the website sees a dead endpoint while the script
-REM                looks healthy. 30s x 3 means a dead link is noticed in ninety
-REM                seconds and the loop below reconnects.
-REM
-REM  ExitOnForwardFailure
-REM                Refuse to sit there connected but NOT forwarding. Without it, a
-REM                port still held by a previous session produces a warning and an
-REM                otherwise-normal connection -- the worst possible state, because
-REM                everything looks fine and nothing works.
 ssh -N -T ^
   -i "%KEY%" ^
   -o IdentitiesOnly=yes ^
@@ -81,12 +67,20 @@ ssh -N -T ^
   -o ServerAliveInterval=30 ^
   -o ServerAliveCountMax=3 ^
   -o StrictHostKeyChecking=accept-new ^
+  -o ConnectTimeout=15 ^
   -R 172.18.0.1:11434:127.0.0.1:11434 ^
   -R 172.18.0.1:8188:127.0.0.1:8188 ^
   %REMOTE%
 
-REM  Reached only when ssh EXITS -- dropped link, server reboot, laptop waking.
-REM  Five seconds so a hard-down server is retried steadily rather than hammered.
-echo [%date% %time%] disconnected, retrying in 5s...
-timeout /t 5 /nobreak >nul
+REM  A connection that LASTED is a healthy one, so the next failure starts from
+REM  five seconds again rather than from wherever the last outage climbed to.
+REM  Without this, one bad night would leave the tunnel reconnecting every five
+REM  minutes for the rest of the week.
+if %ERRORLEVEL% EQU 0 set DELAY=5
+
+echo [%date% %time%] disconnected, retrying in %DELAY%s...
+timeout /t %DELAY% /nobreak >nul
+
+set /a DELAY=%DELAY%*2
+if %DELAY% GTR 300 set DELAY=300
 goto loop
