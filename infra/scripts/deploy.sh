@@ -120,6 +120,20 @@ ok "$(du -h "$DUMP" | cut -f1) → $DUMP"
 #
 # Built BEFORE anything is replaced, so a compile error costs nothing. Images
 # are built under their own names and only swapped in once they exist.
+# ★ PRUNE BEFORE BUILDING, NOT AFTER ★
+#
+# The nightly janitor handles the steady state. This is the burst case: a deploy builds four images
+# and BuildKit keeps every intermediate layer, so several deploys in one session can add tens of GB
+# between two runs of the cron job.
+#
+# Before rather than after, because the failure it prevents is a build that dies half way for want
+# of disk — and a deploy that fails at the build step has already taken the site's attention without
+# giving anything back.
+#
+# 168h keeps a week, so this does NOT slow a routine deploy: today's layers are all still there.
+docker builder prune --force --filter 'until=168h' >/dev/null 2>&1 || true
+ok "old build cache pruned"
+
 say "Building images"
 $COMPOSE --profile jobs build api web bot worker
 ok "api, web, bot, worker built"
