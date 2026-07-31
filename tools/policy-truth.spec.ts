@@ -36,22 +36,49 @@ describe('privacy policy claims match the code', () => {
     expect(read('apps/api/src/auth/discord.service.ts')).not.toMatch(/'email'|"email"/);
   });
 
-  it('CLAIM: every game-data visibility switch starts in the off position', () => {
-    expect(privacy).toMatch(/every\s+switch\s+starts\s+in\s+the\s+off\s+position/i);
-
+  it('CLAIM: the credit balance is the ONE switch that starts off', () => {
+    /*
+     * ★ CHANGED 2026-07-31, AND THE POLICY CHANGED WITH IT ★
+     *
+     * Squadron owner: "default all privacy options to on except balance, they can opt into that!"
+     *
+     * The previous claim was that EVERY switch started off, and it was true. Flipping the defaults
+     * without rewriting the policy would have turned a published promise into a false statement —
+     * which is exactly what this file exists to prevent, and it caught it.
+     *
+     * The balance is the sole exception now, so it is asserted alone and precisely: wealth invites
+     * comparison, and in a squadron that includes minors it invites attention nobody asked for.
+     */
     const schema = read('ssot/03-data/schema.prisma');
     const model = /model PrivacySetting \{([\s\S]*?)\n\}/.exec(schema)?.[1] ?? '';
     expect(model).not.toBe('');
 
+    expect(model).toMatch(/showCredits\s+Boolean\s+@default\(false\)/);
+    // And the policy must say so, in the same words a member would search for.
+    expect(privacy).toMatch(/credit balance is the exception/i);
+    expect(privacy).toMatch(/starts switched/i);
+  });
+
+  it('CLAIM: the other visibility switches are on, and the policy says so', () => {
+    /*
+     * The inverse guard. If somebody later flips these back to false, the policy would again be
+     * wrong — in the opposite direction, telling members their data is shown when it is not.
+     * Both directions are a lie; both fail here.
+     */
+    const schema = read('ssot/03-data/schema.prisma');
+    const model = /model PrivacySetting \{([\s\S]*?)\n\}/.exec(schema)?.[1] ?? '';
+
     const booleans = [...model.matchAll(/^\s+(show\w+)\s+Boolean\s+(.*)$/gm)];
-    // If a new visibility flag is added, it is covered automatically.
     expect(booleans.length).toBeGreaterThanOrEqual(6);
+
     for (const [, name, rest] of booleans) {
-      expect(rest, `${name ?? '?'} must default to false`).toMatch(/@default\(false\)/);
+      if (name === 'showCredits') continue;
+      expect(rest, `${name ?? '?'} must default to true`).toMatch(/@default\(true\)/);
     }
 
-    // Telemetry consent starts empty — no category is pre-agreed.
-    expect(model).toMatch(/telemetryConsent\s+TelemetryCategory\[\]\s+@default\(\[\]\)/);
+    expect(privacy).toMatch(/visible to other members by default/i);
+    // The old promise must be GONE, not merely contradicted elsewhere on the page.
+    expect(privacy).not.toMatch(/every\s+switch\s+starts\s+in\s+the\s+off\s+position/i);
   });
 
   it('CLAIM: tokens are encrypted with AES-256-GCM before reaching the database', () => {

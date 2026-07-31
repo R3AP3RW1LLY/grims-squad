@@ -921,12 +921,28 @@ model PrivacySetting {
   /// Superseded by the two columns above. Retained so the migration can read it, and so anybody
   /// looking at an old backup can see what it meant. Nothing writes it.
   telemetryConsent   TelemetryCategory[] @default([]) @map("telemetry_consent")
-  showLocation       Boolean             @default(false) @map("show_location")
+  /// ★ ON BY DEFAULT, EXCEPT THE BALANCE (owner's instruction, 2026-07-31) ★
+  ///
+  /// "default all privacy options to on except balance, they can opt into that! this is
+  /// non-negotiable!"
+  ///
+  /// These control VISIBILITY, not collection — telemetry is already opt-out above. A squadron
+  /// roster where everybody is hidden by default is a roster nobody uses, and the members who most
+  /// need to appear are the new ones least likely to find a settings page.
+  ///
+  /// Every one of these remains a switch a member can turn off. Defaulting on is a decision about
+  /// what a squadron site is FOR; it is not a decision to stop asking.
+  showLocation       Boolean             @default(true) @map("show_location")
+  /// ★ THE EXCEPTION, AND THE ONLY ONE ★
+  ///
+  /// Credit balance stays OFF until a member chooses otherwise. It is the one field that is nobody
+  /// else's business by default — wealth invites comparison and, in a squadron that includes
+  /// minors, attention nobody asked for. Opt IN, deliberately, against every other field's opt-out.
   showCredits        Boolean             @default(false) @map("show_credits")
-  showFleet          Boolean             @default(false) @map("show_fleet")
-  showActivity       Boolean             @default(false) @map("show_activity")
-  showOnPublicRoster Boolean             @default(false) @map("show_on_public_roster")
-  showOnLeaderboard  Boolean             @default(false) @map("show_on_leaderboard")
+  showFleet          Boolean             @default(true) @map("show_fleet")
+  showActivity       Boolean             @default(true) @map("show_activity")
+  showOnPublicRoster Boolean             @default(true) @map("show_on_public_roster")
+  showOnLeaderboard  Boolean             @default(true) @map("show_on_leaderboard")
   updatedAt          DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)

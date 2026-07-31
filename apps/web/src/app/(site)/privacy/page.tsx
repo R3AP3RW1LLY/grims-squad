@@ -102,29 +102,38 @@ export default function PrivacyPage() {
         </ul>
       </Section>
 
-      <Section id="game-data" heading="Game data, and why it is off by default">
+      <Section id="game-data" heading="Game data, and what you can turn off">
         <p>
-          The platform is being built to show squadron activity &mdash; where members are, what they
-          fly, what they have hauled. Every one of those is <strong>opt-in per item</strong>, and
-          every switch starts in the off position:
+          The platform shows squadron activity &mdash; where members are, what they fly, what they
+          have hauled. Most of that is <strong>visible to other members by default</strong>, because
+          a squadron roster where everybody is hidden is a roster nobody can use. Each one is a
+          switch you can turn off at any time:
         </p>
         <ul>
           <li>Your location</li>
-          <li>Your credit balance</li>
           <li>Your fleet</li>
           <li>Your recent activity</li>
           <li>Whether you appear on the squadron roster, which signed-in members can see</li>
           <li>Whether you appear on leaderboards</li>
         </ul>
         <p>
-          Turning one on is a deliberate act. Until you do, that information is{' '}
-          <strong>absent</strong> from what other members and the public can see &mdash; not merely
-          hidden by the interface, but genuinely not sent. This is enforced by the server, not by
-          the page you are looking at, so it holds regardless of what a browser is asked to do.
+          {/*
+            The one exception, stated as prominently as the rule. A default that goes the other way
+            is exactly the kind of thing a policy must name rather than leave somebody to discover.
+          */}
+          <strong>Your credit balance is the exception.</strong> It starts switched{' '}
+          <strong>off</strong> and stays off until you deliberately turn it on. Nobody sees what you
+          are worth unless you decide they should.
+        </p>
+        <p>
+          Turning any of these off is enforced by the server, not by the page you are looking at:
+          the information is <strong>absent</strong> from what other members and the public receive,
+          not merely hidden by the interface. That holds regardless of what a browser is asked to do.
         </p>
         <p>
           Connecting your Frontier account, or uploading flight telemetry, are separate choices you
-          make explicitly. Neither happens automatically, and neither is required to use the site.
+          make explicitly. Neither is required to use the site, and you can withdraw either at any
+          time &mdash; see <a href="#control">what you can ask us to do</a>.
         </p>
       </Section>
 
