@@ -17,7 +17,7 @@
  */
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import sharp from 'sharp';
-import { DEFAULT_RESTYLE, RESTYLE_STRENGTHS } from '@grims/shared';
+import { DEFAULT_RESTYLE, RESTYLE_STRENGTHS, outputPreset } from '@grims/shared';
 import { StudioClient, studioConfigFrom } from '../apps/api/src/ai/studio.client.js';
 
 const config = studioConfigFrom({
@@ -73,6 +73,7 @@ const jobs = [
       prompt: 'dramatic concept art, volumetric light, deep shadows',
       strength,
       seed: 12_345,
+      output: 'wide1080' as const,
     },
   },
   {
@@ -84,6 +85,7 @@ const jobs = [
       height,
       instruction: 'make this a dramatic sunset with warm orange light',
       seed: 12_345,
+      output: 'wide1080' as const,
     },
   },
   {
@@ -96,6 +98,7 @@ const jobs = [
       prompt: 'dramatic concept art, nebula behind, rim lighting',
       mode: 'depth' as const,
       seed: 12_345,
+      output: 'wide4k' as const,
     },
   },
   {
@@ -108,6 +111,7 @@ const jobs = [
       prompt: 'cold hard sci-fi realism, harsh sunlight',
       mode: 'edges' as const,
       seed: 12_345,
+      output: 'wide720' as const,
     },
   },
 ];
@@ -129,7 +133,23 @@ for (const job of jobs) {
   const dest = `D:/ai/studio-${slug}-${job.req.op === 'structure' ? job.req.mode : job.req.op}.png`;
   writeFileSync(dest, out.png);
   const m = await sharp(out.png).metadata();
-  console.log(`  ok ${m.width}x${m.height}  ${out.tookMs}ms  -> ${dest}`);
+
+  /*
+   * The size is CHECKED, not just printed. "16:9 1080p/4K" was called non-negotiable, and the way
+   * it breaks is silent — FLUX rounds an off-grid request and returns the wrong shape without
+   * erroring. A smoke test that only reported the dimensions would have shown the bug and passed.
+   */
+  const want = 'output' in job.req ? outputPreset(job.req.output) : null;
+  const exact = want === null || (m.width === want.width && m.height === want.height);
+  console.log(
+    `  ok ${m.width}x${m.height}  ${out.tookMs}ms  -> ${dest}` +
+      (want === null
+        ? ''
+        : exact
+          ? `  [exact ${want.label} 16:9]`
+          : `  !! WANTED ${want.width}x${want.height}`),
+  );
+  if (!exact) failures += 1;
 }
 
 console.log(`\n${jobs.length - failures}/${jobs.length} operations working.`);

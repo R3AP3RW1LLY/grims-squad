@@ -1,5 +1,7 @@
 import {
   ART_GUIDANCE,
+  needsUpscale,
+  outputPreset,
   IMAGE_SAMPLER,
   IMAGE_SCHEDULER,
   IMAGE_STEPS,
@@ -7,7 +9,8 @@ import {
   STRUCTURE_STRENGTH,
   STUDIO_TIMEOUT_MS,
   buildArtPrompt,
-  fitInputSize,
+  GEN_BASE,
+  type OutputPresetId,
   type StructureMode,
   type UpscaleFactor,
 } from '@grims/shared';
@@ -96,6 +99,8 @@ export type StudioRequest =
       readonly prompt: string;
       readonly strength: number;
       readonly seed: number | null;
+      /** Exact finished size. Nothing is GENERATED here — see finishTo. */
+      readonly output: OutputPresetId;
     }
   | {
       readonly op: 'structure';
@@ -105,6 +110,8 @@ export type StudioRequest =
       readonly prompt: string;
       readonly mode: StructureMode;
       readonly seed: number | null;
+      /** Exact finished size. Nothing is GENERATED here — see finishTo. */
+      readonly output: OutputPresetId;
     }
   | {
       readonly op: 'instruct';
@@ -113,6 +120,8 @@ export type StudioRequest =
       readonly height: number;
       readonly instruction: string;
       readonly seed: number | null;
+      /** Exact finished size. Nothing is GENERATED here — see finishTo. */
+      readonly output: OutputPresetId;
     }
   | {
       readonly op: 'upscale';
@@ -214,6 +223,59 @@ export class StudioClient {
   }
 }
 
+/**
+ * Turns a decoded image into the exact pixels the member asked for.
+ *
+ * ★ SQUADRON OWNER, 2026-07-30: "full 16:9 1080p / 4k ... this is non-negotiable" ★
+ *
+ * Nothing upstream generates at the output size, and it cannot: 1080 is not a multiple of sixteen,
+ * so FLUX physically cannot produce 1920×1080 — it rounds to 1088 and returns the wrong shape
+ * without complaining. 4K is on the grid and is eight times the resolution FLUX was trained at,
+ * which makes it duplicate horizons and repeat ships.
+ *
+ * So generation happens at `GEN_BASE` and this lands it. ESRGAN adds genuine detail at 4×, then a
+ * Lanczos reduction hits the exact number. The reduction is not a cost — it averages away the
+ * pixel-level noise diffusion always leaves, which is why this beats a native large generation.
+ *
+ * ★ crop: 'center', AND WHY IT MATTERS FOR ONE OPERATION ★
+ *
+ * For generate, restyle and structure the latent is already exactly 16:9, so the crop is a no-op.
+ * Kontext is the exception: it snaps to its own trained aspect buckets and can hand back 2.33:1.
+ * Cropping trims the sides to reach 16:9; the alternative, `fill`, would stretch everything in the
+ * picture. A trimmed edge is a choice somebody can see and work around. A 1% horizontal stretch on
+ * every image is a defect nobody ever notices and cannot undo.
+ */
+function finishTo(
+  graph: Record<string, unknown>,
+  from: string,
+  target: { width: number; height: number },
+  upscaler: string,
+): Record<string, unknown> {
+  let source = from;
+
+  if (needsUpscale(target)) {
+    graph['finishModel'] = { class_type: 'UpscaleModelLoader', inputs: { model_name: upscaler } };
+    graph['finishUp'] = {
+      class_type: 'ImageUpscaleWithModel',
+      inputs: { upscale_model: ['finishModel', 0], image: [source, 0] },
+    };
+    source = 'finishUp';
+  }
+
+  graph['finishScale'] = {
+    class_type: 'ImageScale',
+    inputs: {
+      image: [source, 0],
+      upscale_method: 'lanczos',
+      width: target.width,
+      height: target.height,
+      crop: 'center',
+    },
+  };
+  graph['out'] = { class_type: 'PreviewImage', inputs: { images: ['finishScale', 0] } };
+  return graph;
+}
+
 /** Dispatches to the right pipeline. Free function: it needs config and a request, not a client. */
 function buildGraph(
   c: StudioConfig,
@@ -249,9 +311,7 @@ function restyleGraph(
   imageName: string,
   seed: number,
 ): Record<string, unknown> {
-  const size = fitInputSize(req.width, req.height);
-
-  return {
+  const graph: Record<string, unknown> = {
     unet: { class_type: 'UnetLoaderGGUF', inputs: { unet_name: c.schnell } },
     clip: {
       class_type: 'DualCLIPLoader',
@@ -264,14 +324,26 @@ function restyleGraph(
      * of GPU for detail the sampler immediately discards — and on a card running a game, it is
      * the allocation most likely to fail.
      */
+    /*
+     * Scaled to GEN_BASE — exactly 16:9, on the FLUX grid, 1.33MP — with a CENTRE CROP.
+     *
+     * Two jobs at once. It bounds what the VAE has to encode (a 4K screenshot under --lowvram is
+     * minutes of GPU for detail the sampler discards, and the allocation most likely to fail on a
+     * card running a game). And it guarantees the latent is exactly 16:9, so the finishing stage
+     * can hit 1920x1080 or 3840x2160 without stretching anything.
+     *
+     * Cropping rather than letterboxing: an ultrawide screenshot loses its edges, which somebody
+     * can see and reframe around. Padding would put black bars INSIDE the image the model then
+     * paints over, and it would try to make something of them.
+     */
     scale: {
       class_type: 'ImageScale',
       inputs: {
         image: ['load', 0],
         upscale_method: 'lanczos',
-        width: size.width,
-        height: size.height,
-        crop: 'disabled',
+        width: GEN_BASE.width,
+        height: GEN_BASE.height,
+        crop: 'center',
       },
     },
     encode: { class_type: 'VAEEncode', inputs: { pixels: ['scale', 0], vae: ['vae', 0] } },
@@ -297,8 +369,9 @@ function restyleGraph(
       },
     },
     decode: { class_type: 'VAEDecode', inputs: { samples: ['sampler', 0], vae: ['vae', 0] } },
-    out: { class_type: 'PreviewImage', inputs: { images: ['decode', 0] } },
   };
+
+  return finishTo(graph, 'decode', outputPreset(req.output), c.upscaler);
 }
 
 /**
@@ -324,8 +397,6 @@ function structureGraph(
   imageName: string,
   seed: number,
 ): Record<string, unknown> {
-  const size = fitInputSize(req.width, req.height);
-
   /*
    * Depth for ships, edges for flat subjects. DepthAnythingV2 understands three-dimensional form,
    * so a hull keeps its volume; Canny follows hard outlines, which is right when the lines ARE
@@ -346,7 +417,7 @@ function structureGraph(
           inputs: { image: ['scale', 0], low_threshold: 0.2, high_threshold: 0.5 },
         };
 
-  return {
+  const graph: Record<string, unknown> = {
     unet: { class_type: 'UnetLoaderGGUF', inputs: { unet_name: c.dev } },
     clip: {
       class_type: 'DualCLIPLoader',
@@ -355,14 +426,26 @@ function structureGraph(
     vae: { class_type: 'VAELoader', inputs: { vae_name: c.vae } },
     controlnet: { class_type: 'ControlNetLoader', inputs: { control_net_name: c.controlnet } },
     load: { class_type: 'LoadImage', inputs: { image: imageName } },
+    /*
+     * Scaled to GEN_BASE — exactly 16:9, on the FLUX grid, 1.33MP — with a CENTRE CROP.
+     *
+     * Two jobs at once. It bounds what the VAE has to encode (a 4K screenshot under --lowvram is
+     * minutes of GPU for detail the sampler discards, and the allocation most likely to fail on a
+     * card running a game). And it guarantees the latent is exactly 16:9, so the finishing stage
+     * can hit 1920x1080 or 3840x2160 without stretching anything.
+     *
+     * Cropping rather than letterboxing: an ultrawide screenshot loses its edges, which somebody
+     * can see and reframe around. Padding would put black bars INSIDE the image the model then
+     * paints over, and it would try to make something of them.
+     */
     scale: {
       class_type: 'ImageScale',
       inputs: {
         image: ['load', 0],
         upscale_method: 'lanczos',
-        width: size.width,
-        height: size.height,
-        crop: 'disabled',
+        width: GEN_BASE.width,
+        height: GEN_BASE.height,
+        crop: 'center',
       },
     },
     hint,
@@ -399,7 +482,7 @@ function structureGraph(
     },
     latent: {
       class_type: 'EmptySD3LatentImage',
-      inputs: { width: size.width, height: size.height, batch_size: 1 },
+      inputs: { width: GEN_BASE.width, height: GEN_BASE.height, batch_size: 1 },
     },
     sampler: {
       class_type: 'KSampler',
@@ -418,8 +501,9 @@ function structureGraph(
       },
     },
     decode: { class_type: 'VAEDecode', inputs: { samples: ['sampler', 0], vae: ['vae', 0] } },
-    out: { class_type: 'PreviewImage', inputs: { images: ['decode', 0] } },
   };
+
+  return finishTo(graph, 'decode', outputPreset(req.output), c.upscaler);
 }
 
 /**
@@ -439,7 +523,7 @@ function instructGraph(
   imageName: string,
   seed: number,
 ): Record<string, unknown> {
-  return {
+  const graph: Record<string, unknown> = {
     unet: { class_type: 'UnetLoaderGGUF', inputs: { unet_name: c.kontext } },
     clip: {
       class_type: 'DualCLIPLoader',
@@ -484,8 +568,9 @@ function instructGraph(
       },
     },
     decode: { class_type: 'VAEDecode', inputs: { samples: ['sampler', 0], vae: ['vae', 0] } },
-    out: { class_type: 'PreviewImage', inputs: { images: ['decode', 0] } },
   };
+
+  return finishTo(graph, 'decode', outputPreset(req.output), c.upscaler);
 }
 
 /**

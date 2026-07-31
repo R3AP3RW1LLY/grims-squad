@@ -116,6 +116,87 @@ export type StructureMode = (typeof STRUCTURE_MODES)[number]['id'];
 export const STRUCTURE_STRENGTH = 0.6;
 
 /**
+ * Finished sizes a member can ask for.
+ *
+ * ★ SQUADRON OWNER, 2026-07-30 ★
+ *
+ * "we need to be able to make full 16:9 1080p / 4k images too make sure we can do that! this is
+ * non-negotiable".
+ *
+ * ★ AND HERE IS THE TRAP THAT MAKES THIS NON-OBVIOUS ★
+ *
+ * FLUX cannot generate 1920×1080. Not "does it badly" — cannot. Its latent is downscaled by eight
+ * and then patched by two, so both dimensions must be multiples of sixteen, and 1080 ÷ 16 = 67.5.
+ * Asking for it does not error: the size is silently rounded to 1088 and the image comes back a
+ * different shape to the one requested. Every banner and every wallpaper would be very slightly
+ * wrong, and nothing would ever say so.
+ *
+ * 4K (3840×2160) IS on the grid — and is 8.29 megapixels, roughly eight times the resolution FLUX
+ * was trained at. Generating there produces duplicated horizons and repeated ships, because the
+ * model has never seen a composition that large and tiles what it knows.
+ *
+ * ★ SO NOTHING IS GENERATED AT THE OUTPUT SIZE ★
+ *
+ * Everything is generated at `GEN_BASE` — 1536×864, which is exactly 16:9, on the grid, and 1.33MP,
+ * inside the range FLUX composes well at. Then ESRGAN adds real detail at 4×, and a Lanczos
+ * reduction lands on the exact requested pixels.
+ *
+ * That is not a workaround, it is how high-resolution diffusion output is produced everywhere. It
+ * also gives a genuinely better picture than a native large generation would, because the reduction
+ * averages away the pixel-level noise diffusion always leaves behind.
+ */
+export const OUTPUT_PRESETS = [
+  {
+    id: 'wide720',
+    label: '720p',
+    width: 1280,
+    height: 720,
+    hint: 'Quick. Fine for Discord and forum posts.',
+  },
+  {
+    id: 'wide1080',
+    label: '1080p',
+    width: 1920,
+    height: 1080,
+    hint: 'Full HD, 16:9. The usual choice.',
+  },
+  {
+    id: 'wide4k',
+    label: '4K',
+    width: 3840,
+    height: 2160,
+    hint: 'Wallpaper and print. Slowest.',
+  },
+] as const;
+
+export type OutputPresetId = (typeof OUTPUT_PRESETS)[number]['id'];
+export const DEFAULT_OUTPUT: OutputPresetId = 'wide1080';
+
+/**
+ * What everything is actually generated at, before finishing.
+ *
+ * 1536×864: exactly 16:9 (256k × 144k with k=6), both axes multiples of sixteen, and 1.33MP —
+ * comfortably inside where FLUX composes a single coherent scene rather than tiling.
+ */
+export const GEN_BASE = { width: 1536, height: 864 } as const;
+
+/** Looks up a preset. Falls back to 1080p rather than throwing at a member holding a stale client. */
+export function outputPreset(id: string): (typeof OUTPUT_PRESETS)[number] {
+  return OUTPUT_PRESETS.find((p) => p.id === id) ?? OUTPUT_PRESETS[1];
+}
+
+/**
+ * Whether the finishing upscale is needed at all.
+ *
+ * At 720p the generation base is already larger than the target, so the ESRGAN pass would add
+ * nothing but a minute of GPU — the Lanczos reduction alone is sharper. Skipping it is why 720p is
+ * the "quick" option rather than merely a smaller slow one.
+ */
+export function needsUpscale(target: { width: number; height: number }): boolean {
+  return target.width > GEN_BASE.width || target.height > GEN_BASE.height;
+}
+
+/**
  * Upscale factors offered.
  *
  * The models are 4× natively; 2× is the same model followed by a downscale, which is sharper than

@@ -1,5 +1,14 @@
 import { describe, it, expect, vi } from 'vitest';
-import { MAX_INPUT_EDGE, STRUCTURE_STRENGTH, fitInputSize, toValidSize } from '@grims/shared';
+import {
+  GEN_BASE,
+  MAX_INPUT_EDGE,
+  OUTPUT_PRESETS,
+  STRUCTURE_STRENGTH,
+  fitInputSize,
+  needsUpscale,
+  outputPreset,
+  toValidSize,
+} from '@grims/shared';
 import { StudioClient, studioConfigFrom, type StudioConfig } from './studio.client.js';
 
 /**
@@ -103,7 +112,7 @@ describe('the source image', () => {
      * otherwise have one job silently render the other's picture — a data leak dressed as a bug.
      */
     const g = await capture(
-      { op: 'restyle', source: SOURCE, width: 1920, height: 1080, prompt: 'x', strength: 0.5, seed: 1 },
+      { op: 'restyle', source: SOURCE, width: 1920, height: 1080, prompt: 'x', strength: 0.5, seed: 1, output: 'wide1080' },
       { uploadName: 'screenshot_00042_.png' },
     );
     expect(g['load']?.inputs['image']).toBe('screenshot_00042_.png');
@@ -111,7 +120,7 @@ describe('the source image', () => {
 
   it('a failed upload abandons the job rather than rendering something unrelated', async () => {
     const g = await capture(
-      { op: 'restyle', source: SOURCE, width: 100, height: 100, prompt: 'x', strength: 0.5, seed: 1 },
+      { op: 'restyle', source: SOURCE, width: 100, height: 100, prompt: 'x', strength: 0.5, seed: 1, output: 'wide1080' },
       { uploadName: null },
     );
     expect(g).toEqual({});
@@ -125,7 +134,7 @@ describe('restyle keeps the composition', () => {
      * entirely and generate an unrelated picture — which is exactly what it would look like.
      */
     const g = await capture({
-      op: 'restyle', source: SOURCE, width: 1920, height: 1080, prompt: 'concept art', strength: 0.5, seed: 7,
+      op: 'restyle', source: SOURCE, width: 1920, height: 1080, prompt: 'concept art', strength: 0.5, seed: 7, output: 'wide1080',
     });
     expect(g['sampler']?.inputs['latent_image']).toEqual(['encode', 0]);
     expect(g['encode']?.class_type).toBe('VAEEncode');
@@ -134,34 +143,39 @@ describe('restyle keeps the composition', () => {
   it('MANDATORY: passes the chosen strength through as denoise', async () => {
     // The named stops in the UI are meaningless if this does not arrive intact.
     const g = await capture({
-      op: 'restyle', source: SOURCE, width: 800, height: 600, prompt: 'x', strength: 0.72, seed: 1,
+      op: 'restyle', source: SOURCE, width: 800, height: 600, prompt: 'x', strength: 0.72, seed: 1, output: 'wide1080',
     });
     expect(g['sampler']?.inputs['denoise']).toBe(0.72);
   });
 
   it('uses the fast distilled model at its distilled settings', async () => {
     const g = await capture({
-      op: 'restyle', source: SOURCE, width: 800, height: 600, prompt: 'x', strength: 0.5, seed: 1,
+      op: 'restyle', source: SOURCE, width: 800, height: 600, prompt: 'x', strength: 0.5, seed: 1, output: 'wide1080',
     });
     expect(g['unet']?.inputs['unet_name']).toBe(CONFIG.schnell);
     expect(g['sampler']?.inputs['cfg']).toBe(1.0);
   });
 
-  it('MANDATORY: scales the source down BEFORE encoding it', async () => {
+  it('MANDATORY: scales the source to the 16:9 base BEFORE encoding it', async () => {
     /*
-     * VAE-encoding a 4K screenshot under --lowvram is minutes of GPU for detail the sampler
-     * discards, and on a card running a game it is the allocation most likely to fail outright.
+     * Two things at once. VAE-encoding a 4K screenshot under --lowvram is minutes of GPU for detail
+     * the sampler discards, and on a card running a game it is the allocation most likely to fail.
+     * And landing on GEN_BASE guarantees the latent is exactly 16:9, which is what lets the
+     * finishing stage hit 1920x1080 without stretching anything.
      */
     const g = await capture({
-      op: 'restyle', source: SOURCE, width: 3840, height: 2160, prompt: 'x', strength: 0.5, seed: 1,
+      op: 'restyle', source: SOURCE, width: 3840, height: 2160, prompt: 'x', strength: 0.5, seed: 1, output: 'wide1080',
     });
     expect(g['encode']?.inputs['pixels']).toEqual(['scale', 0]);
-    expect(g['scale']?.inputs['width']).toBeLessThanOrEqual(MAX_INPUT_EDGE);
+    expect(g['scale']?.inputs['width']).toBe(GEN_BASE.width);
+    expect(g['scale']?.inputs['height']).toBe(GEN_BASE.height);
+    // Cropped, not stretched: a trimmed edge is visible and workable, a 1% stretch is neither.
+    expect(g['scale']?.inputs['crop']).toBe('center');
   });
 
   it('keeps the guidance that stops lettering appearing in the art', async () => {
     const g = await capture({
-      op: 'restyle', source: SOURCE, width: 800, height: 600, prompt: 'my name in big letters', strength: 0.5, seed: 1,
+      op: 'restyle', source: SOURCE, width: 800, height: 600, prompt: 'my name in big letters', strength: 0.5, seed: 1, output: 'wide1080',
     });
     expect(String(g['positive']?.inputs['text'])).toContain('no text');
   });
@@ -175,7 +189,7 @@ describe('structure keeps the shapes — the operation that solves the ship prob
      * ControlNet does not work" rather than "the wrong base model".
      */
     const g = await capture({
-      op: 'structure', source: SOURCE, width: 1920, height: 1080, prompt: 'concept art', mode: 'depth', seed: 1,
+      op: 'structure', source: SOURCE, width: 1920, height: 1080, prompt: 'concept art', mode: 'depth', seed: 1, output: 'wide1080',
     });
     expect(g['unet']?.inputs['unet_name']).toBe(CONFIG.dev);
   });
@@ -184,7 +198,7 @@ describe('structure keeps the shapes — the operation that solves the ship prob
     // dev is NOT guidance-distilled. At 1.0 it produces washed-out output that reads as a broken
     // model rather than a misconfigured one.
     const g = await capture({
-      op: 'structure', source: SOURCE, width: 800, height: 600, prompt: 'x', mode: 'depth', seed: 1,
+      op: 'structure', source: SOURCE, width: 800, height: 600, prompt: 'x', mode: 'depth', seed: 1, output: 'wide1080',
     });
     expect(g['guided']?.class_type).toBe('FluxGuidance');
     expect(g['guided']?.inputs['guidance']).toBeGreaterThan(1);
@@ -194,7 +208,7 @@ describe('structure keeps the shapes — the operation that solves the ship prob
     // If the hint were built from anything else, the ship would not be theirs — which is the entire
     // reason this operation exists.
     const g = await capture({
-      op: 'structure', source: SOURCE, width: 800, height: 600, prompt: 'x', mode: 'depth', seed: 1,
+      op: 'structure', source: SOURCE, width: 800, height: 600, prompt: 'x', mode: 'depth', seed: 1, output: 'wide1080',
     });
     expect(g['hint']?.inputs['image']).toEqual(['scale', 0]);
     expect(g['control']?.inputs['image']).toEqual(['hint', 0]);
@@ -202,10 +216,10 @@ describe('structure keeps the shapes — the operation that solves the ship prob
 
   it('depth for ships, edges for flat subjects', async () => {
     const depth = await capture({
-      op: 'structure', source: SOURCE, width: 800, height: 600, prompt: 'x', mode: 'depth', seed: 1,
+      op: 'structure', source: SOURCE, width: 800, height: 600, prompt: 'x', mode: 'depth', seed: 1, output: 'wide1080',
     });
     const edges = await capture({
-      op: 'structure', source: SOURCE, width: 800, height: 600, prompt: 'x', mode: 'edges', seed: 1,
+      op: 'structure', source: SOURCE, width: 800, height: 600, prompt: 'x', mode: 'edges', seed: 1, output: 'wide1080',
     });
     expect(depth['hint']?.class_type).toMatch(/Depth/);
     expect(edges['hint']?.class_type).toBe('Canny');
@@ -217,7 +231,7 @@ describe('structure keeps the shapes — the operation that solves the ship prob
      * the depth map in the output. Releasing early keeps the composition and lets it finish clean.
      */
     const g = await capture({
-      op: 'structure', source: SOURCE, width: 800, height: 600, prompt: 'x', mode: 'depth', seed: 1,
+      op: 'structure', source: SOURCE, width: 800, height: 600, prompt: 'x', mode: 'depth', seed: 1, output: 'wide1080',
     });
     expect(g['control']?.inputs['end_percent']).toBeLessThan(1);
     expect(g['control']?.inputs['strength']).toBe(STRUCTURE_STRENGTH);
@@ -227,7 +241,7 @@ describe('structure keeps the shapes — the operation that solves the ship prob
 describe('instruct edits in words', () => {
   it('MANDATORY: supplies the source as reference conditioning — that is what makes it an edit', async () => {
     const g = await capture({
-      op: 'instruct', source: SOURCE, width: 1920, height: 1080, instruction: 'make it sunset', seed: 1,
+      op: 'instruct', source: SOURCE, width: 1920, height: 1080, instruction: 'make it sunset', seed: 1, output: 'wide1080',
     });
     expect(g['reference']?.class_type).toBe('ReferenceLatent');
     expect(g['reference']?.inputs['latent']).toEqual(['encode', 0]);
@@ -239,7 +253,7 @@ describe('instruct edits in words', () => {
      * editing model to change one thing, and bolting on unrelated negatives muddies the request.
      */
     const g = await capture({
-      op: 'instruct', source: SOURCE, width: 800, height: 600, instruction: 'make it sunset', seed: 1,
+      op: 'instruct', source: SOURCE, width: 800, height: 600, instruction: 'make it sunset', seed: 1, output: 'wide1080',
     });
     expect(g['instruction']?.inputs['text']).toBe('make it sunset');
   });
@@ -248,14 +262,14 @@ describe('instruct edits in words', () => {
     // An arbitrary size degrades the edit noticeably — and looks like a bad model rather than an
     // off-grid input.
     const g = await capture({
-      op: 'instruct', source: SOURCE, width: 1234, height: 567, instruction: 'x', seed: 1,
+      op: 'instruct', source: SOURCE, width: 1234, height: 567, instruction: 'x', seed: 1, output: 'wide1080',
     });
     expect(g['scale']?.class_type).toBe('FluxKontextImageScale');
   });
 
   it('loads the instruction-editing model, not a generator', async () => {
     const g = await capture({
-      op: 'instruct', source: SOURCE, width: 800, height: 600, instruction: 'x', seed: 1,
+      op: 'instruct', source: SOURCE, width: 800, height: 600, instruction: 'x', seed: 1, output: 'wide1080',
     });
     expect(g['unet']?.inputs['unet_name']).toBe(CONFIG.kontext);
   });
@@ -324,5 +338,105 @@ describe('input sizing', () => {
     // A 4px-tall input rounding to 0 would produce a graph ComfyUI rejects with an opaque error.
     expect(toValidSize(4)).toBeGreaterThan(0);
     expect(toValidSize(0)).toBeGreaterThan(0);
+  });
+});
+
+describe('MANDATORY: exact 16:9 at 1080p and 4K', () => {
+  /*
+   * ★ SQUADRON OWNER, 2026-07-30: "this is non-negotiable" ★
+   *
+   * And it is the requirement most easily broken by a well-meaning edit, because the obvious
+   * implementation — generate at the requested size — SILENTLY does not work. 1080 is not a
+   * multiple of 16, so FLUX rounds it to 1088 and returns a 1.78:1 request as 1.76:1. Nothing
+   * errors. Nothing logs. Every wallpaper is just slightly wrong forever.
+   */
+
+  it('every preset is exactly 16:9', () => {
+    for (const p of OUTPUT_PRESETS) {
+      expect(p.width / p.height).toBeCloseTo(16 / 9, 10);
+    }
+  });
+
+  it('MANDATORY: the generation base is 16:9 AND on the FLUX grid', () => {
+    // Both, or the finishing stage has to stretch to reach the target.
+    expect(GEN_BASE.width / GEN_BASE.height).toBeCloseTo(16 / 9, 10);
+    expect(GEN_BASE.width % 16).toBe(0);
+    expect(GEN_BASE.height % 16).toBe(0);
+  });
+
+  it('MANDATORY: nothing is ever generated at 1080p, because FLUX cannot', () => {
+    /*
+     * The proof that the workaround is necessary rather than superstition: if 1080 were on the
+     * grid this whole finishing stage could be deleted. It is not, so it cannot.
+     */
+    expect(1080 % 16).not.toBe(0);
+    expect(outputPreset('wide1080').height % 16).not.toBe(0);
+  });
+
+  it('MANDATORY: 1080p and 4K land on the exact requested pixels', async () => {
+    for (const id of ['wide1080', 'wide4k'] as const) {
+      const g = await capture({
+        op: 'restyle', source: SOURCE, width: 1920, height: 1080,
+        prompt: 'x', strength: 0.5, seed: 1, output: id,
+      });
+      const target = outputPreset(id);
+      expect(g['finishScale']?.inputs['width']).toBe(target.width);
+      expect(g['finishScale']?.inputs['height']).toBe(target.height);
+      // The latent stays at the base — never the output size.
+      expect(g['scale']?.inputs['width']).toBe(GEN_BASE.width);
+    }
+  });
+
+  it('MANDATORY: 4K goes through a real upscale, not a stretch', async () => {
+    /*
+     * Lanczos-enlarging 1536x864 to 3840x2160 would "work" and produce a soft, empty 4K image with
+     * no more detail than the original. ESRGAN is what puts real pixels in it.
+     */
+    const g = await capture({
+      op: 'restyle', source: SOURCE, width: 1920, height: 1080,
+      prompt: 'x', strength: 0.5, seed: 1, output: 'wide4k',
+    });
+    expect(g['finishUp']?.class_type).toBe('ImageUpscaleWithModel');
+    expect(g['finishScale']?.inputs['image']).toEqual(['finishUp', 0]);
+  });
+
+  it('720p skips the upscale, because the base is already bigger', async () => {
+    // An ESRGAN pass to then throw the pixels away is a minute of GPU for nothing. This is why
+    // 720p is the "quick" option rather than a smaller slow one.
+    const g = await capture({
+      op: 'restyle', source: SOURCE, width: 1920, height: 1080,
+      prompt: 'x', strength: 0.5, seed: 1, output: 'wide720',
+    });
+    expect(needsUpscale(outputPreset('wide720'))).toBe(false);
+    expect(g['finishUp']).toBeUndefined();
+    expect(g['finishScale']?.inputs['width']).toBe(1280);
+  });
+
+  it('MANDATORY: all three operations finish to the exact size', async () => {
+    // Kontext especially: it returns its own aspect buckets, so without the finishing stage an
+    // "instruct" job would hand back 1568x672 when the member asked for 1920x1080.
+    const jobs = [
+      { op: 'restyle', source: SOURCE, width: 1920, height: 1080, prompt: 'x', strength: 0.5, seed: 1, output: 'wide1080' },
+      { op: 'structure', source: SOURCE, width: 1920, height: 1080, prompt: 'x', mode: 'depth', seed: 1, output: 'wide1080' },
+      { op: 'instruct', source: SOURCE, width: 1920, height: 1080, instruction: 'x', seed: 1, output: 'wide1080' },
+    ] as const;
+
+    for (const job of jobs) {
+      const g = await capture(job);
+      expect(g['finishScale']?.inputs['width']).toBe(1920);
+      expect(g['finishScale']?.inputs['height']).toBe(1080);
+      expect(g['out']?.inputs['images']).toEqual(['finishScale', 0]);
+    }
+  });
+
+  it('the finishing crop never stretches', async () => {
+    /*
+     * `fill` would reach the exact size too, by distorting. Kontext's 2.33:1 output stretched into
+     * 16:9 makes every ship subtly fat, which nobody identifies and nobody can undo.
+     */
+    const g = await capture({
+      op: 'instruct', source: SOURCE, width: 1920, height: 1080, instruction: 'x', seed: 1, output: 'wide4k',
+    });
+    expect(g['finishScale']?.inputs['crop']).toBe('center');
   });
 });
