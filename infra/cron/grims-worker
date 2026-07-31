@@ -20,5 +20,18 @@ CRON_TZ=UTC
 
 # Elite Dangerous knowledge ingest. Coriolis changes only with a game update; Spansh rebuilds
 # nightly. 03:20 UTC — off-peak, and BEFORE the 04:17 janitor so a long import is never competing
-# with a prune for disk.
-20 3 * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/ingest-knowledge.js >> /var/log/grims-worker.log 2>&1
+# with a prune for disk. The galaxy import also rebuilds market_entries when it finishes, so the
+# route table can never disagree with the stations it was derived from.
+20 3 * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/ingest-knowledge.js coriolis galaxy >> /var/log/grims-worker.log 2>&1
+
+# Roster knowledge, from the Inara profile cache. ON ITS OWN — squadron owner, 2026-07-31: "the
+# ingestion for ML from inara, that one must be batched and run on its own."
+#
+# 05:50, AFTER the 05:12 rank sweep that fills the cache it reads. Ordered rather than coincidental:
+# running it first would ingest yesterday's roster every single day, and nothing would look wrong.
+# Also clear of the 05:40 nickname audit — two `compose run` containers starting together on a
+# one-vCPU box is how a job that normally takes seconds starts timing out.
+#
+# It makes no Inara requests of its own — see the job's own note on why that is the batching, not a
+# shortcut around it.
+50 5 * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/ingest-knowledge.js inara >> /var/log/grims-worker.log 2>&1

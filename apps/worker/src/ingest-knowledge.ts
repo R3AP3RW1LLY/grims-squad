@@ -4,6 +4,7 @@ import { readCoriolis } from './jobs/ingest-coriolis.js';
 import { streamGalaxy } from './jobs/ingest-galaxy.js';
 import { writeBatch, beginIngest, finishIngest } from './jobs/knowledge-writer.js';
 import { rebuildMarketEntries } from './jobs/market-flatten.js';
+import { readInaraKnowledge } from './jobs/ingest-inara.js';
 
 /**
  * Ingests what GMSD AI knows about Elite Dangerous.
@@ -103,8 +104,55 @@ async function ingestGalaxy(db: PrismaClient): Promise<void> {
   }
 }
 
+/**
+ * Our own roster, from the Inara cache.
+ *
+ * ★ ITS OWN SCHEDULE — squadron owner, 2026-07-31 ★
+ *
+ * "the ingestion for ML from inara, that one must be batched and run on its own." It has its own
+ * cron line at 04:40 rather than riding along with the galaxy: a four-gigabyte dump import and a
+ * hundred-row roster read have nothing in common but the word "ingest", and tying them together
+ * would mean the roster could only refresh as often as the galaxy.
+ */
+async function ingestInara(db: PrismaClient): Promise<void> {
+  const run = await beginIngest(db, 'inara');
+  try {
+    const { rows, members } = await readInaraKnowledge(db);
+
+    if (rows.length === 0) {
+      /*
+       * Recorded as a completed run of zero rather than skipped. An empty roster cache is a real
+       * state with a real cause — the rank sweep has not run yet, or every lookup failed — and
+       * marking it "skipped" would leave the training page saying the source had never run at all.
+       */
+      await finishIngest(db, run, { rows: 0 });
+      console.log('inara: 0 rows (no cached profiles yet — the rank sweep fills that table)');
+      return;
+    }
+
+    let written = 0;
+    for (let i = 0; i < rows.length; i += BATCH) {
+      written += await writeBatch(db, rows.slice(i, i + BATCH));
+    }
+    await finishIngest(db, run, { rows: written });
+    console.log(`inara: ${written} rows (${members} commanders)`);
+  } catch (e) {
+    await finishIngest(db, run, { error: e instanceof Error ? e.message : String(e) });
+    throw e;
+  }
+}
+
 async function main(): Promise<void> {
-  const only = process.argv[2];
+  /*
+   * ★ SEVERAL NAMES, NOT ONE ★
+   *
+   * `ingest-knowledge.js coriolis galaxy` runs exactly those two. It took a single name until the
+   * squadron owner asked for the Inara ingest to run on its own schedule — which needs a way to
+   * say "everything EXCEPT that one", and a single name could only say "only this one".
+   *
+   * No names at all still means all of them.
+   */
+  const only = process.argv.slice(2).filter((a) => a !== '');
   const db = new PrismaClient();
   const failures: string[] = [];
 
@@ -112,8 +160,9 @@ async function main(): Promise<void> {
     for (const [name, run] of [
       ['coriolis', ingestCoriolis],
       ['galaxy', ingestGalaxy],
+      ['inara', ingestInara],
     ] as const) {
-      if (only !== undefined && only !== name) continue;
+      if (only.length > 0 && !only.includes(name)) continue;
       try {
         await run(db);
       } catch (e) {
