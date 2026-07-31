@@ -1,8 +1,8 @@
+import { ComfyTransport } from './comfy.transport.js';
 import {
   IMAGE_CFG,
   IMAGE_GEN_HEIGHT,
   IMAGE_GEN_WIDTH,
-  IMAGE_POLL_MS,
   IMAGE_SAMPLER,
   IMAGE_SCHEDULER,
   IMAGE_STEPS,
@@ -129,7 +129,7 @@ export class ImageClient {
     const chosenSeed = seed ?? Math.floor(Math.random() * MAX_SEED);
     const graph = this.#buildGraph(buildImagePrompt(prompt), chosenSeed);
 
-    const promptId = await this.#submit(graph);
+    const promptId = await this.#comfy().submit(graph);
     if (promptId === null) {
       this.stream?.emit({
         level: 'error',
@@ -140,8 +140,20 @@ export class ImageClient {
       return null;
     }
 
-    const png = await this.#awaitResult(promptId, started);
-    if (png === null) return null;
+    const waited = await this.#comfy().awaitImage(promptId, started + IMAGE_TIMEOUT_MS);
+    if (!waited.ok) {
+      this.stream?.emit({
+        level: waited.failure === 'timeout' ? 'warn' : 'error',
+        kind: 'image',
+        message:
+          waited.failure === 'timeout'
+            ? 'Generation timed out. The GPU is likely busy with the game.'
+            : 'Generation finished with no image — check the ComfyUI window.',
+        tookMs: Date.now() - started,
+      });
+      return null;
+    }
+    const png = waited.png;
 
     const tookMs = Date.now() - started;
     this.stream?.emit({ level: 'info', kind: 'image', message: 'Artwork generated', tookMs });
@@ -151,122 +163,17 @@ export class ImageClient {
   /** Whether ComfyUI is answering. Cheap — asks for its stats, does not touch a model. */
   async health(): Promise<{ reachable: boolean; tookMs: number }> {
     if (this.config === null) return { reachable: false, tookMs: 0 };
-
-    const started = Date.now();
-    const abort = new AbortController();
-    const timer = setTimeout(() => abort.abort(), 4_000);
-    try {
-      const res = await this.fetchImpl(`${this.config.baseUrl}/system_stats`, {
-        signal: abort.signal,
-      });
-      return { reachable: res.ok, tookMs: Date.now() - started };
-    } catch {
-      return { reachable: false, tookMs: Date.now() - started };
-    } finally {
-      clearTimeout(timer);
-    }
-  }
-
-  /** Queues the graph. Returns ComfyUI's prompt id, or null. */
-  async #submit(graph: Record<string, unknown>): Promise<string | null> {
-    if (this.config === null) return null;
-
-    const abort = new AbortController();
-    const timer = setTimeout(() => abort.abort(), 15_000);
-    try {
-      const res = await this.fetchImpl(`${this.config.baseUrl}/prompt`, {
-        method: 'POST',
-        signal: abort.signal,
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ prompt: graph }),
-      });
-      if (!res.ok) return null;
-
-      const body = (await res.json()) as { prompt_id?: unknown };
-      return typeof body.prompt_id === 'string' && body.prompt_id !== '' ? body.prompt_id : null;
-    } catch {
-      return null;
-    } finally {
-      clearTimeout(timer);
-    }
+    return this.#comfy().health();
   }
 
   /**
-   * Polls until the image exists, then fetches it.
+   * The transport, built per call.
    *
-   * ★ POLLING, NOT THE WEBSOCKET ★
-   *
-   * ComfyUI does push progress over a websocket, and it would be a little tidier. Polling wins here
-   * because this connection crosses an SSH reverse tunnel from a Vultr box to a home PC: a dropped
-   * websocket is a lost job with no way to recover it, whereas a dropped poll is one failed request
-   * and the next one picks the result up. The job kept running the whole time.
+   * Cheap (it holds a URL and two function references) and it keeps `config === null` handled in
+   * exactly one place — the alternative is a nullable field every method has to re-check.
    */
-  async #awaitResult(promptId: string, startedAt: number): Promise<Uint8Array | null> {
-    if (this.config === null) return null;
-
-    while (Date.now() - startedAt < IMAGE_TIMEOUT_MS) {
-      await this.sleep(IMAGE_POLL_MS);
-
-      const entry = await this.#history(promptId);
-      if (entry === null) continue;
-
-      const image = firstImage(entry);
-      if (image === null) {
-        /*
-         * The job finished but produced no image. That is a real failure — a bad model filename,
-         * or the card ran out of memory mid-decode — and retrying the poll would spin until the
-         * timeout for an answer that already arrived.
-         */
-        if (isFinished(entry)) {
-          this.stream?.emit({
-            level: 'error',
-            kind: 'image',
-            message: 'Generation finished with no image — check the ComfyUI window.',
-            tookMs: Date.now() - startedAt,
-          });
-          return null;
-        }
-        continue;
-      }
-
-      return await this.#download(image);
-    }
-
-    this.stream?.emit({
-      level: 'warn',
-      kind: 'image',
-      message: 'Generation timed out. The GPU is likely busy with the game.',
-      tookMs: Date.now() - startedAt,
-    });
-    return null;
-  }
-
-  async #history(promptId: string): Promise<HistoryEntry | null> {
-    if (this.config === null) return null;
-    try {
-      const res = await this.fetchImpl(`${this.config.baseUrl}/history/${promptId}`);
-      if (!res.ok) return null;
-      const body = (await res.json()) as Record<string, HistoryEntry>;
-      return body[promptId] ?? null;
-    } catch {
-      return null;
-    }
-  }
-
-  async #download(ref: ImageRef): Promise<Uint8Array | null> {
-    if (this.config === null) return null;
-    const q = new URLSearchParams({
-      filename: ref.filename,
-      subfolder: ref.subfolder,
-      type: ref.type,
-    });
-    try {
-      const res = await this.fetchImpl(`${this.config.baseUrl}/view?${q.toString()}`);
-      if (!res.ok) return null;
-      return new Uint8Array(await res.arrayBuffer());
-    } catch {
-      return null;
-    }
+  #comfy(): ComfyTransport {
+    return new ComfyTransport(this.config?.baseUrl ?? '', this.fetchImpl, this.sleep);
   }
 
   /**
@@ -332,43 +239,10 @@ export class ImageClient {
   }
 }
 
-interface ImageRef {
-  readonly filename: string;
-  readonly subfolder: string;
-  readonly type: string;
-}
-
-interface HistoryEntry {
-  readonly outputs?: Record<string, { images?: Array<Record<string, unknown>> }>;
-  readonly status?: { completed?: unknown; status_str?: unknown };
-}
-
-/** Pulls the first image reference out of a history entry, tolerating a graph with several outputs. */
-export function firstImage(entry: HistoryEntry): ImageRef | null {
-  for (const node of Object.values(entry.outputs ?? {})) {
-    for (const img of node.images ?? []) {
-      const filename = img['filename'];
-      if (typeof filename !== 'string' || filename === '') continue;
-      return {
-        filename,
-        subfolder: typeof img['subfolder'] === 'string' ? img['subfolder'] : '',
-        // Defaults to `temp` because that is where PreviewImage writes; `output` would 404.
-        type: typeof img['type'] === 'string' && img['type'] !== '' ? img['type'] : 'temp',
-      };
-    }
-  }
-  return null;
-}
-
-/**
- * Whether ComfyUI considers this job done.
- *
- * A history entry EXISTS while a job is still running, so its presence proves nothing. Only the
- * status says whether there is any point polling again.
+/*
+ * `firstImage` and `isFinished` moved to comfy.transport.ts when the studio needed the same
+ * polling. Re-exported here so existing imports and tests keep working — the protocol quirks they
+ * encode (a history entry exists while a job RUNS; PreviewImage writes to `temp`) are worth having
+ * one copy of.
  */
-export function isFinished(entry: HistoryEntry): boolean {
-  const s = entry.status;
-  if (s === undefined) return false;
-  if (s.completed === true) return true;
-  return s.status_str === 'success' || s.status_str === 'error';
-}
+export { firstImage, isFinished } from './comfy.transport.js';

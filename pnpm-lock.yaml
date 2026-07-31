@@ -450,9 +450,15 @@ importers:
       '@grims/config':
         specifier: workspace:*
         version: link:../packages/config
+      '@grims/shared':
+        specifier: workspace:*
+        version: link:../packages/shared
       '@types/node':
         specifier: ^24.0.0
         version: 24.13.3
+      sharp:
+        specifier: ^0.35.3
+        version: 0.35.3(@types/node@24.13.3)
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
