@@ -29,6 +29,7 @@ import { SearchService, renderSnippet, type SearchResult } from './search.servic
 import { ModerationService } from './moderation.service.js';
 import { SignatureService } from './signature.service.js';
 import { ReviewQueueService, type HeldPost } from '../ai/review-queue.service.js';
+import { ReportService, REPORTED_MESSAGE } from '../ai/report.service.js';
 
 /**
  * The forum's HTTP surface.
@@ -66,6 +67,7 @@ export class ForumController {
     @Inject(NotifyService) private readonly notify: NotifyService,
     @Inject(SignatureService) private readonly signatures: SignatureService,
     @Inject(ReviewQueueService) private readonly review: ReviewQueueService,
+    @Inject(ReportService) private readonly reports: ReportService,
   ) {}
 
   /**
@@ -369,6 +371,29 @@ export class ForumController {
     return {
       candidates: await this.grants.search(db, threadId, q ?? '', await this.#mask(caller)),
     };
+  }
+
+  /**
+   * Report a published post.
+   *
+   * ★ ANY MEMBER, AND IT DOES NOT HIDE ANYTHING ★
+   *
+   * A report is a claim, not a verdict — see ReportService for why holding the post on report would
+   * hand every member a button that silences any other. It is also the ONLY source of "the screener
+   * should have flagged this", which the review queue structurally cannot produce.
+   */
+  @Post('posts/:postId/report')
+  async reportPost(
+    @User() caller: CurrentUser | undefined,
+    @Param('postId') postId: string,
+    @Req() req: FastifyRequest,
+  ): Promise<{ ok: true; message: string }> {
+    const c = requireSession(caller, 'Sign in to report a post.');
+    csrf(req);
+
+    const db = await this.acl.forCaller(c.userId);
+    await this.reports.report(db, postId, { userId: c.userId });
+    return { ok: true, message: REPORTED_MESSAGE };
   }
 
   /**

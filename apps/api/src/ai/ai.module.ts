@@ -4,6 +4,7 @@ import { MODEL_WARM_INTERVAL_MS } from '@grims/shared';
 import { AiClient, aiConfigFrom } from './ai.client.js';
 import { EmbedClient, embedRootFrom } from './embed.client.js';
 import { DecisionStore } from './decision.store.js';
+import { ReportService } from './report.service.js';
 import { ImageClient, imageConfigFrom } from './image.client.js';
 import { AiLog } from './ai-log.port.js';
 import { PrismaAiLog } from './ai-log.prisma.js';
@@ -187,6 +188,11 @@ export class ModelWarmer implements OnModuleInit, OnModuleDestroy {
       inject: [DecisionStore],
       useFactory: (decisions: DecisionStore) => new ReviewQueueService(decisions),
     },
+    {
+      provide: ReportService,
+      inject: [DecisionStore],
+      useFactory: (decisions: DecisionStore) => new ReportService(decisions),
+    },
     ModelWarmer,
   ],
   controllers: [AiController, ArtworkController],
@@ -199,6 +205,7 @@ export class ModelWarmer implements OnModuleInit, OnModuleDestroy {
     ScreeningService,
     ArtworkService,
     ReviewQueueService,
+    ReportService,
     AiStreamService,
   ],
 })
