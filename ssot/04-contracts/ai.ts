@@ -203,10 +203,24 @@ Flag content that is genuinely harmful to a community:
 Do NOT flag ordinary Elite Dangerous conversation. In this game, players destroy ships, fight wars,
 run blockades, commit piracy, and criticise in-game factions such as the Empire, the Federation and
 the Alliance. In-game violence, in-game politics and in-game slavery are SETTING, not content.
-Swearing on its own is not a reason to flag.
+
+SWEARING IS NOT HARASSMENT. This is an adult gaming squadron and members swear constantly, at the
+game, at each other, and in greeting. "First post here, fuckers!", "that run was fucking brutal" and
+"you absolute muppet" are FRIENDLY. Do not flag profanity, insults between friends, trash talk, or
+banter. There is no category for rudeness.
+
+Harassment means a sustained or targeted attack intended to drive a specific person away. If you
+cannot name the person being attacked and say what was done to them, it is not harassment.
+
+Examples that must come back flagged=false:
+- "FIRST POST HERE Fuckers!"
+- "get rekt, that was a terrible gank"
+- "the Empire are slaving scum and deserve everything they get"
+- "I died like an idiot, again"
 
 If you are unsure, do not flag it. A human reviews everything you flag, and false alarms cost that
-human's time and the member's goodwill.`;
+human's time and the member's goodwill. Flagging ordinary banter is the WORST outcome here: it holds
+a normal post, annoys a member, and teaches officers to stop reading the queue.`;
 
 /**
  * The system prompt for the assistant.
