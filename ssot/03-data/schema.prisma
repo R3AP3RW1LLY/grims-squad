@@ -431,6 +431,11 @@ model User {
 
   forumReads           ForumCategoryRead[]
 
+  /// Reputation (P2). Votes cast, experience earned, badges held.
+  forumVotes           ForumVote[]
+  xpEvents             XpEvent[]
+  badges               MemberBadge[]
+
   @@map("users")
 
   /// Screening decisions this member made as a moderator.
@@ -1237,8 +1242,25 @@ model ForumPost {
   replies   ForumPost[]     @relation("PostReplies")
   reactions ForumReaction[]
   revisions PostRevision[]
+  votes     ForumVote[]
+
+  /// The running total of votes on this post.
+  ///
+  /// * DENORMALISED, AND IT HAS TO BE *
+  ///
+  /// Every post in every thread listing shows its score. Computing it from `forum_votes` means a
+  /// correlated aggregate per post per page load, and the ONE query that must stay fast on this
+  /// site is reading a thread. This column is written in the same transaction as the vote, so it
+  /// cannot drift without a bug that also lost the vote itself.
+  ///
+  /// Nullable would be wrong: zero is a real score and "no votes yet" is the same thing to every
+  /// reader.
+  score      Int                      @default(0)
 
   @@index([threadId, createdAt])
+  /// Highest-scoring posts, for the knowledge ingest and for "top answers". Partial in the
+  /// migration - the vast majority of posts sit at zero and indexing them helps nothing.
+  @@index([score])
   @@index([authorId, createdAt])
   @@index([replyToId])
   /// The moderation queue's only query: everything waiting, oldest first.
@@ -1247,6 +1269,84 @@ model ForumPost {
 
   /// Decisions taught by this post. Kept if the post is deleted — see ScreenDecision.
   screenDecisions ScreenDecision[]
+}
+
+/// One member's vote on one post (P2, squadron owner 2026-07-31).
+///
+/// * WHY A ROW PER VOTE RATHER THAN A COUNTER *
+///
+/// A counter cannot answer "have I already voted on this", which every reader needs on every post
+/// to render the buttons correctly. It also cannot be undone: a member changing their mind would
+/// decrement something they might never have incremented.
+///
+/// The unique key is the whole enforcement. One member, one post, one vote — in the DATABASE, so
+/// two browser tabs racing produce a constraint violation rather than two votes.
+model ForumVote {
+  postId    String   @map("post_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  /// +1 or -1. Never 0 — withdrawing a vote deletes the row, so "no opinion" has one
+  /// representation rather than two that queries would have to remember to treat alike.
+  value     Int
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  post ForumPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([postId, userId])
+  /// "What have I voted on in this thread" — asked once per thread render, for the whole page.
+  @@index([userId, postId])
+  @@map("forum_votes")
+}
+
+/// Every experience award, as it happened.
+///
+/// * A LEDGER, NOT A BALANCE *
+///
+/// The obvious design is an `xp` column on `users` that goes up. It cannot answer "why do I have
+/// 340", it cannot be corrected when an award turns out to be wrong, and if a bug ever
+/// double-awards there is no way to find out — the number is just bigger than it should be, for
+/// ever.
+///
+/// Rows are cheap. A hundred and seven members earning a dozen awards a week is a table that stays
+/// small enough to sum on demand for years, and the sum can always be checked against the reasons.
+model XpEvent {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  /// Matches a key of XP_AWARDS in the reputation contract.
+  reason    String
+  amount    Int
+  /// What it was for — a post id, a thread id, or a date for a played day. Free-form because the
+  /// subject differs per reason, and a typed column per reason would be six mostly-null columns.
+  subject   String?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Summing a member's total, which is the only read this table gets.
+  @@index([userId, createdAt])
+  /// * IDEMPOTENCE, ENFORCED IN THE DATABASE *
+  ///
+  /// A unique partial index on (user_id, reason, subject) lives in the migration, because Prisma
+  /// cannot express a partial index. It is what stops the daily job awarding `playedToday` twice
+  /// for the same date if it is ever run twice — which is exactly what a retry does.
+  @@map("xp_events")
+}
+
+/// A badge a member has earned, and when.
+///
+/// Stored rather than computed on read, so the DATE is real. A badge whose earned-at is recomputed
+/// every page load says a member earned it today, every day, and "since March" is most of what a
+/// badge is worth.
+model MemberBadge {
+  userId   String   @map("user_id") @db.Uuid
+  /// Matches a `key` in BADGES.
+  badgeKey String   @map("badge_key")
+  earnedAt DateTime @default(now()) @map("earned_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, badgeKey])
+  @@map("member_badges")
 }
 
 /// Edit history. Retained so moderation can see what a post said before it was changed.

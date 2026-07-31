@@ -381,11 +381,20 @@ export class MembersController {
           location:
             fromJournal.currentSystem === null
               ? null
-              : // The journal's Location/FSDJump gives a system; the station is
-                // a separate fact we do not carry here, and inventing one from
-                // the ship's docking state would be a guess presented as a
-                // record.
-                { system: fromJournal.currentSystem, station: null },
+              : /*
+                 * ★ THE STATION IS REAL NOW ★
+                 *
+                 * This read `station: null` with a note that it was "a separate fact we do not
+                 * carry here" — true when it was written, and no longer. The profile derives the
+                 * sublocation from the newest of Docked / Location / SupercruiseExit /
+                 * ApproachSettlement, with Undocked clearing it.
+                 *
+                 * Still inside `source`, so `showLocation` governs it exactly as it governs the
+                 * system (INV-027). Attaching it after serialisation would publish every member's
+                 * docking to everybody and leave the setting silently doing nothing — which is the
+                 * whole reason this object exists rather than being spread onto the response.
+                 */
+                { system: fromJournal.currentSystem, station: fromJournal.currentLocation },
           fleet: fromJournal.fleet.map((s) => ({ shipType: s.shipType, name: s.name })),
           /*
            * BigInt, because the profile type is `bigint | null` and serialises

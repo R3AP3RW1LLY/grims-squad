@@ -98,7 +98,13 @@ describe('P0.2 database schema', () => {
     // self-join over jsonb that exhausted the disk and took Postgres down with it; the same
     // question against this table is an indexed lookup. Hand-written too — its `cube` column has
     // no Prisma type either.
-    expect(Number(r[0]?.n)).toBe(74);
+    //
+    // 77 as of 2026-08-01: forum_votes, xp_events and member_badges. Reputation — the owner asked
+    // for "upvote, downvote and answer buttons like stack overflow ... an xp and badge system".
+    // xp_events is a LEDGER rather than a counter on users: a number that only goes up cannot say
+    // why somebody has 340, cannot be corrected, and cannot be audited if anything ever
+    // double-awards.
+    expect(Number(r[0]?.n)).toBe(77);
   });
 
   describe('hand-written DDL that Prisma cannot express', () => {

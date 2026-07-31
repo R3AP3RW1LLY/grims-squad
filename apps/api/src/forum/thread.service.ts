@@ -1,4 +1,4 @@
-import { AppError, ErrorCode, Permission } from '@grims/shared';
+import { AppError, ErrorCode, Permission, XP_AWARDS } from '@grims/shared';
 import type { AclBoundClient } from '../authz/acl-db.service.js';
 import { assertSlug, satisfiesMask, type CategoryService } from './category.service.js';
 import type { ReindexQueue } from './reindex.port.js';
@@ -106,6 +106,10 @@ export interface PostView {
   readonly replyTo: { postId: string; author: { handle: string; displayName: string } } | null;
   /** Marked as the answer. At most one per thread - see `markSolution`. */
   readonly isSolution: boolean;
+  /** Net votes, read straight off the post. See the `score` column for why it is denormalised. */
+  readonly score: number;
+  /** What THIS reader voted, so the arrows render correctly on first paint. */
+  readonly myVote: 1 | -1 | null;
   /** Reaction tallies, already including whether the caller reacted. */
   readonly reactions: readonly ReactionCount[];
   /**
@@ -410,6 +414,9 @@ export class ThreadService {
         editCount: true,
         createdAt: true,
         isSolution: true,
+        // The denormalised net vote total. Free here — it is a column on the row already being
+        // read, which is the whole reason it is denormalised rather than aggregated per render.
+        score: true,
         authorId: true,
         thread: { select: { isLocked: true, category: { select: { postPerm: true } } } },
         author: { select: { handle: true, displayName: true, avatarStoredHash: true } },
@@ -453,6 +460,26 @@ export class ThreadService {
       mineByPost.set(r.postId, set);
     }
 
+    /*
+     * ★ THE READER'S OWN VOTES, IN ONE QUERY FOR THE WHOLE PAGE ★
+     *
+     * The arrows must render in their correct state on FIRST paint. Fetching them after the page
+     * loads would mean every post visibly flickers from neutral to voted, on every page load, for
+     * everyone who has ever voted — and the score is already on the post row, so this is the only
+     * extra read voting costs a thread render.
+     *
+     * Same shape as the reactions above and for the same reason: one query for the thread rather
+     * than one per post.
+     */
+    const myVotes = new Map<string, 1 | -1>();
+    if (postIds.length > 0 && callerId !== null) {
+      const rows = await db.forumVote.findMany({
+        where: { postId: { in: postIds }, userId: callerId },
+        select: { postId: true, value: true },
+      });
+      for (const v of rows) myVotes.set(v.postId, v.value as 1 | -1);
+    }
+
     return rows.map((p) => ({
       id: p.id,
       authorId: p.authorId,
@@ -461,6 +488,8 @@ export class ThreadService {
       editCount: p.editCount,
       createdAt: p.createdAt.toISOString(),
       isSolution: p.isSolution,
+      score: p.score,
+      myVote: myVotes.get(p.id) ?? null,
       author: {
         handle: p.author.handle,
         displayName: p.author.displayName ?? p.author.handle,
@@ -546,7 +575,8 @@ export class ThreadService {
      */
     const post = await db.forumPost.findFirst({
       where: { id: postId, threadId: thread.id, deletedAt: null },
-      select: { id: true },
+      // The author too, because accepting an answer awards THEM, not the person accepting it.
+      select: { id: true, authorId: true },
     });
     if (post === null) {
       throw new AppError(ErrorCode.RESOURCE_NOT_VISIBLE, 'Post not found.');
@@ -559,6 +589,47 @@ export class ThreadService {
       }),
       ...(solution
         ? [db.forumPost.update({ where: { id: post.id }, data: { isSolution: true } })]
+        : []),
+      /*
+       * ★ EXPERIENCE FOR THE ANSWER, AND FOR CLOSING THE QUESTION ★
+       *
+       * The largest single award on the platform goes to the answerer: somebody asked, they
+       * answered, and the person who asked confirmed it worked. Nothing else on the forum produces
+       * that much evidence a post was worth writing.
+       *
+       * A smaller one goes to whoever accepted it. Closing a question helps everybody who finds
+       * the thread later, and an unaccepted-but-answered thread is the single most common way a
+       * forum wastes the next reader's time.
+       *
+       * ★ SKIPPED WHEN THEY ARE THE SAME PERSON ★
+       *
+       * A member answering their own question and marking it is a genuinely useful thing to do —
+       * but paying them the answerer's award for it makes experience farmable by anyone willing to
+       * post twice.
+       *
+       * ★ AND WHY UN-MARKING WRITES NOTHING ★
+       *
+       * `createMany` with `skipDuplicates` against the partial unique index on
+       * (user_id, reason, subject) means re-accepting the same post is idempotent. Un-accepting
+       * deliberately does NOT claw the award back: the answer was still correct when it was
+       * accepted, and a member losing 25 points because somebody later re-marked a different post
+       * would be punished for another person's decision.
+       */
+      ...(solution && post.authorId !== caller.userId
+        ? [
+            db.xpEvent.createMany({
+              data: [
+                { userId: post.authorId, reason: 'answerAccepted', amount: XP_AWARDS.answerAccepted, subject: post.id },
+                {
+                  userId: caller.userId,
+                  reason: 'answerAcceptedByYou',
+                  amount: XP_AWARDS.answerAcceptedByYou,
+                  subject: post.id,
+                },
+              ],
+              skipDuplicates: true,
+            }),
+          ]
         : []),
     ]);
   }

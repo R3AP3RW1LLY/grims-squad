@@ -85,27 +85,89 @@ export function Location({ profile }: { profile: CommanderProfile }) {
           .
         </p>
       ) : (
-        <div className="rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel)] px-5 py-4">
-          <p
-            className="text-2xl text-[var(--color-brand-cyan-bright)]"
-            style={{ fontFamily: 'var(--font-display)' }}
-          >
-            {profile.currentSystem}
-          </p>
-          {/*
-            The timestamp travels with it, deliberately. A system name on its own
-            is a claim about NOW, and it might be three weeks old — which for
-            somebody deciding whether to ask you for a wing is the whole
-            question.
-          */}
-          {profile.systemSeenAt !== null && (
-            <p className="mt-1 font-mono text-[11px] text-[var(--color-text-secondary)]">
-              Seen {new Date(profile.systemSeenAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })}
-            </p>
-          )}
+        /*
+         * ★ TWO COLUMNS — squadron owner, 2026-07-30 ★
+         *
+         * "show the system they are currently in ... and then in the second column, show the
+         * station, settlement, planet or what ever sublocation that is transmitted."
+         *
+         * They are two different facts that age at different rates: somebody can sit docked for an
+         * hour after a jump. Each carries its OWN timestamp for that reason — sharing one would
+         * date the docking from the jump.
+         */
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Place
+            label="System"
+            value={profile.currentSystem}
+            seenAt={profile.systemSeenAt}
+            tone="system"
+          />
+          <Place
+            label="Location"
+            value={profile.currentLocation}
+            seenAt={profile.locationSeenAt}
+            tone="sub"
+            /*
+             * "In open space" rather than "Unknown". The journal names a station or a body when
+             * there is one to name; the absence is not missing DATA, it is a commander in
+             * supercruise or between stars, and saying "unknown" would read as a fault in the app.
+             */
+            empty="In open space"
+          />
         </div>
       )}
     </Section>
+  );
+}
+
+/**
+ * One half of Where you are.
+ *
+ * ★ THE TIMESTAMP IS NOT DECORATION ★
+ *
+ * A place name on its own is a claim about NOW, and it might be three weeks old — which for
+ * somebody deciding whether to ask you for a wing is the entire question. It travels with every
+ * value here for that reason, and each half carries its own.
+ */
+function Place({
+  label,
+  value,
+  seenAt,
+  tone,
+  empty,
+}: {
+  readonly label: string;
+  readonly value: string | null;
+  readonly seenAt: string | null;
+  readonly tone: 'system' | 'sub';
+  readonly empty?: string;
+}) {
+  const missing = value === null;
+
+  return (
+    <div className="rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel)] px-5 py-4">
+      <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-secondary)]">
+        {label}
+      </p>
+      <p
+        className={`mt-1 text-2xl leading-tight ${
+          missing
+            ? 'text-[var(--color-text-dim)]'
+            : tone === 'system'
+              ? 'text-[var(--color-brand-cyan-bright)]'
+              : 'text-[var(--color-brand-orange-bright)]'
+        }`}
+        style={{ fontFamily: 'var(--font-display)' }}
+      >
+        {value ?? empty ?? 'Unknown'}
+      </p>
+      {seenAt !== null && (
+        <p className="mt-1 font-mono text-[11px] text-[var(--color-text-secondary)]">
+          Seen{' '}
+          {new Date(seenAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })}
+        </p>
+      )}
+    </div>
   );
 }
 

@@ -543,6 +543,10 @@ export interface CommanderProfile {
   /** The system they were last seen in. Null until something reports one. */
   currentSystem: string | null;
   systemSeenAt: string | null;
+  /** Station, settlement or body — whatever the journal last named inside the system. */
+  currentLocation: string | null;
+  /** Its own timestamp: a docking and a jump age at different rates. */
+  locationSeenAt: string | null;
 }
 
 export const getMyCommander = (): Promise<CommanderProfile | null> =>
@@ -906,6 +910,16 @@ export interface HubPost {
   /** The post this answers, when it answers one in particular. Who and where, never what. */
   replyTo: { postId: string; author: { handle: string; displayName: string } } | null;
   isSolution: boolean;
+  /** Net votes. Denormalised on the post, so a thread render needs no aggregate. */
+  score: number;
+  /**
+   * What THIS reader voted, or null.
+   *
+   * Sent per post rather than fetched separately: the arrows have to render in their correct state
+   * on first paint, and a second request to find out would mean every post flickers from neutral
+   * to voted on every page load.
+   */
+  myVote: 1 | -1 | null;
   reactions: { emoji: string; count: number; mine: boolean }[];
   /** Server-decided: whether this caller may rewrite this post. Re-checked on write. */
   canEdit: boolean;

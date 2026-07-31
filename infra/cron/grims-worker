@@ -15,6 +15,17 @@ CRON_TZ=UTC
 # Nickname + commander reconciliation. After the Inara sync, so it acts on fresh names.
 40 5 * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/daily-audit.js >> /var/log/grims-worker.log 2>&1
 
+# Nightly reputation: experience for days flown, and badges for the totals that adds to.
+#
+# Votes and accepted answers award experience at the moment they happen — they are events. These
+# two are not: "played today" is a fact about a DAY, and a badge is a threshold crossed by a total
+# several different actions can move. Both are questions about accumulated state, and asking them
+# once a night is cheaper and more correct than detecting the crossing inside every write.
+#
+# 06:40, after the role sync and well clear of everything else. Nothing depends on it and it
+# depends on nothing, so it goes where the box is quietest.
+40 6 * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/reputation.js >> /var/log/grims-worker.log 2>&1
+
 # Discord role reconciliation.
 10 6 * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/role-sync.js >> /var/log/grims-worker.log 2>&1
 

@@ -28,6 +28,7 @@ import { GatedDiscordDm, replyDmText } from './discord-dm.port.js';
 import { SearchService, renderSnippet, type SearchResult } from './search.service.js';
 import { ModerationService } from './moderation.service.js';
 import { SignatureService } from './signature.service.js';
+import { VoteService } from './vote.service.js';
 import { ReviewQueueService, type HeldPost } from '../ai/review-queue.service.js';
 import { ReportService, REPORTED_MESSAGE } from '../ai/report.service.js';
 
@@ -63,6 +64,7 @@ export class ForumController {
     @Inject(PostService) private readonly posts: PostService,
     @Inject(EngageService) private readonly engage: EngageService,
     @Inject(SearchService) private readonly search: SearchService,
+    @Inject(VoteService) private readonly votes: VoteService,
     @Inject(ModerationService) private readonly moderation: ModerationService,
     @Inject(NotifyService) private readonly notify: NotifyService,
     @Inject(SignatureService) private readonly signatures: SignatureService,
@@ -265,6 +267,44 @@ export class ForumController {
 
     await this.threads.markSolution(db, slug, threadSlug, postId, { userId: caller.userId, mask }, solution);
     return { ok: true };
+  }
+
+  /**
+   * Up or down on a post.
+   *
+   * ★ THE BODY IS THE BUTTON, NOT THE DESIRED STATE ★
+   *
+   * Unlike `solution` above, this is POST and it is deliberately NOT idempotent. The member's
+   * gesture is "I pressed up", and what that means depends on what they voted last — pressing the
+   * arrow they already chose withdraws it. Sending the desired state instead would put that
+   * decision in the browser, which does not reliably know: a second tab, a stale page, a back
+   * button. The server reads what is stored and decides.
+   *
+   * ★ NO PERMISSION CHECK — SQUADRON OWNER, 2026-07-31 ★
+   *
+   * "everyone can do everything." Asked directly whether voting should require standing, the
+   * answer was that every member votes. The risk of a small forum being swung by a few votes was
+   * raised and the decision was made: this is a hundred-and-seven-person squadron where everybody
+   * knows everybody, and a reputation gate on a group that size mostly stops new members joining
+   * in. The ACL-bound client still applies — a post they cannot READ, they cannot vote on.
+   */
+  @Post('posts/:postId/vote')
+  async vote(
+    @User() caller: CurrentUser | undefined,
+    @Param('postId') postId: string,
+    @Body() body: unknown,
+  ): Promise<{ score: number; myVote: number | null }> {
+    if (caller === undefined) {
+      throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
+    }
+
+    const raw = (body as { value?: unknown } | null)?.value;
+    if (raw !== 1 && raw !== -1) {
+      throw new AppError(ErrorCode.VALIDATION_FAILED, 'A vote is either 1 or -1.');
+    }
+
+    const db = await this.acl.forCaller(caller.userId);
+    return this.votes.press(db, postId, caller.userId, raw);
   }
 
   /**

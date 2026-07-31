@@ -65,6 +65,10 @@ export interface CommanderProfile {
   /** The system they were last seen in, and when. Null until something reports one. */
   readonly currentSystem: string | null;
   readonly systemSeenAt: string | null;
+  /** Station, settlement or body — whatever the journal last named inside the system. */
+  readonly currentLocation: string | null;
+  /** Its own timestamp: a docking and a jump age at different rates. */
+  readonly locationSeenAt: string | null;
 }
 
 /** One raw event, as stored. */
@@ -240,6 +244,50 @@ export function buildCommanderProfile(
 
   const currentSystem = newest === undefined ? null : str(asRecord(newest.payload)['StarSystem']);
 
+  /*
+   * ★ WHERE IN THE SYSTEM — squadron owner, 2026-07-30 ★
+   *
+   * "show the system they are currently in ... and then in the second column, show the station,
+   * settlement, planet or what ever sublocation that is transmitted."
+   *
+   * ★ FOUR EVENTS, AND THE NEWEST OF THEM WINS ★
+   *
+   * A sublocation is not one field. `Docked` names a station; `Location` can name either a station
+   * or a body; `SupercruiseExit` names the body they dropped at; `ApproachSettlement` names a
+   * settlement on a planet. Reading only one of them means a member who docks after loading in
+   * still shows the body they loaded at — right event, stale answer.
+   *
+   * ★ AND WHY UNDOCKING HAS TO COUNT ★
+   *
+   * `Undocked` carries a station name too, and using it would say somebody is AT the station they
+   * just left. It is included as a CLEAR rather than as a value: it is the only event that says
+   * "no longer anywhere in particular", and without it a member who undocks and flies off keeps
+   * showing as docked indefinitely.
+   */
+  const sub = [
+    latest.get('Docked'),
+    latest.get('Location'),
+    latest.get('SupercruiseExit'),
+    latest.get('ApproachSettlement'),
+    latest.get('Undocked'),
+  ]
+    .filter((e): e is NonNullable<typeof e> => e !== undefined)
+    .sort((a, b) => b.occurredAt.getTime() - a.occurredAt.getTime())[0];
+
+  const subPayload = asRecord(sub?.payload);
+  const currentLocation =
+    sub === undefined || sub === latest.get('Undocked')
+      ? null
+      : /*
+         * Station first, then settlement, then body. A station on a planet reports both, and the
+         * station is the more useful of the two — "Jameson Memorial" tells somebody where you are
+         * in a way "Shinrarta Dezhra A 1" does not.
+         */
+        (str(subPayload['StationName']) ??
+        str(subPayload['Name']) ??
+        str(subPayload['Body']) ??
+        null);
+
   return {
     cmdrName,
     ranks: allEliteRanks(held),
@@ -259,5 +307,14 @@ export function buildCommanderProfile(
     // The timestamp travels with it: "Sol" with no date is a claim about now,
     // and it might be three weeks old.
     systemSeenAt: currentSystem === null ? null : (newest?.occurredAt.toISOString() ?? null),
+    currentLocation,
+    /*
+     * Its OWN timestamp, not the system's.
+     *
+     * They move at different rates — somebody can sit docked for an hour after a jump — and
+     * sharing one timestamp would date the sublocation from the jump, making a current docking
+     * look an hour old (or a stale docking look fresh, which is worse).
+     */
+    locationSeenAt: currentLocation === null ? null : (sub?.occurredAt.toISOString() ?? null),
   };
 }

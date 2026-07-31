@@ -255,12 +255,33 @@ function PostCard({
   return (
     <article
       {...(floated ? {} : { id: `post-${index ?? 1}` })}
-      className={`scroll-mt-24 rounded border bg-[var(--color-surface-panel)] p-5 ${
+      /*
+       * ★ A LEFT RAIL, LIKE STACK OVERFLOW — squadron owner, 2026-08-01 ★
+       *
+       * "position the up / down vote buttons and the checkmark icon stacked on the left side of the
+       * post."
+       *
+       * The rail runs the full height of the card rather than sitting inside the body, so the score
+       * stays beside a long post while it is being read — the whole reason Stack Overflow puts it
+       * there. On a narrow screen the rail turns horizontal (see `VoteRail`) instead of stealing a
+       * quarter of the reading width from a phone.
+       */
+      className={`scroll-mt-24 flex flex-col gap-4 rounded border bg-[var(--color-surface-panel)] p-5 sm:flex-row sm:gap-5 ${
         solution
           ? 'border-[var(--color-brand-cyan-bright)]'
           : 'border-[var(--color-border-hairline)]'
       }`}
     >
+      <VoteRail
+        post={post}
+        canVote={canPost}
+        solution={solution}
+        canMarkSolution={canMarkSolution && !floated}
+        onToggleSolution={() => void toggleSolution()}
+      />
+
+      {/* min-w-0 so a long code block or URL inside the body cannot force the whole card wider. */}
+      <div className="min-w-0 flex-1">
       <header className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-border-hairline)] pb-3">
         <span className="flex items-center gap-3">
           {/*
@@ -376,21 +397,186 @@ function PostCard({
           </span>
         )}
 
-        {canMarkSolution && !floated && (
-          <button
-            type="button"
-            onClick={() => void toggleSolution()}
-            aria-pressed={solution}
-            className={`rounded border px-2 py-0.5 font-mono text-[11px] transition-colors ${
-              solution
-                ? 'border-[var(--color-brand-cyan-bright)] text-[var(--color-brand-cyan-bright)]'
-                : 'border-[var(--color-border-hairline)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
-            }`}
-          >
-            {solution ? '✓ Answer' : 'Mark as answer'}
-          </button>
-        )}
+        {/* The answer tick moved to the left rail. See VoteRail. */}
       </footer>
+      </div>
     </article>
+  );
+}
+
+
+/**
+ * The vote rail: score, arrows, and the answer tick, stacked down the left of a post.
+ *
+ * ★ SQUADRON OWNER, 2026-08-01 ★
+ *
+ * "position the up / down vote buttons and the checkmark icon stacked on the left side of the post
+ * like stack overflow please. label them too."
+ *
+ * ★ WHY THE LEFT AND NOT THE FOOTER ★
+ *
+ * They started in the footer, and the footer is the wrong place: a reader working through a long
+ * post has the score off-screen exactly while they are forming an opinion about it. Down the left
+ * it stays beside them the whole way, which is the entire reason Stack Overflow puts it there.
+ *
+ * ★ LABELLED, BECAUSE ARROWS ARE NOT SELF-EXPLANATORY ★
+ *
+ * A bare ▲ next to a number is guessable and not obvious, and the tick is worse — a green check
+ * with no word beside it could mean verified, read, or approved. The words are small and quiet, but
+ * they are there.
+ *
+ * ★ HORIZONTAL ON A PHONE ★
+ *
+ * A fixed left column costs a quarter of the reading width on a narrow screen. Below `sm` the rail
+ * lies down above the post instead, which keeps the same controls in the same order without
+ * squeezing the text they belong to.
+ */
+function VoteRail({
+  post,
+  canVote,
+  solution,
+  canMarkSolution,
+  onToggleSolution,
+}: {
+  readonly post: HubPost;
+  readonly canVote: boolean;
+  readonly solution: boolean;
+  readonly canMarkSolution: boolean;
+  readonly onToggleSolution: () => void;
+}) {
+  const [score, setScore] = useState(post.score);
+  const [mine, setMine] = useState<1 | -1 | null>(post.myVote);
+
+  async function press(value: 1 | -1) {
+    const previous = { score, mine };
+
+    /*
+     * Predicted with the SAME rule the server uses: pressing the arrow already chosen withdraws
+     * the vote. The prediction is only for the paint — the server's answer overwrites it below,
+     * because the server is the one that knows what is stored.
+     */
+    const next = mine === value ? null : value;
+    setMine(next);
+    setScore(score + ((next ?? 0) - (mine ?? 0)));
+
+    try {
+      const res = await apiCall<{ score: number; myVote: 1 | -1 | null }>(
+        'POST',
+        `/v1/forum/posts/${encodeURIComponent(post.id)}/vote`,
+        { body: { value } },
+      );
+      if (res !== null) {
+        setScore(res.score);
+        setMine(res.myVote);
+      }
+    } catch {
+      /*
+       * Put it back. Unlike a reaction, a score is a NUMBER the member reads and believes —
+       * leaving an optimistic value after a refusal (their own post, a post since removed) shows
+       * them a total that does not exist anywhere.
+       */
+      setScore(previous.score);
+      setMine(previous.mine);
+    }
+  }
+
+  return (
+    <div className="flex shrink-0 flex-row items-center gap-3 sm:w-16 sm:flex-col sm:gap-2">
+      <Arrow
+        direction="up"
+        active={mine === 1}
+        disabled={!canVote}
+        onPress={() => void press(1)}
+      />
+
+      <span className="flex flex-col items-center leading-none">
+        <span
+          className={`font-mono text-lg tabular-nums ${
+            score > 0
+              ? 'text-[var(--color-brand-cyan-bright)]'
+              : score < 0
+                ? 'text-[var(--color-semantic-hostile-bright)]'
+                : 'text-[var(--color-text-secondary)]'
+          }`}
+        >
+          {score > 0 ? `+${score}` : score}
+        </span>
+        <span className="mt-0.5 font-mono text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-secondary)]">
+          {/* Singular when it is one either way, because "1 votes" reads as a bug in everything else. */}
+          {Math.abs(score) === 1 ? 'vote' : 'votes'}
+        </span>
+      </span>
+
+      <Arrow
+        direction="down"
+        active={mine === -1}
+        disabled={!canVote}
+        onPress={() => void press(-1)}
+      />
+
+      {/*
+        The tick renders for anybody who can mark the answer, AND on a post that already IS the
+        answer even when they cannot — a reader needs to see that a thread is answered whether or
+        not they are the one who decided it.
+      */}
+      {(canMarkSolution || solution) && (
+        <button
+          type="button"
+          disabled={!canMarkSolution}
+          onClick={onToggleSolution}
+          aria-pressed={solution}
+          aria-label={solution ? 'Accepted answer' : 'Mark as the answer'}
+          title={solution ? 'Accepted answer' : 'Mark as the answer'}
+          className={`mt-1 flex flex-col items-center gap-0.5 rounded border px-2 py-1 transition-colors disabled:cursor-default ${
+            solution
+              ? 'border-[var(--color-semantic-success)] text-[var(--color-semantic-success)]'
+              : 'border-[var(--color-border-hairline)] text-[var(--color-text-secondary)] hover:border-[var(--color-semantic-success)] hover:text-[var(--color-semantic-success)]'
+          }`}
+        >
+          <span className="text-base leading-none">✓</span>
+          <span className="font-mono text-[9px] uppercase tracking-[0.14em]">
+            {solution ? 'answer' : 'accept'}
+          </span>
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** One arrow, with its word underneath. */
+function Arrow({
+  direction,
+  active,
+  disabled,
+  onPress,
+}: {
+  readonly direction: 'up' | 'down';
+  readonly active: boolean;
+  readonly disabled: boolean;
+  readonly onPress: () => void;
+}) {
+  const label = direction === 'up' ? 'Upvote' : 'Downvote';
+
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onPress}
+      aria-pressed={active}
+      aria-label={label}
+      title={disabled ? 'Sign in to vote' : label}
+      className={`flex w-full flex-col items-center gap-0.5 rounded border px-2 py-1 transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+        active
+          ? direction === 'up'
+            ? 'border-[var(--color-brand-cyan-bright)] bg-[color-mix(in_srgb,var(--color-brand-cyan-bright)_12%,transparent)] text-[var(--color-brand-cyan-bright)]'
+            : 'border-[var(--color-semantic-hostile-bright)] bg-[color-mix(in_srgb,var(--color-semantic-hostile-bright)_12%,transparent)] text-[var(--color-semantic-hostile-bright)]'
+          : 'border-[var(--color-border-hairline)] text-[var(--color-text-secondary)] hover:border-[var(--color-border-active)] hover:text-[var(--color-text-primary)]'
+      }`}
+    >
+      <span className="text-sm leading-none">{direction === 'up' ? '▲' : '▼'}</span>
+      <span className="font-mono text-[9px] uppercase tracking-[0.14em]">
+        {direction === 'up' ? 'up' : 'down'}
+      </span>
+    </button>
   );
 }

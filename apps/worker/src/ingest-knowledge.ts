@@ -6,6 +6,7 @@ import { writeBatch, beginIngest, finishIngest } from './jobs/knowledge-writer.j
 import { rebuildMarketEntries } from './jobs/market-flatten.js';
 import { readInaraKnowledge } from './jobs/ingest-inara.js';
 import { readJournalKnowledge } from './jobs/ingest-journal.js';
+import { readForumKnowledge } from './jobs/ingest-forum.js';
 
 /**
  * Ingests what GMSD AI knows about Elite Dangerous.
@@ -166,6 +167,28 @@ async function ingestJournal(db: PrismaClient): Promise<void> {
   }
 }
 
+/**
+ * The squadron's own answers.
+ *
+ * Cheap, like the journal aggregate: a query over tables we already hold, with no network.
+ */
+async function ingestForum(db: PrismaClient): Promise<void> {
+  const run = await beginIngest(db, 'forum');
+  try {
+    const { rows, accepted, upvoted } = await readForumKnowledge(db);
+
+    let written = 0;
+    for (let i = 0; i < rows.length; i += BATCH) {
+      written += await writeBatch(db, rows.slice(i, i + BATCH));
+    }
+    await finishIngest(db, run, { rows: written });
+    console.log(`forum: ${written} rows (${accepted} accepted answers, ${upvoted} highly-rated)`);
+  } catch (e) {
+    await finishIngest(db, run, { error: e instanceof Error ? e.message : String(e) });
+    throw e;
+  }
+}
+
 async function main(): Promise<void> {
   /*
    * ★ SEVERAL NAMES, NOT ONE ★
@@ -186,6 +209,7 @@ async function main(): Promise<void> {
       ['galaxy', ingestGalaxy],
       ['inara', ingestInara],
       ['journal', ingestJournal],
+      ['forum', ingestForum],
     ] as const) {
       if (only.length > 0 && !only.includes(name)) continue;
       try {

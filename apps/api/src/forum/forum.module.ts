@@ -15,6 +15,7 @@ import { MediaModule } from '../media/media.module.js';
 import { ScreeningService } from '../ai/screening.service.js';
 import { ALL_PERMISSIONS } from '@grims/shared';
 import { SignatureService } from './signature.service.js';
+import { VoteService } from './vote.service.js';
 
 /**
  * The forum.
@@ -47,6 +48,12 @@ import { SignatureService } from './signature.service.js';
      * cannot see" a property of the call rather than of this wiring.
      */
     GrantService,
+    /*
+     * No dependencies either, for the same reason: every method takes the caller's bound client,
+     * so "you cannot vote on a post you cannot read" is a property of the call rather than of an
+     * extra permission check somebody could forget on a second route.
+     */
+    VoteService,
     { provide: PendingReindexQueue, useFactory: () => new PendingReindexQueue() },
     ModerationService,
     RecruitmentService,

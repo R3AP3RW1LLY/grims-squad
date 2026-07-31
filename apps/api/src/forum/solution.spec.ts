@@ -39,9 +39,11 @@ function client(opts: {
   const tx: unknown[][] = [];
   const updateMany: Array<Record<string, unknown>> = [];
   const update: Array<Record<string, unknown>> = [];
+  const xp: Array<Record<string, unknown>> = [];
 
   return {
     tx,
+    xp,
     updateMany,
     update,
     forumCategory: {
@@ -85,13 +87,27 @@ function client(opts: {
     },
     forumPost: {
       findFirst: async ({ where }: { where: { id: string; threadId: string } }) =>
-        where.threadId === 't1' && inThread.includes(where.id) ? { id: where.id } : null,
+        where.threadId === 't1' && inThread.includes(where.id)
+          ? /*
+             * The AUTHOR too, since 2026-08-01. Accepting an answer awards experience, and it goes
+             * to whoever WROTE the post — not to the person accepting it, who gets a much smaller
+             * award of their own for closing the question.
+             */
+            { id: where.id, authorId: 'answerer-1' }
+          : null,
       updateMany: (args: Record<string, unknown>) => {
         updateMany.push(args);
         return args;
       },
       update: (args: Record<string, unknown>) => {
         update.push(args);
+        return args;
+      },
+    },
+    // Reputation rides in the same transaction as the answer mark — see markSolution.
+    xpEvent: {
+      createMany: (args: Record<string, unknown>) => {
+        xp.push(args);
         return args;
       },
     },
@@ -168,8 +184,15 @@ describe('marking the answer', () => {
       const db = client({});
       await svc().markSolution(db as never, 'help', 'how-do-i', 'p2', { userId: ASKER, mask: 0n });
 
-      // Two operations, in one transaction: clear the thread, then set this post.
-      expect(db.tx[0]).toHaveLength(2);
+      /*
+       * Three operations, in ONE transaction: clear the thread, set this post, and write the
+       * experience.
+       *
+       * The reputation write belongs INSIDE the transaction rather than after it. An award that
+       * lands without the mark — or a mark without the award — leaves the two permanently
+       * disagreeing, and there is no reconciliation pass that would ever notice.
+       */
+      expect(db.tx[0]).toHaveLength(3);
       expect(db.updateMany[0]).toMatchObject({
         where: { threadId: 't1', isSolution: true },
         data: { isSolution: false },
@@ -178,6 +201,43 @@ describe('marking the answer', () => {
         where: { id: 'p2' },
         data: { isSolution: true },
       });
+    });
+
+    it('MANDATORY: awards the ANSWERER, and the asker only a token for closing it', async () => {
+      /*
+       * ★ WHO GETS WHAT, AND WHY THE SPLIT ★
+       *
+       * The large award goes to whoever wrote the post: somebody asked, they answered, and the
+       * asker confirmed it worked. The asker gets a small one for closing the question — an
+       * answered-but-unaccepted thread is the most common way a forum wastes the next reader's
+       * time.
+       *
+       * Reversing these would pay members for asking rather than for helping.
+       */
+      const db = client({});
+      await svc().markSolution(db as never, 'help', 'how-do-i', 'p2', { userId: ASKER, mask: 0n });
+
+      const written = (db.xp[0] as { data: Array<{ userId: string; reason: string; amount: number }> })
+        .data;
+
+      const answerer = written.find((e) => e.userId === 'answerer-1');
+      const asker = written.find((e) => e.userId === ASKER);
+
+      expect(answerer?.reason).toBe('answerAccepted');
+      expect(asker?.reason).toBe('answerAcceptedByYou');
+      expect(answerer?.amount).toBeGreaterThan(asker?.amount ?? 0);
+    });
+
+    it('MANDATORY: un-marking writes no experience at all', async () => {
+      /*
+       * And deliberately does not claw the award back. The answer was still correct when it was
+       * accepted; a member losing twenty-five points because somebody later marked a different
+       * post would be punished for another person's decision.
+       */
+      const db = client({});
+      await svc().markSolution(db as never, 'help', 'how-do-i', 'p2', { userId: ASKER, mask: 0n }, false);
+
+      expect(db.xp).toHaveLength(0);
     });
 
     it('un-marking clears without setting anything', async () => {
