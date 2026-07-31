@@ -13,7 +13,8 @@ import {
   MIN_DESCRIPTION_CHARS,
   MAX_DESCRIPTION_CHARS,
   MIN_TRAINING_EDGE,
-  TRAINING_IMAGE_TYPES,
+  TRAINING_ACCEPT,
+  isTrainableImage,
   type CategoryProgress,
 } from '@grims/shared/ai-corpus';
 import { apiCall } from '../../../../lib/api-client';
@@ -40,8 +41,11 @@ import type { TrainingSubmission } from '../../../../lib/api';
  * worse experience than telling them instantly.
  */
 
-/** What the picker offers. Matches TRAINING_IMAGE_TYPES — see the contract for why not GIF. */
-const ACCEPT = TRAINING_IMAGE_TYPES.join(',');
+/*
+ * Extensions AND MIME types — see TRAINING_ACCEPT. A picker listing MIME types alone hides .jpg
+ * files whose registry association reports the non-standard `image/jpg`.
+ */
+const ACCEPT = TRAINING_ACCEPT;
 
 interface Draft {
   readonly file: File;
@@ -50,6 +54,7 @@ interface Draft {
   readonly height: number;
   category: string;
   description: string;
+  shipType: string;
   notes: string;
 }
 
@@ -73,8 +78,13 @@ export function TrainStudio({
   async function choose(file: File): Promise<void> {
     setError(null);
 
-    if (!(TRAINING_IMAGE_TYPES as readonly string[]).includes(file.type)) {
-      setError('That file type cannot be used for training. PNG, JPEG or WebP.');
+    /*
+     * Judged on type OR extension. A .jpg can arrive as `image/jpg`, or with no type at all when
+     * it came from an archive or a network share — and refusing a perfectly good JPEG with "that
+     * file type cannot be used" is both wrong and unactionable.
+     */
+    if (!isTrainableImage(file)) {
+      setError('That file cannot be used for training. PNG, JPG or WebP.');
       return;
     }
 
@@ -113,6 +123,7 @@ export function TrainStudio({
       height: size.h,
       category: categories[0]?.key ?? '',
       description: '',
+      shipType: '',
       notes: '',
     });
   }
@@ -142,6 +153,7 @@ export function TrainStudio({
           uploadId: upload.id,
           category: draft.category,
           description: draft.description,
+          shipType: draft.shipType,
           notes: draft.notes,
         },
       });
@@ -247,6 +259,26 @@ export function TrainStudio({
                 >
                   {draft.description.trim().length}/{MIN_DESCRIPTION_CHARS} minimum ·{' '}
                   {MAX_DESCRIPTION_CHARS - draft.description.length} left
+                </span>
+              </label>
+
+              <label className="block">
+                <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-secondary)]">
+                  Ship in the shot
+                </span>
+                <input
+                  value={draft.shipType}
+                  onChange={(e) => setDraft({ ...draft, shipType: e.target.value.slice(0, 120) })}
+                  placeholder="Krait Mk II — leave blank and we read it from your journal"
+                  className="mt-1 w-full rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel)] px-3 py-2 text-sm text-[var(--color-text-primary)]"
+                />
+                <span className="font-mono text-[11px] text-[var(--color-text-secondary)]">
+                  {/*
+                    Said plainly, because a field that fills itself is unnerving when nobody
+                    explained it — and because the journal cannot see a shot of somebody else's
+                    ship, which is exactly when a member needs to type one.
+                  */}
+                  Optional. Blank is fine — your companion app usually knows.
                 </span>
               </label>
 

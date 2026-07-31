@@ -245,6 +245,7 @@ export class AiController {
       category,
       description,
       ...(typeof b['notes'] === 'string' ? { notes: b['notes'] } : {}),
+      ...(typeof b['shipType'] === 'string' ? { shipType: b['shipType'] } : {}),
     });
   }
 

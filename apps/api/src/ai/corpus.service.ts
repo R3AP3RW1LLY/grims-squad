@@ -89,7 +89,13 @@ export class CorpusService {
   async submit(
     userId: string,
     mask: bigint,
-    input: { uploadId: string; category: string; description: string; notes?: string },
+    input: {
+      uploadId: string;
+      category: string;
+      description: string;
+      notes?: string;
+      shipType?: string;
+    },
   ): Promise<{ id: string }> {
     if ((mask & Permission.AI_TRAIN_SUBMIT) !== Permission.AI_TRAIN_SUBMIT) {
       throw new AppError(
@@ -176,11 +182,20 @@ export class CorpusService {
           ? {}
           : { notes: input.notes.trim().slice(0, MAX_DESCRIPTION_CHARS) }),
         /*
-         * DERIVED, not asked. See SHIP_INFERENCE_WINDOW_MS — the companion already knows what
-         * everybody is flying moment to moment, and members will not reliably tell us. A wrong
-         * label is worse than none: it teaches the model that a Python is a Krait.
+         * ★ WHAT THEY TYPED WINS; THE JOURNAL FILLS THE GAP ★
+         *
+         * The original design derived this and never asked — members will not RELIABLY tell us, and
+         * a wrong label is worse than none because it teaches the model that a Python is a Krait.
+         * That reasoning holds for a field nobody filled in. It does not hold for one somebody
+         * deliberately typed: they are looking at their own screenshot, and the journal cannot see
+         * a shot taken from a friend's cockpit, in a replay, or of a ship parked next to theirs.
+         *
+         * So the member's answer is taken when there is one, and the journal answers when there is
+         * not. Neither is invented — the field stays null when nothing knows.
          */
-        ...(await this.#shipAt(userId, upload.createdAt)),
+        ...(input.shipType !== undefined && input.shipType.trim() !== ''
+          ? { shipType: input.shipType.trim().slice(0, 120) }
+          : await this.#shipAt(userId, upload.createdAt)),
       },
       select: { id: true },
     });

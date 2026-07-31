@@ -200,12 +200,22 @@ export function corpusKey(sha256: string): string {
 /**
  * What we are collecting, and how much of each.
  *
- * ★ THE TARGETS ARE NOT ARBITRARY ★
+ * ★ THE TARGET IS THE RELIABLE NUMBER, NOT THE FLOOR — OWNER, 2026-08-01 ★
  *
- * Below `min` a LoRA memorises individual screenshots and reproduces them with artefacts instead of
- * learning the concept. `ideal` is where it becomes reliable. Both come from MIN_IMAGES_PER_SHIP —
- * the categories that are harder to vary need more, because twenty near-identical dock shots are
- * worth about six.
+ * "upgrade the required numbers to be the reliable numbers please! we have a large pool of images,
+ * lets not short hand ourselves here!"
+ *
+ * The floor and the target used to be two different numbers, and `min` was the floor — the point
+ * below which a LoRA memorises individual screenshots and reproduces them with artefacts instead of
+ * learning the concept. That floor is still real (MIN_IMAGES_PER_SHIP, twenty) and it is still the
+ * honest answer to "what is the minimum". It was the wrong thing to aim a progress bar at.
+ *
+ * A bar that fills at the floor tells the squadron the job is done when the result would be a model
+ * that draws recognisable-but-wrong ships. Aiming it at the number where the concept actually holds
+ * costs nothing except a longer bar, and the squadron has the screenshots.
+ *
+ * `ideal` is now a genuine stretch beyond reliable: more angles, more lighting, more variety. It
+ * keeps mattering after the bar is full, which is the point of showing it.
  */
 export interface TrainingCategory {
   readonly key: string;
@@ -222,51 +232,51 @@ export const TRAINING_CATEGORIES: readonly TrainingCategory[] = [
     label: 'Ship exteriors',
     guidance:
       'The whole ship in frame, from outside. Vary the angle and the lighting — twenty shots of the same ship on the same pad from the same side teach less than six taken properly.',
-    min: 20,
-    ideal: 60,
+    min: 60,
+    ideal: 120,
   },
   {
     key: 'ship-cockpit',
     label: 'Cockpits and interiors',
     guidance: 'From the pilot seat or inside the ship. HUD is fine; a full-screen menu is not.',
-    min: 20,
-    ideal: 50,
+    min: 50,
+    ideal: 100,
   },
   {
     key: 'station',
     label: 'Stations and ports',
     guidance:
       'Approach, the mail slot, the interior bays, surface ports. Include the type in your description if you know it.',
-    min: 30,
-    ideal: 80,
+    min: 80,
+    ideal: 160,
   },
   {
     key: 'planet-surface',
     label: 'Planetary surfaces',
     guidance: 'Landed or low altitude. Terrain, canyons, ice, lava — say which planet if you know.',
-    min: 30,
-    ideal: 80,
+    min: 80,
+    ideal: 160,
   },
   {
     key: 'space',
     label: 'Deep space and phenomena',
     guidance: 'Nebulae, rings, neutron jets, black holes, notable stars. No ship needed.',
-    min: 30,
-    ideal: 80,
+    min: 80,
+    ideal: 160,
   },
   {
     key: 'combat',
     label: 'Combat',
     guidance: 'Weapons firing, shields taking hits, conflict zones, interdictions.',
-    min: 25,
-    ideal: 60,
+    min: 60,
+    ideal: 120,
   },
   {
     key: 'srv-onfoot',
     label: 'SRV and on foot',
     guidance: 'Surface vehicles, suits, settlements from the ground.',
-    min: 25,
-    ideal: 60,
+    min: 60,
+    ideal: 120,
   },
 ] as const;
 
@@ -287,8 +297,51 @@ export function trainingCategory(key: string): TrainingCategory | null {
  */
 export const TRAINING_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp'] as const;
 
+/**
+ * What the file picker offers.
+ *
+ * ★ EXTENSIONS AS WELL AS MIME TYPES, AND .jpg IS THE REASON ★
+ *
+ * Reported 2026-08-01: "we need to allow .jpg files please."
+ *
+ * They were always meant to be allowed — a .jpg IS image/jpeg. The failure was that the picker
+ * listed MIME types only, and the browser gate compared `file.type` verbatim. Both break on the
+ * same file depending on where it came from:
+ *
+ *   - Windows reports `image/jpg` for .jpg when the registry association has been rewritten by a
+ *     photo editor. Not a real MIME type, and not in the list above.
+ *   - A file dragged from some archive tools, or off a network share, arrives with `type` set to
+ *     the EMPTY STRING. The browser simply does not know.
+ *
+ * In both cases a perfectly good JPEG was refused with "that file type cannot be used", which is
+ * both wrong and unactionable — there is nothing the member can do about their registry.
+ *
+ * Naming the extensions fixes the picker; `isTrainableImage` below fixes the gate.
+ */
+export const TRAINING_ACCEPT = '.png,.jpg,.jpeg,.webp,image/png,image/jpeg,image/webp';
+
+/**
+ * Whether a chosen file can be used, judged on type OR extension.
+ *
+ * ★ THIS IS COURTESY, NOT SECURITY ★
+ *
+ * The server decides the real format by DECODING the bytes — a PNG announced as JPEG is stored
+ * correctly as a PNG, and nothing here is trusted. This exists so a member is told instantly rather
+ * than after a twelve-megabyte upload, and so a browser that is vague about a file's type does not
+ * cost them a screenshot.
+ */
+export function isTrainableImage(file: { name: string; type: string }): boolean {
+  const type = file.type.toLowerCase();
+  // `image/jpg` is not a real MIME type. Browsers emit it anyway.
+  if (type === 'image/jpg') return true;
+  if ((TRAINING_IMAGE_TYPES as readonly string[]).includes(type)) return true;
+
+  // Type absent or unrecognised: fall back to the name. The decode still has the final say.
+  return /\.(png|jpe?g|webp)$/i.test(file.name);
+}
+
 /** Said to the member, in the words they need rather than as a MIME list. */
-export const TRAINING_TYPES_NOTE = 'PNG, JPEG or WebP, at least 1280px on the long edge.';
+export const TRAINING_TYPES_NOTE = 'PNG, JPG or WebP, at least 1280px on the long edge.';
 
 /**
  * How long a description has to be.
