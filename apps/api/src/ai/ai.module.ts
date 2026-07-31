@@ -15,6 +15,7 @@ import { ReviewQueueService } from './review-queue.service.js';
 import { AiStreamService } from './ai-stream.service.js';
 import { AiController } from './ai.controller.js';
 import { TrainingStatusService } from './training.service.js';
+import { KnowledgeService } from './knowledge.service.js';
 import { ArtworkController } from './artwork.controller.js';
 
 /**
@@ -196,11 +197,18 @@ export class ModelWarmer implements OnModuleInit, OnModuleDestroy {
     },
     // Reads the knowledge tables directly; no client, no stream, nothing to configure.
     TrainingStatusService,
+    /*
+     * Retrieval. The half of the assistant that decides whether it is any good — the model brings
+     * language, this brings facts, and keeping them apart is what lets it say "I do not know"
+     * instead of inventing a station.
+     */
+    KnowledgeService,
     ModelWarmer,
   ],
   controllers: [AiController, ArtworkController],
   exports: [
     AiClient,
+    KnowledgeService,
     DecisionStore,
     EmbedClient,
     ImageClient,
