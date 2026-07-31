@@ -46,6 +46,49 @@ function readCsrf(): string {
   return '';
 }
 
+/** The refresh endpoint itself. Retrying a failed refresh with a refresh would recurse. */
+const REFRESH_PATH = '/v1/auth/refresh';
+
+function isRefreshCall(path: string): boolean {
+  return path.startsWith(REFRESH_PATH);
+}
+
+/**
+ * Renews the access cookie from the refresh cookie. True when it worked.
+ *
+ * ★ IN FLIGHT ONLY ONCE ★
+ *
+ * A page that fires several requests at load — and several of ours do — would otherwise send one
+ * refresh per request the moment the token ages out. The refresh endpoint rotates the token family,
+ * so concurrent refreshes race: the second one presents a token the first has already consumed,
+ * which reads as a stolen-token replay and can invalidate the whole family. Sharing one promise
+ * means the burst produces exactly one refresh and everybody waits on it.
+ */
+let refreshInFlight: Promise<boolean> | null = null;
+
+function tryRefresh(): Promise<boolean> {
+  refreshInFlight ??= (async () => {
+    try {
+      const res = await fetch(REFRESH_PATH, {
+        method: 'POST',
+        credentials: 'same-origin',
+        // CSRF applies to the refresh too — without the header the API refuses it.
+        headers: { 'x-csrf-token': readCsrf() },
+      });
+      return res.ok;
+    } catch {
+      // Offline, or the API is down. Neither is worth surfacing here: the original request's own
+      // error is the one the member needs to see.
+      return false;
+    } finally {
+      // Cleared so a LATER expiry can refresh again. Holding a resolved promise would mean one
+      // refresh per page load forever.
+      refreshInFlight = null;
+    }
+  })();
+  return refreshInFlight;
+}
+
 export interface ApiCallOptions {
   /** Sent as JSON. Omit entirely when the endpoint takes no body. */
   readonly body?: unknown;
@@ -81,7 +124,44 @@ export async function apiCall<T>(
   };
   if (options.body !== undefined) init.body = JSON.stringify(options.body);
 
-  const res = await fetch(path, init);
+  let res = await fetch(path, init);
+
+  /*
+   * ★ ONE REFRESH-AND-RETRY, AND THE OUTAGE THAT PUT IT HERE ★
+   *
+   * 2026-07-31: a new admin could not finish two-factor enrolment in production. `enrol` returned
+   * 201 and every subsequent `confirm` returned 401 in about a millisecond, with `failed_count`
+   * still 0 in the database — the code was never even checked.
+   *
+   * The access cookie lives fifteen minutes and the browser drops it on its own. `middleware.ts`
+   * silently refreshes it, but its matcher excludes `v1/`, so the refresh only ever runs on a page
+   * NAVIGATION. Enrolment is the one flow that sits still for minutes without navigating: install
+   * an authenticator, scan the QR, wait for a code. The token aged out in that gap, and because the
+   * security page is a forced wall there was nowhere to navigate to that would have fixed it. The
+   * member was permanently stuck, and retrying could never work.
+   *
+   * ★ WHY THIS DOES NOT CONTRADICT middleware.ts ★
+   *
+   * That file explains at length why refresh belongs in middleware "and not a retry on 401". Its
+   * reasoning is about SERVER COMPONENTS: they cannot set a cookie during render, so a retry there
+   * would fetch a new token and have nowhere to put it.
+   *
+   * This file runs in the BROWSER, where that constraint does not exist — the browser stores
+   * `Set-Cookie` from the refresh response itself, automatically. Middleware still covers
+   * navigations; this covers the XHR gap it structurally cannot reach.
+   *
+   * Exactly once. A loop here would turn a genuinely signed-out member into a request storm against
+   * our own auth endpoint.
+   */
+  if (res.status === 401 && !isRefreshCall(path)) {
+    if (await tryRefresh()) {
+      // The CSRF cookie is rotated by the refresh, so the header must be rebuilt from the NEW
+      // cookie. Replaying the old token would turn a 401 into a 403 and look like a different bug.
+      if (MUTATING.has(upper)) headers['x-csrf-token'] = readCsrf();
+      res = await fetch(path, { ...init, headers });
+    }
+  }
+
   if (!res.ok) {
     // The API answers with an ENVELOPE — { error: { message } }. Reading
     // `json.message` off the top level always yields undefined and throws away
