@@ -1,12 +1,16 @@
 import { Global, Module } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { AiClient, aiConfigFrom } from './ai.client.js';
+import { ImageClient, imageConfigFrom } from './image.client.js';
 import { AiLog } from './ai-log.port.js';
 import { PrismaAiLog } from './ai-log.prisma.js';
 import { ScreeningService } from './screening.service.js';
+import { ArtworkService, ArtworkQuota } from './artwork.service.js';
+import { PrismaArtworkQuota } from './artwork-quota.prisma.js';
 import { ReviewQueueService } from './review-queue.service.js';
 import { AiStreamService } from './ai-stream.service.js';
 import { AiController } from './ai.controller.js';
+import { ArtworkController } from './artwork.controller.js';
 
 /**
  * The AI, wired.
@@ -38,18 +42,49 @@ import { AiController } from './ai.controller.js';
       useFactory: (stream: AiStreamService) => new AiClient(aiConfigFrom(process.env), fetch, stream),
     },
     {
+      provide: ImageClient,
+      inject: [AiStreamService],
+      /*
+       * A SECOND client, and a second base URL. The text model is Ollama on the 3060; this is
+       * ComfyUI on the 5070 Ti. They are different protocols on different ports on different cards,
+       * and collapsing them into one provider would mean the image model going down takes screening
+       * with it — the exact coupling the two-card split exists to avoid.
+       */
+      useFactory: (stream: AiStreamService) =>
+        new ImageClient(imageConfigFrom(process.env), fetch, stream),
+    },
+    {
       provide: AiLog,
       inject: [PrismaClient],
       useFactory: (db: PrismaClient) => new PrismaAiLog(db),
+    },
+    {
+      provide: ArtworkQuota,
+      inject: [PrismaClient],
+      useFactory: (db: PrismaClient) => new PrismaArtworkQuota(db),
     },
     {
       provide: ScreeningService,
       inject: [AiClient, AiLog],
       useFactory: (ai: AiClient, log: AiLog) => new ScreeningService(ai, log),
     },
+    {
+      provide: ArtworkService,
+      inject: [ImageClient, AiLog, ArtworkQuota, AiStreamService],
+      useFactory: (images: ImageClient, log: AiLog, quota: ArtworkQuota, stream: AiStreamService) =>
+        new ArtworkService(images, log, quota, stream),
+    },
     ReviewQueueService,
   ],
-  controllers: [AiController],
-  exports: [AiClient, AiLog, ScreeningService, ReviewQueueService, AiStreamService],
+  controllers: [AiController, ArtworkController],
+  exports: [
+    AiClient,
+    ImageClient,
+    AiLog,
+    ScreeningService,
+    ArtworkService,
+    ReviewQueueService,
+    AiStreamService,
+  ],
 })
 export class AiModule {}

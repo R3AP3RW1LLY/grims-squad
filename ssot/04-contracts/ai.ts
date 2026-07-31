@@ -13,10 +13,21 @@
  *
  * ★ WHY THIS RUNS ON A HOME GPU, AND WHAT THAT IMPLIES ★
  *
- * The model runs on the owner's 3060 Ti, reached over an SSH reverse tunnel. That is cheap and
+ * The model runs on the owner's own machine, reached over an SSH reverse tunnel. That is cheap and
  * private — no member's writing is sent to a third party — and it means the service is genuinely
  * OPTIONAL from the API's point of view: the machine may be off, the tunnel may be down, and the
  * website must keep working.
+ *
+ * That machine has two graphics cards and the work is split across both, which is worth knowing
+ * because it explains the timeouts below:
+ *
+ *   RTX 3060 (12GB)     Ollama — screening and the assistant. Nothing else touches this card, so
+ *                       it is always warm and always fast.
+ *   RTX 5070 Ti (16GB)  ComfyUI — banner artwork. This is ALSO the card Elite Dangerous runs on,
+ *                       so image work is throttled to leave the game alone. See ai-image.ts.
+ *
+ * The split is the reason screening can afford an eight-second timeout: it never queues behind a
+ * banner being generated, because they are not on the same GPU.
  *
  * Every decision below follows from that. Timeouts are short, failure is explicit rather than
  * silent, and "unavailable" is a first-class answer rather than an exception nobody handles.

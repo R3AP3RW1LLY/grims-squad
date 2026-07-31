@@ -4,7 +4,26 @@ import {
   BANNER_LIMITS,
   defaultBannerSpec,
   validateBannerSpec,
+  type BannerLayer,
+  type BannerTextLayer,
 } from './forum-signature.js';
+
+/**
+ * Narrows a validated layer to a text layer, failing the test if it is not one.
+ *
+ * ★ WHY THIS EXISTS RATHER THAN A CAST ★
+ *
+ * `BannerLayer` is a union and only the text arm has `colour`, so `layers[0]?.colour` does not
+ * compile. The tempting fix is `as BannerTextLayer`, which silences the compiler and would keep
+ * passing if validation ever started returning a BADGE layer where a text layer was expected —
+ * reading `colour` off it as undefined and asserting against undefined.
+ *
+ * This asserts the kind first, so that regression fails loudly on the line that caused it.
+ */
+function asText(layer: BannerLayer | undefined): BannerTextLayer {
+  expect(layer?.kind).toBe('text');
+  return layer as BannerTextLayer;
+}
 
 /**
  * Banner spec validation.
@@ -98,7 +117,7 @@ describe('banner specs', () => {
       expect(out.version).toBe(2);
       expect(out.colourA).toBe('#0b0f14');
       expect(out.layers[0]).toMatchObject({ row: 3, align: 'right', source: 'squadronRank' });
-      expect(out.layers[0]?.colour).toBe('#5cd9ff');
+      expect(asText(out.layers[0]).colour).toBe('#5cd9ff');
     });
 
     it('null, a string, and a number', () => {
@@ -203,7 +222,7 @@ describe('banner specs', () => {
       });
       // Falls back to a legible default rather than reaching the renderer as an unvalidated CSS
       // string. `#000` IS valid CSS but not our format — six digits, so the parser is unambiguous.
-      expect(out.layers[0]?.colour).toBe('#e8eef5');
+      expect(asText(out.layers[0]).colour).toBe('#e8eef5');
     });
   });
 

@@ -48,6 +48,8 @@ function client(
         upserts.push(args.update);
         return {
           avatarMediaId: null,
+          bannerSpec: null,
+          bannerPublishedMediaId: null,
           tagline: null,
           bannerMediaId: null,
           bannerUrl: null,
@@ -272,6 +274,9 @@ describe('forum signatures', () => {
       const view = toView(
         {
           avatarMediaId: 'm1',
+          // Added when banners moved to a spec; these two literals predate it.
+          bannerSpec: null,
+          bannerPublishedMediaId: null,
           tagline: null,
           bannerMediaId: 'm2',
           bannerUrl: 'https://inara.cz/x',
@@ -296,6 +301,8 @@ describe('forum signatures', () => {
       const view = toView(
         {
           avatarMediaId: null,
+          bannerSpec: null,
+          bannerPublishedMediaId: null,
           tagline: null,
           bannerMediaId: null,
           bannerUrl: null,

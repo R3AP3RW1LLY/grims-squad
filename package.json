@@ -21,6 +21,7 @@
     "test:invariants": "vitest run --project invariants",
     "ssot:check": "tsx tools/ssot-drift-check.ts",
     "ssot:sync": "tsx tools/ssot-sync.ts",
+    "ai:image:smoke": "tsx tools/ai-image-smoke.ts",
     "contrast:check": "tsx tools/contrast-check.ts",
     "invariants:check": "tsx tools/ssot-drift-check.ts",
     "ci:local": "pnpm lint && pnpm typecheck && pnpm ssot:check && pnpm contrast:check && pnpm invariants:check && pnpm test",

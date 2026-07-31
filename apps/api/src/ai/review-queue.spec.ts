@@ -18,7 +18,8 @@ function db(rows: Array<Record<string, unknown>> = []) {
   return {
     updates,
     forumPost: {
-      findMany: vi.fn(async () => rows),
+      // The argument is declared so `mock.calls[0][0]` — which several tests assert on — types.
+      findMany: vi.fn(async (_args?: Record<string, unknown>) => rows),
       findFirst: vi.fn(async ({ where }: { where: { id: string } }) =>
         rows.find((r) => r['id'] === where.id) ?? null,
       ),

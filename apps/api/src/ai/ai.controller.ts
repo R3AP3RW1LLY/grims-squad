@@ -6,6 +6,22 @@ import { PermissionService } from '../authz/permission.service.js';
 import { satisfiesMask } from '../forum/category.service.js';
 import { AiStreamService, type AiLogLine } from './ai-stream.service.js';
 import { AiClient, aiHealth } from './ai.client.js';
+import { ImageClient } from './image.client.js';
+
+/** Each runtime reported on its own, because they run on different cards and fail independently. */
+export interface AiHealth {
+  readonly text: {
+    readonly configured: boolean;
+    readonly reachable: boolean;
+    readonly model: string | null;
+    readonly tookMs: number;
+  };
+  readonly image: {
+    readonly configured: boolean;
+    readonly reachable: boolean;
+    readonly tookMs: number;
+  };
+}
 
 /**
  * The AI's live view, for the admin area.
@@ -28,6 +44,7 @@ export class AiController {
   constructor(
     @Inject(AiStreamService) private readonly stream: AiStreamService,
     @Inject(AiClient) private readonly ai: AiClient,
+    @Inject(ImageClient) private readonly images: ImageClient,
     @Inject(PermissionService) private readonly permissions: PermissionService,
   ) {}
 
@@ -42,12 +59,25 @@ export class AiController {
    * which is what makes "it worked locally" mean anything.
    */
   @Get('health')
-  async health(
-    @User() caller: CurrentUser | undefined,
-  ): Promise<{ configured: boolean; reachable: boolean; model: string | null; tookMs: number }> {
+  async health(@User() caller: CurrentUser | undefined): Promise<AiHealth> {
     await this.#assertMayReview(caller);
-    const health = await aiHealth(this.ai);
-    return { configured: this.ai.configured, ...health };
+
+    /*
+     * BOTH sides, reported separately, and asked in PARALLEL.
+     *
+     * They are two runtimes on two graphics cards, and they fail independently — the usual state
+     * during a game session is text up, image busy. One combined "AI: ok/down" would be wrong most
+     * evenings and would send an officer looking for a fault that is somebody playing Elite.
+     *
+     * Parallel because each has its own four-second timeout, and an admin panel that takes eight
+     * seconds to say "both down" is one nobody opens twice.
+     */
+    const [text, image] = await Promise.all([aiHealth(this.ai), this.images.health()]);
+
+    return {
+      text: { configured: this.ai.configured, ...text },
+      image: { configured: this.images.configured, ...image },
+    };
   }
 
   /**

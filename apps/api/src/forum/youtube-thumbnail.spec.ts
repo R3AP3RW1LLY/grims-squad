@@ -39,7 +39,7 @@ const store = () => {
 describe('fetching thumbnails', () => {
   it('stores the image and puts OUR id on the node', async () => {
     const s = store();
-    const fetchImpl = vi.fn(async () => realImage());
+    const fetchImpl = vi.fn(async (_url: string | URL, _init?: RequestInit) => realImage());
 
     const out = await withYouTubeThumbnails(doc(video('dQw4w9WgXcQ')), 'u1', s, fetchImpl as never);
 
@@ -48,7 +48,7 @@ describe('fetching thumbnails', () => {
   });
 
   it('MANDATORY: the only host it ever contacts is YouTube images', async () => {
-    const fetchImpl = vi.fn(async () => realImage());
+    const fetchImpl = vi.fn(async (_url: string | URL, _init?: RequestInit) => realImage());
     await withYouTubeThumbnails(doc(video('dQw4w9WgXcQ')), 'u1', store(), fetchImpl as never);
 
     for (const call of fetchImpl.mock.calls) {
@@ -62,7 +62,7 @@ describe('fetching thumbnails', () => {
      * and a server-side fetcher that follows arbitrary redirects is a request-forgery primitive
      * pointed at our own network.
      */
-    const fetchImpl = vi.fn(async () => realImage());
+    const fetchImpl = vi.fn(async (_url: string | URL, _init?: RequestInit) => realImage());
     await withYouTubeThumbnails(doc(video('dQw4w9WgXcQ')), 'u1', store(), fetchImpl as never);
 
     expect(fetchImpl.mock.calls[0]?.[1]).toMatchObject({ redirect: 'error' });
@@ -111,7 +111,7 @@ describe('what it does not do', () => {
   it('does not re-fetch a video that already has one', async () => {
     // Otherwise every edit of a post re-downloads and re-stores every video in it.
     const s = store();
-    const fetchImpl = vi.fn(async () => realImage());
+    const fetchImpl = vi.fn(async (_url: string | URL, _init?: RequestInit) => realImage());
 
     await withYouTubeThumbnails(doc(video('dQw4w9WgXcQ', 'already-there')), 'u1', s, fetchImpl as never);
 
@@ -121,7 +121,7 @@ describe('what it does not do', () => {
 
   it('fetches the same video once even when embedded twice', async () => {
     const s = store();
-    const fetchImpl = vi.fn(async () => realImage());
+    const fetchImpl = vi.fn(async (_url: string | URL, _init?: RequestInit) => realImage());
 
     const out = await withYouTubeThumbnails(
       doc(video('dQw4w9WgXcQ'), video('dQw4w9WgXcQ')),

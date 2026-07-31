@@ -111,7 +111,7 @@ describe('when screening is not configured at all', () => {
 
 describe('logging', () => {
   it('records the call for officer review', async () => {
-    const record = vi.fn(async () => undefined);
+    const record = vi.fn(async (_entry?: Record<string, unknown>) => undefined);
     const svc = new ScreeningService(ai(FLAGGED), { record } as never);
 
     await svc.screenPost('some post', { userId: 'u1', surface: 'web' });

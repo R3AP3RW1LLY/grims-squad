@@ -100,10 +100,17 @@ describe('reading a verdict', () => {
      * retry that was flagged a minute ago cannot trust either answer, and members would quickly
      * learn to simply post again.
      */
-    const fetchImpl = vi.fn(async () => reply('{"flagged":false,"categories":[],"reason":""}'));
+    /*
+     * The parameters are declared even though the body ignores them. `vi.fn(async () => ...)`
+     * types `mock.calls` as an empty tuple, so reading `calls[0][1]` — the whole point of this
+     * test — does not compile.
+     */
+    const fetchImpl = vi.fn(async (_url: string, _init?: RequestInit) =>
+      reply('{"flagged":false,"categories":[],"reason":""}'),
+    );
     await new AiClient(CONFIG, fetchImpl as never).screen('x');
 
-    const body = JSON.parse(String((fetchImpl.mock.calls[0]?.[1] as RequestInit).body));
+    const body = JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body));
     expect(body.temperature).toBe(0);
   });
 });

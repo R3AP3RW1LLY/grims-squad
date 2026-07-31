@@ -76,6 +76,14 @@ class FakeStore implements MembersStore {
   async handleOf(): Promise<string | null> {
     return 'grim';
   }
+  /*
+   * Added when @mentions started resolving an id back to a handle. Returns the real handle from
+   * `rows` rather than a constant, so a test that mentions an unknown member gets null — the case
+   * that decides whether a mention renders as a link or as plain text.
+   */
+  async handleForId(userId: string): Promise<string | null> {
+    return this.rows.find((r) => r.source.id === userId)?.source.handle ?? null;
+  }
 
   /** Journal events the roster reads. Empty unless a test sets them. */
   snapshots: SnapshotEvent[] = [];
