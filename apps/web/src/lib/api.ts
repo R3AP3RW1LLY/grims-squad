@@ -447,6 +447,44 @@ export const getAdminAudit = (): Promise<{
   pageSize: number;
 } | null> => get('/v1/admin/audit?limit=100&page=1', { authed: true });
 
+/**
+ * A post the screener held, waiting for a human.
+ *
+ * Mirrors `HeldPost` on the API. `reason` is the field an officer actually triages on: `flagged`
+ * means the model objected and `categories` says to what; `unavailable` means the screener could
+ * not be reached and NOBODY has judged this post — which usually means it is fine and needs a
+ * glance, not a verdict.
+ */
+export interface HeldPostRow {
+  id: string;
+  threadId: string;
+  threadTitle: string;
+  categorySlug: string;
+  bodyHtml: string;
+  authorHandle: string;
+  authorName: string;
+  createdAt: string;
+  reason: 'flagged' | 'unavailable';
+  categories: string[];
+  /** The model's own words. For the reviewer only — never shown to the author. */
+  modelReason: string | null;
+}
+
+/** The moderation queue. Null when the caller may not review, which the tab renders as no-access. */
+export const getHeldPosts = (): Promise<{ posts: HeldPostRow[]; total: number } | null> =>
+  get('/v1/forum/review/held', { authed: true });
+
+/**
+ * Whether the AI is answering, reported per runtime.
+ *
+ * Two GPUs, two services, and they fail independently — the usual state during a game session is
+ * text up and image busy. One combined "AI: ok" would be wrong most evenings.
+ */
+export const getAiHealth = (): Promise<{
+  text: { configured: boolean; reachable: boolean; model: string | null; tookMs: number };
+  image: { configured: boolean; reachable: boolean; tookMs: number };
+} | null> => get('/v1/ai/health', { authed: true });
+
 export interface SquadronStats {
   /** People in the Discord guild, bots excluded. THIS is the squadron. */
   members: number;

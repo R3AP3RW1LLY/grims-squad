@@ -3,6 +3,8 @@ import { redirect } from 'next/navigation';
 import {
   getAdminActivity,
   getAdminAudit,
+  getAiHealth,
+  getHeldPosts,
   getAdminDashboard,
   getAdminDashboardGated,
   type AdminActivityRow,
@@ -13,6 +15,7 @@ import { AuditFilters } from './audit-filters';
 import { Dashboard } from './dashboard';
 import { PageHeader, Section, StatGrid, StatTile } from '../../../components/hub-page';
 import { PageTabs, resolveTab, type PageTab } from '../../../components/page-tabs';
+import { Moderation } from './moderation';
 import { lastSeen } from './activity-freshness';
 import { LiveRefresh } from '../../../components/live-refresh';
 
@@ -52,6 +55,14 @@ const TABS: readonly PageTab[] = [
   { key: 'dashboard', label: 'Dashboard' },
   { key: 'activity', label: 'Member activity & promotions' },
   { key: 'audit', label: 'Audit log' },
+  /*
+   * ★ ADDED WHEN SCREENING SHIPPED, AND IT HAD TO ★
+   *
+   * The screener already holds posts it objects to. Without a screen to release or refuse them
+   * they accumulate where nobody can see, while their authors are told an officer will look and
+   * no officer can — which is worse than having no screening at all.
+   */
+  { key: 'moderation', label: 'Moderation' },
   { key: 'roles', label: 'Roles & permissions' },
 ];
 
@@ -103,10 +114,17 @@ export default async function AdminPage({
    * though — every tab needs to know whether the second factor is fresh, and
    * a null from any admin read is that answer.
    */
-  const [dashboard, activity, audit] = await Promise.all([
+  const [dashboard, activity, audit, held, aiHealth] = await Promise.all([
     tab === 'dashboard' ? getAdminDashboard() : Promise.resolve(null),
     tab === 'activity' ? getAdminActivity() : Promise.resolve(null),
     tab === 'audit' ? getAdminAudit() : Promise.resolve(null),
+    tab === 'moderation' ? getHeldPosts() : Promise.resolve(null),
+    /*
+     * Health is fetched alongside the queue rather than gating on it. A null here is not a locked
+     * tab — it means the caller lacks AI_REVIEW for the health route specifically, or the API did
+     * not answer — and neither is a reason to hide a queue that loaded fine.
+     */
+    tab === 'moderation' ? getAiHealth() : Promise.resolve(null),
   ]);
 
   /*
@@ -126,7 +144,8 @@ export default async function AdminPage({
   const locked =
     (tab === 'dashboard' && dashboard === null) ||
     (tab === 'activity' && activity === null) ||
-    (tab === 'audit' && audit === null);
+    (tab === 'audit' && audit === null) ||
+    (tab === 'moderation' && held === null);
 
   if (locked) {
     const why = await getAdminDashboardGated();
@@ -175,6 +194,15 @@ export default async function AdminPage({
             actions={audit.actions}
             initialTotal={audit.total}
           />
+        </Section>
+      )}
+
+      {tab === 'moderation' && held !== null && (
+        <Section
+          title="Moderation"
+          description="Posts the screener held before anybody could read them. Nothing here is public — releasing a post is what publishes it."
+        >
+          <Moderation initial={held.posts} total={held.total} health={aiHealth} />
         </Section>
       )}
     </>
