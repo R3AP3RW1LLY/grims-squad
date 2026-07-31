@@ -15,6 +15,18 @@ CRON_TZ=UTC
 # Nickname + commander reconciliation. After the Inara sync, so it acts on fresh names.
 40 5 * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/daily-audit.js >> /var/log/grims-worker.log 2>&1
 
+# Embedding prose knowledge. The ONE job here that uses the GPU — everything else in the ingest
+# pipeline is a database write, which is why the card is idle during a galaxy import.
+#
+# 06:00, after the 05:50 Inara ingest and before the 06:10 role sync. It embeds forum answers and
+# reference text; structured sources are looked up, never embedded (see STORAGE_KIND — embedding
+# 448,676 systems would take about three weeks and answer WORSE, returning Deciak when asked about
+# Deciat).
+#
+# Resumable by construction: the work remaining is "prose rows with no vector", so a run that dies
+# half way leaves the rest for the next one and re-running is always safe.
+0 6 * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/embed.js >> /var/log/grims-worker.log 2>&1
+
 # Nightly reputation: experience for days flown, and badges for the totals that adds to.
 #
 # Votes and accepted answers award experience at the moment they happen — they are events. These
