@@ -179,3 +179,172 @@ describe('nobody hand-rolls this again', () => {
     ).toEqual([]);
   });
 });
+
+describe('the enrolment outage of 2026-07-31', () => {
+  /**
+   * ★ WHAT HAPPENED ★
+   *
+   * A new admin could not finish two-factor enrolment in production. `POST /v1/auth/totp/enrol`
+   * returned 201; every following `POST /v1/auth/totp/confirm` returned 401 in about a millisecond,
+   * with `failed_count` still 0 in the database — proving the six-digit code was never checked.
+   *
+   * The access cookie lives fifteen minutes and the browser drops it by itself. `middleware.ts`
+   * refreshes it silently, but its matcher excludes `v1/`, so that refresh only runs on a page
+   * NAVIGATION. Enrolment is the one flow that sits still for minutes without navigating — install
+   * an authenticator, scan the QR, wait for a code — and the security page is a forced wall, so
+   * there was nowhere to navigate that would have fixed it.
+   *
+   * The member was permanently stuck, and pressing the button again could never work.
+   */
+
+  /** Replies 401 to the first call at `path`, then 200; the refresh always succeeds. */
+  function expiringSession(path: string): string[] {
+    const seen: string[] = [];
+    let first = true;
+    fetchMock.mockImplementation(async (url: string) => {
+      seen.push(url);
+      if (url === '/v1/auth/refresh') return new Response('{}', { status: 200 });
+      if (url === path && first) {
+        first = false;
+        return new Response(JSON.stringify({ error: { message: 'Sign in to continue.' } }), {
+          status: 401,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response('{"recoveryCodes":["a","b"]}', { status: 200 });
+    });
+    return seen;
+  }
+
+  it('MANDATORY: a 401 refreshes the session and retries once', async () => {
+    const seen = expiringSession('/v1/auth/totp/confirm');
+
+    const out = await apiPost<{ recoveryCodes: string[] }>('/v1/auth/totp/confirm', {
+      code: '123456',
+    });
+
+    expect(out.recoveryCodes).toEqual(['a', 'b']);
+    expect(seen).toEqual(['/v1/auth/totp/confirm', '/v1/auth/refresh', '/v1/auth/totp/confirm']);
+  });
+
+  it('MANDATORY: the retry carries the ROTATED csrf token, not the stale one', async () => {
+    /*
+     * The refresh rotates the CSRF cookie. Replaying the original token turns the 401 into a 403 —
+     * the member stays exactly as stuck, and the symptom changes just enough to look like a
+     * different bug entirely.
+     */
+    const sent: Array<string | undefined> = [];
+    let first = true;
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === '/v1/auth/refresh') {
+        vi.stubGlobal('document', { cookie: 'gs_csrf=token-rotated' });
+        return new Response('{}', { status: 200 });
+      }
+      sent.push(((init?.headers ?? {}) as Record<string, string>)['x-csrf-token']);
+      if (first) {
+        first = false;
+        return new Response('{}', { status: 401 });
+      }
+      return new Response('{}', { status: 200 });
+    });
+
+    await apiPost('/v1/auth/totp/confirm', { code: '123456' });
+
+    expect(sent[0]).toBe('token-abc');
+    expect(sent[1]).toBe('token-rotated');
+  });
+
+  it('MANDATORY: gives up after one retry rather than looping', async () => {
+    // A genuinely signed-out member must see an error, not become a request storm against our own
+    // auth endpoint.
+    let confirms = 0;
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url === '/v1/auth/refresh') return new Response('{}', { status: 200 });
+      confirms += 1;
+      return new Response('{}', { status: 401 });
+    });
+
+    await expect(apiPost('/v1/auth/totp/confirm', { code: '1' })).rejects.toThrow();
+    expect(confirms).toBe(2);
+  });
+
+  it('does not retry the original call when the refresh itself fails', async () => {
+    // The session is genuinely over. Retrying would fail identically and only delay telling them.
+    let confirms = 0;
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url === '/v1/auth/refresh') return new Response('{}', { status: 401 });
+      confirms += 1;
+      return new Response('{}', { status: 401 });
+    });
+
+    await expect(apiPost('/v1/auth/totp/confirm', { code: '1' })).rejects.toThrow();
+    expect(confirms).toBe(1);
+  });
+
+  it('MANDATORY: never tries to refresh a failing refresh', async () => {
+    // Otherwise: infinite recursion, aimed at our own auth endpoint.
+    let refreshes = 0;
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url === '/v1/auth/refresh') refreshes += 1;
+      return new Response('{}', { status: 401 });
+    });
+
+    await expect(apiCall('POST', '/v1/auth/refresh')).rejects.toThrow();
+    expect(refreshes).toBe(1);
+  });
+
+  it('MANDATORY: a 403 is not retried', async () => {
+    /*
+     * 403 is permission denied, not expired. Refreshing returns the same answer, and retrying a
+     * refused privileged action is precisely the noise an audit log does not need.
+     */
+    const seen: string[] = [];
+    fetchMock.mockImplementation(async (url: string) => {
+      seen.push(url);
+      return new Response(JSON.stringify({ error: { message: 'You cannot do that.' } }), {
+        status: 403,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+
+    await expect(apiPost('/v1/admin/roles', {})).rejects.toThrow(/cannot/i);
+    expect(seen).toEqual(['/v1/admin/roles']);
+  });
+
+  it('a successful call never refreshes', async () => {
+    // The overwhelmingly common case must cost nothing extra.
+    const seen: string[] = [];
+    fetchMock.mockImplementation(async (url: string) => {
+      seen.push(url);
+      return new Response('{}', { status: 200 });
+    });
+
+    await apiPost('/v1/forum/threads', { title: 'x' });
+    expect(seen).toEqual(['/v1/forum/threads']);
+  });
+
+  it('MANDATORY: a burst of expired calls produces exactly ONE refresh', async () => {
+    /*
+     * Several of our pages fire multiple requests at load. The refresh rotates the token family, so
+     * concurrent refreshes race — the second presents a token the first already consumed, which
+     * reads as a stolen-token replay and can invalidate the whole family, signing the member out
+     * for real. One shared in-flight promise is what prevents that.
+     */
+    let refreshes = 0;
+    const expired = new Set<string>();
+    fetchMock.mockImplementation(async (url: string) => {
+      if (url === '/v1/auth/refresh') {
+        refreshes += 1;
+        return new Response('{}', { status: 200 });
+      }
+      if (!expired.has(url)) {
+        expired.add(url);
+        return new Response('{}', { status: 401 });
+      }
+      return new Response('{}', { status: 200 });
+    });
+
+    await Promise.all([apiPost('/v1/a', {}), apiPost('/v1/b', {}), apiPost('/v1/c', {})]);
+    expect(refreshes).toBe(1);
+  });
+});
