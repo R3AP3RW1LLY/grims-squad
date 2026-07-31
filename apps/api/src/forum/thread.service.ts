@@ -5,6 +5,7 @@ import type { ReindexQueue } from './reindex.port.js';
 import { renderPostBody } from './sanitize.js';
 import { validateDocument, renderDocument, documentToText } from './rich-doc.js';
 import type { NotifyService } from './notify.service.js';
+import type { ScreeningService } from '../ai/screening.service.js';
 import { ALLOWED_REACTIONS, type ReactionCount } from './engage.service.js';
 import { canEditPost } from './post.service.js';
 
@@ -199,6 +200,23 @@ export class ThreadService {
      * the window a reply would land in.
      */
     private readonly notify: NotifyService,
+    /*
+     * ★ THE OPENING POST IS A POST, AND WAS NEVER BEING SCREENED ★
+     *
+     * Squadron owner, 2026-07-31: "i just made another forum post that has no swearing at all, and
+     * is clean! its still got pulled for moderation".
+     *
+     * It was, and no amount of prompt tuning could have fixed it. The opening post is created
+     * NESTED inside the thread insert, and that nested create never set `screen_state` — so the
+     * column default, `held`, applied to every new thread ever started. Screening was not called,
+     * which is why the live log showed heartbeats and nothing else, and why the stored verdict was
+     * always null.
+     *
+     * Optional, matching PostService, so a unit test that does not care about screening still
+     * constructs. Absent means the opening post publishes, which is the same deliberate choice
+     * ScreeningService makes for an unconfigured AI.
+     */
+    private readonly screening: ScreeningService | null = null,
   ) {}
 
   /**
@@ -608,6 +626,16 @@ export class ThreadService {
      */
     const rendered = this.renderBody(input.body);
 
+    /*
+     * Screened BEFORE the insert, exactly as a reply is. The owner's rule was "the ai must ingest
+     * and moderate all posts before they are visible", and a thread's first post is the most
+     * visible post there is — it is what a board listing shows.
+     */
+    const screened =
+      this.screening === null
+        ? null
+        : await this.screening.screenPost(rendered.bodyMd, { userId: authorId, surface: 'web' });
+
     const created = await db.forumThread.create({
       data: {
         categoryId: category.id,
@@ -630,6 +658,14 @@ export class ThreadService {
               authorId,
               bodyMd: rendered.bodyMd,
               bodyHtml: rendered.bodyHtml,
+              /*
+               * SET EXPLICITLY. The column defaults to `held`, so leaving it out — which is what
+               * this nested create did — silently held every opening post ever written.
+               */
+              screenState: screened === null ? 'clear' : screened.state,
+              ...(screened === null || screened.state === 'clear'
+                ? {}
+                : { screenVerdict: screened.verdict as unknown as object }),
               ...('bodyDoc' in rendered ? { bodyDoc: rendered.bodyDoc as object } : {}),
             },
           ],

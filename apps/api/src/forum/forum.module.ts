@@ -88,9 +88,13 @@ import { SignatureService } from './signature.service.js';
     SearchService,
     {
       provide: ThreadService,
-      inject: [CategoryService, PendingReindexQueue, NotifyService],
-      useFactory: (categories: CategoryService, reindex: PendingReindexQueue, notify: NotifyService) =>
-        new ThreadService(categories, reindex, notify),
+      inject: [CategoryService, PendingReindexQueue, NotifyService, ScreeningService],
+      useFactory: (
+        categories: CategoryService,
+        reindex: PendingReindexQueue,
+        notify: NotifyService,
+        screening: ScreeningService,
+      ) => new ThreadService(categories, reindex, notify, screening),
     },
   ],
 })

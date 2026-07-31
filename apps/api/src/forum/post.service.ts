@@ -438,6 +438,22 @@ export class PostService {
 
     const withinGrace = Date.now() - post.createdAt.getTime() < GRACE_MS && isAuthor;
 
+    /*
+     * ★ AN EDIT IS NEW CONTENT, AND WAS NOT BEING SCREENED ★
+     *
+     * Found 2026-07-31 by the guard written for the opening-post bug. Screening ran on create and
+     * never again, so a member could publish something clean and then edit abuse into it — the post
+     * stays `clear` because nothing re-examines it.
+     *
+     * The owner's rule is "the ai must ingest and moderate all posts before they are visible", and
+     * an edited post is visible content that has never been read. So the same verdict path applies:
+     * an edit that trips the screener sends the post back to the queue rather than publishing.
+     */
+    const rescreened =
+      this.screening === null
+        ? null
+        : await this.screening.screenPost(rendered.bodyMd, { userId: editorId, surface: 'web' });
+
     const [, updated] = await db.$transaction([
       // The body as it WAS, with who changed it and when.
       db.postRevision.create({
@@ -448,6 +464,14 @@ export class PostService {
         data: {
           bodyMd: rendered.bodyMd,
           bodyHtml: rendered.bodyHtml,
+          /*
+           * Re-stated on every edit. Leaving it alone would keep a post `clear` on the strength of
+           * what it used to say, which is exactly the hole this closes.
+           */
+          screenState: rescreened === null ? 'clear' : rescreened.state,
+          ...(rescreened === null || rescreened.state === 'clear'
+            ? {}
+            : { screenVerdict: rescreened.verdict as unknown as object }),
           ...('bodyDoc' in rendered ? { bodyDoc: rendered.bodyDoc as object } : {}),
           /*
            * The revision is written either way; this only governs the visible "edited"
