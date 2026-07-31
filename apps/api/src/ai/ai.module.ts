@@ -54,18 +54,63 @@ import { ArtworkController } from './artwork.controller.js';
 export class ModelWarmer implements OnModuleInit, OnModuleDestroy {
   #timer: NodeJS.Timeout | null = null;
 
-  constructor(@Inject(AiClient) private readonly ai: AiClient) {}
+  constructor(
+    @Inject(AiClient) private readonly ai: AiClient,
+    @Inject(AiStreamService) private readonly stream: AiStreamService,
+  ) {}
 
   onModuleInit(): void {
-    if (!this.ai.configured) return;
+    if (!this.ai.configured) {
+      /*
+       * Said out loud, once, on the stream. An officer watching an empty log needs to know the
+       * difference between "nothing has happened" and "screening is not switched on at all" — and
+       * the second one means every post is publishing unscreened.
+       */
+      this.stream.emit({
+        level: 'warn',
+        kind: 'health',
+        message: 'GMSD AI is not configured — posts are publishing without screening.',
+      });
+      return;
+    }
 
-    void this.ai.warm().catch(() => undefined);
+    void this.#beat();
 
     this.#timer = setInterval(() => {
-      void this.ai.warm().catch(() => undefined);
+      void this.#beat();
     }, MODEL_WARM_INTERVAL_MS);
     // Does not hold the process open: a heartbeat must never be the reason a container will not exit.
     this.#timer.unref?.();
+  }
+
+  /**
+   * Keeps the model warm AND says so on the live log.
+   *
+   * ★ SQUADRON OWNER, 2026-07-31: "show pings that keep it alive" ★
+   *
+   * A silent log is ambiguous — it means either "nothing is happening" or "this is dead", and those
+   * need opposite reactions. A heartbeat every few minutes removes the ambiguity: while pings are
+   * arriving, the stream and the model are both proven, so silence becomes evidence rather than
+   * uncertainty.
+   *
+   * It reports the FAILURE too. A ping that says the model did not answer is exactly the warning
+   * somebody needs before members start finding their posts held.
+   */
+  async #beat(): Promise<void> {
+    const started = Date.now();
+    let ok = false;
+    try {
+      ok = await this.ai.warm();
+    } catch {
+      ok = false;
+    }
+
+    this.stream.emit({
+      level: ok ? 'info' : 'error',
+      kind: 'health',
+      message: ok ? 'GMSD AI ready — model warm' : 'GMSD AI did not answer — posts will be held',
+      tookMs: Date.now() - started,
+    });
   }
 
   onModuleDestroy(): void {

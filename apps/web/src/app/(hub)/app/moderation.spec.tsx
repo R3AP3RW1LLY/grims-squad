@@ -117,11 +117,43 @@ describe('the live log', () => {
     expect(codeOf(LOG)).not.toMatch(/redact|<path>|C:\\\\/i);
   });
 
-  it('MANDATORY: is opt-in, not always-on', () => {
-    // Connecting holds an SSE stream open for the life of the tab. Most visits here are to clear a
-    // queue, not to watch a log.
-    expect(LOG).toMatch(/useState\(false\)/);
-    expect(LOG).toMatch(/Connect/);
+  it('MANDATORY: is always on, never opt-in', () => {
+    /*
+     * Squadron owner, 2026-07-31: "The LIVE AI Log must always be on ... this is non-negotiable".
+     *
+     * It WAS opt-in, and that was wrong for the job. A post was reported as "not screened", and
+     * with the panel disconnected there is no way to distinguish screening working, screening
+     * failing, and screening never running. A monitor you have to switch on says nothing about the
+     * minutes before you switched it on.
+     */
+    // A constant, not state: there is no setter, so no disconnect control can be wired to one.
+    expect(codeOf(LOG)).toMatch(/const open = true/);
+    expect(codeOf(LOG)).not.toMatch(/Disconnect/);
+  });
+
+  it('MANDATORY: shows a heartbeat, so an idle log is not ambiguous', () => {
+    /*
+     * "show pings that keep it alive". A silent log otherwise means either "nothing happened" or
+     * "this is dead", which need opposite reactions. With pings arriving, silence becomes evidence.
+     */
+    const warmer = readFileSync(
+      resolve(HERE, '../../../../../../apps/api/src/ai/ai.module.ts'),
+      'utf8',
+    );
+    expect(warmer).toMatch(/kind: 'health'/);
+    expect(warmer).toMatch(/model warm/);
+    // And it must report the failure, not only the success — that is the useful ping.
+    expect(warmer).toMatch(/did not answer/);
+  });
+
+  it('MANDATORY: says out loud when screening is not configured at all', () => {
+    // The most dangerous quiet state: every post publishing unscreened, and an empty log that
+    // looks exactly like a quiet evening.
+    const warmer = readFileSync(
+      resolve(HERE, '../../../../../../apps/api/src/ai/ai.module.ts'),
+      'utf8',
+    );
+    expect(warmer).toMatch(/without screening/);
   });
 
   it('bounds what a tab left open all evening accumulates', () => {
@@ -136,10 +168,10 @@ describe('the live log', () => {
     expect(LOG).toMatch(/return \(\) => source\.close\(\)/);
   });
 
-  it('describes a dropped connection as retrying, not failed', () => {
+  it('describes a dropped connection as reconnecting, not failed', () => {
     // EventSource reconnects by itself. "Error" sends somebody investigating a stream that is
-    // already coming back.
-    expect(LOG).toMatch(/retrying/i);
+    // already coming back — and on an always-on panel that would happen on every network blip.
+    expect(LOG).toMatch(/reconnecting/i);
   });
 });
 

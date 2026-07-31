@@ -21,11 +21,22 @@ import { useEffect, useRef, useState } from 'react';
  * RIGHT NOW" — the question somebody actually has while a queue is filling up, a tunnel is being
  * set up, or posts are being held for no obvious reason.
  *
- * ★ OPT-IN, NOT ALWAYS-ON ★
+ * ★ ALWAYS ON, AND THAT IS A REVERSAL ★
  *
- * Connecting opens an SSE stream that stays open. Most visits to this tab are to clear a queue, not
- * to watch a log, and a stream nobody is reading is a held connection on both ends for the life of
- * the tab. So it starts closed and says what it is.
+ * Squadron owner, 2026-07-31: "The LIVE AI Log must always be on, show pings that keep it alive!
+ * this is non-negotiable!"
+ *
+ * It was opt-in, on the reasoning that a stream nobody is reading is a held connection. That
+ * reasoning was wrong for the job this panel actually does. The owner reported a post that "was not
+ * screened" — and with the panel disconnected there is NO WAY to tell the difference between
+ * screening running fine, screening failing, and screening not running at all. A monitor you have
+ * to switch on tells you nothing about the minutes before you switched it on.
+ *
+ * ★ AND IT SHOWS THE HEARTBEAT ★
+ *
+ * A quiet log is ambiguous: it means either "nothing is happening" or "this panel is dead". The
+ * server emits a heartbeat every few minutes as it keeps the model warm, so an idle log still
+ * proves the connection and the model are alive. Silence now means something is genuinely wrong.
  */
 
 interface LogLine {
@@ -46,7 +57,11 @@ const LEVEL_COLOUR: Record<LogLine['level'], string> = {
 };
 
 export function AiLogPanel() {
-  const [open, setOpen] = useState(false);
+  /*
+   * A constant, not state. The panel is always connected and there is no control to change that —
+   * a setter nothing calls is an invitation to add a disconnect button back.
+   */
+  const open = true;
   const [lines, setLines] = useState<LogLine[]>([]);
   const [state, setState] = useState<'idle' | 'connecting' | 'live' | 'lost'>('idle');
   const boxRef = useRef<HTMLDivElement | null>(null);
@@ -102,29 +117,29 @@ export function AiLogPanel() {
             What the AI is doing right now. Machine paths are stripped before it leaves the server.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => {
-            setOpen((v) => !v);
-            if (open) {
-              setLines([]);
-              setState('idle');
-            }
-          }}
-          className="rounded border border-[var(--color-brand-cyan-bright)] px-4 py-2 font-mono text-[11px] uppercase tracking-[0.24em] text-[var(--color-brand-cyan-bright)]"
-        >
-          {open ? 'Disconnect' : 'Connect'}
-        </button>
+        {/*
+          A status light, not a switch. The panel is always connected, so the only question worth
+          answering here is whether the stream is actually alive right now.
+        */}
+        <span className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.24em]">
+          <span
+            aria-hidden="true"
+            className={`inline-block h-2 w-2 rounded-full ${
+              state === 'live'
+                ? 'bg-[var(--color-brand-cyan-bright)]'
+                : state === 'lost'
+                  ? 'bg-[var(--color-brand-orange)]'
+                  : 'bg-[var(--color-text-secondary)]'
+            }`}
+          />
+          <span className="text-[var(--color-text-secondary)]">
+            {state === 'live' ? 'live' : state === 'lost' ? 'reconnecting' : 'connecting'}
+          </span>
+        </span>
       </div>
 
       {open && (
         <>
-          <p className="mt-4 font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--color-text-secondary)]">
-            {state === 'connecting' && 'connecting…'}
-            {state === 'live' && `live · ${lines.length} line${lines.length === 1 ? '' : 's'}`}
-            {state === 'lost' && 'connection lost — retrying'}
-          </p>
-
           <div
             ref={boxRef}
             className="mt-3 max-h-80 overflow-y-auto rounded bg-[var(--color-surface-panel-sunken)] p-4 font-mono text-xs"
