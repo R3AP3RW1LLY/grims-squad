@@ -1,0 +1,5 @@
+# Nightly Docker cleanup. See infra/scripts/docker-janitor.sh for why this exists:
+# 250GB of build cache accumulated invisibly and nearly cost a paid instance upgrade.
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+17 4 * * * root /srv/grims/docker-janitor.sh >> /var/log/grims-docker-janitor.log 2>&1

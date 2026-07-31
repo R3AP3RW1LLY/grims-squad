@@ -1,0 +1,19 @@
+# Scheduled jobs. These were WRITTEN, TESTED AND NEVER SCHEDULED — no cron entry, no systemd timer,
+# and no worker container had ever existed on this host. Discovered 2026-07-31.
+#
+# Every one is a ONE-SHOT: the container runs, does its job, exits, and is removed. The compose
+# service carries profiles:[jobs] so `up -d` can never start it as a service.
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+CRON_TZ=UTC
+
+# Inara rank + profile sync. ONCE A DAY, BATCHED — the adapter sends 30 commanders per request, and
+# Inara ask for infrequent bundled calls rather than one per commander. 05:12 is off-peak against
+# measured activity (peaks 01:00 and 20:00-21:00) and clear of the 04:17 janitor.
+12 5 * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/inara-sync.js >> /var/log/grims-worker.log 2>&1
+
+# Nickname + commander reconciliation. After the Inara sync, so it acts on fresh names.
+40 5 * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/daily-audit.js >> /var/log/grims-worker.log 2>&1
+
+# Discord role reconciliation.
+10 6 * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/role-sync.js >> /var/log/grims-worker.log 2>&1
