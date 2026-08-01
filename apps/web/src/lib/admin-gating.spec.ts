@@ -134,35 +134,79 @@ describe('the NoAccess screen', () => {
 });
 
 describe('the role editor can satisfy a fresh-2FA refusal in place', () => {
-  it('MANDATORY: a stale step-up on SAVE offers a code box', () => {
+  /*
+   * ★ THIS MOVED INTO A MODAL ON 2026-08-01, AND THE RULES DID NOT CHANGE ★
+   *
+   * Squadron owner: "the 2FA confirmation, should pop up in a modal please and it should auto
+   * submit after the 6th digit is entered".
+   *
+   * The prompt used to be an <input> inline in the editor, and these guards named that shape
+   * directly — `confirmAndSave`, `one-time-code`, `{needsCode && (`. All three broke on a change
+   * that preserved every property they existed to protect.
+   *
+   * A guard that fails on correct work gets deleted, and the rule goes with it. So they now assert
+   * the PROPERTIES across the component boundary instead of the layout of one file.
+   */
+  it('MANDATORY: a stale step-up on SAVE offers somewhere to enter a code', () => {
     /*
-     * The second dead end. Saving a mask needs a step-up from the last two minutes, while
-     * reads pass on the two-hour window — so the page renders normally and only the save
-     * fails, with "confirm it again" and nowhere to do it.
+     * The second dead end. Saving a mask needs a step-up from the last two minutes, while reads
+     * pass on the two-hour window — so the page renders normally and only the save fails, with
+     * "confirm it again" and nowhere to do it.
      */
-    const src = code('app/(hub)/app/roles/role-editor.tsx');
+    const editor = code('app/(hub)/app/roles/role-editor.tsx');
+    expect(editor).toContain('needsCode');
+    expect(editor).toContain('TwoFactorModal');
 
-    expect(src).toContain('needsCode');
-    expect(src).toContain('/v1/auth/totp/verify');
-    expect(src).toContain('one-time-code');
+    // Wherever the prompt lives, it has to actually verify against the API.
+    expect(code('components/two-factor-modal.tsx')).toContain('/v1/auth/totp/verify');
   });
 
   it('MANDATORY: confirming retries the save rather than restarting the clock', () => {
     // Asking the operator to click Save again would start the two-minute window over
     // against them for no reason.
-    const src = code('app/(hub)/app/roles/role-editor.tsx');
-    expect(src).toMatch(/confirmAndSave/);
-    expect(src).toMatch(/await doSave\(\)/);
+    const editor = code('app/(hub)/app/roles/role-editor.tsx');
+    expect(editor).toMatch(/onConfirmed=/);
+    expect(editor).toMatch(/await doSave\(\)/);
   });
 
-  it('MANDATORY: the code box is gated on state, not on matching the error text at render', () => {
+  it('MANDATORY: the prompt is gated on state, not on matching the error text at render', () => {
     /*
      * `needsCode` is set once, when a save is refused for a stale step-up. Deriving it from
      * the error string during render would put a code box next to "you do not hold
      * ROLE_MANAGE" — the exact conflation this release fixes, moved into a component.
      */
-    const src = code('app/(hub)/app/roles/role-editor.tsx');
-    expect(src).toMatch(/\{needsCode && \(/);
-    expect(src).not.toMatch(/error[^\n]*test\([^\n]*&&[^\n]*<input/);
+    const editor = code('app/(hub)/app/roles/role-editor.tsx');
+    expect(editor).toMatch(/open=\{needsCode\}/);
+    expect(editor).not.toMatch(/error[^\n]*test\([^\n]*&&[^\n]*<input/);
+  });
+
+  it('MANDATORY: the code submits itself at the sixth digit', () => {
+    /*
+     * Squadron owner, 2026-08-01: it should behave "like the official authenticator does when we
+     * first sign in". A TOTP code is complete at six digits — nothing to review, no seventh
+     * character that could change the answer — so a Continue button is a keystroke the sign-in
+     * flow already does not ask for, and asking for it here would make the site inconsistent with
+     * itself.
+     */
+    const modal = code('components/two-factor-modal.tsx');
+    expect(modal).toContain('CodeInput');
+    expect(modal).toContain('onComplete');
+  });
+
+  it('MANDATORY: a rejected code is cleared rather than left to be resubmitted', () => {
+    /*
+     * A TOTP code is dead the moment it is rejected: its window has passed. Leaving the digits in
+     * place invites submitting one that cannot possibly work — and under auto-submit it would fire
+     * again the instant somebody typed a correction.
+     */
+    expect(code('components/two-factor-modal.tsx')).toMatch(/setCode\(''\)/);
+  });
+
+  it('MANDATORY: the modal can be dismissed', () => {
+    // A modal with no way out but a correct code is a trap. The phone may be in another room, and
+    // the honest response is to let somebody leave and come back.
+    const modal = code('components/two-factor-modal.tsx');
+    expect(modal).toContain('Escape');
+    expect(modal).toContain('onCancel');
   });
 });

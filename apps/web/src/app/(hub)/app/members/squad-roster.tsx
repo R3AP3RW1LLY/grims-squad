@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { apiPost } from '../../../../lib/api-client';
 import type { SquadMemberRow } from '../../../../lib/api';
 import { squadronTenure } from '../member-tenure';
@@ -62,6 +63,7 @@ function Badge({ tone, children }: { tone: 'quiet' | 'warn' | 'live' | 'dim'; ch
 }
 
 export function SquadRoster({ rows, now }: { rows: SquadMemberRow[]; now: number }) {
+  const router = useRouter();
   const [search, setSearch] = useState('');
   const [role, setRole] = useState('');
   const [presence, setPresence] = useState<Presence>('');
@@ -222,7 +224,20 @@ export function SquadRoster({ rows, now }: { rows: SquadMemberRow[]; now: number
         </div>
       </div>
 
-      <ManagePanel key={selected?.discordId ?? 'none'} member={selected} now={now} />
+      <ManagePanel
+        key={selected?.discordId ?? 'none'}
+        member={selected}
+        now={now}
+        onChanged={() => {
+          /*
+           * A kicked or banned member leaves the roster entirely, so the panel would be left
+           * pointing at somebody who is no longer in the list. Clearing the selection first means
+           * the refreshed page shows the prompt to choose somebody rather than a stale panel.
+           */
+          setSelectedId(null);
+          router.refresh();
+        }}
+      />
     </div>
   );
 }
@@ -236,7 +251,16 @@ export function SquadRoster({ rows, now }: { rows: SquadMemberRow[]; now: number
  * state. A reason written about one person, submitted against another, is the worst possible bug on
  * a page that bans people — and it would look like it worked.
  */
-function ManagePanel({ member, now }: { member: SquadMemberRow | null; now: number }) {
+function ManagePanel({
+  member,
+  now,
+  onChanged,
+}: {
+  member: SquadMemberRow | null;
+  now: number;
+  /** Re-pulls the roster from the server after an action lands. */
+  onChanged: () => void;
+}) {
   const [reason, setReason] = useState('');
   const [minutes, setMinutes] = useState(TIMEOUT_CHOICES[1]?.minutes ?? 60);
   const [deleteDays, setDeleteDays] = useState(0);
@@ -292,11 +316,17 @@ function ManagePanel({ member, now }: { member: SquadMemberRow | null; now: numb
       if (res.applied) {
         setDone(`Done. ${displayName(member)} — ${action}.`);
         /*
-         * The roster is refetched by reloading, not patched in place. Discord is the authority on
-         * what actually happened and a kicked member disappears from the list entirely; guessing
-         * the new state client-side would show a row that no longer exists.
+         * ★ THE PAGE UPDATES IN PLACE, WITHOUT A RELOAD ★
+         *
+         * Squadron owner, 2026-08-01: "we need this to happen so we can see the changes have been
+         * made as they happen". A reload threw away the scroll position, the search box and the
+         * selected member — after every single action, while working through a queue of them.
+         *
+         * `router.refresh()` re-renders the server component with fresh data and leaves all of that
+         * alone. Discord stays the authority on what happened: nothing is guessed at client-side,
+         * the server is simply asked again.
          */
-        setTimeout(() => window.location.reload(), 900);
+        onChanged();
       } else {
         setProblem(res.problem ?? 'Discord refused, and gave no reason.');
       }

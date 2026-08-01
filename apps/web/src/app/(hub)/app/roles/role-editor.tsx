@@ -1,7 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import { apiPost } from '../../../../lib/api-client';
+import { TwoFactorModal } from '../../../../components/two-factor-modal';
 import type { RoleGroup } from './role-groups';
 
 export interface RoleRow {
@@ -264,6 +266,32 @@ export function countPermissions(mask: bigint): number {
  * JavaScript number, and SITE_CONFIG alone is 1n<<63n.
  */
 export function RoleEditor({ groups }: { groups: readonly RoleGroup[] }) {
+  const router = useRouter();
+  /*
+   * ★ THE ROLE LIST IS STATE, NOT A PROP READ STRAIGHT THROUGH ★
+   *
+   * Squadron owner, 2026-08-01: "when we update permissions etc, can we make sure everything
+   * updates on the page asyncronously please. we need this to happen so we can see the changes have
+   * been made as they happen".
+   *
+   * Rendering `groups` directly meant saving a mask left the permission count in the left-hand list
+   * showing the OLD number — the save had worked, the server knew, and the only thing on screen
+   * that could confirm it was a sentence saying so. Somebody checking their work would reasonably
+   * conclude nothing had happened.
+   *
+   * So the saved mask is written back here the moment the API accepts it, and `router.refresh()`
+   * re-pulls the server's copy behind that. The local write is what makes it instant; the refresh is
+   * what makes it right — if the two ever disagreed, the server's answer arrives a moment later and
+   * wins.
+   */
+  const [rows, setRows] = useState<readonly RoleGroup[]>(groups);
+
+  // A refresh replaces the prop. Without this the server's copy would arrive and be ignored, and
+  // the page would drift from the database in exactly the way the local write exists to avoid.
+  useEffect(() => {
+    setRows(groups);
+  }, [groups]);
+
   const [selected, setSelected] = useState<RoleRow | null>(null);
   const [mask, setMask] = useState(0n);
   const [preview, setPreview] = useState<MaskPreview | null>(null);
@@ -276,7 +304,6 @@ export function RoleEditor({ groups }: { groups: readonly RoleGroup[] }) {
    * "you do not hold ROLE_MANAGE" would repeat the exact mistake this release fixes.
    */
   const [needsCode, setNeedsCode] = useState(false);
-  const [stepUpCode, setStepUpCode] = useState('');
 
   function choose(role: RoleRow) {
     setSelected(role);
@@ -321,6 +348,26 @@ export function RoleEditor({ groups }: { groups: readonly RoleGroup[] }) {
       setSaved(`Saved. ${r.affected.length} member(s) affected.`);
       setPreview(null);
       setNeedsCode(false);
+
+      /*
+       * The list updates NOW, and the server confirms behind it.
+       *
+       * `mask.toString()` rather than re-reading the response: it is the exact value the API just
+       * accepted, so the count beside the role name changes in the same frame as the confirmation
+       * sentence. `router.refresh()` then re-renders the page from the database, which corrects
+       * anything else the save touched — member counts, other roles — without a full reload.
+       */
+      const saved = mask.toString();
+      setRows((current) =>
+        current.map((g) => ({
+          ...g,
+          roles: g.roles.map((role) =>
+            role.id === selected.id ? { ...role, permMask: saved } : role,
+          ),
+        })),
+      );
+      setSelected((current) => (current === null ? null : { ...current, permMask: saved }));
+      router.refresh();
     } catch (e) {
       /*
        * ★ A FRESH-CODE REFUSAL IS ACTIONABLE, SO IT GETS AN ACTION ★
@@ -346,28 +393,35 @@ export function RoleEditor({ groups }: { groups: readonly RoleGroup[] }) {
     }
   }
 
-  /**
-   * Confirms a code without leaving the page, then retries the save.
-   *
-   * The retry is the point. Confirming and then asking the operator to click Save again
-   * would restart the two-minute clock against them for no reason.
-   */
-  async function confirmAndSave(code: string) {
-    setBusy(true);
-    setError(null);
-    try {
-      await apiPost('/v1/auth/totp/verify', { code }, 'That code was not accepted.');
-      setNeedsCode(false);
-      setBusy(false);
-      await doSave();
-    } catch (e) {
-      setError((e as Error).message);
-      setBusy(false);
-    }
-  }
-
   return (
-    <div className="mt-8 grid grid-cols-1 gap-8 lg:grid-cols-[300px_1fr]">
+    <>
+      {/*
+        ★ THE CODE PROMPT IS A MODAL — SQUADRON OWNER, 2026-08-01 ★
+
+        "the 2FA confirmation, should pop up in a modal please and it should auto submit after the
+        6th digit is entered like the official authenticator does when we first sign in etc"
+
+        It used to be a small input wedged between the permission checkboxes and Save. It worked,
+        and it read as one more field on a long form rather than as "everything has stopped until
+        you do this" — so an officer hunting for why Save appeared to do nothing could scroll
+        straight past the thing asking them for a code.
+
+        The selection, the mask and the preview all survive it, and the save is retried the moment
+        the code is accepted — confirming and then asking somebody to press Save again would restart
+        the two-minute clock against them for no reason.
+      */}
+      <TwoFactorModal
+        open={needsCode}
+        title="Confirm this change"
+        explanation="Changing permissions needs a code from the last two minutes. Nothing you have selected is lost."
+        onConfirmed={async () => {
+          setNeedsCode(false);
+          await doSave();
+        }}
+        onCancel={() => setNeedsCode(false)}
+      />
+
+      <div className="mt-8 grid grid-cols-1 gap-8 lg:grid-cols-[300px_1fr]">
       {/*
         CATEGORISED, AND IN LADDER ORDER WITHIN EACH.
 
@@ -381,7 +435,7 @@ export function RoleEditor({ groups }: { groups: readonly RoleGroup[] }) {
         mask is unreadable.
       */}
       <nav aria-label="Roles" className="space-y-6">
-        {groups.map((g) => (
+        {rows.map((g) => (
           <div key={g.key}>
             <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-[var(--color-brand-orange)]">
               {g.title}
@@ -468,47 +522,6 @@ export function RoleEditor({ groups }: { groups: readonly RoleGroup[] }) {
               retries the save straight away. The alternative was a round trip to
               /settings/security and redoing the whole selection inside two minutes.
             */}
-            {needsCode && (
-              <div className="mt-4 rounded border border-[var(--color-brand-cyan-bright)] px-4 py-4">
-                <label
-                  htmlFor="step-up-code"
-                  className="block text-sm text-[var(--color-text-primary)]"
-                >
-                  Confirm this change with your authenticator
-                </label>
-                <p className="mt-1 text-xs leading-relaxed text-[var(--color-text-secondary)]">
-                  Changing permissions needs a code from the last two minutes. Nothing you
-                  have selected is lost.
-                </p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <input
-                    id="step-up-code"
-                    // `inputMode` + `autoComplete` so a phone shows a number pad and a
-                    // password manager can fill the code.
-                    inputMode="numeric"
-                    autoComplete="one-time-code"
-                    maxLength={6}
-                    value={stepUpCode}
-                    onChange={(e) => setStepUpCode(e.target.value.replace(/\D/g, ''))}
-                    disabled={busy}
-                    placeholder="123456"
-                    className="w-32 rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel)] px-3 py-2 font-mono tracking-[0.2em] text-[var(--color-text-primary)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)] disabled:opacity-60"
-                  />
-                  <button
-                    type="button"
-                    disabled={busy || stepUpCode.length !== 6}
-                    onClick={() => {
-                      const code = stepUpCode;
-                      setStepUpCode('');
-                      void confirmAndSave(code);
-                    }}
-                    className="rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel-sunken)] px-4 py-2 text-sm text-[var(--color-text-primary)] transition-colors hover:border-[var(--color-border-active)] disabled:opacity-50"
-                  >
-                    {busy ? 'Confirming…' : 'Confirm and save'}
-                  </button>
-                </div>
-              </div>
-            )}
             {saved !== null && (
               <p className="mt-4 rounded border border-[var(--color-brand-cyan-bright)] px-4 py-3 text-sm text-[var(--color-brand-cyan-bright)]">
                 {saved}
@@ -683,6 +696,7 @@ export function RoleEditor({ groups }: { groups: readonly RoleGroup[] }) {
           </>
         )}
       </div>
-    </div>
+      </div>
+    </>
   );
 }
