@@ -6,6 +6,7 @@ import {
   type Collection,
   type Message,
   type GuildBasedChannel,
+  type User,
 } from 'discord.js';
 import { PrismaClient } from '@grims/db';
 import pino from 'pino';
@@ -245,8 +246,69 @@ function describe(channel: GuildChannelish): ScopeChannel {
   };
 }
 
+/**
+ * Discord ids whose name this process has already written.
+ *
+ * `rememberAuthor` runs on every message, live and backfilled. Without this it would be a database
+ * write per message — 839 of them on the sweep that recovered July — to store the same hundred-odd
+ * names over and over.
+ */
+const authorsWritten = new Set<string>();
+
+/**
+ * Records the name attached to a message, so the author is never just a number.
+ *
+ * ★ SQUADRON OWNER, 2026-08-01 ★
+ *
+ * "we have users that appear looking like this: 820808610073280512 howcome?"
+ *
+ * Because names came from ONE place — the live guild member list, swept at startup — and activity
+ * comes from another. Anybody who posted and then left the squadron had months of real activity and
+ * no row to put a name on, so the table showed the snowflake. Six of them, and the officer reading
+ * that page has no way to tell whether 820808610073280512 was a recruit worth chasing or a spammer.
+ *
+ * The comment on `syncMemberNames` says "a member who leaves keeps their row". True — but only for
+ * somebody the sweep saw at least once. Leave before the bot's first run, or before it was ever
+ * granted the members intent, and there was never a row to keep.
+ *
+ * ★ THE MESSAGE ALREADY CARRIES THE ANSWER ★
+ *
+ * Every message has its author's `username` and `globalName` on it, whether or not that person is
+ * still in the guild. Taking the name from the same record that produced the count means the two can
+ * no longer disagree — which is the only reason they ever did.
+ *
+ * ★ WHAT IT DELIBERATELY DOES NOT WRITE ★
+ *
+ * `nick` and `roles`. Both are properties of guild MEMBERSHIP, not of a user, and a message does not
+ * carry them for someone who has left. Writing null over a current member's nickname would trade one
+ * missing name for a hundred.
+ */
+async function rememberAuthor(user: User | null | undefined): Promise<void> {
+  if (user === null || user === undefined || authorsWritten.has(user.id)) return;
+  authorsWritten.add(user.id);
+
+  await prisma.discordGuildMember
+    .upsert({
+      where: { discordId: user.id },
+      create: {
+        discordId: user.id,
+        username: user.username,
+        globalName: user.globalName,
+        isBot: user.bot,
+      },
+      update: { username: user.username, globalName: user.globalName, isBot: user.bot },
+    })
+    .catch((err: unknown) => {
+      // Best effort, and it must stay that way: a name is worth less than the count beside it, and
+      // the count is what a promotion decision is made on.
+      authorsWritten.delete(user.id);
+      logger.debug({ err, discordId: user.id }, 'could not record author name');
+    });
+}
+
 async function handle(msg: Message): Promise<void> {
   try {
+    await rememberAuthor(msg.author);
     await recorder.onMessage({
       discordId: msg.author?.id ?? '',
       channelId: msg.channelId,
@@ -337,6 +399,7 @@ async function backfillChannelDaily(channel: BackfillableChannel): Promise<numbe
       // Bots excluded here too. The recorder does it on the normal path, and
       // this path bypasses the recorder entirely.
       if (m.author?.bot !== true && typeof m.author?.id === 'string') {
+        await rememberAuthor(m.author);
         await activity
           .recordDayOnly(m.author.id, new Date(m.createdTimestamp), 'message')
           .catch(() => undefined);
@@ -459,6 +522,67 @@ async function syncMemberNames(): Promise<void> {
   }
 
   logger.info({ synced, total: members.size }, 'guild member names cached');
+}
+
+/** Never ask Discord for more than this many names in one start. */
+const MAX_NAME_LOOKUPS = 200;
+
+/**
+ * Puts a name on activity that already has none.
+ *
+ * ★ WHY `rememberAuthor` IS NOT ENOUGH ON ITS OWN ★
+ *
+ * It only names people as they post. The six unnamed ids the owner found had posted in JULY, and the
+ * backfill reads the current month only — their messages are behind a watermark that has long since
+ * moved past. Nothing will ever re-read them, so nothing will ever name them.
+ *
+ * ★ A USER IS NOT A MEMBER ★
+ *
+ * `guild.members.fetch` cannot help: these people are not in the guild, which is the whole reason
+ * they have no row. `client.users.fetch` reads the USER, which Discord still serves after somebody
+ * leaves — and that is exactly the record needed here.
+ *
+ * ★ IT RUNS EVERY START, AND COSTS NOTHING WHEN THERE IS NOTHING TO DO ★
+ *
+ * One indexed query returning zero rows. It is written as a reconciliation rather than a one-off
+ * repair because the same gap opens again for any historical month imported later, and a repair that
+ * has to be remembered is a repair that will not be run.
+ */
+async function nameUnknownAuthors(): Promise<void> {
+  const unknown = await prisma
+    .$queryRaw<{ discord_id: string }[]>`
+      SELECT DISTINCT a.discord_id
+        FROM (SELECT discord_id FROM member_activity_months
+              UNION SELECT discord_id FROM member_activity_days) a
+        LEFT JOIN discord_guild_members m ON m.discord_id = a.discord_id
+       WHERE m.discord_id IS NULL
+          OR (m.nick IS NULL AND m.username IS NULL AND m.global_name IS NULL)
+       LIMIT ${MAX_NAME_LOOKUPS}`
+    .catch((err: unknown) => {
+      logger.error({ err }, 'could not look for unnamed activity');
+      return [];
+    });
+
+  if (unknown.length === 0) return;
+
+  let named = 0;
+  let gone = 0;
+
+  for (const row of unknown) {
+    const user = await client.users.fetch(row.discord_id).catch(() => null);
+    if (user === null) {
+      // A deleted account. Discord has nothing left to give, and the activity stays under its id —
+      // which is honest: there is no name, rather than a name we made up.
+      gone += 1;
+      continue;
+    }
+
+    await rememberAuthor(user).then(() => {
+      named += 1;
+    });
+  }
+
+  logger.info({ named, unresolved: gone }, 'named activity that had no name');
 }
 
 /**
@@ -612,6 +736,7 @@ client.on(Events.ClientReady, (c) => {
   // all — see loadRolesUntilLoaded for the outage that caused.
   void loadRolesUntilLoaded()
     .then(() => syncMemberNames())
+    .then(() => nameUnknownAuthors())
     .then(() => seedVoiceOccupancy())
     .then(() => backfill())
     .catch((err: unknown) => logger.error({ err }, 'startup sweep failed'));
