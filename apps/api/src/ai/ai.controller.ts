@@ -17,9 +17,11 @@ import { AiStreamService, type AiLogLine } from './ai-stream.service.js';
 import {
   ShipBuildService,
   ShipBuildQueries,
+  ShipyardService,
   type BuildView,
   type ImportOutcome,
 } from './ship-build.service.js';
+import type { FitRole } from '@grims/ed-clients';
 import { AiClient, aiHealth } from './ai.client.js';
 import { ImageClient } from './image.client.js';
 import { TrainingStatusService } from './training.service.js';
@@ -86,6 +88,7 @@ export class AiController {
     @Inject(AssistantService) private readonly assistant: AssistantService,
     @Inject(ShipBuildService) private readonly builds: ShipBuildService,
     @Inject(ShipBuildQueries) private readonly buildQueries: ShipBuildQueries,
+    @Inject(ShipyardService) private readonly shipyard: ShipyardService,
   ) {}
 
   // ------------------------------------------------------------- ship builds
@@ -196,6 +199,88 @@ export class AiController {
      * doctrine and make the credit meaningless where it matters, on members' own contributions.
      */
     return this.builds.importLink(url, { submittedById: null, isBaseline: true });
+  }
+
+  // ---------------------------------------------------------------- shipyard
+  /**
+   * Every hull, for the Shipyard's ship picker.
+   *
+   * ★ SQUADRON OWNER, 2026-08-01 ★
+   *
+   * "a page under squadron called Shipyard ... 2 options build my own or AI Assisted build".
+   *
+   * Ungated beyond sign-in. Outfitting is not a privileged act — it is a member working out what to
+   * save for, and the data is Frontier's own.
+   */
+  @Get('shipyard/ships')
+  async shipyardShips(@User() caller: CurrentUser | undefined) {
+    if (caller === undefined) throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
+    return { ships: await this.shipyard.ships() };
+  }
+
+  /**
+   * One hull and every module that fits it.
+   *
+   * ★ THE WHOLE THING GOES DOWN AT ONCE ★
+   *
+   * A Coriolis-style outfitter re-computes mass, power and jump the instant a module changes.
+   * Asking the server per click would put a round trip between picking a power plant and seeing
+   * what it did — the one thing that screen has to feel immediate about.
+   */
+  @Get('shipyard/outfit/:shipId')
+  async shipyardOutfit(
+    @User() caller: CurrentUser | undefined,
+    @Param('shipId') shipId: string,
+  ) {
+    if (caller === undefined) throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
+
+    const outfit = await this.shipyard.outfit(shipId);
+    if (outfit === null) {
+      throw new AppError(ErrorCode.RESOURCE_NOT_VISIBLE, 'We do not have that ship in our data.');
+    }
+    return outfit;
+  }
+
+  /**
+   * Fits a ship for a role, within a budget.
+   *
+   * ★ THE ANSWER IS COMPUTED, NOT WRITTEN ★
+   *
+   * This is what the AI-assisted path calls and what the assistant will call. Every module comes
+   * from Frontier's data and every number from the stats calculator — the model's job is to explain
+   * the result, never to invent one.
+   */
+  @Post('shipyard/fit')
+  async shipyardFit(@User() caller: CurrentUser | undefined, @Body() body: unknown) {
+    if (caller === undefined) throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
+
+    const input = (body ?? {}) as Record<string, unknown>;
+    const role = typeof input['role'] === 'string' ? input['role'] : '';
+
+    const ROLES: readonly string[] = ['mining', 'combat', 'explorer', 'trader'];
+    if (!ROLES.includes(role)) {
+      throw new AppError(ErrorCode.VALIDATION_FAILED, `Unknown role: ${role}`);
+    }
+
+    const budget = typeof input['budget'] === 'number' && input['budget'] > 0 ? input['budget'] : undefined;
+    const shipId = typeof input['shipId'] === 'string' && input['shipId'] !== '' ? input['shipId'] : undefined;
+
+    const fit = await this.builds.fit({ role: role as FitRole, budget, shipId });
+
+    if (fit === null) {
+      /*
+       * Nothing affordable is a real answer, and saying so beats fitting the cheapest hull anyway
+       * and letting somebody discover the price at the shipyard.
+       */
+      throw new AppError(
+        ErrorCode.VALIDATION_FAILED,
+        budget === undefined
+          ? 'No ship could be fitted for that.'
+          : `Nothing can be fitted for that role within ${Math.round(budget / 1_000_000)} million credits.`,
+      );
+    }
+
+    return fit;
   }
 
   /** Removes a build: your own always, anybody's with AI_REVIEW. */

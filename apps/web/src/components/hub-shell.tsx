@@ -27,15 +27,21 @@ import {
   KeyIcon,
   AcademicCapIcon,
   SparklesIcon,
+  WrenchScrewdriverIcon,
 } from '@heroicons/react/24/outline';
 import { ChevronDownIcon } from '@heroicons/react/20/solid';
 import { ViewAsBanner } from './view-as-banner';
 import {
   NAV_STORAGE_KEY,
+  SUBSECTION_STORAGE_KEY,
   openSections,
+  openSubsections,
   parseStored,
+  parseStoredSubsections,
   sectionOf,
+  subsectionOf,
   toggleSection,
+  toggleSubsection,
   type Section,
 } from './nav-sections';
 import type { MeResponse, NavItem } from '../lib/api';
@@ -147,11 +153,39 @@ function SidebarContents({ me, current }: { me: MeResponse; current: string }) {
    */
   const uid = useId();
   const here = sectionOf(me.nav, current);
+  const hereSub = subsectionOf(me.nav, current);
+
   const [open, setOpen] = useState<Set<Section>>(() => openSections(null, here));
+  /*
+   * ★ SUBCATEGORIES START CLOSED — SQUADRON OWNER, 2026-08-01 ★
+   *
+   * "make this collapsable and make it closed by default please!"
+   *
+   * Separate state and a separate key from the sections. They are the same control with opposite
+   * defaults, and one stored set could not express both: an absent entry means "use the open list"
+   * for a section and "closed" for a subcategory.
+   */
+  const [openSubs, setOpenSubs] = useState<Set<string>>(() => openSubsections(null, hereSub));
 
   useEffect(() => {
     setOpen(openSections(parseStored(window.localStorage.getItem(NAV_STORAGE_KEY)), here));
-  }, [here]);
+    setOpenSubs(
+      openSubsections(
+        parseStoredSubsections(window.localStorage.getItem(SUBSECTION_STORAGE_KEY)),
+        hereSub,
+      ),
+    );
+  }, [here, hereSub]);
+
+  const toggleSub = (name: string) => {
+    const next = toggleSubsection(openSubs, name);
+    setOpenSubs(openSubsections([...next], hereSub));
+    try {
+      window.localStorage.setItem(SUBSECTION_STORAGE_KEY, JSON.stringify([...next]));
+    } catch {
+      /* the preference is not worth an error */
+    }
+  };
 
   const toggle = (section: Section) => {
     const next = toggleSection(open, section);
@@ -217,7 +251,16 @@ function SidebarContents({ me, current }: { me: MeResponse; current: string }) {
                 hidden={!expanded}
                 className="mt-2 -mx-2 list-none space-y-1 p-0"
               >
-                {items.map((item) => {
+                {/*
+                  ★ SUBCATEGORIES FIRST, THEN LOOSE ITEMS ★
+
+                  A group heading between two plain links reads as if the links below it belong to
+                  it. Putting every subcategory after the section's own items keeps the nesting
+                  legible without indentation having to carry the whole message.
+                */}
+                {items
+                  .filter((i) => i.subsection === undefined)
+                  .map((item) => {
                   const Icon = ICONS[item.href] ?? HomeIcon;
                   const active = current === item.href;
                   return (
@@ -238,6 +281,70 @@ function SidebarContents({ me, current }: { me: MeResponse; current: string }) {
                     </li>
                   );
                 })}
+
+                {[...new Set(items.map((i) => i.subsection).filter((v): v is string => v !== undefined))].map(
+                  (sub) => {
+                    const subOpen = openSubs.has(sub);
+                    const subId = `${uid}-${section}-${sub.replace(/\s+/g, '-')}`;
+                    const subItems = items.filter((i) => i.subsection === sub);
+
+                    return (
+                      <li key={sub} className="mt-1">
+                        <button
+                          type="button"
+                          onClick={() => toggleSub(sub)}
+                          aria-expanded={subOpen}
+                          aria-controls={subId}
+                          className="flex w-full items-center justify-between gap-2 rounded p-2 text-sm/6 text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-panel-hover)] hover:text-[var(--color-text-primary)]"
+                        >
+                          <span className="flex items-center gap-x-3">
+                            <WrenchScrewdriverIcon aria-hidden="true" className="size-5 shrink-0" />
+                            {sub}
+                          </span>
+                          <ChevronDownIcon
+                            aria-hidden="true"
+                            className={cx(
+                              'size-3.5 shrink-0 transition-transform duration-150',
+                              subOpen ? 'rotate-0' : '-rotate-90',
+                            )}
+                          />
+                        </button>
+
+                        {/*
+                          Indented by a border rather than by padding alone: a vertical line makes
+                          the nesting readable at a glance, where indentation alone reads as an
+                          accident on a narrow sidebar.
+                        */}
+                        <ul
+                          id={subId}
+                          role="list"
+                          hidden={!subOpen}
+                          className="ml-4 mt-1 list-none space-y-1 border-l border-[var(--color-border-hairline)] p-0 pl-2"
+                        >
+                          {subItems.map((item) => {
+                            const active = current === item.href;
+                            return (
+                              <li key={item.href}>
+                                <a
+                                  href={item.href}
+                                  aria-current={active ? 'page' : undefined}
+                                  className={cx(
+                                    'group flex gap-x-3 rounded p-2 text-sm/6 transition-colors',
+                                    active
+                                      ? 'bg-[color-mix(in_srgb,var(--color-brand-orange)_14%,transparent)] text-[var(--color-brand-orange-bright)]'
+                                      : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-panel-hover)] hover:text-[var(--color-text-primary)]',
+                                  )}
+                                >
+                                  {item.label}
+                                </a>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </li>
+                    );
+                  },
+                )}
               </ul>
             </li>
             );
@@ -365,7 +472,14 @@ export function HubShell({
           Above the top bar rather than inside it: a preview is a state the whole page is in, not a
           control that lives in the chrome.
         */}
-        {me.viewingAs !== null && <ViewAsBanner roleName={me.viewingAs.name} />}
+        {/*
+          `!= null`, catching undefined as well as null.
+          
+          `!== null` alone crashes the entire shell on a response that omits the field — an older
+          cached client, or any error path that builds a partial `me`. The banner is chrome; it must
+          never be the reason a page fails to render.
+        */}
+        {me.viewingAs != null && <ViewAsBanner roleName={me.viewingAs.name} />}
 
         {/* ------------------------------------------------------- top bar */}
         <div className="sticky top-0 z-40 flex h-[var(--nav-h)] shrink-0 items-center gap-x-4 border-b border-[var(--color-border-hairline)] bg-[color-mix(in_srgb,var(--color-surface-void)_78%,transparent)] px-4 backdrop-blur-md sm:gap-x-6 sm:px-6 lg:px-8">

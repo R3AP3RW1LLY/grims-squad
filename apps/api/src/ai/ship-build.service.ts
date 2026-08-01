@@ -16,8 +16,11 @@ import {
   decodeCoriolis,
   decodeEdsy,
   decodeLoadout,
+  fitForRole,
   type BuildCatalogue,
   type EdsySymbolLookup,
+  type FitRequest,
+  type FitResult,
 } from '@grims/ed-clients';
 
 /**
@@ -160,6 +163,16 @@ export class ShipBuildService {
       isBaseline: false,
       fromJournal: true,
     });
+  }
+
+  /**
+   * Fits a ship for a role, within a budget.
+   *
+   * The catalogue is this service's already, so the fitter lives behind it rather than being wired
+   * separately — one place that knows how to load ships and modules.
+   */
+  async fit(request: FitRequest): Promise<FitResult | null> {
+    return fitForRole(await this.catalogue(), request);
   }
 
   /**
@@ -413,3 +426,186 @@ export class ShipBuildQueries {
     await this.db.shipBuild.delete({ where: { id } });
   }
 }
+
+/**
+ * What the Shipyard needs to render an outfitting screen.
+ *
+ * ★ SQUADRON OWNER, 2026-08-01 ★
+ *
+ * "a page under squadron called Shipyard that operates like the signature builder, 2 options build
+ * my own or AI Assisted build, build my own should give a builder that looks and feels like
+ * coriolis, works the same way etc but styled to match our theme".
+ *
+ * ★ THE WHOLE CATALOGUE GOES DOWN ONCE ★
+ *
+ * A Coriolis-style outfitter changes a module and re-computes everything instantly. Asking the
+ * server on every click would put a round trip between picking a power plant and seeing what it did
+ * to the power budget, which is the one thing that outfitter has to feel immediate about.
+ *
+ * So the ship's slots and every module that could go in them are sent with the page, and the
+ * browser does the arithmetic. It is a few hundred kilobytes for a screen somebody spends ten
+ * minutes on.
+ */
+export interface ShipyardModule {
+  readonly id: string;
+  readonly grp: string;
+  readonly name: string;
+  readonly class: number;
+  readonly rating: string | null;
+  readonly mass: number | null;
+  readonly power: number | null;
+  readonly cost: number | null;
+  /** Everything else coriolis records — cargo, fuel, pgen, damage, the shield curve. */
+  readonly raw: Record<string, unknown>;
+}
+
+export interface ShipyardShip {
+  readonly id: string;
+  readonly name: string;
+  readonly hullCost: number;
+  readonly properties: Record<string, unknown>;
+  readonly bulkheads: ShipyardModule[];
+  readonly slots: Array<{
+    group: string;
+    index: number;
+    size: number;
+    fixedGroup: string | null;
+    eligible: readonly string[] | null;
+  }>;
+  /** The factory loadout, per group, so "reset to stock" needs no second request. */
+  readonly defaults: Record<string, readonly (string | null)[]>;
+}
+
+export class ShipyardService {
+  constructor(private readonly builds: ShipBuildService) {}
+
+  /** Every hull, with enough to list and price them. */
+  async ships(): Promise<Array<{ id: string; name: string; hullCost: number; pad: number }>> {
+    const catalogue = await this.builds.catalogue();
+
+    return catalogue
+      .ships()
+      .map((ship) => ({
+        id: ship.id,
+        name: ship.name,
+        hullCost:
+          typeof ship.properties['hullCost'] === 'number'
+            ? ship.properties['hullCost']
+            : typeof ship.properties['retailCost'] === 'number'
+              ? ship.properties['retailCost']
+              : 0,
+        // Landing pad size decides where a ship can dock at all, which is the first thing anybody
+        // filters a shipyard by.
+        pad: typeof ship.properties['class'] === 'number' ? ship.properties['class'] : 0,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /** One hull and everything that fits it. */
+  async outfit(shipId: string): Promise<{ ship: ShipyardShip; modules: ShipyardModule[] } | null> {
+    const catalogue = await this.builds.catalogue();
+    const ship = catalogue.ship(shipId);
+    if (ship === null) return null;
+
+    const strip = (m: {
+      id: string;
+      grp: string;
+      name: string;
+      class: number;
+      rating: string | null;
+      mass: number | null;
+      power: number | null;
+      cost: number | null;
+      raw: Readonly<Record<string, unknown>>;
+    }): ShipyardModule => ({
+      id: m.id,
+      grp: m.grp,
+      name: m.name,
+      class: m.class,
+      rating: m.rating,
+      mass: m.mass,
+      power: m.power,
+      cost: m.cost,
+      raw: { ...m.raw },
+    });
+
+    /*
+     * Only what this hull can actually take. Sending all 970 modules for a Sidewinder would be four
+     * times the payload and every one of them wrong for it — the outfitter would then have to
+     * filter by size on the client, which is the server's job and it has the slot list.
+     */
+    const wanted = new Set<string>();
+    const seen = new Set<string>();
+    const modules: ShipyardModule[] = [];
+
+    for (const slot of ship.slots) {
+      const category =
+        slot.group === 'standard'
+          ? 'standard'
+          : slot.group === 'internal'
+            ? 'internal'
+            : slot.size === 0
+              ? 'utility'
+              : 'hardpoint';
+
+      const groups: readonly string[] =
+        slot.fixedGroup !== null
+          ? [slot.fixedGroup]
+          : (slot.eligible ?? GROUPS_BY_CATEGORY[category] ?? []);
+
+      for (const group of groups) {
+        wanted.add(`${category}:${group}`);
+        for (const module of catalogue.modulesIn(category, group)) {
+          if (module.class > slot.size) continue;
+
+          const key = `${category}:${module.id}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          modules.push(strip(module));
+        }
+      }
+    }
+
+    return {
+      ship: {
+        id: ship.id,
+        name: ship.name,
+        hullCost:
+          typeof ship.properties['hullCost'] === 'number'
+            ? ship.properties['hullCost']
+            : 0,
+        properties: { ...ship.properties },
+        bulkheads: ship.bulkheads.map(strip),
+        slots: ship.slots.map((s) => ({
+          group: s.group,
+          index: s.index,
+          size: s.size,
+          fixedGroup: s.fixedGroup,
+          eligible: s.eligible,
+        })),
+        defaults: { ...ship.defaults },
+      },
+      modules,
+    };
+  }
+}
+
+/**
+ * Which module groups belong in which kind of slot.
+ *
+ * ★ LISTED, NOT DERIVED ★
+ *
+ * The catalogue knows every group it holds, but "every internal group" includes fighter hangars and
+ * luxury cabins that most hulls cannot take and nobody is outfitting for. This is the vocabulary of
+ * the outfitter — what a person picking a module expects to see offered — and it is a shorter list
+ * than everything that technically exists.
+ */
+const GROUPS_BY_CATEGORY: Record<string, readonly string[]> = {
+  standard: ['pp', 't', 'fsd', 'ls', 'pd', 's', 'ft'],
+  hardpoint: ['mc', 'pl', 'bl', 'c', 'rg', 'pa', 'ml', 'abl', 'sdm', 'mr', 'tp', 'nl', 'axmc', 'rfl'],
+  utility: ['sb', 'ch', 'hs', 'ecm', 'pwa', 'xs', 'kw', 'ws', 'sfn'],
+  internal: [
+    'cr', 'sg', 'bsg', 'psg', 'hr', 'mrp', 'scb', 'fs', 'am', 'rf', 'cc', 'pc', 'dtl', 'fx',
+    'rpl', 'rsl', 'mlc', 'hb', 'pce', 'pci', 'pcm', 'pcq', 'fh', 'pas', 'gsc', 'sua', 'dc', 'sc',
+  ],
+};

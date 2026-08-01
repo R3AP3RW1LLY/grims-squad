@@ -30,6 +30,21 @@ export interface NavItem {
    * the same as it not existing.
    */
   readonly section: 'squadron' | 'personal' | 'ai' | 'admin';
+  /**
+   * A collapsible group WITHIN a section. Absent for items that sit directly under the heading.
+   *
+   * ★ SQUADRON OWNER, 2026-08-01 ★
+   *
+   * "create the shipyard page under a subcategory in the Squadron category called Shipyard then
+   * name the page outfitter please. make this collapsable and make it closed by default."
+   *
+   * A second level exists because the Shipyard is a PLACE with several things in it — the outfitter
+   * today, comparisons and saved builds later — and hanging them all off the Squadron heading would
+   * bury the roster and the ops board among tools nobody uses daily.
+   *
+   * Closed by default, so an unused subcategory costs one line rather than a screenful.
+   */
+  readonly subsection?: string;
   /** A one-line description, for the dashboard cards. */
   readonly blurb: string;
 }
@@ -219,6 +234,24 @@ const NAV: readonly NavDefinition[] = [
    * lesson from last time is not "never add a nav entry" — it is that the entry and the page ship
    * together or neither does.
    */
+  /*
+   * ★ THE SHIPYARD — SQUADRON OWNER, 2026-08-01 ★
+   *
+   * "a page under squadron called Shipyard that operates like the signature builder, 2 options
+   * build my own or AI Assisted build" — and, refined: a subcategory called Shipyard with the page
+   * named Outfitter.
+   *
+   * Ungated. Working out what to save for is not a privileged act, and the data behind it is
+   * Frontier's own — every member should be able to plan a ship.
+   */
+  {
+    href: '/shipyard',
+    label: 'Outfitter',
+    section: 'squadron',
+    subsection: 'Shipyard',
+    blurb: 'Outfit any hull in the game, or let the assistant fit one to a budget.',
+    requires: null,
+  },
   {
     href: '/app/members',
     label: 'Squad members',

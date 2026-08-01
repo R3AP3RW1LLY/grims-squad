@@ -81,3 +81,67 @@ export function toggleSection(open: ReadonlySet<Section>, section: Section): Set
   else next.add(section);
   return next;
 }
+
+/**
+ * Subcategories, which are collapsed unless somebody opens them.
+ *
+ * ★ SQUADRON OWNER, 2026-08-01 ★
+ *
+ * "make this collapsable and make it closed by default please!"
+ *
+ * ★ WHY THEY GET THEIR OWN STORAGE KEY ★
+ *
+ * A subcategory and a section are the same control with different defaults — sections Squadron and
+ * Administration start OPEN, every subcategory starts CLOSED. Sharing one stored set would make an
+ * absent entry ambiguous: for a section it means "use the default open list", for a subcategory it
+ * means closed, and one value cannot mean both.
+ */
+export const SUBSECTION_STORAGE_KEY = 'gmsd.nav.subsections.open';
+
+/**
+ * Which subcategories are open.
+ *
+ * ★ THE ONE HOLDING THE CURRENT PAGE IS ALWAYS OPEN ★
+ *
+ * Same rule as sections, and it matters more here: a subcategory is closed by default, so landing
+ * on the Outfitter from a link would otherwise show a sidebar with the Shipyard collapsed and no
+ * indication that the page you are on lives inside it.
+ */
+export function openSubsections(
+  stored: readonly string[] | null,
+  currentSubsection: string | null,
+): Set<string> {
+  const open = new Set<string>(stored ?? []);
+  if (currentSubsection !== null) open.add(currentSubsection);
+  return open;
+}
+
+/** The subcategory containing `href`, or null. */
+export function subsectionOf(items: readonly NavItem[], href: string): string | null {
+  return items.find((i) => i.href === href)?.subsection ?? null;
+}
+
+/**
+ * Reads stored subcategory names.
+ *
+ * Unlike sections, junk here falls back to an EMPTY set rather than to a default list — closed is
+ * the default, so an unreadable value costs nothing and collapsing everything is exactly what a
+ * first visit looks like anyway.
+ */
+export function parseStoredSubsections(raw: string | null): string[] {
+  if (raw === null) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Open a closed subcategory, close an open one. */
+export function toggleSubsection(open: ReadonlySet<string>, name: string): Set<string> {
+  const next = new Set(open);
+  if (next.has(name)) next.delete(name);
+  else next.add(name);
+  return next;
+}

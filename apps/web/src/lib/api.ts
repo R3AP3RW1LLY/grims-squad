@@ -719,6 +719,13 @@ export interface NavItem {
   // 'ai' added 2026-08-01 — the GMSD AI sidebar group. Mirrors NavItem in the API's nav.ts; the
   // API decides which items a member gets, this only names the headings.
   section: 'squadron' | 'personal' | 'ai' | 'admin';
+  /**
+   * A collapsible group WITHIN a section, closed by default. Absent for items that sit directly
+   * under the heading.
+   *
+   * Squadron owner, 2026-08-01: the Shipyard is a subcategory of Squadron holding the Outfitter.
+   */
+  subsection?: string;
   blurb: string;
 }
 
@@ -1391,3 +1398,27 @@ export const getShipBuildsGated = (): Promise<
     canModerate: boolean;
   }>
 > => getAdmin('/v1/ai/builds');
+
+/** A hull in the Shipyard's picker. */
+export interface ShipyardShipRow {
+  id: string;
+  name: string;
+  hullCost: number;
+  /** 1 small, 2 medium, 3 large. Decides where it can dock at all. */
+  pad: number;
+}
+
+export const getShipyardShips = (): Promise<{ ships: ShipyardShipRow[] } | null> =>
+  get('/v1/ai/shipyard/ships', { authed: true });
+
+/**
+ * One hull and every module that fits it.
+ *
+ * Typed loosely on purpose: the payload is coriolis's own module records, and the outfitter hands
+ * them straight to `computeStats`, which is where their shape is actually known. Restating that
+ * shape here would be a second definition free to drift from the one doing the arithmetic.
+ */
+export const getShipyardOutfit = (
+  shipId: string,
+): Promise<import('../app/(hub)/shipyard/outfitter-catalogue').OutfitPayload | null> =>
+  get(`/v1/ai/shipyard/outfit/${encodeURIComponent(shipId)}`, { authed: true });

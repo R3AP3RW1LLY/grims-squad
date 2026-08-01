@@ -17,7 +17,7 @@ import { AiController } from './ai.controller.js';
 import { TrainingStatusService } from './training.service.js';
 import { KnowledgeService } from './knowledge.service.js';
 import { AssistantService } from './assistant.service.js';
-import { ShipBuildService, ShipBuildQueries } from './ship-build.service.js';
+import { ShipBuildService, ShipBuildQueries, ShipyardService } from './ship-build.service.js';
 import { CorpusService } from './corpus.service.js';
 import { JobLogListener } from './job-log.listener.js';
 import { ArtworkController } from './artwork.controller.js';
@@ -270,6 +270,16 @@ export class ModelWarmer implements OnModuleInit, OnModuleDestroy {
       provide: ShipBuildQueries,
       inject: [PrismaClient],
       useFactory: (db: PrismaClient) => new ShipBuildQueries(db),
+    },
+    /*
+     * The Shipyard's outfitting data. Built on the import service rather than beside it, because
+     * both need the same ship and module catalogue and two copies would be two caches to go stale
+     * independently.
+     */
+    {
+      provide: ShipyardService,
+      inject: [ShipBuildService],
+      useFactory: (builds: ShipBuildService) => new ShipyardService(builds),
     },
     /*
      * Brings the worker's ingest and embed activity onto the live log. The jobs run in a container
