@@ -179,6 +179,59 @@ export async function writeBatch(db: PrismaClient, rows: readonly WritableRow[])
  * half way still leaves evidence that it tried.
  */
 export async function beginIngest(db: PrismaClient, source: string): Promise<string> {
+  /*
+   * ★ CLOSE WHATEVER THE LAST LIFE LEFT BEHIND ★
+   *
+   * `finishIngest` writes the outcome, and it only runs if the process lives long enough to call
+   * it. A job that is killed — OOM, a container stop, `pnpm dev` tearing its children down, a host
+   * reboot — leaves an unfinished row and no error, forever. Nothing ever cleaned those up.
+   *
+   * On 2026-08-01 `galaxy` had two of them. Every one of its nine runs had SUCCEEDED, the most
+   * recent finishing with all 448,676 rows, and the training page still reported the source as
+   * stalled, because it was reading a corpse from ninety minutes earlier. The owner reasonably
+   * read that as "Systems and Stations keeps failing".
+   *
+   * Closing it here rather than in a separate sweep means it happens exactly when somebody is in a
+   * position to care: a job for this source is starting, so any older unfinished run for the same
+   * source is definitively over.
+   *
+   * `finished_at` comes from the last heartbeat, not from now: `progress_at` is the last moment we
+   * know that process was alive, and stamping the present would claim it kept working through
+   * however long it was actually dead.
+   */
+  const stranded = await db.$queryRawUnsafe<Array<{ id: string; rows: number | null }>>(
+    `UPDATE knowledge_ingests
+        SET finished_at = COALESCE(progress_at, started_at),
+            error = 'The job stopped without reporting a result — it was killed or it crashed.'
+      WHERE source = $1 AND finished_at IS NULL
+      RETURNING id, rows`,
+    source,
+  );
+
+  for (const s of stranded) {
+    /*
+     * Into the audit log as a failure, because that is what it was. The training page will stop
+     * showing it the moment this run succeeds — which is correct, a crash followed by a success is
+     * not a current problem — and the audit log is then the only place the crash is recorded at
+     * all. Swallowed: cleanup must never stop the run it is clearing the way for.
+     */
+    await db.auditLog
+      .create({
+        data: {
+          actorType: 'system',
+          action: 'knowledge.ingest.failed',
+          targetType: 'knowledge_source',
+          targetId: source,
+          after: {
+            error: 'Stopped without reporting a result — killed or crashed.',
+            rowsWritten: s.rows ?? 0,
+            detectedBy: 'the next run of the same source',
+          },
+        },
+      })
+      .catch(() => undefined);
+  }
+
   const rows = await db.$queryRawUnsafe<Array<{ id: string }>>(
     /*
      * `rows` and `progress_at` are set from the start rather than left null.

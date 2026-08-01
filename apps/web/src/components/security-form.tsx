@@ -1,8 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { apiPost } from '../lib/api-client';
+import { CodeInput } from './code-input';
 
 type Stage = 'idle' | 'showing-secret' | 'showing-codes';
 
@@ -65,7 +66,7 @@ export function SecurityForm({
     }
   }
 
-  async function confirm() {
+  const confirm = useCallback(async () => {
     setBusy(true);
     setError(null);
     try {
@@ -80,10 +81,23 @@ export function SecurityForm({
       setStage('showing-codes');
     } catch (e) {
       setError((e as Error).message);
+      /*
+       * Cleared on failure, like the step-up gate. A rejected TOTP code is expired by definition,
+       * so leaving the digits in place only invites confirming the same dead code twice — and empty
+       * boxes say "look at your phone again" more plainly than any error text.
+       */
+      setCode('');
     } finally {
       setBusy(false);
     }
-  }
+    // Rebuilt whenever the code changes, because it sends the code it closed over. That is what
+    // makes auto-submit send the digits that just completed rather than the previous render's.
+  }, [code]);
+
+  /** Adapts the async submit to CodeInput's void callback, without changing identity gratuitously. */
+  const onConfirmComplete = useCallback(() => {
+    void confirm();
+  }, [confirm]);
 
   if (enrolled && stage === 'idle') {
     return (
@@ -130,8 +144,11 @@ export function SecurityForm({
 
       {stage === 'showing-secret' && (
         <>
-          <p className="text-[var(--color-text-primary)]">
-            Scan this with your authenticator app, then enter the six-digit code it shows.
+          <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-[var(--color-brand-cyan-bright)]">
+            Step 1
+          </p>
+          <p className="mt-2 text-[var(--color-text-primary)]">
+            Scan this with your authenticator app.
           </p>
 
           {/*
@@ -182,26 +199,45 @@ export function SecurityForm({
             </p>
           </details>
 
-          <label htmlFor="totp-code" className="mt-8 block text-[var(--color-text-primary)]">
-            Six-digit code
-          </label>
-          <input
-            id="totp-code"
-            value={code}
-            onChange={(e) => setCode(e.currentTarget.value)}
-            inputMode="numeric"
-            autoComplete="one-time-code"
-            maxLength={6}
-            className="mt-2 w-40 rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-void)] px-4 py-2.5 font-mono text-lg tracking-[0.3em] text-[var(--color-text-primary)]"
-          />
-          <button
-            type="button"
-            onClick={() => void confirm()}
-            disabled={busy || code.length !== 6}
-            className="ml-4 rounded border border-[var(--color-brand-cyan-bright)] px-5 py-2.5 font-mono text-[12px] uppercase tracking-[0.24em] text-[var(--color-brand-cyan-bright)] disabled:opacity-50"
-          >
-            Confirm
-          </button>
+          {/*
+            ★ THE CODE STEP, SET APART FROM THE QR STEP ★
+
+            These are two different actions — point a camera, then type what it shows — and they
+            used to run together as one column of text with a 160px field and a button floating to
+            its right on a `ml-4`. The rule and the step number say where one ends and the other
+            begins, and the button now sits UNDER the field it belongs to rather than beside it,
+            which is also the only arrangement that survives a narrow screen.
+          */}
+          <div className="mt-8 border-t border-[var(--color-border-hairline)] pt-7">
+            <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-[var(--color-brand-cyan-bright)]">
+              Step 2
+            </p>
+            <p className="mt-2 text-[var(--color-text-primary)]">
+              Enter the six-digit code your authenticator is showing.
+            </p>
+
+            <div className="mt-5">
+              <CodeInput
+                value={code}
+                onChange={setCode}
+                onComplete={onConfirmComplete}
+                label="Six-digit code"
+                disabled={busy}
+              />
+            </div>
+            <p className="mt-3 font-mono text-[11px] text-[var(--color-text-secondary)]">
+              {busy ? 'Checking…' : 'Confirmed as soon as the sixth digit lands.'}
+            </p>
+
+            <button
+              type="button"
+              onClick={() => void confirm()}
+              disabled={busy || code.length !== 6}
+              className="mt-5 rounded border border-[var(--color-brand-cyan-bright)] px-6 py-3 font-mono text-[12px] uppercase tracking-[0.24em] text-[var(--color-brand-cyan-bright)] transition-opacity hover:opacity-80 disabled:opacity-40"
+            >
+              {busy ? 'Checking…' : 'Confirm'}
+            </button>
+          </div>
         </>
       )}
 

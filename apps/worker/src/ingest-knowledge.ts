@@ -3,6 +3,7 @@ import { PrismaClient } from '@grims/db';
 import { readCoriolis } from './jobs/ingest-coriolis.js';
 import { refreshCoriolis } from './jobs/coriolis-refresh.js';
 import { streamGalaxy } from './jobs/ingest-galaxy.js';
+import { refreshGalaxyDump } from './jobs/galaxy-download.js';
 import { writeBatch, beginIngest, finishIngest, progressIngest } from './jobs/knowledge-writer.js';
 import { rebuildMarketEntries } from './jobs/market-flatten.js';
 import { readInaraKnowledge } from './jobs/ingest-inara.js';
@@ -96,13 +97,40 @@ async function ingestCoriolis(db: PrismaClient): Promise<void> {
 }
 
 async function ingestGalaxy(db: PrismaClient): Promise<void> {
-  if (!existsSync(GALAXY_FILE)) {
-    console.log(`galaxy: skipped, no dump at ${GALAXY_FILE}`);
-    return;
-  }
-
   const run = await beginIngest(db, 'galaxy');
   try {
+    /*
+     * ★ FETCH FIRST, AND A MISSING DUMP IS A FAILURE — squadron owner, 2026-08-01 ★
+     *
+     * "the Systems and Stations Ingestion keeps failing ... deep dive all ingestions and ensure
+     * they are all working 100% reliably"
+     *
+     * This used to begin with `if (!existsSync(GALAXY_FILE)) { console.log(...); return }` — before
+     * any run row was written. Two consequences, both bad:
+     *
+     *   - On the production host the default path is a WINDOWS path, so the file cannot exist. The
+     *     job would have returned silently every night, written nothing, and left the training page
+     *     saying "Never run" for ever. Not broken-looking. Just absent.
+     *   - Even here, the data could never be fresher than the last time a human downloaded it.
+     *
+     * Now it fetches, and if it cannot get a dump AND has none on disk, that is recorded as a
+     * failure — which is what it is. Coriolis already worked this way; the two disagreed, and the
+     * quieter one was wrong.
+     */
+    const dump = await refreshGalaxyDump(GALAXY_FILE);
+    if (dump.changed) {
+      console.log(`galaxy: downloaded a new dump (${(dump.bytes ?? 0) / 1e9} GB)`);
+      await announce(db, { level: 'info', kind: 'ingest', message: 'galaxy: downloaded a fresh Spansh dump' });
+    } else if (dump.skipped !== null) {
+      console.log(`galaxy: ${dump.skipped}`);
+    }
+
+    if (!dump.available || !existsSync(GALAXY_FILE)) {
+      throw new Error(
+        `no galaxy dump available at ${GALAXY_FILE}${dump.skipped === null ? '' : ` — ${dump.skipped}`}`,
+      );
+    }
+
     let written = 0;
     let lastLogged = 0;
     const tally = { inserted: 0, updated: 0 };
@@ -139,29 +167,43 @@ async function ingestGalaxy(db: PrismaClient): Promise<void> {
       BATCH,
     );
 
-    await finishIngest(db, run, { rows: written, ...tally, source: 'galaxy' });
     console.log(
       `galaxy: ${written} rows (${tally.inserted} new, ${tally.updated} updated; ` +
         `${stats.systems} systems, ${stats.stations} stations)`,
     );
+
+    /*
+     * ★ FLATTEN AFTER EVERY GALAXY INGEST, AND BEFORE THE RUN IS CALLED DONE ★
+     *
+     * market_entries is derived from what was just written, so it is stale the moment the rows
+     * land. Rebuilding it here — rather than on its own schedule — means the two can never
+     * disagree, which is the failure that would have members routed to prices that no longer exist
+     * while the station page showed the correct ones.
+     *
+     * ★ IT USED TO RUN AFTER finishIngest, AND THAT WAS TWO BUGS ★
+     *
+     * The rebuild takes ten minutes or more — it truncates an eighteen-million-row table, reloads
+     * it and recreates five indexes. With the run already closed, the training page said "Trained"
+     * for that entire time, over a market table that was at that moment EMPTY.
+     *
+     * And if the rebuild threw, the catch below called `finishIngest` a second time on an
+     * already-finished run, overwriting a successful result with an error and a null row count.
+     *
+     * Inside the run, both stop being possible: the page says "Training now" until the data is
+     * actually usable, and the outcome is written exactly once.
+     */
+    const flat = await rebuildMarketEntries(db);
+    console.log(`markets: ${flat} rows flattened for route-finding`);
+
+    await finishIngest(db, run, { rows: written, ...tally, source: 'galaxy' });
     await announce(db, {
       level: 'info',
       kind: 'ingest',
       message:
         `galaxy: ${tally.inserted.toLocaleString()} new, ${tally.updated.toLocaleString()} updated ` +
-        `(${stats.systems.toLocaleString()} systems, ${stats.stations.toLocaleString()} stations)`,
+        `(${stats.systems.toLocaleString()} systems, ${stats.stations.toLocaleString()} stations), ` +
+        `${flat.toLocaleString()} market rows flattened`,
     });
-
-    /*
-     * ★ FLATTEN AFTER EVERY GALAXY INGEST ★
-     *
-     * market_entries is derived from what was just written, so it is stale the moment the ingest
-     * finishes. Rebuilding it here — rather than on its own schedule — means the two can never
-     * disagree, which is the failure that would have members routed to prices that no longer exist
-     * while the station page showed the correct ones.
-     */
-    const flat = await rebuildMarketEntries(db);
-    console.log(`markets: ${flat} rows flattened for route-finding`);
   } catch (e) {
     await finishIngest(db, run, { error: e instanceof Error ? e.message : String(e) });
     throw e;

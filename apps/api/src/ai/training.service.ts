@@ -131,9 +131,32 @@ export class TrainingStatusService {
             * on the full dump; six hours is generous enough that a slow night is never mistaken
             * for a corpse.
             */
+           /*
+            * ★ AND IT MUST BE NEWER THAN THE LAST SUCCESS — squadron owner, 2026-08-01 ★
+            *
+            * "the Systems and Stations Ingestion keeps failing"
+            *
+            * It was not failing. It had succeeded every time. The galaxy source had NINE runs, ZERO
+            * of them errored, and the most recent finished at 03:41:03 with all 448,676 rows —
+            * while this page reported it stalled, because a run killed at 02:09 had left an
+            * unfinished row and that row was picked regardless of everything that came after.
+            *
+            * One crashed run poisoned the display permanently. Every subsequent success was
+            * invisible, so the source looked broken for as long as anybody cared to look, and the
+            * only way out was deleting a row by hand.
+            *
+            * An unfinished run OLDER than the last completed one is not in progress and is not a
+            * stall — it is history that has already been superseded. The beginIngest path now
+            * closes those on the way past, but the guard belongs here too: this page must not
+            * depend on a cleanup having run in order to tell the truth.
+            *
+            * (No backticks in this comment. It sits inside a template literal, and one would end
+            * the SQL string right here. That has happened three times in this codebase.)
+            */
            LEFT JOIN LATERAL (
                   SELECT started_at, rows, progress_at FROM knowledge_ingests
                    WHERE source = s.source AND finished_at IS NULL
+                     AND (l.finished_at IS NULL OR started_at > l.finished_at)
                    ORDER BY started_at DESC LIMIT 1) r ON true`,
       ),
     ]);
