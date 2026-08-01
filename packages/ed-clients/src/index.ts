@@ -34,3 +34,4 @@ export {
 } from './builds/catalogue.js';
 export { decodeCoriolis, stockBuild } from './builds/coriolis.js';
 export { decodeLoadout } from './builds/journal.js';
+export { computeStats, type BuildStats } from './builds/stats.js';
