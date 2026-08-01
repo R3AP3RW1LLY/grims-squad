@@ -51,15 +51,22 @@ const BACKPLATE_CHOICES: ReadonlyArray<{ value: BackplateChoice; label: string; 
 /**
  * Roughly how long one backplate takes, in milliseconds.
  *
- * ★ USED FOR A BAR, NOT FOR A PROMISE ★
+ * ★ MEASURED, NOT ASSUMED — AND THE FIRST NUMBER WAS OUT BY SEVEN ★
  *
- * Measured against the squadron's card at about fifty seconds. It is an estimate and it is treated
- * as one: the bar approaches the end and STOPS THERE rather than completing, because a bar that
- * fills and then keeps waiting is worse than no bar — it says the thing is finished when it is not.
+ * This was 50,000, inherited from a comment estimating "about thirty seconds" per banner. Timed
+ * through the real ComfyUI workflow on the squadron's 5070 Ti: **4.1 seconds** for a 579 KB image.
  *
- * The real completion comes from the request returning, never from this clock.
+ * That error was visible to the member as an absent feature. A bar animating towards a fifty-second
+ * finish line reaches eight per cent before the work completes and the bar disappears — which is
+ * indistinguishable from no progress bar at all, and was reported as exactly that.
+ *
+ * ★ STILL A BAR, NOT A PROMISE ★
+ *
+ * The image runtime answers once, when the picture is done; there is no partial state to read. So
+ * this remains an estimate against elapsed time, capped below the end, and completion comes from
+ * the request returning rather than from this clock.
  */
-const BACKPLATE_MS = 50_000;
+const BACKPLATE_MS = 6_000;
 
 /** How many designs get artwork, for each choice. */
 function artworkCount(choice: BackplateChoice, total: number): number {
@@ -124,6 +131,8 @@ export function AiDesigner({
   const [busy, setBusy] = useState(false);
   const [choosing, setChoosing] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** The FIRST artwork failure of a run. Kept separate: the designs themselves still worked. */
+  const [artError, setArtError] = useState<string | null>(null);
   const [drawing, setDrawing] = useState<number | null>(null);
   /** How far the current backplate has got, 0–95. See BACKPLATE_MS. */
   const [progress, setProgress] = useState(0);
@@ -135,6 +144,7 @@ export function AiDesigner({
   const generate = useCallback(async () => {
     setBusy(true);
     setError(null);
+    setArtError(null);
     setOptions(null);
     const mine = run.current + 1;
     run.current = mine;
@@ -198,8 +208,22 @@ export function AiDesigner({
               ? prev
               : prev.map((o, j) => (j === i ? { ...o, art: `data:image/png;base64,${png}` } : o)),
           );
-        } catch {
-          // One backplate failing leaves that option on its gradient, which is still a design.
+        } catch (e) {
+          /*
+           * ★ SAID OUT LOUD. IT USED TO BE SWALLOWED. ★
+           *
+           * This was a bare `catch {}` with a comment explaining that one failed backplate leaves
+           * its design on a gradient — which is true and was not the whole story.
+           *
+           * Every refusal looked identical to success-with-no-picture: no error, no bar (it cleared
+           * within milliseconds), no GPU activity. The squadron owner reported the feature as
+           * simply not working, and the actual cause — an hourly artwork limit of five against a
+           * feature that asks for five per press — was sitting in `ai_calls.refused_reason` where
+           * nothing on screen would ever show it.
+           *
+           * A design keeping its gradient is a fine outcome. Not saying why is not.
+           */
+          setArtError((prev) => prev ?? (e as Error).message);
         } finally {
           clearInterval(ticker);
         }
@@ -376,6 +400,21 @@ export function AiDesigner({
 
       {options !== null && (
         <div className="space-y-5">
+          {artError !== null && (
+            /*
+              Beside the designs rather than replacing them: five usable signatures arrived and only
+              the artwork failed, so this explains a missing picture without implying the whole thing
+              broke.
+            */
+            <p
+              role="alert"
+              className="rounded border border-[var(--color-semantic-warning)] bg-[var(--color-semantic-warning)]/5 px-4 py-3 text-sm text-[var(--color-semantic-warning)]"
+            >
+              The designs are ready, but the artwork could not be drawn: {artError} The gradients
+              below are real designs and can be used as they are.
+            </p>
+          )}
+
           <p className="text-[var(--color-text-primary)]">
             Five designs. Use one as it is, or open it in the builder and change anything.
             {drawing !== null && (

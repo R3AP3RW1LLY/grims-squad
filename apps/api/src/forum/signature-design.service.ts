@@ -115,7 +115,12 @@ export class SignatureDesignService {
     await this.log
       .record({
         userId,
-        kind: 'signature',
+        /*
+         * NOT `signature`: that kind is the artwork quota, and this call draws nothing. Logging it
+         * as artwork meant one press of "Design five for me" spent six of a five-an-hour allowance,
+         * one of which never touched the GPU.
+         */
+        kind: 'signature-design',
         surface: 'web',
         prompt: asked.slice(0, MAX_PROMPT),
         response: reachable

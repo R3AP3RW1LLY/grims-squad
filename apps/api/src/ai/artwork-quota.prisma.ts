@@ -26,15 +26,32 @@ export class PrismaArtworkQuota extends ArtworkQuota {
     super();
   }
 
+  /*
+   * ★ REFUSED CALLS DO NOT COUNT — AND THEY USED TO ★
+   *
+   * Every refusal is logged with `kind: 'signature'` so an officer can see somebody hitting the
+   * wall. It was then counted BY the wall, which made the lockout self-perpetuating: once a member
+   * reached the limit, each retry wrote another row and pushed the window out again. An hour's
+   * cooldown became an hour after they stopped trying.
+   *
+   * Observed on 2026-08-01: 18 calls in an hour, 11 of them refusals — so seven real generations
+   * had consumed a quota of five, and nothing the member did could clear it.
+   *
+   * The quota exists to protect the GPU. A refused call never reached it.
+   *
+   * `kind` is also narrowed to artwork only. The AI designer logs its TEXT-model call under
+   * `signature-design`, which costs a few seconds of a CPU-bound endpoint and has no business
+   * consuming a picture's allowance.
+   */
   async byMember(userId: string): Promise<number> {
     return this.db.aiCall.count({
-      where: { userId, kind: 'signature', createdAt: { gte: anHourAgo() } },
+      where: { userId, kind: 'signature', refusedReason: null, createdAt: { gte: anHourAgo() } },
     });
   }
 
   async global(): Promise<number> {
     return this.db.aiCall.count({
-      where: { kind: 'signature', createdAt: { gte: anHourAgo() } },
+      where: { kind: 'signature', refusedReason: null, createdAt: { gte: anHourAgo() } },
     });
   }
 }

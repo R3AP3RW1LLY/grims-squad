@@ -17,7 +17,12 @@
 export interface AiCallRecord {
   /** Null for an anonymous caller on the public recruiting or guides pages. */
   readonly userId: string | null;
-  readonly kind: 'screen' | 'assistant' | 'signature';
+  /**
+   * `signature` is an ARTWORK generation and counts against the image quota. `signature-design` is
+   * the text-model brief behind the AI designer — a few seconds of the language model, no GPU
+   * picture — and deliberately does not.
+   */
+  readonly kind: 'screen' | 'assistant' | 'signature' | 'signature-design';
   /** `web`, `discord`, or `public`. */
   readonly surface: string;
   readonly prompt: string;

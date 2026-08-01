@@ -203,26 +203,43 @@ export interface ImageResult {
 /**
  * How often a member may generate.
  *
- * ★ COUNTED IN BATCHES, NOT IMAGES ★
+ * ★ COUNTED IN CALLS, NOT IMAGES ★
  *
- * One "generation" is one press of the button and yields `IMAGE_OPTIONS` images, so five per hour
- * is fifteen images — roughly ten minutes of GPU on a card somebody is also playing on.
+ * One entry in `ai_calls` is one request to the generator. The signature builder asks for
+ * `IMAGE_OPTIONS` images in a call; the AI designer asks for one, five times.
  *
- * ★ AND WHY THIS IS SO MUCH TIGHTER THAN THE ASSISTANT'S LIMIT ★
+ * ★ RAISED FROM 5 ON 2026-08-01, AGAINST A MEASUREMENT ★
  *
- * `AI_RATE_LIMITS.memberPerHour` is thirty, because a question costs a second or two of a card
- * nothing else wants. A banner costs about thirty seconds of the card Elite Dangerous is running
- * on. The limits differ by a factor of six because the underlying costs differ by more than that.
+ * These numbers were sized on the belief that a banner costs "about thirty seconds of the card
+ * Elite Dangerous is running on", which put five generations at roughly ten minutes of GPU.
  *
- * There is no anonymous limit because there is no anonymous access: the signature builder is behind
- * a login. An unauthenticated door to a home GPU that does thirty seconds of work per request is
- * not something to rate-limit, it is something not to build.
+ * Measured on the squadron's own 5070 Ti, through the real ComfyUI workflow: **4.1 seconds** for a
+ * 579 KB banner. The estimate was out by a factor of seven, and everything built on it was wrong in
+ * the same direction.
+ *
+ * The consequence was not theoretical. The AI signature designer asks for five backplates per press
+ * — one per design — so a single press consumed an entire hour's quota and every press after it was
+ * refused. The squadron owner saw no artwork, no progress and no GPU activity, and the reason was a
+ * limit doing exactly what it was told.
+ *
+ * Twenty calls an hour is about 82 seconds of GPU at the measured rate — comfortably under the ~450
+ * seconds the old limit was *intended* to permit. The card is protected by a smaller number than
+ * before, because the number is now based on what the work actually costs.
+ *
+ * ★ WHY IT IS STILL TIGHTER THAN THE ASSISTANT'S LIMIT ★
+ *
+ * A question costs a second or two and holds no VRAM afterwards. An image holds a diffusion model
+ * resident on a card that is also serving post screening, embeddings and, quite often, Elite.
+ *
+ * There is no anonymous limit because there is no anonymous access: both surfaces are behind a
+ * login. An unauthenticated door to a home GPU is not something to rate-limit, it is something not
+ * to build.
  */
 export const IMAGE_RATE_LIMITS = {
-  /** Generations (not images) per signed-in member per hour. */
-  memberPerHour: 5,
+  /** Calls (not images) per signed-in member per hour. One AI-designer press is five. */
+  memberPerHour: 20,
   /** Across everybody. A backstop against the squadron collectively occupying the machine. */
-  globalPerHour: 30,
+  globalPerHour: 120,
 } as const;
 
 /**
