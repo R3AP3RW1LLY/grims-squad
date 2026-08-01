@@ -19,6 +19,9 @@
     "test:unit": "vitest run --passWithNoTests",
     "clean": "rm -rf dist *.tsbuildinfo"
   },
+  "dependencies": {
+    "@grims/shared": "workspace:*"
+  },
   "devDependencies": {
     "@grims/config": "workspace:*",
     "typescript": "^5.7.0",

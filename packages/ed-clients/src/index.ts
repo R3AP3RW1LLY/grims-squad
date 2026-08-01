@@ -20,3 +20,16 @@ export {
   LimiterBusyError,
   INARA_MIN_SPACING_MS,
 } from './inara/limiter.js';
+
+// Ship build importers. Decode a shared build link into the canonical shape; no network.
+export {
+  buildCatalogue,
+  categoryOf,
+  STANDARD_GROUPS,
+  type BuildCatalogue,
+  type CatalogueModule,
+  type CatalogueShip,
+  type CatalogueSlot,
+  type SlotCategory,
+} from './builds/catalogue.js';
+export { decodeCoriolis, stockBuild } from './builds/coriolis.js';
