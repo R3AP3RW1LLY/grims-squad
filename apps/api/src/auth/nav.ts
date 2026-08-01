@@ -130,6 +130,24 @@ const NAV: readonly NavDefinition[] = [
 
   // ---- GMSD AI -------------------------------------------------------------
   {
+    href: '/gmsd-ai/ask',
+    label: 'Ask GMSD AI',
+    section: 'ai',
+    blurb: 'Prices, systems, ships and our own guides — answered from squadron data.',
+    /*
+     * ★ NO PERMISSION ★
+     *
+     * Everything it can reach is already visible to any signed-in member: the galaxy dump, market
+     * prices, ship data, and the guides board — which the reference ingest only reads while it is
+     * PUBLIC. Gating the assistant would mean the same facts are available through the forum and
+     * refused through the thing built to find them.
+     *
+     * Signing in is still required, at the route: every conversation is logged for officer review,
+     * and a log of anonymous questions is one nobody can act on.
+     */
+    requires: null,
+  },
+  {
     href: '/gmsd-ai/train',
     label: 'Help Train the Bot',
     section: 'ai',
@@ -193,6 +211,21 @@ const NAV: readonly NavDefinition[] = [
     section: 'admin',
     blurb: 'What GMSD AI has learned, what it is learning, and when it next will.',
     requires: Permission.AI_TRAINING,
+  },
+  {
+    href: '/app/conversations',
+    label: 'AI conversations',
+    section: 'admin',
+    blurb: 'What members asked GMSD AI, and what it answered.',
+    /*
+     * ★ AI_REVIEW, WHICH THE WEBMASTER ALWAYS HAS ★
+     *
+     * Squadron owner: the log "need[s] to be visible to the webmaster role! this is non-negotiable
+     * as the webmaster is the AI developer." That override lives in `effectiveMask`, so using the
+     * ordinary permission satisfies it — a separate webmaster check here would be a second answer
+     * to a question that already has one, and the two could drift.
+     */
+    requires: Permission.AI_REVIEW,
   },
 ];
 

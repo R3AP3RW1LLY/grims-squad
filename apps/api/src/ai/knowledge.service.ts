@@ -1,5 +1,6 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { PrismaClient } from '@grims/db';
+import { EmbedClient } from './embed.client.js';
 
 /**
  * Finding the facts that answer a question.
@@ -48,9 +49,106 @@ const LIMIT = 8;
  */
 const DEFAULT_RADIUS_LY = 50;
 
+/**
+ * How close a vector has to be before it counts as an answer.
+ *
+ * ★ A FLOOR, BECAUSE NEAREST IS NOT THE SAME AS RELEVANT ★
+ *
+ * A nearest-neighbour search always returns something. Ask "what is the capital of France" against
+ * a corpus of Elite Dangerous guides and it will hand back the eight least-unrelated paragraphs it
+ * has, with no signal that every one of them is nonsense — and the model, handed eight paragraphs
+ * and a question, will find a way to connect them.
+ *
+ * Cosine similarity of 0.55 was picked by trying it: real questions about mechanics we have written
+ * about land between 0.6 and 0.8, and questions about things we have never covered sit under 0.5.
+ * Below the floor the honest answer is that we do not know, which is the whole point of separating
+ * facts from language.
+ */
+const MIN_SIMILARITY = 0.55;
+
+/**
+ * How alike two NAMES have to be to count as the same thing.
+ *
+ * Separate from the vector floor because it measures something else entirely — shared trigrams, not
+ * shared meaning — and because the failure it prevents is different. See `byName`.
+ */
+const MIN_NAME_SIMILARITY = 0.55;
+
+/**
+ * How old a price may be and still be offered as the best one.
+ *
+ * Thirty days. Long enough that a whole region does not fall out of the answer between visits,
+ * short enough to exclude the years-old carrier prices that otherwise top every ranking. See the
+ * measurements in `market`.
+ */
+const MAX_PRICE_AGE_DAYS = 30;
+
 @Injectable()
 export class KnowledgeService {
-  constructor(@Inject(PrismaClient) private readonly db: PrismaClient) {}
+  constructor(
+    @Inject(PrismaClient) private readonly db: PrismaClient,
+    /**
+     * Optional, so every consumer of name/spatial/market retrieval does not acquire a dependency on
+     * a running embedding model. Semantic search returns nothing when it is absent, which is the
+     * correct degradation: the other three legs still work.
+     */
+    @Inject(EmbedClient) private readonly embed: EmbedClient | null = null,
+  ) {}
+
+  /**
+   * Facts by MEANING — the leg this service documented and did not have.
+   *
+   * ★ WHAT THE OTHER THREE CANNOT DO ★
+   *
+   * "How do I get more jump range" names no ship, no system and no commodity. There is nothing to
+   * look it up BY. The answer is a paragraph in a guide that very likely never uses the word
+   * "jump range" in those words, and only a vector can find it.
+   *
+   * Restricted to embedded sources by construction: the query returns rows whose embedding is not
+   * null, and only prose sources are ever embedded (see STORAGE_KIND). A market row has no vector
+   * and cannot surface here even if the question sounds like prose.
+   */
+  async semantic(query: string, limit = LIMIT): Promise<Fact[]> {
+    if (this.embed === null || !this.embed.configured) return [];
+
+    const vector = await this.embed.embed(query);
+    if (vector === null) return [];
+
+    const rows = await this.db.$queryRawUnsafe<
+      Array<{
+        source: string;
+        kind: string;
+        name: string;
+        text: string | null;
+        data: unknown;
+        similarity: number;
+      }>
+    >(
+      /*
+       * Ordered by the operator so the HNSW index can serve it. Filtering on similarity in the
+       * WHERE clause instead would force a sequential scan over every embedded row — and there are
+       * hundreds of thousands of them.
+       *
+       * The floor is applied AFTER the index has done its work, in the outer query.
+       */
+      `SELECT source, kind, name, text, data, similarity
+         FROM (
+           SELECT source, kind, name, text, data,
+                  1 - (embedding <=> $1::vector) AS similarity
+             FROM knowledge_items
+            WHERE embedding IS NOT NULL
+            ORDER BY embedding <=> $1::vector
+            LIMIT $2
+         ) ranked
+        WHERE similarity >= $3
+        ORDER BY similarity DESC`,
+      `[${vector.join(',')}]`,
+      limit,
+      MIN_SIMILARITY,
+    );
+
+    return rows.map(toFact);
+  }
 
   /**
    * Facts for a question, by name.
@@ -65,15 +163,28 @@ export class KnowledgeService {
     const rows = await this.db.$queryRawUnsafe<
       Array<{ source: string; kind: string; name: string; text: string | null; data: unknown }>
     >(
+      /*
+       * ★ AND A FLOOR ON TOP OF THE OPERATOR ★
+       *
+       * pg_trgm's default threshold is 0.3, which is loose enough to be actively harmful here.
+       * Asked "where can I sell Painite", the router looked up the capitalised word by name and
+       * got back the stations "Paine Mine", "Pacalite" and "Pate" — three rows of pure noise
+       * handed to the model as facts, in an answer about prices.
+       *
+       * 0.55 keeps the misspellings this exists for ("krait mk2", "platinium") while dropping
+       * words that merely share letters. The operator still does the index work; this only decides
+       * what survives it.
+       */
       `SELECT source, kind, name, text, data
          FROM knowledge_items
-        WHERE name % $1
+        WHERE name % $1 AND similarity(name, $1) >= $3
         -- similarity() rather than the % operator's own ordering: the operator filters, this ranks,
         -- and without an explicit ORDER BY the "best" match is whichever row Postgres reached first.
         ORDER BY similarity(name, $1) DESC
         LIMIT $2`,
       query,
       limit,
+      MIN_NAME_SIMILARITY,
     );
 
     return rows.map(toFact);
@@ -154,7 +265,13 @@ export class KnowledgeService {
   async market(
     commodity: string,
     side: 'buy' | 'sell',
-    opts: { near?: { x: number; y: number; z: number }; radiusLy?: number; largePadOnly?: boolean } = {},
+    opts: {
+      near?: { x: number; y: number; z: number };
+      radiusLy?: number;
+      largePadOnly?: boolean;
+      /** Set only by the fallback below, when a fresh search found nothing at all. */
+      anyAge?: boolean;
+    } = {},
   ): Promise<Fact[]> {
     const radius = opts.radiusLy ?? DEFAULT_RADIUS_LY;
     const params: unknown[] = [commodity];
@@ -163,6 +280,33 @@ export class KnowledgeService {
       `commodity % $1`,
       side === 'buy' ? `supply > 0 AND buy_price > 0` : `demand > 0 AND sell_price > 0`,
     ];
+
+    /*
+     * ★ FRESH PRICES ONLY, AND THE NUMBERS SAY WHY — 2026-08-01 ★
+     *
+     * Ordering by price alone puts the highest number first regardless of when anybody last saw it,
+     * and the highest numbers are the oldest. Measured against the real table, for Painite:
+     *
+     *     seen under 7 days   13,481 rows   best 436,124 CR
+     *     seen 7-30 days      23,014 rows   best 280,625 CR
+     *     seen 30 days-1 year 81,549 rows   best 320,262 CR
+     *     seen over 1 year     9,182 rows   best 715,960 CR   <- what the assistant recommended
+     *
+     * That 715,960 is a fleet carrier price from before the last balance pass, at a carrier that
+     * jumped away years ago. The assistant offered it as the best place to sell — correctly noting
+     * it was 2,077 days old, which no member reading a confident list of stations would weigh
+     * against the number beside it.
+     *
+     * A stale price is not a slightly worse answer than a fresh one. It is a wasted trip, which is
+     * the specific harm this whole knowledge layer exists to avoid.
+     */
+    if (opts.anyAge !== true) {
+      const i0 = params.length;
+      params.push(MAX_PRICE_AGE_DAYS);
+      where.push(
+        `market_seen_at IS NOT NULL AND market_seen_at > now() - ($${i0 + 1} || ' days')::interval`,
+      );
+    }
 
     if (opts.largePadOnly === true) where.push(`large_pads > 0`);
 
@@ -201,6 +345,19 @@ export class KnowledgeService {
         LIMIT $${params.length}`,
       ...params,
     );
+
+    /*
+     * ★ AND A FALLBACK, SO A QUIET COMMODITY STILL GETS AN ANSWER ★
+     *
+     * The window is right for anything actively traded. For something nobody has reported in months
+     * it would return nothing at all, and "I have no prices for that" is a worse answer than an old
+     * price clearly labelled as old — which `seenNote` does on every row.
+     *
+     * Only when the fresh search came back empty, so a stale row can never outrank a current one.
+     */
+    if (rows.length === 0 && opts.anyAge !== true) {
+      return this.market(commodity, side, { ...opts, anyAge: true });
+    }
 
     return rows.map((r) => ({
       source: 'galaxy',

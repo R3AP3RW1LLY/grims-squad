@@ -193,6 +193,16 @@ export async function apiCall<T>(
   return (await res.json().catch(() => ({}))) as T;
 }
 
+/**
+ * A browser-side GET.
+ *
+ * Server components read through `lib/api.ts` instead; this is for the cases where a page fetches
+ * AFTER it has rendered — expanding one conversation out of a hundred, rather than sending all of
+ * them down with the page.
+ */
+export const apiGet = <T>(path: string, fallbackMessage?: string): Promise<T> =>
+  apiCall<T>('GET', path, { ...(fallbackMessage !== undefined && { fallbackMessage }) });
+
 export const apiPost = <T>(path: string, body?: unknown, fallbackMessage?: string): Promise<T> =>
   apiCall<T>('POST', path, { ...(body !== undefined && { body }), ...(fallbackMessage !== undefined && { fallbackMessage }) });
 

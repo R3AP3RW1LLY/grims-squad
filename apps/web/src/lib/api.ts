@@ -1191,3 +1191,44 @@ export interface DmPreferences {
 /** Which Discord DMs this member has asked for. All default false — see the migration. */
 export const getDmPreferences = (): Promise<DmPreferences | null> =>
   get('/v1/me/notifications', { authed: true });
+
+/**
+ * One conversation with GMSD AI, as the review screen lists them.
+ *
+ * ★ SQUADRON OWNER — NON-NEGOTIABLE ★
+ *
+ * "Every conversation logged for officer review ... it also need to be visible to the webmaster
+ * role! this is non-negotiable as the webmaster is the AI developer."
+ *
+ * Collapsed to one row per thread rather than one per turn: a busy evening is hundreds of turns in
+ * which consecutive lines belong to different people asking about different things, and that is not
+ * something anybody reviews twice.
+ */
+export interface AiConversation {
+  threadId: string;
+  userId: string | null;
+  displayName: string | null;
+  turns: number;
+  startedAt: string;
+  lastAt: string;
+  /** The first question asked — what the conversation is about. */
+  opener: string;
+  /** Turns that never reached the model: a rate limit, or nothing retrieved. */
+  refusals: number;
+}
+
+export interface AiConversationTurn {
+  prompt: string;
+  response: string | null;
+  refusedReason: string | null;
+  tookMs: number | null;
+  createdAt: string;
+}
+
+export const getAiConversationsGated = (): Promise<AdminRead<{ threads: AiConversation[] }>> =>
+  getAdmin('/v1/ai/conversations');
+
+export const getAiConversationGated = (
+  threadId: string,
+): Promise<AdminRead<{ turns: AiConversationTurn[] }>> =>
+  getAdmin(`/v1/ai/conversations/${encodeURIComponent(threadId)}`);

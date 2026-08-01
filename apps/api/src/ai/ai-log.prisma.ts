@@ -28,6 +28,11 @@ export class PrismaAiLog extends AiLog {
         response: entry.response,
         ...(entry.refusedReason === undefined ? {} : { refusedReason: entry.refusedReason }),
         ...(entry.tookMs === undefined ? {} : { tookMs: entry.tookMs }),
+        // Omitted rather than set to undefined — exactOptionalPropertyTypes, and Prisma treats a
+        // present-but-undefined key differently from an absent one.
+        ...(entry.threadId === undefined || entry.threadId === null
+          ? {}
+          : { threadId: entry.threadId }),
       },
     });
   }

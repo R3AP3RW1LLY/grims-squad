@@ -1,4 +1,5 @@
 import { Controller, Get, Post, Delete, Body, Param, Inject, Res } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
 import type { FastifyReply } from 'fastify';
 import {
   AppError,
@@ -16,6 +17,10 @@ import { AiClient, aiHealth } from './ai.client.js';
 import { ImageClient } from './image.client.js';
 import { TrainingStatusService } from './training.service.js';
 import { CorpusService, type SubmissionView } from './corpus.service.js';
+import { AssistantService } from './assistant.service.js';
+
+/** Accepted thread ids. An unvalidated string reaching an indexed uuid column fails the insert. */
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * Each runtime reported on its own, because they run on different cards and fail independently.
@@ -71,6 +76,7 @@ export class AiController {
     @Inject(PermissionService) private readonly permissions: PermissionService,
     @Inject(TrainingStatusService) private readonly trainingStatus: TrainingStatusService,
     @Inject(CorpusService) private readonly corpusService: CorpusService,
+    @Inject(AssistantService) private readonly assistant: AssistantService,
   ) {}
 
   /**
@@ -330,6 +336,91 @@ export class AiController {
     }
     await this.corpusService.withdraw(caller.userId, id);
     return { ok: true };
+  }
+
+  /**
+   * Ask the assistant.
+   *
+   * ★ SIGNED IN, ALWAYS ★
+   *
+   * Not because the knowledge is secret — most of it is a public galaxy dump — but because every
+   * conversation is logged for officer review, and a log of anonymous questions is a log nobody can
+   * act on. It also makes the rate limit mean something.
+   *
+   * ★ HISTORY COMES FROM THE CLIENT ★
+   *
+   * The turns are sent back with each question rather than reassembled server-side. The alternative
+   * is trusting the thread id to reconstruct history, which would let anybody replay somebody
+   * else's conversation into their own context by guessing a uuid. The client already has its own
+   * transcript; the server keeps the durable copy for review.
+   */
+  @Post('ask')
+  async ask(
+    @User() caller: CurrentUser | undefined,
+    @Body() body: unknown,
+  ): Promise<{ answer: string; sources: unknown[]; threadId: string }> {
+    if (caller === undefined) {
+      throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in to ask the assistant.');
+    }
+
+    const b = (body ?? {}) as Record<string, unknown>;
+    const question = typeof b['question'] === 'string' ? b['question'] : '';
+    if (question.trim() === '') {
+      throw new AppError(ErrorCode.VALIDATION_FAILED, 'Ask a question first.');
+    }
+
+    /*
+     * The thread id is minted by the SERVER when a conversation starts, and only accepted from the
+     * client if it is a well-formed uuid. Echoing back whatever arrives would put an unvalidated
+     * string into an indexed uuid column, and a malformed one fails the insert — which would lose
+     * the log entry for a conversation that otherwise worked.
+     */
+    const supplied = typeof b['threadId'] === 'string' ? b['threadId'] : '';
+    const threadId = UUID.test(supplied) ? supplied : randomUUID();
+
+    const history = Array.isArray(b['history'])
+      ? (b['history'] as unknown[])
+          .filter((t): t is Record<string, unknown> => typeof t === 'object' && t !== null)
+          .filter((t) => t['role'] === 'user' || t['role'] === 'assistant')
+          .map((t) => ({
+            role: t['role'] as 'user' | 'assistant',
+            content: String(t['content'] ?? '').slice(0, 2_000),
+          }))
+      : [];
+
+    const result = await this.assistant.ask(caller.userId, question, history, 'web', threadId);
+
+    return { answer: result.answer, sources: [...result.sources], threadId };
+  }
+
+  /**
+   * Conversations, for officer review.
+   *
+   * ★ SQUADRON OWNER — NON-NEGOTIABLE ★
+   *
+   * "Every conversation logged for officer review ... it also need to be visible to the webmaster
+   * role! this is non-negotiable as the webmaster is the AI developer."
+   *
+   * `AI_REVIEW` is the same gate as the rest of the log, and the webmaster override is already
+   * built into `effectiveMask` — so the requirement is satisfied by using the existing permission
+   * rather than by carving out a second path that could drift from it.
+   */
+  @Get('conversations')
+  async conversations(@User() caller: CurrentUser | undefined): Promise<{ threads: unknown[] }> {
+    await this.#assertMayReview(caller);
+    return { threads: await this.assistant.recentThreads() };
+  }
+
+  @Get('conversations/:threadId')
+  async conversation(
+    @User() caller: CurrentUser | undefined,
+    @Param('threadId') threadId: string,
+  ): Promise<{ turns: unknown[] }> {
+    await this.#assertMayReview(caller);
+    if (!UUID.test(threadId)) {
+      throw new AppError(ErrorCode.VALIDATION_FAILED, 'That is not a conversation id.');
+    }
+    return { turns: await this.assistant.thread(threadId) };
   }
 
   async #assertMayReview(caller: CurrentUser | undefined): Promise<void> {

@@ -130,27 +130,117 @@ export function readCoriolis(root: string): KnowledgeRow[] {
  * — belong in words a vector search can match.
  */
 function describeShip(name: string, value: unknown): string {
-  const ship = value as { properties?: Record<string, unknown> };
+  const ship = value as {
+    properties?: Record<string, unknown>;
+    slots?: { internal?: unknown[]; hardpoints?: unknown[] };
+  };
   const p = ship.properties ?? {};
-  const bits = [`${name} is a ship in Elite Dangerous`];
 
   const num = (k: string): number | null => (typeof p[k] === 'number' ? (p[k] as number) : null);
+
+  const bits = [`${name} is a ship in Elite Dangerous`];
+
+  const maker = typeof p['manufacturer'] === 'string' ? p['manufacturer'] : null;
+  if (maker !== null) bits.push(`built by ${maker}`);
+
   const cls = num('class');
   if (cls !== null) {
-    // Landing pad size is the single most consequential fact about a hull.
-    bits.push(`It needs a ${cls === 1 ? 'small' : cls === 2 ? 'medium' : 'large'} landing pad`);
+    // Landing pad size is the single most consequential fact about a hull. Lower case and
+    // participial, because these fragments are joined with commas into one sentence — "built by
+    // Faulcon DeLacy, It needs a medium landing pad" is what a capital here produces.
+    bits.push(`needing a ${cls === 1 ? 'small' : cls === 2 ? 'medium' : 'large'} landing pad`);
   }
-  const hardpoints = num('hardpoints');
-  if (hardpoints !== null) bits.push(`with ${hardpoints} hardpoints`);
+
+  /*
+   * ★ READ FROM slots, NOT FROM properties — AND THE OLD CODE READ NEITHER ★
+   *
+   * `describeShip` asked for `properties.hardpoints` and `properties.cost`. Neither field exists in
+   * coriolis-data: the counts live in `slots`, and the price is `hullCost`. Both lookups returned
+   * null, silently, so every ship in the knowledge base was described as a landing pad size, a hull
+   * mass and a top speed.
+   *
+   * The cost of that was measurable. Asked "what does a Krait Mk II hold?", the assistant retrieved
+   * the correct ship and answered "I do not have that information" — which was true, and was the
+   * fault of this function rather than of the model.
+   */
+  const hardpointSizes = numericSizes(ship.slots?.hardpoints);
+  const guns = hardpointSizes.filter((s) => s > 0);
+  // Size 0 entries are utility mounts, which is where the shield boosters and heat sinks go.
+  const utilities = hardpointSizes.filter((s) => s === 0).length;
+  if (guns.length > 0) {
+    bits.push(`with ${guns.length} weapon hardpoints (${describeMounts(guns)}) and ${utilities} utility mounts`);
+  }
+
   const mass = num('hullMass');
   if (mass !== null) bits.push(`and a hull mass of ${mass} tonnes`);
 
   const parts = [`${bits.join(', ')}.`];
-  const cost = num('cost');
-  if (cost !== null) parts.push(`It costs about ${cost.toLocaleString()} credits.`);
+
+  /*
+   * ★ MAXIMUM CARGO, DERIVED — because it is the question people actually ask ★
+   *
+   * Coriolis stores no cargo figure, and there is no single right one: capacity depends on what a
+   * commander fits. What CAN be stated is the ceiling, and it follows from the optional internal
+   * slots — a cargo rack of class N carries 2^N tonnes, so filling every optional slot with racks
+   * gives the maximum the hull can physically hold.
+   *
+   * Phrased as the ceiling rather than as "cargo: N", because a member reading "230 tonnes" against
+   * a ship they have fitted with shields and a fuel scoop would rightly call it wrong.
+   */
+  const internal = numericSizes(ship.slots?.internal);
+  if (internal.length > 0) {
+    const maxCargo = internal.reduce((n, size) => n + 2 ** size, 0);
+    parts.push(
+      `It has ${internal.length} optional internal slots and can carry up to ${maxCargo} tonnes of ` +
+        `cargo if every one of them is filled with cargo racks — less once shields, a fuel scoop or ` +
+        `anything else is fitted.`,
+    );
+  }
+
+  const cost = num('hullCost');
+  if (cost !== null) parts.push(`The hull costs about ${cost.toLocaleString()} credits.`);
+
   const speed = num('speed');
-  if (speed !== null) parts.push(`Top speed ${speed} m/s.`);
+  const boost = num('boost');
+  if (speed !== null) {
+    parts.push(boost === null ? `Top speed ${speed} m/s.` : `Top speed ${speed} m/s, ${boost} boosting.`);
+  }
+
+  const crew = num('crew');
+  if (crew !== null) parts.push(`It seats a crew of ${crew}.`);
+
+  const armour = num('baseArmour');
+  const shields = num('baseShieldStrength');
+  if (armour !== null && shields !== null) {
+    parts.push(`Base armour ${armour}, base shields ${shields}.`);
+  }
+
+  if (p['fighterHangars'] === true) parts.push('It can carry a ship-launched fighter.');
+
   return parts.join(' ');
+}
+
+/**
+ * The numeric slot sizes, ignoring the restricted ones.
+ *
+ * Some entries are objects rather than numbers — a Planetary Approach Suite bay, a military slot —
+ * and those cannot take a cargo rack. Counting them would overstate what a hull holds.
+ */
+function numericSizes(slots: unknown[] | undefined): number[] {
+  if (!Array.isArray(slots)) return [];
+  return slots.filter((s): s is number => typeof s === 'number');
+}
+
+/** `3,3,3,2,2` -> `3 large, 2 medium`. Sizes are what a member fits weapons into. */
+function describeMounts(sizes: readonly number[]): string {
+  const names: Record<number, string> = { 1: 'small', 2: 'medium', 3: 'large', 4: 'huge' };
+  const counts = new Map<number, number>();
+  for (const s of sizes) counts.set(s, (counts.get(s) ?? 0) + 1);
+
+  return [...counts.entries()]
+    .sort((a, b) => b[0] - a[0])
+    .map(([size, n]) => `${n} ${names[size] ?? `class ${size}`}`)
+    .join(', ');
 }
 
 /** `frame_shift_drive` -> `Frame Shift Drive`. What a member would type and read. */

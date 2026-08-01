@@ -1592,6 +1592,16 @@ model AiCall {
   /// Milliseconds. A tunnel degrading shows up here long before it fails outright.
   tookMs Int? @map("took_ms")
 
+  /// Groups the turns of one assistant conversation. Null for screening and signature calls,
+  /// which are single exchanges with nothing to belong to.
+  ///
+  /// ★ WITHOUT IT THE REVIEW SCREEN CAN ONLY GUESS ★
+  ///
+  /// Grouping by member and a time gap gets it wrong in exactly the cases somebody is reviewing:
+  /// two unrelated questions ten minutes apart read as one incoherent conversation, and a member
+  /// returning an hour later to finish a thought reads as two.
+  threadId String? @map("thread_id") @db.Uuid
+
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
 
   user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
@@ -1600,6 +1610,8 @@ model AiCall {
   @@index([createdAt])
   @@index([kind, createdAt])
   @@index([userId, createdAt])
+  /// One conversation, in order. Partial in the migration - most rows never carry a thread.
+  @@index([threadId, createdAt])
   @@map("ai_calls")
 }
 

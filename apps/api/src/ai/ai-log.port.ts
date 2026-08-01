@@ -26,6 +26,14 @@ export interface AiCallRecord {
   /** Set when the call was refused before reaching the model: a rate limit, or being off-scope. */
   readonly refusedReason?: string;
   readonly tookMs?: number;
+  /**
+   * Groups the turns of one assistant conversation. Null for screening and signature calls.
+   *
+   * Without it the review screen can only group by member and a time gap, which misreads exactly
+   * the cases somebody is reviewing — two unrelated questions close together, or one conversation
+   * resumed an hour later.
+   */
+  readonly threadId?: string | null;
 }
 
 export abstract class AiLog {

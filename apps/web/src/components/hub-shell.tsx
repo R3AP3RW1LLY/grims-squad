@@ -77,6 +77,7 @@ const ICONS: Record<string, typeof HomeIcon> = {
   '/app': ShieldCheckIcon,
   '/app/roles': KeyIcon,
   '/app/training': AcademicCapIcon,
+  '/gmsd-ai/ask': ChatBubbleLeftRightIcon,
   '/gmsd-ai/train': SparklesIcon,
 };
 

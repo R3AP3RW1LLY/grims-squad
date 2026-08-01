@@ -16,6 +16,7 @@ import { AiStreamService } from './ai-stream.service.js';
 import { AiController } from './ai.controller.js';
 import { TrainingStatusService } from './training.service.js';
 import { KnowledgeService } from './knowledge.service.js';
+import { AssistantService } from './assistant.service.js';
 import { CorpusService } from './corpus.service.js';
 import { JobLogListener } from './job-log.listener.js';
 import { ArtworkController } from './artwork.controller.js';
@@ -233,6 +234,22 @@ export class ModelWarmer implements OnModuleInit, OnModuleDestroy {
      * instead of inventing a station.
      */
     KnowledgeService,
+    /*
+     * The assistant itself — the surface all of that retrieval was built for.
+     *
+     * Constructed explicitly rather than by class shorthand because `AiLog` is an abstract class
+     * used as a token: Nest can resolve it, but only when the dependency list says so.
+     */
+    {
+      provide: AssistantService,
+      inject: [PrismaClient, AiClient, KnowledgeService, AiLog],
+      useFactory: (
+        db: PrismaClient,
+        ai: AiClient,
+        knowledge: KnowledgeService,
+        log: AiLog,
+      ) => new AssistantService(db, ai, knowledge, log),
+    },
     // Help Train the Bot. Never touches bytes — the media pipeline does that.
     CorpusService,
     /*
@@ -246,6 +263,7 @@ export class ModelWarmer implements OnModuleInit, OnModuleDestroy {
   exports: [
     AiClient,
     KnowledgeService,
+    AssistantService,
     DecisionStore,
     EmbedClient,
     ImageClient,
