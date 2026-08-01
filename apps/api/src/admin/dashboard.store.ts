@@ -376,7 +376,22 @@ export class PrismaDashboardStore implements DashboardStore {
        */
       this.#db.$queryRaw<Array<{ day: number; signins: bigint }>>`
         SELECT
-          EXTRACT(DAY FROM occurred_at AT TIME ZONE 'UTC')::int AS day,
+          /*
+           * ★ SAME GRAIN AS THE ACTIVITY QUERY, AND IT WAS NOT ★
+           *
+           * When the year view was added, the activity query was switched to bucket by MONTH and
+           * this one was left on DAY. The two results are written into the same 12-slot array, so
+           * a sign-in on the 3rd of July landed in slot 3 and drew as MARCH — sign-ins appearing
+           * in months that have not happened yet. Days 13 to 31 fell outside the array and were
+           * dropped without trace.
+           *
+           * Reported as "how are we showing elite signing in months far ahead of what were
+           * actually in". Exactly that, and entirely self-inflicted: two queries feeding one array
+           * have to agree about what an index means, and nothing in the types enforced it.
+           */
+          ${ytd
+            ? Prisma.sql`EXTRACT(MONTH FROM occurred_at AT TIME ZONE 'UTC')::int`
+            : Prisma.sql`EXTRACT(DAY FROM occurred_at AT TIME ZONE 'UTC')::int`} AS day,
           COUNT(*)::bigint                                      AS signins
         FROM telemetry_events
         WHERE event_type = 'LoadGame'

@@ -170,6 +170,12 @@ const TOOLTIP_DARK_LABEL_STYLE = { color: BRAND.text, fontWeight: 600 } as const
 /** Bar labels for the year view. Index 0 is January, matching EXTRACT(MONTH) minus one. */
 const MONTH_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'] as const;
 
+/** Full names, for the tooltip — there is room there, and "Jul" beside a figure reads as clipped. */
+const MONTH_NAME = [
+  'January','February','March','April','May','June',
+  'July','August','September','October','November','December',
+] as const;
+
 export interface HeatDay {
   /** Day of the month, 1-indexed. */
   readonly day: number;
@@ -269,7 +275,22 @@ export function ActivityChart({
             contentStyle={TOOLTIP_DARK}
             labelStyle={TOOLTIP_DARK_LABEL_STYLE}
             cursor={{ stroke: BRAND.orange, strokeWidth: 1, strokeDasharray: '3 3' }}
-            labelFormatter={(d) => `${String(d)} ${monthLabel}`}
+            /*
+             * ★ THE MONTH SPELLED OUT IN THE YEAR VIEW ★
+             *
+             * Squadron owner: "replace the month number with the actual spelling of the month
+             * please! this is confusing to spell!" — and it was: a bucket labelled "7 2026" is
+             * genuinely ambiguous between the 7th of a month and July, and the axis and the tooltip
+             * were both saying the number.
+             *
+             * Days stay numeric, because "15 July" is unambiguous and spelling a day out would be
+             * noise.
+             */
+            labelFormatter={(d) =>
+              granularity === 'month'
+                ? `${MONTH_NAME[Number(d) - 1] ?? String(d)} ${monthLabel}`
+                : `${String(d)} ${monthLabel}`
+            }
             /*
               A lookup rather than a ternary. With three series the ternary read
               "messages ? Actions : Members" and would have labelled the new
