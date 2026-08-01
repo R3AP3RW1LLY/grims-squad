@@ -33,6 +33,27 @@ await mkdir('dist/renderer', { recursive: true });
 await cp('src/renderer/index.html', 'dist/renderer/index.html');
 
 /*
+ * The brand fonts, copied from the website's own set.
+ *
+ * ★ BUNDLED, NOT FETCHED ★
+ *
+ * The window's CSP is `default-src 'none'` and the app is expected to work with no network at all —
+ * a member whose connection is down should still see the app they installed, not a fallback face.
+ * Fetching from Google Fonts would also announce every launch of this app to a third party, from a
+ * desktop program that has no other reason to talk to anyone but us.
+ *
+ * The same files the site serves, so "matches the website" is literal rather than approximate.
+ */
+await cp('src/renderer/fonts', 'dist/renderer/fonts', { recursive: true });
+
+/*
+ * The squadron lockup for the login screen. Exported once from `brand/full-logo.png` — trimmed of
+ * its transparent margin and resized to 640px wide, which is twice the 320px it renders at so it
+ * stays sharp on a high-DPI screen.
+ */
+await cp('src/renderer/img', 'dist/renderer/img', { recursive: true });
+
+/*
  * The squadron badge, used for the tray, the taskbar, the window and the
  * installer.
  *

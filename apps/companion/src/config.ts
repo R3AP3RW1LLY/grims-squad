@@ -216,6 +216,24 @@ export function apiBaseUrlFor(config: CompanionConfig, env: NodeJS.ProcessEnv): 
   return typeof override === 'string' && override !== '' ? override : config.apiBaseUrl;
 }
 
+/**
+ * Where the WEBSITE lives, as opposed to the API.
+ *
+ * ★ THE SAME ORIGIN IN PRODUCTION, TWO PORTS IN DEVELOPMENT ★
+ *
+ * On the server one origin serves both — Caddy routes `/v1` to the API and everything else to the
+ * site — so the api base is the right answer there and no second setting is needed.
+ *
+ * On a development machine they are different ports, and building a website link from the API base
+ * opened a JSON 404. `GRIMS_WEB_URL` exists for that, set by `dev.mjs`, exactly as `GRIMS_API_URL`
+ * already is. There is deliberately no UI for either — see the note above.
+ */
+export function webBaseUrlFor(config: CompanionConfig, env: NodeJS.ProcessEnv): string {
+  const override = env['GRIMS_WEB_URL'];
+  if (typeof override === 'string' && override !== '') return override.replace(/\/+$/, '');
+  return apiBaseUrlFor(config, env).replace(/\/+$/, '');
+}
+
 export function saveConfig(userDataDir: string, config: CompanionConfig): void {
   const path = configPath(userDataDir);
   mkdirSync(dirname(path), { recursive: true });

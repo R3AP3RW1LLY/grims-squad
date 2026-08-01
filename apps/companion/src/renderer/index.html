@@ -11,19 +11,74 @@
     -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; script-src 'unsafe-inline'"
+      content="default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; font-src 'self'; script-src 'unsafe-inline'"
     />
     <title>Grim's Squad Hub</title>
     <style>
+      /*
+        ★ THE WEBSITE'S OWN TOKENS AND THE WEBSITE'S OWN FONTS ★
+
+        Squadron owner, 2026-08-01: "lets make the app match the website in brand and theme."
+
+        These values are copied from `apps/web/src/app/theme.generated.css`, which is generated from
+        `ssot/07-design/tokens.json`. They are duplicated here rather than imported because this
+        window loads no network resources and shares no build with the site — and a wrong colour is
+        visible, which is the one kind of drift that reports itself.
+
+        The app previously had its own approximation: #0b0d10 against the site's #05070a, a grey
+        #232a32 border against the site's translucent orange hairline. Close enough to look like a
+        different product by the same people.
+      */
+      @font-face {
+        font-family: 'Chakra Petch';
+        src: url('fonts/chakra-petch-400.woff2') format('woff2');
+        font-weight: 400;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: 'Chakra Petch';
+        src: url('fonts/chakra-petch-700.woff2') format('woff2');
+        font-weight: 700;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: 'Inter';
+        src: url('fonts/inter-400.woff2') format('woff2');
+        font-weight: 400;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: 'Inter';
+        src: url('fonts/inter-700.woff2') format('woff2');
+        font-weight: 700;
+        font-display: swap;
+      }
+      @font-face {
+        font-family: 'JetBrains Mono';
+        src: url('fonts/jetbrains-mono-400.woff2') format('woff2');
+        font-weight: 400;
+        font-display: swap;
+      }
+
       :root {
-        --bg: #0b0d10;
-        --panel: #14181d;
-        --line: #232a32;
-        --text: #e6e9ed;
-        --dim: #8b95a1;
+        --bg: #05070a;
+        --panel: #0b0f14;
+        --panel-raised: #121820;
+        --sunken: #080b10;
+        --line: rgba(255, 113, 0, 0.18);
+        --line-active: rgba(255, 113, 0, 0.55);
+        --text: #e8eef5;
+        --dim: #93a4b8;
+        --faint: #5b6b7d;
         --orange: #ff7100;
-        --green: #4ade80;
-        --red: #f87171;
+        --orange-bright: #ff9d3f;
+        --cyan: #00c8ff;
+        --cyan-bright: #5cd9ff;
+        --green: #3dff8f;
+        --red: #ff7a7a;
+        --display: 'Chakra Petch', system-ui, sans-serif;
+        --body: 'Inter', system-ui, sans-serif;
+        --mono: 'JetBrains Mono', ui-monospace, Consolas, monospace;
       }
       * { box-sizing: border-box; }
       body {
@@ -31,30 +86,66 @@
         padding: 20px;
         background: var(--bg);
         color: var(--text);
-        font: 14px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        font: 14px/1.55 var(--body);
       }
-      h1 { font-size: 17px; margin: 0 0 2px; letter-spacing: .02em; }
-      h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .09em; color: var(--dim); margin: 0 0 10px; }
+      /* Display face and the site's orange, as on every page heading. */
+      h1 {
+        font-family: var(--display);
+        font-size: 20px;
+        margin: 0 0 2px;
+        letter-spacing: .04em;
+        text-transform: uppercase;
+        color: var(--orange);
+      }
+      /* Section eyebrows: mono, wide-tracked, cyan — the site's Section header. */
+      h2 {
+        font-family: var(--mono);
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: .24em;
+        color: var(--cyan-bright);
+        margin: 0 0 10px;
+      }
       .sub { color: var(--dim); margin: 0 0 18px; font-size: 13px; }
       .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 14px; }
       .row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
       .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-right: 8px; }
       .ok { background: var(--green); } .off { background: var(--dim); } .bad { background: var(--red); }
+      /*
+        Outlined and mono-tracked, like every button on the site. The old solid-orange fill was the
+        loudest thing in the window, which put "Pause" and "Search again" at the same weight as the
+        one action that matters.
+      */
       button {
-        background: var(--orange); color: #14181d; border: 0; border-radius: 7px;
-        padding: 8px 14px; font: inherit; font-weight: 600; cursor: pointer;
+        background: transparent;
+        color: var(--cyan-bright);
+        border: 1px solid var(--cyan-bright);
+        border-radius: 6px;
+        padding: 9px 16px;
+        font-family: var(--mono);
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: .18em;
+        cursor: pointer;
+        transition: opacity .15s;
       }
-      button.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); font-weight: 500; }
-      button:disabled { opacity: .45; cursor: default; }
+      button:hover { opacity: .8; }
+      button.ghost {
+        color: var(--dim);
+        border-color: var(--line);
+      }
+      button.ghost:hover { color: var(--text); }
+      button:disabled { opacity: .4; cursor: default; }
       input {
-        width: 100%; padding: 9px 11px; border-radius: 7px; border: 1px solid var(--line);
-        background: #0b0d10; color: var(--text); font: inherit; font-family: ui-monospace, Menlo, Consolas, monospace;
+        width: 100%; padding: 9px 11px; border-radius: 6px; border: 1px solid var(--line);
+        background: var(--sunken); color: var(--text); font: inherit; font-family: var(--mono);
       }
+      input:focus { outline: none; border-color: var(--cyan-bright); }
       .muted { color: var(--dim); font-size: 12.5px; }
       .err { color: var(--red); font-size: 12.5px; }
       .stat { display: flex; gap: 22px; margin-top: 12px; }
-      .stat div span { display: block; font-size: 19px; font-weight: 600; }
-      .stat div small { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: .07em; }
+      .stat div span { display: block; font-family: var(--mono); font-size: 20px; color: var(--cyan-bright); }
+      .stat div small { color: var(--faint); font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: .18em; }
       pre {
         background: #0b0d10; border: 1px solid var(--line); border-radius: 7px; padding: 11px;
         max-height: 220px; overflow: auto; font-size: 11.5px; color: var(--dim); margin: 10px 0 0;
@@ -99,31 +190,248 @@
         background: #1d1408; border: 1px solid var(--orange); border-radius: 10px;
         padding: 12px 16px; margin-bottom: 14px;
       }
-      .update strong { color: var(--orange); }
-      .update p { margin: 0; font-size: 13px; }
-      .update .ver { color: var(--dim); font-size: 12px; margin-top: 2px; }
+      /* ---------------------------------------------------------- login view */
+      /*
+        Centred on the window rather than stacked at the top. There is exactly one thing to do here,
+        and putting it in the middle of the frame is what makes that obvious without a word of
+        instruction.
+      */
+      #login {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        background: var(--bg);
+      }
+      .login-card {
+        width: 100%;
+        max-width: 420px;
+        text-align: center;
+      }
+      .login-eyebrow {
+        font-family: var(--mono);
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: .32em;
+        color: var(--cyan-bright);
+        margin: 0;
+      }
+      .login-title {
+        font-family: var(--display);
+        font-size: 34px;
+        letter-spacing: .06em;
+        color: var(--orange);
+        margin: 10px 0 0;
+      }
+      /* The site's `rule-glow` divider, which is how a heading ends on every page there. */
+      .login-rule {
+        height: 1px;
+        width: 96px;
+        margin: 18px auto 0;
+        background: linear-gradient(90deg, transparent, var(--orange), transparent);
+        box-shadow: 0 0 8px rgba(255, 113, 0, .6);
+      }
+      .login-lead { color: var(--text); margin: 26px 0 0; }
+      #login button#signIn {
+        margin-top: 28px;
+        width: 100%;
+        padding: 13px 16px;
+        font-size: 12px;
+        letter-spacing: .24em;
+      }
+      /* The lockup. Width-driven so the aspect never distorts if the export changes. */
+      .login-logo {
+        display: block;
+        width: 320px;
+        max-width: 100%;
+        height: auto;
+        margin: 0 auto;
+      }
+      .login-waiting {
+        margin: 22px 0 0;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+        padding: 18px;
+      }
+      .login-waiting-head {
+        margin: 0;
+        color: var(--dim);
+        font-family: var(--mono);
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: .16em;
+      }
+      .login-code-label {
+        margin: 16px 0 0;
+        font-family: var(--mono);
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: .24em;
+        color: var(--faint);
+      }
+      /*
+        Big, spaced and SELECTABLE. This is read off one screen and typed into another — often a
+        phone — so it is set at a size somebody can read from a step back, and it can still be
+        selected with the mouse because the obvious thing to try is to copy it.
+      */
+      .login-code {
+        margin: 6px 0 0;
+        font-family: var(--mono);
+        font-size: 30px;
+        letter-spacing: .18em;
+        color: var(--orange-bright);
+        user-select: text;
+        cursor: text;
+      }
+      .login-code-note { margin: 12px 0 0; color: var(--faint); font-size: 12px; line-height: 1.5; }
+      .login-code-url { color: var(--cyan-bright); font-family: var(--mono); font-size: 11px; }
+      .login-waiting-actions {
+        margin-top: 16px;
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 8px;
+      }
+      .login-waiting-actions button { padding: 6px 12px; font-size: 10px; }
+      /* A moving thing, so a fifteen-second wait does not read as a frozen window. */
+      .login-spinner {
+        display: inline-block;
+        width: 9px; height: 9px;
+        margin-right: 8px;
+        border: 1px solid var(--cyan-bright);
+        border-top-color: transparent;
+        border-radius: 50%;
+        animation: spin 700ms linear infinite;
+        vertical-align: -1px;
+      }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      .login-note { color: var(--faint); font-size: 12px; margin: 24px 0 0; }
+      .login-foot {
+        margin: 30px 0 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 14px;
+      }
+      .login-foot .ver { color: var(--faint); font-family: var(--mono); font-size: 11px; }
+      #login .err { margin-top: 16px; }
     </style>
   </head>
   <body>
     <!--
-      ★ A BANNER, NOT AN UPDATER ★
+      ★ THE UPDATE BANNER IS GONE — squadron owner, 2026-08-01 ★
 
-      Squadron owner's decision, 2026-07-29: no over-the-air updates. An
-      auto-updater is only as trustworthy as its code signing, and without a
-      certificate an app that downloads and runs a binary by itself is a worse
-      proposition than one that sends the member to a page they can read.
+      "if this app now quietly updates on version change in the background without needing us to
+      download anything, then lets remove the update banner"
 
-      So this tells them, and the button opens the website in their own browser
-      where the address bar is visible.
+      It does, so it has. `startAutoUpdate` downloads in the background and installs once Elite is
+      closed, and it never prompts — see auto-update.ts. The banner belonged to the earlier decision
+      NOT to ship over-the-air updates, when the only way to get a new version was for a member to
+      go to the website and download an installer.
+
+      Telling somebody to fetch a build the app is already fetching is worse than saying nothing: it
+      asks for work that is not needed, and the member who does it ends up running an installer over
+      an app that was about to update itself.
+
+      What survives is one quiet line, `#updatePending` — an answer to "why did it restart", given
+      before it happens rather than after. Not a banner, not a button, nothing to press.
     -->
-    <div class="update" id="updateBanner" hidden>
-      <div>
-        <p><strong>An update is available.</strong></p>
-        <p class="ver" id="updateVersions"></p>
+
+    <!--
+      ★ A LOGIN SCREEN, NOT A PANEL — squadron owner, 2026-08-01 ★
+
+      "the pairing screen should be like a login screen, shown the first time, or if the app is
+      closed out, it should show on reopen if the session is not persisted"
+
+      It used to be the third panel down, under a status block reading "Not paired yet" and a row of
+      statistics that were all zero because nothing could have been sent yet. Everything above it
+      was answering questions about an app that was not doing anything.
+
+      Now: while there is no device token, this is the ENTIRE window. There is one thing to do and
+      one button to do it with. The moment a token exists, this disappears for good and the app
+      proper takes over — which is exactly the persistence rule asked for, since the token IS the
+      session and it survives a restart.
+    -->
+    <div id="login" hidden>
+      <div class="login-card">
+        <!--
+          ★ THE LOCKUP, NOT A TYPESET WORDMARK — squadron owner, 2026-08-01 ★
+
+          "remove Grim's Squad text and replace it with this image"
+
+          `brand/full-logo.png`, trimmed of its transparent margin and exported at 640px — twice the
+          320 it renders at, so it stays sharp on a high-DPI screen. The source has a real alpha
+          channel, so it sits on the app's near-black background with no plate behind it.
+        -->
+        <img class="login-logo" src="img/logo.png" alt="Grim&rsquo;s Squad" />
+        <h1 class="login-title">COMPANION</h1>
+        <div class="login-rule" aria-hidden="true"></div>
+
+        <p class="login-lead">
+          Connect this app to your squadron account. It reads Elite&rsquo;s journal and keeps your
+          profile, your ships and the squadron&rsquo;s market prices current.
+        </p>
+
+        <button id="signIn">Sign in with Discord</button>
+
+        <!--
+          ★ THE CODE IS SHOWN — squadron owner, 2026-08-01 ★
+
+          "the connect the app code is not showing in the app ... make sure this code is visible in
+          the app please! this is very important!"
+
+          It was not, and that was a real hole rather than a cosmetic one. The happy path carries the
+          code in the URL, so the browser opens already knowing it and nobody needs to read anything.
+          Every other path was broken:
+
+            - the browser fails to open, or opens the wrong one, or the member closes the tab
+            - they are signed in on a DIFFERENT machine, or on a phone
+            - the link is opened without the query string
+
+          In all of those the approval page correctly asks for a code, and the app was the only
+          thing that knew it and would not say. The member had no way forward but to cancel.
+
+          So it is on screen, in the same eight-character form the page expects, selectable so it can
+          be copied, and beside the address to go to.
+        -->
+        <div class="login-waiting" id="signInWaiting" hidden>
+          <p class="login-waiting-head">
+            <span class="login-spinner" aria-hidden="true"></span>
+            Waiting for you to approve this in your browser&hellip;
+          </p>
+
+          <p class="login-code-label">Your code</p>
+          <p class="login-code" id="linkCode">&mdash;</p>
+          <p class="login-code-note">
+            Your browser should already be showing this. If it is not, go to
+            <span class="login-code-url" id="linkUrl"></span> and enter it.
+          </p>
+
+          <div class="login-waiting-actions">
+            <button class="ghost" id="copyCode">Copy code</button>
+            <button class="ghost" id="reopenLink">Open the page again</button>
+            <button class="ghost" id="cancelSignIn">Cancel</button>
+          </div>
+        </div>
+
+        <p class="err" id="pairError" hidden></p>
+
+        <p class="login-note">
+          Your browser opens so you can sign in with Discord. This app never sees your password, and
+          there is nothing to copy. It can only send journal events &mdash; nothing else.
+        </p>
+
+        <p class="login-foot">
+          <button class="ghost" id="openHub">Open the website</button>
+          <span class="ver" id="appVersionLogin"></span>
+        </p>
       </div>
-      <button id="getUpdate">Get it from the website</button>
     </div>
 
+    <div id="app" hidden>
     <h1>Grim's Squad Hub</h1>
     <p class="sub">
       Keeps your squadron profile current from your Elite Dangerous journals.
@@ -217,26 +525,14 @@
       <p class="muted" id="refused" hidden></p>
     </div>
 
+    <!--
+      The sign-in controls moved to the login screen — see `#login`. What is left is the half that
+      only makes sense once connected: which device this is, and how to disconnect it.
+    -->
     <div class="panel" id="pairing">
-      <h2>Pairing</h2>
-      <div class="stack">
-        <p class="muted" id="pairHelp">
-          Connect this app to your squadron account. It opens your browser so you can sign in with
-          Discord — nothing to copy, and this app never sees your password. It can only send journal
-          events, nothing else.
-        </p>
-        <div class="row">
-          <button id="signIn">Sign in with Discord</button>
-          <button class="ghost" id="openHub">Open the website</button>
-        </div>
-        <p class="muted" id="signInWaiting" hidden>
-          Waiting for you to approve it in the browser…
-          <button class="ghost" id="cancelSignIn">Cancel</button>
-        </p>
-        <p class="err" id="pairError" hidden></p>
-      </div>
-      <div class="stack" id="paired" hidden>
-        <p class="muted">Paired as <code id="hint"></code></p>
+      <h2>This device</h2>
+      <div class="stack" id="paired">
+        <p class="muted">Connected as <code id="hint"></code></p>
         <div class="row">
           <button class="ghost" id="unpair">Forget this device</button>
           <button class="ghost" id="openHub2">Manage devices</button>
@@ -278,6 +574,8 @@
         <button class="ghost" id="folder">Set it myself</button>
       </div>
       <pre id="previewOut" hidden></pre>
+    </div>
+
     </div>
 
     <script>
@@ -474,22 +772,15 @@
         renderCategories(s);
 
         /*
-          Shown only when the hub has named a NEWER version. `updateAvailable`
-          is computed in the main process, where the running version comes from
-          Electron itself rather than a constant somebody has to remember to
-          bump.
-        */
-        $('updateBanner').hidden = s.updateAvailable !== true;
-        /*
-         * Shown whether or not an update is pending. `appVersion` comes from
-         * Electron, so it is whatever was actually installed.
+         * The version, on both views. From Electron, so it is whatever was actually installed —
+         * a string written here would go on claiming to be current after every release.
+         *
+         * There is no longer an "an update is available" banner beside it: the app updates itself
+         * and there is nothing for a member to do. See the note where that banner used to be.
          */
-        $('appVersion').textContent = s.appVersion ? `v${s.appVersion}` : '';
-
-        $('updateVersions').textContent =
-          s.updateAvailable === true
-            ? `You have ${s.appVersion}. The squadron has ${s.hub?.latestVersion}.`
-            : '';
+        const version = s.appVersion ? `v${s.appVersion}` : '';
+        $('appVersion').textContent = version;
+        $('appVersionLogin').textContent = version;
 
         $('error').hidden = s.last?.error == null;
         $('error').textContent = s.last?.error ?? '';
@@ -507,13 +798,35 @@
             refused.map(([c, n]) => `${c} (${n})`).join(', ') + '.'
           : '';
 
-        $('pairing').querySelector('.stack').hidden = s.paired;
-        $('paired').hidden = !s.paired;
+        /*
+          ★ ONE VIEW OR THE OTHER, NEVER BOTH ★
+
+          The token is the session. While there is none, the login screen is the whole window; the
+          moment there is one, the app proper replaces it. That is also the "shown again on reopen
+          if the session is not persisted" rule — nothing extra is needed, because a token that did
+          not survive the restart puts us straight back here.
+        */
+        $('login').hidden = s.paired;
+        $('app').hidden = !s.paired;
+
         $('hint').textContent = s.tokenHint;
         // While waiting, the button is hidden rather than disabled: the member's next action is in
         // the browser window that just opened, and a greyed-out button here invites clicking it.
         $('signIn').hidden = s.linking === true;
         $('signInWaiting').hidden = s.linking !== true;
+
+        /*
+          The code, on screen, in the form the approval page expects. An em dash until the server
+          has issued one — a blank would read as a code that failed to arrive.
+        */
+        $('linkCode').textContent = s.linkCode ?? '—';
+        /*
+          The address WITHOUT the query string. Somebody typing this into a phone should not have to
+          copy an eight-character code twice, and the page asks for it anyway when it is absent.
+        */
+        $('linkUrl').textContent = s.linkUrl ? String(s.linkUrl).split('?')[0] : '';
+        $('copyCode').disabled = !s.linkCode;
+        $('reopenLink').disabled = !s.linkUrl;
       }
 
       $('signIn').onclick = async () => {
@@ -527,6 +840,15 @@
         $('pairError').textContent = r.error ?? '';
         render(await api.getState());
       };
+      $('copyCode').onclick = async () => {
+        const s = await api.getState();
+        if (!s.linkCode) return;
+        await navigator.clipboard.writeText(s.linkCode).catch(() => undefined);
+        // Said on the button itself: a toast in a window this small is more chrome than message.
+        $('copyCode').textContent = 'Copied';
+        setTimeout(() => { $('copyCode').textContent = 'Copy code'; }, 1500);
+      };
+      $('reopenLink').onclick = () => api.reopenLink();
       $('cancelSignIn').onclick = async () => {
         await api.cancelSignIn();
         render(await api.getState());
@@ -555,7 +877,6 @@
       // Opens the companion page in the real browser — never an in-app window.
       // A download prompt inside an Electron shell is exactly the shape of a
       // phishing page, and members should see the address bar.
-      $('getUpdate').onclick = () => api.openHub();
       $('openHub').onclick = () => api.openHub();
       $('openHub2').onclick = () => api.openHub();
       $('folder').onclick = async () => { await api.chooseJournalFolder(); render(await api.getState()); };

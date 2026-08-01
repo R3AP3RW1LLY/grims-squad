@@ -9,9 +9,28 @@
  * way `update-banner-rules` and `user-multi-select-rules` are.
  */
 
-/** Digits only, never longer than the code. Typing and pasting both come through here. */
-export function normaliseCode(raw: string, length: number): string {
-  return raw.replace(/\D/g, '').slice(0, length);
+/**
+ * What characters a code may contain.
+ *
+ * ★ ADDED AFTER THIS COMPONENT WAS REUSED AND SILENTLY BROKE — 2026-08-01 ★
+ *
+ * It was written for six-digit TOTP and stripped everything that was not a digit. Reusing it for
+ * the companion's device code — which is alphanumeric, `K7M2-QP4X` — meant typing the real code
+ * produced "724", and the approval page could not be completed by hand at all.
+ *
+ * Nothing failed. The field simply ate most of what was typed, and the button stayed disabled.
+ */
+export type Charset = 'digits' | 'alnum';
+
+/** Trimmed to length, and to the characters this kind of code is made of. */
+export function normaliseCode(raw: string, length: number, charset: Charset = 'digits'): string {
+  const stripped =
+    charset === 'alnum'
+      ? // Upper-cased, because the code is generated and displayed in upper case, and somebody
+        // typing it in lower case has entered the right code.
+        raw.toUpperCase().replace(/[^A-Z0-9]/g, '')
+      : raw.replace(/\D/g, '');
+  return stripped.slice(0, length);
 }
 
 export interface SubmitDecision {

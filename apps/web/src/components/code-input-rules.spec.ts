@@ -65,3 +65,31 @@ describe('decideSubmit', () => {
     expect(decideSubmit('123456', 6, null, true).submit).toBe(false);
   });
 });
+
+describe('alphanumeric codes', () => {
+  /*
+   * ★ THE REGRESSION THIS EXISTS TO STOP ★
+   *
+   * This component was written for six-digit TOTP and reused for the companion's device code, which
+   * is alphanumeric. Stripping non-digits meant typing the real code "K7M2-QP4X" produced "724" —
+   * the approval page could not be completed by hand at all, and nothing errored. The field simply
+   * ate what was typed and left the button disabled.
+   */
+  it('MANDATORY: keeps the letters', () => {
+    expect(normaliseCode('K7M2-QP4X', 8, 'alnum')).toBe('K7M2QP4X');
+  });
+
+  it('accepts it in lower case, because that is the same code', () => {
+    expect(normaliseCode('k7m2-qp4x', 8, 'alnum')).toBe('K7M2QP4X');
+  });
+
+  it('still drops punctuation and spacing', () => {
+    expect(normaliseCode(' K7M2 QP4X ', 8, 'alnum')).toBe('K7M2QP4X');
+  });
+
+  it('leaves digit codes exactly as they were', () => {
+    // The default must not change: every existing caller is a TOTP field.
+    expect(normaliseCode('12ab34cd56', 6)).toBe('123456');
+    expect(normaliseCode('123 456', 6)).toBe('123456');
+  });
+});

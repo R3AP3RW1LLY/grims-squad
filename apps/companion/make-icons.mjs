@@ -33,12 +33,21 @@ const BUILD = join(HERE, 'build');
 /**
  * Which sizes go in.
  *
- * 16 and 24 are deliberately absent: the brand set does not have them, and
- * inventing them would mean resampling — the exact thing this avoids. Windows
- * downscales 32→16 for the one place that needs it, which is a single halving
- * of an already-simple mark rather than a 512→16 collapse.
+ * ★ 16 AND 24 ADDED, 2026-08-01 ★
+ *
+ * They used to be absent, on the reasoning that the brand set did not have them and inventing them
+ * would mean resampling — leaving Windows to halve 32→16 for the title bar.
+ *
+ * That reasoning was right about resampling and wrong about who should do it. Windows' runtime
+ * downscale is a plain box filter with no sharpening, and the title bar and Alt-Tab are where the
+ * icon is seen most. The two sizes are now exported ONCE, with ImageMagick's Lanczos filter and a
+ * light unsharp pass, and committed to the brand set alongside the others.
+ *
+ * So the resampling still does not happen here — it happened once, deliberately, with a good
+ * filter, and the bytes in the .ico are still exactly the bytes of an exported file. This script
+ * keeps its promise of no decoding and no image dependency at build time.
  */
-const SIZES = [32, 48, 64, 128, 256];
+const SIZES = [16, 24, 32, 48, 64, 128, 256];
 
 /**
  * Packs PNGs into an .ico.

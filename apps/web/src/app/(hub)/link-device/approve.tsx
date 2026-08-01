@@ -75,12 +75,15 @@ export function ApproveDevice({ code: initialCode, label }: { code: string; labe
           </p>
           <div className="mt-6">
             <CodeInput
-              value={code.replace(/-/g, '')}
+              value={code.toUpperCase().replace(/[^A-Z0-9]/g, '')}
               onChange={(v) => setCode(v)}
               onComplete={() => void approve()}
               label="Code from the app"
               disabled={busy}
               length={8}
+              // The device code is alphanumeric. Without this the field strips every letter and
+              // "K7M2-QP4X" becomes "724" — see normaliseCode.
+              charset="alnum"
               autoFocus
             />
           </div>

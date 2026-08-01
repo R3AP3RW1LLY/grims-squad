@@ -16,6 +16,7 @@ import {
   saveConfig,
   redactToken,
   apiBaseUrlFor,
+  webBaseUrlFor,
   type CompanionConfig,
 } from './config.js';
 import { Uploader } from './uploader.js';
@@ -82,6 +83,18 @@ let timer: NodeJS.Timeout | null = null;
 let linking = false;
 /** Set by the cancel button, read by the poll loop. */
 let linkCancelled = false;
+
+/**
+ * The link currently awaiting approval, so the window can SHOW the code.
+ *
+ * ★ THE APP WAS THE ONLY THING THAT KNEW IT, AND WOULD NOT SAY ★
+ *
+ * The happy path puts the code in the URL, so the browser opens already knowing it. Every other
+ * path — the browser failing to open, the member closing the tab, approving from a phone or another
+ * machine — leaves the approval page correctly asking for a code that nothing on screen could
+ * supply. Reported by the squadron owner, 2026-08-01.
+ */
+let activeLink: { code: string; verifyUrl: string } | null = null;
 
 let lastOutcome: WatchOutcome | null = null;
 let explainedTrayOnce = false;
@@ -579,6 +592,8 @@ function state(): Record<string, unknown> {
   return {
     paired: config.deviceToken !== '',
     linking,
+    linkCode: activeLink?.code ?? null,
+    linkUrl: activeLink?.verifyUrl ?? null,
     tokenHint: redactToken(config.deviceToken),
     enabled: config.enabled,
     autoStart: config.autoStart,
@@ -949,6 +964,8 @@ if (!app.requestSingleInstanceLock()) {
 
       linking = true;
       linkCancelled = false;
+      // Published BEFORE the browser is opened, so the code is on screen even if opening fails.
+      activeLink = { code: started.code, verifyUrl: started.verifyUrl };
       push();
 
       // Their own browser, never an embedded one. See the note above.
@@ -972,8 +989,16 @@ if (!app.requestSingleInstanceLock()) {
         return { ok: true };
       } finally {
         linking = false;
+        activeLink = null;
         push();
       }
+    });
+
+    /** Opens the approval page again — the browser may have failed to open, or been closed. */
+    ipcMain.handle('reopenLink', () => {
+      if (activeLink === null) return { ok: false };
+      void shell.openExternal(activeLink.verifyUrl);
+      return { ok: true };
     });
 
     ipcMain.handle('cancelSignIn', () => {
@@ -1016,8 +1041,18 @@ if (!app.requestSingleInstanceLock()) {
       return { ok: true };
     });
 
+    /*
+     * ★ THE SITE, NOT THE API — squadron owner, 2026-08-01 ★
+     *
+     * "the link on open the website should take us to the home page please. not the api."
+     *
+     * This built the URL from `apiBaseUrlFor`. In production that is harmless — one origin serves
+     * both, with Caddy routing `/v1` to the API — but in development the API is on :5001 and the
+     * site on :5000, so the button opened a JSON 404. It also went to a settings sub-page rather
+     * than the front door.
+     */
     ipcMain.handle('openHub', () => {
-      void shell.openExternal(`${apiBaseUrlFor(config, process.env).replace(/\/+$/, '')}/settings/devices`);
+      void shell.openExternal(webBaseUrlFor(config, process.env));
     });
 
     /*

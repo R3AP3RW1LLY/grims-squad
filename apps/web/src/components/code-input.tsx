@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useId, useRef, useState } from 'react';
-import { decideSubmit, normaliseCode } from './code-input-rules';
+import { decideSubmit, normaliseCode, type Charset } from './code-input-rules';
 
 /**
  * The six-digit code box, everywhere a code is asked for.
@@ -47,6 +47,8 @@ export function CodeInput({
   disabled = false,
   autoFocus = false,
   length = 6,
+  /** Digits for a TOTP code; alnum for the companion's device code. See `normaliseCode`. */
+  charset = 'digits',
 }: {
   value: string;
   onChange: (next: string) => void;
@@ -56,6 +58,7 @@ export function CodeInput({
   disabled?: boolean;
   autoFocus?: boolean;
   length?: number;
+  charset?: Charset;
 }) {
   const id = useId();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -138,12 +141,13 @@ export function CodeInput({
           onChange={(e) => {
             // Digits only, and trimmed to length. Handles typing and pasting identically, which is
             // why paste needs no special case: a pasted "123 456" arrives here as 123456.
-            onChange(normaliseCode(e.currentTarget.value, length));
+            onChange(normaliseCode(e.currentTarget.value, length, charset));
           }}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
           disabled={disabled}
-          inputMode="numeric"
+          // `numeric` would put a phone keyboard with no letters under an alphanumeric code.
+          inputMode={charset === 'alnum' ? 'text' : 'numeric'}
           autoComplete="one-time-code"
           // Off, all of it. A one-time code is not a word, and a phone capitalising or correcting
           // it is a phone silently changing what the member typed.
