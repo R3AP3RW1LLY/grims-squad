@@ -39,6 +39,13 @@ const COPIES: readonly Copy[] = [
     copy: 'packages/shared/src/permissions.ts',
     why: 'The authorization model. Drift here is a security defect, not a style one.',
   },
+  {
+    source: 'ssot/04-contracts/job-channels.ts',
+    copy: 'packages/shared/src/job-channels.ts',
+    why:
+      'Channel names four processes agree on. A NOTIFY nobody listens to is silently discarded, ' +
+      'so drift here fails nothing and breaks everything.',
+  },
 ];
 
 const red = (s: string) => `\x1b[31m${s}\x1b[0m`;

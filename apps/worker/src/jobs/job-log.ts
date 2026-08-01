@@ -1,5 +1,3 @@
-import type { PrismaClient } from '@grims/db';
-
 /**
  * Putting worker activity on the admin area's live log.
  *
@@ -29,36 +27,15 @@ import type { PrismaClient } from '@grims/db';
  * own errors: the job is the thing that matters and it has already done the work.
  */
 
-/** The channel the API listens on. One name, in one place, or the two sides never meet. */
-export const JOB_LOG_CHANNEL = 'gmsd_job_log';
-
-export interface JobLogLine {
-  readonly level: 'info' | 'warn' | 'error';
-  /** Shown as the source column. `ingest` or `embed`. */
-  readonly kind: string;
-  readonly message: string;
-  /** Milliseconds, when the line describes something that finished. */
-  readonly tookMs?: number;
-}
-
-/**
- * Announces one line.
+/*
+ * ★ THE CHANNEL AND THE ENCODING MOVED TO THE CONTRACT ★
  *
- * ★ TRUNCATED, BECAUSE NOTIFY HAS A HARD LIMIT ★
+ * They used to live here, and the API's listener had its own copy of the name. Two definitions of a
+ * string that only works when both sides agree, with nothing to make them agree — and a NOTIFY to
+ * the wrong channel fails silently, so the drift would have shown up as a live log that simply
+ * never scrolled.
  *
- * A payload over 8000 bytes makes `pg_notify` raise, which would turn a long error message into a
- * failed job. Nothing here should ever be near that, and "should never" is not a reason to let it
- * throw — an error string is exactly the field that arrives unexpectedly long.
+ * Re-exported rather than removed: the worker's callers import `announce` from here, and the
+ * collector imports it from the contract directly. Same function either way.
  */
-export async function announce(db: PrismaClient, line: JobLogLine): Promise<void> {
-  const payload = JSON.stringify({
-    level: line.level,
-    kind: line.kind,
-    message: line.message.slice(0, 500),
-    ...(line.tookMs === undefined ? {} : { tookMs: line.tookMs }),
-  });
-
-  await db
-    .$executeRawUnsafe(`SELECT pg_notify($1, $2)`, JOB_LOG_CHANNEL, payload)
-    .catch(() => undefined);
-}
+export { JOB_LOG_CHANNEL, announce, type JobLogLine } from '@grims/shared';

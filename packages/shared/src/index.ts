@@ -12,6 +12,7 @@ export * from './ai-corpus.js';
 export * from './ai-learning.js';
 export * from './ai-knowledge.js';
 export * from './reputation.js';
+export * from './job-channels.js';
 export * from './errors.js';
 export * from './dto/common.js';
 export * from './redirect.js';

@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { Client } from 'pg';
 import { PrismaClient } from '@grims/db';
+import { JOB_REQUEST_CHANNEL } from '@grims/shared';
 import { announce } from './jobs/job-log.js';
 
 /**
@@ -33,8 +34,8 @@ import { announce } from './jobs/job-log.js';
  * nothing resets. A child process cannot: it dies, and the next request gets a clean one.
  */
 
-/** Must match the API. Two sides, one name. */
-const CHANNEL = 'gmsd_job_request';
+/** From the contract, not retyped. See `ssot/04-contracts/job-channels.ts`. */
+const CHANNEL = JOB_REQUEST_CHANNEL;
 
 /**
  * What may be asked for: the entrypoint, and the arguments it takes.
@@ -187,43 +188,98 @@ async function run(db: PrismaClient, source: string): Promise<void> {
   });
 }
 
+/** How long to wait before trying the connection again. */
+const RETRY_MS = 5_000;
+
+/**
+ * Connects, listens, and reconnects for ever.
+ *
+ * ★ IT MUST NEVER EXIT, AND THE FIRST VERSION COULD ★
+ *
+ * `await client.connect()` throws when Postgres is not up. That is not an exotic failure — it is
+ * what happens every time somebody runs `pnpm dev` before Docker has finished starting, which is
+ * most mornings. The process would exit non-zero, and because this is now a task in `pnpm dev`,
+ * TURBO TEARS DOWN EVERY OTHER TASK WITH IT. Starting the stack a few seconds early would have
+ * taken the web and API down with no obvious cause.
+ *
+ * There was a second hole beside it: nothing reconnected. A dropped socket left the daemon running
+ * and listening to nothing, so the button would report "Requested" for ever and no job would run —
+ * exactly the silent failure this whole feature exists to remove.
+ *
+ * So it retries, indefinitely, and says so each time. A resident service that cannot tolerate its
+ * database restarting is not resident.
+ */
+async function listenForever(db: PrismaClient, url: string): Promise<void> {
+  for (;;) {
+    const client = new Client({ connectionString: url });
+
+    /*
+     * ★ THE ERROR HANDLER IS NOT OPTIONAL ★
+     *
+     * An unhandled 'error' on a pg Client is an unhandled EventEmitter error, which ends the
+     * process. Registered BEFORE connect, because that is when the first one can arrive.
+     */
+    const dropped = new Promise<void>((resolve) => {
+      client.on('error', (e) => {
+        console.error(`daemon: connection error — ${e.message}`);
+        resolve();
+      });
+      client.on('end', () => resolve());
+    });
+
+    try {
+      await client.connect();
+      await client.query(`LISTEN ${CHANNEL}`);
+      console.log(`daemon: listening on ${CHANNEL}`);
+      await announce(db, {
+        level: 'info',
+        kind: 'health',
+        message: 'Worker daemon ready for on-demand runs',
+      });
+
+      client.on('notification', (msg) => {
+        if (msg.channel !== CHANNEL || msg.payload === undefined) return;
+        // The payload is just the source name. Validated against RUNNABLE before anything is spawned.
+        void run(db, msg.payload.trim());
+      });
+
+      // Resolves only when the connection goes away. Until then this is the whole program.
+      await dropped;
+      console.error('daemon: connection lost, reconnecting');
+    } catch (e) {
+      console.error(
+        `daemon: could not connect (${e instanceof Error ? e.message : String(e)}), retrying in ${RETRY_MS / 1000}s`,
+      );
+    }
+
+    await client.end().catch(() => undefined);
+    await new Promise((r) => setTimeout(r, RETRY_MS));
+  }
+}
+
 async function main(): Promise<void> {
   const url = process.env['DATABASE_URL'];
   if (url === undefined || url === '') {
-    console.error('daemon: DATABASE_URL is not set');
-    process.exitCode = 1;
-    return;
+    /*
+     * ★ COMPLAINS FOR EVER RATHER THAN EXITING ★
+     *
+     * This was an `exitCode = 1` on the reasoning that a missing connection string cannot fix
+     * itself by waiting. True, and beside the point: this is a task in `pnpm dev`, and turbo tears
+     * down every other task when one fails — so the tidy exit takes the web app and the API with
+     * it. One idle process saying what is wrong is strictly better than three dead ones.
+     */
+    for (;;) {
+      console.error('daemon: DATABASE_URL is not set — on-demand ingests cannot be served');
+      await new Promise((r) => setTimeout(r, 60_000));
+    }
   }
 
   const db = new PrismaClient();
-  const client = new Client({ connectionString: url });
-
   /*
-   * ★ THE ERROR HANDLER IS NOT OPTIONAL ★
-   *
-   * An unhandled 'error' on a pg Client is an unhandled EventEmitter error, which ends the process.
-   * This one is meant to stay up for weeks; a network blip must not be the end of it.
+   * Never returns. The subscription and the reconnect loop live in there, and this process exists
+   * to wait — no timer, no poll, nothing else to go wrong.
    */
-  client.on('error', (e) => {
-    console.error(`daemon: connection error — ${e.message}`);
-  });
-
-  await client.connect();
-  await client.query(`LISTEN ${CHANNEL}`);
-  console.log(`daemon: listening on ${CHANNEL}`);
-  await announce(db, { level: 'info', kind: 'health', message: 'Worker daemon ready for on-demand runs' });
-
-  client.on('notification', (msg) => {
-    if (msg.channel !== CHANNEL || msg.payload === undefined) return;
-    // The payload is just the source name. Validated against RUNNABLE before anything is spawned.
-    void run(db, msg.payload.trim());
-  });
-
-  /*
-   * Held open by the listener. No timer, no poll — the process exists to wait, and a heartbeat here
-   * would only be a second thing to go wrong.
-   */
-  await new Promise(() => {});
+  await listenForever(db, url);
 }
 
 await main();

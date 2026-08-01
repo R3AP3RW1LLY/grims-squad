@@ -52,8 +52,13 @@ export default async function TrainingPage() {
   const trained = sources.filter((s) => s.rows > 0).length;
   const running = sources.filter((s) => s.ingesting);
   const overdue = sources.filter((s) => s.nextInHours !== null && s.nextInHours < 0);
-  // A stall reports itself through lastError while not being `ingesting` — see the service.
-  const stalled = sources.filter((s) => !s.ingesting && s.lastError !== null);
+  /*
+   * The flag, not the message. This counted every source with a `lastError` as stalled, which
+   * lumped in ordinary failures — so the tile and the row pill could describe the same source two
+   * different ways, and the tile was the one people read first.
+   */
+  const stalled = sources.filter((s) => s.stalled);
+  const failed = sources.filter((s) => !s.stalled && s.lastError !== null);
 
   return (
     <>
@@ -78,20 +83,23 @@ export default async function TrainingPage() {
             tone={running.length > 0 ? 'accent' : 'default'}
           />
           <StatTile
-            label={stalled.length > 0 ? 'Needs attention' : 'Overdue'}
+            label={stalled.length + failed.length > 0 ? 'Needs attention' : 'Overdue'}
             /*
-             * A STALL outranks being overdue. Overdue means a schedule has slipped and will catch
-             * up on its own; stalled means a job died and never will. Showing the smaller number
-             * when the larger problem exists is how the larger problem gets missed.
+             * A STALL outranks a failure, and a failure outranks being overdue. Overdue means a
+             * schedule has slipped and will catch up on its own; the other two mean a job is not
+             * coming back. Showing the smaller number when the larger problem exists is how the
+             * larger problem gets missed.
              */
             value={
               stalled.length > 0
                 ? `${stalled.length} stalled`
-                : overdue.length === 0
-                  ? 'None'
-                  : String(overdue.length)
+                : failed.length > 0
+                  ? `${failed.length} failed`
+                  : overdue.length === 0
+                    ? 'None'
+                    : String(overdue.length)
             }
-            tone={stalled.length > 0 || overdue.length > 0 ? 'warn' : 'default'}
+            tone={stalled.length + failed.length + overdue.length > 0 ? 'warn' : 'default'}
           />
         </StatGrid>
 
@@ -167,7 +175,19 @@ function SourceRow({ source: s }: { source: TrainingSource }) {
         */}
         {!s.ingesting && (s.lastError !== null || s.lastIngestedAt === null) && (
           <div className="mt-2">
-            <RerunButton source={s.source} label={SOURCE_LABELS[key] ?? s.source} />
+            {/*
+              ★ EXCEPT EDDN, WHICH HAS NOTHING TO START ★
+              It is a resident subscriber, not a job — the daemon has no entry for it and would
+              reject the request, leaving the member with "Requested" and no run. What it needs when
+              it is down is its container restarted, so that is what it says.
+            */}
+            {s.source === 'eddn' ? (
+              <p className="font-mono text-[11px] text-[var(--color-text-secondary)]">
+                Runs continuously — restart the collector if it has stopped reporting.
+              </p>
+            ) : (
+              <RerunButton source={s.source} label={SOURCE_LABELS[key] ?? s.source} />
+            )}
           </div>
         )}
       </td>
@@ -188,19 +208,57 @@ function SourceRow({ source: s }: { source: TrainingSource }) {
 function State({ source: s }: { source: TrainingSource }) {
   if (s.ingesting) return <Pill tone="accent">Training now</Pill>;
   /*
-   * A stall arrives as an error, and reads as one — the service turns "started six hours ago and
-   * never finished" into a message, because the job that died left none of its own. Distinguished
-   * from an ordinary failure by its wording rather than by a second flag: both mean somebody has
-   * to look, and one pill saying so is clearer than two that need telling apart.
+   * A stall still arrives as an error message — the job that died left none of its own — but which
+   * KIND of wrong it is comes from the flag, not from reading the prose. This used to sniff for a
+   * prefix the service had since stopped writing, so every stall showed as "Last run failed" while
+   * the tile above went on counting it as stalled.
    */
-  if (s.lastError !== null) {
-    return <Pill tone="danger">{s.lastError.startsWith('Started') ? 'Stalled' : 'Last run failed'}</Pill>;
+  if (s.stalled) return <Pill tone="danger">Stalled</Pill>;
+  if (s.lastError !== null) return <Pill tone="danger">Last run failed</Pill>;
+
+  /*
+   * ★ A SOURCE THAT NEVER FINISHES MUST NOT SAY "TRAINED" — squadron owner, 2026-08-01 ★
+   *
+   * "if its always updating we should not say Trained it should be Live Updating or something."
+   *
+   * Exactly right, and the pill was wrong for a specific reason. "Trained" answers "when did the
+   * last run complete", which is the only question the other six sources have. The collector has no
+   * runs — it closes a reporting window every fifteen minutes purely so this page has something
+   * recent to show. Calling that "Trained" reports the bookkeeping as if it were the work, and
+   * implies a finished batch that will now sit still until the next one.
+   *
+   * The freshness check still applies underneath: `stalled` and `lastError` are tested first, so a
+   * collector that has actually stopped says so rather than claiming to be live.
+   */
+  if (s.source === 'eddn') {
+    /*
+     * ...but only while it is actually live. A collector stopped CLEANLY leaves no unfinished row,
+     * so `stalled` is false and nothing else here would notice — the pill would go on saying "Live"
+     * over prices that stopped updating hours ago, which is the most confident kind of wrong.
+     *
+     * Its deadline is the guard: `REFRESH_HOURS.eddn` is one hour and it closes a window every
+     * fifteen minutes, so overdue at all means four expected reports did not arrive.
+     */
+    const dead = s.nextInHours !== null && s.nextInHours < 0;
+    return dead ? <Pill tone="danger">Not reporting</Pill> : <Pill tone="accent">Live</Pill>;
   }
   if (s.lastIngestedAt === null) return <Pill tone="muted">Never run</Pill>;
   return <Pill tone="ok">Trained</Pill>;
 }
 
 function nextLabel(s: TrainingSource): string {
+  /*
+   * ★ THE INFINITY, ASKED FOR BY NAME — squadron owner, 2026-08-01 ★
+   *
+   * "something with the infinite symbol where the - is there now if we can do that please"
+   *
+   * "Next cycle" has no answer for a subscriber: there is no next one, because there is no
+   * boundary between this one and the last. A dash reads as missing data — the same thing the page
+   * shows when it does not know — and every other value in this column is a duration, so a number
+   * here would be a promise of a wait that never happens. The symbol says "continuously" in the
+   * width of one character.
+   */
+  if (s.source === 'eddn') return '∞';
   if (s.ingesting) return 'in progress';
   if (s.nextInHours === null) return 'not scheduled';
   // Negative is overdue, and it is SHOWN as overdue rather than clamped to zero: "4h overdue" and

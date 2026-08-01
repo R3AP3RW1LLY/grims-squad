@@ -21,16 +21,16 @@
   "devDependencies": {
     "@grims/config": "workspace:*",
     "@types/pg": "^8.20.0",
+    "tsx": "^4.19.0",
     "typescript": "^5.7.0",
-    "vitest": "^3.0.0",
-    "tsx": "^4.19.0"
+    "vitest": "^3.0.0"
   },
   "dependencies": {
     "@grims/db": "workspace:*",
-    "pg": "^8.22.0",
     "@grims/ed-clients": "workspace:*",
     "@grims/shared": "workspace:*",
     "ioredis": "^5.11.1",
+    "pg": "^8.22.0",
     "pino": "^10.3.1"
   }
 }

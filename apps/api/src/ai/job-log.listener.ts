@@ -1,5 +1,6 @@
 import { Injectable, Inject, type OnModuleInit, type OnModuleDestroy } from '@nestjs/common';
 import { Client } from 'pg';
+import { JOB_LOG_CHANNEL } from '@grims/shared';
 import { AiStreamService } from './ai-stream.service.js';
 
 /**
@@ -23,8 +24,8 @@ import { AiStreamService } from './ai-stream.service.js';
  * So this owns one raw client for the lifetime of the process, and nothing else uses it.
  */
 
-/** Must match `JOB_LOG_CHANNEL` in the worker. Two sides, one name. */
-const CHANNEL = 'gmsd_job_log';
+/** From the contract, not retyped. Four processes agreed on this name by coincidence until it moved there. */
+const CHANNEL = JOB_LOG_CHANNEL;
 
 /** How long to wait before reconnecting after the connection drops. */
 const RETRY_MS = 10_000;

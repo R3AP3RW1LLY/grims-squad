@@ -88,7 +88,23 @@ export const STORAGE_KIND: Record<KnowledgeSource, 'lookup' | 'vector' | 'both'>
   journal: 'both',
   coriolis: 'both',
   galaxy: 'both',
-  eddn: 'both',
+  /*
+   * ★ LOOKUP ONLY, AND THE REASON IS MEASURED ★
+   *
+   * This was `both` before the collector existed, on the assumption that everything worth holding is
+   * worth embedding. Building it showed why prices are the exception.
+   *
+   * A vector of "Platinum, 51,204 credits, Jameson Memorial" answers no question a similarity search
+   * is good at. Every question about a price is a COMPARISON — cheapest, nearest, most demand — and
+   * those are ORDER BY on an index, which `market_entries` already serves.
+   *
+   * And the cost is not neutral. EDDN delivers roughly one market snapshot a second; embedding them
+   * would rewrite station vectors continuously, and this project has already watched what that does:
+   * on 2026-08-01 re-embedding churn degraded the HNSW graph until "become a member" returned ship
+   * descriptions. The vectors were correct; the graph was not. A REINDEX fixed it, and nothing that
+   * needs an hourly REINDEX belongs in the index.
+   */
+  eddn: 'lookup',
   inara: 'both',
   /** Prose. There is nothing to look these up BY except their meaning. */
   reference: 'vector',
@@ -123,7 +139,11 @@ export const EMBED_EVERY_MINUTES: Record<KnowledgeSource, number> = {
    * a wing is actually there should hear yes.
    */
   journal: 3,
-  /** Prices move constantly, and a stale vector describes a market that no longer exists. */
+  /*
+   * Unused: `eddn` is `lookup`, so `EMBEDDED_SOURCES` excludes it and no sweep is scheduled. The key
+   * stays because the Record is exhaustive over KNOWLEDGE_SOURCES — which is what makes adding a
+   * source a compile error rather than a silently unembedded one. See STORAGE_KIND for why.
+   */
   eddn: 5,
   /** The roster changes when somebody joins or is promoted. Daily is plainly enough. */
   inara: 1_440,
@@ -172,7 +192,17 @@ export const REFRESH_HOURS: Record<KnowledgeSource, number> = {
   coriolis: 3,
   /** Spansh rebuilds nightly; systems do not move. */
   galaxy: 24,
-  /** Markets move hourly, and a stale price is worse than no price. */
+  /*
+   * ★ NOT A SCHEDULE — A DEADLINE ★
+   *
+   * The collector never stops; it is a subscriber, not a cron job. Nothing "runs" every hour.
+   *
+   * What it does is close a reporting window every fifteen minutes (EDDN_WINDOW_MINUTES), so the
+   * training page always has a recent completion to show. Setting this to 1 turns that into an
+   * alarm: four windows are expected inside the hour, so "overdue" can only mean the collector has
+   * actually stopped — which is the one thing about a resident process nobody would otherwise
+   * notice, because a dead subscriber looks exactly like a quiet one.
+   */
   eddn: 1,
   /** Our own roster. Daily, batched — see the Inara job. */
   inara: 24,
@@ -200,6 +230,22 @@ export interface SourceStatus {
   readonly nextInHours: number | null;
   /** Set when the last attempt failed. A source that is quietly broken looks identical to a fresh one. */
   readonly lastError: string | null;
+
+  /**
+   * Started and then stopped reporting — as opposed to having failed with a message of its own.
+   *
+   * ★ A FLAG, BECAUSE THE PAGE USED TO GUESS FROM THE WORDING ★
+   *
+   * The stall was only ever expressed as `lastError` prose, and the page told it apart from a real
+   * failure with `lastError.startsWith('Started')`. When the service's wording changed to "No
+   * progress for N minutes" that test silently became unreachable, so every stalled source rendered
+   * as "Last run failed" — while the count above it still called them stalled. The tile and the row
+   * disagreed and neither was obviously wrong.
+   *
+   * Two states that need different reactions must not be distinguished by a string that either side
+   * can reword without the other noticing.
+   */
+  readonly stalled: boolean;
 
   /**
    * When the run currently in progress began. Null when nothing is running.

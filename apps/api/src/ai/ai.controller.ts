@@ -225,6 +225,25 @@ export class AiController {
       throw new AppError(ErrorCode.VALIDATION_FAILED, 'That is not an ingestion source.');
     }
 
+    /*
+     * ★ EDDN CANNOT BE RUN, BECAUSE IT NEVER STOPS ★
+     *
+     * Every other source is a job the daemon spawns and waits for. The collector is a resident
+     * subscriber in its own container; there is nothing to start, and the daemon rejects it as an
+     * unknown source — which reached the member as "Requested" followed by nothing happening, the
+     * exact silent failure the re-run button was built to remove.
+     *
+     * Said plainly here instead. If the collector is genuinely down, the answer is to restart its
+     * container, and a button on this page cannot and should not do that.
+     */
+    if (source === 'eddn') {
+      throw new AppError(
+        ErrorCode.VALIDATION_FAILED,
+        'The EDDN collector runs continuously rather than in scheduled runs, so there is nothing ' +
+          'to start. If it has stopped reporting, its container needs restarting.',
+      );
+    }
+
     await this.trainingStatus.requestRun(source);
     return { requested: true };
   }

@@ -1110,6 +1110,8 @@ export interface TrainingSource {
   ingesting: boolean;
   nextInHours: number | null;
   lastError: string | null;
+  /** Started and then went quiet, as opposed to failing with a message. Never inferred from wording. */
+  stalled: boolean;
   /** Only while something is running — what the live bar and countdown are computed from. */
   startedAt: string | null;
   rowsSoFar: number | null;

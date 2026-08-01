@@ -33,6 +33,7 @@ const COPIES: ReadonlyArray<{ source: string; copy: string }> = [
   { source: 'ssot/04-contracts/ai-learning.ts', copy: 'packages/shared/src/ai-learning.ts' },
   { source: 'ssot/04-contracts/ai-knowledge.ts', copy: 'packages/shared/src/ai-knowledge.ts' },
   { source: 'ssot/04-contracts/reputation.ts', copy: 'packages/shared/src/reputation.ts' },
+  { source: 'ssot/04-contracts/job-channels.ts', copy: 'packages/shared/src/job-channels.ts' },
 ];
 
 const green = (s: string) => `\x1b[32m${s}\x1b[0m`;

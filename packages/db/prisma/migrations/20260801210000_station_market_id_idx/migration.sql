@@ -1,0 +1,33 @@
+-- Finding a station by Frontier's market id.
+--
+-- ★ MEASURED, NOT GUESSED — 2026-08-01 ★
+--
+-- Every live market update, from either source, starts by turning a `marketId` into a station. The
+-- only way to ask that question was:
+--
+--     WHERE source='galaxy' AND kind='station' AND data->>'marketId' = $1
+--
+-- which the planner served with an index scan on (source, kind) and then a FILTER across all
+-- 305,726 station rows. A hit could stop early and looked fine at 0.2ms. A MISS could not:
+--
+--     Rows Removed by Filter: 305726
+--     Execution Time: 2696.815 ms
+--
+-- Nearly three seconds, and misses are the common case rather than the exception — EDDN reports
+-- fleet carriers that have jumped since the last dump, construction sites laid down this morning,
+-- and systems Spansh has not indexed. The feed delivers about one market a second, so at 2.7s per
+-- miss the collector could never keep up: its first hundred seconds against the live relay wrote
+-- exactly zero rows.
+--
+-- The journal path (`applyMarketEvent`) has always asked the same question the same way. Every
+-- Market, MarketBuy and MarketSell event from a member has been paying this, silently, for a
+-- station we may not hold.
+--
+-- ★ PARTIAL, AND ON THE EXPRESSION ★
+--
+-- Expression index because `marketId` lives inside JSONB and there is no column to index. Partial
+-- because only galaxy station rows have the key at all — including the other ~143,000 knowledge
+-- rows would index a NULL for every one of them and make the index bigger than the question.
+CREATE INDEX "knowledge_items_station_market_id_idx"
+  ON "knowledge_items" ((data->>'marketId'))
+  WHERE source = 'galaxy' AND kind = 'station';

@@ -2,6 +2,7 @@ import { Injectable, Inject } from '@nestjs/common';
 import { PrismaClient } from '@grims/db';
 import {
   KNOWLEDGE_SOURCES,
+  JOB_REQUEST_CHANNEL,
   nextInHours,
   type KnowledgeSource,
   type SourceStatus,
@@ -53,7 +54,7 @@ export class TrainingStatusService {
    * exactly the semantics of a button press.
    */
   async requestRun(source: string): Promise<void> {
-    await this.db.$executeRawUnsafe(`SELECT pg_notify('gmsd_job_request', $1)`, source);
+    await this.db.$executeRawUnsafe(`SELECT pg_notify($1, $2)`, JOB_REQUEST_CHANNEL, source);
   }
 
   async status(now: Date = new Date()): Promise<SourceStatus[]> {
@@ -64,7 +65,28 @@ export class TrainingStatusService {
      */
     const [counts, runs] = await Promise.all([
       this.db.$queryRawUnsafe<Array<{ source: string; n: bigint }>>(
-        `SELECT source, COUNT(*)::bigint AS n FROM knowledge_items GROUP BY source`,
+        /*
+         * ★ EDDN DOES NOT LIVE IN knowledge_items, AND SHOWED AS NOTHING — 2026-08-01 ★
+         *
+         * Squadron owner: "Why are there no Facts Held reported or written by the Live Market of
+         * the /app/training page?"
+         *
+         * Because this only counted `knowledge_items`, and the collector writes prices to
+         * `market_entries` — the flattened table route-finding needs. So the one source doing the
+         * most work reported zero, which reads as broken rather than as counted elsewhere.
+         *
+         * ★ THE ESTIMATE, NOT COUNT(*) ★
+         *
+         * `market_entries` holds ~18.5 million rows. An exact count is a 653ms scan; `reltuples` is
+         * 2.5ms and was within 1,629 rows of the truth when measured — nine thousandths of one per
+         * cent. This page live-refreshes, so paying two thirds of a second per tick to sharpen a
+         * number displayed as "18,538,119" is the wrong trade.
+         *
+         * Autovacuum keeps the estimate current; the nightly rebuild ANALYZEs on the way out.
+         */
+        `SELECT source, COUNT(*)::bigint AS n FROM knowledge_items GROUP BY source
+         UNION ALL
+         SELECT 'eddn', GREATEST(reltuples, 0)::bigint FROM pg_class WHERE relname = 'market_entries'`,
       ),
       this.db.$queryRawUnsafe<
         Array<{
@@ -167,6 +189,7 @@ export class TrainingStatusService {
          * that died left no message of its own. Anything the previous run said is kept alongside:
          * a source that failed and then stalled has two things wrong with it.
          */
+        stalled,
         lastError: stalled
           ? `No progress for ${Math.round((silentFor ?? 0) / 60_000)} minutes — the job was killed ` +
             `or crashed after running ${Math.round(ranFor / 60_000)} minutes.` +

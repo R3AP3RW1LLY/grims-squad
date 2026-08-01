@@ -35,6 +35,19 @@ allowBuilds:
   # stops pnpm asking — leaving it blank re-triggers the placeholder state that
   # disables every OTHER build script too.
   electron-winstaller: false
+  # DECLINED, deliberately. zeromq ships prebuilt bindings for every platform we
+  # run on — win32-x64 for development, linux-x64 in the collector image — and
+  # `import('zeromq')` was verified to resolve `Subscriber` on both without its
+  # build script ever running.
+  #
+  # `true` would mean compiling libzmq from source, which needs a C++ toolchain
+  # that node:24-slim does not carry: the image would have to grow build-essential
+  # to produce a binary identical to the prebuild it already had.
+  #
+  # The risk `false` accepts is a platform with no prebuild failing at `import`
+  # rather than at install. Dockerfile.eddn-collector closes that: it loads the
+  # module during the build and fails there, not in production.
+  zeromq: false
 
 onlyBuiltDependencies:
   - esbuild

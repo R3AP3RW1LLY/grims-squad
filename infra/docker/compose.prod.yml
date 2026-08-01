@@ -214,6 +214,41 @@ services:
     depends_on:
       postgres: { condition: service_healthy }
 
+  # ── The EDDN collector ─────────────────────────────────────────────────────
+  #
+  # Subscribes to the public EDDN relay and keeps `market_entries` current between nightly Spansh
+  # rebuilds. Roughly one market snapshot a second, from every player running an uploader.
+  #
+  # ★ EXACTLY ONE, AND THE SCALE FIELD IS NOT THE THING ENFORCING IT ★
+  #
+  # Two collectors would both write every station, interleaving two delete-and-insert transactions
+  # over the same rows. `deploy.replicas: 1` states the intent; the guarantee is a Postgres advisory
+  # lock inside the process, because a second one started by hand during a deploy would not consult
+  # this file.
+  #
+  # ★ NO PORTS, NO INGRESS, OUTBOUND ONLY ★
+  #
+  # It connects out to tcp://eddn.edcd.io:9500 and to Postgres. Nothing reaches it.
+  #
+  # `restart: unless-stopped` because a dead subscriber is invisible: prices simply stop being
+  # current, with no error anywhere. The training page's one-hour deadline is the alarm for that,
+  # and this is what makes the alarm rare enough to be worth reading.
+  eddn-collector:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.eddn-collector
+    env_file: [/srv/grims/.env]
+    environment:
+      NODE_ENV: production
+    restart: unless-stopped
+    # SIGTERM closes the current reporting window before exiting, so an ordinary redeploy does not
+    # leave a row the training page would report as a stall. Given room to finish that write.
+    stop_grace_period: 20s
+    deploy:
+      replicas: 1
+    depends_on:
+      postgres: { condition: service_healthy }
+
   worker:
     profiles: ['jobs']
     build:
