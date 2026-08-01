@@ -235,8 +235,11 @@ Authoritative detail: `ssot/10-quality/adversarial-reviews.md`. Every phase and 
 | **DATA-INTEGRITY-ADV** | Any phase touching EDDN, market, BGS or telemetry ingestion | "Here is the input that corrupts your data silently." |
 | **UX-ADV** | Any member-facing surface | "Here is where a member is misled, blocked, or excluded." |
 | **OPS-ADV** | Phase exit | "It is 02:00 and this is broken. The runbook does not help me because…" |
+| **CONTROL-ADV** | Whenever a change adds or tightens a control: CSP, rate limit, permission, quota, validation, conservative default | "Here is the legitimate thing this control refuses." |
 
 **Rules:**
+- **A finding whose fix is a new or tighter control is incomplete until the reviewer states what that control does to the legitimate path.** Not "this should be tightened" — what breaks when it is. A reviewer who cannot name the request it now refuses has not finished the finding, and it is downgraded to MINOR until they can. Five real outages here were caused by correct controls nobody walked the happy path through; see the CONTROL-ADV brief for the list.
+- **Secure yes, crippled no.** A control that silently disables a working feature is a BLOCKER, ranked alongside a leak. Availability is a security property: a member who cannot use the site has not been protected from anything.
 - Reviews are **independent**: a reviewer does not see another reviewer's findings until all are submitted.
 - Each panel produces findings with severity `BLOCKER | MAJOR | MINOR | NIT` and a **concrete failure scenario** — inputs and state that produce a wrong result. A finding without a failure scenario is a NIT by definition.
 - Findings are **verified before action**: a second pass tries to refute each one. Unrefuted BLOCKER and MAJOR findings must be fixed or converted into a written, accepted risk in `ssot/08-plan/risks.md` signed off by the human.

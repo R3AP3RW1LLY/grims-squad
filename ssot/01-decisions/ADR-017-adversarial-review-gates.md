@@ -60,3 +60,18 @@ Which gates apply to a given change is set by its **risk tier** (ADR-021). Full 
 | **Findings acted on without verification** | Adversarial reviewers over-report by design. Without refutation, the team spends its time on non-problems and learns to ignore findings. |
 | **The author clears their own gate** | Not a review. |
 | **Six gates on every change** | Unaffordable and would be abandoned within a week. Risk tiering keeps it survivable. |
+
+
+## Amendment — 2026-08-01: CONTROL-ADV
+
+Six gates all asked variations of *"what gets through that should not?"*. None asked *"what is refused that should not be?"* — and that is the failure this project actually kept having.
+
+Five incidents, all the same shape: a correct control, correctly implemented, silently refusing something legitimate. A CSP that refused a `data:` URI so a member could not choose a generated signature. A CSP that refused `blob:` so no image preview worked, reported as ".jpg uploads are broken". An artwork quota of five an hour against a feature that requests five per press, which the owner reported as the generator being dead. That same quota counting its own refusals, so retrying extended the lockout. And a bot that treats "no viewer roles" as "do not count" — right for a locked channel, catastrophic when the role list merely failed to load, which cost three days of unrecorded squadron activity with nothing in the logs.
+
+None was a bad control. Every one was a good control nobody walked the happy path through.
+
+So a seventh gate, and a rule that binds all seven: **a finding whose fix is a new or tighter control is incomplete until the reviewer states what that control does to the legitimate path.** A reviewer who cannot name the request it now refuses has not finished the finding.
+
+The severity table changes with it: a control that silently disables a working feature is a BLOCKER, ranked alongside a leak. Availability is a security property, and a member who cannot use the site has not been protected from anything.
+
+This does not weaken any existing gate. RED-TEAM still opens with *"here is how I get data I should not have."* CONTROL-ADV is the other half of the same question, asked by somebody else.
