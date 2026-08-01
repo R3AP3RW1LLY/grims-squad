@@ -363,6 +363,18 @@ export class AiController {
       throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in to ask the assistant.');
     }
 
+    /*
+     * ★ CHECKED HERE AS WELL AS IN THE NAV ★
+     *
+     * The sidebar hides the page without this permission, and a hidden link is not a boundary —
+     * the URL is still typeable and this endpoint is still callable. Officers taking the assistant
+     * away from a rank need it actually taken away, not merely unadvertised.
+     */
+    const mask = await this.permissions.effectiveMask(caller.userId);
+    if (!satisfiesMask(mask, Permission.AI_CHAT)) {
+      throw new AppError(ErrorCode.PERMISSION_DENIED, 'You cannot use the assistant.');
+    }
+
     const b = (body ?? {}) as Record<string, unknown>;
     const question = typeof b['question'] === 'string' ? b['question'] : '';
     if (question.trim() === '') {

@@ -135,17 +135,36 @@ const NAV: readonly NavDefinition[] = [
     section: 'ai',
     blurb: 'Prices, systems, ships and our own guides — answered from squadron data.',
     /*
-     * ★ NO PERMISSION ★
+     * ★ AI_CHAT — squadron owner, 2026-08-01 ★
      *
-     * Everything it can reach is already visible to any signed-in member: the galaxy dump, market
-     * prices, ship data, and the guides board — which the reference ingest only reads while it is
-     * PUBLIC. Gating the assistant would mean the same facts are available through the forum and
-     * refused through the thing built to find them.
+     * "does the Ask GMSD AI page have controls in the permissions page ... so we can show and hide
+     * the page when we need too?"
      *
-     * Signing in is still required, at the route: every conversation is logged for officer review,
-     * and a log of anonymous questions is one nobody can act on.
+     * It does now. This shipped with `requires: null` on the reasoning that everything the
+     * assistant can reach is already visible to any signed-in member, so gating it would refuse
+     * through one door what another door gives away.
+     *
+     * That was an argument about the DATA and the owner's question is about the FEATURE. The model
+     * runs on the squadron's own card, alongside post screening and artwork; being able to take it
+     * away from a rank — or hold it back while it is being tuned — is an operational control, not a
+     * privacy one. `AI_CHAT` already existed for exactly this: "Converse with GMSD AI at all.
+     * Without it, the panel is not offered."
+     *
+     * ★ CHECKED AGAINST THE REAL ROLE TABLE, NOT THE CONSTANT ★
+     *
+     * `AI_CHAT` is in the MEMBER mask in this file, but what governs access is `roles.perm_mask` in
+     * the database, and the two are not the same thing — an earlier draft of this comment claimed
+     * SQUADRON_STANDING_PERMISSIONS, which is false: that constant is only the two officer forum
+     * bits.
+     *
+     * Verified: every role that grants ANY permission also grants AI_CHAT. The roles that do not
+     * have it hold an empty mask, so those members cannot reach the forum, ops or fleet either —
+     * gating this changes nothing for anybody who can currently reach a members' page.
+     *
+     * Worth re-checking after any role reshuffle. A permission that everybody happens to hold is
+     * indistinguishable from one nobody needs, right up until somebody edits a mask.
      */
-    requires: null,
+    requires: Permission.AI_CHAT,
   },
   {
     href: '/gmsd-ai/train',

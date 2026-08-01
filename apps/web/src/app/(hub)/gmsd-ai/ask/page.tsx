@@ -22,15 +22,19 @@ export const metadata: Metadata = {
  * component that fetched something would add a round trip before the page could paint, to display
  * a text box.
  *
- * ★ NO STEP-UP, NO PERMISSION ★
+ * ★ GATED ON AI_CHAT, NOT ON THE DATA ★
  *
- * Unlike the rest of the GMSD AI section, this is an ordinary member page. Everything it can reach
- * is already visible to any signed-in member — the galaxy dump, market prices, ship data, and the
- * guides board, which the reference ingest reads only while it is public. Gating it would mean the
- * same facts are available through the forum and refused through the thing built to find them.
+ * Everything the assistant can reach is already visible to any signed-in member, so this shipped
+ * ungated — refusing through one door what another gives away seemed wrong.
  *
- * The route itself still requires signing in: every conversation is logged for officer review, and
- * a log of anonymous questions is one nobody can act on.
+ * The owner asked for a control, and they were asking a different question: not "who may see these
+ * facts" but "who may use this feature". The model runs on the squadron's own card beside post
+ * screening and artwork, and being able to take it off a rank — or hold it back while it is being
+ * tuned — is operational.
+ *
+ * Checked against the real role table: every role granting any permission also grants AI_CHAT, so
+ * nothing changes for anybody who can currently reach a members' page. The endpoint checks it too —
+ * a hidden nav link is not a boundary.
  */
 export default function AskPage() {
   return (

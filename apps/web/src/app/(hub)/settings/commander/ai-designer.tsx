@@ -48,6 +48,19 @@ const BACKPLATE_CHOICES: ReadonlyArray<{ value: BackplateChoice; label: string; 
   { value: 'mix', label: 'A mix', note: 'Artwork on the first three, gradients on the rest.' },
 ];
 
+/**
+ * Roughly how long one backplate takes, in milliseconds.
+ *
+ * ★ USED FOR A BAR, NOT FOR A PROMISE ★
+ *
+ * Measured against the squadron's card at about fifty seconds. It is an estimate and it is treated
+ * as one: the bar approaches the end and STOPS THERE rather than completing, because a bar that
+ * fills and then keeps waiting is worse than no bar — it says the thing is finished when it is not.
+ *
+ * The real completion comes from the request returning, never from this clock.
+ */
+const BACKPLATE_MS = 50_000;
+
 /** How many designs get artwork, for each choice. */
 function artworkCount(choice: BackplateChoice, total: number): number {
   if (choice === 'gradient') return 0;
@@ -112,6 +125,10 @@ export function AiDesigner({
   const [choosing, setChoosing] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [drawing, setDrawing] = useState<number | null>(null);
+  /** How far the current backplate has got, 0–95. See BACKPLATE_MS. */
+  const [progress, setProgress] = useState(0);
+  /** How many backplates are wanted in this run, so the cards can say "2 of 5". */
+  const [wantedArt, setWantedArt] = useState(0);
   /** Bumped on every generate, so a superseded artwork run drops its results. */
   const run = useRef(0);
 
@@ -132,6 +149,7 @@ export function AiDesigner({
       setBusy(false);
 
       const wanted = artworkCount(backplate, r.options.length);
+      setWantedArt(wanted);
 
       /*
        * ★ ONE AT A TIME, AND ABANDONED IF THEY GENERATE AGAIN ★
@@ -143,6 +161,28 @@ export function AiDesigner({
       for (let i = 0; i < wanted; i += 1) {
         if (run.current !== mine) return;
         setDrawing(i);
+        setProgress(0);
+
+        /*
+         * ★ A CLOCK, BECAUSE THE GENERATOR CANNOT REPORT PROGRESS ★
+         *
+         * Squadron owner: "we need a realtime generating progress bar on each of the generated
+         * signatures as it takes a bit of time ... this will help show people that the AI is
+         * working".
+         *
+         * The image runtime answers once, when the picture is done — there is no partial state to
+         * read, so anything shown before then is necessarily an estimate against elapsed time.
+         *
+         * It is capped at 95 and never reaches the end on its own. A bar that fills while the work
+         * continues is a lie the member can catch, and catching it is worse than never having
+         * claimed it: the next honest progress bar they see, they will not believe either.
+         */
+        const startedAt = Date.now();
+        const ticker = setInterval(() => {
+          const pct = Math.min(95, ((Date.now() - startedAt) / BACKPLATE_MS) * 100);
+          setProgress(pct);
+        }, 250);
+
         try {
           const art = await apiPost<{ options: Array<{ png: string }> }>('/v1/ai/artwork', {
             prompt: r.options[i]?.imageryPrompt ?? '',
@@ -160,13 +200,18 @@ export function AiDesigner({
           );
         } catch {
           // One backplate failing leaves that option on its gradient, which is still a design.
+        } finally {
+          clearInterval(ticker);
         }
       }
     } catch (e) {
       setError((e as Error).message);
       setBusy(false);
     } finally {
-      if (run.current === mine) setDrawing(null);
+      if (run.current === mine) {
+        setDrawing(null);
+        setProgress(0);
+      }
     }
   }, [answers, backplate]);
 
@@ -179,7 +224,19 @@ export function AiDesigner({
   const commit = useCallback(async (option: DesignOption): Promise<BannerSpec> => {
     if (option.art === undefined) return option.spec;
 
-    const blob = await (await fetch(option.art)).blob();
+    /*
+     * ★ DECODED, NOT FETCHED — AND THE CSP IS WHY ★
+     *
+     * This was `await (await fetch(option.art)).blob()`, which is the idiomatic way to turn a data
+     * URI into a Blob and is blocked here: `connect-src 'self'` does not permit `data:`, so every
+     * press of Use or Tweak failed on an option that had artwork.
+     *
+     * The same trap as the `img-src blob:` failure that presented as ".jpg uploads are broken" —
+     * a CSP refusal surfaces as a generic exception with nothing pointing at the policy.
+     *
+     * `atob` is not a network operation, so no directive applies to it.
+     */
+    const blob = base64ToPng(option.art);
     const res = await fetch('/v1/media/uploads', {
       method: 'POST',
       body: blob,
@@ -323,8 +380,7 @@ export function AiDesigner({
             Five designs. Use one as it is, or open it in the builder and change anything.
             {drawing !== null && (
               <span className="block pt-1 font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--color-text-secondary)]">
-                Drawing artwork for {drawing + 1} of {artworkCount(backplate, options.length)} — you
-                can choose at any time.
+                Drawing artwork {drawing + 1} of {wantedArt} — you can choose at any time.
               </span>
             )}
           </p>
@@ -338,12 +394,47 @@ export function AiDesigner({
                 <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-[var(--color-brand-cyan-bright)]">
                   {o.name}
                 </p>
-                {drawing === i && (
-                  <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-secondary)]">
-                    Drawing artwork…
+                {drawing === i ? (
+                  <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--color-brand-cyan-bright)]">
+                    Drawing artwork · {Math.round(progress)}%
                   </p>
-                )}
+                ) : o.art !== undefined ? (
+                  <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--color-semantic-success)]">
+                    Artwork ready
+                  </p>
+                ) : drawing !== null && i > drawing && i < wantedArt ? (
+                  // Queued: generation is sequential, so an option further down the list is not
+                  // stalled — it has not started. Saying so stops it reading as a failure.
+                  <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-secondary)]">
+                    Queued
+                  </p>
+                ) : null}
               </div>
+
+              {/*
+                ★ THE PROGRESS BAR, ON THE CARD IT BELONGS TO ★
+
+                Under the name and above the banner, so the thing being worked on and the evidence
+                that it is being worked on are the same object. A single bar at the top of the page
+                would say "something is happening" without saying to what.
+
+                Rendered only while THIS option is drawing — the others show Queued or Ready, which
+                is the same information without a bar that is not moving.
+              */}
+              {drawing === i && (
+                <div className="mt-3">
+                  <div className="h-1 w-full overflow-hidden rounded-full bg-[var(--color-surface-panel-sunken)]">
+                    <div
+                      className="h-full rounded-full bg-[var(--color-brand-cyan-bright)] transition-[width] duration-300 ease-linear"
+                      style={{ width: `${progress}%` }}
+                    />
+                  </div>
+                  <p className="mt-1.5 font-mono text-[10px] text-[var(--color-text-secondary)]">
+                    GMSD AI is painting this backplate. It takes about a minute — you can use any
+                    design already finished while you wait.
+                  </p>
+                </div>
+              )}
 
               {/*
                 The real renderer, fed the real spec — the same component the forum uses, so what
@@ -382,6 +473,21 @@ export function AiDesigner({
       )}
     </div>
   );
+}
+
+/**
+ * `data:image/png;base64,…` to a Blob, without going near the network stack.
+ *
+ * Chunked rather than one `Uint8Array.from(...)` over the whole string: a banner PNG is a few
+ * hundred kilobytes, and spreading that many char codes into a single call overflows the argument
+ * limit on some engines — which would fail on large images only, and therefore in production only.
+ */
+function base64ToPng(dataUri: string): Blob {
+  const base64 = dataUri.slice(dataUri.indexOf(',') + 1);
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: 'image/png' });
 }
 
 /** Reads the CSRF cookie. The name is `gs_csrf`, not `csrf` — see `image-uploader`. */
