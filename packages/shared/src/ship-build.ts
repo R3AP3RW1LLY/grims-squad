@@ -212,3 +212,116 @@ export function coverageOf(build: ShipBuild): ImportCoverage {
     warnings,
   };
 }
+
+/**
+ * What a build is FOR, inferred from what is bolted to it.
+ *
+ * ★ SQUADRON OWNER, 2026-08-01 ★
+ *
+ * "please add a status bar like we have on the image training page so we know how many ship builds
+ * we need for reliable training ... over do it on the requirements so we have a solid base to train
+ * with"
+ *
+ * A bar needs something to count TOWARDS, and "forty builds" is not a target — forty exploration
+ * builds teach the assistant nothing about mining. So builds are counted per role, and the role is
+ * read off the modules rather than asked for: the person pasting a link they found on a forum has
+ * no idea how we categorise it, and a dropdown they guess at is worse data than a rule.
+ */
+export type BuildRole = 'mining' | 'combat' | 'exploration' | 'trading' | 'multipurpose';
+
+export const BUILD_ROLES: readonly BuildRole[] = [
+  'mining',
+  'combat',
+  'exploration',
+  'trading',
+  'multipurpose',
+];
+
+export const BUILD_ROLE_LABELS: Readonly<Record<BuildRole, string>> = {
+  mining: 'Mining',
+  combat: 'Combat',
+  exploration: 'Exploration',
+  trading: 'Trading',
+  multipurpose: 'Multipurpose',
+};
+
+/**
+ * How many builds each role needs before the assistant should be trusted on it.
+ *
+ * ★ DELIBERATELY HIGH, ON INSTRUCTION ★
+ *
+ * "over do it on the requirements so we have a solid base to train with." These are not the minimum
+ * that makes an answer possible — the fitting engine already computes a correct build from one hull
+ * and one module table. They are the number at which the assistant can say what people ACTUALLY
+ * fly, which is a different and much more useful claim, and it needs enough examples that one
+ * unusual build cannot skew it.
+ *
+ * Combat is highest because it has the widest spread: the same hull is fitted completely differently
+ * for ganking, for AX, for bounty hunting and for PvP, and a handful of examples would teach the
+ * assistant that one of those is "the" combat build.
+ */
+export const BUILD_ROLE_TARGETS: Readonly<Record<BuildRole, number>> = {
+  combat: 60,
+  mining: 40,
+  exploration: 40,
+  trading: 40,
+  multipurpose: 30,
+};
+
+/** Module groups that mark a build as belonging to a role. */
+const ROLE_MARKERS: Readonly<Record<Exclude<BuildRole, 'multipurpose'>, readonly string[]>> = {
+  // A refinery is the tell. Mining lasers without one is somebody cutting rocks for fun.
+  mining: ['rf'],
+  // Weapons that do damage, as opposed to mining tools that also happen to.
+  combat: ['mc', 'pl', 'bl', 'c', 'rg', 'pa', 'ml_', 'nl', 'tp', 'mr', 'axmc', 'abl_'],
+  // A fuel scoop is what separates a long trip from a long jump.
+  exploration: ['fs'],
+  trading: ['cr'],
+};
+
+/**
+ * Which role a build serves, from the module groups fitted to it.
+ *
+ * ★ ORDER MATTERS, AND IT IS NOT ALPHABETICAL ★
+ *
+ * A mining ship carries cargo racks; a trader does not carry a refinery. So the SPECIFIC markers are
+ * tested before the general ones — otherwise every miner and every explorer with a hold would be
+ * filed as a trader, and the trading bar would fill with ships nobody trades in.
+ *
+ * `multipurpose` is the honest answer for a build that shows no strong marker, not a failure. Plenty
+ * of real ships are exactly that, and forcing them into a role would put noise in a bar somebody is
+ * using to decide what to go and collect.
+ */
+export function classifyBuild(groups: readonly string[]): BuildRole {
+  const has = (markers: readonly string[]): boolean => markers.some((m) => groups.includes(m));
+
+  if (has(ROLE_MARKERS.mining)) return 'mining';
+  if (has(ROLE_MARKERS.combat)) return 'combat';
+  if (has(ROLE_MARKERS.exploration)) return 'exploration';
+
+  /*
+   * Cargo alone is a trader only if there is a REAL hold. Two tonnes is the rack a stock ship ships
+   * with, and counting it would file every unmodified hull as a trading build.
+   */
+  if (has(ROLE_MARKERS.trading)) return 'trading';
+
+  return 'multipurpose';
+}
+
+/** How the training page reports one role. */
+export interface BuildRoleProgress {
+  readonly role: BuildRole;
+  readonly label: string;
+  readonly have: number;
+  readonly need: number;
+  /** True once there are enough to answer from with confidence. */
+  readonly ready: boolean;
+}
+
+export function buildProgress(counts: Readonly<Partial<Record<BuildRole, number>>>): BuildRoleProgress[] {
+  return BUILD_ROLES.map((role) => {
+    const have = counts[role] ?? 0;
+    const need = BUILD_ROLE_TARGETS[role];
+    return { role, label: BUILD_ROLE_LABELS[role], have, need, ready: have >= need };
+  });
+}

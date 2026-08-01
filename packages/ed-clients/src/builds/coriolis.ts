@@ -138,8 +138,13 @@ export function decodeCoriolis(url: string, catalogue: BuildCatalogue): ImportRe
  * decoding the owner's `coriolis.io/outfit/panthermkii` link and reading the output.
  */
 export function stockBuild(ship: CatalogueShip, sourceUrl: string, catalogue: BuildCatalogue): ShipBuild {
-  const modules: FittedModule[] = ship.slots.map((slot, i) => {
-    const entry = ship.defaults[i] ?? null;
+  const modules: FittedModule[] = ship.slots.map((slot) => {
+    /*
+     * Looked up by GROUP and index, not by position in a flattened array. Ten of the arrays in
+     * coriolis-data have more slots than defaults, and a flat mapping shifted every later group —
+     * see the note on `CatalogueShip.defaults`.
+     */
+    const entry = ship.defaults[slot.group][slot.index] ?? null;
 
     let moduleId: string | null = null;
     if (entry !== null) {

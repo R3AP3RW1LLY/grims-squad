@@ -40,6 +40,7 @@ export function PageHeader({
   title,
   subtitle,
   action,
+  tabs,
   icon,
 }: {
   eyebrow: string;
@@ -47,6 +48,24 @@ export function PageHeader({
   /** A line under the title — a rank, a status. */
   subtitle?: string;
   action?: React.ReactNode;
+  /**
+   * Page tabs, rendered ABOVE the rule that separates the header from the body.
+   *
+   * ★ SQUADRON OWNER, 2026-08-01 ★
+   *
+   * "the tabs need to be above the horizontal line that seperates the title from the body like the
+   * tabs we have on the /app page please. this needs to be the default for these types of tabs."
+   *
+   * ★ WHY THIS IS A PROP AND NOT A CONVENTION ★
+   *
+   * `/app` got it right by passing its tabs through `action`, which happens to render inside the
+   * header. Help Train the Bot got it wrong by rendering `<PageTabs>` after `<PageHeader>`, which
+   * puts them below the rule — and nothing about either page said which was correct.
+   *
+   * A named prop makes the right placement the easy one. `action` still exists for genuine actions;
+   * tabs belong to the header and now say so.
+   */
+  tabs?: React.ReactNode;
   /** Rendered to the LEFT of the text. The dashboard puts an avatar here. */
   icon?: React.ReactNode;
 }) {
@@ -78,6 +97,7 @@ export function PageHeader({
           </div>
         </div>
         {action}
+        {tabs}
       </div>
 
       <div className="rule-glow mt-5" aria-hidden="true" />

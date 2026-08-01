@@ -3139,6 +3139,13 @@ model ShipBuild {
   submittedById String? @map("submitted_by_id") @db.Uuid
   submittedBy   User?   @relation(fields: [submittedById], references: [id], onDelete: SetNull)
 
+  /// What the build is FOR — `mining`, `combat`, `exploration`, `trading`, `multipurpose`.
+  ///
+  /// Inferred from the modules at import by `classifyBuild`, not asked for: somebody pasting a link
+  /// they found on a forum has no idea how we categorise it, and a dropdown they guess at is worse
+  /// data than a rule. Null on rows imported before the classifier existed.
+  role String?
+
   /// True for the reference builds imported in the admin console.
   ///
   /// The AI weights them differently: a baseline is "this is how the squadron does it", a member's

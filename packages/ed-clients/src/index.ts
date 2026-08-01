@@ -36,3 +36,4 @@ export { decodeCoriolis, stockBuild } from './builds/coriolis.js';
 export { decodeLoadout } from './builds/journal.js';
 export { computeStats, type BuildStats } from './builds/stats.js';
 export { decodeEdsy, readEntries, type EdsySymbolLookup } from './builds/edsy.js';
+export { fitForRole, fitShip, type FitRole, type FitRequest, type FitResult } from './builds/fit.js';

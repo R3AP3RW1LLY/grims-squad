@@ -81,9 +81,8 @@ export default async function TrainPage({
         eyebrow="GMSD AI"
         title="Help Train the Bot"
         subtitle={`${approved.toLocaleString()} images in the pool · ${trainable} of ${categories.length} categories ready to train`}
+        tabs={<PageTabs tabs={TABS} current={tab} basePath="/gmsd-ai/train" />}
       />
-
-      <PageTabs tabs={TABS} current={tab} basePath="/gmsd-ai/train" />
 
       <PageBody
         wide
@@ -174,6 +173,7 @@ export default async function TrainPage({
           >
             <BuildTraining
               builds={buildsRead.data.builds}
+              progress={buildsRead.data.progress}
               canSubmit={buildsRead.data.canSubmit}
               canModerate={buildsRead.data.canModerate}
               currentUserId={me?.user?.userId ?? null}

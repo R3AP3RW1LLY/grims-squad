@@ -3,7 +3,7 @@
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiPost, apiDelete } from '../../../../lib/api-client';
-import type { ShipBuildView } from '../../../../lib/api';
+import type { ShipBuildView, BuildRoleProgressView } from '../../../../lib/api';
 
 /**
  * Ship build training.
@@ -50,11 +50,13 @@ function Stat({ label, value }: { label: string; value: string }) {
 
 export function BuildTraining({
   builds,
+  progress,
   canSubmit,
   canModerate,
   currentUserId,
 }: {
   builds: ShipBuildView[];
+  progress: BuildRoleProgressView[];
   canSubmit: boolean;
   canModerate: boolean;
   currentUserId: string | null;
@@ -119,6 +121,73 @@ export function BuildTraining({
 
   return (
     <>
+      {/*
+        ★ WHAT THE POOL STILL NEEDS — SQUADRON OWNER, 2026-08-01 ★
+
+        "add a status bar like we have on the image training page so we know how many ship builds we
+        need for reliable training ... over do it on the requirements so we have a solid base".
+
+        Counted PER ROLE, because a single total would fill up while whole questions stayed
+        unanswerable — forty exploration builds teach the assistant nothing about mining. The role is
+        read off the modules at import rather than asked for: somebody pasting a link they found has
+        no idea how we categorise it, and a dropdown they guess at is worse data than a rule.
+
+        Above the form, for the same reason the image page puts its bars first: the page has to
+        answer "is this worth my time" before it asks for anything.
+      */}
+      <div className="mb-6 rounded-lg border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel)] p-5">
+        <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+          <h3 className="m-0 text-sm text-[var(--color-text-primary)]">What the pool still needs</h3>
+          <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-dim)]">
+            {progress.filter((p) => p.ready).length} of {progress.length} roles ready
+          </span>
+        </div>
+
+        <ul className="m-0 grid list-none gap-3 p-0 sm:grid-cols-2 lg:grid-cols-3">
+          {progress.map((p) => {
+            const pct = Math.min(100, Math.round((p.have / Math.max(1, p.need)) * 100));
+            return (
+              <li key={p.role}>
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-xs text-[var(--color-text-primary)]">{p.label}</span>
+                  <span className="font-mono text-[10px] tabular-nums text-[var(--color-text-secondary)]">
+                    {p.have} / {p.need}
+                    {p.ready && <span className="ml-1.5 text-[var(--color-semantic-success)]">ready</span>}
+                  </span>
+                </div>
+                {/*
+                  A real progressbar with the numbers on it. A bare coloured div is invisible to a
+                  screen reader, and this is the element carrying the whole message of the section.
+                */}
+                <div
+                  role="progressbar"
+                  aria-valuenow={p.have}
+                  aria-valuemin={0}
+                  aria-valuemax={p.need}
+                  aria-label={`${p.label} builds collected`}
+                  className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-[var(--color-surface-void)]"
+                >
+                  <div
+                    className={`h-full rounded-full transition-[width] ${
+                      p.ready ? 'bg-[var(--color-semantic-success)]' : 'bg-[var(--color-brand-cyan)]'
+                    }`}
+                    style={{ width: `${pct}%` }}
+                  />
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+
+        <p className="mt-4 text-xs leading-relaxed text-[var(--color-text-secondary)]">
+          These targets are deliberately high. The assistant can already compute a correct build from
+          the module tables — what it cannot do without these is tell somebody what people{' '}
+          <em>actually fly</em>, which is the more useful answer and needs enough examples that one
+          unusual build cannot skew it. Combat needs the most: the same hull is fitted completely
+          differently for AX, bounty hunting and PvP.
+        </p>
+      </div>
+
       {canSubmit ? (
         <div className="rounded-lg border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel-sunken)] p-5">
           <label className="block">

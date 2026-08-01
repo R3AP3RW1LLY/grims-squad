@@ -181,6 +181,66 @@ describe('a bare outfit link is the stock ship', () => {
   });
 });
 
+describe('stock loadouts with ragged data', () => {
+  /*
+   * ★ THE BUG THE SQUADRON OWNER SPOTTED, 2026-08-01 ★
+   *
+   * "check the cargo levels on the imported builds they do not seem right especially the panther
+   * clipper ... 32t seems really low even for the stock build!"
+   *
+   * It was 32 t on a hauler whose first bay is a class 8. `defaults` used to be flattened into one
+   * array — standard ++ hardpoints ++ internal — and mapped index-to-index against the slots
+   * flattened the same way. That is correct only while every array is the same length on both
+   * sides, and TEN of the 141 arrays in coriolis-data are not.
+   *
+   * The Panther lists more hardpoint slots than hardpoint defaults, so every internal default
+   * shifted left: a class 5 rack from a later position landed in the class 8 bay. Nothing errored.
+   * The build was simply the right modules in the wrong holes, and it read perfectly.
+   */
+  const RAGGED: RawShipItem = {
+    extKey: 'ragged',
+    name: 'Ragged',
+    data: {
+      // Four hardpoint slots, but only TWO defaults — exactly the Panther's shape.
+      slots: { standard: [3], hardpoints: [2, 1, 0, 0], internal: [5, 2] },
+      defaults: { standard: ['3E'], hardpoints: ['1b', '17'], internal: ['bigRack', 'smallRack'] },
+      bulkheads: [{ id: 'BC', grp: 'bh', name: 'Lightweight Alloy' }],
+      properties: { hullMass: 100 },
+    },
+  };
+
+  const raggedCatalogue = buildCatalogue(
+    [RAGGED],
+    [
+      ...MODULES,
+      { data: [{ id: 'bigRack', grp: 'cr', class: 5, rating: 'E', cargo: 32, symbol: 'Int_CargoRack_Size5_Class1' }] },
+      { data: [{ id: 'smallRack', grp: 'cr', class: 2, rating: 'E', cargo: 4, symbol: 'Int_CargoRack_Size2_Class1' }] },
+      { data: [{ id: 'p3', grp: 'pp', class: 3, rating: 'E', symbol: 'Int_Powerplant_Size3_Class1' }] },
+    ],
+  );
+
+  it('MANDATORY: a short defaults array does not shift the groups after it', () => {
+    const result = decodeCoriolis('https://coriolis.io/outfit/ragged', raggedCatalogue);
+    if (!result.ok) throw new Error(result.problem);
+
+    const internals = result.build.modules.filter((m) => m.group === 'internal');
+
+    // The BIG rack belongs in the big bay. Flattened, it would have landed two positions earlier.
+    expect(internals[0]?.moduleId).toBe('bigRack');
+    expect(internals[1]?.moduleId).toBe('smallRack');
+  });
+
+  it('the slots with no default are simply empty', () => {
+    const result = decodeCoriolis('https://coriolis.io/outfit/ragged', raggedCatalogue);
+    if (!result.ok) throw new Error(result.problem);
+
+    const hardpoints = result.build.modules.filter((m) => m.group === 'hardpoint');
+    expect(hardpoints).toHaveLength(4);
+    expect(hardpoints[2]?.moduleId).toBeNull();
+    expect(hardpoints[3]?.moduleId).toBeNull();
+  });
+});
+
 describe('links we cannot read', () => {
   it('names the ship we do not have', () => {
     // Almost always a hull released since our last coriolis refresh. "We do not know the X yet" is

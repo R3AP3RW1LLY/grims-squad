@@ -57,6 +57,16 @@ export interface CatalogueSlot {
    * without ambiguity even though the id alone would not be.
    */
   readonly fixedGroup: string | null;
+  /**
+   * Module groups this slot will accept, when it is restricted. Null when anything of the size fits.
+   *
+   * ★ RESTRICTED SLOTS ARE REAL AND THE FITTER MUST RESPECT THEM ★
+   *
+   * The Type-11 Prospector's hardpoints are mining-only (`ml`, `abl`, `mvr`, `pwa`, `scl`, `sdm`);
+   * several hulls have a limpet-only bay and a fighter-only bay. Fitting a beam laser into a mining
+   * mount produces a build that reads perfectly and cannot be bought.
+   */
+  readonly eligible: readonly string[] | null;
 }
 
 export interface CatalogueShip {
@@ -70,8 +80,27 @@ export interface CatalogueShip {
    */
   readonly edID: number | null;
   readonly slots: readonly CatalogueSlot[];
-  /** The stock loadout, as coriolis ids. `null` for a slot the stock ship leaves empty. */
-  readonly defaults: readonly (string | null)[];
+  /**
+   * The stock loadout, PER GROUP, aligned to that group's own slots.
+   *
+   * ★ NOT ONE FLAT ARRAY — SQUADRON OWNER, 2026-08-01 ★
+   *
+   * "check the cargo levels on the imported builds they do not seem right especially the panther
+   * clipper ... 32t seems really low even for the stock build!"
+   *
+   * It was. This used to be `standard ++ hardpoints ++ internal` flattened, mapped index-to-index
+   * against the slots flattened the same way — which is correct only while every array is the same
+   * length on both sides. TEN of the 141 arrays in coriolis-data are not: the Panther lists more
+   * hardpoint slots than hardpoint defaults, so every internal default shifted left by the
+   * difference.
+   *
+   * The Panther's first cargo bay is a class 8 (`06`, 256 t). It was reading `04`, a class 5, out of
+   * a later position — 32 t, in a hauler, which is exactly what looked wrong to the owner. Nothing
+   * errored; the build was simply somebody else's modules in the wrong holes.
+   *
+   * Kept per group, each aligned to its own slots, a short array just leaves the later slots empty.
+   */
+  readonly defaults: Readonly<Record<SlotGroup, readonly (string | null)[]>>;
   readonly bulkheads: readonly CatalogueModule[];
   readonly properties: Readonly<Record<string, unknown>>;
 }
@@ -127,6 +156,14 @@ export interface BuildCatalogue {
    * seen in a real loadout, with the remainder being holograms and ship-kit parts.
    */
   moduleBySymbol(category: SlotCategory, symbol: string): CatalogueModule | null;
+  /**
+   * Every module of one group that could go in one kind of slot.
+   *
+   * The fitter's whole vocabulary. Scoped by category for the same reason every other lookup is —
+   * `F9` is a drive among the standard modules and a limpet controller among the internals, and a
+   * fitter that searched across categories would offer one for the other.
+   */
+  modulesIn(category: SlotCategory, group: string): readonly CatalogueModule[];
 }
 
 /** The raw shapes the coriolis ingest stores. Narrow on purpose — this reads a few fields of many. */
@@ -180,6 +217,19 @@ function slotSize(entry: unknown): number {
   if (typeof entry === 'number') return entry;
   const size = num(asRecord(entry)['class']);
   return size ?? 0;
+}
+
+/**
+ * Which module groups a restricted slot accepts.
+ *
+ * Coriolis writes these as `{ name: 'Mining', class: 3, eligible: { ml: 1, abl: 1, … } }`. A plain
+ * numeric slot has no restriction and returns null — which the fitter reads as "anything of the
+ * size", not as "nothing".
+ */
+function eligibleOf(entry: unknown): readonly string[] | null {
+  const eligible = asRecord(asRecord(entry)['eligible']);
+  const groups = Object.keys(eligible);
+  return groups.length === 0 ? null : groups;
 }
 
 /** A stock-loadout entry. Coriolis writes `0` or `""` for an empty slot, not null. */
@@ -244,26 +294,31 @@ export function buildCatalogue(ships: readonly RawShipItem[], modules: readonly 
         index: i,
         size: slotSize(s),
         fixedGroup: STANDARD_GROUPS[i] ?? null,
+        eligible: eligibleOf(s),
       })),
       ...hardpoints.map((s, i) => ({
         group: 'hardpoint' as SlotGroup,
         index: i,
         size: slotSize(s),
         fixedGroup: null,
+        eligible: eligibleOf(s),
       })),
       ...internal.map((s, i) => ({
         group: 'internal' as SlotGroup,
         index: i,
         size: slotSize(s),
         fixedGroup: null,
+        eligible: eligibleOf(s),
       })),
     ];
 
-    const defaults = [
-      ...(Array.isArray(defaultData['standard']) ? defaultData['standard'] : []).map(defaultId),
-      ...(Array.isArray(defaultData['hardpoints']) ? defaultData['hardpoints'] : []).map(defaultId),
-      ...(Array.isArray(defaultData['internal']) ? defaultData['internal'] : []).map(defaultId),
-    ];
+    const defaults: Record<SlotGroup, readonly (string | null)[]> = {
+      standard: (Array.isArray(defaultData['standard']) ? defaultData['standard'] : []).map(defaultId),
+      hardpoint: (Array.isArray(defaultData['hardpoints']) ? defaultData['hardpoints'] : []).map(defaultId),
+      internal: (Array.isArray(defaultData['internal']) ? defaultData['internal'] : []).map(defaultId),
+      // Utilities live in the hardpoint array on both sides; nothing indexes this one.
+      utility: [],
+    };
 
     const bulkheads = (Array.isArray(data['bulkheads']) ? data['bulkheads'] : [])
       .map((b) => toModule(asRecord(b)))
@@ -314,5 +369,7 @@ export function buildCatalogue(ships: readonly RawShipItem[], modules: readonly 
     standardByRating: (group, cls, rating) =>
       standardByRating.get(`${group}:${cls}${rating}`) ?? null,
     moduleBySymbol: (category, symbol) => bySymbol[category].get(symbol.toLowerCase()) ?? null,
+    modulesIn: (category, group) =>
+      [...byCategory[category].values()].filter((m) => m.grp === group),
   };
 }

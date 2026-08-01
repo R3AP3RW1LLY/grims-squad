@@ -8,6 +8,7 @@ import {
   KNOWLEDGE_SOURCES,
   type SourceStatus,
   type CategoryProgress,
+  type BuildRoleProgress,
 } from '@grims/shared';
 import { User, type CurrentUser } from '../auth/current-user.js';
 import { PermissionService } from '../authz/permission.service.js';
@@ -102,13 +103,24 @@ export class AiController {
   async listBuilds(
     @User() caller: CurrentUser | undefined,
     @Query('ship') ship?: string,
-  ): Promise<{ builds: BuildView[]; canSubmit: boolean; canModerate: boolean }> {
+  ): Promise<{
+    builds: BuildView[];
+    progress: BuildRoleProgress[];
+    canSubmit: boolean;
+    canModerate: boolean;
+  }> {
     if (caller === undefined) throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
 
     const mask = await this.permissions.effectiveMask(caller.userId);
 
+    const [builds, progress] = await Promise.all([
+      this.buildQueries.list(ship === undefined ? {} : { shipId: ship }),
+      this.buildQueries.progress(),
+    ]);
+
     return {
-      builds: await this.buildQueries.list(ship === undefined ? {} : { shipId: ship }),
+      builds,
+      progress,
       canSubmit: (mask & Permission.AI_TRAIN_SUBMIT) === Permission.AI_TRAIN_SUBMIT,
       canModerate: (mask & Permission.AI_REVIEW) === Permission.AI_REVIEW,
     };

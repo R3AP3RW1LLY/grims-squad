@@ -1374,6 +1374,20 @@ export interface ShipBuildView {
  * Gated read, so a member without AI_TRAIN_SUBMIT gets the "no access" screen rather than a
  * two-factor code box — the confusion that cost an officer an evening on 2026-07-30.
  */
+/** How far the build collection is from being worth training on, per role. */
+export interface BuildRoleProgressView {
+  role: string;
+  label: string;
+  have: number;
+  need: number;
+  ready: boolean;
+}
+
 export const getShipBuildsGated = (): Promise<
-  AdminRead<{ builds: ShipBuildView[]; canSubmit: boolean; canModerate: boolean }>
+  AdminRead<{
+    builds: ShipBuildView[];
+    progress: BuildRoleProgressView[];
+    canSubmit: boolean;
+    canModerate: boolean;
+  }>
 > => getAdmin('/v1/ai/builds');

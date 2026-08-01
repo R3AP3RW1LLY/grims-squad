@@ -112,4 +112,11 @@ export {
   type ShipBuild,
   type ImportResult,
   type ImportCoverage,
+  BUILD_ROLES,
+  BUILD_ROLE_LABELS,
+  BUILD_ROLE_TARGETS,
+  classifyBuild,
+  buildProgress,
+  type BuildRole,
+  type BuildRoleProgress,
 } from './ship-build.js';

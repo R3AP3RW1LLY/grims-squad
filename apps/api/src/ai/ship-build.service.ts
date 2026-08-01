@@ -1,5 +1,15 @@
 import type { PrismaClient } from '@grims/db';
-import { AppError, ErrorCode, sourceOf, coverageOf, type ShipBuild } from '@grims/shared';
+import {
+  AppError,
+  ErrorCode,
+  sourceOf,
+  coverageOf,
+  classifyBuild,
+  buildProgress,
+  type ShipBuild,
+  type BuildRole,
+  type BuildRoleProgress,
+} from '@grims/shared';
 import {
   buildCatalogue,
   computeStats,
@@ -195,6 +205,35 @@ export class ShipBuildService {
     const stats = computeStats(build, catalogue);
     const coverage = coverageOf(build);
 
+    /*
+     * ★ CLASSIFIED HERE, WHERE THE CATALOGUE IS ★
+     *
+     * Working out what a build is FOR needs its module groups, which needs the ship catalogue. Doing
+     * it on read would make listing five numbers load 47 ships and 970 modules; doing it here costs
+     * a lookup per slot on data already in hand.
+     */
+    const groups = build.modules
+      .map((m) => {
+        if (m.moduleId === null) return null;
+        const slot = catalogue.ship(build.shipId)?.slots.find(
+          (sl) => sl.group === m.group && sl.index === m.index,
+        );
+        if (slot === undefined) return null;
+        return catalogue.module(
+          slot.group === 'standard'
+            ? 'standard'
+            : slot.group === 'internal'
+              ? 'internal'
+              : slot.size === 0
+                ? 'utility'
+                : 'hardpoint',
+          m.moduleId,
+        )?.grp ?? null;
+      })
+      .filter((g): g is string => g !== null);
+
+    const role: BuildRole = classifyBuild(groups);
+
     const data = {
       shipId: build.shipId,
       shipName: build.shipName,
@@ -213,6 +252,7 @@ export class ShipBuildService {
       submittedById: options.submittedById,
       isBaseline: options.isBaseline,
       fromJournal: options.fromJournal,
+      role,
     };
 
     /*
@@ -276,6 +316,26 @@ export interface BuildView {
  */
 export class ShipBuildQueries {
   constructor(private readonly db: PrismaClient) {}
+
+  /**
+   * How far the collection is from being worth training on, per role.
+   *
+   * ★ COUNTED PER ROLE, NOT IN TOTAL ★
+   *
+   * Forty exploration builds teach the assistant nothing about mining. A single total would fill up
+   * while leaving whole questions unanswerable, and the bar would say ready when it was not.
+   */
+  async progress(): Promise<BuildRoleProgress[]> {
+    const rows = await this.db.shipBuild.groupBy({ by: ['role'], _count: true });
+
+    const counts: Partial<Record<BuildRole, number>> = {};
+    for (const row of rows) {
+      if (row.role === null) continue;
+      counts[row.role as BuildRole] = row._count;
+    }
+
+    return buildProgress(counts);
+  }
 
   async list(options: { shipId?: string; baselineOnly?: boolean } = {}): Promise<BuildView[]> {
     const rows = await this.db.shipBuild.findMany({

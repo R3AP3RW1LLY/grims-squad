@@ -165,7 +165,7 @@ export default async function AdminPage({
       <PageHeader
         eyebrow="Squadron leadership"
         title="ADMIN CONSOLE"
-        action={<PageTabs tabs={TABS} current={tab} basePath="/app" />}
+        tabs={<PageTabs tabs={TABS} current={tab} basePath="/app" />}
       />
 
       {tab === 'dashboard' && dashboard !== null && (
