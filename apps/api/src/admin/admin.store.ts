@@ -91,6 +91,34 @@ export interface ActivityRow {
    * Squadron owner, 2026-07-29.
    */
   readonly inVoiceSince: string | null;
+  /**
+   * When Discord says they joined the server — the squadron tenure.
+   *
+   * ★ ASKED FOR FROM INARA, AND INARA CANNOT ANSWER IT ★
+   *
+   * Squadron owner, 2026-08-01: "unless we can pull this from the Inara Squadron roster and show
+   * when they joined the squadron on Inara?"
+   *
+   * No. `getcommanderprofile` is the only commander endpoint and returns a squadron NAME and RANK,
+   * no dates; there is no roster endpoint at all. The game does not record it either — the
+   * journal's `SquadronStartup` carries a name and a rank. "When did this commander join this
+   * squadron" is not a readable fact anywhere in the Elite ecosystem.
+   *
+   * Discord records it exactly, and this squadron recruits through Discord, so the server join date
+   * is both the best available answer and, in practice, the true one.
+   *
+   * Null for everybody who has left: Discord discards a join date on departure and there is no way
+   * to recover it. `activeSince` covers those rows.
+   */
+  readonly joinedAt: string | null;
+  /**
+   * The earliest month we recorded any activity for them. The FALLBACK tenure.
+   *
+   * Separate from `joinedAt` because it is a weaker claim — "we first saw them in March", not "they
+   * joined in March". They may well have been here for a year before the bot was. The column labels
+   * which of the two it is showing rather than presenting a floor as a fact.
+   */
+  readonly activeSince: string | null;
 }
 
 export interface MemberRow {
@@ -264,6 +292,8 @@ export class PrismaAdminStore implements AdminStore {
            * Squadron owner, 2026-07-29.
            */
           inVoiceSince: true,
+          /* The squadron tenure. See the note on the row's `joinedAt`. */
+          joinedAt: true,
         },
       }),
       // Names and categories, for the membership fallback.
@@ -276,9 +306,18 @@ export class PrismaAdminStore implements AdminStore {
        * scoped to the month on screen, and the whole point of this figure is to
        * see past it. One aggregate query for the page, not one per member.
        */
+      /*
+       * `_min: firstActivityAt` rides along on the same aggregate, at no extra cost.
+       *
+       * It is the FALLBACK tenure for anybody Discord will not tell us about — everyone who has
+       * left, whose `joinedAt` Discord discards. "Active since March" is not the same claim as
+       * "joined in March", so the column labels which one it is showing rather than quietly mixing
+       * two different facts under one heading.
+       */
       this.#db.memberActivityMonth.groupBy({
         by: ['discordId'],
         _max: { lastActivityAt: true },
+        _min: { firstActivityAt: true },
       }),
 
       /*
@@ -304,6 +343,9 @@ export class PrismaAdminStore implements AdminStore {
 
     const lastSeenByDiscordId = new Map(
       lastSeen.map((g) => [g.discordId, g._max.lastActivityAt]),
+    );
+    const firstSeenByDiscordId = new Map(
+      lastSeen.map((g) => [g.discordId, g._min.firstActivityAt]),
     );
 
     return rows.map((r) => {
@@ -447,6 +489,22 @@ export class PrismaAdminStore implements AdminStore {
         (r.gameActivity === 'observed' || r.gameActivity === 'assumed'),
       lastActivityAt: r.lastActivityAt?.toISOString() ?? null,
       lastSeenAt: lastSeenByDiscordId.get(r.discordId)?.toISOString() ?? null,
+      /*
+       * ★ HOW LONG THEY HAVE BEEN IN THE SQUADRON ★
+       *
+       * Squadron owner, 2026-08-01, asked for it from the Inara squadron roster if that were
+       * possible. It is not — Inara's commander endpoint returns a squadron name and rank and no
+       * dates, there is no roster endpoint, and the game's `SquadronStartup` has no date either.
+       * Discord has it exactly, and this squadron recruits through Discord.
+       *
+       * Two fields rather than one string, because they are two different claims. `joinedAt` is
+       * when Discord says they arrived. `activeSince` is the earliest month we recorded anything
+       * for them, used only when the first is missing — which means everybody who has left, since
+       * Discord discards a join date on departure. Collapsing them would let the column say
+       * "joined" about a date that is merely the oldest thing we happen to have seen.
+       */
+      joinedAt: guild?.joinedAt?.toISOString() ?? null,
+      activeSince: firstSeenByDiscordId.get(r.discordId)?.toISOString() ?? null,
       inVoiceSince: byDiscordId.get(r.discordId)?.inVoiceSince?.toISOString() ?? null,
       };
     });

@@ -505,6 +505,7 @@ async function syncMemberNames(): Promise<void> {
           globalName: m.user.globalName,
           roles: [...m.roles.cache.keys()],
           isBot: m.user.bot,
+          joinedAt: m.joinedAt,
         },
         update: {
           nick: m.nickname,
@@ -512,6 +513,20 @@ async function syncMemberNames(): Promise<void> {
           globalName: m.user.globalName,
           roles: [...m.roles.cache.keys()],
           isBot: m.user.bot,
+          /*
+           * ★ HOW LONG THEY HAVE BEEN IN THE SQUADRON ★
+           *
+           * Squadron owner, 2026-08-01, asked whether it could come from the Inara roster. It
+           * cannot: Inara's only commander endpoint returns a squadron NAME and RANK and no dates,
+           * and there is no roster endpoint. The game does not record it either. Discord does, to
+           * the second, and it arrives on the member objects this sweep already has — so it costs
+           * nothing on top of what this loop was already doing.
+           *
+           * Rewritten every sweep rather than written once. Discord discards this when somebody
+           * leaves, so a member who left and came back has a genuinely new date, and pinning the
+           * old one would claim a continuous membership that did not happen.
+           */
+          joinedAt: m.joinedAt,
           syncedAt: new Date(),
         },
       })
@@ -870,6 +885,45 @@ client.on(Events.MessageCreate, (msg) => {
 });
 
 /*
+ * ★ SOMEBODY JOINING IS THE ONLY MOMENT THIS IS FREE ★
+ *
+ * Without this, a new member gets no row until the next restart's sweep. `rememberAuthor` would
+ * create one on their first message, but a message carries a USER, and a user has no join date — so
+ * the row would exist with a null tenure and look like an ex-member until somebody redeployed.
+ *
+ * The event carries the member. One write, no fetch, and the roster is right from the minute they
+ * arrive, which is exactly when an officer is most likely to go looking for them.
+ */
+client.on(Events.GuildMemberAdd, (member) => {
+  if (member.guild.id !== GUILD_ID) return;
+
+  void prisma.discordGuildMember
+    .upsert({
+      where: { discordId: member.id },
+      create: {
+        discordId: member.id,
+        nick: member.nickname,
+        username: member.user.username,
+        globalName: member.user.globalName,
+        roles: [...member.roles.cache.keys()],
+        isBot: member.user.bot,
+        joinedAt: member.joinedAt,
+      },
+      update: {
+        nick: member.nickname,
+        username: member.user.username,
+        globalName: member.user.globalName,
+        roles: [...member.roles.cache.keys()],
+        // A REJOIN overwrites the old date, which is the honest answer: Discord has discarded the
+        // first spell and there is no way to recover it. See the schema note on this column.
+        joinedAt: member.joinedAt,
+        syncedAt: new Date(),
+      },
+    })
+    .catch((err: unknown) => logger.error({ err }, 'failed to record a joining member'));
+});
+
+/*
  * A nickname change is the one thing that would otherwise go stale between
  * restarts, and in this squadron the nickname IS the commander name — the thing
  * officers recognise each other by. Cheap to keep current: the event carries
@@ -888,12 +942,14 @@ client.on(Events.GuildMemberUpdate, (_before, after) => {
         globalName: after.user.globalName,
         roles: [...after.roles.cache.keys()],
         isBot: after.user.bot,
+        joinedAt: after.joinedAt,
       },
       update: {
         nick: after.nickname,
         username: after.user.username,
         globalName: after.user.globalName,
         roles: [...after.roles.cache.keys()],
+        joinedAt: after.joinedAt,
         syncedAt: new Date(),
       },
     })

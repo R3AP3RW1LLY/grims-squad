@@ -87,3 +87,4 @@ export {
   type CatalogueGroup,
   type CatalogueEntry,
 } from './journal/telemetry-catalogue.js';
+export { tenureBetween, formatTenure, tenureFrom, type Tenure } from './tenure.js';

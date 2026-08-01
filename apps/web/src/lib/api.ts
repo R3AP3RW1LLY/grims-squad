@@ -349,6 +349,19 @@ export interface AdminActivityRow {
   gameActivity: string;
   qualifies: boolean;
   lastActivityAt: string | null;
+  /**
+   * When Discord says they joined the server — how long they have been in the squadron.
+   *
+   * Not from Inara: its commander endpoint returns a squadron name and rank and no dates, and there
+   * is no roster endpoint. The game does not record it either. Discord is the only source that has
+   * it, and for a squadron that recruits through Discord it is the right one.
+   *
+   * Null for everybody who has left — Discord discards the date on departure — in which case the
+   * column falls back to `activeSince` and says so.
+   */
+  joinedAt: string | null;
+  /** Earliest recorded activity. A weaker claim than `joinedAt`, and labelled differently. */
+  activeSince: string | null;
 }
 
 export interface AdminAuditRow {

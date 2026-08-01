@@ -327,6 +327,22 @@ export class PrismaMembersStore implements MembersStore {
      * `joined_at` to `discord_guild_members` before finding it — which would
      * have been the same fact in two tables, free to disagree, with nothing
      * saying which one won.
+     *
+     * ★ AND ON 2026-08-01 IT WAS ADDED ANYWAY, ON PURPOSE ★
+     *
+     * The warning above is right in general and wrong about this case. This
+     * table is keyed on a WEBSITE ACCOUNT, so it only has a row once somebody
+     * has signed in: 117 guild members, one identity row. The admin activity
+     * roster needs a tenure for all 117.
+     *
+     * They are not the same fact in two tables. They are the same fact about two
+     * different sets of people, and `discord_guild_members.joined_at` is the
+     * larger set — refreshed on every bot start rather than snapshotted once at
+     * sign-in, and therefore the one that wins where both exist.
+     *
+     * This read is left alone deliberately. Rank must keep working with no bot
+     * running, and for anybody who has not left and rejoined since signing in
+     * the two values are identical.
      */
     const identity = await this.#db.discordIdentity.findUnique({
       where: { userId },

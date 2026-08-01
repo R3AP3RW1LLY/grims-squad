@@ -885,6 +885,49 @@ model DiscordGuildMember {
   isBot      Boolean  @default(false) @map("is_bot")
   syncedAt   DateTime @default(now()) @map("synced_at") @db.Timestamptz(6)
 
+  /// When they joined the Discord server. Null until the name sweep has seen them.
+  ///
+  /// ★ THIS IS HOW LONG SOMEBODY HAS BEEN IN THE SQUADRON ★
+  ///
+  /// Squadron owner, 2026-08-01, asked for it from Inara if possible. It is not: Inara's only
+  /// commander endpoint returns `squadronName` and `squadronMemberRank` and no dates at all, and
+  /// there is no squadron-roster endpoint. The game does not record it either — the journal's
+  /// `SquadronStartup` carries a name and a rank, never a date. Nowhere in the Elite ecosystem is
+  /// "when did this commander join this squadron" a fact you can read.
+  ///
+  /// Discord does record it, exactly, and this squadron recruits through Discord — so the server
+  /// join date IS the membership start for all practical purposes. It also costs nothing: it comes
+  /// on the member objects the name sweep already fetches.
+  ///
+  /// ★ IT IS THE CURRENT SPELL, NOT THE FIRST ★
+  ///
+  /// Discord discards `joinedAt` when somebody leaves. Rejoin and it is the new date, and there is
+  /// no way to recover the old one. So a returning member reads as new, which is wrong but
+  /// unknowable — and the alternative, silently keeping a stale date, would claim a continuous
+  /// membership that did not happen.
+  ///
+  /// Null for anyone the sweep cannot see, which is everybody who has left. Their earliest recorded
+  /// activity is used instead, and the column says which it is showing.
+  ///
+  /// ★ YES, `discord_identities.guildJoinedAt` ALSO EXISTS. HERE IS WHICH WINS ★
+  ///
+  /// `PrismaMembersStore.guildJoinedAt` carries a comment warning against adding exactly this
+  /// column — "the same fact in two tables, free to disagree, with nothing saying which one won."
+  /// That warning is right in general and does not apply here, because the two cover different
+  /// populations: `discord_identities` is keyed on a WEBSITE account and only exists once somebody
+  /// has signed in. Measured on 2026-08-01: 117 guild members, ONE identity row. It can put a
+  /// tenure against one person out of a hundred and seventeen.
+  ///
+  /// So they are not the same fact in two tables. They are the same fact about two different sets
+  /// of people, and this is the larger set.
+  ///
+  /// Precedence, stated once so it is never a guess: THIS COLUMN WINS. It is refreshed on every bot
+  /// start, so it survives a member leaving and rejoining. `guildJoinedAt` is a snapshot taken at
+  /// sign-in and never revisited, so it can only go stale. The rank ladder still reads
+  /// `guildJoinedAt` — deliberately unchanged, because rank must keep working with no bot running,
+  /// and the two agree for anybody who has not left and rejoined since signing in.
+  joinedAt   DateTime? @map("joined_at") @db.Timestamptz(6)
+
   /// When this member joined the voice channel they are sitting in. Null when they are not in one.
   ///
   /// ★ PRESENCE, NOT HISTORY ★

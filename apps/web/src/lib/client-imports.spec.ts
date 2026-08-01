@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { globSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { existsSync } from 'node:fs';
 
 /**
  * A client component may not import VALUES from the `@grims/shared` barrel.
@@ -21,6 +22,17 @@ import { join } from 'node:path';
  * The fix is a subpath export (`@grims/shared/forum-signature`), which pulls one module instead of
  * the whole package.
  *
+ * ★ IT FOLLOWS RELATIVE IMPORTS, BECAUSE THE FIRST VERSION DID NOT ★
+ *
+ * The rule was applied only to files carrying `'use client'`. A client component that imports a
+ * plain local module, which imports the barrel, puts `node:crypto` in the bundle just the same —
+ * and the guard saw nothing. That is precisely what happened on 2026-08-01: `activity-table.tsx`
+ * imported `member-tenure.ts`, which imported the barrel, and `/app` went to a 500 while this test
+ * stayed green.
+ *
+ * So the client boundary is computed transitively: every module reachable from a client component
+ * through relative imports is treated as client code, because that is what a bundler does.
+ *
  * ★ WHAT IT DELIBERATELY ALLOWS ★
  *
  * `import type { X } from '@grims/shared'` — erased at compile time, so it cannot reach a bundler.
@@ -37,14 +49,63 @@ function sources(): string[] {
     .map((p) => join(SRC, p));
 }
 
+/**
+ * Every relative import in a file, resolved to a path under src.
+ *
+ * Extensionless, `.js` (TypeScript's own convention for ESM) and directory `index` forms are all
+ * tried, because all three appear in this codebase and a specifier this cannot resolve is a module
+ * this cannot follow.
+ */
+function relativeImports(file: string, src: string): string[] {
+  const found: string[] = [];
+
+  for (const m of src.matchAll(/from\s+['"](\.[^'"]*)['"]/g)) {
+    const spec = m[1];
+    if (spec === undefined) continue;
+
+    const base = resolve(dirname(file), spec.replace(/\.js$/, ''));
+    for (const candidate of [`${base}.ts`, `${base}.tsx`, join(base, 'index.ts'), join(base, 'index.tsx')]) {
+      if (existsSync(candidate)) {
+        found.push(candidate);
+        break;
+      }
+    }
+  }
+
+  return found;
+}
+
+/**
+ * Every file that ends up in the client bundle: the `'use client'` entry points, and everything
+ * reachable from them through relative imports.
+ */
+function clientReachable(files: readonly string[]): Set<string> {
+  const reached = new Set<string>();
+  const queue: string[] = [];
+
+  for (const file of files) {
+    // `'use client'` must be the first statement, so a presence check is enough.
+    if (/^\s*['"]use client['"]/m.test(readFileSync(file, 'utf8'))) queue.push(file);
+  }
+
+  while (queue.length > 0) {
+    const file = queue.pop();
+    if (file === undefined || reached.has(file)) continue;
+    reached.add(file);
+    for (const next of relativeImports(file, readFileSync(file, 'utf8'))) {
+      if (!reached.has(next)) queue.push(next);
+    }
+  }
+
+  return reached;
+}
+
 describe('client components and the shared barrel', () => {
   it('MANDATORY: no client component imports runtime values from @grims/shared', () => {
     const offenders: string[] = [];
 
-    for (const file of sources()) {
+    for (const file of clientReachable(sources())) {
       const src = readFileSync(file, 'utf8');
-      // `'use client'` must be the first statement, so a simple presence check is enough.
-      if (!/^\s*['"]use client['"]/m.test(src)) continue;
 
       /*
        * Matches an import FROM the bare package only — `@grims/shared/forum-signature` and
@@ -82,7 +143,8 @@ describe('client components and the shared barrel', () => {
 
     expect(
       offenders,
-      'These client components pull the @grims/shared barrel into the browser bundle, which ' +
+      'These modules reach the browser bundle — either a client component or something one ' +
+        'imports — and pull the @grims/shared barrel with them, which ' +
         'reaches node:crypto and fails the build with UnhandledSchemeError — surfacing as a 500 ' +
         'on every hub page, not just this one. Import from a subpath instead ' +
         '(e.g. @grims/shared/forum-signature), or make the import type-only:\n' +
