@@ -22,6 +22,15 @@ const NOW = new Date('2026-07-27T12:00:00Z');
 type Row = Parameters<IngestStore['insertIgnoringDuplicates']>[0][number];
 
 class FakeStore implements IngestStore {
+  /*
+   * Members default to showing their fleet, so the fake does too. A test that wants the opt-out
+   * case sets it — see the ship-build import tests.
+   */
+  fleetShown = true;
+  async showsFleet(): Promise<boolean> {
+    return this.fleetShown;
+  }
+
   inserted: Row[] = [];
   seenKeys = new Set<string>();
   observed: Array<{ userId: string; month: string }> = [];

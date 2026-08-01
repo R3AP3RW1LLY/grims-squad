@@ -7,6 +7,8 @@ import { getAiTrainingGated, type TrainingSource } from '../../../../lib/api';
 import { StepUp } from '../step-up';
 import { NoAccess, AdminUnavailable } from '../no-access';
 import { PageHeader, PageBody, Section, StatGrid, StatTile } from '../../../../components/hub-page';
+import { BaselineBuilds } from './baseline-builds';
+import { getShipBuildsGated } from '../../../../lib/api';
 import { LiveRefresh } from '../live-refresh';
 import { IngestProgress } from './progress';
 import { RerunButton } from './rerun';
@@ -38,7 +40,12 @@ export const dynamic = 'force-dynamic';
  * exactly that rather than showing an empty count that could mean anything.
  */
 export default async function TrainingPage() {
-  const read = await getAiTrainingGated();
+  /*
+   * Read alongside the ingestion status rather than after it. Both are on screen at once, so
+   * fetching them in sequence would add a round trip to a page an officer refreshes while watching
+   * a run.
+   */
+  const [read, buildsRead] = await Promise.all([getAiTrainingGated(), getShipBuildsGated()]);
 
   if (read.state === 'needs-step-up') return <StepUp />;
   if (read.state === 'signed-out') return <StepUp />;
@@ -48,6 +55,14 @@ export default async function TrainingPage() {
   if (read.state === 'unavailable') return <AdminUnavailable />;
 
   const sources = read.data.sources;
+
+  /*
+   * Baseline builds only. Members' contributions live on Help Train the Bot — mixing them in here
+   * would put somebody's experiment beside the squadron's reference on the page that defines what
+   * the reference IS.
+   */
+  const baseline =
+    buildsRead.state === 'ok' ? buildsRead.data.builds.filter((b) => b.isBaseline) : null;
   const totalRows = sources.reduce((n, s) => n + s.rows, 0);
   const trained = sources.filter((s) => s.rows > 0).length;
   const running = sources.filter((s) => s.ingesting);
@@ -125,6 +140,29 @@ export default async function TrainingPage() {
               </tbody>
             </table>
           </div>
+        </Section>
+
+        {/*
+          ★ THE BASELINE — SQUADRON OWNER, 2026-08-01 ★
+
+          "in the admin /app/training i want to add a section where the webmaster can import via
+          link in the same way all the default ship builds ... this will be the base level".
+
+          Below the ingestion table on purpose. That table is about what the assistant KNOWS; this
+          is about what it should treat as the squadron's own answer. Different question, and the
+          one people open this page for comes first.
+        */}
+        <Section
+          title="Baseline ship builds"
+          description="The squadron's reference builds. The assistant treats these as how we do it, and members' own submissions as what somebody flies — so a baseline answers with more weight than an experiment."
+        >
+          {baseline === null ? (
+            <p className="text-sm text-[var(--color-text-secondary)]">
+              The baseline could not be loaded. Refresh, or ask the webmaster if it keeps happening.
+            </p>
+          ) : (
+            <BaselineBuilds builds={baseline} />
+          )}
         </Section>
       </PageBody>
     </>

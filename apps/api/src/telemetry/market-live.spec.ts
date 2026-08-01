@@ -16,6 +16,11 @@ import { JournalIngestService, type IngestStore, type MarketUpdater } from './jo
 type Row = Parameters<IngestStore['insertIgnoringDuplicates']>[0][number];
 
 class FakeStore implements IngestStore {
+  // Members default to showing their fleet; these tests are about markets, not builds.
+  async showsFleet(): Promise<boolean> {
+    return true;
+  }
+
   readonly seen = new Set<string>();
   readonly rows: Row[] = [];
 

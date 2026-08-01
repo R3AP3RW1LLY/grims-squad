@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { PrismaClient } from '@grims/db';
 import { DatabaseModule } from '../database.module.js';
+import { ShipBuildService } from '../ai/ship-build.service.js';
 import { CompanionModule } from '../companion/companion.module.js';
 import { TelemetryController } from './telemetry.controller.js';
 import { PairingService } from './pairing.service.js';
@@ -39,7 +40,21 @@ import { PAIRING_SERVICE, INGEST_SERVICE, CONSENT_SERVICE } from './telemetry.to
          * squadron can route against — the same table the nightly Spansh
          * rebuild fills, kept current in the day between rebuilds.
          */
-        new JournalIngestService(new PrismaIngestStore(db), new PrismaMarketUpdater(db)),
+        new JournalIngestService(
+          new PrismaIngestStore(db),
+          new PrismaMarketUpdater(db),
+          /*
+           * ★ THEIR OWN SHIPS, IMPORTED AS THEY FLY ★
+           *
+           * Squadron owner, 2026-08-01: automatic for everyone. A `Loadout` is the strongest build
+           * we can hold — what is bolted to the hull, with the engineering actually on it — and it
+           * refreshes on every refit with nobody pasting anything.
+           *
+           * Constructed here rather than injected from the AI module: telemetry must not depend on
+           * the assistant, and the service takes only a database.
+           */
+          new ShipBuildService(db),
+        ),
     },
     {
       provide: CONSENT_SERVICE,

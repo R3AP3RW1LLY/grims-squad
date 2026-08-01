@@ -10,6 +10,23 @@ export class PrismaPairingStore implements PairingStore {
     this.#db = db;
   }
 
+  /**
+   * Whether this member lets their fleet be shown.
+   *
+   * Reads the same `showFleet` the profile serializer reads (INV-027), so a member who hid their
+   * ships from their profile has hidden them from the assistant too — one setting, one meaning.
+   *
+   * True when there is no row: privacy settings are created on first edit, and an unedited account
+   * is at the defaults, which show the fleet.
+   */
+  async showsFleet(userId: string): Promise<boolean> {
+    const row = await this.#db.privacySetting.findUnique({
+      where: { userId },
+      select: { showFleet: true },
+    });
+    return row?.showFleet ?? true;
+  }
+
   async create(userId: string, label: string, tokenHash: string): Promise<DeviceTokenRecord> {
     return (await this.#db.deviceToken.create({
       data: { userId, label, tokenHash, scopes: ['telemetry:write'] },
@@ -76,6 +93,29 @@ export class PrismaIngestStore implements IngestStore {
 
   constructor(db: PrismaClient) {
     this.#db = db;
+  }
+
+  /**
+   * Whether this member lets their fleet be shown.
+   *
+   * ★ AN EXISTING PROMISE, HONOURED BY A NEW FEATURE ★
+   *
+   * Reads the same `showFleet` the profile serializer reads (INV-027), so a member who hid their
+   * ships from their profile has hidden them from the assistant too — one setting, one meaning.
+   *
+   * The squadron owner chose automatic build import for everyone, and everyone who has not turned
+   * this off is exactly that. Somebody who DID turn it off was told their ships would not be shown,
+   * and publishing their loadout squadron-wide anyway would make that setting a lie.
+   *
+   * True when there is no row: privacy settings are written on first edit, so an unedited account
+   * is at the defaults — which show the fleet.
+   */
+  async showsFleet(userId: string): Promise<boolean> {
+    const row = await this.#db.privacySetting.findUnique({
+      where: { userId },
+      select: { showFleet: true },
+    });
+    return row?.showFleet ?? true;
   }
 
   /**

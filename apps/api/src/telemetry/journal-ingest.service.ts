@@ -55,6 +55,20 @@ export interface MarketUpdater {
 
 export interface IngestStore {
   /**
+   * Whether this member lets their fleet be shown.
+   *
+   * ★ AN EXISTING PROMISE, HONOURED BY A NEW FEATURE ★
+   *
+   * Members set `showFleet` long before ship builds existed. The squadron owner chose automatic
+   * import for everyone — and everyone who has not turned this off is exactly that. Somebody who
+   * DID turn it off was told their ships would not be shown, and publishing their loadout
+   * squadron-wide anyway would make that setting a lie.
+   *
+   * Defaults to true on any failure: the setting is an opt-OUT, and a database blip must not
+   * silently start withholding data the member chose to share.
+   */
+  showsFleet(userId: string): Promise<boolean>;
+  /**
    * Inserts, ignoring anything whose eventKey is already present.
    *
    * ★ RETURNS THE KEYS ACTUALLY INSERTED, NOT A COUNT ★
@@ -195,11 +209,28 @@ type Row = Parameters<IngestStore['insertIgnoringDuplicates']>[0][number];
  */
 const MARKET_EVENTS = new Set(['Market', 'MarketBuy', 'MarketSell']);
 
+/**
+ * The one thing this service needs in order to import a fitted ship.
+ *
+ * Structural rather than the concrete service, so telemetry does not depend on the AI module — and
+ * so a test can pass a two-line fake instead of a ship catalogue.
+ */
+export interface LoadoutImporter {
+  importLoadout(payload: unknown, userId: string): Promise<unknown>;
+}
+
 export class JournalIngestService {
   constructor(
     private readonly store: IngestStore,
     /** Absent in unit tests, and in any deployment without the knowledge store. */
     private readonly market: MarketUpdater | null = null,
+    /**
+     * Imports a member's own ship from a `Loadout`.
+     *
+     * Optional for the same reason the market updater is: a unit test of ingestion should not need
+     * the ship catalogue, and a deployment without it should still accept journals.
+     */
+    private readonly builds: LoadoutImporter | null = null,
   ) {}
 
   /** How much this member has contributed in total. See `IngestStore`. */
@@ -278,6 +309,8 @@ export class JournalIngestService {
      * not in a hundred and seven copies of a member's telemetry.
      */
     const marketEvents: Array<{ key: string; raw: Record<string, unknown> & { event: string } }> = [];
+    /** `Loadout` events, for importing the member's own ship. See the note below the insert. */
+    const loadouts: Array<{ key: string; payload: unknown }> = [];
     const refused: Record<string, number> = {};
     let rejected = 0;
 
@@ -351,6 +384,18 @@ export class JournalIngestService {
       // LoadGame is the one that proves they played. Collected per month so a
       // batch spanning a month boundary marks both.
       if (e.name === 'LoadGame') sessionMonths.add(monthKeyOf(occurredAt).getTime());
+
+      /*
+       * ★ THEIR ACTUAL SHIP — SQUADRON OWNER, 2026-08-01 ★
+       *
+       * Collected the same way market events are, and for the same reason: after the consent gates,
+       * so a member who has switched a category off is not quietly harvested anyway.
+       *
+       * A `Loadout` is the strongest build we can hold — it is what is bolted to the hull, with the
+       * engineering actually on it, rather than a plan somebody shared. The owner chose automatic
+       * import for everyone.
+       */
+      if (e.name === 'Loadout') loadouts.push({ key: eventKey, payload });
     }
 
     const insertedKeys = rows.length === 0 ? [] : await this.store.insertIgnoringDuplicates(rows);
@@ -379,6 +424,38 @@ export class JournalIngestService {
          * result rather than a failure.
          */
         await this.market.apply(m.raw).catch(() => 0);
+      }
+    }
+
+    /*
+     * ★ SHIP BUILDS, FROM GENUINELY NEW LOADOUTS ONLY ★
+     *
+     * The companion retries a failed batch, so the same `Loadout` can arrive more than once.
+     * Re-importing costs a decode and a write that changes nothing, which is harmless but pointless
+     * — and doing it per ARRIVAL rather than per new row would rewrite a member's ship every time
+     * their app retried.
+     *
+     * ★ AND IT RESPECTS THE FLEET PRIVACY TOGGLE ★
+     *
+     * The owner chose automatic import for everyone. Members already have a `showFleet` setting
+     * that governs whether their ships are shown to anybody, and they set it before this feature
+     * existed — publishing their loadout squadron-wide regardless would break a promise the site
+     * had already made them. Somebody who has turned it off keeps their ships private; everybody
+     * else, which is the default, is imported automatically as asked.
+     */
+    if (this.builds !== null && loadouts.length > 0) {
+      const isNew = new Set(insertedKeys);
+      const mayShare = await this.store.showsFleet(userId).catch(() => true);
+
+      if (mayShare) {
+        for (const l of loadouts) {
+          if (!isNew.has(l.key)) continue;
+          /*
+           * Never allowed to throw. A member's upload must succeed whether or not we could read
+           * their ship — a hull we lack data for is a normal result, not a failure of their send.
+           */
+          await this.builds.importLoadout(l.payload, userId).catch(() => null);
+        }
       }
     }
 
