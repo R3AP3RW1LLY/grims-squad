@@ -70,10 +70,12 @@ export function ApproveDevice({ code: initialCode, label }: { code: string; labe
             deliberately indistinguishable: telling them apart is only useful to somebody working
             through codes, and the member's remedy is the same in all three cases.
           */}
-          <p className="text-[var(--color-text-primary)]">
+          <p className="text-center text-[var(--color-text-primary)]">
             Enter the code your companion app is showing.
           </p>
-          <div className="mt-6">
+          {/* Centred, because the boxes are a fixed width and left-aligning them in a centred card
+              leaves an obvious lopsided gap on the right. */}
+          <div className="mt-6 flex justify-center">
             <CodeInput
               value={code.toUpperCase().replace(/[^A-Z0-9]/g, '')}
               onChange={(v) => setCode(v)}
@@ -90,10 +92,13 @@ export function ApproveDevice({ code: initialCode, label }: { code: string; labe
         </>
       ) : (
         <>
-          <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-[var(--color-text-secondary)]">
+          <p className="text-center font-mono text-[11px] uppercase tracking-[0.24em] text-[var(--color-text-secondary)]">
             Asking to connect
           </p>
-          <p className="mt-2 text-xl text-[var(--color-brand-orange)]" style={{ fontFamily: 'var(--font-display)' }}>
+          <p
+            className="mt-2 text-center text-xl text-[var(--color-brand-orange)]"
+            style={{ fontFamily: 'var(--font-display)' }}
+          >
             {label}
           </p>
           <p className="mt-5 text-[var(--color-text-primary)]">

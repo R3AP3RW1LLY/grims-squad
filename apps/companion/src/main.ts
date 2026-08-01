@@ -1035,10 +1035,28 @@ if (!app.requestSingleInstanceLock()) {
           return { ok: false, error: why };
         }
 
-        config = { ...config, deviceToken: outcome.token };
+        /*
+         * ★ SIGNING IN TURNS SENDING ON ★
+         *
+         * `enabled` defaults to false, from the days when pairing meant pasting a token — an act
+         * that said nothing about intent, so a second deliberate switch was right.
+         *
+         * It is not right any more. The member has just opened their browser, signed in with
+         * Discord, and pressed a button on a page that says in as many words that connecting lets
+         * this app upload their journals. That IS the consent. Making them then find a Resume
+         * button in the app is how somebody completes the whole flow and watches nothing happen —
+         * which is exactly what was reported, with three successfully linked devices that had
+         * never once checked in.
+         *
+         * What they switched off stays off: the server still drops any category they have opted
+         * out of (INV-013), and Pause is one click away.
+         */
+        config = { ...config, deviceToken: outcome.token, enabled: true };
         saveConfig(app.getPath('userData'), config);
         lastOutcome = null;
-        if (config.enabled) startPolling();
+        // Registration follows consent, and consent has just been given.
+        applyAutoStart();
+        startPolling();
         refreshTray();
         return { ok: true };
       } finally {

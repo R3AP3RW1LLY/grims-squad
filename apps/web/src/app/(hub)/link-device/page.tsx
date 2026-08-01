@@ -1,5 +1,4 @@
 import type { Metadata } from 'next';
-import { PageHeader, PageBody } from '../../../components/hub-page';
 import { describeDeviceLink } from '../../../lib/api';
 import { ApproveDevice } from './approve';
 
@@ -22,11 +21,20 @@ export const dynamic = 'force-dynamic';
  * actually means in practice: the app never sees a password, never handles the OAuth exchange, and
  * never holds a client secret it has nowhere safe to keep.
  *
- * ★ THIS PAGE IS INSIDE THE HUB, WHICH IS THE POINT ★
+ * ★ NOT A DOCUMENT, SO NOT LAID OUT LIKE ONE ★
  *
- * Being under the authenticated shell means the existing sign-in requirement does all the work. A
- * public page would have to invent its own way of getting a member signed in and back again, and
- * that is precisely the machinery this flow exists to avoid writing twice.
+ * This first used PageHeader and PageBody like every other hub page. Reported as "all smashed to
+ * the left side and looks really bad", and that was right: those exist for pages somebody READS —
+ * a heading, a lead paragraph, then content in a 68ch reading column pinned to the left of a wide
+ * screen. Correct for the roster. Wrong for a page with one sentence and one button, where the
+ * result is a small card marooned in the top-left corner of an empty page.
+ *
+ * A single decision gets a centred card, the same shape as the step-up gate. Deliberately NOT one
+ * of the `mx-auto max-w-[NNch]` patterns `hub-page.spec` forbids — that rule is about pages
+ * re-centring themselves as narrow documents inside the shell, which is the opposite of what a
+ * confirmation dialog wants.
+ *
+ * The shell still provides the main landmark; this page adds no second one.
  */
 export default async function LinkDevicePage({
   searchParams,
@@ -45,17 +53,30 @@ export default async function LinkDevicePage({
   const link = code === '' ? null : await describeDeviceLink(code);
 
   return (
-    <>
-      <PageHeader
-        eyebrow="Companion app"
-        title="CONNECT THE APP"
-        subtitle="Signed in as you — the app never sees your password"
-      />
-      <PageBody lead="The companion app reads your Elite Dangerous journals and uploads them to your account, which is what puts your commander name, ships and activity on the site. Approving here is what connects it.">
-        <div className="mt-2 max-w-[34rem]">
+    <div className="flex min-h-[70vh] items-center justify-center py-8">
+      <div className="w-full max-w-[30rem]">
+        <div className="text-center">
+          <p className="font-mono text-[11px] uppercase tracking-[0.32em] text-[var(--color-brand-cyan-bright)]">
+            Companion app
+          </p>
+          <h1
+            className="mt-3 text-[clamp(1.5rem,3.5vw,2rem)] leading-tight text-[var(--color-brand-orange)]"
+            style={{ fontFamily: 'var(--font-display)' }}
+          >
+            CONNECT THE APP
+          </h1>
+          <div className="rule-glow mx-auto mt-5 w-24" aria-hidden="true" />
+          <p className="mt-6 text-sm leading-relaxed text-[var(--color-text-secondary)]">
+            The companion reads your Elite Dangerous journal and keeps your profile, your ships and
+            the squadron&rsquo;s market prices current. Connecting it here is what links it to your
+            account.
+          </p>
+        </div>
+
+        <div className="mt-8">
           <ApproveDevice code={code} label={link?.label ?? null} />
         </div>
-      </PageBody>
-    </>
+      </div>
+    </div>
   );
 }

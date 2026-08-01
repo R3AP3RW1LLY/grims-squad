@@ -205,6 +205,19 @@
         padding: 24px;
         background: var(--bg);
       }
+      /*
+        ★ THIS LINE IS THE WHOLE FEATURE WORKING ★
+
+        `hidden` hides an element through the user agent's `[hidden] { display: none }`, which has
+        specificity (0,1,0). The rule above is an ID selector at (1,0,0) and beats it — so setting
+        `hidden` on this element did nothing at all, and a full-window `position: fixed` overlay sat
+        on top of a perfectly functional app for ever.
+        
+        Reported as "after signing in, its not redirecting me at all". Nothing was wrong with the
+        sign-in: the token was saved, the pairing completed, and the app was running underneath a
+        login screen that could not be dismissed.
+      */
+      #login[hidden] { display: none; }
       .login-card {
         width: 100%;
         max-width: 420px;
