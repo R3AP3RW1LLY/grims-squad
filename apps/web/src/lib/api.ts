@@ -462,6 +462,58 @@ export const getAdminActivity = (
     authed: true,
   });
 
+/**
+ * One member of the Discord server, for the Squad Members roster.
+ *
+ * Not the same list as `getAdminMembers`, which returns WEBSITE accounts — one of them, against a
+ * hundred and seventeen people in Discord. An officer moderating the squadron works from this one.
+ */
+export interface SquadMemberRow {
+  discordId: string;
+  /** Server nickname — the in-game name, by this squadron's convention. */
+  nick: string | null;
+  username: string | null;
+  globalName: string | null;
+  isBot: boolean;
+  /** Every Discord role they wear, by name. */
+  roles: string[];
+  /** Highest TENURE rank. Separate axis from `appointment`. */
+  rank: string | null;
+  appointment: string | null;
+  joinedAt: string | null;
+  /**
+   * When a Discord timeout expires.
+   *
+   * A value IN THE PAST means not timed out — Discord expires a timeout silently, so this is
+   * compared against the clock rather than tested for null.
+   */
+  timeoutUntil: string | null;
+  inVoiceSince: string | null;
+  lastSeenAt: string | null;
+  hasAccount: boolean;
+  handle: string | null;
+  cmdrName: string | null;
+  /**
+   * Whether Discord will let the bot act on them at all.
+   *
+   * A bot cannot kick, ban or time out anybody whose highest role sits at or above its own,
+   * whatever permissions it holds. Computed server-side so the page can disable the controls and
+   * say why, rather than offering an action that always comes back 403.
+   */
+  moderatable: boolean;
+  notModeratableBecause: string | null;
+}
+
+/**
+ * The Discord roster, read through the gate.
+ *
+ * `getAdmin`, not `get`: a plain read collapses every failure into null, and the Squad Members page
+ * would then show a two-factor code box to somebody who simply lacks MEMBER_MANAGE. That exact
+ * confusion cost an officer an evening on 2026-07-30 — see the note on `getAdmin`.
+ */
+export const getSquadRosterGated = (): Promise<AdminRead<{ rows: SquadMemberRow[] }>> =>
+  getAdmin('/v1/admin/squad');
+
 export const getAdminAudit = (): Promise<{
   entries: AdminAuditRow[];
   actions: string[];

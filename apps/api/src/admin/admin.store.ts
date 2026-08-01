@@ -121,6 +121,64 @@ export interface ActivityRow {
   readonly activeSince: string | null;
 }
 
+/**
+ * One member of the Discord server, for the Squad Members roster.
+ *
+ * ★ SQUADRON OWNER, 2026-08-01 ★
+ *
+ * "we need to create a full on member roster that shows every member in our discord with full
+ * administrative tools for them, kick, ban, timeout"
+ *
+ * ★ EVERY MEMBER, NOT EVERY ACCOUNT ★
+ *
+ * `members()` above lists WEBSITE accounts, of which there is currently one. This lists the Discord
+ * server, of which there are a hundred and seventeen. An officer moderating the squadron is working
+ * from the second list, and asking them to reconcile it against the first by hand is how the
+ * activity roster ended up unreadable.
+ */
+export interface SquadMemberRow {
+  readonly discordId: string;
+  /** Server nickname — the in-game name, by this squadron's convention. */
+  readonly nick: string | null;
+  readonly username: string | null;
+  readonly globalName: string | null;
+  readonly isBot: boolean;
+  /** Discord role names they wear, resolved through our own role table. */
+  readonly roles: string[];
+  /** The highest TENURE rank they hold, for sorting and filtering. */
+  readonly rank: string | null;
+  /** A leadership appointment, a separate axis from rank. */
+  readonly appointment: string | null;
+  /** When Discord says they joined the server. Null for anyone who has left. */
+  readonly joinedAt: string | null;
+  /**
+   * When a Discord timeout expires. A value IN THE PAST means not timed out.
+   *
+   * Discord expires a timeout silently, so this is compared against the clock rather than tested
+   * for null — testing for null would show an expired timeout as active for ever.
+   */
+  readonly timeoutUntil: string | null;
+  readonly inVoiceSince: string | null;
+  /** Last activity in Discord, across every month. Null when never seen. */
+  readonly lastSeenAt: string | null;
+  /** They have an account on this site, not merely a presence in Discord. */
+  readonly hasAccount: boolean;
+  readonly handle: string | null;
+  readonly cmdrName: string | null;
+  /**
+   * Whether the bot can action them at all.
+   *
+   * ★ A DISCORD RULE, NOT A PERMISSION OF OURS ★
+   *
+   * A bot cannot kick, ban or time out anybody whose highest role sits at or above its own,
+   * whatever permissions it holds. Computed here so the page can DISABLE the buttons and say why,
+   * rather than offering an action that will always come back 403.
+   */
+  readonly moderatable: boolean;
+  /** Why not, when `moderatable` is false. */
+  readonly notModeratableBecause: string | null;
+}
+
 export interface MemberRow {
   readonly id: string;
   readonly handle: string;
@@ -210,9 +268,30 @@ export interface AuditPage {
   readonly total: number;
 }
 
+/** What a moderation action needs recorded, whether or not Discord accepted it. */
+export interface ModerationAudit {
+  readonly actorId: string;
+  readonly discordId: string;
+  /** The name at the time, so the log stays readable after they leave. */
+  readonly targetName: string | null;
+  readonly action: string;
+  readonly reason: string;
+  readonly minutes?: number | undefined;
+  readonly deleteMessageDays?: number | undefined;
+  /** False when Discord refused. A refused action is still recorded — somebody tried. */
+  readonly applied: boolean;
+  readonly problem?: string | undefined;
+}
+
 export interface AdminStore {
   activityForMonth(monthKey: string): Promise<ActivityRow[]>;
   members(): Promise<MemberRow[]>;
+  /** Every member of the Discord server, for the moderation roster. */
+  squadRoster(): Promise<SquadMemberRow[]>;
+  /** Writes the audit row for a moderation action. The Discord call is made by the controller. */
+  recordModeration(entry: ModerationAudit): Promise<void>;
+  /** The Discord id behind a website account, for the "not on yourself" check. Null if unlinked. */
+  discordIdFor(userId: string): Promise<string | null>;
   auditTail(limit: number): Promise<AuditRow[]>;
   auditSearch(filter: AuditFilter): Promise<AuditPage>;
   /** Clears a member's second factor. Audited; never silent. */
@@ -711,6 +790,178 @@ export class PrismaAdminStore implements AdminStore {
         },
       }),
     ]);
+  }
+
+  /**
+   * Where the bot sits in the Discord role hierarchy, published by the bot on every role load.
+   *
+   * Zero when it has never run. Zero is the safe answer: nobody comes out moderatable, the page
+   * says the bot has not reported in, and no officer is offered a button that would 403.
+   */
+  static readonly #BOT_ROLE_POSITION_KEY = 'discord.bot_role_position';
+
+  async squadRoster(): Promise<SquadMemberRow[]> {
+    const [members, discordRoles, mappings, lastSeen, identities, botPosition] = await Promise.all([
+      this.#db.discordGuildMember.findMany({
+        select: {
+          discordId: true,
+          nick: true,
+          username: true,
+          globalName: true,
+          isBot: true,
+          roles: true,
+          joinedAt: true,
+          timeoutUntil: true,
+          inVoiceSince: true,
+        },
+      }),
+      this.#db.discordRole.findMany({
+        select: { discordRoleId: true, name: true, position: true, category: true },
+      }),
+      this.#db.roleMapping.findMany({
+        where: { role: { isHierarchical: true } },
+        select: { discordRoleId: true, role: { select: { name: true, rankOrder: true } } },
+      }),
+      this.#db.memberActivityMonth.groupBy({
+        by: ['discordId'],
+        _max: { lastActivityAt: true },
+      }),
+      /*
+       * The website account behind a Discord id, when there is one.
+       *
+       * Through `discord_identities` rather than through `users`, because the join key IS the
+       * Discord id — a website account has no other way to be matched to a server member.
+       */
+      this.#db.discordIdentity.findMany({
+        select: {
+          discordId: true,
+          user: {
+            select: {
+              handle: true,
+              cmdrVerifications: {
+                where: { revokedAt: null, isVerified: true },
+                select: { cmdrName: true },
+                take: 1,
+              },
+            },
+          },
+        },
+      }),
+      this.#db.siteConfig.findUnique({
+        where: { key: PrismaAdminStore.#BOT_ROLE_POSITION_KEY },
+        select: { value: true },
+      }),
+    ]);
+
+    const roleById = new Map(discordRoles.map((r) => [r.discordRoleId, r]));
+    const rankByRoleId = new Map(mappings.map((m) => [m.discordRoleId, m.role]));
+    const lastSeenById = new Map(lastSeen.map((g) => [g.discordId, g._max.lastActivityAt]));
+    const identityById = new Map(identities.map((i) => [i.discordId, i]));
+
+    const botPos = typeof botPosition?.value === 'number' ? botPosition.value : 0;
+
+    return members
+      .map((m): SquadMemberRow => {
+        const held = m.roles.map((id) => roleById.get(id)).filter((r) => r !== undefined);
+
+        /*
+         * ★ TWO LADDERS, NOT ONE ★
+         *
+         * The same split the activity roster makes. Roles below LEADERSHIP_CEILING are
+         * APPOINTMENTS; from it upward they are TENURE ranks. Showing only the higher number made
+         * a Squadron Leader look like they were at the top of a ladder they are not on.
+         */
+        const ranks = m.roles
+          .map((id) => rankByRoleId.get(id))
+          .filter((r) => r !== undefined)
+          .sort((a, b) => (b.rankOrder ?? 0) - (a.rankOrder ?? 0));
+
+        const rank = ranks.find((r) => (r.rankOrder ?? 0) >= LEADERSHIP_CEILING) ?? null;
+        const appointment = ranks.find((r) => (r.rankOrder ?? 0) < LEADERSHIP_CEILING) ?? null;
+
+        const highest = held.reduce((top, r) => Math.max(top, r.position), 0);
+        const identity = identityById.get(m.discordId);
+
+        /*
+         * ★ WHY THE BOT MIGHT NOT BE ABLE TO TOUCH THEM ★
+         *
+         * Two different reasons, and they need different sentences. "The bot has not reported in"
+         * is our problem and is fixed by starting it. "They outrank the bot" is a Discord
+         * hierarchy rule and is fixed by dragging a role in Server Settings. Collapsing both into
+         * "cannot moderate" would send an officer to the wrong place.
+         */
+        const reason =
+          botPos === 0
+            ? 'The bot has not reported its role position yet. Start the bot and refresh.'
+            : highest >= botPos
+              ? `Their highest Discord role sits at or above the bot's own, so Discord will refuse. ` +
+                `Move the bot's role above theirs in Server Settings → Roles.`
+              : null;
+
+        return {
+          discordId: m.discordId,
+          nick: m.nick,
+          username: m.username,
+          globalName: m.globalName,
+          isBot: m.isBot,
+          roles: held.map((r) => r.name).sort((a, b) => a.localeCompare(b)),
+          rank: rank?.name ?? null,
+          appointment: appointment?.name ?? null,
+          joinedAt: m.joinedAt?.toISOString() ?? null,
+          timeoutUntil: m.timeoutUntil?.toISOString() ?? null,
+          inVoiceSince: m.inVoiceSince?.toISOString() ?? null,
+          lastSeenAt: lastSeenById.get(m.discordId)?.toISOString() ?? null,
+          hasAccount: identity !== undefined,
+          handle: identity?.user?.handle ?? null,
+          cmdrName: identity?.user?.cmdrVerifications[0]?.cmdrName ?? null,
+          moderatable: reason === null,
+          notModeratableBecause: reason,
+        };
+      })
+      /*
+       * Newest first. An officer opening this page is almost always looking at somebody who has
+       * just arrived — a recruit to place, or a name they do not recognise. Members with no join
+       * date (everybody who has left) sort last rather than first, which is where an unknown date
+       * would otherwise put them.
+       */
+      .sort((a, b) => (b.joinedAt ?? '').localeCompare(a.joinedAt ?? ''));
+  }
+
+  async discordIdFor(userId: string): Promise<string | null> {
+    const identity = await this.#db.discordIdentity.findUnique({
+      where: { userId },
+      select: { discordId: true },
+    });
+    return identity?.discordId ?? null;
+  }
+
+  async recordModeration(entry: ModerationAudit): Promise<void> {
+    await this.#db.auditLog.create({
+      data: {
+        actorId: entry.actorId,
+        actorType: 'user',
+        /*
+         * ★ REFUSED ACTIONS ARE RECORDED TOO ★
+         *
+         * `applied: false` still gets a row. Somebody tried to ban a member and Discord said no —
+         * that is exactly the sort of thing an audit log exists to hold, and dropping it would mean
+         * the log only ever shows successful moderation, which is a flattering fiction.
+         */
+        action: `discord.member.${entry.action}`,
+        targetType: 'discord_member',
+        targetId: entry.discordId,
+        before: { name: entry.targetName },
+        after: {
+          reason: entry.reason,
+          applied: entry.applied,
+          ...(entry.minutes === undefined ? {} : { minutes: entry.minutes }),
+          ...(entry.deleteMessageDays === undefined
+            ? {}
+            : { deleteMessageDays: entry.deleteMessageDays }),
+          ...(entry.problem === undefined ? {} : { problem: entry.problem }),
+        },
+      },
+    });
   }
 
   async auditActions(): Promise<string[]> {

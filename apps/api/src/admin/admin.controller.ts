@@ -20,9 +20,26 @@ import {
 } from '../auth/admin-gate.guard.js';
 import { User, type CurrentUser } from '../auth/current-user.js';
 import { verifyCsrf, readCsrfCookie } from '../common/csrf.js';
-import { ADMIN_STORE, DASHBOARD_STORE, ROLE_ADMIN, MAPPING_ADMIN } from './admin.tokens.js';
+import {
+  ADMIN_STORE,
+  DASHBOARD_STORE,
+  ROLE_ADMIN,
+  MAPPING_ADMIN,
+  DISCORD_MODERATION,
+} from './admin.tokens.js';
 import type { DashboardStore, DashboardData } from './dashboard.store.js';
-import type { AdminStore, ActivityRow, AuditRow, MemberRow } from './admin.store.js';
+import type {
+  AdminStore,
+  ActivityRow,
+  AuditRow,
+  MemberRow,
+  SquadMemberRow,
+} from './admin.store.js';
+import {
+  MAX_TIMEOUT_MINUTES,
+  type DiscordModeration,
+  type ModerationAction,
+} from './discord-moderation.port.js';
 import type { RoleAdminService, MaskPreview } from './role-admin.service.js';
 import type { MappingAdminService, MappingRecord } from './mapping-admin.service.js';
 
@@ -51,7 +68,141 @@ export class AdminController {
     @Inject(DASHBOARD_STORE) private readonly dash: DashboardStore,
     @Inject(ROLE_ADMIN) private readonly roles: RoleAdminService,
     @Inject(MAPPING_ADMIN) private readonly mappings: MappingAdminService,
+    @Inject(DISCORD_MODERATION) private readonly discord: DiscordModeration,
   ) {}
+
+  // ------------------------------------------------------------ squad roster
+  /**
+   * Every member of the Discord server.
+   *
+   * ★ SQUADRON OWNER, 2026-08-01 ★
+   *
+   * "we need to create a full on member roster that shows every member in our discord with full
+   * administrative tools for them, kick, ban, timeout"
+   *
+   * Distinct from `members()`, which lists WEBSITE accounts — currently one, against a hundred and
+   * seventeen people in Discord. An officer moderating the squadron works from the second list.
+   */
+  @Get('squad')
+  async squad(): Promise<{ rows: SquadMemberRow[] }> {
+    return { rows: await this.store.squadRoster() };
+  }
+
+  /**
+   * Times out, kicks or bans a Discord member.
+   *
+   * ★ WHY ONE ENDPOINT AND NOT FIVE ★
+   *
+   * Every action shares the same four steps in the same order — check the caller may act on this
+   * person, call Discord, record what happened whether or not it worked, report it in words. Split
+   * five ways, that is five places for one of the four to be forgotten, and the one that gets
+   * forgotten is always the audit row.
+   *
+   * ★ MEMBER_MANAGE, BY THE OWNER'S DECISION ★
+   *
+   * 2026-08-01, offered separate MEMBER_TIMEOUT / MEMBER_KICK / MEMBER_BAN bits and chose to keep
+   * all three under MEMBER_MANAGE. So anybody who can manage members can ban, and that is
+   * deliberate. It is inherited from the controller, along with the two-factor gate.
+   */
+  @Post('squad/:discordId/moderate')
+  async moderate(
+    @User() caller: CurrentUser | undefined,
+    @Param('discordId') discordId: string,
+    @Body() body: unknown,
+    @Req() req: FastifyRequest,
+  ): Promise<{ applied: boolean; problem?: string }> {
+    const actorId = requireUser(caller);
+    csrf(req);
+
+    const input = (body ?? {}) as Record<string, unknown>;
+    const action = readString(input, 'action') as ModerationAction;
+
+    const ALLOWED: readonly ModerationAction[] = ['timeout', 'untimeout', 'kick', 'ban', 'unban'];
+    if (!ALLOWED.includes(action)) {
+      throw new AppError(ErrorCode.VALIDATION_FAILED, `Unknown moderation action: ${action}`);
+    }
+
+    /*
+     * A reason is REQUIRED, and it is not bureaucracy.
+     *
+     * It goes into Discord's own server audit log as well as ours, so the next officer scrolling
+     * that log sees why somebody vanished. Without it a ban issued from this site is
+     * indistinguishable from one issued by a compromised bot.
+     */
+    const reason = readString(input, 'reason').trim();
+    if (reason.length < 3) {
+      throw new AppError(
+        ErrorCode.VALIDATION_FAILED,
+        'Give a reason. It is written to the squadron audit log and to the one in Discord.',
+      );
+    }
+
+    const roster = await this.store.squadRoster();
+    const target = roster.find((r) => r.discordId === discordId);
+
+    if (target === undefined) {
+      throw new AppError(
+        ErrorCode.RESOURCE_NOT_VISIBLE,
+        'That member is not in the Discord server.',
+      );
+    }
+
+    /*
+     * Acting on yourself is refused before Discord ever sees it. Banning your own account from the
+     * console is a mistake with no undo from inside the console, and nobody needs this to do it —
+     * the Discord client is right there if they genuinely mean to.
+     *
+     * The caller's Discord id is looked up rather than read off the session: `CurrentUser` carries
+     * a userId and nothing else, and widening it for one check here would put a Discord id on every
+     * authenticated request in the application.
+     */
+    if ((await this.store.discordIdFor(actorId)) === discordId) {
+      throw new AppError(ErrorCode.PERMISSION_DENIED, 'You cannot use this on your own account.');
+    }
+
+    /*
+     * `unban` is the exception to the hierarchy rule: the person is not in the guild, so they hold
+     * no roles to outrank anybody with. Refusing it on `moderatable` would make an accidental ban
+     * unfixable from here, which is the one thing this page must never be.
+     */
+    if (!target.moderatable && action !== 'unban') {
+      throw new AppError(
+        ErrorCode.PERMISSION_DENIED,
+        target.notModeratableBecause ?? 'Discord will not let the bot act on this member.',
+      );
+    }
+
+    const minutes = action === 'timeout' ? readTimeoutMinutes(input) : undefined;
+    const deleteMessageDays = action === 'ban' ? readDeleteDays(input) : undefined;
+
+    const outcome = await this.discord.apply({
+      action,
+      discordId,
+      reason,
+      ...(minutes === undefined ? {} : { minutes }),
+      ...(deleteMessageDays === undefined ? {} : { deleteMessageDays }),
+    });
+
+    /*
+     * Recorded even when Discord refused.
+     *
+     * An audit log that only holds SUCCESSFUL moderation is a flattering fiction: "who tried to ban
+     * this member last week" is exactly the question it should be able to answer.
+     */
+    await this.store.recordModeration({
+      actorId,
+      discordId,
+      targetName: target.nick ?? target.globalName ?? target.username,
+      action,
+      reason,
+      minutes,
+      deleteMessageDays,
+      applied: outcome.ok,
+      problem: outcome.problem,
+    });
+
+    return outcome.ok ? { applied: true } : { applied: false, problem: outcome.problem ?? '' };
+  }
 
   /**
    * Monthly activity, the input to promotion.
@@ -376,4 +527,39 @@ function csrf(req: FastifyRequest): void {
 function requireUser(caller: CurrentUser | undefined): string {
   if (caller === undefined) throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
   return caller.userId;
+}
+
+/**
+ * How long a timeout lasts, in minutes.
+ *
+ * Clamped rather than rejected at the top: Discord's ceiling is 28 days, and an officer who types
+ * 60 days meant "as long as possible", not "fail". Below one minute IS rejected, because a
+ * zero-minute timeout reports success and does nothing.
+ */
+function readTimeoutMinutes(input: Record<string, unknown>): number {
+  const raw = input['minutes'];
+  const n = typeof raw === 'number' ? raw : Number(raw);
+
+  if (!Number.isFinite(n) || n < 1) {
+    throw new AppError(ErrorCode.VALIDATION_FAILED, 'Choose how long the timeout should last.');
+  }
+  return Math.min(Math.floor(n), MAX_TIMEOUT_MINUTES);
+}
+
+/**
+ * How much of a banned member's recent history to delete, in days.
+ *
+ * Defaults to ZERO — deleting nothing. Wiping a week of somebody's messages is a much larger act
+ * than removing them: it takes conversations other members were part of with it, and none of it
+ * comes back. It has to be asked for explicitly.
+ */
+function readDeleteDays(input: Record<string, unknown>): number {
+  const raw = input['deleteMessageDays'];
+  if (raw === undefined || raw === null) return 0;
+
+  const n = typeof raw === 'number' ? raw : Number(raw);
+  if (!Number.isFinite(n) || n < 0 || n > 7) {
+    throw new AppError(ErrorCode.VALIDATION_FAILED, 'Message deletion must be between 0 and 7 days.');
+  }
+  return Math.floor(n);
 }

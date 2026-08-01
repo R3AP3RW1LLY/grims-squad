@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
+import { readFileSync, globSync } from 'node:fs';
+import { resolve, dirname, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { navFor, hasAdminArea } from './nav.js';
 import { Permission, ROLE_PRESETS, NO_PERMISSIONS, ALL_PERMISSIONS } from '@grims/shared';
@@ -16,6 +16,32 @@ import { Permission, ROLE_PRESETS, NO_PERMISSIONS, ALL_PERMISSIONS } from '@grim
  * because an interface that offers things it will not do teaches people to
  * distrust all of it.
  */
+
+/**
+ * Every route the web app actually serves, derived from its `page.tsx` files.
+ *
+ * Next.js route GROUPS — the `(hub)` and `(site)` directories — organise files without appearing in
+ * the URL, so they are stripped. Dynamic segments are left alone: no nav entry is dynamic, and one
+ * that became so would show up here as a genuine mismatch rather than being quietly waved through.
+ */
+function routesOnDisk(): Set<string> {
+  const appDir = resolve(dirname(fileURLToPath(import.meta.url)), '../../../web/src/app');
+
+  return new Set(
+    globSync('**/page.tsx', { cwd: appDir }).map((file) => {
+      const route = file
+        // globSync returns Windows separators on Windows and POSIX ones elsewhere.
+        .split(sep)
+        .join('/')
+        .replace(/\/page\.tsx$/, '')
+        .split('/')
+        .filter((segment) => !/^\(.*\)$/.test(segment))
+        .join('/');
+
+      return route === '' ? '/' : `/${route}`;
+    }),
+  );
+}
 
 describe('what a signed-in member sees', () => {
   it('MANDATORY: an ordinary member gets their own settings', () => {
@@ -108,18 +134,34 @@ describe('the admin area', () => {
 
   it('MANDATORY: no nav item points at a route that does not exist', () => {
     /*
-     * `/app/members` and `/app/audit` were nav entries with no `page.tsx`
-     * behind them, so every officer who clicked either one got a 404 from
-     * their own sidebar. Both are tabs on `/app` and were removed on the
+     * `/app/members` and `/app/audit` were nav entries with no `page.tsx` behind them, so every
+     * officer who clicked either one got a 404 from their own sidebar. Both were removed on the
      * squadron owner's instruction, 2026-07-29.
      *
-     * Asserted rather than merely deleted, because the obvious way to
-     * "restore" them later is to add the link back — which would recreate the
-     * 404 exactly.
+     * ★ THIS USED TO BE TWO HARD-CODED STRINGS, AND IT WENT STALE ★
+     *
+     * It asserted `not.toContain('/app/members')`, which was a stand-in for "that page does not
+     * exist" and stopped being true the moment one was written — 2026-08-01, when the owner asked
+     * for the Squad Members roster. A guard that fails on correct work gets deleted, and the real
+     * rule would have gone with it.
+     *
+     * So it reads the web app instead. The rule is unchanged and now enforced against what is
+     * actually on disk, which is what it always meant.
      */
-    const everything = navFor(ALL_PERMISSIONS).map((i) => i.href);
-    expect(everything).not.toContain('/app/members');
-    expect(everything).not.toContain('/app/audit');
+    const pages = routesOnDisk();
+
+    // A guard that finds nothing would pass vacuously and prove the opposite of its name.
+    expect(pages.size, 'no page.tsx files found — this guard cannot see the web app').toBeGreaterThan(5);
+
+    const missing = navFor(ALL_PERMISSIONS)
+      .map((i) => i.href)
+      .filter((href) => !pages.has(href));
+
+    expect(
+      missing,
+      'These nav entries point at routes with no page.tsx, so clicking them gives a 404 from the ' +
+        'sidebar:\n' + missing.map((m) => `  ${m}`).join('\n'),
+    ).toEqual([]);
   });
 
   it('somebody holding everything sees every section', () => {

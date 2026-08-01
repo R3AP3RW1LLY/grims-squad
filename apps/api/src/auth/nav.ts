@@ -205,6 +205,27 @@ const NAV: readonly NavDefinition[] = [
    * `/app/roles` stays. It IS a real page — it has its own tabs now, and it is
    * the only surface that can edit a permission mask.
    */
+  /*
+   * ★ `/app/members` IS BACK, AND THIS TIME THE PAGE EXISTS ★
+   *
+   * The note above records why it was removed: it was a nav entry pointing at a route with no
+   * `page.tsx`, so every officer who clicked it got a 404 from their own sidebar.
+   *
+   * Squadron owner, 2026-08-01: "we need to create a full on member roster that shows every member
+   * in our discord with full administrative tools for them, kick, ban, timeout blah blah blah.
+   * create a new Squad Members page in the administration category".
+   *
+   * `apps/web/src/app/(hub)/app/members/page.tsx` was written in the same change as this line. The
+   * lesson from last time is not "never add a nav entry" — it is that the entry and the page ship
+   * together or neither does.
+   */
+  {
+    href: '/app/members',
+    label: 'Squad members',
+    section: 'admin',
+    blurb: 'Everybody in the Discord server, and the tools to moderate them.',
+    requires: Permission.MEMBER_MANAGE,
+  },
   {
     href: '/app/roles',
     label: 'Roles',

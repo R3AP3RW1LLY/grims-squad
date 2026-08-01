@@ -928,6 +928,23 @@ model DiscordGuildMember {
   /// and the two agree for anybody who has not left and rejoined since signing in.
   joinedAt   DateTime? @map("joined_at") @db.Timestamptz(6)
 
+  /// When a Discord timeout on this member expires. Null when they are not timed out.
+  ///
+  /// ★ MIRRORED FROM DISCORD, NEVER DECIDED HERE ★
+  ///
+  /// Discord owns this: it is `communication_disabled_until` on the guild member, and it expires on
+  /// its own with no event to tell us. So a row in the past means NOT timed out, and every reader
+  /// must compare against the clock rather than testing for null.
+  ///
+  /// Kept here so the Squad Members roster is one database read. The alternative — asking Discord
+  /// for the member list on every page load — puts a rate-limited network call in front of a page
+  /// an officer refreshes while working through a queue.
+  ///
+  /// Written on the startup sweep and on every member update, which is what Discord sends when a
+  /// timeout is applied or lifted. It can therefore be a few seconds stale after somebody is timed
+  /// out from Discord's own UI, and that is the correct trade for a roster.
+  timeoutUntil DateTime? @map("timeout_until") @db.Timestamptz(6)
+
   /// When this member joined the voice channel they are sitting in. Null when they are not in one.
   ///
   /// ★ PRESENCE, NOT HISTORY ★

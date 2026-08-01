@@ -170,6 +170,14 @@ let roleScope: ScopeRole[] = [];
  */
 const ROLE_RETRY_MS = 30_000;
 
+/**
+ * Where the admin console reads the bot's own place in the role hierarchy.
+ *
+ * A plain config key rather than a column: it is one integer about the BOT, not about any member,
+ * and it changes only when somebody drags a role in Discord.
+ */
+const BOT_ROLE_POSITION_KEY = 'discord.bot_role_position';
+
 async function loadRoles(): Promise<void> {
   const guild = await client.guilds.fetch(GUILD_ID);
   const roles = await guild.roles.fetch();
@@ -188,8 +196,36 @@ async function loadRoles(): Promise<void> {
       r.permissions.has(PermissionFlagsBits.ManageChannels),
   }));
 
+  /*
+   * ★ WHERE THE BOT SITS IN THE ROLE HIERARCHY ★
+   *
+   * Squadron owner, 2026-08-01, asked for kick, ban and timeout on the Squad Members roster.
+   * Discord refuses ALL THREE against anybody whose highest role sits at or above the bot's own,
+   * whatever permissions the bot holds. Measured on this guild: the bot's top role is `Assistant`
+   * at position 41, so `Admin` (42) and `YAGPDB.xyz` (43) are out of reach.
+   *
+   * Published here so the roster can grey those rows out and SAY SO, rather than offering a button
+   * that always returns 403. An officer who is told "this person outranks the bot" can fix it in
+   * Server Settings; an officer shown a shrug tries three more members and reports the page broken.
+   *
+   * Written on every role load, so moving the bot's role in Discord is reflected on the next
+   * reconnect rather than needing a deploy.
+   */
+  const position = guild.members.me?.roles.highest.position ?? 0;
+  await prisma.siteConfig
+    .upsert({
+      where: { key: BOT_ROLE_POSITION_KEY },
+      create: { key: BOT_ROLE_POSITION_KEY, value: position },
+      update: { value: position },
+    })
+    .catch((err: unknown) => logger.warn({ err }, 'could not publish the bot role position'));
+
   logger.info(
-    { roles: roleScope.length, privileged: roleScope.filter((r) => r.isPrivileged).length },
+    {
+      roles: roleScope.length,
+      privileged: roleScope.filter((r) => r.isPrivileged).length,
+      botRolePosition: position,
+    },
     'role scope loaded',
   );
 }
@@ -506,6 +542,7 @@ async function syncMemberNames(): Promise<void> {
           roles: [...m.roles.cache.keys()],
           isBot: m.user.bot,
           joinedAt: m.joinedAt,
+          timeoutUntil: m.communicationDisabledUntil,
         },
         update: {
           nick: m.nickname,
@@ -527,6 +564,15 @@ async function syncMemberNames(): Promise<void> {
            * old one would claim a continuous membership that did not happen.
            */
           joinedAt: m.joinedAt,
+          /*
+           * ★ MIRRORED, NOT DECIDED ★
+           *
+           * Discord owns the timeout and expires it silently. Writing it here means the Squad
+           * Members roster is one database read instead of a rate-limited call to Discord on every
+           * page load — and null is written back when a timeout is lifted, which is what makes the
+           * roster correct rather than merely fast.
+           */
+          timeoutUntil: m.communicationDisabledUntil,
           syncedAt: new Date(),
         },
       })
@@ -908,6 +954,7 @@ client.on(Events.GuildMemberAdd, (member) => {
         roles: [...member.roles.cache.keys()],
         isBot: member.user.bot,
         joinedAt: member.joinedAt,
+        timeoutUntil: member.communicationDisabledUntil,
       },
       update: {
         nick: member.nickname,
@@ -917,6 +964,7 @@ client.on(Events.GuildMemberAdd, (member) => {
         // A REJOIN overwrites the old date, which is the honest answer: Discord has discarded the
         // first spell and there is no way to recover it. See the schema note on this column.
         joinedAt: member.joinedAt,
+        timeoutUntil: member.communicationDisabledUntil,
         syncedAt: new Date(),
       },
     })
@@ -943,6 +991,7 @@ client.on(Events.GuildMemberUpdate, (_before, after) => {
         roles: [...after.roles.cache.keys()],
         isBot: after.user.bot,
         joinedAt: after.joinedAt,
+        timeoutUntil: after.communicationDisabledUntil,
       },
       update: {
         nick: after.nickname,
@@ -950,6 +999,9 @@ client.on(Events.GuildMemberUpdate, (_before, after) => {
         globalName: after.user.globalName,
         roles: [...after.roles.cache.keys()],
         joinedAt: after.joinedAt,
+        // The event that carries a timeout being APPLIED or LIFTED. Without this the roster would
+        // only learn about either on the next restart.
+        timeoutUntil: after.communicationDisabledUntil,
         syncedAt: new Date(),
       },
     })
