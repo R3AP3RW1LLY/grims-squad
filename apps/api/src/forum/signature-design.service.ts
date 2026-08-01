@@ -161,7 +161,8 @@ export class SignatureDesignService {
       return {
         name,
         spec: specFor(brief),
-        imageryPrompt: backplatePrompt(brief),
+        // Their own background description leads; the model's scene varies it per option.
+        imageryPrompt: backplatePrompt(brief, answers.prompt),
       };
     });
   }

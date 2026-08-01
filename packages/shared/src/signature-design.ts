@@ -341,9 +341,26 @@ export function specFor(brief: DesignBrief, imageMediaId?: string): BannerSpec {
  * written across it. So the scene is pushed wide and dark, and told to leave the left side quiet —
  * which is where every layout above puts the text.
  */
-export function backplatePrompt(brief: DesignBrief): string {
+export function backplatePrompt(brief: DesignBrief, wanted = ''): string {
+  /*
+   * ★ THE MEMBER'S OWN WORDS COME FIRST — squadron owner, 2026-08-01 ★
+   *
+   * "it must also generate actual images for background if they want for example like a galaxy,
+   * planet surface or something else they may prompt ... wildly unique to what the end user wants".
+   *
+   * The model is asked for a scene and does it well — against the real one it returned a Krait over
+   * an asteroid field for somebody who said they mine. But "does it well" is not "always", and a
+   * member who typed "a planet surface at dawn" and got a nebula would reasonably conclude nothing
+   * read what they wrote.
+   *
+   * So when they described a background, that description leads and the model's is the variation
+   * behind it. Five options still differ, because the model's sentence differs each time.
+   */
+  const asked = wanted.trim();
+  const scene = asked === '' ? brief.imagery : `${asked}. ${brief.imagery}`;
+
   return [
-    `Elite Dangerous style space scene: ${brief.imagery}.`,
+    `Elite Dangerous style space scene: ${scene}.`,
     'Wide cinematic banner background, dark, high contrast, deep shadows.',
     // The composition instruction is what makes it usable rather than merely pretty.
     'Empty uncluttered space on the left third for text overlay.',

@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   AppError,
   ErrorCode,
+  IMAGE_OPTIONS,
   MAX_PROMPT_LENGTH,
   MAX_SEED,
   PROMPT_EXAMPLES,
@@ -41,6 +42,12 @@ const GenerateBody = z.object({
    * refusing it is better than honouring it approximately.
    */
   seed: z.number().int().min(0).max(MAX_SEED).nullish(),
+  /*
+   * How many images. Defaults to the builder's three; the signature designer asks for one per
+   * design, because it already has five designs on screen and needs a backplate for each rather
+   * than a choice of three for one of them.
+   */
+  count: z.number().int().min(1).max(IMAGE_OPTIONS).optional(),
 });
 
 interface GeneratedOption {
@@ -92,6 +99,7 @@ export class ArtworkController {
       parsed.data.prompt,
       caller.userId,
       parsed.data.seed ?? null,
+      parsed.data.count ?? IMAGE_OPTIONS,
     );
 
     if (!outcome.ok) {

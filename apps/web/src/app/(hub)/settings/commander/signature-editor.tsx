@@ -24,6 +24,7 @@ import { defaultBannerSpec, type BannerSpec } from '@grims/shared/forum-signatur
 import { apiCall } from '../../../../lib/api-client';
 import { SignatureBlock } from '../../../../components/forum/signature-block';
 import { BannerGenerator } from './banner-generator';
+import { AiDesigner } from './ai-designer';
 import type { BannerIdentity } from '../../../../components/forum/banner-render';
 
 /**
@@ -78,6 +79,30 @@ export function SignatureEditor({
    */
   readonly who: BannerIdentity;
 }) {
+  /**
+   * Which path they are on.
+   *
+   * ★ SQUADRON OWNER, 2026-08-01 ★
+   *
+   * "turn this page into a stepper form, with 2 options, option 1 is generate signature with GMSD
+   * AI ... the second option is another stepper that allows a user to manually create their
+   * signature with a live preview"
+   *
+   * `choose` until they say. Landing straight in the builder would hide the generator behind a wall
+   * of controls, and landing in the generator would make somebody who knows exactly what they want
+   * dismiss a questionnaire first.
+   */
+  const [mode, setMode] = useState<'choose' | 'ai' | 'build'>('choose');
+
+  /**
+   * Which step of the manual path.
+   *
+   * The controls are the ones that were always here, grouped rather than reduced — every colour,
+   * layer, font and upload still exists. What changed is that they arrive four at a time instead of
+   * as one wall, with the preview pinned beside them throughout.
+   */
+  const [step, setStep] = useState(0);
+
   const [sig, setSig] = useState<SignatureView | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -239,7 +264,70 @@ export function SignatureEditor({
     );
   }
 
-  const linkLooksWrong = sig.bannerLink !== null && !isAllowedSignatureLink(sig.bannerLink);
+  /* ── the two paths ──────────────────────────────────────────────────── */
+
+  if (mode === 'choose') {
+    return (
+      <div className="max-w-[46rem]">
+        <p className="text-[var(--color-text-primary)]">
+          Your signature appears under everything you post. Have GMSD AI design one from a few
+          questions, or build it yourself.
+        </p>
+
+        <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <PathCard
+            eyebrow="Option one"
+            title="GENERATE WITH GMSD AI"
+            body="Answer four questions. It designs five signatures from your own words and draws artwork for the backplates. Use one as it is, or open it in the builder."
+            action="Design mine"
+            onClick={() => setMode('ai')}
+          />
+          <PathCard
+            eyebrow="Option two"
+            title="BUILD IT MYSELF"
+            body="Every colour, layer, font and image, in four steps, with a live preview beside you the whole way."
+            action="Start building"
+            onClick={() => {
+              setStep(0);
+              setMode('build');
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  if (mode === 'ai') {
+    return (
+      <div className="max-w-[46rem]">
+        <AiDesigner
+          who={who}
+          onUse={async (spec) => {
+            /*
+             * Saved and finished. `save` writes through the same endpoint the builder uses, so a
+             * generated signature is not a second kind of signature — it is the same record.
+             */
+            await save({ bannerSpec: spec });
+            patch({ bannerSpec: spec });
+            setMode('build');
+            setStep(3);
+          }}
+          onTweak={(spec) => {
+            // Straight into the banner step, which is the one they will want to change first.
+            patch({ bannerSpec: spec });
+            setMode('build');
+            setStep(0);
+          }}
+          onBack={() => {
+            setStep(0);
+            setMode('build');
+          }}
+        />
+      </div>
+    );
+  }
+
+    const linkLooksWrong = sig.bannerLink !== null && !isAllowedSignatureLink(sig.bannerLink);
 
   const avatar = sig.avatarUrl ?? discordAvatarUrl;
 
@@ -308,9 +396,14 @@ export function SignatureEditor({
         </div>
       </section>
 
-      {/* ── the controls ────────────────────────────────────────────────── */}
+      {/* ── the controls, four steps at a time ──────────────────────────── */}
+      <div className="space-y-6">
+        <StepNav step={step} onStep={setStep} onRestart={() => setMode('choose')} />
+
       <div className="min-w-0 space-y-8">
 
+      {step === 0 && (
+      <>
       {/* ── avatar ───────────────────────────────────────────────────────── */}
       <section className="space-y-3">
         <h2 className="font-mono text-xs tracking-[0.3em] text-[var(--color-text-secondary)]">
@@ -357,6 +450,11 @@ export function SignatureEditor({
         </div>
       </section>
 
+      </>
+      )}
+
+      {step === 1 && (
+      <>
       {/* ── tagline ──────────────────────────────────────────────────────── */}
       <section className="space-y-2">
         <label
@@ -379,6 +477,11 @@ export function SignatureEditor({
         </p>
       </section>
 
+      </>
+      )}
+
+      {step === 2 && (
+      <>
       {/* ── banner: build one, or bring one ──────────────────────────────── */}
       <section className="space-y-4">
         <BannerGenerator
@@ -477,6 +580,11 @@ export function SignatureEditor({
         )}
       </section>
 
+      </>
+      )}
+
+      {step === 3 && (
+      <>
       {/* ── accent ───────────────────────────────────────────────────────── */}
       <section className="space-y-2">
         <h2 className="font-mono text-xs tracking-[0.3em] text-[var(--color-text-secondary)]">
@@ -519,6 +627,8 @@ export function SignatureEditor({
           onChange={(v) => patch({ showCommander: v })}
         />
       </section>
+      </>
+      )}
 
       {error !== null && (
         <p role="alert" className="text-sm text-[var(--color-brand-orange-bright)]">
@@ -538,6 +648,101 @@ export function SignatureEditor({
           {saved && <span className="text-sm text-[var(--color-semantic-success)]">Saved.</span>}
         </div>
       </div>
+      {/* closes the stepped controls column opened above the step nav */}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * One of the two paths, on the first screen.
+ *
+ * A whole card is the target rather than a link at the end of a paragraph: this is the one decision
+ * on the page and it should be hard to miss.
+ */
+function PathCard({
+  eyebrow,
+  title,
+  body,
+  action,
+  onClick,
+}: {
+  readonly eyebrow: string;
+  readonly title: string;
+  readonly body: string;
+  readonly action: string;
+  readonly onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex h-full flex-col rounded-lg border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel)] p-6 text-left transition-colors hover:border-[var(--color-border-active)]"
+    >
+      <span className="font-mono text-[11px] uppercase tracking-[0.24em] text-[var(--color-brand-cyan-bright)]">
+        {eyebrow}
+      </span>
+      <span
+        className="mt-2 text-lg text-[var(--color-brand-orange)]"
+        style={{ fontFamily: 'var(--font-display)' }}
+      >
+        {title}
+      </span>
+      <span className="mt-3 flex-1 text-sm leading-relaxed text-[var(--color-text-secondary)]">
+        {body}
+      </span>
+      <span className="mt-5 font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--color-brand-cyan-bright)]">
+        {action} →
+      </span>
+    </button>
+  );
+}
+
+/** The four steps of the manual path. */
+const STEPS = ['Avatar', 'Words', 'Banner', 'Finish'] as const;
+
+/**
+ * Which step, and a way back to the start.
+ *
+ * ★ EVERY STEP IS REACHABLE AT ANY TIME ★
+ *
+ * Not a wizard that locks you into an order. Somebody who came here to change one colour should not
+ * have to walk past three screens to reach it, and nothing in a signature depends on anything else
+ * having been filled in first — which is exactly when a forced sequence is an obstacle rather than
+ * a guide.
+ */
+function StepNav({
+  step,
+  onStep,
+  onRestart,
+}: {
+  readonly step: number;
+  readonly onStep: (n: number) => void;
+  readonly onRestart: () => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-b border-[var(--color-border-hairline)] pb-4">
+      {STEPS.map((label, i) => (
+        <button
+          key={label}
+          type="button"
+          onClick={() => onStep(i)}
+          className={`rounded px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.18em] transition-colors ${
+            step === i
+              ? 'border border-[var(--color-brand-cyan-bright)] text-[var(--color-brand-cyan-bright)]'
+              : 'border border-transparent text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
+          }`}
+        >
+          {i + 1}. {label}
+        </button>
+      ))}
+      <button
+        type="button"
+        onClick={onRestart}
+        className="ml-auto font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--color-text-secondary)] underline underline-offset-4 hover:text-[var(--color-brand-cyan-bright)]"
+      >
+        Start over
+      </button>
     </div>
   );
 }

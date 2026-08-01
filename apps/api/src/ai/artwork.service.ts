@@ -77,6 +77,19 @@ export class ArtworkService {
     prompt: string,
     userId: string,
     seed: number | null = null,
+    /**
+     * How many images to make.
+     *
+     * ★ ADDED FOR THE SIGNATURE DESIGNER — 2026-08-01 ★
+     *
+     * The builder asks for three so a member can choose. The designer asks for ONE per design,
+     * because the choosing already happened a step earlier — it has five designs on screen and
+     * needs a backplate for each.
+     *
+     * Without this, five designs would be fifteen images: about twelve minutes of a shared card
+     * that also serves post screening, to throw away ten of them.
+     */
+    count: number = IMAGE_OPTIONS,
   ): Promise<ArtworkOutcome> {
     if (!this.images.configured) return { ok: false, reason: 'unconfigured' };
 
@@ -98,7 +111,9 @@ export class ArtworkService {
     const options: ArtworkOption[] = [];
     const deadline = Date.now() + IMAGE_BATCH_BUDGET_MS;
 
-    for (let i = 0; i < IMAGE_OPTIONS; i += 1) {
+    const wanted = Math.min(Math.max(1, Math.round(count)), IMAGE_OPTIONS);
+
+    for (let i = 0; i < wanted; i += 1) {
       /*
        * The budget is checked before STARTING an option, never during one. Aborting a generation
        * half way through wastes the GPU time already spent and returns nothing for it; declining to
@@ -158,7 +173,7 @@ export class ArtworkService {
     this.stream?.emit({
       level: 'warn',
       kind: 'image',
-      message: `Stopped after ${made} of ${IMAGE_OPTIONS} — the batch ran out of time.`,
+      message: `Stopped after ${made} — the batch ran out of time.`,
     });
   }
 
