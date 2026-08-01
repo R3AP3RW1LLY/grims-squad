@@ -1,4 +1,4 @@
-import type { PrismaClient } from '@grims/db';
+import { Prisma, type PrismaClient } from '@grims/db';
 import { isSuit, shipDisplayName } from '@grims/shared';
 import { LEADERSHIP_CEILING } from '../members/members.store.js';
 
@@ -35,6 +35,8 @@ export interface DashboardData {
   readonly daysInMonth: number;
   /** Months that actually have activity, newest first, as `YYYY-MM`. Drives the history tabs. */
   readonly availableMonths: readonly string[];
+  /** What one bar of the activity chart covers: a day, or a whole month in the year view. */
+  readonly granularity: 'day' | 'month';
 
   readonly discord: {
     readonly messages: number;
@@ -133,6 +135,9 @@ const PLAYING_WINDOW_MS = 5 * 60_000;
  * query. Null falls back to the current month rather than erroring — a bad tab in a URL should show
  * today, not a stack trace.
  */
+/** The value that asks for the whole calendar year rather than one month. */
+export const YTD = 'ytd';
+
 function parseMonth(value: string | undefined): Date | null {
   if (value === undefined || !/^\d{4}-(0[1-9]|1[0-2])$/.test(value)) return null;
   const [year, month] = value.split('-').map(Number);
@@ -173,12 +178,40 @@ export class PrismaDashboardStore implements DashboardStore {
      * to make July reachable, and to say plainly why a fresh month looks quiet.
      */
     const picked = parseMonth(selectedMonth);
-    const month = picked ?? new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-    const nextMonth = new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth() + 1, 1));
-    const monthKey = month.toISOString().slice(0, 7);
 
-    // Day 0 of the next month is the last day of this one — 28, 29, 30 or 31 without a lookup table.
-    const daysInMonth = new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth() + 1, 0)).getUTCDate();
+    /*
+     * ★ YEAR TO DATE — squadron owner, 2026-08-01 ★
+     *
+     * "a new tab that is YTD that shows everything the monthly tabs show but an aggregate of the
+     * year total."
+     *
+     * ★ TWELVE BARS, NOT THREE HUNDRED AND SIXTY-FIVE ★
+     *
+     * The chart's axis is one bar per bucket. A year of DAILY buckets is 365 bars on a panel that
+     * already thins 31 labels to avoid a smear — it would be a solid block of ink answering
+     * nothing.
+     *
+     * So YTD buckets by MONTH. The question changes with the span: across a month you want to know
+     * which days were busy, across a year you want to know which months were. Same chart, same
+     * arrays, different grain — and `granularity` tells the page which it is looking at so it can
+     * label the axis honestly.
+     */
+    const ytd = selectedMonth === YTD;
+    const month = picked ?? new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const yearStart = new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
+    const nextMonth = ytd
+      ? new Date(Date.UTC(now.getUTCFullYear() + 1, 0, 1))
+      : new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth() + 1, 1));
+    const rangeStart = ytd ? yearStart : month;
+    const monthKey = ytd ? String(now.getUTCFullYear()) : month.toISOString().slice(0, 7);
+
+    /*
+     * Bucket count: twelve for a year, or this month's own length. Day 0 of the next month is the
+     * last day of this one — 28, 29, 30 or 31 without a lookup table.
+     */
+    const daysInMonth = ytd
+      ? 12
+      : new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth() + 1, 0)).getUTCDate();
 
     const [
       activity,
@@ -199,7 +232,15 @@ export class PrismaDashboardStore implements DashboardStore {
       ranks,
     ] = await Promise.all([
       this.#db.memberActivityMonth.findMany({
-        where: { month },
+        /*
+         * ★ THE WHOLE YEAR IN YTD MODE ★
+         *
+         * This drives the headline totals — messages, voice, forum, active members. Left scoped to
+         * one month it reported AUGUST's numbers under a "2026" heading: zero, four minutes into
+         * the year's eighth month, while July alone held 10,233 messages. The chart aggregated
+         * correctly and the numbers above it did not, which is worse than neither working.
+         */
+        where: ytd ? { month: { gte: yearStart, lt: nextMonth } } : { month },
         select: {
           messageCount: true,
           forumPostCount: true,
@@ -304,13 +345,14 @@ export class PrismaDashboardStore implements DashboardStore {
         Array<{ day: number; msgs: bigint; voice: bigint; forum: bigint; members: bigint }>
       >`
         SELECT
-          EXTRACT(DAY FROM day)::int          AS day,
+          -- Day of the month, or month of the year when the span is a year. One query, one shape.
+          ${ytd ? Prisma.sql`EXTRACT(MONTH FROM day)::int` : Prisma.sql`EXTRACT(DAY FROM day)::int`} AS day,
           SUM(message_count)::bigint          AS msgs,
           SUM(voice_join_count)::bigint       AS voice,
           SUM(forum_post_count)::bigint       AS forum,
           COUNT(DISTINCT discord_id)::bigint  AS members
         FROM member_activity_days
-        WHERE day >= ${month}::date AND day < ${nextMonth}::date
+        WHERE day >= ${rangeStart}::date AND day < ${nextMonth}::date
         GROUP BY 1 ORDER BY 1
       `,
 
@@ -338,7 +380,7 @@ export class PrismaDashboardStore implements DashboardStore {
           COUNT(*)::bigint                                      AS signins
         FROM telemetry_events
         WHERE event_type = 'LoadGame'
-          AND occurred_at >= ${month}::date
+          AND occurred_at >= ${rangeStart}::date
           AND occurred_at <  ${nextMonth}::date
         GROUP BY 1 ORDER BY 1
       `,
@@ -346,7 +388,7 @@ export class PrismaDashboardStore implements DashboardStore {
       this.#db.telemetryEvent.count(),
       this.#db.telemetryEvent.findMany({ distinct: ['userId'], select: { userId: true } }),
       this.#db.telemetryEvent.findMany({
-        where: { eventType: 'LoadGame', occurredAt: { gte: month, lt: nextMonth } },
+        where: { eventType: 'LoadGame', occurredAt: { gte: rangeStart, lt: nextMonth } },
         select: { userId: true },
       }),
       this.#db.user.count({
@@ -549,6 +591,11 @@ export class PrismaDashboardStore implements DashboardStore {
       month: monthKey,
       daysInMonth,
       availableMonths: monthsWithData.map((r) => r.m),
+      /*
+       * What one bar means. The chart cannot tell 31 days from 12 months by looking at the array,
+       * and labelling a month bucket "day 7" is the kind of wrong that goes unnoticed for months.
+       */
+      granularity: ytd ? ('month' as const) : ('day' as const),
       discord: {
         messages: sum((r) => r.messageCount),
         forumPosts: sum((r) => r.forumPostCount),

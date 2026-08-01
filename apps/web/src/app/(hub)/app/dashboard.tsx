@@ -57,7 +57,11 @@ function Empty({ children }: { children: React.ReactNode }) {
 export function Dashboard({ data }: { data: AdminDashboard }) {
   const { discord, game, squadron } = data;
 
-  const label = monthLabel(data.month);
+  /*
+   * "July 2026" for a month, "2026" for the year view — the API sends the bare year as the label
+   * when YTD was asked for, and `monthLabel` would turn that into something meaningless.
+   */
+  const label = /^\d{4}$/.test(data.month) ? data.month : monthLabel(data.month);
   const participation =
     squadron.members === 0 ? 0 : Math.round((discord.activeMembers / squadron.members) * 100);
 
@@ -120,7 +124,7 @@ export function Dashboard({ data }: { data: AdminDashboard }) {
         description="Actions per day against the number of people behind them. Counted from per-day records rather than from a monthly total, so a member active on the 5th and the 20th appears on both."
       >
         {discord.daily.some((d) => d > 0) ? (
-          <ActivityChart days={heat} monthLabel={label} />
+          <ActivityChart days={heat} monthLabel={label} granularity={data.granularity} />
         ) : (
           /*
            * ★ SAYS WHY, AND WHERE TO LOOK ★
@@ -133,8 +137,8 @@ export function Dashboard({ data }: { data: AdminDashboard }) {
            * empty state names it and points at the tabs rather than leaving somebody to guess.
            */
           <Empty>
-            {label} has only just started, so there is nothing charted yet. Pick an earlier month
-            above to see history — nothing has been lost.
+            {label} has only just started, so there is nothing charted yet. Pick an earlier month —
+            or YTD — above to see history. Nothing has been lost.
           </Empty>
         )}
       </Section>

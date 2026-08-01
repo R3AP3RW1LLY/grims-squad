@@ -382,6 +382,8 @@ export interface AdminDashboard {
   daysInMonth: number;
   /** Months that actually have activity, newest first. Drives the history tabs. */
   availableMonths: string[];
+  /** What one bar of the activity chart covers. `month` in the year view. */
+  granularity: 'day' | 'month';
   discord: {
     messages: number;
     forumPosts: number;

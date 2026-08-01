@@ -167,6 +167,9 @@ const TOOLTIP_DARK_LABEL_STYLE = { color: BRAND.text, fontWeight: 600 } as const
 
 /* ----------------------------------------------------------- activity chart */
 
+/** Bar labels for the year view. Index 0 is January, matching EXTRACT(MONTH) minus one. */
+const MONTH_ABBR = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'] as const;
+
 export interface HeatDay {
   /** Day of the month, 1-indexed. */
   readonly day: number;
@@ -209,7 +212,20 @@ export interface HeatDay {
  * Separate axes, since the two are orders of magnitude apart. Sharing one would
  * flatten the member line onto the floor.
  */
-export function ActivityChart({ days, monthLabel }: { days: HeatDay[]; monthLabel: string }) {
+export function ActivityChart({
+  days,
+  monthLabel,
+  granularity = 'day',
+}: {
+  days: HeatDay[];
+  monthLabel: string;
+  /*
+   * What one bar covers. The year view buckets by MONTH — 365 bars on a panel that already thins 31
+   * labels would be a solid block of ink answering nothing — and a month bucket labelled "day 7"
+   * is the kind of wrong nobody spots for months.
+   */
+  granularity?: 'day' | 'month';
+}) {
   const busiest = days.length === 0 ? undefined : days.reduce((a, b) => (b.messages > a.messages ? b : a));
   const active = days.filter((d) => d.messages > 0);
   const busiestMembers =
@@ -225,9 +241,14 @@ export function ActivityChart({ days, monthLabel }: { days: HeatDay[]; monthLabe
             tick={{ fill: BRAND.textSecondary, fontSize: 10 }}
             axisLine={false}
             tickLine={false}
-            // Every other day. Thirty-one labels on a narrow panel overlap into
-            // a smear, and the shape is what matters here rather than the dates.
-            interval={1}
+            /*
+             * Every other DAY, but every MONTH. Twelve labels fit comfortably; thirty-one do not,
+             * and the shape is what matters across a month rather than the exact dates.
+             */
+            interval={granularity === 'month' ? 0 : 1}
+            tickFormatter={(v: number) =>
+              granularity === 'month' ? MONTH_ABBR[v - 1] ?? String(v) : String(v)
+            }
           />
           <YAxis
             yAxisId="actions"
@@ -407,7 +428,9 @@ export function ActivityChart({ days, monthLabel }: { days: HeatDay[]; monthLabe
           <span className="text-[var(--color-text-secondary)]">
             Busiest{' '}
             <span className="font-mono text-[var(--color-brand-cyan-bright)]">
-              {busiest.day} {monthLabel.split(' ')[0]}
+              {granularity === 'month'
+                ? `${MONTH_ABBR[busiest.day - 1] ?? busiest.day} ${monthLabel}`
+                : `${busiest.day} ${monthLabel.split(' ')[0]}`}
             </span>{' '}
             at{' '}
             <span className="font-mono text-[var(--color-text-primary)]">

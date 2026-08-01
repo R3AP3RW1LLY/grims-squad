@@ -74,15 +74,34 @@ export function MonthTabs({
    */
   const thisMonth = new Date().toISOString().slice(0, 7);
   const all = [...new Set([thisMonth, ...months, current])].sort().reverse();
-  if (all.length <= 1) return null;
 
   const spansYears = new Set(all.map((m) => m.slice(0, 4))).size > 1;
 
   return (
     <nav aria-label="Month" className="mb-6 flex flex-wrap items-center gap-1">
       <span className="mr-2 font-mono text-[10px] uppercase tracking-[0.24em] text-[var(--color-text-secondary)]">
-        Month
+        Period
       </span>
+
+      {/*
+        ★ YTD FIRST, BECAUSE IT IS THE WIDEST VIEW ★
+        Squadron owner: "a new tab that is YTD that shows everything the monthly tabs show but an
+        aggregate of the year total." It answers "how has the year gone", which is the question you
+        arrive with; the months answer "what happened in June", which is the one you drill into.
+      */}
+      <a
+        href={`${basePath}?tab=${encodeURIComponent(tab)}&month=ytd`}
+        aria-current={current === String(new Date().getUTCFullYear()) ? 'page' : undefined}
+        title={`Everything so far in ${new Date().getUTCFullYear()}`}
+        className={`rounded border px-2.5 py-1 font-mono text-[11px] transition-colors ${
+          // The API answers a YTD request with the YEAR as its label, which is how the tab knows.
+          current === String(new Date().getUTCFullYear())
+            ? 'border-[var(--color-brand-orange)] bg-[color-mix(in_srgb,var(--color-brand-orange)_12%,transparent)] text-[var(--color-brand-orange-bright)]'
+            : 'border-[var(--color-border-hairline)] text-[var(--color-text-secondary)] hover:border-[var(--color-border-active)] hover:text-[var(--color-text-primary)]'
+        }`}
+      >
+        YTD
+      </a>
       {all.map((m) => {
         const active = m === current;
         // A month in the list purely because it is TODAY may have no rows yet. Marked rather than
