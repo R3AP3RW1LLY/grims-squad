@@ -406,6 +406,7 @@ model User {
   posts               ForumPost[]
   postsReviewed       ForumPost[]           @relation("PostReviewer")
   aiCalls             AiCall[]
+  shipBuilds          ShipBuild[]
   reactions           ForumReaction[]
   subscriptions       ForumSubscription[]
   forumSignature      ForumSignature?
@@ -3093,4 +3094,73 @@ model AchievementAward {
   @@id([achievementId, userId])
   @@index([userId, awardedAt])
   @@map("achievement_awards")
+}
+
+/// A fitted ship, imported from a build link or read out of a member's own journal.
+///
+/// ★ SQUADRON OWNER, 2026-08-01 ★
+///
+/// "users should be able to submit links to existing coriolis and other elite dangerous ship builds
+/// and it should take that link and learn everything about that ship and build" — with a webmaster
+/// import of baseline builds so "we have a strong baseline to build ships from when players start
+/// asking for this information".
+///
+/// ★ THE CANONICAL FORM IS STORED, NOT THE LINK ★
+///
+/// `build` holds the decoded `ShipBuild`: every slot, what is in it, and the engineering on it.
+/// Storing only the URL and re-decoding on read would tie every answer to a website staying up and
+/// keeping its format — and would make a build that decoded correctly last month fail silently
+/// after somebody else's deploy.
+///
+/// The URL is kept beside it so a member can always get back to where it came from.
+model ShipBuild {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  /// Coriolis ship key — `mandalay`, `type_11_prospector`. Joins to everything about the hull.
+  shipId   String @map("ship_id")
+  shipName String @map("ship_name")
+  /// What its owner called it. Null when the source carried no name.
+  buildName String? @map("build_name")
+
+  /// `coriolis`, `edsy` or `journal`. See the note on BuildSource: they are not equally trusted.
+  source    String
+  sourceUrl String @map("source_url")
+
+  /// The decoded build. The whole point of the row.
+  build Json
+  /// Mass, jump range, power and armour, computed at import.
+  ///
+  /// Stored rather than derived on read because the answer must not change when coriolis-data
+  /// refreshes underneath it — a member asking twice and getting two jump ranges for one ship would
+  /// have no way to tell which was true.
+  stats Json?
+
+  /// Who submitted it. Null for the webmaster's baseline builds, which belong to the squadron.
+  submittedById String? @map("submitted_by_id") @db.Uuid
+  submittedBy   User?   @relation(fields: [submittedById], references: [id], onDelete: SetNull)
+
+  /// True for the reference builds imported in the admin console.
+  ///
+  /// The AI weights them differently: a baseline is "this is how the squadron does it", a member's
+  /// is "this is what somebody flies". Collapsing the two would let one person's experiment answer
+  /// as doctrine.
+  isBaseline Boolean @default(false) @map("is_baseline")
+
+  /// Set when the build came from a member's own journal rather than a link they pasted.
+  ///
+  /// Kept current on every refit, so it is the only kind of row that is UPDATED rather than added.
+  fromJournal Boolean @default(false) @map("from_journal")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  /// One journal build per member per ship: a refit replaces it rather than adding a second.
+  ///
+  /// Pasted links are deliberately NOT unique — two members may share the same build, and one
+  /// member may keep several plans for one hull.
+  @@unique([submittedById, shipId, fromJournal], name: "one_journal_build_per_ship")
+  @@index([shipId])
+  @@index([isBaseline])
+  @@index([submittedById])
+  @@map("ship_builds")
 }

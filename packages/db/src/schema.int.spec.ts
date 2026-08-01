@@ -119,7 +119,12 @@ describe('P0.2 database schema', () => {
     // hold a client secret and has no trustworthy redirect target, so it never performs the OAuth
     // exchange — it shows a code, the member approves it in their own browser, and the app collects
     // the result. This table is that handshake's state, and it is short-lived by construction.
-    expect(Number(r[0]?.n)).toBe(80);
+    //
+    // 81 as of 2026-08-01: ship_builds. Fitted ships, from a build link a member found in the wild
+    // or read straight out of their own journal. The DECODED build is stored rather than the link:
+    // re-decoding on read would tie every answer to somebody else's website staying up and keeping
+    // its format, and a build that decoded last month would start failing after their deploy.
+    expect(Number(r[0]?.n)).toBe(81);
   });
 
   describe('hand-written DDL that Prisma cannot express', () => {
