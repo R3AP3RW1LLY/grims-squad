@@ -105,7 +105,40 @@ CRON_TZ=UTC
 # nightly. 03:20 UTC — off-peak, and BEFORE the 04:17 janitor so a long import is never competing
 # with a prune for disk. The galaxy import also rebuilds market_entries when it finishes, so the
 # route table can never disagree with the stations it was derived from.
-20 3 * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/ingest-knowledge.js coriolis galaxy >> /var/log/grims-worker.log 2>&1
+20 3 * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/ingest-knowledge.js galaxy >> /var/log/grims-worker.log 2>&1
+
+# Coriolis, EVERY THREE HOURS — not daily with the galaxy.
+#
+# ★ IT WAS SCHEDULED AT AN EIGHTH OF ITS OWN CADENCE ★
+#
+# `REFRESH_HOURS.coriolis` is 3, on the owner's instruction ("can we not do this on like a 2-3 hour
+# schedule?"), and this ran once a day bundled with the galaxy import. So the training page computed
+# "overdue" against 3 hours and was right for 21 hours out of every 24 — reported as "we have a lot
+# of ingestions that are overdue".
+#
+# Affordable at this cadence because the job asks GitHub for one commit id and stops when it
+# matches: a few hundred bytes, eight times a day, downloading only when upstream actually moved.
+#
+# Offset by 20 minutes from the hour so it never starts alongside the galaxy import or the janitor.
+20 */3 * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/ingest-knowledge.js coriolis >> /var/log/grims-worker.log 2>&1
+
+# Journal, forum and reference knowledge.
+#
+# ★ THESE HAD NO INGEST LINE AT ALL ★
+#
+# All three had EMBED sweeps — `embed.js forum` every five minutes, `embed.js journal` every three —
+# embedding rows that nothing ever created. The ingests that produce those rows were never
+# scheduled, so the sweeps ran thousands of times a day over an empty result set and the sources sat
+# permanently overdue.
+#
+# `reference` is the worst of the three: it is the guides corpus, the only source whose entire value
+# is being embedded, and it had never run on a schedule in its life.
+#
+# Journal hourly (REFRESH_HOURS 1): it reads members' already-uploaded telemetry, so it is a
+# database pass rather than a network one. Forum and reference daily, matching their own cadences —
+# an accepted answer is not time-critical and a guide changes when somebody writes one.
+7 * * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/ingest-knowledge.js journal >> /var/log/grims-worker.log 2>&1
+35 4 * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/ingest-knowledge.js forum reference >> /var/log/grims-worker.log 2>&1
 
 # Roster knowledge, from the Inara profile cache. ON ITS OWN — squadron owner, 2026-07-31: "the
 # ingestion for ML from inara, that one must be batched and run on its own."
