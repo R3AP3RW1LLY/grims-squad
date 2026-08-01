@@ -245,3 +245,111 @@ export class ShipBuildService {
     };
   }
 }
+
+/** One build as the browser sees it. */
+export interface BuildView {
+  readonly id: string;
+  readonly shipId: string;
+  readonly shipName: string;
+  readonly buildName: string | null;
+  readonly source: string;
+  readonly sourceUrl: string;
+  readonly isBaseline: boolean;
+  readonly fromJournal: boolean;
+  /** Who contributed it, by display name. Null for the squadron's own baseline. */
+  readonly submittedBy: string | null;
+  readonly submittedById: string | null;
+  readonly stats: Record<string, unknown> | null;
+  readonly fitted: number;
+  readonly slots: number;
+  readonly createdAt: string;
+}
+
+/**
+ * Reading and removing builds.
+ *
+ * ★ EVERYTHING IS VISIBLE TO EVERY MEMBER ★
+ *
+ * The squadron owner chose squadron-wide and credited on 2026-08-01: "any member can ask what
+ * people are flying and get real answers with names". A build nobody can see teaches the assistant
+ * nothing anybody asked for.
+ */
+export class ShipBuildQueries {
+  constructor(private readonly db: PrismaClient) {}
+
+  async list(options: { shipId?: string; baselineOnly?: boolean } = {}): Promise<BuildView[]> {
+    const rows = await this.db.shipBuild.findMany({
+      where: {
+        ...(options.shipId === undefined ? {} : { shipId: options.shipId }),
+        ...(options.baselineOnly === true ? { isBaseline: true } : {}),
+      },
+      select: {
+        id: true,
+        shipId: true,
+        shipName: true,
+        buildName: true,
+        source: true,
+        sourceUrl: true,
+        isBaseline: true,
+        fromJournal: true,
+        submittedById: true,
+        stats: true,
+        build: true,
+        createdAt: true,
+        submittedBy: { select: { displayName: true } },
+      },
+      /*
+       * Baseline first, then newest. An officer or the assistant looking for "how do we do this"
+       * should meet the squadron's reference before somebody's experiment from Tuesday.
+       */
+      orderBy: [{ isBaseline: 'desc' }, { createdAt: 'desc' }],
+      take: 500,
+    });
+
+    return rows.map((r) => {
+      const modules = ((r.build as { modules?: Array<{ moduleId: string | null }> })?.modules ?? []);
+      return {
+        id: r.id,
+        shipId: r.shipId,
+        shipName: r.shipName,
+        buildName: r.buildName,
+        source: r.source,
+        sourceUrl: r.sourceUrl,
+        isBaseline: r.isBaseline,
+        fromJournal: r.fromJournal,
+        submittedBy: r.submittedBy?.displayName ?? null,
+        submittedById: r.submittedById,
+        stats: (r.stats as Record<string, unknown> | null) ?? null,
+        fitted: modules.filter((m) => m.moduleId !== null).length,
+        slots: modules.length,
+        createdAt: r.createdAt.toISOString(),
+      };
+    });
+  }
+
+  /**
+   * Removes a build.
+   *
+   * ★ YOUR OWN, OR ANY OF THEM IF YOU MODERATE ★
+   *
+   * The owner chose "straight in, removable by officers". A member can always withdraw what they
+   * contributed — that is the other half of contributing it — and an officer can remove anything,
+   * because a bad build teaches bad answers and a review queue nobody empties is worse than a
+   * delete button somebody uses.
+   */
+  async remove(id: string, actorId: string, canModerate: boolean): Promise<void> {
+    const row = await this.db.shipBuild.findUnique({
+      where: { id },
+      select: { submittedById: true },
+    });
+
+    if (row === null) {
+      throw new AppError(ErrorCode.RESOURCE_NOT_VISIBLE, 'No such build.');
+    }
+    if (!canModerate && row.submittedById !== actorId) {
+      throw new AppError(ErrorCode.PERMISSION_DENIED, 'That is not your build.');
+    }
+
+    await this.db.shipBuild.delete({ where: { id } });
+  }
+}

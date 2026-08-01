@@ -1335,3 +1335,45 @@ export interface WeaponsChart {
 
 export const getSquadronWeapons = (): Promise<WeaponsChart | null> =>
   get('/v1/squadron/weapons', { authed: true });
+
+/** A fitted ship the squadron holds. */
+export interface ShipBuildView {
+  id: string;
+  shipId: string;
+  shipName: string;
+  buildName: string | null;
+  /** `coriolis`, `edsy` or `journal` — see the note on BuildSource: not equally trusted. */
+  source: string;
+  sourceUrl: string;
+  /** The squadron's reference build rather than a member's contribution. */
+  isBaseline: boolean;
+  /** Read out of a member's own journal rather than pasted. */
+  fromJournal: boolean;
+  submittedBy: string | null;
+  submittedById: string | null;
+  stats: {
+    unladenMass?: number;
+    ladenMass?: number;
+    jumpRange?: number | null;
+    ladenJumpRange?: number | null;
+    powerDrawn?: number;
+    powerGenerated?: number;
+    powerDeficit?: boolean;
+    cargoCapacity?: number;
+    fuelCapacity?: number;
+    armour?: number;
+  } | null;
+  fitted: number;
+  slots: number;
+  createdAt: string;
+}
+
+/**
+ * The squadron's builds.
+ *
+ * Gated read, so a member without AI_TRAIN_SUBMIT gets the "no access" screen rather than a
+ * two-factor code box — the confusion that cost an officer an evening on 2026-07-30.
+ */
+export const getShipBuildsGated = (): Promise<
+  AdminRead<{ builds: ShipBuildView[]; canSubmit: boolean; canModerate: boolean }>
+> => getAdmin('/v1/ai/builds');

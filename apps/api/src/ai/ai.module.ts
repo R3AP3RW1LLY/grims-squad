@@ -17,6 +17,7 @@ import { AiController } from './ai.controller.js';
 import { TrainingStatusService } from './training.service.js';
 import { KnowledgeService } from './knowledge.service.js';
 import { AssistantService } from './assistant.service.js';
+import { ShipBuildService, ShipBuildQueries } from './ship-build.service.js';
 import { CorpusService } from './corpus.service.js';
 import { JobLogListener } from './job-log.listener.js';
 import { ArtworkController } from './artwork.controller.js';
@@ -252,6 +253,24 @@ export class ModelWarmer implements OnModuleInit, OnModuleDestroy {
     },
     // Help Train the Bot. Never touches bytes — the media pipeline does that.
     CorpusService,
+    /*
+     * Ship builds: importing a link, and reading back what the squadron holds.
+     *
+     * Two classes rather than one. Importing decodes and writes; the queries only read. Keeping the
+     * read path free of the decoder means listing builds cannot fail because a ship table is cold,
+     * which is the difference between a page that renders and one that 500s while somebody waits
+     * for an ingest.
+     */
+    {
+      provide: ShipBuildService,
+      inject: [PrismaClient],
+      useFactory: (db: PrismaClient) => new ShipBuildService(db),
+    },
+    {
+      provide: ShipBuildQueries,
+      inject: [PrismaClient],
+      useFactory: (db: PrismaClient) => new ShipBuildQueries(db),
+    },
     /*
      * Brings the worker's ingest and embed activity onto the live log. The jobs run in a container
      * that exits when it is done, so they announce over Postgres NOTIFY and this forwards.

@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Delete, Body, Param, Inject, Res } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Param, Query, Inject, Res } from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { FastifyReply } from 'fastify';
 import {
@@ -13,6 +13,12 @@ import { User, type CurrentUser } from '../auth/current-user.js';
 import { PermissionService } from '../authz/permission.service.js';
 import { satisfiesMask } from '../forum/category.service.js';
 import { AiStreamService, type AiLogLine } from './ai-stream.service.js';
+import {
+  ShipBuildService,
+  ShipBuildQueries,
+  type BuildView,
+  type ImportOutcome,
+} from './ship-build.service.js';
 import { AiClient, aiHealth } from './ai.client.js';
 import { ImageClient } from './image.client.js';
 import { TrainingStatusService } from './training.service.js';
@@ -77,7 +83,123 @@ export class AiController {
     @Inject(TrainingStatusService) private readonly trainingStatus: TrainingStatusService,
     @Inject(CorpusService) private readonly corpusService: CorpusService,
     @Inject(AssistantService) private readonly assistant: AssistantService,
+    @Inject(ShipBuildService) private readonly builds: ShipBuildService,
+    @Inject(ShipBuildQueries) private readonly buildQueries: ShipBuildQueries,
   ) {}
+
+  // ------------------------------------------------------------- ship builds
+  /**
+   * Every build the squadron holds.
+   *
+   * ★ NOT GATED, LIKE THE CORPUS PROGRESS ABOVE ★
+   *
+   * The owner chose squadron-wide and credited: "any member can ask what people are flying and get
+   * real answers with names". A build only its submitter can see teaches the assistant nothing
+   * anybody asked for, and gating the LIST while the assistant quotes them anyway would be a
+   * distinction without a difference.
+   */
+  @Get('builds')
+  async listBuilds(
+    @User() caller: CurrentUser | undefined,
+    @Query('ship') ship?: string,
+  ): Promise<{ builds: BuildView[]; canSubmit: boolean; canModerate: boolean }> {
+    if (caller === undefined) throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
+
+    const mask = await this.permissions.effectiveMask(caller.userId);
+
+    return {
+      builds: await this.buildQueries.list(ship === undefined ? {} : { shipId: ship }),
+      canSubmit: (mask & Permission.AI_TRAIN_SUBMIT) === Permission.AI_TRAIN_SUBMIT,
+      canModerate: (mask & Permission.AI_REVIEW) === Permission.AI_REVIEW,
+    };
+  }
+
+  /**
+   * Imports a build from a link somebody found.
+   *
+   * ★ FOUND IN THE WILD, NOT NECESSARILY THEIRS ★
+   *
+   * Squadron owner, 2026-08-01: "the training import are for builds they find in the wild". So this
+   * is a contribution, like a training image — gated on AI_TRAIN_SUBMIT rather than on owning the
+   * ship. Their own ships arrive separately, from their journals.
+   */
+  @Post('builds')
+  async importBuild(
+    @User() caller: CurrentUser | undefined,
+    @Body() body: unknown,
+  ): Promise<ImportOutcome> {
+    if (caller === undefined) throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
+
+    const mask = await this.permissions.effectiveMask(caller.userId);
+    if ((mask & Permission.AI_TRAIN_SUBMIT) !== Permission.AI_TRAIN_SUBMIT) {
+      throw new AppError(ErrorCode.PERMISSION_DENIED, 'You cannot submit training material.');
+    }
+
+    const url = typeof (body as { url?: unknown })?.url === 'string' ? (body as { url: string }).url : '';
+    if (url.trim() === '') {
+      throw new AppError(ErrorCode.VALIDATION_FAILED, 'Paste a build link.');
+    }
+
+    return this.builds.importLink(url, { submittedById: caller.userId, isBaseline: false });
+  }
+
+  /**
+   * Imports a BASELINE build — the squadron's reference, not somebody's contribution.
+   *
+   * ★ SQUADRON OWNER, 2026-08-01 ★
+   *
+   * "in the admin /app/training i want to add a section where the webmaster can import via link in
+   * the same way all the default ship builds please this will be the base level".
+   *
+   * ★ WHY THE DISTINCTION IS LOAD-BEARING ★
+   *
+   * A baseline says "this is how the squadron does it"; a member's build says "this is what
+   * somebody flies". The assistant weights them differently and cites them differently, so
+   * collapsing the two would let one person's experiment answer as doctrine.
+   *
+   * `AI_TRAINING`, which is the permission the training page itself runs on — the same officers who
+   * decide what the assistant learns decide what its reference builds are.
+   *
+   * A bare `coriolis.io/outfit/<ship>` link is the STOCK ship, which is exactly what a baseline
+   * import wants and needs no build code at all.
+   */
+  @Post('builds/baseline')
+  async importBaseline(
+    @User() caller: CurrentUser | undefined,
+    @Body() body: unknown,
+  ): Promise<ImportOutcome> {
+    if (caller === undefined) throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
+
+    const mask = await this.permissions.effectiveMask(caller.userId);
+    if ((mask & Permission.AI_TRAINING) !== Permission.AI_TRAINING) {
+      throw new AppError(ErrorCode.PERMISSION_DENIED, 'You cannot manage what the assistant learns.');
+    }
+
+    const url = typeof (body as { url?: unknown })?.url === 'string' ? (body as { url: string }).url : '';
+    if (url.trim() === '') throw new AppError(ErrorCode.VALIDATION_FAILED, 'Paste a build link.');
+
+    /*
+     * `submittedById: null` — a baseline belongs to the squadron rather than to whoever pasted it.
+     * Crediting the webmaster on forty reference builds would put one name against the whole
+     * doctrine and make the credit meaningless where it matters, on members' own contributions.
+     */
+    return this.builds.importLink(url, { submittedById: null, isBaseline: true });
+  }
+
+  /** Removes a build: your own always, anybody's with AI_REVIEW. */
+  @Delete('builds/:id')
+  async removeBuild(
+    @User() caller: CurrentUser | undefined,
+    @Param('id') id: string,
+  ): Promise<{ removed: true }> {
+    if (caller === undefined) throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
+
+    const mask = await this.permissions.effectiveMask(caller.userId);
+    const canModerate = (mask & Permission.AI_REVIEW) === Permission.AI_REVIEW;
+
+    await this.buildQueries.remove(id, caller.userId, canModerate);
+    return { removed: true };
+  }
 
   /**
    * Is the model answering, right now.
