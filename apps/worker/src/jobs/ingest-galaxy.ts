@@ -209,7 +209,14 @@ function describeStation(
   system: string,
   s: { type?: unknown; landingPads?: unknown; services?: unknown; primaryEconomy?: unknown; distanceToArrival?: unknown },
 ): string {
-  const parts = [`${station} is a ${typeof s.type === 'string' ? s.type : 'station'} in ${system}.`];
+  /*
+   * "an Outpost", not "a Outpost". Most station types in Elite begin with a vowel — Outpost, Orbis,
+   * Ocellus, Asteroid base — so getting this wrong is wrong on the MAJORITY of 305,865 rows, and
+   * this text is both what gets embedded and what the assistant reads back to a member.
+   */
+  const type = typeof s.type === 'string' ? s.type : 'station';
+  const article = /^[aeiou]/i.test(type) ? 'an' : 'a';
+  const parts = [`${station} is ${article} ${type} in ${system}.`];
 
   const pads = s.landingPads as { large?: unknown } | undefined;
   const large = typeof pads?.large === 'number' ? pads.large : 0;

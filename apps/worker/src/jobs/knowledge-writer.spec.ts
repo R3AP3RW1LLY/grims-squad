@@ -78,17 +78,32 @@ describe('MANDATORY: re-ingesting updates rather than duplicating', () => {
     expect(executed[0]?.sql).toContain('ON CONFLICT (source, kind, ext_key) DO UPDATE');
   });
 
-  it('MANDATORY: an update never clears the embedding', async () => {
+  it('MANDATORY: an update clears the embedding ONLY when the text changed', async () => {
     /*
-     * `embedding` is written by the embedder, not the ingest. Including it in the update set would
-     * silently un-embed every prose source on each nightly run, and the assistant would quietly
-     * stop finding guides.
+     * ★ THIS TEST USED TO ASSERT THE OPPOSITE, AND WAS RIGHT AT THE TIME ★
+     *
+     * It required `embedding` to be absent from the update set entirely, because it is written by
+     * the embedder and clearing it every night would silently un-embed everything — the assistant
+     * would quietly stop finding guides.
+     *
+     * That held while text never changed. It stopped holding the moment structured rows started
+     * carrying a generated description: a vector describes the WORDS it was made from, so a
+     * reworded row keeps a vector answering for content that no longer exists. Retrieval still
+     * returns rows; they are simply the wrong ones, and nothing anywhere notices.
+     *
+     * Both halves matter, so both are asserted. Unconditionally clearing would throw away 448,676
+     * vectors and an hour of GPU time on every nightly re-ingest of unchanged data.
      */
     const { db, executed } = fakeDb();
     await writeBatch(db, [row()]);
 
     const updateClause = executed[0]?.sql.slice(executed[0].sql.indexOf('DO UPDATE')) ?? '';
-    expect(updateClause).not.toContain('embedding');
+
+    // It IS in the update set now...
+    expect(updateClause).toContain('embedding');
+    // ...but only behind a comparison of old text against new.
+    expect(updateClause).toContain('IS DISTINCT FROM');
+    expect(updateClause).toContain('knowledge_items.embedding');
   });
 
   it('refreshes ingested_at, so a stable row does not look stale', async () => {

@@ -111,8 +111,9 @@ export async function writeBatch(db: PrismaClient, rows: readonly WritableRow[])
    * keep its original timestamp forever, and the training page would report the source as stale
    * while it was in fact being refreshed nightly.
    *
-   * `embedding` is deliberately untouched: it is written by the embedder, not the ingest, and an
-   * update that reset it to NULL would silently un-embed the prose sources on every run.
+   * `embedding` is cleared ONLY when the text changed — see the CASE below. Clearing it
+   * unconditionally would un-embed everything on every nightly run; never clearing it leaves a
+   * vector describing words that no longer exist.
    */
   /*
    * ★ xmax = 0 IS HOW POSTGRES TELLS AN INSERT FROM AN UPDATE ★
@@ -135,7 +136,30 @@ export async function writeBatch(db: PrismaClient, rows: readonly WritableRow[])
        data        = EXCLUDED.data,
        text        = EXCLUDED.text,
        coords      = EXCLUDED.coords,
-       ingested_at = now()
+       ingested_at = now(),
+       /*
+        * ★ A CHANGED TEXT INVALIDATES ITS VECTOR ★
+        *
+        * This column used to be left alone here, with a comment explaining that it belongs to the
+        * embedder and that resetting it would silently un-embed everything. That was right while
+        * text never changed, and wrong the moment it could.
+        *
+        * (No backticks in this comment: it sits inside a template literal, and a stray one ends the
+        *  SQL mid-statement. That has now cost two debugging rounds in one session.)
+        *
+        * A vector describes the words it was made from. If the text is rewritten — a station gains
+        * a service, a summary is reworded — the old vector keeps answering for content that no
+        * longer exists, and nothing anywhere notices: retrieval still returns rows, they are simply
+        * the wrong ones.
+        *
+        * Cleared ONLY when the text actually differs, so a nightly re-ingest of unchanged data does
+        * not throw away 448,676 vectors and an hour of GPU time. The embedder then picks the row up
+        * on its next sweep, because "needs embedding" is defined as having none.
+        */
+       embedding   = CASE
+                       WHEN knowledge_items.text IS DISTINCT FROM EXCLUDED.text THEN NULL
+                       ELSE knowledge_items.embedding
+                     END
      RETURNING (xmax = 0) AS inserted`,
     ...params,
   );
