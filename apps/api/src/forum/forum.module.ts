@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ForumController } from './forum.controller.js';
 import { CategoryService } from './category.service.js';
+import { SignatureDesignService } from './signature-design.service.js';
 import { ThreadService } from './thread.service.js';
 import { GrantService } from './grant.service.js';
 import { PostService } from './post.service.js';
@@ -41,6 +42,12 @@ import { VoteService } from './vote.service.js';
   imports: [MediaModule],
   controllers: [ForumController],
   providers: [
+    /*
+     * The AI signature generator. Depends on the text model (for the design briefs), the artwork
+     * service (for backplates) and the AI log — all exported by AiModule, which is already imported
+     * here for post screening.
+     */
+    SignatureDesignService,
     CategoryService,
     /*
      * No dependencies of its own: every method takes the caller's bound client as its

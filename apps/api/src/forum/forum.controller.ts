@@ -27,6 +27,7 @@ import { NotifyService } from './notify.service.js';
 import { GatedDiscordDm, replyDmText } from './discord-dm.port.js';
 import { SearchService, renderSnippet, type SearchResult } from './search.service.js';
 import { ModerationService } from './moderation.service.js';
+import { SignatureDesignService } from './signature-design.service.js';
 import { SignatureService } from './signature.service.js';
 import { VoteService } from './vote.service.js';
 import { ReviewQueueService, type HeldPost } from '../ai/review-queue.service.js';
@@ -68,6 +69,7 @@ export class ForumController {
     @Inject(ModerationService) private readonly moderation: ModerationService,
     @Inject(NotifyService) private readonly notify: NotifyService,
     @Inject(SignatureService) private readonly signatures: SignatureService,
+    @Inject(SignatureDesignService) private readonly signatureDesign: SignatureDesignService,
     @Inject(ReviewQueueService) private readonly review: ReviewQueueService,
     @Inject(ReportService) private readonly reports: ReportService,
   ) {}
@@ -520,6 +522,60 @@ export class ForumController {
       ),
     };
   }
+
+  /**
+   * Five signature designs, from what the member told the generator.
+   *
+   * ★ SQUADRON OWNER, 2026-08-01 ★
+   *
+   * "generate signature with GMSD AI which should be a prompt based and Q&A based signature
+   * generator ... 5 options to choose from"
+   *
+   * Returns complete, renderable designs in the few seconds the text model takes. Artwork for the
+   * backplate is a SEPARATE request per option — see `signatureBackplate` and the note in the
+   * service for why five images in one call would be four minutes of blank screen.
+   */
+  @Post('signature/design')
+  async designSignature(
+    @User() caller: CurrentUser | undefined,
+    @Body() body: unknown,
+    @Req() req: FastifyRequest,
+  ): Promise<{ options: unknown[] }> {
+    const c = requireSession(caller, 'Sign in first.');
+    csrf(req);
+    const b = (body ?? {}) as Record<string, unknown>;
+    const str = (k: string): string => (typeof b[k] === 'string' ? (b[k] as string).slice(0, 400) : '');
+
+    const options = await this.signatureDesign.design(c.userId, {
+      activity: str('activity'),
+      ship: str('ship'),
+      vibe: str('vibe'),
+      prompt: str('prompt'),
+    });
+
+    if (options.length === 0) {
+      /*
+       * AI_OFFLINE rather than a generic failure: the page hides the generator and offers the
+       * manual builder on this code, which is the right thing to do when the model is unreachable.
+       */
+      throw new AppError(
+        ErrorCode.AI_OFFLINE,
+        'GMSD AI could not design anything just now. Try again in a moment, or build one yourself.',
+      );
+    }
+    return { options };
+  }
+
+  /*
+   * ★ THERE IS NO BACKPLATE ENDPOINT HERE, DELIBERATELY ★
+   *
+   * The first draft added `POST signature/backplate`, which would have been a second way to reach
+   * the same generator — with its own rate limit reading, its own error mapping, and its own drift.
+   *
+   * `POST /v1/ai/artwork` already takes a prompt and returns banner-sized images, and the manual
+   * builder already uses it. The generator hands each design an `imageryPrompt`; the page sends that
+   * to the endpoint that exists. One artwork path, one place the quota and the messages live.
+   */
 
   /**
    * Who the caller can usefully @mention in this thread.
