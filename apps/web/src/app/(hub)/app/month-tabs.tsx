@@ -56,15 +56,26 @@ export function MonthTabs({
   /** Preserved so switching month does not throw you back to the default tab. */
   readonly tab: string;
 }) {
-  if (months.length === 0) return null;
-
   /*
-   * The CURRENT month is included even when it has no rows yet.
+   * ★ THE LIST IS THE SAME WHICHEVER MONTH YOU ARE ON ★
    *
-   * It is the default view, so leaving it out would mean the selected tab was not in the list —
-   * and on the 1st of a month that is precisely the situation.
+   * ★ THE BUG THIS FIXES ★
+   *
+   * This used to inject the SELECTED month when it was missing from the list, which is subtly and
+   * badly wrong. On the 1st of August, `months` is ['2026-07'] — August has no rows yet. Viewing
+   * August injected August and showed two tabs. Clicking July then made July the selection, August
+   * was no longer selected, nothing injected it, and the only tab left was July.
+   *
+   * The squadron owner's words: "when i choose a month im locked on the month". Exactly that — a
+   * one-way door into history with no way back to today.
+   *
+   * The set is now built from facts that do not depend on what is selected: every month with data,
+   * plus the month it actually is. Navigation is then stable in both directions, always.
    */
-  const all = months.includes(current) ? months : [current, ...months];
+  const thisMonth = new Date().toISOString().slice(0, 7);
+  const all = [...new Set([thisMonth, ...months, current])].sort().reverse();
+  if (all.length <= 1) return null;
+
   const spansYears = new Set(all.map((m) => m.slice(0, 4))).size > 1;
 
   return (
@@ -74,16 +85,21 @@ export function MonthTabs({
       </span>
       {all.map((m) => {
         const active = m === current;
+        // A month in the list purely because it is TODAY may have no rows yet. Marked rather than
+        // hidden: a tab that vanishes when you leave it is what caused the lock-in above.
+        const empty = !months.includes(m);
         return (
           <a
             key={m}
             href={`${basePath}?tab=${encodeURIComponent(tab)}&month=${encodeURIComponent(m)}`}
             aria-current={active ? 'page' : undefined}
-            title={monthName(m)}
+            title={empty ? `${monthName(m)} — nothing recorded yet` : monthName(m)}
             className={`rounded border px-2.5 py-1 font-mono text-[11px] transition-colors ${
               active
                 ? 'border-[var(--color-brand-orange)] bg-[color-mix(in_srgb,var(--color-brand-orange)_12%,transparent)] text-[var(--color-brand-orange-bright)]'
-                : 'border-[var(--color-border-hairline)] text-[var(--color-text-secondary)] hover:border-[var(--color-border-active)] hover:text-[var(--color-text-primary)]'
+                : empty
+                  ? 'border-[var(--color-border-hairline)] text-[var(--color-text-dim)] hover:text-[var(--color-text-secondary)]'
+                  : 'border-[var(--color-border-hairline)] text-[var(--color-text-secondary)] hover:border-[var(--color-border-active)] hover:text-[var(--color-text-primary)]'
             }`}
           >
             {shortMonth(m, spansYears)}

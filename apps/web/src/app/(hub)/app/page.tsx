@@ -203,6 +203,13 @@ export default async function AdminPage({
             basePath="/app"
             tab="dashboard"
           />
+          {/*
+            ★ NO SECOND REFRESHER HERE ★
+            The page already carries `<LiveRefresh types={['roster','verification','activity',
+            'presence']} />` above — an SSE-driven refresh that fires when activity is actually
+            recorded, which is strictly better than a timer. Adding a thirty-second poll beside it
+            would mean two mechanisms racing to re-render the same page.
+          */}
           <Dashboard data={dashboard} />
         </>
       )}

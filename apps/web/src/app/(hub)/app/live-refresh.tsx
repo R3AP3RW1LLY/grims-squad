@@ -4,7 +4,14 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 /**
- * Keeps the training page current without anybody pressing anything.
+ * Keeps an admin page current without anybody pressing anything.
+ *
+ * ★ USED BY THE CONSOLE AND THE TRAINING PAGE ★
+ *
+ * It started life beside the training page and was asked for again on the console — "the ticking
+ * whos showed up". Moved up a directory rather than copied: two timers with two intervals drifting
+ * apart is exactly the kind of difference nobody notices until one page feels stale and nobody can
+ * say why.
  *
  * ★ SQUADRON OWNER, 2026-08-01 ★
  *
@@ -28,9 +35,15 @@ import { useRouter } from 'next/navigation';
  */
 
 /** Half a minute. Fast enough that a start or a finish appears while somebody is looking. */
-const INTERVAL_MS = 30_000;
+const DEFAULT_INTERVAL_MS = 30_000;
 
-export function LiveRefresh() {
+export function LiveRefresh({
+  intervalMs = DEFAULT_INTERVAL_MS,
+  label = 'Updating every 30 seconds',
+}: {
+  readonly intervalMs?: number;
+  readonly label?: string;
+} = {}) {
   const router = useRouter();
   const [at, setAt] = useState<Date | null>(null);
 
@@ -43,7 +56,7 @@ export function LiveRefresh() {
     };
 
     const start = (): void => {
-      if (timer === null) timer = setInterval(tick, INTERVAL_MS);
+      if (timer === null) timer = setInterval(tick, intervalMs);
     };
     const stop = (): void => {
       if (timer !== null) clearInterval(timer);
@@ -71,7 +84,7 @@ export function LiveRefresh() {
       stop();
       document.removeEventListener('visibilitychange', onVisibility);
     };
-  }, [router]);
+  }, [router, intervalMs]);
 
   return (
     /*
@@ -80,7 +93,7 @@ export function LiveRefresh() {
      * exists to remove. Until the first tick it says so rather than showing a made-up time.
      */
     <p className="mt-2 font-mono text-[11px] text-[var(--color-text-secondary)]">
-      Updating every 30 seconds
+      {label}
       {at === null
         ? ' · waiting for the first refresh'
         : ` · last checked ${at.toLocaleTimeString('en-GB')}`}

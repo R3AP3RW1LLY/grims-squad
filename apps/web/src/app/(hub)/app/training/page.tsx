@@ -7,7 +7,7 @@ import { getAiTrainingGated, type TrainingSource } from '../../../../lib/api';
 import { StepUp } from '../step-up';
 import { NoAccess, AdminUnavailable } from '../no-access';
 import { PageHeader, PageBody, Section, StatGrid, StatTile } from '../../../../components/hub-page';
-import { LiveRefresh } from './live';
+import { LiveRefresh } from '../live-refresh';
 import { IngestProgress } from './progress';
 
 export const metadata: Metadata = {
