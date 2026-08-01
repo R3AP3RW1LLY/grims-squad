@@ -29,8 +29,19 @@
  * restyle. Squadron owner chose Coriolis and EDSY first, on exactly that trade.
  */
 
-/** Where a build came from. */
-export type BuildSource = 'coriolis' | 'edsy';
+/**
+ * Where a build came from.
+ *
+ * ★ `journal` IS THE STRONGEST OF THE THREE ★
+ *
+ * A link is somebody's PLAN for a ship. `journal` is the ship — the game's own `Loadout` event,
+ * forwarded by the companion app, carrying the engineering that is actually fitted with its grade,
+ * quality, engineer and every modifier. It needs no decoding and it refreshes on every refit.
+ *
+ * Worth ranking explicitly, because an answer built from a member's real ship and one built from a
+ * link they shared a year ago deserve different confidence.
+ */
+export type BuildSource = 'coriolis' | 'edsy' | 'journal';
 
 /** Which group of slots a module sits in. Coriolis's own division, and the game's. */
 export type SlotGroup = 'standard' | 'hardpoint' | 'internal' | 'utility';

@@ -33,3 +33,4 @@ export {
   type SlotCategory,
 } from './builds/catalogue.js';
 export { decodeCoriolis, stockBuild } from './builds/coriolis.js';
+export { decodeLoadout } from './builds/journal.js';

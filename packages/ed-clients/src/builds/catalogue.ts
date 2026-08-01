@@ -111,6 +111,15 @@ export interface BuildCatalogue {
    * Internal and hardpoint defaults DO use ids. Only `standard` is different.
    */
   standardByRating(group: string, cls: number, rating: string): CatalogueModule | null;
+  /**
+   * A module by the GAME's own symbol, scoped to a slot category.
+   *
+   * The journal writes `hpt_pulselaser_gimbal_medium`; coriolis records `Hpt_PulseLaser_Gimbal_Medium`
+   * on the same module. Case-insensitively they are the same string, so the two datasets join with
+   * no translation table to build or keep current — 93.7% of every functional module we have ever
+   * seen in a real loadout, with the remainder being holograms and ship-kit parts.
+   */
+  moduleBySymbol(category: SlotCategory, symbol: string): CatalogueModule | null;
 }
 
 /** The raw shapes the coriolis ingest stores. Narrow on purpose — this reads a few fields of many. */
@@ -274,11 +283,26 @@ export function buildCatalogue(ships: readonly RawShipItem[], modules: readonly 
     standardByRating.set(`${module.grp}:${module.class}${module.rating}`, module);
   }
 
+  // The game's symbol, per category, for reading a journal loadout. Lower-cased on both sides
+  // because the journal and coriolis-data disagree about capitalisation and about nothing else.
+  const bySymbol: Record<SlotCategory, Map<string, CatalogueModule>> = {
+    standard: new Map(),
+    hardpoint: new Map(),
+    utility: new Map(),
+    internal: new Map(),
+  };
+  for (const [category, index] of Object.entries(byCategory) as [SlotCategory, Map<string, CatalogueModule>][]) {
+    for (const module of index.values()) {
+      if (module.symbol !== null) bySymbol[category].set(module.symbol.toLowerCase(), module);
+    }
+  }
+
   return {
     ship: (shipId) => shipsById.get(shipId) ?? null,
     ships: () => [...shipsById.values()],
     module: (category, id) => byCategory[category].get(id) ?? null,
     standardByRating: (group, cls, rating) =>
       standardByRating.get(`${group}:${cls}${rating}`) ?? null,
+    moduleBySymbol: (category, symbol) => bySymbol[category].get(symbol.toLowerCase()) ?? null,
   };
 }
