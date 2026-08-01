@@ -78,7 +78,9 @@ export class ShipBuildService {
       }),
       this.db.knowledgeItem.findMany({
         where: { source: 'coriolis', kind: 'module' },
-        select: { data: true },
+        // `name` is the GROUP's display name ("Power Distributor"). 168 of 970 modules carry no
+        // name of their own and would fall back to their symbol without it.
+        select: { name: true, data: true },
       }),
     ]);
 

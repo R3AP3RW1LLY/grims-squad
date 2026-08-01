@@ -82,7 +82,7 @@ interface RoleProfile {
    * wants every bay it can get as cargo, a miner wants one prospector and two collectors and then
    * cargo, and a combat fit wants a shield generator and no more.
    */
-  readonly internals: ReadonlyArray<{ group: string; max: number }>;
+  readonly internals: ReadonlyArray<{ group: string; max: number; sizeToFit?: boolean }>;
   /** How to break ties between candidates for one slot. */
   readonly prefer: 'light' | 'capable';
   readonly describe: string;
@@ -117,7 +117,8 @@ const PROFILES: Readonly<Record<FitRole, RoleProfile>> = {
       { group: 'cr', max: 1 },
       { group: 'pc', max: 1 },
       { group: 'cc', max: 2 },
-      { group: 'sg', max: 1 },
+      // Sized to the hull for the same reason as the trader: ore capacity is the yield.
+      { group: 'sg', max: 1, sizeToFit: true },
       // Everything left is hold. Cargo is the yield, so it takes whatever the tools do not need.
       { group: 'cr', max: 99 },
     ],
@@ -180,7 +181,19 @@ const PROFILES: Readonly<Record<FitRole, RoleProfile>> = {
     hardpoints: [],
     utilities: ['sb'],
     internals: [
-      { group: 'sg', max: 1 },
+      /*
+       * ★ SIZED TO THE HULL, NOT TO THE BIGGEST BAY ★
+       *
+       * A trader's shield generator used to claim the largest internal, because that is what the
+       * assignment loop does. On a Python Mk II that meant a class 6 shield generator in the class
+       * 6 bay and 32 t of cargo in what is sold as a trading ship.
+       *
+       * A shield generator has a maximum hull mass; above it the shields barely form. Below it,
+       * bigger buys strength this role is not being scored on. So it takes the SMALLEST class that
+       * still covers the hull, and the hold gets the class 6 bay — which is the whole point of
+       * buying the ship.
+       */
+      { group: 'sg', max: 1, sizeToFit: true },
       { group: 'cr', max: 99 },
     ],
     prefer: 'light',
@@ -340,19 +353,60 @@ export function fitShip(ship: CatalogueShip, request: FitRequest, catalogue: Bui
   const internalSlots = ship.slots.filter((s) => s.group === 'internal').sort((a, b) => b.size - a.size);
   const usedInternals = new Set<number>();
 
-  for (const { group, max } of profile.internals) {
+  /*
+   * The hull's own mass, which is what a shield generator has to cover. Modules add to it, so this
+   * under-states the laden figure — deliberately: over-stating it would push every ship up a class
+   * of shield generator and take the bay back, which is the behaviour being fixed.
+   */
+  const bareHullMass = typeof ship.properties['hullMass'] === 'number' ? ship.properties['hullMass'] : 0;
+
+  /**
+   * Does this module still do its job on this hull?
+   *
+   * Only mass-curve modules have an answer. A shield generator whose `maxmass` is under the hull's
+   * mass produces almost nothing — the curve has already bottomed out — so it is not "adequate" at
+   * any price. Everything else has no such limit and is adequate by definition.
+   */
+  const adequate = (module: CatalogueModule): boolean => {
+    const maxmass = num(module, 'maxmass');
+    return maxmass === 0 || maxmass >= bareHullMass;
+  };
+
+  for (const { group, max, sizeToFit } of profile.internals) {
     let placed = 0;
 
-    for (const slot of internalSlots) {
+    /*
+     * Smallest bay first when the module is sized to the hull, so the big bays stay free for the
+     * bulk group behind it. Largest first otherwise, which is right for anything scored on capacity.
+     */
+    const order = sizeToFit === true ? [...internalSlots].reverse() : internalSlots;
+
+    for (const slot of order) {
       if (placed >= max) break;
       if (usedInternals.has(slot.index)) continue;
 
       const candidates = candidatesFor(catalogue, slot, [group]);
       if (candidates.length === 0) continue;
+      if (sizeToFit === true && !candidates.some(adequate)) continue;
 
       if (fill(slot, [group])) {
         usedInternals.add(slot.index);
         placed += 1;
+      }
+    }
+
+    /*
+     * A sized-to-fit module that found no adequate bay still gets the biggest one going. A trader
+     * with no shield at all is worse than a trader with a shield that struggles, and silently
+     * skipping it would look like the fitter forgot.
+     */
+    if (sizeToFit === true && placed === 0 && max > 0) {
+      for (const slot of internalSlots) {
+        if (usedInternals.has(slot.index)) continue;
+        if (fill(slot, [group])) {
+          usedInternals.add(slot.index);
+          break;
+        }
       }
     }
   }

@@ -60,6 +60,15 @@ export interface BuildStats {
   readonly armour: number;
 
   /**
+   * Top speed and boost in metres per second, at unladen mass.
+   *
+   * Null when no thrusters are fitted. Zero would describe a ship that has drives and cannot move,
+   * which is a different — and much more alarming — claim than "nothing is fitted yet".
+   */
+  readonly speed: number | null;
+  readonly boostSpeed: number | null;
+
+  /**
    * Shield strength in megajoules. Null when no generator is fitted, which is a real build.
    *
    * A shieldless ship is a deliberate choice — explorers and some miners fly one — so zero would be
@@ -144,13 +153,13 @@ function jumpOf(drive: CatalogueModule | undefined, mass: number, fuel: number):
  * Clamped at both ends: past `maxmass` the generator does not fail gracefully, it stops working,
  * and reporting a multiplier below `maxmul` would describe a shield that does not exist.
  */
-function shieldMultiplier(generator: CatalogueModule, mass: number): number {
-  const minMass = raw(generator, 'minmass');
-  const optMass = raw(generator, 'optmass');
-  const maxMass = raw(generator, 'maxmass');
-  const minMul = raw(generator, 'minmul');
-  const optMul = raw(generator, 'optmul');
-  const maxMul = raw(generator, 'maxmul');
+function massCurve(module: CatalogueModule, mass: number): number {
+  const minMass = raw(module, 'minmass');
+  const optMass = raw(module, 'optmass');
+  const maxMass = raw(module, 'maxmass');
+  const minMul = raw(module, 'minmul');
+  const optMul = raw(module, 'optmul');
+  const maxMul = raw(module, 'maxmul');
 
   if (optMass <= 0 || maxMass <= minMass) return 0;
 
@@ -160,6 +169,40 @@ function shieldMultiplier(generator: CatalogueModule, mass: number): number {
   return mass <= optMass
     ? minMul + ((mass - minMass) / (optMass - minMass)) * (optMul - minMul)
     : optMul + ((mass - optMass) / (maxMass - optMass)) * (maxMul - optMul);
+}
+
+/**
+ * How fast the ship actually moves.
+ *
+ * ★ THE SAME CURVE AS THE SHIELDS, BECAUSE IT IS THE SAME CURVE ★
+ *
+ * Thrusters carry `minmass/optmass/maxmass` and `minmul/optmul/maxmul` exactly as generators do, and
+ * the game reads them the same way — which is why `massCurve` is shared rather than copied. An
+ * overweight ship is slow for the same reason it is under-shielded.
+ *
+ * Reported at UNLADEN mass, matching what an outfitting screen means by "speed": the figure that
+ * describes the ship, not the figure it manages on a full trade run. Laden mass moves both numbers
+ * down together and the laden jump range is already on the readout to make the trade visible.
+ */
+function driveSpeeds(
+  thrusters: CatalogueModule | null,
+  properties: Readonly<Record<string, unknown>>,
+  mass: number,
+): { speed: number | null; boost: number | null } {
+  const base = typeof properties['speed'] === 'number' ? properties['speed'] : 0;
+  const baseBoost = typeof properties['boost'] === 'number' ? properties['boost'] : 0;
+
+  // No drive is a real state for a part-built ship. Null, not zero — zero is a claim that it is
+  // fitted and cannot move.
+  if (thrusters === null || base <= 0) return { speed: null, boost: null };
+
+  const multiplier = massCurve(thrusters, mass);
+  if (multiplier <= 0) return { speed: null, boost: null };
+
+  return {
+    speed: Math.round(base * multiplier),
+    boost: baseBoost <= 0 ? null : Math.round(baseBoost * multiplier),
+  };
 }
 
 /**
@@ -222,6 +265,7 @@ export function computeStats(build: ShipBuild, catalogue: BuildCatalogue): Build
     }, 0);
 
   const drive = modules.find((m) => m.grp === 'fsd');
+  const thrusters = modules.find((m) => m.grp === 't') ?? null;
 
   const baseArmour = typeof ship.properties['baseArmour'] === 'number' ? ship.properties['baseArmour'] : 0;
   const hullBoost = bulkhead === undefined ? 0 : raw(bulkhead, 'hullboost');
@@ -246,7 +290,7 @@ export function computeStats(build: ShipBuild, catalogue: BuildCatalogue): Build
       ? null
       : Math.round(
           baseShield *
-            shieldMultiplier(generator, unladenMass) *
+            massCurve(generator, unladenMass) *
             boosterMultiplier(modules.filter((m) => m.grp === 'sb')),
         );
 
@@ -288,6 +332,8 @@ export function computeStats(build: ShipBuild, catalogue: BuildCatalogue): Build
     damageByType[type] = Math.round((damageByType[type] ?? 0) * 100) / 100;
   }
 
+  const speeds = driveSpeeds(thrusters, ship.properties, unladenMass);
+
   return {
     hullMass,
     moduleMass: Math.round(moduleMass * 100) / 100,
@@ -313,6 +359,8 @@ export function computeStats(build: ShipBuild, catalogue: BuildCatalogue): Build
         : round(jumpOf(drive, unladenMass + Math.min(fuelCapacity, raw(drive, 'maxfuel')), fuelCapacity)),
     ladenJumpRange: round(jumpOf(drive, ladenMass, fuelCapacity)),
     armour: Math.round(baseArmour * (1 + hullBoost) + reinforcement),
+    speed: speeds.speed,
+    boostSpeed: speeds.boost,
     shields,
     // Null rather than zero for an unarmed ship: a trader carrying no guns is a choice, not a
     // gunship that does nothing.

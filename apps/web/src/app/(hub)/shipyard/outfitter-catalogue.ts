@@ -132,6 +132,35 @@ export function catalogueFrom(payload: OutfitPayload): BuildCatalogue {
 }
 
 /**
+ * Coriolis's stand-ins for modules it does not know yet.
+ *
+ * There are ten — "Unrecognised Power Plant", "Unrecognised Weapon" and so on — and they exist so
+ * that importing a build containing a module coriolis has not catalogued yet degrades to a named
+ * placeholder instead of failing. That is the right behaviour for an IMPORT and the wrong thing
+ * entirely in a shop: they cost nothing, weigh nothing, do nothing, and cannot be bought.
+ *
+ * So they are filtered here rather than out of the catalogue, which still needs them.
+ *
+ * Matched on the symbol. Every one of the ten carries `_Missing_` and no real module does — the
+ * `info` field ("Not in Coriolis yet") covers only nine of them, and names drift.
+ */
+function isPlaceholder(module: CatalogueModule): boolean {
+  return module.symbol !== null && /_Missing_/i.test(module.symbol);
+}
+
+/**
+ * Which bucket a SLOT draws from.
+ *
+ * Written once because it was written four times, and a copy that drifts would search a bucket the
+ * module was never filed under — which does not throw, it just silently offers an empty list.
+ */
+export function slotCategory(slot: { group: string; size: number }): SlotCategory {
+  if (slot.group === 'standard') return 'standard';
+  if (slot.group === 'internal') return 'internal';
+  return slot.size === 0 ? 'utility' : 'hardpoint';
+}
+
+/**
  * Every module that could go in one slot, best-sorted for a dropdown.
  *
  * ★ SORTED BY CLASS THEN RATING, NOT ALPHABETICALLY ★
@@ -145,20 +174,14 @@ export function optionsFor(
   slot: { group: string; index: number; size: number; fixedGroup: string | null; eligible: readonly string[] | null },
   allGroups: readonly string[],
 ): CatalogueModule[] {
-  const category: SlotCategory =
-    slot.group === 'standard'
-      ? 'standard'
-      : slot.group === 'internal'
-        ? 'internal'
-        : slot.size === 0
-          ? 'utility'
-          : 'hardpoint';
+  const category = slotCategory(slot);
 
   const groups = slot.fixedGroup !== null ? [slot.fixedGroup] : (slot.eligible ?? allGroups);
 
   const found: CatalogueModule[] = [];
   for (const group of groups) {
     for (const module of catalogue.modulesIn(category, group)) {
+      if (isPlaceholder(module)) continue;
       // Bigger than the slot cannot be fitted. Smaller is offered — under-filling saves weight and
       // is how every long-range build is made.
       if (module.class <= slot.size) found.push(module);

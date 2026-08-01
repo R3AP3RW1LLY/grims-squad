@@ -173,6 +173,13 @@ export interface RawShipItem {
   readonly data: unknown;
 }
 export interface RawModuleItem {
+  /**
+   * The group's display name, e.g. "Power Distributor".
+   *
+   * Optional so existing callers that select only `data` still compile — but they will get symbol
+   * fallbacks for the 168 modules that carry no name of their own, so pass it.
+   */
+  readonly name?: string | null;
   readonly data: unknown;
 }
 
@@ -184,15 +191,61 @@ function num(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
-function toModule(raw: Record<string, unknown>): CatalogueModule | null {
+/**
+ * A name a person would recognise.
+ *
+ * ★ SQUADRON OWNER, 2026-08-01 ★
+ *
+ * "in the various equipment dropdowns, we need to make sure the names of the items are human
+ * readable, these look like they are keys."
+ *
+ * They were keys. The fallback was `symbol`, so most of the fleet's modules were offered as
+ * `Int_PowerDistributor_Size8_Class1`.
+ *
+ * ★ THREE SOURCES, BECAUSE NO ONE OF THEM COVERS THE FLEET ★
+ *
+ * Of 970 modules, 141 carry `name` — only the variants that need distinguishing from their group,
+ * like "Guardian Power Distributor". 742 carry `ukName`, coriolis's display name. 168 carry
+ * NEITHER: the abrasion blasters and AX missile racks, whose group name is the whole name.
+ *
+ * So: the module's own name, else its display name, else the group's. Every one of the 970 resolves
+ * to something readable, and `symbol` survives only as a last resort that should now be unreachable
+ * — kept because a new module group with no name at all should show something rather than blank.
+ */
+function displayName(raw: Record<string, unknown>, groupName: string | null, id: string): string {
+  if (typeof raw['name'] === 'string' && raw['name'] !== '') return raw['name'];
+  if (typeof raw['ukName'] === 'string' && raw['ukName'] !== '') return raw['ukName'];
+  if (groupName !== null && groupName !== '') return groupName;
+  return typeof raw['symbol'] === 'string' && raw['symbol'] !== '' ? raw['symbol'] : id;
+}
+
+/**
+ * Coriolis derives its group names from directory names, and a few are misspelled at the source.
+ *
+ * Corrected here rather than in the ingest: the ingest's job is to mirror upstream faithfully, and a
+ * squadron member reading "Pristmatic Shield Generator" in a dropdown would reasonably conclude we
+ * could not spell. If coriolis fixes these upstream the corrected spelling simply matches and this
+ * map stops mattering.
+ */
+const GROUP_NAME_FIXES: Readonly<Record<string, string>> = {
+  'Pristmatic Shield Generator': 'Prismatic Shield Generator',
+  'Planetary Vehicle Hanger': 'Planetary Vehicle Hangar',
+  'Ax Missile Rack Enhanced': 'AX Missile Rack (Enhanced)',
+  'Ax Multi Cannon': 'AX Multi-Cannon',
+  'Guardian Fsd Booster': 'Guardian FSD Booster',
+};
+
+function toModule(raw: Record<string, unknown>, groupName: string | null): CatalogueModule | null {
   const id = raw['id'];
   const grp = raw['grp'];
   if (typeof id !== 'string' || typeof grp !== 'string') return null;
 
+  const fixed = groupName === null ? null : (GROUP_NAME_FIXES[groupName] ?? groupName);
+
   return {
     id,
     grp,
-    name: typeof raw['name'] === 'string' ? raw['name'] : (raw['symbol'] as string) || id,
+    name: displayName(raw, fixed, id),
     symbol: typeof raw['symbol'] === 'string' ? raw['symbol'] : null,
     // Utility mounts and bulkheads have no class; zero is the honest reading, and `categoryOf`
     // relies on it to tell a chaff launcher from a pulse laser.
@@ -232,9 +285,28 @@ function eligibleOf(entry: unknown): readonly string[] | null {
   return groups.length === 0 ? null : groups;
 }
 
-/** A stock-loadout entry. Coriolis writes `0` or `""` for an empty slot, not null. */
+/**
+ * A stock-loadout entry.
+ *
+ * ★ CORIOLIS WRITES MODULE IDS AS BOTH STRINGS AND NUMBERS ★
+ *
+ * `"4j"` and `17` are both module ids in the same array. Ids are base-62-ish pairs, so any pair of
+ * digits — `17`, `02`, `00` — parses as a JSON number if whoever edited the file left the quotes
+ * off, and coriolis's own loosely-typed JS never noticed. Accepting only strings silently dropped
+ * 89 stock modules across the fleet, which is why hardpoints came up empty on ships that ship with
+ * weapons fitted.
+ *
+ * ★ AND `0` IS EMPTY, NOT MODULE ZERO ★
+ *
+ * 482 entries are a numeric `0` meaning "nothing fitted". There IS a module whose id is `"0"` — a
+ * medium turreted Plasma Shock Cannon — so coercing every number to a string would have fitted 482
+ * plasma shock cannons across the fleet and made every stock loadout wrong in a way that looks
+ * deliberate. Coriolis's own rule is falsiness: `0` and `""` are empty, anything else is an id.
+ */
 function defaultId(entry: unknown): string | null {
-  return typeof entry === 'string' && entry !== '' ? entry : null;
+  if (typeof entry === 'string') return entry === '' ? null : entry;
+  if (typeof entry === 'number') return entry === 0 || !Number.isFinite(entry) ? null : String(entry);
+  return null;
 }
 
 /**
@@ -257,7 +329,7 @@ export function buildCatalogue(ships: readonly RawShipItem[], modules: readonly 
   for (const item of modules) {
     const variants = Array.isArray(item.data) ? item.data : [];
     for (const entry of variants) {
-      const module = toModule(asRecord(entry));
+      const module = toModule(asRecord(entry), item.name ?? null);
       if (module === null) continue;
 
       /*
@@ -321,7 +393,8 @@ export function buildCatalogue(ships: readonly RawShipItem[], modules: readonly 
     };
 
     const bulkheads = (Array.isArray(data['bulkheads']) ? data['bulkheads'] : [])
-      .map((b) => toModule(asRecord(b)))
+      // Bulkheads carry their own names in the ship row — "Lightweight Alloy", "Military Grade".
+      .map((b) => toModule(asRecord(b), null))
       .filter((b): b is CatalogueModule => b !== null);
 
     shipsById.set(item.extKey, {

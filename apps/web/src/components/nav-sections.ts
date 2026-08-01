@@ -138,6 +138,50 @@ export function parseStoredSubsections(raw: string | null): string[] {
   }
 }
 
+/** A sidebar row: either a plain link, or a collapsible group of them. */
+export type NavEntry =
+  | { readonly kind: 'item'; readonly item: NavItem }
+  | { readonly kind: 'group'; readonly name: string; readonly items: readonly NavItem[] };
+
+/**
+ * A section's rows, in the order they were defined.
+ *
+ * ★ SQUADRON OWNER, 2026-08-01 ★
+ *
+ * "move the shipyard category so its below the roster please in the sidenav."
+ *
+ * The sidebar used to render every loose link first and every subcategory afterwards, which meant a
+ * subcategory could not be positioned at all — wherever it sat in `nav.ts`, it rendered last. A
+ * group now appears where its FIRST member appears, so the definition order IS the sidebar order.
+ *
+ * Members of a group are gathered to that one position even if the definitions scatter them, since
+ * the alternative is the same heading rendered twice with the same stored open/closed state.
+ */
+export function orderedEntries(items: readonly NavItem[]): NavEntry[] {
+  const entries: NavEntry[] = [];
+  const groupAt = new Map<string, number>();
+
+  for (const item of items) {
+    const sub = item.subsection;
+    if (sub === undefined) {
+      entries.push({ kind: 'item', item });
+      continue;
+    }
+
+    const at = groupAt.get(sub);
+    if (at === undefined) {
+      groupAt.set(sub, entries.length);
+      entries.push({ kind: 'group', name: sub, items: [item] });
+      continue;
+    }
+
+    const existing = entries[at] as { kind: 'group'; name: string; items: NavItem[] };
+    existing.items = [...existing.items, item];
+  }
+
+  return entries;
+}
+
 /** Open a closed subcategory, close an open one. */
 export function toggleSubsection(open: ReadonlySet<string>, name: string): Set<string> {
   const next = new Set(open);

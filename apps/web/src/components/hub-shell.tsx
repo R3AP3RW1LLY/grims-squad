@@ -36,6 +36,7 @@ import {
   SUBSECTION_STORAGE_KEY,
   openSections,
   openSubsections,
+  orderedEntries,
   parseStored,
   parseStoredSubsections,
   sectionOf,
@@ -252,99 +253,118 @@ function SidebarContents({ me, current }: { me: MeResponse; current: string }) {
                 className="mt-2 -mx-2 list-none space-y-1 p-0"
               >
                 {/*
-                  ★ SUBCATEGORIES FIRST, THEN LOOSE ITEMS ★
+                  ★ RENDERED IN DEFINITION ORDER ★
 
-                  A group heading between two plain links reads as if the links below it belong to
-                  it. Putting every subcategory after the section's own items keeps the nesting
-                  legible without indentation having to carry the whole message.
+                  Squadron owner, 2026-08-01: "move the shipyard category so its below the roster
+                  please in the sidenav."
+
+                  This used to render every loose link first and push subcategories to the bottom,
+                  which made a subcategory's position in `nav.ts` meaningless — it could only ever
+                  land last. Now a group appears where its FIRST member appears, so ordering the
+                  sidebar is done by ordering the definitions, which is where somebody looking to
+                  reorder it would go first.
+
+                  The original worry stands: a group heading between two plain links can read as
+                  though the links below belong to it. Indentation and the smaller type carry that
+                  now, which is the honest fix — the old one solved a legibility problem by taking
+                  away control over the order.
                 */}
-                {items
-                  .filter((i) => i.subsection === undefined)
-                  .map((item) => {
-                  const Icon = ICONS[item.href] ?? HomeIcon;
-                  const active = current === item.href;
+                {orderedEntries(items).map((entry) => {
+                  if (entry.kind === 'item') {
+                    const item = entry.item;
+                    const Icon = ICONS[item.href] ?? HomeIcon;
+                    const active = current === item.href;
+                    return (
+                      <li key={item.href}>
+                        <a
+                          href={item.href}
+                          aria-current={active ? 'page' : undefined}
+                          className={cx(
+                            'group flex gap-x-3 rounded p-2 text-sm/6 transition-colors',
+                            active
+                              ? 'bg-[color-mix(in_srgb,var(--color-brand-orange)_14%,transparent)] text-[var(--color-brand-orange-bright)]'
+                              : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-panel-hover)] hover:text-[var(--color-text-primary)]',
+                          )}
+                        >
+                          <Icon aria-hidden="true" className="size-5 shrink-0" />
+                          {item.label}
+                        </a>
+                      </li>
+                    );
+                  }
+
+                  const sub = entry.name;
+                  const subOpen = openSubs.has(sub);
+                  const subId = `${uid}-${section}-${sub.replace(/\s+/g, '-')}`;
+
                   return (
-                    <li key={item.href}>
-                      <a
-                        href={item.href}
-                        aria-current={active ? 'page' : undefined}
-                        className={cx(
-                          'group flex gap-x-3 rounded p-2 text-sm/6 transition-colors',
-                          active
-                            ? 'bg-[color-mix(in_srgb,var(--color-brand-orange)_14%,transparent)] text-[var(--color-brand-orange-bright)]'
-                            : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-panel-hover)] hover:text-[var(--color-text-primary)]',
-                        )}
+                    /*
+                      Inset from the section's own links, and set smaller than them.
+
+                      Squadron owner, 2026-08-01: "make the sub cagegory text smaller please. and
+                      inset it a bit."
+
+                      Size is doing the same job here that indentation is: a subcategory heading at
+                      the same weight as the links around it competes with them for the eye, when
+                      what it needs to say is "the things under me are a level down". The icon
+                      shrinks with the text, because an icon left at full size next to smaller type
+                      is the thing that then looks wrong.
+                    */
+                    <li key={sub} className="mt-1 ml-2">
+                      <button
+                        type="button"
+                        onClick={() => toggleSub(sub)}
+                        aria-expanded={subOpen}
+                        aria-controls={subId}
+                        className="flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-xs/5 font-medium tracking-wide text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-panel-hover)] hover:text-[var(--color-text-primary)]"
                       >
-                        <Icon aria-hidden="true" className="size-5 shrink-0" />
-                        {item.label}
-                      </a>
+                        <span className="flex items-center gap-x-2.5">
+                          <WrenchScrewdriverIcon aria-hidden="true" className="size-4 shrink-0" />
+                          {sub}
+                        </span>
+                        <ChevronDownIcon
+                          aria-hidden="true"
+                          className={cx(
+                            'size-3 shrink-0 transition-transform duration-150',
+                            subOpen ? 'rotate-0' : '-rotate-90',
+                          )}
+                        />
+                      </button>
+
+                      {/*
+                        Indented by a border rather than by padding alone: a vertical line makes the
+                        nesting readable at a glance, where indentation alone reads as an accident
+                        on a narrow sidebar.
+                      */}
+                      <ul
+                        id={subId}
+                        role="list"
+                        hidden={!subOpen}
+                        className="ml-3.5 mt-0.5 list-none space-y-0.5 border-l border-[var(--color-border-hairline)] p-0 pl-2.5"
+                      >
+                        {entry.items.map((item) => {
+                          const active = current === item.href;
+                          return (
+                            <li key={item.href}>
+                              <a
+                                href={item.href}
+                                aria-current={active ? 'page' : undefined}
+                                className={cx(
+                                  'group flex gap-x-3 rounded px-2 py-1.5 text-xs/5 transition-colors',
+                                  active
+                                    ? 'bg-[color-mix(in_srgb,var(--color-brand-orange)_14%,transparent)] text-[var(--color-brand-orange-bright)]'
+                                    : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-panel-hover)] hover:text-[var(--color-text-primary)]',
+                                )}
+                              >
+                                {item.label}
+                              </a>
+                            </li>
+                          );
+                        })}
+                      </ul>
                     </li>
                   );
                 })}
-
-                {[...new Set(items.map((i) => i.subsection).filter((v): v is string => v !== undefined))].map(
-                  (sub) => {
-                    const subOpen = openSubs.has(sub);
-                    const subId = `${uid}-${section}-${sub.replace(/\s+/g, '-')}`;
-                    const subItems = items.filter((i) => i.subsection === sub);
-
-                    return (
-                      <li key={sub} className="mt-1">
-                        <button
-                          type="button"
-                          onClick={() => toggleSub(sub)}
-                          aria-expanded={subOpen}
-                          aria-controls={subId}
-                          className="flex w-full items-center justify-between gap-2 rounded p-2 text-sm/6 text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-panel-hover)] hover:text-[var(--color-text-primary)]"
-                        >
-                          <span className="flex items-center gap-x-3">
-                            <WrenchScrewdriverIcon aria-hidden="true" className="size-5 shrink-0" />
-                            {sub}
-                          </span>
-                          <ChevronDownIcon
-                            aria-hidden="true"
-                            className={cx(
-                              'size-3.5 shrink-0 transition-transform duration-150',
-                              subOpen ? 'rotate-0' : '-rotate-90',
-                            )}
-                          />
-                        </button>
-
-                        {/*
-                          Indented by a border rather than by padding alone: a vertical line makes
-                          the nesting readable at a glance, where indentation alone reads as an
-                          accident on a narrow sidebar.
-                        */}
-                        <ul
-                          id={subId}
-                          role="list"
-                          hidden={!subOpen}
-                          className="ml-4 mt-1 list-none space-y-1 border-l border-[var(--color-border-hairline)] p-0 pl-2"
-                        >
-                          {subItems.map((item) => {
-                            const active = current === item.href;
-                            return (
-                              <li key={item.href}>
-                                <a
-                                  href={item.href}
-                                  aria-current={active ? 'page' : undefined}
-                                  className={cx(
-                                    'group flex gap-x-3 rounded p-2 text-sm/6 transition-colors',
-                                    active
-                                      ? 'bg-[color-mix(in_srgb,var(--color-brand-orange)_14%,transparent)] text-[var(--color-brand-orange-bright)]'
-                                      : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-panel-hover)] hover:text-[var(--color-text-primary)]',
-                                  )}
-                                >
-                                  {item.label}
-                                </a>
-                              </li>
-                            );
-                          })}
-                        </ul>
-                      </li>
-                    );
-                  },
-                )}
               </ul>
             </li>
             );

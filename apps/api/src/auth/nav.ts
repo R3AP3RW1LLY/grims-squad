@@ -95,6 +95,24 @@ const NAV: readonly NavDefinition[] = [
     blurb: 'Who flies with the squadron.',
     requires: null,
   },
+  /*
+   * ★ THE SHIPYARD — SQUADRON OWNER, 2026-08-01 ★
+   *
+   * "a page under squadron called Shipyard that operates like the signature builder, 2 options
+   * build my own or AI Assisted build" — and, refined: a subcategory called Shipyard with the page
+   * named Outfitter.
+   *
+   * Ungated. Working out what to save for is not a privileged act, and the data behind it is
+   * Frontier's own — every member should be able to plan a ship.
+   */
+  {
+    href: '/shipyard',
+    label: 'Outfitter',
+    section: 'squadron',
+    subsection: 'Shipyard',
+    blurb: 'Outfit any hull in the game, or let the assistant fit one to a budget.',
+    requires: null,
+  },
   {
     href: '/ops',
     label: 'Operations',
@@ -117,24 +135,6 @@ const NAV: readonly NavDefinition[] = [
     requires: Permission.FLEET_VIEW,
   },
 
-  /*
-   * ★ THE SHIPYARD — SQUADRON OWNER, 2026-08-01 ★
-   *
-   * "a page under squadron called Shipyard that operates like the signature builder, 2 options
-   * build my own or AI Assisted build" — and, refined: a subcategory called Shipyard with the page
-   * named Outfitter.
-   *
-   * Ungated. Working out what to save for is not a privileged act, and the data behind it is
-   * Frontier's own — every member should be able to plan a ship.
-   */
-  {
-    href: '/shipyard',
-    label: 'Outfitter',
-    section: 'squadron',
-    subsection: 'Shipyard',
-    blurb: 'Outfit any hull in the game, or let the assistant fit one to a budget.',
-    requires: null,
-  },
 
   // ---- personal ------------------------------------------------------------
   {
