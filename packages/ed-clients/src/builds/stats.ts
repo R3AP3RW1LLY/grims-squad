@@ -10,15 +10,20 @@ import { categoryOf, type BuildCatalogue, type CatalogueModule } from './catalog
  * everything, how much it carries and whether it will survive. Those are the answers the AI needs,
  * and none of them are in the build — they are computed from it.
  *
- * ★ WHAT THIS DELIBERATELY DOES NOT COMPUTE ★
+ * ★ SHIELDS AND DPS ARE HERE NOW, AND WHY THEY WERE NOT ★
  *
- * Shield strength and DPS. Both are genuinely involved — shields curve on the generator's optimal
- * mass and multiply through boosters with diminishing returns; DPS depends on rate of fire,
- * ammunition, distributor draw and engineering per weapon.
+ * The first version left both out on the grounds that they are involved enough to get subtly wrong,
+ * and a wrong number the assistant repeats is worse than a missing one.
  *
- * Getting either subtly wrong produces a number that looks authoritative and is not, which the AI
- * would then repeat to a member deciding what to fly. Fewer numbers, each correct, beats a full
- * panel where two of them lie. They are named as absent rather than shown as zero.
+ * They are in because the data turned out to carry everything they need. A shield generator records
+ * `minmul/optmul/maxmul` against `minmass/optmass/maxmass`, which is the whole curve; a booster
+ * records `shieldboost`; and every weapon records `damage`, `fireint` and its `damagedist` split.
+ * None of it is estimated.
+ *
+ * What is still absent is SUSTAINED dps — the figure that depends on the distributor draining under
+ * continuous fire. `distdraw` and the distributor's `wepcap`/`weprate` are both present, so it is
+ * computable, but the interaction with trigger discipline is a modelling choice rather than a
+ * calculation, and this reports what the guns do rather than what a pilot does with them.
  */
 
 export interface BuildStats {
@@ -53,6 +58,24 @@ export interface BuildStats {
 
   /** Hull integrity: base armour, the bulkhead's boost, and any reinforcement. */
   readonly armour: number;
+
+  /**
+   * Shield strength in megajoules. Null when no generator is fitted, which is a real build.
+   *
+   * A shieldless ship is a deliberate choice — explorers and some miners fly one — so zero would be
+   * a claim about a broken build rather than a description of an intentional one.
+   */
+  readonly shields: number | null;
+
+  /**
+   * Burst damage per second, with everything firing.
+   *
+   * Null when nothing is armed. What a ship "does" in a fight over time is lower and depends on the
+   * distributor and on trigger discipline — see the note at the top.
+   */
+  readonly dps: number | null;
+  /** The same figure split by damage type, for reading against a target's resistances. */
+  readonly damageByType: Readonly<Record<string, number>> | null;
 
   /** Modules that could not be priced or weighed, so the totals are known to be short. */
   readonly unknownModules: number;
@@ -108,6 +131,62 @@ function jumpOf(drive: CatalogueModule | undefined, mass: number, fuel: number):
   return (optmass / mass) * Math.pow(burn / fuelmul, 1 / fuelpower);
 }
 
+/**
+ * The shield multiplier for a hull of this mass.
+ *
+ * ★ A TWO-PIECE CURVE, NOT A RATIO ★
+ *
+ * A generator has three mass points and three multipliers. Below optimal it interpolates from
+ * `minmul` up to `optmul`; above it, down towards `maxmul` — and the two halves have different
+ * gradients, which is exactly why a single `optmass / mass` ratio (the shape the JUMP calculation
+ * uses) is wrong here and would flatter every overweight ship.
+ *
+ * Clamped at both ends: past `maxmass` the generator does not fail gracefully, it stops working,
+ * and reporting a multiplier below `maxmul` would describe a shield that does not exist.
+ */
+function shieldMultiplier(generator: CatalogueModule, mass: number): number {
+  const minMass = raw(generator, 'minmass');
+  const optMass = raw(generator, 'optmass');
+  const maxMass = raw(generator, 'maxmass');
+  const minMul = raw(generator, 'minmul');
+  const optMul = raw(generator, 'optmul');
+  const maxMul = raw(generator, 'maxmul');
+
+  if (optMass <= 0 || maxMass <= minMass) return 0;
+
+  if (mass <= minMass) return minMul;
+  if (mass >= maxMass) return maxMul;
+
+  return mass <= optMass
+    ? minMul + ((mass - minMass) / (optMass - minMass)) * (optMul - minMul)
+    : optMul + ((mass - optMass) / (maxMass - optMass)) * (maxMul - optMul);
+}
+
+/**
+ * What the boosters add.
+ *
+ * ★ DIMINISHING RETURNS ARE THE POINT ★
+ *
+ * Six boosters do not add six times one booster. The game applies an exponential falloff, so the
+ * fourth is worth noticeably less than the first — and a build that stacks them is making a
+ * deliberate trade the naive sum would hide, reporting a shield strength no ship achieves.
+ */
+function boosterMultiplier(boosters: readonly CatalogueModule[]): number {
+  if (boosters.length === 0) return 1;
+
+  // Strongest first: the falloff is applied by POSITION, so ordering decides the answer.
+  const boosts = boosters
+    .map((b) => raw(b, 'shieldboost'))
+    .filter((b) => b > 0)
+    .sort((a, b) => b - a);
+
+  let total = 1;
+  boosts.forEach((boost, index) => {
+    total += boost * Math.pow(0.7, index);
+  });
+  return total;
+}
+
 export function computeStats(build: ShipBuild, catalogue: BuildCatalogue): BuildStats | null {
   const ship = catalogue.ship(build.shipId);
   if (ship === null) return null;
@@ -150,6 +229,65 @@ export function computeStats(build: ShipBuild, catalogue: BuildCatalogue): Build
 
   const fittedCount = build.modules.filter((m) => m.moduleId !== null).length;
 
+  /*
+   * ★ SHIELDS CURVE ON UNLADEN MASS ★
+   *
+   * The generator sizes itself against the HULL, not against what is in the hold — a full cargo bay
+   * does not weaken the shield. Using laden mass would under-report every trader.
+   */
+  const generator = modules.find((m) => m.grp === 'sg' || m.grp === 'bsg' || m.grp === 'psg');
+  const baseShield =
+    typeof ship.properties['baseShieldStrength'] === 'number'
+      ? ship.properties['baseShieldStrength']
+      : 0;
+
+  const shields =
+    generator === undefined || baseShield <= 0
+      ? null
+      : Math.round(
+          baseShield *
+            shieldMultiplier(generator, unladenMass) *
+            boosterMultiplier(modules.filter((m) => m.grp === 'sb')),
+        );
+
+  /*
+   * ★ DAMAGE PER SECOND, AND BY TYPE ★
+   *
+   * `damage / fireint` per weapon. `damagedist` splits it — a beam laser is entirely thermal, a
+   * multi-cannon entirely kinetic, and plenty of things are a mixture. Keeping the split is what
+   * lets an answer say "mostly thermal, so it will struggle against a hull-tanked target" instead
+   * of quoting one number that hides the whole question.
+   */
+  const weapons = modules.filter((m) => raw(m, 'damage') > 0 && raw(m, 'fireint') > 0);
+
+  const damageByType: Record<string, number> = {};
+  let dps = 0;
+
+  for (const weapon of weapons) {
+    const rate = raw(weapon, 'damage') / raw(weapon, 'fireint');
+    dps += rate;
+
+    const split = weapon.raw['damagedist'];
+    const shares =
+      typeof split === 'object' && split !== null
+        ? (split as Record<string, number>)
+        : /*
+           * No distribution recorded means the module is single-type and coriolis did not bother to
+           * say so. Filed as `unknown` rather than silently dropped: a weapon whose type we cannot
+           * name still contributes damage, and losing it would under-report the ship.
+           */
+          { unknown: 1 };
+
+    for (const [type, share] of Object.entries(shares)) {
+      if (typeof share !== 'number') continue;
+      damageByType[type] = (damageByType[type] ?? 0) + rate * share;
+    }
+  }
+
+  for (const type of Object.keys(damageByType)) {
+    damageByType[type] = Math.round((damageByType[type] ?? 0) * 100) / 100;
+  }
+
   return {
     hullMass,
     moduleMass: Math.round(moduleMass * 100) / 100,
@@ -175,6 +313,11 @@ export function computeStats(build: ShipBuild, catalogue: BuildCatalogue): Build
         : round(jumpOf(drive, unladenMass + Math.min(fuelCapacity, raw(drive, 'maxfuel')), fuelCapacity)),
     ladenJumpRange: round(jumpOf(drive, ladenMass, fuelCapacity)),
     armour: Math.round(baseArmour * (1 + hullBoost) + reinforcement),
+    shields,
+    // Null rather than zero for an unarmed ship: a trader carrying no guns is a choice, not a
+    // gunship that does nothing.
+    dps: weapons.length === 0 ? null : Math.round(dps * 100) / 100,
+    damageByType: weapons.length === 0 ? null : damageByType,
     unknownModules: fittedCount - modules.length,
   };
 }
