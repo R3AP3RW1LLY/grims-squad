@@ -159,6 +159,16 @@ const client = new Client({
  */
 let roleScope: ScopeRole[] = [];
 
+/**
+ * How long to wait before trying the role list again.
+ *
+ * ★ IT RETRIES FOREVER, AND THAT IS THE POINT ★
+ *
+ * Everything below depends on this list. Without it the scope rule sees a channel with no viewers,
+ * takes the conservative branch, and counts nothing — for as long as the process lives.
+ */
+const ROLE_RETRY_MS = 30_000;
+
 async function loadRoles(): Promise<void> {
   const guild = await client.guilds.fetch(GUILD_ID);
   const roles = await guild.roles.fetch();
@@ -181,6 +191,36 @@ async function loadRoles(): Promise<void> {
     { roles: roleScope.length, privileged: roleScope.filter((r) => r.isPrivileged).length },
     'role scope loaded',
   );
+}
+
+/**
+ * Loads the role list, and keeps trying until it has one.
+ *
+ * ★ THE FAILURE THIS EXISTS TO STOP HAD ALREADY HAPPENED ★
+ *
+ * `loadRoles` was called once, on ready, with a `.catch` that logged and moved on. The comment
+ * beside it correctly said that classifying against an empty role list "marks every channel
+ * admin-gated and records nothing at all" — and then left exactly that outcome reachable, because a
+ * single transient failure to fetch roles produced an empty list that nothing ever refilled.
+ *
+ * Discord message recording stopped on 2026-07-29 and nobody could tell: no error after the first
+ * line, no gap in the logs, the bot connected and responsive, and a member activity table that
+ * simply stopped growing. Reported nearly three days later as "no Discord activity for August".
+ *
+ * A conservative default is right. A conservative default that can be entered by accident and never
+ * left is not a safety measure, it is an outage with good manners.
+ */
+async function loadRolesUntilLoaded(): Promise<void> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await loadRoles();
+      if (roleScope.length > 0) return;
+      logger.error({ attempt }, 'role scope came back EMPTY — nothing would be counted; retrying');
+    } catch (err) {
+      logger.error({ err, attempt }, 'could not load the role scope; retrying');
+    }
+    await new Promise((r) => setTimeout(r, ROLE_RETRY_MS));
+  }
 }
 
 /** Turns a discord.js channel into the shape the scope rule reads. */
@@ -554,13 +594,23 @@ async function seedVoiceOccupancy(): Promise<void> {
   logger.info({ seeded }, 'voice occupancy seeded');
 }
 
-client.once(Events.ClientReady, (c) => {
+/*
+ * ★ `on`, NOT `once` ★
+ *
+ * discord.js emits this again after a full reconnect. With `once`, a bot that dropped its gateway
+ * and came back had whatever role scope it happened to be holding — including an empty one — and no
+ * further chance to fix it.
+ *
+ * Everything in the chain below is idempotent, so running it again on a reconnect costs a few
+ * queries and removes a class of silent failure.
+ */
+client.on(Events.ClientReady, (c) => {
   logger.info({ tag: c.user.tag, guilds: c.guilds.cache.size }, 'bot connected');
 
-  // Roles FIRST. The scope rule cannot classify a channel without them, and
-  // classifying against an empty role list marks every channel admin-gated and
-  // records nothing at all, which is the failure this change exists to fix.
-  void loadRoles()
+  // Roles FIRST, and until they load. The scope rule cannot classify a channel without them, and
+  // classifying against an empty role list marks every channel admin-gated and records nothing at
+  // all — see loadRolesUntilLoaded for the outage that caused.
+  void loadRolesUntilLoaded()
     .then(() => syncMemberNames())
     .then(() => seedVoiceOccupancy())
     .then(() => backfill())
@@ -629,8 +679,35 @@ client.on(Events.VoiceStateUpdate, (before, after) => {
     .catch((err: unknown) => logger.error({ err }, 'failed to record voice join'));
 });
 
+/**
+ * How often to complain that nothing can be counted. Once a minute is enough to be findable in a
+ * log and infrequent enough not to become the log.
+ */
+const SCOPE_COMPLAINT_MS = 60_000;
+let lastScopeComplaint = 0;
+
 client.on(Events.MessageCreate, (msg) => {
   if (msg.guildId !== GUILD_ID) return;
+
+  /*
+   * ★ AN EMPTY ROLE SCOPE IS AN INCIDENT, NOT A QUIET SKIP ★
+   *
+   * Without roles every channel resolves to "no viewers", the scope rule takes its conservative
+   * branch, and every message is dropped. That is the correct decision on bad data and a disaster
+   * to make silently — it is precisely how three days of squadron activity went unrecorded with
+   * nothing anywhere saying so.
+   *
+   * `loadRolesUntilLoaded` should make this unreachable. This is here because "should be
+   * unreachable" is the description of every outage nobody had a log line for.
+   */
+  if (roleScope.length === 0) {
+    const now = Date.now();
+    if (now - lastScopeComplaint > SCOPE_COMPLAINT_MS) {
+      lastScopeComplaint = now;
+      logger.error('role scope is EMPTY — no activity is being recorded for anybody');
+    }
+    return;
+  }
 
   /*
    * The scope rule decides, per channel, every time. Not a configured id.
