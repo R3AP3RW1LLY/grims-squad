@@ -15,6 +15,20 @@ CRON_TZ=UTC
 # Nickname + commander reconciliation. After the Inara sync, so it acts on fresh names.
 40 5 * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/daily-audit.js >> /var/log/grims-worker.log 2>&1
 
+# ── The resident worker ──────────────────────────────────────────────────────
+#
+# NOT a cron entry — it belongs in compose.prod.yml as a long-running service. Recorded here so the
+# schedule and the thing that answers on-demand requests are described in one place.
+#
+#   node apps/worker/dist/daemon.js
+#
+# It LISTENs on `gmsd_job_request` and runs an ingest when the training page's "Run now" button asks
+# for one. The API cannot start these itself: they are containers, and a web-facing process with a
+# Docker socket is a much larger decision than a refresh button warrants.
+#
+# If it is down, the button reports "requested" and nothing runs — which is honest, and the page
+# says so within one thirty-second refresh.
+
 # ── Embedding ────────────────────────────────────────────────────────────────
 #
 # The ONLY jobs here that use the GPU. Everything else in the pipeline is a database write, which is

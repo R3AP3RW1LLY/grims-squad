@@ -8,6 +8,7 @@ import { rebuildMarketEntries } from './jobs/market-flatten.js';
 import { readInaraKnowledge } from './jobs/ingest-inara.js';
 import { readJournalKnowledge } from './jobs/ingest-journal.js';
 import { readForumKnowledge } from './jobs/ingest-forum.js';
+import { readReferenceKnowledge } from './jobs/ingest-reference.js';
 import { announce } from './jobs/job-log.js';
 
 /**
@@ -268,6 +269,39 @@ async function ingestForum(db: PrismaClient): Promise<void> {
   }
 }
 
+/**
+ * Guides and reference — the squadron's own writing, plus documents kept with the repository.
+ *
+ * The only source whose value comes from being EMBEDDED rather than looked up: nobody searches a
+ * guide by its title, they ask "how do I get more jump range" and the answer is a paragraph that
+ * never uses those words.
+ */
+async function ingestReference(db: PrismaClient): Promise<void> {
+  const run = await beginIngest(db, 'reference');
+  try {
+    const { rows, fromBoard, fromFiles } = await readReferenceKnowledge(
+      db,
+      process.env['KNOWLEDGE_REFERENCE_DIR'] ?? 'ssot/09-reference',
+    );
+
+    const tally = { inserted: 0, updated: 0 };
+    for (let i = 0; i < rows.length; i += BATCH) {
+      const batch = await writeBatch(db, rows.slice(i, i + BATCH));
+      tally.inserted += batch.inserted;
+      tally.updated += batch.updated;
+      await progressIngest(db, run, tally.inserted + tally.updated);
+    }
+    const written = tally.inserted + tally.updated;
+    await finishIngest(db, run, { rows: written, ...tally, source: 'reference' });
+    console.log(
+      `reference: ${written} passages (${fromBoard} guides, ${fromFiles} documents)`,
+    );
+  } catch (e) {
+    await finishIngest(db, run, { error: e instanceof Error ? e.message : String(e) });
+    throw e;
+  }
+}
+
 async function main(): Promise<void> {
   /*
    * ★ SEVERAL NAMES, NOT ONE ★
@@ -289,6 +323,7 @@ async function main(): Promise<void> {
       ['inara', ingestInara],
       ['journal', ingestJournal],
       ['forum', ingestForum],
+      ['reference', ingestReference],
     ] as const) {
       if (only.length > 0 && !only.includes(name)) continue;
 

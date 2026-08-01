@@ -9,6 +9,7 @@ import { NoAccess, AdminUnavailable } from '../no-access';
 import { PageHeader, PageBody, Section, StatGrid, StatTile } from '../../../../components/hub-page';
 import { LiveRefresh } from '../live-refresh';
 import { IngestProgress } from './progress';
+import { RerunButton } from './rerun';
 
 export const metadata: Metadata = {
   title: "AI training — Grim's Squad",
@@ -156,6 +157,18 @@ function SourceRow({ source: s }: { source: TrainingSource }) {
             rowsSoFar={s.rowsSoFar}
             expectedRows={s.expectedRows}
           />
+        )}
+
+        {/*
+          ★ OFFERED WHEN SOMETHING IS WRONG, AND ONLY THEN ★
+          A stall, a failure, or a source that has never run — the three states that need somebody.
+          A "run now" button on a healthy source invites a member to kick off a 448,676-row import
+          because the number looked low, which is how a nightly job becomes an hourly one.
+        */}
+        {!s.ingesting && (s.lastError !== null || s.lastIngestedAt === null) && (
+          <div className="mt-2">
+            <RerunButton source={s.source} label={SOURCE_LABELS[key] ?? s.source} />
+          </div>
         )}
       </td>
       <td className="py-3 text-right font-mono tabular-nums text-[var(--color-text-secondary)]">

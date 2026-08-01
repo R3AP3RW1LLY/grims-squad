@@ -6,6 +6,8 @@
   "description": "BullMQ processors. Spansh jobs, digests, retention, reconciliation.",
   "scripts": {
     "build": "tsc -b",
+    "//dev": "The resident worker. Part of `pnpm dev` so the training page's Run now button works on localhost — without something listening on the channel, the button reports Requested and nothing happens, which is what it did the first time it shipped.",
+    "dev": "tsx watch --env-file-if-exists=../api/.env src/daemon.ts",
     "typecheck": "tsc -b --noEmit false --emitDeclarationOnly && tsc -p tsconfig.spec.json",
     "test": "vitest run --passWithNoTests",
     "test:unit": "vitest run --passWithNoTests",
@@ -18,12 +20,14 @@
   },
   "devDependencies": {
     "@grims/config": "workspace:*",
+    "@types/pg": "^8.20.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0",
     "tsx": "^4.19.0"
   },
   "dependencies": {
     "@grims/db": "workspace:*",
+    "pg": "^8.22.0",
     "@grims/ed-clients": "workspace:*",
     "@grims/shared": "workspace:*",
     "ioredis": "^5.11.1",

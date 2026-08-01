@@ -67,6 +67,14 @@ export interface EmbedReport {
 const BATCH = 256;
 
 /**
+ * How many new vectors justify rebuilding the index.
+ *
+ * Below this the graph churn is not worth a rebuild; above it, retrieval quality is at stake. A
+ * few hundred is the scale at which the degradation was first observed.
+ */
+const REINDEX_AFTER = 200;
+
+/**
  * Embeds everything that needs it.
  *
  * ★ RESUMABLE BY CONSTRUCTION ★
@@ -169,6 +177,48 @@ export async function embedKnowledge(
         embedded += 1;
       }
     }
+  }
+
+  /*
+   * ★ REBUILD THE VECTOR INDEX AFTER A LARGE SWEEP ★
+   *
+   * ★ THE BUG THIS EXISTS FOR ★
+   *
+   * HNSW is a graph, and pgvector maintains it by inserting a new entry on every UPDATE and leaving
+   * the old one behind. Re-embedding the same rows a few times — which happens whenever a text is
+   * reworded — fills it with dead entries until traversal stops finding the real nearest neighbours.
+   *
+   * Observed on 2026-08-01 with a 230-row index: asking "what do I need to do to become a member"
+   * returned SHIP DESCRIPTIONS, and the joining guide was not in the top three. Raising ef_search to
+   * 200 on 230 rows returned different wrong answers. A sequential scan gave the correct result
+   * immediately — the stored vectors were fine, the graph was not.
+   *
+   * Nothing errors. Retrieval keeps returning rows and they are simply the wrong ones, which is the
+   * worst failure a search index has.
+   *
+   * Only after a sweep that actually wrote something substantial: rebuilding after every three-minute
+   * journal sweep would be constant work for nothing.
+   */
+  if (embedded >= REINDEX_AFTER) {
+    await db
+      .$executeRawUnsafe(
+        /*
+         * Bounded memory, deliberately. The default lets Postgres request a work area larger than
+         * Docker's /dev/shm and the rebuild fails with "could not resize shared memory segment" —
+         * which is what happened the first time this was run by hand.
+         */
+        `SET LOCAL maintenance_work_mem = '256MB'`,
+      )
+      .catch(() => undefined);
+    await db
+      .$executeRawUnsafe(`REINDEX INDEX CONCURRENTLY knowledge_items_embedding_idx`)
+      .catch(async () => {
+        // CONCURRENTLY cannot run inside a transaction and needs the index to be valid. A plain
+        // rebuild is the fallback: slower and it takes a lock, but this is a nightly job.
+        await db
+          .$executeRawUnsafe(`REINDEX INDEX knowledge_items_embedding_idx`)
+          .catch(() => undefined);
+      });
   }
 
   return { pending, embedded, failed };

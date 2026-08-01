@@ -42,6 +42,20 @@ const STALL_AFTER_MS = 15 * 60 * 1000;
 export class TrainingStatusService {
   constructor(@Inject(PrismaClient) private readonly db: PrismaClient) {}
 
+  /**
+   * Asks the resident worker to run a source now.
+   *
+   * ★ NOTIFY, NOT A QUEUE TABLE ★
+   *
+   * A request is only meaningful while somebody is listening: if the daemon is down there is
+   * nothing to run the job, and a row sitting in a table would be executed at some unknowable later
+   * moment when it may no longer be wanted. NOTIFY is discarded when nobody is listening, which is
+   * exactly the semantics of a button press.
+   */
+  async requestRun(source: string): Promise<void> {
+    await this.db.$executeRawUnsafe(`SELECT pg_notify('gmsd_job_request', $1)`, source);
+  }
+
   async status(now: Date = new Date()): Promise<SourceStatus[]> {
     /*
      * One query for the row counts, one for the run history. Not one per source: the page renders

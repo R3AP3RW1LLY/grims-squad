@@ -189,6 +189,31 @@ services:
   #
   # There is deliberately no `restart:` for the same reason. A job that fails
   # should be visible in cron's mail, not retried in a loop against Inara.
+  # ── The resident worker ────────────────────────────────────────────────────
+  #
+  # Long-running, unlike `worker` below. It LISTENs on a Postgres channel and runs an ingest when
+  # the training page's "Run now" button asks for one.
+  #
+  # ★ WHY THIS EXISTS RATHER THAN THE API DOING IT ★
+  #
+  # The ingests are containers. The API has no Docker socket, and giving a web-facing service the
+  # ability to start containers is a far larger decision than a refresh button warrants. This has no
+  # ports and no ingress — it only listens to the database.
+  #
+  # `restart: unless-stopped` because a button that silently does nothing is worse than no button:
+  # if this is down, requests are discarded and the page will say "requested" for ever.
+  worker-daemon:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.worker
+    command: ['node', 'apps/worker/dist/daemon.js']
+    env_file: [/srv/grims/.env]
+    environment:
+      NODE_ENV: production
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+
   worker:
     profiles: ['jobs']
     build:

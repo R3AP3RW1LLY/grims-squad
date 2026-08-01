@@ -1,6 +1,13 @@
 import { Controller, Get, Post, Delete, Body, Param, Inject, Res } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
-import { AppError, ErrorCode, Permission, type SourceStatus, type CategoryProgress } from '@grims/shared';
+import {
+  AppError,
+  ErrorCode,
+  Permission,
+  KNOWLEDGE_SOURCES,
+  type SourceStatus,
+  type CategoryProgress,
+} from '@grims/shared';
 import { User, type CurrentUser } from '../auth/current-user.js';
 import { PermissionService } from '../authz/permission.service.js';
 import { satisfiesMask } from '../forum/category.service.js';
@@ -176,6 +183,50 @@ export class AiController {
     }
 
     return { sources: await this.trainingStatus.status() };
+  }
+
+  /**
+   * Asks the worker to run one source now.
+   *
+   * ★ SQUADRON OWNER, 2026-08-01 ★
+   *
+   * "if any of the ingestion sources stall, we need to show a button to re-trigger."
+   *
+   * ★ IT PUBLISHES A REQUEST; IT DOES NOT RUN ANYTHING ★
+   *
+   * The ingests are containers cron starts and discards. This process has no Docker socket, and
+   * giving a web-facing service the ability to start containers would be a much larger decision
+   * than a refresh button warrants.
+   *
+   * So it NOTIFYs, and the resident worker daemon runs the job. If that daemon is not up, nothing
+   * happens — which is why the response says the request was sent rather than that the job started.
+   * Claiming a job began when nobody was listening would be the same class of lie as the stalled
+   * run that prompted this.
+   */
+  @Post('training/:source/rerun')
+  async rerun(
+    @User() caller: CurrentUser | undefined,
+    @Param('source') source: string,
+  ): Promise<{ requested: true }> {
+    if (caller === undefined) {
+      throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
+    }
+    const mask = await this.permissions.effectiveMask(caller.userId);
+    if (!satisfiesMask(mask, Permission.AI_TRAINING)) {
+      throw new AppError(ErrorCode.PERMISSION_DENIED, 'You cannot start a training run.');
+    }
+
+    /*
+     * Validated against the contract's own list before it reaches the channel. The daemon checks
+     * again against what it is willing to spawn — two gates, because this value crosses a process
+     * boundary and arrives there as a bare string.
+     */
+    if (!(KNOWLEDGE_SOURCES as readonly string[]).includes(source) && source !== 'embed') {
+      throw new AppError(ErrorCode.VALIDATION_FAILED, 'That is not an ingestion source.');
+    }
+
+    await this.trainingStatus.requestRun(source);
+    return { requested: true };
   }
 
   /**

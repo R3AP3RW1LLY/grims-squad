@@ -85,6 +85,60 @@ A task is not done until **all** of these are true:
 
 "It runs" is not done. "The happy path works" is not done. "I'll add tests after" is a §8 violation.
 
+### 4a. THE FOUR CHECKS THAT TYPECHECK AND TESTS DO NOT COVER
+
+Added 2026-08-01, after the squadron owner said: *"your building this pretty hap-hazzardly a lot of
+mistakes are being made and things ignored and left out."* That was fair. Every defect listed below
+passed typecheck, passed lint, and passed the full test suite.
+
+**1. EXERCISE THE PATH A HUMAN WILL TAKE, NOT THE ONE THE COMPILER CHECKS.**
+
+The "Run now" button was typechecked, tested and reported as working. Nobody had pressed it. There
+was no process listening on the channel it published to, so it said "Requested" and did nothing —
+in exactly the situation it exists for, when something is already broken.
+
+Before reporting a user-facing feature: **use it end to end, as the member would.** A page render,
+a button press, a real request. If that is impossible in this environment, say so plainly rather
+than letting a green suite imply it was checked.
+
+**2. WHEN YOU CHANGE ONE OF A PAIR, GREP FOR THE OTHER.**
+
+The year view buckets by month. The activity query was changed; the sign-ins query was not. Both
+write into the same twelve-slot array, so sign-ins drew in months that had not happened yet.
+
+Before changing a query, an array shape, or a contract: **search for everything that writes into
+the same structure.** `number[]` will not tell you that two producers disagree about what an index
+means.
+
+**3. DO NOT EDIT CODE WITH STRING REPLACEMENT.**
+
+Three separate corruptions in one session, all from scripted find-and-replace:
+
+- a backtick inside a comment **inside a SQL template literal**, ending the query mid-statement —
+  twice, hours apart
+- literal NUL bytes as a map-key separator, which made git and grep treat the file as **binary**
+- an append to `.env` with no trailing newline, which **concatenated onto the Inara API key**
+
+Use the editing tools. They fail loudly on an ambiguous match; a regex silently writes something
+plausible.
+
+**4. NEVER DISTURB A RUNNING PROCESS CASUALLY.**
+
+Two self-inflicted outages: adding a dependency while the dev servers held stale module resolution,
+and a process kill matching `*grim-squad*` that also killed a 25-minute galaxy import.
+
+Stop what you intend to stop, by pid. After changing dependencies or a generated client,
+**restart deliberately and verify the restart** before continuing.
+
+### 4b. AND ONE ABOUT CLAIMS
+
+State measured numbers, not inherited ones. "Embedding the galaxy takes about three weeks" sat in a
+contract, was repeated as fact, and shaped the design. Measured on the actual hardware it was
+**1.2 hours** — wrong by a factor of three hundred, and it had never been checked by anyone.
+
+If a number decides an architecture, measure it before relying on it, and record the measurement
+where the decision lives.
+
 ---
 
 ## 5. HOW TO BEHAVE
