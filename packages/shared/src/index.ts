@@ -100,3 +100,16 @@ export {
   isWrite,
   readPreviewRoleId,
 } from './view-as.js';
+export {
+  BUILD_HOSTS,
+  SUPPORTED_BUILD_HOSTS,
+  sourceOf,
+  coverageOf,
+  type BuildSource,
+  type SlotGroup,
+  type FittedModule,
+  type Engineering,
+  type ShipBuild,
+  type ImportResult,
+  type ImportCoverage,
+} from './ship-build.js';

@@ -35,6 +35,7 @@ const COPIES: ReadonlyArray<{ source: string; copy: string }> = [
   { source: 'ssot/04-contracts/reputation.ts', copy: 'packages/shared/src/reputation.ts' },
   { source: 'ssot/04-contracts/job-channels.ts', copy: 'packages/shared/src/job-channels.ts' },
   { source: 'ssot/04-contracts/view-as.ts', copy: 'packages/shared/src/view-as.ts' },
+  { source: 'ssot/04-contracts/ship-build.ts', copy: 'packages/shared/src/ship-build.ts' },
   {
     source: 'ssot/04-contracts/signature-design.ts',
     copy: 'packages/shared/src/signature-design.ts',

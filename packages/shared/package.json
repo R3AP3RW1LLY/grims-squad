@@ -39,6 +39,10 @@
       "types": "./dist/permissions.d.ts",
       "default": "./dist/permissions.js"
     },
+    "./ship-build": {
+      "types": "./dist/ship-build.d.ts",
+      "default": "./dist/ship-build.js"
+    },
     "./tenure": {
       "types": "./dist/tenure.d.ts",
       "default": "./dist/tenure.js"
