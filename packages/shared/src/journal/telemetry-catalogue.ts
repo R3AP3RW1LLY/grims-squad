@@ -197,6 +197,27 @@ export const TELEMETRY_CATALOGUE: readonly CatalogueGroup[] = [
       { event: 'CarrierStats', label: 'Carrier status', reveals: 'Its name, services and balance.' },
     ],
   },
+  {
+    /*
+     * ★ ITS OWN GROUP, SO IT IS SEPARATELY REFUSABLE ★
+     *
+     * Folding this into `fleet` or `combat` would mean a member who is happy sharing their Python
+     * has to accept sharing their suit to keep it. An on-foot loadout says rather more about how
+     * somebody plays than a hull does, and the whole point of this catalogue is that each thing can
+     * be declined on its own terms.
+     */
+    category: 'onfoot',
+    label: 'On foot',
+    purpose: 'What you carry when you leave the ship, for the squadron weapons chart.',
+    required: false,
+    entries: [
+      {
+        event: 'SuitLoadout',
+        label: 'Suit and weapons',
+        reveals: 'Which suit you wear and the weapons in it, with their engineering.',
+      },
+    ],
+  },
 ];
 
 /**

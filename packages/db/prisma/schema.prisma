@@ -266,6 +266,12 @@ enum TelemetryCategory {
   session
   /// Ranks, progress and squadron standing. What a commander IS, rather than what they did.
   profile
+  /// The suit and weapons a commander takes out of the ship.
+  ///
+  /// Its OWN category rather than part of `fleet` or `combat`, so it can be declined on its own:
+  /// an on-foot loadout says more about how somebody plays than a hull does, and a member happy to
+  /// share their Python should not have to accept sharing their suit to keep it.
+  onfoot
 }
 
 /// Delivery channel for a notification fan-out.

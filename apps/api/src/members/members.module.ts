@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { PrismaClient } from '@grims/db';
 import { DatabaseModule } from '../database.module.js';
+import { WeaponsStore } from './weapons.store.js';
 import { MembersController } from './members.controller.js';
 import { AccountController } from './account.controller.js';
 import { PrismaMembersStore } from './members.store.js';
@@ -11,6 +12,15 @@ import { MEMBERS_STORE, ACCOUNT_STORE } from './members.tokens.js';
   imports: [DatabaseModule],
   controllers: [MembersController, AccountController],
   providers: [
+    /*
+     * The on-foot weapons chart. A plain provider: it takes only the database and answers one
+     * aggregate question, so there is nothing to bind to a caller.
+     */
+    {
+      provide: WeaponsStore,
+      inject: [PrismaClient],
+      useFactory: (db: PrismaClient) => new WeaponsStore(db),
+    },
     {
       provide: MEMBERS_STORE,
       inject: [PrismaClient],

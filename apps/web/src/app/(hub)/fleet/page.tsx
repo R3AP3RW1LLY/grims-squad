@@ -1,5 +1,7 @@
 import type { Metadata } from 'next';
 import { PageHeader } from '../../../components/hub-page';
+import { getSquadronWeapons } from '../../../lib/api';
+import { WeaponsChartPanel } from './weapons-chart';
 import {
   ComingSoonBody,
   UnderConstruction,
@@ -38,7 +40,16 @@ const COPY: ComingSoonCopy = {
     'For now your fleet already shows on your profile, and builds get passed around the way they always have — in Discord, usually with a screenshot and an opinion.',
 };
 
-export default function FleetPage() {
+export default async function FleetPage() {
+  /*
+   * ★ THE FIRST REAL FLEET CONTENT ★
+   *
+   * The placeholder below says "we have nowhere dignified to put them yet", and for ships that is
+   * still true. For what members carry ON FOOT it is not any more, so the weapons chart sits above
+   * the coming-soon rather than waiting for the rest of the hangar to be built.
+   */
+  const weapons = await getSquadronWeapons();
+
   return (
     <>
       {/*
@@ -54,6 +65,22 @@ export default function FleetPage() {
         title={COPY.title}
         action={<UnderConstruction />}
       />
+      {weapons !== null && (
+        <section className="mb-12">
+          <h2
+            className="text-xl text-[var(--color-brand-orange)]"
+            style={{ fontFamily: 'var(--font-display)' }}
+          >
+            WHAT THE SQUADRON CARRIES
+          </h2>
+          <p className="mb-6 mt-2 max-w-[68ch] text-sm text-[var(--color-text-secondary)]">
+            Suits and weapons, counted across everybody who has been on foot. Nobody is named —
+            this is how many commanders carry each thing, not who.
+          </p>
+          <WeaponsChartPanel chart={weapons} />
+        </section>
+      )}
+
       <ComingSoonBody copy={COPY} />
     </>
   );

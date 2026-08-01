@@ -5,6 +5,7 @@ import { User, type CurrentUser } from '../auth/current-user.js';
 import { verifyCsrf, readCsrfCookie } from '../common/csrf.js';
 import { MEMBERS_STORE, type MembersStore } from './members.tokens.js';
 import { LEADERSHIP_CEILING } from './members.store.js';
+import { WeaponsStore, type WeaponsChart } from './weapons.store.js';
 import {
   buildSnapshots,
   withInaraRanks,
@@ -57,7 +58,10 @@ function readPatch(body: unknown): Partial<PrivacySettings> {
 
 @Controller('v1')
 export class MembersController {
-  constructor(@Inject(MEMBERS_STORE) private readonly store: MembersStore) {}
+  constructor(
+    @Inject(MEMBERS_STORE) private readonly store: MembersStore,
+    @Inject(WeaponsStore) private readonly weapons: WeaponsStore,
+  ) {}
 
   /**
    * The squadron roster.
@@ -436,6 +440,21 @@ export class MembersController {
       guildJoinedAt: guildJoinedAt?.toISOString() ?? null,
       siteRoles: row.source.siteRoles ?? [],
     };
+  }
+
+  /**
+   * What the squadron carries on foot.
+   *
+   * ★ SIGNED IN, AND AGGREGATE ONLY ★
+   *
+   * No member is named and no loadout belongs to anybody in the response — it is a count of how
+   * many people carry each weapon. A per-member view would be a different feature with a different
+   * privacy question; this one answers "what does the squadron use", which is nobody's secret.
+   */
+  @Get('squadron/weapons')
+  async squadronWeapons(@User() caller: CurrentUser | undefined): Promise<WeaponsChart> {
+    requireUser(caller);
+    return this.weapons.chart();
   }
 
   /** The caller's own toggles, for the settings page. */

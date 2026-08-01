@@ -107,6 +107,26 @@ export const JOURNAL_EVENTS = {
   /** Fleet carrier jumps and finances, for the squadron's own carrier. */
   CarrierJump: 'carrier',
   CarrierStats: 'carrier',
+
+  /**
+   * The suit and weapons a commander takes on foot.
+   *
+   * ★ A NEW THING COLLECTED, DECLARED THE ORDINARY WAY ★
+   *
+   * The squadron wanted a chart of what people carry on foot, and nothing was collecting it —
+   * `SuitLoadout` was not in this registry, so the ingest had no category for it and every one
+   * ever sent was discarded.
+   *
+   * It joins as its OWN category rather than being folded into `ship` or `combat`, because that is
+   * what makes it separately refusable. On-foot loadouts say more about how somebody plays than a
+   * ship does, and a member who is happy sharing their Python should not have to accept sharing
+   * their suit to keep it — which is exactly what would happen if this rode in on an existing
+   * switch.
+   *
+   * Optional, like everything below the baseline: it appears in the app's "What the squadron keeps"
+   * panel and can be switched off there, on its own.
+   */
+  SuitLoadout: 'onfoot',
 } as const;
 
 export type JournalEventName = keyof typeof JOURNAL_EVENTS;
@@ -208,6 +228,20 @@ export const EVENT_FIELDS: Record<JournalEventName, readonly string[]> = {
 
   CarrierJump: ['StarSystem', 'SystemAddress', 'StationName', 'CarrierID'],
   CarrierStats: ['CarrierID', 'Callsign', 'Name', 'DockingAccess', 'JumpRangeCurr'],
+
+  /*
+   * ★ THE SUIT AND WHAT IS IN IT, AND NOTHING ELSE ★
+   *
+   * A raw SuitLoadout carries SuitID and LoadoutID — Frontier's internal handles, which identify
+   * nothing to us and are the sort of value that gets stored because it was in the payload. The
+   * chart needs what the suit IS and what weapons are in it; the ids answer no question anybody is
+   * asking.
+   *
+   * `Modules` is the weapon list. It is kept whole because a weapon without its slot is not a
+   * loadout — the same gun in a primary and a secondary slot is a different build, which is the
+   * distinction the chart exists to show.
+   */
+  SuitLoadout: ['SuitName', 'SuitName_Localised', 'SuitMods', 'LoadoutName', 'Modules'],
 };
 
 /**
@@ -322,7 +356,9 @@ export type TelemetryCategoryName =
   | 'trade'
   | 'exploration'
   | 'bgs'
-  | 'carrier';
+  | 'carrier'
+  /** On-foot: the suit and weapons a commander takes out of the ship. */
+  | 'onfoot';
 
 const CATEGORY_BY_LABEL: Record<JournalCategory, TelemetryCategoryName> = {
   // ---- baseline -----------------------------------------------------------
@@ -342,6 +378,7 @@ const CATEGORY_BY_LABEL: Record<JournalCategory, TelemetryCategoryName> = {
   exploration: 'exploration',
   bgs: 'bgs',
   carrier: 'carrier',
+  onfoot: 'onfoot',
 };
 
 /**

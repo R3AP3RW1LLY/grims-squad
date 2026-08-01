@@ -1,0 +1,12 @@
+-- On-foot loadouts as their own consent category.
+--
+-- ★ WHY IT IS NOT PART OF `fleet` OR `combat` ★
+--
+-- An on-foot loadout says rather more about how somebody plays than a hull does, and the whole
+-- point of the catalogue is that each thing can be declined on its own terms. Folding this into an
+-- existing switch would mean a member happy to share their Python has to accept sharing their suit
+-- in order to keep it.
+--
+-- The enum is what makes the opt-out storable at all: a category name with no enum value fails at
+-- write time, which is exactly what a spec caught before this shipped.
+ALTER TYPE "TelemetryCategory" ADD VALUE IF NOT EXISTS 'onfoot';

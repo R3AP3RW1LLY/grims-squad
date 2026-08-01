@@ -174,7 +174,8 @@ let ctl: MembersController;
 
 beforeEach(() => {
   store = new FakeStore();
-  ctl = new MembersController(store);
+  ctl = // The weapons store answers one aggregate question and is not exercised here.
+      new MembersController(store, { chart: async () => ({ weapons: [], suits: [], members: 0 }) } as never);
 });
 
 describe('GET /v1/members/:handle @INV-027', () => {

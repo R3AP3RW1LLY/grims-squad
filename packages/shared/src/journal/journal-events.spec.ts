@@ -116,6 +116,13 @@ describe('the event allowlist', () => {
       'SAAScanComplete',
       'SellExplorationData',
       'SellMicroResources',
+      /*
+       * Added 2026-08-01 for the squadron weapons chart. Optional, and in its OWN category
+       * (`onfoot`) rather than folded into fleet or combat — an on-foot loadout says more about how
+       * somebody plays than a hull does, and a member happy to share their Python should not have
+       * to accept sharing their suit to keep it.
+       */
+      'SuitLoadout',
     ]);
   });
 

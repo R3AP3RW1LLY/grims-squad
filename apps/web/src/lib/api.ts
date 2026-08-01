@@ -1245,3 +1245,19 @@ export const describeDeviceLink = (code: string): Promise<{ label: string } | nu
   get<{ label: string | null }>(`/v1/telemetry/links/${encodeURIComponent(code)}`).then((r) =>
     r === null || r.label === null ? null : { label: r.label },
   );
+
+/**
+ * What the squadron carries on foot.
+ *
+ * Aggregate only: how many members carry each weapon, never who. A per-member view would be a
+ * different feature with a different privacy question.
+ */
+export interface WeaponsChart {
+  weapons: Array<{ name: string; members: number; loadouts: number }>;
+  suits: Array<{ name: string; members: number }>;
+  /** Members who have reported any on-foot loadout. The denominator, and zero until some do. */
+  members: number;
+}
+
+export const getSquadronWeapons = (): Promise<WeaponsChart | null> =>
+  get('/v1/squadron/weapons', { authed: true });
