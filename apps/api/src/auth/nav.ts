@@ -117,6 +117,25 @@ const NAV: readonly NavDefinition[] = [
     requires: Permission.FLEET_VIEW,
   },
 
+  /*
+   * ★ THE SHIPYARD — SQUADRON OWNER, 2026-08-01 ★
+   *
+   * "a page under squadron called Shipyard that operates like the signature builder, 2 options
+   * build my own or AI Assisted build" — and, refined: a subcategory called Shipyard with the page
+   * named Outfitter.
+   *
+   * Ungated. Working out what to save for is not a privileged act, and the data behind it is
+   * Frontier's own — every member should be able to plan a ship.
+   */
+  {
+    href: '/shipyard',
+    label: 'Outfitter',
+    section: 'squadron',
+    subsection: 'Shipyard',
+    blurb: 'Outfit any hull in the game, or let the assistant fit one to a budget.',
+    requires: null,
+  },
+
   // ---- personal ------------------------------------------------------------
   {
     href: '/settings/commander',
@@ -234,24 +253,6 @@ const NAV: readonly NavDefinition[] = [
    * lesson from last time is not "never add a nav entry" — it is that the entry and the page ship
    * together or neither does.
    */
-  /*
-   * ★ THE SHIPYARD — SQUADRON OWNER, 2026-08-01 ★
-   *
-   * "a page under squadron called Shipyard that operates like the signature builder, 2 options
-   * build my own or AI Assisted build" — and, refined: a subcategory called Shipyard with the page
-   * named Outfitter.
-   *
-   * Ungated. Working out what to save for is not a privileged act, and the data behind it is
-   * Frontier's own — every member should be able to plan a ship.
-   */
-  {
-    href: '/shipyard',
-    label: 'Outfitter',
-    section: 'squadron',
-    subsection: 'Shipyard',
-    blurb: 'Outfit any hull in the game, or let the assistant fit one to a budget.',
-    requires: null,
-  },
   {
     href: '/app/members',
     label: 'Squad members',
@@ -302,10 +303,32 @@ const NAV: readonly NavDefinition[] = [
   },
 ];
 
-/** The destinations this mask can reach, in render order. */
+/**
+ * The destinations this mask can reach, in render order.
+ *
+ * ★ THE FIELDS ARE LISTED, NOT SPREAD — AND THAT COSTS SOMETHING ★
+ *
+ * Rebuilding each item by name is deliberate: `requires` is a permission mask and must not travel
+ * to the browser, and `...rest` would have shipped it the moment anybody added a field.
+ *
+ * The cost is that a NEW display field is silently dropped unless it is added here. That is not
+ * hypothetical — `subsection` was added to the interface, set on the Shipyard entry, and rendered
+ * by a sidebar that handled it correctly, and the feature was still dead: this function never
+ * copied it, so no member would ever have seen the subcategory. `nav-shape.spec.ts` now fails if
+ * any displayable field goes missing here.
+ */
 export function navFor(mask: PermissionMask): NavItem[] {
   return NAV.filter((item) => item.requires === null || hasAnyPermission(mask, item.requires)).map(
-    ({ href, label, section, blurb }) => ({ href, label, section, blurb }),
+    ({ href, label, section, subsection, blurb }) => ({
+      href,
+      label,
+      section,
+      blurb,
+      // Conditional, not `subsection: subsection` — `exactOptionalPropertyTypes` forbids assigning
+      // undefined to an optional field, and an explicit `"subsection": undefined` in the JSON is a
+      // different shape from its absence.
+      ...(subsection === undefined ? {} : { subsection }),
+    }),
   );
 }
 
