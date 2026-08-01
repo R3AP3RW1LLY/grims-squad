@@ -3184,6 +3184,13 @@ model EdsyId {
   edsyId   Int      @map("edsy_id")
   /// The game's symbol, e.g. `Int_Hyperdrive_Size5_Class1`.
   fdname   String
+  /// Frontier's own id, which Coriolis records as `edID`.
+  ///
+  /// The join for SHIPS. EDSY calls the Alliance Challenger `TypeX_3` and Coriolis calls it
+  /// `alliance_challenger`; no string normalisation reconciles those. Both files carry Frontier's
+  /// number and they agree exactly, so the hull match is a lookup rather than an alias table
+  /// somebody has to extend every time Frontier ships a ship.
+  fdid     BigInt?
   syncedAt DateTime @default(now()) @map("synced_at") @db.Timestamptz(6)
 
   @@id([kind, edsyId])

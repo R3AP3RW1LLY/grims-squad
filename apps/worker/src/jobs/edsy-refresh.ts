@@ -57,9 +57,23 @@ export interface EdsyRefreshResult {
  * the file on those two section headers is what keeps a ship's armour variants — which are nested
  * INSIDE a ship and share the module shape — from being read as top-level modules.
  */
+export interface EdsyEntry {
+  readonly edsyId: number;
+  readonly fdname: string;
+  /**
+   * Frontier's own id, which Coriolis records as `edID`.
+   *
+   * The join for ships. EDSY calls the Alliance Challenger `TypeX_3` and Coriolis calls it
+   * `alliance_challenger` — no string normalisation reconciles those, and the journal importer
+   * already needed a hand-written alias map for two hulls. Both files carry Frontier's number and
+   * they agree exactly, so this replaces that class of maintenance entirely.
+   */
+  readonly fdid: number | null;
+}
+
 export function parseEdsyIds(source: string): {
-  ships: Array<{ edsyId: number; fdname: string }>;
-  modules: Array<{ edsyId: number; fdname: string }>;
+  ships: EdsyEntry[];
+  modules: EdsyEntry[];
 } {
   const shipsAt = source.indexOf('\n\tship : {');
   const modulesAt = source.indexOf('\n\tmodule : {');
@@ -90,7 +104,7 @@ export function parseEdsyIds(source: string): {
    * the nearest preceding `<digits> :` at the start of an indented line, and nesting cannot
    * confuse that because a nested object has no such opener.
    */
-  const entries = (text: string): Array<{ edsyId: number; fdname: string }> => {
+  const entries = (text: string): EdsyEntry[] => {
     /*
      * ★ ONE ORDERED PASS, NOT A BACKWARDS SEARCH PER NAME ★
      *
@@ -112,11 +126,12 @@ export function parseEdsyIds(source: string): {
       if (Number.isFinite(id)) openers.push({ at: match.index, id });
     }
 
-    const found: Array<{ edsyId: number; fdname: string }> = [];
+    const found: EdsyEntry[] = [];
     let cursor = 0;
 
-    for (const match of text.matchAll(/fdname:'([^']+)'/g)) {
-      const fdname = match[1];
+    for (const match of text.matchAll(/fdid:(\d+),\s*fdname:'([^']+)'/g)) {
+      const fdid = Number(match[1]);
+      const fdname = match[2];
       if (fdname === undefined) continue;
 
       // Both lists are in file order, so the cursor only ever moves forward.
@@ -126,7 +141,7 @@ export function parseEdsyIds(source: string): {
 
       const opener = openers[cursor];
       if (opener !== undefined && opener.at < match.index) {
-        found.push({ edsyId: opener.id, fdname });
+        found.push({ edsyId: opener.id, fdname, fdid: Number.isFinite(fdid) ? fdid : null });
       }
     }
 
@@ -194,8 +209,8 @@ export async function refreshEdsyIds(
   }
 
   const rows = [
-    ...ships.map((s) => ({ kind: 'ship', edsyId: s.edsyId, fdname: s.fdname })),
-    ...modules.map((m) => ({ kind: 'module', edsyId: m.edsyId, fdname: m.fdname })),
+    ...ships.map((s) => ({ kind: 'ship', edsyId: s.edsyId, fdname: s.fdname, fdid: s.fdid })),
+    ...modules.map((m) => ({ kind: 'module', edsyId: m.edsyId, fdname: m.fdname, fdid: m.fdid })),
   ];
 
   /*

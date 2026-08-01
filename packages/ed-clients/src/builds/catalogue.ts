@@ -62,6 +62,13 @@ export interface CatalogueSlot {
 export interface CatalogueShip {
   readonly id: string;
   readonly name: string;
+  /**
+   * Frontier's own id for the hull. Null when coriolis-data does not record one.
+   *
+   * The join to EDSY, which records the same number as `fdid`. Names cannot do it: EDSY calls the
+   * Alliance Challenger `TypeX_3` and this file calls it `alliance_challenger`.
+   */
+  readonly edID: number | null;
   readonly slots: readonly CatalogueSlot[];
   /** The stock loadout, as coriolis ids. `null` for a slot the stock ship leaves empty. */
   readonly defaults: readonly (string | null)[];
@@ -265,6 +272,9 @@ export function buildCatalogue(ships: readonly RawShipItem[], modules: readonly 
     shipsById.set(item.extKey, {
       id: item.extKey,
       name: item.name,
+      // A sibling of `properties`, not inside it — reading it from there silently returned undefined
+      // and left every EDSY ship match falling back to the name.
+      edID: num(data['edID']),
       slots,
       defaults,
       bulkheads,

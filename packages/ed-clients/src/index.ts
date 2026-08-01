@@ -35,3 +35,4 @@ export {
 export { decodeCoriolis, stockBuild } from './builds/coriolis.js';
 export { decodeLoadout } from './builds/journal.js';
 export { computeStats, type BuildStats } from './builds/stats.js';
+export { decodeEdsy, readEntries, type EdsySymbolLookup } from './builds/edsy.js';

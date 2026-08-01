@@ -4,8 +4,10 @@ import {
   buildCatalogue,
   computeStats,
   decodeCoriolis,
+  decodeEdsy,
   decodeLoadout,
   type BuildCatalogue,
+  type EdsySymbolLookup,
 } from '@grims/ed-clients';
 
 /**
@@ -107,24 +109,13 @@ export class ShipBuildService {
       );
     }
 
-    if (source === 'edsy') {
-      /*
-       * ★ NAMED, NOT SWALLOWED ★
-       *
-       * EDSY's structure is understood — seven comma-separated fields, five characters per module —
-       * but its module ids are its own and we have no table for them. Accepting the link and storing
-       * a hull with no modules would be worse than refusing it: it would look like a working import
-       * and teach the AI that somebody flies an empty ship.
-       */
-      throw new AppError(
-        ErrorCode.VALIDATION_FAILED,
-        'EDSY links are not readable yet — we do not have their module table. A Coriolis or ' +
-          'orbis.zone link for the same build works today.',
-      );
-    }
-
     const catalogue = await this.catalogue();
-    const result = decodeCoriolis(trimmed, catalogue);
+
+    const result =
+      source === 'edsy'
+        ? decodeEdsy(trimmed, catalogue, await this.#edsyLookup())
+        : decodeCoriolis(trimmed, catalogue);
+
     if (!result.ok) throw new AppError(ErrorCode.VALIDATION_FAILED, result.problem);
 
     return this.#store(result.build, catalogue, {
@@ -159,6 +150,41 @@ export class ShipBuildService {
       isBaseline: false,
       fromJournal: true,
     });
+  }
+
+  /**
+   * EDSY's own numbering, resolved to the game's symbols.
+   *
+   * ★ TWO KEYS, BECAUSE SHIPS AND MODULES JOIN DIFFERENTLY ★
+   *
+   * Modules join on `fdname`, the game's symbol, which is the same key the journal importer uses.
+   * Ships cannot: EDSY calls the Alliance Challenger `TypeX_3` and Coriolis calls it
+   * `alliance_challenger`, and nothing normalises one into the other. They join on Frontier's own
+   * number instead, which both files record and which agrees exactly.
+   *
+   * Loaded per import, like the catalogue. It is one small table and an import is rare.
+   */
+  async #edsyLookup(): Promise<EdsySymbolLookup> {
+    const rows = await this.db.edsyId.findMany({
+      select: { kind: true, edsyId: true, fdname: true, fdid: true },
+    });
+
+    if (rows.length === 0) {
+      throw new AppError(
+        ErrorCode.AI_OFFLINE,
+        'EDSY links cannot be read until the EDSY reference has been loaded. Try a Coriolis link, ' +
+          'or ask an officer to run the EDSY refresh.',
+      );
+    }
+
+    const byId = new Map(
+      rows.map((r) => [
+        `${r.kind}:${r.edsyId}`,
+        { fdname: r.fdname, fdid: r.fdid === null ? null : Number(r.fdid) },
+      ]),
+    );
+
+    return (kind, edsyId) => byId.get(`${kind}:${edsyId}`) ?? null;
   }
 
   async #store(
