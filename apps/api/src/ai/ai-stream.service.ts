@@ -39,6 +39,21 @@ const BACKLOG = 100;
 export class AiStreamService {
   readonly #recent: AiLogLine[] = [];
   readonly #subscribers = new Set<(line: AiLogLine) => void>();
+  /**
+   * Where every line is kept.
+   *
+   * ★ OPTIONAL, AND THE STREAM WORKS WITHOUT IT ★
+   *
+   * Set once at boot by the module. Absent, the panel behaves exactly as it always has — a ring
+   * buffer and nothing else — which is what every unit test constructs and what a deployment with
+   * no database would do. The record is an addition, never a dependency.
+   */
+  #sink: ((line: AiLogLine) => void) | null = null;
+
+  /** Called once, at boot. See `#sink`. */
+  persistTo(sink: (line: AiLogLine) => void): void {
+    this.#sink = sink;
+  }
 
   /**
    * Records a line and pushes it to anybody watching.
@@ -60,6 +75,24 @@ export class AiStreamService {
 
     this.#recent.push(entry);
     if (this.#recent.length > BACKLOG) this.#recent.shift();
+
+    /*
+     * ★ RECORDED AFTER THE BUFFER, BEFORE THE FAN-OUT, AND NEVER ALLOWED TO THROW ★
+     *
+     * Squadron owner: "record all logs so we have a record of them." The ring buffer is a hundred
+     * lines that vanish on restart; this is the part that survives.
+     *
+     * Wrapped because a log line must never be the reason something fails. The database being
+     * unreachable is exactly the sort of moment when the live panel matters most, and taking the
+     * stream down to record a message about it would be the worst possible trade.
+     */
+    if (this.#sink !== null) {
+      try {
+        this.#sink(entry);
+      } catch {
+        // Deliberately silent: reporting a failed log write through the log is a loop.
+      }
+    }
 
     for (const send of this.#subscribers) {
       /*

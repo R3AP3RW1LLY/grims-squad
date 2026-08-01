@@ -128,7 +128,35 @@ export class ModelWarmer implements OnModuleInit, OnModuleDestroy {
 @Global()
 @Module({
   providers: [
-    AiStreamService,
+    {
+      provide: AiStreamService,
+      inject: [PrismaClient],
+      /*
+       * The stream keeps its ring buffer for the live panel AND writes every line to
+       * `ai_log_lines`, so "what did the screener say at 3am on Tuesday" has an answer.
+       *
+       * Fire-and-forget: `emit` is synchronous and called from request paths, so awaiting a write
+       * would put database latency on the screening hot path to record a message about it. The
+       * catch is not optional — an unhandled rejection here would take the process down.
+       */
+      useFactory: (db: PrismaClient) => {
+        const stream = new AiStreamService();
+        stream.persistTo((line) => {
+          void db.aiLogLine
+            .create({
+              data: {
+                level: line.level,
+                kind: line.kind,
+                message: line.message.slice(0, 2_000),
+                ...(line.tookMs === undefined ? {} : { tookMs: line.tookMs }),
+                at: new Date(line.at),
+              },
+            })
+            .catch(() => undefined);
+        });
+        return stream;
+      },
+    },
     {
       provide: AiClient,
       inject: [AiStreamService],

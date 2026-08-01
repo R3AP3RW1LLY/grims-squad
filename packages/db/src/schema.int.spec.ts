@@ -108,7 +108,12 @@ describe('P0.2 database schema', () => {
     // 78 as of 2026-08-01: training_images. "Help Train the Bot" — members offering screenshots for
     // the image models. A separate row from media_uploads because an upload is a FILE and this is an
     // OFFER: which concept it teaches, what the member says is in it, and whether they still consent.
-    expect(Number(r[0]?.n)).toBe(78);
+    //
+    // 79 as of 2026-08-01: ai_log_lines. The live panel is a hundred-line ring buffer in memory,
+    // gone on restart — the owner asked for "a record of them", and "what did the screener say at
+    // 3am on Tuesday" had no answer. Deliberately NOT folded into ai_calls: half of what crosses
+    // the stream is not a call to the model.
+    expect(Number(r[0]?.n)).toBe(79);
   });
 
   describe('hand-written DDL that Prisma cannot express', () => {

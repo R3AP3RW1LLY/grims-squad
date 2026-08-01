@@ -47,8 +47,19 @@ interface LogLine {
   readonly tookMs?: number;
 }
 
-/** Enough to show a pattern without turning the panel into an archive. */
-const MAX_LINES = 200;
+/**
+ * How many lines a tab left open all evening keeps.
+ *
+ * ★ SQUADRON OWNER, 2026-08-01 ★
+ *
+ * "only keep a max of 1000 logs visible here please. but record all logs so we have a record of
+ * them."
+ *
+ * A thousand in the browser, and every line persisted server-side — see `ai_log_lines`. The two
+ * numbers answer different questions: this one is how much a reader can scroll back through before
+ * the tab starts costing memory, and the table is the record.
+ */
+const MAX_LINES = 1_000;
 
 const LEVEL_COLOUR: Record<LogLine['level'], string> = {
   info: 'text-[var(--color-text-secondary)]',
@@ -83,7 +94,16 @@ export function AiLogPanel() {
          * subscriber receives; this decides what a tab left open all evening accumulates, which is
          * otherwise unbounded browser memory.
          */
-        setLines((prev) => [...prev, line].slice(-MAX_LINES));
+        /*
+         * ★ NEWEST FIRST ★
+         *
+         * "newest logs need to be at the top and older logs need to be at the bottom."
+         *
+         * Prepended rather than appended, so the thing that just happened is the thing you are
+         * already looking at. `slice(0, MAX)` therefore drops the OLDEST — the tail — which is the
+         * correct end to lose.
+         */
+        setLines((prev) => [line, ...prev].slice(0, MAX_LINES));
       } catch {
         // A malformed line is not worth breaking the panel over.
       }
@@ -100,11 +120,15 @@ export function AiLogPanel() {
     return () => source.close();
   }, [open]);
 
-  // Follow the tail, which is the only part anybody is reading.
-  useEffect(() => {
-    const box = boxRef.current;
-    if (box !== null) box.scrollTop = box.scrollHeight;
-  }, [lines]);
+  /*
+   * ★ NO AUTO-SCROLL ANY MORE ★
+   *
+   * This used to jump to the bottom on every line, because the newest was there. With the newest at
+   * the TOP the newest line is already in view without moving anything — and scrolling somebody
+   * back to the top while they are reading history would be worse than the problem it solved.
+   *
+   * `boxRef` is kept: it is what makes the panel a scroll container rather than the page.
+   */
 
   return (
     <section className="rounded border border-[var(--color-border-hairline)] p-5">

@@ -1705,6 +1705,41 @@ model KnowledgeItem {
 ///
 /// Records FAILURES as well as successes. A source that is quietly broken looks identical to one
 /// that has never been ingested, and both look like "nothing to see" on a status page.
+/// Every line that has appeared on the live AI log (P2).
+///
+/// * SQUADRON OWNER, 2026-08-01: "record all logs so we have a record of them" *
+///
+/// * WHY A TABLE WHEN THERE IS ALREADY A STREAM *
+///
+/// `AiStreamService` is a ring buffer in memory: a hundred lines, gone on restart, and invisible to
+/// anybody who was not watching. That is the right shape for a LIVE panel and no shape at all for a
+/// record. "What did the screener say at 3am on Tuesday" had no answer.
+///
+/// * WHY NOT ai_calls *
+///
+/// That table records CALLS TO THE MODEL - prompt, verdict, duration. Half of what crosses the
+/// stream is not a call: heartbeats, ingest progress, embedding sweeps, the listener connecting.
+/// Widening ai_calls to hold them would make every row's meaning conditional on its kind.
+///
+/// Volume is small - a heartbeat every four minutes is 360 rows a day, and everything else is
+/// event-driven. A retention sweep can trim it if it ever stops being small.
+model AiLogLine {
+  id      BigInt   @id @default(autoincrement())
+  /// info | warn | error.
+  level   String
+  /// Which subsystem spoke: screen, embed, ingest, health, assistant, signature.
+  kind    String
+  message String
+  /// Milliseconds, when the line describes something that finished.
+  tookMs  Int?     @map("took_ms")
+  at      DateTime @default(now()) @db.Timestamptz(6)
+
+  /// The panel's only query: newest first, optionally filtered by kind.
+  @@index([at])
+  @@index([kind, at])
+  @@map("ai_log_lines")
+}
+
 model KnowledgeIngest {
   id     String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   source String

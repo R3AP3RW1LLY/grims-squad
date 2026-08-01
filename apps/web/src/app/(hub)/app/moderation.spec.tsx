@@ -160,7 +160,16 @@ describe('the live log', () => {
     // The server's ring buffer bounds what a NEW subscriber receives; it does nothing about a
     // browser holding every line since morning.
     expect(LOG).toMatch(/MAX_LINES/);
-    expect(LOG).toMatch(/slice\(-MAX_LINES\)/);
+    /*
+     * ★ slice(0, MAX), NOT slice(-MAX) — AND THE DIRECTION IS THE POINT ★
+     *
+     * Squadron owner, 2026-08-01: "newest logs need to be at the top". Lines are PREPENDED now, so
+     * the oldest sit at the end of the array and `slice(0, MAX)` is what discards them. The old
+     * `slice(-MAX)` would keep the tail — which, with the order reversed, means throwing away
+     * everything that just happened and keeping the oldest thousand for ever.
+     */
+    expect(LOG).toMatch(/slice\(0, MAX_LINES\)/);
+    expect(LOG).toMatch(/\[line, \.\.\.prev\]/);
   });
 
   it('closes the stream when the panel is unmounted', () => {
