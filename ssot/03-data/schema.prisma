@@ -1024,6 +1024,27 @@ model PrivacySetting {
   showActivity       Boolean             @default(true) @map("show_activity")
   showOnPublicRoster Boolean             @default(true) @map("show_on_public_roster")
   showOnLeaderboard  Boolean             @default(true) @map("show_on_leaderboard")
+
+  /// The font this member's own new posts start in. Null means the site face.
+  ///
+  /// An id from the font catalogue, never a family name - the same rule as the document marks, so
+  /// nothing a member picked can reach a `font-family` value directly.
+  defaultFontId      String?             @map("default_font_id")
+
+  /// ★ THE READER'S OVERRIDE, WHICH IS NOT THE SAME QUESTION ★
+  ///
+  /// `defaultFontId` is what THEY write in. This is what they READ in: when true, every post and
+  /// signature renders in the site face regardless of what its author chose.
+  ///
+  /// Members can pick from thirty display faces, and a forum where each post is a different one is
+  /// genuinely harder to read - worse for anybody with dyslexia or low vision, who currently have
+  /// no way out but to stop reading. An author choosing a font is expression; a reader turning
+  /// them off is accessibility, and neither should be able to overrule the other.
+  ///
+  /// Costs nothing to honour: fonts render as `doc-font-<id>` CLASSES, so this is one stylesheet
+  /// rule rather than a second render path.
+  plainFonts         Boolean             @default(false) @map("plain_fonts")
+
   updatedAt          DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)

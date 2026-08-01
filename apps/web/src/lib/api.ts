@@ -88,6 +88,8 @@ export interface PrivacySettings {
   showActivity: boolean;
   showOnPublicRoster: boolean;
   showOnLeaderboard: boolean;
+  /** Render every post and signature in the site face, whatever their author chose. */
+  plainFonts: boolean;
 }
 
 /**

@@ -52,6 +52,7 @@ const PRIVATE: PrivacySettings = {
   showActivity: false,
   showOnPublicRoster: false,
   showOnLeaderboard: false,
+      plainFonts: false,
 };
 const ROSTER_ONLY: PrivacySettings = { ...PRIVATE, showOnPublicRoster: true };
 

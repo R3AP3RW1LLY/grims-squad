@@ -792,6 +792,28 @@ body {
  *
  * Generated from ssot/04-contracts/fonts.ts; regenerate alongside `pnpm fonts:fetch`.
  */
+/*
+ * ★ THE READER'S OVERRIDE ★
+ *
+ * Squadron owner's list: "fonts default + reader override". `plainFonts` on a member's settings
+ * puts `plain-fonts` on the document root, and every author-chosen face collapses to the site one.
+ *
+ * Members can pick from thirty display faces. A thread where each post is a different one is
+ * genuinely hard to read, and for anybody with dyslexia or low vision the only way out today is to
+ * stop reading. An author choosing a font is expression; a reader switching them off is
+ * accessibility. Neither overrules the other — this is the reader's copy only.
+ *
+ * `!important` because the per-family rules below have identical specificity and come after; this
+ * has to win regardless of source order, and it is the one place in the sheet where overriding
+ * everything IS the intent.
+ *
+ * Placed before the families so the generator can keep appending to them without stepping on it.
+ */
+.plain-fonts [class*='doc-font-'],
+.plain-fonts .banner-font {
+  font-family: var(--font-body) !important;
+}
+
 .doc-font-orbitron { font-family: 'Orbitron', system-ui, -apple-system, Segoe UI, sans-serif; }
 .doc-font-michroma { font-family: 'Michroma', system-ui, -apple-system, Segoe UI, sans-serif; }
 .doc-font-audiowide { font-family: 'Audiowide', system-ui, -apple-system, Segoe UI, sans-serif; }

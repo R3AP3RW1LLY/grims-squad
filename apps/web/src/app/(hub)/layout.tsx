@@ -1,6 +1,7 @@
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { HubShell } from '../../components/hub-shell';
+import { getMyPrivacy } from '../../lib/api';
 import { UpdateBanner } from '../../components/update-banner';
 import { SecureAccountBanner } from '../../components/secure-account-banner';
 import { VerifyPromptBanner } from '../../components/verify-prompt-banner';
@@ -58,7 +59,20 @@ export default async function HubLayout({ children }: { children: React.ReactNod
     redirect(me.onboarding.path);
   }
 
+  /*
+   * ★ THE READER'S FONT OVERRIDE ★
+   *
+   * `plainFonts` is a READING setting, so it is applied here — around everything a member sees —
+   * rather than by each component that renders a post. One class, and `globals.css` collapses every
+   * author-chosen face to the site one.
+   *
+   * Fetched with the layout so it is right in the first paint: applying it after hydration would
+   * show a wall of display faces to the very person who asked not to see them.
+   */
+  const privacy = await getMyPrivacy();
+
   return (
+    <div className={privacy?.plainFonts === true ? 'plain-fonts' : undefined}>
     <HubShell me={me} current={await currentPath()}>
       {/*
         ★ HERE AS WELL AS ON THE PUBLIC SITE ★
@@ -81,6 +95,7 @@ export default async function HubLayout({ children }: { children: React.ReactNod
       <UpdateBanner />
       {children}
     </HubShell>
+    </div>
   );
 }
 

@@ -481,6 +481,7 @@ export class PrismaMembersStore implements MembersStore {
         showActivity: true,
         showOnPublicRoster: true,
         showOnLeaderboard: true,
+        plainFonts: true,
       },
     })) as Partial<PrivacySettings> | null;
   }
@@ -499,6 +500,7 @@ export class PrismaMembersStore implements MembersStore {
         showActivity: true,
         showOnPublicRoster: true,
         showOnLeaderboard: true,
+        plainFonts: true,
       },
     });
     return saved as PrivacySettings;

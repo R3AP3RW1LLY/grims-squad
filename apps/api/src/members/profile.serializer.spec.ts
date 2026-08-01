@@ -62,6 +62,7 @@ const ALL_PRIVATE: PrivacySettings = {
   showActivity: false,
   showOnPublicRoster: false,
   showOnLeaderboard: false,
+      plainFonts: false,
 };
 
 const ALL_PUBLIC: PrivacySettings = {
@@ -71,6 +72,7 @@ const ALL_PUBLIC: PrivacySettings = {
   showActivity: true,
   showOnPublicRoster: true,
   showOnLeaderboard: true,
+      plainFonts: false,
 };
 
 describe('@INV-027 private fields are ABSENT from a public profile', () => {

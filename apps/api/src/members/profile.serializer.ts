@@ -39,6 +39,17 @@ export interface PrivacySettings {
   readonly showActivity: boolean;
   readonly showOnPublicRoster: boolean;
   readonly showOnLeaderboard: boolean;
+  /**
+   * Render every post and signature in the site face, whatever their author chose.
+   *
+   * ★ A READING SETTING, NOT A PRIVACY ONE ★
+   *
+   * It sits on this record because that is where a member's own switches live and it is fetched
+   * with them — not because it hides anything. Members can pick from thirty display faces, and a
+   * thread where every post is a different one is genuinely hard to read; for anybody with dyslexia
+   * or low vision the only way out today is to stop reading.
+   */
+  readonly plainFonts: boolean;
 }
 
 /**
@@ -56,6 +67,9 @@ export const DEFAULT_PRIVACY: PrivacySettings = {
   showActivity: false,
   showOnPublicRoster: false,
   showOnLeaderboard: false,
+  // Off: an author's chosen font is shown unless a reader says otherwise. Turning them all off by
+  // default would silently discard something every member deliberately picked.
+  plainFonts: false,
 };
 
 export interface ProfileLocation {
@@ -194,6 +208,7 @@ export function resolvePrivacy(stored: Partial<PrivacySettings> | null | undefin
     showActivity: stored.showActivity === true,
     showOnPublicRoster: stored.showOnPublicRoster === true,
     showOnLeaderboard: stored.showOnLeaderboard === true,
+    plainFonts: stored.plainFonts === true,
   };
 }
 

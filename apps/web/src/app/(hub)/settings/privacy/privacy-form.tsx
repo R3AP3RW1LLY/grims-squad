@@ -59,6 +59,21 @@ const TOGGLES: readonly Toggle[] = [
     label: 'Include me on leaderboards',
     help: 'Off by default. Leaderboards are opt-in, separately from the roster.',
   },
+  {
+    /*
+     * ★ NOT A PRIVACY TOGGLE, AND IT SAYS SO ★
+     *
+     * Every other switch here controls what OTHERS see of you. This one controls what YOU see of
+     * them, and it is on this page because this is where a member's own switches live and it
+     * arrives in the same request.
+     *
+     * The help text carries that distinction, because a reading setting filed among privacy
+     * settings would otherwise read as "hide my fonts from other people".
+     */
+    key: 'plainFonts',
+    label: 'Show all posts in the site font',
+    help: 'For you only, everywhere on the site. Commanders can pick from thirty fonts for their posts and signatures; this ignores all of them and renders everything in the plain site face. It changes nothing about how your own posts look to anybody else.',
+  },
 ];
 
 export function PrivacyForm({ initial }: { initial: PrivacySettings }) {
