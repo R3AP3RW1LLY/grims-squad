@@ -26,6 +26,15 @@ import { LEADERSHIP_CEILING } from '../members/members.store.js';
 export interface DashboardData {
   /** The month everything monthly is scoped to, as `YYYY-MM`. */
   readonly month: string;
+  /**
+   * How many days this month has — 28, 29, 30 or 31.
+   *
+   * Sent rather than computed on the client, so the axis length and the data come from the same
+   * place. A client deriving it from `month` is a second implementation of leap years.
+   */
+  readonly daysInMonth: number;
+  /** Months that actually have activity, newest first, as `YYYY-MM`. Drives the history tabs. */
+  readonly availableMonths: readonly string[];
 
   readonly discord: {
     readonly messages: number;
@@ -103,11 +112,35 @@ export interface DashboardData {
 }
 
 export interface DashboardStore {
-  dashboard(now: Date): Promise<DashboardData>;
+  /**
+   * `selectedMonth` is `YYYY-MM`, or absent for the current month.
+   *
+   * Optional so every existing caller and test keeps working unchanged — the history tabs are an
+   * addition, not a new requirement on anybody who just wants today's numbers.
+   */
+  dashboard(now: Date, selectedMonth?: string): Promise<DashboardData>;
 }
 
 /** Playing-now window, matched to the roster card's so the two never disagree. */
 const PLAYING_WINDOW_MS = 5 * 60_000;
+
+/**
+ * `2026-06` -> the first of that month, UTC. Null for anything else.
+ *
+ * ★ VALIDATED, BECAUSE IT ARRIVES FROM A QUERY STRING ★
+ *
+ * It is interpolated into a date comparison, so a value that is not a month must never reach the
+ * query. Null falls back to the current month rather than erroring — a bad tab in a URL should show
+ * today, not a stack trace.
+ */
+function parseMonth(value: string | undefined): Date | null {
+  if (value === undefined || !/^\d{4}-(0[1-9]|1[0-2])$/.test(value)) return null;
+  const [year, month] = value.split('-').map(Number);
+  if (year === undefined || month === undefined) return null;
+  // Refuse anything absurd: a typo in a URL should not scan a table for the year 9999.
+  if (year < 2020 || year > 2100) return null;
+  return new Date(Date.UTC(year, month - 1, 1));
+}
 
 export class PrismaDashboardStore implements DashboardStore {
   readonly #db: PrismaClient;
@@ -116,17 +149,42 @@ export class PrismaDashboardStore implements DashboardStore {
     this.#db = db;
   }
 
-  async dashboard(now: Date): Promise<DashboardData> {
+
+  async dashboard(now: Date, selectedMonth?: string): Promise<DashboardData> {
     // UTC throughout. A month boundary read in local time would move the whole
     // dashboard by a day depending on where the server happens to run.
-    const month = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-    const nextMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+    /*
+     * ★ THE CALENDAR MONTH, WITH ITS OWN NUMBER OF DAYS — squadron owner, 2026-08-01 ★
+     *
+     * "not a 30 day window, as many days that are in the current month please!"
+     *
+     * Twenty-eight to thirty-one bars depending on the month, which is what a reader expects when
+     * the axis is dates. A fixed thirty-day window spans two months and puts a boundary in the
+     * middle of the chart with nothing marking it.
+     *
+     * ★ AND A MONTH CAN BE ASKED FOR ★
+     *
+     * "add tabs to the admin console for each month of the year so we can go back and look at
+     * history please, do this for the member activiy & promotions too."
+     *
+     * That is also the answer to the thing that started this: at 00:04 on 1 August the console was
+     * blank, because August genuinely had no data yet. It was not broken and nothing was lost —
+     * 355 rows sat in July. The fix is not to widen the window until the emptiness is hidden; it is
+     * to make July reachable, and to say plainly why a fresh month looks quiet.
+     */
+    const picked = parseMonth(selectedMonth);
+    const month = picked ?? new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const nextMonth = new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth() + 1, 1));
     const monthKey = month.toISOString().slice(0, 7);
+
+    // Day 0 of the next month is the last day of this one — 28, 29, 30 or 31 without a lookup table.
+    const daysInMonth = new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth() + 1, 0)).getUTCDate();
 
     const [
       activity,
       trackedMembers,
       guildMembers,
+      monthsWithData,
       daily,
       dailySignIns,
       events,
@@ -229,6 +287,19 @@ export class PrismaDashboardStore implements DashboardStore {
        * Still ONE query. Three separate ones over the same rows for the same window would be
        * three scans to produce three columns the first scan already had.
        */
+      /*
+       * Which months have anything in them, for the history tabs.
+       *
+       * From the DAILY table rather than a generated range: offering a tab for a month with no rows
+       * is offering a blank page, and the whole reason this exists is that a blank page is
+       * alarming. Newest first, because that is the order somebody looks.
+       */
+      this.#db.$queryRaw<Array<{ m: string }>>`
+        SELECT DISTINCT to_char(day, 'YYYY-MM') AS m
+          FROM member_activity_days
+         ORDER BY 1 DESC
+         LIMIT 24
+      `,
       this.#db.$queryRaw<
         Array<{ day: number; msgs: bigint; voice: bigint; forum: bigint; members: bigint }>
       >`
@@ -435,9 +506,8 @@ export class PrismaDashboardStore implements DashboardStore {
       }
     }
 
-    const daysInMonth = new Date(
-      Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0),
-    ).getUTCDate();
+    // Computed once above, from the SELECTED month. Recomputing it from `now` here is what made
+    // a chosen month draw the CURRENT month's number of bars — 31 slots for a 30-day June.
     const dailyArray = Array.from({ length: daysInMonth }, () => 0);
     /*
      * Zero-filled like the rest. A day with no voice activity produces no ROW, and a line that
@@ -477,6 +547,8 @@ export class PrismaDashboardStore implements DashboardStore {
 
     return {
       month: monthKey,
+      daysInMonth,
+      availableMonths: monthsWithData.map((r) => r.m),
       discord: {
         messages: sum((r) => r.messageCount),
         forumPosts: sum((r) => r.forumPostCount),

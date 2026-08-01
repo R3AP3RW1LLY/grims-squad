@@ -122,7 +122,20 @@ export function Dashboard({ data }: { data: AdminDashboard }) {
         {discord.daily.some((d) => d > 0) ? (
           <ActivityChart days={heat} monthLabel={label} />
         ) : (
-          <Empty>Nothing recorded this month yet.</Empty>
+          /*
+           * ★ SAYS WHY, AND WHERE TO LOOK ★
+           *
+           * This read "Nothing recorded this month yet", which is true and reads as a fault — the
+           * squadron owner opened the console four minutes into August and reasonably concluded the
+           * page was broken. Nothing was lost; the previous month was full and unreachable.
+           *
+           * A fresh month being quiet is the expected state for a day or two every month, so the
+           * empty state names it and points at the tabs rather than leaving somebody to guess.
+           */
+          <Empty>
+            {label} has only just started, so there is nothing charted yet. Pick an earlier month
+            above to see history — nothing has been lost.
+          </Empty>
         )}
       </Section>
 

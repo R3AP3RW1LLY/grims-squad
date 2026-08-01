@@ -378,6 +378,10 @@ export interface AdminAuditRow {
 /** Squadron-wide figures for the admin dashboard. Aggregates only, never one member's data. */
 export interface AdminDashboard {
   month: string;
+  /** 28, 29, 30 or 31 — the axis length, sent so the client is not a second leap-year implementation. */
+  daysInMonth: number;
+  /** Months that actually have activity, newest first. Drives the history tabs. */
+  availableMonths: string[];
   discord: {
     messages: number;
     forumPosts: number;
@@ -429,8 +433,10 @@ export interface AdminDashboard {
   };
 }
 
-export const getAdminDashboard = (): Promise<AdminDashboard | null> =>
-  get('/v1/admin/dashboard', { authed: true });
+export const getAdminDashboard = (month?: string): Promise<AdminDashboard | null> =>
+  get(`/v1/admin/dashboard${month === undefined ? '' : `?month=${encodeURIComponent(month)}`}`, {
+    authed: true,
+  });
 
 export const getAdminActivity = (
   month?: string,
@@ -1081,8 +1087,12 @@ async function getAdmin<T>(path: string): Promise<AdminRead<T>> {
 export const getAdminRolesGated = (): Promise<AdminRead<{ roles: AdminRoleRow[] }>> =>
   getAdmin('/v1/admin/roles');
 
-export const getAdminDashboardGated = (): Promise<AdminRead<AdminDashboard>> =>
-  getAdmin('/v1/admin/dashboard');
+export const getAdminDashboardGated = (month?: string): Promise<AdminRead<AdminDashboard>> =>
+  /*
+   * `month` is `YYYY-MM`. Encoded even though it is validated server-side: a value that reaches a
+   * URL unencoded is a value somebody will eventually put a slash in.
+   */
+  getAdmin(month === undefined ? '/v1/admin/dashboard' : `/v1/admin/dashboard?month=${encodeURIComponent(month)}`);
 
 /**
  * What GMSD AI has learned, per source.

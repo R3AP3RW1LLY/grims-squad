@@ -74,8 +74,13 @@ export class AdminController {
    * Behind the same second-factor gate as every other read on this controller.
    */
   @Get('dashboard')
-  async dashboard(): Promise<DashboardData> {
-    return this.dash.dashboard(new Date());
+  async dashboard(@Query('month') month?: string): Promise<DashboardData> {
+    /*
+     * `month` is validated in the store (parseMonth) rather than here, and anything unparseable
+     * falls back to the current month rather than erroring — a stale tab in somebody's URL should
+     * show them today, not a stack trace.
+     */
+    return this.dash.dashboard(new Date(), month);
   }
 
   @Get('activity')

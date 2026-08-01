@@ -15,6 +15,7 @@ import { AuditFilters } from './audit-filters';
 import { Dashboard } from './dashboard';
 import { PageHeader, Section, StatGrid, StatTile } from '../../../components/hub-page';
 import { PageTabs, resolveTab, type PageTab } from '../../../components/page-tabs';
+import { MonthTabs } from './month-tabs';
 import { Moderation } from './moderation';
 import { lastSeen } from './activity-freshness';
 import { LiveRefresh } from '../../../components/live-refresh';
@@ -101,6 +102,11 @@ export default async function AdminPage({
 }) {
   const params = await searchParams;
   const tab = resolveTab(TABS, params['tab']);
+  /*
+   * `YYYY-MM`, or absent for the current month. Validated server-side (parseMonth) — anything
+   * unparseable falls back to today rather than erroring, so a stale link shows a page.
+   */
+  const monthParam = typeof params['month'] === 'string' ? params['month'] : undefined;
 
   /*
    * Roles lives at its own route. Handled as a redirect rather than rendered
@@ -115,8 +121,17 @@ export default async function AdminPage({
    * a null from any admin read is that answer.
    */
   const [dashboard, activity, audit, held, aiHealth] = await Promise.all([
-    tab === 'dashboard' ? getAdminDashboard() : Promise.resolve(null),
-    tab === 'activity' ? getAdminActivity() : Promise.resolve(null),
+    /*
+     * Fetched for the ACTIVITY tab too, and only for its `availableMonths`.
+     *
+     * The month list lives in the dashboard response because that is where the activity table is
+     * summarised. Duplicating the query onto the activity endpoint would be a second place for the
+     * same list to be computed differently.
+     */
+    tab === 'dashboard' || tab === 'activity'
+      ? getAdminDashboard(monthParam)
+      : Promise.resolve(null),
+    tab === 'activity' ? getAdminActivity(monthParam) : Promise.resolve(null),
     tab === 'audit' ? getAdminAudit() : Promise.resolve(null),
     tab === 'moderation' ? getHeldPosts() : Promise.resolve(null),
     /*
@@ -148,7 +163,7 @@ export default async function AdminPage({
     (tab === 'moderation' && held === null);
 
   if (locked) {
-    const why = await getAdminDashboardGated();
+    const why = await getAdminDashboardGated(monthParam);
     if (why.state === 'forbidden') {
       return <NoAccess what="the admin console" permission="MEMBER_MANAGE" />;
     }
@@ -180,9 +195,35 @@ export default async function AdminPage({
         action={<PageTabs tabs={TABS} current={tab} basePath="/app" />}
       />
 
-      {tab === 'dashboard' && dashboard !== null && <Dashboard data={dashboard} />}
+      {tab === 'dashboard' && dashboard !== null && (
+        <>
+          <MonthTabs
+            months={dashboard.availableMonths}
+            current={dashboard.month}
+            basePath="/app"
+            tab="dashboard"
+          />
+          <Dashboard data={dashboard} />
+        </>
+      )}
 
-      {tab === 'activity' && activity !== null && <ActivityTab activity={activity} />}
+      {tab === 'activity' && activity !== null && (
+        <>
+          {/*
+            Member activity and promotion standing are BOTH monthly by nature — qualification is a
+            statement about a calendar month — so history matters here more than anywhere. The month
+            list is read from the dashboard's response when we have it, and falls back to the
+            activity response's own month so the tabs still render on a direct link.
+          */}
+          <MonthTabs
+            months={dashboard?.availableMonths ?? [activity.month]}
+            current={activity.month}
+            basePath="/app"
+            tab="activity"
+          />
+          <ActivityTab activity={activity} />
+        </>
+      )}
 
       {tab === 'audit' && audit !== null && (
         <Section
