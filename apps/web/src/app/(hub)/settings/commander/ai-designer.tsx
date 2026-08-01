@@ -230,7 +230,24 @@ export function AiDesigner({
             <input
               id={`q-${q.key}`}
               value={answers[q.key]}
-              onChange={(e) => setAnswers((a) => ({ ...a, [q.key]: e.currentTarget.value }))}
+              onChange={(e) => {
+                /*
+                 * ★ READ THE VALUE BEFORE THE UPDATER RUNS ★
+                 *
+                 * This was `setAnswers((a) => ({ ...a, [q.key]: e.currentTarget.value }))`, which
+                 * threw "Cannot read properties of null" on the first keystroke.
+                 *
+                 * React nulls `currentTarget` as soon as the handler returns — it only means
+                 * anything while the event is propagating. A functional updater is called LATER,
+                 * during render, by which time there is nothing to read. `target` survives;
+                 * `currentTarget` specifically does not.
+                 *
+                 * Capturing it here is the fix, and it is the fix rather than switching to
+                 * `e.target` because the value is what is wanted, not the element.
+                 */
+                const value = e.currentTarget.value;
+                setAnswers((a) => ({ ...a, [q.key]: value }));
+              }}
               placeholder={q.placeholder}
               maxLength={400}
               disabled={busy}

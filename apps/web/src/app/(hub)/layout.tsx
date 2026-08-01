@@ -1,11 +1,10 @@
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { HubShell } from '../../components/hub-shell';
-import { getMyPrivacy } from '../../lib/api';
 import { UpdateBanner } from '../../components/update-banner';
 import { SecureAccountBanner } from '../../components/secure-account-banner';
 import { VerifyPromptBanner } from '../../components/verify-prompt-banner';
-import { getMe } from '../../lib/api';
+import { getMe, getMyPrivacy } from '../../lib/api';
 
 /**
  * The members' area.
