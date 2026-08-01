@@ -35,6 +35,10 @@
       "types": "./dist/ai-corpus.d.ts",
       "default": "./dist/ai-corpus.js"
     },
+    "./permissions": {
+      "types": "./dist/permissions.d.ts",
+      "default": "./dist/permissions.js"
+    },
     "./tenure": {
       "types": "./dist/tenure.d.ts",
       "default": "./dist/tenure.js"

@@ -150,7 +150,7 @@ export default async function RolesPage({
             Side by side, an officer changes a mask and immediately walks the result.
           */}
           <div className="mb-6">
-            <ViewAsPicker roles={roles.roles.map((r) => ({ id: r.id, name: r.name }))} />
+            <ViewAsPicker roles={roles.roles} />
           </div>
 
           <RoleEditor groups={groups} />
