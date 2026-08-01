@@ -231,8 +231,13 @@ export function Dashboard({ data }: { data: AdminDashboard }) {
              * or too few have for a band to be anonymous. Saying which would itself leak the count.
              */
             <Empty>
-              Not enough commanders share their balance yet. Turn it on in Commander management to
-              be counted.
+              {/*
+                The sidebar's wording, exactly. This sentence tells a member where to go, so it has
+                to name the thing they will actually see in the nav — a pointer to "Commander
+                management" sends them looking for an entry that says Commander Mgmt.
+              */}
+              Not enough commanders share their balance yet. Turn it on in Commander Mgmt to be
+              counted.
             </Empty>
           )}
         </Section>

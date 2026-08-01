@@ -36,6 +36,7 @@ import {
 import { fetchHubSettings, type HubSettings } from './hub-settings.js';
 import { updateAvailable } from './update-check.js';
 import { searchForJournalDir, searchRootsFor, type SearchFs } from './journal-search.js';
+import { append as appendActivity, gameLine, linesFor, type ActivityLine } from './activity.js';
 
 /**
  * The Electron half: a window, a tray icon, and a timer.
@@ -95,6 +96,20 @@ let linkCancelled = false;
  * supply. Reported by the squadron owner, 2026-08-01.
  */
 let activeLink: { code: string; verifyUrl: string } | null = null;
+
+/**
+ * What the app has actually been doing, newest last.
+ *
+ * ★ SQUADRON OWNER, 2026-08-01: "a real time log of activity ... thats being streamed" ★
+ *
+ * The window reported totals and rates — all of them numbers, none of them saying WHAT happened.
+ * `linesFor` decides what is worth a line and, more importantly, what is not: a quiet pass produces
+ * nothing at all, so a glance at this is meaningful rather than a wall of "nothing new".
+ */
+let activity: ActivityLine[] = [];
+
+/** The last known game state, so only the TRANSITION is logged rather than the boolean. */
+let gameWasRunning = false;
 
 let lastOutcome: WatchOutcome | null = null;
 let explainedTrayOnce = false;
@@ -469,6 +484,19 @@ async function tick(): Promise<void> {
     }
 
     lastOutcome = outcome;
+
+    /*
+     * ★ THE ACTIVITY LOG ★
+     *
+     * Appended here, where the pass is finished and its outcome is final. `linesFor` returns an
+     * empty array for a pass that did nothing, so a quiet twenty seconds adds nothing at all —
+     * which is what keeps the panel worth looking at.
+     */
+    const now = Date.now();
+    const fresh = linesFor(outcome, now);
+    const transition = gameLine(gameWasRunning, outcome.gameRunning, now);
+    gameWasRunning = outcome.gameRunning;
+    activity = appendActivity(activity, transition === null ? fresh : [transition, ...fresh]);
     noteRate(outcome);
 
     /*
@@ -592,6 +620,7 @@ function state(): Record<string, unknown> {
   return {
     paired: config.deviceToken !== '',
     linking,
+    activity,
     linkCode: activeLink?.code ?? null,
     linkUrl: activeLink?.verifyUrl ?? null,
     tokenHint: redactToken(config.deviceToken),
@@ -792,7 +821,16 @@ function showWindow(): void {
   window = new BrowserWindow({
     width: 620,
     height: 700,
-    title: "Grim's Squad Hub",
+    /*
+     * ★ THE VERSION IN THE TITLE BAR — squadron owner, 2026-08-01 ★
+     *
+     * "can we add the companion app version number to the topbar of the electron app please?"
+     *
+     * From `app.getVersion()`, which reads package.json — never a string written here. A hardcoded
+     * number would go on claiming to be the current version after every release, which is exactly
+     * the question a member is answering when they look at a title bar to report a problem.
+     */
+    title: `Grim's Squad Companion — v${app.getVersion()}`,
     // The squadron badge, so the taskbar and Alt-Tab show us rather than the
     // default Electron atom — which reads as "some developer's test build".
     /*
@@ -865,6 +903,22 @@ function showWindow(): void {
 
   window.on('closed', () => {
     window = null;
+  });
+
+  /*
+   * ★ THE DOCUMENT DOES NOT GET TO NAME THE WINDOW ★
+   *
+   * `BrowserWindow({ title })` only holds until the page loads: Electron then adopts the document's
+   * own `<title>`, and index.html had one. So the version was set correctly and immediately
+   * replaced by "Grim's Squad Hub" — the title bar looked untouched and nothing was wrong with the
+   * value.
+   *
+   * Preventing the default keeps the title the one built from `app.getVersion()`, which is the
+   * whole point: a member reading their version off the title bar must be reading what is actually
+   * installed, and the HTML cannot interpolate that.
+   */
+  window.on('page-title-updated', (event) => {
+    event.preventDefault();
   });
 
   // External links open in the real browser. A member signing in to the hub

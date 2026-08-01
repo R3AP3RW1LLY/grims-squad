@@ -105,7 +105,7 @@ const NAV: readonly NavDefinition[] = [
   // ---- personal ------------------------------------------------------------
   {
     href: '/settings/commander',
-    label: 'Commander management',
+    label: 'Commander Mgmt',
     section: 'personal',
     blurb: 'Your name, verification, privacy, security and account.',
     requires: null,

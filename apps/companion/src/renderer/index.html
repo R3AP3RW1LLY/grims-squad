@@ -318,6 +318,37 @@
       }
       .login-foot .ver { color: var(--faint); font-family: var(--mono); font-size: 11px; }
       #login .err { margin-top: 16px; }
+
+      /* ------------------------------------------------------- activity log */
+      /*
+        Fixed height and scrolled, NOT growing. A panel that grows with the log pushes the settings
+        below it off the window during a busy session, and the member who wanted to change something
+        has to scroll past an hour of history to reach it.
+      */
+      .log {
+        margin-top: 12px;
+        max-height: 220px;
+        overflow-y: auto;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: var(--sunken);
+        padding: 10px 12px;
+      }
+      .log-line {
+        display: flex;
+        gap: 10px;
+        align-items: baseline;
+        padding: 3px 0;
+        font-family: var(--mono);
+        font-size: 11.5px;
+        line-height: 1.5;
+      }
+      .log-line + .log-line { border-top: 1px solid rgba(255, 113, 0, .06); }
+      .log-at { color: var(--faint); flex: 0 0 auto; font-size: 10.5px; }
+      .log-text { color: var(--text); }
+      .log-line.warn .log-text { color: #ffc400; }
+      .log-line.error .log-text { color: var(--red); }
+      #activityLog .muted { margin: 0; font-size: 12px; }
     </style>
   </head>
   <body>
@@ -526,6 +557,31 @@
     </div>
 
     <!--
+      ★ A LIVE LOG — squadron owner, 2026-08-01 ★
+
+      "a real time log of activity etc thats being streamed"
+
+      Everything above this is a NUMBER. A member watching "Events sent" tick from 4,182 to 4,190
+      learns that something happened and nothing about what — and only if they were already looking.
+      This answers "is it working right now", which is the actual question about a background agent,
+      and "what did it just send", which no total can.
+
+      Quiet passes are absent by construction, not filtered here: `linesFor` returns nothing for a
+      pass that did nothing. See activity.ts.
+    -->
+    <div class="panel" id="activityPanel">
+      <div class="row">
+        <h2 style="margin: 0">Activity</h2>
+        <span class="muted" id="activityCount"></span>
+      </div>
+      <div class="log" id="activityLog">
+        <p class="muted" id="activityEmpty">
+          Nothing yet. Entries appear here as your journals are read and sent.
+        </p>
+      </div>
+    </div>
+
+    <!--
       The sign-in controls moved to the login screen — see `#login`. What is left is the half that
       only makes sense once connected: which device this is, and how to disconnect it.
     -->
@@ -701,6 +757,50 @@
         }
       }
 
+      /**
+       * The activity log.
+       *
+       * ★ REBUILT ONLY WHEN IT CHANGED, AND PINNED TO THE BOTTOM ★
+       *
+       * `draw` runs on every state push — three times a minute — and rebuilding a two-hundred-line
+       * list each time would fight the member's scrollbar and reset any text they were selecting.
+       * The length is the cheapest honest test for "new lines arrived", because the buffer only
+       * ever grows or drops from the front.
+       *
+       * Auto-scroll follows only if they were ALREADY at the bottom. Someone reading back through
+       * the session must not be yanked to the end because a journal ticked over.
+       */
+      let drawnActivity = -1;
+      function renderActivity(s) {
+        const lines = s.activity ?? [];
+        $('activityCount').textContent = lines.length ? `${lines.length} recent` : '';
+        if (lines.length === drawnActivity) return;
+        drawnActivity = lines.length;
+
+        const box = $('activityLog');
+        const atBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 24;
+        box.replaceChildren();
+
+        if (lines.length === 0) {
+          const empty = el('p', 'muted', 'Nothing yet. Entries appear here as your journals are read and sent.');
+          box.append(empty);
+          return;
+        }
+
+        // Newest at the BOTTOM, like a terminal — this is a running record, and a log that grows
+        // upwards makes "what just happened" the hardest line to find.
+        for (const line of lines) {
+          const row = el('div', 'log-line ' + (line.level ?? 'info'));
+          row.append(el('span', 'log-at', new Date(line.at).toLocaleTimeString()));
+          // textContent throughout: these strings include an error message from the network. See
+          // the note on `el`.
+          row.append(el('span', 'log-text', line.text));
+          box.append(row);
+        }
+
+        if (atBottom) box.scrollTop = box.scrollHeight;
+      }
+
       function draw(s) {
         const running = s.running && s.enabled && s.paired;
         const failing = s.last?.error != null || s.last?.unauthorised === true;
@@ -770,6 +870,7 @@
         $('since').textContent = t.since ? `Sending from this PC since ${date(t.since)}.` : '';
 
         renderCategories(s);
+        renderActivity(s);
 
         /*
          * The version, on both views. From Electron, so it is whatever was actually installed —
