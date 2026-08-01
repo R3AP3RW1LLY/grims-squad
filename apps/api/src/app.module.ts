@@ -16,6 +16,7 @@ import { LiveModule } from './live/live.module.js';
 import { MediaModule } from './media/media.module.js';
 import { AuthGuard } from './auth/auth.guard.js';
 import { RequiresPermissionGuard } from './authz/requires-permission.guard.js';
+import { ViewAsGuard } from './authz/view-as.guard.js';
 
 @Module({
   imports: [DatabaseModule, AuthzModule, AuthModule, MembersModule, CmdrModule, AdminModule, PublicModule, TelemetryModule, MediaModule, CompanionModule, LiveModule, AiModule, ForumModule],
@@ -31,6 +32,15 @@ import { RequiresPermissionGuard } from './authz/requires-permission.guard.js';
      * case. This way the failure mode is a locked door, not an open one.
      */
     { provide: APP_GUARD, useClass: AuthGuard },
+    /*
+     * ★ BEFORE the permission guard, and after AuthGuard ★
+     *
+     * A preview refuses every write outright, so it should answer before anything works out whether
+     * the narrowed mask would have allowed one — otherwise a write inside a preview could be
+     * refused for the WRONG reason ("you do not have access") and send an officer looking at
+     * permissions rather than at the banner on their own screen.
+     */
+    { provide: APP_GUARD, useClass: ViewAsGuard },
     { provide: APP_GUARD, useClass: RequiresPermissionGuard },
   ],
 })

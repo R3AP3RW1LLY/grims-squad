@@ -88,3 +88,15 @@ export {
   type CatalogueEntry,
 } from './journal/telemetry-catalogue.js';
 export { tenureBetween, formatTenure, tenureFrom, type Tenure } from './tenure.js';
+export {
+  VIEW_AS_COOKIE,
+  VIEW_AS_MAX_AGE_SEC,
+  VIEW_AS_REFUSAL,
+  VIEW_AS_EXEMPT_PATHS,
+  PREVIEW_UNKNOWN_ROLE_MASK,
+  previewMask,
+  previewAllows,
+  isExemptFromPreview,
+  isWrite,
+  readPreviewRoleId,
+} from './view-as.js';

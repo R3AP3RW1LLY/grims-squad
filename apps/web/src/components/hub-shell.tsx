@@ -29,6 +29,7 @@ import {
   SparklesIcon,
 } from '@heroicons/react/24/outline';
 import { ChevronDownIcon } from '@heroicons/react/20/solid';
+import { ViewAsBanner } from './view-as-banner';
 import {
   NAV_STORAGE_KEY,
   openSections,
@@ -354,6 +355,18 @@ export function HubShell({
       </div>
 
       <div className="lg:pl-64">
+        {/*
+          ★ THE PREVIEW BANNER SITS ABOVE EVERYTHING ★
+
+          A rank preview makes the site behave as that rank's does — the admin section leaves the
+          sidebar, pages refuse, buttons vanish. All correct, and all exactly what somebody would
+          report as "I have lost my permissions" if nothing accounted for it.
+
+          Above the top bar rather than inside it: a preview is a state the whole page is in, not a
+          control that lives in the chrome.
+        */}
+        {me.viewingAs !== null && <ViewAsBanner roleName={me.viewingAs.name} />}
+
         {/* ------------------------------------------------------- top bar */}
         <div className="sticky top-0 z-40 flex h-[var(--nav-h)] shrink-0 items-center gap-x-4 border-b border-[var(--color-border-hairline)] bg-[color-mix(in_srgb,var(--color-surface-void)_78%,transparent)] px-4 backdrop-blur-md sm:gap-x-6 sm:px-6 lg:px-8">
           <button

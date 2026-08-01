@@ -737,6 +737,14 @@ export interface MeResponse {
   isAdmin: boolean;
   mustSecureAccount: boolean;
   /**
+   * The rank being previewed, or null.
+   *
+   * Every page renders its chrome from this response, so the banner announcing a preview comes free
+   * — and it has to, because a preview with nothing on screen saying so is indistinguishable from
+   * having lost permissions.
+   */
+  viewingAs: { id: string; name: string } | null;
+  /**
    * What they still owe. Decided by the SERVER (onboarding-gate.ts) so the
    * ordering lives in one place — two copies of a rule this fiddly drift, and
    * the symptom is a member bounced between two pages.
@@ -771,6 +779,7 @@ export const getMe = async (): Promise<MeResponse> =>
     nav: [],
     isAdmin: false,
     mustSecureAccount: false,
+    viewingAs: null,
     session: { expiresAt: null, twoFactorExpiresAt: null },
     onboarding: { step: null, path: null, promptForVerification: false, verified: false },
   };

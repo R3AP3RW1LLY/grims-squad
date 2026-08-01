@@ -5,6 +5,9 @@ import { PermissionService } from './permission.service.js';
 import { AclDbService } from './acl-db.service.js';
 import { PrismaPermissionStore, RedisPermissionCache } from './permission.store.prisma.js';
 import { RequiresPermissionGuard } from './requires-permission.guard.js';
+import { ViewAsService } from './view-as.service.js';
+import { ViewAsGuard } from './view-as.guard.js';
+import { PrismaRoleMaskStore } from './role-mask.store.prisma.js';
 import { WebmasterService, parseBootstrapIds } from './webmaster.js';
 import { PrismaWebmasterStore } from './webmaster.store.prisma.js';
 
@@ -26,6 +29,24 @@ import { PrismaWebmasterStore } from './webmaster.store.prisma.js';
         ),
     },
     RequiresPermissionGuard,
+    ViewAsGuard,
+    {
+      /*
+       * ★ THE RANK PREVIEW, AND WHY IT IS IN THE AUTHZ MODULE ★
+       *
+       * Squadron owner, 2026-08-01: officers need to see the site as another rank sees it. The nav,
+       * the permission guard and every page that asks "may I" must agree about the answer, or the
+       * preview shows one rank's sidebar over another rank's pages — which looks like the
+       * permissions themselves are broken.
+       *
+       * So it lives beside the thing it narrows, in the @Global module, and everything that needs a
+       * mask for a REQUEST goes through it.
+       */
+      provide: ViewAsService,
+      inject: [PermissionService, PrismaClient],
+      useFactory: (permissions: PermissionService, prisma: PrismaClient) =>
+        new ViewAsService(permissions, new PrismaRoleMaskStore(prisma)),
+    },
     {
       /*
        * ★ INV-002's ENFORCEMENT POINT — the thing that was missing ★
@@ -71,6 +92,13 @@ import { PrismaWebmasterStore } from './webmaster.store.prisma.js';
         }),
     },
   ],
-  exports: [AclDbService, PermissionService, RequiresPermissionGuard, WebmasterService],
+  exports: [
+    AclDbService,
+    PermissionService,
+    RequiresPermissionGuard,
+    ViewAsGuard,
+    ViewAsService,
+    WebmasterService,
+  ],
 })
 export class AuthzModule {}

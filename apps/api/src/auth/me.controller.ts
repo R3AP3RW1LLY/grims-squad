@@ -13,6 +13,7 @@ import {
 } from './onboarding-gate.js';
 import { createHash } from 'node:crypto';
 import { PermissionService } from '../authz/permission.service.js';
+import { ViewAsService } from '../authz/view-as.service.js';
 import { STEP_UP_TTL_MS } from './admin-gate.guard.js';
 import { verifyCsrf, readCsrfCookie } from '../common/csrf.js';
 import { isValidTimezone, knownTimezones, DEFAULT_TIMEZONE } from '../common/timezone.js';
@@ -53,6 +54,19 @@ export interface MeResponse {
   /** Privileged AND unenrolled — the chrome uses this to keep admin links honest. */
   mustSecureAccount: boolean;
   /**
+   * The role being previewed, or null.
+   *
+   * ★ SQUADRON OWNER, 2026-08-01 ★
+   *
+   * "a way for the webmaster and officers to visually spoof a rank and physically see what they see
+   * in the web app".
+   *
+   * Reported so the chrome can say so on every page. A preview with nothing on screen announcing it
+   * is indistinguishable from having lost permissions — which is exactly the panic the feature
+   * would otherwise cause, in the person who pressed the button.
+   */
+  viewingAs: { id: string; name: string } | null;
+  /**
    * What they still owe, decided in ONE place (onboarding-gate.ts).
    *
    * The web layout redirects on `step`; it does not re-derive the rule. Two
@@ -91,6 +105,20 @@ export class MeController {
     @Optional()
     @Inject(PermissionService)
     private readonly permissions: PermissionService | null = null,
+    /*
+     * ★ THE RANK PREVIEW HAS TO REACH THE NAV ★
+     *
+     * Squadron owner, 2026-08-01: officers need to see the site as another rank sees it. If this
+     * endpoint kept answering with the viewer's REAL mask, the sidebar would still show the admin
+     * section while every page inside it refused — which looks like the permissions are broken
+     * rather than like a preview.
+     *
+     * Optional, like the permission service beside it, so a unit test of this controller does not
+     * need the whole authz module.
+     */
+    @Optional()
+    @Inject(ViewAsService)
+    private readonly viewAs: ViewAsService | null = null,
   ) {}
 
   @Public()
@@ -103,6 +131,8 @@ export class MeController {
         nav: [],
         isAdmin: false,
         mustSecureAccount: false,
+        // Signed out: no preview can be running, and saying null is more honest than omitting it.
+        viewingAs: null,
         session: { expiresAt: null, twoFactorExpiresAt: null },
         onboarding: { step: null, path: null, promptForVerification: false, verified: false },
       };
@@ -131,13 +161,25 @@ export class MeController {
         nav: [],
         isAdmin: false,
         mustSecureAccount: false,
+        // Signed out: no preview can be running, and saying null is more honest than omitting it.
+        viewingAs: null,
         session: { expiresAt: null, twoFactorExpiresAt: null },
         onboarding: { step: null, path: null, promptForVerification: false, verified: false },
       };
     }
 
+    /*
+     * `viewAs.maskFor` when it is available, which is `effectiveMask` unless a preview is running.
+     * One source of truth for "what may this request do", shared with the permission guard.
+     */
     const mask =
-      this.permissions === null ? NO_PERMISSIONS : await this.permissions.effectiveMask(userId);
+      this.viewAs !== null
+        ? await this.viewAs.maskFor(userId, req)
+        : this.permissions === null
+          ? NO_PERMISSIONS
+          : await this.permissions.effectiveMask(userId);
+
+    const viewingAs = this.viewAs === null ? null : await this.viewAs.previewedRole(req);
 
     const privileged = requiresTwoFactor(mask);
     const enrolled = await this.#enrolled(userId);
@@ -181,6 +223,14 @@ export class MeController {
       // explain why they are being asked; it just must not link them anywhere.
       isAdmin: hasAdminArea(mask),
       mustSecureAccount: mustSecure,
+      /*
+       * ★ REPORTED SO THE BANNER CAN EXIST ★
+       *
+       * A preview with nothing on screen saying so is indistinguishable from having lost
+       * permissions — which is precisely the panic this feature would otherwise cause. Every page
+       * already reads this endpoint for its chrome, so the banner comes free.
+       */
+      viewingAs,
       session: {
         expiresAt: (await this.#sessionEndsAt(req))?.toISOString() ?? null,
         twoFactorExpiresAt:

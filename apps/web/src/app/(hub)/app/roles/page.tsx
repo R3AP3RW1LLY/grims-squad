@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { getAdminRolesGated, getAdminMappings } from '../../../../lib/api';
 import { RoleEditor } from './role-editor';
+import { ViewAsPicker } from './view-as-picker';
 import { MappingEditor } from './mapping-editor';
 import { groupRoles } from './role-groups';
 import { StepUp } from '../step-up';
@@ -141,6 +142,17 @@ export default async function RolesPage({
           title="Role permissions"
           description="Every change has to be previewed before it can be saved. A permission mask is a 70-bit number and nobody can read one — the preview lists exactly which members gain and lose what, by name, before anything is written."
         >
+          {/*
+            ★ THE PREVIEW SITS WITH THE EDITOR, NOT IN ITS OWN TAB ★
+
+            Squadron owner, 2026-08-01. The editor answers "what does this role GRANT" — a list of
+            bits. This answers "what does that actually look like", which a list of bits cannot.
+            Side by side, an officer changes a mask and immediately walks the result.
+          */}
+          <div className="mb-6">
+            <ViewAsPicker roles={roles.roles.map((r) => ({ id: r.id, name: r.name }))} />
+          </div>
+
           <RoleEditor groups={groups} />
         </Section>
       ) : (

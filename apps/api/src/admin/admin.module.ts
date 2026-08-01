@@ -4,6 +4,7 @@ import { PrismaClient } from '@grims/db';
 import { DatabaseModule } from '../database.module.js';
 import { AuthModule } from '../auth/auth.module.js';
 import { AdminController } from './admin.controller.js';
+import { ViewAsController } from './view-as.controller.js';
 import { PrismaAdminStore } from './admin.store.js';
 import { RoleAdminService } from './role-admin.service.js';
 import { MappingAdminService } from './mapping-admin.service.js';
@@ -27,7 +28,7 @@ const cache = (): Redis => new Redis(process.env['REDIS_URL'] ?? 'redis://localh
 
 @Module({
   imports: [DatabaseModule, AuthModule],
-  controllers: [AdminController],
+  controllers: [AdminController, ViewAsController],
   providers: [
     {
       provide: DASHBOARD_STORE,
