@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import {
   Dialog,
   DialogBackdrop,
@@ -29,6 +29,14 @@ import {
   SparklesIcon,
 } from '@heroicons/react/24/outline';
 import { ChevronDownIcon } from '@heroicons/react/20/solid';
+import {
+  NAV_STORAGE_KEY,
+  openSections,
+  parseStored,
+  sectionOf,
+  toggleSection,
+  type Section,
+} from './nav-sections';
 import type { MeResponse, NavItem } from '../lib/api';
 import { Avatar } from './account-menu';
 
@@ -113,6 +121,49 @@ function SidebarContents({ me, current }: { me: MeResponse; current: string }) {
     items: me.nav.filter((i) => i.section === section),
   })).filter((s) => s.items.length > 0);
 
+  /*
+   * ★ COLLAPSIBLE CATEGORIES ★
+   *
+   * Squadron owner, 2026-08-01: "make all sidebar categories collapsable, by default the only
+   * categories that should be expanded is Squadron and Administration".
+   *
+   * ★ THE DEFAULTS RENDER FIRST, THE STORED CHOICE ARRIVES AFTER ★
+   *
+   * Local storage does not exist on the server. Reading it during render would put one set of open
+   * sections in the HTML and another at hydration — React replaces the markup and logs a mismatch.
+   * So the first paint is always the defaults and the effect applies what was saved, which is one
+   * frame later and only differs for somebody who has changed it.
+   *
+   * The section holding the current page is forced open either way. See `openSections`.
+   */
+  /*
+   * ★ THE MOBILE DRAWER AND THE DESKTOP SIDEBAR ARE BOTH IN THE DOM ★
+   *
+   * One is hidden by a media query, not unmounted, so this component renders twice on every page. A
+   * literal `nav-section-admin` would therefore appear twice — invalid HTML, and `aria-controls`
+   * resolves to whichever came first, so a screen reader operating the drawer would be told about
+   * the desktop sidebar's list.
+   */
+  const uid = useId();
+  const here = sectionOf(me.nav, current);
+  const [open, setOpen] = useState<Set<Section>>(() => openSections(null, here));
+
+  useEffect(() => {
+    setOpen(openSections(parseStored(window.localStorage.getItem(NAV_STORAGE_KEY)), here));
+  }, [here]);
+
+  const toggle = (section: Section) => {
+    const next = toggleSection(open, section);
+    setOpen(openSections([...next], here));
+    // Best effort. Private browsing and a full quota both throw here, and neither is a reason to
+    // stop the sidebar from opening.
+    try {
+      window.localStorage.setItem(NAV_STORAGE_KEY, JSON.stringify([...next]));
+    } catch {
+      /* the preference is not worth an error */
+    }
+  };
+
   return (
     <div className="flex grow flex-col gap-y-5 overflow-y-auto border-r border-[var(--color-border-hairline)] bg-[color-mix(in_srgb,var(--color-surface-panel)_92%,transparent)] px-5 pb-4 backdrop-blur-md">
       <a href="/dashboard" className="flex h-[var(--nav-h)] shrink-0 items-center gap-3">
@@ -128,12 +179,43 @@ function SidebarContents({ me, current }: { me: MeResponse; current: string }) {
 
       <nav className="flex flex-1 flex-col">
         <ul role="list" className="flex flex-1 list-none flex-col gap-y-7 p-0">
-          {sections.map(({ section, items }) => (
+          {sections.map(({ section, items }) => {
+            const expanded = open.has(section);
+            const panelId = `${uid}-${section}`;
+
+            return (
             <li key={section}>
-              <div className="font-mono text-[10px] uppercase tracking-[0.28em] text-[var(--color-text-secondary)]">
-                {SECTION_LABELS[section]}
-              </div>
-              <ul role="list" className="mt-2 -mx-2 list-none space-y-1 p-0">
+              {/*
+                A button, not a heading with a click handler. It is operated by keyboard and
+                announced as expandable for free, and `aria-expanded` is the only thing telling a
+                screen reader that the links below appeared because of this control.
+              */}
+              <button
+                type="button"
+                onClick={() => toggle(section)}
+                aria-expanded={expanded}
+                aria-controls={panelId}
+                className="flex w-full items-center justify-between gap-2 rounded py-1 font-mono text-[10px] uppercase tracking-[0.28em] text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)]"
+              >
+                <span>{SECTION_LABELS[section]}</span>
+                {/*
+                  The chevron points down when open and right when closed — the direction the
+                  content is, not an abstract state. Rotated rather than swapped so it turns.
+                */}
+                <ChevronDownIcon
+                  aria-hidden="true"
+                  className={cx(
+                    'size-3.5 shrink-0 transition-transform duration-150',
+                    expanded ? 'rotate-0' : '-rotate-90',
+                  )}
+                />
+              </button>
+              <ul
+                id={panelId}
+                role="list"
+                hidden={!expanded}
+                className="mt-2 -mx-2 list-none space-y-1 p-0"
+              >
                 {items.map((item) => {
                   const Icon = ICONS[item.href] ?? HomeIcon;
                   const active = current === item.href;
@@ -157,7 +239,8 @@ function SidebarContents({ me, current }: { me: MeResponse; current: string }) {
                 })}
               </ul>
             </li>
-          ))}
+            );
+          })}
 
           {/*
             Back to the public site, pinned to the bottom.

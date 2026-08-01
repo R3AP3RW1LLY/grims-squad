@@ -278,7 +278,20 @@ function ActivityTab({
 
       <Section
         title={`Activity — ${activity.month}`}
-        description="Counts are for this calendar month only, reset at 00:00 UTC on the 1st. A month counts when there is any Discord activity AND an Elite session; qualifying rows are tinted green. Nothing is promoted before 1 August 2026, and the first live run will follow a dry run you have read."
+        /*
+          ★ SQUADRON OWNER, 2026-08-01 ★
+
+          "make this read alot better, right now it reads like a developer note ... nothing should
+          be there about a dry run or the first promotion etc."
+
+          Quite right. It opened with a reset time and a boolean, then spent its last sentence on
+          our release plan — three facts about how the system works and none about the squadron.
+
+          What an officer needs from a subtitle is what earns a month and what the colours mean.
+          Both are said plainly, in the order they will be read. The green and red are described
+          because they are the fastest thing on the page and are otherwise unexplained.
+        */
+        description="A member earns the month by talking in Discord and flying in Elite — both, not either. Green rows have earned it. Red rows have gone quiet for three months or more and are worth a message. Everything resets at midnight UTC on the 1st."
       >
         {/*
           ★ THE TABLE IS A CLIENT COMPONENT NOW ★

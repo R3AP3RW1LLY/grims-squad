@@ -14,46 +14,44 @@ import {
 } from './activity-filters';
 
 /**
- * The activity roster, with every column filterable.
+ * The activity roster.
  *
  * ★ SQUADRON OWNER, 2026-08-01 ★
  *
- * "we need to make these pages columns filterable please!" and "add a member for column that shows
- * how long a member has been in the Grim's Squad Discord server".
+ * "the table is also getting pretty squished, is there a better way to lay this out so its not
+ * getting mangled? we really want this to look freaking awesome!"
  *
- * ★ WHY THIS IS A CLIENT COMPONENT AND THE PAGE IS NOT ★
+ * It was twelve columns across 1400px with a filter control under each heading, which is two tables
+ * fighting for the same width. Every cell held one small fact and none of them had room.
  *
- * Filtering a hundred and seventeen rows that are already on the page is instant in the browser and
- * a round trip on the server. Doing it in the URL would mean a navigation per keystroke on the name
- * box — visibly worse for the one filter most likely to be typed into.
+ * ★ SEVEN COLUMNS, BECAUSE FACTS COME IN GROUPS ★
  *
- * The trade is that the rows must be handed down as a prop. They already are: the page fetches them
- * for the table it used to render itself.
+ * The twelve were never twelve independent things. A member's identity is their nickname AND their
+ * commander name AND whether they have a hub account — three columns for one answer to "who is
+ * this". Rank is their rung AND their appointment AND the rung above. Activity is three counters
+ * read together, never apart.
  *
- * ★ `now` COMES FROM THE SERVER ★
+ * Grouped, each cell gets a primary line and a quieter second line, which is how the information
+ * was actually shaped all along. Nothing was dropped: every value that was on screen before is
+ * still on screen, with room to breathe.
  *
- * Two columns are relative to the present — Last seen, and In squadron. A client component is still
- * rendered on the server first, so calling `Date.now()` during render would produce one answer in
- * the HTML and a different one at hydration, and React would replace the text and log a mismatch.
- * Taking the instant as a prop makes both renders agree. It goes stale until the next load, which
- * for "3 months" and "2 days" is not a number anybody is watching tick.
+ * ★ AND THE FILTERS MOVED OUT OF THE HEADER ★
+ *
+ * Under-the-column was the right answer when columns and filters were one to one. They no longer
+ * are — "Rank" now carries three facts and "This month" carries three counters — so a control
+ * wedged under a heading would be ambiguous as well as cramped. A labelled panel above the table
+ * says what each one filters, in words, and gives the table its full width back.
  */
 
-/** Applies the row-level styling every filter control shares. */
+/** Shared styling for every filter control. */
 const CONTROL =
-  'w-full rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel)] ' +
-  'px-2 py-1 font-mono text-[11px] text-[var(--color-text-primary)] ' +
-  'focus:border-[var(--color-brand-cyan)] focus:outline-none';
+  'w-full rounded-md border border-[var(--color-border-hairline)] bg-[var(--color-surface-void)] ' +
+  'px-2.5 py-1.5 font-mono text-xs text-[var(--color-text-primary)] ' +
+  'transition-colors hover:border-[var(--color-border-subtle)] ' +
+  'focus:border-[var(--color-border-focus)] focus:outline-none';
 
-function Num({ n, dim = false }: { n: number; dim?: boolean }) {
-  return (
-    <span
-      className={`font-mono ${n === 0 || dim ? 'text-[var(--color-text-secondary)]' : 'text-[var(--color-text-primary)]'}`}
-    >
-      {n.toLocaleString('en-GB')}
-    </span>
-  );
-}
+const FIELD_LABEL =
+  'mb-1 block font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-dim)]';
 
 /** How a commander name was proven. The tier is the point, not the tick. */
 const VERIFY_LABEL: Record<string, string> = {
@@ -73,7 +71,25 @@ const GAME_LABEL: Record<string, string> = {
   unknown: 'Not checked',
 };
 
-/** A dropdown filter under a column heading. */
+/** Elite session state, coloured by how much it can be relied on. */
+const GAME_TONE: Record<string, string> = {
+  observed: 'text-[var(--color-semantic-success)]',
+  // Amber, not green. An assumption must not look like an observation at a glance either.
+  assumed: 'text-[var(--color-semantic-warning)]',
+  absent: 'text-[var(--color-text-secondary)]',
+  unlinked: 'text-[var(--color-text-secondary)]',
+  unknown: 'text-[var(--color-text-secondary)]',
+};
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="block">
+      <span className={FIELD_LABEL}>{label}</span>
+      {children}
+    </label>
+  );
+}
+
 function Pick({
   label,
   value,
@@ -86,24 +102,20 @@ function Pick({
   options: ReadonlyArray<{ value: string; label: string }>;
 }) {
   return (
-    <select
-      aria-label={`Filter by ${label}`}
-      className={CONTROL}
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-    >
-      {/* "Any" rather than a blank. A blank first option reads as a missing value. */}
-      <option value="">Any</option>
-      {options.map((o) => (
-        <option key={o.value} value={o.value}>
-          {o.label}
-        </option>
-      ))}
-    </select>
+    <Field label={label}>
+      <select className={CONTROL} value={value} onChange={(e) => onChange(e.target.value)}>
+        {/* "Any" rather than a blank. A blank first option reads as a missing value. */}
+        <option value="">Any</option>
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+    </Field>
   );
 }
 
-/** A "minimum" filter on one of the counters. */
 function Min({
   label,
   value,
@@ -114,43 +126,77 @@ function Min({
   onChange: (v: number | null) => void;
 }) {
   return (
-    <input
-      type="number"
-      min={0}
-      inputMode="numeric"
-      aria-label={`Minimum ${label}`}
-      placeholder="min"
-      className={CONTROL}
-      value={value === null ? '' : String(value)}
-      onChange={(e) => {
-        /*
-         * An empty box is NO FILTER, not zero. Typing 0 and deleting it has to restore every row —
-         * otherwise a filter stays applied with nothing on screen to show for it, which reads as
-         * missing data rather than as a filter nobody cleared.
-         */
-        const raw = e.target.value.trim();
-        if (raw === '') return onChange(null);
-        const n = Number(raw);
-        onChange(Number.isFinite(n) && n >= 0 ? Math.floor(n) : null);
-      }}
-    />
+    <Field label={label}>
+      <input
+        type="number"
+        min={0}
+        inputMode="numeric"
+        placeholder="Any"
+        className={CONTROL}
+        value={value === null ? '' : String(value)}
+        onChange={(e) => {
+          /*
+           * An empty box is NO FILTER, not zero. Typing 0 and deleting it has to restore every row —
+           * otherwise a filter stays applied with nothing on screen to show for it, which reads as
+           * missing data rather than as a filter nobody cleared.
+           */
+          const raw = e.target.value.trim();
+          if (raw === '') return onChange(null);
+          const n = Number(raw);
+          onChange(Number.isFinite(n) && n >= 0 ? Math.floor(n) : null);
+        }}
+      />
+    </Field>
   );
 }
+
+/** One counter in the activity cell: a number over its unit. */
+function Count({ n, unit, strong = false }: { n: number; unit: string; strong?: boolean }) {
+  return (
+    <div className="text-center">
+      <div
+        className={`font-mono text-sm tabular-nums ${
+          n === 0
+            ? 'text-[var(--color-text-dim)]'
+            : strong
+              ? 'text-[var(--color-text-primary)]'
+              : 'text-[var(--color-text-secondary)]'
+        }`}
+      >
+        {n.toLocaleString('en-GB')}
+      </div>
+      <div className="font-mono text-[9px] uppercase tracking-[0.14em] text-[var(--color-text-dim)]">
+        {unit}
+      </div>
+    </div>
+  );
+}
+
+const TH =
+  'sticky top-0 z-10 bg-[var(--color-surface-panel)] py-3 pr-4 text-left font-mono text-[10px] ' +
+  'uppercase tracking-[0.2em] text-[var(--color-text-secondary)]';
 
 export function ActivityTable({
   rows,
   now,
 }: {
   rows: AdminActivityRow[];
-  /** The instant the server rendered at. See the note on hydration above. */
+  /**
+   * The instant the server rendered at.
+   *
+   * Two columns are relative to the present. A client component is still rendered on the server
+   * first, so `Date.now()` during render would put one answer in the HTML and a different one at
+   * hydration, and React would swap the text and log a mismatch. Taking the instant as a prop makes
+   * both renders agree.
+   */
   now: number;
 }) {
   const [filter, setFilter] = useState<ActivityFilter>(EMPTY_FILTER);
   const set = <K extends keyof ActivityFilter>(key: K, value: ActivityFilter[K]) =>
     setFilter((f) => ({ ...f, [key]: value }));
 
-  // Dropdown contents come from the rows, so a rank added in Discord next month appears here on its
-  // own and a rank nobody holds never clutters the list.
+  // Dropdown contents come from the rows, so a rank role added in Discord next month appears here
+  // on its own and a rank nobody holds never clutters the list.
   const ranks = useMemo(() => distinct(rows, rankLabel), [rows]);
   const games = useMemo(() => distinct(rows, (r) => r.gameActivity), [rows]);
 
@@ -159,157 +205,140 @@ export function ActivityTable({
 
   return (
     <>
-      <div className="mb-3 flex items-center justify-between gap-4 font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--color-text-secondary)]">
-        <span>
-          {filtering ? (
-            <>
-              Showing <span className="text-[var(--color-brand-cyan-bright)]">{shown.length}</span> of{' '}
-              {rows.length}
-            </>
-          ) : (
-            <>{rows.length} members</>
+      {/*
+        ★ THE FILTER PANEL ★
+
+        A labelled grid rather than a row of bare controls. Eleven filters with no labels is a
+        puzzle, and the two that need explaining most — "min" boxes and the three-state Qualifies —
+        are exactly the ones a placeholder cannot carry.
+      */}
+      <div className="mb-5 rounded-lg border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel-sunken)] p-4">
+        <div className="grid grid-cols-2 gap-x-3 gap-y-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
+          {/* Widest, and first, because it is the one most often reached for. */}
+          <div className="col-span-2">
+            <Field label="Member">
+              <input
+                type="search"
+                placeholder="Name, CMDR or Discord ID…"
+                className={CONTROL}
+                value={filter.member}
+                onChange={(e) => set('member', e.target.value)}
+              />
+            </Field>
+          </div>
+
+          <Pick
+            label="In Discord"
+            value={filter.tenure}
+            onChange={(v) => set('tenure', v as ActivityFilter['tenure'])}
+            options={[
+              { value: 'under1m', label: 'Under a month' },
+              { value: '1to6m', label: '1–6 months' },
+              { value: '6to12m', label: '6–12 months' },
+              { value: 'over1y', label: 'Over a year' },
+              { value: 'unknown', label: 'Unknown' },
+            ]}
+          />
+          <Pick
+            label="Rank"
+            value={filter.rank}
+            onChange={(v) => set('rank', v)}
+            options={ranks.map((r) => ({ value: r, label: r }))}
+          />
+          <Pick
+            label="Hub account"
+            value={filter.hub}
+            onChange={(v) => set('hub', v as ActivityFilter['hub'])}
+            options={[
+              { value: 'joined', label: 'Joined' },
+              { value: 'discord', label: 'Discord only' },
+            ]}
+          />
+          <Pick
+            label="Commander"
+            value={filter.verified}
+            onChange={(v) => set('verified', v as ActivityFilter['verified'])}
+            options={[
+              { value: 'yes', label: 'Verified' },
+              { value: 'no', label: 'Not verified' },
+            ]}
+          />
+          <Pick
+            label="Elite session"
+            value={filter.game}
+            onChange={(v) => set('game', v)}
+            options={games.map((g) => ({ value: g, label: GAME_LABEL[g] ?? g }))}
+          />
+          <Pick
+            label="Last seen"
+            value={filter.seen}
+            onChange={(v) => set('seen', v as ActivityFilter['seen'])}
+            options={[
+              { value: 'live', label: 'In voice now' },
+              { value: 'active', label: 'Active' },
+              { value: 'quiet', label: 'Gone quiet' },
+            ]}
+          />
+          <Pick
+            label="Qualifies"
+            value={filter.qualifies}
+            onChange={(v) => set('qualifies', v as ActivityFilter['qualifies'])}
+            options={[
+              { value: 'yes', label: 'Yes' },
+              { value: 'no', label: 'No' },
+              { value: 'na', label: 'Top of ladder' },
+            ]}
+          />
+          <Min label="Min messages" value={filter.minMessages} onChange={(v) => set('minMessages', v)} />
+          <Min label="Min forum" value={filter.minForum} onChange={(v) => set('minForum', v)} />
+          <Min label="Min voice" value={filter.minVoice} onChange={(v) => set('minVoice', v)} />
+        </div>
+
+        <div className="mt-4 flex items-center justify-between gap-4 border-t border-[var(--color-border-hairline)] pt-3 font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--color-text-secondary)]">
+          <span>
+            {filtering ? (
+              <>
+                <span className="text-[var(--color-brand-cyan-bright)]">{shown.length}</span> of{' '}
+                {rows.length} members
+              </>
+            ) : (
+              <>{rows.length} members</>
+            )}
+          </span>
+          {/*
+            Offered only when something is actually filtered. A permanently visible Clear invites
+            the question "is anything filtered right now?", which the count already answers.
+          */}
+          {filtering && (
+            <button
+              type="button"
+              onClick={() => setFilter(EMPTY_FILTER)}
+              className="rounded-md border border-[var(--color-border-hairline)] px-3 py-1 uppercase tracking-[0.2em] text-[var(--color-brand-cyan-bright)] transition-colors hover:border-[var(--color-brand-cyan)] hover:bg-[var(--color-surface-panel-hover)]"
+            >
+              Clear filters
+            </button>
           )}
-        </span>
-        {/*
-          Only offered when something is actually filtered. A permanently visible Clear invites the
-          question "is anything filtered right now?", which is the question the count already
-          answers.
-        */}
-        {filtering && (
-          <button
-            type="button"
-            onClick={() => setFilter(EMPTY_FILTER)}
-            className="rounded border border-[var(--color-border-hairline)] px-2 py-1 uppercase tracking-[0.2em] text-[var(--color-brand-cyan-bright)] hover:border-[var(--color-brand-cyan)]"
-          >
-            Clear filters
-          </button>
-        )}
+        </div>
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[1400px] border-collapse text-sm">
+      {/*
+        ★ THE HEADER STAYS PUT ★
+
+        A hundred and seventeen rows is well past a screen. Scrolling the headings away turns the
+        three number columns into three anonymous columns of numbers, at exactly the point somebody
+        is comparing rows far apart.
+      */}
+      <div className="overflow-x-auto rounded-lg border border-[var(--color-border-hairline)]">
+        <table className="w-full min-w-[1040px] border-collapse text-sm">
           <thead>
-            <tr className="border-b border-[var(--color-border-hairline)] text-left font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--color-text-secondary)]">
-              <th scope="col" className="py-3 pr-4">Member</th>
-              <th scope="col" className="py-3 pr-4">In squadron</th>
-              <th scope="col" className="py-3 pr-4">Hub</th>
-              <th scope="col" className="py-3 pr-4">CMDR verified</th>
-              <th scope="col" className="py-3 pr-4">Rank</th>
-              <th scope="col" className="py-3 pr-4">Working toward</th>
-              <th scope="col" className="py-3 pr-4">Messages</th>
-              <th scope="col" className="py-3 pr-4">Forum</th>
-              <th scope="col" className="py-3 pr-4">Voice</th>
-              <th scope="col" className="py-3 pr-4">Elite</th>
-              <th scope="col" className="py-3 pr-4">Last seen</th>
-              <th scope="col" className="py-3">Qualifies</th>
-            </tr>
-
-            {/*
-              ★ THE FILTERS SIT UNDER THEIR OWN COLUMNS ★
-
-              Not in a toolbar above the table. A toolbar makes the reader match a control to a
-              column by its name; a control in the column needs no matching at all, and there is
-              never a question about which column a filter applies to.
-            */}
-            <tr className="border-b border-[var(--color-border-hairline)] align-top">
-              <td className="py-2 pr-4">
-                <input
-                  type="search"
-                  aria-label="Filter by member name"
-                  placeholder="name, CMDR, id…"
-                  className={CONTROL}
-                  value={filter.member}
-                  onChange={(e) => set('member', e.target.value)}
-                />
-              </td>
-              <td className="py-2 pr-4">
-                <Pick
-                  label="time in squadron"
-                  value={filter.tenure}
-                  onChange={(v) => set('tenure', v as ActivityFilter['tenure'])}
-                  options={[
-                    { value: 'under1m', label: 'Under a month' },
-                    { value: '1to6m', label: '1–6 months' },
-                    { value: '6to12m', label: '6–12 months' },
-                    { value: 'over1y', label: 'Over a year' },
-                    { value: 'unknown', label: 'Unknown' },
-                  ]}
-                />
-              </td>
-              <td className="py-2 pr-4">
-                <Pick
-                  label="hub account"
-                  value={filter.hub}
-                  onChange={(v) => set('hub', v as ActivityFilter['hub'])}
-                  options={[
-                    { value: 'joined', label: 'Joined' },
-                    { value: 'discord', label: 'Discord only' },
-                  ]}
-                />
-              </td>
-              <td className="py-2 pr-4">
-                <Pick
-                  label="commander verification"
-                  value={filter.verified}
-                  onChange={(v) => set('verified', v as ActivityFilter['verified'])}
-                  options={[
-                    { value: 'yes', label: 'Verified' },
-                    { value: 'no', label: 'Not verified' },
-                  ]}
-                />
-              </td>
-              <td className="py-2 pr-4">
-                <Pick
-                  label="rank"
-                  value={filter.rank}
-                  onChange={(v) => set('rank', v)}
-                  options={ranks.map((r) => ({ value: r, label: r }))}
-                />
-              </td>
-              {/* Working toward is derived from Rank; filtering it as well would be two controls
-                  for one fact. */}
-              <td className="py-2 pr-4" />
-              <td className="py-2 pr-4">
-                <Min label="messages" value={filter.minMessages} onChange={(v) => set('minMessages', v)} />
-              </td>
-              <td className="py-2 pr-4">
-                <Min label="forum posts" value={filter.minForum} onChange={(v) => set('minForum', v)} />
-              </td>
-              <td className="py-2 pr-4">
-                <Min label="voice joins" value={filter.minVoice} onChange={(v) => set('minVoice', v)} />
-              </td>
-              <td className="py-2 pr-4">
-                <Pick
-                  label="Elite session"
-                  value={filter.game}
-                  onChange={(v) => set('game', v)}
-                  options={games.map((g) => ({ value: g, label: GAME_LABEL[g] ?? g }))}
-                />
-              </td>
-              <td className="py-2 pr-4">
-                <Pick
-                  label="last seen"
-                  value={filter.seen}
-                  onChange={(v) => set('seen', v as ActivityFilter['seen'])}
-                  options={[
-                    { value: 'live', label: 'In voice now' },
-                    { value: 'active', label: 'Active' },
-                    { value: 'quiet', label: 'Gone quiet' },
-                  ]}
-                />
-              </td>
-              <td className="py-2">
-                <Pick
-                  label="qualifies"
-                  value={filter.qualifies}
-                  onChange={(v) => set('qualifies', v as ActivityFilter['qualifies'])}
-                  options={[
-                    { value: 'yes', label: 'Yes' },
-                    { value: 'no', label: 'No' },
-                    { value: 'na', label: 'Top of ladder' },
-                  ]}
-                />
-              </td>
+            <tr className="border-b border-[var(--color-border-subtle)]">
+              <th scope="col" className={`${TH} pl-4`}>Member</th>
+              <th scope="col" className={TH}>In Discord</th>
+              <th scope="col" className={TH}>Rank</th>
+              <th scope="col" className={`${TH} text-center`}>This month</th>
+              <th scope="col" className={TH}>Elite</th>
+              <th scope="col" className={TH}>Last seen</th>
+              <th scope="col" className={`${TH} pr-4`}>Qualifies</th>
             </tr>
           </thead>
 
@@ -324,9 +353,9 @@ export function ActivityTable({
                   /*
                     ★ QUALIFYING ROWS ARE TINTED, NOT JUST TICKED ★
 
-                    The question this table answers is "who is due a promotion on the 1st". Scanning
-                    a Qualifies column down fifty rows to answer it is work; a tinted row answers it
-                    at a glance.
+                    The question this table answers is "who is due a promotion on the 1st".
+                    Scanning a Qualifies column down a hundred rows to answer it is work; a tinted
+                    row answers it at a glance.
 
                     ★ TWO TINTS, AND GONE-QUIET WINS ★
 
@@ -337,64 +366,96 @@ export function ActivityTable({
 
                     `seen.tone`, not `goneQuiet` directly. Somebody sitting in a voice channel must
                     never be highlighted red for having gone quiet, however old their last message
-                    is — that is the most obviously wrong thing this table could show, and it would
-                    be showing it to an officer deciding who has left the squadron.
+                    is — the most obviously wrong thing this table could show, to an officer
+                    deciding who has left the squadron.
                   */
-                  className={`border-b border-[var(--color-border-hairline)] ${
+                  className={`border-b border-[var(--color-border-hairline)] transition-colors last:border-0 ${
                     seen.tone === 'quiet'
-                      ? 'bg-[color-mix(in_srgb,var(--color-semantic-hostile)_14%,transparent)]'
+                      ? 'bg-[color-mix(in_srgb,var(--color-semantic-hostile)_12%,transparent)] hover:bg-[color-mix(in_srgb,var(--color-semantic-hostile)_20%,transparent)]'
                       : r.qualifies
-                        ? 'bg-[color-mix(in_srgb,var(--color-semantic-success)_10%,transparent)]'
-                        : ''
+                        ? 'bg-[color-mix(in_srgb,var(--color-semantic-success)_9%,transparent)] hover:bg-[color-mix(in_srgb,var(--color-semantic-success)_16%,transparent)]'
+                        : 'hover:bg-[var(--color-surface-panel-hover)]'
                   }`}
                 >
-                  <td className="py-3 pr-4 text-[var(--color-text-primary)]">
-                    {/*
-                      ★ THE SERVER NICKNAME, WHICH IS THE IN-GAME NAME ★
+                  {/*
+                    ★ WHO THIS IS, IN ONE CELL ★
 
-                      By this squadron's convention the Discord nickname is the commander name, and
-                      it is what officers recognise each other by.
+                    Nickname, commander name and hub account were three columns. They are one
+                    question — "who am I looking at" — and the answer reads better stacked than
+                    spread across a third of the table.
 
-                      The snowflake fallback is the last resort and should now be unreachable: the
-                      bot records a name from every message and reconciles anyone it has activity
-                      for but no name against, including members who have left. It stays because a
-                      deleted Discord account genuinely has no name left to show, and a number is
-                      more honest than a blank.
-                    */}
-                    {r.nick ?? r.displayName ?? r.handle ?? (
-                      <span className="font-mono text-xs text-[var(--color-text-secondary)]">
-                        {r.discordId}
-                      </span>
-                    )}
+                    The nickname leads because by this squadron's convention it IS the in-game name,
+                    and it is what officers recognise each other by.
+                  */}
+                  <td className="py-3 pl-4 pr-4">
+                    <div className="font-medium text-[var(--color-text-primary)]">
+                      {r.nick ?? r.displayName ?? r.handle ?? (
+                        /*
+                          The snowflake fallback should now be unreachable: the bot records a name
+                          from every message and reconciles anyone it has activity for but no name
+                          against, including members who have left. It stays because a deleted
+                          Discord account genuinely has no name left, and a number is more honest
+                          than a blank.
+                        */
+                        <span className="font-mono text-xs text-[var(--color-text-dim)]">
+                          {r.discordId}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[10px]">
+                      {r.cmdrName !== null ? (
+                        <span className="text-[var(--color-semantic-success)]">
+                          <span aria-hidden="true">✓ </span>
+                          CMDR {r.cmdrName}
+                          {/*
+                            HOW it was proven, not just that it was. An officer's manual say-so and
+                            a name Inara returned for the member's own API key are not the same
+                            claim, and collapsing them to a tick presents the weaker as the stronger.
+                          */}
+                          <span className="ml-1 text-[var(--color-text-dim)]">
+                            ({VERIFY_LABEL[r.verifiedVia ?? ''] ?? r.verifiedVia})
+                          </span>
+                        </span>
+                      ) : (
+                        <span className="text-[var(--color-text-dim)]">No verified CMDR</span>
+                      )}
+
+                      {/*
+                        Only shown when they have NOT signed in. An officer needs to know who cannot
+                        be chased through the site; a badge on the eighty per cent who can would be
+                        noise on every row.
+                      */}
+                      {!r.joinedWebsite && (
+                        <span className="rounded border border-[var(--color-border-hairline)] px-1.5 py-px uppercase tracking-[0.1em] text-[var(--color-text-dim)]">
+                          Discord only
+                        </span>
+                      )}
+                    </div>
                   </td>
 
                   {/*
-                    ★ HOW LONG THEY HAVE BEEN IN THE SQUADRON ★
+                    ★ HOW LONG THEY HAVE BEEN HERE ★
 
                     From Discord's join date, because nowhere else has it — Inara's commander
                     endpoint returns a squadron name and rank and no dates, there is no roster
-                    endpoint, and the game's own journal never records when you joined one.
+                    endpoint, and the game's journal never records when you joined a squadron.
 
                     Where Discord cannot say — everybody who has left, whose join date it discards —
-                    this falls back to the earliest activity we recorded and LABELS IT AS SUCH.
-                    "Joined in March" and "first seen in March" are different claims and this column
-                    must not blur them.
+                    this falls back to the earliest activity we recorded and LABELS it. "Joined in
+                    March" and "first seen in March" are different claims.
                   */}
-                  <td className="py-3 pr-4 font-mono text-xs">
+                  <td className="py-3 pr-4">
                     {tenure === null ? (
                       <span
-                        className="text-[var(--color-text-secondary)]"
-                        title="No join date from Discord and no recorded activity to fall back on."
+                        className="font-mono text-xs text-[var(--color-text-dim)]"
+                        title="No join date from Discord, and no recorded activity to fall back on."
                       >
                         Unknown
                       </span>
                     ) : (
                       <span
-                        className={
-                          tenure.source === 'joined'
-                            ? 'text-[var(--color-text-primary)]'
-                            : 'text-[var(--color-text-secondary)]'
-                        }
+                        className="font-mono text-xs text-[var(--color-text-primary)]"
                         title={
                           tenure.source === 'joined'
                             ? `Joined Discord ${new Date(tenure.at).toLocaleDateString('en-GB')}`
@@ -403,8 +464,8 @@ export function ActivityTable({
                       >
                         {tenure.label}
                         {tenure.source === 'seen' && (
-                          <span className="ml-1 text-[10px] text-[var(--color-brand-orange)]">
-                            seen
+                          <span className="ml-1.5 text-[9px] uppercase tracking-[0.1em] text-[var(--color-brand-orange)]">
+                            first seen
                           </span>
                         )}
                       </span>
@@ -412,130 +473,113 @@ export function ActivityTable({
                   </td>
 
                   {/*
-                    Has an account here, versus present in Discord only. An officer needs to know
-                    which, because someone who has never signed in cannot have linked a commander
-                    and cannot be chased through the site.
-                  */}
-                  <td className="py-3 pr-4 font-mono text-xs">
-                    {r.joinedWebsite ? (
-                      <span className="text-[var(--color-brand-cyan-bright)]">
-                        <span aria-hidden="true">✓ </span>Joined
-                      </span>
-                    ) : (
-                      <span className="text-[var(--color-text-secondary)]">Discord only</span>
-                    )}
-                  </td>
+                    ★ RANK, APPOINTMENT AND THE RUNG ABOVE ★
 
-                  {/*
-                    The commander name and HOW it was proven. Tier matters: an officer's manual
-                    say-so and a name Inara returned for the member's own API key are not the same
-                    claim, and collapsing them to a tick would present the weaker as the stronger.
+                    Three columns before, and they are one subject. The appointment sits beneath the
+                    tenure rank rather than instead of it: they are different axes, and showing only
+                    the higher made a Squadron Leader appear to be at the top of a ladder they are
+                    not on.
                   */}
-                  <td className="py-3 pr-4 font-mono text-xs">
-                    {r.cmdrName !== null ? (
-                      <span className="text-[var(--color-semantic-success)]">
-                        <span aria-hidden="true">✓ </span>
-                        {r.cmdrName}
-                        <span className="ml-2 text-[10px] text-[var(--color-text-secondary)]">
-                          {VERIFY_LABEL[r.verifiedVia ?? ''] ?? r.verifiedVia}
+                  <td className="py-3 pr-4">
+                    <div className="font-mono text-xs">
+                      {r.currentRank !== null ? (
+                        <span className="text-[var(--color-brand-cyan-bright)]">{r.currentRank}</span>
+                      ) : (
+                        /*
+                          A full member shown as "Unranked" is both wrong and unwelcoming — they are
+                          a member, they simply hold no rung yet.
+                        */
+                        <span className="text-[var(--color-text-secondary)]">
+                          {r.membershipRole ?? 'Unranked'}
                         </span>
-                      </span>
-                    ) : (
-                      <span className="text-[var(--color-text-secondary)]">Not verified</span>
+                      )}
+                    </div>
+
+                    {r.appointment !== null && (
+                      <div className="mt-0.5 font-mono text-[10px] text-[var(--color-brand-orange)]">
+                        {r.appointment}
+                      </div>
                     )}
+
+                    <div className="mt-0.5 font-mono text-[10px]">
+                      {r.nextRank !== null ? (
+                        <span
+                          className={
+                            r.qualifies
+                              ? 'text-[var(--color-semantic-success)]'
+                              : 'text-[var(--color-text-dim)]'
+                          }
+                        >
+                          <span aria-hidden="true">↑ </span>
+                          {r.nextRank}
+                        </span>
+                      ) : r.currentRank !== null ? (
+                        /*
+                          Genuinely the top of the TENURE ladder — Grand Master General, twelve
+                          qualifying months. An achievement, not missing data. Reached only when a
+                          tenure rank exists, which is what stops an appointment being labelled so.
+                        */
+                        <span className="text-[var(--color-brand-orange)]">Top of ladder</span>
+                      ) : (
+                        /*
+                          Says so rather than showing a dash: "—" reads as a rendering failure, and
+                          the real answer — nobody has given them a rank role — is actionable.
+                        */
+                        <span className="text-[var(--color-text-dim)]">No rank role</span>
+                      )}
+                    </div>
                   </td>
 
                   {/*
-                    The rank they hold, then the rung above it. Both on the member line because "is
-                    this person due a promotion" is the question this table exists to answer, and it
-                    cannot be answered by activity counts alone.
+                    ★ THE THREE COUNTERS, READ TOGETHER ★
+
+                    They were never compared across columns — they are compared to each other, on
+                    one member, to answer "what has this person actually been doing". Messages leads
+                    because it is the counter promotion turns on.
                   */}
-                  <td className="py-3 pr-4 font-mono text-xs text-[var(--color-brand-cyan-bright)]">
-                    {/*
-                      Rank, then the membership fallback, then Unranked. A full member of the
-                      squadron shown as "Unranked" is both wrong and unwelcoming — they are a
-                      member, they simply hold no rung yet.
-                    */}
-                    {r.currentRank ?? (
-                      <span className="text-[var(--color-text-secondary)]">
-                        {r.membershipRole ?? 'Unranked'}
-                      </span>
-                    )}
-                    {/*
-                      The APPOINTMENT, beneath the tenure rank rather than instead of it. They are
-                      different axes: somebody can be a Cadet by tenure and a Squadron Leader by
-                      appointment, and showing only the higher made a Squadron Leader appear to be
-                      at the top of a ladder they are not on.
-                    */}
-                    {r.appointment !== null && (
-                      <span className="mt-0.5 block text-[10px] text-[var(--color-brand-orange)]">
-                        {r.appointment}
-                      </span>
-                    )}
+                  <td className="py-3 pr-4">
+                    <div className="flex items-start justify-center gap-4">
+                      <Count n={r.messageCount} unit="msg" strong />
+                      <Count n={r.forumPostCount} unit="forum" />
+                      <Count n={r.voiceJoinCount} unit="voice" />
+                    </div>
                   </td>
 
-                  <td className="py-3 pr-4 font-mono text-xs">
-                    {r.nextRank !== null ? (
-                      <span
-                        className={
-                          r.qualifies
-                            ? 'text-[var(--color-semantic-success)]'
-                            : 'text-[var(--color-text-secondary)]'
-                        }
-                      >
-                        <span aria-hidden="true">↑ </span>
-                        {r.nextRank}
-                      </span>
-                    ) : r.currentRank !== null ? (
-                      /*
-                        Genuinely the top of the TENURE ladder — Grand Master General, twelve
-                        qualifying months. An achievement, not missing data.
-
-                        Reached only when a tenure rank exists, which is what stops a leadership
-                        appointment being labelled this way.
-                      */
-                      <span className="text-[var(--color-brand-orange)]">Top of ladder</span>
-                    ) : (
-                      /*
-                        No mapped rank in Discord. Says so rather than showing a dash: "—" reads as
-                        a rendering failure, and the real answer — nobody has given them a rank
-                        role — is something an officer can act on.
-                      */
-                      <span className="text-[var(--color-text-secondary)]">No rank role</span>
-                    )}
-                  </td>
-
-                  <td className="py-3 pr-4"><Num n={r.messageCount} /></td>
-                  <td className="py-3 pr-4"><Num n={r.forumPostCount} /></td>
-                  <td className="py-3 pr-4"><Num n={r.voiceJoinCount} /></td>
-                  <td className="py-3 pr-4 font-mono text-xs text-[var(--color-text-secondary)]">
-                    {GAME_LABEL[r.gameActivity] ?? r.gameActivity}
+                  <td className="py-3 pr-4">
+                    <span
+                      className={`font-mono text-xs ${GAME_TONE[r.gameActivity] ?? 'text-[var(--color-text-secondary)]'}`}
+                      title={
+                        r.gameActivity === 'assumed'
+                          ? 'The upstream check could not run and the month was counted anyway. An assumption, not an observation.'
+                          : undefined
+                      }
+                    >
+                      {GAME_LABEL[r.gameActivity] ?? r.gameActivity}
+                    </span>
                   </td>
 
                   {/*
                     ★ LAST SEEN IN DISCORD, NOT ON THE WEBSITE ★
 
-                    Squadron owner, 2026-07-29. Somebody can read the site every day without saying
-                    a word to anyone, and a roster of silent accounts is exactly what this column
-                    exists to surface.
+                    Somebody can read the site every day without saying a word to anyone, and a
+                    roster of silent accounts is what this column exists to surface.
 
                     ★ IN VOICE IS ITS OWN ANSWER, NOT A FRESHER TIMESTAMP ★
 
-                    Somebody in comms is HERE. This column showed them as "3 days" — true of their
-                    last message, and the wrong answer to the question the column exists for.
-
-                    A dot as well as a colour, because "live" and "quiet" are both rendered in
-                    colour and one of them must not depend on being able to tell red from cyan.
+                    Somebody in comms is HERE. This showed them as "3 days" — true of their last
+                    message, and the wrong answer to the question the column exists for. A dot as
+                    well as a colour, because "live" and "quiet" are both rendered in colour and one
+                    of them must not depend on telling red from cyan.
                   */}
-                  <td className="py-3 pr-4 font-mono text-xs">
+                  <td className="py-3 pr-4">
                     <span
-                      className={
+                      className={`font-mono text-xs ${
                         seen.tone === 'live'
                           ? 'text-[var(--color-brand-cyan-bright)]'
                           : seen.tone === 'quiet'
                             ? 'text-[var(--color-semantic-hostile-bright)]'
                             : 'text-[var(--color-text-secondary)]'
-                      }
+                      }`}
                       title={
                         seen.tone === 'live'
                           ? `In a voice channel since ${new Date(r.inVoiceSince ?? '').toLocaleString('en-GB')}`
@@ -549,30 +593,31 @@ export function ActivityTable({
                     </span>
                   </td>
 
-                  <td className="py-3 font-mono text-xs">
+                  <td className="py-3 pr-4">
                     {/*
                       ★ THREE ANSWERS, BECAUSE THERE ARE THREE ★
 
-                      Somebody at the top of the ladder cannot qualify for a promotion — there is
-                      none above them. Rendering that as "no" alongside everybody who simply has not
-                      been active would read as a failure, and it is the opposite: they have
-                      finished the ladder.
-
-                      `qualifies` is false for them by design (see admin.store). This cell says WHY,
-                      so the two read as one consistent answer rather than as a member who has
-                      somehow stopped meeting the rules.
+                      Somebody at the top of the ladder cannot qualify — there is nothing above
+                      them. Rendering that as "no" alongside everybody who simply has not been
+                      active would read as a failure, and it is the opposite: they have finished the
+                      ladder. `qualifies` is false for them by design (see admin.store); this cell
+                      says WHY, so the two read as one consistent answer.
                     */}
                     {r.qualifies ? (
-                      <span className="text-[var(--color-brand-cyan-bright)]">YES</span>
+                      <span className="inline-block rounded-md border border-[var(--color-brand-cyan)] bg-[color-mix(in_srgb,var(--color-brand-cyan)_18%,transparent)] px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--color-brand-cyan-bright)]">
+                        Yes
+                      </span>
                     ) : r.nextRank === null && r.currentRank !== null ? (
                       <span
-                        className="text-[var(--color-brand-orange)]"
+                        className="inline-block rounded-md border border-[var(--color-brand-orange-dim)] px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--color-brand-orange)]"
                         title="At the top of the tenure ladder. There is no further rank to be promoted to."
                       >
-                        n/a
+                        Top
                       </span>
                     ) : (
-                      <span className="text-[var(--color-text-secondary)]">no</span>
+                      <span className="font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-dim)]">
+                        No
+                      </span>
                     )}
                   </td>
                 </tr>
@@ -589,12 +634,13 @@ export function ActivityTable({
       )}
 
       {/*
-        A filter that matches nothing says so. An empty table under a row of controls reads as
+        A filter that matches nothing says so. An empty table under a panel of controls reads as
         broken data, and the fix — which filter to loosen — is not visible from it.
       */}
       {rows.length > 0 && shown.length === 0 && (
         <p className="mt-6 text-sm text-[var(--color-text-secondary)]">
-          No member matches these filters. <button
+          No member matches these filters.{' '}
+          <button
             type="button"
             onClick={() => setFilter(EMPTY_FILTER)}
             className="text-[var(--color-brand-cyan-bright)] underline"
