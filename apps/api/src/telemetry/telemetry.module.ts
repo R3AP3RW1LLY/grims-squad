@@ -4,6 +4,7 @@ import { DatabaseModule } from '../database.module.js';
 import { CompanionModule } from '../companion/companion.module.js';
 import { TelemetryController } from './telemetry.controller.js';
 import { PairingService } from './pairing.service.js';
+import { DeviceLinkService } from './device-link.service.js';
 import { JournalIngestService } from './journal-ingest.service.js';
 import { ConsentService } from './consent.service.js';
 import { PrismaPairingStore, PrismaIngestStore, PrismaConsentStore } from './telemetry.store.prisma.js';
@@ -23,6 +24,11 @@ import { PAIRING_SERVICE, INGEST_SERVICE, CONSENT_SERVICE } from './telemetry.to
       inject: [PrismaClient],
       useFactory: (db: PrismaClient) => new PairingService(new PrismaPairingStore(db)),
     },
+    /*
+     * Linking the companion app without anybody copying a credential. Uses the pairing service to
+     * mint, so the five-device limit and the audit entry are the same ones the old flow produced.
+     */
+    DeviceLinkService,
     {
       provide: INGEST_SERVICE,
       inject: [PrismaClient],

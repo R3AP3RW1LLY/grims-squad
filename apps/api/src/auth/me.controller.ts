@@ -116,6 +116,7 @@ export class MeController {
         avatarStoredHash: true,
         timezone: true,
         commanderOnboardedAt: true,
+        companionPromptedAt: true,
       },
     });
     if (user === null) {
@@ -146,6 +147,7 @@ export class MeController {
       privileged,
       twoFactorEnrolled: enrolled,
       commanderOnboarded: user.commanderOnboardedAt !== null,
+      companionPrompted: user.companionPromptedAt !== null,
       verified: await this.#verified(userId),
     };
     const step = nextOnboardingStep(state);
@@ -350,6 +352,34 @@ export class MeController {
       data: { timezone, commanderOnboardedAt: new Date() },
     });
     return { timezone, done: true };
+  }
+
+  /**
+   * Marks the companion step as seen.
+   *
+   * ★ SEEN, NOT INSTALLED — squadron owner, 2026-08-01: "onboarding download step" ★
+   *
+   * Called when the member moves on from the page, whether or not they connected anything. Gating
+   * this on a paired device would wall out anybody whose machine cannot run the app, and the
+   * squadron would rather have them in the forum than nowhere.
+   *
+   * Idempotent: the timestamp is only written the first time, so passing through again does not
+   * make an old member look newly onboarded in the audit trail.
+   */
+  @Post('me/onboarding/companion')
+  async companionSeen(@Req() req: FastifyRequest): Promise<{ done: true }> {
+    const userId = req.user?.userId;
+    if (userId === undefined) throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
+
+    const cookies =
+      (req as unknown as { cookies?: Record<string, string | undefined> }).cookies ?? {};
+    verifyCsrf(req.method, readCsrfCookie(cookies), req.headers['x-csrf-token'] as string | undefined);
+
+    await this.db.user.updateMany({
+      where: { id: userId, companionPromptedAt: null },
+      data: { companionPromptedAt: new Date() },
+    });
+    return { done: true };
   }
 
   /** The zones the picker offers. Read from the runtime, never a hand-kept list. */

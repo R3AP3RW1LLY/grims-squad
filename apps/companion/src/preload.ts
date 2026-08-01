@@ -26,7 +26,13 @@ contextBridge.exposeInMainWorld('companion', {
     ipcRenderer.on('state', (_event, state) => handler(state));
   },
 
-  pair: (token: string) => ipcRenderer.invoke('pair', token),
+  /*
+   * Signing in, not pasting a key. The app opens the member's own browser at our approval page and
+   * waits — see `device-link.ts`. Takes no argument because there is nothing for the member to
+   * supply: that was the whole problem with the flow it replaces.
+   */
+  signIn: () => ipcRenderer.invoke('signIn'),
+  cancelSignIn: () => ipcRenderer.invoke('cancelSignIn'),
   unpair: () => ipcRenderer.invoke('unpair'),
   setEnabled: (enabled: boolean) => ipcRenderer.invoke('setEnabled', enabled),
   setAutoStart: (autoStart: boolean) => ipcRenderer.invoke('setAutoStart', autoStart),

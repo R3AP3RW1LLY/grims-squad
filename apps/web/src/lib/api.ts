@@ -1232,3 +1232,14 @@ export const getAiConversationGated = (
   threadId: string,
 ): Promise<AdminRead<{ turns: AiConversationTurn[] }>> =>
   getAdmin(`/v1/ai/conversations/${encodeURIComponent(threadId)}`);
+
+/**
+ * What the companion app is asking for, before a member approves it.
+ *
+ * Null when the code is wrong, already used, or expired — the three are deliberately
+ * indistinguishable, because telling them apart only helps somebody working through codes.
+ */
+export const describeDeviceLink = (code: string): Promise<{ label: string } | null> =>
+  get<{ label: string | null }>(`/v1/telemetry/links/${encodeURIComponent(code)}`).then((r) =>
+    r === null || r.label === null ? null : { label: r.label },
+  );

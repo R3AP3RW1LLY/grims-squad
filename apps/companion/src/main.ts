@@ -3,7 +3,8 @@ import { readdir, readFile, stat, open } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { join } from 'node:path';
-import { homedir, platform } from 'node:os';
+import { homedir, platform, hostname } from 'node:os';
+import { startLink, awaitApproval } from './device-link.js';
 import {
   journalPathCandidates,
   noJournalsAdvice,
@@ -77,6 +78,11 @@ let tray: Tray | null = null;
 let window: BrowserWindow | null = null;
 let config: CompanionConfig;
 let timer: NodeJS.Timeout | null = null;
+/** True while a sign-in is waiting for the member to approve it in the browser. */
+let linking = false;
+/** Set by the cancel button, read by the poll loop. */
+let linkCancelled = false;
+
 let lastOutcome: WatchOutcome | null = null;
 let explainedTrayOnce = false;
 let searching = false;
@@ -572,6 +578,7 @@ function autoUpdaterQuitAndInstall(): void {
 function state(): Record<string, unknown> {
   return {
     paired: config.deviceToken !== '',
+    linking,
     tokenHint: redactToken(config.deviceToken),
     enabled: config.enabled,
     autoStart: config.autoStart,
@@ -913,19 +920,64 @@ if (!app.requestSingleInstanceLock()) {
       return state();
     });
 
-    ipcMain.handle('pair', (_e, token: unknown) => {
-      const value = typeof token === 'string' ? token.trim() : '';
-      if (!value.startsWith('gsq_')) {
-        // Checked here as well as on the server, so a mistyped paste is a
-        // sentence rather than a round trip and a 401.
-        return { ok: false, error: "That does not look like a pairing code — they start with 'gsq_'." };
+    /*
+     * ★ SIGNING IN, NOT PASTING A KEY — squadron owner, 2026-08-01 ★
+     *
+     * "COMPANION Discord login; remove key generator"
+     *
+     * This used to accept a `gsq_…` string the member had copied off the website. It now asks the
+     * server for a link, opens their REAL browser at our approval page, and waits. They sign in
+     * with Discord there — in a window with an address bar, in the session they already have — and
+     * the app collects its token over a channel authenticated by a secret it never displayed.
+     *
+     * An OAuth window inside Electron would be simpler and worse: nowhere to keep a client secret,
+     * and it teaches members to type their Discord password into whatever window asks.
+     */
+    ipcMain.handle('signIn', async () => {
+      if (linking) return { ok: false, error: 'Already waiting for you to approve it in the browser.' };
+
+      const base = apiBaseUrlFor(config, process.env);
+      // The machine's own name, so the approval page can say WHICH device is asking.
+      const label = hostname().slice(0, 60) || 'Companion app';
+
+      let started;
+      try {
+        started = await startLink(base, label);
+      } catch (e) {
+        return { ok: false, error: e instanceof Error ? e.message : 'Could not reach the squadron site.' };
       }
 
-      config = { ...config, deviceToken: value };
-      saveConfig(app.getPath('userData'), config);
-      lastOutcome = null;
-      if (config.enabled) startPolling();
-      refreshTray();
+      linking = true;
+      linkCancelled = false;
+      push();
+
+      // Their own browser, never an embedded one. See the note above.
+      void shell.openExternal(started.verifyUrl);
+
+      try {
+        const outcome = await awaitApproval(base, started, { cancelled: () => linkCancelled });
+        if (outcome.status !== 'approved') {
+          const why =
+            outcome.status === 'cancelled'
+              ? 'Sign-in cancelled.'
+              : 'That sign-in expired before it was approved. Try again.';
+          return { ok: false, error: why };
+        }
+
+        config = { ...config, deviceToken: outcome.token };
+        saveConfig(app.getPath('userData'), config);
+        lastOutcome = null;
+        if (config.enabled) startPolling();
+        refreshTray();
+        return { ok: true };
+      } finally {
+        linking = false;
+        push();
+      }
+    });
+
+    ipcMain.handle('cancelSignIn', () => {
+      linkCancelled = true;
       return { ok: true };
     });
 

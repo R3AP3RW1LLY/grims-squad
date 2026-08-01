@@ -221,14 +221,18 @@
       <h2>Pairing</h2>
       <div class="stack">
         <p class="muted" id="pairHelp">
-          Sign in on the squadron website, add this device, and paste the code it gives you. The code
-          is shown once and only lets this app send journal events — nothing else.
+          Connect this app to your squadron account. It opens your browser so you can sign in with
+          Discord — nothing to copy, and this app never sees your password. It can only send journal
+          events, nothing else.
         </p>
-        <input id="token" type="password" placeholder="gsq_…" autocomplete="off" spellcheck="false" />
         <div class="row">
-          <button id="pair">Pair this device</button>
+          <button id="signIn">Sign in with Discord</button>
           <button class="ghost" id="openHub">Open the website</button>
         </div>
+        <p class="muted" id="signInWaiting" hidden>
+          Waiting for you to approve it in the browser…
+          <button class="ghost" id="cancelSignIn">Cancel</button>
+        </p>
         <p class="err" id="pairError" hidden></p>
       </div>
       <div class="stack" id="paired" hidden>
@@ -506,13 +510,25 @@
         $('pairing').querySelector('.stack').hidden = s.paired;
         $('paired').hidden = !s.paired;
         $('hint').textContent = s.tokenHint;
+        // While waiting, the button is hidden rather than disabled: the member's next action is in
+        // the browser window that just opened, and a greyed-out button here invites clicking it.
+        $('signIn').hidden = s.linking === true;
+        $('signInWaiting').hidden = s.linking !== true;
       }
 
-      $('pair').onclick = async () => {
-        const r = await api.pair($('token').value);
+      $('signIn').onclick = async () => {
+        $('pairError').hidden = true;
+        // Rendered immediately: `signIn` does not resolve until the member approves or it times
+        // out, so waiting for it to return before showing anything leaves the panel looking dead
+        // for however long they take.
+        render({ ...(await api.getState()), linking: true });
+        const r = await api.signIn();
         $('pairError').hidden = r.ok;
         $('pairError').textContent = r.error ?? '';
-        if (r.ok) $('token').value = '';
+        render(await api.getState());
+      };
+      $('cancelSignIn').onclick = async () => {
+        await api.cancelSignIn();
         render(await api.getState());
       };
       $('unpair').onclick = async () => { await api.unpair(); render(await api.getState()); };

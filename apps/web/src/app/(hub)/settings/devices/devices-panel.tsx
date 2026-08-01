@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import type { DeviceRow } from '../../../../lib/api';
 import { formatLocal } from '../../../../lib/time';
-import { apiPost, apiDelete } from '../../../../lib/api-client';
+import { apiDelete } from '../../../../lib/api-client';
 
 /**
  * Pairing the companion app, and choosing what it may send.
@@ -32,37 +32,8 @@ export function DevicesPanel({
   timezone: string;
 }) {
   const [devices, setDevices] = useState(initialDevices);
-  const [label, setLabel] = useState('');
-  const [freshToken, setFreshToken] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  async function pair(event: React.FormEvent) {
-    event.preventDefault();
-    setBusy(true);
-    setError(null);
-    try {
-      const body = await apiPost<{ token: string; deviceId: string; label: string }>(
-        '/v1/me/devices',
-        { label },
-      );
-      setFreshToken(body.token);
-      setDevices((d) => [
-        {
-          id: body.deviceId,
-          label: body.label,
-          lastUsedAt: null,
-          createdAt: new Date().toISOString(),
-        },
-        ...d,
-      ]);
-      setLabel('');
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'That did not work.');
-    } finally {
-      setBusy(false);
-    }
-  }
 
   async function revoke(id: string) {
     setBusy(true);
@@ -101,7 +72,9 @@ export function DevicesPanel({
 
         {devices.length === 0 ? (
           <p className="mt-2 text-sm text-[var(--color-text-secondary)]">
-            No devices yet. Add one below, then paste the code into the app.
+            No devices yet. Open the companion app and choose{' '}
+            <span className="text-[var(--color-text-primary)]">Sign in with Discord</span> — it will
+            bring you back here to confirm.
           </p>
         ) : (
           <ul className="mt-4 space-y-3">
@@ -131,43 +104,34 @@ export function DevicesPanel({
           </ul>
         )}
 
-        {freshToken !== null && (
-          <div className="mt-6 rounded border border-[var(--color-brand-orange)] p-4">
-            <p className="font-mono text-[11px] uppercase tracking-[0.24em] text-[var(--color-brand-orange)]">
-              Copy this now
-            </p>
-            <p className="mt-2 text-sm text-[var(--color-text-primary)]">
-              This is the only time it is shown. We keep only a fingerprint of it, so it cannot be
-              displayed again — if you lose it, remove the device and add another.
-            </p>
-            <code className="mt-3 block break-all rounded bg-[var(--color-surface-panel-sunken)] p-3 font-mono text-sm text-[var(--color-text-primary)]">
-              {freshToken}
-            </code>
-          </div>
-        )}
+        {/*
+          ★ THE KEY GENERATOR IS GONE — squadron owner, 2026-08-01 ★
 
-        <form onSubmit={pair} className="mt-6 flex gap-3">
-          <input
-            type="text"
-            value={label}
-            onChange={(e) => setLabel(e.target.value)}
-            placeholder="desktop"
-            maxLength={60}
-            aria-label="Device name"
-            className="flex-1 rounded border border-[var(--color-border-hairline)] bg-transparent px-3 py-2 text-[var(--color-text-primary)]"
-          />
-          <button
-            type="submit"
-            disabled={busy || label.trim() === ''}
-            className="rounded border border-[var(--color-brand-cyan-bright)] px-5 py-2 font-mono text-[12px] uppercase tracking-[0.24em] text-[var(--color-brand-cyan-bright)] disabled:opacity-50"
-          >
-            Add device
-          </button>
-        </form>
-        <p className="mt-2 text-sm text-[var(--color-text-secondary)]">
-          A name is how you tell &ldquo;the laptop I sold&rdquo; from &ldquo;this desktop&rdquo; when
-          you come to remove one.
-        </p>
+          "COMPANION Discord login; remove key generator"
+
+          This used to mint a `gsq_…` token, show it once in an orange box headed "copy this now",
+          and ask the member to paste it into the app. Six steps, one of which was handling a live
+          credential by hand — and the most likely place for it to end up was a chat message asking
+          for help with the step before.
+
+          The app now starts the link itself and sends the member here to approve it, so nothing is
+          ever displayed that would be worth stealing. This panel keeps the half that is still
+          needed: seeing what is connected, and disconnecting it.
+        */}
+        <div className="mt-6 rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel)] p-4">
+          <p className="text-sm text-[var(--color-text-primary)]">
+            Devices are added from the app itself. Open the companion, choose{' '}
+            <span className="text-[var(--color-brand-cyan-bright)]">Sign in with Discord</span>, and
+            approve it in the browser window it opens.
+          </p>
+          <p className="mt-2 text-sm text-[var(--color-text-secondary)]">
+            Nothing to copy and no key to keep safe.{' '}
+            <a href="/companion" className="text-[var(--color-brand-cyan-bright)] underline underline-offset-4">
+              Get the companion app
+            </a>
+            .
+          </p>
+        </div>
 
         {error !== null && (
           <p role="alert" className="mt-4 text-sm text-[var(--color-semantic-hostile-bright)]">

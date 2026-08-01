@@ -113,7 +113,13 @@ describe('P0.2 database schema', () => {
     // gone on restart — the owner asked for "a record of them", and "what did the screener say at
     // 3am on Tuesday" had no answer. Deliberately NOT folded into ai_calls: half of what crosses
     // the stream is not a call to the model.
-    expect(Number(r[0]?.n)).toBe(79);
+    //
+    // 80 as of 2026-08-01: device_links. The companion app signs in with Discord instead of the
+    // member copying a `gsq_…` token out of the website and pasting it in. A desktop app cannot
+    // hold a client secret and has no trustworthy redirect target, so it never performs the OAuth
+    // exchange — it shows a code, the member approves it in their own browser, and the app collects
+    // the result. This table is that handshake's state, and it is short-lived by construction.
+    expect(Number(r[0]?.n)).toBe(80);
   });
 
   describe('hand-written DDL that Prisma cannot express', () => {

@@ -21,6 +21,7 @@ const base: OnboardingState = {
   privileged: false,
   twoFactorEnrolled: false,
   commanderOnboarded: false,
+  companionPrompted: true,
   verified: false,
 };
 
@@ -144,5 +145,57 @@ describe('the destinations', () => {
     for (const path of Object.values(ONBOARDING_PATHS)) {
       expect(path.startsWith('/settings') || path.startsWith('/app')).toBe(false);
     }
+  });
+});
+
+
+describe('the companion step', () => {
+  /*
+   * ★ BEFORE VERIFICATION, AND THE ORDER IS THE ARGUMENT ★
+   *
+   * Verification is an officer confirming which commander somebody is, judged on journal data the
+   * companion uploads. Asking for the app afterwards means arriving at the queue with nothing to be
+   * verified by — which is roughly what happened: six of fifty-six members had a paired device.
+   */
+  it('MANDATORY: comes after commander settings and before verification', () => {
+    const state = { ...base, commanderOnboarded: true, companionPrompted: false };
+    expect(nextOnboardingStep(state)).toBe('companion');
+  });
+
+  it('does not jump the queue ahead of commander settings', () => {
+    const state = { ...base, commanderOnboarded: false, companionPrompted: false };
+    expect(nextOnboardingStep(state)).toBe('commander');
+  });
+
+  it('does not jump ahead of two-factor for a privileged account', () => {
+    const state = {
+      ...base,
+      privileged: true,
+      twoFactorEnrolled: false,
+      commanderOnboarded: true,
+      companionPrompted: false,
+    };
+    expect(nextOnboardingStep(state)).toBe('security');
+  });
+
+  it('MANDATORY: having SEEN it is enough — it never becomes a wall', () => {
+    /*
+     * Satisfied by passing through, not by owning a device. Requiring a paired device would wall
+     * out anybody whose machine cannot run the app, and the squadron would rather have them in the
+     * forum than nowhere.
+     */
+    const state = { ...base, commanderOnboarded: true, companionPrompted: true };
+    expect(nextOnboardingStep(state)).toBe('verification');
+  });
+
+  it('lets an admin who has seen it through to nothing at all', () => {
+    const state = {
+      privileged: true,
+      twoFactorEnrolled: true,
+      commanderOnboarded: true,
+      companionPrompted: true,
+      verified: false,
+    };
+    expect(nextOnboardingStep(state)).toBeNull();
   });
 });
