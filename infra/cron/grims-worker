@@ -48,6 +48,31 @@ CRON_TZ=UTC
 # tomorrow and re-running is never redundant.
 20 6 * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/embed.js >> /var/log/grims-worker.log 2>&1
 
+# ── Monthly promotions ───────────────────────────────────────────────────────
+#
+# ★ THIS WAS NEVER SCHEDULED — found 2026-08-01 ★
+#
+# The engine was written, tested, and had a `promote.js` in the deployed image. Nothing ever ran it.
+# Asked "did the auto promotions work on production", the answer was no, and the reason was that
+# there was no cron entry for it anywhere — the word "promote" appeared in this file exactly once,
+# inside a comment about something else.
+#
+# ★ WHY THE 1st, AND WHY 07:00 ★
+#
+# Qualification is a statement about a COMPLETED calendar month, so the earliest it can be answered
+# for July is the 1st of August. 07:00 UTC puts it after the nightly ingests and the role sync, so
+# it acts on a reconciled roster rather than on yesterday's.
+#
+# ★ --live AND --post ★
+#
+# Without --live it is a dry run that writes nothing, which is the safe default everywhere else and
+# would be a silent no-op here. --post sends the result to the admin channel, because a promotion
+# nobody is told about is a promotion nobody acts on.
+#
+# The squadron owner's instruction was "DO NOT START ASSIGNING PROMOTIONS UNTIL AUGUST 1ST 2026".
+# That date has passed; this is the automation it was gating.
+0 7 1 * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/promote.js --live --post >> /var/log/grims-worker.log 2>&1
+
 # Nightly reputation: experience for days flown, and badges for the totals that adds to.
 #
 # Votes and accepted answers award experience at the moment they happen — they are events. These
