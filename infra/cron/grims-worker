@@ -118,3 +118,8 @@ CRON_TZ=UTC
 # It makes no Inara requests of its own — see the job's own note on why that is the batching, not a
 # shortcut around it.
 50 5 * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/ingest-knowledge.js inara >> /var/log/grims-worker.log 2>&1
+
+# Orphaned media: uploads nothing points at any more — a member who picked a second AI signature
+# design, replaced a banner, or abandoned an upload. Idempotent and biased towards keeping, so a
+# nightly run is a tidy-up rather than a risk. See sweep-orphan-media.ts.
+40 4 * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/sweep-orphan-media.js >> /var/log/grims-worker.log 2>&1

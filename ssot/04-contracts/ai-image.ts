@@ -222,9 +222,18 @@ export interface ImageResult {
  * refused. The squadron owner saw no artwork, no progress and no GPU activity, and the reason was a
  * limit doing exactly what it was told.
  *
- * Twenty calls an hour is about 82 seconds of GPU at the measured rate — comfortably under the ~450
- * seconds the old limit was *intended* to permit. The card is protected by a smaller number than
- * before, because the number is now based on what the work actually costs.
+ * ★ RAISED AGAIN, SAME DAY, BECAUSE TWENTY WAS STILL TOO MEAN ★
+ *
+ * Twenty allowed four presses of the AI designer an hour, and the owner hit the wall while simply
+ * trying the feature: "we cant limit to like 8 images on a signature people may want to run this a
+ * few times."
+ *
+ * Right — a member designing a signature does not get it on the first attempt, and a limit that
+ * assumes they will is a limit that only ever fires on somebody using the feature properly.
+ *
+ * Sixty calls is twelve presses, or about four minutes of GPU an hour per member. That is still
+ * well inside the ~450 seconds the original limit meant to allow, because the original was priced
+ * at seven times the real cost.
  *
  * ★ WHY IT IS STILL TIGHTER THAN THE ASSISTANT'S LIMIT ★
  *
@@ -237,9 +246,14 @@ export interface ImageResult {
  */
 export const IMAGE_RATE_LIMITS = {
   /** Calls (not images) per signed-in member per hour. One AI-designer press is five. */
-  memberPerHour: 20,
-  /** Across everybody. A backstop against the squadron collectively occupying the machine. */
-  globalPerHour: 120,
+  memberPerHour: 60,
+  /**
+   * Across everybody. A backstop against the squadron collectively occupying the machine.
+   *
+   * 240 is about sixteen minutes of GPU an hour at the measured rate — a real ceiling on a card
+   * that also serves post screening, embeddings and, most evenings, Elite Dangerous.
+   */
+  globalPerHour: 240,
 } as const;
 
 /**
