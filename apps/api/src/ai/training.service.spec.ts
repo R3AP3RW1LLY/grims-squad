@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import type { PrismaClient } from '@grims/db';
-import { KNOWLEDGE_SOURCES } from '@grims/shared';
+import { KNOWLEDGE_SOURCES, REFRESH_HOURS } from '@grims/shared';
 import { TrainingStatusService } from './training.service.js';
 
 /**
@@ -71,18 +71,32 @@ describe('every source is accounted for', () => {
 
 describe('the next cycle', () => {
   it('reports hours remaining from the last finish', async () => {
-    // galaxy refreshes every 24h; it finished 5h ago, so 19h remain.
+    /*
+     * ★ DERIVED FROM THE CONTRACT, NOT WRITTEN DOWN ★
+     *
+     * This used to say "galaxy refreshes every 24h; it finished 5h ago, so 19h remain" with a
+     * hard-coded 19. On 2026-08-01 the squadron owner moved galaxy to hourly and the test failed on
+     * a change that was entirely correct — the arithmetic was right and the constant had moved.
+     *
+     * A test that has to be edited every time a cadence changes teaches people to edit it without
+     * reading it. Taking the cadence from `REFRESH_HOURS` tests the CALCULATION, which is the part
+     * that could actually be wrong.
+     */
+    const finishedHoursAgo = 0.5;
+    const finishedAt = new Date(NOW.getTime() - finishedHoursAgo * 3_600_000);
+
     const svc = new TrainingStatusService(
       fakeDb(
         [{ source: 'galaxy', n: 448_893n }],
-        [{ source: 'galaxy', last_at: new Date('2026-08-01T07:00:00Z'), error: null, started_at: null }],
+        [{ source: 'galaxy', last_at: finishedAt, error: null, started_at: null }],
       ),
     );
 
     const galaxy = (await svc.status(NOW)).find((r) => r.source === 'galaxy');
 
     expect(galaxy?.rows).toBe(448_893);
-    expect(galaxy?.nextInHours).toBe(19);
+    // Not rounded: the service reports the real remainder, and the page formats it.
+    expect(galaxy?.nextInHours).toBe(REFRESH_HOURS.galaxy - finishedHoursAgo);
   });
 
   it('reports overdue as NEGATIVE rather than clamping it to zero', async () => {

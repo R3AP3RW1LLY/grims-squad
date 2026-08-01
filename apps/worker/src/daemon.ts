@@ -4,6 +4,7 @@ import { dirname, join } from 'node:path';
 import { Client } from 'pg';
 import { PrismaClient } from '@grims/db';
 import { JOB_REQUEST_CHANNEL } from '@grims/shared';
+import { dueSources, lastRuns, TICK_MS } from './scheduler.js';
 import { announce } from './jobs/job-log.js';
 
 /**
@@ -257,6 +258,36 @@ async function listenForever(db: PrismaClient, url: string): Promise<void> {
   }
 }
 
+/**
+ * Starts anything that is due, once a minute.
+ *
+ * ★ NOT AWAITED PER SOURCE ★
+ *
+ * The galaxy stream runs for roughly two hours. Awaiting it inside the tick would stop every other
+ * source being considered for that whole time — so each is started and left to run, and `run`'s
+ * advisory lock is what stops a second copy of the same source ever starting.
+ *
+ * A failure inside one source is logged by `run` itself and must not stop the loop: the next tick
+ * is a minute away and one broken source is not a reason to stall the other five.
+ */
+function startScheduler(db: PrismaClient): void {
+  const tick = async (): Promise<void> => {
+    try {
+      const due = dueSources(await lastRuns(db), Date.now());
+      for (const source of due) {
+        void run(db, source).catch(() => undefined);
+      }
+    } catch (e) {
+      console.error(`daemon: scheduler tick failed (${e instanceof Error ? e.message : String(e)})`);
+    }
+  };
+
+  // Once at startup as well as on the interval: a worker that has just been restarted after being
+  // down for a day should not wait another minute before catching up.
+  void tick();
+  setInterval(() => void tick(), TICK_MS);
+}
+
 async function main(): Promise<void> {
   const url = process.env['DATABASE_URL'];
   if (url === undefined || url === '') {
@@ -275,9 +306,30 @@ async function main(): Promise<void> {
   }
 
   const db = new PrismaClient();
+
+  /*
+   * ★ THE SCHEDULE LIVES HERE NOW — SQUADRON OWNER, 2026-08-01 ★
+   *
+   * "this is a non-negotiable! these are clearly not triggering as we have overdue on them!"
+   *
+   * They were not, and the cadences were not the reason: NOTHING SCHEDULED THEM. The entire
+   * schedule lived in `infra/cron/grims-worker`, a crontab that has to be installed on the host by
+   * hand — never installed in production, and absent entirely on a developer's machine. This daemon
+   * listened for on-demand requests and did nothing on its own.
+   *
+   * There was even a test reading that crontab and asserting every source appeared in it often
+   * enough. It passed the whole time. It proved the FILE said the right thing, which was true and
+   * unrelated to whether anything ran.
+   *
+   * So the schedule moved into the process that does the work, driven by the same `REFRESH_HOURS`
+   * the training page reports from. One number, one place, no installation step, and "due to run"
+   * and "overdue" can no longer disagree.
+   */
+  startScheduler(db);
+
   /*
    * Never returns. The subscription and the reconnect loop live in there, and this process exists
-   * to wait — no timer, no poll, nothing else to go wrong.
+   * to wait.
    */
   await listenForever(db, url);
 }

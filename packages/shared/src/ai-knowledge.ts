@@ -173,8 +173,19 @@ export const EMBED_CONCURRENCY = 8;
  * Squadron owner asked the training page to show when the next cycle runs. These are those numbers,
  * and each follows from how fast the underlying thing actually changes:
  */
+/**
+ * ★ RESET BY THE SQUADRON OWNER, 2026-08-01 ★
+ *
+ * "these need to run automatically every 30 minutes ... these need to run every hour automatically
+ * ... this stays as it currently is [live markets] ... this is a non-negotiable! these are clearly
+ * not triggering as we have overdue on them!"
+ *
+ * They were not triggering, and the cadences were not the reason — see the note in `daemon.ts`.
+ * Nothing scheduled them at all. These are the intervals asked for, and the worker now enforces
+ * them itself rather than depending on a crontab that has to be installed by hand.
+ */
 export const REFRESH_HOURS: Record<KnowledgeSource, number> = {
-  /** Continuous — it arrives as members fly. The number is nominal. */
+  /** Hourly. Members fly constantly and their logs are the most trusted thing we hold. */
   journal: 1,
   /*
    * ★ THREE HOURS — squadron owner, 2026-08-01 ★
@@ -189,9 +200,15 @@ export const REFRESH_HOURS: Record<KnowledgeSource, number> = {
    * Affordable because the job asks GitHub for one commit id and stops when it matches — a single
    * small request, eight times a day. It downloads only when upstream actually moved.
    */
-  coriolis: 3,
-  /** Spansh rebuilds nightly; systems do not move. */
-  galaxy: 24,
+  coriolis: 1,
+  /**
+   * Hourly, by instruction.
+   *
+   * Spansh itself rebuilds nightly, so most runs find nothing new — but the job is incremental and
+   * a run with nothing to do is cheap, while the alternative is a window in which a newly visited
+   * system is unknown to the assistant for most of a day.
+   */
+  galaxy: 1,
   /*
    * ★ NOT A SCHEDULE — A DEADLINE ★
    *
@@ -204,12 +221,12 @@ export const REFRESH_HOURS: Record<KnowledgeSource, number> = {
    * notice, because a dead subscriber looks exactly like a quiet one.
    */
   eddn: 1,
-  /** Our own roster. Daily, batched — see the Inara job. */
-  inara: 24,
-  /** Wiki edits are slow and rarely urgent. */
-  reference: 168,
-  /** Our forum. Daily is plenty; an accepted answer is not time-critical. */
-  forum: 24,
+  /** Every half hour. Ranks change and the roster is what the promotion cycle reads. */
+  inara: 0.5,
+  /** Every half hour. Our own guides are edited by officers who expect to see the effect. */
+  reference: 0.5,
+  /** Every half hour. An accepted answer should be usable by the assistant the same session. */
+  forum: 0.5,
 };
 
 /** What the training page shows for one source. */

@@ -3164,3 +3164,28 @@ model ShipBuild {
   @@index([submittedById])
   @@map("ship_builds")
 }
+
+/// EDSY's own module and ship numbering, mapped to the game's symbols.
+///
+/// An EDSY build link encodes each module as a three-character base-64 id in EDSY's own numbering —
+/// `FBG` is 62160 is `Hpt_PulseLaser_Fixed_Small`. Nothing in Frontier's data or Coriolis's carries
+/// that numbering, so without this table an EDSY link cannot be read at all.
+///
+/// `fdname` is the game's own symbol, which is the key the journal importer already joins on. So
+/// this is the single hop EDSY needs, and everything downstream is unchanged.
+///
+/// Extracted from `eddb.js` in taleden/EDSY and refreshed on a schedule, the same way coriolis-data
+/// is. Only the id-to-symbol mapping is taken — none of EDSY's code and none of its statistics,
+/// which we already hold from Coriolis. taleden's work is CC BY-NC 4.0; this hub is non-commercial
+/// and attributes it on the import page.
+model EdsyId {
+  /// `ship` or `module` — EDSY numbers them separately and a link uses both.
+  kind     String
+  edsyId   Int      @map("edsy_id")
+  /// The game's symbol, e.g. `Int_Hyperdrive_Size5_Class1`.
+  fdname   String
+  syncedAt DateTime @default(now()) @map("synced_at") @db.Timestamptz(6)
+
+  @@id([kind, edsyId])
+  @@map("edsy_ids")
+}

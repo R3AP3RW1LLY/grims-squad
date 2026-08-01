@@ -105,7 +105,6 @@ CRON_TZ=UTC
 # nightly. 03:20 UTC — off-peak, and BEFORE the 04:17 janitor so a long import is never competing
 # with a prune for disk. The galaxy import also rebuilds market_entries when it finishes, so the
 # route table can never disagree with the stations it was derived from.
-20 3 * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/ingest-knowledge.js galaxy >> /var/log/grims-worker.log 2>&1
 
 # Coriolis, EVERY THREE HOURS — not daily with the galaxy.
 #
@@ -120,7 +119,6 @@ CRON_TZ=UTC
 # matches: a few hundred bytes, eight times a day, downloading only when upstream actually moved.
 #
 # Offset by 20 minutes from the hour so it never starts alongside the galaxy import or the janitor.
-20 */3 * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/ingest-knowledge.js coriolis >> /var/log/grims-worker.log 2>&1
 
 # Journal, forum and reference knowledge.
 #
@@ -137,8 +135,6 @@ CRON_TZ=UTC
 # Journal hourly (REFRESH_HOURS 1): it reads members' already-uploaded telemetry, so it is a
 # database pass rather than a network one. Forum and reference daily, matching their own cadences —
 # an accepted answer is not time-critical and a guide changes when somebody writes one.
-7 * * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/ingest-knowledge.js journal >> /var/log/grims-worker.log 2>&1
-35 4 * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/ingest-knowledge.js forum reference >> /var/log/grims-worker.log 2>&1
 
 # Roster knowledge, from the Inara profile cache. ON ITS OWN — squadron owner, 2026-07-31: "the
 # ingestion for ML from inara, that one must be batched and run on its own."
@@ -150,9 +146,26 @@ CRON_TZ=UTC
 #
 # It makes no Inara requests of its own — see the job's own note on why that is the batching, not a
 # shortcut around it.
-50 5 * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/ingest-knowledge.js inara >> /var/log/grims-worker.log 2>&1
 
 # Orphaned media: uploads nothing points at any more — a member who picked a second AI signature
 # design, replaced a banner, or abandoned an upload. Idempotent and biased towards keeping, so a
 # nightly run is a tidy-up rather than a risk. See sweep-orphan-media.ts.
 40 4 * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/sweep-orphan-media.js >> /var/log/grims-worker.log 2>&1
+
+# ★ THE INGESTS ARE NOT SCHEDULED HERE ANY MORE — 2026-08-01 ★
+#
+# They used to be, and they never ran. This file has to be installed on the host by hand, it was not
+# installed in production, and it does not exist at all on a developer's machine — so every source
+# sat at whatever a human had last triggered, and the training page correctly showed all of them
+# overdue. Reported by the squadron owner as "these are clearly not triggering".
+#
+# The worker daemon now schedules them itself from REFRESH_HOURS, which is the same constant the
+# training page reads. That works identically in both places, needs nothing installed, and cannot
+# drift from the page that reports it.
+#
+# They are NOT listed here as well. Two schedulers against one advisory lock means half the runs are
+# started only to be declined, which is noise in the log and a permanent question about which one is
+# actually driving the cadence.
+#
+# Everything below is a job with no equivalent in the daemon: embeds, the promotion run, role sync,
+# the audit, and the media sweep.

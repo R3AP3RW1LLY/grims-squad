@@ -124,7 +124,12 @@ describe('P0.2 database schema', () => {
     // or read straight out of their own journal. The DECODED build is stored rather than the link:
     // re-decoding on read would tie every answer to somebody else's website staying up and keeping
     // its format, and a build that decoded last month would start failing after their deploy.
-    expect(Number(r[0]?.n)).toBe(81);
+    //
+    // 82 as of 2026-08-01: edsy_ids. EDSY encodes each module in a build link as a three-character
+    // id in its OWN numbering — `FBG` is 62160 is Hpt_PulseLaser_Fixed_Small. Nothing in Frontier's
+    // data or Coriolis's carries that numbering, so without this mapping an EDSY link cannot be
+    // read at all. Refreshed from taleden/EDSY; only the id-to-symbol mapping is taken.
+    expect(Number(r[0]?.n)).toBe(82);
   });
 
   describe('hand-written DDL that Prisma cannot express', () => {
