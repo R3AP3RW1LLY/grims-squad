@@ -136,7 +136,20 @@ describe('P0.2 database schema', () => {
     // row, because the collector has to keep up with a message a second and cannot wait on a
     // rate-limited third party, and because a station with a name and no pad size answers one
     // question and lies about the next.
-    expect(Number(r[0]?.n)).toBe(83);
+    //
+    // 84 as of 2026-08-02: commodity_snapshots. One hour of the galaxy's trade per commodity — the
+    // series behind "price over time". A row per PRICE was never possible: EDDN carries ~140,000
+    // every fifteen minutes, which is 13.4 million a day and about 1.2 billion inside
+    // market_history's ninety-day retention. Rolled up per commodity per hour it is 391 rows an
+    // hour and answers the question that was actually asked.
+    //
+    // 87 as of 2026-08-02: colony_projects, colony_needs, colony_contributions. Colonisation, built
+    // self-contained after the owner was shown that Ravencolonial's API holds nothing we cannot
+    // capture from the same journal events our own companion app already reads. Three tables
+    // because the three things have different lifetimes: a project is posted once, its needs are a
+    // snapshot REPLACED whole from each depot event, and its contributions are an append-only
+    // ledger that must stay recomputable.
+    expect(Number(r[0]?.n)).toBe(87);
   });
 
   describe('hand-written DDL that Prisma cannot express', () => {

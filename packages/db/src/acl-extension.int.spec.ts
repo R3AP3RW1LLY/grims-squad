@@ -215,6 +215,10 @@ describe('registration completeness', () => {
      * hand-maintained as well.
      */
     expect(Object.keys(ACL_MODELS).sort()).toEqual([
+      // Colonisation projects, 2026-08-02. The same three values as ShipBuild below, and the same
+      // rule that `public` reads with no session — the owner chose "Squadron projects members-only,
+      // personal projects publishable by choice".
+      'ColonyProject',
       'ForumCategory',
       'ForumThread',
       'ForumThreadGrant',

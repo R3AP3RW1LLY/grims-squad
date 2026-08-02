@@ -256,6 +256,40 @@ export const Permission = {
    * consent in PrivacySetting is a separate, server-enforced control (INV-013).
    */
   TELEMETRY_WRITE: 1n << 70n,
+
+  // ── Colonisation ─────────────────────────────────────────────────────────
+  /*
+   * ★ SQUADRON OWNER, 2026-08-02 ★
+   *
+   * "colonization ... will allow our members to post their colonization project to the squadron for
+   * assistance etc. officers will be able to add Squadron specific and personal project and ladder
+   * ranked members will be able to list personal projects."
+   *
+   * Four bits, split the same way the Shipyard is and for the same reason: the things a member does
+   * here carry different consequences. Reading the board is nothing. Posting a project puts their
+   * name and their build in front of the squadron. Publishing one puts a system, a station and a
+   * shopping list on the open web, which cannot be recalled. And declaring what the WHOLE squadron
+   * is working on steers everybody's evening.
+   */
+  /** Ring 1. See the colonisation boards. Members only — a project board is operational. */
+  COLONY_VIEW: 1n << 71n,
+  /** Ring 1. Post a personal project and ask the squadron for help with it. */
+  COLONY_POST: 1n << 72n,
+  /**
+   * Ring 2. Publish a personal project on a link that works WITHOUT signing in.
+   *
+   * Its own bit because it is the only action here that cannot be taken back once somebody has
+   * copied the link — the same reasoning as SHIPYARD_SHARE_PUBLIC, which is deliberately NOT in
+   * PRIVILEGED_PERMISSIONS. Neither is this: see the note below that list.
+   */
+  COLONY_SHARE_PUBLIC: 1n << 73n,
+  /**
+   * Ring 2. Create and prioritise SQUADRON projects — the ones the whole squadron hauls for.
+   *
+   * Officer-level, and grouped with BGS_SET_ORDERS in spirit: marking a project as the current
+   * effort is a claim on everybody's playing time.
+   */
+  COLONY_MANAGE: 1n << 74n,
 } as const;
 
 export type PermissionName = keyof typeof Permission;
@@ -411,8 +445,20 @@ const P = Permission;
  *
  * SHIPYARD_VIEW only. A visitor may plan a ship and read what the squadron has published; saving
  * and sharing need an account, because both write a row that belongs to somebody.
+ *
+ * ★ AND SO IS LOGISTICS & TRADE — SQUADRON OWNER, 2026-08-02 ★
+ *
+ * "this will also be available to the public for use", of the route planner. TRADE_QUERY is the bit
+ * that opens both the commodities market and the Freight Office, and they are one system: the
+ * planner is built on the market's prices and shows the same numbers on the way to a route. Opening
+ * the planner while gating the market would hide a page while publishing everything on it.
+ *
+ * The same shape as the Shipyard decision above, for the same reason — granted as a PERMISSION, so
+ * a rank can still have it taken away, and "public" stays a decision recorded in the model rather
+ * than a missing check. TRADE_SAVE_ROUTE and TRADE_MANAGE_ALERTS are NOT here: both write a row
+ * that belongs to somebody, which needs an account.
  */
-const GUEST: PermissionMask = P.FORUM_VIEW_PUBLIC | P.SHIPYARD_VIEW;
+const GUEST: PermissionMask = P.FORUM_VIEW_PUBLIC | P.SHIPYARD_VIEW | P.TRADE_QUERY;
 
 /** Application in flight. Public forum plus their own application thread (by ownership predicate). */
 const APPLICANT: PermissionMask = GUEST | P.FORUM_POST_PUBLIC;
@@ -455,6 +501,16 @@ const MEMBER: PermissionMask =
    * collects nothing. Removable per role when somebody abuses it — see AI_TRAIN_SUBMIT.
    */
   P.AI_TRAIN_SUBMIT |
+  /*
+   * Reading the colonisation boards, posting a personal project, and publishing one if they choose
+   * to — "ladder ranked members will be able to list personal projects".
+   *
+   * COLONY_MANAGE is NOT here. Squadron projects are what the whole squadron hauls for, and
+   * declaring one is an officer's call; it is granted in OFFICER below.
+   */
+  P.COLONY_VIEW |
+  P.COLONY_POST |
+  P.COLONY_SHARE_PUBLIC |
   P.TELEMETRY_WRITE;
 
 /** Member plus the ability to create and run operations. */
@@ -463,6 +519,15 @@ const WING_LEAD: PermissionMask = MEMBER | P.OPS_CREATE;
 /** Moderation, member management, BGS direction, audit visibility. */
 const OFFICER: PermissionMask =
   WING_LEAD |
+  /*
+   * Squadron colonisation projects — "officers will be able to add Squadron specific and personal
+   * project", squadron owner, 2026-08-02.
+   *
+   * The personal half comes up from MEMBER. This bit is only the squadron half, because marking a
+   * project as the effort everybody hauls for is a claim on the whole squadron's playing time —
+   * the same kind of decision as BGS_SET_ORDERS, and held by the same people.
+   */
+  P.COLONY_MANAGE |
   P.FORUM_VIEW_OFFICER |
   P.FORUM_POST_OFFICER |
   /*

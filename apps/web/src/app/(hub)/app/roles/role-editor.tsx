@@ -111,6 +111,14 @@ export const DESCRIBES: Readonly<Record<string, string>> = {
     'Keep a planned route against their own account, and post it to the squadron trade board.',
   TRADE_MANAGE_ALERTS:
     'Create and manage their own price alerts.',
+  COLONY_VIEW:
+    'See the colonisation boards — what the squadron is building, and what members have asked for help with. Members only: a project board says who is building what and where.',
+  COLONY_POST:
+    'Post their own colonisation project and ask the squadron for help with it. Their companion app then keeps its needs and deliveries current.',
+  COLONY_SHARE_PUBLIC:
+    'Publish one of their own projects on a link that works without signing in. The only action here that cannot be taken back once somebody has copied the link.',
+  COLONY_MANAGE:
+    'Create SQUADRON projects and mark which one is the current effort. This is a claim on everybody’s playing time, so it sits with officers.',
   SHIPYARD_VIEW:
     'Open the outfitter and the assisted builder. Everything behind it is Frontier’s own module data — working out what to save for is not a privileged act.',
   SHIPYARD_SAVE:
@@ -208,6 +216,24 @@ const PERMISSION_GROUPS: readonly PermissionGroup[] = [
       ['TRADE_QUERY', 40],
       ['TRADE_SAVE_ROUTE', 41],
       ['TRADE_MANAGE_ALERTS', 42],
+    ],
+  },
+  {
+    /*
+     * ★ ITS OWN GROUP — SQUADRON OWNER, 2026-08-02 ★
+     *
+     * Colonisation sits under Logistics & Trade in the sidebar, but its permissions are not the
+     * market's: one of these is an officer power over everybody's evening, and one publishes to the
+     * open web. Folded into the group above, both would be buried among three read permissions that
+     * do nothing of the sort.
+     */
+    title: 'Colonisation',
+    note: 'Who can see the project boards, who can post their own, and who decides what the whole squadron is hauling for.',
+    items: [
+      ['COLONY_VIEW', 71],
+      ['COLONY_POST', 72],
+      ['COLONY_SHARE_PUBLIC', 73],
+      ['COLONY_MANAGE', 74],
     ],
   },
   {

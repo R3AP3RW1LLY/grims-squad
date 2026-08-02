@@ -499,6 +499,11 @@ model User {
   trainingSubmissions  TrainingImage[] @relation("TrainingSubmitter")
   trainingReviews      TrainingImage[] @relation("TrainingReviewer")
 
+  /// Colonisation. Projects they posted, and cargo they hauled to anybody's — two relations
+  /// because helping with somebody else's build is the common case, not the exception.
+  colonyProjects       ColonyProject[]      @relation("ColonyProjectPoster")
+  colonyContributions  ColonyContribution[] @relation("ColonyContributor")
+
   @@map("users")
 
   /// Screening decisions this member made as a moderator.
@@ -2224,6 +2229,148 @@ model MarketHistory {
   @@index([marketId, commodity, observedAt])
   @@index([observedAt])
   @@map("market_history")
+}
+
+/// Who a colonisation project belongs to.
+enum ColonyOwner {
+  /// The whole squadron hauls for it. Created by officers (COLONY_MANAGE).
+  squadron
+  /// One member's own build, posted so the squadron can help.
+  personal
+}
+
+/// Who may open a colonisation project.
+enum ColonyVisibility {
+  /// Only its owner.
+  private
+  /// Every signed-in member. The default, because the point of posting is asking for help.
+  squadron
+  /// Anyone, on a link. Personal projects only — see the note on ColonyProject.
+  public
+}
+
+/// A colonisation build the squadron is working on, or one member is.
+///
+/// ★ SQUADRON OWNER, 2026-08-02 ★
+///
+/// "colonization ... will allow our members to post their colonization project to the squadron for
+/// assistance etc. officers will be able to add Squadron specific and personal project and ladder
+/// ranked members will be able to list personal projects. ... keep our own full records too."
+///
+/// ★ FULLY OURS, BY THE OWNER'S DECISION ★
+///
+/// The original instruction was to integrate with Ravencolonial's API. Shown that their API holds
+/// no data we cannot capture ourselves — it learns everything from the same journal events our
+/// companion app already reads — the owner chose to build this self-contained. So this table IS the
+/// record, not a cache of somebody else's, and nothing here degrades when a third party is down.
+///
+/// ★ POSTED, THEN TRACKED ★
+///
+/// Asked whether a project should appear automatically when a member docks at a construction site,
+/// the owner chose: "Member posts it; journal then tracks it". So a row here exists because
+/// somebody decided it should, and `marketId` is what lets their journal keep it current from then
+/// on. A board of things people asked for help with, rather than everywhere anyone has flown.
+model ColonyProject {
+  id    String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  owner ColonyOwner
+
+  /// Who posted it. Kept for a squadron project too — somebody made that call, and the audit
+  /// trail for "who declared this the effort" is worth more than the null.
+  postedById String @map("posted_by_id") @db.Uuid
+
+  /// The construction site's market id, from the journal. THE JOIN TO REALITY: it is how a
+  /// `ColonisationConstructionDepot` event is matched to the project a member posted, and it is
+  /// stable in a way the station name is not.
+  marketId BigInt @map("market_id")
+
+  systemName  String  @map("system_name")
+  systemId64  BigInt? @map("system_id64")
+  stationName String? @map("station_name")
+  /// Frontier's build type, e.g. `apollo`. Null until the journal tells us.
+  buildType String? @map("build_type")
+
+  title String
+  notes String?
+
+  visibility ColonyVisibility @default(squadron)
+  /// Set only when visibility is `public`. The capability for a signed-out reader.
+  shareToken String? @unique @map("share_token")
+
+  /// The squadron's current effort. Officers set it; more than one may be true at a time, because
+  /// a squadron can be pushing two builds and pretending otherwise helps nobody.
+  isPriority Boolean @default(false) @map("is_priority")
+
+  completedAt DateTime? @map("completed_at") @db.Timestamptz(6)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  postedBy      User                 @relation("ColonyProjectPoster", fields: [postedById], references: [id], onDelete: Cascade)
+  needs         ColonyNeed[]
+  contributions ColonyContribution[]
+
+  /// One project per construction site. A second post of the same site is the same build, and two
+  /// rows would split its deliveries in half with neither showing the truth.
+  @@unique([marketId])
+  @@index([owner, isPriority])
+  @@index([postedById])
+  @@map("colony_projects")
+}
+
+/// What one project still needs, per commodity.
+///
+/// ★ A SNAPSHOT, REPLACED WHOLE ★
+///
+/// `ColonisationConstructionDepot` reports the REMAINING need for every commodity at once, so these
+/// rows are replaced from each event rather than decremented. Decrementing would drift the moment a
+/// single event was missed — and events are missed, because a member can haul with the companion
+/// app closed.
+model ColonyNeed {
+  projectId String @map("project_id") @db.Uuid
+  commodity String
+
+  /// Tonnes still wanted, as the depot last reported it.
+  remaining Int
+  /// Tonnes the site wants in total, when the journal gives it. Lets a bar show progress.
+  required Int?
+
+  observedAt DateTime @map("observed_at") @db.Timestamptz(6)
+
+  project ColonyProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@id([projectId, commodity])
+  @@index([commodity])
+  @@map("colony_needs")
+}
+
+/// Who delivered what.
+///
+/// ★ THE LEDGER, AND WHY IT IS APPEND-ONLY ★
+///
+/// One row per `ColonisationContribution` event. Never updated, so the tally is always the sum of
+/// what actually happened rather than a running total that can drift away from it — and so a
+/// squadron leaderboard can be recomputed from scratch if it is ever doubted.
+model ColonyContribution {
+  id        BigInt @id @default(autoincrement())
+  projectId String @map("project_id") @db.Uuid
+  /// The member who hauled it. Null for a delivery we can attribute to no account — somebody
+  /// helping who is not on the site.
+  userId    String? @map("user_id") @db.Uuid
+
+  commodity String
+  amount    Int
+
+  deliveredAt DateTime @map("delivered_at") @db.Timestamptz(6)
+  /// The idempotency key, same discipline as TelemetryEvent (INV-017). Elite's journal timestamps
+  /// have whole-second resolution, so two deliveries in the same second would collide without the
+  /// commodity and amount in the hash.
+  eventKey String @unique @map("event_key")
+
+  project ColonyProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User?         @relation("ColonyContributor", fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([projectId, deliveredAt])
+  @@index([userId])
+  @@map("colony_contributions")
 }
 
 /// One hour of the galaxy's trade in one commodity — the series behind "price over time".
