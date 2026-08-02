@@ -16,6 +16,7 @@ import { Dashboard } from './dashboard';
 import { PageHeader, Section, StatGrid, StatTile } from '../../../components/hub-page';
 import { PageTabs, resolveTab, type PageTab } from '../../../components/page-tabs';
 import { MonthTabs } from './month-tabs';
+import { PromotionRun } from './promotion-run';
 import { Moderation } from './moderation';
 import { ActivityTable } from './activity-table';
 import { LiveRefresh } from '../../../components/live-refresh';
@@ -201,6 +202,11 @@ export default async function AdminPage({
             basePath="/app"
             tab="activity"
           />
+          {/*
+            Directly under the month tabs, because it acts on the month they name. Above the table
+            rather than below it: the table is what you read, this is what you do about it.
+          */}
+          <PromotionRun month={activity.month} />
           <ActivityTab activity={activity} />
         </>
       )}

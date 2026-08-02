@@ -9,8 +9,8 @@ import { useMemo, useState } from 'react';
  */
 const PER_PAGE = 25;
 import { useRouter } from 'next/navigation';
-import { apiPost } from '../../../../lib/api-client';
-import type { SquadMemberRow } from '../../../../lib/api';
+import { apiPost, apiCall } from '../../../../lib/api-client';
+import type { PromotionStanding, SquadMemberRow } from '../../../../lib/api';
 import { squadronTenure } from '../member-tenure';
 import {
   confirmText,
@@ -78,7 +78,27 @@ function Badge({ tone, children }: { tone: 'quiet' | 'warn' | 'live' | 'dim'; ch
   );
 }
 
-export function SquadRoster({ rows, now }: { rows: SquadMemberRow[]; now: number }) {
+export function SquadRoster({
+  rows,
+  now,
+  standings,
+}: {
+  rows: SquadMemberRow[];
+  now: number;
+  /**
+   * Where each member stands on the ladder, keyed by WEBSITE user id.
+   *
+   * ★ SQUADRON OWNER, 2026-08-02 ★
+   *
+   * "add a promote feature to the /app/members page for each member, show thier current rank and
+   * what clicking this button would promote them too based on the promotion rules."
+   *
+   * Keyed on user id rather than Discord id because the ladder is `UserRole` grants — most of the
+   * guild has no account and therefore no standing, which is exactly why the control is absent for
+   * them rather than disabled.
+   */
+  standings: Record<string, PromotionStanding>;
+}) {
   const router = useRouter();
   const [search, setSearch] = useState('');
   const [role, setRole] = useState('');
@@ -323,6 +343,7 @@ export function SquadRoster({ rows, now }: { rows: SquadMemberRow[]; now: number
         key={selected?.discordId ?? 'none'}
         member={selected}
         now={now}
+        standing={selected?.userId == null ? null : (standings[selected.userId] ?? null)}
         onChanged={() => {
           /*
            * A kicked or banned member leaves the roster entirely, so the panel would be left
@@ -349,10 +370,13 @@ export function SquadRoster({ rows, now }: { rows: SquadMemberRow[]; now: number
 function ManagePanel({
   member,
   now,
+  standing,
   onChanged,
 }: {
   member: SquadMemberRow | null;
   now: number;
+  /** Their ladder standing, or null with no website account or no rank. */
+  standing: PromotionStanding | null;
   /** Re-pulls the roster from the server after an action lands. */
   onChanged: () => void;
 }) {
@@ -450,6 +474,29 @@ function ManagePanel({
             {timeoutRemainingMinutes(member, now)} minutes left
           </Row>
         )}
+        {/*
+          ★ THE PROMOTE CONTROL — SQUADRON OWNER, 2026-08-02 ★
+
+          "show thier current rank and what clicking this button would promote them too based on the
+          promotion rules."
+
+          So it says BOTH: the rung they hold, the rung above, and how their qualifying months
+          compare with what the rules ask for. The button is enabled either way — the owner chose an
+          override, "always enabled, officer's judgement", because the squadron is still onboarding
+          and the ladder has not had time to earn anybody anything.
+
+          What it does NOT do is hide the difference. A promotion the rules have not earned says so
+          before you press it and again in the audit log, so nobody has to reconstruct later which
+          promotions were earned and which were decided.
+        */}
+        {standing !== null && standing.currentRank !== null && (
+          <PromoteControl
+            userId={standing.userId}
+            standing={standing}
+            onPromoted={onChanged}
+          />
+        )}
+
         <Row label="Discord roles">
           {member.roles.length === 0 ? 'None' : member.roles.join(', ')}
         </Row>
@@ -547,6 +594,104 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
         {label}
       </dt>
       <dd className="m-0 text-right text-[var(--color-text-secondary)]">{children}</dd>
+    </div>
+  );
+}
+
+/**
+ * Promoting one member, by an officer's decision.
+ *
+ * ★ AN OVERRIDE, AND IT SAYS SO ★
+ *
+ * Enabled whether or not the rules have earned it — the owner's choice, for a squadron still
+ * onboarding. The honesty is in the labelling rather than in a disabled button: "earned" and "not
+ * yet earned" are both stated, with the months behind them, so pressing it is a decision somebody
+ * made rather than one the interface implied.
+ *
+ * It only ever offers the NEXT rung. The server enforces that too; this simply never shows a member
+ * a jump it would refuse.
+ */
+function PromoteControl({
+  userId,
+  standing,
+  onPromoted,
+}: {
+  readonly userId: string;
+  readonly standing: PromotionStanding;
+  readonly onPromoted: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  const promote = async (): Promise<void> => {
+    setBusy(true);
+    setProblem(null);
+    try {
+      await apiCall('POST', `/v1/admin/members/${encodeURIComponent(userId)}/promote`);
+      onPromoted();
+    } catch (err) {
+      setProblem(err instanceof Error ? err.message : 'That could not be done just now.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-3 rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-void)] p-3">
+      <div className="font-mono text-[9px] uppercase tracking-[0.16em] text-[var(--color-text-dim)]">
+        Rank
+      </div>
+
+      <p className="m-0 mt-1 font-mono text-[12px] text-[var(--color-text-primary)]">
+        {standing.currentRank}
+        {standing.nextRank !== null && (
+          <>
+            {' '}&rarr;{' '}
+            <span className="text-[var(--color-brand-cyan-bright)]">{standing.nextRank}</span>
+          </>
+        )}
+      </p>
+
+      <p className="m-0 mt-1 text-[11px] leading-relaxed text-[var(--color-text-secondary)]">
+        {standing.nextRank === null ? (
+          'The top of the ladder — there is nothing above this.'
+        ) : standing.earned ? (
+          <>
+            Earned: {standing.qualifyingMonths} of {standing.monthsRequired} qualifying month
+            {standing.monthsRequired === 1 ? '' : 's'}. The run on the 1st would promote them.
+          </>
+        ) : (
+          <>
+            Not yet earned: {standing.qualifyingMonths} of {standing.monthsRequired} qualifying month
+            {standing.monthsRequired === 1 ? '' : 's'}. Promoting now is an override, recorded
+            against your name.
+          </>
+        )}
+      </p>
+
+      {problem !== null && (
+        <p
+          role="alert"
+          className="m-0 mt-2 text-[11px] text-[var(--color-semantic-hostile-bright)]"
+        >
+          {problem}
+        </p>
+      )}
+
+      {standing.nextRank !== null && (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => void promote()}
+          className={`mt-2 w-full rounded border px-3 py-2 font-mono text-[11px] uppercase tracking-[0.14em] transition-colors disabled:opacity-40 ${
+            standing.earned
+              ? 'border-[var(--color-brand-cyan-bright)] text-[var(--color-brand-cyan-bright)] hover:bg-[color-mix(in_srgb,var(--color-brand-cyan)_12%,transparent)]'
+              : 'border-[var(--color-brand-orange)] text-[var(--color-brand-orange)] hover:bg-[color-mix(in_srgb,var(--color-brand-orange)_12%,transparent)]'
+          }`}
+        >
+          {busy ? 'Promoting…' : `Promote to ${standing.nextRank}`}
+        </button>
+      )}
     </div>
   );
 }

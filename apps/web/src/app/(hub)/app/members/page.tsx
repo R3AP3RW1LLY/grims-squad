@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { getSquadRosterGated } from '../../../../lib/api';
+import { getSquadRosterGated, getPromotionStandings } from '../../../../lib/api';
 import { SquadRoster } from './squad-roster';
 import { StepUp } from '../step-up';
 import { NoAccess, AdminUnavailable } from '../no-access';
@@ -54,6 +54,21 @@ export default async function SquadMembersPage() {
 
   const rows = read.data.rows;
   const now = Date.now();
+
+  /*
+   * Ladder standings, keyed by website user id for the promote control.
+   *
+   * Fetched separately rather than folded into the roster: the roster is every Discord account and
+   * the ladder is only the ones with a website rank, so joining them server-side would put a null
+   * on most rows to serve a panel that shows one member at a time.
+   *
+   * A failure here costs the promote control, not the page — moderation is what an officer opened
+   * this for.
+   */
+  const standingsRead = await getPromotionStandings();
+  const standings = Object.fromEntries(
+    (standingsRead?.standings ?? []).map((s) => [s.userId, s]),
+  );
 
   /*
    * ★ THE API NO LONGER SENDS BOTS AT ALL — SQUADRON OWNER, 2026-08-02 ★
@@ -119,7 +134,7 @@ export default async function SquadMembersPage() {
             so reading the clock inside it would put one answer in the HTML and another at
             hydration.
           */}
-          <SquadRoster rows={rows} now={now} />
+          <SquadRoster rows={rows} now={now} standings={standings} />
         </div>
       </Section>
     </>
