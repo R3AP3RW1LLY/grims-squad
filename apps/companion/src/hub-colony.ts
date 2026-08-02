@@ -175,6 +175,10 @@ export const postColonyProject = (
     stationName: string;
     title: string;
     notes: string;
+    /** The depot reading the member can already see, so the project lands with its progress known. */
+    snapshot?: {
+      resources: ReadonlyArray<{ commodity: string; required: number; provided: number }>;
+    };
   },
 ): Promise<Answer<{ id: string }>> =>
   hubColony(call, '/projects', { method: 'POST', body });

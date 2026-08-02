@@ -36,7 +36,13 @@ import {
 } from './config.js';
 import { Uploader } from './uploader.js';
 import { runWatchPass, type JournalFs, type WatchOutcome } from './watcher.js';
-import { isFresh, seedFromJournal, SEED_TAIL_BYTES, type DockedAt } from './docked.js';
+import {
+  isFresh,
+  mergeDock,
+  seedFromJournal,
+  SEED_TAIL_BYTES,
+  type DockedAt,
+} from './docked.js';
 import { accumulate } from './totals.js';
 import { isGameRunning, isActivelyPlaying } from './game-process.js';
 import { startAutoUpdate } from './auto-update.js';
@@ -142,6 +148,21 @@ let gameWasRunning = false;
 let dockedAt: DockedAt | null = null;
 
 /**
+ * What the startup seed found, kept for as long as it is useful.
+ *
+ * ★ KEPT, NOT CONSUMED ONCE ★
+ *
+ * The depot heartbeat arrives every fifteen seconds carrying only a market id, so the LIVE value is
+ * rebuilt nameless over and over. Merging the seed in once would be undone by the next pass twenty
+ * seconds later — which is precisely the half-filled form the owner reported: market id present,
+ * station and system blank.
+ *
+ * It is discarded the moment the member docks somewhere else, because `mergeDock` refuses to apply
+ * a name across a different market id.
+ */
+let seededDock: DockedAt | null = null;
+
+/**
  * Rebuilds `dockedAt` from the tail of the newest journal, ignoring saved offsets.
  *
  * ★ WHY THIS HAS TO EXIST — REPORTED FROM A LIVE GAME, 2026-08-02 ★
@@ -174,9 +195,11 @@ async function seedDock(): Promise<void> {
       const buffer = Buffer.alloc(size - from);
       await handle.read(buffer, 0, buffer.length, from);
       const seeded = seedFromJournal(buffer.toString('utf8'));
-      // Only ever ADOPTED when the live path has not already found something better. A pass may
-      // have completed while this was reading.
-      if (seeded !== null && dockedAt === null) dockedAt = seeded;
+      /*
+       * Kept rather than adopted. `state()` merges it with whatever the live pass holds, so the
+       * name survives every nameless heartbeat instead of being overwritten by the next one.
+       */
+      if (seeded !== null) seededDock = seeded;
     } finally {
       await handle.close();
     }
@@ -723,7 +746,15 @@ function state(): Record<string, unknown> {
      * pointing at the wrong construction site — which then silently never updates, because the
      * market id is what a journal event matches on. A stale answer here is worse than none.
      */
-    dockedAt: isFresh(dockedAt, Date.now()) ? dockedAt : null,
+    dockedAt: (() => {
+      /*
+       * The live pass knows WHERE and WHAT; the startup seed knows what it is CALLED. Merged on a
+       * matching market id, so the form gets a name even when the only thing arriving is a depot
+       * heartbeat that carries none.
+       */
+      const merged = mergeDock(dockedAt, seededDock);
+      return isFresh(merged, Date.now()) ? merged : null;
+    })(),
     overlays: config.overlays,
     overlayEditing: isEditing(),
     displayMode: currentMode(),

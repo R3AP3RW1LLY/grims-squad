@@ -337,3 +337,77 @@ export function seedFromJournal(text: string): DockedAt | null {
   // in precisely the situations that are hardest to reproduce.
   return trackDocked(null, events);
 }
+
+
+/**
+ * Combines what the live journal pass knows with what the startup seed found.
+ *
+ * ★ WHY THE SEED CANNOT SIMPLY BE "USE IT IF WE HAVE NOTHING" ★
+ *
+ * That was the first version and it left the form half filled — market id present, station and
+ * system blank — which the owner reported immediately.
+ *
+ * The race is the cause. The depot heartbeat arrives every fifteen seconds and carries ONLY a
+ * market id, so the live path produces a real, non-null dock with no name in it. The seed, reading
+ * the tail of the journal, is the only thing holding the `Docked` that has the name — and by the
+ * time it had read half a megabyte, the live value already existed, so an all-or-nothing adopt
+ * declined to use it.
+ *
+ * The two are not competing answers. The heartbeat knows WHERE and WHAT; the seed knows what it is
+ * CALLED. Merging on a matching market id takes each from whichever actually has it.
+ */
+export function mergeDock(live: DockedAt | null, seeded: DockedAt | null): DockedAt | null {
+  if (seeded === null) return live;
+  if (live === null) return seeded;
+
+  /*
+   * Different stations: the live one wins outright. The seed is a snapshot of the past, and a name
+   * belonging to a station the member has since left is worse than no name at all.
+   */
+  if (live.marketId !== seeded.marketId) return live;
+
+  return {
+    ...live,
+    // Each field from whichever source has it. The live path never invents a name, so an empty one
+    // there always means "not known" rather than "known to be blank".
+    stationName: live.stationName !== '' ? live.stationName : seeded.stationName,
+    systemName: live.systemName !== '' ? live.systemName : seeded.systemName,
+    // The heartbeat's site data is fresher by construction: emitted every fifteen seconds, where
+    // the seed is whatever the tail happened to contain.
+    site: live.site ?? seeded.site,
+  };
+}
+
+/**
+ * What to call a project, from the station name.
+ *
+ * ★ SQUADRON OWNER, 2026-08-02 ★
+ *
+ * "it should auto complete what to call it based on the site name excluding thisng like this
+ * Planetary Construction Site:"
+ *
+ * Frontier prefixes every construction site with its class, which is noise on a board where every
+ * entry is a construction site. The distinguishing part is what follows the colon.
+ *
+ * Only ever a STARTING VALUE for an editable field. Somebody naming their build something else is
+ * the entire point of having a title, so this never overrides what a member has typed.
+ */
+export function projectTitleFrom(stationName: string): string {
+  const name = stationName.trim();
+  if (name === '') return '';
+
+  /*
+   * The FIRST colon only, and only when what precedes it really looks like a class prefix. Stations
+   * are legitimately named things like `Ridley Scott: Prospect`, and an over-eager rule would
+   * silently halve one.
+   */
+  const colon = name.indexOf(':');
+  if (colon === -1) return name;
+
+  const prefix = name.slice(0, colon).toLowerCase();
+  if (!prefix.includes('construction site') && !prefix.includes('construction depot')) return name;
+
+  const rest = name.slice(colon + 1).trim();
+  // A prefix with nothing after it is all we have. The full name beats an empty box.
+  return rest === '' ? name : rest;
+}

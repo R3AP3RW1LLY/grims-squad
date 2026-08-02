@@ -7,6 +7,7 @@ import type {
   ColonyRights,
   ColonyShoppingRow,
 } from '../hub-colony.js';
+import { projectTitleFrom } from '../docked.js';
 import {
   Bar,
   Button,
@@ -213,14 +214,34 @@ function HereNow({ dockedAt }: { dockedAt: DockedAt }): JSX.Element {
           .sort((a, b) => b.required - b.provided - (a.required - a.provided));
 
   const totalNeeded = outstanding.reduce((sum, r) => sum + (r.required - r.provided), 0);
+  // Across EVERY commodity, including the ones already finished — otherwise a site whose remaining
+  // work is one commodity would report a delivery total that shrank as it neared completion.
+  const totalDelivered =
+    site === null ? 0 : site.resources.reduce((sum, r) => sum + r.provided, 0);
+  const totalRequired =
+    site === null ? 0 : site.resources.reduce((sum, r) => sum + r.required, 0);
 
   return (
     <Card accent={C.cyan}>
+      {/*
+        ★ THE SITE NAME, WITH THE MARKET ID IN BRACKETS — SQUADRON OWNER, 2026-08-02 ★
+
+        "this should also give the name of the site docked at with the Market xxx in brackets".
+
+        The id is shown alongside rather than instead of the name, because it is the thing a member
+        can check against the game and against a project already on the board. It was standing in
+        for the name only when we did not have one, which was itself the bug.
+      */}
       <p style={{ margin: 0, fontSize: '14px' }}>
-        {dockedAt.stationName === '' ? 'The construction site you are docked at' : dockedAt.stationName}
+        {dockedAt.stationName === ''
+          ? 'The construction site you are docked at'
+          : projectTitleFrom(dockedAt.stationName)}{' '}
+        <span style={{ fontSize: '11px', color: C.faint, fontVariantNumeric: 'tabular-nums' }}>
+          (Market {dockedAt.marketId})
+        </span>
       </p>
       <p style={{ margin: '3px 0 0', fontSize: '11px', color: C.faint }}>
-        {dockedAt.systemName === '' ? `Market ${dockedAt.marketId}` : dockedAt.systemName} · docked now
+        {dockedAt.systemName === '' ? 'System not known yet' : dockedAt.systemName} · docked now
       </p>
 
       {site === null ? (
@@ -235,29 +256,41 @@ function HereNow({ dockedAt }: { dockedAt: DockedAt }): JSX.Element {
         <div style={{ marginTop: '12px' }}>
           <Bar done={Math.round(site.progress * 1000)} total={1000} />
           <p style={{ margin: '6px 0 0', fontSize: '12px', color: C.dim }}>
-            {(site.progress * 100).toFixed(1)}% built ·{' '}
+            {(site.progress * 100).toFixed(1)}% built · {tonnes(totalDelivered)} of{' '}
+            {totalRequired.toLocaleString()} already delivered
+          </p>
+          <p style={{ margin: '2px 0 0', fontSize: '12px', color: C.dim }}>
             {outstanding.length === 0
-              ? 'everything delivered'
+              ? 'Everything this site asked for has been delivered.'
               : `${tonnes(totalNeeded)} still needed across ${outstanding.length} commodit${outstanding.length === 1 ? 'y' : 'ies'}`}
           </p>
 
           {outstanding.length === 0 ? null : (
             <div style={{ marginTop: '10px' }}>
+              {/*
+                ★ WHAT HAS ALREADY BEEN DELIVERED, TOO — SQUADRON OWNER, 2026-08-02 ★
+
+                "if we can see the historical data on all materials that have been delivered, can we
+                please include that when we create the new project, so we have full data visibilty."
+
+                We can, and it costs nothing: the depot event carries `ProvidedAmount` for every
+                commodity, which is the site's ENTIRE delivery history — everyone's, not just this
+                commander's. A site half built by strangers shows as half built.
+              */}
               {outstanding.slice(0, 6).map((r) => (
-                <div
-                  key={r.commodity}
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    gap: '12px',
-                    padding: '3px 0',
-                    fontSize: '12px',
-                  }}
-                >
-                  <span>{r.commodity}</span>
-                  <span style={{ fontVariantNumeric: 'tabular-nums', color: C.dim }}>
-                    {(r.required - r.provided).toLocaleString()} of {r.required.toLocaleString()}
-                  </span>
+                <div key={r.commodity} style={{ padding: '4px 0', fontSize: '12px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
+                    <span>{r.commodity}</span>
+                    <span style={{ fontVariantNumeric: 'tabular-nums', color: C.dim }}>
+                      {(r.required - r.provided).toLocaleString()} still needed
+                    </span>
+                  </div>
+                  <div style={{ marginTop: '3px' }}>
+                    <Bar done={r.provided} total={r.required} />
+                  </div>
+                  <p style={{ margin: '2px 0 0', fontSize: '10px', color: C.faint }}>
+                    {r.provided.toLocaleString()} of {r.required.toLocaleString()} delivered
+                  </p>
                 </div>
               ))}
               {outstanding.length > 6 ? (
@@ -271,7 +304,8 @@ function HereNow({ dockedAt }: { dockedAt: DockedAt }): JSX.Element {
       )}
 
       <p style={{ margin: '12px 0 0', fontSize: '11px', color: C.faint }}>
-        Press New project — the name, system, station and market id are already filled in.
+        Press New project — the name, system, station and market id are already filled in, and
+        everything delivered so far is posted with it.
       </p>
     </Card>
   );
@@ -540,7 +574,11 @@ function PostForm({
    * else is the point of having a title at all.
    */
   const [form, setForm] = useState({
-    title: dockedAt?.stationName ?? '',
+    /*
+     * The cleaned name, not the raw one. Frontier prefixes every site with its class — "Planetary
+     * Construction Site: " — which is noise on a board where every entry is a construction site.
+     */
+    title: projectTitleFrom(dockedAt?.stationName ?? ''),
     systemName: dockedAt?.systemName ?? '',
     stationName: dockedAt?.stationName ?? '',
     marketId: dockedAt?.marketId ?? '',
@@ -556,7 +594,30 @@ function PostForm({
   async function submit(): Promise<void> {
     setBusy(true);
     setError(null);
-    const answer = await window.colony.post(form);
+    /*
+     * ★ THE SNAPSHOT GOES WITH IT ★
+     *
+     * Without this a newly posted project sits on the board reading "waiting for somebody to dock
+     * there" — while the member who posted it is standing on the pad, looking at the needs. The
+     * depot reading they can already see is the same one the sync would fetch later, so sending it
+     * now removes a wait that exists for no reason.
+     *
+     * The hub still treats it as one reading among many: the next sync REPLACES it wholesale from
+     * whatever the newest journal says, so a stale or hand-edited snapshot cannot poison anything.
+     */
+    const answer = await window.colony.post({
+      ...form,
+      ...(dockedAt?.site == null
+        ? {}
+        : {
+            snapshot: {
+              progress: dockedAt.site.progress,
+              complete: dockedAt.site.complete,
+              failed: dockedAt.site.failed,
+              resources: dockedAt.site.resources,
+            },
+          }),
+    });
     setBusy(false);
     if (answer.ok) onPosted();
     else setError(answer.error);

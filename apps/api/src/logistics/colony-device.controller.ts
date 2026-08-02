@@ -188,6 +188,9 @@ export class ColonyDeviceController {
       stationName?: string;
       title?: string;
       notes?: string;
+      snapshot?: {
+        resources?: Array<{ commodity?: unknown; required?: unknown; provided?: unknown }>;
+      };
     },
   ) {
     const owner: ColonyOwner = body.owner === 'squadron' ? 'squadron' : 'personal';
@@ -216,6 +219,12 @@ export class ColonyDeviceController {
       stationName: body.stationName ?? null,
       title: body.title ?? '',
       notes: body.notes ?? null,
+      /*
+       * The depot reading the app could already see. Sanitised here rather than trusted: it arrives
+       * from a client we do not control, and a non-numeric amount would become NaN in a column the
+       * progress bar divides by.
+       */
+      snapshot: readSnapshot(body.snapshot),
     });
   }
 
@@ -235,6 +244,31 @@ export class ColonyDeviceController {
     await this.colony.setPriority(id, body.isPriority === true);
     return { ok: true };
   }
+}
+
+/**
+ * The opening depot reading, cleaned.
+ *
+ * Every entry that is not a name and two finite numbers is DROPPED rather than repaired. A
+ * half-understood row on a needs list is a line a member cannot act on, and the next sync will
+ * replace the whole set from the journal anyway.
+ */
+function readSnapshot(
+  raw: { resources?: Array<{ commodity?: unknown; required?: unknown; provided?: unknown }> } | undefined,
+): { resources: Array<{ commodity: string; required: number; provided: number }> } | null {
+  if (raw === undefined || !Array.isArray(raw.resources)) return null;
+
+  const resources: Array<{ commodity: string; required: number; provided: number }> = [];
+  for (const entry of raw.resources) {
+    const commodity = typeof entry?.commodity === 'string' ? entry.commodity.trim() : '';
+    const required = Number(entry?.required);
+    const provided = Number(entry?.provided);
+    if (commodity === '' || !Number.isFinite(required) || !Number.isFinite(provided)) continue;
+    if (required < 0 || provided < 0) continue;
+    resources.push({ commodity, required, provided });
+  }
+
+  return resources.length === 0 ? null : { resources };
 }
 
 function has(mask: bigint, need: bigint): boolean {

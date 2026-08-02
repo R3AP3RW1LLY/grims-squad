@@ -52,6 +52,26 @@ export interface NeedDetail {
   readonly required: number | null;
 }
 
+/**
+ * A depot reading sent with a new project, so it lands with its progress already known.
+ *
+ * ★ SQUADRON OWNER, 2026-08-02 ★
+ *
+ * "if we can see the historical data on all materials that have been delivered, can we please
+ * include that when we create the new project, so we have full data visibilty."
+ *
+ * We can: the game's own depot event carries `ProvidedAmount` for every commodity, which is the
+ * site's ENTIRE delivery history — everybody's, not just the poster's. A site half built by
+ * strangers arrives on the board reading half built.
+ */
+export interface OpeningSnapshot {
+  readonly resources: ReadonlyArray<{
+    readonly commodity: string;
+    readonly required: number;
+    readonly provided: number;
+  }>;
+}
+
 export interface HaulerTally {
   readonly name: string;
   readonly tonnes: number;
@@ -337,6 +357,19 @@ export class ColonyService {
     stationName: string | null;
     title: string;
     notes: string | null;
+    /**
+     * What the poster could already see, from the depot they are standing on.
+     *
+     * ★ SQUADRON OWNER, 2026-08-02 ★
+     *
+     * "if we can see the historical data on all materials that have been delivered, can we please
+     * include that when we create the new project, so we have full data visibilty."
+     *
+     * Optional, and never trusted as authority: the very next sync REPLACES these rows wholesale
+     * from the newest journal reading. It exists so a project does not sit on the board saying
+     * "waiting for somebody to dock there" while the person who posted it is standing on the pad.
+     */
+    snapshot?: OpeningSnapshot | null;
   }): Promise<{ id: string }> {
     const title = input.title.trim();
     if (title === '') {
@@ -382,7 +415,42 @@ export class ColonyService {
       select: { id: true },
     });
 
+    /*
+     * Written after the project, and deliberately not inside a transaction with it.
+     *
+     * A snapshot that fails to write costs a member the wait until the next sync — fifteen minutes,
+     * and self-correcting. Rolling back a project they successfully posted because an optional
+     * convenience failed would cost them the project, and they would post it again and be told it
+     * already exists.
+     */
+    if (input.snapshot != null) {
+      await this.#writeSnapshot(created.id, input.snapshot).catch(() => undefined);
+    }
+
     return created;
+  }
+
+  async #writeSnapshot(projectId: string, snapshot: OpeningSnapshot): Promise<void> {
+    const observedAt = new Date();
+
+    const needs = snapshot.resources
+      .filter((r) => typeof r.commodity === 'string' && r.commodity.trim() !== '')
+      .map((r) => ({
+        projectId,
+        commodity: r.commodity.trim(),
+        // Floored at zero, like the sync's own rule: an over-delivered site reports a negative
+        // remainder, and "-40 tonnes still needed" on a progress bar is worse than saying nothing.
+        remaining: Math.max(0, Math.trunc(r.required) - Math.trunc(r.provided)),
+        required: Math.trunc(r.required),
+        observedAt,
+      }))
+      .filter((n) => Number.isFinite(n.required) && n.required >= 0);
+
+    if (needs.length === 0) return;
+
+    // `skipDuplicates`, because the sync job may already have run between the project being created
+    // and this landing. Whichever wrote first is equally correct — both are the same depot reading.
+    await this.db.colonyNeed.createMany({ data: needs, skipDuplicates: true });
   }
 
   /**

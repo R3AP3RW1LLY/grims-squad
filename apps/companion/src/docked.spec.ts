@@ -3,6 +3,8 @@ import {
   trackDocked,
   isFresh,
   seedFromJournal,
+  mergeDock,
+  projectTitleFrom,
   DOCK_FRESH_MS,
   type DockedAt,
   type ParsedLike,
@@ -322,5 +324,95 @@ describe('seeding from a journal on startup', () => {
     ].join('\n');
 
     expect(seedFromJournal(journal)).toBeNull();
+  });
+});
+
+
+describe('naming a project from the station', () => {
+  it('MANDATORY: drops Frontier class prefixes', () => {
+    /*
+     * "it should auto complete what to call it based on the site name excluding thisng like this
+     * Planetary Construction Site:" — the real name from the owner's own journal.
+     */
+    expect(projectTitleFrom("Planetary Construction Site: Harry's Dysfunctional Society")).toBe(
+      "Harry's Dysfunctional Society",
+    );
+    expect(projectTitleFrom('Orbital Construction Site: Ambrose Dock')).toBe('Ambrose Dock');
+    expect(projectTitleFrom('Construction Site: Somewhere')).toBe('Somewhere');
+  });
+
+  it('MANDATORY: leaves a station whose name merely contains a colon', () => {
+    // Frontier names are stranger than any rule. An over-eager split would silently halve one.
+    expect(projectTitleFrom('Ridley Scott: Prospect')).toBe('Ridley Scott: Prospect');
+    expect(projectTitleFrom('Jameson Memorial')).toBe('Jameson Memorial');
+  });
+
+  it('keeps the whole thing when nothing follows the prefix', () => {
+    expect(projectTitleFrom('Planetary Construction Site:')).toBe('Planetary Construction Site:');
+  });
+
+  it('gives back nothing for nothing', () => {
+    expect(projectTitleFrom('')).toBe('');
+    expect(projectTitleFrom('   ')).toBe('');
+  });
+});
+
+describe('merging the seed with the live pass', () => {
+  const heartbeatOnly: DockedAt = {
+    marketId: '4359491587',
+    stationName: '',
+    systemName: '',
+    at: '2026-08-02T17:45:12Z',
+    site: { progress: 0.42, complete: false, failed: false, resources: [] },
+  };
+
+  const fromSeed: DockedAt = {
+    marketId: '4359491587',
+    stationName: "Planetary Construction Site: Harry's Dysfunctional Society",
+    systemName: 'Hyades Sector XJ-Z c18',
+    at: '2026-08-02T17:33:08Z',
+    site: null,
+  };
+
+  it('MANDATORY: fills in the name the heartbeat cannot know', () => {
+    /*
+     * The reported bug. The depot heartbeat carries only a market id, so the live path produces a
+     * real dock with no name — and an all-or-nothing seed declined to help, leaving the form with
+     * an id and two empty boxes.
+     */
+    const merged = mergeDock(heartbeatOnly, fromSeed);
+
+    expect(merged?.marketId).toBe('4359491587');
+    expect(merged?.stationName).toBe("Planetary Construction Site: Harry's Dysfunctional Society");
+    expect(merged?.systemName).toBe('Hyades Sector XJ-Z c18');
+  });
+
+  it('keeps the heartbeat freshness and site data', () => {
+    // The seed is a snapshot of the past; the heartbeat is fifteen seconds old at worst.
+    const merged = mergeDock(heartbeatOnly, fromSeed);
+
+    expect(merged?.at).toBe('2026-08-02T17:45:12Z');
+    expect(merged?.site?.progress).toBeCloseTo(0.42);
+  });
+
+  it('MANDATORY: refuses a name from a station the member has left', () => {
+    // Different market: the live answer wins outright, blank name and all. A stale name on a fresh
+    // id would put the wrong station on a project.
+    const elsewhere = { ...heartbeatOnly, marketId: '999' };
+    expect(mergeDock(elsewhere, fromSeed)?.stationName).toBe('');
+  });
+
+  it('never lets the seed overrule a name the live pass has', () => {
+    const named = { ...heartbeatOnly, stationName: 'Live name', systemName: 'Live system' };
+    const merged = mergeDock(named, fromSeed);
+
+    expect(merged?.stationName).toBe('Live name');
+    expect(merged?.systemName).toBe('Live system');
+  });
+
+  it('handles either side being absent', () => {
+    expect(mergeDock(null, fromSeed)).toEqual(fromSeed);
+    expect(mergeDock(heartbeatOnly, null)).toEqual(heartbeatOnly);
+    expect(mergeDock(null, null)).toBeNull();
   });
 });
