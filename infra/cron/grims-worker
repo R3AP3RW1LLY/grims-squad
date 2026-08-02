@@ -27,6 +27,22 @@ CRON_TZ=UTC
 # :20 keeps it clear of the ingest daemon's own hourly work at the top of the hour.
 20 * * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/resolve-stations.js >> /var/log/grims-worker.log 2>&1
 
+# One hour of the galaxy's trade, per commodity — the series behind "price over time".
+#
+# Squadron owner, 2026-08-02: "average pricing, price over time lots of data". Told the history
+# table had never been written to, they chose "start recording now, show charts as they fill".
+#
+# ★ EVERY MISSED HOUR IS A PERMANENT HOLE ★
+#
+# `market_entries` holds only the CURRENT price. The past cannot be reconstructed from it, so an
+# hour this does not run is an hour no chart will ever have. That is the reason it sits at :05
+# rather than sharing the top of the hour with the ingest daemon, and the reason it takes a lock
+# instead of trusting cron not to overlap.
+#
+# The run itself is deliberately dull: ~800 aggregates that ride partial indexes only, a few
+# minutes, competing with nothing.
+5 * * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/commodity-rollup.js >> /var/log/grims-worker.log 2>&1
+
 # ── The resident worker ──────────────────────────────────────────────────────
 #
 # NOT a cron entry — it belongs in compose.prod.yml as a long-running service. Recorded here so the

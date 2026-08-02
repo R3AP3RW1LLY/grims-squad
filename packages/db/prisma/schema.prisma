@@ -2226,6 +2226,61 @@ model MarketHistory {
   @@map("market_history")
 }
 
+/// One hour of the galaxy's trade in one commodity — the series behind "price over time".
+///
+/// ★ WHY THIS EXISTS RATHER THAN `MarketHistory` — SQUADRON OWNER, 2026-08-02 ★
+///
+/// The owner asked for "average pricing, price over time, lots of data" and chose to start
+/// recording immediately, accepting thin charts for a fortnight. `MarketHistory` is the obvious
+/// home and it cannot be: the feed carries ~140,000 prices every fifteen minutes, so a row per
+/// price is 13.4 MILLION A DAY — about 1.2 BILLION inside the ninety-day retention. That is not a
+/// chart, it is an outage with a graph on top.
+///
+/// Rolling up per commodity per hour is 398 rows an hour. Nine and a half thousand a day, under
+/// four million a year, and it answers the question actually being asked — what is this commodity
+/// worth across the bubble, and which way is it moving. `MarketHistory` stays empty and stays
+/// defined; per-station series are a different feature with a different cost.
+///
+/// ★ FLEET CARRIERS ARE COUNTED SEPARATELY, NOT SILENTLY ★
+///
+/// Carrier owners set prices by hand. Gold's cheapest sellers in our own data are carriers at
+/// 2,356 against a station average of 48,098 — genuine, and gone the moment the carrier jumps.
+/// Folding those into one mean produces a number that describes nowhere. The station figures are
+/// the honest average; the carrier figures are kept beside them so neither has to be a guess.
+model CommoditySnapshot {
+  commodity  String
+  observedAt DateTime @map("observed_at") @db.Timestamptz(6)
+
+  /// Repeated on every row so the market index is ONE indexed read with no join. A commodity's
+  /// category never changes, and 398 short strings an hour is nothing against a join to an
+  /// 18.8-million-row table that has no index supporting it.
+  category String?
+
+  /// Stations only — carriers excluded. Null when nowhere stocked it this hour.
+  avgBuy    Int? @map("avg_buy")
+  minBuy    Int? @map("min_buy")
+  /// Stations only — carriers excluded. Null when nowhere wanted it this hour.
+  avgSell   Int? @map("avg_sell")
+  maxSell   Int? @map("max_sell")
+  /// Tonnes on offer and tonnes wanted, across every station counted above.
+  supply    BigInt @default(0)
+  demand    BigInt @default(0)
+  /// How many stations stocked it, and how many wanted it. A price averaged over three markets
+  /// means something very different from one averaged over three thousand, and a chart that will
+  /// not say which is a chart that misleads.
+  buyMarkets  Int @default(0) @map("buy_markets")
+  sellMarkets Int @default(0) @map("sell_markets")
+
+  /// Carriers, kept apart for the reason in the note above.
+  carrierMinBuy  Int? @map("carrier_min_buy")
+  carrierMaxSell Int? @map("carrier_max_sell")
+  carrierMarkets Int  @default(0) @map("carrier_markets")
+
+  @@id([commodity, observedAt])
+  @@index([observedAt])
+  @@map("commodity_snapshots")
+}
+
 /// FDevIDs internal→display mapping for commodities, modules and ships.
 /// Never hand-map. Never show an internal name to a user (INV-020).
 model ReferenceName {
