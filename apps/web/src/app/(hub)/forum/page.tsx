@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import { ChatBubbleLeftRightIcon, LockClosedIcon } from '@heroicons/react/20/solid';
-import { getForumCategories, type ForumCategory } from '../../../lib/api';
+import { getForumCategories, type ForumCategory, getMe } from '../../../lib/api';
 import { PageHeader, PageBody, Panel, RailStat, CouldNotLoad } from '../../../components/hub-page';
 
 /**
@@ -119,6 +119,12 @@ function CategoryRow({ category }: { category: ForumCategory }) {
 
 export default async function ForumPage() {
   const data = await getForumCategories();
+  /*
+   * Whether anybody is signed in. Not what they may READ — the category list already carries that,
+   * filtered server-side — only whether the rail should talk to a member or to a visitor.
+   */
+  const me = await getMe();
+  const signedIn = me.user !== null;
 
   if (data === null) {
     return (
@@ -150,28 +156,76 @@ export default async function ForumPage() {
       <PageBody
         lead="Where the squadron talks when it is not in Discord — the things worth keeping, and finding again six months later."
         rail={
-          <>
-            <Panel title="Status">
-              <RailStat label="Boards" value={String(data.categories.length)} />
-              <RailStat
-                label="You can post in"
-                value={`${postable} of ${data.categories.length}`}
-                tone={postable === 0 ? 'default' : 'good'}
-              />
-            </Panel>
+          /*
+           * ★ THIS PAGE HAS TWO KINDS OF READER NOW ★
+           *
+           * Squadron owner, 2026-08-01: the public navbar's Forum link must take people "to the
+           * forum page and only shows them publically viewable forum categories".
+           *
+           * The board list already handles that on its own — visibility is a `viewPerm` bitmask and
+           * the guest mask holds FORUM_VIEW_PUBLIC and nothing else. The RAIL did not: it counted
+           * how many boards "you can post in" and offered a visitor their commander settings, both
+           * written when nobody without a session could reach this page.
+           *
+           * So the rail asks who is reading. A visitor is told what the forum is and how to get
+           * into the rest of it; a member gets the figures they had before.
+           */
+          signedIn ? (
+            <>
+              <Panel title="Status">
+                <RailStat label="Boards" value={String(data.categories.length)} />
+                <RailStat
+                  label="You can post in"
+                  value={`${postable} of ${data.categories.length}`}
+                  tone={postable === 0 ? 'default' : 'good'}
+                />
+              </Panel>
 
-            <Panel title="Related">
-              <a href="/roster" className="block text-sm text-[var(--color-brand-cyan-bright)]">
-                Who flies with the squadron
-              </a>
-              <a
-                href="/settings/commander"
-                className="mt-2 block text-sm text-[var(--color-brand-cyan-bright)]"
-              >
-                Your commander settings
-              </a>
-            </Panel>
-          </>
+              <Panel title="Related">
+                <a href="/roster" className="block text-sm text-[var(--color-brand-cyan-bright)]">
+                  Who flies with the squadron
+                </a>
+                <a
+                  href="/settings/commander"
+                  className="mt-2 block text-sm text-[var(--color-brand-cyan-bright)]"
+                >
+                  Your commander settings
+                </a>
+              </Panel>
+            </>
+          ) : (
+            <>
+              <Panel title="Reading as a visitor">
+                <p className="m-0 text-sm leading-relaxed text-[var(--color-text-secondary)]">
+                  These are the boards we keep open to everybody. The rest of the forum — operations,
+                  the background simulation, and where the squadron talks day to day — opens when you
+                  join us on Discord.
+                </p>
+                <a
+                  href="/join"
+                  className="mt-3 block text-sm text-[var(--color-brand-orange-bright)]"
+                >
+                  How to join
+                </a>
+              </Panel>
+
+              <Panel title="Also open to you">
+                {/*
+                  The other two things a visitor can actually use, rather than a list of pages that
+                  will ask them to sign in.
+                */}
+                <a href="/shipyard" className="block text-sm text-[var(--color-brand-cyan-bright)]">
+                  Outfit a ship
+                </a>
+                <a
+                  href="/shipyard/public"
+                  className="mt-2 block text-sm text-[var(--color-brand-cyan-bright)]"
+                >
+                  Builds our commanders have published
+                </a>
+              </Panel>
+            </>
+          )
         }
       >
         {data.categories.length === 0 ? (

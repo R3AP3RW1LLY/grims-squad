@@ -73,47 +73,59 @@ export function DeepField() {
 
 /* --------------------------------------------------------------------- nav */
 
+/**
+ * The PUBLIC navbar.
+ *
+ * ★ SQUADRON OWNER, 2026-08-01 ★
+ *
+ * "the Public navbar should only have a Forum link that takes people to the forum page and only
+ * shows them publically viewable forum categories please. then we need a nav group dropdown for
+ * Shipyard that has outfitter as the first link and public builds as the second link remove
+ * everything else please. we will add to this as we grow the site."
+ *
+ * ★ WHAT WAS REMOVED, AND WHY THAT IS THE POINT ★
+ *
+ * Situation, Market, Recruiting and Guides all came out. Every one of them was a real page, and
+ * that was the problem: a visitor arriving from Discord met six choices before they had any reason
+ * to care about the difference between them. Two destinations they can actually use — read what the
+ * squadron says, and build a ship — is a front door rather than a directory.
+ *
+ * The pages still exist and are still linked from where they belong. This is a nav, not an index.
+ *
+ * ★ DASHBOARD IS NOT HERE, AND CANNOT BE ★
+ *
+ * "Dashboard should be the first link ... but only visible if a user is logged in." This component
+ * only renders for a visitor with NO session — `(site)/layout.tsx` swaps in `AuthedNav` the moment
+ * there is one, and that bar already leads with Dashboard. So the condition is satisfied by which
+ * component renders rather than by a check inside one, which is why there is no `signedIn` prop
+ * here to get wrong.
+ */
 export const NAV_LINKS: ReadonlyArray<
   { href: string; label: string } | { label: string; children: readonly NavChild[] }
 > = [
-  { href: '/situation', label: 'Situation' },
-  { href: '/market', label: 'Market' },
-  { href: '/shipyard', label: 'Shipyard' },
   /*
-   * ★ GUIDES IS PUBLIC; COMMS IS NOT ★
+   * ★ /forum IS PUBLIC NOW ★
    *
-   * Squadron owner, 2026-07-29: "when a post is public in guides it should be publically
-   * visible on the website homepage navbar".
+   * It sat in `(hub)` and redirected anybody without a session to sign in. A "Forum" link that
+   * bounces a visitor to Discord OAuth is not a forum link, it is a sign-in button wearing one.
    *
-   * `/guides` lives in this `(site)` group and reads the API with no credentials, so an
-   * anonymous visitor sees exactly the public guides and nothing else. `/forum` is in
-   * `(hub)` and redirects anybody without a session to sign in — which is right for the
-   * boards, and was wrong for the guides: the one board deliberately readable by the
-   * public sat behind a login, and it is the board whose whole purpose is being read by
-   * people who have not joined yet.
-   *
-   * Placed before Comms so the reading order is "here is how to join" and then "here is
-   * where members talk", which is the order a prospective member needs them in.
+   * What they see is decided by the ACL, not by this nav: category visibility is a `viewPerm`
+   * bitmask, and the guest mask holds FORUM_VIEW_PUBLIC and nothing else. So an anonymous reader
+   * gets exactly the public categories — the same filter a member's own reads go through, one mask
+   * lower.
    */
-  /*
-   * ★ A DROPDOWN, ADDED 2026-07-30 ★
-   *
-   * Owner: "add a category to the forums called Recruiting ... add a dropdown to the public navbar
-   * and add Guides to it".
-   *
-   * Two public boards now exist, and both are aimed at the same reader: somebody deciding whether
-   * to join. Two sibling links would have spent two of the five nav slots on one audience, so they
-   * group under one — Recruiting first (why join), Guides second (how), which is the order that
-   * question gets asked in.
-   */
+  { href: '/forum', label: 'Forum' },
   {
-    label: 'Join us',
+    label: 'Shipyard',
     children: [
-      { href: '/recruiting', label: 'Recruiting', hint: 'Who we are and who we are looking for' },
-      { href: '/guides', label: 'Guides', hint: 'How to join, step by step' },
+      { href: '/shipyard', label: 'Outfitter', hint: 'Fit any ship in the game, no account needed' },
+      {
+        href: '/shipyard/public',
+        label: 'Public builds',
+        hint: 'Ships our commanders have published',
+      },
     ],
   },
-  { href: '/forum', label: 'Comms' },
 ] as const;
 
 export function SiteNav() {
@@ -284,9 +296,14 @@ export function SiteFooter() {
             </h2>
             <ul className="mt-4 list-none space-y-2 p-0 text-sm">
               {[
-                { href: '/situation', label: 'Situation board' },
-                { href: '/market', label: 'Commodities' },
-                { href: '/shipyard', label: 'Shipyard' },
+                /*
+                 * Kept in step with the navbar above. The footer used to list a Situation board and
+                 * a Commodities page that the nav no longer offers — a footer quietly advertising
+                 * what the nav dropped is how a site ends up with two answers to "what is here".
+                 */
+                { href: '/shipyard', label: 'Ship outfitter' },
+                { href: '/shipyard/public', label: 'Public builds' },
+                { href: '/forum', label: 'Forum' },
               ].map((l) => (
                 <li key={l.href}>
                   <a

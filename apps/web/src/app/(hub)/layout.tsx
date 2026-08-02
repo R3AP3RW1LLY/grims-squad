@@ -51,7 +51,23 @@ import { getMe, getMyPrivacy } from '../../lib/api';
  * `/shipyard/build/` keeps its trailing slash and its prefix match, because a shared link is the
  * main thing a visitor arrives on and the token varies.
  */
-const PUBLIC_PATHS: readonly string[] = ['/shipyard', '/shipyard/public'];
+const PUBLIC_PATHS: readonly string[] = [
+  '/shipyard',
+  '/shipyard/public',
+  /*
+   * Squadron owner, 2026-08-01: the public navbar's Forum link must take people "to the forum page
+   * and only show them publically viewable forum categories".
+   *
+   * `/forum` is the board INDEX, and what appears on it is decided by each category's `viewPerm`
+   * against the reader's mask — the guest mask holds FORUM_VIEW_PUBLIC and nothing else. So a
+   * visitor sees the public categories and a member sees theirs, from one page.
+   *
+   * Only the index. A THREAD lives at `/forum/<category>/<thread>` and is not listed here, so
+   * reading one still requires a session unless it is in a public category, which the ACL decides
+   * on its own terms rather than by this list.
+   */
+  '/forum',
+];
 const PUBLIC_PREFIXES: readonly string[] = ['/shipyard/build/'];
 
 function isPublicPath(path: string): boolean {
