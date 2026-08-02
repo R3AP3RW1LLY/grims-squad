@@ -43,6 +43,17 @@ export interface RosterEntry {
   }>;
   /** Tonnes they have actually delivered, from the ledger. */
   readonly delivered: number;
+  /**
+   * True for the caller's own row.
+   *
+   * ★ THE SERVER DECIDES WHO YOU ARE ★
+   *
+   * The app cannot work this out: it holds a device token, not a user id, and nothing in the
+   * roster payload identified the reader. Sending the caller's id down for the client to compare
+   * would be one more value the app could get wrong about its own identity — and it is the answer
+   * to "should this button say Join or Leave", which had better not be a guess.
+   */
+  readonly you: boolean;
 }
 
 export class ColonyRosterService {
@@ -116,6 +127,7 @@ export class ColonyRosterService {
       userId: m.user_id,
       name: m.name,
       joinedAt: m.joined_at,
+      you: m.user_id === callerId,
       assignments: assignments
         .filter((a) => a.user_id === m.user_id)
         .map((a) => ({

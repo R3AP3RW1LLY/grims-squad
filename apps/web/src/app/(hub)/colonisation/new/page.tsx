@@ -60,6 +60,40 @@ export default async function NewProjectPage() {
           When they may not, the page says what it is and what they can still do, rather than
           rendering an empty shell.
         */}
+        {/*
+          ★ HOW TO START ONE — SQUADRON OWNER, 2026-08-02 ★
+
+          "add a how to start a new project box to this page on both the website and app page for
+          new projects please."
+
+          Written as what happens FOR you rather than as steps to perform, because most of it is
+          handled without being asked — and that is both the least obvious part and the reason to
+          bother running the companion app at all.
+        */}
+        <Section title="How to start a project">
+          <div className="rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel)] p-5">
+            <ol className="m-0 list-decimal space-y-2 pl-5 text-sm leading-relaxed text-[var(--color-text-secondary)]">
+              <li>
+                Fly to your construction site and dock with the companion app running. It reads the
+                depot the game reports and fills the form in — name, system, station and market id.
+              </li>
+              <li>
+                Post it from the app, or fill the form below in by hand if you are away from the
+                game, and choose whether it is the squadron&rsquo;s build or your own.
+              </li>
+              <li>
+                From then on it keeps itself current. Every time anyone with the app docks there,
+                what the site still needs is updated, and every delivery is recorded against the
+                commander who made it.
+              </li>
+              <li>
+                Members join the build and take on commodities, and the shopping list works out
+                where to buy what is left and what it will cost.
+              </li>
+            </ol>
+          </div>
+        </Section>
+
         <Section title="Post a project">
           {read.data.can.post ? (
             <PostProject canPostSquadron={read.data.can.manage} />

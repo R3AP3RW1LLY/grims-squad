@@ -196,24 +196,78 @@ export function ColonyNewPage({
     );
   }
 
-  // Already on the board: the member is looking at it, not creating it. Offering the form would end
-  // in the server answering "already posted as X", which is a worse way to find out.
-  const alreadyPosted =
-    dockedAt !== null && projects.some((p) => p.marketId === dockedAt.marketId);
+  /*
+   * Already on the board: the member is looking at it, not creating it. Offering the form would end
+   * in the server answering "already posted as X", which is a worse way to find out.
+   *
+   * The PROJECT is held, not just a boolean, because its title is what somebody named this build —
+   * which is not necessarily what the station is called. Squadron owner, 2026-08-02: "after a
+   * project is started add the project name to the left of (Market 4359491587) please so this make
+   * sense."
+   */
+  const posted =
+    dockedAt === null ? undefined : projects.find((p) => p.marketId === dockedAt.marketId);
+  const alreadyPosted = posted !== undefined;
 
   return (
     <div>
+      {/*
+        ★ HOW TO START ONE — SQUADRON OWNER, 2026-08-02 ★
+
+        "add a how to start a new project box to this page on both the website and app page for new
+        projects please."
+
+        The page assumed you already knew that posting a project means flying to the site first.
+        Somebody arriving with no idea saw an empty panel saying "Dock at a construction site" and
+        no explanation of why, what happens next, or what the app then does on its own — which is
+        the genuinely useful part and the least obvious.
+
+        Written as what the app does FOR you rather than as a list of steps to perform, because
+        three of the four steps are things it handles without being asked.
+      */}
+      <Section title="How to start a project">
+        <Card hud>
+          <ol style={{ margin: 0, paddingLeft: '18px', fontSize: '13px', lineHeight: 1.65 }}>
+            <li>
+              Fly to your construction site and dock. The app reads the depot the game reports and
+              fills this page in — name, system, station and market id, all of it.
+            </li>
+            <li>
+              Press <strong>New project</strong>, check the details, and choose whether it is the
+              squadron&rsquo;s build or your own.
+            </li>
+            <li>
+              From then on it keeps itself current. Every time anyone with the app docks there, what
+              the site still needs is updated, and every delivery is recorded against the commander
+              who made it.
+            </li>
+            <li>
+              Members join the build and take on commodities, and the shopping list works out where
+              to buy what is left.
+            </li>
+          </ol>
+        </Card>
+      </Section>
+
       <Section title="Where you are">
         {dockedAt === null ? (
           <Empty>Dock at a construction site and everything about it appears here.</Empty>
         ) : alreadyPosted ? (
           <Card accent={C.cyan}>
             <p style={{ margin: 0, fontSize: '14px' }}>
-              {projectTitleFrom(dockedAt.stationName)}{' '}
+              {/*
+                The project's OWN name, falling back to the station's. Somebody who renamed their
+                build when they posted it should see the name they chose here — a market id beside a
+                station name they did not pick is two identifiers and no answer to "which of my
+                projects is this".
+              */}
+              {posted?.title ?? projectTitleFrom(dockedAt.stationName)}{' '}
               <span style={{ fontSize: '11px', color: C.faint }}>(Market {dockedAt.marketId})</span>
             </p>
             <p style={{ margin: '6px 0 0', fontSize: '12px', color: C.dim }}>
-              This site is already posted. Open it from Squadron or Members’ projects.
+              This site is already posted as{' '}
+              {posted?.owner === 'squadron' ? 'a squadron project' : 'a member’s project'}. Open it
+              from {posted?.owner === 'squadron' ? 'Squadron' : 'Members’'} projects.
             </p>
           </Card>
         ) : (
@@ -881,6 +935,74 @@ function CommodityRow({ need }: { need: ColonyNeed }): JSX.Element {
 }
 
 /**
+ * How much of a commodity somebody is taking on.
+ *
+ * Quarter, half or all of what is left. Three is the right number: two is not a choice and five is
+ * a decision. Every button prints the tonnes it works out to, so agreeing to a share never means
+ * doing the sum yourself.
+ */
+const SHARES = [
+  { label: '¼', of: 0.25 },
+  { label: '½', of: 0.5 },
+  { label: 'All', of: 1 },
+] as const;
+
+function ClaimRow({
+  need,
+  busy,
+  onClaim,
+}: {
+  need: ColonyNeed;
+  busy: boolean;
+  onClaim: (tonnes: number) => void;
+}): JSX.Element {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: '10px',
+        padding: '5px 0',
+        borderTop: `1px solid ${C.hairline}`,
+      }}
+    >
+      <span style={{ fontSize: '12px' }}>
+        {need.commodity}
+        <span style={{ color: C.faint, marginLeft: '8px', fontVariantNumeric: 'tabular-nums' }}>
+          {tonnes(need.remaining)} left
+        </span>
+      </span>
+
+      <span style={{ display: 'flex', gap: '4px' }}>
+        {SHARES.map((share) => {
+          /*
+           * Rounded UP, and never past what is left. A quarter of 4,001 tonnes is 1,000.25, and a
+           * claim in fractions of a tonne is not a thing the game can carry — rounding up also
+           * means three quarter-shares cover the pile rather than leaving one tonne behind.
+           */
+          const amount = Math.min(need.remaining, Math.ceil(need.remaining * share.of));
+          return (
+            <button
+              key={share.label}
+              type="button"
+              class="chip"
+              disabled={busy}
+              title={`Take ${tonnes(amount)} of ${need.commodity}`}
+              style={{ padding: '3px 9px', fontSize: '11px' }}
+              onClick={() => onClaim(amount)}
+            >
+              {share.label}
+              <span style={{ color: C.faint, marginLeft: '6px' }}>{amount.toLocaleString()}</span>
+            </button>
+          );
+        })}
+      </span>
+    </div>
+  );
+}
+
+/**
  * The roster: who has joined, what they have taken on, and what nobody is covering.
  *
  * ★ THE UNCOVERED LIST IS THE POINT ★
@@ -964,64 +1086,131 @@ function Roster({
                   not carrying anything in particular
                 </p>
               ) : (
-                <p style={{ margin: '3px 0 0', fontSize: '11px', color: C.dim }}>
-                  {m.assignments
-                    .map(
-                      (a) =>
-                        `${a.commodity}${a.tonnes === null ? '' : ` ${a.tonnes.toLocaleString()} t`}` +
-                        // Said out loud: "you took this on" and "somebody asked you to" are
-                        // different things to read about yourself.
-                        (a.assigned ? ' (assigned)' : ''),
-                    )
-                    .join(' \u00b7 ')}
-                </p>
+                /*
+                 * ★ ROWS, NOT A SENTENCE — SQUADRON OWNER, 2026-08-02 ★
+                 *
+                 * "when we assign materials for a crew member to haul, we need a way to remove
+                 * those materials too please so we can update."
+                 *
+                 * They were joined into one line of text, which read fine and could not be undone.
+                 * A plan somebody cannot change is a plan that goes stale the first time anybody's
+                 * evening turns out differently.
+                 */
+                <div style={{ marginTop: '4px', display: 'grid', gap: '3px' }}>
+                  {m.assignments.map((a) => (
+                    <div
+                      key={a.id}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'baseline',
+                        justifyContent: 'space-between',
+                        gap: '8px',
+                        fontSize: '11px',
+                        color: C.dim,
+                      }}
+                    >
+                      <span>
+                        {a.commodity}
+                        {a.tonnes === null ? '' : ` · ${a.tonnes.toLocaleString()} t`}
+                        {/* Said out loud: "you took this on" and "somebody asked you to" are
+                            different things to read about yourself. */}
+                        {a.assigned ? ' (assigned)' : ''}
+                      </span>
+                      <button
+                        type="button"
+                        class="chip"
+                        disabled={busy}
+                        title={`Drop ${a.commodity}`}
+                        style={{ padding: '1px 7px', fontSize: '10px', color: C.faint }}
+                        onClick={() =>
+                          void act(() =>
+                            window.colony.unassign(projectId, {
+                              commodity: a.commodity,
+                              // Sent explicitly: dropping somebody ELSE's assignment is a different
+                              // permission from dropping your own, and the hub checks it. Omitting
+                              // this would silently drop the caller's instead.
+                              userId: m.userId,
+                            }),
+                          )
+                        }
+                      >
+                        Drop
+                      </button>
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
           ))
         )}
 
-        <div style={{ marginTop: '12px', display: 'flex', gap: '10px' }}>
-          <Button
-            tone="primary"
-            disabled={busy}
-            onClick={() => void act(() => window.colony.join(projectId))}
-          >
-            Join this build
-          </Button>
-          <Button disabled={busy} onClick={() => void act(() => window.colony.leave(projectId))}>
-            Leave
-          </Button>
+        {/*
+          ★ ONE BUTTON, AND IT IS THE ONE THAT APPLIES — SQUADRON OWNER, 2026-08-02 ★
+
+          "when a crew member joins a build the join this build button needs to be replaced with a
+          red leave this build button."
+
+          Both were drawn at once before, so a member who had already joined still saw Join and had
+          no way to know whether they were on the build. Which button is showing IS the answer to
+          "am I on this", and two buttons could not say it.
+
+          The hub decides who you are — `you` comes back on the roster row — because the app holds a
+          device token rather than a user id and should not be guessing at its own identity.
+        */}
+        <div style={{ marginTop: '12px' }}>
+          {roster.some((m) => m.you) ? (
+            <Button
+              tone="danger"
+              disabled={busy}
+              onClick={() => void act(() => window.colony.leave(projectId))}
+            >
+              Leave this build
+            </Button>
+          ) : (
+            <Button
+              tone="primary"
+              disabled={busy}
+              onClick={() => void act(() => window.colony.join(projectId))}
+            >
+              Join this build
+            </Button>
+          )}
         </div>
       </Card>
 
       {uncovered.length === 0 ? null : (
         <div style={{ marginTop: '12px' }}>
+          {/*
+            ★ TAKE A SHARE, NOT ALL OR NOTHING — SQUADRON OWNER, 2026-08-02 ★
+
+            "perhaps allowing us to assign them a qty of materials to haul or a percentage would be
+            a cool feature too."
+
+            It was one button that claimed the entire outstanding amount, which is the wrong default
+            for the case it matters most in: forty thousand tonnes of steel is nobody's evening, and
+            a member who could only claim all of it either claimed a promise they could not keep or
+            claimed nothing.
+
+            Percentages rather than a number box, because the question somebody actually has is
+            "how much of this am I taking on", and they answer it in fractions of the pile in front
+            of them. The tonnage each button works out to is printed on it, so nobody is doing
+            arithmetic to find out what they just agreed to.
+          */}
           <p style={{ margin: '0 0 6px', fontSize: '11px', color: C.faint }}>
-            Nobody is covering these yet — take one and it shows against your name.
+            Nobody is covering these yet — take a share and it shows against your name.
           </p>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '7px' }}>
+          <div style={{ display: 'grid', gap: '6px' }}>
             {uncovered.slice(0, 12).map((n) => (
-              <button
+              <ClaimRow
                 key={n.commodity}
-                type="button"
-                disabled={busy}
-                onClick={() =>
+                need={n}
+                busy={busy}
+                onClaim={(amount) =>
                   void act(() =>
-                    window.colony.assign(projectId, {
-                      commodity: n.commodity,
-                      // The whole outstanding amount, as the obvious default. It is a starting
-                      // figure on a claim, not a promise — nothing measures somebody against it.
-                      tonnes: n.remaining,
-                    }),
+                    window.colony.assign(projectId, { commodity: n.commodity, tonnes: amount }),
                   )
                 }
-                // Styled entirely by the class — see the note in theme.css on why a control
-                // whose colour changes on hover cannot carry an inline colour.
-                class="chip"
-              >
-                {n.commodity}
-                <span style={{ color: C.faint, marginLeft: '6px' }}>{tonnes(n.remaining)}</span>
-              </button>
+              />
             ))}
           </div>
         </div>

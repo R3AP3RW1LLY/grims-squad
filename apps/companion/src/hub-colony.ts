@@ -179,6 +179,8 @@ export interface RosterEntry {
     readonly assigned: boolean;
   }>;
   readonly delivered: number;
+  /** True for your own row. Decided by the hub — the app holds a device token, not a user id. */
+  readonly you: boolean;
 }
 
 export const colonyRoster = (
