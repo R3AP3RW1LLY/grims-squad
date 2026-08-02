@@ -120,4 +120,12 @@ contextBridge.exposeInMainWorld('colony', {
   /** The project for a construction site, by market id. Null when nobody has posted it. */
   at: (marketId: string) => ipcRenderer.invoke('colonyAt', marketId),
   post: (body: unknown) => ipcRenderer.invoke('colonyPost', body),
+
+  /** Who is on a build, what they have taken on, and what they have delivered. */
+  roster: (id: string) => ipcRenderer.invoke('colonyRoster', id),
+  join: (id: string) => ipcRenderer.invoke('colonyJoin', id),
+  leave: (id: string) => ipcRenderer.invoke('colonyLeave', id),
+  /** Claim a commodity, or assign one to somebody else. The hub decides whether you may. */
+  assign: (id: string, body: unknown) => ipcRenderer.invoke('colonyAssign', id, body),
+  unassign: (id: string, body: unknown) => ipcRenderer.invoke('colonyUnassign', id, body),
 });

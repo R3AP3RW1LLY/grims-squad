@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 import type {
+  RosterEntry,
   ColonyHauler,
   ColonyNeed,
   ColonyProject,
@@ -44,6 +45,17 @@ declare global {
       project(id: string): Promise<Answer<ProjectDetailData>>;
       at(marketId: string): Promise<Answer<{ project: ColonyProject | null; needs: ColonyNeed[] }>>;
       post(body: unknown): Promise<Answer<{ id: string }>>;
+      roster(id: string): Promise<Answer<{ roster: RosterEntry[] }>>;
+      join(id: string): Promise<Answer<{ ok: true }>>;
+      leave(id: string): Promise<Answer<{ ok: true }>>;
+      assign(
+        id: string,
+        body: { commodity: string; tonnes?: number; userId?: string },
+      ): Promise<Answer<{ ok: true }>>;
+      unassign(
+        id: string,
+        body: { commodity: string; userId?: string },
+      ): Promise<Answer<{ ok: true }>>;
     };
   }
 }
@@ -410,6 +422,16 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
   const [data, setData] = useState<ProjectDetailData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  /*
+   * Re-read after a roster change, so the delivered totals and the needs the roster is offering
+   * stay in step with what was just claimed. Deliberately silent on failure: the roster has already
+   * reported its own error, and a second message about the same action reads as two problems.
+   */
+  const reloadDetail = async (): Promise<void> => {
+    const answer = await window.colony.project(id);
+    if (answer.ok) setData(answer.data);
+  };
+
   useEffect(() => {
     let live = true;
     const load = async (): Promise<void> => {
@@ -564,6 +586,19 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
         )}
       </Section>
 
+      {/*
+        ★ WHO IS ON THIS, AND WHO IS COVERING WHAT — SQUADRON OWNER, 2026-08-02 ★
+
+        "a way for people to join the project ahead of time, and a way that we can assign people who
+        do join what materials we want them to haul."
+
+        Above the delivery history on purpose: this is what is GOING to happen and the history is
+        what already did. Somebody opening a build in order to help wants the first.
+      */}
+      <Section title="Who is on this build">
+        <Roster projectId={project.id} needs={needs} onChanged={() => void reloadDetail()} />
+      </Section>
+
       <Section title="Who has hauled">
         {haulers.length === 0 ? (
           <Empty>No deliveries recorded yet.</Empty>
@@ -607,6 +642,163 @@ function CommodityRow({ need }: { need: ColonyNeed }): JSX.Element {
             {provided.toLocaleString()} of {required.toLocaleString()} delivered
           </p>
         </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The roster: who has joined, what they have taken on, and what nobody is covering.
+ *
+ * ★ THE UNCOVERED LIST IS THE POINT ★
+ *
+ * A roster that only shows who has claimed something answers "who is helping" and leaves the more
+ * useful question — what is nobody bringing — to be worked out by comparing two lists by eye. The
+ * gap is computed here and named, because it is what somebody arriving to help actually needs.
+ */
+function Roster({
+  projectId,
+  needs,
+  onChanged,
+}: {
+  projectId: string;
+  needs: readonly ColonyNeed[];
+  onChanged: () => void;
+}): JSX.Element {
+  const [roster, setRoster] = useState<RosterEntry[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = async (): Promise<void> => {
+    const answer = await window.colony.roster(projectId);
+    if (answer.ok) {
+      setRoster(answer.data.roster);
+      setError(null);
+    } else {
+      setError(answer.error);
+    }
+  };
+
+  useEffect(() => {
+    void load();
+  }, [projectId]);
+
+  /*
+   * Every action goes through here so the failure path is one path. The hub is where the rules
+   * live — whether this member may assign to that one — so a refusal is a SENTENCE to show rather
+   * than something the app should have predicted and hidden.
+   */
+  const act = async (fn: () => Promise<Answer<unknown>>): Promise<void> => {
+    setBusy(true);
+    const answer = await fn();
+    setBusy(false);
+    if (!answer.ok) {
+      setError(answer.error);
+      return;
+    }
+    setError(null);
+    await load();
+    onChanged();
+  };
+
+  if (roster === null) return <Empty>Loading…</Empty>;
+
+  const claimed = new Set(roster.flatMap((m) => m.assignments.map((a) => a.commodity)));
+  const uncovered = needs.filter((n) => n.remaining > 0 && !claimed.has(n.commodity));
+
+  return (
+    <div>
+      {error === null ? null : (
+        <div style={{ marginBottom: '12px' }}>
+          <Problem>{error}</Problem>
+        </div>
+      )}
+
+      <Card>
+        {roster.length === 0 ? (
+          <Empty>Nobody has joined yet.</Empty>
+        ) : (
+          roster.map((m) => (
+            <div key={m.userId} style={{ padding: '7px 0', borderTop: `1px solid ${C.hairline}` }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
+                <span style={{ fontSize: '13px' }}>{m.name}</span>
+                <span style={{ fontSize: '12px', color: C.dim, fontVariantNumeric: 'tabular-nums' }}>
+                  {m.delivered > 0 ? `${tonnes(m.delivered)} delivered` : 'nothing yet'}
+                </span>
+              </div>
+              {m.assignments.length === 0 ? (
+                <p style={{ margin: '3px 0 0', fontSize: '11px', color: C.faint }}>
+                  not carrying anything in particular
+                </p>
+              ) : (
+                <p style={{ margin: '3px 0 0', fontSize: '11px', color: C.dim }}>
+                  {m.assignments
+                    .map(
+                      (a) =>
+                        `${a.commodity}${a.tonnes === null ? '' : ` ${a.tonnes.toLocaleString()} t`}` +
+                        // Said out loud: "you took this on" and "somebody asked you to" are
+                        // different things to read about yourself.
+                        (a.assigned ? ' (assigned)' : ''),
+                    )
+                    .join(' \u00b7 ')}
+                </p>
+              )}
+            </div>
+          ))
+        )}
+
+        <div style={{ marginTop: '12px', display: 'flex', gap: '10px' }}>
+          <Button
+            tone="primary"
+            disabled={busy}
+            onClick={() => void act(() => window.colony.join(projectId))}
+          >
+            Join this build
+          </Button>
+          <Button disabled={busy} onClick={() => void act(() => window.colony.leave(projectId))}>
+            Leave
+          </Button>
+        </div>
+      </Card>
+
+      {uncovered.length === 0 ? null : (
+        <div style={{ marginTop: '12px' }}>
+          <p style={{ margin: '0 0 6px', fontSize: '11px', color: C.faint }}>
+            Nobody is covering these yet — take one and it shows against your name.
+          </p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '7px' }}>
+            {uncovered.slice(0, 12).map((n) => (
+              <button
+                key={n.commodity}
+                type="button"
+                disabled={busy}
+                onClick={() =>
+                  void act(() =>
+                    window.colony.assign(projectId, {
+                      commodity: n.commodity,
+                      // The whole outstanding amount, as the obvious default. It is a starting
+                      // figure on a claim, not a promise — nothing measures somebody against it.
+                      tonnes: n.remaining,
+                    }),
+                  )
+                }
+                style={{
+                  border: `1px solid ${C.subtle}`,
+                  background: C.raised,
+                  color: C.text,
+                  borderRadius: '7px',
+                  padding: '5px 10px',
+                  fontSize: '12px',
+                  cursor: busy ? 'default' : 'pointer',
+                  fontFamily: 'inherit',
+                }}
+              >
+                {n.commodity}
+                <span style={{ color: C.faint, marginLeft: '6px' }}>{tonnes(n.remaining)}</span>
+              </button>
+            ))}
+          </div>
+        </div>
       )}
     </div>
   );

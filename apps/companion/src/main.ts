@@ -9,9 +9,14 @@ import {
 } from './overlay-runtime.js';
 import { explain } from './display-mode.js';
 import {
+  colonyAssign,
   colonyAtMarket,
+  colonyJoin,
+  colonyLeave,
   colonyProject,
   colonyProjects,
+  colonyRoster,
+  colonyUnassign,
   postColonyProject,
 } from './hub-colony.js';
 import { readdir, readFile, stat, open } from 'node:fs/promises';
@@ -1193,6 +1198,35 @@ if (!app.requestSingleInstanceLock()) {
         ? colonyAtMarket(hub(), marketId)
         : { ok: false as const, error: 'No construction site asked for.' },
     );
+    /*
+     * The roster. Same shape as everything else here: the renderer names a project and the main
+     * process attaches the credential, so the device token never reaches the page.
+     */
+    const projectId = (v: unknown): string => (typeof v === 'string' ? v : '');
+
+    ipcMain.handle('colonyRoster', (_e, id: unknown) => colonyRoster(hub(), projectId(id)));
+    ipcMain.handle('colonyJoin', (_e, id: unknown) => colonyJoin(hub(), projectId(id)));
+    ipcMain.handle('colonyLeave', (_e, id: unknown) => colonyLeave(hub(), projectId(id)));
+
+    ipcMain.handle('colonyAssign', (_e, id: unknown, body: unknown) => {
+      const b = (body ?? {}) as Record<string, unknown>;
+      return colonyAssign(hub(), projectId(id), {
+        commodity: typeof b['commodity'] === 'string' ? b['commodity'] : '',
+        // Omitted rather than sent as undefined: the hub reads a missing `userId` as "me", which is
+        // the common case and one fewer value the app can get wrong about its own identity.
+        ...(typeof b['tonnes'] === 'number' ? { tonnes: b['tonnes'] } : {}),
+        ...(typeof b['userId'] === 'string' && b['userId'] !== '' ? { userId: b['userId'] } : {}),
+      });
+    });
+
+    ipcMain.handle('colonyUnassign', (_e, id: unknown, body: unknown) => {
+      const b = (body ?? {}) as Record<string, unknown>;
+      return colonyUnassign(hub(), projectId(id), {
+        commodity: typeof b['commodity'] === 'string' ? b['commodity'] : '',
+        ...(typeof b['userId'] === 'string' && b['userId'] !== '' ? { userId: b['userId'] } : {}),
+      });
+    });
+
     ipcMain.handle('colonyPost', (_e, body: unknown) => {
       const b = (body ?? {}) as Record<string, unknown>;
       const text = (k: string): string => (typeof b[k] === 'string' ? (b[k] as string) : '');

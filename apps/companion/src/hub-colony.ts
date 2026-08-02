@@ -166,6 +166,48 @@ export const colonyAtMarket = (
 ): Promise<Answer<{ project: ColonyProject | null; needs: ColonyNeed[] }>> =>
   hubColony(call, `/at/${encodeURIComponent(marketId)}`);
 
+/** Somebody on a build, with what they have taken on and what they have actually delivered. */
+export interface RosterEntry {
+  readonly userId: string;
+  readonly name: string;
+  readonly joinedAt: string;
+  readonly assignments: ReadonlyArray<{
+    readonly id: string;
+    readonly commodity: string;
+    readonly tonnes: number | null;
+    /** True when somebody else put this on them, rather than them claiming it. */
+    readonly assigned: boolean;
+  }>;
+  readonly delivered: number;
+}
+
+export const colonyRoster = (
+  call: HubCall,
+  id: string,
+): Promise<Answer<{ roster: RosterEntry[] }>> =>
+  hubColony(call, `/projects/${encodeURIComponent(id)}/roster`);
+
+export const colonyJoin = (call: HubCall, id: string): Promise<Answer<{ ok: true }>> =>
+  hubColony(call, `/projects/${encodeURIComponent(id)}/join`, { method: 'POST', body: {} });
+
+export const colonyLeave = (call: HubCall, id: string): Promise<Answer<{ ok: true }>> =>
+  hubColony(call, `/projects/${encodeURIComponent(id)}/leave`, { method: 'POST', body: {} });
+
+/** Claim a commodity, or — with `userId` — put one on somebody else. */
+export const colonyAssign = (
+  call: HubCall,
+  id: string,
+  body: { commodity: string; tonnes?: number; userId?: string },
+): Promise<Answer<{ ok: true }>> =>
+  hubColony(call, `/projects/${encodeURIComponent(id)}/assign`, { method: 'POST', body });
+
+export const colonyUnassign = (
+  call: HubCall,
+  id: string,
+  body: { commodity: string; userId?: string },
+): Promise<Answer<{ ok: true }>> =>
+  hubColony(call, `/projects/${encodeURIComponent(id)}/unassign`, { method: 'POST', body });
+
 export const postColonyProject = (
   call: HubCall,
   body: {
