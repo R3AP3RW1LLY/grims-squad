@@ -91,7 +91,12 @@ export async function SecurityBody() {
             </>
           }
         >
-          <SecurityForm enrolled={status.enrolled} />
+          {/*
+            `privileged` only changes what removal WARNS about. Whether the admin console actually
+            closes is decided by AdminGateGuard, which reads enrolment directly — this is the
+            courtesy of saying so first.
+          */}
+          <SecurityForm enrolled={status.enrolled} privileged={account?.privileged === true} />
         </PageBody>
       )}
     </>

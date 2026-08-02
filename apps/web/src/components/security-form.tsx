@@ -5,7 +5,15 @@ import { QRCodeSVG } from 'qrcode.react';
 import { apiPost } from '../lib/api-client';
 import { CodeInput } from './code-input';
 
-type Stage = 'idle' | 'showing-secret' | 'showing-codes';
+type Stage = 'idle' | 'showing-secret' | 'showing-codes' | 'removing';
+
+/**
+ * What removal is for.
+ *
+ * `replace` goes straight into enrolment afterwards, because somebody moving to a new phone wants
+ * one flow, not two visits to the same page. `remove` stops.
+ */
+type RemoveIntent = 'replace' | 'remove';
 
 /**
  * TOTP enrolment.
@@ -32,6 +40,14 @@ type Stage = 'idle' | 'showing-secret' | 'showing-codes';
 export function SecurityForm({
   enrolled,
   /**
+   * Whether this account can open the admin console.
+   *
+   * Only changes what removal WARNS about, never whether it is allowed. A member who has taken on
+   * an officer role and wants their authenticator off their old phone is entitled to do that; they
+   * are not entitled to be surprised by the admin console closing behind them.
+   */
+  privileged = false,
+  /**
    * Where to send them once the recovery codes have been acknowledged.
    *
    * Only set by the FORCED onboarding flow. On the ordinary settings page there
@@ -41,6 +57,7 @@ export function SecurityForm({
   onDone,
 }: {
   enrolled: boolean;
+  privileged?: boolean;
   onDone?: string;
 }) {
   const [stage, setStage] = useState<Stage>('idle');
@@ -50,6 +67,17 @@ export function SecurityForm({
   const [codes, setCodes] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [intent, setIntent] = useState<RemoveIntent>('remove');
+  const [removeCode, setRemoveCode] = useState('');
+  const [useRecovery, setUseRecovery] = useState(false);
+  const [recovery, setRecovery] = useState('');
+  /*
+   * Tracked here rather than re-fetched, so the panel updates the instant removal succeeds. The
+   * server is still the authority — `enrolled` arrives from it on the next load — but a page that
+   * kept claiming "two-factor is on" until a refresh would be lying about the thing it exists to
+   * report.
+   */
+  const [isEnrolled, setIsEnrolled] = useState(enrolled);
 
   async function begin() {
     setBusy(true);
@@ -99,17 +127,204 @@ export function SecurityForm({
     void confirm();
   }, [confirm]);
 
-  if (enrolled && stage === 'idle') {
+  /**
+   * Removes the authenticator, proving possession first.
+   *
+   * ★ A CURRENT CODE, NOT THE STEP-UP COOKIE ★
+   *
+   * The server insists on one and this asks for it plainly. Removal is the most useful thing an
+   * attacker can do with a hijacked session — it turns a stolen tab into a permanent hold, because
+   * everything afterwards needs only Discord. A step-up is a decision made up to eight hours ago;
+   * this asks the person at the keyboard to prove possession now.
+   */
+  const remove = useCallback(async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await apiPost('/v1/auth/totp/remove', useRecovery ? { recoveryCode: recovery } : { code: removeCode });
+
+      setIsEnrolled(false);
+      setRemoveCode('');
+      setRecovery('');
+      setUseRecovery(false);
+
+      if (intent === 'replace') {
+        // Straight on to setting the new one up. Somebody moving to a new phone asked for one
+        // errand, not two.
+        await begin();
+      } else {
+        setStage('idle');
+      }
+    } catch (e) {
+      setError((e as Error).message);
+      // Same reasoning as confirm(): a rejected code is expired by definition.
+      setRemoveCode('');
+    } finally {
+      setBusy(false);
+    }
+    /*
+     * `begin` is deliberately not a dependency. It is a plain function redeclared every render, so
+     * listing it would rebuild this callback on every keystroke; what it closes over (nothing but
+     * setters) does not change. The repo does not run `react-hooks/exhaustive-deps`, so this is a
+     * note rather than a suppression — a disable comment for a rule that is not configured is an
+     * eslint error in its own right, which is how this first failed.
+     */
+  }, [intent, removeCode, recovery, useRecovery]);
+
+  const onRemoveComplete = useCallback(() => {
+    void remove();
+  }, [remove]);
+
+  if (isEnrolled && stage === 'idle') {
     return (
       <div className="mt-8">
         <p className="text-[var(--color-text-primary)]">
           <span className="text-[var(--color-brand-cyan-bright)]">Two-factor is on.</span> You will
           be asked for a code when you open the admin console.
         </p>
-        <p className="mt-3 text-sm text-[var(--color-text-secondary)]">
-          Lost your authenticator? Use a recovery code to get in, then set it up again from a device
-          you still have.
+
+        {/*
+          ★ SQUADRON OWNER ★
+
+          "we need a way for our users to either add the authenticator to their profile and manage
+          the authenticator, remove and re add etc."
+
+          This panel used to end at the sentence above, and then told people to "set it up again
+          from a device you still have" — advice with no control anywhere on the page to follow it.
+        */}
+        <div className="mt-6 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              setIntent('replace');
+              setError(null);
+              setStage('removing');
+            }}
+            className="rounded border border-[var(--color-border-active)] px-4 py-2 text-sm text-[var(--color-brand-orange-bright)] transition-colors hover:bg-[var(--color-surface-panel-hover)]"
+          >
+            Move to a new authenticator
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setIntent('remove');
+              setError(null);
+              setStage('removing');
+            }}
+            className="rounded border border-[var(--color-border-hairline)] px-4 py-2 text-sm text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-border-subtle)] hover:text-[var(--color-text-primary)]"
+          >
+            Remove it
+          </button>
+        </div>
+
+        <p className="mt-4 text-sm text-[var(--color-text-secondary)]">
+          Changing phones? Use <em>Move to a new authenticator</em> — it removes the old one and
+          sets the new one up in a single step, and gives you fresh recovery codes.
         </p>
+
+        {privileged && (
+          /*
+            Said BEFORE they click, not after. The owner's rule is that an officer who removes it
+            "can not be able to access the admin area at all" until it is back — which is enforced
+            by the guard whatever this panel says. What the panel owes them is knowing that in
+            advance rather than discovering it at a locked door.
+          */
+          <p className="mt-3 rounded border border-[var(--color-brand-orange)] bg-[color-mix(in_srgb,var(--color-brand-orange)_8%,transparent)] px-4 py-3 text-sm text-[var(--color-brand-orange)]">
+            Your account can open the admin console, so removing your authenticator closes it until
+            you set one up again. Everything else on the site keeps working.
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  if (stage === 'removing') {
+    return (
+      <div className="mt-8">
+        <h2 className="m-0 text-lg text-[var(--color-text-primary)]">
+          {intent === 'replace' ? 'Move to a new authenticator' : 'Remove your authenticator'}
+        </h2>
+        <p className="mt-2 text-sm leading-relaxed text-[var(--color-text-secondary)]">
+          {intent === 'replace'
+            ? 'Enter a code from the authenticator you are leaving. We will remove it and set the new one up straight away.'
+            : 'Enter a code from your authenticator to confirm this is you.'}
+        </p>
+
+        {error !== null && (
+          <p
+            role="alert"
+            className="mt-4 rounded border border-[var(--color-brand-orange)] px-4 py-3 text-sm text-[var(--color-brand-orange)]"
+          >
+            {error}
+          </p>
+        )}
+
+        {useRecovery ? (
+          <div className="mt-6">
+            <label className="block">
+              <span className="mb-1 block font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-dim)]">
+                Recovery code
+              </span>
+              <input
+                value={recovery}
+                onChange={(e) => setRecovery(e.target.value)}
+                autoComplete="one-time-code"
+                className="w-full max-w-xs rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-void)] px-3 py-2 font-mono text-sm text-[var(--color-text-primary)] focus:border-[var(--color-border-focus)] focus:outline-none"
+              />
+            </label>
+            <button
+              type="button"
+              disabled={busy || recovery.trim() === ''}
+              onClick={() => void remove()}
+              className="mt-3 rounded border border-[var(--color-border-active)] px-4 py-2 text-sm text-[var(--color-brand-orange-bright)] disabled:opacity-40"
+            >
+              {busy ? 'Working…' : 'Confirm'}
+            </button>
+          </div>
+        ) : (
+          <div className="mt-6">
+            {/* Auto-submits on the sixth digit, like every other code box on this site. */}
+            <CodeInput
+              value={removeCode}
+              onChange={setRemoveCode}
+              onComplete={onRemoveComplete}
+              label={
+                intent === 'replace'
+                  ? 'Code from the authenticator you are leaving'
+                  : 'Code from your authenticator'
+              }
+              disabled={busy}
+            />
+          </div>
+        )}
+
+        <div className="mt-6 flex flex-wrap gap-4">
+          <button
+            type="button"
+            onClick={() => {
+              setStage('idle');
+              setError(null);
+              setRemoveCode('');
+              setRecovery('');
+              setUseRecovery(false);
+            }}
+            className="text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setUseRecovery(!useRecovery);
+              setError(null);
+            }}
+            className="text-sm text-[var(--color-brand-cyan-bright)]"
+          >
+            {useRecovery
+              ? 'Use a code from my authenticator'
+              : 'I have lost my authenticator — use a recovery code'}
+          </button>
+        </div>
       </div>
     );
   }
