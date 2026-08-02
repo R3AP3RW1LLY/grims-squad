@@ -1,9 +1,11 @@
 import Image from 'next/image';
 import { AccountMenu } from './account-menu';
+import { NAV_LINKS } from './site-chrome';
+import { NavDropdown } from './nav-dropdown';
 import type { MeResponse } from '../lib/api';
 
 /**
- * The navbar a signed-in member sees.
+ * The navbar a signed-in member sees ON THE PUBLIC SITE.
  *
  * ★ A DIFFERENT BAR, NOT THE PUBLIC ONE WITH EXTRAS ★
  *
@@ -12,13 +14,30 @@ import type { MeResponse } from '../lib/api';
  * and leaving it there means the most valuable strip of the page is spent
  * advertising to existing members.
  *
- * So this replaces it entirely: squadron destinations on the left, the member on
- * the right. What appears is decided by the SERVER from their permission mask —
- * see apps/api/src/auth/nav.ts for why that is not a security boundary but is an
- * honesty one.
+ * ★ BUT IT IS NOT THE SIDEBAR EITHER — SQUADRON OWNER, 2026-08-01 ★
+ *
+ * "even when im logged in i dont want all that clutter up there! it should just
+ * show the public stuff and dashboard if im logged in and on the homepage."
+ *
+ * This used to render every `squadron` entry the server sent — Dashboard, Forum,
+ * Roster, Outfitter, Squadron builds, Operations, BGS, Fleet — which turned the
+ * marketing site's header into a second copy of the hub sidebar, and one that grew
+ * every time a page was added.
+ *
+ * The hub has a sidebar for that, and it is better at it. THIS bar is on the public
+ * pages, where the job is: get me back to the members area, and let me use the two
+ * things that work without one. So it is the same list the public bar shows, with
+ * Dashboard in front of it.
+ *
+ * ★ DASHBOARD COMES FROM THE SERVER, NOT FROM A STRING ★
+ *
+ * Taken out of `me.nav` rather than hard-coded, so the one case where it must NOT
+ * appear still works: while an admin is unsecured the server sends an EMPTY nav
+ * (see me.controller.ts), and a hard-coded link would offer a door the guard is
+ * about to refuse.
  */
 export function AuthedNav({ me }: { me: MeResponse }) {
-  const squadron = me.nav.filter((i) => i.section === 'squadron');
+  const dashboard = me.nav.find((i) => i.href === '/dashboard') ?? null;
 
   return (
     <header className="sticky top-0 z-50 border-b border-[var(--color-border-hairline)] bg-[color-mix(in_srgb,var(--color-surface-void)_78%,transparent)] backdrop-blur-md">
@@ -52,16 +71,37 @@ export function AuthedNav({ me }: { me: MeResponse }) {
           below takes its place.
         */}
         <ul className="ml-4 hidden list-none items-center gap-1 p-0 md:flex">
-          {squadron.map((item) => (
-            <li key={item.href}>
+          {/*
+            Dashboard first, and only when the server offered it. Everything after it is the
+            PUBLIC list, shared with the signed-out bar so the two cannot drift into disagreeing
+            about what this site has.
+          */}
+          {dashboard !== null && (
+            <li>
               <a
-                href={item.href}
-                className="px-3 py-2 text-sm tracking-wide text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)]"
+                href={dashboard.href}
+                className="px-3 py-2 text-sm tracking-wide text-[var(--color-text-primary)] transition-colors hover:text-[var(--color-brand-orange-bright)]"
               >
-                {item.label}
+                {dashboard.label}
               </a>
             </li>
-          ))}
+          )}
+          {NAV_LINKS.map((l) =>
+            'children' in l ? (
+              <li key={l.label}>
+                <NavDropdown label={l.label} children={l.children} />
+              </li>
+            ) : (
+              <li key={l.href}>
+                <a
+                  href={l.href}
+                  className="px-3 py-2 text-sm tracking-wide text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)]"
+                >
+                  {l.label}
+                </a>
+              </li>
+            ),
+          )}
         </ul>
 
         {me.mustSecureAccount && (
