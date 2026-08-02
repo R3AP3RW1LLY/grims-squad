@@ -2,8 +2,11 @@ import { Module } from '@nestjs/common';
 import { PrismaClient } from '@grims/db';
 import { DatabaseModule } from '../database.module.js';
 import { AuthzModule } from '../authz/authz.module.js';
+import { AclDbService } from '../authz/acl-db.service.js';
 import { MarketController } from './market.controller.js';
-import { PrismaMarketStore } from './market.store.js';
+import { ColonyController } from './colony.controller.js';
+import { ColonyService } from './colony.service.js';
+import { PrismaMarketStore, type MarketStore } from './market.store.js';
 import { MARKET_STORE } from './logistics.tokens.js';
 
 /**
@@ -21,12 +24,27 @@ import { MARKET_STORE } from './logistics.tokens.js';
   // AuthzModule for PermissionService: every route here checks TRADE_QUERY against the caller's own
   // mask, falling back to the guest preset when there is no session.
   imports: [DatabaseModule, AuthzModule],
-  controllers: [MarketController],
+  controllers: [MarketController, ColonyController],
   providers: [
     {
       provide: MARKET_STORE,
       inject: [PrismaClient],
       useFactory: (db: PrismaClient) => new PrismaMarketStore(db),
+    },
+    {
+      /*
+       * Colonisation takes the market store as well as the database, because a project's shopping
+       * list — "Squadron projects also get a shopping list from the Freight Office" — is the market
+       * answering "where do I buy this" for each outstanding need. One implementation of those
+       * index-shaped queries, used by both features.
+       */
+      provide: ColonyService,
+      // AclDbService as well: projects carry a visibility, so every read of one is bound to whoever
+      // is asking (INV-002). The plain client is for `colony_needs` and the contribution ledger,
+      // which carry no ACL column and are only ever reached through a resolved project.
+      inject: [PrismaClient, MARKET_STORE, AclDbService],
+      useFactory: (db: PrismaClient, market: MarketStore, acl: AclDbService) =>
+        new ColonyService(db, market, acl),
     },
   ],
 })

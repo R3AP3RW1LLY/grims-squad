@@ -127,6 +127,38 @@ export const JOURNAL_EVENTS = {
    * panel and can be switched off there, on its own.
    */
   SuitLoadout: 'onfoot',
+
+  /**
+   * Colonisation: what a construction site still needs, and what somebody delivered to it.
+   *
+   * ★ SQUADRON OWNER, 2026-08-02 ★
+   *
+   * "colonization ... will allow our members to post their colonization project to the squadron for
+   * assistance etc ... keep our own full records too."
+   *
+   * ★ THIS IS THE ONLY WAY THE DATA EXISTS ★
+   *
+   * There is no API anywhere that knows what a construction site needs. Ravencolonial does not; it
+   * learns from exactly these two events, sent by exactly this kind of plugin. Shown that, the owner
+   * chose to build ours self-contained — which makes this registry entry the whole foundation. An
+   * event missing from here is discarded by the ingest with no error, which is how `SuitLoadout`
+   * silently collected nothing for weeks.
+   *
+   * ★ ITS OWN CATEGORY, ON BY DEFAULT ★
+   *
+   * Consent here is OPT-OUT: a category defaults to on and a member declines it on the website. The
+   * owner chose that for this — "On by default for anyone in the colonization system" — on the
+   * reasoning that posting a project implies sending its progress, since a project with no progress
+   * data is an empty page.
+   *
+   * Separate from `trade` even though both are cargo, because they answer different questions and
+   * one is far more revealing: a delivery says a member was at a specific construction site at a
+   * specific moment. Somebody happy to appear on a trade leaderboard should be able to decline that
+   * without giving up the leaderboard, which is the same reasoning that gave `onfoot` its own
+   * switch.
+   */
+  ColonisationConstructionDepot: 'colonisation',
+  ColonisationContribution: 'colonisation',
 } as const;
 
 export type JournalEventName = keyof typeof JOURNAL_EVENTS;
@@ -242,6 +274,35 @@ export const EVENT_FIELDS: Record<JournalEventName, readonly string[]> = {
    * distinction the chart exists to show.
    */
   SuitLoadout: ['SuitName', 'SuitName_Localised', 'SuitMods', 'LoadoutName', 'Modules'],
+
+  /*
+   * ★ THE ARRAY IS KEPT HERE, UNLIKE EVERYWHERE ELSE ★
+   *
+   * `Market.Items` is deliberately dropped a few entries above, because storing a hundred-entry
+   * price list in a member's own telemetry every time they open a market screen is a copy of public
+   * data filed under a person.
+   *
+   * `ResourcesRequired` is the opposite case on every axis. It is about thirty commodities, not a
+   * hundred; it is written once when a depot's needs CHANGE rather than on every screen; it exists
+   * nowhere else in the world, because no API publishes what a construction site still needs; and
+   * it is the entire reason the event is being read. Dropping it would leave us storing that
+   * somebody docked at a building site and nothing about the building.
+   *
+   * `ConstructionProgress` is the fraction complete, and `ConstructionComplete` / `ConstructionFailed`
+   * are how a project stops being current without anybody having to remember to close it.
+   */
+  ColonisationConstructionDepot: [
+    'MarketID',
+    'ConstructionProgress',
+    'ConstructionComplete',
+    'ConstructionFailed',
+    'ResourcesRequired',
+  ],
+  /*
+   * What one commander handed over. `Contributions` is a handful of entries — the contents of a
+   * hold, not a market — and it is the ledger the squadron leaderboard is summed from.
+   */
+  ColonisationContribution: ['MarketID', 'Contributions'],
 };
 
 /**
@@ -358,7 +419,9 @@ export type TelemetryCategoryName =
   | 'bgs'
   | 'carrier'
   /** On-foot: the suit and weapons a commander takes out of the ship. */
-  | 'onfoot';
+  | 'onfoot'
+  /** Colonisation: construction-site needs, and deliveries to them. */
+  | 'colonisation';
 
 const CATEGORY_BY_LABEL: Record<JournalCategory, TelemetryCategoryName> = {
   // ---- baseline -----------------------------------------------------------
@@ -379,6 +442,7 @@ const CATEGORY_BY_LABEL: Record<JournalCategory, TelemetryCategoryName> = {
   bgs: 'bgs',
   carrier: 'carrier',
   onfoot: 'onfoot',
+  colonisation: 'colonisation',
 };
 
 /**

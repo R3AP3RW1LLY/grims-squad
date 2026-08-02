@@ -218,6 +218,41 @@ export const TELEMETRY_CATALOGUE: readonly CatalogueGroup[] = [
       },
     ],
   },
+  {
+    /*
+     * ★ SQUADRON OWNER, 2026-08-02 ★
+     *
+     * "colonization ... will allow our members to post their colonization project to the squadron
+     * for assistance etc", and, on how it should reach people: "On by default for anyone in the
+     * colonization system".
+     *
+     * Consent here is opt-out, so being in the catalogue at all IS on by default. What it buys is
+     * the thing that matters: a member can see exactly what this collects and switch it off,
+     * knowing what they lose. Nothing about colonisation is collected silently.
+     *
+     * Its own group rather than part of `trade`, because a delivery says a member was at a specific
+     * construction site at a specific moment — rather more than a tonnage on a leaderboard — and
+     * declining one should not cost the other.
+     */
+    category: 'colonisation',
+    label: 'Colonisation',
+    purpose:
+      'Progress on construction sites, so a project you post keeps itself up to date and the squadron can see what it still needs.',
+    required: false,
+    entries: [
+      {
+        event: 'ColonisationConstructionDepot',
+        label: 'What a site still needs',
+        reveals:
+          'The commodities a construction site you dock at is still short of, and how far along it is.',
+      },
+      {
+        event: 'ColonisationContribution',
+        label: 'What you delivered',
+        reveals: 'The cargo you hand over to a construction site, and which site it was.',
+      },
+    ],
+  },
 ];
 
 /**

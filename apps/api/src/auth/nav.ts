@@ -168,6 +168,22 @@ const NAV: readonly NavDefinition[] = [
     blurb: 'Plan a run: pick the cargo, the hull and the range, and get the route.',
     requires: Permission.TRADE_QUERY,
   },
+  /*
+   * Colonisation, under the same subcategory. Gated on COLONY_VIEW, which guests do NOT hold —
+   * unlike the two above. Squadron owner, 2026-08-02: "Squadron projects members-only, personal
+   * projects publishable by choice", and a project board says who is building what and where.
+   *
+   * A published personal project is reachable without a session, but on a TOKEN rather than through
+   * this entry — the same shape as a shared ship build.
+   */
+  {
+    href: '/logistics/colonisation',
+    label: 'Colonisation',
+    section: 'squadron',
+    subsection: 'Logistics & Trade',
+    blurb: 'What the squadron is building, and what it still needs hauled.',
+    requires: Permission.COLONY_VIEW,
+  },
   {
     href: '/ops',
     label: 'Operations',

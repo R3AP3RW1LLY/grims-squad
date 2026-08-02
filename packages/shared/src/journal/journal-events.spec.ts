@@ -99,6 +99,22 @@ describe('the event allowlist', () => {
       'Bounty',
       'CarrierJump',
       'CarrierStats',
+      /*
+       * Added 2026-08-02, for colonisation. In their OWN category so they can be declined without
+       * giving up the trade leaderboard: a delivery says a member was at a specific construction
+       * site at a specific moment, which is more than a tonnage.
+       *
+       * ★ THE WIDENING THIS LIST EXISTS TO SURFACE — SAY IT PLAINLY ★
+       *
+       * `ColonisationConstructionDepot` keeps its `ResourcesRequired` ARRAY, which no other event
+       * here is allowed to do (`Market.Items` is dropped for exactly that reason). The difference
+       * is that a market's item list is public data filed under a person, and a construction site's
+       * outstanding needs exist nowhere else in the world — no API publishes them. Without the
+       * array we would store that somebody docked at a building site and nothing about the
+       * building. Squadron owner, 2026-08-02, chose this collected on by default.
+       */
+      'ColonisationConstructionDepot',
+      'ColonisationContribution',
       'Died',
       'Docked',
       'FSDJump',

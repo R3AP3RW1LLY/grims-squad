@@ -1646,3 +1646,92 @@ export const getRoutes = (query: Record<string, string> = {}): Promise<RoutePlan
   const qs = new URLSearchParams(query).toString();
   return get(`/v1/logistics/routes${qs === '' ? '' : `?${qs}`}`, { authed: true });
 };
+
+// ── Colonisation ─────────────────────────────────────────────────────────────
+//
+// Squadron owner, 2026-08-02: "allow our members to post their colonization project to the squadron
+// for assistance etc ... keep our own full records too."
+//
+// `getAdmin` rather than plain `get`: these are members-only, so a refusal has to be distinguishable
+// from the API being down. A signed-out visitor reaching /logistics/colonisation should be told to
+// sign in, not shown "could not load".
+
+export interface ColonyProject {
+  id: string;
+  owner: 'squadron' | 'personal';
+  title: string;
+  systemName: string;
+  stationName: string | null;
+  buildType: string | null;
+  notes: string | null;
+  visibility: 'private' | 'squadron' | 'public';
+  shareToken: string | null;
+  isPriority: boolean;
+  completedAt: string | null;
+  postedBy: string | null;
+  postedById: string;
+  updatedAt: string;
+  remaining: number;
+  required: number;
+  needCount: number;
+}
+
+export interface ColonyNeed {
+  commodity: string;
+  remaining: number;
+  required: number | null;
+}
+
+export interface ColonyHauler {
+  name: string;
+  tonnes: number;
+}
+
+/** Where to buy what a project still needs — the Freight Office answering for each line. */
+export interface ColonyShoppingRow {
+  commodity: string;
+  remaining: number;
+  stationName: string | null;
+  systemName: string | null;
+  price: number | null;
+  supply: number | null;
+  distance: number | null;
+  cost: number | null;
+}
+
+export interface ColonyDetail {
+  project: ColonyProject;
+  needs: ColonyNeed[];
+  haulers: ColonyHauler[];
+  shopping: ColonyShoppingRow[];
+  origin: { system: string } | null;
+  unknownSystem: string | null;
+}
+
+/** What the caller may do here. A rendering hint only — every write re-checks. */
+export interface ColonyRights {
+  post: boolean;
+  manage: boolean;
+  publish: boolean;
+}
+
+export const getColonyProjects = (
+  owner: 'squadron' | 'personal' | 'all' = 'all',
+): Promise<AdminRead<{ projects: ColonyProject[]; can: ColonyRights }>> =>
+  getAdmin(`/v1/logistics/colony/projects?owner=${owner}`);
+
+export const getColonyProject = (
+  id: string,
+  query: Record<string, string> = {},
+): Promise<AdminRead<ColonyDetail>> => {
+  const qs = new URLSearchParams(query).toString();
+  return getAdmin(
+    `/v1/logistics/colony/projects/${encodeURIComponent(id)}${qs === '' ? '' : `?${qs}`}`,
+  );
+};
+
+/** A published project, by its token. No session: the token is the capability. */
+export const getSharedColonyProject = (
+  token: string,
+): Promise<{ project: ColonyProject; needs: ColonyNeed[] } | null> =>
+  get(`/v1/logistics/colony/shared/${encodeURIComponent(token)}`, { authed: true });

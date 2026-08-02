@@ -43,6 +43,21 @@ CRON_TZ=UTC
 # minutes, competing with nothing.
 5 * * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/commodity-rollup.js >> /var/log/grims-worker.log 2>&1
 
+# Colonisation projects, kept current from members' journals.
+#
+# Squadron owner, 2026-08-02: "keep our own full records too" — built self-contained once
+# Ravencolonial turned out to learn everything from the same journal events we already read.
+#
+# ★ EVERY FIFTEEN MINUTES, AND THAT IS AFFORDABLE ★
+#
+# There is no cursor to advance. Needs are REPLACED from the newest depot reading and contributions
+# carry the journal's own idempotency key into a UNIQUE column, so a run is safe at any moment and a
+# missed one costs nothing. The work is one small query per live project.
+#
+# Frequent on purpose: a member who has just hauled to a site should see their delivery on the board
+# while they are still docked, not an hour later.
+*/15 * * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/colony-sync.js >> /var/log/grims-worker.log 2>&1
+
 # ── The resident worker ──────────────────────────────────────────────────────
 #
 # NOT a cron entry — it belongs in compose.prod.yml as a long-running service. Recorded here so the

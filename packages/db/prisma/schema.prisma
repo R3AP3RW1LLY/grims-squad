@@ -272,6 +272,12 @@ enum TelemetryCategory {
   /// an on-foot loadout says more about how somebody plays than a hull does, and a member happy to
   /// share their Python should not have to accept sharing their suit to keep it.
   onfoot
+  /// Construction-site needs and deliveries to them.
+  ///
+  /// Separate from `trade` for the same reason `onfoot` is separate from `fleet`: a delivery says a
+  /// member was at a specific construction site at a specific moment, which is rather more than a
+  /// tonnage on a leaderboard, and declining one should not cost the other.
+  colonisation
 }
 
 /// Delivery channel for a notification fan-out.

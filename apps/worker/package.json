@@ -18,7 +18,8 @@
     "audit:daily": "tsx src/daily-audit.ts",
     "role:sync": "tsx src/role-sync.ts",
     "resolve:stations": "tsx src/resolve-stations.ts",
-    "rollup:commodities": "tsx src/commodity-rollup.ts"
+    "rollup:commodities": "tsx src/commodity-rollup.ts",
+    "sync:colony": "tsx src/colony-sync.ts"
   },
   "devDependencies": {
     "@grims/config": "workspace:*",
