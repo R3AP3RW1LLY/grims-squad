@@ -358,6 +358,13 @@ model User {
   /// having forgotten them.
   companionPromptedAt DateTime? @map("companion_prompted_at") @db.Timestamptz(6)
 
+  /// When they were shown the "choose your own nickname" onboarding step.
+  ///
+  /// SEEN, not acted on — the same shape as `companionPromptedAt`, and for the same reason. The
+  /// step is an offer rather than an obligation, so passing through it is what completes it; an
+  /// officer who is happy with the convention should not be asked again every time they sign in.
+  nicknamePromptedAt DateTime? @map("nickname_prompted_at") @db.Timestamptz(6)
+
   /// The nickname this member wears INSTEAD of their humanized Inara name, or null.
   ///
   /// ★ SQUADRON OWNER, 2026-08-02 ★

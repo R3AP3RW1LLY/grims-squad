@@ -1420,6 +1420,19 @@ export interface ShipyardShipRow {
  * `SHIPYARD_VIEW` is new, so this page can now refuse somebody, and it must refuse them with the
  * screen that names the permission rather than the one that asks for six digits.
  */
+/** What this member wears, and whether they may choose it. */
+export interface MyNicknameState {
+  nickname: string | null;
+  convention: string | null;
+  override: string | null;
+  source: string | null;
+  mayOverride: boolean;
+  unverified: boolean;
+}
+
+export const getMyNickname = (): Promise<MyNicknameState | null> =>
+  get('/v1/me/nickname', { authed: true });
+
 export const getShipyardShipsGated = (): Promise<AdminRead<{ ships: ShipyardShipRow[] }>> =>
   getAdmin('/v1/ai/shipyard/ships');
 

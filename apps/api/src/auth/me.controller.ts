@@ -147,6 +147,8 @@ export class MeController {
         timezone: true,
         commanderOnboardedAt: true,
         companionPromptedAt: true,
+        nicknamePromptedAt: true,
+        nicknameOverrideAllowed: true,
       },
     });
     if (user === null) {
@@ -191,6 +193,19 @@ export class MeController {
       commanderOnboarded: user.commanderOnboardedAt !== null,
       companionPrompted: user.companionPromptedAt !== null,
       verified: await this.#verified(userId),
+      /*
+       * ★ OFFICERS AND GRANTED MEMBERS ONLY — SQUADRON OWNER, 2026-08-02 ★
+       *
+       * `privileged` is the same test the admin console uses, and it is the right one here: the
+       * ranks that can open the admin area are exactly the leadership appointments the owner meant
+       * by "officer". `nicknameOverrideAllowed` covers the exception an officer can grant to
+       * somebody who is not one.
+       *
+       * Everybody else has nothing to decide — their nickname is their humanized Inara name — and a
+       * step explaining a rule they cannot change is a page they click past without reading.
+       */
+      mayChooseNickname: privileged || user.nicknameOverrideAllowed,
+      nicknamePrompted: user.nicknamePromptedAt !== null,
     };
     const step = nextOnboardingStep(state);
 
@@ -428,6 +443,35 @@ export class MeController {
     await this.db.user.updateMany({
       where: { id: userId, companionPromptedAt: null },
       data: { companionPromptedAt: new Date() },
+    });
+    return { done: true };
+  }
+
+  /**
+   * Marks the nickname step as seen.
+   *
+   * ★ SEEN, NOT DECIDED — squadron owner, 2026-08-02 ★
+   *
+   * "add a step to onboarding that allows them to overide their discord server nickname."
+   *
+   * Allows, not requires. Wanting the humanized Inara name is a valid answer and the commonest one,
+   * so passing through completes the step — exactly like the companion page above, and for the same
+   * reason: a prompt an officer cannot dismiss is one they learn to click past.
+   *
+   * Idempotent, so passing again does not make an old officer look newly onboarded in the audit.
+   */
+  @Post('me/onboarding/nickname')
+  async nicknameSeen(@Req() req: FastifyRequest): Promise<{ done: true }> {
+    const userId = req.user?.userId;
+    if (userId === undefined) throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
+
+    const cookies =
+      (req as unknown as { cookies?: Record<string, string | undefined> }).cookies ?? {};
+    verifyCsrf(req.method, readCsrfCookie(cookies), req.headers['x-csrf-token'] as string | undefined);
+
+    await this.db.user.updateMany({
+      where: { id: userId, nicknamePromptedAt: null },
+      data: { nicknamePromptedAt: new Date() },
     });
     return { done: true };
   }

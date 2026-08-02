@@ -33,7 +33,13 @@
  * verification would confirm they deserve, so blocking them protects nothing.
  */
 
-export type OnboardingStep = 'security' | 'commander' | 'companion' | 'verification' | null;
+export type OnboardingStep =
+  | 'security'
+  | 'commander'
+  | 'companion'
+  | 'verification'
+  | 'nickname'
+  | null;
 
 export interface OnboardingState {
   /** Holds permissions that require a second factor. */
@@ -50,6 +56,20 @@ export interface OnboardingState {
    * whose machine cannot run it, and the squadron would rather have them in the forum than nowhere.
    */
   readonly companionPrompted: boolean;
+  /**
+   * May this member choose their own Discord nickname?
+   *
+   * ★ SQUADRON OWNER, 2026-08-02 ★
+   *
+   * "if they are an officer their names should match the same convention please, but add a step to
+   * onboarding that allows them to overide their discord server nickname."
+   *
+   * True for officers, and for anybody an officer has granted the exception to. Everyone else wears
+   * their humanized Inara name and has nothing to decide, so they are never shown the step.
+   */
+  readonly mayChooseNickname: boolean;
+  /** Has been shown the nickname step. Like the companion step, SEEN rather than acted on. */
+  readonly nicknamePrompted: boolean;
 }
 
 /** Where to send them, or null when they owe nothing. */
@@ -58,6 +78,7 @@ export const ONBOARDING_PATHS: Record<Exclude<OnboardingStep, null>, string> = {
   commander: '/onboarding/commander',
   companion: '/onboarding/companion',
   verification: '/onboarding/verification',
+  nickname: '/onboarding/nickname',
 };
 
 export function nextOnboardingStep(state: OnboardingState): OnboardingStep {
@@ -86,6 +107,23 @@ export function nextOnboardingStep(state: OnboardingState): OnboardingStep {
    * about the queue deadlocking on day one.
    */
   if (!state.verified && !state.privileged) return 'verification';
+
+  /*
+   * ★ THE NICKNAME STEP IS LAST, AND ONLY FOR PEOPLE WITH A CHOICE ★
+   *
+   * Last because it is the only optional one. Everything before it is something the member OWES —
+   * a second factor, their settings, being told what the companion is for, being verified — and
+   * putting an offer in the middle of a queue of obligations makes the obligations feel optional
+   * too.
+   *
+   * Shown only to somebody who may actually override. For everybody else there is nothing to
+   * decide: their nickname is their humanized Inara name, and a step that explains a rule they
+   * cannot change is a page they will click past without reading.
+   *
+   * It does not block, for the same reason the companion step does not. `nicknamePrompted` is set
+   * by passing through, so an officer who wants the convention simply continues.
+   */
+  if (state.mayChooseNickname && !state.nicknamePrompted) return 'nickname';
 
   return null;
 }

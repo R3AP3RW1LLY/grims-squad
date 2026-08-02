@@ -23,6 +23,10 @@ const base: OnboardingState = {
   commanderOnboarded: false,
   companionPrompted: true,
   verified: false,
+  // An ordinary member has no nickname to choose — they wear their humanized Inara name — so the
+  // step never applies to them and the existing assertions stay about the obligations.
+  mayChooseNickname: false,
+  nicknamePrompted: false,
 };
 
 describe('an ordinary member', () => {
@@ -195,7 +199,68 @@ describe('the companion step', () => {
       commanderOnboarded: true,
       companionPrompted: true,
       verified: false,
+      // Already offered, so the nickname step does not hold them either. This test is about the
+      // VERIFICATION exception for admins, and a second pending step would hide it.
+      mayChooseNickname: true,
+      nicknamePrompted: true,
     };
     expect(nextOnboardingStep(state)).toBeNull();
+  });
+});
+
+/**
+ * The nickname step.
+ *
+ * ★ SQUADRON OWNER, 2026-08-02 ★
+ *
+ * "if they are an officer their names should match the same convention please, but add a step to
+ * onboarding that allows them to overide their discord server nickname."
+ */
+describe('choosing your own nickname', () => {
+  const done = {
+    ...base,
+    commanderOnboarded: true,
+    companionPrompted: true,
+    verified: true,
+  };
+
+  it('MANDATORY: is never shown to somebody who cannot use it', () => {
+    /*
+     * The whole squadron wears its humanized Inara name and has nothing to decide. A step
+     * explaining a rule they cannot change is a page they click past without reading, and it would
+     * sit between them and the site on their first visit.
+     */
+    expect(nextOnboardingStep({ ...done, mayChooseNickname: false, nicknamePrompted: false })).toBeNull();
+  });
+
+  it('is offered to an officer who has not seen it', () => {
+    expect(nextOnboardingStep({ ...done, mayChooseNickname: true, nicknamePrompted: false })).toBe(
+      'nickname',
+    );
+  });
+
+  it('is not offered twice', () => {
+    // SEEN, not acted on — wanting the convention is a valid answer, and asking an officer the same
+    // optional question on every sign-in is how a prompt becomes noise.
+    expect(nextOnboardingStep({ ...done, mayChooseNickname: true, nicknamePrompted: true })).toBeNull();
+  });
+
+  it('MANDATORY: comes after every obligation', () => {
+    /*
+     * Last because it is the only OPTIONAL step. Putting an offer in the middle of a queue of
+     * obligations makes the obligations feel optional too — and a second factor is not optional.
+     */
+    const officer = { ...base, mayChooseNickname: true, nicknamePrompted: false };
+
+    expect(nextOnboardingStep({ ...officer, privileged: true, twoFactorEnrolled: false })).toBe('security');
+    expect(nextOnboardingStep({ ...officer, commanderOnboarded: false })).toBe('commander');
+    expect(nextOnboardingStep({ ...officer, commanderOnboarded: true, companionPrompted: false })).toBe(
+      'companion',
+    );
+  });
+
+  it('has a path to send them to', () => {
+    // A step with no route is a redirect loop.
+    expect(ONBOARDING_PATHS.nickname).toBe('/onboarding/nickname');
   });
 });

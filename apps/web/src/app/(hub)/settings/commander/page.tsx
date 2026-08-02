@@ -17,7 +17,8 @@ import { PageTabs, resolveTab, type PageTab } from '../../../../components/page-
 import { SignatureEditor } from './signature-editor';
 import { PrivacyControls, sharedFields } from '../privacy/body';
 import { appVersionSummary } from '../../../../components/update-banner-rules';
-import { getMyPrivacy, getProfile, getUpdateStatus } from '../../../../lib/api';
+import { getMyPrivacy, getProfile, getUpdateStatus, getMyNickname } from '../../../../lib/api';
+import { NicknameChooser } from '../../../../components/nickname-chooser';
 import { SecurityBody } from '../security/body';
 import { AccountBody } from '../account/body';
 
@@ -81,6 +82,11 @@ export default async function CommanderPage({
 }) {
   const params = await searchParams;
   const tab = resolveTab(TABS, params['tab']);
+  /*
+   * Only for the tab that shows it. This is a Discord round trip's worth of state behind it, and
+   * the signature editor has no use for it.
+   */
+  const nickname = tab === 'verification' ? await getMyNickname() : null;
 
   /*
    * Privacy is fetched HERE as well as inside `PrivacyControls`, because the
@@ -396,6 +402,27 @@ export default async function CommanderPage({
             <SquadronStatus />
             <InaraForm />
           </VerificationProvider>
+
+          {/*
+            ★ YOUR NAME IN DISCORD, ON THE "NAME & VERIFICATION" TAB ★
+
+            Squadron owner, 2026-08-02: an officer's chosen nickname "should not change from that
+            unless they change it" — so there has to be a place to change it, and this is the tab
+            about what the member is called.
+
+            Shown to everybody, not only to officers. `NicknameChooser` explains the convention to
+            somebody who cannot alter it, which is worth more than hiding the section: a member who
+            has heard that officers can choose should be told why they cannot, rather than
+            concluding the page is broken.
+          */}
+          {nickname !== null && (
+            <Section
+              title="Your name in Discord"
+              description="What the squadron sees in the member list, and where it comes from."
+            >
+              <NicknameChooser initial={nickname} />
+            </Section>
+          )}
         </PageBody>
       )}
     </>
