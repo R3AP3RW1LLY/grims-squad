@@ -468,7 +468,31 @@ export const getAdminActivity = (
  * Not the same list as `getAdminMembers`, which returns WEBSITE accounts — one of them, against a
  * hundred and seventeen people in Discord. An officer moderating the squadron works from this one.
  */
+export interface PromotionStanding {
+  userId: string;
+  currentRank: string | null;
+  nextRank: string | null;
+  qualifyingMonths: number;
+  monthsRequired: number | null;
+  earned: boolean;
+}
+
+export interface PromotionReport {
+  dryRun: boolean;
+  ranAt: string;
+  considered: number;
+  wouldPromote: Array<{ userId: string; handle: string; from: string; to: string; qualifyingMonths: number }>;
+  skipped: Array<{ userId: string; handle: string; rank: string; reason: string }>;
+  promoted: number;
+  failed: Array<{ userId: string; handle: string; reason: string }>;
+}
+
+export const getPromotionStandings = (): Promise<{ standings: PromotionStanding[] } | null> =>
+  get('/v1/admin/promotions/standings', { authed: true });
+
 export interface SquadMemberRow {
+  /** Their website user id, or null for somebody in the guild with no account. */
+  userId: string | null;
   discordId: string;
   /** Server nickname — the in-game name, by this squadron's convention. */
   nick: string | null;

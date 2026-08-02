@@ -4,3 +4,4 @@
 // bundled into the browser, and a Node builtin reaching that bundle is either a
 // build failure or — worse — a polyfilled cipher doing something unintended.
 export * from './crypto.js';
+export { readLadderFromSsot } from './promotion-ladder.js';

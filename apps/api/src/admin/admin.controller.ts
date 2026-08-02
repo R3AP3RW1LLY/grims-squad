@@ -1,4 +1,6 @@
-import { COMMANDER_AUDIT_JOB } from '@grims/shared';
+import { COMMANDER_AUDIT_JOB, type PromotionReport } from '@grims/shared';
+import { PROMOTIONS_SERVICE } from './admin.tokens.js';
+import type { PromotionsService, PromotionStanding } from './promotions.service.js';
 import {
   Controller,
   Get,
@@ -9,6 +11,7 @@ import {
   Query,
   Req,
   Inject,
+  Optional,
   UseGuards,
 } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
@@ -70,6 +73,15 @@ export class AdminController {
     @Inject(ROLE_ADMIN) private readonly roles: RoleAdminService,
     @Inject(MAPPING_ADMIN) private readonly mappings: MappingAdminService,
     @Inject(DISCORD_MODERATION) private readonly discord: DiscordModeration,
+    /*
+     * @Optional, matching the pattern already used for LiveService on the cmdr controller: this
+     * controller's own tests construct it directly with the collaborators they exercise, and a
+     * required sixth would turn each of them into a wiring test.
+     *
+     * Its absence is not silently survivable — the promotion routes have nothing to answer with —
+     * so `#promotions()` says so rather than dereferencing undefined.
+     */
+    @Optional() @Inject(PROMOTIONS_SERVICE) private readonly promotions?: PromotionsService,
   ) {}
 
   // ------------------------------------------------------------ squad roster
@@ -87,6 +99,78 @@ export class AdminController {
   @Get('squad')
   async squad(): Promise<{ rows: SquadMemberRow[] }> {
     return { rows: await this.store.squadRoster() };
+  }
+
+  // ------------------------------------------------------------- promotions
+  /**
+   * Who WOULD be promoted if the run happened now. Writes nothing.
+   *
+   * ★ SQUADRON OWNER, 2026-08-02 ★
+   *
+   * "add a button to each month, that will trigger promotions beyond the job that runs once a month
+   * on the 1st day of the month" — and, asked whether to preview first: yes for a whole-month run.
+   *
+   * The evaluation is the SAME one the monthly job performs, which is what the owner chose: only
+   * complete months count, so this is "run it now" rather than "let somebody through".
+   */
+  @Post('promotions/preview')
+  async promotionsPreview(): Promise<PromotionReport> {
+    return this.#promotions().preview();
+  }
+
+  /** Runs them for real. Same evaluation as the preview, one flag apart. */
+  @Post('promotions/run')
+  async promotionsRun(@User() caller: CurrentUser | undefined): Promise<PromotionReport> {
+    const report = await this.#promotions().apply();
+
+    await this.store.writeAudit({
+      actorId: caller?.userId ?? null,
+      action: 'promotion.run.manual',
+      targetType: 'system',
+      targetId: 'promotions',
+      before: null,
+      /*
+       * The COUNT and the names. A run that promoted nobody is a real outcome worth being able to
+       * point at later — "we did press it, and nobody was due" is a different fact from silence.
+       */
+      after: { promoted: report.promoted, considered: report.considered, who: report.wouldPromote },
+    });
+
+    return report;
+  }
+
+  /** Where every member stands on the ladder, for the members page. */
+  @Get('promotions/standings')
+  async promotionStandings(): Promise<{ standings: PromotionStanding[] }> {
+    return { standings: [...(await this.#promotions().standings()).values()] };
+  }
+
+  /**
+   * Promotes one member by an officer's decision.
+   *
+   * ★ AN OVERRIDE, DELIBERATELY UNCONDITIONAL — SQUADRON OWNER, 2026-08-02 ★
+   *
+   * "we are still onboarding, and we need an override!" Asked whether this should follow the rules
+   * or override them, the owner chose the override: an officer's judgement, always available.
+   *
+   * It still refuses to skip rungs — the only rank it grants is the one directly above — so a slip
+   * cannot put a new member at Grand Master General.
+   */
+  @Post('members/:userId/promote')
+  async promoteMember(
+    @User() caller: CurrentUser | undefined,
+    @Param('userId') userId: string,
+  ): Promise<{ from: string; to: string }> {
+    if (caller === undefined) throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
+    return this.#promotions().promoteOne(userId, caller.userId);
+  }
+
+  /** The promotions service, or a clear refusal rather than a crash on undefined. */
+  #promotions(): PromotionsService {
+    if (this.promotions === undefined) {
+      throw new AppError(ErrorCode.UPSTREAM_UNAVAILABLE, 'Promotions are not configured here.');
+    }
+    return this.promotions;
   }
 
   /**

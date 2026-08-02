@@ -395,6 +395,9 @@ importers:
 
   packages/db:
     dependencies:
+      '@grims/ed-clients':
+        specifier: workspace:*
+        version: link:../ed-clients
       '@grims/shared':
         specifier: workspace:*
         version: link:../shared

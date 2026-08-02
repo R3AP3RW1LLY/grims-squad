@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { Redis } from 'ioredis';
 import { PrismaClient } from '@grims/db';
+import { PromotionsService } from './promotions.service.js';
 import { DatabaseModule } from '../database.module.js';
 import { AuthModule } from '../auth/auth.module.js';
 import { AdminController } from './admin.controller.js';
@@ -16,6 +17,7 @@ import {
   ROLE_ADMIN,
   MAPPING_ADMIN,
   DISCORD_MODERATION,
+  PROMOTIONS_SERVICE,
 } from './admin.tokens.js';
 import { PrismaDashboardStore } from './dashboard.store.js';
 
@@ -30,6 +32,13 @@ const cache = (): Redis => new Redis(process.env['REDIS_URL'] ?? 'redis://localh
   imports: [DatabaseModule, AuthModule],
   controllers: [AdminController, ViewAsController],
   providers: [
+    {
+      // Promotions, for the month button and the per-member override. Reads the ladder from the
+      // SSOT file and applies rank changes to Discord as well as to our rows.
+      provide: PROMOTIONS_SERVICE,
+      inject: [PrismaClient],
+      useFactory: (db: PrismaClient) => new PromotionsService(db),
+    },
     {
       provide: DASHBOARD_STORE,
       inject: [PrismaClient],

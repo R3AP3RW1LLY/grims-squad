@@ -26,3 +26,5 @@ if (process.env['NODE_ENV'] !== 'production') {
 export * from '@prisma/client';
 export * from './acl-extension.js';
 export * from './nonce.store.prisma.js';
+export { PrismaPromotionStore } from './promotion.store.prisma.js';
+export { DiscordRankApplier, ladderRoleIds } from './rank-applier.discord.js';

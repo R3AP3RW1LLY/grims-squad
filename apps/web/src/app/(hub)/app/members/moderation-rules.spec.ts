@@ -14,6 +14,9 @@ const NOW = new Date('2026-08-01T12:00:00Z').getTime();
 
 function row(over: Partial<SquadMemberRow> = {}): SquadMemberRow {
   return {
+    // No website account by default — most of the guild has none, which is what makes the promote
+    // control unavailable for them.
+    userId: null,
     discordId: '820808610073280512',
     nick: 'Rablefin',
     username: 'rablefin',

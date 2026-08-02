@@ -28,7 +28,8 @@
   },
   "dependencies": {
     "@prisma/client": "^6.19.0",
-    "@grims/shared": "workspace:*"
+    "@grims/shared": "workspace:*",
+    "@grims/ed-clients": "workspace:*"
   },
   "devDependencies": {
     "@grims/config": "workspace:*",

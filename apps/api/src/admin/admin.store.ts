@@ -164,6 +164,16 @@ export interface SquadMemberRow {
   readonly lastSeenAt: string | null;
   /** They have an account on this site, not merely a presence in Discord. */
   readonly hasAccount: boolean;
+  /**
+   * Their website user id, or null for somebody in the guild with no account.
+   *
+   * ★ ADDED FOR THE PROMOTE CONTROL, 2026-08-02 ★
+   *
+   * The ladder is keyed on website users, not Discord ids — ranks are `UserRole` grants. Without
+   * this the page would have to match members to standings by HANDLE, which is a display name and
+   * therefore the wrong key to promote somebody by.
+   */
+  readonly userId: string | null;
   readonly handle: string | null;
   readonly cmdrName: string | null;
   /**
@@ -353,6 +363,8 @@ export class PrismaAdminStore implements AdminStore {
         lastActivityAt: true,
           user: {
             select: {
+              // The ladder is keyed on website users, so the promote control needs this.
+              id: true,
               handle: true,
               displayName: true,
               cmdrVerifications: {
@@ -879,6 +891,8 @@ export class PrismaAdminStore implements AdminStore {
           discordId: true,
           user: {
             select: {
+              // The ladder is keyed on website users, so the promote control needs this.
+              id: true,
               handle: true,
               cmdrVerifications: {
                 where: { revokedAt: null, isVerified: true },
@@ -954,6 +968,7 @@ export class PrismaAdminStore implements AdminStore {
           inVoiceSince: m.inVoiceSince?.toISOString() ?? null,
           lastSeenAt: lastSeenById.get(m.discordId)?.toISOString() ?? null,
           hasAccount: identity !== undefined,
+          userId: identity?.user?.id ?? null,
           handle: identity?.user?.handle ?? null,
           cmdrName: identity?.user?.cmdrVerifications[0]?.cmdrName ?? null,
           moderatable: reason === null,
