@@ -1213,6 +1213,14 @@ export const getAdminDashboardGated = (month?: string): Promise<AdminRead<AdminD
 export interface TrainingSource {
   source: string;
   rows: number;
+  /**
+   * Rows with text that have not been embedded yet.
+   *
+   * Not an error. An ingest that has just written five thousand rows is SUPPOSED to leave them
+   * waiting for the embedder; this going up after a run is the system working. What it answers is
+   * "has the backlog stopped moving".
+   */
+  awaitingEmbedding: number;
   lastIngestedAt: string | null;
   ingesting: boolean;
   nextInHours: number | null;

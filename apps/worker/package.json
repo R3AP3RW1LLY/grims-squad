@@ -6,7 +6,7 @@
   "description": "BullMQ processors. Spansh jobs, digests, retention, reconciliation.",
   "scripts": {
     "build": "tsc -b",
-    "//dev": "The resident worker. Part of `pnpm dev` so the training page's Run now button works on localhost — without something listening on the channel, the button reports Requested and nothing happens, which is what it did the first time it shipped.",
+    "//dev": "The resident worker. Part of `pnpm dev` so the training page's Run now button works on localhost \u2014 without something listening on the channel, the button reports Requested and nothing happens, which is what it did the first time it shipped.",
     "dev": "tsx watch --env-file-if-exists=../api/.env src/daemon.ts",
     "typecheck": "tsc -b --noEmit false --emitDeclarationOnly && tsc -p tsconfig.spec.json",
     "test": "vitest run --passWithNoTests",
@@ -16,7 +16,8 @@
     "promote": "tsx src/promote.ts",
     "inara:sync": "tsx src/inara-sync.ts",
     "audit:daily": "tsx src/daily-audit.ts",
-    "role:sync": "tsx src/role-sync.ts"
+    "role:sync": "tsx src/role-sync.ts",
+    "resolve:stations": "tsx src/resolve-stations.ts"
   },
   "devDependencies": {
     "@grims/config": "workspace:*",

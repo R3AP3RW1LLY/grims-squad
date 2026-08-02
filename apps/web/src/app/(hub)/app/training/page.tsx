@@ -190,6 +190,25 @@ function SourceRow({ source: s }: { source: TrainingSource }) {
       <td className="py-3 pr-4 text-[var(--color-text-secondary)]">{SOURCE_ANSWERS[key] ?? ''}</td>
       <td className="py-3 pr-4 text-right font-mono tabular-nums text-[var(--color-text-primary)]">
         {s.rows === 0 ? '—' : s.rows.toLocaleString()}
+        {/*
+          ★ WHAT IS STILL WAITING FOR THE EMBEDDER — SQUADRON OWNER, 2026-08-02 ★
+
+          New stations and commodities are picked up by the next scheduled embed run, "and tell me
+          how many are waiting".
+
+          Under the count rather than beside it, and quiet: a backlog is NOT an error. An ingest
+          that has just written five thousand rows is supposed to leave them waiting, and this
+          number going up after a run is the system working. What it answers is "has the backlog
+          stopped moving", which nothing here could say before.
+        */}
+        {s.awaitingEmbedding > 0 && (
+          <span
+            className="mt-0.5 block text-[10px] font-normal text-[var(--color-text-dim)]"
+            title="Rows with text that have not been embedded yet. The embed job picks them up on its next run."
+          >
+            {s.awaitingEmbedding.toLocaleString()} awaiting embedding
+          </span>
+        )}
       </td>
       <td className="py-3 pr-4">
         <State source={s} />

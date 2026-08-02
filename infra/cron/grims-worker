@@ -15,6 +15,18 @@ CRON_TZ=UTC
 # Nickname + commander reconciliation. After the Inara sync, so it acts on fresh names.
 40 5 * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/daily-audit.js >> /var/log/grims-worker.log 2>&1
 
+# Stations EDDN reported that we do not hold, looked up and written properly.
+#
+# Squadron owner, 2026-08-02: "add the stations we do not hold" — about 111 every fifteen minutes,
+# previously counted and discarded.
+#
+# HOURLY, AT :20. EDSM is a community service on donated hardware and asks for courtesy; one call
+# per SYSTEM rather than per station collapses most of the work, and the batch is capped so a
+# backlog is worked through over hours rather than in one burst that gets us rate limited.
+#
+# :20 keeps it clear of the ingest daemon's own hourly work at the top of the hour.
+20 * * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/resolve-stations.js >> /var/log/grims-worker.log 2>&1
+
 # ── The resident worker ──────────────────────────────────────────────────────
 #
 # NOT a cron entry — it belongs in compose.prod.yml as a long-running service. Recorded here so the

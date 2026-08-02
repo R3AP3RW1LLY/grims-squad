@@ -76,7 +76,16 @@ describe('ingest schedule', () => {
      * daemon and are genuinely cron's job. If this file were emptied by a future tidy-up they would
      * stop with nothing reporting it — which is precisely how the ingests failed.
      */
-    for (const job of ['embed.js', 'promote.js', 'role-sync.js', 'daily-audit.js', 'sweep-orphan-media.js']) {
+    for (const job of [
+      'embed.js',
+      'promote.js',
+      'role-sync.js',
+      'daily-audit.js',
+      'sweep-orphan-media.js',
+      // Added 2026-08-02. Turns EDDN sightings into stations we hold; without it the queue fills
+      // and nothing ever drains it, which is a slower version of the bug it was built to fix.
+      'resolve-stations.js',
+    ]) {
       expect(LINES.some((l) => l.includes(job)), `${job} is no longer scheduled`).toBe(true);
     }
   });

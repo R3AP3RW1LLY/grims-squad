@@ -63,7 +63,7 @@ export class TrainingStatusService {
      * all seven together, and fourteen round trips to draw one panel is the sort of thing that is
      * invisible on localhost and obvious over a transatlantic link.
      */
-    const [counts, runs] = await Promise.all([
+    const [counts, runs, backlog] = await Promise.all([
       this.db.$queryRawUnsafe<Array<{ source: string; n: bigint }>>(
         /*
          * ★ EDDN DOES NOT LIVE IN knowledge_items, AND SHOWED AS NOTHING — 2026-08-01 ★
@@ -159,9 +159,30 @@ export class TrainingStatusService {
                      AND (l.finished_at IS NULL OR started_at > l.finished_at)
                    ORDER BY started_at DESC LIMIT 1) r ON true`,
       ),
+
+      /*
+       * ★ WHAT IS WAITING FOR THE EMBEDDER — SQUADRON OWNER, 2026-08-02 ★
+       *
+       * New stations and commodities picked up by the next scheduled embed run, "and tell me how
+       * many are waiting".
+       *
+       * The SAME predicate `embedKnowledge` selects on — text present, embedding absent. Written
+       * differently in the two places it would eventually mean two different numbers, and the one
+       * on the page is the one somebody would act on.
+       *
+       * Grouped rather than totalled: a backlog of four thousand means something very different
+       * against the galaxy dump than against our forum guides.
+       */
+      this.db.$queryRawUnsafe<Array<{ source: string; n: bigint }>>(
+        `SELECT source, COUNT(*)::bigint AS n
+           FROM knowledge_items
+          WHERE text IS NOT NULL AND embedding IS NULL
+          GROUP BY source`,
+      ),
     ]);
 
     const rowsBySource = new Map(counts.map((c) => [c.source, Number(c.n)]));
+    const backlogBySource = new Map(backlog.map((b) => [b.source, Number(b.n)]));
     const runBySource = new Map(runs.map((r) => [r.source, r]));
 
     return KNOWLEDGE_SOURCES.map((source): SourceStatus => {
@@ -191,6 +212,17 @@ export class TrainingStatusService {
       return {
         source: source as KnowledgeSource,
         rows: rowsBySource.get(source) ?? 0,
+        /*
+         * ★ WAITING FOR THE EMBEDDER — SQUADRON OWNER, 2026-08-02 ★
+         *
+         * New stations and commodities "need to be included in all future training and embedding",
+         * picked up by the next scheduled run "and tell me how many are waiting".
+         *
+         * Zero for a source that is never embedded, which is most of the reason this is a per-source
+         * number rather than one total: a backlog of 4,000 means something very different against
+         * the galaxy than against our forum guides.
+         */
+        awaitingEmbedding: backlogBySource.get(source) ?? 0,
         lastIngestedAt: lastAt,
         ingesting,
         nextInHours: nextInHours(source, lastAt, now),

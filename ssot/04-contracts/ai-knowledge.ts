@@ -232,6 +232,22 @@ export const REFRESH_HOURS: Record<KnowledgeSource, number> = {
 /** What the training page shows for one source. */
 export interface SourceStatus {
   readonly source: KnowledgeSource;
+  /**
+   * Rows held that have text but no embedding yet.
+   *
+   * ★ SQUADRON OWNER, 2026-08-02 ★
+   *
+   * New stations and commodities "need to be included in all future training and embedding" — and,
+   * asked how eagerly: the next scheduled embed run, "and tell me how many are waiting".
+   *
+   * This is that number. It is not an error: an ingest that has just written five thousand rows is
+   * SUPPOSED to leave them waiting for the embedder, and the count going up after a run is the
+   * system working. What it answers is "has the backlog stopped moving", which nothing on the page
+   * could say before.
+   *
+   * Zero for sources that are never embedded — the market feed is queried by price, not by meaning.
+   */
+  readonly awaitingEmbedding: number;
   /** Rows currently held. Zero means never ingested. */
   readonly rows: number;
   /** When it last completed, or null if never. */
