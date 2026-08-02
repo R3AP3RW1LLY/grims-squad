@@ -2,6 +2,8 @@
 
 import { useState } from 'react';
 import { apiPost } from '../../../lib/api-client';
+import { ShipPicker } from './ship-picker';
+import type { ShipyardShipRow } from '../../../lib/api';
 
 /**
  * AI assisted — a few questions, then a real build.
@@ -21,7 +23,34 @@ import { apiPost } from '../../../lib/api-client';
  * and somebody would go and spend two hundred million credits on it.
  */
 
-type Step = 'role' | 'budget' | 'result';
+/**
+ * ★ TWO WAYS TO ANSWER THE SECOND QUESTION — SQUADRON OWNER, 2026-08-01 ★
+ *
+ * "once they pick the [role] they want to build for, then it should ask if they want to pick a
+ * specific ship to build or build based on budget."
+ *
+ * Both were always supported by the fitting engine — `FitRequest` takes a `shipId` OR a `budget`,
+ * and with a hull named it fits that hull instead of searching every one. Only the stepper was
+ * missing, so it asked everybody the budget question and quietly decided the hull for them.
+ *
+ * They answer genuinely different questions. "I have 50 million" is somebody who does not know what
+ * to buy. "Fit my Python" is somebody who already owns one and wants to know what to put in it —
+ * and for them a budget prompt is a question about a decision they have already made.
+ */
+type Step = 'role' | 'how' | 'ship' | 'budget' | 'result';
+
+/** The four stages shown in the progress bar. `ship` and `budget` are one stage with two faces. */
+const STAGES: ReadonlyArray<{ key: Step | 'choice'; label: string }> = [
+  { key: 'role', label: 'What for' },
+  { key: 'how', label: 'How' },
+  { key: 'choice', label: 'Details' },
+  { key: 'result', label: 'Your ship' },
+];
+
+const stageOf = (step: Step): number =>
+  step === 'ship' || step === 'budget'
+    ? 2
+    : STAGES.findIndex((s) => s.key === step);
 
 interface Fit {
   build: { shipId: string; shipName: string; buildName: string | null; modules: Array<{ moduleId: string | null }> };
@@ -93,25 +122,31 @@ const credits = (n: number): string =>
     ? `${(n / 1_000_000_000).toFixed(2)} billion`
     : `${(n / 1_000_000).toFixed(1)} million`;
 
-export function AiBuilder() {
+export function AiBuilder({ ships }: { readonly ships: readonly ShipyardShipRow[] }) {
   const [step, setStep] = useState<Step>('role');
   const [role, setRole] = useState<string | null>(null);
   const [budget, setBudget] = useState<number | null>(null);
+  const [shipId, setShipId] = useState<string | null>(null);
   const [custom, setCustom] = useState('');
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [fit, setFit] = useState<Fit | null>(null);
 
-  async function build(chosenBudget: number | undefined) {
+  async function build(opts: { budget?: number; shipId?: string }) {
     if (role === null) return;
 
     setBusy(true);
     setProblem(null);
 
     try {
+      /*
+       * Both fields are optional and either may be sent alone. A named hull with no budget fits the
+       * best the role can afford on it; a budget with no hull searches every one.
+       */
       const result = await apiPost<Fit>('/v1/ai/shipyard/fit', {
         role,
-        ...(chosenBudget === undefined ? {} : { budget: chosenBudget }),
+        ...(opts.budget === undefined ? {} : { budget: opts.budget }),
+        ...(opts.shipId === undefined ? {} : { shipId: opts.shipId }),
       });
       setFit(result);
       setStep('result');
@@ -126,6 +161,7 @@ export function AiBuilder() {
     setStep('role');
     setRole(null);
     setBudget(null);
+    setShipId(null);
     setCustom('');
     setFit(null);
     setProblem(null);
@@ -135,17 +171,19 @@ export function AiBuilder() {
     <div className="mx-auto max-w-3xl">
       {/* Where you are, and how far there is to go. Three steps is short enough to show all of them. */}
       <ol className="m-0 mb-6 flex list-none gap-2 p-0">
-        {(['role', 'budget', 'result'] as const).map((s, i) => (
-          <li key={s} className="flex-1">
+        {STAGES.map((stage, i) => (
+          <li key={stage.key} className="flex-1">
             <div
               className={`h-1 rounded-full ${
-                (['role', 'budget', 'result'] as const).indexOf(step) >= i
-                  ? 'bg-[var(--color-brand-cyan)]'
-                  : 'bg-[var(--color-surface-panel)]'
+                stageOf(step) >= i ? 'bg-[var(--color-brand-cyan)]' : 'bg-[var(--color-surface-panel)]'
               }`}
             />
             <span className="mt-1.5 block font-mono text-[9px] uppercase tracking-[0.16em] text-[var(--color-text-dim)]">
-              {s === 'role' ? 'What for' : s === 'budget' ? 'Budget' : 'Your ship'}
+              {/*
+                "Details" rather than "Budget", because this stage is now one of two questions and a
+                label naming only one of them would be wrong half the time.
+              */}
+              {stage.label}
             </span>
           </li>
         ))}
@@ -158,16 +196,25 @@ export function AiBuilder() {
             This decides what gets fitted and what gets sacrificed for it.
           </p>
 
-          <ul className="m-0 mt-4 grid list-none gap-3 p-0 sm:grid-cols-2">
+          {/*
+            ★ SQUADRON OWNER, 2026-08-01: "always make sure cards are the same height" ★
+
+            `items-stretch` on the grid and `h-full` on the button inside. The blurbs are different
+            lengths — "Every tonne of module is a tonne of cargo not carried" against a two-line
+            mining description — so without both, each card shrank to its own text and the row came
+            out ragged, which reads as four options of different importance rather than four of the
+            same kind.
+          */}
+          <ul className="m-0 mt-4 grid list-none items-stretch gap-3 p-0 sm:grid-cols-2">
             {ROLES.map((r) => (
               <li key={r.key}>
                 <button
                   type="button"
                   onClick={() => {
                     setRole(r.key);
-                    setStep('budget');
+                    setStep('how');
                   }}
-                  className="w-full rounded-lg border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel)] p-4 text-left transition-colors hover:border-[var(--color-brand-cyan)] hover:bg-[var(--color-surface-panel-hover)]"
+                  className="h-full w-full rounded-lg border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel)] p-4 text-left transition-colors hover:border-[var(--color-brand-cyan)] hover:bg-[var(--color-surface-panel-hover)]"
                 >
                   <span className="block text-[var(--color-text-primary)]">{r.label}</span>
                   <span className="mt-1 block text-xs leading-relaxed text-[var(--color-text-secondary)]">
@@ -177,6 +224,105 @@ export function AiBuilder() {
               </li>
             ))}
           </ul>
+        </>
+      )}
+
+      {step === 'how' && (
+        <>
+          <h2 className="m-0 text-lg text-[var(--color-text-primary)]">
+            Do you know which ship?
+          </h2>
+          <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
+            Either answer gets you a full loadout. This only decides whether we pick the hull or you
+            do.
+          </p>
+
+          <ul className="m-0 mt-4 grid list-none items-stretch gap-3 p-0 sm:grid-cols-2">
+            <li className="h-full">
+              <button
+                type="button"
+                onClick={() => setStep('ship')}
+                className="h-full w-full rounded-lg border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel)] p-4 text-left transition-colors hover:border-[var(--color-brand-cyan)] hover:bg-[var(--color-surface-panel-hover)]"
+              >
+                <span className="block text-[var(--color-text-primary)]">
+                  I have a ship in mind
+                </span>
+                <span className="mt-1 block text-xs leading-relaxed text-[var(--color-text-secondary)]">
+                  Pick the hull and we will fit it for this job as well as it can be fitted. Best if
+                  you already own one, or you have decided what you are saving for.
+                </span>
+              </button>
+            </li>
+            <li className="h-full">
+              <button
+                type="button"
+                onClick={() => setStep('budget')}
+                className="h-full w-full rounded-lg border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel)] p-4 text-left transition-colors hover:border-[var(--color-brand-cyan)] hover:bg-[var(--color-surface-panel-hover)]"
+              >
+                <span className="block text-[var(--color-text-primary)]">
+                  Tell me what to buy
+                </span>
+                <span className="mt-1 block text-xs leading-relaxed text-[var(--color-text-secondary)]">
+                  Give us a figure and we will search every hull in the game for the best one at
+                  this job that you can actually afford, hull and modules together.
+                </span>
+              </button>
+            </li>
+          </ul>
+
+          <button
+            type="button"
+            onClick={() => setStep('role')}
+            className="mt-4 font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+          >
+            &larr; Back
+          </button>
+        </>
+      )}
+
+      {step === 'ship' && (
+        <>
+          <h2 className="m-0 text-lg text-[var(--color-text-primary)]">Which hull?</h2>
+          <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
+            Prices are the hull alone, before anything is fitted. We will fit the rest for{' '}
+            {ROLES.find((r) => r.key === role)?.label.toLowerCase() ?? 'the job'} without a spending
+            limit &mdash; change anything you cannot afford afterwards in the outfitter.
+          </p>
+
+          <div className="mt-4">
+            {ships.length === 0 ? (
+              <p className="m-0 text-sm text-[var(--color-text-secondary)]">
+                The ship list could not be loaded. Choose a budget instead, or refresh the page.
+              </p>
+            ) : (
+              <ShipPicker
+                ships={[...ships]}
+                onPick={(id) => {
+                  setShipId(id);
+                  setBudget(null);
+                  void build({ shipId: id });
+                }}
+              />
+            )}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setStep('how')}
+            className="mt-4 font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+          >
+            &larr; Back
+          </button>
+
+          {busy && (
+            <p className="mt-4 font-mono text-[11px] text-[var(--color-text-dim)]">Fitting&hellip;</p>
+          )}
+
+          {problem !== null && (
+            <p className="mt-4 rounded-md border border-[var(--color-semantic-hostile)] bg-[color-mix(in_srgb,var(--color-semantic-hostile)_10%,transparent)] p-3 text-xs text-[var(--color-semantic-hostile-bright)]">
+              {problem}
+            </p>
+          )}
         </>
       )}
 
@@ -196,7 +342,8 @@ export function AiBuilder() {
                   disabled={busy}
                   onClick={() => {
                     setBudget(b.value);
-                    void build(b.value);
+                    setShipId(null);
+                    void build({ budget: b.value });
                   }}
                   className="w-full rounded-lg border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel)] px-4 py-3 font-mono text-xs text-[var(--color-text-primary)] transition-colors hover:border-[var(--color-brand-cyan)] disabled:opacity-50"
                 >
@@ -227,7 +374,8 @@ export function AiBuilder() {
                 const n = Number(custom);
                 if (Number.isFinite(n) && n > 0) {
                   setBudget(n);
-                  void build(n);
+                  setShipId(null);
+                  void build({ budget: n });
                 }
               }}
               className="rounded-md border border-[var(--color-brand-cyan)] px-4 py-2 font-mono text-[11px] uppercase tracking-[0.14em] text-[var(--color-brand-cyan-bright)] disabled:opacity-40"
@@ -238,10 +386,10 @@ export function AiBuilder() {
 
           <button
             type="button"
-            onClick={() => setStep('role')}
+            onClick={() => setStep('how')}
             className="mt-4 font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
           >
-            ← Back
+            &larr; Back
           </button>
 
           {problem !== null && (
@@ -261,6 +409,14 @@ export function AiBuilder() {
               <span className="ml-2 text-[var(--color-text-dim)]">
                 of {credits(budget)} budgeted
               </span>
+            )}
+            {/*
+              No budget was set on the named-hull path, so there is nothing to compare against. Said
+              out loud rather than left blank, because a bare figure invites "is that within what I
+              asked for?" — and here nothing was asked for.
+            */}
+            {budget === null && shipId !== null && (
+              <span className="ml-2 text-[var(--color-text-dim)]">no spending limit set</span>
             )}
           </p>
 

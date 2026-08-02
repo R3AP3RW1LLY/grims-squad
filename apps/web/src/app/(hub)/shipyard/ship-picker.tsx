@@ -22,7 +22,28 @@ const credits = (n: number): string =>
       ? `${(n / 1_000_000).toFixed(1)} M`
       : `${Math.round(n / 1000)} K`;
 
-export function ShipPicker({ ships }: { ships: ShipyardShipRow[] }) {
+export function ShipPicker({
+  ships,
+  onPick,
+}: {
+  readonly ships: ShipyardShipRow[];
+  /**
+   * What a row does when chosen.
+   *
+   * ★ SQUADRON OWNER, 2026-08-01 ★
+   *
+   * "once they pick the [role] they want to build for, then it should ask if they want to pick a
+   * specific ship to build or build based on budget."
+   *
+   * The assisted stepper needed the same list — search, pad filter, price, sorted by cost — with
+   * the row selecting rather than navigating. Copying it would have been the quick version and two
+   * pickers that disagree about pad labels within a month.
+   *
+   * Absent means the rows are LINKS, which is what the build tab wants: a hull choice there IS a
+   * navigation, and a button that then pushes a URL would break opening one in a new tab.
+   */
+  readonly onPick?: (shipId: string) => void;
+}) {
   const [search, setSearch] = useState('');
   const [pad, setPad] = useState<number | null>(null);
 
@@ -67,13 +88,11 @@ export function ShipPicker({ ships }: { ships: ShipyardShipRow[] }) {
         </div>
       </div>
 
-      <ul className="m-0 grid list-none gap-2 p-0 sm:grid-cols-2 lg:grid-cols-3">
-        {shown.map((s) => (
-          <li key={s.id}>
-            <a
-              href={`/shipyard?ship=${encodeURIComponent(s.id)}`}
-              className="flex items-center justify-between gap-3 rounded-lg border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel)] px-4 py-3 transition-colors hover:border-[var(--color-brand-cyan)] hover:bg-[var(--color-surface-panel-hover)]"
-            >
+      {/* Stretched, so a two-line ship name does not leave its neighbours short. */}
+      <ul className="m-0 grid list-none items-stretch gap-2 p-0 sm:grid-cols-2 lg:grid-cols-3">
+        {shown.map((s) => {
+          const face = (
+            <>
               <span className="min-w-0">
                 <span className="block truncate text-sm text-[var(--color-text-primary)]">{s.name}</span>
                 <span className="font-mono text-[10px] text-[var(--color-text-dim)]">
@@ -83,9 +102,32 @@ export function ShipPicker({ ships }: { ships: ShipyardShipRow[] }) {
               <span className="shrink-0 font-mono text-xs text-[var(--color-brand-cyan-bright)]">
                 {credits(s.hullCost)}
               </span>
-            </a>
-          </li>
-        ))}
+            </>
+          );
+
+          const shell =
+            'flex h-full w-full items-center justify-between gap-3 rounded-lg border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel)] px-4 py-3 text-left transition-colors hover:border-[var(--color-brand-cyan)] hover:bg-[var(--color-surface-panel-hover)]';
+
+          return (
+            <li key={s.id} className="h-full">
+              {onPick === undefined ? (
+                <a href={`/shipyard?ship=${encodeURIComponent(s.id)}`} className={shell}>
+                  {face}
+                </a>
+              ) : (
+                /*
+                  A real <button>, not an <a> with a click handler. This one does not go anywhere —
+                  it answers a question in a form — and dressing it as a link would put it in the
+                  tab order announced as a link and offer a context menu full of navigation that
+                  does nothing.
+                */
+                <button type="button" onClick={() => onPick(s.id)} className={shell}>
+                  {face}
+                </button>
+              )}
+            </li>
+          );
+        })}
       </ul>
 
       {shown.length === 0 && (

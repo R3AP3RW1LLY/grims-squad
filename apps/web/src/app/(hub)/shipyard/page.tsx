@@ -58,7 +58,12 @@ export default async function ShipyardPage({
    * payload is only fetched once a hull is chosen — it is a few hundred kilobytes and there is no
    * sense sending it to somebody still deciding.
    */
-  const shipsRead = tab === 'build' ? await getShipyardShipsGated() : null;
+  /*
+   * Fetched for BOTH tabs now. The assisted builder offers "I have a ship in mind", which needs the
+   * same hull list the build tab's picker uses — it is a few kilobytes of names and prices, unlike
+   * the outfitting payload below.
+   */
+  const shipsRead = await getShipyardShipsGated();
   const outfitRead =
     tab === 'build' && shipId !== null ? await getShipyardOutfitGated(shipId) : null;
 
@@ -100,11 +105,11 @@ export default async function ShipyardPage({
         lead={
           tab === 'build'
             ? 'Every hull the game has, every module that fits it, and what the result actually does. Mass, jump range and the power budget update as you change things — nothing is submitted and nothing is saved until you want it to be.'
-            : 'Answer two questions and the fitting engine searches every hull and every module against them. It picks from the game’s own data, so the ship it names is one you can walk into a shipyard and buy.'
+            : 'Tell us what the ship is for, then either name a hull or give us a budget. The fitting engine does the rest from the game’s own data — so what it names is a ship you can walk into a shipyard and buy.'
         }
       >
         {tab === 'assisted' ? (
-          <AiBuilder />
+          <AiBuilder ships={ships?.ships ?? []} />
         ) : outfit !== null ? (
           <Section
             title="Outfitting"
