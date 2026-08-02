@@ -114,14 +114,17 @@ export class AdminController {
    * complete months count, so this is "run it now" rather than "let somebody through".
    */
   @Post('promotions/preview')
-  async promotionsPreview(): Promise<PromotionReport> {
-    return this.#promotions().preview();
+  async promotionsPreview(@Query('month') month?: string): Promise<PromotionReport> {
+    return this.#promotions().preview(month ?? null);
   }
 
   /** Runs them for real. Same evaluation as the preview, one flag apart. */
   @Post('promotions/run')
-  async promotionsRun(@User() caller: CurrentUser | undefined): Promise<PromotionReport> {
-    const report = await this.#promotions().apply();
+  async promotionsRun(
+    @User() caller: CurrentUser | undefined,
+    @Query('month') month?: string,
+  ): Promise<PromotionReport> {
+    const report = await this.#promotions().apply(month ?? null);
 
     await this.store.writeAudit({
       actorId: caller?.userId ?? null,
@@ -133,7 +136,14 @@ export class AdminController {
        * The COUNT and the names. A run that promoted nobody is a real outcome worth being able to
        * point at later — "we did press it, and nobody was due" is a different fact from silence.
        */
-      after: { promoted: report.promoted, considered: report.considered, who: report.wouldPromote },
+      after: {
+        // The month is recorded because it changes what the run MEANT. "We ran promotions" and "we
+        // ran July's promotions in October" are different facts.
+        month: month ?? null,
+        promoted: report.promoted,
+        considered: report.considered,
+        who: report.wouldPromote,
+      },
     });
 
     return report;

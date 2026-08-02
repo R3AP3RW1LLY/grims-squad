@@ -109,8 +109,38 @@ export class PromotionsService {
     return new DiscordRankApplier(this.db, discord, guildId);
   }
 
-  #engine(): PromotionEngine {
-    const store = new PrismaPromotionStore(this.db, this.#ladder());
+  /**
+   * The last month a run counts, from a `YYYY-MM` label.
+   *
+   * ★ SQUADRON OWNER, 2026-08-02: A BUTTON PER MONTH ★
+   *
+   * Scoped to the FIRST of that month, because `member_activity_months` stores one row per month
+   * keyed on its first day. `lte` that date therefore includes the month itself and excludes every
+   * later one — "what would the job on the 1st of next month have done".
+   *
+   * Null for an unscoped run, which is what the nightly job does.
+   */
+  #throughMonth(month: string | null): Date | null {
+    if (month === null || month === '') return null;
+
+    const m = /^(\d{4})-(\d{2})$/.exec(month);
+    if (m === null) {
+      throw new AppError(ErrorCode.VALIDATION_FAILED, 'A month must be written as YYYY-MM.');
+    }
+
+    const year = Number(m[1]);
+    const index = Number(m[2]) - 1;
+    if (index < 0 || index > 11) {
+      throw new AppError(ErrorCode.VALIDATION_FAILED, 'That is not a month.');
+    }
+
+    // UTC, matching how the rollups are keyed. A local-time Date would land on the last day of the
+    // previous month for anybody west of Greenwich and quietly drop a month from the count.
+    return new Date(Date.UTC(year, index, 1));
+  }
+
+  #engine(month: string | null = null): PromotionEngine {
+    const store = new PrismaPromotionStore(this.db, this.#ladder(), this.#throughMonth(month));
     const applier = this.#rankApplier();
     return applier === null ? new PromotionEngine(store) : new PromotionEngine(store, applier);
   }
@@ -123,12 +153,12 @@ export class PromotionsService {
    * the engine, so this is the engine's own safe path rather than a separate code route that might
    * disagree with it.
    */
-  async preview(): Promise<PromotionReport> {
-    return this.#engine().run({ dryRun: true });
+  async preview(month: string | null = null): Promise<PromotionReport> {
+    return this.#engine(month).run({ dryRun: true });
   }
 
   /** Runs them for real. Same evaluation as the preview, one flag apart. */
-  async apply(): Promise<PromotionReport> {
+  async apply(month: string | null = null): Promise<PromotionReport> {
     if (!promotionsPermitted()) {
       /*
        * The floor is a coded guard, not a schedule — a cron expression that does not fire yet is no
@@ -141,7 +171,7 @@ export class PromotionsService {
       );
     }
 
-    return this.#engine().run({ dryRun: false });
+    return this.#engine(month).run({ dryRun: false });
   }
 
   /**

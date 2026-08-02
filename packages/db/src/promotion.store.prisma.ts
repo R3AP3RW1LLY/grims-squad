@@ -17,9 +17,32 @@ export class PrismaPromotionStore implements PromotionStore {
   readonly #db: PrismaClient;
   readonly #rungs: LadderRung[];
 
-  constructor(db: PrismaClient, rungs: LadderRung[]) {
+  /**
+   * The last month that counts, or null for "everything up to now".
+   *
+   * ★ SQUADRON OWNER, 2026-08-02 ★
+   *
+   * "add a button to each month, that will trigger promotions beyond the job that runs once a month
+   * on the 1st day of the month."
+   *
+   * A month-scoped run answers "what would the 1st-of-next-month job have done", so months AFTER
+   * the chosen one must not count. Without this bound every button would produce an identical
+   * result and the month labels would be decoration.
+   *
+   * Null for the nightly job and the unscoped path, which is the behaviour that was already there.
+   *
+   * ★ THE RISK, RECORDED ★
+   *
+   * Choosing the CURRENT month credits a month that has not finished. The owner was shown that this
+   * is what the 1 August floor exists to prevent on partial data, and chose per-month scoping
+   * anyway. It is an officer's deliberate act on a page that says so, not a default.
+   */
+  readonly #throughMonth: Date | null;
+
+  constructor(db: PrismaClient, rungs: LadderRung[], throughMonth: Date | null = null) {
     this.#db = db;
     this.#rungs = rungs;
+    this.#throughMonth = throughMonth;
   }
 
   async ladder(): Promise<LadderRung[]> {
@@ -71,7 +94,11 @@ export class PrismaPromotionStore implements PromotionStore {
       const months = await this.#db.memberActivityMonth.count({
         where: {
           userId: u.id,
-          month: { gte: rankGrant.grantedAt },
+          month: {
+            gte: rankGrant.grantedAt,
+            // Bounded when the run is for a named month; open otherwise.
+            ...(this.#throughMonth === null ? {} : { lte: this.#throughMonth }),
+          },
           /*
            * ★ ONLY MESSAGES QUALIFY — squadron owner, 2026-07-29 ★
            *
