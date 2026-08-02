@@ -1,7 +1,6 @@
 import { PrismaClient } from '@grims/db';
 import { announce } from '@grims/shared';
-import { syncColonyProjects } from './jobs/colony-sync.js';
-import { PrismaColonyStore } from './jobs/colony-sync.wiring.js';
+import { PrismaColonyStore, syncColonyProjects } from '@grims/db';
 import { takeJobLock } from './lib/job-lock.js';
 
 /**

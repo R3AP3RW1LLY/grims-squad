@@ -7,7 +7,7 @@ import {
   type DepotReading,
   type NeedRow,
   type TrackedProject,
-} from './colony-sync.js';
+} from '@grims/db';
 
 /**
  * Turning colonisation journal events into the squadron's own records.

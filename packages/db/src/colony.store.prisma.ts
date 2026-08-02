@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { PrismaClient } from '@grims/db';
+import type { PrismaClient } from '@prisma/client';
 import {
   commodityName,
   type ColonyStore,

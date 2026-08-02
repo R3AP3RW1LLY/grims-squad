@@ -5,8 +5,7 @@ import { Client } from 'pg';
 import { PrismaClient } from '@grims/db';
 import { JOB_REQUEST_CHANNEL } from '@grims/shared';
 import { dueSources, lastRuns, TICK_MS } from './scheduler.js';
-import { syncColonyProjects } from './jobs/colony-sync.js';
-import { PrismaColonyStore } from './jobs/colony-sync.wiring.js';
+import { PrismaColonyStore, syncColonyProjects } from '@grims/db';
 import { announce } from './jobs/job-log.js';
 
 /**

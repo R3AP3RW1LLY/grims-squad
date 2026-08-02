@@ -636,8 +636,24 @@ async function tick(): Promise<void> {
        * one request every half hour rather than a member's whole session.
        */
       backoff = onUnauthorised(backoff, Date.now());
+    } else if (outcome.newFilesRead > 0 && outcome.txBytes === 0) {
+      /*
+       * ★ A FAILED SEND IS NOT A SUCCESSFUL PASS ★
+       *
+       * This was a bare `else` calling `onSuccess()`, so ONLY an unauthorised reply armed the
+       * backoff. Every other failure — the hub down, DNS gone, a 500, a timeout — landed here and
+       * CLEARED the throttle, and the app went on hammering at full cadence for ever.
+       *
+       * That is also what made the freeze compound: a failed upload does not advance the file
+       * offset, so every pass re-read and re-parsed the entire unsent journal, and nothing was
+       * slowing the passes down.
+       *
+       * Read new bytes and sent none: something is wrong at the far end. Backed off on the same
+       * schedule as an unauthorised reply.
+       */
+      backoff = onUnauthorised(backoff, Date.now());
     } else {
-      // Any successful pass clears it: whatever the condition was, it has passed.
+      // Any genuinely successful pass clears it: whatever the condition was, it has passed.
       backoff = onSuccess();
     }
   } catch (error) {
@@ -660,9 +676,32 @@ async function tick(): Promise<void> {
   refreshTray();
 }
 
+/**
+ * True while a pass is in flight.
+ *
+ * ★ SQUADRON OWNER, 2026-08-02: "the app seems to be freezing up quite a bit" ★
+ *
+ * The interval had no reentrancy guard. A pass that took longer than twenty seconds — which is the
+ * NORMAL case after playing offline for a while, because a failed upload does not advance the file
+ * offset and the whole unsent remainder is re-read and re-parsed every time — had the next pass
+ * start on top of it. Two passes then read the same files against the same module-level config and
+ * both wrote it back. Then three, then four, each synchronously parsing megabytes of journal on the
+ * main thread. The app locks up harder the longer the member plays.
+ *
+ * A flag rather than a queue: a skipped pass costs nothing, because the next one twenty seconds
+ * later reads from exactly the same offsets and does exactly the same work.
+ */
+let ticking = false;
+
 function startPolling(): void {
   if (timer !== null) return;
-  timer = setInterval(() => void tick(), POLL_MS);
+  timer = setInterval(() => {
+    if (ticking) return;
+    ticking = true;
+    void tick().finally(() => {
+      ticking = false;
+    });
+  }, POLL_MS);
   void tick();
 }
 

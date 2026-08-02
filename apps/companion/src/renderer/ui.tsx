@@ -1,4 +1,4 @@
-import type { JSX } from 'preact';
+import { Component, type ComponentChildren, type JSX } from 'preact';
 
 /**
  * The pieces every panel is built from.
@@ -385,6 +385,55 @@ export function Tabs<K extends string>({
       })}
     </div>
   );
+}
+
+/**
+ * Catches a render failure and says so, instead of leaving a blank rectangle.
+ *
+ * ★ SQUADRON OWNER, 2026-08-02 ★
+ *
+ * "in the companion app Deliveries and Haulers tabs are 100% empty."
+ *
+ * They were, and the cause was a hub serving an older shape than this build expected: one field was
+ * undefined, reading `.length` off it threw during render, and Preact unmounted the subtree. The
+ * two tabs that touched that field went blank — silently, with no message and nothing in the app to
+ * suggest anything had gone wrong. The other three were fine, which is exactly what made it look
+ * like a layout bug rather than a crash.
+ *
+ * A boundary does not fix the cause. It changes the symptom from "this feature is missing" to "this
+ * panel could not be drawn", which is the difference between a member filing a useful report and a
+ * member concluding the app is broken.
+ */
+export class Guard extends Component<
+  { children: ComponentChildren; what: string },
+  { failed: string | null }
+> {
+  override state = { failed: null as string | null };
+
+  static override getDerivedStateFromError(error: unknown): { failed: string } {
+    return { failed: error instanceof Error ? error.message : String(error) };
+  }
+
+  override render(): JSX.Element {
+    if (this.state.failed === null) return <>{this.props.children}</>;
+
+    return (
+      <Card accent={C.warn}>
+        <p style={{ margin: 0, fontSize: '13px', color: C.warn }}>
+          {this.props.what} could not be drawn.
+        </p>
+        {/*
+          The real message, not a friendly paraphrase. Whoever sees this is the person who can
+          report it, and "something went wrong" gives them nothing to report.
+        */}
+        <p style={{ margin: '6px 0 0', fontSize: '11px', color: C.dim }}>{this.state.failed}</p>
+        <p style={{ margin: '6px 0 0', fontSize: '11px', color: C.faint }}>
+          This usually means the app and the hub are on different versions. Everything else on this
+          page still works.
+        </p>
+      </Card>
+    );
+  }
 }
 
 export const tonnes = (n: number): string => `${n.toLocaleString()} t`;

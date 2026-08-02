@@ -219,6 +219,42 @@ export interface LoadoutImporter {
   importLoadout(payload: unknown, userId: string): Promise<unknown>;
 }
 
+/**
+ * Folds colonisation events into project records as they arrive.
+ *
+ * ★ SQUADRON OWNER, 2026-08-02 ★
+ *
+ * "i have made several deliveries to the project, but they are not seeming to register."
+ *
+ * They were stored, and nothing was reading them: the only thing that converts a
+ * `ColonisationContribution` into a ledger row was a job in the worker daemon, and the daemon was
+ * not running. Applying it here means a delivery lands the moment it is uploaded, by the one
+ * process that must be up for the upload to have happened at all.
+ */
+export interface ColonyApplier {
+  /** Everything known about one construction site, re-derived. Never throws. */
+  applyAt(marketId: bigint): Promise<void>;
+}
+
+/**
+ * The two events that say anything about a construction site.
+ *
+ * The depot heartbeat carries what the site still needs; the contribution carries what somebody
+ * just handed over. Either one changes what a project page should say, so either one is worth
+ * applying immediately.
+ */
+const COLONY_EVENTS = new Set(['ColonisationConstructionDepot', 'ColonisationContribution']);
+
+const DIGITS_ONLY = /^\d+$/;
+
+/** `MarketID` out of a journal payload, or null when it is missing or unusable. */
+function marketIdOf(payload: unknown): bigint | null {
+  const raw = (payload as { MarketID?: unknown } | null)?.MarketID;
+  if (typeof raw === 'number' && Number.isSafeInteger(raw)) return BigInt(raw);
+  if (typeof raw === 'string' && DIGITS_ONLY.test(raw)) return BigInt(raw);
+  return null;
+}
+
 export class JournalIngestService {
   constructor(
     private readonly store: IngestStore,
@@ -231,6 +267,14 @@ export class JournalIngestService {
      * the ship catalogue, and a deployment without it should still accept journals.
      */
     private readonly builds: LoadoutImporter | null = null,
+    /**
+     * Applies colonisation events to project records.
+     *
+     * Optional for the same reason the other two are: a unit test of ingestion should not need the
+     * colonisation tables, and a deployment without it still accepts journals — the worker's
+     * scheduled pass picks them up as it always did.
+     */
+    private readonly colony: ColonyApplier | null = null,
   ) {}
 
   /** How much this member has contributed in total. See `IngestStore`. */
@@ -309,6 +353,12 @@ export class JournalIngestService {
      * not in a hundred and seven copies of a member's telemetry.
      */
     const marketEvents: Array<{ key: string; raw: Record<string, unknown> & { event: string } }> = [];
+    /*
+     * SITES, not events. A batch commonly carries twenty depot heartbeats for one construction site
+     * — the game emits one every fifteen seconds — and each would re-derive the identical answer.
+     * One pass per site is the same answer for a twentieth of the work.
+     */
+    const colonySites = new Set<bigint>();
     /** `Loadout` events, for importing the member's own ship. See the note below the insert. */
     const loadouts: Array<{ key: string; payload: unknown }> = [];
     const refused: Record<string, number> = {};
@@ -396,6 +446,16 @@ export class JournalIngestService {
        * import for everyone.
        */
       if (e.name === 'Loadout') loadouts.push({ key: eventKey, payload });
+
+      /*
+       * Colonisation, collected after the consent gates like everything else. A member who has
+       * switched the category off contributes nothing to a project — which is the correct behaviour
+       * and not a special case, because the events never reach the table either.
+       */
+      if (this.colony !== null && COLONY_EVENTS.has(e.name)) {
+        const marketId = marketIdOf(payload);
+        if (marketId !== null) colonySites.add(marketId);
+      }
     }
 
     const insertedKeys = rows.length === 0 ? [] : await this.store.insertIgnoringDuplicates(rows);
@@ -456,6 +516,21 @@ export class JournalIngestService {
            */
           await this.builds.importLoadout(l.payload, userId).catch(() => null);
         }
+      }
+    }
+
+    /*
+     * ★ COLONISATION, APPLIED PER SITE AND NOT PER NEW ROW ★
+     *
+     * Deliberately NOT filtered to `insertedKeys`, unlike the market and loadout hooks above. Those
+     * apply a DELTA, so replaying one double-counts. This re-derives a site's whole state from
+     * every event ever stored for it — needs are replaced wholesale and the ledger is keyed unique
+     * — so a repeat run is free, and running it on a retried batch is how a delivery that arrived
+     * before anybody had posted the project finally lands.
+     */
+    if (this.colony !== null) {
+      for (const marketId of colonySites) {
+        await this.colony.applyAt(marketId);
       }
     }
 

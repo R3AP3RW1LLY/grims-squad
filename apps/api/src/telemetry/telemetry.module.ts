@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { PrismaClient } from '@grims/db';
 import { DatabaseModule } from '../database.module.js';
 import { ShipBuildService } from '../ai/ship-build.service.js';
+import { ColonyLiveService } from '../logistics/colony-live.service.js';
 import { AclDbService } from '../authz/acl-db.service.js';
 import { CompanionModule } from '../companion/companion.module.js';
 import { TelemetryController } from './telemetry.controller.js';
@@ -59,6 +60,19 @@ import { PAIRING_SERVICE, INGEST_SERVICE, CONSENT_SERVICE } from './telemetry.to
            * behalf of the member whose ship it is, and binds to them.
            */
           new ShipBuildService(db, acl),
+          /*
+           * ★ A DELIVERY LANDS WHEN IT IS UPLOADED, NOT WHEN A DAEMON NEXT WAKES ★
+           *
+           * Squadron owner, 2026-08-02: "i have made several deliveries to the project, but they
+           * are not seeming to register." Nine contribution events were in telemetry and six had
+           * become ledger rows, because the only thing converting them ran in the worker daemon
+           * and the daemon was down.
+           *
+           * Constructed here for the same reason the market updater is: the API is the process
+           * that must be up for the events to have arrived at all, so it is the one place the
+           * conversion cannot be missed. The worker's scheduled pass stays as the backstop.
+           */
+          new ColonyLiveService(db),
         ),
     },
     {

@@ -134,7 +134,20 @@ export function OverlaysPanel({
                           min={20}
                           max={100}
                           value={Math.round(state.style.opacity * 100)}
-                          onInput={(e) =>
+                          /*
+                           * ★ onChange, NOT onInput — SQUADRON OWNER, 2026-08-02 ★
+                           *
+                           * "the app seems to be freezing up quite a bit."
+                           *
+                           * `onInput` fires on every pixel of a drag, sixty to a hundred times a
+                           * second. Each one wrote the config file to disk SYNCHRONOUSLY, re-applied
+                           * all four overlay windows and re-rendered the whole app. The slider's own
+                           * value came back through that round trip, so the thumb fought the cursor
+                           * as well.
+                           *
+                           * `onChange` fires once, on release — which is when you have decided.
+                           */
+                          onChange={(e) =>
                             style(id, {
                               opacity: Number((e.target as HTMLInputElement).value) / 100,
                             })
@@ -148,7 +161,7 @@ export function OverlaysPanel({
                           min={70}
                           max={200}
                           value={Math.round(state.style.scale * 100)}
-                          onInput={(e) =>
+                          onChange={(e) =>
                             style(id, { scale: Number((e.target as HTMLInputElement).value) / 100 })
                           }
                         />
@@ -159,7 +172,9 @@ export function OverlaysPanel({
                           type="color"
                           value={state.style.accent}
                           style={{ ...inputStyle, padding: '2px', height: '34px' }}
-                          onInput={(e) =>
+                          // Same reason as the sliders: a colour picker streams input events
+                          // the whole time the member is dragging around the wheel.
+                          onChange={(e) =>
                             style(id, { accent: (e.target as HTMLInputElement).value })
                           }
                         />

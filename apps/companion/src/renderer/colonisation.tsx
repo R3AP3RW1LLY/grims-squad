@@ -28,6 +28,7 @@ import {
   credits,
   inputStyle,
   tonnes,
+  Guard,
   Tabs,
 } from './ui.js';
 
@@ -553,7 +554,28 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
     );
   }
 
-  const { project, needs, haulers, shopping, deliveries, chart } = data;
+  const { project, needs, haulers, shopping, deliveries } = data;
+
+  /*
+   * ★ THE CHART PAYLOAD, DEFENDED — SQUADRON OWNER, 2026-08-02 ★
+   *
+   * "Deliveries and Haulers tabs are 100% empty."
+   *
+   * They were the only two tabs that read `chart`, and the hub was serving an older shape in which
+   * `byCommodity` did not exist. `undefined.length` threw during render and Preact unmounted the
+   * whole panel — no message, no error on screen, just a blank rectangle in two of five tabs.
+   *
+   * An app talking to a hub it was not built against is a NORMAL condition, not an exceptional one:
+   * the hub deploys without asking anybody to update, so every member runs a mismatched pair for
+   * some window. Missing arrays therefore become empty ones and the panel says "nothing yet", which
+   * is honest and legible. The <Guard> below catches whatever this does not anticipate.
+   */
+  const chart = {
+    bucket: data.chart?.bucket ?? 'hour',
+    byCommodity: data.chart?.byCommodity ?? [],
+    byCommander: data.chart?.byCommander ?? [],
+    haulers: data.chart?.haulers ?? [],
+  };
   const outstanding = needs.filter((n) => n.remaining > 0);
   const done = needs.filter((n) => n.remaining <= 0);
   const total = shopping.reduce((sum, r) => sum + (r.cost ?? 0), 0);
@@ -599,6 +621,12 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
       <div class="rule-glow" style={{ margin: '0 0 22px' }} />
 
       <div id={`panel-${tab}`} role="tabpanel" aria-labelledby={`tab-${tab}`} tabIndex={0}>
+        {/*
+          Keyed on the tab so a panel that failed once does not stay failed after switching away and
+          back — the boundary's state resets with its identity, and the next tab genuinely is a
+          fresh attempt.
+        */}
+        <Guard key={tab} what="This section">
 
       {/*
         ★ EVERY COMMODITY, WITH WHAT HAS BEEN DELIVERED — SQUADRON OWNER, 2026-08-02 ★
@@ -773,6 +801,7 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
         )}
       </Section>
       )}
+        </Guard>
       </div>
     </div>
   );

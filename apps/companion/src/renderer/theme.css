@@ -122,13 +122,28 @@
   z-index: -2;
   pointer-events: none;
   background-color: #05070a;
+  /*
+   * ★ CLIPPED, AND THAT IS A PERFORMANCE FIX NOT A TIDINESS ONE ★
+   *
+   * Without it the two pseudo-elements below paint outside the viewport and Chromium rasterises
+   * every pixel of them.
+   */
+  overflow: hidden;
 }
 
 .deepfield::before,
 .deepfield::after {
   content: '';
   position: absolute;
-  inset: -50%;
+  /*
+   * `inset: 0`, not the site's `inset: -50%`.
+   *
+   * The website oversizes these because it animates them — a layer that drifts has to be bigger
+   * than the screen or its edge would swing into view. Nothing moves here, so -50% bought a layer
+   * FOUR TIMES the viewport area, twice over: on a 3440×1440 ultrawide that is roughly forty
+   * million pixels of tiled radial-gradient rasterised for no visible difference whatsoever.
+   */
+  inset: 0;
   background-repeat: repeat;
 }
 
@@ -165,14 +180,23 @@
     radial-gradient(40rem 34rem at 78% 62%, rgba(255, 60, 90, 0.07), transparent 66%);
 }
 
-/* Scanline at ~1.2%. At this level it is texture, not pattern; above ~3% it is a migraine trigger. */
+/*
+ * Scanline at ~1.2%. At this level it is texture, not pattern; above ~3% it is a migraine trigger.
+ *
+ * ★ BEHIND THE CONTENT, NOT OVER IT ★
+ *
+ * The website puts this at z-index 9999 over everything. Here it sits with the background layers,
+ * because a full-screen FIXED element stacked above a scrolling pane defeats Chromium's scroll-blit
+ * fast path — every scroll of the project list repainted the whole window instead of shifting it.
+ * Over a 1.2% white gradient. It is texture on the starfield either way.
+ */
 body.scanlines::after {
   content: '';
   position: fixed;
   inset: 0;
   pointer-events: none;
   background: repeating-linear-gradient(0deg, transparent 0 2px, rgba(255, 255, 255, 0.012) 2px 3px);
-  z-index: 9999;
+  z-index: -1;
 }
 
 /* ========================================================================== */
@@ -195,12 +219,21 @@ body.scanlines::after {
   background-color: rgba(11, 15, 20, 0.82);
   border: 1px solid rgba(255, 113, 0, 0.18);
   /*
-   * Real, and only in this window. The main window is opaque, so the blur samples the deepfield and
-   * nebulae painted beneath it. The OVERLAY windows are genuinely transparent and sit over the
-   * game: there, backdrop-filter samples an empty document and produces nothing at full GPU cost.
-   * It is deliberately absent from overlay.html.
+   * ★ NO backdrop-filter HERE, DELIBERATELY — SQUADRON OWNER, 2026-08-02 ★
+   *
+   * "the app seems to be freezing up quite a bit."
+   *
+   * It had one, copied from the site. On the website six panels sit on a page that scrolls the
+   * document. Here, `<main>` is its own scroll container over a FIXED background, so every scroll
+   * frame invalidates the backdrop snapshot of every panel — and Chromium does not batch that: it
+   * is one readback, one blur and one clip-path mask pass PER PANEL PER FRAME. The project board
+   * draws one panel per project with no upper bound, so a squadron with thirty builds was asking
+   * for thirty blurred readbacks every frame it scrolled.
+   *
+   * What actually reads as glass is the translucency, the chamfered corner and the warm hairline —
+   * all three are still here and all three are free. The blur was the expensive tenth of the effect.
+   * It survives on the sidebar alone, which is one element and never scrolls.
    */
-  backdrop-filter: blur(6px);
   clip-path: polygon(
     0 10px,
     10px 0,
@@ -446,7 +479,6 @@ body.scanlines::after {
     background-color: #0b0f14;
     border-color: rgba(255, 113, 0, 0.55);
     border-width: 2px;
-    backdrop-filter: none;
   }
   .hud::before,
   .hud::after {
