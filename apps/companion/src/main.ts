@@ -2,11 +2,13 @@ import { app, BrowserWindow, Tray, Menu, shell, ipcMain, nativeImage, dialog } f
 import {
   currentMode,
   isEditing,
+  pushOverlayData,
   setEditing,
   setLayout,
   startOverlays,
   stopOverlays,
 } from './overlay-runtime.js';
+import { buildOverlayData } from './overlay-data.js';
 import { explain } from './display-mode.js';
 import {
   colonyAssign,
@@ -411,6 +413,19 @@ async function runDeepSearch(os: Platform): Promise<string | null> {
 let wasPlaying = false;
 
 /**
+ * True while a journal pass is actually uploading.
+ *
+ * ★ SUB-TICK, OR THE DOT IS A LIE ★
+ *
+ * Everything else the overlays show is sampled once per pass, which is fine for a build tracker.
+ * "Sending" is not: a pass begins and ends between two samples, so an overlay reading this at pass
+ * boundaries would observe `false` every single time and the light would never come on. A member
+ * watching a status light that never changes concludes the app is dead — which is exactly the
+ * failure the status panel exists to rule out.
+ */
+let sending = false;
+
+/**
  * When the newest journal was last written, in epoch milliseconds.
  *
  * ★ WHY NOT JUST "DID IT GROW THIS PASS" ★
@@ -508,7 +523,18 @@ async function tick(): Promise<void> {
   });
 
   try {
-    const pass = await runWatchPass(nodeFs, dir, config, uploader, dockedAt);
+    /*
+     * The light goes on before the pass and off after it, whatever happens — including a throw.
+     * `push()` on each edge so the overlay sees the transition rather than only the resting state.
+     */
+    sending = true;
+    push();
+    let pass;
+    try {
+      pass = await runWatchPass(nodeFs, dir, config, uploader, dockedAt);
+    } finally {
+      sending = false;
+    }
     dockedAt = pass.outcome.dockedAt;
     const nextConfig = pass.config;
     let outcome = pass.outcome;
@@ -745,6 +771,24 @@ function stopPolling(): void {
 /** Sends the current state to the window, if one is open. */
 function push(): void {
   window?.webContents.send('state', state());
+  /*
+   * ★ THE OVERLAYS, ON THE SAME SIGNAL AS THE WINDOW ★
+   *
+   * `push()` already means "something changed, tell the UI", and every mutation path calls it — the
+   * end of every journal pass, every early return, a settings refresh, the startup dock seed, an
+   * overlay layout change. So the overlays need no timer of their own: they are simply another
+   * surface that gets told, and they cannot drift out of step with the window that shows the same
+   * numbers.
+   */
+  pushOverlayData(
+    buildOverlayData({
+      dock: mergedDock(),
+      sending,
+      lastTransferAt,
+      gameRunning: wasPlaying,
+      now: Date.now(),
+    }),
+  );
 }
 
 /** The version waiting to be installed, once one has downloaded. Null the rest of the time. */
@@ -760,6 +804,16 @@ let stopAutoUpdate: (() => void) | null = null;
 function autoUpdaterQuitAndInstall(): void {
   // `isSilent`, `isForceRunAfter`: install without a wizard, and come back up sending afterwards.
   void import('electron-updater').then(({ autoUpdater }) => autoUpdater.quitAndInstall(true, true));
+}
+
+/**
+ * Where the commander is, live pass merged with the startup seed.
+ *
+ * Named rather than inlined because BOTH the window and the overlays ask, and two copies of a
+ * merge rule is two chances for the app to tell somebody two different things about where they are.
+ */
+function mergedDock(): DockedAt | null {
+  return mergeDock(dockedAt, seededDock);
 }
 
 function state(): Record<string, unknown> {

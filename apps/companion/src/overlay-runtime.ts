@@ -94,6 +94,17 @@ export interface OverlayRuntimeHost {
 
 let windows: OverlayWindows | null = null;
 let host: OverlayRuntimeHost | null = null;
+/**
+ * The last data pushed, kept so a window that opens late is not blank until the next pass.
+ *
+ * ★ WITHOUT THIS, ENABLING A PANEL MID-SESSION SHOWS NOTHING FOR TWENTY SECONDS ★
+ *
+ * `broadcast` drops a message to a window that is still loading, and the display-mode watcher
+ * destroys and re-creates windows whenever the member alt-tabs between fullscreen and windowed. In
+ * both cases the panel would sit on its placeholder until the next journal pass happened to push
+ * again — which reads as "the overlay is broken", because for twenty seconds it is.
+ */
+let lastData: OverlayData | null = null;
 let mode: DisplayMode = 'unknown';
 let editing = false;
 
@@ -146,6 +157,8 @@ export function startOverlays(h: OverlayRuntimeHost): void {
     // A window finished loading and wants its state. Re-applying is the simplest correct answer and
     // is idempotent by design.
     if (host !== null) windows?.apply(host.layout(), mode);
+    // And its data, which it missed by not existing yet. See the note on `lastData`.
+    if (lastData !== null) windows?.broadcast('overlay:data', lastData);
   });
 }
 
@@ -198,8 +211,14 @@ export function currentMode(): DisplayMode {
   return mode;
 }
 
-/** Pushes live data to every open overlay. Cheap to call; does nothing when none are open. */
+/**
+ * Pushes live data to every open overlay. Cheap to call; does nothing when none are open.
+ *
+ * The payload is remembered BEFORE the open check, deliberately: a member who switches a panel on
+ * after the last pass should get what we already know rather than an empty box until the next one.
+ */
 export function pushOverlayData(data: OverlayData): void {
+  lastData = data;
   if (windows === null || !windows.anyOpen) return;
   windows.broadcast('overlay:data', data);
 }
@@ -207,6 +226,9 @@ export function pushOverlayData(data: OverlayData): void {
 export function stopOverlays(): void {
   if (displayTimer !== null) clearInterval(displayTimer);
   displayTimer = null;
+  // Dropped with the windows. Replaying a build from a previous session into a fresh one would be
+  // the overlay's own version of stale data.
+  lastData = null;
   windows?.closeAll();
   windows = null;
 }
