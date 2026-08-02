@@ -52,7 +52,7 @@ interface AppState {
   gameRunning?: boolean;
   error?: string | null;
   /** Where the commander is docked, when it is recent enough to trust. Null otherwise. */
-  dockedAt: { marketId: string; stationName: string; systemName: string } | null;
+  dockedAt: import('./colonisation.js').DockedAt | null;
   overlays: OverlayLayout;
   overlayEditing: boolean;
   displayMode: string;

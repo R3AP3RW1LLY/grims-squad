@@ -36,7 +36,7 @@ import {
 } from './config.js';
 import { Uploader } from './uploader.js';
 import { runWatchPass, type JournalFs, type WatchOutcome } from './watcher.js';
-import { isFresh, type DockedAt } from './docked.js';
+import { isFresh, seedFromJournal, SEED_TAIL_BYTES, type DockedAt } from './docked.js';
 import { accumulate } from './totals.js';
 import { isGameRunning, isActivelyPlaying } from './game-process.js';
 import { startAutoUpdate } from './auto-update.js';
@@ -140,6 +140,51 @@ let gameWasRunning = false;
  * closes.
  */
 let dockedAt: DockedAt | null = null;
+
+/**
+ * Rebuilds `dockedAt` from the tail of the newest journal, ignoring saved offsets.
+ *
+ * ★ WHY THIS HAS TO EXIST — REPORTED FROM A LIVE GAME, 2026-08-02 ★
+ *
+ * "i am currently in game, i am in the colonization window in the companion app, however, nothing at
+ * all is auto populating!"
+ *
+ * The watcher reads FORWARD from a saved byte offset, so an arrival consumed before this feature
+ * existed is behind it for ever. Their journal had `Docked` at byte 184,341 against a saved offset
+ * of 211,038 — thirty thousand bytes in the past, and no amount of waiting would bring it back.
+ *
+ * This reads the last half-megabyte directly, once, at startup. Nothing is uploaded from it and no
+ * offset moves: it exists purely to answer "where are they right now" for the app's own UI.
+ */
+async function seedDock(): Promise<void> {
+  try {
+    const dir = await findJournalDir();
+    if (dir === null) return;
+
+    const names = (await readdir(dir)).filter(isJournalFile).sort();
+    const newest = names[names.length - 1];
+    if (newest === undefined) return;
+
+    const path = join(dir, newest);
+    const { size } = await stat(path);
+    const from = Math.max(0, size - SEED_TAIL_BYTES);
+
+    const handle = await open(path, 'r');
+    try {
+      const buffer = Buffer.alloc(size - from);
+      await handle.read(buffer, 0, buffer.length, from);
+      const seeded = seedFromJournal(buffer.toString('utf8'));
+      // Only ever ADOPTED when the live path has not already found something better. A pass may
+      // have completed while this was reading.
+      if (seeded !== null && dockedAt === null) dockedAt = seeded;
+    } finally {
+      await handle.close();
+    }
+  } catch {
+    // Best effort, always. A journal we cannot read here simply means the form is not pre-filled,
+    // which is exactly where the app was before this existed.
+  }
+}
 
 let lastOutcome: WatchOutcome | null = null;
 let explainedTrayOnce = false;
@@ -1040,6 +1085,13 @@ if (!app.requestSingleInstanceLock()) {
      * tray and is closed almost always, which is precisely when the overlays need to be up. Nothing
      * opens unless the member has switched one on — `defaultLayout` has them all off.
      */
+    /*
+     * Recovers where the member is docked from the journal we have already read past. Deliberately
+     * NOT awaited: it is a convenience for one form, and blocking the window on a half-megabyte
+     * read would make every launch feel slower to everyone who is not posting a project.
+     */
+    void seedDock().then(() => push());
+
     startOverlays({
       layout: () => config.overlays,
       save: (overlays) => {

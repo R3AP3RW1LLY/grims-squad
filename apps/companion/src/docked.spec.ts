@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { trackDocked, isFresh, DOCK_FRESH_MS, type DockedAt, type ParsedLike } from './docked.js';
+import {
+  trackDocked,
+  isFresh,
+  seedFromJournal,
+  DOCK_FRESH_MS,
+  type DockedAt,
+  type ParsedLike,
+} from './docked.js';
 
 /**
  * Knowing where the commander is docked, so the app can fill a form in for them.
@@ -34,6 +41,9 @@ describe('tracking where somebody is docked', () => {
       stationName: 'Ambrose Dock',
       systemName: 'HIP 58832',
       at: '2026-08-02T10:00:00Z',
+      // No depot heartbeat has named this market, so nothing is known about it as a build site.
+      // An ordinary station stays null here for ever, which is correct.
+      site: null,
     });
   });
 
@@ -139,6 +149,7 @@ describe('how fresh a dock is', () => {
     stationName: 'X',
     systemName: 'Y',
     at: iso,
+    site: null,
   });
 
   it('accepts one from this session', () => {
@@ -168,5 +179,148 @@ describe('how fresh a dock is', () => {
   it('refuses nothing, and refuses nonsense', () => {
     expect(isFresh(null, NOW)).toBe(false);
     expect(isFresh(at('not a date'), NOW)).toBe(false);
+  });
+});
+
+/**
+ * The construction-site heartbeat.
+ *
+ * ★ REPORTED FROM A LIVE GAME, 2026-08-02 ★
+ *
+ * "i am currently in game, i am in the colonization window in the companion app, however, nothing at
+ * all is auto populating!"
+ *
+ * Their journal said why, precisely: `Docked` at 17:33:08 and already behind the app's saved offset
+ * of 211,038 bytes, while `ColonisationConstructionDepot` fired at 17:45:12 and every fifteen
+ * seconds before it. Watching only the arrival meant watching the one event that had already gone.
+ *
+ * The events below are that journal's real shapes.
+ */
+describe('a construction site', () => {
+  const DEPOT = ev('ColonisationConstructionDepot', {
+    MarketID: 4_359_491_587,
+    ConstructionProgress: 0.421_395,
+    ConstructionComplete: false,
+    ConstructionFailed: false,
+    ResourcesRequired: [
+      { Name: '$aluminium_name;', Name_Localised: 'Aluminium', RequiredAmount: 42_282, ProvidedAmount: 16_526 },
+      { Name: '$ceramiccomposites_name;', Name_Localised: 'Ceramic Composites', RequiredAmount: 4_884, ProvidedAmount: 4_884 },
+    ],
+  }, '2026-08-02T17:45:12Z');
+
+  const ARRIVED = ev('Docked', {
+    MarketID: 4_359_491_587,
+    StationName: "Planetary Construction Site: Harry's Dysfunctional Society",
+    StationType: 'PlanetaryConstructionDepot',
+    StarSystem: 'Hyades Sector XJ-Z c18',
+  }, '2026-08-02T17:33:08Z');
+
+  it('MANDATORY: recognises the site from the depot alone', () => {
+    /*
+     * The whole bug. With no `Docked` in the events we can still see — because it was consumed
+     * before the feature existed — the heartbeat has to be enough to know where the member is.
+     */
+    const seen = trackDocked(null, [DEPOT]);
+
+    expect(seen?.marketId).toBe('4359491587');
+    expect(seen?.site?.resources).toHaveLength(2);
+  });
+
+  it('reads everything about the site', () => {
+    // "it should read all data about the site and populate the new project window."
+    const site = trackDocked(null, [DEPOT])?.site;
+
+    expect(site?.progress).toBeCloseTo(0.421_395);
+    expect(site?.complete).toBe(false);
+    expect(site?.resources[0]).toEqual({
+      commodity: 'Aluminium',
+      required: 42_282,
+      provided: 16_526,
+    });
+  });
+
+  it('MANDATORY: uses the localised name, which is what the market joins on', () => {
+    // `$aluminium_name;` would match nothing in market_entries, and the shopping list would come
+    // back silently empty.
+    expect(trackDocked(null, [DEPOT])?.site?.resources.map((r) => r.commodity)).toEqual([
+      'Aluminium',
+      'Ceramic Composites',
+    ]);
+  });
+
+  it('keeps the station name when the arrival IS known', () => {
+    // Docked first, then heartbeats. The name comes from the arrival and must survive them.
+    const seen = trackDocked(null, [ARRIVED, DEPOT]);
+
+    expect(seen?.stationName).toBe("Planetary Construction Site: Harry's Dysfunctional Society");
+    expect(seen?.systemName).toBe('Hyades Sector XJ-Z c18');
+    expect(seen?.site?.resources).toHaveLength(2);
+  });
+
+  it('MANDATORY: the heartbeat keeps the dock fresh', () => {
+    /*
+     * A member sitting at a site for hours must not age out of the freshness window while they are
+     * still standing there. The depot's timestamp is the one that counts, not the arrival's.
+     */
+    const seen = trackDocked(null, [ARRIVED, DEPOT]);
+    expect(seen?.at).toBe('2026-08-02T17:45:12Z');
+  });
+
+  it('MANDATORY: drops a name that belongs to a different station', () => {
+    // A heartbeat from another market means the remembered identity is stale. Carrying the old name
+    // onto a new id would put the wrong station on a project.
+    const elsewhere = ev('ColonisationConstructionDepot', { MarketID: 111, ResourcesRequired: [] });
+    const seen = trackDocked(trackDocked(null, [ARRIVED]), [elsewhere]);
+
+    expect(seen?.marketId).toBe('111');
+    expect(seen?.stationName).toBe('');
+  });
+
+  it('keeps the site detail across a re-dock at the same market', () => {
+    // Undock and dock again at the same site: the arrival must not blank out what the heartbeat
+    // already told us.
+    const withSite = trackDocked(null, [DEPOT]);
+    expect(trackDocked(withSite, [ARRIVED])?.site?.resources).toHaveLength(2);
+  });
+});
+
+describe('seeding from a journal on startup', () => {
+  it('MANDATORY: recovers a dock the watcher already consumed', () => {
+    /*
+     * The exact failure. The watcher reads forward from a byte offset, so an arrival before that
+     * offset is gone for ever — and waiting for the member to undock and dock again is not a fix.
+     */
+    const journal = [
+      JSON.stringify({ timestamp: '2026-08-02T17:33:08Z', event: 'Docked', MarketID: 4_359_491_587, StationName: 'Site', StarSystem: 'Hyades' }),
+      JSON.stringify({ timestamp: '2026-08-02T17:45:12Z', event: 'ColonisationConstructionDepot', MarketID: 4_359_491_587, ConstructionProgress: 0.42, ResourcesRequired: [] }),
+    ].join('\n');
+
+    const seeded = seedFromJournal(journal);
+
+    expect(seeded?.marketId).toBe('4359491587');
+    expect(seeded?.stationName).toBe('Site');
+  });
+
+  it('survives the half-line a tail read always starts with', () => {
+    // Reading from a byte offset lands mid-line. Expected, not an error — and the reason the tail
+    // read is generous.
+    const journal = ['ationName": "cut off"}', JSON.stringify({ timestamp: '2026-08-02T17:33:08Z', event: 'Docked', MarketID: 7, StationName: 'Fine', StarSystem: 'X' })].join('\n');
+
+    expect(seedFromJournal(journal)?.stationName).toBe('Fine');
+  });
+
+  it('says nothing when the tail holds nothing relevant', () => {
+    const journal = [JSON.stringify({ timestamp: '2026-08-02T17:00:00Z', event: 'Music', MusicTrack: 'NoTrack' })].join('\n');
+    expect(seedFromJournal(journal)).toBeNull();
+  });
+
+  it('honours an undock that happened after the arrival', () => {
+    // The tail is replayed through the same rules as the live path, so leaving still means leaving.
+    const journal = [
+      JSON.stringify({ timestamp: '2026-08-02T17:33:08Z', event: 'Docked', MarketID: 7, StationName: 'Site', StarSystem: 'X' }),
+      JSON.stringify({ timestamp: '2026-08-02T17:50:00Z', event: 'Undocked' }),
+    ].join('\n');
+
+    expect(seedFromJournal(journal)).toBeNull();
   });
 });

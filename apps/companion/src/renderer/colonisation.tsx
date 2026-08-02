@@ -60,6 +60,17 @@ export interface DockedAt {
   readonly marketId: string;
   readonly stationName: string;
   readonly systemName: string;
+  /** Present when this dock is a construction site, straight from the depot heartbeat. */
+  readonly site: {
+    readonly progress: number;
+    readonly complete: boolean;
+    readonly failed: boolean;
+    readonly resources: ReadonlyArray<{
+      readonly commodity: string;
+      readonly required: number;
+      readonly provided: number;
+    }>;
+  } | null;
 }
 
 export function Colonisation({ dockedAt }: { dockedAt: DockedAt | null }): JSX.Element {
@@ -173,18 +184,96 @@ export function Colonisation({ dockedAt }: { dockedAt: DockedAt | null }): JSX.E
               Dock at a construction site and the details fill themselves in here.
             </Empty>
           ) : (
-            /*
-             * Named, so pressing "New project" is not a leap of faith. Somebody who has just docked
-             * can see we already know where they are before they open the form.
-             */
-            <Empty>
-              You are docked at <span style={{ color: C.text }}>{dockedAt.stationName}</span> — press
-              New project and the details are already filled in.
-            </Empty>
+            <HereNow dockedAt={dockedAt} />
           )}
         </Section>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * What we already know about the site the member is standing on.
+ *
+ * ★ SQUADRON OWNER, 2026-08-02 ★
+ *
+ * "it should read all data about the site and populate the new project window."
+ *
+ * So this is not a hint that the form will be pre-filled — it is the site itself, read from the
+ * depot heartbeat the game emits every fifteen seconds. Progress, and every commodity still
+ * outstanding, before anything has been posted to the squadron at all.
+ */
+function HereNow({ dockedAt }: { dockedAt: DockedAt }): JSX.Element {
+  const site = dockedAt.site;
+  const outstanding =
+    site === null
+      ? []
+      : site.resources
+          .filter((r) => r.required > r.provided)
+          .sort((a, b) => b.required - b.provided - (a.required - a.provided));
+
+  const totalNeeded = outstanding.reduce((sum, r) => sum + (r.required - r.provided), 0);
+
+  return (
+    <Card accent={C.cyan}>
+      <p style={{ margin: 0, fontSize: '14px' }}>
+        {dockedAt.stationName === '' ? 'The construction site you are docked at' : dockedAt.stationName}
+      </p>
+      <p style={{ margin: '3px 0 0', fontSize: '11px', color: C.faint }}>
+        {dockedAt.systemName === '' ? `Market ${dockedAt.marketId}` : dockedAt.systemName} · docked now
+      </p>
+
+      {site === null ? (
+        /*
+         * Docked, but no depot heartbeat — so this is an ordinary station, not a build site. Said
+         * plainly rather than offering a form that would create a project pointing at a shipyard.
+         */
+        <p style={{ margin: '10px 0 0', fontSize: '12px', color: C.dim }}>
+          This is not a construction site. Dock at one and its needs appear here.
+        </p>
+      ) : (
+        <div style={{ marginTop: '12px' }}>
+          <Bar done={Math.round(site.progress * 1000)} total={1000} />
+          <p style={{ margin: '6px 0 0', fontSize: '12px', color: C.dim }}>
+            {(site.progress * 100).toFixed(1)}% built ·{' '}
+            {outstanding.length === 0
+              ? 'everything delivered'
+              : `${tonnes(totalNeeded)} still needed across ${outstanding.length} commodit${outstanding.length === 1 ? 'y' : 'ies'}`}
+          </p>
+
+          {outstanding.length === 0 ? null : (
+            <div style={{ marginTop: '10px' }}>
+              {outstanding.slice(0, 6).map((r) => (
+                <div
+                  key={r.commodity}
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    gap: '12px',
+                    padding: '3px 0',
+                    fontSize: '12px',
+                  }}
+                >
+                  <span>{r.commodity}</span>
+                  <span style={{ fontVariantNumeric: 'tabular-nums', color: C.dim }}>
+                    {(r.required - r.provided).toLocaleString()} of {r.required.toLocaleString()}
+                  </span>
+                </div>
+              ))}
+              {outstanding.length > 6 ? (
+                <p style={{ margin: '5px 0 0', fontSize: '11px', color: C.faint }}>
+                  and {outstanding.length - 6} more
+                </p>
+              ) : null}
+            </div>
+          )}
+        </div>
+      )}
+
+      <p style={{ margin: '12px 0 0', fontSize: '11px', color: C.faint }}>
+        Press New project — the name, system, station and market id are already filled in.
+      </p>
+    </Card>
   );
 }
 
