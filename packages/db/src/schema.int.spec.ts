@@ -129,7 +129,14 @@ describe('P0.2 database schema', () => {
     // id in its OWN numbering — `FBG` is 62160 is Hpt_PulseLaser_Fixed_Small. Nothing in Frontier's
     // data or Coriolis's carries that numbering, so without this mapping an EDSY link cannot be
     // read at all. Refreshed from taleden/EDSY; only the id-to-symbol mapping is taken.
-    expect(Number(r[0]?.n)).toBe(82);
+    //
+    // 83 as of 2026-08-02: pending_stations. EDDN reports markets for stations our galaxy dump does
+    // not hold — about 111 in a fifteen-minute window — and they used to be counted and discarded.
+    // The sighting is queued here and a worker job looks each one up before writing a real station
+    // row, because the collector has to keep up with a message a second and cannot wait on a
+    // rate-limited third party, and because a station with a name and no pad size answers one
+    // question and lies about the next.
+    expect(Number(r[0]?.n)).toBe(83);
   });
 
   describe('hand-written DDL that Prisma cannot express', () => {

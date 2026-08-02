@@ -3233,6 +3233,50 @@ model ShipBuild {
   @@map("ship_builds")
 }
 
+/// A station EDDN reported that we do not hold, waiting to be looked up.
+///
+/// ★ SQUADRON OWNER, 2026-08-02 ★
+///
+/// "add the stations we do not hold" — and, asked what a station should become given EDDN carries
+/// only a name, a system and a market id: "Look each one up before creating it", so it lands
+/// complete with pad size and type rather than as a stub.
+///
+/// ★ WHY A QUEUE AND NOT A LOOKUP IN THE COLLECTOR ★
+///
+/// The collector has to keep up with roughly one message a second off the live relay. An HTTP
+/// lookup per unknown station inside that loop would stall the feed behind a rate-limited third
+/// party — and unknown stations arrive in bursts, about 111 in a fifteen-minute window.
+///
+/// So the sighting is recorded here, which is one cheap upsert, and a worker job resolves them at
+/// a pace the upstream will tolerate. Nothing is written to `knowledge_items` until it is complete,
+/// which is what "no stubs" means.
+model PendingStation {
+  /// Frontier's market id. The key EDDN and our station records both use.
+  marketId  BigInt @id @map("market_id")
+
+  /// What EDDN called it. Kept so a resolver can match by name when the market id is not indexed
+  /// upstream yet, which is common for a station built this week.
+  stationName String @map("station_name")
+  systemName  String @map("system_name")
+
+  firstSeenAt DateTime @default(now()) @map("first_seen_at") @db.Timestamptz(6)
+  lastSeenAt  DateTime @default(now()) @map("last_seen_at") @db.Timestamptz(6)
+  /// How many times we have tried to resolve it, so a station nobody upstream knows about stops
+  /// being retried for ever.
+  attempts    Int      @default(0)
+  lastTriedAt DateTime? @map("last_tried_at") @db.Timestamptz(6)
+  /// Why the last attempt failed, for an officer wondering why a station never appeared.
+  lastError   String?  @map("last_error")
+
+  /// Set when a real station row was written. Kept rather than deleted so a station that vanishes
+  /// upstream is not re-queued on its next sighting.
+  resolvedAt  DateTime? @map("resolved_at") @db.Timestamptz(6)
+
+  /// The queue the resolver reads: unresolved, least recently tried first.
+  @@index([resolvedAt, lastTriedAt])
+  @@map("pending_stations")
+}
+
 /// EDSY's own module and ship numbering, mapped to the game's symbols.
 ///
 /// An EDSY build link encodes each module as a three-character base-64 id in EDSY's own numbering —

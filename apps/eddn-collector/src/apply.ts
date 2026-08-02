@@ -54,7 +54,41 @@ export async function applyMarket(
    * commodities say, and doing it the other way round would burn the name lookups for the many
    * carriers and construction sites we do not hold.
    */
-  if (station === null) return { ...NOTHING, unknownStation: true };
+  if (station === null) {
+    /*
+     * ★ RECORDED, NOT JUST COUNTED — SQUADRON OWNER, 2026-08-02 ★
+     *
+     * "add the stations we do not hold". Until now this was a number in a log line and the market
+     * was dropped; about 111 a window, for ever.
+     *
+     * One cheap upsert, and no HTTP. Asked what an unknown station should become, the owner chose
+     * "look each one up before creating it" — so the sighting is queued and a worker job resolves
+     * it against the galaxy source at a pace that upstream tolerates. Doing the lookup HERE would
+     * stall a loop that has to keep up with a message a second behind a rate-limited third party.
+     *
+     * Failure is swallowed: the market is already lost either way, and losing the whole window
+     * because a queue insert failed would turn a small gap into a large one.
+     */
+    await db.pendingStation
+      .upsert({
+        where: { marketId: BigInt(market.marketId) },
+        create: {
+          marketId: BigInt(market.marketId),
+          stationName: market.stationName,
+          systemName: market.systemName,
+        },
+        // The name can change — carriers are renamed — and `lastSeenAt` is what tells an officer
+        // whether a station nobody can resolve is still out there being reported.
+        update: {
+          stationName: market.stationName,
+          systemName: market.systemName,
+          lastSeenAt: new Date(),
+        },
+      })
+      .catch(() => undefined);
+
+    return { ...NOTHING, unknownStation: true };
+  }
 
   let unresolved = 0;
   const rows: Array<{
