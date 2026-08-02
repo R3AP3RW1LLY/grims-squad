@@ -137,6 +137,37 @@ const NAV: readonly NavDefinition[] = [
     blurb: 'Ships the squadron has published for anyone to use.',
     requires: Permission.SHIPYARD_VIEW,
   },
+  /*
+   * ★ LOGISTICS & TRADE — SQUADRON OWNER, 2026-08-02 ★
+   *
+   * "create another subcategory under Squadron called Logistics & Trade please. the first thing i
+   * want to build is a realt time commodities market ... this market will also be the basis for our
+   * version of a trade route planner ... put that under the new subcategory too."
+   *
+   * The planner's name is the owner's pick from a shortlist: the Freight Office. It reads as a
+   * PLACE you go to get hauling work, which is the same shape as Shipyard → Outfitter above.
+   *
+   * Both are gated on TRADE_QUERY, which guests now hold — "this will also be available to the
+   * public for use". Sitting under `squadron` is not a contradiction: the section is where the
+   * pages LIVE in the sidebar, and the permission is what decides who may open them. The Outfitter
+   * has been exactly this since 2026-08-01.
+   */
+  {
+    href: '/logistics/commodities',
+    label: 'Commodities',
+    section: 'squadron',
+    subsection: 'Logistics & Trade',
+    blurb: 'What every commodity is worth, where to buy it, and which way the price is moving.',
+    requires: Permission.TRADE_QUERY,
+  },
+  {
+    href: '/logistics/freight-office',
+    label: 'Freight Office',
+    section: 'squadron',
+    subsection: 'Logistics & Trade',
+    blurb: 'Plan a run: pick the cargo, the hull and the range, and get the route.',
+    requires: Permission.TRADE_QUERY,
+  },
   {
     href: '/ops',
     label: 'Operations',

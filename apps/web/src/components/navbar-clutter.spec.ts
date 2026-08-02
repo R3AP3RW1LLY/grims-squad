@@ -50,13 +50,37 @@ const HUB_ONLY: readonly string[] = [
 ];
 
 describe('the public navbar', () => {
-  it('offers exactly Forum and a Shipyard dropdown', () => {
-    expect(NAV_LINKS).toHaveLength(2);
+  it('offers exactly Forum, Shipyard and Logistics — and nothing else', () => {
+    /*
+     * ★ THREE, AND EACH ONE WAS ASKED FOR ★
+     *
+     * This asserted a length of two until 2026-08-02, when the owner made the commodities market
+     * and the Freight Office public — "this will also be available to the public for use" — under
+     * the growth they invited while cutting the bar back: "we will add to this as we grow the site
+     * please".
+     *
+     * Still an EXACT list rather than a floor. The clutter this file exists to stop did not arrive
+     * by anybody deciding to add a link; it arrived because `AuthedNav` rendered every squadron nav
+     * entry, so the bar grew whenever a page was added elsewhere. A relaxed assertion would let
+     * that happen again quietly. Growing this list should take an edit HERE, by somebody who has
+     * read why.
+     */
+    expect(NAV_LINKS.map((l) => l.label)).toEqual(['Forum', 'Shipyard', 'Logistics']);
 
-    const [forum, shipyard] = NAV_LINKS;
+    const [forum] = NAV_LINKS;
     expect(forum).toEqual({ href: '/forum', label: 'Forum' });
+  });
 
-    expect(shipyard && 'children' in shipyard ? shipyard.label : null).toBe('Shipyard');
+  it('puts Commodities first in Logistics, then the Freight Office', () => {
+    // The market is the thing somebody arrives wanting — "what is this worth" — and the planner is
+    // built on it. Same reasoning as Outfitter before Public builds below.
+    const logistics = NAV_LINKS.find((l) => 'children' in l && l.label === 'Logistics');
+    const children = logistics !== undefined && 'children' in logistics ? logistics.children : [];
+
+    expect(children.map((c) => c.href)).toEqual([
+      '/logistics/commodities',
+      '/logistics/freight-office',
+    ]);
   });
 
   it('puts Outfitter first in the dropdown and Public builds second', () => {

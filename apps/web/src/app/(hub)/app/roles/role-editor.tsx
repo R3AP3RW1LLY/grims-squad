@@ -106,9 +106,9 @@ export const DESCRIBES: Readonly<Record<string, string>> = {
   BGS_SET_ORDERS:
     'Set the per-system directives the whole squadron flies to. This steers everybody’s evening.',
   TRADE_QUERY:
-    'Look up commodities, find importers and exporters, and optimise routes.',
+    'Open the commodities market and the Freight Office: look up any commodity, see where it is bought and sold, and plan routes. Signed-out visitors hold this too, so taking it from a rank hides the pages from members while the public keeps them.',
   TRADE_SAVE_ROUTE:
-    'Save routes and post them to the squadron trade board.',
+    'Keep a planned route against their own account, and post it to the squadron trade board.',
   TRADE_MANAGE_ALERTS:
     'Create and manage their own price alerts.',
   SHIPYARD_VIEW:
@@ -194,7 +194,16 @@ const PERMISSION_GROUPS: readonly PermissionGroup[] = [
     ],
   },
   {
-    title: 'Trade',
+    /*
+     * ★ NAMED FOR THE SUBCATEGORY IT GATES — SQUADRON OWNER, 2026-08-02 ★
+     *
+     * "create another subcategory under Squadron called Logistics & Trade". The heading was
+     * "Trade", which is now the name of neither the section in the sidebar nor either page inside
+     * it — and the GMSD AI group above is here precisely because a heading that does not match what
+     * the site calls the thing reads as missing.
+     */
+    title: 'Logistics & Trade',
+    note: 'The commodities market and the Freight Office. Signed-out visitors can already open both, so removing the first of these hides them from a rank while the public keeps them.',
     items: [
       ['TRADE_QUERY', 40],
       ['TRADE_SAVE_ROUTE', 41],

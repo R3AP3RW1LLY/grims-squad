@@ -411,8 +411,20 @@ const P = Permission;
  *
  * SHIPYARD_VIEW only. A visitor may plan a ship and read what the squadron has published; saving
  * and sharing need an account, because both write a row that belongs to somebody.
+ *
+ * ★ AND SO IS LOGISTICS & TRADE — SQUADRON OWNER, 2026-08-02 ★
+ *
+ * "this will also be available to the public for use", of the route planner. TRADE_QUERY is the bit
+ * that opens both the commodities market and the Freight Office, and they are one system: the
+ * planner is built on the market's prices and shows the same numbers on the way to a route. Opening
+ * the planner while gating the market would hide a page while publishing everything on it.
+ *
+ * The same shape as the Shipyard decision above, for the same reason — granted as a PERMISSION, so
+ * a rank can still have it taken away, and "public" stays a decision recorded in the model rather
+ * than a missing check. TRADE_SAVE_ROUTE and TRADE_MANAGE_ALERTS are NOT here: both write a row
+ * that belongs to somebody, which needs an account.
  */
-const GUEST: PermissionMask = P.FORUM_VIEW_PUBLIC | P.SHIPYARD_VIEW;
+const GUEST: PermissionMask = P.FORUM_VIEW_PUBLIC | P.SHIPYARD_VIEW | P.TRADE_QUERY;
 
 /** Application in flight. Public forum plus their own application thread (by ownership predicate). */
 const APPLICANT: PermissionMask = GUEST | P.FORUM_POST_PUBLIC;

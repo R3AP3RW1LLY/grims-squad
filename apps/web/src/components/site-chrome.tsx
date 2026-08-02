@@ -126,6 +126,33 @@ export const NAV_LINKS: ReadonlyArray<
       },
     ],
   },
+  /*
+   * ★ GROWING THE PUBLIC BAR, AS INVITED — SQUADRON OWNER, 2026-08-02 ★
+   *
+   * "we will add to this as we grow the site please", said while cutting this bar back to Forum and
+   * Shipyard. This is the first addition, and it is here because the owner made the pages public:
+   * "this will also be available to the public for use".
+   *
+   * Squadron builds is deliberately still absent — "Squadron builds should not be publically
+   * accessible at all!" Nothing here is a shortcut past a permission: every one of these pages
+   * checks TRADE_QUERY or SHIPYARD_VIEW against the caller's own mask, and the guest mask holds
+   * both. The bar shows what a visitor may open, and the pages decide.
+   */
+  {
+    label: 'Logistics',
+    children: [
+      {
+        href: '/logistics/commodities',
+        label: 'Commodities',
+        hint: 'Live prices across the bubble, no account needed',
+      },
+      {
+        href: '/logistics/freight-office',
+        label: 'Freight Office',
+        hint: 'Plan a hauling run and get the route',
+      },
+    ],
+  },
 ] as const;
 
 export function SiteNav() {

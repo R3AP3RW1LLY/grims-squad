@@ -8,6 +8,7 @@ import { MembersModule } from './members/members.module.js';
 import { CmdrModule } from './cmdr/cmdr.module.js';
 import { AdminModule } from './admin/admin.module.js';
 import { PublicModule } from './public/public.module.js';
+import { LogisticsModule } from './logistics/logistics.module.js';
 import { TelemetryModule } from './telemetry/telemetry.module.js';
 import { CompanionModule } from './companion/companion.module.js';
 import { ForumModule } from './forum/forum.module.js';
@@ -19,7 +20,7 @@ import { RequiresPermissionGuard } from './authz/requires-permission.guard.js';
 import { ViewAsGuard } from './authz/view-as.guard.js';
 
 @Module({
-  imports: [DatabaseModule, AuthzModule, AuthModule, MembersModule, CmdrModule, AdminModule, PublicModule, TelemetryModule, MediaModule, CompanionModule, LiveModule, AiModule, ForumModule],
+  imports: [DatabaseModule, AuthzModule, AuthModule, MembersModule, CmdrModule, AdminModule, PublicModule, LogisticsModule, TelemetryModule, MediaModule, CompanionModule, LiveModule, AiModule, ForumModule],
   controllers: [HealthController],
   providers: [
     /*
