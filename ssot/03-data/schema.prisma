@@ -509,6 +509,12 @@ model User {
   /// because helping with somebody else's build is the common case, not the exception.
   colonyProjects       ColonyProject[]      @relation("ColonyProjectPoster")
   colonyContributions  ColonyContribution[] @relation("ColonyContributor")
+  /// Projects they have joined, what they have taken on, what they have handed out, and carriers
+  /// they have offered. Four relations because they are four different acts.
+  colonyMemberships    ColonyMember[]       @relation("ColonyMemberOf")
+  colonyAssignments    ColonyAssignment[]   @relation("ColonyAssignee")
+  colonyAssignedOut    ColonyAssignment[]   @relation("ColonyAssigner")
+  colonyCarriersAdded  ColonyCarrier[]      @relation("ColonyCarrierAdder")
 
   @@map("users")
 
@@ -2313,6 +2319,9 @@ model ColonyProject {
   postedBy      User                 @relation("ColonyProjectPoster", fields: [postedById], references: [id], onDelete: Cascade)
   needs         ColonyNeed[]
   contributions ColonyContribution[]
+  members       ColonyMember[]
+  assignments   ColonyAssignment[]
+  carriers      ColonyCarrier[]
 
   /// One project per construction site. A second post of the same site is the same build, and two
   /// rows would split its deliveries in half with neither showing the truth.
@@ -2377,6 +2386,124 @@ model ColonyContribution {
   @@index([projectId, deliveredAt])
   @@index([userId])
   @@map("colony_contributions")
+}
+
+/// Somebody who has put their name to a colonisation project.
+///
+/// ★ SQUADRON OWNER, 2026-08-02 ★
+///
+/// "we also need a way for people to join the project ahead of time."
+///
+/// Joining is a ROSTER, not a commitment. It says "I intend to help", which is what makes a build
+/// plannable before anybody has flown anywhere — and it is the list an officer assigns from.
+///
+/// Deliberately separate from having delivered something. A member who hauls without joining still
+/// appears in the ledger and on every chart; joining is about what is going to happen, and
+/// contributions are about what did.
+model ColonyMember {
+  projectId String   @map("project_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  joinedAt  DateTime @default(now()) @map("joined_at") @db.Timestamptz(6)
+
+  project ColonyProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User          @relation("ColonyMemberOf", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([projectId, userId])
+  @@index([userId])
+  @@map("colony_members")
+}
+
+/// Who is bringing what.
+///
+/// ★ CLAIMED OR ASSIGNED, AND THE DIFFERENCE IS RECORDED ★
+///
+/// Squadron owner, 2026-08-02: "Officers can assign on Squadron Projects, Project Owners can assign
+/// on Members Projects" — and members may also claim freely.
+///
+/// `assignedById` is what tells the two apart: null means the member took it themselves, a value
+/// means somebody put it on them. That matters on screen — "you claimed this" and "an officer asked
+/// you to do this" are different messages — and it matters for who may remove it.
+model ColonyAssignment {
+  id        String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId String @map("project_id") @db.Uuid
+  userId    String @map("user_id") @db.Uuid
+  commodity String
+
+  /// Tonnes this member is taking on. Null means "this one is mine" without a number attached,
+  /// which is how most claims actually happen.
+  tonnes Int?
+
+  /// Who assigned it. Null when the member claimed it themselves.
+  assignedById String?  @map("assigned_by_id") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  project    ColonyProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user       User          @relation("ColonyAssignee", fields: [userId], references: [id], onDelete: Cascade)
+  assignedBy User?         @relation("ColonyAssigner", fields: [assignedById], references: [id], onDelete: SetNull)
+
+  /// One claim per member per commodity on a project. A second is the same intention restated, and
+  /// two rows would double-count what the build believes is covered.
+  @@unique([projectId, userId, commodity])
+  @@index([projectId, commodity])
+  @@map("colony_assignments")
+}
+
+/// A fleet carrier helping with a build.
+///
+/// ★ SQUADRON OWNER, 2026-08-02 ★
+///
+/// "we also need a way to add fleet carriers to the project like raven colonial does", and
+/// "squadron carriers too".
+///
+/// A carrier is attached by ANYBODY on the project who owns it — the owner's choice — because a big
+/// build is exactly where somebody offers their carrier to a project that is not theirs.
+model ColonyCarrier {
+  projectId String @map("project_id") @db.Uuid
+  /// The carrier's own market id, which is how its cargo is recognised in the journal.
+  marketId  BigInt @map("market_id")
+
+  name     String
+  /// The callsign, e.g. `K7Q-B4L`. What everybody actually calls it.
+  callsign String?
+
+  /// True for a squadron carrier rather than a member's own. Kept because they are answerable to
+  /// different people, and a board that cannot tell them apart cannot say whose cargo is whose.
+  isSquadron Boolean @default(false) @map("is_squadron")
+
+  addedById String   @map("added_by_id") @db.Uuid
+  addedAt   DateTime @default(now()) @map("added_at") @db.Timestamptz(6)
+
+  project ColonyProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  addedBy User          @relation("ColonyCarrierAdder", fields: [addedById], references: [id], onDelete: Cascade)
+
+  @@id([projectId, marketId])
+  @@index([marketId])
+  @@map("colony_carriers")
+}
+
+/// What is actually sitting in a carrier's hold.
+///
+/// ★ KEYED ON THE CARRIER, NOT ON A PROJECT ★
+///
+/// A carrier has one hold. Attaching it to two builds must not mean two sets of cargo — so this is
+/// a property of the carrier, and a project sums whatever its attached carriers are holding.
+///
+/// ★ AND IT IS A SNAPSHOT, NOT A LEDGER ★
+///
+/// The same reasoning as `ColonyNeed`. The journal reports transfers as DELTAS, but a member can
+/// haul with the app closed, so accumulating deltas drifts permanently from the first one missed.
+/// Each reading replaces the commodity's row outright, and a stale figure carries its own timestamp
+/// so a page can say how old it is rather than implying it is current.
+model CarrierCargo {
+  marketId  BigInt @map("market_id")
+  commodity String
+  tonnes    Int
+
+  observedAt DateTime @map("observed_at") @db.Timestamptz(6)
+
+  @@id([marketId, commodity])
+  @@index([commodity])
+  @@map("carrier_cargo")
 }
 
 /// One hour of the galaxy's trade in one commodity — the series behind "price over time".

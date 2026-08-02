@@ -149,7 +149,12 @@ describe('P0.2 database schema', () => {
     // because the three things have different lifetimes: a project is posted once, its needs are a
     // snapshot REPLACED whole from each depot event, and its contributions are an append-only
     // ledger that must stay recomputable.
-    expect(Number(r[0]?.n)).toBe(87);
+    //
+    // 91 as of 2026-08-02: colony_members, colony_assignments, colony_carriers, carrier_cargo.
+    // Joining a build, taking on a commodity, and offering a carrier to it. `carrier_cargo` is
+    // keyed on the CARRIER rather than the project, because a carrier has one hold and attaching it
+    // to two builds must not produce two sets of cargo.
+    expect(Number(r[0]?.n)).toBe(91);
   });
 
   describe('hand-written DDL that Prisma cannot express', () => {
@@ -342,6 +347,20 @@ describe('seeded roles', () => {
     // Shipyard, 2026-08-01: view, save, share to the squadron, share publicly.
     43, 44, 45, 46,
     50, 51, 52, 53, 54, 55, 56, 60, 61, 62, 63, 70,
+    /*
+     * ★ BITS 71-74 ADDED 2026-08-02: COLONISATION ★
+     *
+     * View the boards, post a personal project, publish one, and create squadron projects.
+     *
+     * The deliberate mirroring working a third time, and in the same two directions the note above
+     * records: first the stored mask was SMALLER, because adding a permission to the contract does
+     * not touch the database and the webmaster is promised every non-squadron-standing bit
+     * (INV-006) — that needed `20260802170000_webmaster_colony_grant`. Then it was LARGER, because
+     * the migration had run and this list had not been updated.
+     *
+     * Both look like a stale build. Neither is. The list is local by design; see the note above.
+     */
+    71, 72, 73, 74,
   ].reduce((acc, bit) => acc | (1n << BigInt(bit)), 0n);
 
   /**
