@@ -35,6 +35,19 @@ export interface NicknameSyncDeps {
   verifiedNameFor(userId: string): Promise<string | null>;
   /** Their current guild nickname, so an unchanged one costs nothing. */
   currentNickFor(discordId: string): Promise<string | null>;
+  /**
+   * A nickname they chose instead of the convention, or null.
+   *
+   * ★ SQUADRON OWNER, 2026-08-02 ★
+   *
+   * "if an officer overrides their name, then this is the name that stays as their discord
+   * nickname it should not change from that unless they change it."
+   *
+   * Checked here as well as in the nightly sweep, because this path fires on every Inara call —
+   * an officer who re-linked their key would otherwise be renamed back within seconds of setting
+   * their override, which is the most confusing possible version of this bug.
+   */
+  overrideFor(userId: string): Promise<string | null>;
   setNickname(
     guildId: string,
     discordId: string,
@@ -105,6 +118,14 @@ export class NicknameSyncService {
    * string.
    */
   async preview(userId: string, discordId: string): Promise<string | null> {
+    /*
+     * The override is what they will actually wear, so it is what the preview shows. Previewing the
+     * computed name to somebody who has overridden it would promise a rename that will never
+     * happen.
+     */
+    const override = await (async () => this.deps.overrideFor(userId))().catch(() => null);
+    if (override != null && override.trim() !== '') return override.trim();
+
     const verified = await this.deps.verifiedNameFor(userId);
     if (verified === null || verified.trim() === '') return null;
 
@@ -122,6 +143,18 @@ export class NicknameSyncService {
    */
   async sync(userId: string, discordId: string): Promise<SyncResult> {
     try {
+      /*
+       * ★ AN OVERRIDE ENDS IT, BEFORE ANYTHING ELSE IS READ ★
+       *
+       * Not "set it to the override" — leave alone. Setting the override is what wrote it to the
+       * guild in the first place, so re-asserting it here would be a Discord write and an audit row
+       * on every Inara call for a value nothing but the member can change.
+       */
+      const override = await (async () => this.deps.overrideFor(userId))().catch(() => null);
+      if (override != null && override.trim() !== '') {
+        return { changed: false, reason: 'This member has chosen their own nickname.' };
+      }
+
       const verified = await this.deps.verifiedNameFor(userId);
 
       // No key, or not verified. Their nickname is their own business, and

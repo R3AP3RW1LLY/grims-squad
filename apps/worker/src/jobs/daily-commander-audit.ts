@@ -39,6 +39,20 @@ export interface AuditableCommander {
   readonly currentNick: string | null;
   /** Their rank, for the `RANK - COMMANDER` prefix. Null when they hold none. */
   readonly rank: string | null;
+  /**
+   * A nickname they chose instead of the convention, or null.
+   *
+   * ★ SQUADRON OWNER, 2026-08-02 ★
+   *
+   * "if an officer overrides their name, then this is the name that stays as their discord nickname
+   * it should not change from that unless they change it."
+   *
+   * Set means this sweep leaves them entirely alone. Not "sets it to the override" — leaves alone:
+   * the override is already their nickname, because setting it is what wrote it to the guild, and
+   * re-asserting it nightly would be a Discord write and an audit row per officer per day for a
+   * value nothing can change but them.
+   */
+  readonly nicknameOverride: string | null;
 }
 
 export interface AuditStore {
@@ -72,6 +86,8 @@ export interface AuditReport {
   readonly unreachable: number;
   readonly nicknamesFixed: number;
   readonly nicknamesRefused: number;
+  /** Members left alone because they hold a nickname override. */
+  readonly nicknamesOverridden: number;
 }
 
 /**
@@ -96,6 +112,7 @@ export async function auditCommanders(
   let unreachable = 0;
   let nicknamesFixed = 0;
   let nicknamesRefused = 0;
+  let nicknamesOverridden = 0;
 
   /*
    * Members with no key of their own, batched. Fetched ONCE up front rather
@@ -174,6 +191,23 @@ export async function auditCommanders(
     // ---------------------------------------------------------- nickname
     if (c.discordId === null) continue;
 
+    /*
+     * ★ AN OVERRIDE IS THE END OF THE MATTER ★
+     *
+     * Counted rather than silently skipped. A sweep that reports "0 nicknames fixed" every night
+     * looks identical whether nobody had drifted or everybody had opted out, and the second is
+     * something an officer would want to know about.
+     */
+    /*
+     * `!= null`, catching undefined as well as null. A store that omits the field — an older
+     * implementation, a hand-built fixture, a projection somebody trimmed — would otherwise throw
+     * inside the nightly sweep, and this job runs unattended at 4am against every commander.
+     */
+    if (c.nicknameOverride != null && c.nicknameOverride.trim() !== '') {
+      nicknamesOverridden += 1;
+      continue;
+    }
+
     const want = compose(c.rank, c.cmdrName);
     /*
      * Case-insensitive, because Elite is. Rewriting "Grim" to "GRIM" nightly
@@ -217,5 +251,6 @@ export async function auditCommanders(
     unreachable,
     nicknamesFixed,
     nicknamesRefused,
+    nicknamesOverridden,
   };
 }

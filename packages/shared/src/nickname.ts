@@ -28,6 +28,97 @@
 /** Discord's hard ceiling on a nickname. */
 export const MAX_NICK = 32;
 
+/*
+ * ─────────────────────────────────────────────────────────────────────────────
+ * HUMANIZING A COMMANDER NAME
+ *
+ * ★ SQUADRON OWNER, 2026-08-02 ★
+ *
+ * "these need to match their verified inara name please. this is non-negotiable! ... their name
+ * must match what is on inara exactly, but humanized (first letter capitalized) ... if they have
+ * two words seperated by a space, then each first letter of each word must be capitalized. if they
+ * have "" in their name, then everything between the quotes must be capitalized letters please like
+ * a call sign."
+ *
+ * The same rule for everybody — allies, Grim's Squad members, the tenure ladder from Cadet to Grand
+ * Master General, and officers. Rank changes nothing about the SHAPE of the name; officers differ
+ * only in being allowed to override it entirely (see `nicknameOverride`).
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
+
+/**
+ * Characters that open or close a callsign.
+ *
+ * Straight and both smart doubles, because a name typed on a phone arrives with `“ ”` and a member
+ * would have no idea why their callsign was not shouting.
+ *
+ * The APOSTROPHE is deliberately not here. It is a word break (`o'brien` → `O'Brien`), and treating
+ * it as a quote would turn the rest of that name into a callsign.
+ */
+const CALLSIGN_QUOTES = new Set(['"', '\u201C', '\u201D']);
+
+/**
+ * Characters after which the next letter starts a new word.
+ *
+ * Owner's answer when asked, with worked examples: `jean-luc picard` → `Jean-Luc Picard`, and
+ * `o'brien` → `O'Brien`. So hyphens and apostrophes break words exactly as spaces do.
+ */
+const WORD_BREAKS = new Set([' ', '-', "'", '\u2019']);
+
+/**
+ * A commander name, as the squadron wears it.
+ *
+ * ★ LOWERCASED FIRST, AND THAT IS A DELIBERATE TRADE ★
+ *
+ * Everything outside a callsign is lowercased before the word starts are raised. That is what makes
+ * `GRIMREAPER` come back as `Grimreaper` rather than staying at a shout, which is the whole point
+ * of "humanized".
+ *
+ * It costs deliberate inner capitals: `McDonald` becomes `Mcdonald`. The owner was shown that
+ * exact trade and chose this. A member who needs the other spelling is what the override is for.
+ *
+ * ★ UNBALANCED QUOTES ARE IGNORED, NOT GUESSED AT ★
+ *
+ * `sean "grim` has one quote. Treating it as an opening one would uppercase everything after it —
+ * a typo turning into A SHOUTING HALF NAME. With an odd number of quotes the callsign rule is
+ * dropped entirely and the name is simply title-cased, which is wrong in the small way rather than
+ * the loud way.
+ */
+export function humanizeCommanderName(raw: string): string {
+  // Collapse runs of whitespace first, so `grim   reaper` does not produce empty words.
+  const name = raw.trim().replace(/\s+/g, ' ');
+  if (name === '') return '';
+
+  const quotes = [...name].filter((c) => CALLSIGN_QUOTES.has(c)).length;
+  const callsignsBalanced = quotes > 0 && quotes % 2 === 0;
+
+  let out = '';
+  let inCallsign = false;
+  let startOfWord = true;
+
+  for (const ch of name) {
+    if (callsignsBalanced && CALLSIGN_QUOTES.has(ch)) {
+      inCallsign = !inCallsign;
+      // Normalised to a straight quote. A name that renders with `“` here and `"` on the site
+      // would look like two different names to the member reading both.
+      out += '"';
+      startOfWord = true;
+      continue;
+    }
+
+    if (inCallsign) {
+      // The callsign itself: every letter, not just the first.
+      out += ch.toUpperCase();
+      continue;
+    }
+
+    out += startOfWord ? ch.toUpperCase() : ch.toLowerCase();
+    startOfWord = WORD_BREAKS.has(ch);
+  }
+
+  return out;
+}
+
 /**
  * Builds the nickname: just the commander name.
  *
@@ -39,7 +130,18 @@ export const MAX_NICK = 32;
  * this function can solve, and a rejected API call would leave the member with no nickname at all.
  */
 export function composeNickname(_rank: string | null, cmdrName: string): string {
-  return cmdrName.trim().slice(0, MAX_NICK);
+  /*
+   * ★ HUMANIZED HERE, SO EVERY CALLER GETS IT ★
+   *
+   * Three things need the same answer — the website when it verifies somebody, the settings page
+   * when it previews their nickname, and the nightly worker sweep. Putting the rule anywhere else
+   * would mean a member whose name the site shows one way and the guild another, which is the
+   * exact failure this function was moved to `shared` to prevent.
+   *
+   * Truncation comes AFTER humanizing. Doing it first would title-case a name that had already
+   * lost its last word, and the result would differ from what the preview promised.
+   */
+  return humanizeCommanderName(cmdrName).slice(0, MAX_NICK);
 }
 
 /**

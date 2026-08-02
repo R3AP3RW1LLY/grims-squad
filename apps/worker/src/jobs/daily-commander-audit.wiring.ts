@@ -64,6 +64,22 @@ export class PrismaAuditStore implements AuditStore {
     });
     const memberByDiscordId = new Map(members.map((m) => [m.discordId, m]));
 
+    /*
+     * Who has chosen their own nickname.
+     *
+     * Read for everybody in one query rather than per member: the sweep already makes one Inara
+     * request per commander and is the slowest job on the platform — adding a round trip per person
+     * to read one nullable column would be the cheapest possible way to make it slower.
+     */
+    const overrides = new Map(
+      (
+        await this.db.user.findMany({
+          where: { id: { in: userIds }, nicknameOverride: { not: null } },
+          select: { id: true, nicknameOverride: true },
+        })
+      ).map((u) => [u.id, u.nicknameOverride]),
+    );
+
     const keyByUser = new Map(
       links.flatMap((l) => {
         try {
@@ -103,6 +119,8 @@ export class PrismaAuditStore implements AuditStore {
         // on every GuildMemberUpdate — so it wins where both have a value.
         currentNick: member?.nick ?? identity?.guildNick ?? null,
         rank: rankForDisplay(held, LEADERSHIP_CEILING),
+        // Null for almost everybody. Set means the sweep leaves their nickname entirely alone.
+        nicknameOverride: overrides.get(v.userId) ?? null,
       };
     });
   }

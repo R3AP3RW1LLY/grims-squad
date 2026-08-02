@@ -357,6 +357,36 @@ model User {
   /// removed their only device has still SEEN this, and showing it again would read as the site
   /// having forgotten them.
   companionPromptedAt DateTime? @map("companion_prompted_at") @db.Timestamptz(6)
+
+  /// The nickname this member wears INSTEAD of their humanized Inara name, or null.
+  ///
+  /// ★ SQUADRON OWNER, 2026-08-02 ★
+  ///
+  /// "if an officer overrides their name, then this is the name that stays as their discord
+  /// nickname it should not change from that unless they change it. if they update it in discord,
+  /// it should also update here and not change back!"
+  ///
+  /// Set means the nightly sweep leaves them alone entirely. Null means they follow the convention
+  /// like everybody else — which is why this is nullable rather than defaulting to the computed
+  /// name: a stored copy of the computed name would freeze it, and a member who later corrects
+  /// their Inara profile would never pick the correction up.
+  nicknameOverride String? @map("nickname_override")
+  /// When it was set, so an officer reviewing the roster can see how old a frozen name is.
+  nicknameOverrideAt DateTime? @map("nickname_override_at") @db.Timestamptz(6)
+  /// How it arrived: `web` from the site, `discord` from renaming themselves in the guild.
+  ///
+  /// Recorded because the two mean different things to whoever is reading the audit later. A
+  /// `discord` source is somebody who may not realise they have opted out of the convention.
+  nicknameOverrideSource String? @map("nickname_override_source")
+
+  /// Whether this member may hold an override at all, when their rank does not already allow it.
+  ///
+  /// Officers get the right from their rank and never need this. It exists for the owner's answer
+  /// to "who can hold a nickname override": "Officers, and anyone an officer grants it to" — a
+  /// well-known callsign, or a name Inara simply cannot represent, without promoting somebody to
+  /// officer to achieve it.
+  nicknameOverrideAllowed Boolean @default(false) @map("nickname_override_allowed")
+
   status      UserStatus @default(active)
   joinedAt    DateTime   @default(now()) @map("joined_at") @db.Timestamptz(6)
   lastSeenAt  DateTime?  @map("last_seen_at") @db.Timestamptz(6)

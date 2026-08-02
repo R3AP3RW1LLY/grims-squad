@@ -64,6 +64,20 @@ function nicknameReconciler(prisma: PrismaClient): NicknameSyncService | undefin
       });
       return i?.guildNick ?? null;
     },
+    /**
+     * A nickname they chose instead of the convention.
+     *
+     * Read fresh on every check rather than cached: the whole point is that setting one takes
+     * effect immediately, and a member who set it on the settings page thirty seconds ago must not
+     * be renamed back by the next Inara call.
+     */
+    async overrideFor(userId) {
+      const u = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { nicknameOverride: true },
+      });
+      return u?.nicknameOverride ?? null;
+    },
     setNickname: (g, d, nick) => discord.setMemberNickname(g, d, nick),
     /**
      * The rank that goes in front of their commander name.
