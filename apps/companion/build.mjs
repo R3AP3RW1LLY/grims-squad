@@ -29,8 +29,50 @@ const common = {
 await build({ ...common, entryPoints: ['src/main.ts'], outfile: 'dist/main.cjs' });
 await build({ ...common, entryPoints: ['src/preload.ts'], outfile: 'dist/preload.cjs' });
 
+/*
+ * The two renderers, bundled as browser ESM.
+ *
+ * ★ A DIFFERENT TARGET FROM THE TWO ABOVE, AND IT MATTERS ★
+ *
+ * Those are Node running inside Electron's main process. These run in a Chromium page with
+ * `nodeIntegration: false` and `sandbox: true` — there is no `require`, no `process`, and no module
+ * resolution. `platform: 'browser'` and `format: 'esm'` produce a single file the page can load with
+ * one <script type="module">, which is the only shape that works under that CSP.
+ *
+ * Preact rather than React: ~4KB against ~140KB, in an app whose entire dependency list was two
+ * packages, for a UI that is a nav shell and some panels. `jsx: automatic` with `jsxImportSource`
+ * means no `h` import in every file and no pragma comments.
+ */
+const renderer = {
+  bundle: true,
+  platform: 'browser',
+  format: 'esm',
+  target: 'chrome120',
+  jsx: 'automatic',
+  jsxImportSource: 'preact',
+  // Sourcemaps are worth their size here: an exception inside a transparent overlay window has no
+  // console anybody will look at, so the stack in the log is the only diagnosis available.
+  sourcemap: true,
+  minify: true,
+  logLevel: 'info',
+};
+
 await mkdir('dist/renderer', { recursive: true });
+
+/*
+ * The overlay renderer. The MAIN window is still `index.html` — the vanilla one that works — and is
+ * being moved to Preact separately: replacing a UI that logs members in and manages their consent
+ * in the same change as introducing a windowing subsystem would put two risky things behind one
+ * commit, and a bug in either would look like a bug in the other.
+ */
+await build({
+  ...renderer,
+  entryPoints: ['src/renderer/overlay.tsx'],
+  outfile: 'dist/renderer/overlay.js',
+});
+
 await cp('src/renderer/index.html', 'dist/renderer/index.html');
+await cp('src/renderer/overlay.html', 'dist/renderer/overlay.html');
 
 /*
  * The brand fonts, copied from the website's own set.

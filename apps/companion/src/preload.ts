@@ -55,3 +55,50 @@ contextBridge.exposeInMainWorld('companion', {
    */
   refreshSettings: () => ipcRenderer.invoke('refreshSettings'),
 });
+
+/**
+ * The overlay windows' bridge.
+ *
+ * ★ A SEPARATE, SMALLER SURFACE — AND DELIBERATELY READ-ONLY ★
+ *
+ * The overlay windows load the same preload as the main window, because Electron takes one preload
+ * per window and maintaining two files that must not drift is worse than one with two exports.
+ *
+ * But an overlay is drawn over a game and has no controls: it receives what to draw and does
+ * nothing else. There is no `setEnabled` here, no `unpair`, no `signIn`. If an overlay is ever
+ * compromised — by a bug in a panel, or by something rendered from data we did not sanitise — the
+ * worst it can do is ask for its own state again.
+ *
+ * Position and size are NOT sent from here either. The window is dragged by `app-region: drag`,
+ * which the operating system handles, and the main process reads the result off the window itself.
+ * A renderer that could move its own window could move it off screen.
+ */
+contextBridge.exposeInMainWorld('overlayBridge', {
+  /** Layout, lock state and style for this panel. Pushed whenever the member changes anything. */
+  onState: (handler: (payload: unknown) => void) => {
+    ipcRenderer.on('overlay:state', (_event, payload: unknown) => handler(payload));
+  },
+  /** Live data — needs, run, cargo, uplink. Broadcast to every open overlay. */
+  onData: (handler: (payload: unknown) => void) => {
+    ipcRenderer.on('overlay:data', (_event, payload: unknown) => handler(payload));
+  },
+  /*
+   * Closes a genuine race: a window can finish loading AFTER the main process has already pushed
+   * its state, and without this it would sit blank until the member next changed a setting.
+   */
+  ready: (id: string) => ipcRenderer.send('overlay:ready', id),
+});
+
+/*
+ * The overlay controls, on the MAIN window's bridge.
+ *
+ * Here rather than on `overlayBridge` because these are things the settings panel does, not things
+ * an overlay does. An overlay that could rearrange itself would be an overlay a rendering bug could
+ * move off screen.
+ */
+contextBridge.exposeInMainWorld('overlays', {
+  /** Sends the whole arrangement back after an edit. Validated in the main process. */
+  set: (layout: unknown) => ipcRenderer.invoke('setOverlays', layout),
+  /** Arrange mode: every panel takes the mouse so it can be dragged. Not persisted. */
+  setEditing: (on: boolean) => ipcRenderer.invoke('setOverlayEditing', on),
+});

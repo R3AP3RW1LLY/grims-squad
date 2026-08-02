@@ -2,7 +2,15 @@
   "extends": "@grims/config/tsconfig/node-app.json",
   "compilerOptions": {
     "rootDir": "src",
-    "outDir": "dist"
+    "outDir": "dist",
+    // Preact. This MUST match what esbuild is told in build.mjs — if the two ever disagree the
+    // build still succeeds and the app renders nothing, because tsc only checks types here and
+    // esbuild is what actually emits the bundle.
+    "jsx": "react-jsx",
+    "jsxImportSource": "preact",
+    // The renderers run in a Chromium page and touch document, location and window. The base
+    // config is for a Node app and has none of those.
+    "lib": ["ES2023", "DOM", "DOM.Iterable"]
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist", "release", "**/*.spec.ts"],

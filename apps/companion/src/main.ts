@@ -1,4 +1,13 @@
 import { app, BrowserWindow, Tray, Menu, shell, ipcMain, nativeImage, dialog } from 'electron';
+import {
+  currentMode,
+  isEditing,
+  setEditing,
+  setLayout,
+  startOverlays,
+  stopOverlays,
+} from './overlay-runtime.js';
+import { explain } from './display-mode.js';
 import { readdir, readFile, stat, open } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -626,6 +635,17 @@ function state(): Record<string, unknown> {
     tokenHint: redactToken(config.deviceToken),
     enabled: config.enabled,
     autoStart: config.autoStart,
+    /*
+     * The overlay arrangement, and whether it can actually be drawn over the game.
+     *
+     * `displayNote` is null whenever everything works — the settings panel shows it only when there
+     * is something to say, because a line that always appears is a line nobody reads on the day it
+     * matters.
+     */
+    overlays: config.overlays,
+    overlayEditing: isEditing(),
+    displayMode: currentMode(),
+    displayNote: explain(currentMode()),
     /** Set once an update has downloaded and is waiting for the game to close. */
     pendingUpdate,
     /*
@@ -936,6 +956,13 @@ app.on('before-quit', () => {
   // an update check that resolves after teardown throws into a context with nothing to catch it.
   stopAutoUpdate?.();
   stopAutoUpdate = null;
+  /*
+   * The overlays are NOT children of the main window — deliberately, so they survive it being
+   * closed to the tray. That means nothing else closes them, and a transparent always-on-top window
+   * left behind after the app quits is a rectangle over somebody's game that they cannot get rid of
+   * without Task Manager.
+   */
+  stopOverlays();
 });
 
 /*
@@ -954,6 +981,24 @@ if (!app.requestSingleInstanceLock()) {
   void app.whenReady().then(() => {
     config = loadConfig(app.getPath('userData'));
     applyAutoStart();
+
+    /*
+     * The overlays.
+     *
+     * Started before the window, because they are independent of it: the main window lives in the
+     * tray and is closed almost always, which is precisely when the overlays need to be up. Nothing
+     * opens unless the member has switched one on — `defaultLayout` has them all off.
+     */
+    startOverlays({
+      layout: () => config.overlays,
+      save: (overlays) => {
+        config = { ...config, overlays };
+        saveConfig(app.getPath('userData'), config);
+      },
+      // Re-renders the settings panel, so a panel dragged over the game updates its coordinates in
+      // the app without the member having to reopen anything.
+      changed: () => push(),
+    });
 
     /*
      * The tray icon.
@@ -977,6 +1022,32 @@ if (!app.requestSingleInstanceLock()) {
     refreshTray();
 
     ipcMain.handle('state', () => state());
+
+    /*
+     * ★ THE OVERLAY CONTROLS ★
+     *
+     * Squadron owner, 2026-08-02: "make nice professional editable and lockable overlays for our
+     * modules etc."
+     *
+     * `setOverlays` carries the whole layout rather than a field at a time. The renderer edits a
+     * copy and sends it back, which means there is one validation point (`normaliseLayout`) instead
+     * of one per property, and no way to construct a partially-applied arrangement.
+     */
+    ipcMain.handle('setOverlays', (_e, layout: unknown) => {
+      const applied = setLayout(layout);
+      push();
+      return applied;
+    });
+
+    /*
+     * Arrange mode. Deliberately not persisted — see `setEditing`. An app that crashed while
+     * arranging must not come back with every overlay loose over somebody's game.
+     */
+    ipcMain.handle('setOverlayEditing', (_e, on: unknown) => {
+      setEditing(on === true);
+      push();
+      return true;
+    });
 
     /*
      * A FORCED refresh, bypassing the cache. This is the button somebody

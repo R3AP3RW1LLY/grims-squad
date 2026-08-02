@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <!--
+      ★ THE SAME LOCKED-DOWN POLICY AS THE MAIN WINDOW ★
+
+      `default-src 'none'` and nothing loaded from anywhere. An overlay is drawn over a game the
+      member is playing and runs with the app's privileges; there is no reason for it to be able to
+      reach the network, and every reason for it not to.
+
+      `style-src 'unsafe-inline'` is needed because the panels are positioned and coloured from the
+      member's saved layout, which means inline style attributes. Those values are clamped and the
+      accent is validated against `#rrggbb` in overlay-config.ts before they ever get here.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:"
+    />
+    <title>Grim's Squad overlay</title>
+    <style>
+      @font-face {
+        font-family: 'Orbitron';
+        src: url('fonts/Orbitron-Bold.woff2') format('woff2');
+        font-weight: 700;
+        font-display: block;
+      }
+
+      :root {
+        color-scheme: dark;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        overflow: hidden;
+        /*
+          ★ TRANSPARENT ALL THE WAY DOWN ★
+
+          A single opaque ancestor anywhere here paints a rectangle over the game. The window is
+          created with `transparent: true`, which only works if nothing inside it fills the
+          background — and the default `background: white` on <body> is exactly that.
+        */
+        background: transparent;
+        font-family:
+          ui-sans-serif,
+          system-ui,
+          -apple-system,
+          'Segoe UI',
+          sans-serif;
+        /*
+          Clicks pass to the game by default. The draggable header opts back IN with `app-region:
+          drag`, which is the only part that should ever catch the mouse while arranging.
+        */
+        -webkit-user-select: none;
+        user-select: none;
+        cursor: default;
+      }
+
+      #root {
+        height: 100%;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="overlay.js"></script>
+  </body>
+</html>
