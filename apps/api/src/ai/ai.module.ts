@@ -244,13 +244,16 @@ export class ModelWarmer implements OnModuleInit, OnModuleDestroy {
      */
     {
       provide: AssistantService,
-      inject: [PrismaClient, AiClient, KnowledgeService, AiLog],
+      // ShipBuildService too: "what should I fly for mining with 50 million" is answered by the
+      // fitting engine, as a retrieval leg beside the market and spatial ones.
+      inject: [PrismaClient, AiClient, KnowledgeService, AiLog, ShipBuildService],
       useFactory: (
         db: PrismaClient,
         ai: AiClient,
         knowledge: KnowledgeService,
         log: AiLog,
-      ) => new AssistantService(db, ai, knowledge, log),
+        builds: ShipBuildService,
+      ) => new AssistantService(db, ai, knowledge, log, builds),
     },
     // Help Train the Bot. Never touches bytes — the media pipeline does that.
     CorpusService,

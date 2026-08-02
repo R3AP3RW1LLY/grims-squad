@@ -4,6 +4,7 @@ import { AiClient } from './ai.client.js';
 import { AiLog } from './ai-log.port.js';
 import { KnowledgeService, type Fact } from './knowledge.service.js';
 import { planFor } from './question.js';
+import { ShipBuildService } from './ship-build.service.js';
 
 /**
  * The assistant — the surface everything else has been building towards.
@@ -77,6 +78,10 @@ const SYSTEM_PROMPT = [
   '4. Be brief. Two or three sentences unless a list is genuinely clearer.',
   '5. Write in plain British English. No headings, no bullet symbols unless listing stations.',
   '6. You are talking to a commander who plays the game. Do not explain what Elite Dangerous is.',
+  '7. A FACT of kind "fit" is a COMPLETE build our fitting engine computed for that question, with',
+  '   real modules and real figures. Give the ship name and the total cost first, then the figures',
+  '   that matter for the job. Never substitute a different ship, never adjust the numbers, and',
+  '   never add modules it does not mention — if it names compromises, repeat them.',
 ].join('\n');
 
 @Injectable()
@@ -84,11 +89,26 @@ export class AssistantService {
   #commodities: string[] = [];
   #commoditiesAt = 0;
 
+  #ships: Array<{ id: string; name: string }> = [];
+  #shipsAt = 0;
+
   constructor(
     @Inject(PrismaClient) private readonly db: PrismaClient,
     private readonly ai: AiClient,
     private readonly knowledge: KnowledgeService,
     private readonly log: AiLog,
+    /**
+     * The fitting engine.
+     *
+     * ★ SQUADRON OWNER ★
+     *
+     * "we want this to be promptable and answered in the Ask GDSM AI."
+     *
+     * The SAME service the Shipyard's stepper calls. Two answers to "what should I fly for mining
+     * with fifty million" — one from a page and one from the assistant — would eventually be two
+     * different answers, and the member would have no way to tell which was right.
+     */
+    private readonly builds: ShipBuildService,
   ) {}
 
   async ask(
@@ -130,7 +150,8 @@ export class AssistantService {
       return {
         answer:
           'I do not have anything on that. I know about systems and stations, market prices, ships ' +
-          'and modules, our guides, and the squadron roster — try asking about one of those.',
+          'and modules, our guides, and the squadron roster — and I can work out what to fly for ' +
+          'mining, combat, exploration or trading, to a budget if you give me one. Try one of those.',
         sources: [],
         refusedReason,
       };
@@ -235,9 +256,11 @@ export class AssistantService {
    * twice in the context is a fact the model weights twice.
    */
   async #gather(question: string): Promise<Fact[]> {
-    const plan = planFor(question, await this.#commodityNames());
+    const plan = planFor(question, await this.#commodityNames(), await this.#shipNames());
 
     const legs: Array<Promise<Fact[]>> = [this.knowledge.semantic(question)];
+
+    if (plan.fit !== null) legs.push(this.#fitLeg(plan.fit));
 
     for (const name of plan.names) legs.push(this.knowledge.byName(name, 4));
 
@@ -268,6 +291,109 @@ export class AssistantService {
 
     // Bounded. Past a dozen the context stops helping and starts burying the relevant rows.
     return facts.slice(0, 12);
+  }
+
+  /**
+   * A build, computed and rendered as a fact.
+   *
+   * ★ THE ANSWER IS COMPUTED BEFORE THE MODEL SEES ANYTHING ★
+   *
+   * Every module comes from Frontier's data and every figure from the stats calculator. What
+   * reaches the prompt is a finished loadout with its price; the model's job is to put sentences
+   * around it, which is the same job it has for a market price.
+   *
+   * This is why the fitter is a retrieval leg rather than a tool the model invokes. A model asked
+   * to fit a ship produces modules that do not exist and jump ranges it invented, in the same
+   * confident prose as a correct answer — and somebody would go and spend two hundred million
+   * credits on it.
+   */
+  async #fitLeg(want: NonNullable<ReturnType<typeof planFor>['fit']>): Promise<Fact[]> {
+    const result = await this.builds.fit({
+      role: want.role,
+      ...(want.budget === null ? {} : { budget: want.budget }),
+      ...(want.shipId === null ? {} : { shipId: want.shipId }),
+    });
+
+    /*
+     * Nothing affordable is a real answer and must not become silence. Returning no fact would drop
+     * the question back to the semantic leg, which would find prose about mining and let the model
+     * answer around the budget entirely — the failure being avoided is a recommendation somebody
+     * cannot afford, and "nothing at this price" prevents it where a vague answer does not.
+     */
+    if (result === null) {
+      return [
+        {
+          source: 'shipyard',
+          kind: 'fit',
+          name: `${want.role} build`,
+          text:
+            want.budget === null
+              ? `No ship could be fitted for ${want.role}.`
+              : `Nothing can be fitted for ${want.role} within ${Math.round(want.budget / 1_000_000)} million credits. That budget is below the cheapest hull that can do the job with the modules it needs.`,
+          url: '/shipyard?tab=assisted',
+        },
+      ];
+    }
+
+    const s = result.stats;
+    const figures = [
+      s?.jumpRange == null ? null : `jump ${s.jumpRange} ly`,
+      s?.ladenJumpRange == null ? null : `laden jump ${s.ladenJumpRange} ly`,
+      s === null ? null : `cargo ${s.cargoCapacity} t`,
+      s?.shields == null ? null : `shields ${s.shields} MJ`,
+      s === null ? null : `armour ${s.armour}`,
+      s?.dps == null ? null : `DPS ${s.dps}`,
+      s === null ? null : `power ${s.powerDrawn}/${s.powerGenerated} MW`,
+    ].filter((v): v is string => v !== null);
+
+    const lines = [
+      `${result.build.shipName}, fitted for ${want.role}.`,
+      `Total cost ${result.totalCost.toLocaleString('en-GB')} credits, hull and modules together.`,
+      figures.join(', ') + '.',
+      result.whyThisShip,
+      // Compromises go in verbatim. A fit that could not afford something is still the best answer
+      // available, and presenting it without saying so presents a compromise as a recommendation.
+      ...result.compromises,
+    ];
+
+    return [
+      {
+        source: 'shipyard',
+        kind: 'fit',
+        name: `${result.build.shipName} — ${want.role}`,
+        text: lines.join(' '),
+        /*
+         * Points at the outfitter with the hull already chosen, so the member can change anything
+         * they disagree with rather than taking the recommendation whole.
+         */
+        url: `/shipyard?ship=${encodeURIComponent(result.build.shipId)}`,
+      },
+    ];
+  }
+
+  /**
+   * Hull names the router matches "fit my Python" against.
+   *
+   * Cached like the commodity list and for the same reason, though far cheaper: the ship table is
+   * forty-odd rows behind a catalogue build, and doing it per question would rebuild the catalogue
+   * for every message in a conversation.
+   */
+  async #shipNames(): Promise<Array<{ id: string; name: string }>> {
+    if (this.#ships.length > 0 && Date.now() - this.#shipsAt < COMMODITIES_TTL_MS) {
+      return this.#ships;
+    }
+
+    try {
+      const catalogue = await this.builds.catalogue();
+      this.#ships = catalogue.ships().map((ship) => ({ id: ship.id, name: ship.name }));
+      this.#shipsAt = Date.now();
+    } catch {
+      // The coriolis ingest not having run is not a reason to fail every question. The fit leg then
+      // matches on the role alone, which still answers "what should I buy for mining".
+      this.#ships = [];
+    }
+
+    return this.#ships;
   }
 
   /**

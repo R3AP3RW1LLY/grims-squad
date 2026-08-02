@@ -30,6 +30,28 @@ export interface Plan {
   readonly market: { readonly commodity: string; readonly side: 'buy' | 'sell' } | null;
   /** Set when the question is about proximity to a named system. */
   readonly near: { readonly system: string; readonly radiusLy: number } | null;
+  /**
+   * Set when the question is "what should I fly for X".
+   *
+   * ★ SQUADRON OWNER ★
+   *
+   * "we want this to be promptable and answered in the Ask GDSM AI" — the fitting engine, reachable
+   * by asking rather than only through the Shipyard's stepper.
+   *
+   * ★ THE FITTER IS A RETRIEVAL LEG, NOT A TOOL THE MODEL CALLS ★
+   *
+   * It sits beside the market and spatial legs and obeys the same rule as the rest of this file:
+   * grammar decides, not the model. What comes back is a computed build rendered as a FACT, so the
+   * model's job stays what it has always been — putting sentences around figures it did not invent.
+   *
+   * Letting the model call a fitting tool would have put the one component that cannot explain
+   * itself in charge of deciding whether to spend two hundred million credits.
+   */
+  readonly fit: {
+    readonly role: 'mining' | 'combat' | 'explorer' | 'trader';
+    readonly budget: number | null;
+    readonly shipId: string | null;
+  } | null;
 }
 
 /**
@@ -61,10 +83,16 @@ const DEFAULT_RADIUS_LY = 50;
 /** Bounded so a typo cannot ask for the whole galaxy. */
 const MAX_RADIUS_LY = 250;
 
-export function planFor(question: string, commodities: readonly string[]): Plan {
+export function planFor(
+  question: string,
+  commodities: readonly string[],
+  /** Hull names to match "fit my Python" against. Empty is fine — the leg then works on role alone. */
+  ships: ReadonlyArray<{ id: string; name: string }> = [],
+): Plan {
   const q = question.trim();
   const market = marketIn(q, commodities);
   const near = nearIn(q);
+  const fit = fitIn(q, ships);
 
   /*
    * ★ A TERM IS CONSUMED BY THE LEG THAT UNDERSTOOD IT ★
@@ -87,7 +115,108 @@ export function planFor(question: string, commodities: readonly string[]): Plan 
     names: namesIn(q).filter((n) => !consumed.has(n.toLowerCase())),
     market,
     near,
+    fit,
   };
+}
+
+/**
+ * Words naming a job the fitter knows how to build for.
+ *
+ * Longest alternatives first within each group, so "exploration" is not matched as "explore" with a
+ * trailing fragment left over.
+ */
+const ROLE_WORDS: ReadonlyArray<{
+  readonly role: 'mining' | 'combat' | 'explorer' | 'trader';
+  readonly pattern: RegExp;
+}> = [
+  { role: 'mining', pattern: /\b(mining|miner|mine|prospect(?:ing|or)?|laser\s*mining)\b/i },
+  {
+    role: 'combat',
+    pattern:
+      /\b(combat|fighting|fight|pvp|pve|bounty|bounties|assassination|warship|gunship|conflict\s*zones?|cz)\b/i,
+  },
+  { role: 'explorer', pattern: /\b(exploration|exploring|explorer|explore|long[\s-]?range|jump\s*range)\b/i },
+  { role: 'trader', pattern: /\b(trading|trader|trade|hauling|haulier|hauler|cargo|freight)\b/i },
+];
+
+/**
+ * Phrasings that mean "tell me what to fly or what to fit".
+ *
+ * Required alongside a role word unless a budget or a hull was named, because "where do I sell
+ * mining cargo" is a MARKET question that happens to contain "mining" — and answering it with a
+ * ship recommendation would be answering a question nobody asked.
+ *
+ * ★ "BEST MINING SHIP" NEEDED THE GAP ★
+ *
+ * The first version listed `best ship` literally and missed every real phrasing: people write "best
+ * mining ship", "which combat hull", "what cheap trading ship". Up to two words are allowed between
+ * the question word and the noun — enough for those, and short enough that "best place to sell
+ * Painite from mining" still does not match.
+ */
+const BUILD_INTENT =
+  /\b(?:build|builds|buildout|fit|fits|fitting|outfit(?:ting)?|loadout|load[\s-]?out|refit|kit\s*out|recommend|suggest|should\s+i\s+(?:buy|get|fly)|what\s+should\s+i\s+(?:buy|get|fly)|(?:what|which|best)\s+(?:\w+\s+){0,2}(?:ship|hull))\b/i;
+
+/**
+ * A spending figure, in the shapes people write it.
+ *
+ * `50m`, `50 million`, `1.5b`, `200,000,000`, `250 mil`. A bare small number is NOT a budget —
+ * "a 4 pip build" and "Type 9" both contain digits, and reading either as credits would produce a
+ * recommendation for four credits.
+ */
+const BUDGET_PATTERNS: readonly RegExp[] = [
+  /\b(\d+(?:\.\d+)?)\s*(?:b|bn|bil|billion)\b/i,
+  /\b(\d+(?:\.\d+)?)\s*(?:m|mn|mil|million)\b/i,
+  /\b(\d{1,3}(?:,\d{3})+)\s*(?:cr|credits?)?\b/i,
+  /\b(\d{7,})\s*(?:cr|credits?)?\b/i,
+];
+
+/** Bounded. A typo of "1000 billion" should not be treated as a real figure. */
+const MAX_BUDGET = 100_000_000_000;
+
+export function budgetIn(q: string): number | null {
+  for (const [i, pattern] of BUDGET_PATTERNS.entries()) {
+    const hit = pattern.exec(q);
+    if (hit?.[1] === undefined) continue;
+
+    const raw = Number(hit[1].replace(/,/g, ''));
+    if (!Number.isFinite(raw) || raw <= 0) continue;
+
+    const scaled = i === 0 ? raw * 1_000_000_000 : i === 1 ? raw * 1_000_000 : raw;
+    if (scaled > MAX_BUDGET) continue;
+
+    return Math.round(scaled);
+  }
+
+  return null;
+}
+
+function fitIn(
+  q: string,
+  ships: ReadonlyArray<{ id: string; name: string }>,
+): Plan['fit'] {
+  const role = ROLE_WORDS.find((r) => r.pattern.test(q))?.role ?? null;
+  if (role === null) return null;
+
+  const budget = budgetIn(q);
+
+  /*
+   * Longest hull name first: "Type-9 Heavy" contains "Type-9", and "Krait Mk II" contains "Krait".
+   * Matching the shorter one would fit a different ship from the one that was asked about — the
+   * same failure the commodity matcher avoids the same way.
+   */
+  const hull =
+    [...ships]
+      .sort((a, b) => b.name.length - a.name.length)
+      .find((s) => q.toLowerCase().includes(s.name.toLowerCase())) ?? null;
+
+  /*
+   * A role word ALONE is not enough. "Where do I sell mining cargo" is a market question that
+   * happens to say "mining", and fitting a ship for it would answer something nobody asked. A
+   * budget or a named hull is its own evidence of intent, so either stands in for the phrasing.
+   */
+  if (!BUILD_INTENT.test(q) && budget === null && hull === null) return null;
+
+  return { role, budget, shipId: hull?.id ?? null };
 }
 
 /**
