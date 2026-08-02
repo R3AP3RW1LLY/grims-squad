@@ -31,6 +31,15 @@ import {
  * and a write cannot leave a truncated one behind.
  */
 
+/**
+ * The byte order mark, by name.
+ *
+ * Written as a code point rather than pasted in: an invisible character in source is one no
+ * reviewer can see, no diff can show, and `no-irregular-whitespace` rightly refuses. Which is the
+ * same class of problem as the bug itself.
+ */
+const BOM = String.fromCharCode(0xfe_ff);
+
 let dir: string;
 
 beforeEach(() => {
@@ -56,7 +65,7 @@ describe('a byte order mark', () => {
      */
     saveConfig(dir, PAIRED);
     const written = readFileSync(configPath(dir), 'utf8');
-    writeFileSync(configPath(dir), `﻿${written}`, 'utf8');
+    writeFileSync(configPath(dir), `${BOM}${written}`, 'utf8');
 
     const loaded = loadConfig(dir);
 
@@ -72,7 +81,7 @@ describe('a byte order mark', () => {
     // problem that no longer exists.
     saveConfig(dir, PAIRED);
     const written = readFileSync(configPath(dir), 'utf8');
-    writeFileSync(configPath(dir), `﻿${written}`, 'utf8');
+    writeFileSync(configPath(dir), `${BOM}${written}`, 'utf8');
 
     loadConfig(dir);
 

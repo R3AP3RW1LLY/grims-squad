@@ -171,7 +171,7 @@ export function configPath(userDataDir: string): string {
  *
  * ★ THIS COST A REAL PAIRING, AND IT WOULD HAVE COST MEMBERS THEIRS ★
  *
- * `JSON.parse` throws on a leading BOM — `﻿` is not whitespace and is not legal JSON. Node
+ * `JSON.parse` throws on a leading BOM: U+FEFF is not whitespace and is not legal JSON. Node
  * does not remove it for you when you read as `utf8`; you get the character.
  *
  * That matters because of who writes one. PowerShell's `Set-Content -Encoding utf8` adds a BOM by
