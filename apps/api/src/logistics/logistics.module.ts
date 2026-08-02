@@ -2,9 +2,11 @@ import { Module } from '@nestjs/common';
 import { PrismaClient } from '@grims/db';
 import { DatabaseModule } from '../database.module.js';
 import { AuthzModule } from '../authz/authz.module.js';
+import { TelemetryModule } from '../telemetry/telemetry.module.js';
 import { AclDbService } from '../authz/acl-db.service.js';
 import { MarketController } from './market.controller.js';
 import { ColonyController } from './colony.controller.js';
+import { ColonyDeviceController } from './colony-device.controller.js';
 import { ColonyService } from './colony.service.js';
 import { PrismaMarketStore, type MarketStore } from './market.store.js';
 import { MARKET_STORE } from './logistics.tokens.js';
@@ -23,8 +25,11 @@ import { MARKET_STORE } from './logistics.tokens.js';
 @Module({
   // AuthzModule for PermissionService: every route here checks TRADE_QUERY against the caller's own
   // mask, falling back to the guest preset when there is no session.
-  imports: [DatabaseModule, AuthzModule],
-  controllers: [MarketController, ColonyController],
+  // TelemetryModule for PAIRING_SERVICE: the companion identifies itself with a paired device
+  // token rather than a session, and the colonisation routes it reaches resolve it the same way
+  // the telemetry upload does.
+  imports: [DatabaseModule, AuthzModule, TelemetryModule],
+  controllers: [MarketController, ColonyController, ColonyDeviceController],
   providers: [
     {
       provide: MARKET_STORE,

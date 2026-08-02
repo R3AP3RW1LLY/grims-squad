@@ -67,5 +67,18 @@ import { PAIRING_SERVICE, INGEST_SERVICE, CONSENT_SERVICE } from './telemetry.to
       useFactory: (db: PrismaClient) => new ConsentService(new PrismaConsentStore(db)),
     },
   ],
+  /*
+   * ★ ONLY THE PAIRING SERVICE LEAVES THIS MODULE ★
+   *
+   * Squadron owner, 2026-08-02: "people should be able to have full interaction with colonization
+   * either from the website or from the app." The app identifies itself with a paired device token,
+   * so the colonisation routes it reaches have to resolve one — and resolving it any other way
+   * would be a second authentication path, which is how one of them ends up accepting a token the
+   * other rejects.
+   *
+   * Exported alone. The ingest and consent services stay private: nothing outside telemetry should
+   * be able to write a member's journal rows or change what they have agreed to.
+   */
+  exports: [PAIRING_SERVICE],
 })
 export class TelemetryModule {}

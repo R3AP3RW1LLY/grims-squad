@@ -24,6 +24,13 @@ export interface ProjectRow {
   readonly title: string;
   readonly systemName: string;
   readonly stationName: string | null;
+  /**
+   * The construction site this points at, as a STRING.
+   *
+   * A market id exceeds 2^53, so it is carried as text end to end rather than as a JSON number —
+   * the same reasoning as the tonnage totals on the market rows.
+   */
+  readonly marketId: string;
   readonly buildType: string | null;
   readonly notes: string | null;
   readonly visibility: ColonyVisibility;
@@ -102,6 +109,7 @@ export class ColonyService {
   ): Promise<readonly ProjectRow[]> {
     const rows = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
       `SELECT p.id, p.owner::text AS owner, p.title, p.system_name, p.station_name, p.build_type,
+              p.market_id::text AS market_id,
               p.notes, p.visibility::text AS visibility, p.share_token, p.is_priority,
               p.completed_at, p.posted_by_id, p.updated_at,
               u.display_name AS posted_by,
@@ -136,10 +144,47 @@ export class ColonyService {
     return rows.find((r) => r.id === id) ?? null;
   }
 
+  /**
+   * The live project for a construction site, by its market id.
+   *
+   * ★ WHAT THE COMPANION'S BUILD-TRACKER ASKS ★
+   *
+   * The app knows the member has docked and knows the market id from the journal; it does not know
+   * which project that is. Resolved through `board` so the visibility rules are applied ONCE, in
+   * the place that already applies them — a direct query here would be a second copy of the
+   * "public, or squadron and signed in, or your own" predicate, and the copy is what drifts.
+   *
+   * Finished projects are excluded: an overlay showing a completed build's needs while the member
+   * is docked somewhere else entirely is worse than showing nothing.
+   */
+  async byMarketId(
+    marketId: bigint,
+    caller: { userId: string } | null,
+  ): Promise<ProjectRow | null> {
+    /*
+     * ★ FILTERED FROM THE BOARD, NOT QUERIED DIRECTLY ★
+     *
+     * The first version read `colonyProject` on the plain client for just the id, on the reasoning
+     * that an id leaks nothing. `acl-usage.spec.ts` failed it, and the guard is right: INV-002 is
+     * about the CLIENT, not about how much of the row is selected, because the next person to touch
+     * that query will add a column to it.
+     *
+     * A squadron has a handful of live projects. Filtering them in memory costs nothing and means
+     * the visibility rules are applied exactly once, in `board`.
+     */
+    const wanted = marketId.toString();
+    return (
+      (await this.board('all', caller)).find(
+        (p) => p.marketId === wanted && p.completedAt === null,
+      ) ?? null
+    );
+  }
+
   /** One published project, by its token. The token IS the capability. */
   async byToken(token: string): Promise<ProjectRow | null> {
     const rows = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
       `SELECT p.id, p.owner::text AS owner, p.title, p.system_name, p.station_name, p.build_type,
+              p.market_id::text AS market_id,
               p.notes, p.visibility::text AS visibility, p.share_token, p.is_priority,
               p.completed_at, p.posted_by_id, p.updated_at,
               u.display_name AS posted_by,
@@ -168,6 +213,7 @@ export class ColonyService {
       title: String(r['title']),
       systemName: String(r['system_name']),
       stationName: r['station_name'] === null ? null : String(r['station_name']),
+      marketId: String(r['market_id'] ?? ''),
       buildType: r['build_type'] === null ? null : String(r['build_type']),
       notes: r['notes'] === null ? null : String(r['notes']),
       visibility: String(r['visibility']) as ColonyVisibility,
