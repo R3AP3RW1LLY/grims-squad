@@ -1,4 +1,15 @@
+import { useEffect, useRef } from 'preact/hooks';
 import type { JSX } from 'preact';
+import {
+  BarController,
+  BarElement,
+  CategoryScale,
+  Chart,
+  Legend,
+  LinearScale,
+  Tooltip,
+  type ChartConfiguration,
+} from 'chart.js';
 import { C } from './ui.js';
 
 /**
@@ -6,15 +17,25 @@ import { C } from './ui.js';
  *
  * ★ SQUADRON OWNER, 2026-08-02 ★
  *
- * "a stacked bar chart that shows commoditied selivered per hour per day like raven colonial."
+ * "a stacked bar chart that shows commoditied selivered per hour per day like raven colonial", and
+ * then: "add a charting library so our graphs and dashboard look really good please!"
  *
- * ★ AN INLINE SVG, AND THE BUCKET IS THE SERVER'S CHOICE ★
+ * ★ THIS REPLACES A HAND-ROLLED SVG, AND THAT WAS A DELIBERATE REVERSAL ★
  *
- * A charting library would be tens of kilobytes in a desktop app whose whole renderer is 35, for a
- * shape that is rectangles. And the hour-or-day decision is made where the data is — a build that
- * started this morning wants hours, one running three weeks wants days, and the client should not
- * be re-deriving that from rows it would have to fetch in full to see.
+ * The first version drew rectangles by hand, on the reasoning that a library was tens of kilobytes
+ * in a renderer that was 43KB total, for a shape that is rectangles. The reasoning was sound about
+ * SIZE and wrong about the thing that mattered: the owner looked at it and said it looked basic,
+ * which it did. Tooltips, animation, legends and axis handling are most of what makes a chart feel
+ * finished, and every one of them is work we were not going to do by hand.
+ *
+ * ★ REGISTERED PIECEMEAL, NOT `registerables` ★
+ *
+ * Chart.js ships every chart type, scale and plugin it has. Importing the lot pulls radar, polar,
+ * doughnut, the time scale and its date adapter into a bundle that draws bars — `registerables` is
+ * the convenient import and roughly three times the size of what is actually used here.
  */
+
+Chart.register(BarController, BarElement, CategoryScale, LinearScale, Tooltip, Legend);
 
 export interface DeliveryBucket {
   readonly at: string;
@@ -25,12 +46,9 @@ export interface DeliveryBucket {
 /**
  * Colours for the stack.
  *
- * ★ ASSIGNED BY POSITION IN A STABLE ORDER, NOT HASHED ★
- *
- * A hash of the commodity name would be stable across renders and would also give two adjacent
- * segments the same colour often enough to matter. Ordering the commodities by how much was
- * delivered and taking colours in sequence means the biggest contributors are always the most
- * distinct, which is what somebody reads first.
+ * Assigned by position in an order sorted by total delivered, not hashed from the name: a hash is
+ * stable but hands adjacent segments similar colours often enough to matter, where this guarantees
+ * the biggest contributors are the most distinct — which is what somebody reads first.
  */
 const PALETTE = [
   '#3fd0d4',
@@ -43,9 +61,6 @@ const PALETTE = [
   '#f472b6',
 ];
 
-const H = 130;
-const PAD = { top: 8, bottom: 22, left: 44, right: 8 };
-
 export function DeliveryChart({
   buckets,
   bucket,
@@ -53,6 +68,130 @@ export function DeliveryChart({
   buckets: readonly DeliveryBucket[];
   bucket: 'hour' | 'day';
 }): JSX.Element {
+  const canvas = useRef<HTMLCanvasElement | null>(null);
+  const chart = useRef<Chart | null>(null);
+
+  useEffect(() => {
+    const element = canvas.current;
+    if (element === null || buckets.length === 0) return;
+
+    // Ordered by total delivered, so the palette's most distinct colours land on the commodities
+    // that dominate the chart.
+    const totals = new Map<string, number>();
+    for (const b of buckets) {
+      for (const [commodity, amount] of Object.entries(b.byCommodity)) {
+        totals.set(commodity, (totals.get(commodity) ?? 0) + amount);
+      }
+    }
+    const order = [...totals.entries()].sort((a, b) => b[1] - a[1]).map(([c]) => c);
+
+    const labels = buckets.map((b) => {
+      const d = new Date(b.at);
+      return bucket === 'hour'
+        ? `${String(d.getHours()).padStart(2, '0')}:00`
+        : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+    });
+
+    const config: ChartConfiguration<'bar'> = {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: order.map((commodity, i) => ({
+          label: commodity,
+          data: buckets.map((b) => b.byCommodity[commodity] ?? 0),
+          backgroundColor: PALETTE[i % PALETTE.length] as string,
+          borderRadius: 3,
+          // Every dataset keeps its position in the stack across all bars, so a commodity does not
+          // move up and down the chart between one bar and the next.
+          stack: 'deliveries',
+        })),
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: { duration: 320 },
+        /*
+         * `index` mode with `intersect: false` means hovering anywhere over a bar shows the WHOLE
+         * stack — every commodity delivered in that slice — rather than only the segment the
+         * cursor happens to be inside. That is the question somebody is asking when they point at
+         * a bar.
+         */
+        interaction: { mode: 'index', intersect: false },
+        scales: {
+          x: {
+            stacked: true,
+            grid: { display: false },
+            ticks: { color: C.faint, font: { size: 10 } },
+            border: { color: C.hairline },
+          },
+          y: {
+            stacked: true,
+            beginAtZero: true,
+            grid: { color: C.hairline },
+            border: { display: false },
+            ticks: {
+              color: C.faint,
+              font: { size: 10 },
+              // Tonnages run to tens of thousands; the raw numbers crowd the axis and add nothing.
+              callback: (value) => {
+                const n = Number(value);
+                return n >= 1000 ? `${(n / 1000).toFixed(n >= 10_000 ? 0 : 1)}k` : String(n);
+              },
+            },
+          },
+        },
+        plugins: {
+          legend: {
+            position: 'bottom',
+            labels: {
+              color: C.dim,
+              font: { size: 11 },
+              boxWidth: 10,
+              boxHeight: 10,
+              usePointStyle: true,
+              pointStyle: 'rectRounded',
+            },
+          },
+          tooltip: {
+            backgroundColor: C.void,
+            borderColor: C.hairline,
+            borderWidth: 1,
+            titleColor: C.text,
+            bodyColor: C.dim,
+            padding: 10,
+            callbacks: {
+              label: (item) => ` ${item.dataset.label}: ${Number(item.parsed.y).toLocaleString()} t`,
+              /*
+               * The slice total, appended. A stack of five commodities is five lines that a reader
+               * would otherwise have to add up in their head to answer "how much went in that day".
+               */
+              footer: (items) => {
+                const total = items.reduce((sum, i) => sum + Number(i.parsed.y), 0);
+                return `Total ${total.toLocaleString()} t`;
+              },
+            },
+            // Segments that contributed nothing to this slice are noise in a stacked tooltip.
+            filter: (item) => Number(item.parsed.y) > 0,
+          },
+        },
+      },
+    };
+
+    chart.current = new Chart(element, config);
+
+    /*
+     * Destroyed on every change, not updated in place.
+     *
+     * Chart.js keeps a registry keyed on the canvas element and THROWS if a second chart is created
+     * on one it already owns — so a component that re-renders without cleaning up dies on its
+     * second render with an error that names the canvas rather than the cause.
+     */
+    return () => {
+      chart.current?.destroy();
+      chart.current = null;
+    };
+  }, [buckets, bucket]);
+
   if (buckets.length === 0) {
     return (
       <p style={{ margin: 0, fontSize: '13px', color: C.dim }}>
@@ -61,114 +200,16 @@ export function DeliveryChart({
     );
   }
 
-  // Ordered by total delivered, so the palette's most distinct colours land on the commodities that
-  // dominate the chart.
-  const totals = new Map<string, number>();
-  for (const b of buckets) {
-    for (const [commodity, amount] of Object.entries(b.byCommodity)) {
-      totals.set(commodity, (totals.get(commodity) ?? 0) + amount);
-    }
-  }
-  const order = [...totals.entries()].sort((a, b) => b[1] - a[1]).map(([c]) => c);
-  const colour = new Map(order.map((c, i) => [c, PALETTE[i % PALETTE.length] as string]));
-
-  const peak = Math.max(...buckets.map((b) => b.total));
-  const W = Math.max(320, PAD.left + PAD.right + buckets.length * 22);
-  const plotH = H - PAD.top - PAD.bottom;
-  const plotW = W - PAD.left - PAD.right;
-  // Capped so a chart with three bars does not draw them a third of the width of the panel.
-  const barW = Math.min(28, (plotW / buckets.length) * 0.72);
-
-  const label = (iso: string): string => {
-    const d = new Date(iso);
-    return bucket === 'hour'
-      ? `${d.getHours()}:00`
-      : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
-  };
-
   return (
     <div>
-      <div style={{ overflowX: 'auto' }}>
-        <svg
-          viewBox={`0 0 ${W} ${H}`}
-          style={{ width: '100%', minWidth: `${Math.min(W, 640)}px` }}
-          role="img"
-          aria-label={`Deliveries per ${bucket}, stacked by commodity. Peak ${peak.toLocaleString()} tonnes.`}
-        >
-          {[0, 0.5, 1].map((f) => {
-            const y = PAD.top + plotH * (1 - f);
-            return (
-              <g key={f}>
-                <line x1={PAD.left} x2={W - PAD.right} y1={y} y2={y} stroke={C.hairline} strokeWidth="1" />
-                <text x={PAD.left - 6} y={y + 3} textAnchor="end" fontSize="9" fill={C.faint}>
-                  {Math.round(peak * f).toLocaleString()}
-                </text>
-              </g>
-            );
-          })}
-
-          {buckets.map((b, i) => {
-            const x = PAD.left + (plotW / buckets.length) * (i + 0.5) - barW / 2;
-            let y = PAD.top + plotH;
-
-            /*
-             * Stacked in the SAME order for every bar, so a commodity keeps its vertical position
-             * across the chart. Sorting each bar by its own amounts would make the segments jump
-             * between bars and the shape unreadable.
-             */
-            const segments = order
-              .filter((c) => (b.byCommodity[c] ?? 0) > 0)
-              .map((c) => {
-                const amount = b.byCommodity[c] ?? 0;
-                const h = peak > 0 ? (amount / peak) * plotH : 0;
-                y -= h;
-                return { c, amount, h, y };
-              });
-
-            return (
-              <g key={b.at}>
-                {segments.map((s) => (
-                  <rect
-                    key={s.c}
-                    x={x}
-                    y={s.y}
-                    width={barW}
-                    // A hairline minimum, so a small delivery is still visible rather than rounding
-                    // away to a bar that looks like nothing was hauled at all.
-                    height={Math.max(1, s.h)}
-                    fill={colour.get(s.c)}
-                  >
-                    <title>{`${label(b.at)} · ${s.c} · ${s.amount.toLocaleString()} t`}</title>
-                  </rect>
-                ))}
-                <text
-                  x={x + barW / 2}
-                  y={H - 7}
-                  textAnchor="middle"
-                  fontSize="9"
-                  fill={C.faint}
-                >
-                  {label(b.at)}
-                </text>
-              </g>
-            );
-          })}
-        </svg>
+      {/* A fixed height, because `maintainAspectRatio: false` means the canvas fills its parent and
+          a parent with no height collapses to nothing. */}
+      <div style={{ height: '200px' }}>
+        <canvas ref={canvas} />
       </div>
-
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginTop: '8px' }}>
-        {order.slice(0, 8).map((c) => (
-          <span key={c} style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px', color: C.dim }}>
-            <span style={{ width: '9px', height: '9px', borderRadius: '2px', background: colour.get(c) }} />
-            {c}
-            <span style={{ color: C.faint }}>{(totals.get(c) ?? 0).toLocaleString()} t</span>
-          </span>
-        ))}
-      </div>
-
       <p style={{ margin: '8px 0 0', fontSize: '11px', color: C.faint }}>
-        {/* The bucket is stated, because a chart whose bars mean "an hour" and one whose bars mean
-            "a day" look identical and describe very different builds. */}
+        {/* The bucket is stated: a chart whose bars mean "an hour" and one whose bars mean "a day"
+            look identical and describe very different builds. */}
         One bar per {bucket} · {buckets.length} {bucket === 'hour' ? 'hours' : 'days'} with
         deliveries
       </p>
