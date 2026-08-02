@@ -159,6 +159,52 @@ export interface ShoppingRow {
  * `colonyNeed` and `colonyContribution` carry no ACL column and are reached only after a project
  * has been resolved through a bound client, so they are read on the plain one.
  */
+/**
+ * How far a station is, in bands rather than light years.
+ *
+ * ★ LOCAL FIRST, THEN CHEAPEST WITHIN THE SAME TRIP ★
+ *
+ * "always prioritize local markets before sending out of system" is not the same instruction as
+ * "sort by distance". Sorting purely by distance picks a station eleven light years away over one
+ * twelve light years away that is half the price, which is a distinction nobody flying cares about.
+ * What a member actually means is: the same system beats leaving it, a short hop beats a long haul,
+ * and *within a comparable trip* they want the better price.
+ *
+ * So distance is bucketed and price decides inside a bucket. Band 0 is the build's own system,
+ * which is the case the owner reported and the one that matters most.
+ */
+function distanceBand(ly: number | null): number {
+  if (ly === null) return 99;
+  if (ly < 1) return 0; // the same system
+  if (ly <= 15) return 1; // one jump in almost anything
+  if (ly <= 50) return 2;
+  if (ly <= 150) return 3;
+  return 4;
+}
+
+/** Orders candidate stations by what the member asked for. */
+function rankPlaces<T extends { readonly distance: number | null; readonly price: number }>(
+  places: readonly T[],
+  sort: 'local' | 'cheapest' | 'closest',
+): readonly T[] {
+  const by = [...places];
+
+  if (sort === 'cheapest') {
+    return by.sort((a, b) => a.price - b.price || (a.distance ?? Infinity) - (b.distance ?? Infinity));
+  }
+  if (sort === 'closest') {
+    return by.sort((a, b) => (a.distance ?? Infinity) - (b.distance ?? Infinity) || a.price - b.price);
+  }
+
+  // 'local' — the default, and the one the owner asked for.
+  return by.sort(
+    (a, b) =>
+      distanceBand(a.distance) - distanceBand(b.distance) ||
+      a.price - b.price ||
+      (a.distance ?? Infinity) - (b.distance ?? Infinity),
+  );
+}
+
 export class ColonyService {
   constructor(
     private readonly db: PrismaClient,
@@ -511,7 +557,7 @@ export class ColonyService {
        * tonnage is large enough that the price difference outweighs the trips. Only the member
        * knows which they are doing, so it is a toggle rather than a cleverer default.
        */
-      sort?: 'cheapest' | 'closest';
+      sort?: 'local' | 'cheapest' | 'closest';
     },
   ): Promise<readonly ShoppingRow[]> {
     const needs = await this.needs(projectId);
@@ -534,22 +580,43 @@ export class ColonyService {
       if (need.remaining <= 0) continue;
 
       /*
-       * ★ MORE THAN ONE CANDIDATE, BECAUSE THE SORT DECIDES BETWEEN THEM ★
+       * ★ TWO CANDIDATE SETS, AND THE REASON IS A REAL BUG — SQUADRON OWNER, 2026-08-02 ★
        *
-       * `bestBuys` orders by price within the radius. For "closest" the cheapest row is the wrong
-       * one to keep, so a handful are fetched and re-ranked here — still one indexed query per
-       * commodity, still ~8ms, and no second query shape to maintain.
+       * "the Where to buy page is sending to to really odd places, we know we can get everything
+       * except CMM Composite from a station pretty close to the construction site, this is telling
+       * us to leave the system! ... always prioritize local markets before sending out of system!"
+       *
+       * They were right, and the data was never the problem: the station in their own system had
+       * 374,554 steel, 355,793 titanium, 221,834 aluminium and 207,220 litres of oxygen on the
+       * shelf. The problem was that this fetched the twelve CHEAPEST rows and then re-sorted them.
+       * A re-sort can only reorder answers it was already given, and an in-system starport charging
+       * 3,456 for steel is never among the twelve cheapest when distant ones charge less. The local
+       * option was invisible to the ranking that was supposed to prefer it.
+       *
+       * So both are asked for: the cheapest few AND the nearest few, merged. Two indexed queries
+       * per commodity instead of one — the partial index answers the first, the cube GiST answers
+       * the second — and the local station is now always a candidate.
        */
-      const best = await this.market
-        .bestBuys(need.commodity, { ...query, limit: 12, near: opts.near })
-        .catch(() => []);
+      const [cheapest, nearest] = await Promise.all([
+        this.market
+          .bestBuys(need.commodity, { ...query, limit: 8, near: opts.near, order: 'price' })
+          .catch(() => []),
+        opts.near === null
+          ? Promise.resolve([])
+          : this.market
+              .bestBuys(need.commodity, { ...query, limit: 8, near: opts.near, order: 'distance' })
+              .catch(() => []),
+      ]);
 
-      const ranked =
-        opts.sort === 'closest' && opts.near !== null
-          ? [...best].sort((a, b) => (a.distance ?? Infinity) - (b.distance ?? Infinity))
-          : best;
+      const seen = new Set<string>();
+      const candidates = [...cheapest, ...nearest].filter((p) => {
+        const key = `${p.systemName}\u0000${p.stationName}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
 
-      const place = ranked[0];
+      const place = rankPlaces(candidates, opts.sort ?? 'local')[0];
 
       out.push({
         commodity: need.commodity,

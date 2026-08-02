@@ -94,6 +94,24 @@ export interface Coords {
 
 export interface PlaceQuery {
   readonly limit: number;
+  /**
+   * What to rank by.
+   *
+   * ★ WHY THIS HAD TO BECOME A CHOICE — SQUADRON OWNER, 2026-08-02 ★
+   *
+   * "the Where to buy page is sending to to really odd places, we know we can get everything except
+   * CMM Composite from a station pretty close to the construction site, this is telling us to leave
+   * the system!"
+   *
+   * The query only ever ordered by price. A caller wanting the NEAREST station could fetch a
+   * handful and re-rank them, but that cannot work: the handful is the CHEAPEST handful, so a
+   * station in the member's own system charging 3,456 for steel is never in it when a dozen distant
+   * ones charge less. Re-ranking a price-sorted list can only reorder answers it was already given.
+   *
+   * So the ordering has to happen in the query. Both indexes support it — price by the partial
+   * index, distance by the cube GiST.
+   */
+  readonly order?: 'price' | 'distance';
   /** Exclude fleet carriers. Default true — see the note on CARRIER_TYPE. */
   readonly excludeCarriers: boolean;
   /** Only stations with a large pad. */
@@ -294,11 +312,20 @@ export class PrismaMarketStore implements MarketStore {
       params.push(opts.withinLy);
       where.push(`coords IS NOT NULL AND (coords <-> ${origin}) <= $${params.length}`);
       /*
-       * Price still leads inside the radius. Sorting by distance first answers "what is nearest",
-       * which is not the question — a member asking where to buy within 50 light years wants the
-       * best price in that circle, and every result is already close enough by construction.
+       * Price leads by default inside the radius: a member asking where to buy within 50 light
+       * years usually wants the best price in that circle, and every result is close enough by
+       * construction.
+       *
+       * `order: 'distance'` inverts it, and exists because "close enough by construction" stops
+       * being true the moment the radius is wide. Within 100 ly the cheapest row can be ninety
+       * jumps from a station in the member's own system that has what they need on the shelf.
        */
-      order = buying ? `buy_price ASC, distance ASC` : `sell_price DESC, distance ASC`;
+      order =
+        opts.order === 'distance'
+          ? `distance ASC, ${buying ? 'buy_price ASC' : 'sell_price DESC'}`
+          : buying
+            ? `buy_price ASC, distance ASC`
+            : `sell_price DESC, distance ASC`;
     }
 
     params.push(opts.limit);

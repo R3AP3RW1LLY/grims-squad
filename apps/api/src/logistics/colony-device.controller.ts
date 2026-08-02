@@ -117,6 +117,8 @@ export class ColonyDeviceController {
     @Query('near') near?: string,
     @Query('withinLy') withinLy?: string,
     @Query('sort') sort?: string,
+    // Matches the website's own filter, so the two surfaces cannot disagree about the same build.
+    @Query('largePad') largePad?: string,
   ) {
     const me = await this.#caller(
       req,
@@ -151,8 +153,15 @@ export class ColonyDeviceController {
       this.colony.shoppingList(id, {
         near: coords,
         withinLy: clamp(numberOr(withinLy, 100), 1, 500),
-        largePadOnly: false,
-        sort: sort === 'closest' ? 'closest' : 'cheapest',
+        /*
+         * ★ THE SAME ANSWER AS THE WEBSITE — it was hardcoded off here ★
+         *
+         * The website exposes a large-pad filter and this path pinned it to false, so the two
+         * surfaces gave DIFFERENT shopping answers for the same build. Read from the query like
+         * every other filter.
+         */
+        largePadOnly: largePad === '1',
+        sort: sort === 'closest' ? 'closest' : sort === 'cheapest' ? 'cheapest' : 'local',
       }),
       // "whos delivered what and when", and the stacked chart over it. Fetched with everything else
       // rather than on their own routes: the page shows them together, and three round trips would
@@ -171,7 +180,7 @@ export class ColonyDeviceController {
       // Echoed so the page can say where it is measuring from — a distance column with no stated
       // origin is a number nobody can check.
       shoppingFrom: coords === null ? null : origin,
-      shoppingSort: sort === 'closest' ? 'closest' : 'cheapest',
+      shoppingSort: sort === 'closest' ? 'closest' : sort === 'cheapest' ? 'cheapest' : 'local',
     };
   }
 

@@ -131,7 +131,7 @@ export class ColonyController {
         near: origin?.coords ?? null,
         withinLy: clamp(numberOr(withinLy, 100), 1, 500),
         largePadOnly: largePad === '1',
-        sort: sort === 'closest' ? 'closest' : 'cheapest',
+        sort: sort === 'closest' ? 'closest' : sort === 'cheapest' ? 'cheapest' : 'local',
       }),
       // The same two the app gets. One service, one shape — the website and the companion showing
       // different histories of the same build is the failure this whole controller exists to avoid.
