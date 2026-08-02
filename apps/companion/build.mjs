@@ -59,12 +59,7 @@ const renderer = {
 
 await mkdir('dist/renderer', { recursive: true });
 
-/*
- * The overlay renderer. The MAIN window is still `index.html` — the vanilla one that works — and is
- * being moved to Preact separately: replacing a UI that logs members in and manages their consent
- * in the same change as introducing a windowing subsystem would put two risky things behind one
- * commit, and a bug in either would look like a bug in the other.
- */
+await build({ ...renderer, entryPoints: ['src/renderer/app.tsx'], outfile: 'dist/renderer/app.js' });
 await build({
   ...renderer,
   entryPoints: ['src/renderer/overlay.tsx'],

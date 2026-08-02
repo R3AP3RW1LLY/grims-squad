@@ -102,3 +102,22 @@ contextBridge.exposeInMainWorld('overlays', {
   /** Arrange mode: every panel takes the mouse so it can be dragged. Not persisted. */
   setEditing: (on: boolean) => ipcRenderer.invoke('setOverlayEditing', on),
 });
+
+/**
+ * Colonisation.
+ *
+ * ★ THE TOKEN NEVER REACHES THE PAGE ★
+ *
+ * Every one of these asks the main process to make the call; the credential is attached there. A
+ * renderer that could talk to the hub directly would need the device token in the page, where any
+ * rendering bug that can read the DOM can read it too.
+ */
+contextBridge.exposeInMainWorld('colony', {
+  /** Both boards, plus what this member is allowed to do with them. */
+  projects: () => ipcRenderer.invoke('colonyProjects'),
+  /** One project in full: needs, haulers, and where to buy the rest. */
+  project: (id: string) => ipcRenderer.invoke('colonyProject', id),
+  /** The project for a construction site, by market id. Null when nobody has posted it. */
+  at: (marketId: string) => ipcRenderer.invoke('colonyAt', marketId),
+  post: (body: unknown) => ipcRenderer.invoke('colonyPost', body),
+});

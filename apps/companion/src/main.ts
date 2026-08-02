@@ -8,6 +8,12 @@ import {
   stopOverlays,
 } from './overlay-runtime.js';
 import { explain } from './display-mode.js';
+import {
+  colonyAtMarket,
+  colonyProject,
+  colonyProjects,
+  postColonyProject,
+} from './hub-colony.js';
 import { readdir, readFile, stat, open } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -839,8 +845,22 @@ function showWindow(): void {
   }
 
   window = new BrowserWindow({
-    width: 620,
-    height: 700,
+    /*
+     * ★ RESIZED FOR THE NAVIGATION — SQUADRON OWNER, 2026-08-02 ★
+     *
+     * "change the app window size if needed please!"
+     *
+     * 620 wide was right for one column of status. It is not right for a 212px sidebar plus a
+     * colonisation board with a shopping list in it, which was being squeezed into ~390px.
+     *
+     * `minWidth` matters as much as the default: below about 900 the three-column stat rows wrap
+     * into something unreadable, and a member who drags the window narrow should hit a floor rather
+     * than discover a broken layout.
+     */
+    width: 1120,
+    height: 780,
+    minWidth: 900,
+    minHeight: 620,
     /*
      * ★ THE VERSION IN THE TITLE BAR — squadron owner, 2026-08-01 ★
      *
@@ -1033,6 +1053,45 @@ if (!app.requestSingleInstanceLock()) {
      * copy and sends it back, which means there is one validation point (`normaliseLayout`) instead
      * of one per property, and no way to construct a partially-applied arrangement.
      */
+    /*
+     * ★ COLONISATION, PROXIED THROUGH THE MAIN PROCESS ★
+     *
+     * Squadron owner, 2026-08-02: "full interaction with colonization either from the website or
+     * from the app."
+     *
+     * The renderer never sees the device token and never calls the hub itself. It asks for a
+     * project list; the main process attaches the credential. That keeps the token in one place —
+     * the same reasoning as the preload bridge being a named list rather than a passthrough.
+     */
+    const hub = (): { apiBaseUrl: string; deviceToken: string } => ({
+      apiBaseUrl: apiBaseUrlFor(config, process.env),
+      deviceToken: config.deviceToken,
+    });
+
+    ipcMain.handle('colonyProjects', () => colonyProjects(hub()));
+    ipcMain.handle('colonyProject', (_e, id: unknown) =>
+      typeof id === 'string' && id !== ''
+        ? colonyProject(hub(), id)
+        : { ok: false as const, error: 'No project asked for.' },
+    );
+    ipcMain.handle('colonyAt', (_e, marketId: unknown) =>
+      typeof marketId === 'string' && marketId !== ''
+        ? colonyAtMarket(hub(), marketId)
+        : { ok: false as const, error: 'No construction site asked for.' },
+    );
+    ipcMain.handle('colonyPost', (_e, body: unknown) => {
+      const b = (body ?? {}) as Record<string, unknown>;
+      const text = (k: string): string => (typeof b[k] === 'string' ? (b[k] as string) : '');
+      return postColonyProject(hub(), {
+        owner: b['owner'] === 'squadron' ? 'squadron' : 'personal',
+        marketId: text('marketId'),
+        systemName: text('systemName'),
+        stationName: text('stationName'),
+        title: text('title'),
+        notes: text('notes'),
+      });
+    });
+
     ipcMain.handle('setOverlays', (_e, layout: unknown) => {
       const applied = setLayout(layout);
       push();
