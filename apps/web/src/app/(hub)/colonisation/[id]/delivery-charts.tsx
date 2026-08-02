@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import type { ColonyCharts } from '../../../../../lib/api';
+import type { ColonyCharts } from '../../../../lib/api';
 import {
   ChartBox,
   GRID,
@@ -10,7 +10,7 @@ import {
   TOOLTIP_DARK,
   seriesColour,
   useChart,
-} from '../../../../../components/chart-kit';
+} from '../../../../components/chart-kit';
 
 /**
  * What went into this build, and who put it there.

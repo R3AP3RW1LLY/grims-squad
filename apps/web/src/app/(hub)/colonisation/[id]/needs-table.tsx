@@ -1,4 +1,4 @@
-import type { ColonyNeed } from '../../../../../lib/api';
+import type { ColonyNeed } from '../../../../lib/api';
 
 /**
  * What a construction site still wants, biggest shortfall first.

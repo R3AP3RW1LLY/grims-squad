@@ -123,9 +123,17 @@ describe('hub pages', () => {
         const withoutComments = src
           .replace(/\/\*[\s\S]*?\*\//g, '')
           .replace(/^\s*\/\/.*$/gm, '');
+        /*
+         * `permanentRedirect` counts too.
+         *
+         * It did not, and the omission was invisible until a route moved: `redirect(` is lowercase
+         * and does not appear inside `permanentRedirect(`, so a 308 stub read as a page that
+         * renders without a header. Both are the same thing to this rule — a page that leaves
+         * before it draws anything.
+         */
         const isPureRedirect =
           /from 'next\/navigation'/.test(src) &&
-          /\): never \{\s*redirect\(/.test(withoutComments);
+          /\): never \{\s*(?:permanentRedirect|redirect)\(/.test(withoutComments);
 
         /*
          * ★ A PAGE THAT RENDERS NO MARKUP AT ALL ★
@@ -140,7 +148,7 @@ describe('hub pages', () => {
          * a JSX element in it, and this rule applies again — which is the property the test wants.
          */
         const importsNav = /from 'next\/navigation'/.test(src);
-        const leavesViaThrow = /(redirect|notFound)\(/.test(withoutComments);
+        const leavesViaThrow = /(?:permanentRedirect|redirect|notFound)\(/.test(withoutComments);
         /*
          * ★ THE SLASH IS OUTSIDE THE CHARACTER CLASS ON PURPOSE ★
          *
@@ -151,7 +159,15 @@ describe('hub pages', () => {
          *
          * An alternation moves the slash where escaping it is both required and honest.
          */
-        const hasJsx = /<[A-Za-z][A-Za-z0-9]*(?:[\s>]|\/)/.test(withoutComments);
+        /*
+         * ★ A GENERIC IS NOT A JSX TAG ★
+         *
+         * `Promise<never>` matched this, so an async redirect stub — which renders nothing at all —
+         * was reported as a page missing its header. The lookbehind is what separates them: JSX
+         * opens after whitespace, a bracket or another tag, while a type parameter always follows
+         * the identifier it belongs to.
+         */
+        const hasJsx = /(?<![A-Za-z0-9_$])<[A-Za-z][A-Za-z0-9]*(?:[\s>]|\/)/.test(withoutComments);
         const rendersNothing = importsNav && leavesViaThrow && !hasJsx;
 
         return !isPureRedirect && !rendersNothing;

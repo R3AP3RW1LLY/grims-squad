@@ -1,4 +1,4 @@
-import type { ColonyHauler } from '../../../../../lib/api';
+import type { ColonyHauler } from '../../../../lib/api';
 
 /**
  * Who has hauled to this build.

@@ -1,4 +1,4 @@
-import type { ColonyProject } from '../../../../lib/api';
+import type { ColonyProject } from '../../../lib/api';
 
 /**
  * A board of colonisation projects.
@@ -48,7 +48,7 @@ export function ProjectBoard({
             <header className="flex flex-wrap items-baseline justify-between gap-2">
               <h3 className="m-0 text-base">
                 <a
-                  href={`/logistics/colonisation/${p.id}`}
+                  href={`/colonisation/${p.id}`}
                   className="text-[var(--color-text-primary)] no-underline hover:underline"
                 >
                   {p.title}

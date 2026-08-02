@@ -176,12 +176,43 @@ const NAV: readonly NavDefinition[] = [
    * A published personal project is reachable without a session, but on a TOKEN rather than through
    * this entry — the same shape as a shared ship build.
    */
+  /*
+   * ★ ITS OWN GROUP, NOT A LINE UNDER LOGISTICS — SQUADRON OWNER, 2026-08-02 ★
+   *
+   * "remove colonization from the Logistics and Trade subcategory and create a colonization category
+   * that matches up with the companion app please!"
+   *
+   * The companion app's sidebar has a collapsible Colonisation group with exactly these three
+   * destinations, in exactly this order — New project first, then squadron above members. A member
+   * who learns one of the two apps should not have to learn the other, and a subsection exists here
+   * purely because several entries share a `subsection` string, so this is the whole mechanism.
+   *
+   * Definition order is sidebar order, and a group renders where its first member appears — so
+   * these three sitting together, after the Logistics & Trade entries, is what puts the group in
+   * the right place.
+   */
   {
-    href: '/logistics/colonisation',
-    label: 'Colonisation',
+    href: '/colonisation/new',
+    label: 'New project',
     section: 'squadron',
-    subsection: 'Logistics & Trade',
+    subsection: 'Colonisation',
+    blurb: 'Post a construction site so the squadron can help build it.',
+    requires: Permission.COLONY_VIEW,
+  },
+  {
+    href: '/colonisation/squadron',
+    label: 'Squadron projects',
+    section: 'squadron',
+    subsection: 'Colonisation',
     blurb: 'What the squadron is building, and what it still needs hauled.',
+    requires: Permission.COLONY_VIEW,
+  },
+  {
+    href: '/colonisation/members',
+    label: 'Members’ projects',
+    section: 'squadron',
+    subsection: 'Colonisation',
+    blurb: 'Builds members have asked the squadron for help with.',
     requires: Permission.COLONY_VIEW,
   },
   {

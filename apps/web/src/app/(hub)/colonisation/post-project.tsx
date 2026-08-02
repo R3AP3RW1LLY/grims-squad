@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { apiPost } from '../../../../lib/api-client';
+import { apiPost } from '../../../lib/api-client';
 
 /**
  * Posting a colonisation project.

@@ -1,4 +1,4 @@
-import type { ColonyShoppingRow } from '../../../../../lib/api';
+import type { ColonyShoppingRow } from '../../../../lib/api';
 
 /**
  * Where to buy what a project still needs.
@@ -45,7 +45,7 @@ export function ShoppingList({
     <div>
       <form
         method="get"
-        action={`/logistics/colonisation/${projectId}`}
+        action={`/colonisation/${projectId}`}
         className="mb-4 flex flex-wrap items-end gap-3"
       >
         <label className="flex flex-col gap-1">
