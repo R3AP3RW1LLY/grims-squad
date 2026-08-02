@@ -231,7 +231,43 @@ export class CommodityNames {
         if (this.#find(key) !== undefined) continue;
 
         const ours = this.#find(squash(name));
-        if (ours !== undefined) next.set(key, ours);
+        if (ours !== undefined) {
+          next.set(key, ours);
+          continue;
+        }
+
+        /*
+         * ★ A COMMODITY WE HAVE NEVER HELD — SQUADRON OWNER, 2026-08-02 ★
+         *
+         * "name the 497 unnamed commodities! this needs to happen as we will be using the
+         * commodities ect here soon!"
+         *
+         * This branch used to `continue`, and that was a chicken and egg: our name for a commodity
+         * comes from `market_entries`, so a commodity we have never written has no name, so it can
+         * never be written. Every market message carrying it was silently discarded, for ever.
+         *
+         * It cost far more than the two entries the note above this method admits to. `Drones` is
+         * LIMPETS, sold at very nearly every station in the galaxy — which is why one fifteen-minute
+         * window reported 479 unnamed commodities across 662 markets. Not 479 different things: two
+         * things, hundreds of times.
+         *
+         * ★ WHY TAKING EDCD'S SPELLING IS SAFE *HERE* AND NOT ABOVE ★
+         *
+         * The rule this file exists to enforce is that OUR table is the authority on what a
+         * commodity is called, because `market_entries.commodity` is what every route query filters
+         * on — writing EDCD's spelling for something we already hold would create a second row for
+         * one commodity the moment the two disagreed.
+         *
+         * That reasoning needs us to HOLD it. When we do not, there is no spelling to disagree
+         * with, and the choice is between EDCD's name and throwing the data away. EDCD is the
+         * community's maintained id list and the same project Coriolis comes from; it is a far
+         * better answer than nothing.
+         *
+         * The first row written creates the name, and `refresh()` picks it up from our own table
+         * on the next pass — so this branch stops applying to it from then on and the authority
+         * rule reasserts itself without anybody doing anything.
+         */
+        next.set(key, { name, category: null });
       }
     }
 

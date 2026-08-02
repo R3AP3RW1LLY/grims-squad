@@ -125,3 +125,67 @@ describe('the symbol -> name chain, as it actually runs', () => {
     expect(find(squash(edcdName ?? ''))).toBe('Void Opals');
   });
 });
+
+/**
+ * Commodities we have never held.
+ *
+ * ★ SQUADRON OWNER, 2026-08-02 ★
+ *
+ * "name the 497 unnamed commodities! this needs to happen as we will be using the commodities ect
+ * here soon!"
+ *
+ * ★ IT WAS TWO THINGS, HUNDREDS OF TIMES ★
+ *
+ * One fifteen-minute window reported 479 unnamed commodities across 662 markets. Not 479 different
+ * commodities — `Drones` is LIMPETS, sold at very nearly every station in the galaxy, so it alone
+ * accounted for most of them, and `PoliticalPrisoner` for the rest.
+ *
+ * The cause was a chicken and egg. Our name for a commodity comes from `market_entries`, so one we
+ * had never written had no name, so it could never be written — for ever, silently.
+ */
+describe('a commodity we do not hold yet', () => {
+  const EDCD = parseEdcdCsv(
+    [
+      'id,symbol,category,name',
+      '1,Drones,NonMarketable,Limpets',
+      '2,PoliticalPrisoner,Slavery,Political Prisoners',
+      '3,Gold,Metals,Gold',
+    ].join('\n'),
+  );
+
+  /** We hold Gold and nothing else — the state that produced the bug. */
+  const ours = new Map([[squash('Gold'), 'Gold']]);
+  const find = (k: string): string | undefined => ours.get(k);
+
+  /** The alias loop from `#loadAliases`, including the branch this suite exists for. */
+  const aliases = (): Map<string, string> => {
+    const out = new Map<string, string>();
+    for (const { symbol, name } of EDCD) {
+      const key = squash(symbol);
+      if (find(key) !== undefined) continue;
+
+      const mine = find(squash(name));
+      out.set(key, mine ?? name);
+    }
+    return out;
+  };
+
+  it('MANDATORY: takes EDCD’s name rather than discarding the market', () => {
+    // The whole point. Before this, every message carrying limpets lost them — which is very nearly
+    // every message.
+    expect(aliases().get('drones')).toBe('Limpets');
+    expect(aliases().get('politicalprisoner')).toBe('Political Prisoners');
+  });
+
+  it('still prefers OUR name for anything we do hold', () => {
+    /*
+     * The rule the rest of this file enforces: `market_entries.commodity` is what every route query
+     * filters on, so writing EDCD's spelling for something we already hold would create a second
+     * row for one commodity the moment the two disagreed.
+     *
+     * That reasoning needs us to HOLD it — which is exactly why the fallback above is safe and this
+     * is not. Gold resolves directly, so no alias is written for it at all.
+     */
+    expect(aliases().has('gold')).toBe(false);
+  });
+});
