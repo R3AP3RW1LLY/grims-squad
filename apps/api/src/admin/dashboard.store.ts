@@ -283,6 +283,14 @@ export class PrismaDashboardStore implements DashboardStore {
        * the next load.
        */
       this.#db.discordGuildMember.findMany({
+        /*
+         * ★ NO BOTS, NO APPS — SQUADRON OWNER, 2026-08-02 ★
+         *
+         * "this is for players only". Two places downstream already skipped them — the rank ladder
+         * and the member count — which is exactly the pattern this replaces: a rule enforced in
+         * every consumer is a rule the next consumer forgets. Those guards stay as belt and braces.
+         */
+        where: { isBot: false },
         select: {
           discordId: true,
           nick: true,

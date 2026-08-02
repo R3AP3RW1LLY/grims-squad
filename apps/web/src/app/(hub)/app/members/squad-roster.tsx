@@ -48,7 +48,16 @@ const CONTROL =
 const FIELD_LABEL =
   'mb-1 block font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-dim)]';
 
-type Presence = '' | 'timedout' | 'voice' | 'bot' | 'blocked';
+/*
+ * ★ 'bot' REMOVED — SQUADRON OWNER, 2026-08-02 ★
+ *
+ * "do not include bots or apps in the discord in our website please! they have no need to be listed
+ * here as this is for players only!"
+ *
+ * The roster no longer receives any, so a filter for them could only ever return nothing — and a
+ * control that always finds nobody reads as a broken search rather than an empty category.
+ */
+type Presence = '' | 'timedout' | 'voice' | 'blocked';
 
 function Badge({ tone, children }: { tone: 'quiet' | 'warn' | 'live' | 'dim'; children: React.ReactNode }) {
   const colour =
@@ -103,7 +112,6 @@ export function SquadRoster({ rows, now }: { rows: SquadMemberRow[]; now: number
 
       if (presence === 'timedout' && !isTimedOut(r, now)) return false;
       if (presence === 'voice' && r.inVoiceSince === null) return false;
-      if (presence === 'bot' && !r.isBot) return false;
       if (presence === 'blocked' && r.moderatable) return false;
 
       return true;
@@ -186,7 +194,6 @@ export function SquadRoster({ rows, now }: { rows: SquadMemberRow[]; now: number
                 <option value="timedout">Currently timed out</option>
                 <option value="voice">In voice now</option>
                 <option value="blocked">Out of the bot&rsquo;s reach</option>
-                <option value="bot">Bots</option>
               </select>
             </label>
           </div>
@@ -254,13 +261,12 @@ export function SquadRoster({ rows, now }: { rows: SquadMemberRow[]; now: number
                     <span className="flex shrink-0 items-center gap-1.5">
                       {isTimedOut(r, now) && <Badge tone="warn">Timed out</Badge>}
                       {r.inVoiceSince !== null && <Badge tone="live">In voice</Badge>}
-                      {r.isBot && <Badge tone="dim">Bot</Badge>}
                       {/*
                         Marked on the row, not only in the panel. An officer scanning for somebody
                         to action should be able to see who is out of reach without opening each in
                         turn.
                       */}
-                      {!r.moderatable && !r.isBot && <Badge tone="dim">Outranks bot</Badge>}
+                      {!r.moderatable && <Badge tone="dim">Outranks bot</Badge>}
                       <span className="w-28 text-right font-mono text-[10px] text-[var(--color-text-dim)]">
                         {tenure?.label ?? 'unknown'}
                       </span>

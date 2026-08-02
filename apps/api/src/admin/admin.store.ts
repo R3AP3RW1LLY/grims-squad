@@ -376,6 +376,13 @@ export class PrismaAdminStore implements AdminStore {
        * one person and a raw snowflake for the rest.
        */
       this.#db.discordGuildMember.findMany({
+        /*
+         * No bots here either, though nothing today can reach it: `ActivityRecorder.record` drops
+         * bot events before they are stored, so no bot has an activity row to be named. Filtered
+         * anyway, because this map is what turns an id into a name — and the failure mode if a bot
+         * row ever DID appear is the one already reported once, a raw snowflake in the members list.
+         */
+        where: { isBot: false },
         select: {
           discordId: true,
           nick: true,
@@ -826,6 +833,18 @@ export class PrismaAdminStore implements AdminStore {
   async squadRoster(): Promise<SquadMemberRow[]> {
     const [members, discordRoles, mappings, lastSeen, identities, botPosition] = await Promise.all([
       this.#db.discordGuildMember.findMany({
+        /*
+         * ★ NO BOTS, NO APPS — SQUADRON OWNER, 2026-08-02 ★
+         *
+         * "do not include bots or apps in the discord in our website please! they have no need to be
+         * listed here as this is for players only!"
+         *
+         * Filtered in the QUERY rather than after it. A `.filter()` downstream is one refactor away
+         * from being dropped, and every count, every page and every export built on this read would
+         * silently start including them again. Discord marks both bots and applications with the
+         * same flag, so one condition covers what the owner asked about.
+         */
+        where: { isBot: false },
         select: {
           discordId: true,
           nick: true,

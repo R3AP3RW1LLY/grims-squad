@@ -55,6 +55,13 @@ export default async function SquadMembersPage() {
   const rows = read.data.rows;
   const now = Date.now();
 
+  /*
+   * ★ THE API NO LONGER SENDS BOTS AT ALL — SQUADRON OWNER, 2026-08-02 ★
+   *
+   * "this is for players only". `squadRoster()` filters them in the query, so this is belt and
+   * braces rather than the guard: if a bot ever reached this page it would be a fault worth seeing
+   * as a wrong count, not one this line quietly papers over.
+   */
   const people = rows.filter((r) => !r.isBot);
   const timedOut = rows.filter((r) => isTimedOut(r, now)).length;
   const inVoice = rows.filter((r) => r.inVoiceSince !== null).length;
@@ -83,7 +90,7 @@ export default async function SquadMembersPage() {
         description="Every action here happens in Discord immediately and is written to the squadron audit log with your name, the reason and the outcome — including the ones Discord refuses."
       >
         <StatGrid>
-          <StatTile label="Members" value={String(people.length)} hint="Excluding bots" tone="accent" />
+          <StatTile label="Members" value={String(people.length)} hint="Players in the server" tone="accent" />
           <StatTile
             label="In voice"
             value={String(inVoice)}
