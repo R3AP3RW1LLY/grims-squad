@@ -11,6 +11,7 @@ import { User, type CurrentUser } from '../auth/current-user.js';
 import { PermissionService } from '../authz/permission.service.js';
 import { MARKET_STORE } from './logistics.tokens.js';
 import type { Coords, MarketStore, PlaceQuery } from './market.store.js';
+import { planRoutes } from './routes.service.js';
 
 /**
  * The commodities market.
@@ -167,6 +168,74 @@ export class MarketController {
   async #typedOrigin(system: string): Promise<Origin | null> {
     const coords = await this.store.systemCoords(system);
     return coords === null ? null : { coords, system, station: null, from: 'typed' };
+  }
+
+  /**
+   * The Freight Office: plan a run from here.
+   *
+   * ★ SQUADRON OWNER, 2026-08-02 ★
+   *
+   * "a trade route planner that is very granular and will allow one to selct any buyable and
+   * sellable commodity ... this will also be available to the public for use."
+   *
+   * Same origin rules as the market: a typed system first, the caller's own journal otherwise. With
+   * neither, there is nothing to plan FROM — a route needs a starting point in a way a price table
+   * does not — so it answers with an empty plan and says why rather than guessing at Sol.
+   */
+  @Public()
+  @Get('routes')
+  async routes(
+    @User() caller: CurrentUser | undefined,
+    @Query('near') near?: string,
+    @Query('cargo') cargo?: string,
+    @Query('buyWithinLy') buyWithinLy?: string,
+    @Query('sellWithinLy') sellWithinLy?: string,
+    @Query('budget') budget?: string,
+    @Query('largePad') largePad?: string,
+    @Query('carriers') carriers?: string,
+    @Query('freshDays') freshDays?: string,
+    @Query('commodity') commodity?: string,
+  ) {
+    await this.#assertMarket(caller);
+
+    const typed = near?.trim() ?? '';
+    const origin: Origin | null =
+      typed !== ''
+        ? await this.#typedOrigin(typed)
+        : await this.#whereTheyAre(caller?.userId ?? null);
+
+    if (origin === null) {
+      return {
+        routes: [],
+        considered: [],
+        origin: null,
+        unknownSystem: typed === '' ? null : typed,
+      };
+    }
+
+    const plan = await planRoutes(this.store, {
+      origin: origin.coords,
+      originName: origin.system,
+      /*
+       * Clamped, not trusted. 794 is the largest hold in the game (a fully fitted Type-9 style
+       * hauler is around there), and a member typing 99999999 would otherwise be quoted a total
+       * profit that is pure fiction — the one number on this page nobody double-checks.
+       */
+      cargo: clamp(numberOr(cargo, 64), 1, 794),
+      buyWithinLy: clamp(numberOr(buyWithinLy, 50), 1, 500),
+      sellWithinLy: clamp(numberOr(sellWithinLy, 100), 1, 500),
+      budget: budget === undefined || budget.trim() === '' ? null : Math.max(0, numberOr(budget, 0)),
+      largePadOnly: largePad === '1',
+      includeCarriers: carriers === '1',
+      seenSince: daysAgo(numberOr(freshDays, 0)),
+      only: commodity?.trim() ?? null,
+    });
+
+    return {
+      ...plan,
+      origin: { system: origin.system, station: origin.station, from: origin.from },
+      unknownSystem: null,
+    };
   }
 
   /** Type-ahead for the origin box. Signed-out visitors need this; it is how they say where they are. */

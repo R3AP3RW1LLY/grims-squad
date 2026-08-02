@@ -1535,3 +1535,114 @@ export const getShipyardOutfitGated = (
   shipId: string,
 ): Promise<AdminRead<import('../app/(hub)/shipyard/outfitter-catalogue').OutfitPayload>> =>
   getAdmin(`/v1/ai/shipyard/outfit/${encodeURIComponent(shipId)}`);
+
+// ── Logistics & Trade ────────────────────────────────────────────────────────
+//
+// Squadron owner, 2026-08-02: "a realt time commodities market ... as well as the best places to
+// buy both in general and based on the players current location and station they are at."
+//
+// Plain `get`, like the shared build boards above and for the same reason: these answer without a
+// session, because the owner made them public. So `null` here means the API is down rather than
+// that somebody was refused — and the page has to say the first thing, not the second.
+
+/** One commodity as the market lists it. */
+export interface MarketRow {
+  commodity: string;
+  category: string | null;
+  avgBuy: number | null;
+  avgSell: number | null;
+  minBuy: number | null;
+  maxSell: number | null;
+  /** Tonnes, as a string: totals run into the billions and would lose precision as a JSON number. */
+  supply: string;
+  demand: string;
+  buyMarkets: number;
+  sellMarkets: number;
+  /** Movement in the average sell price over a day, as a fraction. Null until we hold a day. */
+  sellTrend: number | null;
+}
+
+/** One station trading one commodity. */
+export interface MarketPlace {
+  stationName: string;
+  systemName: string;
+  stationType: string | null;
+  largePads: number;
+  price: number;
+  quantity: number;
+  seenAt: string | null;
+  distance: number | null;
+}
+
+export interface HistoryPoint {
+  observedAt: string;
+  avgBuy: number | null;
+  avgSell: number | null;
+  minBuy: number | null;
+  maxSell: number | null;
+  buyMarkets: number;
+  sellMarkets: number;
+}
+
+export interface CommodityDetail {
+  commodity: MarketRow | null;
+  buys: MarketPlace[];
+  sells: MarketPlace[];
+  history: HistoryPoint[];
+  origin: { system: string; station: string | null; from: 'typed' | 'journal' } | null;
+  /** A system somebody typed that we cannot place — so no radius was applied. Never silent. */
+  unknownSystem: string | null;
+}
+
+export const getCommodities = (): Promise<{ commodities: MarketRow[] } | null> =>
+  get('/v1/logistics/commodities', { authed: true });
+
+/** One commodity, with where to trade it. `query` carries the filters verbatim. */
+export const getCommodity = (
+  name: string,
+  query: Record<string, string> = {},
+): Promise<CommodityDetail | null> => {
+  const qs = new URLSearchParams(query).toString();
+  return get(
+    `/v1/logistics/commodities/${encodeURIComponent(name)}${qs === '' ? '' : `?${qs}`}`,
+    { authed: true },
+  );
+};
+
+/** One leg of a planned run. */
+export interface RouteLeg {
+  stationName: string;
+  systemName: string;
+  stationType: string | null;
+  largePads: number;
+  price: number;
+  quantity: number;
+  seenAt: string | null;
+  distance: number | null;
+}
+
+export interface Route {
+  commodity: string;
+  buy: RouteLeg;
+  sell: RouteLeg;
+  profitPerTonne: number;
+  tonnes: number;
+  totalProfit: number;
+  outlay: number;
+  distanceLy: number;
+  /** What capped the load — shown, because a bare tonnage never explains itself. */
+  limitedBy: 'hold' | 'supply' | 'demand' | 'budget';
+}
+
+export interface RoutePlan {
+  routes: Route[];
+  considered: string[];
+  origin: { system: string; station: string | null; from: 'typed' | 'journal' } | null;
+  unknownSystem: string | null;
+}
+
+/** The Freight Office. `query` carries the member's filters verbatim. */
+export const getRoutes = (query: Record<string, string> = {}): Promise<RoutePlan | null> => {
+  const qs = new URLSearchParams(query).toString();
+  return get(`/v1/logistics/routes${qs === '' ? '' : `?${qs}`}`, { authed: true });
+};

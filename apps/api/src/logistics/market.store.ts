@@ -52,6 +52,14 @@ export interface MarketPlace {
   readonly seenAt: Date | null;
   /** Light years from the system asked about. Null when no origin was given. */
   readonly distance: number | null;
+  /**
+   * Where this station is, so it can become the origin of the NEXT leg.
+   *
+   * The Freight Office plans a run as buy-here then sell-there, and the second query has to be
+   * anchored on the first station rather than on where the member started. Null for a station whose
+   * coordinates we never learned — which drops it out of leg two rather than measuring from nowhere.
+   */
+  readonly coords: Coords | null;
 }
 
 export interface HistoryPoint {
@@ -66,6 +74,8 @@ export interface HistoryPoint {
 
 export interface MarketStore {
   list(): Promise<readonly MarketRow[]>;
+  /** Commodities worth carrying, widest average margin first. Narrows the route search. */
+  topMargins(limit: number): Promise<readonly string[]>;
   one(commodity: string): Promise<MarketRow | null>;
   history(commodity: string, hours: number): Promise<readonly HistoryPoint[]>;
   bestBuys(commodity: string, opts: PlaceQuery): Promise<readonly MarketPlace[]>;
@@ -295,7 +305,10 @@ export class PrismaMarketStore implements MarketStore {
 
     const rows = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
       `SELECT station_name, system_name, station_type, large_pads,
-              ${priceCol} AS price, ${qtyCol} AS quantity, market_seen_at, ${distanceSelect}
+              ${priceCol} AS price, ${qtyCol} AS quantity, market_seen_at, ${distanceSelect},
+              cube_ll_coord(coords, 1) AS cx,
+              cube_ll_coord(coords, 2) AS cy,
+              cube_ll_coord(coords, 3) AS cz
          FROM market_entries
         WHERE ${where.join(' AND ')}
         ORDER BY ${order}
@@ -312,7 +325,42 @@ export class PrismaMarketStore implements MarketStore {
       quantity: int(r['quantity']) ?? 0,
       seenAt: (r['market_seen_at'] as Date | null) ?? null,
       distance: r['distance'] === null ? null : Number(r['distance']),
+      coords:
+        r['cx'] === null || r['cy'] === null || r['cz'] === null
+          ? null
+          : { x: Number(r['cx']), y: Number(r['cy']), z: Number(r['cz']) },
     }));
+  }
+
+  /**
+   * The commodities worth carrying at all, widest margin first.
+   *
+   * ★ THIS IS WHAT MAKES ROUTE PLANNING AFFORDABLE ★
+   *
+   * The obvious way to plan a route is to join buy-side against sell-side across every commodity at
+   * once. That was tried on 2026-07-31 and a four-way self-join over this data spilled to temp until
+   * it exhausted the disk and took the whole Docker engine down — the reason `market_entries` exists
+   * as a flat table in the first place.
+   *
+   * So the search is narrowed BEFORE any station work happens, using the hourly rollup: 391 rows,
+   * already aggregated, read in two milliseconds. Carrying something with a two-credit margin is
+   * never the answer, so the planner only ever does expensive per-station work for commodities that
+   * could plausibly pay for the trip.
+   */
+  async topMargins(limit: number): Promise<readonly string[]> {
+    const rows = await this.db.$queryRawUnsafe<Array<{ commodity: string }>>(
+      `SELECT commodity
+         FROM commodity_snapshots
+        WHERE observed_at = (SELECT max(observed_at) FROM commodity_snapshots)
+          AND avg_buy IS NOT NULL AND avg_sell IS NOT NULL
+          -- Both sides have to be genuinely tradeable. A commodity stocked at four markets in the
+          -- galaxy has a wonderful margin and no route.
+          AND buy_markets >= 20 AND sell_markets >= 20
+        ORDER BY (avg_sell - avg_buy) DESC
+        LIMIT $1`,
+      limit,
+    );
+    return rows.map((r) => r.commodity);
   }
 
   async systemCoords(name: string): Promise<Coords | null> {

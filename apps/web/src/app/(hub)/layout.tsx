@@ -67,8 +67,26 @@ const PUBLIC_PATHS: readonly string[] = [
    * on its own terms rather than by this list.
    */
   '/forum',
+  /*
+   * ★ LOGISTICS & TRADE — SQUADRON OWNER, 2026-08-02 ★
+   *
+   * "this will also be available to the public for use." The API agrees: both routes are `@Public()`
+   * in `market.controller.ts` and both are gated on TRADE_QUERY, which the guest mask now holds.
+   *
+   * Listed, not prefixed, for the same reason as the Shipyard above — a blanket `/logistics` would
+   * silently carry whatever is added under it next, and colonisation is coming under exactly that
+   * path. A squadron project board shown to a stranger as an empty page headed "Colonisation" is a
+   * worse thing to publish than a sign-in redirect.
+   */
+  '/logistics/commodities',
+  '/logistics/freight-office',
 ];
-const PUBLIC_PREFIXES: readonly string[] = ['/shipyard/build/'];
+/*
+ * `/logistics/commodities/` carries the trailing slash and matches by prefix, because the detail
+ * page for one commodity is the thing a member actually pastes into Discord — and a link that
+ * bounces a visitor to Discord OAuth is not a price link.
+ */
+const PUBLIC_PREFIXES: readonly string[] = ['/shipyard/build/', '/logistics/commodities/'];
 
 function isPublicPath(path: string): boolean {
   // The query string is not part of the decision — `/shipyard?tab=assisted` is the same page.
