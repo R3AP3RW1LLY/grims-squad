@@ -11,6 +11,7 @@ import { getColonyProject } from '../../../../../lib/api';
 import { NeedsTable } from './needs-table';
 import { ShoppingList } from './shopping-list';
 import { HaulerBoard } from './hauler-board';
+import { DeliveryTimeline, HaulerChart } from './delivery-charts';
 
 /**
  * One colonisation project.
@@ -59,7 +60,7 @@ export default async function ColonyProjectPage({
     return <AdminUnavailable />;
   }
 
-  const { project, needs, haulers, shopping, origin, unknownSystem } = read.data;
+  const { project, needs, haulers, shopping, chart, origin, unknownSystem } = read.data;
   const delivered = Math.max(0, project.required - project.remaining);
 
   return (
@@ -108,7 +109,21 @@ export default async function ColonyProjectPage({
           />
         </Section>
 
+        {/*
+          ★ SQUADRON OWNER, 2026-08-02 ★
+
+          "a stacked bar chart that shows commoditied selivered per hour per day like raven
+          colonial", switchable between stacking by commodity and by commander.
+
+          Above the leaderboard rather than below it: the shape of a build — did it go in over one
+          night or three weeks, and did it stall — is the thing somebody opens this page to see.
+        */}
+        <Section title="Deliveries over time">
+          <DeliveryTimeline chart={chart} />
+        </Section>
+
         <Section title="Who has hauled">
+          <HaulerChart chart={chart} />
           <HaulerBoard haulers={haulers} />
         </Section>
       </PageBody>

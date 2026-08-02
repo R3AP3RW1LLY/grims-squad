@@ -9,7 +9,12 @@ import type {
   ColonyShoppingRow,
 } from '../hub-colony.js';
 import { projectTitleFrom } from '../docked.js';
-import { DeliveryChart, type DeliveryBucket } from './delivery-chart.js';
+import {
+  DeliveryChart,
+  HaulerChart,
+  type DeliveryBucket,
+  type HaulerStack,
+} from './delivery-chart.js';
 import {
   Bar,
   Button,
@@ -76,7 +81,12 @@ export interface ProjectDetailData {
   haulers: ColonyHauler[];
   shopping: ColonyShoppingRow[];
   deliveries: Delivery[];
-  chart: { bucket: 'hour' | 'day'; buckets: DeliveryBucket[] };
+  chart: {
+    bucket: 'hour' | 'day';
+    byCommodity: DeliveryBucket[];
+    byCommander: DeliveryBucket[];
+    haulers: HaulerStack[];
+  };
 }
 
 /** Where the commander is docked, handed down from the app's state. */
@@ -421,6 +431,15 @@ function Board({
 function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.Element {
   const [data, setData] = useState<ProjectDetailData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /*
+   * ★ WHICH WAY THE TIME CHART IS STACKED — SQUADRON OWNER, 2026-08-02 ★
+   *
+   * Both cuts of the same bars, and they answer different questions. By commodity: what went in on
+   * Tuesday. By commander: who was flying on Tuesday. Held in state and switched locally rather
+   * than refetched, because both stackings arrive in the same payload — a toggle that waits on the
+   * network to redraw bars it already has reads as broken.
+   */
+  const [stackBy, setStackBy] = useState<'commodity' | 'commander'>('commodity');
 
   /*
    * Re-read after a roster change, so the delivered totals and the needs the roster is offering
@@ -526,9 +545,16 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
       </Section>
 
       {/* "a stacked bar chart that shows commoditied selivered per hour per day like raven colonial" */}
-      <Section title="Deliveries over time">
+      <Section
+        title="Deliveries over time"
+        aside={<Toggle value={stackBy} onChange={setStackBy} />}
+      >
         <Card>
-          <DeliveryChart buckets={chart.buckets} bucket={chart.bucket} />
+          <DeliveryChart
+            buckets={stackBy === 'commodity' ? chart.byCommodity : chart.byCommander}
+            bucket={chart.bucket}
+            by={stackBy}
+          />
         </Card>
       </Section>
 
@@ -599,17 +625,78 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
         <Roster projectId={project.id} needs={needs} onChanged={() => void reloadDetail()} />
       </Section>
 
+      {/*
+        ★ THE CHART AND THE LIST, BOTH — SQUADRON OWNER, 2026-08-02 ★
+
+        "we want the who has hauled to be a stacked bar chart."
+
+        The chart is what was asked for and it is the better picture: it says whether somebody's
+        forty thousand tonnes was all steel or a share of everything. The ranked list stays under
+        it because a chart cannot be read to the tonne, and "am I third or fourth" is a question
+        people genuinely have about their own name.
+      */}
       <Section title="Who has hauled">
         {haulers.length === 0 ? (
           <Empty>No deliveries recorded yet.</Empty>
         ) : (
-          <Card>
-            {haulers.map((h, i) => (
-              <Row key={`${h.name}-${i}`} left={`${i + 1}. ${h.name}`} right={tonnes(h.tonnes)} />
-            ))}
-          </Card>
+          <>
+            <Card>
+              <HaulerChart haulers={chart.haulers} />
+            </Card>
+            <div style={{ marginTop: '12px' }}>
+              <Card>
+                {haulers.map((h, i) => (
+                  <Row
+                    key={`${h.name}-${i}`}
+                    left={`${i + 1}. ${h.name}`}
+                    right={tonnes(h.tonnes)}
+                  />
+                ))}
+              </Card>
+            </div>
+          </>
         )}
       </Section>
+    </div>
+  );
+}
+
+/**
+ * The stacking switch above the time chart.
+ *
+ * Two words rather than a dropdown: there are exactly two answers, and a select box that has to be
+ * opened to find out what the alternative is hides half the feature.
+ */
+function Toggle({
+  value,
+  onChange,
+}: {
+  value: 'commodity' | 'commander';
+  onChange: (next: 'commodity' | 'commander') => void;
+}): JSX.Element {
+  const options: ReadonlyArray<'commodity' | 'commander'> = ['commodity', 'commander'];
+
+  return (
+    <div style={{ display: 'flex', gap: '4px' }}>
+      {options.map((option) => (
+        <button
+          key={option}
+          type="button"
+          onClick={() => onChange(option)}
+          style={{
+            border: `1px solid ${value === option ? C.subtle : 'transparent'}`,
+            background: value === option ? C.raised : 'transparent',
+            color: value === option ? C.text : C.faint,
+            borderRadius: '6px',
+            padding: '3px 9px',
+            fontSize: '11px',
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+          }}
+        >
+          by {option}
+        </button>
+      ))}
     </div>
   );
 }

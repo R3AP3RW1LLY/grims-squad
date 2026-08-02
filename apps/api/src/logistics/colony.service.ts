@@ -85,15 +85,44 @@ export interface DeliveryRow {
  *
  * ★ SQUADRON OWNER, 2026-08-02 ★
  *
- * "a stacked bar chart that shows commoditied selivered per hour per day like raven colonial."
+ * "a stacked bar chart that shows commoditied selivered per hour per day like raven colonial", and
+ * then "we want the who has hauled to be a stacked bar chart" too.
  *
- * `byCommodity` is what makes the bar STACKED rather than a single total — each commodity is its
- * own segment, so a member can see that Tuesday was all steel and Wednesday was all aluminium.
+ * `bySeries` is what makes the bar STACKED rather than a single total. It is deliberately NOT
+ * called `byCommodity` any more: the same bar is stacked by commodity in one view and by commander
+ * in the other, and a field named for one of them while holding the other is the kind of lie that
+ * costs somebody an hour.
  */
 export interface DeliveryBucket {
   readonly at: Date;
+  readonly bySeries: Readonly<Record<string, number>>;
+  readonly total: number;
+}
+
+/**
+ * One commander's column: everything they have hauled, split by commodity.
+ *
+ * ★ THE QUESTION THE TIME CHART CANNOT ANSWER ★
+ *
+ * "Who has hauled" as a plain tally says one person brought 40,000 tonnes. It does not say whether
+ * that was forty thousand tonnes of steel or a share of everything — which is the difference
+ * between somebody who covered a commodity and somebody who did a bit of each run.
+ */
+export interface HaulerStack {
+  readonly commander: string;
   readonly byCommodity: Readonly<Record<string, number>>;
   readonly total: number;
+}
+
+/** Everything the two charts on a project page need, in one read. */
+export interface DeliveryCharts {
+  readonly bucket: 'hour' | 'day';
+  /** Time on the x-axis, stacked by commodity. */
+  readonly byCommodity: readonly DeliveryBucket[];
+  /** The same time buckets, stacked by commander. */
+  readonly byCommander: readonly DeliveryBucket[];
+  /** One column per commander, stacked by commodity. Biggest hauler first. */
+  readonly haulers: readonly HaulerStack[];
 }
 
 export interface HaulerTally {
@@ -359,9 +388,7 @@ export class ColonyService {
    * `date_trunc` rather than arithmetic in Node: bucketing in SQL means one row per bar rather than
    * every contribution crossing the wire to be counted here.
    */
-  async deliveryChart(
-    projectId: string,
-  ): Promise<{ bucket: 'hour' | 'day'; buckets: readonly DeliveryBucket[] }> {
+  async deliveryChart(projectId: string): Promise<DeliveryCharts> {
     const span = await this.db.$queryRawUnsafe<Array<{ hours: number | null }>>(
       `SELECT EXTRACT(EPOCH FROM (max(delivered_at) - min(delivered_at))) / 3600 AS hours
          FROM colony_contributions WHERE project_id = $1::uuid`,
@@ -376,29 +403,77 @@ export class ColonyService {
     const hours = Number(span[0]?.hours ?? 0);
     const bucket: 'hour' | 'day' = Number.isFinite(hours) && hours > 48 ? 'day' : 'hour';
 
+    /*
+     * ★ ONE QUERY, PIVOTED THREE WAYS ★
+     *
+     * Grouped by time AND commodity AND commander together, because all three views are cuts of
+     * the same fact — who put what in, and when. Three separate GROUP BYs would read the ledger
+     * three times to produce answers that must agree, and the day they disagree is the day nobody
+     * can tell which one is wrong.
+     *
+     * The row count is bounded by the number of (bucket, commodity, commander) combinations that
+     * ACTUALLY occurred, not by their product: a build with twenty commodities and ten haulers
+     * over a fortnight is a few hundred rows, because most commanders never touch most commodities
+     * on most days.
+     */
     const rows = await this.db.$queryRawUnsafe<
-      Array<{ at: Date; commodity: string; amount: bigint }>
+      Array<{ at: Date; commodity: string; commander: string | null; amount: bigint }>
     >(
-      `SELECT date_trunc($2, delivered_at) AS at, commodity, SUM(amount)::bigint AS amount
-         FROM colony_contributions
-        WHERE project_id = $1::uuid
-        GROUP BY 1, 2
+      `SELECT date_trunc($2, c.delivered_at) AS at,
+              c.commodity,
+              u.display_name AS commander,
+              SUM(c.amount)::bigint AS amount
+         FROM colony_contributions c
+         LEFT JOIN users u ON u.id = c.user_id
+        WHERE c.project_id = $1::uuid
+        GROUP BY 1, 2, 3
         ORDER BY 1`,
       projectId,
       bucket,
     );
 
-    const byBucket = new Map<number, { at: Date; byCommodity: Record<string, number>; total: number }>();
+    /** Accumulates a stacked series onto a bucket keyed by time. */
+    const stackByTime = (pick: (r: (typeof rows)[number]) => string): DeliveryBucket[] => {
+      const map = new Map<number, { at: Date; bySeries: Record<string, number>; total: number }>();
+      for (const r of rows) {
+        const key = r.at.getTime();
+        const slice = map.get(key) ?? { at: r.at, bySeries: {}, total: 0 };
+        const amount = Number(r.amount);
+        const series = pick(r);
+        slice.bySeries[series] = (slice.bySeries[series] ?? 0) + amount;
+        slice.total += amount;
+        map.set(key, slice);
+      }
+      return [...map.values()].sort((a, b) => a.at.getTime() - b.at.getTime());
+    };
+
+    /*
+     * A member who has left still hauled the cargo. The ledger uses SET NULL, so their rows
+     * survive with no user — named rather than dropped, because erasing them would understate the
+     * build and leave the chart disagreeing with the total at the top of the page.
+     */
+    const commanderOf = (r: (typeof rows)[number]): string => r.commander ?? 'A former member';
+
+    const haulers = new Map<string, { byCommodity: Record<string, number>; total: number }>();
     for (const r of rows) {
-      const key = r.at.getTime();
-      const existing = byBucket.get(key) ?? { at: r.at, byCommodity: {}, total: 0 };
+      const name = commanderOf(r);
+      const stack = haulers.get(name) ?? { byCommodity: {}, total: 0 };
       const amount = Number(r.amount);
-      existing.byCommodity[r.commodity] = (existing.byCommodity[r.commodity] ?? 0) + amount;
-      existing.total += amount;
-      byBucket.set(key, existing);
+      stack.byCommodity[r.commodity] = (stack.byCommodity[r.commodity] ?? 0) + amount;
+      stack.total += amount;
+      haulers.set(name, stack);
     }
 
-    return { bucket, buckets: [...byBucket.values()].sort((a, b) => a.at.getTime() - b.at.getTime()) };
+    return {
+      bucket,
+      byCommodity: stackByTime((r) => r.commodity),
+      byCommander: stackByTime(commanderOf),
+      // Biggest first. A ranked axis is read top-down and answers "who is carrying this build"
+      // before anybody has to compare column heights.
+      haulers: [...haulers.entries()]
+        .map(([commander, stack]) => ({ commander, ...stack }))
+        .sort((a, b) => b.total - a.total),
+    };
   }
 
   /**

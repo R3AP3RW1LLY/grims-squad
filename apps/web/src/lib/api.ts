@@ -1699,11 +1699,39 @@ export interface ColonyShoppingRow {
   cost: number | null;
 }
 
+/**
+ * One bar of the delivery chart.
+ *
+ * `bySeries` rather than `byCommodity`: the same bar is stacked by commodity in one view and by
+ * commander in the other, and a field named for one of them while holding the other is a lie.
+ */
+export interface ColonyDeliveryBucket {
+  at: string;
+  bySeries: Record<string, number>;
+  total: number;
+}
+
+/** One commander's column: everything they have hauled, split by commodity. */
+export interface ColonyHaulerStack {
+  commander: string;
+  byCommodity: Record<string, number>;
+  total: number;
+}
+
+/** Both charts on a project page, in one read. Switching between them costs no round trip. */
+export interface ColonyCharts {
+  bucket: 'hour' | 'day';
+  byCommodity: ColonyDeliveryBucket[];
+  byCommander: ColonyDeliveryBucket[];
+  haulers: ColonyHaulerStack[];
+}
+
 export interface ColonyDetail {
   project: ColonyProject;
   needs: ColonyNeed[];
   haulers: ColonyHauler[];
   shopping: ColonyShoppingRow[];
+  chart: ColonyCharts;
   origin: { system: string } | null;
   unknownSystem: string | null;
 }

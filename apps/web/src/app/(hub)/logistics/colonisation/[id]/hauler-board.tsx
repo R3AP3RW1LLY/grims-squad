@@ -3,12 +3,21 @@ import type { ColonyHauler } from '../../../../../lib/api';
 /**
  * Who has hauled to this build.
  *
- * ★ TOTALS ONLY, AND THAT IS A PRIVACY DECISION ★
+ * ★ TOTALS ONLY HERE — BUT THE PAGE NO LONGER STOPS THERE ★
  *
- * The ledger records when every delivery happened, and this deliberately does not show it. A
- * contribution board that listed times would be an activity log of who was online at what hour —
- * a different thing entirely, and not something anybody agreed to by delivering cargo. A name and a
- * tonnage is what a leaderboard needs.
+ * This used to be the whole story, on the reasoning that a contribution board listing times would
+ * be an activity log of who was online at what hour, which is not something anybody agreed to by
+ * delivering cargo.
+ *
+ * The squadron owner then asked for the delivery chart to be stackable by commander, and it is
+ * directly above this list. So the reasoning is recorded rather than quietly deleted: the page now
+ * does show when each commander hauled, at hour or day resolution, to members who can already see
+ * the build. It is worth the owner knowing that is what was asked for — the companion app has
+ * shown the same ledger, with names and timestamps, since it was built, so withholding it here was
+ * protecting nothing and only made the website the less useful of the two.
+ *
+ * This component itself stays a plain leaderboard. A chart cannot be read to the tonne, and "am I
+ * third or fourth" is a question people genuinely have about their own name.
  */
 export function HaulerBoard({ haulers }: { haulers: readonly ColonyHauler[] }) {
   if (haulers.length === 0) {
