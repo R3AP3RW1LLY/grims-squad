@@ -9,6 +9,7 @@ import {
   type User,
 } from 'discord.js';
 import { PrismaClient } from '@grims/db';
+import { composeNickname, overrideActionFor, LEADERSHIP_CEILING } from '@grims/shared';
 import pino from 'pino';
 import { ActivityRecorder, monthKey } from './activity.recorder.js';
 import {
@@ -977,8 +978,118 @@ client.on(Events.GuildMemberAdd, (member) => {
  * officers recognise each other by. Cheap to keep current: the event carries
  * the new value, so this is one write and no fetch.
  */
-client.on(Events.GuildMemberUpdate, (_before, after) => {
+/**
+ * Records a nickname an officer set for themselves.
+ *
+ * ★ SQUADRON OWNER, 2026-08-02 ★
+ *
+ * "if they update it in discord, it should also update here and not change back!"
+ *
+ * ★ WHY THIS COMPARES AGAINST THE CONVENTION ★
+ *
+ * Our OWN renames fire this same event. Recording every change would mean the first time the
+ * nightly sweep corrected somebody, they acquired an override and were never corrected again — the
+ * convention disabling itself one member at a time. `overrideActionFor` decides; the reasoning
+ * lives with it in @grims/shared, next to its tests.
+ *
+ * Everything here is best-effort. A member renaming themselves must never fail because we could
+ * not write a row about it.
+ */
+async function captureNicknameChoice(discordId: string, newNick: string | null): Promise<void> {
+  const identity = await prisma.discordIdentity.findUnique({
+    where: { discordId },
+    select: { userId: true },
+  });
+
+  // No website account, so nothing to record against. Most of the guild is in this state.
+  if (identity === null) return;
+
+  const [user, verification, member, mappings] = await Promise.all([
+    prisma.user.findUnique({
+      where: { id: identity.userId },
+      select: { nicknameOverride: true, nicknameOverrideAllowed: true },
+    }),
+    prisma.cmdrVerification.findFirst({
+      where: { userId: identity.userId, isVerified: true, revokedAt: null },
+      select: { cmdrName: true },
+    }),
+    prisma.discordGuildMember.findUnique({ where: { discordId }, select: { roles: true } }),
+    prisma.roleMapping.findMany({
+      where: { role: { isHierarchical: true } },
+      select: { discordRoleId: true, role: { select: { rankOrder: true } } },
+    }),
+  ]);
+
+  if (user === null) return;
+
+  /*
+   * ★ WHO MAY OVERRIDE ★
+   *
+   * An OFFICER by rank — below LEADERSHIP_CEILING, which is Squadron Leader up to Galactic Admiral
+   * — or anybody an officer has granted the right to. Read from the roles they WEAR rather than
+   * granted internal roles, for the same reason the rank prefix always was: grants only exist for
+   * an account that has been reconciled, and the guild is the authority on who is an officer.
+   */
+  const rankByRoleId = new Map(mappings.map((m) => [m.discordRoleId, m.role.rankOrder]));
+  const isOfficer = (member?.roles ?? []).some((id) => {
+    const order = rankByRoleId.get(id);
+    return order !== undefined && order !== null && order < LEADERSHIP_CEILING;
+  });
+
+  const action = overrideActionFor({
+    newNick,
+    conventionNick:
+      verification === null ? null : composeNickname(null, verification.cmdrName),
+    mayOverride: isOfficer || user.nicknameOverrideAllowed,
+  });
+
+  if (action === 'ignore') return;
+
+  // Nothing to do, and writing anyway would put a fresh timestamp on an unchanged decision.
+  if (action === 'clear' && user.nicknameOverride === null) return;
+  if (action === 'set' && user.nicknameOverride === newNick) return;
+
+  await prisma.user.update({
+    where: { id: identity.userId },
+    data:
+      action === 'clear'
+        ? { nicknameOverride: null, nicknameOverrideAt: null, nicknameOverrideSource: null }
+        : {
+            nicknameOverride: newNick,
+            nicknameOverrideAt: new Date(),
+            // `discord` rather than `web`: somebody who renamed themselves in the guild may not
+            // realise they have opted out of the convention at all, and an officer reading the
+            // audit later should be able to tell the two apart.
+            nicknameOverrideSource: 'discord',
+          },
+  });
+
+  await prisma.auditLog
+    .create({
+      data: {
+        actorId: identity.userId,
+        action: action === 'clear' ? 'discord.nickname.override.cleared' : 'discord.nickname.override.set',
+        targetType: 'user',
+        targetId: identity.userId,
+        before: { nickname: user.nicknameOverride } as never,
+        after: { nickname: newNick, source: 'discord' } as never,
+      },
+    })
+    .catch(() => undefined);
+}
+
+client.on(Events.GuildMemberUpdate, (before, after) => {
   if (after.guild.id !== GUILD_ID) return;
+
+  /*
+   * Only when the NICKNAME moved. This event also fires for roles, timeouts and avatar changes, and
+   * re-deciding on each of those would put a fresh timestamp on a decision nobody made.
+   */
+  if (before.nickname !== after.nickname) {
+    void captureNicknameChoice(after.id, after.nickname).catch((err: unknown) =>
+      logger.error({ err }, 'failed to record a self-chosen nickname'),
+    );
+  }
 
   void prisma.discordGuildMember
     .upsert({

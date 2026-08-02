@@ -241,3 +241,64 @@ export function resolveMemberRank(held: readonly HeldRole[], leadershipCeiling: 
   const membership = held.filter((r) => r.category === 'membership');
   return membership[0]?.name ?? null;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CAPTURING A NICKNAME SOMEBODY CHANGED IN DISCORD
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** What to do about a nickname that just changed in the guild. */
+export type OverrideAction = 'set' | 'clear' | 'ignore';
+
+/**
+ * Whether a Discord nickname change is somebody choosing their own name.
+ *
+ * ★ SQUADRON OWNER, 2026-08-02 ★
+ *
+ * "if they update it in discord, it should also update here and not change back!" — for officers,
+ * and for anyone an officer has granted the right to.
+ *
+ * ★ THE TRAP THIS EXISTS TO AVOID ★
+ *
+ * OUR OWN renames fire `GuildMemberUpdate` too. Recording every change as an override would mean
+ * the first time the nightly sweep corrected somebody, they would acquire an override and never be
+ * corrected again — the feature would disable itself, quietly, one member at a time, and the
+ * symptom would be "the convention stopped working" weeks later.
+ *
+ * So the new nickname is compared against what the convention WOULD produce. Matching it is either
+ * our own write or a member typing the same thing by hand, and neither is a decision to opt out.
+ *
+ * Case-insensitively, because Elite is: somebody re-typing their own name with different capitals
+ * has not chosen a different name, and treating it as one would opt them out by accident.
+ *
+ * ★ CLEARING IT IS ALSO A CHOICE ★
+ *
+ * Removing your nickname in Discord — leaving just your username — reads as "put me back to
+ * normal", so it clears the override rather than freezing an empty name.
+ */
+export function overrideActionFor(input: {
+  /** The nickname now set in the guild. Null means they removed it. */
+  readonly newNick: string | null;
+  /** What the convention would give them, or null when there is no verified name to build one from. */
+  readonly conventionNick: string | null;
+  /** Whether this member is permitted to hold an override at all. */
+  readonly mayOverride: boolean;
+}): OverrideAction {
+  // Not permitted: the sweep will put them back tonight, and recording anything would imply
+  // otherwise to whoever reads the audit.
+  if (!input.mayOverride) return 'ignore';
+
+  const next = input.newNick?.trim() ?? '';
+  if (next === '') return 'clear';
+
+  const convention = input.conventionNick?.trim() ?? '';
+  if (convention !== '' && next.toLowerCase() === convention.toLowerCase()) {
+    /*
+     * Indistinguishable from our own write, and harmless either way: a member wearing exactly the
+     * convention has not opted out of anything, so leaving them un-overridden keeps them following
+     * their Inara name if it later changes.
+     */
+    return 'ignore';
+  }
+
+  return 'set';
+}

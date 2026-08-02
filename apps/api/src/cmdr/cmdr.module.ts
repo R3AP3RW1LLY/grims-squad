@@ -16,7 +16,8 @@ import { InaraLinkService } from './inara-link.service.js';
 import { PrismaInaraLinkStore } from './inara-link.store.prisma.js';
 import { NicknameSyncService } from './nickname-sync.service.js';
 import { LEADERSHIP_CEILING } from '../members/members.store.js';
-import { CMDR_SERVICE, NONCE_SERVICE, INARA_LINK } from './cmdr.tokens.js';
+import { CMDR_SERVICE, NONCE_SERVICE, INARA_LINK, NICKNAME_SERVICE } from './cmdr.tokens.js';
+import { NicknameService } from './nickname.service.js';
 import { logger } from '../logging.js';
 
 /**
@@ -151,6 +152,37 @@ function nicknameReconciler(prisma: PrismaClient): NicknameSyncService | undefin
   imports: [DatabaseModule],
   controllers: [CmdrController],
   providers: [
+    {
+      provide: NICKNAME_SERVICE,
+      inject: [PrismaClient],
+      useFactory: (db: PrismaClient) => {
+        /*
+         * The SAME Discord adapter the nickname sync uses, built the same way — including the empty
+         * `grantableRoleIds`, which makes "this adapter renames people and never grants a role"
+         * structural rather than a promise about how it happens to be called.
+         *
+         * Null when the guild or token is unset, which is the ordinary state in a development
+         * environment. Choosing a nickname still works; it simply is not pushed anywhere.
+         */
+        const guildId = process.env['DISCORD_GUILD_ID'] ?? '';
+        const botToken = process.env['DISCORD_BOT_TOKEN'] ?? '';
+
+        if (guildId === '' || botToken === '') return new NicknameService(db, null);
+
+        const discord = new DiscordAdapter({
+          clientId: process.env['DISCORD_CLIENT_ID'] ?? '',
+          clientSecret: process.env['DISCORD_CLIENT_SECRET'] ?? '',
+          botToken,
+          // EMPTY, deliberately — same reasoning as the sync adapter above. This exists to rename
+          // people and must never grant a role.
+          grantableRoleIds: [],
+        });
+        return new NicknameService(db, {
+          guildId,
+          set: (g, d, nick) => discord.setMemberNickname(g, d, nick),
+        });
+      },
+    },
     {
       provide: CMDR_SERVICE,
       inject: [PrismaClient],

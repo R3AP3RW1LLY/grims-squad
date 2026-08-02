@@ -16,7 +16,8 @@ import { User, type CurrentUser } from '../auth/current-user.js';
 import { RequiresPermission, CloakAsNotFound } from '../authz/requires-permission.guard.js';
 import { AdminGateGuard, RequiresTwoFactor } from '../auth/admin-gate.guard.js';
 import { verifyCsrf, readCsrfCookie } from '../common/csrf.js';
-import { CMDR_SERVICE, NONCE_SERVICE, INARA_LINK } from './cmdr.tokens.js';
+import { CMDR_SERVICE, NONCE_SERVICE, INARA_LINK, NICKNAME_SERVICE } from './cmdr.tokens.js';
+import type { NicknameService } from './nickname.service.js';
 import { LIVE_SERVICE } from '../live/live.tokens.js';
 import type { CmdrService, ClaimRecord, QueueEntry } from './cmdr.service.js';
 import type { NonceService } from '@grims/shared';
@@ -65,7 +66,24 @@ export class CmdrController {
      * Nothing is written, granted or lost.
      */
     @Optional() @Inject(LIVE_SERVICE) private readonly live?: LiveService,
+    /*
+     * @Optional for the same reason as `live`: this controller's own tests construct it directly
+     * with the three collaborators they exercise, and a required fifth would turn every one of them
+     * into a wiring test. In the running application the module always provides it.
+     *
+     * Unlike `live`, its absence is not silently survivable — the nickname routes have nothing to
+     * answer with — so they say so rather than dereferencing undefined.
+     */
+    @Optional() @Inject(NICKNAME_SERVICE) private readonly nicknames?: NicknameService,
   ) {}
+
+  /** The nickname service, or a clear refusal rather than a crash on undefined. */
+  #nick(): NicknameService {
+    if (this.nicknames === undefined) {
+      throw new AppError(ErrorCode.UPSTREAM_UNAVAILABLE, 'Nicknames are not configured here.');
+    }
+    return this.nicknames;
+  }
 
   /**
    * Tells this member's other tabs that their verification moved.
@@ -283,6 +301,79 @@ export class CmdrController {
     // The user id comes from the SESSION. A member can only ever declare for
     // themselves, so there is no id in the body to tamper with.
     return this.cmdr.declare(userId, readString(body, 'cmdrName'));
+  }
+
+  // ------------------------------------------------------------- nicknames
+  /**
+   * What this member wears, what the convention would give them, and whether they may choose.
+   *
+   * Ungated beyond sign-in: it is a fact about the caller's own account.
+   */
+  @Get('me/nickname')
+  async myNickname(@User() caller: CurrentUser | undefined) {
+    return this.#nick().state(requireUser(caller));
+  }
+
+  /**
+   * The member chooses their own nickname, or clears it.
+   *
+   * ★ SQUADRON OWNER, 2026-08-02 ★
+   *
+   * "add a step to onboarding that allows them to overide their discord server nickname ... this is
+   * the name that stays as their discord nickname it should not change from that unless they change
+   * it."
+   *
+   * ★ THE GUILD IS UPDATED HERE, NOT LEFT TO THE NIGHTLY SWEEP ★
+   *
+   * The sweep now SKIPS anybody with an override, so if this did not write to Discord the chosen
+   * name would never be worn at all — the member would set it, see it confirmed, and find their old
+   * nickname still in the member list tomorrow. The one write is here, at the moment they choose.
+   *
+   * A Discord failure does not fail the request. The choice is recorded either way, and the reason
+   * comes back so the page can say what happened rather than pretending it worked.
+   */
+  @Post('me/nickname')
+  async setMyNickname(
+    @User() caller: CurrentUser | undefined,
+    @Body() body: unknown,
+    @Req() req: FastifyRequest,
+  ) {
+    const userId = requireUser(caller);
+    csrf(req);
+
+    const raw = (body ?? {}) as Record<string, unknown>;
+    const wanted = typeof raw['nickname'] === 'string' ? raw['nickname'] : null;
+
+    const state = await this.#nick().setOverride(userId, wanted, 'web');
+    const pushed = await this.#nick().pushToGuild(userId, state.nickname);
+
+    return { ...state, pushed: pushed.ok, pushedReason: pushed.reason };
+  }
+
+  /**
+   * An officer grants a member the right to choose their own nickname.
+   *
+   * MEMBER_MANAGE for the same reason approving a commander claim uses it: deciding what a member
+   * is called is member management, and a bespoke permission per action makes the mask harder to
+   * reason about without making it more precise.
+   */
+  @RequiresPermission(Permission.MEMBER_MANAGE)
+  @RequiresTwoFactor()
+  @CloakAsNotFound()
+  @Post('admin/nickname-exception/:userId')
+  async grantNicknameException(
+    @User() caller: CurrentUser | undefined,
+    @Param('userId') targetUserId: string,
+    @Body() body: unknown,
+    @Req() req: FastifyRequest,
+  ): Promise<{ allowed: boolean }> {
+    const actorId = requireUser(caller);
+    csrf(req);
+
+    const allowed = ((body ?? {}) as Record<string, unknown>)['allowed'] === true;
+    await this.#nick().setAllowed(targetUserId, allowed, actorId);
+
+    return { allowed };
   }
 
   /**

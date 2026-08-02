@@ -73,11 +73,14 @@ export {
 } from './squadron.js';
 export {
   composeNickname,
+  humanizeCommanderName,
+  overrideActionFor,
   rankForDisplay,
   resolveMemberRank,
   MAX_NICK,
   LEADERSHIP_CEILING,
   type HeldRole,
+  type OverrideAction,
 } from './nickname.js';
 export {
   TELEMETRY_CATALOGUE,
