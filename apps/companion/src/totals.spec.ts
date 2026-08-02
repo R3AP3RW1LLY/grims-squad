@@ -17,6 +17,9 @@ import type { WatchOutcome } from './watcher.js';
 
 function pass(over: Partial<WatchOutcome> = {}): WatchOutcome {
   return {
+    // Not docked. Totals have nothing to do with where somebody is parked, and a default here keeps
+    // every case in this file about the numbers it is actually testing.
+    dockedAt: null,
     gameRunning: false,
     filesRead: 0,
     newFilesRead: 0,

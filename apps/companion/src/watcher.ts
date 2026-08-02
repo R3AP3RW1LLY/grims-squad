@@ -1,4 +1,5 @@
 import { readJournalChunk, journalFilesInOrder } from './journal-reader.js';
+import { trackDocked, type DockedAt } from './docked.js';
 import type { CompanionConfig } from './config.js';
 import type { Uploader } from './uploader.js';
 
@@ -72,6 +73,21 @@ export interface WatchOutcome {
   /** Set when the token has been revoked — the loop should stop until re-paired. */
   readonly unauthorised: boolean;
   readonly error: string | null;
+  /**
+   * Where the commander is docked, folded over every event this pass read.
+   *
+   * ★ SQUADRON OWNER, 2026-08-02 ★
+   *
+   * "it should appear automatically in the companion app on the new project page if it is not being
+   * used please!" — of the market id a project needs.
+   *
+   * Carried out of the watcher rather than read again elsewhere, because this is the only place the
+   * journal is parsed. A second reader would be a second set of offsets to keep in step, and the
+   * one that fell behind would quietly serve a station the member left.
+   *
+   * Null means "not docked, as far as we know", which is also what a first run reports.
+   */
+  readonly dockedAt: DockedAt | null;
 }
 
 /**
@@ -100,6 +116,12 @@ export async function runWatchPass(
   journalDir: string,
   config: CompanionConfig,
   uploader: Uploader,
+  /*
+   * What we believed before this pass. Threaded through rather than held in module state so the
+   * function stays pure enough to test — the same reason every other decision in this file is a
+   * parameter rather than a global.
+   */
+  dockedBefore: DockedAt | null = null,
 ): Promise<{ outcome: WatchOutcome; config: CompanionConfig }> {
   if (!config.enabled || config.deviceToken === '') {
     // Not an error. The app is installed and waiting, which is the state it
@@ -123,6 +145,9 @@ export async function runWatchPass(
   let txBytes = 0;
   let rxBytes = 0;
   let gameRunning = false;
+  // Seeded from what the caller already believed, so a station docked at ten minutes ago survives
+  // the passes in between that mention nothing.
+  let docked: DockedAt | null = dockedBefore;
   let sent = 0;
   let duplicates = 0;
   const refused: Record<string, number> = {};
@@ -166,6 +191,18 @@ export async function runWatchPass(
 
     if (result.sessionIsLive !== null) next.sessionLive[name] = result.sessionIsLive;
 
+    /*
+     * ★ FOLDED BEFORE THE "NOTHING TO SEND" RETURN, DELIBERATELY ★
+     *
+     * `Docked` is only uploaded when the member has left the `location` category on. Where they are
+     * docked is needed by the app itself — to fill in a project form — whether or not the squadron
+     * is allowed to know it, and reading it here rather than after the consent filter keeps those
+     * two questions separate.
+     *
+     * Nothing about this leaves the machine. It is used to pre-fill a form the member is looking at.
+     */
+    docked = trackDocked(docked, result.events);
+
     if (result.events.length === 0) {
       /*
        * Nothing to send, but the offset still moves: those bytes have been read
@@ -196,7 +233,7 @@ export async function runWatchPass(
       // picks up exactly where it left off.
       return {
         outcome: {
-          ...empty(),
+          ...empty(docked),
           gameRunning,
           filesRead,
           newFilesRead,
@@ -218,7 +255,7 @@ export async function runWatchPass(
        */
       return {
         outcome: {
-          ...empty(),
+          ...empty(docked),
           gameRunning,
           filesRead,
           newFilesRead,
@@ -260,6 +297,7 @@ export async function runWatchPass(
   next = pruneOffsets(next, all);
   return {
     outcome: {
+      dockedAt: docked,
       gameRunning,
       filesRead,
       newFilesRead,
@@ -295,8 +333,9 @@ export function pruneOffsets(config: CompanionConfig, present: readonly string[]
   return { ...config, offsets, sessionLive };
 }
 
-function empty(): WatchOutcome {
+function empty(dockedAt: DockedAt | null = null): WatchOutcome {
   return {
+    dockedAt,
     gameRunning: false,
     filesRead: 0,
     newFilesRead: 0,

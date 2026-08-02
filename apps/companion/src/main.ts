@@ -36,6 +36,7 @@ import {
 } from './config.js';
 import { Uploader } from './uploader.js';
 import { runWatchPass, type JournalFs, type WatchOutcome } from './watcher.js';
+import { isFresh, type DockedAt } from './docked.js';
 import { accumulate } from './totals.js';
 import { isGameRunning, isActivelyPlaying } from './game-process.js';
 import { startAutoUpdate } from './auto-update.js';
@@ -125,6 +126,20 @@ let activity: ActivityLine[] = [];
 
 /** The last known game state, so only the TRANSITION is logged rather than the boolean. */
 let gameWasRunning = false;
+
+/**
+ * Where the commander is docked, as of the last journal pass.
+ *
+ * ★ SQUADRON OWNER, 2026-08-02 ★
+ *
+ * "it should appear automatically in the companion app on the new project page if it is not being
+ * used please!"
+ *
+ * Held here rather than in the config: it describes right now, not a setting, and persisting it
+ * would be a file write every twenty seconds to record something worthless the moment the app
+ * closes.
+ */
+let dockedAt: DockedAt | null = null;
 
 let lastOutcome: WatchOutcome | null = null;
 let explainedTrayOnce = false;
@@ -388,6 +403,7 @@ async function tick(): Promise<void> {
       refused: {},
       unauthorised: true,
       error: statusLine(backoff, Date.now()) ?? 'Not sending — retrying shortly.',
+      dockedAt,
     };
     push();
     refreshTray();
@@ -407,6 +423,7 @@ async function tick(): Promise<void> {
       refused: {},
       unauthorised: false,
       error: advice(),
+      dockedAt,
     };
     push();
     return;
@@ -418,7 +435,8 @@ async function tick(): Promise<void> {
   });
 
   try {
-    const pass = await runWatchPass(nodeFs, dir, config, uploader);
+    const pass = await runWatchPass(nodeFs, dir, config, uploader, dockedAt);
+    dockedAt = pass.outcome.dockedAt;
     const nextConfig = pass.config;
     let outcome = pass.outcome;
 
@@ -561,6 +579,7 @@ async function tick(): Promise<void> {
       refused: {},
       unauthorised: false,
       error: error instanceof Error ? error.message : 'Something went wrong reading your journals.',
+      dockedAt,
     };
   }
 
@@ -648,6 +667,18 @@ function state(): Record<string, unknown> {
      * is something to say, because a line that always appears is a line nobody reads on the day it
      * matters.
      */
+    /*
+     * ★ WHERE THEY ARE DOCKED, FOR THE PROJECT FORM ★
+     *
+     * Squadron owner, 2026-08-02: "it should appear automatically in the companion app on the new
+     * project page if it is not being used please!"
+     *
+     * Gated on `isFresh`. The app may have been closed for days with a `Docked` as the last thing
+     * it saw, and pre-filling a form with a station somebody left on Tuesday creates a project
+     * pointing at the wrong construction site — which then silently never updates, because the
+     * market id is what a journal event matches on. A stale answer here is worse than none.
+     */
+    dockedAt: isFresh(dockedAt, Date.now()) ? dockedAt : null,
     overlays: config.overlays,
     overlayEditing: isEditing(),
     displayMode: currentMode(),

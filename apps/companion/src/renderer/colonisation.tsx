@@ -55,7 +55,14 @@ declare global {
 
 type Answer<T> = { ok: true; data: T } | { ok: false; error: string };
 
-export function Colonisation(): JSX.Element {
+/** Where the commander is docked, handed down from the app's state. */
+export interface DockedAt {
+  readonly marketId: string;
+  readonly stationName: string;
+  readonly systemName: string;
+}
+
+export function Colonisation({ dockedAt }: { dockedAt: DockedAt | null }): JSX.Element {
   const [boards, setBoards] = useState<{ projects: ColonyProject[]; can: ColonyRights } | null>(
     null,
   );
@@ -144,14 +151,35 @@ export function Colonisation(): JSX.Element {
           {posting ? (
             <PostForm
               canPostSquadron={boards.can.manage}
+              /*
+               * The site they are standing on, unless it is already posted. Somebody docked at a
+               * project that exists is looking at the board, not filling in a form — offering to
+               * create a duplicate would be answered by the server with "already posted as X",
+               * which is a worse way to learn it.
+               */
+              dockedAt={
+                dockedAt !== null &&
+                !boards.projects.some((p) => p.marketId === dockedAt.marketId)
+                  ? dockedAt
+                  : null
+              }
               onPosted={() => {
                 setPosting(false);
                 void reload();
               }}
             />
-          ) : (
+          ) : dockedAt === null ? (
             <Empty>
-              Dock at a construction site, then post it here so the squadron can see what it needs.
+              Dock at a construction site and the details fill themselves in here.
+            </Empty>
+          ) : (
+            /*
+             * Named, so pressing "New project" is not a leap of faith. Somebody who has just docked
+             * can see we already know where they are before they open the form.
+             */
+            <Empty>
+              You are docked at <span style={{ color: C.text }}>{dockedAt.stationName}</span> — press
+              New project and the details are already filled in.
             </Empty>
           )}
         </Section>
@@ -398,18 +426,35 @@ function Row({
 
 function PostForm({
   canPostSquadron,
+  dockedAt,
   onPosted,
 }: {
   canPostSquadron: boolean;
+  dockedAt: DockedAt | null;
   onPosted: () => void;
 }): JSX.Element {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /*
+   * ★ FILLED IN FROM THE JOURNAL — SQUADRON OWNER, 2026-08-02 ★
+   *
+   * "it should appear automatically in the companion app on the new project page if it is not being
+   * used please!"
+   *
+   * The form used to ask for a market id and point at a Status screen that did not show one. The
+   * app is already reading the journal that contains the answer, so asking a member to find and
+   * retype a ten-digit number was asking them to redo work the machine had done — and a typo in it
+   * produces a project that silently never updates.
+   *
+   * The station name seeds the title too, because "Ambrose Dock" is what almost everybody would
+   * type. It is an ordinary editable field, not a locked one: a member naming their build something
+   * else is the point of having a title at all.
+   */
   const [form, setForm] = useState({
-    title: '',
-    systemName: '',
-    stationName: '',
-    marketId: '',
+    title: dockedAt?.stationName ?? '',
+    systemName: dockedAt?.systemName ?? '',
+    stationName: dockedAt?.stationName ?? '',
+    marketId: dockedAt?.marketId ?? '',
     notes: '',
     owner: 'personal' as 'personal' | 'squadron',
   });
@@ -442,7 +487,11 @@ function PostForm({
         </Field>
         <Field
           label="Market id"
-          hint="Dock at the site and copy the id the app shows on Status. Everything else fills itself in."
+          hint={
+            dockedAt === null
+              ? 'Dock at the construction site and this fills itself in.'
+              : 'Read from your journal — you are docked there now.'
+          }
         >
           <input style={inputStyle} value={form.marketId} onInput={set('marketId')} placeholder="3706117632" />
         </Field>

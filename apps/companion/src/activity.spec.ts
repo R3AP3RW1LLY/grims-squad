@@ -11,6 +11,8 @@ import type { WatchOutcome } from './watcher.js';
  */
 
 const QUIET: WatchOutcome = {
+  // Not docked: these cases are about which lines get logged, not about where the ship is.
+  dockedAt: null,
   gameRunning: false,
   filesRead: 0,
   newFilesRead: 0,

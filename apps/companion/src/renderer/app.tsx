@@ -51,6 +51,8 @@ interface AppState {
   totals?: { sent: number; duplicates: number; journalsRead: number; since: string | null };
   gameRunning?: boolean;
   error?: string | null;
+  /** Where the commander is docked, when it is recent enough to trust. Null otherwise. */
+  dockedAt: { marketId: string; stationName: string; systemName: string } | null;
   overlays: OverlayLayout;
   overlayEditing: boolean;
   displayMode: string;
@@ -168,7 +170,7 @@ function App(): JSX.Element {
 
       <main style={{ flex: 1, overflowY: 'auto', padding: '22px 26px' }}>
         {page === 'status' ? <Status state={state} /> : null}
-        {page === 'colonisation' ? <Colonisation /> : null}
+        {page === 'colonisation' ? <Colonisation dockedAt={state.dockedAt} /> : null}
         {page === 'trade' ? <TradeRuns /> : null}
         {page === 'overlays' ? (
           <OverlaysPanel
