@@ -122,6 +122,22 @@ const NAV: readonly NavDefinition[] = [
     requires: Permission.SHIPYARD_VIEW,
   },
   {
+    href: '/shipyard/squadron',
+    label: 'Squadron builds',
+    section: 'squadron',
+    subsection: 'Shipyard',
+    blurb: 'What people here are flying, and how they fitted it.',
+    requires: Permission.SHIPYARD_VIEW,
+  },
+  {
+    href: '/shipyard/public',
+    label: 'Public builds',
+    section: 'squadron',
+    subsection: 'Shipyard',
+    blurb: 'Ships the squadron has published for anyone to use.',
+    requires: Permission.SHIPYARD_VIEW,
+  },
+  {
     href: '/ops',
     label: 'Operations',
     section: 'squadron',

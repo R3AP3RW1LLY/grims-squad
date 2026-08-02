@@ -1430,6 +1430,62 @@ export const getShipyardShipsGated = (): Promise<AdminRead<{ ships: ShipyardShip
  * them straight to `computeStats`, which is where their shape is actually known. Restating that
  * shape here would be a second definition free to drift from the one doing the arithmetic.
  */
+/** One row on a build board. */
+export interface SharedBuildRow {
+  shipName: string;
+  buildName: string | null;
+  role: string | null;
+  stats: Record<string, unknown> | null;
+  visibility: 'private' | 'squadron' | 'public';
+  shareToken: string;
+  author: string | null;
+  updatedAt: string;
+}
+
+/** A shared build, as its reader receives it. */
+export interface SharedBuild {
+  shipId: string;
+  shipName: string;
+  buildName: string | null;
+  build: import('@grims/shared/ship-build').ShipBuild;
+  stats: Record<string, unknown> | null;
+  role: string | null;
+  author: string | null;
+  visibility: 'private' | 'squadron' | 'public';
+  updatedAt: string;
+}
+
+/**
+ * The squadron's or the world's published builds.
+ *
+ * Plain `get`, not the gated reader: both boards answer without a session — the owner asked for the
+ * public page to be "visible ... to anyone not signed in" — so `null` here means the API is down
+ * rather than that somebody was refused, and the page says exactly that.
+ */
+export const getSharedBuilds = (
+  scope: 'squadron' | 'public',
+): Promise<{ builds: SharedBuildRow[] } | null> =>
+  get(`/v1/ai/shipyard/builds/shared?scope=${scope}`, { authed: true });
+
+/** One shared build by its token. Null covers "no such build" and "not shared with you" alike. */
+export const getSharedBuild = (token: string): Promise<SharedBuild | null> =>
+  get(`/v1/ai/shipyard/builds/shared/${encodeURIComponent(token)}`, { authed: true });
+
+/** The caller's own saved builds. */
+export const getMyBuilds = (): Promise<{ builds: SavedBuildRow[] } | null> =>
+  get('/v1/ai/shipyard/builds/mine', { authed: true });
+
+export interface SavedBuildRow {
+  id: string;
+  shipName: string;
+  buildName: string | null;
+  role: string | null;
+  stats: Record<string, unknown> | null;
+  visibility: 'private' | 'squadron' | 'public';
+  shareToken: string | null;
+  updatedAt: string;
+}
+
 export const getShipyardOutfitGated = (
   shipId: string,
 ): Promise<AdminRead<import('../app/(hub)/shipyard/outfitter-catalogue').OutfitPayload>> =>

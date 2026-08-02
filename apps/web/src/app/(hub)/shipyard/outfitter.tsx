@@ -5,6 +5,7 @@ import { computeStats, fitShip, type CatalogueModule, type FitRole } from '@grim
 import type { ShipBuild, FittedModule } from '@grims/shared/ship-build';
 import { catalogueFrom, optionsFor, slotCategory, type OutfitPayload } from './outfitter-catalogue';
 import { moduleFacts, moduleDescription, moduleSummary } from './module-facts';
+import { SaveBuild } from './save-build';
 
 /**
  * Build my own — the outfitting screen.
@@ -154,7 +155,14 @@ function ModuleDetail({ module }: { module: CatalogueModule }) {
   );
 }
 
-export function Outfitter({ payload }: { payload: OutfitPayload }) {
+export function Outfitter({
+  payload,
+  signedIn,
+}: {
+  payload: OutfitPayload;
+  /** A visitor may plan a ship; saving one needs an account. */
+  signedIn: boolean;
+}) {
   const catalogue = useMemo(() => catalogueFrom(payload), [payload]);
 
   /**
@@ -594,6 +602,17 @@ export function Outfitter({ payload }: { payload: OutfitPayload }) {
           </section>
         );
       })}
+
+      {/*
+        Saving sits at the BOTTOM, after the slots.
+
+        It is the end of the activity, and putting it at the top would make the first thing on an
+        outfitting screen a form about visibility — a decision nobody can make about a ship they
+        have not fitted yet.
+      */}
+      <div className="pt-1">
+        <SaveBuild build={build} shipName={payload.ship.name} signedIn={signedIn} />
+      </div>
 
       {emptySlots > 0 && (
         <p className="m-0 text-[11px] text-[var(--color-text-dim)]">

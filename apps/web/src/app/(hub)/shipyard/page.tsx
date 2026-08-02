@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import { PageHeader, PageBody, Section } from '../../../components/hub-page';
 import { PageTabs, resolveTab, type PageTab } from '../../../components/page-tabs';
-import { getShipyardShipsGated, getShipyardOutfitGated } from '../../../lib/api';
+import { getShipyardShipsGated, getShipyardOutfitGated, getMe } from '../../../lib/api';
 import { NoAccess, AdminUnavailable } from '../app/no-access';
 import { StepUp } from '../app/step-up';
 import { Outfitter } from './outfitter';
@@ -48,6 +48,8 @@ export default async function ShipyardPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const params = await searchParams;
+  // Whether to offer saving at all. A visitor may plan a ship; keeping one needs an account.
+  const me = await getMe();
   const tab = resolveTab(TABS, params['tab']);
   const shipId = typeof params['ship'] === 'string' ? params['ship'] : null;
 
@@ -108,7 +110,7 @@ export default async function ShipyardPage({
             title="Outfitting"
             description="Slot sizes are shown beside each dropdown — a module larger than its slot is not offered, and a smaller one usually saves weight."
           >
-            <Outfitter payload={outfit} />
+            <Outfitter payload={outfit} signedIn={me.user !== null} />
           </Section>
         ) : ships === null ? (
           <p className="text-sm text-[var(--color-text-secondary)]">
