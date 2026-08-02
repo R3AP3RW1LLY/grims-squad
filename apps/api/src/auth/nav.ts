@@ -102,8 +102,16 @@ const NAV: readonly NavDefinition[] = [
    * build my own or AI Assisted build" — and, refined: a subcategory called Shipyard with the page
    * named Outfitter.
    *
-   * Ungated. Working out what to save for is not a privileged act, and the data behind it is
-   * Frontier's own — every member should be able to plan a ship.
+   * ★ GATED ON SHIPYARD_VIEW SINCE 2026-08-01 ★
+   *
+   * This shipped ungated, on the reasoning that working out what to save for is not a privileged
+   * act and the data behind it is Frontier's own.
+   *
+   * That is an argument about the DATA, and the owner's instruction — "create the permissions for
+   * the Shipyard category ... make them work the same as all other categories" — is about the
+   * FEATURE. Being able to hold a page back from a rank while it is being tuned, or take it away
+   * from one that is abusing it, is an operational control rather than a privacy one. Every member
+   * holds SHIPYARD_VIEW in the preset, so nothing changes for anybody today.
    */
   {
     href: '/shipyard',
@@ -111,7 +119,7 @@ const NAV: readonly NavDefinition[] = [
     section: 'squadron',
     subsection: 'Shipyard',
     blurb: 'Outfit any hull in the game, or let the assistant fit one to a budget.',
-    requires: null,
+    requires: Permission.SHIPYARD_VIEW,
   },
   {
     href: '/ops',

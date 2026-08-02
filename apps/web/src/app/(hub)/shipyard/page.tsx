@@ -1,7 +1,9 @@
 import type { Metadata } from 'next';
 import { PageHeader, PageBody, Section } from '../../../components/hub-page';
 import { PageTabs, resolveTab, type PageTab } from '../../../components/page-tabs';
-import { getShipyardShips, getShipyardOutfit } from '../../../lib/api';
+import { getShipyardShipsGated, getShipyardOutfitGated } from '../../../lib/api';
+import { NoAccess, AdminUnavailable } from '../app/no-access';
+import { StepUp } from '../app/step-up';
 import { Outfitter } from './outfitter';
 import { AiBuilder } from './ai-builder';
 import { ShipPicker } from './ship-picker';
@@ -50,12 +52,33 @@ export default async function ShipyardPage({
   const shipId = typeof params['ship'] === 'string' ? params['ship'] : null;
 
   /*
-   * The ship list is needed by the picker on the build tab and by nothing else, and the outfitting
+   * The ship list is needed by the picker on the build tab and by nothing else; the outfitting
    * payload is only fetched once a hull is chosen — it is a few hundred kilobytes and there is no
    * sense sending it to somebody still deciding.
    */
-  const ships = tab === 'build' ? await getShipyardShips() : null;
-  const outfit = tab === 'build' && shipId !== null ? await getShipyardOutfit(shipId) : null;
+  const shipsRead = tab === 'build' ? await getShipyardShipsGated() : null;
+  const outfitRead =
+    tab === 'build' && shipId !== null ? await getShipyardOutfitGated(shipId) : null;
+
+  /*
+   * ★ A REFUSAL IS NOT A 2FA PROMPT ★
+   *
+   * `SHIPYARD_VIEW` can now refuse somebody, so the three ways this page can fail are told apart:
+   * a lost session or a genuine step-up gets the code box, a missing permission gets the screen
+   * that NAMES the permission, and everything else gets "the API is down". Collapsing them is what
+   * produced the loop `no-access.tsx` was written for.
+   */
+  const failure = [shipsRead, outfitRead].find((r) => r !== null && r.state !== 'ok') ?? null;
+  if (failure !== null) {
+    if (failure.state === 'needs-step-up' || failure.state === 'signed-out') return <StepUp />;
+    if (failure.state === 'forbidden') {
+      return <NoAccess what="the Shipyard" permission="SHIPYARD_VIEW" />;
+    }
+    return <AdminUnavailable />;
+  }
+
+  const ships = shipsRead?.state === 'ok' ? shipsRead.data : null;
+  const outfit = outfitRead?.state === 'ok' ? outfitRead.data : null;
 
   return (
     <>

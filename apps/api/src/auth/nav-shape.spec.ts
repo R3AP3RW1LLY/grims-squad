@@ -67,10 +67,20 @@ describe('navFor', () => {
   });
 
   it('gives a member with no permissions only ungated items', () => {
+    /*
+     * `/shipyard` used to be asserted here, because it shipped ungated. It is gated on
+     * SHIPYARD_VIEW as of 2026-08-01 — the owner asked for Shipyard permissions that "work the same
+     * as all other categories" — so a zero mask must NOT see it. `shipyard-permissions.spec.ts`
+     * covers that bit specifically.
+     */
     const items = navFor(0n);
 
-    expect(items.map((i) => i.href)).toContain('/shipyard');
+    expect(items.map((i) => i.href)).not.toContain('/shipyard');
     expect(items.every((i) => i.section !== 'admin')).toBe(true);
+
+    // The personal pages stay reachable on an empty mask: your own settings are yours regardless of
+    // rank, and gating them is a bug waiting for the first role rebuild.
+    expect(items.map((i) => i.href)).toContain('/settings/commander');
   });
 
   it('places every subsection inside exactly one section', () => {

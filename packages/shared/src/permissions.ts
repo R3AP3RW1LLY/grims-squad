@@ -21,8 +21,15 @@
  *   Bits are grouped by domain with reserved gaps, so a new permission never renumbers an
  *   existing one. Renumbering would silently change what every stored role mask means.
  *     0-9   forum        10-19 ops         20-29 fleet & carriers
- *     30-39 BGS          40-49 trade       50-59 AI
- *     60-69 admin        70-79 telemetry   80+   reserved
+ *     30-39 BGS          40-42 trade       43-49 shipyard
+ *     50-59 AI           60-69 admin       70-79 telemetry
+ *     80+   reserved
+ *
+ *   The 40s were "trade" alone until 2026-08-01. Trade had used three of ten for a year and the
+ *   shipyard needed four; a fresh decade for four bits would have cost the last unreserved block
+ *   for a domain that is unlikely to grow past this. The ranges are a convention for keeping
+ *   related bits together, not a promise — what must never change is a bit's NUMBER, because every
+ *   stored role mask is interpreted by position.
  */
 
 /** A permission bitmask. Always `bigint`, never `number` (INV-006). */
@@ -122,6 +129,39 @@ export const Permission = {
   TRADE_SAVE_ROUTE: 1n << 41n,
   /** Ring 1. Create and manage personal price alerts. */
   TRADE_MANAGE_ALERTS: 1n << 42n,
+
+  /*
+   * ── Shipyard ──────────────────────────────────────────────────────────────
+   *
+   * ★ SQUADRON OWNER, 2026-08-01 ★
+   *
+   * "create the permissions for the Shipyard category and add them to the roles page make them work
+   * the same as all other categories."
+   *
+   * ★ WHY FOUR AND NOT ONE ★
+   *
+   * Because the four things a member does here carry different consequences. Planning a ship is
+   * private and costs nothing. Saving one keeps a row. Sharing one puts a member's name in front of
+   * the squadron. Publishing one puts it in front of the internet, where it cannot be recalled.
+   *
+   * One bit for all four would mean the only way to stop somebody publishing to the public web is
+   * to stop them planning a ship at all — which is the shape of gate that gets left wide open
+   * because closing it costs too much.
+   */
+  /** Ring 1. Open the outfitter and the assisted builder. Reads Frontier's own data. */
+  SHIPYARD_VIEW: 1n << 43n,
+  /** Ring 1. Keep builds against their own account. */
+  SHIPYARD_SAVE: 1n << 44n,
+  /** Ring 1. Publish a build to the squadron — every signed-in member can then open it. */
+  SHIPYARD_SHARE: 1n << 45n,
+  /**
+   * Ring 2. Publish a build on a link that works WITHOUT signing in.
+   *
+   * Separate from SHIPYARD_SHARE because a public link is the only action on this page that cannot
+   * be taken back once somebody has copied it — so it must be revocable on its own. Every member
+   * holds it; the point of the separate bit is being able to take it away from one of them.
+   */
+  SHIPYARD_SHARE_PUBLIC: 1n << 46n,
 
   // ── AI ───────────────────────────────────────────────────────────────────
   /** Ring 1. Converse with GSAI at all. Without it, the panel is not offered. */
@@ -252,6 +292,22 @@ export const PRIVILEGED_PERMISSIONS: PermissionMask =
   Permission.BGS_SET_ORDERS |
   Permission.FLEET_APPROVE_DOCTRINE;
 
+/*
+ * ★ SHIPYARD_SHARE_PUBLIC IS DELIBERATELY *NOT* PRIVILEGED — READ BEFORE ADDING IT ★
+ *
+ * It was in the list above for about an hour, on the reasoning that a link working with no session
+ * is the one thing a compromised account could put in front of the internet under the squadron's
+ * name.
+ *
+ * That reasoning ignores what this constant DOES. `requiresTwoFactor` reads it, so putting a bit
+ * here obliges every member holding it to enrol an authenticator. The owner's instruction is that
+ * members share publicly "if they choose to" — so the bit is in the member preset, so that change
+ * would have marched all hundred-odd members into a 2FA enrolment for the sake of a ship build.
+ *
+ * The separate bit still earns its place: it is how an officer stops ONE member publishing without
+ * taking away everything else they can do here.
+ */
+
 /**
  * Does this member have to enrol a second factor?
  *
@@ -361,6 +417,20 @@ const MEMBER: PermissionMask =
   P.TRADE_QUERY |
   P.TRADE_SAVE_ROUTE |
   P.TRADE_MANAGE_ALERTS |
+  /*
+   * Planning, saving and sharing a ship — to the squadron, and to the open web if they choose to.
+   *
+   * Squadron owner, 2026-08-01: "the ability for our users to share their builds and make them
+   * visible to the squadron and public if they choose to."
+   *
+   * Public sharing keeps its own bit even though every member holds it, so an officer can stop one
+   * person publishing without taking away everything else they can do here. A permission every
+   * member happens to hold still earns its place when the interesting case is removing it.
+   */
+  P.SHIPYARD_VIEW |
+  P.SHIPYARD_SAVE |
+  P.SHIPYARD_SHARE |
+  P.SHIPYARD_SHARE_PUBLIC |
   P.AI_CHAT |
   P.AI_TOOLS_READ |
   P.AI_TOOLS_WRITE |

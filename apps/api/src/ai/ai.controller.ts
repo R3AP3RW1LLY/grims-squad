@@ -209,13 +209,26 @@ export class AiController {
    *
    * "a page under squadron called Shipyard ... 2 options build my own or AI Assisted build".
    *
-   * Ungated beyond sign-in. Outfitting is not a privileged act — it is a member working out what to
-   * save for, and the data is Frontier's own.
+   * ★ SHIPYARD_VIEW, CHECKED HERE AND NOT ONLY IN THE NAV ★
+   *
+   * Hiding the sidebar entry is honesty, not authorisation — the URL is still typeable and the
+   * endpoint is still callable. Both shipyard reads assert the bit for the same reason every other
+   * gated route does: the menu and the guard must read the same mask, and only one of them is a
+   * security boundary.
    */
   @Get('shipyard/ships')
   async shipyardShips(@User() caller: CurrentUser | undefined) {
     if (caller === undefined) throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
+    await this.#assertShipyard(caller.userId);
     return { ships: await this.shipyard.ships() };
+  }
+
+  /** SHIPYARD_VIEW or nothing. Written once because three endpoints need the same sentence. */
+  async #assertShipyard(userId: string): Promise<void> {
+    const mask = await this.permissions.effectiveMask(userId);
+    if ((mask & Permission.SHIPYARD_VIEW) !== Permission.SHIPYARD_VIEW) {
+      throw new AppError(ErrorCode.PERMISSION_DENIED, 'You do not have access to the Shipyard.');
+    }
   }
 
   /**
@@ -233,6 +246,7 @@ export class AiController {
     @Param('shipId') shipId: string,
   ) {
     if (caller === undefined) throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
+    await this.#assertShipyard(caller.userId);
 
     const outfit = await this.shipyard.outfit(shipId);
     if (outfit === null) {
@@ -253,6 +267,7 @@ export class AiController {
   @Post('shipyard/fit')
   async shipyardFit(@User() caller: CurrentUser | undefined, @Body() body: unknown) {
     if (caller === undefined) throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
+    await this.#assertShipyard(caller.userId);
 
     const input = (body ?? {}) as Record<string, unknown>;
     const role = typeof input['role'] === 'string' ? input['role'] : '';

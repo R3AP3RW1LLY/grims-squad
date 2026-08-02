@@ -111,6 +111,14 @@ export const DESCRIBES: Readonly<Record<string, string>> = {
     'Save routes and post them to the squadron trade board.',
   TRADE_MANAGE_ALERTS:
     'Create and manage their own price alerts.',
+  SHIPYARD_VIEW:
+    'Open the outfitter and the assisted builder. Everything behind it is Frontier’s own module data — working out what to save for is not a privileged act.',
+  SHIPYARD_SAVE:
+    'Keep builds against their own account, so a ship planned on Tuesday is still there on Friday.',
+  SHIPYARD_SHARE:
+    'Publish a build to the squadron. Every signed-in member can then open it, with the author’s name on it.',
+  SHIPYARD_SHARE_PUBLIC:
+    'Publish a build on a link that works without signing in. The only action here that cannot be taken back once somebody has copied the link — and anyone holding it must carry a second factor.',
   AI_CHAT:
     'Talk to the squadron assistant at all. Without this the panel is not offered.',
   AI_TOOLS_READ:
@@ -225,6 +233,26 @@ const PERMISSION_GROUPS: readonly PermissionGroup[] = [
        */
       ['AI_TRAINING', 55],
       ['AI_TRAIN_SUBMIT', 56],
+    ],
+  },
+  {
+    /*
+     * ★ ITS OWN CATEGORY — SQUADRON OWNER, 2026-08-01 ★
+     *
+     * "create the permissions for the Shipyard category and add them to the roles page make them
+     * work the same as all other categories."
+     *
+     * Not folded into Fleet, though the two are about ships. Fleet is a record of what the squadron
+     * OWNS; the Shipyard is a tool for planning what somebody might buy. A rank can reasonably have
+     * one and not the other, and a heading that merges them makes that impossible to express.
+     */
+    title: 'Shipyard',
+    note: 'Who may plan ships, keep what they plan, and show it to other people. Sharing to the squadron and publishing to the open web are separate on purpose — only the second is permanent.',
+    items: [
+      ['SHIPYARD_VIEW', 43],
+      ['SHIPYARD_SAVE', 44],
+      ['SHIPYARD_SHARE', 45],
+      ['SHIPYARD_SHARE_PUBLIC', 46],
     ],
   },
   {

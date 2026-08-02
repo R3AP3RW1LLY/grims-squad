@@ -1408,8 +1408,20 @@ export interface ShipyardShipRow {
   pad: number;
 }
 
-export const getShipyardShips = (): Promise<{ ships: ShipyardShipRow[] } | null> =>
-  get('/v1/ai/shipyard/ships', { authed: true });
+/**
+ * Every hull, keeping the reason it failed.
+ *
+ * ★ GATED, NOT `get()` — AND THE REASON IS ON RECORD ★
+ *
+ * `get()` returns null for everything: 401, 403, a permission refusal and the API being down are
+ * one value. That is what put an officer in a loop typing valid authenticator codes at a page that
+ * was refusing them on a PERMISSION — see `no-access.tsx`, which exists because of it.
+ *
+ * `SHIPYARD_VIEW` is new, so this page can now refuse somebody, and it must refuse them with the
+ * screen that names the permission rather than the one that asks for six digits.
+ */
+export const getShipyardShipsGated = (): Promise<AdminRead<{ ships: ShipyardShipRow[] }>> =>
+  getAdmin('/v1/ai/shipyard/ships');
 
 /**
  * One hull and every module that fits it.
@@ -1418,7 +1430,7 @@ export const getShipyardShips = (): Promise<{ ships: ShipyardShipRow[] } | null>
  * them straight to `computeStats`, which is where their shape is actually known. Restating that
  * shape here would be a second definition free to drift from the one doing the arithmetic.
  */
-export const getShipyardOutfit = (
+export const getShipyardOutfitGated = (
   shipId: string,
-): Promise<import('../app/(hub)/shipyard/outfitter-catalogue').OutfitPayload | null> =>
-  get(`/v1/ai/shipyard/outfit/${encodeURIComponent(shipId)}`, { authed: true });
+): Promise<AdminRead<import('../app/(hub)/shipyard/outfitter-catalogue').OutfitPayload>> =>
+  getAdmin(`/v1/ai/shipyard/outfit/${encodeURIComponent(shipId)}`);
