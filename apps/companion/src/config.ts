@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { defaultLayout, normaliseLayout, type OverlayLayout } from './overlay-config.js';
 
 /**
  * The companion's own settings, on disk.
@@ -85,6 +86,19 @@ export interface CompanionConfig {
    * from the hub, and both are shown because they answer different questions.
    */
   totals: CompanionTotals;
+  /**
+   * How the member has arranged their overlays.
+   *
+   * ★ SQUADRON OWNER, 2026-08-02 ★
+   *
+   * "make nice professional editable and lockable overlays for our modules etc."
+   *
+   * Kept in the same file as everything else so an arrangement survives a restart, an update and a
+   * machine that was switched off mid-game. The shape, the clamping and the rescue from an
+   * unplugged monitor all live in `overlay-config.ts`, which is pure and tested — this file only
+   * has to store it.
+   */
+  overlays: OverlayLayout;
 }
 
 export interface CompanionTotals {
@@ -128,6 +142,8 @@ export const DEFAULT_CONFIG: CompanionConfig = {
   searchedAndFoundNothing: false,
   autoStart: true,
   totals: EMPTY_TOTALS,
+  // Every overlay off and locked. See `defaultLayout` for why both of those are the safe start.
+  overlays: defaultLayout(),
 };
 
 export function configPath(userDataDir: string): string {
@@ -170,6 +186,13 @@ export function loadConfig(userDataDir: string): CompanionConfig {
        */
       autoStart: parsed.autoStart !== false,
       totals: readTotals(parsed.totals),
+      /*
+       * Normalised rather than trusted. This is a JSON file in the member's own profile — hand
+       * edited, half-written by a crash, or produced by a version with different fields — and an
+       * out-of-range opacity or a placement on a monitor that no longer exists is a panel they can
+       * neither see nor reach.
+       */
+      overlays: normaliseLayout(parsed.overlays),
     };
   } catch {
     return { ...DEFAULT_CONFIG };
