@@ -1,3 +1,4 @@
+import { JOB_REQUEST_CHANNEL } from '@grims/shared';
 import type { PrismaClient } from '@grims/db';
 import { LEADERSHIP_CEILING } from '../members/members.store.js';
 
@@ -298,6 +299,28 @@ export interface AdminStore {
   resetTwoFactor(userId: string, actorId: string, reason: string): Promise<void>;
   /** Distinct action names present in the log, so the UI can offer them. */
   auditActions(): Promise<string[]>;
+  /**
+   * Asks the resident worker to run a job now.
+   *
+   * ★ SQUADRON OWNER, 2026-08-02: a button to trigger the Inara check ★
+   *
+   * NOTIFY rather than a queue row, matching the ingest buttons. A request only means anything
+   * while somebody is listening; a row would run at some unknowable later moment when nobody was
+   * expecting it, which is not what a button press means.
+   *
+   * Whether it ACTUALLY runs is the job's decision — the nightly commander audit holds an advisory
+   * lock, so a request arriving mid-run is declined rather than starting a second one.
+   */
+  requestJob(job: string): Promise<void>;
+  /** Writes one audit row. For actions that are not moderation of a member. */
+  writeAudit(entry: {
+    actorId: string | null;
+    action: string;
+    targetType: string;
+    targetId: string;
+    before: unknown;
+    after: unknown;
+  }): Promise<void>;
 }
 
 export class PrismaAdminStore implements AdminStore {
@@ -960,6 +983,30 @@ export class PrismaAdminStore implements AdminStore {
             : { deleteMessageDays: entry.deleteMessageDays }),
           ...(entry.problem === undefined ? {} : { problem: entry.problem }),
         },
+      },
+    });
+  }
+
+  async requestJob(job: string): Promise<void> {
+    await this.#db.$executeRawUnsafe(`SELECT pg_notify($1, $2)`, JOB_REQUEST_CHANNEL, job);
+  }
+
+  async writeAudit(entry: {
+    actorId: string | null;
+    action: string;
+    targetType: string;
+    targetId: string;
+    before: unknown;
+    after: unknown;
+  }): Promise<void> {
+    await this.#db.auditLog.create({
+      data: {
+        actorId: entry.actorId,
+        action: entry.action,
+        targetType: entry.targetType,
+        targetId: entry.targetId,
+        before: (entry.before ?? null) as never,
+        after: (entry.after ?? null) as never,
       },
     });
   }

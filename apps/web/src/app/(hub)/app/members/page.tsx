@@ -5,6 +5,7 @@ import { StepUp } from '../step-up';
 import { NoAccess, AdminUnavailable } from '../no-access';
 import { PageHeader, Section, StatGrid, StatTile } from '../../../../components/hub-page';
 import { isTimedOut } from './moderation-rules';
+import { RefreshInara } from './refresh-inara';
 
 export const metadata: Metadata = {
   title: "Squad members — Grim's Squad",
@@ -69,6 +70,12 @@ export default async function SquadMembersPage() {
         eyebrow="Administration"
         title="Squad members"
         subtitle="Everybody in the Discord server, and the tools to moderate them"
+        /*
+         * `action` renders inside the header row, above the rule that separates it from the body —
+         * which is where the owner asked for it: "put that new button on the /app/members page above
+         * the title line".
+         */
+        action={<RefreshInara />}
       />
 
       <Section

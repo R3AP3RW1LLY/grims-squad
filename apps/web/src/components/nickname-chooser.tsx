@@ -30,6 +30,40 @@ export interface NicknameState {
   unverified: boolean;
 }
 
+/**
+ * The way off this page.
+ *
+ * ★ SQUADRON OWNER, 2026-08-02 ★
+ *
+ * "we need a proceed button there so people can continue to login to their dashboard. it was very
+ * hard for me to continue on from that new screen."
+ *
+ * Two things were wrong with the first version, and the second was worse.
+ *
+ * The continue action was a grey bordered link, third in a row, after an orange Save button — so
+ * the loudest thing on a screen most people want to walk straight past was the one action they did
+ * not need. Visual weight is an instruction, and it was pointing the wrong way.
+ *
+ * And the branch for members who may NOT choose a nickname had no way out AT ALL. Anybody reaching
+ * that page without override rights was simply stuck.
+ *
+ * So it is one component, rendered by both branches, and it is the PRIMARY action: filled, on its
+ * own row, under a divider that says the decision above is finished.
+ */
+function Proceed({ href, label }: { readonly href: string; readonly label: string }) {
+  return (
+    <div className="mt-6 border-t border-[var(--color-border-hairline)] pt-5">
+      <a
+        href={href}
+        className="inline-block rounded bg-[var(--color-brand-orange)] px-6 py-3 text-sm text-[var(--color-text-on-accent)] no-underline transition-opacity hover:opacity-90"
+        style={{ fontFamily: 'var(--font-display)' }}
+      >
+        {label}
+      </a>
+    </div>
+  );
+}
+
 export function NicknameChooser({
   initial,
   onDone,
@@ -95,6 +129,12 @@ export function NicknameChooser({
           in Discord as it does in game. Officers can set something different, and can grant that to
           anybody who needs it — ask one if your name cannot be written the usual way.
         </p>
+
+        {/*
+          There is nothing to decide here, so this is the ONLY action — and its absence is what left
+          people stranded on this screen.
+        */}
+        {onDone !== undefined && <Proceed href={onDone} label="CONTINUE TO YOUR DASHBOARD" />}
       </div>
     );
   }
@@ -180,19 +220,20 @@ export function NicknameChooser({
           </button>
         )}
 
-        {onDone !== undefined && (
-          <a
-            href={onDone}
-            className="rounded border border-[var(--color-border-subtle)] px-4 py-2 text-sm text-[var(--color-text-secondary)] no-underline hover:text-[var(--color-text-primary)]"
-          >
-            {/*
-              "Continue", not "Skip". Keeping the convention is a real answer and the commonest one,
-              and calling it skipping frames the default as something you failed to do.
-            */}
-            {state.override === null ? 'Keep my Inara name and continue' : 'Continue'}
-          </a>
-        )}
       </div>
+
+      {/*
+        ★ THE WAY OUT IS THE LOUDEST THING, NOT THE QUIETEST ★
+
+        Below the name controls and under a divider, because it is a different kind of action: the
+        two buttons above change something, this one leaves. Most people arriving here are happy
+        with their Inara name and want their dashboard — and they should not have to work out which
+        of three similar-looking controls does that.
+
+        "Continue", never "Skip". Keeping the convention is a real answer and the commonest one;
+        calling it skipping frames the default as something you failed to do.
+      */}
+      {onDone !== undefined && <Proceed href={onDone} label="CONTINUE TO YOUR DASHBOARD" />}
     </div>
   );
 }

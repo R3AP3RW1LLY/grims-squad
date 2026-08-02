@@ -73,3 +73,23 @@ export async function announce(db: NotifyCapable, line: JobLogLine): Promise<voi
     .$executeRawUnsafe(`SELECT pg_notify($1, $2)`, JOB_LOG_CHANNEL, encodeJobLogLine(line))
     .catch(() => undefined);
 }
+
+/**
+ * The nightly commander audit, by the name every caller keys on.
+ *
+ * ★ SQUADRON OWNER, 2026-08-02 ★
+ *
+ * "add a button to the admin console to trigger an inara update manually ... pressing this should
+ * not interupt the daily job."
+ *
+ * THREE things have to agree on this string or the guarantee evaporates:
+ *
+ *   the ADMIN CONSOLE  names it when it asks for a run
+ *   the WORKER DAEMON  looks it up to know what to spawn
+ *   the AUDIT ITSELF   derives its advisory lock id from it, and cron reaches that same code
+ *
+ * If the button and the lock disagreed by one character, a press would start a second audit
+ * alongside the nightly one and nothing would report a problem — two processes renaming the same
+ * members and spending a request budget of two a minute. So it is written once, here.
+ */
+export const COMMANDER_AUDIT_JOB = 'commanders';

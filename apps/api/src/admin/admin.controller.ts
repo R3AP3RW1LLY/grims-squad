@@ -1,3 +1,4 @@
+import { COMMANDER_AUDIT_JOB } from '@grims/shared';
 import {
   Controller,
   Get,
@@ -86,6 +87,51 @@ export class AdminController {
   @Get('squad')
   async squad(): Promise<{ rows: SquadMemberRow[] }> {
     return { rows: await this.store.squadRoster() };
+  }
+
+  /**
+   * Runs the Inara commander check now.
+   *
+   * ★ SQUADRON OWNER, 2026-08-02 ★
+   *
+   * "add a button to the admin console to trigger an inara update manually please. that way we can
+   * trigger this if we need too ... pressing this should not interupt the daily job."
+   *
+   * ★ IT REQUESTS, AND THE JOB DECIDES ★
+   *
+   * NOTIFY, not a queue row. A request is only meaningful while somebody is listening: if the
+   * daemon is down there is nothing to run it, and a row sitting in a table would execute at some
+   * unknowable later moment when it may no longer be wanted. That is exactly the semantics of a
+   * button press.
+   *
+   * Not interrupting the nightly run is NOT enforced here, and could not be. Both callers contend
+   * for one Postgres advisory lock inside `daily-audit.ts` — cron at 00:15 and this — and whichever
+   * arrives second is declined and says so. Doing it in this controller would guard only the half
+   * of the traffic that comes through the website.
+   *
+   * ★ MEMBER_MANAGE, MATCHING THE PAGE IT SITS ON ★
+   *
+   * The button is on Squad members. Anybody who can kick somebody from the guild can certainly ask
+   * Inara whether they are still in the squadron.
+   */
+  @Post('squad/refresh-inara')
+  async refreshInara(@User() caller: CurrentUser | undefined): Promise<{ requested: true }> {
+    /*
+     * `pg_notify` through the same channel the ingest buttons use. The payload is the job name the
+     * daemon's registry and the audit's lock both key on — one string, agreed in one place.
+     */
+    await this.store.requestJob(COMMANDER_AUDIT_JOB);
+
+    await this.store.writeAudit({
+      actorId: caller?.userId ?? null,
+      action: 'inara.commander-audit.requested',
+      targetType: 'system',
+      targetId: COMMANDER_AUDIT_JOB,
+      before: null,
+      after: { source: 'admin console' },
+    });
+
+    return { requested: true };
   }
 
   /**

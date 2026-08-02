@@ -1,6 +1,13 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+
+/**
+ * How many members one page shows.
+ *
+ * Squadron owner, 2026-08-02: "max 25 perople per page please."
+ */
+const PER_PAGE = 25;
 import { useRouter } from 'next/navigation';
 import { apiPost } from '../../../../lib/api-client';
 import type { SquadMemberRow } from '../../../../lib/api';
@@ -68,6 +75,7 @@ export function SquadRoster({ rows, now }: { rows: SquadMemberRow[]; now: number
   const [role, setRole] = useState('');
   const [presence, setPresence] = useState<Presence>('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
 
   const roles = useMemo(
     () => [...new Set(rows.flatMap((r) => r.roles))].sort((a, b) => a.localeCompare(b)),
@@ -102,6 +110,29 @@ export function SquadRoster({ rows, now }: { rows: SquadMemberRow[]; now: number
     });
   }, [rows, search, role, presence, now]);
 
+  /*
+   * ★ PAGINATED AFTER FILTERING, NOT BEFORE — SQUADRON OWNER, 2026-08-02 ★
+   *
+   * "add a searchable pagination to this page ... max 25 perople per page please. the filter shoiuld
+   * be able to search this paginated list."
+   *
+   * The search runs over the WHOLE server and the pages are cut from the result. Paginating first
+   * and searching the visible page would be the other reading and a useless one: an officer looking
+   * for one person among a hundred and seventeen would have to already know which page they were on.
+   */
+  const pageCount = Math.max(1, Math.ceil(shown.length / PER_PAGE));
+
+  /*
+   * ★ CLAMPED, NOT STORED ★
+   *
+   * Typing into the search shrinks the result set, and a member sitting on page 4 of 5 would
+   * otherwise be left looking at an empty list with no indication why — the commonest way a
+   * paginated filter goes wrong. Deriving the page rather than correcting it in an effect means
+   * there is never a render where the two disagree.
+   */
+  const safePage = Math.min(page, pageCount);
+  const visible = shown.slice((safePage - 1) * PER_PAGE, safePage * PER_PAGE);
+
   const selected = rows.find((r) => r.discordId === selectedId) ?? null;
 
   return (
@@ -116,12 +147,23 @@ export function SquadRoster({ rows, now }: { rows: SquadMemberRow[]; now: number
                 placeholder="Name, CMDR or Discord ID…"
                 className={CONTROL}
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  /*
+                   * Back to the first page on every filter change. The clamp below stops an
+                   * out-of-range page rendering empty, but landing on page 2 of a fresh search is
+                   * still wrong — a new query means starting from the top of its results.
+                   */
+                  setPage(1);
+                }}
               />
             </label>
             <label className="block">
               <span className={FIELD_LABEL}>Discord role</span>
-              <select className={CONTROL} value={role} onChange={(e) => setRole(e.target.value)}>
+              <select className={CONTROL} value={role} onChange={(e) => {
+                  setRole(e.target.value);
+                  setPage(1);
+                }}>
                 <option value="">Any</option>
                 {roles.map((r) => (
                   <option key={r} value={r}>
@@ -135,7 +177,10 @@ export function SquadRoster({ rows, now }: { rows: SquadMemberRow[]; now: number
               <select
                 className={CONTROL}
                 value={presence}
-                onChange={(e) => setPresence(e.target.value as Presence)}
+                onChange={(e) => {
+                  setPresence(e.target.value as Presence);
+                  setPage(1);
+                }}
               >
                 <option value="">Everyone</option>
                 <option value="timedout">Currently timed out</option>
@@ -149,12 +194,22 @@ export function SquadRoster({ rows, now }: { rows: SquadMemberRow[]; now: number
           <div className="mt-3 border-t border-[var(--color-border-hairline)] pt-3 font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--color-text-secondary)]">
             <span className="text-[var(--color-brand-cyan-bright)]">{shown.length}</span> of {rows.length}{' '}
             in the server
+            {/*
+              The range, not just the page number. "Showing 26–50" answers "have I already looked at
+              this person" in a way "page 2" does not.
+            */}
+            {shown.length > PER_PAGE && (
+              <span className="ml-2 text-[var(--color-text-dim)]">
+                &middot; showing {(safePage - 1) * PER_PAGE + 1}&ndash;
+                {Math.min(safePage * PER_PAGE, shown.length)}
+              </span>
+            )}
           </div>
         </div>
 
         <div className="overflow-hidden rounded-lg border border-[var(--color-border-hairline)]">
           <ul className="list-none divide-y divide-[var(--color-border-hairline)] p-0">
-            {shown.map((r) => {
+            {visible.map((r) => {
               const tenure = squadronTenure({ joinedAt: r.joinedAt, activeSince: null }, now);
               const active = r.discordId === selectedId;
 
@@ -222,6 +277,40 @@ export function SquadRoster({ rows, now }: { rows: SquadMemberRow[]; now: number
             </p>
           )}
         </div>
+
+        {/*
+          Hidden entirely on a single page. Controls that can only say "1 of 1" are furniture, and
+          this list is short for most filters.
+        */}
+        {pageCount > 1 && (
+          <nav
+            aria-label="Member pages"
+            className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel-sunken)] px-4 py-2.5"
+          >
+            <button
+              type="button"
+              disabled={safePage <= 1}
+              onClick={() => setPage(safePage - 1)}
+              className="rounded border border-[var(--color-border-hairline)] px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.14em] text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)] disabled:opacity-30"
+            >
+              &larr; Previous
+            </button>
+
+            <span className="font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--color-text-dim)]">
+              Page <span className="text-[var(--color-brand-cyan-bright)]">{safePage}</span> of{' '}
+              {pageCount}
+            </span>
+
+            <button
+              type="button"
+              disabled={safePage >= pageCount}
+              onClick={() => setPage(safePage + 1)}
+              className="rounded border border-[var(--color-border-hairline)] px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.14em] text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)] disabled:opacity-30"
+            >
+              Next &rarr;
+            </button>
+          </nav>
+        )}
       </div>
 
       <ManagePanel

@@ -44,7 +44,10 @@ const CHANNEL = JOB_REQUEST_CHANNEL;
  * An allowlist, because the payload crosses a process boundary and names a program to run. Nothing
  * outside this table can ever be spawned, whatever arrives on the channel.
  */
-const RUNNABLE: Record<string, { readonly entry: string; readonly args: readonly string[] }> = {
+const RUNNABLE: Record<
+  string,
+  { readonly entry: string; readonly args: readonly string[]; readonly selfLocked?: boolean }
+> = {
   coriolis: { entry: 'ingest-knowledge', args: ['coriolis'] },
   galaxy: { entry: 'ingest-knowledge', args: ['galaxy'] },
   inara: { entry: 'ingest-knowledge', args: ['inara'] },
@@ -52,6 +55,23 @@ const RUNNABLE: Record<string, { readonly entry: string; readonly args: readonly
   forum: { entry: 'ingest-knowledge', args: ['forum'] },
   reference: { entry: 'ingest-knowledge', args: ['reference'] },
   embed: { entry: 'embed', args: [] },
+  /*
+   * ★ THE NIGHTLY COMMANDER AUDIT, ON REQUEST — SQUADRON OWNER, 2026-08-02 ★
+   *
+   * "add a button to the admin console to trigger an inara update manually ... pressing this should
+   * not interupt the daily job."
+   *
+   * `selfLocked` because this one has a second caller the daemon knows nothing about: cron runs it
+   * at 00:15 in its own container, straight from the entrypoint. If the lock were taken HERE, the
+   * nightly run would hold nothing and a button press would happily start a second audit alongside
+   * it — two processes asking Inara about the same members and spending a budget of two requests a
+   * minute.
+   *
+   * So `daily-audit.ts` takes the lock itself and both callers contend on the same key. Taking it
+   * here as well would be worse than useless: the parent would hold it and the child it spawned
+   * would be refused by its own daemon.
+   */
+  commanders: { entry: 'daily-audit', args: [], selfLocked: true },
 };
 
 /**
@@ -124,26 +144,35 @@ async function run(db: PrismaClient, source: string): Promise<void> {
    *
    * A dedicated client, because the lock is held by the SESSION and Prisma's pool would hand the
    * connection back — releasing it while the job was still running.
+   *
+   * ★ UNLESS THE JOB LOCKS ITSELF ★
+   *
+   * A `selfLocked` job has a caller the daemon does not control — cron, running the entrypoint
+   * directly — so the lock has to live in the entrypoint for both to contend on it. Taking it here
+   * as well would mean the parent held it and the child it just spawned was refused.
    */
-  const lock = new Client({ connectionString: process.env['DATABASE_URL'] });
-  await lock.connect();
+  const lock = job.selfLocked === true ? null : new Client({ connectionString: process.env['DATABASE_URL'] });
 
-  const claimed = await lock
-    .query<{ ok: boolean }>(`SELECT pg_try_advisory_lock($1, $2) AS ok`, [
-      LOCK_NAMESPACE,
-      lockIdFor(source),
-    ])
-    .then((r) => r.rows[0]?.ok === true)
-    .catch(() => false);
+  if (lock !== null) {
+    await lock.connect();
 
-  if (!claimed) {
-    await lock.end().catch(() => undefined);
-    await announce(db, {
-      level: 'warn',
-      kind: 'ingest',
-      message: `${source}: already running, request ignored`,
-    });
-    return;
+    const claimed = await lock
+      .query<{ ok: boolean }>(`SELECT pg_try_advisory_lock($1, $2) AS ok`, [
+        LOCK_NAMESPACE,
+        lockIdFor(source),
+      ])
+      .then((r) => r.rows[0]?.ok === true)
+      .catch(() => false);
+
+    if (!claimed) {
+      await lock?.end().catch(() => undefined);
+      await announce(db, {
+        level: 'warn',
+        kind: 'ingest',
+        message: `${source}: already running, request ignored`,
+      });
+      return;
+    }
   }
 
   const startedAt = Date.now();
@@ -171,7 +200,7 @@ async function run(db: PrismaClient, source: string): Promise<void> {
       }).finally(() => {
         // Released explicitly rather than left to the connection closing, so the next request can
         // proceed the instant this one is done.
-        void lock.end().catch(() => undefined);
+        void lock?.end().catch(() => undefined);
         resolve();
       });
     });
@@ -182,7 +211,7 @@ async function run(db: PrismaClient, source: string): Promise<void> {
         kind: 'ingest',
         message: `${source}: could not start — ${e.message}`,
       }).finally(() => {
-        void lock.end().catch(() => undefined);
+        void lock?.end().catch(() => undefined);
         resolve();
       });
     });
