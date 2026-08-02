@@ -200,6 +200,21 @@ CREATE INDEX telemetry_events_unprocessed_idx ON telemetry_events (received_at)
 ```
 Partial, because the processing queue is a small fraction of a 30-day table.
 
+### `ship_builds` — one journal build per member per ship
+```sql
+CREATE UNIQUE INDEX ship_builds_one_journal_per_ship_idx
+  ON ship_builds (submitted_by_id, ship_id)
+  WHERE from_journal;
+```
+Partial, and it has to be. A member's ship refits, so the journal row for (member, ship) is updated
+rather than added to. Their *pasted* builds are a different thing entirely: somebody may keep three
+plans for the same hull and compare them, and two members may save the same build.
+
+This replaced `@@unique([submittedById, shipId, fromJournal])`, which looks like it says the same
+thing and does not. Adding `fromJournal` as a column makes the tuple unique for *every* value of it,
+so the second plan a member saved for one hull was rejected — found the first time the Shipyard's
+save button was pressed.
+
 ### `idempotency_keys` — expiry sweep
 ```sql
 CREATE INDEX idempotency_keys_expiry_idx ON idempotency_keys (expires_at);

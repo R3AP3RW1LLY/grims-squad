@@ -220,6 +220,10 @@ describe('registration completeness', () => {
       'ForumThreadGrant',
       'KnowledgeChunk',
       'Loadout',
+      // Shipyard builds, 2026-08-01. `private` / `squadron` / `public`, where public
+      // is readable with no session at all — the owner asked for a public build page
+      // "visible ... to anyone not signed in".
+      'ShipBuild',
     ]);
   });
 });

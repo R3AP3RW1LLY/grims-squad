@@ -3158,17 +3158,41 @@ model ShipBuild {
   /// Kept current on every refit, so it is the only kind of row that is UPDATED rather than added.
   fromJournal Boolean @default(false) @map("from_journal")
 
+  /// Who may open it: `private`, `squadron` or `public`. See BuildVisibility.
+  ///
+  /// Defaults to private because a build is a PLAN — somebody working out whether they can afford a
+  /// Cutter has not decided to tell the squadron they are saving for one.
+  visibility String @default("private")
+
+  /// The token in a share link, or null when it has never been shared.
+  ///
+  /// Kept when visibility goes back to private rather than cleared, so re-sharing restores the link
+  /// somebody already pasted into Discord instead of silently minting a different one.
+  shareToken String? @unique @map("share_token")
+
   createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   /// One journal build per member per ship: a refit replaces it rather than adding a second.
   ///
-  /// Pasted links are deliberately NOT unique — two members may share the same build, and one
-  /// member may keep several plans for one hull.
-  @@unique([submittedById, shipId, fromJournal], name: "one_journal_build_per_ship")
+  /// ★ THE CONSTRAINT IS HAND-WRITTEN, AND THE COMPOUND UNIQUE THAT WAS HERE WAS WRONG ★
+  ///
+  /// It read `@@unique([submittedById, shipId, fromJournal])`, whose own comment said pasted links
+  /// are "deliberately NOT unique — one member may keep several plans for one hull". The constraint
+  /// did not say that. Including `fromJournal` as a COLUMN makes the tuple unique for every value
+  /// of it, so a member saving a second plan for the same hull hit a unique violation — which is
+  /// exactly what the Shipyard's save button did the first time it ran against a real database.
+  ///
+  /// What is meant is a PARTIAL unique index: unique on (member, ship) only where the row came from
+  /// a journal. Prisma cannot express a partial unique index, so it is hand-written DDL —
+  /// `ship_builds_one_journal_per_ship_idx`, in ssot/03-data/indexes.md. Declaring it here as well
+  /// would make Prisma create a second, total one.
+  @@index([submittedById, shipId])
   @@index([shipId])
   @@index([isBaseline])
   @@index([submittedById])
+  /// The squadron's shared builds, newest first — the only query the share boards run.
+  @@index([visibility, updatedAt])
   @@map("ship_builds")
 }
 

@@ -1,4 +1,6 @@
-import type { PrismaClient } from '@grims/db';
+import { randomBytes } from 'node:crypto';
+import { AclDbService } from '../authz/acl-db.service.js';
+import { Prisma, type PrismaClient } from '@grims/db';
 import {
   AppError,
   ErrorCode,
@@ -6,6 +8,10 @@ import {
   coverageOf,
   classifyBuild,
   buildProgress,
+  isShareToken,
+  SHARE_TOKEN_ALPHABET,
+  SHARE_TOKEN_LENGTH,
+  type BuildVisibility,
   type ShipBuild,
   type BuildRole,
   type BuildRoleProgress,
@@ -50,11 +56,28 @@ export interface ImportOutcome {
   readonly warnings: readonly string[];
 }
 
+/**
+ * ★ SHIP BUILDS ARE ACL-BEARING, SO EVERY READ IS BOUND (INV-002) ★
+ *
+ * `visibility` made ShipBuild an ACL model, and `acl-usage.spec.ts` failed the build the moment it
+ * did. That guard is right: a controller check protects one route, and the second route onto the
+ * same data is the one nobody guards.
+ *
+ * So nothing here touches `prisma.shipBuild` directly. Reads go through a client bound to whoever
+ * is asking, and the predicate in `acl-extension.ts` — public to everyone, squadron to anyone
+ * signed in, private to its author — is applied inside the query rather than after it. Counts and
+ * `findFirst` are covered by the same mechanism, which application-level filtering never is.
+ *
+ * The two `forSystem` uses are named and narrow. Both are below, with their reasons.
+ */
 export class ShipBuildService {
   #catalogue: BuildCatalogue | null = null;
   #loadedAt = 0;
 
-  constructor(private readonly db: PrismaClient) {}
+  constructor(
+    private readonly db: PrismaClient,
+    private readonly acl: AclDbService,
+  ) {}
 
   /**
    * The ship and module tables, rebuilt when they go stale.
@@ -275,20 +298,47 @@ export class ShipBuildService {
      * link always creates: two members may share the same build and one member may keep several
      * plans for one hull, and neither is a duplicate.
      */
-    const row =
-      options.fromJournal && options.submittedById !== null
-        ? await this.db.shipBuild.upsert({
-            where: {
-              one_journal_build_per_ship: {
-                submittedById: options.submittedById,
-                shipId: build.shipId,
-                fromJournal: true,
-              },
-            },
-            create: data,
-            update: data,
-          })
-        : await this.db.shipBuild.create({ data });
+    /*
+     * ★ FIND-THEN-WRITE, NOT `upsert` ★
+     *
+     * The uniqueness is a PARTIAL index (`... WHERE from_journal`), because a member may keep
+     * several pasted plans for one hull but only one journal row. Prisma's `upsert` can only key on
+     * a unique it knows about in the schema, and it cannot model a partial one — so the lookup is
+     * explicit.
+     *
+     * The partial index still exists and still holds: this is the happy path, and the database
+     * remains the thing that guarantees it if two journal uploads race.
+     */
+    let row;
+    if (options.fromJournal && options.submittedById !== null) {
+      /*
+       * Bound to the submitter, who by definition may see their own rows — so the ACL predicate
+       * changes nothing here and the binding costs one cheap read. That is the point: the rule is
+       * "reads of this model are bound", not "bound when it would have mattered", because the
+       * second version is a judgement somebody eventually gets wrong.
+       */
+      const db = await this.acl.forCaller(options.submittedById);
+
+      const existing = await db.shipBuild.findFirst({
+        where: { submittedById: options.submittedById, shipId: build.shipId, fromJournal: true },
+        select: { id: true },
+      });
+
+      row =
+        existing === null
+          ? await db.shipBuild.create({ data })
+          : await db.shipBuild.update({ where: { id: existing.id }, data });
+    } else {
+      /*
+       * Baseline imports carry `submittedById: null` — they belong to the squadron rather than to
+       * whoever pasted them — so there is no caller to bind to. A write, and writes are never ACL
+       * filtered; the binding exists so the accessor is reached through the same door as every
+       * other one.
+       */
+      row = await this.acl.forSystem('baseline build import, owned by the squadron').shipBuild.create({
+        data,
+      });
+    }
 
     return {
       id: row.id,
@@ -298,6 +348,315 @@ export class ShipBuildService {
       slots: coverage.slotsTotal,
       warnings: coverage.warnings,
     };
+  }
+
+  // ----------------------------------------------------------------- sharing
+  /**
+   * Saves a build somebody put together in the outfitter.
+   *
+   * ★ SQUADRON OWNER, 2026-08-01 ★
+   *
+   * "the ability for our users to share their builds and make them visible to the squadron and
+   * public if they choose to."
+   *
+   * ★ STATS ARE COMPUTED HERE, NOT ACCEPTED FROM THE BROWSER ★
+   *
+   * The outfitter already knows the jump range — it has been showing it — and posting it would
+   * save a computation. It would also mean the stored figure is whatever the client said, which is
+   * how a build reaches the share board claiming a jump range no ship achieves. The browser chooses
+   * the MODULES; the server decides what they do.
+   */
+  async save(
+    input: { build: ShipBuild; buildName: string | null; visibility: BuildVisibility },
+    ownerId: string,
+  ): Promise<{ id: string; shareToken: string | null; visibility: BuildVisibility }> {
+    const catalogue = await this.catalogue();
+    if (catalogue.ship(input.build.shipId) === null) {
+      throw new AppError(ErrorCode.VALIDATION_FAILED, 'We do not have that ship in our data.');
+    }
+
+    const stats = computeStats(input.build, catalogue);
+    const groups = input.build.modules
+      .map((m) => m.moduleId)
+      .filter((v): v is string => v !== null);
+
+    /*
+     * A token is minted only when the build is actually shared. Minting one on every private save
+     * would put a live URL behind a build nobody chose to publish — unguessable, but present, and
+     * "unguessable" is not the promise `private` makes.
+     */
+    const shareToken = input.visibility === 'private' ? null : await this.#mintToken();
+
+    const db = await this.acl.forCaller(ownerId);
+
+    const row = await db.shipBuild.create({
+      data: {
+        shipId: input.build.shipId,
+        shipName: input.build.shipName,
+        buildName: input.buildName,
+        // Ours. Not `coriolis` — nobody imported this from anywhere, and labelling it as a coriolis
+        // build would put a source on the board that cannot be checked.
+        source: 'outfitter',
+        sourceUrl: `/shipyard?ship=${encodeURIComponent(input.build.shipId)}`,
+        build: input.build as unknown as Prisma.InputJsonValue,
+        stats: (stats as unknown as Prisma.InputJsonValue) ?? Prisma.JsonNull,
+        submittedById: ownerId,
+        role: classifyBuild(groups),
+        isBaseline: false,
+        fromJournal: false,
+        visibility: input.visibility,
+        shareToken,
+      },
+      select: { id: true, shareToken: true, visibility: true },
+    });
+
+    return {
+      id: row.id,
+      shareToken: row.shareToken,
+      visibility: row.visibility as BuildVisibility,
+    };
+  }
+
+  /**
+   * Changes who may open a build.
+   *
+   * ★ THE TOKEN SURVIVES GOING PRIVATE ★
+   *
+   * Setting a build back to private does NOT clear its token. Somebody who shares, un-shares and
+   * shares again has almost certainly pasted the first link into Discord, and minting a second one
+   * would leave that message pointing at a dead page while a working link exists elsewhere.
+   *
+   * The token is not the permission. `visibility` is checked on every read, so a stale link stops
+   * working the moment the build goes private and starts working again if it comes back — which is
+   * what somebody toggling this expects, and is only true because the token is stable.
+   */
+  async setVisibility(
+    id: string,
+    visibility: BuildVisibility,
+    actorId: string,
+  ): Promise<{ shareToken: string | null; visibility: BuildVisibility }> {
+    /*
+     * `findFirst`, not `findUnique`. Prisma's `findUnique` takes only the unique key, so the ACL
+     * predicate cannot be merged into it — which is why `acl-find-unique.spec.ts` forbids it on
+     * these models outright. A build this member cannot see now reads as "no such build", which is
+     * also the right answer.
+     */
+    const db = await this.acl.forCaller(actorId);
+
+    const row = await db.shipBuild.findFirst({
+      where: { id },
+      select: { submittedById: true, shareToken: true },
+    });
+
+    if (row === null) throw new AppError(ErrorCode.RESOURCE_NOT_VISIBLE, 'No such build.');
+
+    /*
+     * Ownership only — no moderator override. An officer may DELETE a build, because a bad build
+     * teaches bad answers; publishing somebody else's plan under their name is not moderation.
+     */
+    if (row.submittedById !== actorId) {
+      throw new AppError(ErrorCode.PERMISSION_DENIED, 'That is not your build.');
+    }
+
+    const shareToken =
+      visibility === 'private' ? row.shareToken : (row.shareToken ?? (await this.#mintToken()));
+
+    const updated = await db.shipBuild.update({
+      where: { id },
+      data: { visibility, shareToken },
+      select: { shareToken: true, visibility: true },
+    });
+
+    return {
+      shareToken: updated.visibility === 'private' ? null : updated.shareToken,
+      visibility: updated.visibility as BuildVisibility,
+    };
+  }
+
+  /**
+   * One shared build, by its token.
+   *
+   * `viewerIsMember` decides whether a squadron-only build is readable. Passed in rather than read
+   * here, so this method gives the same answer for the same inputs.
+   */
+  async byToken(token: string, viewerId: string | null): Promise<SharedBuild | null> {
+    if (!isShareToken(token)) return null;
+
+    /*
+     * ★ THE ACL DOES THE WORK NOW ★
+     *
+     * `viewerId` binds the read, and the predicate — public to everyone, squadron to anyone signed
+     * in, private to its author — decides what comes back. The explicit visibility checks that used
+     * to sit below this were doing the same job one layer too late.
+     *
+     * They are kept anyway, because they say out loud what the caller may rely on and because a
+     * defence that only exists in a shared extension is one refactor from being absent.
+     */
+    const db = await this.acl.forCaller(viewerId ?? undefined);
+
+    const row = await db.shipBuild.findFirst({
+      where: { shareToken: token },
+      select: {
+        shipId: true,
+        shipName: true,
+        buildName: true,
+        build: true,
+        stats: true,
+        role: true,
+        visibility: true,
+        updatedAt: true,
+        submittedBy: { select: { displayName: true } },
+      },
+    });
+
+    if (row === null) return null;
+
+    /*
+     * A private build, and a squadron build read by somebody signed out, both return null rather
+     * than a 403. A 403 confirms the token is real, which turns the share URL into an oracle for
+     * anybody enumerating them.
+     */
+    if (row.visibility === 'private') return null;
+    if (row.visibility === 'squadron' && viewerId === null) return null;
+
+    return {
+      shipId: row.shipId,
+      shipName: row.shipName,
+      buildName: row.buildName,
+      build: row.build as unknown as ShipBuild,
+      stats: (row.stats as Record<string, unknown> | null) ?? null,
+      role: row.role,
+      author: row.submittedBy?.displayName ?? null,
+      visibility: row.visibility as BuildVisibility,
+      updatedAt: row.updatedAt.toISOString(),
+    };
+  }
+
+  /**
+   * Builds published to the squadron, or to everybody.
+   *
+   * ★ SQUADRON OWNER, 2026-08-01 ★
+   *
+   * "add a Squadron page and Public build pages to the Shipyard category ... the public page must
+   * also be visible along with the builds in them to anyone not signed in."
+   *
+   * ★ 'squadron' INCLUDES THE PUBLIC ONES ★
+   *
+   * A build published to the whole internet is, necessarily, also visible to the squadron. Filtering
+   * the squadron page to `visibility = 'squadron'` exactly would hide the most widely shared builds
+   * from the members they were shared with — which reads as a bug and is one.
+   *
+   * The public page is the strict filter, because that page is about what the squadron shows the
+   * world.
+   */
+  async shared(scope: 'squadron' | 'public', viewerId: string | null): Promise<SharedBuildRow[]> {
+    const db = await this.acl.forCaller(viewerId ?? undefined);
+
+    const rows = await db.shipBuild.findMany({
+      where:
+        scope === 'public'
+          ? { visibility: 'public', shareToken: { not: null } }
+          : { visibility: { in: ['squadron', 'public'] }, shareToken: { not: null } },
+      orderBy: { updatedAt: 'desc' },
+      take: 200,
+      select: {
+        shipName: true,
+        buildName: true,
+        role: true,
+        stats: true,
+        visibility: true,
+        shareToken: true,
+        updatedAt: true,
+        submittedBy: { select: { displayName: true } },
+      },
+    });
+
+    return rows.map((r) => ({
+      shipName: r.shipName,
+      buildName: r.buildName,
+      role: r.role,
+      stats: (r.stats as Record<string, unknown> | null) ?? null,
+      visibility: r.visibility as BuildVisibility,
+      /*
+       * Non-null by the query's own filter. Asserted rather than defaulted to '': a row that
+       * reached here without a token is a broken invariant, and an empty string would render a
+       * link to nowhere instead of failing where somebody would notice.
+       */
+      shareToken: r.shareToken as string,
+      author: r.submittedBy?.displayName ?? null,
+      updatedAt: r.updatedAt.toISOString(),
+    }));
+  }
+
+  /** Every build this member saved in the outfitter, with its share state. */
+  async mine(ownerId: string): Promise<SavedBuildRow[]> {
+    const db = await this.acl.forCaller(ownerId);
+
+    const rows = await db.shipBuild.findMany({
+      where: { submittedById: ownerId, source: 'outfitter' },
+      orderBy: { updatedAt: 'desc' },
+      take: 200,
+      select: {
+        id: true,
+        shipName: true,
+        buildName: true,
+        role: true,
+        stats: true,
+        visibility: true,
+        shareToken: true,
+        updatedAt: true,
+      },
+    });
+
+    return rows.map((r) => ({
+      id: r.id,
+      shipName: r.shipName,
+      buildName: r.buildName,
+      role: r.role,
+      stats: (r.stats as Record<string, unknown> | null) ?? null,
+      visibility: r.visibility as BuildVisibility,
+      // Withheld while private, so the page cannot show a link that would not work.
+      shareToken: r.visibility === 'private' ? null : r.shareToken,
+      updatedAt: r.updatedAt.toISOString(),
+    }));
+  }
+
+  /**
+   * A share token that is not already taken.
+   *
+   * ★ RETRIES, RATHER THAN TRUSTING THE ODDS ★
+   *
+   * 58 bits makes a collision vanishingly unlikely, and "vanishingly unlikely" handled by nothing
+   * at all is a unique-constraint violation surfacing as a 500 to whoever happened to be there.
+   * Three attempts, then it says so plainly.
+   */
+  async #mintToken(): Promise<string> {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const bytes = randomBytes(SHARE_TOKEN_LENGTH);
+      let token = '';
+      for (const byte of bytes) {
+        token += SHARE_TOKEN_ALPHABET[byte % SHARE_TOKEN_ALPHABET.length];
+      }
+
+      /*
+       * ★ forSystem, AND IT HAS TO BE ★
+       *
+       * A uniqueness check that could not see private builds would happily mint a token already
+       * held by one, and the unique index would then reject the insert — turning a collision that
+       * should be retried into a 500 for whoever was saving.
+       *
+       * It reads one boolean and returns no data, so seeing everything costs nothing.
+       */
+      const taken = await this.acl
+        .forSystem('share-token uniqueness across every build, including private ones')
+        .shipBuild.findFirst({
+          where: { shareToken: token },
+          select: { id: true },
+        });
+      if (taken === null) return token;
+    }
+
+    throw new AppError(ErrorCode.INTERNAL_ERROR, 'Could not allocate a share link. Try again.');
   }
 }
 
@@ -329,8 +688,14 @@ export interface BuildView {
  * people are flying and get real answers with names". A build nobody can see teaches the assistant
  * nothing anybody asked for.
  */
+/**
+ * Reads for the admin console and the training page.
+ *
+ * ACL-bound like everything else that touches this model — see the note on ShipBuildService. The
+ * one `forSystem` here is the training progress count, and its reason is written where it is used.
+ */
 export class ShipBuildQueries {
-  constructor(private readonly db: PrismaClient) {}
+  constructor(private readonly acl: AclDbService) {}
 
   /**
    * How far the collection is from being worth training on, per role.
@@ -341,7 +706,19 @@ export class ShipBuildQueries {
    * while leaving whole questions unanswerable, and the bar would say ready when it was not.
    */
   async progress(): Promise<BuildRoleProgress[]> {
-    const rows = await this.db.shipBuild.groupBy({ by: ['role'], _count: true });
+    /*
+     * ★ forSystem: this counts the CORPUS, not what one person may read ★
+     *
+     * "Do we have enough combat builds to train on" is a question about the training set. Bound to
+     * a caller it would answer "enough that YOU can see", so an officer and a cadet would be shown
+     * different progress bars for the same shared corpus and both would be told it was the
+     * squadron's total.
+     *
+     * It returns counts per role and no build content whatsoever.
+     */
+    const rows = await this.acl
+      .forSystem('training corpus totals, which are about the corpus rather than about a reader')
+      .shipBuild.groupBy({ by: ['role'], _count: true });
 
     const counts: Partial<Record<BuildRole, number>> = {};
     for (const row of rows) {
@@ -352,8 +729,19 @@ export class ShipBuildQueries {
     return buildProgress(counts);
   }
 
-  async list(options: { shipId?: string; baselineOnly?: boolean } = {}): Promise<BuildView[]> {
-    const rows = await this.db.shipBuild.findMany({
+  async list(
+    options: { shipId?: string; baselineOnly?: boolean } = {},
+    viewerId: string | null = null,
+  ): Promise<BuildView[]> {
+    /*
+     * Bound to the reader, which changes what this list contains: somebody else's PRIVATE build is
+     * no longer in it. That is a behaviour change and the right one — before `visibility` existed
+     * every stored build was a contribution to the squadron, and now a build can be a plan its
+     * author has not shared.
+     */
+    const db = await this.acl.forCaller(viewerId ?? undefined);
+
+    const rows = await db.shipBuild.findMany({
       where: {
         ...(options.shipId === undefined ? {} : { shipId: options.shipId }),
         ...(options.baselineOnly === true ? { isBaseline: true } : {}),
@@ -413,10 +801,20 @@ export class ShipBuildQueries {
    * delete button somebody uses.
    */
   async remove(id: string, actorId: string, canModerate: boolean): Promise<void> {
-    const row = await this.db.shipBuild.findUnique({
-      where: { id },
-      select: { submittedById: true },
-    });
+    /*
+     * A moderator must be able to remove a build they cannot READ — a private one somebody reported
+     * — so the lookup is unbound and the ownership check below is what authorises it. Bound to the
+     * actor, a private build would read as "no such build" and the moderation route would be a lie.
+     *
+     * `findFirst`, not `findUnique`: banned on ACL models so that a bound call cannot silently drop
+     * its predicate, and using it here would be the one exception somebody later copies.
+     */
+    const row = await this.acl
+      .forSystem('moderation lookup: an officer may remove a build they cannot read')
+      .shipBuild.findFirst({
+        where: { id },
+        select: { submittedById: true },
+      });
 
     if (row === null) {
       throw new AppError(ErrorCode.RESOURCE_NOT_VISIBLE, 'No such build.');
@@ -425,8 +823,48 @@ export class ShipBuildQueries {
       throw new AppError(ErrorCode.PERMISSION_DENIED, 'That is not your build.');
     }
 
-    await this.db.shipBuild.delete({ where: { id } });
+    await this.acl
+      .forSystem('moderation delete, authorised by the ownership check above')
+      .shipBuild.delete({ where: { id } });
   }
+
+}
+
+/** A shared build as a reader receives it. */
+export interface SharedBuild {
+  readonly shipId: string;
+  readonly shipName: string;
+  readonly buildName: string | null;
+  readonly build: ShipBuild;
+  readonly stats: Record<string, unknown> | null;
+  readonly role: string | null;
+  readonly author: string | null;
+  readonly visibility: BuildVisibility;
+  readonly updatedAt: string;
+}
+
+/** One row on the squadron or public build boards. */
+export interface SharedBuildRow {
+  readonly shipName: string;
+  readonly buildName: string | null;
+  readonly role: string | null;
+  readonly stats: Record<string, unknown> | null;
+  readonly visibility: BuildVisibility;
+  readonly shareToken: string;
+  readonly author: string | null;
+  readonly updatedAt: string;
+}
+
+/** One row on "my builds". */
+export interface SavedBuildRow {
+  readonly id: string;
+  readonly shipName: string;
+  readonly buildName: string | null;
+  readonly role: string | null;
+  readonly stats: Record<string, unknown> | null;
+  readonly visibility: BuildVisibility;
+  readonly shareToken: string | null;
+  readonly updatedAt: string;
 }
 
 /**

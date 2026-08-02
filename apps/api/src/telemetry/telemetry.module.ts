@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { PrismaClient } from '@grims/db';
 import { DatabaseModule } from '../database.module.js';
 import { ShipBuildService } from '../ai/ship-build.service.js';
+import { AclDbService } from '../authz/acl-db.service.js';
 import { CompanionModule } from '../companion/companion.module.js';
 import { TelemetryController } from './telemetry.controller.js';
 import { PairingService } from './pairing.service.js';
@@ -32,8 +33,8 @@ import { PAIRING_SERVICE, INGEST_SERVICE, CONSENT_SERVICE } from './telemetry.to
     DeviceLinkService,
     {
       provide: INGEST_SERVICE,
-      inject: [PrismaClient],
-      useFactory: (db: PrismaClient) =>
+      inject: [PrismaClient, AclDbService],
+      useFactory: (db: PrismaClient, acl: AclDbService) =>
         /*
          * The market updater is passed in here and nowhere else. It is what
          * turns a member opening a commodity screen into a price the whole
@@ -51,9 +52,13 @@ import { PAIRING_SERVICE, INGEST_SERVICE, CONSENT_SERVICE } from './telemetry.to
            * refreshes on every refit with nobody pasting anything.
            *
            * Constructed here rather than injected from the AI module: telemetry must not depend on
-           * the assistant, and the service takes only a database.
+           * the assistant.
+           *
+           * It takes the ACL client as well as the plain one now: a build carries a visibility, so
+           * every read of one is bound to whoever it is for (INV-002). A journal import is on
+           * behalf of the member whose ship it is, and binds to them.
            */
-          new ShipBuildService(db),
+          new ShipBuildService(db, acl),
         ),
     },
     {

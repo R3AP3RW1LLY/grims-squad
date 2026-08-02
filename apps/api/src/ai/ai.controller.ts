@@ -1,16 +1,32 @@
-import { Controller, Get, Post, Delete, Body, Param, Query, Inject, Res } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Delete,
+  Body,
+  Param,
+  Query,
+  Inject,
+  Res,
+} from '@nestjs/common';
 import { randomUUID } from 'node:crypto';
 import type { FastifyReply } from 'fastify';
 import {
   AppError,
   ErrorCode,
   Permission,
+  ROLE_PRESETS,
   KNOWLEDGE_SOURCES,
+  isBuildVisibility,
   type SourceStatus,
   type CategoryProgress,
   type BuildRoleProgress,
+  type BuildVisibility,
+  type ShipBuild,
 } from '@grims/shared';
 import { User, type CurrentUser } from '../auth/current-user.js';
+import { Public } from '../auth/auth.guard.js';
 import { PermissionService } from '../authz/permission.service.js';
 import { satisfiesMask } from '../forum/category.service.js';
 import { AiStreamService, type AiLogLine } from './ai-stream.service.js';
@@ -201,6 +217,144 @@ export class AiController {
     return this.builds.importLink(url, { submittedById: null, isBaseline: true });
   }
 
+  // ----------------------------------------------------------- shared builds
+  /**
+   * Saves a build from the outfitter, at the visibility its author chose.
+   *
+   * ★ SQUADRON OWNER, 2026-08-01 ★
+   *
+   * "also include shareable links, and the ability for our users to share their builds and make
+   * them visible to the squadron and public if they choose to."
+   *
+   * Two permissions, checked separately: SHIPYARD_SAVE to keep it at all, and — only when the
+   * chosen visibility is `public` — SHIPYARD_SHARE_PUBLIC. Somebody whose public sharing has been
+   * withdrawn can still save and still share to the squadron, which is the whole reason those are
+   * different bits.
+   */
+  @Post('shipyard/builds')
+  async saveBuild(@User() caller: CurrentUser | undefined, @Body() body: unknown) {
+    if (caller === undefined) throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
+
+    const input = (body ?? {}) as Record<string, unknown>;
+    const visibility = input['visibility'];
+    if (!isBuildVisibility(visibility)) {
+      throw new AppError(ErrorCode.VALIDATION_FAILED, 'Choose who may see this build.');
+    }
+
+    await this.#assertCanShare(caller.userId, visibility);
+
+    const build = input['build'];
+    if (typeof build !== 'object' || build === null) {
+      throw new AppError(ErrorCode.VALIDATION_FAILED, 'No build was sent.');
+    }
+
+    const rawName = input['buildName'];
+    const buildName =
+      typeof rawName === 'string' && rawName.trim() !== '' ? rawName.trim().slice(0, 80) : null;
+
+    return this.builds.save(
+      { build: build as ShipBuild, buildName, visibility },
+      caller.userId,
+    );
+  }
+
+  /** Changes who may open a saved build. */
+  @Patch('shipyard/builds/:id/visibility')
+  async setBuildVisibility(
+    @User() caller: CurrentUser | undefined,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ) {
+    if (caller === undefined) throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
+
+    const visibility = ((body ?? {}) as Record<string, unknown>)['visibility'];
+    if (!isBuildVisibility(visibility)) {
+      throw new AppError(ErrorCode.VALIDATION_FAILED, 'Choose who may see this build.');
+    }
+
+    await this.#assertCanShare(caller.userId, visibility);
+    return this.builds.setVisibility(id, visibility, caller.userId);
+  }
+
+  /** The caller's own saved builds, with their share state. */
+  @Get('shipyard/builds/mine')
+  async myBuilds(@User() caller: CurrentUser | undefined) {
+    if (caller === undefined) throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
+    return { builds: await this.builds.mine(caller.userId) };
+  }
+
+  /**
+   * Builds published to the squadron, or to everybody.
+   *
+   * ★ THE PUBLIC LIST NEEDS NO SESSION ★
+   *
+   * Squadron owner: "the public page must also be visible along with the builds in them to anyone
+   * not signed in from the homepage."
+   *
+   * `scope` decides which, and a signed-out caller asking for `squadron` gets the public list
+   * rather than an error — the page it feeds is reachable without a session, and refusing would
+   * mean rendering an error screen to somebody who simply followed a link.
+   */
+  // Public for the same reason as `shipyard/ships` above: reachable signed out, identity still
+  // resolved when a session exists.
+  @Public()
+  @Get('shipyard/builds/shared')
+  async sharedBuilds(
+    @User() caller: CurrentUser | undefined,
+    @Query('scope') scope?: string,
+  ) {
+    const wantsSquadron = scope === 'squadron' && caller !== undefined;
+    return {
+      builds: await this.builds.shared(
+        wantsSquadron ? 'squadron' : 'public',
+        caller?.userId ?? null,
+      ),
+    };
+  }
+
+  /**
+   * One shared build, by its token.
+   *
+   * No permission check and no session requirement: the token IS the capability, bounded by the
+   * build's own visibility. A `null` result covers "no such token", "it is private" and "it is
+   * squadron-only and you are signed out" alike — distinguishing them would confirm which tokens
+   * are real to anybody enumerating them.
+   */
+  // Public for the same reason as `shipyard/ships` above: reachable signed out, identity still
+  // resolved when a session exists.
+  @Public()
+  @Get('shipyard/builds/shared/:token')
+  async sharedBuild(@User() caller: CurrentUser | undefined, @Param('token') token: string) {
+    const found = await this.builds.byToken(token, caller?.userId ?? null);
+    if (found === null) {
+      throw new AppError(ErrorCode.RESOURCE_NOT_VISIBLE, 'That build is not available.');
+    }
+    return found;
+  }
+
+  /** SHIPYARD_SAVE always; SHIPYARD_SHARE / SHIPYARD_SHARE_PUBLIC according to the choice. */
+  async #assertCanShare(userId: string, visibility: BuildVisibility): Promise<void> {
+    const mask = await this.permissions.effectiveMask(userId);
+
+    const need =
+      visibility === 'public'
+        ? Permission.SHIPYARD_SAVE | Permission.SHIPYARD_SHARE_PUBLIC
+        : visibility === 'squadron'
+          ? Permission.SHIPYARD_SAVE | Permission.SHIPYARD_SHARE
+          : Permission.SHIPYARD_SAVE;
+
+    if ((mask & need) !== need) {
+      throw new AppError(
+        ErrorCode.PERMISSION_DENIED,
+        visibility === 'public'
+          ? 'You cannot publish builds outside the squadron.'
+          : visibility === 'squadron'
+            ? 'You cannot share builds with the squadron.'
+            : 'You cannot save builds.',
+      );
+    }
+  }
+
   // ---------------------------------------------------------------- shipyard
   /**
    * Every hull, for the Shipyard's ship picker.
@@ -212,20 +366,49 @@ export class AiController {
    * ★ SHIPYARD_VIEW, CHECKED HERE AND NOT ONLY IN THE NAV ★
    *
    * Hiding the sidebar entry is honesty, not authorisation — the URL is still typeable and the
-   * endpoint is still callable. Both shipyard reads assert the bit for the same reason every other
-   * gated route does: the menu and the guard must read the same mask, and only one of them is a
-   * security boundary.
+   * endpoint is still callable. All three shipyard reads assert the bit for the same reason every
+   * other gated route does: the menu and the guard must read the same mask, and only one of them is
+   * a security boundary.
+   *
+   * ★ AND NO SESSION IS REQUIRED ★
+   *
+   * Squadron owner, 2026-08-01: "make the builder public please and accessible to signed out
+   * users." A visitor with no session is checked against the GUEST mask, which holds SHIPYARD_VIEW.
+   *
+   * So this is still a permission check — it is simply one that guests pass. That matters: the
+   * alternative was deleting the check, which would have made "public" the absence of a decision
+   * rather than a decision, and thrown away the ability to take the page from a rank.
    */
+  /*
+   * ★ @Public — AND IT STILL KNOWS WHO YOU ARE ★
+   *
+   * Squadron owner, 2026-08-01: "make the builder public please and accessible to signed out
+   * users", and "the public page must also be visible ... to anyone not signed in".
+   *
+   * `@Public()` only stops the guard from REQUIRING a session; it still resolves one when the
+   * cookie is there. So a signed-in member reaching these gets their own identity and their own
+   * ACL binding, and a visitor gets the guest mask — one route, two correct answers, rather than a
+   * second anonymous copy of each endpoint that would drift.
+   */
+  @Public()
   @Get('shipyard/ships')
   async shipyardShips(@User() caller: CurrentUser | undefined) {
-    if (caller === undefined) throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
-    await this.#assertShipyard(caller.userId);
+    await this.#assertShipyard(caller);
     return { ships: await this.shipyard.ships() };
   }
 
-  /** SHIPYARD_VIEW or nothing. Written once because three endpoints need the same sentence. */
-  async #assertShipyard(userId: string): Promise<void> {
-    const mask = await this.permissions.effectiveMask(userId);
+  /**
+   * SHIPYARD_VIEW or nothing, for a caller who may not be signed in.
+   *
+   * Written once because three endpoints need the same sentence, and because the guest branch is
+   * exactly the sort of thing that gets right in two places and wrong in the third.
+   */
+  async #assertShipyard(caller: CurrentUser | undefined): Promise<void> {
+    const mask =
+      caller === undefined
+        ? ROLE_PRESETS.guest
+        : await this.permissions.effectiveMask(caller.userId);
+
     if ((mask & Permission.SHIPYARD_VIEW) !== Permission.SHIPYARD_VIEW) {
       throw new AppError(ErrorCode.PERMISSION_DENIED, 'You do not have access to the Shipyard.');
     }
@@ -240,13 +423,15 @@ export class AiController {
    * Asking the server per click would put a round trip between picking a power plant and seeing
    * what it did — the one thing that screen has to feel immediate about.
    */
+  // Public for the same reason as `shipyard/ships` above: reachable signed out, identity still
+  // resolved when a session exists.
+  @Public()
   @Get('shipyard/outfit/:shipId')
   async shipyardOutfit(
     @User() caller: CurrentUser | undefined,
     @Param('shipId') shipId: string,
   ) {
-    if (caller === undefined) throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
-    await this.#assertShipyard(caller.userId);
+    await this.#assertShipyard(caller);
 
     const outfit = await this.shipyard.outfit(shipId);
     if (outfit === null) {
@@ -264,10 +449,12 @@ export class AiController {
    * from Frontier's data and every number from the stats calculator — the model's job is to explain
    * the result, never to invent one.
    */
+  // Public for the same reason as `shipyard/ships` above: reachable signed out, identity still
+  // resolved when a session exists.
+  @Public()
   @Post('shipyard/fit')
   async shipyardFit(@User() caller: CurrentUser | undefined, @Body() body: unknown) {
-    if (caller === undefined) throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
-    await this.#assertShipyard(caller.userId);
+    await this.#assertShipyard(caller);
 
     const input = (body ?? {}) as Record<string, unknown>;
     const role = typeof input['role'] === 'string' ? input['role'] : '';

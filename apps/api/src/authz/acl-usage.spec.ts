@@ -168,12 +168,52 @@ describe('INV-002 — no ACL-bearing model is read through the plain client', ()
        */
       const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '');
 
+      /*
+       * ★ CLIENTS THIS FILE OBTAINED FROM AclDbService ★
+       *
+       * The guard used to flag ANY `.shipBuild.` access, which made the fix it prescribes —
+       * "inject AclDbService and call forCaller(userId)" — fail its own check. A service that
+       * resolves its own bound client is not a violation; it is the pattern.
+       *
+       * So local names assigned from `this.acl.forCaller(...)` or `.forSystem(...)` are collected
+       * first, and accesses through them are not offences. This is strictly narrower than the
+       * forum services' exemption, which trusts a whole file on the strength of a branded
+       * parameter type.
+       *
+       * What remains an offence is unchanged and is the thing INV-002 names: reading an ACL model
+       * off the PLAIN client.
+       */
+      const bound = new Set<string>(['this.acl.forCaller', 'this.acl.forSystem']);
+      for (const m of code.matchAll(
+        /(?:const|let)\s+(\w+)\s*=\s*(?:await\s+)?this\.acl\.for(?:Caller|System)\s*\(/g,
+      )) {
+        bound.add(m[1] as string);
+      }
+
       for (const accessor of accessors) {
         // `.forumCategory.` — a property access on some client, not the word.
-        const re = new RegExp(`\\.\\s*${accessor}\\s*\\.`);
-        if (re.test(code)) {
-          const line = code.split('\n').findIndex((l) => re.test(l)) + 1;
-          offenders.push(`${rel}:${line} reads .${accessor}. outside AclDbService`);
+        const re = new RegExp(`([\\w.)]+)\\s*\\.\\s*${accessor}\\s*\\.`);
+
+        const lines = code.split('\n');
+        for (let i = 0; i < lines.length; i += 1) {
+          const hit = re.exec(lines[i] as string);
+          if (hit === null) continue;
+
+          const receiver = (hit[1] as string).replace(/^await\s+/, '');
+
+          /*
+           * A chained call — `this.acl.forSystem('why').shipBuild.findFirst(...)` — leaves the
+           * closing paren as the receiver, and the `this.acl.forX(` that produced it is on the
+           * same statement. Both spellings are accepted; neither can name the plain client.
+           */
+          const chained =
+            receiver.endsWith(')') &&
+            /this\.acl\.for(?:Caller|System)\s*\(/.test(lines.slice(Math.max(0, i - 8), i + 1).join('\n'));
+
+          if (bound.has(receiver) || chained) continue;
+
+          offenders.push(`${rel}:${i + 1} reads .${accessor}. outside AclDbService`);
+          break;
         }
       }
     }

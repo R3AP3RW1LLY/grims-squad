@@ -325,3 +325,69 @@ export function buildProgress(counts: Readonly<Partial<Record<BuildRole, number>
     return { role, label: BUILD_ROLE_LABELS[role], have, need, ready: have >= need };
   });
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SHARING
+//
+// ★ SQUADRON OWNER, 2026-08-01 ★
+//
+// "also include shareable links, and the ability for our users to share their builds and make them
+// visible to the squadron and public if they choose to please."
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Who may open a saved build.
+ *
+ * ★ THREE STATES, AND THE DEFAULT IS THE QUIET ONE ★
+ *
+ * A build is a plan. Somebody working out whether they can afford a Cutter has not decided to tell
+ * the squadron they are saving for one, and a builder that published by default would make that
+ * decision for them. So `private` is where every build starts and the other two are chosen.
+ *
+ * `squadron` and `public` are separate rather than a single "shared" flag because they differ in
+ * one property that matters: a squadron link can be un-shared and it is actually gone, since every
+ * reader had to sign in. A public link cannot — once it is copied, it is out.
+ */
+export type BuildVisibility = 'private' | 'squadron' | 'public';
+
+export const BUILD_VISIBILITIES: readonly BuildVisibility[] = ['private', 'squadron', 'public'];
+
+/** What each choice means, in the words shown to the member making it. */
+export const BUILD_VISIBILITY_LABELS: Readonly<Record<BuildVisibility, string>> = {
+  private: 'Only you',
+  squadron: 'Anyone in the squadron',
+  public: 'Anyone with the link',
+};
+
+export const BUILD_VISIBILITY_NOTES: Readonly<Record<BuildVisibility, string>> = {
+  private: 'Kept against your account. Nobody else can open it.',
+  squadron: 'Signed-in members can open it, with your name on it. Set it back to private and it is gone.',
+  public: 'Works without signing in. Once somebody has the link you cannot take it back.',
+};
+
+export function isBuildVisibility(value: unknown): value is BuildVisibility {
+  return typeof value === 'string' && (BUILD_VISIBILITIES as readonly string[]).includes(value);
+}
+
+/**
+ * The alphabet a share token is drawn from.
+ *
+ * ★ NO VOWELS, NO LOOKALIKES ★
+ *
+ * Vowels are out so a random token cannot spell something the squadron then has to explain. `0/O`
+ * and `1/l/I` are out because these get read down a voice channel and typed by hand — a token that
+ * is unambiguous when spoken is worth more than four extra bits of entropy.
+ *
+ * 29 characters and a length of 12 is about 58 bits, which is far past guessable for a resource
+ * whose worst case is a stranger reading a ship build.
+ */
+export const SHARE_TOKEN_ALPHABET = '23456789bcdfghjkmnpqrstvwxyz';
+export const SHARE_TOKEN_LENGTH = 12;
+
+export function isShareToken(value: unknown): value is string {
+  return (
+    typeof value === 'string' &&
+    value.length === SHARE_TOKEN_LENGTH &&
+    [...value].every((c) => SHARE_TOKEN_ALPHABET.includes(c))
+  );
+}

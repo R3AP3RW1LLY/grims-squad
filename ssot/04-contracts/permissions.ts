@@ -396,8 +396,23 @@ export const WEBMASTER_PERMISSIONS: PermissionMask = ALL_PERMISSIONS & ~SQUADRON
 
 const P = Permission;
 
-/** Unauthenticated. Never persisted as a role row — this is the default mask for no session. */
-const GUEST: PermissionMask = P.FORUM_VIEW_PUBLIC;
+/**
+ * Unauthenticated. Never persisted as a role row — this is the default mask for no session.
+ *
+ * ★ THE SHIPYARD IS OPEN — SQUADRON OWNER, 2026-08-01 ★
+ *
+ * "also make the builder public please and accessible to signed out users."
+ *
+ * Granted as a PERMISSION rather than by removing the gate. Deleting the check would have been
+ * fewer lines and would have thrown away the thing the owner asked for three messages earlier:
+ * Shipyard permissions that "work the same as all other categories", so a rank can have the page
+ * taken away. Putting the bit in the guest mask keeps that intact and makes "public" a decision
+ * recorded in the permission model rather than an absence of one.
+ *
+ * SHIPYARD_VIEW only. A visitor may plan a ship and read what the squadron has published; saving
+ * and sharing need an account, because both write a row that belongs to somebody.
+ */
+const GUEST: PermissionMask = P.FORUM_VIEW_PUBLIC | P.SHIPYARD_VIEW;
 
 /** Application in flight. Public forum plus their own application thread (by ownership predicate). */
 const APPLICANT: PermissionMask = GUEST | P.FORUM_POST_PUBLIC;

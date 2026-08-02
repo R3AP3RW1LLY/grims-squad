@@ -1,6 +1,7 @@
 import { Global, Module, type OnModuleDestroy, type OnModuleInit, Inject, Injectable } from '@nestjs/common';
 import { PrismaClient } from '@prisma/client';
 import { MODEL_WARM_INTERVAL_MS } from '@grims/shared';
+import { AclDbService } from '../authz/acl-db.service.js';
 import { AiClient, aiConfigFrom } from './ai.client.js';
 import { EmbedClient, embedRootFrom } from './embed.client.js';
 import { DecisionStore } from './decision.store.js';
@@ -263,13 +264,16 @@ export class ModelWarmer implements OnModuleInit, OnModuleDestroy {
      */
     {
       provide: ShipBuildService,
-      inject: [PrismaClient],
-      useFactory: (db: PrismaClient) => new ShipBuildService(db),
+      // AclDbService as well as the plain client: builds carry a visibility, so every read of them
+      // is bound to whoever is asking (INV-002). The plain client remains for the catalogue reads,
+      // which are ingested reference data and carry no ACL.
+      inject: [PrismaClient, AclDbService],
+      useFactory: (db: PrismaClient, acl: AclDbService) => new ShipBuildService(db, acl),
     },
     {
       provide: ShipBuildQueries,
-      inject: [PrismaClient],
-      useFactory: (db: PrismaClient) => new ShipBuildQueries(db),
+      inject: [AclDbService],
+      useFactory: (acl: AclDbService) => new ShipBuildQueries(acl),
     },
     /*
      * The Shipyard's outfitting data. Built on the import service rather than beside it, because

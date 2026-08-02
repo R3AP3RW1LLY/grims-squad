@@ -119,4 +119,12 @@ export {
   buildProgress,
   type BuildRole,
   type BuildRoleProgress,
+  BUILD_VISIBILITIES,
+  BUILD_VISIBILITY_LABELS,
+  BUILD_VISIBILITY_NOTES,
+  isBuildVisibility,
+  isShareToken,
+  SHARE_TOKEN_ALPHABET,
+  SHARE_TOKEN_LENGTH,
+  type BuildVisibility,
 } from './ship-build.js';
