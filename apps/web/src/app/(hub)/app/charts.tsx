@@ -1,169 +1,38 @@
 'use client';
 
 import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Cell,
-  ComposedChart,
-  Line,
-  Pie,
-  PieChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts';
+  BRAND,
+  ChartBox,
+  GRID,
+  RESPONSIVE,
+  SERIES,
+  TICKS,
+  TOOLTIP_DARK,
+  TOOLTIP_LIGHT,
+  crosshair,
+  seriesColour,
+  useChart,
+} from '../../../components/chart-kit';
 
 /**
  * The dashboard's charts.
  *
  * ★ WHY THIS FILE IS A CLIENT COMPONENT AND THE PAGE IS NOT ★
  *
- * Recharts measures the DOM to lay itself out, so it cannot render on the
- * server. Isolating it here keeps the page a server component: the data is
- * fetched and reduced server-side, and only the drawing ships to the browser.
+ * A chart measures the DOM and draws to a canvas, so it cannot render on the server. Isolating it
+ * here keeps the page a server component: the data is fetched and reduced server-side, and only
+ * the drawing ships to the browser.
  *
- * ★ THE PALETTE IS READ, NOT REDECLARED ★
+ * ★ THESE WERE RECHARTS UNTIL 2026-08-02 ★
  *
- * Recharts takes colours as strings and cannot resolve a CSS variable, so the
- * hex values appear literally below — the one place in the app where that is
- * true. They are pulled from the generated theme and pinned by a test, because
- * a chart quietly drifting from the brand is exactly the kind of thing nobody
- * notices until it looks wrong beside everything else.
+ * They moved to Chart.js when the owner asked for one library across the website and the companion
+ * app. The reasoning is in chart-kit.tsx; what matters here is that every decision the owner made
+ * about these charts survived the move — the colours, which series sits on which axis, the two
+ * tooltip treatments, the spelled-out month, the hand-written legends. A library change is not a
+ * licence to redesign a page somebody already tuned.
  */
 
-export const BRAND = {
-  orange: '#ff7100',
-  orangeBright: '#ff9d3f',
-  orangeDim: '#b34f00',
-  cyan: '#00c8ff',
-  cyanBright: '#5cd9ff',
-  success: '#3dff8f',
-  warning: '#ffc400',
-  hostile: '#ff7a7a',
-  panel: '#0b0f14',
-  panelRaised: '#121820',
-  hairline: 'rgba(255, 113, 0, 0.18)',
-  text: '#e8eef5',
-  textSecondary: '#93a4b8',
-  void: '#05070a',
-  /*
-   * ★ TWO COLOURS ADDED FOR THE SPLIT ACTIVITY SERIES — owner, 2026-07-30 ★
-   *
-   * "make this line purple" for forum activity, and for voice "choose a seperate color for the
-   * voice activity that doesnt match other colors used".
-   *
-   * Both were picked against the EXISTING palette rather than in isolation: orange, orangeBright,
-   * orangeDim, cyan, cyanBright, success green, warning gold and hostile salmon are all already in
-   * play. Violet and magenta are the two hue regions nothing else occupies, and they are far
-   * enough apart from each other to stay distinguishable at a 2px stroke — which is the only width
-   * anybody will actually see them at.
-   */
-  violet: '#a97bff',
-  magenta: '#ff4fd8',
-} as const;
-
-/**
- * A rotation for categorical series.
- *
- * Ordered so ADJACENT entries are far apart in hue and brightness. A palette
- * that steps evenly through a gradient looks elegant in isolation and becomes
- * unreadable the moment two neighbouring slices are the same size — which is
- * the normal case for a rank distribution.
- */
-/** Picks a series colour, wrapping. Total by construction, so no undefined escapes. */
-export function seriesColour(i: number): string {
-  return SERIES[i % SERIES.length] ?? BRAND.orange;
-}
-
-export const SERIES = [
-  BRAND.orange,
-  BRAND.cyan,
-  BRAND.success,
-  BRAND.orangeBright,
-  BRAND.warning,
-  BRAND.cyanBright,
-  BRAND.hostile,
-  BRAND.orangeDim,
-] as const;
-
-/**
- * The hover tooltip on every chart.
- *
- * ★ LIGHT ON DARK, NOT DARK ON DARK ★
- *
- * Squadron owner, 2026-07-30: "the tool tip color is a dark color, the dark colors are hard to
- * read, can we lighten this up".
- *
- * It used to be `panelRaised` (#121820) — a panel colour, one shade off the panel BEHIND it. That
- * is the actual problem: a tooltip has to read as floating ABOVE the chart, and a surface within a
- * few percent of its background reads as part of it, with the numbers competing against gridlines
- * and bars showing through the edges.
- *
- * So it inverts: the near-white text token becomes the surface, and the void token becomes the
- * ink. Both are existing tokens and the pairing is already used elsewhere for accent-filled chips,
- * so this stays inside the palette rather than introducing a colour.
- *
- * ★ THE ITEM COLOUR HAS TO BE OVERRIDDEN, AND THAT IS THE SUBTLE PART ★
- *
- * Recharts colours each tooltip row with its SERIES colour by default. Those are chosen to be
- * legible on a near-black chart — cyan-bright (#5cd9ff) and success (#3dff8f) on near-white are
- * close to invisible. Inverting the surface without also pinning `itemStyle` would have swapped one
- * unreadable tooltip for a worse one, and only on the coloured charts.
- */
-const TOOLTIP_STYLE = {
-  backgroundColor: BRAND.text,
-  border: `1px solid ${BRAND.orange}`,
-  borderRadius: 4,
-  fontSize: 12,
-  color: BRAND.void,
-  // Lifts it off the chart. Without a shadow an inverted box looks pasted on rather than floating.
-  boxShadow: '0 4px 14px rgba(0, 0, 0, 0.55)',
-} as const;
-
-/** Forces every row's text to the dark ink — see the note above on series colours. */
-const TOOLTIP_ITEM_STYLE = { color: BRAND.void } as const;
-
-/** The label row (the x-axis value). Slightly muted so it reads as a heading, not as data. */
-const TOOLTIP_LABEL_STYLE = { color: BRAND.void, fontWeight: 600 } as const;
-
-/**
- * The DARK tooltip, for the charts where the row colour carries meaning.
- *
- * ★ TWO TOOLTIP TREATMENTS, ON PURPOSE ★
- *
- * Squadron owner, 2026-07-30: on Who showed up, What the squadron flies and Journal telemetry,
- * "make the tool tip text match the corresponding data point it represents please give it the old
- * background color too keep the others not mentioned here the same colors they currently are".
- *
- * Those three are MULTI-SERIES: several lines on one chart, or a ring of coloured segments. There,
- * the colour of a tooltip row is the thing that tells you which series it belongs to — so the row
- * has to keep its series colour, and the surface has to be dark for those colours to be legible on.
- *
- * The bar charts are single-series. Nothing is distinguished by colour, so they keep the light
- * treatment, which reads better against a dark chart because it floats clearly above it.
- *
- * A border in the brand orange and a shadow, so it still reads as ABOVE the chart rather than as
- * part of it — which was the original complaint, and is fixed by separation rather than by
- * inverting the surface.
- */
-const TOOLTIP_DARK = {
-  backgroundColor: BRAND.panelRaised,
-  border: `1px solid ${BRAND.orange}`,
-  borderRadius: 4,
-  fontSize: 12,
-  color: BRAND.text,
-  boxShadow: '0 4px 14px rgba(0, 0, 0, 0.55)',
-} as const;
-
-/**
- * The label row on a dark tooltip.
- *
- * NOT paired with an `itemStyle`: leaving item styling to Recharts is what keeps each row in its
- * own SERIES colour, which is the entire point of the dark treatment.
- */
-const TOOLTIP_DARK_LABEL_STYLE = { color: BRAND.text, fontWeight: 600 } as const;
+export { BRAND, SERIES, seriesColour };
 
 /* ----------------------------------------------------------- activity chart */
 
@@ -199,6 +68,36 @@ export interface HeatDay {
 }
 
 /**
+ * The five series, in draw order.
+ *
+ * ★ WHICH AXIS A SERIES SITS ON IS A DECISION, NOT A DETAIL ★
+ *
+ * Messages, voice and forum posts are the same kind of quantity — things people did — so they
+ * share an axis and can be compared directly. That is the whole reason they were split apart: a
+ * quiet week of chat with a big voice night used to look identical to a steady week of typing.
+ *
+ * Members and Elite sign-ins are counts of PEOPLE, in tens where actions run to hundreds. On the
+ * actions axis they would press flat against the floor and read as "nobody plays".
+ */
+const ACTIVITY_SERIES = [
+  /*
+   * ORANGE, per the owner: "keep the message color orange". It was cyan, and the member line was
+   * orange — so the colour they associated with messages was on the wrong series.
+   */
+  { key: 'messages', name: 'Discord messages', colour: BRAND.orange, axis: 'actions' },
+  { key: 'voice', name: 'Voice joins', colour: BRAND.magenta, axis: 'actions' },
+  /*
+   * Forum posts are counted in ones and twos next to hundreds of messages, so this usually sits
+   * near the floor — which is honest. Its own axis would inflate three posts into a mountain.
+   */
+  { key: 'forum', name: 'Forum posts', colour: BRAND.violet, axis: 'actions' },
+  // Moved off orange, which now belongs to messages. Gold is the nearest unused warm tone, so the
+  // chart still reads the same way at a glance.
+  { key: 'members', name: 'Members active', colour: BRAND.warning, axis: 'members' },
+  { key: 'signIns', name: 'Elite sign-ins', colour: BRAND.success, axis: 'members' },
+] as const;
+
+/**
  * The month, as a time series.
  *
  * ★ WHY THIS REPLACED A CALENDAR HEATMAP ★
@@ -209,14 +108,12 @@ export interface HeatDay {
  * shaded squares makes you compare colours to answer "is the squadron getting
  * busier", which is a question a LINE answers instantly.
  *
- * Two series, because they are genuinely different questions and one loud
- * member should not look like a crowd:
+ * ★ LINES ONLY ★
  *
- *   area   total actions — how much happened
- *   line   distinct members — how many people it was
- *
- * Separate axes, since the two are orders of magnitude apart. Sharing one would
- * flatten the member line onto the floor.
+ * Squadron owner, 2026-07-31: "the discord orange line, with the blue filling, lets remove the
+ * blue filling, use lines only please." It was an area with an orange stroke over a CYAN gradient
+ * — so the fill did not even match its own line, and on a chart carrying five series it read as a
+ * coloured region behind four unrelated lines rather than as one of them.
  */
 export function ActivityChart({
   days,
@@ -226,9 +123,9 @@ export function ActivityChart({
   days: HeatDay[];
   monthLabel: string;
   /*
-   * What one bar covers. The year view buckets by MONTH — 365 bars on a panel that already thins 31
-   * labels would be a solid block of ink answering nothing — and a month bucket labelled "day 7"
-   * is the kind of wrong nobody spots for months.
+   * What one bar covers. The year view buckets by MONTH — 365 points on a panel that already thins
+   * 31 labels would be a solid block of ink answering nothing — and a month bucket labelled
+   * "day 7" is the kind of wrong nobody spots for months.
    */
   granularity?: 'day' | 'month';
 }) {
@@ -237,213 +134,127 @@ export function ActivityChart({
   const busiestMembers =
     days.length === 0 ? undefined : days.reduce((a, b) => (b.members > a.members ? b : a));
 
+  /** `7` as `July 2026` in the year view, `7 July 2026` in the month view. */
+  const bucketLabel = (day: number): string =>
+    granularity === 'month'
+      ? `${MONTH_NAME[day - 1] ?? String(day)} ${monthLabel}`
+      : `${String(day)} ${monthLabel}`;
+
+  const canvas = useChart<'line'>(
+    () => ({
+      type: 'line',
+      data: {
+        labels: days.map((d) => d.day),
+        datasets: ACTIVITY_SERIES.map((s) => ({
+          label: s.name,
+          data: days.map((d) => d[s.key]),
+          borderColor: s.colour,
+          backgroundColor: s.colour,
+          borderWidth: 2,
+          // The Recharts curve was `type="monotone"`; this is the same interpolation, and it
+          // matters because a plain cubic overshoots into negative territory on a spiky series.
+          cubicInterpolationMode: 'monotone',
+          pointRadius: 0,
+          // Nothing until you hover, then a dot on the line you are reading about.
+          pointHoverRadius: 3,
+          yAxisID: s.axis,
+        })),
+      },
+      options: {
+        ...RESPONSIVE,
+        // Hovering anywhere in a column reports every series at that point, which is the question
+        // somebody has when they point at a date.
+        interaction: { mode: 'index', intersect: false },
+        scales: {
+          x: {
+            grid: { display: false },
+            border: { display: false },
+            ticks: {
+              ...TICKS,
+              autoSkip: false,
+              /*
+               * Every other DAY, but every MONTH. Twelve labels fit comfortably; thirty-one do
+               * not, and the shape is what matters across a month rather than the exact dates.
+               */
+              callback: (_value, index) => {
+                const day = days[index]?.day;
+                if (day === undefined) return '';
+                if (granularity === 'month') return MONTH_ABBR[day - 1] ?? String(day);
+                return index % 2 === 0 ? String(day) : '';
+              },
+            },
+          },
+          actions: {
+            type: 'linear',
+            position: 'left',
+            beginAtZero: true,
+            grid: GRID,
+            border: { display: false },
+            ticks: TICKS,
+          },
+          members: {
+            type: 'linear',
+            position: 'right',
+            beginAtZero: true,
+            // No gridlines from the right axis: two sets of horizontal lines at different spacings
+            // is a moiré, not a scale.
+            grid: { display: false },
+            border: { display: false },
+            ticks: { ...TICKS, color: BRAND.orangeBright },
+          },
+        },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            ...TOOLTIP_DARK,
+            callbacks: {
+              /*
+               * ★ THE MONTH SPELLED OUT IN THE YEAR VIEW ★
+               *
+               * Squadron owner: "replace the month number with the actual spelling of the month
+               * please! this is confusing to spell!" — and it was: a bucket labelled "7 2026" is
+               * genuinely ambiguous between the 7th of a month and July.
+               *
+               * Days stay numeric, because "15 July" is unambiguous and spelling a day out would
+               * be noise.
+               */
+              title: (items) => bucketLabel(days[items[0]?.dataIndex ?? 0]?.day ?? 0),
+              label: (item) =>
+                ` ${item.dataset.label ?? ''}: ${Number(item.parsed.y).toLocaleString('en-GB')}`,
+            },
+          },
+        },
+      },
+      plugins: [crosshair],
+    }),
+    [days, monthLabel, granularity],
+  );
+
   return (
     <div>
-      <ResponsiveContainer width="100%" height={200}>
-        <ComposedChart data={days} margin={{ top: 8, right: 8, bottom: 0, left: -20 }}>
-          <CartesianGrid stroke="rgba(147,164,184,0.08)" vertical={false} />
-          <XAxis
-            dataKey="day"
-            tick={{ fill: BRAND.textSecondary, fontSize: 10 }}
-            axisLine={false}
-            tickLine={false}
-            /*
-             * Every other DAY, but every MONTH. Twelve labels fit comfortably; thirty-one do not,
-             * and the shape is what matters across a month rather than the exact dates.
-             */
-            interval={granularity === 'month' ? 0 : 1}
-            tickFormatter={(v: number) =>
-              granularity === 'month' ? MONTH_ABBR[v - 1] ?? String(v) : String(v)
-            }
-          />
-          <YAxis
-            yAxisId="actions"
-            tick={{ fill: BRAND.textSecondary, fontSize: 10 }}
-            axisLine={false}
-            tickLine={false}
-            width={44}
-          />
-          <YAxis
-            yAxisId="members"
-            orientation="right"
-            tick={{ fill: BRAND.orangeBright, fontSize: 10 }}
-            axisLine={false}
-            tickLine={false}
-            width={28}
-          />
-          <Tooltip
-            contentStyle={TOOLTIP_DARK}
-            labelStyle={TOOLTIP_DARK_LABEL_STYLE}
-            cursor={{ stroke: BRAND.orange, strokeWidth: 1, strokeDasharray: '3 3' }}
-            /*
-             * ★ THE MONTH SPELLED OUT IN THE YEAR VIEW ★
-             *
-             * Squadron owner: "replace the month number with the actual spelling of the month
-             * please! this is confusing to spell!" — and it was: a bucket labelled "7 2026" is
-             * genuinely ambiguous between the 7th of a month and July, and the axis and the tooltip
-             * were both saying the number.
-             *
-             * Days stay numeric, because "15 July" is unambiguous and spelling a day out would be
-             * noise.
-             */
-            labelFormatter={(d) =>
-              granularity === 'month'
-                ? `${MONTH_NAME[Number(d) - 1] ?? String(d)} ${monthLabel}`
-                : `${String(d)} ${monthLabel}`
-            }
-            /*
-              A lookup rather than a ternary. With three series the ternary read
-              "messages ? Actions : Members" and would have labelled the new
-              green line "Members" — two lines in one tooltip claiming to be the
-              same thing.
-            */
-            formatter={(v, n) => [
-              Number(v).toLocaleString('en-GB'),
-              {
-                messages: 'Discord messages',
-                voice: 'Voice joins',
-                forum: 'Forum posts',
-                members: 'Members',
-                signIns: 'Elite sign-ins',
-              }[String(n)] ??
-                String(n),
-            ]}
-          />
-          {/*
-            ★ A LINE, NOT AN AREA ★
-
-            Squadron owner, 2026-07-31: "the discord orange line, with the blue filling, lets remove
-            the blue filling, use lines only please."
-
-            It was an Area with an orange stroke over a CYAN gradient — so the fill did not even
-            match its own line, and on a chart that now carries four series it read as a coloured
-            region behind three unrelated lines rather than as one of them.
-
-            Lines only also makes the four series directly comparable, which is the entire point of
-            having split messages, voice, forum and members apart.
-          */}
-          <Line
-            yAxisId="actions"
-            type="monotone"
-            dataKey="messages"
-            /*
-             * ORANGE, per the owner: "keep the message color orange". It was cyan, and the member
-             * line was orange — so the colour they associated with messages was on the wrong
-             * series. The member line moves to gold below rather than staying orange, because two
-             * orange lines on one chart is worse than either arrangement.
-             */
-            stroke={BRAND.orange}
-            strokeWidth={2}
-            dot={false}
-          />
-          {/*
-            ★ VOICE, SPLIT OUT OF THE OLD COMBINED FIGURE ★
-
-            On the ACTIONS axis with messages, because they are the same kind of quantity and the
-            whole point of splitting them is to compare them. A quiet week of chat with a big voice
-            night used to look identical to a steady week of typing.
-          */}
-          <Line
-            yAxisId="actions"
-            type="monotone"
-            dataKey="voice"
-            stroke={BRAND.magenta}
-            strokeWidth={2}
-            dot={false}
-          />
-          {/*
-            ★ FORUM ACTIVITY — purple, as asked ★
-
-            Also on the actions axis. Forum posts are counted in ones and twos next to hundreds of
-            messages, so this will usually sit near the floor — which is honest. Giving it its own
-            axis would inflate three posts into a mountain and imply the forum is as busy as
-            Discord.
-          */}
-          <Line
-            yAxisId="actions"
-            type="monotone"
-            dataKey="forum"
-            stroke={BRAND.violet}
-            strokeWidth={2}
-            dot={false}
-          />
-          <Line
-            yAxisId="members"
-            type="monotone"
-            dataKey="members"
-            // Moved off orange, which now belongs to messages. Gold is the nearest unused warm
-            // tone, so the chart still reads the same way at a glance.
-            stroke={BRAND.warning}
-            strokeWidth={2}
-            dot={false}
-          />
-          {/*
-            ★ ELITE SIGN-INS — squadron owner, 2026-07-29 ★
-
-            Green, and on the MEMBERS axis rather than the actions one. Sign-ins
-            are counted in tens like the member line, while actions run into the
-            hundreds; sharing the actions axis would press this flat against the
-            floor and it would read as "nobody plays".
-          */}
-          <Line
-            yAxisId="members"
-            type="monotone"
-            dataKey="signIns"
-            stroke={BRAND.success}
-            strokeWidth={2}
-            dot={false}
-          />
-        </ComposedChart>
-      </ResponsiveContainer>
+      <ChartBox
+        height={200}
+        label={`Squadron activity across ${days.length} ${granularity === 'month' ? 'months' : 'days'} of ${monthLabel}`}
+        canvasRef={canvas}
+      />
 
       {/* ------------------------------------------------------------ legend */}
       <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-[var(--color-border-hairline)] pt-3 text-[11px]">
-        <span className="flex items-center gap-2">
-          <span
-            aria-hidden="true"
-            className="h-0.5 w-5 rounded"
-            style={{ backgroundColor: BRAND.orange }}
-          />
-          <span className="text-[var(--color-text-secondary)]">Discord messages</span>
-        </span>
-        <span className="flex items-center gap-2">
-          <span
-            aria-hidden="true"
-            className="h-0.5 w-5 rounded"
-            style={{ backgroundColor: BRAND.magenta }}
-          />
-          <span className="text-[var(--color-text-secondary)]">Voice joins</span>
-        </span>
-        <span className="flex items-center gap-2">
-          <span
-            aria-hidden="true"
-            className="h-0.5 w-5 rounded"
-            style={{ backgroundColor: BRAND.violet }}
-          />
-          <span className="text-[var(--color-text-secondary)]">Forum posts</span>
-        </span>
-        <span className="flex items-center gap-2">
-          <span
-            aria-hidden="true"
-            className="h-0.5 w-5 rounded"
-            style={{ backgroundColor: BRAND.warning }}
-          />
-          <span className="text-[var(--color-text-secondary)]">Members active</span>
-        </span>
-        <span className="flex items-center gap-2">
-          <span
-            aria-hidden="true"
-            className="h-0.5 w-5 rounded"
-            style={{ backgroundColor: BRAND.success }}
-          />
-          {/*
-            "Elite sign-ins", not "sign-ins". The hub has its own sign-in, and a
-            legend on the admin console reading just "Sign-ins" beside two
-            Discord series would be read as website logins by anybody who had
-            not written it.
-          */}
-          <span className="text-[var(--color-text-secondary)]">Elite sign-ins</span>
-        </span>
+        {ACTIVITY_SERIES.map((s) => (
+          <span key={s.key} className="flex items-center gap-2">
+            <span
+              aria-hidden="true"
+              className="h-0.5 w-5 rounded"
+              style={{ backgroundColor: s.colour }}
+            />
+            {/*
+              "Elite sign-ins", not "sign-ins". The hub has its own sign-in, and a legend on the
+              admin console reading just "Sign-ins" beside two Discord series would be read as
+              website logins by anybody who had not written it.
+            */}
+            <span className="text-[var(--color-text-secondary)]">{s.name}</span>
+          </span>
+        ))}
 
         {busiest !== undefined && busiest.messages > 0 && (
           <span className="text-[var(--color-text-secondary)]">
@@ -492,8 +303,8 @@ export interface Datum {
 /**
  * A horizontal bar chart, for rankings with long labels.
  *
- * Horizontal because commander names and ship types do not fit under a vertical
- * bar — they end up rotated forty-five degrees, which is unreadable at ten rows.
+ * Horizontal because commander names and ship types do not fit under a vertical bar — they end up
+ * rotated forty-five degrees, which is unreadable at ten rows.
  */
 export function RankedBars({
   data,
@@ -507,40 +318,72 @@ export function RankedBars({
   /** Give every bar its own colour. For categories, never for a ranking. */
   colourful?: boolean;
 }) {
+  const canvas = useChart<'bar'>(
+    () => ({
+      type: 'bar',
+      data: {
+        labels: data.map((d) => d.label),
+        datasets: [
+          {
+            label: unit,
+            data: data.map((d) => d.value),
+            backgroundColor: data.map((_d, i) => (colourful ? seriesColour(i) : colour)),
+            // Rounded on the growing end only. A bar rounded at its origin looks detached from the
+            // axis it is measured from.
+            borderRadius: { topLeft: 0, bottomLeft: 0, topRight: 3, bottomRight: 3 },
+            maxBarThickness: 22,
+          },
+        ],
+      },
+      options: {
+        ...RESPONSIVE,
+        indexAxis: 'y',
+        interaction: { mode: 'index', intersect: false },
+        scales: {
+          // Hidden. The bar lengths carry the comparison and the tooltip carries the number; an
+          // axis of round figures underneath adds a third way to read the same thing.
+          x: { display: false, beginAtZero: true },
+          y: {
+            grid: { display: false },
+            border: { display: false },
+            ticks: {
+              ...TICKS,
+              font: { size: 11 },
+              autoSkip: false,
+              /*
+               * Truncated rather than wrapped. A canvas cannot reflow a label, so a long ship name
+               * would otherwise push the plot area down to nothing on a ten-row chart.
+               */
+              callback: (_v, index) => {
+                const label = data[index]?.label ?? '';
+                return label.length > 22 ? `${label.slice(0, 21)}…` : label;
+              },
+            },
+          },
+        },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            ...TOOLTIP_LIGHT,
+            callbacks: {
+              // The full label, even when the axis truncated it — this is where somebody looks to
+              // find out what the clipped row actually said.
+              title: (items) => data[items[0]?.dataIndex ?? 0]?.label ?? '',
+              label: (item) => ` ${Number(item.parsed.x).toLocaleString('en-GB')} ${unit}`,
+            },
+          },
+        },
+      },
+    }),
+    [data, unit, colour, colourful],
+  );
+
   return (
-    <ResponsiveContainer width="100%" height={Math.max(160, data.length * 34)}>
-      <BarChart data={data} layout="vertical" margin={{ top: 0, right: 44, bottom: 0, left: 0 }}>
-        <XAxis type="number" hide />
-        <YAxis
-          type="category"
-          dataKey="label"
-          width={150}
-          tick={{ fill: BRAND.textSecondary, fontSize: 11 }}
-          axisLine={false}
-          tickLine={false}
-        />
-        <Tooltip
-          contentStyle={TOOLTIP_STYLE}
-          itemStyle={TOOLTIP_ITEM_STYLE}
-          labelStyle={TOOLTIP_LABEL_STYLE}
-          // The default hover fill is a pale grey box that looks like a
-          // rendering artefact on a dark panel.
-          cursor={{ fill: 'rgba(255,113,0,0.08)' }}
-          /*
-            Recharts types the formatter's value as its own ValueType union, so
-            a `(v: number)` signature does not satisfy it. Narrowed at the call
-            rather than cast, because the value genuinely can be a string or an
-            array and pretending otherwise would crash on the day it is.
-          */
-          formatter={(v) => [`${Number(v).toLocaleString('en-GB')} ${unit}`, '']}
-        />
-        <Bar dataKey="value" radius={[0, 3, 3, 0]} maxBarSize={22}>
-          {data.map((d, i) => (
-            <Cell key={d.label} fill={colourful ? seriesColour(i) : colour} />
-          ))}
-        </Bar>
-      </BarChart>
-    </ResponsiveContainer>
+    <ChartBox
+      height={Math.max(160, data.length * 34)}
+      label={`${data.length} ranked by ${unit}`}
+      canvasRef={canvas}
+    />
   );
 }
 
@@ -549,31 +392,46 @@ export function RankedBars({
 export function Donut({ data, unit }: { data: Datum[]; unit: string }) {
   const total = data.reduce((a, d) => a + d.value, 0);
 
+  const canvas = useChart<'doughnut'>(
+    () => ({
+      type: 'doughnut',
+      data: {
+        labels: data.map((d) => d.label),
+        datasets: [
+          {
+            data: data.map((d) => d.value),
+            backgroundColor: data.map((_d, i) => seriesColour(i)),
+            borderWidth: 0,
+            // A hairline of background between segments, so two adjacent slices of similar
+            // lightness still read as two.
+            spacing: 2,
+            // Leaves room for the total in the middle — see below.
+            cutout: '66%',
+          },
+        ],
+      },
+      options: {
+        ...RESPONSIVE,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            ...TOOLTIP_DARK,
+            callbacks: {
+              title: () => '',
+              label: (item) =>
+                ` ${item.label}: ${Number(item.parsed).toLocaleString('en-GB')} ${unit}`,
+            },
+          },
+        },
+      },
+    }),
+    [data, unit],
+  );
+
   return (
     <div className="flex flex-col items-center gap-4 sm:flex-row">
       <div className="relative h-52 w-52 shrink-0">
-        <ResponsiveContainer width="100%" height="100%">
-          <PieChart>
-            <Pie
-              data={data}
-              dataKey="value"
-              nameKey="label"
-              innerRadius="58%"
-              outerRadius="88%"
-              paddingAngle={2}
-              stroke="none"
-            >
-              {data.map((d, i) => (
-                <Cell key={d.label} fill={seriesColour(i)} />
-              ))}
-            </Pie>
-            <Tooltip
-              contentStyle={TOOLTIP_DARK}
-              labelStyle={TOOLTIP_DARK_LABEL_STYLE}
-              formatter={(v, n) => [`${Number(v).toLocaleString('en-GB')} ${unit}`, n]}
-            />
-          </PieChart>
-        </ResponsiveContainer>
+        <ChartBox height={208} label={`Split of ${total.toLocaleString('en-GB')} ${unit}`} canvasRef={canvas} />
 
         {/*
           The total in the hole. A donut answers "what is the split"; the one
@@ -591,9 +449,9 @@ export function Donut({ data, unit }: { data: Datum[]; unit: string }) {
       </div>
 
       {/*
-        A written legend rather than Recharts' own. Its built-in one wraps into
-        an unreadable line at ten entries and cannot show the value beside the
-        name, which is half of what somebody is looking for.
+        A written legend rather than the library's own. Built-in legends wrap into an unreadable
+        line at ten entries and cannot show the value beside the name, which is half of what
+        somebody is looking for.
       */}
       <ol className="m-0 min-w-0 flex-1 list-none space-y-1 p-0">
         {data.map((d, i) => (
@@ -625,6 +483,11 @@ export function Donut({ data, unit }: { data: Datum[]; unit: string }) {
  * for them: nine people across a handful of offices is a composition, not a
  * ranking, and stacking it says "this is the leadership" in a way nine separate
  * bars do not.
+ *
+ * ★ NOT A CHART.JS CHART, AND THAT IS NOT AN INCONSISTENCY ★
+ *
+ * It is four divs with percentage widths. A charting library adds nothing to a single bar with no
+ * axes and no scale — it would replace text a screen reader can read with a canvas it cannot.
  */
 export function StackedStrip({ data, unit }: { data: Datum[]; unit: string }) {
   const total = data.reduce((a, d) => a + d.value, 0);

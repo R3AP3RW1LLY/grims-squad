@@ -1,4 +1,16 @@
+'use client';
+
 import type { HistoryPoint } from '../../../../../lib/api';
+import {
+  BRAND,
+  ChartBox,
+  GRID,
+  RESPONSIVE,
+  TICKS,
+  TOOLTIP_DARK,
+  crosshair,
+  useChart,
+} from '../../../../../components/chart-kit';
 
 /**
  * How a commodity's price has moved.
@@ -13,23 +25,158 @@ import type { HistoryPoint } from '../../../../../lib/api';
  * it has two points or two thousand is one that misleads for a fortnight and then quietly becomes
  * useful with nobody the wiser.
  *
- * ★ AN INLINE SVG, NOT A CHARTING LIBRARY ★
+ * ★ THIS WAS A HAND-ROLLED SVG UNTIL 2026-08-02, AND THE REVERSAL WAS DELIBERATE ★
  *
- * Two series over at most 2,160 hourly points is a polyline. A library would be ~50KB on a page
- * that is otherwise server-rendered HTML, for axes we would restyle anyway to match the site.
+ * The first version drew polylines by hand, justified on size: a library was tens of kilobytes on
+ * a page that is otherwise server-rendered HTML, for axes we would restyle anyway. That reasoning
+ * was sound about SIZE and wrong about the thing that mattered — it had no tooltips, so the one
+ * question somebody actually brings to a price chart, "what was it worth on Tuesday", could not be
+ * answered by pointing at Tuesday. The owner asked for a charting library across both apps, and
+ * every honest behaviour below survived the move intact.
  */
 
-const W = 960;
-const H = 220;
-const PAD = { top: 12, right: 16, bottom: 26, left: 56 };
+/**
+ * A series, with gaps where the galaxy stopped trading.
+ *
+ * ★ NaN IS THE GAP, AND IT HAS TO BE ★
+ *
+ * An hour nobody traded records a null. Joining across it would draw a straight line through a
+ * hole — claiming a price held steady through an hour in which there was no price at all, which is
+ * the single most misleading thing a price chart can do.
+ *
+ * The point still has to occupy its place on the time axis, so the gap cannot simply be dropped:
+ * removing it would slide the following hours backwards and compress a two-day outage into
+ * nothing. NaN keeps the x-position and breaks the line, which is exactly the shape of the truth.
+ */
+function series(points: readonly HistoryPoint[], pick: (p: HistoryPoint) => number | null) {
+  return points.map((p) => {
+    const v = pick(p);
+    return { x: new Date(p.observedAt).getTime(), y: v === null ? Number.NaN : v };
+  });
+}
 
 export function PriceHistory({ points }: { points: readonly HistoryPoint[] }) {
+  const ts = points.map((p) => new Date(p.observedAt).getTime());
+  const t0 = ts.length === 0 ? 0 : Math.min(...ts);
+  const t1 = ts.length === 0 ? 0 : Math.max(...ts);
+  const hours = Math.round((t1 - t0) / 3_600_000);
+  const label = hours < 48 ? `${hours} hours` : `${Math.round(hours / 24)} days`;
+
+  const values = points.flatMap((p) => [p.avgBuy, p.avgSell].filter((v): v is number => v !== null));
+  const lo = values.length === 0 ? 0 : Math.min(...values);
+  const hi = values.length === 0 ? 0 : Math.max(...values);
+
+  /*
+   * ★ HOOKS RUN BEFORE THE EMPTY STATES, NOT AFTER ★
+   *
+   * The two "nothing to draw yet" returns below are real and stay. They sit AFTER this hook
+   * because a component that returns early past a hook changes its hook count between renders,
+   * which React refuses at exactly the moment the first reading arrives and the panel switches
+   * from words to a chart. The hook is harmless when there is nothing to draw: no canvas is
+   * mounted, so nothing is built.
+   */
+  const canvas = useChart<'line'>(
+    () => ({
+      type: 'line',
+      data: {
+        datasets: [
+          {
+            label: 'average buy',
+            data: series(points, (p) => p.avgBuy),
+            borderColor: BRAND.cyan,
+            backgroundColor: BRAND.cyan,
+            borderWidth: 2,
+            pointRadius: 0,
+            pointHoverRadius: 3,
+            // Straight segments. A smoothed curve through hourly averages invents prices between
+            // the readings, and on a market chart an invented price is a lie with a shape.
+            tension: 0,
+            spanGaps: false,
+          },
+          {
+            label: 'average sell',
+            data: series(points, (p) => p.avgSell),
+            borderColor: BRAND.orange,
+            backgroundColor: BRAND.orange,
+            borderWidth: 2,
+            pointRadius: 0,
+            pointHoverRadius: 3,
+            tension: 0,
+            spanGaps: false,
+          },
+        ],
+      },
+      options: {
+        ...RESPONSIVE,
+        interaction: { mode: 'index', intersect: false },
+        scales: {
+          /*
+           * A LINEAR scale over timestamps, not a category scale over labels.
+           *
+           * Hourly readings are not evenly spaced — the rollup misses an hour whenever the worker
+           * is down — and a category axis would draw a missing hour as no gap at all. This also
+           * avoids Chart.js's time scale, which needs a date adapter as a second dependency to
+           * format labels we are formatting ourselves anyway.
+           */
+          x: {
+            type: 'linear',
+            grid: { display: false },
+            border: { color: BRAND.hairline },
+            ticks: {
+              ...TICKS,
+              maxTicksLimit: 6,
+              callback: (value) =>
+                new Date(Number(value)).toLocaleString('en-GB', {
+                  day: 'numeric',
+                  month: 'short',
+                  // The clock only when the whole window is inside two days. Across a fortnight
+                  // "2 Aug 14:00" is four characters of noise per label.
+                  ...(hours < 48 ? { hour: '2-digit', minute: '2-digit' } : {}),
+                }),
+            },
+          },
+          y: {
+            grid: GRID,
+            border: { display: false },
+            ticks: {
+              ...TICKS,
+              count: 3,
+              callback: (value) => Math.round(Number(value)).toLocaleString('en-GB'),
+            },
+          },
+        },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            ...TOOLTIP_DARK,
+            callbacks: {
+              title: (items) =>
+                new Date(Number(items[0]?.parsed.x ?? 0)).toLocaleString('en-GB', {
+                  day: 'numeric',
+                  month: 'short',
+                  hour: '2-digit',
+                  minute: '2-digit',
+                }),
+              label: (item) =>
+                ` ${item.dataset.label ?? ''}: ${Math.round(Number(item.parsed.y)).toLocaleString('en-GB')} cr`,
+            },
+            // An hour with no trade is a gap in the line, and a tooltip row reading "NaN" would
+            // undo the honesty the gap exists to preserve.
+            filter: (item) => Number.isFinite(item.parsed.y),
+          },
+        },
+      },
+      plugins: [crosshair],
+    }),
+    [points, hours],
+  );
+
   /*
    * ★ ONE POINT IS NOT A LINE ★
    *
-   * The first hour after the rollup job starts, every commodity has exactly one reading. An SVG
-   * polyline through one point draws nothing at all — a blank panel that reads as broken rather
-   * than as new. Said in words instead.
+   * The first hour after the rollup job starts, every commodity has exactly one reading. A line
+   * through one point draws nothing at all — a blank panel that reads as broken rather than as
+   * new. Said in words instead.
    */
   if (points.length < 2) {
     return (
@@ -42,11 +189,6 @@ export function PriceHistory({ points }: { points: readonly HistoryPoint[] }) {
     );
   }
 
-  const ts = points.map((p) => new Date(p.observedAt).getTime());
-  const t0 = Math.min(...ts);
-  const t1 = Math.max(...ts);
-
-  const values = points.flatMap((p) => [p.avgBuy, p.avgSell].filter((v): v is number => v !== null));
   if (values.length === 0) {
     return (
       <p className="m-0 text-sm text-[var(--color-text-secondary)]">
@@ -55,112 +197,20 @@ export function PriceHistory({ points }: { points: readonly HistoryPoint[] }) {
     );
   }
 
-  const lo = Math.min(...values);
-  const hi = Math.max(...values);
-  /*
-   * A flat series would give hi === lo and divide by zero, painting the line off the top of the
-   * box. Widening by 1 keeps a genuinely steady price as a straight line through the middle, which
-   * is what it is.
-   */
-  const span = hi - lo === 0 ? 1 : hi - lo;
-
-  const x = (t: number): number =>
-    PAD.left + ((t - t0) / (t1 - t0 === 0 ? 1 : t1 - t0)) * (W - PAD.left - PAD.right);
-  const y = (v: number): number =>
-    PAD.top + (1 - (v - lo) / span) * (H - PAD.top - PAD.bottom);
-
-  /**
-   * A polyline for one series, BROKEN wherever the data is.
-   *
-   * An hour nobody traded records a null, and joining across it would draw a straight line through
-   * a gap — claiming a price held steady through an hour in which there was no price at all. The
-   * series is emitted as separate segments so a gap looks like a gap.
-   */
-  const segments = (pick: (p: HistoryPoint) => number | null): string[] => {
-    const out: string[] = [];
-    let run: string[] = [];
-
-    points.forEach((p, i) => {
-      const v = pick(p);
-      if (v === null) {
-        if (run.length > 1) out.push(run.join(' '));
-        run = [];
-        return;
-      }
-      run.push(`${x(ts[i] ?? t0).toFixed(1)},${y(v).toFixed(1)}`);
-    });
-
-    if (run.length > 1) out.push(run.join(' '));
-    return out;
-  };
-
-  const buy = segments((p) => p.avgBuy);
-  const sell = segments((p) => p.avgSell);
-
-  const hours = Math.round((t1 - t0) / 3_600_000);
-  const label = hours < 48 ? `${hours} hours` : `${Math.round(hours / 24)} days`;
-
   return (
     <div>
-      <svg
-        viewBox={`0 0 ${W} ${H}`}
-        className="w-full"
-        role="img"
-        aria-label={`Average buy and sell price over the last ${label}, from ${lo.toLocaleString()} to ${hi.toLocaleString()} credits`}
-      >
-        {[0, 0.5, 1].map((f) => {
-          const v = lo + f * span;
-          const yy = y(v);
-          return (
-            <g key={f}>
-              <line
-                x1={PAD.left}
-                x2={W - PAD.right}
-                y1={yy}
-                y2={yy}
-                stroke="var(--color-border-hairline)"
-                strokeWidth="1"
-              />
-              <text
-                x={PAD.left - 8}
-                y={yy + 4}
-                textAnchor="end"
-                className="font-mono"
-                fontSize="11"
-                fill="var(--color-text-dim)"
-              >
-                {Math.round(v).toLocaleString()}
-              </text>
-            </g>
-          );
-        })}
-
-        {sell.map((d, i) => (
-          <polyline
-            key={`s${i}`}
-            points={d}
-            fill="none"
-            stroke="var(--color-brand-orange)"
-            strokeWidth="2"
-          />
-        ))}
-        {buy.map((d, i) => (
-          <polyline
-            key={`b${i}`}
-            points={d}
-            fill="none"
-            stroke="var(--color-brand-cyan)"
-            strokeWidth="2"
-          />
-        ))}
-      </svg>
+      <ChartBox
+        height={220}
+        label={`Average buy and sell price over the last ${label}, from ${lo.toLocaleString()} to ${hi.toLocaleString()} credits`}
+        canvasRef={canvas}
+      />
 
       <p className="m-0 mt-2 flex flex-wrap items-center gap-4 font-mono text-[11px] text-[var(--color-text-secondary)]">
         <span>
           <span
             aria-hidden
             className="mr-1.5 inline-block h-2 w-4 align-middle"
-            style={{ background: 'var(--color-brand-cyan)' }}
+            style={{ background: BRAND.cyan }}
           />
           average buy
         </span>
@@ -168,7 +218,7 @@ export function PriceHistory({ points }: { points: readonly HistoryPoint[] }) {
           <span
             aria-hidden
             className="mr-1.5 inline-block h-2 w-4 align-middle"
-            style={{ background: 'var(--color-brand-orange)' }}
+            style={{ background: BRAND.orange }}
           />
           average sell
         </span>
