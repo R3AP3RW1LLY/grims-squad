@@ -974,6 +974,15 @@ function showWindow(): void {
     minWidth: 900,
     minHeight: 620,
     /*
+     * ★ THE FIRST FRAME, BEFORE ANY CSS EXISTS ★
+     *
+     * Chromium paints one frame with its own default background before index.html's styles land.
+     * Unset, that default is WHITE — a full-screen flash on every single launch of an application
+     * that is otherwise near-black. One line, and it is the difference between a window that
+     * appears and a window that blinks at you first.
+     */
+    backgroundColor: '#05070a',
+    /*
      * ★ THE VERSION IN THE TITLE BAR — squadron owner, 2026-08-01 ★
      *
      * "can we add the companion app version number to the topbar of the electron app please?"

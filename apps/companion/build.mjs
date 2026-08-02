@@ -70,6 +70,18 @@ await cp('src/renderer/index.html', 'dist/renderer/index.html');
 await cp('src/renderer/overlay.html', 'dist/renderer/overlay.html');
 
 /*
+ * The theme, as a plain file rather than an import.
+ *
+ * ★ NOT `import './theme.css'` FROM app.tsx ★
+ *
+ * esbuild's css loader would emit `dist/renderer/app.css` and then NOT inject it — so a <link> tag
+ * would still be needed, and a second file named app.css would collide with the bundle's own
+ * output. One copy and one <link> is the entire mechanism, and it is the one both HTML shells
+ * already expect.
+ */
+await cp('src/renderer/theme.css', 'dist/renderer/theme.css');
+
+/*
  * The brand fonts, copied from the website's own set.
  *
  * ★ BUNDLED, NOT FETCHED ★

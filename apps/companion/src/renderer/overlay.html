@@ -18,17 +18,18 @@
       content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:"
     />
     <title>Grim's Squad overlay</title>
-    <style>
-      @font-face {
-        font-family: 'Orbitron';
-        src: url('fonts/Orbitron-Bold.woff2') format('woff2');
-        font-weight: 700;
-        font-display: block;
-      }
 
-      :root {
-        color-scheme: dark;
-      }
+    <!--
+      ★ THE SAME STYLESHEET, FOR THE FONTS AND THE FOCUS RING ONLY ★
+
+      The overlay shares the app's typefaces and tokens so the two windows do not drift apart, but
+      it must NOT take the glass treatment. Its window is genuinely transparent and sits over the
+      game: `backdrop-filter` there samples this document, which is empty, so it would cost GPU time
+      to blur nothing. Nothing here carries the `panel` class.
+    -->
+    <link rel="stylesheet" href="theme.css" />
+
+    <style>
 
       html,
       body {
@@ -44,12 +45,9 @@
           background — and the default `background: white` on <body> is exactly that.
         */
         background: transparent;
-        font-family:
-          ui-sans-serif,
-          system-ui,
-          -apple-system,
-          'Segoe UI',
-          sans-serif;
+        font-family: var(--font-body);
+        font-variant-numeric: tabular-nums lining-nums;
+        -webkit-font-smoothing: antialiased;
         /*
           Clicks pass to the game by default. The draggable header opts back IN with `app-region:
           drag`, which is the only part that should ever catch the mouse while arranging.

@@ -28,6 +28,7 @@ import {
   credits,
   inputStyle,
   tonnes,
+  Tabs,
 } from './ui.js';
 
 /**
@@ -134,7 +135,18 @@ export function ColonyBoardPage({
   const [openId, setOpenId] = useState<string | null>(null);
 
   if (openId !== null) {
-    return <ProjectDetail id={openId} onBack={() => { setOpenId(null); onReload(); }} />;
+    /*
+     * ★ KEYED, AND IT MATTERS MORE THAN IT LOOKS ★
+     *
+     * Without a key, opening project B while A's instance is alive re-runs the effect but keeps A's
+     * state on screen until the fetch lands — A's needs, A's chart stacking, A's open tab. Worse,
+     * `error` is never cleared inside the effect, so one failed load leaves a permanent error
+     * banner on every project opened afterwards. The key makes the identity change, which resets
+     * data, error, stacking and tab together.
+     */
+    return (
+      <ProjectDetail key={openId} id={openId} onBack={() => { setOpenId(null); onReload(); }} />
+    );
   }
 
   const mine = projects.filter((p) => p.owner === owner);
@@ -370,12 +382,18 @@ function Board({
         <div
           key={p.id}
           onClick={() => onOpen(p.id)}
+          /*
+           * The same glass as every other panel. These rows were left as opaque rounded boxes when
+           * the theme landed, which put flat rectangles with invisible edges directly under a
+           * chamfered translucent card — the one screen that is the main way into colonisation,
+           * looking like it belonged to a different application.
+           */
+          class="panel"
           style={{
             cursor: 'pointer',
-            border: `1px solid ${p.isPriority ? C.orange : C.hairline}`,
-            background: C.panel,
-            borderRadius: '10px',
             padding: '12px 14px',
+            // Priority builds keep their brighter edge. It is the only thing distinguishing them.
+            ...(p.isPriority ? { borderColor: C.orange } : {}),
           }}
         >
           <div
@@ -428,6 +446,35 @@ function Board({
   );
 }
 
+/**
+ * The five tabs of a project page.
+ *
+ * ★ SQUADRON OWNER, 2026-08-02 ★
+ *
+ * "tab this out please so the project pages are nice and clean and crisp and clear."
+ *
+ * It was seven sections in one column, two of which are twenty-to-forty-row tables. Grouped by the
+ * QUESTION each answers rather than by what kind of thing it is:
+ *
+ *   NEEDS       what is left to haul. The reason anybody opens the page, so it is the default.
+ *   WHERE TO BUY where to get it — a different task, answered at a market rather than at the site.
+ *   CREW        who is on this and what they have taken on. The only interactive part.
+ *   DELIVERIES  what went in, as a shape and then as a ledger. Same question at two resolutions.
+ *   HAULERS     who put it in. A question about people rather than about cargo.
+ *
+ * The two Chart.js canvases are deliberately in different tabs: only one exists at a time, so the
+ * app never holds two live charts it is animating in the background.
+ */
+const PROJECT_TABS = [
+  { key: 'needs', label: 'Needs' },
+  { key: 'buy', label: 'Where to buy' },
+  { key: 'crew', label: 'Crew' },
+  { key: 'deliveries', label: 'Deliveries' },
+  { key: 'haulers', label: 'Haulers' },
+] as const;
+
+type ProjectTab = (typeof PROJECT_TABS)[number]['key'];
+
 function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.Element {
   const [data, setData] = useState<ProjectDetailData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -440,6 +487,16 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
    * network to redraw bars it already has reads as broken.
    */
   const [stackBy, setStackBy] = useState<'commodity' | 'commander'>('commodity');
+  /*
+   * ★ THE TAB LIVES HERE, NOT IN A ROUTER AND NOT IN THE PARENT ★
+   *
+   * `data`, `error`, `stackBy` and the 60-second poll all belong to this component and the effect
+   * is keyed on `[id]`. If a tab change swapped which COMPONENT was mounted, every click would tear
+   * down that interval and refetch the whole project. Tabs swap this component's children; they
+   * never remount the component, so switching tabs costs no IPC at all and every tab is current the
+   * instant it opens.
+   */
+  const [tab, setTab] = useState<ProjectTab>('needs');
 
   /*
    * Re-read after a roster change, so the delivered totals and the needs the roster is offering
@@ -480,7 +537,21 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
     );
   }
 
-  if (data === null) return <Empty>Loading…</Empty>;
+  /*
+   * A way out of the loading state. It had none: a member who opened a project and hit a slow or
+   * hung IPC call was stuck on the word "Loading" with no Back button and no other navigation on
+   * screen — the app looked frozen when it was merely waiting.
+   */
+  if (data === null) {
+    return (
+      <div>
+        <Button onClick={onBack}>← Back</Button>
+        <div style={{ marginTop: '14px' }}>
+          <Empty>Loading…</Empty>
+        </div>
+      </div>
+    );
+  }
 
   const { project, needs, haulers, shopping, deliveries, chart } = data;
   const outstanding = needs.filter((n) => n.remaining > 0);
@@ -500,19 +571,34 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
         </span>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '14px', marginBottom: '20px' }}>
-        <Stat
-          label="Still needed"
-          value={project.needCount === 0 ? '—' : tonnes(project.remaining)}
-          tone={project.remaining > 0 ? C.warn : C.good}
-        />
-        <Stat
-          label="Delivered"
-          value={project.required > 0 ? tonnes(delivered) : '—'}
-          tone={C.good}
-        />
-        <Stat label="Commodities" value={String(project.needCount)} />
+      {/*
+        The summary strip stays OUTSIDE the tabs, because it is true whichever tab is open. Putting
+        "Still needed" inside a tab would make it vanish on the tab where somebody is deciding what
+        to buy — which is the one moment they most want to see it.
+      */}
+      <Card hud>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '14px' }}>
+          <Stat
+            label="Still needed"
+            value={project.needCount === 0 ? '—' : tonnes(project.remaining)}
+            tone={project.remaining > 0 ? C.warn : C.good}
+          />
+          <Stat
+            label="Delivered"
+            value={project.required > 0 ? tonnes(delivered) : '—'}
+            tone={C.good}
+          />
+          <Stat label="Commodities" value={String(project.needCount)} />
+        </div>
+      </Card>
+
+      <div style={{ margin: '20px 0 0' }}>
+        <Tabs tabs={PROJECT_TABS} current={tab} onChange={setTab} label="Project sections" />
       </div>
+      {/* The rule under the strip is what makes it read as a strip rather than as five buttons. */}
+      <div class="rule-glow" style={{ margin: '0 0 22px' }} />
+
+      <div id={`panel-${tab}`} role="tabpanel" aria-labelledby={`tab-${tab}`} tabIndex={0}>
 
       {/*
         ★ EVERY COMMODITY, WITH WHAT HAS BEEN DELIVERED — SQUADRON OWNER, 2026-08-02 ★
@@ -523,6 +609,22 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
         are kept below rather than dropped: a build's shopping list is not the same as its
         specification, and a member checking whether the titanium is done needs to find it.
       */}
+      {tab !== 'needs' ? null : (
+        <>
+        {/*
+          The note, which the app has never shown. `PostForm` writes it and nothing rendered it
+          back — somebody could describe their own build and then never see the description again.
+        */}
+        {project.notes === null || project.notes.trim() === '' ? null : (
+          <Section title="Notes">
+            <Card>
+              <p style={{ margin: 0, fontSize: '13px', color: C.dim, whiteSpace: 'pre-wrap' }}>
+                {project.notes}
+              </p>
+            </Card>
+          </Section>
+        )}
+
       <Section title="What it still needs">
         {needs.length === 0 ? (
           <Empty>
@@ -543,7 +645,11 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
           </Card>
         )}
       </Section>
+        </>
+      )}
 
+      {tab !== 'deliveries' ? null : (
+        <>
       {/* "a stacked bar chart that shows commoditied selivered per hour per day like raven colonial" */}
       <Section
         title="Deliveries over time"
@@ -580,7 +686,10 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
           </Card>
         )}
       </Section>
+        </>
+      )}
 
+      {tab !== 'buy' ? null : (
       <Section title="Where to buy it">
         {shopping.length === 0 ? (
           <Empty>Nothing to buy.</Empty>
@@ -611,7 +720,10 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
           </Card>
         )}
       </Section>
+      )}
 
+      {tab !== 'crew' ? null : (
+      <>
       {/*
         ★ WHO IS ON THIS, AND WHO IS COVERING WHAT — SQUADRON OWNER, 2026-08-02 ★
 
@@ -624,6 +736,8 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
       <Section title="Who is on this build">
         <Roster projectId={project.id} needs={needs} onChanged={() => void reloadDetail()} />
       </Section>
+      </>
+      )}
 
       {/*
         ★ THE CHART AND THE LIST, BOTH — SQUADRON OWNER, 2026-08-02 ★
@@ -635,6 +749,7 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
         it because a chart cannot be read to the tonne, and "am I third or fourth" is a question
         people genuinely have about their own name.
       */}
+      {tab !== 'haulers' ? null : (
       <Section title="Who has hauled">
         {haulers.length === 0 ? (
           <Empty>No deliveries recorded yet.</Empty>
@@ -657,6 +772,8 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
           </>
         )}
       </Section>
+      )}
+      </div>
     </div>
   );
 }
@@ -684,7 +801,7 @@ function Toggle({
           type="button"
           onClick={() => onChange(option)}
           style={{
-            border: `1px solid ${value === option ? C.subtle : 'transparent'}`,
+            border: `1px solid ${value === option ? C.active : 'transparent'}`,
             background: value === option ? C.raised : 'transparent',
             color: value === option ? C.text : C.faint,
             borderRadius: '6px',
@@ -869,16 +986,9 @@ function Roster({
                     }),
                   )
                 }
-                style={{
-                  border: `1px solid ${C.subtle}`,
-                  background: C.raised,
-                  color: C.text,
-                  borderRadius: '7px',
-                  padding: '5px 10px',
-                  fontSize: '12px',
-                  cursor: busy ? 'default' : 'pointer',
-                  fontFamily: 'inherit',
-                }}
+                // Styled entirely by the class — see the note in theme.css on why a control
+                // whose colour changes on hover cannot carry an inline colour.
+                class="chip"
               >
                 {n.commodity}
                 <span style={{ color: C.faint, marginLeft: '6px' }}>{tonnes(n.remaining)}</span>

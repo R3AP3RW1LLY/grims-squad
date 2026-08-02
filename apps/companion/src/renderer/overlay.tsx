@@ -1,6 +1,7 @@
 import { render } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 import type { OverlayId, OverlayState } from '../overlay-config.js';
+import { C } from './ui.js';
 
 /**
  * What a single overlay panel draws.
@@ -93,15 +94,15 @@ function App(): preact.JSX.Element | null {
         display: 'flex',
         flexDirection: 'column',
         fontSize: `${13 * state.style.scale}px`,
-        color: '#e8eef2',
+        color: C.text,
         /*
           Opacity is on the PANEL, not the window. `BrowserWindow.setOpacity` fades the whole window
           including its own compositing, which on Windows disables click-through — so a member who
           dimmed a locked overlay would find it started catching their clicks.
         */
         opacity: state.style.opacity,
-        background: 'rgba(9, 13, 17, 0.82)',
-        border: `1px solid ${arranging ? state.style.accent : 'rgba(255,255,255,0.10)'}`,
+        background: C.panelGlass,
+        border: `1px solid ${arranging ? state.style.accent : C.hairline}`,
         borderRadius: '8px',
         overflow: 'hidden',
       }}
@@ -150,7 +151,7 @@ function Header({
     >
       <span
         style={{
-          fontFamily: 'Orbitron, sans-serif',
+          fontFamily: 'var(--font-mono)',
           fontSize: '9px',
           letterSpacing: '0.18em',
           textTransform: 'uppercase',
@@ -164,7 +165,7 @@ function Header({
         has just switched an overlay on and unlocked it needs to know the bar is the handle.
       */}
       {arranging ? (
-        <span style={{ fontSize: '9px', color: 'rgba(232,238,242,0.55)' }}>drag · resize edges</span>
+        <span style={{ fontSize: '9px', color: C.dim }}>drag · resize edges</span>
       ) : null}
     </div>
   );
@@ -202,7 +203,13 @@ function Panel({
 
 /** Every panel says this rather than drawing an empty frame that reads as broken. */
 function Waiting({ what }: { what: string }): preact.JSX.Element {
-  return <p style={{ margin: 0, fontSize: '0.85em', color: 'rgba(232,238,242,0.5)' }}>{what}</p>;
+  /*
+   * C.dim, not C.faint. This sentence is the ONLY thing an empty panel draws — it is what tells a
+   * member why there are no numbers — and `faint` is the token the design SSOT marks decorative and
+   * disabled only. Over a bright part of the game it fell to about 2.3:1 and vanished at exactly
+   * the moment somebody needed to read it.
+   */
+  return <p style={{ margin: 0, fontSize: '0.85em', color: C.dim }}>{what}</p>;
 }
 
 const ROW: preact.JSX.CSSProperties = {
@@ -249,10 +256,10 @@ function BuildPanel({
 
       {show('progress') && pct !== null ? (
         <div style={{ marginTop: '6px' }}>
-          <div style={{ height: '3px', background: 'rgba(255,255,255,0.12)', borderRadius: '2px' }}>
+          <div style={{ height: '3px', background: C.subtle, borderRadius: '2px' }}>
             <div style={{ height: '100%', width: `${pct}%`, background: accent, borderRadius: '2px' }} />
           </div>
-          <p style={{ margin: '3px 0 0', fontSize: '0.8em', color: 'rgba(232,238,242,0.6)' }}>
+          <p style={{ margin: '3px 0 0', fontSize: '0.8em', color: C.dim }}>
             {data.delivered.toLocaleString()} of {data.required.toLocaleString()} t · {pct}%
             {show('haulers') && data.haulers > 0 ? ` · ${data.haulers} hauling` : ''}
           </p>
@@ -299,7 +306,7 @@ function RoutePanel({
         </div>
       ) : null}
       {show('cargo') ? (
-        <p style={{ margin: '3px 0 0', fontSize: '0.8em', color: 'rgba(232,238,242,0.6)' }}>
+        <p style={{ margin: '3px 0 0', fontSize: '0.8em', color: C.dim }}>
           {data.tonnes.toLocaleString()} t · {(data.profitPerTonne * data.tonnes).toLocaleString()} cr
         </p>
       ) : null}
@@ -345,7 +352,7 @@ function CargoPanel({
         : null}
 
       {show('capacity') ? (
-        <p style={{ margin: '4px 0 0', fontSize: '0.8em', color: 'rgba(232,238,242,0.6)' }}>
+        <p style={{ margin: '4px 0 0', fontSize: '0.8em', color: C.dim }}>
           {data.used.toLocaleString()}
           {data.capacity === null ? '' : ` / ${data.capacity.toLocaleString()}`} t
         </p>
@@ -376,7 +383,7 @@ function StatusPanel({
               borderRadius: '50%',
               // Green only when it is genuinely sending. A dot that is always green is a dot nobody
               // believes, and this panel exists so somebody can check without alt-tabbing.
-              background: data.sending ? accent : 'rgba(232,238,242,0.35)',
+              background: data.sending ? accent : C.faint,
             }}
           />
           <span>{data.sending ? 'Sending' : 'Idle'}</span>
@@ -391,7 +398,7 @@ function StatusPanel({
       ) : null}
 
       {show('gameState') ? (
-        <p style={{ margin: '4px 0 0', fontSize: '0.8em', color: 'rgba(232,238,242,0.6)' }}>
+        <p style={{ margin: '4px 0 0', fontSize: '0.8em', color: C.dim }}>
           {data.gameRunning ? 'Elite is running' : 'Elite is not running'}
         </p>
       ) : null}

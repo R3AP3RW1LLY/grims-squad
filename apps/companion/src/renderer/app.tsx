@@ -177,7 +177,13 @@ function App(): JSX.Element {
           width: '212px',
           flexShrink: 0,
           borderRight: `1px solid ${C.hairline}`,
-          background: C.panel,
+          /*
+           * Translucent, not opaque. An opaque sidebar would paint a solid slab over the starfield
+           * for a fifth of the window — the blur is what lets the background read as one scene with
+           * the app sitting in it rather than as a picture behind a wall.
+           */
+          background: 'rgba(11,15,20,0.92)',
+          backdropFilter: 'blur(12px)',
           padding: '18px 12px',
           display: 'flex',
           flexDirection: 'column',
@@ -188,10 +194,10 @@ function App(): JSX.Element {
         <p
           style={{
             margin: '0 0 16px 8px',
-            fontFamily: 'Orbitron, sans-serif',
-            fontSize: '11px',
+            fontFamily: 'var(--font-display)',
+            fontSize: '13px',
             letterSpacing: '0.2em',
-            color: C.cyan,
+            color: C.text,
           }}
         >
           GRIM&rsquo;S SQUAD
@@ -345,23 +351,18 @@ function NavButton({
       type="button"
       onClick={onClick}
       title={hint}
-      style={{
-        width: '100%',
-        textAlign: 'left',
-        border: 'none',
-        borderLeft: `2px solid ${active ? C.cyan : 'transparent'}`,
-        background: active ? C.raised : 'transparent',
-        color: active ? C.text : C.dim,
-        padding: indent === true ? '7px 12px 7px 26px' : '9px 12px',
-        borderRadius: '0 7px 7px 0',
-        fontSize: indent === true ? '12.5px' : '13px',
-        cursor: 'pointer',
-        fontFamily: 'inherit',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: '8px',
-      }}
+      class={indent === true ? 'nav-item nav-item-sub' : 'nav-item'}
+      /*
+       * ★ `aria-current` IS THE STATE, NOT A DECORATION ★
+       *
+       * Both the active style and the hover rule key off it in theme.css, so the state a screen
+       * reader is told and the state that is drawn cannot disagree — and the destination you are
+       * already on does not light up under the cursor as though clicking it went somewhere.
+       *
+       * Nothing here is styled inline. An inline `background` or `color` would outrank the
+       * stylesheet and freeze the hover, which is exactly the bug this file shipped with once.
+       */
+      aria-current={active ? 'page' : undefined}
     >
       <span>{label}</span>
       {/*
@@ -371,11 +372,12 @@ function NavButton({
       {count === undefined || count === 0 ? null : (
         <span
           style={{
+            fontFamily: 'var(--font-mono)',
             fontSize: '10px',
             fontVariantNumeric: 'tabular-nums',
-            color: C.faint,
+            color: C.dim,
             background: C.raised,
-            borderRadius: '9px',
+            borderRadius: '999px',
             padding: '1px 6px',
           }}
         >
@@ -399,7 +401,7 @@ function SignIn({ state }: { state: AppState }): JSX.Element {
         padding: '40px',
       }}
     >
-      <p style={{ margin: 0, fontFamily: 'Orbitron, sans-serif', fontSize: '15px', letterSpacing: '0.2em', color: C.cyan }}>
+      <p style={{ margin: 0, fontFamily: 'var(--font-display)', fontSize: '15px', letterSpacing: '0.2em', color: C.cyan }}>
         COMPANION
       </p>
       <p style={{ margin: 0, maxWidth: '42ch', textAlign: 'center', fontSize: '13px', color: C.dim }}>
@@ -415,7 +417,7 @@ function SignIn({ state }: { state: AppState }): JSX.Element {
             asking for a code that nothing on screen could supply.
           */}
           {state.linkCode === null ? null : (
-            <p style={{ margin: 0, fontFamily: 'Orbitron, sans-serif', fontSize: '26px', letterSpacing: '0.3em', color: C.text }}>
+            <p style={{ margin: 0, fontFamily: 'var(--font-display)', fontSize: '26px', letterSpacing: '0.3em', color: C.text }}>
               {state.linkCode}
             </p>
           )}

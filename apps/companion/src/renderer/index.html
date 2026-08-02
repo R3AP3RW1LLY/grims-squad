@@ -7,24 +7,43 @@
       content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:"
     />
     <title>Grim's Squad Hub</title>
+
+    <!--
+      ★ THE BRAND, IN A STYLESHEET RATHER THAN INLINE ★
+
+      Everything visual that a JavaScript style object cannot express — the fonts, the starfield,
+      the glass panels, every hover and focus state, and the two accessibility escapes — lives in
+      theme.css. `style-src 'self'` already permits a same-origin stylesheet, so the policy above is
+      unchanged and nothing is fetched from anywhere.
+    -->
+    <link rel="stylesheet" href="theme.css" />
+
     <style>
-      @font-face {
-        font-family: 'Orbitron';
-        src: url('fonts/Orbitron-Bold.woff2') format('woff2');
-        font-weight: 700;
-        font-display: swap;
-      }
+      /*
+        ★ THE BASE COLOUR IS ON <html>, NOT ON <body> ★
 
-      :root { color-scheme: dark; }
-
-      html, body {
+        The starfield and nebulae are fixed layers at z-index -2 and -1. A painted background on
+        <body> covers them completely, and the symptom is not an error — it is a flat dark app that
+        looks exactly like the theme never loaded. Base colour on <html>, <body> transparent.
+      */
+      html {
         margin: 0;
         padding: 0;
         height: 100%;
-        background: #070b0e;
-        color: #e8eef2;
-        font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+        background: #05070a;
+        color: #e8eef5;
+      }
+
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: transparent;
+        font-family: var(--font-body);
         font-size: 14px;
+        /* Figures line up in a column without being asked to, everywhere in the app. */
+        font-variant-numeric: tabular-nums lining-nums;
+        -webkit-font-smoothing: antialiased;
       }
 
       #root { height: 100%; }
@@ -32,25 +51,26 @@
       /* Scrollbars that belong to this window rather than to Windows. */
       ::-webkit-scrollbar { width: 10px; height: 10px; }
       ::-webkit-scrollbar-thumb {
-        background: rgba(255, 255, 255, 0.14);
+        background: rgba(255, 113, 0, 0.18);
         border-radius: 5px;
       }
+      ::-webkit-scrollbar-thumb:hover { background: rgba(255, 113, 0, 0.55); }
       ::-webkit-scrollbar-track { background: transparent; }
 
       /* Range inputs pick up the accent rather than the platform blue. */
-      input[type='range'] { accent-color: #3fd0d4; width: 100%; }
-      input[type='checkbox'] { accent-color: #3fd0d4; }
-
-      button:focus-visible,
-      input:focus-visible,
-      select:focus-visible,
-      textarea:focus-visible {
-        outline: 2px solid #3fd0d4;
-        outline-offset: 1px;
-      }
+      input[type='range'] { accent-color: #5cd9ff; width: 100%; }
+      input[type='checkbox'] { accent-color: #5cd9ff; }
     </style>
   </head>
-  <body>
+  <body class="scanlines">
+    <!--
+      Static markup rather than Preact components: these two never change, hold no state and have no
+      business being re-rendered by anything. `aria-hidden` because a starfield is decoration, and a
+      screen reader announcing two empty divs before every page is noise.
+    -->
+    <div class="deepfield" aria-hidden="true"></div>
+    <div class="nebula" aria-hidden="true"></div>
+
     <div id="root"></div>
     <script type="module" src="app.js"></script>
   </body>

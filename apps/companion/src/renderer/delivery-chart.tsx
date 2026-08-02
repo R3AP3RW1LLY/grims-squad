@@ -64,16 +64,27 @@ export interface HaulerStack {
  * Assigned by position in an order sorted by total delivered, not hashed from the name: a hash is
  * stable but hands adjacent segments similar colours often enough to matter, where this guarantees
  * the biggest contributors are the most distinct — which is what somebody reads first.
+ *
+ * ★ THE ONE PLACE "MATCH THE WEBSITE" CANNOT MEAN "COPY THE WEBSITE" ★
+ *
+ * The site has no categorical series palette at all — its charts are one or two named series in
+ * brand colours. So the first five here are the brand and semantic tokens, and the last three are
+ * lifted from the nebula and starfield washes in the background itself (globals.css) and raised to
+ * a legible lightness. Every one of them therefore already exists somewhere in the site's scene,
+ * rather than being eight colours picked to look nice on their own.
+ *
+ * The order matters: slot one goes to the largest contributor, so the most distinct hues land on
+ * the segments that dominate the chart.
  */
 const PALETTE = [
-  '#3fd0d4',
-  '#ff7a33',
-  '#a78bfa',
-  '#4ade80',
-  '#fbbf24',
-  '#f87171',
-  '#60a5fa',
-  '#f472b6',
+  '#ff7100', // brand orange
+  '#00c8ff', // brand cyan
+  '#ffc400', // semantic warning, borrowed as a hue
+  '#b085ff', // the violet nebula wash, lifted for legibility
+  '#3dff8f', // semantic success, borrowed as a hue
+  '#ff7fd0', // the magenta nebula wash, lifted
+  '#7fb3ff', // the blue starlight in the deepfield, lifted
+  '#ff7a7a', // semantic hostile-bright
 ];
 
 /**
@@ -119,6 +130,15 @@ function StackedBars({
           data: stacks.map((stack) => stack[series] ?? 0),
           backgroundColor: PALETTE[i % PALETTE.length] as string,
           borderRadius: 3,
+          /*
+           * A 2px gap between stacked segments, drawn in the panel colour. Two adjacent hues of
+           * similar lightness are hard to separate on a stacked bar for anybody, and impossible for
+           * somebody with a colour vision deficiency — a hairline of background between them does
+           * the work that colour alone cannot be relied on for.
+           */
+          borderColor: C.panel,
+          borderWidth: { top: 2, right: 0, bottom: 0, left: 0 },
+          borderSkipped: false,
           // Every dataset keeps its position in the stack across all bars, so a segment does not
           // move up and down the chart between one bar and the next.
           stack: 'deliveries',
@@ -144,7 +164,10 @@ function StackedBars({
           y: {
             stacked: true,
             beginAtZero: true,
-            grid: { color: C.hairline },
+            // The NEUTRAL border token, not the orange hairline. A warm brown gridline reads as
+            // part of the data on a chart whose largest series is brand orange — and disappears
+            // entirely where it crosses that segment.
+            grid: { color: C.subtle },
             border: { display: false },
             ticks: {
               color: C.faint,

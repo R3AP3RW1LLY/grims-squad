@@ -97,7 +97,7 @@ export function OverlaysPanel({
             const expanded = open === id;
 
             return (
-              <Card key={id} accent={state.enabled ? C.subtle : C.hairline}>
+              <Card key={id} accent={state.enabled ? C.active : C.hairline}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: '9px', flex: 1, cursor: 'pointer' }}>
                     <input
