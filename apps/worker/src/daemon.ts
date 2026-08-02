@@ -5,6 +5,8 @@ import { Client } from 'pg';
 import { PrismaClient } from '@grims/db';
 import { JOB_REQUEST_CHANNEL } from '@grims/shared';
 import { dueSources, lastRuns, TICK_MS } from './scheduler.js';
+import { syncColonyProjects } from './jobs/colony-sync.js';
+import { PrismaColonyStore } from './jobs/colony-sync.wiring.js';
 import { announce } from './jobs/job-log.js';
 
 /**
@@ -315,6 +317,50 @@ function startScheduler(db: PrismaClient): void {
   // down for a day should not wait another minute before catching up.
   void tick();
   setInterval(() => void tick(), TICK_MS);
+
+  startColonySync(db);
+}
+
+/**
+ * How often to fold colonisation journals into project records.
+ *
+ * ★ WHY THIS RUNS IN THE DAEMON AND NOT ONLY IN CRON ★
+ *
+ * It has a crontab entry, and on a developer's machine there is no cron at all — so a project
+ * posted locally sat on the board with no needs, no deliveries and no progress, reading "waiting for
+ * somebody to dock there" while the owner was docked there. Reported 2026-08-02, and the data was
+ * never missing: 1,764 depot events and six contributions were already stored, with nothing
+ * scheduled to read them.
+ *
+ * A resident daemon is the one thing guaranteed to be running wherever the platform runs. The
+ * crontab entry stays — it is what covers the daemon being down — and running twice is free: the
+ * job takes an advisory lock, needs are REPLACED rather than accumulated, and contributions carry a
+ * unique key.
+ *
+ * Five minutes rather than fifteen. A member who has just hauled to a site wants to see it while
+ * they are still on the pad, and the work is one small query per live project.
+ */
+const COLONY_SYNC_MS = 5 * 60_000;
+
+function startColonySync(db: PrismaClient): void {
+  const run = async (): Promise<void> => {
+    try {
+      const report = await syncColonyProjects(new PrismaColonyStore(db));
+      // Only worth a line when something changed. A squadron with no live projects would otherwise
+      // print an identical zero every five minutes for ever.
+      if (report.needsUpdated > 0 || report.contributionsAdded > 0 || report.completed > 0) {
+        console.log(
+          `daemon: colony sync — ${report.projects} project(s), ` +
+            `${report.contributionsAdded} new deliveries, ${report.completed} completed`,
+        );
+      }
+    } catch (e) {
+      console.error(`daemon: colony sync failed (${e instanceof Error ? e.message : String(e)})`);
+    }
+  };
+
+  void run();
+  setInterval(() => void run(), COLONY_SYNC_MS);
 }
 
 async function main(): Promise<void> {

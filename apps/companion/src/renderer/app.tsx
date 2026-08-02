@@ -3,7 +3,10 @@ import { useEffect, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 import type { OverlayLayout } from '../overlay-config.js';
 import { Button, C, Card, Empty, Problem, Section, Stat } from './ui.js';
-import { Colonisation } from './colonisation.js';
+import { ColonyBoardPage, ColonyNewPage } from './colonisation.js';
+// The shapes come from the hub client, which is where they are defined — re-exporting them through
+// the component file would be a second name for one type.
+import type { ColonyProject, ColonyRights } from '../hub-colony.js';
 import { OverlaysPanel } from './overlays-panel.js';
 
 /**
@@ -59,11 +62,52 @@ interface AppState {
   displayNote: string | null;
 }
 
-type Page = 'status' | 'colonisation' | 'trade' | 'overlays' | 'device';
+type Page =
+  | 'status'
+  | 'colony-new'
+  | 'colony-squadron'
+  | 'colony-members'
+  | 'trade'
+  | 'overlays'
+  | 'device';
 
-const PAGES: ReadonlyArray<{ id: Page; label: string; hint: string }> = [
+/**
+ * The sidebar.
+ *
+ * ★ SQUADRON OWNER, 2026-08-02 ★
+ *
+ * "create in the sidebar a colonization category, collapsable, New project should be its own page
+ * please. then Member Projects and Squadron projects should be their own pages too ... Squadron
+ * should be on top of members and new project at the top please. include how many projects are in
+ * each category on the sidebar too."
+ *
+ * A group with children rather than five flat entries: colonisation is one thing with three ways
+ * in, and flattening it would put "New project" next to "This device" as though they were peers.
+ */
+interface NavItem {
+  readonly id: Page;
+  readonly label: string;
+  readonly hint: string;
+}
+
+interface NavGroup {
+  readonly group: 'colonisation';
+  readonly label: string;
+  readonly children: readonly NavItem[];
+}
+
+const NAV: ReadonlyArray<NavItem | NavGroup> = [
   { id: 'status', label: 'Status', hint: 'What the app is doing' },
-  { id: 'colonisation', label: 'Colonisation', hint: 'Projects and what they need' },
+  {
+    group: 'colonisation',
+    label: 'Colonisation',
+    children: [
+      // The order the owner asked for: new project first, then squadron above members.
+      { id: 'colony-new', label: 'New project', hint: 'Post the site you are docked at' },
+      { id: 'colony-squadron', label: 'Squadron projects', hint: 'What the squadron is building' },
+      { id: 'colony-members', label: 'Members’ projects', hint: 'What members have asked help with' },
+    ],
+  },
   { id: 'trade', label: 'Trade runs', hint: 'Routes from the Freight Office' },
   { id: 'overlays', label: 'Overlays', hint: 'Panels drawn over the game' },
   { id: 'device', label: 'This device', hint: 'Pairing and privacy' },
@@ -72,11 +116,43 @@ const PAGES: ReadonlyArray<{ id: Page; label: string; hint: string }> = [
 function App(): JSX.Element {
   const [state, setState] = useState<AppState | null>(null);
   const [page, setPage] = useState<Page>('status');
+  const [colonyOpen, setColonyOpen] = useState(true);
+
+  /*
+   * ★ THE PROJECTS LIVE HERE, NOT IN EACH PAGE ★
+   *
+   * The sidebar needs the counts whichever page is showing, so the shell has to hold them anyway.
+   * Fetching per page as well would be the same data arriving twice and two chances for the badge
+   * and the list to disagree — which is the kind of difference a member notices and nobody can
+   * reproduce.
+   */
+  const [colony, setColony] = useState<{ projects: ColonyProject[]; can: ColonyRights } | null>(null);
+  const [colonyError, setColonyError] = useState<string | null>(null);
+
+  const loadColony = (): void => {
+    void window.colony.projects().then((answer) => {
+      if (answer.ok) {
+        setColony(answer.data);
+        setColonyError(null);
+      } else {
+        setColonyError(answer.error);
+      }
+    });
+  };
 
   useEffect(() => {
     void window.companion.getState().then(setState);
     window.companion.onState(setState);
   }, []);
+
+  useEffect(() => {
+    if (state?.paired !== true) return;
+    loadColony();
+    // Needs and progress change when ANY member hauls, so a count that only moved on navigation
+    // would be wrong for as long as somebody left the app open.
+    const timer = setInterval(loadColony, 60_000);
+    return () => clearInterval(timer);
+  }, [state?.paired]);
 
   if (state === null) {
     return (
@@ -121,29 +197,66 @@ function App(): JSX.Element {
           GRIM&rsquo;S SQUAD
         </p>
 
-        {PAGES.map((p) => {
-          const active = page === p.id;
+        {NAV.map((entry) => {
+          if (!('group' in entry)) {
+            return (
+              <NavButton
+                key={entry.id}
+                label={entry.label}
+                hint={entry.hint}
+                active={page === entry.id}
+                onClick={() => setPage(entry.id)}
+              />
+            );
+          }
+
+          const counts: Record<string, number> = {
+            'colony-squadron': (colony?.projects ?? []).filter((p) => p.owner === 'squadron').length,
+            'colony-members': (colony?.projects ?? []).filter((p) => p.owner === 'personal').length,
+          };
+          const insideOpen = entry.children.some((c) => c.id === page);
+
           return (
-            <button
-              key={p.id}
-              type="button"
-              onClick={() => setPage(p.id)}
-              title={p.hint}
-              style={{
-                textAlign: 'left',
-                border: 'none',
-                borderLeft: `2px solid ${active ? C.cyan : 'transparent'}`,
-                background: active ? C.raised : 'transparent',
-                color: active ? C.text : C.dim,
-                padding: '9px 12px',
-                borderRadius: '0 7px 7px 0',
-                fontSize: '13px',
-                cursor: 'pointer',
-                fontFamily: 'inherit',
-              }}
-            >
-              {p.label}
-            </button>
+            <div key={entry.group}>
+              <button
+                type="button"
+                onClick={() => setColonyOpen((o) => !o)}
+                style={{
+                  width: '100%',
+                  textAlign: 'left',
+                  border: 'none',
+                  background: 'transparent',
+                  color: insideOpen ? C.text : C.dim,
+                  padding: '9px 12px',
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '7px',
+                }}
+                aria-expanded={colonyOpen}
+              >
+                <span style={{ fontSize: '9px', color: C.faint, width: '8px' }}>
+                  {colonyOpen ? '▾' : '▸'}
+                </span>
+                {entry.label}
+              </button>
+
+              {colonyOpen
+                ? entry.children.map((child) => (
+                    <NavButton
+                      key={child.id}
+                      label={child.label}
+                      hint={child.hint}
+                      active={page === child.id}
+                      indent
+                      count={counts[child.id]}
+                      onClick={() => setPage(child.id)}
+                    />
+                  ))
+                : null}
+            </div>
           );
         })}
 
@@ -170,7 +283,30 @@ function App(): JSX.Element {
 
       <main style={{ flex: 1, overflowY: 'auto', padding: '22px 26px' }}>
         {page === 'status' ? <Status state={state} /> : null}
-        {page === 'colonisation' ? <Colonisation dockedAt={state.dockedAt} /> : null}
+        {page === 'colony-new' ? (
+          <ColonyNewPage
+            dockedAt={state.dockedAt}
+            can={colony?.can ?? null}
+            projects={colony?.projects ?? []}
+            onPosted={loadColony}
+          />
+        ) : null}
+        {page === 'colony-squadron' ? (
+          <ColonyBoardPage
+            owner="squadron"
+            projects={colony?.projects ?? []}
+            error={colonyError}
+            onReload={loadColony}
+          />
+        ) : null}
+        {page === 'colony-members' ? (
+          <ColonyBoardPage
+            owner="personal"
+            projects={colony?.projects ?? []}
+            error={colonyError}
+            onReload={loadColony}
+          />
+        ) : null}
         {page === 'trade' ? <TradeRuns /> : null}
         {page === 'overlays' ? (
           <OverlaysPanel
@@ -183,6 +319,70 @@ function App(): JSX.Element {
         {page === 'device' ? <Device state={state} /> : null}
       </main>
     </div>
+  );
+}
+
+/** One sidebar destination. A count is shown only when there is something to count. */
+function NavButton({
+  label,
+  hint,
+  active,
+  onClick,
+  indent,
+  count,
+}: {
+  label: string;
+  hint: string;
+  active: boolean;
+  onClick: () => void;
+  indent?: boolean | undefined;
+  // `| undefined` explicitly: `exactOptionalPropertyTypes` treats an optional property and one
+  // that may be undefined as different types, and the caller reads it out of a lookup table.
+  count?: number | undefined;
+}): JSX.Element {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={hint}
+      style={{
+        width: '100%',
+        textAlign: 'left',
+        border: 'none',
+        borderLeft: `2px solid ${active ? C.cyan : 'transparent'}`,
+        background: active ? C.raised : 'transparent',
+        color: active ? C.text : C.dim,
+        padding: indent === true ? '7px 12px 7px 26px' : '9px 12px',
+        borderRadius: '0 7px 7px 0',
+        fontSize: indent === true ? '12.5px' : '13px',
+        cursor: 'pointer',
+        fontFamily: 'inherit',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: '8px',
+      }}
+    >
+      <span>{label}</span>
+      {/*
+        Zero is deliberately NOT drawn. A badge reading 0 is a thing to read and dismiss on every
+        glance; its absence says the same and costs nothing.
+      */}
+      {count === undefined || count === 0 ? null : (
+        <span
+          style={{
+            fontSize: '10px',
+            fontVariantNumeric: 'tabular-nums',
+            color: C.faint,
+            background: C.raised,
+            borderRadius: '9px',
+            padding: '1px 6px',
+          }}
+        >
+          {count}
+        </span>
+      )}
+    </button>
   );
 }
 

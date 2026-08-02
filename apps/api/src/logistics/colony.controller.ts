@@ -95,6 +95,7 @@ export class ColonyController {
     @Query('near') near?: string,
     @Query('withinLy') withinLy?: string,
     @Query('largePad') largePad?: string,
+    @Query('sort') sort?: string,
   ) {
     await this.#assert(
       caller,
@@ -115,16 +116,27 @@ export class ColonyController {
       throw new AppError(ErrorCode.RESOURCE_NOT_VISIBLE, 'That project is not available.');
     }
 
-    const origin = await this.#origin(near);
+    /*
+     * Defaults to the build's own system, for the reason recorded in the device controller: with no
+     * origin the list ranked by price across the whole galaxy, so a seller in the build's own system
+     * could never win. The site is where somebody is hauling to.
+     */
+    const origin =
+      (await this.#origin(near)) ?? (await this.#origin(project.systemName));
 
-    const [needs, haulers, shopping] = await Promise.all([
+    const [needs, haulers, shopping, deliveries, chart] = await Promise.all([
       this.colony.needs(id),
       this.colony.haulers(id),
       this.colony.shoppingList(id, {
         near: origin?.coords ?? null,
         withinLy: clamp(numberOr(withinLy, 100), 1, 500),
         largePadOnly: largePad === '1',
+        sort: sort === 'closest' ? 'closest' : 'cheapest',
       }),
+      // The same two the app gets. One service, one shape — the website and the companion showing
+      // different histories of the same build is the failure this whole controller exists to avoid.
+      this.colony.deliveries(id),
+      this.colony.deliveryChart(id),
     ]);
 
     return {
@@ -132,6 +144,8 @@ export class ColonyController {
       needs,
       haulers,
       shopping,
+      deliveries,
+      chart,
       origin: origin === null ? null : { system: origin.system },
       unknownSystem: (near?.trim() ?? '') !== '' && origin === null ? near?.trim() : null,
     };

@@ -8,6 +8,7 @@ import type {
   ColonyShoppingRow,
 } from '../hub-colony.js';
 import { projectTitleFrom } from '../docked.js';
+import { DeliveryChart, type DeliveryBucket } from './delivery-chart.js';
 import {
   Bar,
   Button,
@@ -40,14 +41,7 @@ declare global {
   interface Window {
     readonly colony: {
       projects(): Promise<Answer<{ projects: ColonyProject[]; can: ColonyRights }>>;
-      project(id: string): Promise<
-        Answer<{
-          project: ColonyProject;
-          needs: ColonyNeed[];
-          haulers: ColonyHauler[];
-          shopping: ColonyShoppingRow[];
-        }>
-      >;
+      project(id: string): Promise<Answer<ProjectDetailData>>;
       at(marketId: string): Promise<Answer<{ project: ColonyProject | null; needs: ColonyNeed[] }>>;
       post(body: unknown): Promise<Answer<{ id: string }>>;
     };
@@ -55,6 +49,23 @@ declare global {
 }
 
 type Answer<T> = { ok: true; data: T } | { ok: false; error: string };
+
+/** One delivery, straight off the append-only ledger. */
+export interface Delivery {
+  readonly at: string;
+  readonly commander: string;
+  readonly commodity: string;
+  readonly amount: number;
+}
+
+export interface ProjectDetailData {
+  project: ColonyProject;
+  needs: ColonyNeed[];
+  haulers: ColonyHauler[];
+  shopping: ColonyShoppingRow[];
+  deliveries: Delivery[];
+  chart: { bucket: 'hour' | 'day'; buckets: DeliveryBucket[] };
+}
 
 /** Where the commander is docked, handed down from the app's state. */
 export interface DockedAt {
@@ -74,51 +85,37 @@ export interface DockedAt {
   } | null;
 }
 
-export function Colonisation({ dockedAt }: { dockedAt: DockedAt | null }): JSX.Element {
-  const [boards, setBoards] = useState<{ projects: ColonyProject[]; can: ColonyRights } | null>(
-    null,
-  );
-  const [error, setError] = useState<string | null>(null);
+/**
+ * One board — squadron or members — as its own page.
+ *
+ * ★ SQUADRON OWNER, 2026-08-02 ★
+ *
+ * "lets break this up, create in the sidebar a colonization category, collapsable, New project
+ * should be its own page please. then Member Projects and Squadron projects should be their own
+ * pages too."
+ *
+ * The projects themselves are fetched once by the shell and handed down, because the sidebar needs
+ * the counts anyway — a second fetch per page would be the same data arriving twice and two chances
+ * for the badge and the list to disagree.
+ */
+export function ColonyBoardPage({
+  owner,
+  projects,
+  error,
+  onReload,
+}: {
+  owner: 'squadron' | 'personal';
+  projects: readonly ColonyProject[];
+  error: string | null;
+  onReload: () => void;
+}): JSX.Element {
   const [openId, setOpenId] = useState<string | null>(null);
-  const [posting, setPosting] = useState(false);
-
-  async function reload(): Promise<void> {
-    const answer = await window.colony.projects();
-    if (answer.ok) {
-      setBoards(answer.data);
-      setError(null);
-    } else {
-      setError(answer.error);
-    }
-  }
-
-  useEffect(() => {
-    void reload();
-    /*
-     * Refreshed while the panel is open. Needs change when ANY member hauls, not just this one, so a
-     * board that only updated on click would show a member a shortfall their wingmate filled twenty
-     * minutes ago — and they would fly out for it.
-     */
-    const timer = setInterval(() => void reload(), 60_000);
-    return () => clearInterval(timer);
-  }, []);
 
   if (openId !== null) {
-    return <ProjectDetail id={openId} onBack={() => setOpenId(null)} />;
+    return <ProjectDetail id={openId} onBack={() => { setOpenId(null); onReload(); }} />;
   }
 
-  if (error !== null && boards === null) {
-    return (
-      <Section title="Colonisation">
-        <Problem>{error}</Problem>
-      </Section>
-    );
-  }
-
-  if (boards === null) return <Empty>Asking the hub…</Empty>;
-
-  const squadron = boards.projects.filter((p) => p.owner === 'squadron');
-  const personal = boards.projects.filter((p) => p.owner === 'personal');
+  const mine = projects.filter((p) => p.owner === owner);
 
   return (
     <div>
@@ -127,68 +124,91 @@ export function Colonisation({ dockedAt }: { dockedAt: DockedAt | null }): JSX.E
           <Problem>{error}</Problem>
         </div>
       )}
-
-      <Section
-        title="Squadron projects"
-        aside={
-          <span style={{ fontSize: '11px', color: C.faint }}>
-            {squadron.length === 0 ? '' : `${squadron.length}`}
-          </span>
-        }
-      >
+      <Section title={owner === 'squadron' ? 'Squadron projects' : 'Members’ projects'}>
         <Board
-          projects={squadron}
+          projects={mine}
           onOpen={setOpenId}
-          empty="No squadron projects yet."
+          empty={
+            owner === 'squadron'
+              ? 'No squadron projects yet. An officer can post one from New project.'
+              : 'Nobody has posted a project yet.'
+          }
         />
       </Section>
+    </div>
+  );
+}
 
-      <Section title="Members’ projects">
-        <Board
-          projects={personal}
-          onOpen={setOpenId}
-          empty="Nobody has posted a project yet."
-        />
+/** Posting a project, as its own page. */
+export function ColonyNewPage({
+  dockedAt,
+  can,
+  projects,
+  onPosted,
+}: {
+  dockedAt: DockedAt | null;
+  can: ColonyRights | null;
+  projects: readonly ColonyProject[];
+  onPosted: () => void;
+}): JSX.Element {
+  const [posting, setPosting] = useState(false);
+
+  if (can !== null && !can.post) {
+    return (
+      <Section title="New project">
+        <Empty>Your rank cannot post colonisation projects.</Empty>
+      </Section>
+    );
+  }
+
+  // Already on the board: the member is looking at it, not creating it. Offering the form would end
+  // in the server answering "already posted as X", which is a worse way to find out.
+  const alreadyPosted =
+    dockedAt !== null && projects.some((p) => p.marketId === dockedAt.marketId);
+
+  return (
+    <div>
+      <Section title="Where you are">
+        {dockedAt === null ? (
+          <Empty>Dock at a construction site and everything about it appears here.</Empty>
+        ) : alreadyPosted ? (
+          <Card accent={C.cyan}>
+            <p style={{ margin: 0, fontSize: '14px' }}>
+              {projectTitleFrom(dockedAt.stationName)}{' '}
+              <span style={{ fontSize: '11px', color: C.faint }}>(Market {dockedAt.marketId})</span>
+            </p>
+            <p style={{ margin: '6px 0 0', fontSize: '12px', color: C.dim }}>
+              This site is already posted. Open it from Squadron or Members’ projects.
+            </p>
+          </Card>
+        ) : (
+          <HereNow dockedAt={dockedAt} />
+        )}
       </Section>
 
-      {boards.can.post ? (
+      {dockedAt === null || alreadyPosted ? null : (
         <Section
-          title="Post a project"
+          title="Post it"
           aside={
-            <Button onClick={() => setPosting((p) => !p)}>
+            <Button tone={posting ? 'default' : 'primary'} onClick={() => setPosting((x) => !x)}>
               {posting ? 'Cancel' : 'New project'}
             </Button>
           }
         >
           {posting ? (
             <PostForm
-              canPostSquadron={boards.can.manage}
-              /*
-               * The site they are standing on, unless it is already posted. Somebody docked at a
-               * project that exists is looking at the board, not filling in a form — offering to
-               * create a duplicate would be answered by the server with "already posted as X",
-               * which is a worse way to learn it.
-               */
-              dockedAt={
-                dockedAt !== null &&
-                !boards.projects.some((p) => p.marketId === dockedAt.marketId)
-                  ? dockedAt
-                  : null
-              }
+              canPostSquadron={can?.manage === true}
+              dockedAt={dockedAt}
               onPosted={() => {
                 setPosting(false);
-                void reload();
+                onPosted();
               }}
             />
-          ) : dockedAt === null ? (
-            <Empty>
-              Dock at a construction site and the details fill themselves in here.
-            </Empty>
           ) : (
-            <HereNow dockedAt={dockedAt} />
+            <Empty>Everything is filled in already — press New project to check it and post.</Empty>
           )}
         </Section>
-      ) : null}
+      )}
     </div>
   );
 }
@@ -387,12 +407,7 @@ function Board({
 }
 
 function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.Element {
-  const [data, setData] = useState<{
-    project: ColonyProject;
-    needs: ColonyNeed[];
-    haulers: ColonyHauler[];
-    shopping: ColonyShoppingRow[];
-  } | null>(null);
+  const [data, setData] = useState<ProjectDetailData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -426,10 +441,12 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
 
   if (data === null) return <Empty>Loading…</Empty>;
 
-  const { project, needs, haulers, shopping } = data;
+  const { project, needs, haulers, shopping, deliveries, chart } = data;
   const outstanding = needs.filter((n) => n.remaining > 0);
+  const done = needs.filter((n) => n.remaining <= 0);
   const total = shopping.reduce((sum, r) => sum + (r.cost ?? 0), 0);
   const unsourced = shopping.filter((r) => r.price === null).length;
+  const delivered = project.required - project.remaining;
 
   return (
     <div>
@@ -450,19 +467,68 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
         />
         <Stat
           label="Delivered"
-          value={project.required > 0 ? tonnes(project.required - project.remaining) : '—'}
+          value={project.required > 0 ? tonnes(delivered) : '—'}
+          tone={C.good}
         />
         <Stat label="Commodities" value={String(project.needCount)} />
       </div>
 
+      {/*
+        ★ EVERY COMMODITY, WITH WHAT HAS BEEN DELIVERED — SQUADRON OWNER, 2026-08-02 ★
+
+        "this should show me all comodites required for the build incluiding everythign delivered".
+
+        Outstanding first, because that is what somebody is about to go and haul. The finished ones
+        are kept below rather than dropped: a build's shopping list is not the same as its
+        specification, and a member checking whether the titanium is done needs to find it.
+      */}
       <Section title="What it still needs">
-        {outstanding.length === 0 ? (
-          <Empty>Nothing outstanding.</Empty>
+        {needs.length === 0 ? (
+          <Empty>
+            Nothing recorded yet. The needs appear the first time somebody with the companion app
+            docks at the site.
+          </Empty>
         ) : (
           <Card>
             {outstanding.map((n) => (
-              <Row key={n.commodity} left={n.commodity} right={tonnes(n.remaining)} />
+              <CommodityRow key={n.commodity} need={n} />
             ))}
+            {done.length === 0 ? null : (
+              <p style={{ margin: '10px 0 0', fontSize: '11px', color: C.faint }}>
+                {done.length} commodit{done.length === 1 ? 'y' : 'ies'} fully delivered:{' '}
+                {done.map((n) => n.commodity).join(', ')}
+              </p>
+            )}
+          </Card>
+        )}
+      </Section>
+
+      {/* "a stacked bar chart that shows commoditied selivered per hour per day like raven colonial" */}
+      <Section title="Deliveries over time">
+        <Card>
+          <DeliveryChart buckets={chart.buckets} bucket={chart.bucket} />
+        </Card>
+      </Section>
+
+      {/* "whos delivered what and when" — the literal ledger, newest first. */}
+      <Section title="Every delivery">
+        {deliveries.length === 0 ? (
+          <Empty>No deliveries recorded yet.</Empty>
+        ) : (
+          <Card>
+            {deliveries.slice(0, 25).map((d, i) => (
+              <Row
+                key={`${d.at}-${d.commodity}-${i}`}
+                left={d.commodity}
+                sub={`${d.commander} · ${new Date(d.at).toLocaleString()}`}
+                right={tonnes(d.amount)}
+              />
+            ))}
+            {deliveries.length > 25 ? (
+              <p style={{ margin: '10px 0 0', fontSize: '11px', color: C.faint }}>
+                Showing the 25 most recent of {deliveries.length}.
+              </p>
+            ) : null}
           </Card>
         )}
       </Section>
@@ -509,6 +575,39 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
           </Card>
         )}
       </Section>
+    </div>
+  );
+}
+
+/**
+ * One commodity: what is left, what has gone in, and how far along it is.
+ *
+ * The bar matters more than the numbers for scanning a list of twenty-three — a member looking for
+ * what to haul next wants the short one, and finding it by reading pairs of five-digit numbers is
+ * slower than seeing it.
+ */
+function CommodityRow({ need }: { need: ColonyNeed }): JSX.Element {
+  const required = need.required ?? 0;
+  const provided = Math.max(0, required - need.remaining);
+
+  return (
+    <div style={{ padding: '6px 0', borderTop: `1px solid ${C.hairline}` }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
+        <span style={{ fontSize: '13px' }}>{need.commodity}</span>
+        <span style={{ fontSize: '13px', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+          {tonnes(need.remaining)} left
+        </span>
+      </div>
+      {required <= 0 ? null : (
+        <>
+          <div style={{ marginTop: '4px' }}>
+            <Bar done={provided} total={required} />
+          </div>
+          <p style={{ margin: '3px 0 0', fontSize: '11px', color: C.faint }}>
+            {provided.toLocaleString()} of {required.toLocaleString()} delivered
+          </p>
+        </>
+      )}
     </div>
   );
 }

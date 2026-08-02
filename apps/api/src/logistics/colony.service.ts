@@ -72,6 +72,30 @@ export interface OpeningSnapshot {
   }>;
 }
 
+/** One delivery, as the append-only ledger recorded it. */
+export interface DeliveryRow {
+  readonly at: Date;
+  readonly commander: string;
+  readonly commodity: string;
+  readonly amount: number;
+}
+
+/**
+ * One bar of the delivery chart: a slice of time, and what went in during it.
+ *
+ * ★ SQUADRON OWNER, 2026-08-02 ★
+ *
+ * "a stacked bar chart that shows commoditied selivered per hour per day like raven colonial."
+ *
+ * `byCommodity` is what makes the bar STACKED rather than a single total — each commodity is its
+ * own segment, so a member can see that Tuesday was all steel and Wednesday was all aluminium.
+ */
+export interface DeliveryBucket {
+  readonly at: Date;
+  readonly byCommodity: Readonly<Record<string, number>>;
+  readonly total: number;
+}
+
 export interface HaulerTally {
   readonly name: string;
   readonly tonnes: number;
@@ -283,6 +307,101 @@ export class ColonyService {
   }
 
   /**
+   * Every delivery, newest first.
+   *
+   * ★ SQUADRON OWNER, 2026-08-02 ★
+   *
+   * "whos delivered what and when."
+   *
+   * The ledger is append-only, so this is the literal record rather than a derived tally — which is
+   * what makes it worth showing at all: a member can see their own run land on it.
+   *
+   * Capped, because a finished build can hold thousands of rows and nobody scrolls that far. The
+   * chart below summarises the whole history; this is the recent detail.
+   */
+  async deliveries(projectId: string, limit = 200): Promise<readonly DeliveryRow[]> {
+    const rows = await this.db.$queryRawUnsafe<
+      Array<{ at: Date; commander: string | null; commodity: string; amount: number }>
+    >(
+      `SELECT c.delivered_at AS at, u.display_name AS commander, c.commodity, c.amount
+         FROM colony_contributions c
+         LEFT JOIN users u ON u.id = c.user_id
+        WHERE c.project_id = $1::uuid
+        ORDER BY c.delivered_at DESC
+        LIMIT $2`,
+      projectId,
+      limit,
+    );
+
+    return rows.map((r) => ({
+      at: r.at,
+      // A member who has left still hauled the cargo. Their rows survive with a null user (the
+      // ledger uses SET NULL), and erasing them from the history would understate the build.
+      commander: r.commander ?? 'A former member',
+      commodity: r.commodity,
+      amount: r.amount,
+    }));
+  }
+
+  /**
+   * Deliveries bucketed over time, for a stacked bar chart.
+   *
+   * ★ SQUADRON OWNER, 2026-08-02 ★
+   *
+   * "a stacked bar chart that shows commoditied selivered per hour per day like raven colonial."
+   *
+   * ★ BUCKETED IN POSTGRES, AND THE WIDTH IS CHOSEN FROM THE SPAN ★
+   *
+   * A build that started this morning wants hours; one running for three weeks wants days, or the
+   * chart is five hundred bars a pixel wide. The caller does not have to know which — the span of
+   * the data decides, and the answer says which it chose so the axis can be labelled honestly.
+   *
+   * `date_trunc` rather than arithmetic in Node: bucketing in SQL means one row per bar rather than
+   * every contribution crossing the wire to be counted here.
+   */
+  async deliveryChart(
+    projectId: string,
+  ): Promise<{ bucket: 'hour' | 'day'; buckets: readonly DeliveryBucket[] }> {
+    const span = await this.db.$queryRawUnsafe<Array<{ hours: number | null }>>(
+      `SELECT EXTRACT(EPOCH FROM (max(delivered_at) - min(delivered_at))) / 3600 AS hours
+         FROM colony_contributions WHERE project_id = $1::uuid`,
+      projectId,
+    );
+
+    /*
+     * Forty-eight hours is the switch. Below it, hourly bars show the shape of a single evening's
+     * hauling — which is the thing a member most wants to see. Above it, hourly would be hundreds
+     * of bars and the daily rhythm is what matters instead.
+     */
+    const hours = Number(span[0]?.hours ?? 0);
+    const bucket: 'hour' | 'day' = Number.isFinite(hours) && hours > 48 ? 'day' : 'hour';
+
+    const rows = await this.db.$queryRawUnsafe<
+      Array<{ at: Date; commodity: string; amount: bigint }>
+    >(
+      `SELECT date_trunc($2, delivered_at) AS at, commodity, SUM(amount)::bigint AS amount
+         FROM colony_contributions
+        WHERE project_id = $1::uuid
+        GROUP BY 1, 2
+        ORDER BY 1`,
+      projectId,
+      bucket,
+    );
+
+    const byBucket = new Map<number, { at: Date; byCommodity: Record<string, number>; total: number }>();
+    for (const r of rows) {
+      const key = r.at.getTime();
+      const existing = byBucket.get(key) ?? { at: r.at, byCommodity: {}, total: 0 };
+      const amount = Number(r.amount);
+      existing.byCommodity[r.commodity] = (existing.byCommodity[r.commodity] ?? 0) + amount;
+      existing.total += amount;
+      byBucket.set(key, existing);
+    }
+
+    return { bucket, buckets: [...byBucket.values()].sort((a, b) => a.at.getTime() - b.at.getTime()) };
+  }
+
+  /**
    * Where to buy what a project still needs.
    *
    * ★ SQUADRON OWNER, 2026-08-02 ★
@@ -301,7 +420,24 @@ export class ColonyService {
    */
   async shoppingList(
     projectId: string,
-    opts: { near: { x: number; y: number; z: number } | null; withinLy: number; largePadOnly: boolean },
+    opts: {
+      near: { x: number; y: number; z: number } | null;
+      withinLy: number;
+      largePadOnly: boolean;
+      /**
+       * ★ SQUADRON OWNER, 2026-08-02 ★
+       *
+       * "the where to buy it, is wrong! there is a station in system that offers most of this, this
+       * must offer a toggle for the Where to buy it that gives locations that are closest, and an
+       * option with locations that are cheapest."
+       *
+       * They are genuinely different answers and neither is always right. A station in the build's
+       * own system at a poor price beats one forty jumps away at a good one, right up until the
+       * tonnage is large enough that the price difference outweighs the trips. Only the member
+       * knows which they are doing, so it is a toggle rather than a cleverer default.
+       */
+      sort?: 'cheapest' | 'closest';
+    },
   ): Promise<readonly ShoppingRow[]> {
     const needs = await this.needs(projectId);
 
@@ -322,11 +458,23 @@ export class ColonyService {
       // Settled lines are dropped rather than shown at zero: a shopping list is what to go and buy.
       if (need.remaining <= 0) continue;
 
+      /*
+       * ★ MORE THAN ONE CANDIDATE, BECAUSE THE SORT DECIDES BETWEEN THEM ★
+       *
+       * `bestBuys` orders by price within the radius. For "closest" the cheapest row is the wrong
+       * one to keep, so a handful are fetched and re-ranked here — still one indexed query per
+       * commodity, still ~8ms, and no second query shape to maintain.
+       */
       const best = await this.market
-        .bestBuys(need.commodity, { ...query, near: opts.near })
+        .bestBuys(need.commodity, { ...query, limit: 12, near: opts.near })
         .catch(() => []);
 
-      const place = best[0];
+      const ranked =
+        opts.sort === 'closest' && opts.near !== null
+          ? [...best].sort((a, b) => (a.distance ?? Infinity) - (b.distance ?? Infinity))
+          : best;
+
+      const place = ranked[0];
 
       out.push({
         commodity: need.commodity,

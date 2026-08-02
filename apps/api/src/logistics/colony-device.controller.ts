@@ -114,6 +114,7 @@ export class ColonyDeviceController {
     @Param('id') id: string,
     @Query('near') near?: string,
     @Query('withinLy') withinLy?: string,
+    @Query('sort') sort?: string,
   ) {
     const me = await this.#caller(
       req,
@@ -126,20 +127,50 @@ export class ColonyDeviceController {
       throw new AppError(ErrorCode.RESOURCE_NOT_VISIBLE, 'That project is not available.');
     }
 
+    /*
+     * ★ THE BUILD'S OWN SYSTEM IS THE DEFAULT — REPORTED 2026-08-02 ★
+     *
+     * "the where to buy it, is wrong! there is a station in system that offers most of this."
+     *
+     * It was, and this was why: with no origin the shopping list ranked by price across the ENTIRE
+     * galaxy, so a station in the build's own system was never going to win against the cheapest
+     * seller in the bubble. Nothing was measuring distance because nothing had said where from.
+     *
+     * The obvious place to haul from is the site itself, so that is where it measures from unless
+     * the member names somewhere else.
+     */
     const typed = near?.trim() ?? '';
-    const coords = typed === '' ? null : await this.market.systemCoords(typed);
+    const origin = typed === '' ? project.systemName : typed;
+    const coords = origin === '' ? null : await this.market.systemCoords(origin);
 
-    const [needs, haulers, shopping] = await Promise.all([
+    const [needs, haulers, shopping, deliveries, chart] = await Promise.all([
       this.colony.needs(id),
       this.colony.haulers(id),
       this.colony.shoppingList(id, {
         near: coords,
         withinLy: clamp(numberOr(withinLy, 100), 1, 500),
         largePadOnly: false,
+        sort: sort === 'closest' ? 'closest' : 'cheapest',
       }),
+      // "whos delivered what and when", and the stacked chart over it. Fetched with everything else
+      // rather than on their own routes: the page shows them together, and three round trips would
+      // render it in three stages, each shifting the layout under whoever is reading.
+      this.colony.deliveries(id),
+      this.colony.deliveryChart(id),
     ]);
 
-    return { project, needs, haulers, shopping };
+    return {
+      project,
+      needs,
+      haulers,
+      shopping,
+      deliveries,
+      chart,
+      // Echoed so the page can say where it is measuring from — a distance column with no stated
+      // origin is a number nobody can check.
+      shoppingFrom: coords === null ? null : origin,
+      shoppingSort: sort === 'closest' ? 'closest' : 'cheapest',
+    };
   }
 
   /**
