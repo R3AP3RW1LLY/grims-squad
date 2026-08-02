@@ -8,6 +8,7 @@ import { MarketController } from './market.controller.js';
 import { ColonyController } from './colony.controller.js';
 import { ColonyDeviceController } from './colony-device.controller.js';
 import { ColonyService } from './colony.service.js';
+import { ColonyRosterService } from './colony-roster.service.js';
 import { PrismaMarketStore, type MarketStore } from './market.store.js';
 import { MARKET_STORE } from './logistics.tokens.js';
 
@@ -35,6 +36,14 @@ import { MARKET_STORE } from './logistics.tokens.js';
       provide: MARKET_STORE,
       inject: [PrismaClient],
       useFactory: (db: PrismaClient) => new PrismaMarketStore(db),
+    },
+    {
+      // The roster is its own service because its rules are about PEOPLE — who may direct whom —
+      // where ColonyService's are about the build. Folding them together would put two unrelated
+      // authorisation stories in one file.
+      provide: ColonyRosterService,
+      inject: [PrismaClient, AclDbService],
+      useFactory: (db: PrismaClient, acl: AclDbService) => new ColonyRosterService(db, acl),
     },
     {
       /*

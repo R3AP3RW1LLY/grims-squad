@@ -6,6 +6,7 @@ import { PermissionService } from '../authz/permission.service.js';
 import { PAIRING_SERVICE } from '../telemetry/telemetry.tokens.js';
 import type { PairingService } from '../telemetry/pairing.service.js';
 import { ColonyService, type ColonyOwner } from './colony.service.js';
+import { ColonyRosterService } from './colony-roster.service.js';
 import { MARKET_STORE } from './logistics.tokens.js';
 import type { MarketStore } from './market.store.js';
 
@@ -42,6 +43,7 @@ import type { MarketStore } from './market.store.js';
 export class ColonyDeviceController {
   constructor(
     @Inject(ColonyService) private readonly colony: ColonyService,
+    @Inject(ColonyRosterService) private readonly rosters: ColonyRosterService,
     @Inject(MARKET_STORE) private readonly market: MarketStore,
     @Inject(PermissionService) private readonly permissions: PermissionService,
     @Inject(PAIRING_SERVICE) private readonly pairing: PairingService,
@@ -257,6 +259,110 @@ export class ColonyDeviceController {
        */
       snapshot: readSnapshot(body.snapshot),
     });
+  }
+
+  /**
+   * Everybody on the build, what they have taken on, and what they have delivered.
+   *
+   * ★ SQUADRON OWNER, 2026-08-02 ★
+   *
+   * "a way for people to join the project ahead of time, and a way that we can assign people who do
+   * join what materials we want them to haul."
+   */
+  @Public()
+  @Get('projects/:id/roster')
+  async roster(@Req() req: FastifyRequest, @Param('id') id: string) {
+    const me = await this.#caller(
+      req,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+    return { roster: await this.rosters.roster(id, me.userId) };
+  }
+
+  /** Puts the caller on the roster. Needs only COLONY_VIEW: volunteering is not a privilege. */
+  @Public()
+  @Post('projects/:id/join')
+  async join(@Req() req: FastifyRequest, @Param('id') id: string) {
+    const me = await this.#caller(
+      req,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+    await this.rosters.join(id, me.userId);
+    return { ok: true };
+  }
+
+  @Public()
+  @Post('projects/:id/leave')
+  async leave(@Req() req: FastifyRequest, @Param('id') id: string) {
+    const me = await this.#caller(
+      req,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+    await this.rosters.leave(id, me.userId);
+    return { ok: true };
+  }
+
+  /**
+   * Claim a commodity, or put one on somebody else.
+   *
+   * Gated on COLONY_VIEW here rather than something stronger, because the interesting check is not
+   * about the caller's rank in general — it is about whose build this is, and the service makes it.
+   * A member claiming for themselves needs no permission at all beyond seeing the board.
+   */
+  @Public()
+  @Post('projects/:id/assign')
+  async assign(
+    @Req() req: FastifyRequest,
+    @Param('id') id: string,
+    @Body() body: { userId?: string; commodity?: string; tonnes?: number },
+  ) {
+    const me = await this.#caller(
+      req,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+    const mask = await this.permissions.effectiveMask(me.userId);
+
+    await this.rosters.assign({
+      projectId: id,
+      callerId: me.userId,
+      callerMask: mask,
+      // Absent means "me". The common case is a member claiming something, and making the app send
+      // its own id back to identify itself would be a value it could get wrong.
+      targetUserId: typeof body.userId === 'string' && body.userId !== '' ? body.userId : me.userId,
+      commodity: body.commodity ?? '',
+      tonnes: typeof body.tonnes === 'number' ? body.tonnes : null,
+    });
+
+    return { ok: true };
+  }
+
+  @Public()
+  @Post('projects/:id/unassign')
+  async unassign(
+    @Req() req: FastifyRequest,
+    @Param('id') id: string,
+    @Body() body: { userId?: string; commodity?: string },
+  ) {
+    const me = await this.#caller(
+      req,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+    const mask = await this.permissions.effectiveMask(me.userId);
+
+    await this.rosters.unassign({
+      projectId: id,
+      callerId: me.userId,
+      callerMask: mask,
+      targetUserId: typeof body.userId === 'string' && body.userId !== '' ? body.userId : me.userId,
+      commodity: body.commodity ?? '',
+    });
+
+    return { ok: true };
   }
 
   @Public()
