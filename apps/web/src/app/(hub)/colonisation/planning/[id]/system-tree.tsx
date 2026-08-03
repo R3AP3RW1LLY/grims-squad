@@ -2,7 +2,13 @@
 
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import type { ColonyBuildType, ColonyPlan, PlanBody, PlanSite } from '../../../../../lib/api';
+import type {
+  ColonyBuildType,
+  ColonyPlan,
+  PlanBody,
+  PlanSite,
+  SiteEconomy,
+} from '../../../../../lib/api';
 import { apiDelete, apiPatch, apiPost } from '../../../../../lib/api-client';
 
 /**
@@ -39,6 +45,63 @@ const CHIP =
   'rounded border border-[var(--color-border-hairline)] px-2 py-0.5 font-mono text-[10px] ' +
   'uppercase tracking-[0.16em] text-[var(--color-text-secondary)] transition-colors ' +
   'hover:border-[var(--color-border-active)] hover:text-[var(--color-text-primary)] disabled:opacity-40';
+
+/**
+ * What a planned site's economy would resolve to.
+ *
+ * ★ A PORT HAS AN ECONOMY. AN INSTALLATION FEEDS ONE. ★
+ *
+ * Only starports and outposts trade, so only they get a verdict. Everything else says what it
+ * contributes instead — printing "industrial" beside a satellite would claim it has a market to be
+ * industrial about, and it has none. It makes the port on its body more industrial.
+ */
+function SiteEconomyLine({
+  economy,
+  site,
+}: {
+  economy: SiteEconomy | undefined;
+  site: PlanSite;
+}) {
+  if (economy === undefined) return null;
+
+  if (!economy.receivesLinks) {
+    // What it CONTRIBUTES, which is the only economic thing it does. Plenty contribute nothing,
+    // and saying "feeds none" would be noise on two thirds of the rows.
+    if (site.economyInfluence === null || site.economyInfluence === 'none') return null;
+    return (
+      <span className="ml-2 font-mono text-[10px] text-[var(--color-text-dim)]">
+        feeds {site.economyInfluence}
+      </span>
+    );
+  }
+
+  if (economy.leading === null) {
+    return (
+      <span className="ml-2 font-mono text-[10px] text-[var(--color-text-dim)]">
+        no economy yet — nothing on this body feeds it
+      </span>
+    );
+  }
+
+  const ranked = Object.entries(economy.scores)
+    .filter(([, v]) => v > 0)
+    .sort((a, b) => b[1] - a[1]);
+
+  return (
+    <span
+      className="ml-2 font-mono text-[10px] text-[var(--color-brand-cyan-bright)]"
+      title={
+        `${ranked.map(([k, v]) => `${k} ${v.toFixed(2)}`).join(', ')}` +
+        `\n\n${economy.audit.map((a) => `${a.delta > 0 ? '+' : ''}${a.delta} ${a.economy} — ${a.reason}`).join('\n')}`
+      }
+    >
+      {economy.leading}
+      {economy.strongLinks.length + economy.weakLinks.length > 0
+        ? ` · fed by ${economy.strongLinks.length + economy.weakLinks.length}`
+        : ''}
+    </span>
+  );
+}
 
 /** Nests bodies under their parents. Anything whose parent is missing is treated as a root. */
 function tree(bodies: readonly PlanBody[]): Array<{ body: PlanBody; depth: number }> {
@@ -134,6 +197,17 @@ export function SystemTree({
         </p>
       )}
 
+      {/*
+        ★ WHAT THE MODEL CANNOT SEE ★
+
+        Three inputs the game uses are not in the body data anybody publishes. A prediction that
+        quietly omitted them would be wrong in a way nobody could check, so they are printed.
+      */}
+      <p className="m-0 mb-3 text-[11px] text-[var(--color-text-dim)]">
+        Economies are predicted from the body and from what stands on it. Not taken into account:{' '}
+        {plan.economies.blindSpots.join('; ')}.
+      </p>
+
       <ol className="m-0 list-none p-0">
         {rows.map(({ body, depth }) => {
           const here = sitesOn(body.bodyId);
@@ -205,6 +279,10 @@ export function SystemTree({
                                   {s.totalTonnes.toLocaleString()} t
                                 </span>
                               )}
+                              <SiteEconomyLine
+                                site={s}
+                                economy={plan.economies.sites.find((e) => e.siteId === s.id)}
+                              />
                             </span>
                             {canEdit ? (
                               <button

@@ -46,6 +46,15 @@ export interface BuildTypeSeed {
   readonly requires: string | null;
   /** The prerequisite keys this build satisfies for others. Usually empty. */
   readonly satisfies: readonly string[];
+  /**
+   * What economy this pushes towards, and whether its own is locked.
+   *
+   * `none` is a real answer — plenty of installations influence nothing — so it is stored rather
+   * than left null, and null on `economyFixed` genuinely means "takes the body's economy".
+   */
+  readonly economyInfluence: string;
+  readonly economyFixed: string | null;
+
   /** What a finished build does to the system. Every figure is community-gathered. */
   readonly effects: {
     readonly population: number;
@@ -108,7 +117,7 @@ export async function seedBuildCatalogue(
            gives_tier = $5, gives_points = $6, requires = $7, satisfies = $8::text[],
            eff_population = $9, eff_max_population = $10, eff_security = $11,
            eff_technology = $12, eff_wealth = $13, eff_standard_of_living = $14,
-           eff_development = $15, updated_at = now()
+           eff_development = $15, economy_influence = $16, economy_fixed = $17, updated_at = now()
          WHERE id = $1`,
         type.id,
         type.buildClass,
@@ -125,6 +134,8 @@ export async function seedBuildCatalogue(
         type.effects.wealth,
         type.effects.standardOfLiving,
         type.effects.development,
+        type.economyInfluence,
+        type.economyFixed,
       );
       continue;
     }
@@ -141,10 +152,10 @@ export async function seedBuildCatalogue(
            (id, display_name, category, tier, location, pad_size, layouts, total_tonnes, source,
             build_class, needs_tier, needs_points, gives_tier, gives_points, requires, satisfies,
             eff_population, eff_max_population, eff_security, eff_technology, eff_wealth,
-            eff_standard_of_living, eff_development, updated_at)
+            eff_standard_of_living, eff_development, economy_influence, economy_fixed, updated_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7::text[], $8, 'community',
                  $9, $10, $11, $12, $13, $14, $15::text[],
-                 $16, $17, $18, $19, $20, $21, $22, now())
+                 $16, $17, $18, $19, $20, $21, $22, $23, $24, now())
          ON CONFLICT (id) DO UPDATE SET
            display_name = EXCLUDED.display_name,
            category     = EXCLUDED.category,
@@ -167,6 +178,8 @@ export async function seedBuildCatalogue(
            eff_wealth             = EXCLUDED.eff_wealth,
            eff_standard_of_living = EXCLUDED.eff_standard_of_living,
            eff_development        = EXCLUDED.eff_development,
+           economy_influence      = EXCLUDED.economy_influence,
+           economy_fixed          = EXCLUDED.economy_fixed,
            updated_at   = now()`,
         type.id,
         type.displayName,
@@ -190,6 +203,8 @@ export async function seedBuildCatalogue(
         type.effects.wealth,
         type.effects.standardOfLiving,
         type.effects.development,
+        type.economyInfluence,
+        type.economyFixed,
       );
 
       await tx.$executeRawUnsafe(

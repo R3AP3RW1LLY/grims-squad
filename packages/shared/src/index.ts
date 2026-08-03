@@ -47,6 +47,25 @@ export type {
   SystemEffects,
 } from './colony-simulation.js';
 
+export {
+  ECONOMIES,
+  WEAK_LINK_STRENGTH,
+  bodyBuffs,
+  bodyEconomies,
+  resolveEconomies,
+  strongLinkStrength,
+} from './colony-economy.js';
+export type {
+  EconAudit,
+  EconBody,
+  EconBuildType,
+  EconSite,
+  Economy,
+  EconomyResult,
+  EconomyScores,
+  SiteEconomy,
+} from './colony-economy.js';
+
 export { NonceService, formatNonce, NONCE_TTL_MS } from './nonce.service.js';
 export type { NonceStore, NonceClaim, CheckResult, CheckOutcome } from './nonce.service.js';
 

@@ -1840,6 +1840,8 @@ export interface PlanBody {
   distanceLs: number | null;
   hasRings: boolean;
   terraformable: boolean;
+  hasVolcanism: boolean;
+  hasAtmosphere: boolean;
   /** What this orbits, so a moon draws under its planet. Null for the primary star. */
   parentBodyId: number | null;
   orbitalSlots: number | null;
@@ -1856,6 +1858,8 @@ export interface PlanSite {
   buildTypeName: string | null;
   tier: number | null;
   totalTonnes: number | null;
+  /** What this feeds into the port that receives it. `none` when it feeds nothing. */
+  economyInfluence: string | null;
   position: number;
   /** The system's first station. The game charges nothing for it. */
   isPrimary: boolean;
@@ -1898,6 +1902,32 @@ export interface PlanEffects {
   development: number;
 }
 
+/** One adjustment the economy model made, and why. */
+export interface EconAudit {
+  economy: string;
+  delta: number;
+  reason: string;
+}
+
+export interface SiteEconomy {
+  siteId: string;
+  buildTypeId: string | null;
+  /** Only starports and outposts trade. Everything else FEEDS one. */
+  receivesLinks: boolean;
+  isReceiver: boolean;
+  scores: Record<string, number>;
+  leading: string | null;
+  audit: EconAudit[];
+  strongLinks: string[];
+  weakLinks: string[];
+}
+
+export interface PlanEconomies {
+  sites: SiteEconomy[];
+  /** Inputs the game uses that we do not hold. Printed, never hidden. */
+  blindSpots: string[];
+}
+
 export interface PlanSimulation {
   steps: PlanSimStep[];
   tier2: number;
@@ -1923,6 +1953,7 @@ export interface ColonyPlan {
   bodiesFetchedAt: string | null;
   sites: PlanSite[];
   simulation: PlanSimulation;
+  economies: PlanEconomies;
 }
 
 export const getColonyPlans = (

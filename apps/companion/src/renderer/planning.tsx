@@ -6,6 +6,8 @@ import type {
   PlanBody,
   PlanProblem,
   PlanSimStep,
+  PlanSite,
+  SiteEconomy,
 } from '../hub-colony.js';
 import { Button, C, Card, Copy, Empty, Field, Problem, Section, Stat, inputStyle } from './ui.js';
 
@@ -471,6 +473,61 @@ function PlanDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.Ele
 }
 
 /**
+ * What a planned site's economy would resolve to.
+ *
+ * ★ A PORT HAS AN ECONOMY. AN INSTALLATION FEEDS ONE. ★
+ *
+ * Only starports and outposts trade, so only they get a verdict. Everything else says what it
+ * contributes instead — printing "industrial" beside a satellite would claim it has a market to be
+ * industrial about, and it has none. It makes the port on its body more industrial.
+ */
+function SiteEconomyLine({
+  economy,
+  site,
+}: {
+  economy: SiteEconomy | undefined;
+  site: PlanSite;
+}): JSX.Element | null {
+  if (economy === undefined) return null;
+
+  if (!economy.receivesLinks) {
+    // Plenty contribute nothing, and saying "feeds none" would be noise on two thirds of the rows.
+    if (site.economyInfluence === null || site.economyInfluence === 'none') return null;
+    return (
+      <span style={{ ...MONO, marginLeft: '7px', fontSize: '10px', color: C.faint }}>
+        feeds {site.economyInfluence}
+      </span>
+    );
+  }
+
+  if (economy.leading === null) {
+    return (
+      <span style={{ ...MONO, marginLeft: '7px', fontSize: '10px', color: C.faint }}>
+        no economy yet — nothing on this body feeds it
+      </span>
+    );
+  }
+
+  const ranked = Object.entries(economy.scores)
+    .filter(([, v]) => v > 0)
+    .sort((a, b) => b[1] - a[1]);
+  const fed = economy.strongLinks.length + economy.weakLinks.length;
+
+  return (
+    <span
+      style={{ ...MONO, marginLeft: '7px', fontSize: '10px', color: C.cyan }}
+      title={
+        `${ranked.map(([k, v]) => `${k} ${v.toFixed(2)}`).join(', ')}` +
+        `\n\n${economy.audit.map((a) => `${a.delta > 0 ? '+' : ''}${a.delta} ${a.economy} — ${a.reason}`).join('\n')}`
+      }
+    >
+      {economy.leading}
+      {fed > 0 ? ` · fed by ${fed}` : ''}
+    </span>
+  );
+}
+
+/**
  * The system, laid out.
  *
  * ★ A VERTICAL INDENTED TREE, NOT AN ORRERY ★
@@ -503,6 +560,17 @@ function SystemTree({
 
   return (
     <div>
+      {/*
+        ★ WHAT THE MODEL CANNOT SEE ★
+
+        Three inputs the game uses are not in the body data anybody publishes. A prediction that
+        quietly omitted them would be wrong in a way nobody could check, so they are printed.
+      */}
+      <p style={{ margin: '0 0 10px', fontSize: '11px', color: C.faint }}>
+        Economies are predicted from the body and from what stands on it. Not taken into account:{' '}
+        {plan.economies.blindSpots.join('; ')}.
+      </p>
+
       {tree(plan.bodies).map(({ body, depth }) => {
         const here = plan.sites.filter((s) => s.bodyId === body.bodyId);
 
@@ -603,6 +671,10 @@ function SystemTree({
                             {s.totalTonnes.toLocaleString()} t
                           </span>
                         )}
+                        <SiteEconomyLine
+                          site={s}
+                          economy={plan.economies.sites.find((e) => e.siteId === s.id)}
+                        />
                       </span>
                       <Button
                         tone="danger"

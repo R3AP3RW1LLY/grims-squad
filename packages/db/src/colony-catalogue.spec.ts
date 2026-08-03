@@ -47,6 +47,8 @@ function type(id: string, costs: Record<string, number>): BuildTypeSeed {
     givesPoints: 0,
     requires: null,
     satisfies: [],
+    economyInfluence: 'none',
+    economyFixed: null,
     effects: {
       population: 0,
       maxPopulation: 0,

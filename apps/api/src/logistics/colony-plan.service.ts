@@ -3,7 +3,10 @@ import {
   AppError,
   ErrorCode,
   Permission,
+  resolveEconomies,
   simulatePlan,
+  type EconBuildType,
+  type EconomyResult,
   type SimBuildType,
   type SimResult,
 } from '@grims/shared';
@@ -44,6 +47,8 @@ export interface PlanBody {
   readonly distanceLs: number | null;
   readonly hasRings: boolean;
   readonly terraformable: boolean;
+  readonly hasVolcanism: boolean;
+  readonly hasAtmosphere: boolean;
   readonly parentBodyId: number | null;
   /** Read off the in-game architect view. Null until somebody has looked. */
   readonly orbitalSlots: number | null;
@@ -59,6 +64,7 @@ export interface PlanSite {
   readonly buildTypeName: string | null;
   readonly tier: number | null;
   readonly totalTonnes: number | null;
+  readonly economyInfluence: string | null;
   readonly position: number;
   readonly isPrimary: boolean;
   readonly projectId: string | null;
@@ -90,6 +96,17 @@ export interface PlanDetail {
    * legal. The shared module runs once, on the server, and both ends render the same answer.
    */
   readonly simulation: SimResult;
+
+  /**
+   * What economy each planned station would end up with.
+   *
+   * ★ THE QUESTION UNDERNEATH "WHERE SHOULD THE PORT GO" ★
+   *
+   * A station's economy decides what its market carries. The same Coriolis around a gas giant and
+   * around an earth-like world are two different shops, and the answer depends on the arrangement
+   * of the whole system rather than on the port alone — which is precisely what a planner is for.
+   */
+  readonly economies: EconomyResult;
 }
 
 /** Injected so the service is testable without a network. */
@@ -354,7 +371,12 @@ export class ColonyPlanService {
     const head = this.#head(row);
     const [bodies, sites] = await Promise.all([this.#bodiesOf(head.systemId64), this.#sitesOf(id)]);
 
-    return { ...head, bodies, sites, simulation: await this.#simulate(sites) };
+    const [simulation, economies] = await Promise.all([
+      this.#simulate(sites),
+      this.#economies(sites, bodies),
+    ]);
+
+    return { ...head, bodies, sites, simulation, economies };
   }
 
   /** Runs the construction-point rules over one plan's build order. */
@@ -366,13 +388,70 @@ export class ColonyPlanService {
     );
   }
 
+  /**
+   * Works out what each planned station's economy would resolve to.
+   *
+   * Reads only the builds this plan uses, for the same reason the point simulation does: fifty-five
+   * rows to answer a question about four is a query nobody asked for.
+   */
+  async #economies(
+    sites: readonly PlanSite[],
+    bodies: readonly PlanBody[],
+  ): Promise<EconomyResult> {
+    const ids = [...new Set(sites.map((s) => s.buildTypeId).filter((v): v is string => v !== null))];
+
+    const rows =
+      ids.length === 0
+        ? []
+        : await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
+            `SELECT id, display_name, tier, build_class, economy_influence, economy_fixed
+               FROM colony_build_types
+              WHERE id = ANY($1::text[])`,
+            ids,
+          );
+
+    const catalogue = new Map<string, EconBuildType>(
+      rows.map((r) => [
+        String(r['id']),
+        {
+          id: String(r['id']),
+          displayName: String(r['display_name']),
+          tier: Number(r['tier']),
+          buildClass: String(r['build_class']),
+          economyInfluence: String(r['economy_influence']),
+          economyFixed: r['economy_fixed'] === null ? null : String(r['economy_fixed']),
+        },
+      ]),
+    );
+
+    return resolveEconomies(
+      sites.map((s) => ({
+        id: s.id,
+        bodyId: s.bodyId,
+        location: s.location,
+        buildTypeId: s.buildTypeId,
+      })),
+      bodies.map((b) => ({
+        bodyId: b.bodyId,
+        kind: b.kind,
+        subType: b.subType,
+        hasRings: b.hasRings,
+        terraformable: b.terraformable,
+        hasVolcanism: b.hasVolcanism,
+        isLandable: b.isLandable,
+      })),
+      catalogue,
+    );
+  }
+
   /** Every plan's sites, grouped, in one query. */
   async #sitesOfMany(planIds: readonly string[]): Promise<Map<string, PlanSite[]>> {
     const rows = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
       `SELECT s.plan_id::text AS plan_id,
               s.id, s.body_id, s.location, s.build_type_id, s.position, s.is_primary,
               s.project_id::text AS project_id,
-              t.display_name AS build_type_name, t.tier, t.total_tonnes
+              t.display_name AS build_type_name, t.tier, t.total_tonnes,
+              t.economy_influence
          FROM colony_plan_sites s
          LEFT JOIN colony_build_types t ON t.id = s.build_type_id
         WHERE s.plan_id = ANY($1::uuid[])
@@ -445,7 +524,8 @@ export class ColonyPlanService {
 
     const rows = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
       `SELECT b.body_id, b.name, b.kind, b.sub_type, b.is_landable, b.gravity, b.temperature,
-              b.distance_ls, b.has_rings, b.terraformable, b.parent_body_id,
+              b.distance_ls, b.has_rings, b.terraformable, b.has_volcanism, b.has_atmosphere,
+              b.parent_body_id,
               b.orbital_slots, b.surface_slots, u.display_name AS slots_by
          FROM colony_bodies b
          LEFT JOIN users u ON u.id = b.slots_by_id
@@ -466,6 +546,11 @@ export class ColonyPlanService {
       distanceLs: r['distance_ls'] === null ? null : Number(r['distance_ls']),
       hasRings: r['has_rings'] === true,
       terraformable: r['terraformable'] === true,
+      // Fetched from EDSM and stored since the planner shipped, but never read back out. The
+      // economy model needs both: volcanism feeds extraction, and an atmosphere is what makes a
+      // body worth more surface slots.
+      hasVolcanism: r['has_volcanism'] === true,
+      hasAtmosphere: r['has_atmosphere'] === true,
       parentBodyId: r['parent_body_id'] === null ? null : Number(r['parent_body_id']),
       orbitalSlots: r['orbital_slots'] === null ? null : Number(r['orbital_slots']),
       surfaceSlots: r['surface_slots'] === null ? null : Number(r['surface_slots']),
@@ -477,7 +562,8 @@ export class ColonyPlanService {
     const rows = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
       `SELECT s.id, s.body_id, s.location, s.build_type_id, s.position, s.is_primary,
               s.project_id::text AS project_id,
-              t.display_name AS build_type_name, t.tier, t.total_tonnes
+              t.display_name AS build_type_name, t.tier, t.total_tonnes,
+              t.economy_influence
          FROM colony_plan_sites s
          LEFT JOIN colony_build_types t ON t.id = s.build_type_id
         WHERE s.plan_id = $1::uuid
@@ -498,6 +584,9 @@ export class ColonyPlanService {
       buildTypeName: r['build_type_name'] === null ? null : String(r['build_type_name']),
       tier: r['tier'] === null ? null : Number(r['tier']),
       totalTonnes: r['total_tonnes'] === null ? null : Number(r['total_tonnes']),
+      // What this build feeds into whatever port receives it. `none` for the many that feed
+      // nothing, null only while no build has been chosen.
+      economyInfluence: r['economy_influence'] === null ? null : String(r['economy_influence']),
       position: Number(r['position']),
       isPrimary: r['is_primary'] === true,
       projectId: r['project_id'] === null ? null : String(r['project_id']),
@@ -522,6 +611,12 @@ export class ColonyPlanService {
       // The head row alone knows nothing about the build order. Both callers fill this in — `byId`
       // from the plan's own sites, `list` from one query across every plan.
       simulation: simulatePlan([], new Map()),
+      /*
+       * Left empty on the board deliberately. An economy depends on the BODIES the sites stand on,
+       * and the board loads none of them — computing it there would produce a number that looks
+       * authoritative and is arrived at from half the inputs.
+       */
+      economies: resolveEconomies([], [], new Map()),
     };
   }
 

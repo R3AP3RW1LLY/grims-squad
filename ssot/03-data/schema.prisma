@@ -2620,6 +2620,17 @@ model ColonyBuildType {
   effStandardOfLiving Int @default(0) @map("eff_standard_of_living")
   effDevelopment      Int @default(0) @map("eff_development")
 
+  /// ★ WHAT ECONOMY A FINISHED SITE PUSHES THE SYSTEM TOWARDS ★
+  ///
+  /// A station's economy decides what its market carries, which is the question a squadron is
+  /// really asking when they choose where to put a port. `economyInfluence` is what this build
+  /// contributes to whatever it links to; `economyFixed` is set only on builds whose OWN economy is
+  /// locked regardless of surroundings — a Pirate Outpost is a service economy wherever it stands.
+  ///
+  /// `none` is a real answer, not a missing one: plenty of installations influence nothing.
+  economyInfluence String  @map("economy_influence")
+  economyFixed     String? @map("economy_fixed")
+
   /// When one of OUR OWN depot readings last agreed with this row, exactly. Null until it has.
   confirmedAt DateTime? @map("confirmed_at") @db.Timestamptz(6)
   /// How many distinct sites of ours have matched it. A row confirmed six times is not a guess.
