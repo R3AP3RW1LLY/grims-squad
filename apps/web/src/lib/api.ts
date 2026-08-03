@@ -1707,6 +1707,19 @@ export interface ColonyShoppingRow {
   supply: number | null;
   distance: number | null;
   cost: number | null;
+  /**
+   * The nearest place selling this AT ALL, when nothing inside the radius does.
+   *
+   * "Nobody in range sells this" is true and useless on its own — it says the search failed and
+   * nothing about what to do next.
+   */
+  nearestOutOfRange: {
+    stationName: string;
+    systemName: string;
+    price: number;
+    supply: number;
+    distance: number | null;
+  } | null;
 }
 
 /**

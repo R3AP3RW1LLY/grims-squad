@@ -151,6 +151,30 @@ export interface ShoppingRow {
   readonly price: number | null;
   readonly supply: number | null;
   readonly distance: number | null;
+  /**
+   * The nearest place that sells this AT ALL, when nothing inside the radius does.
+   *
+   * ★ SQUADRON OWNER, 2026-08-03 ★
+   *
+   * "if on the where to buy a commodty is listed as 'nobody in range sells this' can we display the
+   * actual nearest location that does sell it, with an estimated light years in distance please.
+   * this will help people locate the commodity."
+   *
+   * "Nobody in range sells this" is true and useless: it tells a member the search failed and
+   * nothing about what to do next. CMM Composite on the squadron's own build is exactly this — not
+   * sold within a hundred light years, and somebody still has to go and get forty thousand tonnes
+   * of it from somewhere.
+   *
+   * Null only when nobody anywhere in our mirror sells it, which is a different and much rarer
+   * statement.
+   */
+  readonly nearestOutOfRange: {
+    readonly stationName: string;
+    readonly systemName: string;
+    readonly price: number;
+    readonly supply: number;
+    readonly distance: number | null;
+  } | null;
   /** Credits to buy the outstanding tonnage at that price. Null when nowhere sells it. */
   readonly cost: number | null;
 }
@@ -630,6 +654,32 @@ export class ColonyService {
 
       const place = rankPlaces(candidates, opts.sort ?? 'local')[0];
 
+      /*
+       * ★ WHEN NOTHING IS IN RANGE, SAY WHERE IT IS ANYWAY ★
+       *
+       * Only reached when the radius search found nothing, so it costs one extra query on the lines
+       * that would otherwise have been a dead end — and none at all on a shopping list that is
+       * fully sourced.
+       *
+       * `withinLy` is deliberately enormous rather than absent: the query needs a radius to use the
+       * cube index at all, and 20,000 light years reaches the far side of anything a squadron will
+       * ever colonise while still being a bounded search.
+       */
+      const nearestOutOfRange =
+        place !== undefined || opts.near === null
+          ? null
+          : ((
+              await this.market
+                .bestBuys(need.commodity, {
+                  ...query,
+                  limit: 1,
+                  near: opts.near,
+                  withinLy: 20_000,
+                  order: 'distance',
+                })
+                .catch(() => [])
+            )[0] ?? null);
+
       out.push({
         commodity: need.commodity,
         remaining: need.remaining,
@@ -638,6 +688,16 @@ export class ColonyService {
         price: place?.price ?? null,
         supply: place?.quantity ?? null,
         distance: place?.distance ?? null,
+        nearestOutOfRange:
+          nearestOutOfRange === null
+            ? null
+            : {
+                stationName: nearestOutOfRange.stationName,
+                systemName: nearestOutOfRange.systemName,
+                price: nearestOutOfRange.price,
+                supply: nearestOutOfRange.quantity,
+                distance: nearestOutOfRange.distance,
+              },
         /*
          * The whole outstanding tonnage at that price, not what is on that station's shelf. It
          * answers "what will finishing this cost me", which is the question — and a member reading

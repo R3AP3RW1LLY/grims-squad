@@ -1,4 +1,5 @@
 import type { ColonyShoppingRow } from '../../../../lib/api';
+import { CopySystem } from '../../../../components/copy-system';
 
 /**
  * Where to buy what a project still needs.
@@ -178,12 +179,38 @@ export function ShoppingList({
                     <td className={`${TD} text-[var(--color-text-secondary)]`}>
                       {r.stationName === null ? (
                         /*
-                         * Said plainly rather than left blank. Nobody in range sells it, which is
-                         * actionable information — widen the radius, or find a miner.
+                         * ★ NOT A DEAD END — SQUADRON OWNER, 2026-08-03 ★
+                         *
+                         * "if a commodty is listed as 'nobody in range sells this' can we display
+                         * the actual nearest location that does sell it, with an estimated light
+                         * years in distance please."
+                         *
+                         * "Nobody in range" was true and useless: it said the search failed and
+                         * nothing about what to do next. Somebody still has to go and get forty
+                         * thousand tonnes of CMM Composite from somewhere.
                          */
-                        <span className="text-[var(--color-semantic-warning)]">
-                          nobody in range sells this
-                        </span>
+                        <div>
+                          <span className="text-[var(--color-semantic-warning)]">
+                            nobody in range sells this
+                          </span>
+                          {r.nearestOutOfRange === null ? null : (
+                            <div className="mt-1 text-[11px] text-[var(--color-text-secondary)]">
+                              nearest is{' '}
+                              <span className="text-[var(--color-text-primary)]">
+                                {r.nearestOutOfRange.stationName}
+                              </span>{' '}
+                              in {r.nearestOutOfRange.systemName}
+                              <CopySystem system={r.nearestOutOfRange.systemName} size="small" />
+                              <span className="ml-2 font-mono tabular-nums">
+                                {r.nearestOutOfRange.distance === null
+                                  ? ''
+                                  : `${r.nearestOutOfRange.distance.toFixed(0)} ly · `}
+                                {r.nearestOutOfRange.price.toLocaleString()} cr ·{' '}
+                                {r.nearestOutOfRange.supply.toLocaleString()} in stock
+                              </span>
+                            </div>
+                          )}
+                        </div>
                       ) : (
                         <>
                           {r.stationName}
@@ -191,6 +218,11 @@ export function ShoppingList({
                             {r.systemName}
                             {r.distance === null ? '' : ` · ${r.distance.toFixed(0)} ly`}
                           </span>
+                          {/* The system alone, because the galaxy map searches systems — a station
+                              name pasted into it finds nothing. */}
+                          {r.systemName === null ? null : (
+                            <CopySystem system={r.systemName} size="small" />
+                          )}
                         </>
                       )}
                     </td>

@@ -8,6 +8,7 @@ import { MarketController } from './market.controller.js';
 import { ColonyController } from './colony.controller.js';
 import { ColonyDeviceController } from './colony-device.controller.js';
 import { ColonyService } from './colony.service.js';
+import { ColonyCatalogueService } from './colony-catalogue.service.js';
 import { ColonyRosterService } from './colony-roster.service.js';
 import { PrismaMarketStore, type MarketStore } from './market.store.js';
 import { MARKET_STORE } from './logistics.tokens.js';
@@ -52,6 +53,17 @@ import { MARKET_STORE } from './logistics.tokens.js';
        * answering "where do I buy this" for each outstanding need. One implementation of those
        * index-shaped queries, used by both features.
        */
+      /*
+       * The build catalogue. Reads the market store like the shopping list does, because "what
+       * does a Coriolis cost near me" is the same question as "where do I buy this project's
+       * remaining steel" asked before the project exists.
+       */
+      provide: ColonyCatalogueService,
+      inject: [PrismaClient, MARKET_STORE],
+      useFactory: (db: PrismaClient, market: MarketStore) =>
+        new ColonyCatalogueService(db, market),
+    },
+    {
       provide: ColonyService,
       // AclDbService as well: projects carry a visibility, so every read of one is bound to whoever
       // is asking (INV-002). The plain client is for `colony_needs` and the contribution ledger,

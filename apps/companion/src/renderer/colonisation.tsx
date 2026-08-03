@@ -782,8 +782,23 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
                 key={r.commodity}
                 left={r.commodity}
                 sub={
+                  /*
+                   * ★ NOT A DEAD END — SQUADRON OWNER, 2026-08-03 ★
+                   *
+                   * "if a commodty is listed as 'nobody in range sells this' can we display the
+                   * actual nearest location that does sell it, with an estimated light years in
+                   * distance please."
+                   *
+                   * The old line said the search failed and nothing about what to do next.
+                   */
                   r.stationName === null
-                    ? 'nobody in range sells this'
+                    ? r.nearestOutOfRange === null
+                      ? 'nobody anywhere we know of sells this'
+                      : `none in range · nearest ${r.nearestOutOfRange.stationName} · ` +
+                        `${r.nearestOutOfRange.systemName}` +
+                        (r.nearestOutOfRange.distance === null
+                          ? ''
+                          : ` · ${Math.round(r.nearestOutOfRange.distance)} ly`)
                     : `${r.stationName} · ${r.systemName}`
                 }
                 subTone={r.stationName === null ? C.warn : C.faint}

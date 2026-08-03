@@ -5,6 +5,7 @@ import { User, type CurrentUser } from '../auth/current-user.js';
 import { PermissionService } from '../authz/permission.service.js';
 import { ColonyService, type ColonyOwner, type ColonyVisibility } from './colony.service.js';
 import { ColonyRosterService } from './colony-roster.service.js';
+import { ColonyCatalogueService } from './colony-catalogue.service.js';
 import { MARKET_STORE } from './logistics.tokens.js';
 import type { MarketStore } from './market.store.js';
 
@@ -36,6 +37,7 @@ export class ColonyController {
     // The same roster service the companion controller uses: one rule about who may direct a build,
     // in one place, so the two surfaces cannot disagree.
     @Inject(ColonyRosterService) private readonly rosters: ColonyRosterService,
+    @Inject(ColonyCatalogueService) private readonly catalogue: ColonyCatalogueService,
   ) {}
 
   async #mask(caller: CurrentUser | undefined): Promise<bigint> {
@@ -270,6 +272,56 @@ export class ColonyController {
    * The same service the companion uses, so the two surfaces cannot disagree about who is on a
    * build or who may direct it.
    */
+  /**
+   * The build catalogue.
+   *
+   * ★ WHY THIS IS NOT UNDER `projects` ★
+   *
+   * It is not about any project. It is what a KIND of build costs, which is the question somebody
+   * has before they have posted anything — and the whole reason the catalogue exists.
+   *
+   * COLONY_VIEW, like the boards: it is squadron planning material, not public reference.
+   */
+  @Get('build-types')
+  async buildTypes(@User() caller: CurrentUser | undefined) {
+    await this.#assert(
+      caller,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+    return { buildTypes: await this.catalogue.list() };
+  }
+
+  @Get('build-types/:id')
+  async buildType(
+    @User() caller: CurrentUser | undefined,
+    @Param('id') id: string,
+    @Query('near') near?: string,
+  ) {
+    await this.#assert(
+      caller,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    /*
+     * No origin means no prices, deliberately. A cheapest-anywhere figure is a number nobody can
+     * act on, and worse, it looks like a real quote — so the page asks where you are buying from
+     * rather than inventing an answer.
+     */
+    const origin = await this.#origin(near);
+    const detail = await this.catalogue.byId(id, origin?.coords ?? null);
+    if (detail === null) {
+      throw new AppError(ErrorCode.RESOURCE_NOT_VISIBLE, 'No such build type.');
+    }
+
+    return {
+      buildType: detail,
+      origin: origin === null ? null : { system: origin.system },
+      unknownSystem: (near?.trim() ?? '') !== '' && origin === null ? near?.trim() : null,
+    };
+  }
+
   @Get('projects/:id/roster')
   async roster(@User() caller: CurrentUser | undefined, @Param('id') id: string) {
     const me = this.#requireSession(caller);

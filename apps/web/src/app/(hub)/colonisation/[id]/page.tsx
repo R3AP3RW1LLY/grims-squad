@@ -15,6 +15,7 @@ import { DeliveryTimeline, HaulerChart } from './delivery-charts';
 import { DeliveryLedger } from './delivery-ledger';
 import { ProjectActions } from './project-actions';
 import { Crew } from './crew';
+import { CopySystem } from '../../../../components/copy-system';
 
 /**
  * One colonisation project.
@@ -72,8 +73,22 @@ export default async function ColonyProjectPage({
       <PageHeader
         eyebrow={project.owner === 'squadron' ? 'Squadron project' : 'Members’ project'}
         title={project.title.toUpperCase()}
-        subtitle={`${project.systemName}${project.stationName === null ? '' : ` · ${project.stationName}`}`}
       />
+      {/*
+        ★ THE SYSTEM, WITH A COPY BUTTON — SQUADRON OWNER, 2026-08-03 ★
+
+        "on the project titles where it lists the system they are in, can we add copy buttons ... so
+        its easier to drop them into the galaxy / system maps."
+
+        Lifted out of the header's subtitle to get it, because a subtitle is a string and a button
+        is not. The system is what the galaxy map searches; the station is only there for orientation
+        once you have arrived.
+      */}
+      <p className="-mt-4 mb-8 flex flex-wrap items-center gap-x-1 text-sm text-[var(--color-text-secondary)]">
+        <span className="text-[var(--color-text-primary)]">{project.systemName}</span>
+        <CopySystem system={project.systemName} />
+        {project.stationName === null ? null : <span className="ml-2">· {project.stationName}</span>}
+      </p>
       <PageBody wide>
         <StatGrid>
           <StatTile

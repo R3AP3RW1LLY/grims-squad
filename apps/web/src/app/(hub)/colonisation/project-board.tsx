@@ -1,4 +1,5 @@
 import type { ColonyProject } from '../../../lib/api';
+import { CopySystem } from '../../../components/copy-system';
 
 /**
  * A board of colonisation projects.
@@ -64,10 +65,17 @@ export function ProjectBoard({
                   </span>
                 ) : null}
               </h3>
-              <p className="m-0 text-[11px] text-[var(--color-text-secondary)]">
-                {p.systemName}
-                {p.stationName === null ? null : ` · ${p.stationName}`}
-                {p.postedBy === null ? null : ` · posted by ${p.postedBy}`}
+              <p className="m-0 flex flex-wrap items-center gap-x-1 text-[11px] text-[var(--color-text-secondary)]">
+                <span>{p.systemName}</span>
+                {/*
+                  Safe here because the link wraps the TITLE only, not the card — a button inside an
+                  anchor is invalid markup and would navigate instead of copying.
+                */}
+                <CopySystem system={p.systemName} size="small" />
+                <span>
+                  {p.stationName === null ? null : ` · ${p.stationName}`}
+                  {p.postedBy === null ? null : ` · posted by ${p.postedBy}`}
+                </span>
               </p>
             </header>
 
