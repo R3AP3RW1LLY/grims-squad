@@ -107,6 +107,10 @@ export default tseslint.config(
       '**/dev.mjs',
       '**/prod.mjs',
       '**/make-icons.mjs',
+      // Refuses `next build` while the dev server is up. Added 2026-08-03 and it failed lint on
+      // `process` and `console` exactly as `prod.mjs` did — which is the third time this list has
+      // proved it is explicit by design rather than by accident.
+      '**/prebuild.mjs',
     ],
     languageOptions: {
       globals: {

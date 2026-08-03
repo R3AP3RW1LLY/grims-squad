@@ -1559,6 +1559,19 @@ if (!app.requestSingleInstanceLock()) {
       applyAutoStart();
       stopPolling();
       refreshTray();
+      /*
+       * ★ AND TELL THE WINDOW — SQUADRON OWNER, 2026-08-03 ★
+       *
+       * "nothing happens when i click unpair device."
+       *
+       * It worked. The token was cleared, written to disk, and the poll stopped — and the page was
+       * never told, so it went on saying "Paired as …" over a config with no token in it. The
+       * member sees a dead button, presses it again, and finds out only on the next restart that
+       * they have been unpaired the whole time.
+       *
+       * One line, and it is the same line every other mutating handler already had.
+       */
+      push();
       return { ok: true };
     });
 
@@ -1578,6 +1591,8 @@ if (!app.requestSingleInstanceLock()) {
       if (config.enabled) startPolling();
       else stopPolling();
       refreshTray();
+      // Same omission as `unpair` had: the switch moves, the page is not told, and it snaps back.
+      push();
       return { ok: true };
     });
 
@@ -1621,6 +1636,15 @@ if (!app.requestSingleInstanceLock()) {
 
       config = { ...config, journalPathOverride: result.filePaths[0] };
       saveConfig(app.getPath('userData'), config);
+      /*
+       * Told immediately, not merely at the end of the pass. `tick()` is not awaited — it reads a
+       * directory and can take a second or more — so without this the folder somebody just chose
+       * does not appear until it finishes, and a dialog that closes with nothing changing on screen
+       * reads as a dialog that did not work.
+       *
+       * Found by the IPC guard rather than by anybody using it, which is the point of the guard.
+       */
+      push();
       void tick();
       return { ok: true, path: result.filePaths[0] };
     });
