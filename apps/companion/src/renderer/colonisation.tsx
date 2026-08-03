@@ -3,6 +3,7 @@ import type { JSX } from 'preact';
 import type {
   BuildTypeDetail,
   BuildTypeRow,
+  ColonyPlan,
   RosterEntry,
   ColonyHauler,
   ColonyNeed,
@@ -81,6 +82,44 @@ declare global {
         id: string,
         body: { commodity: string; userId?: string },
       ): Promise<Answer<{ ok: true }>>;
+
+      /*
+       * The planner. Declared here with the rest of the bridge for the reason stated above:
+       * `window.colony` is one object, and a second `declare global` for it in planning.tsx would
+       * be a CONFLICTING declaration rather than an addition — TypeScript merges interfaces but
+       * refuses two different types for the same property.
+       */
+      plans(): Promise<Answer<{ plans: ColonyPlan[] }>>;
+      plan(id: string): Promise<Answer<{ plan: ColonyPlan }>>;
+      planCreate(body: {
+        owner: 'squadron' | 'personal';
+        title: string;
+        systemName: string;
+      }): Promise<Answer<{ id: string }>>;
+      planSlots(
+        systemId64: string,
+        bodyId: number,
+        body: { orbital: number | null; surface: number | null },
+      ): Promise<Answer<{ ok: true }>>;
+      planAddSite(
+        id: string,
+        body: {
+          version: number;
+          bodyId: number | null;
+          location: 'orbital' | 'surface';
+          buildTypeId: string | null;
+        },
+      ): Promise<Answer<{ version: number }>>;
+      planRemoveSite(
+        id: string,
+        siteId: string,
+        version: number,
+      ): Promise<Answer<{ version: number }>>;
+      planReorder(
+        id: string,
+        body: { version: number; siteIds: string[] },
+      ): Promise<Answer<{ version: number }>>;
+      planRemove(id: string): Promise<Answer<{ ok: true }>>;
     };
   }
 }

@@ -1,4 +1,5 @@
 import { Component, type ComponentChildren, type JSX } from 'preact';
+import { useState } from 'preact/hooks';
 
 /**
  * The pieces every panel is built from.
@@ -252,6 +253,48 @@ export function Empty({ children }: { children: preact.ComponentChildren }): JSX
 }
 
 /** A labelled number. Tabular figures, so a column of them does not jitter as they change. */
+/**
+ * Copies a system name to the clipboard.
+ *
+ * ★ SQUADRON OWNER, 2026-08-03 ★
+ *
+ * "can we add copy buttons that are size appropriate so that we can copy the system the locations
+ * are in so its easier to drop them into the galaxy / system maps."
+ *
+ * Sized to sit INSIDE a line of text — a full-height button next to an eleven-pixel caption reads
+ * as the more important of the two, which is backwards.
+ *
+ * The label changes to "copied" for a moment and changes back. A clipboard write is silent, and
+ * without an acknowledgement the only way to find out whether it worked is to go and paste it.
+ */
+export function Copy({ value }: { value: string }): JSX.Element {
+  const [done, setDone] = useState(false);
+
+  return (
+    <button
+      type="button"
+      class="copy"
+      title={`Copy ${value}`}
+      onClick={() => {
+        void navigator.clipboard.writeText(value).then(
+          () => {
+            setDone(true);
+            setTimeout(() => setDone(false), 1200);
+          },
+          () => {
+            // Silence would be indistinguishable from success. Rare — the app is the focused
+            // window when this is clicked — but a lie about the clipboard costs somebody a
+            // paste into the galaxy map that puts them in the wrong system.
+            setDone(false);
+          },
+        );
+      }}
+    >
+      {done ? 'copied' : 'copy'}
+    </button>
+  );
+}
+
 export function Stat({
   label,
   value,

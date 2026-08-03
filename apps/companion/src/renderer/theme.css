@@ -407,6 +407,50 @@ body.scanlines::after {
   color: #ff9d3f;
 }
 
+/*
+ * A title that opens something, as a real button.
+ *
+ * ★ WHY NOT A DIV WITH AN onClick ★
+ *
+ * Because a div is not reachable by keyboard, does not announce itself as a control, and does not
+ * fire on Enter. Everything visual lives here rather than inline for the reason at the top of this
+ * file: an inline colour outranks the hover rule and freezes the control.
+ */
+.linkish {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  font-family: inherit;
+  color: #e8eef5;
+  cursor: pointer;
+  transition: color 150ms ease;
+}
+.linkish:hover {
+  color: #ff9d3f;
+  text-decoration: underline;
+}
+
+/* A copy button sized to sit inside a line of text rather than next to it. */
+.copy {
+  border-radius: 3px;
+  border: 1px solid rgba(255, 113, 0, 0.18);
+  background-color: transparent;
+  color: #93a4b8;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  cursor: pointer;
+  transition:
+    color 150ms ease,
+    border-color 150ms ease;
+}
+.copy:hover {
+  border-color: rgba(255, 113, 0, 0.55);
+  color: #e8eef5;
+}
+
 /* A chip somebody can claim. Same idea as .tab, on a control that is not selectable. */
 .chip {
   border-radius: 4px;

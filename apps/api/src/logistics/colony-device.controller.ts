@@ -1,4 +1,15 @@
-import { Body, Controller, Get, Inject, Param, Patch, Post, Query, Req } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Inject,
+  Param,
+  Patch,
+  Post,
+  Query,
+  Req,
+} from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
 import { AppError, ErrorCode, Permission } from '@grims/shared';
 import { Public } from '../auth/auth.guard.js';
@@ -8,6 +19,7 @@ import type { PairingService } from '../telemetry/pairing.service.js';
 import { ColonyService, type ColonyOwner } from './colony.service.js';
 import { ColonyRosterService } from './colony-roster.service.js';
 import { ColonyCatalogueService } from './colony-catalogue.service.js';
+import { ColonyPlanService } from './colony-plan.service.js';
 import { MARKET_STORE } from './logistics.tokens.js';
 import type { MarketStore } from './market.store.js';
 
@@ -46,6 +58,9 @@ export class ColonyDeviceController {
     @Inject(ColonyService) private readonly colony: ColonyService,
     @Inject(ColonyRosterService) private readonly rosters: ColonyRosterService,
     @Inject(ColonyCatalogueService) private readonly catalogue: ColonyCatalogueService,
+    // Trailing underscore for the same reason the website's controller has one: `plans` is already
+    // a route method on this class, and a field of that name would shadow it.
+    @Inject(ColonyPlanService) private readonly plans_: ColonyPlanService,
     @Inject(MARKET_STORE) private readonly market: MarketStore,
     @Inject(PermissionService) private readonly permissions: PermissionService,
     @Inject(PAIRING_SERVICE) private readonly pairing: PairingService,
@@ -451,6 +466,195 @@ export class ColonyDeviceController {
     );
 
     await this.colony.setPriority(id, body.isPriority === true);
+    return { ok: true };
+  }
+
+  /**
+   * ★ THE PLANNER, FOR THE APP — SQUADRON OWNER, 2026-08-03 ★
+   *
+   * "ensure the Companion app matches and has all the same pages in colonization that the website
+   * has please! must be a mirror!"
+   *
+   * Every route below is the website's route with the door changed. Same `ColonyPlanService`, same
+   * `COLONY_VIEW` to read, same rule in the service deciding who may change what — a squadron plan
+   * is the squadron's so an officer directs it, a personal one belongs to whoever started it.
+   *
+   * Nothing here re-implements a rule. The one that would drift if it did is the check on who may
+   * edit a squadron plan, because it is the rule nobody re-reads.
+   */
+  @Public()
+  @Get('plans')
+  async plans(@Req() req: FastifyRequest, @Query('owner') owner?: string) {
+    const me = await this.#caller(
+      req,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    const scope = owner === 'squadron' || owner === 'personal' ? owner : 'all';
+    return { plans: await this.plans_.list(scope, me.userId) };
+  }
+
+  @Public()
+  @Get('plans/:id')
+  async plan(@Req() req: FastifyRequest, @Param('id') id: string) {
+    const me = await this.#caller(
+      req,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    const plan = await this.plans_.byId(id, me.userId);
+    if (plan === null) {
+      throw new AppError(ErrorCode.RESOURCE_NOT_VISIBLE, 'That plan is not available.');
+    }
+    return { plan };
+  }
+
+  @Public()
+  @Post('plans')
+  async createPlan(
+    @Req() req: FastifyRequest,
+    @Body() body: { owner?: string; title?: string; systemName?: string },
+  ) {
+    const me = await this.#caller(
+      req,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+    const mask = await this.permissions.effectiveMask(me.userId);
+
+    return this.plans_.create({
+      owner: body.owner === 'squadron' ? 'squadron' : 'personal',
+      title: body.title ?? '',
+      systemName: body.systemName ?? '',
+      callerId: me.userId,
+      callerMask: mask,
+    });
+  }
+
+  /**
+   * How many slots a body has, as read off the in-game architect view.
+   *
+   * COLONY_VIEW only, and that matters MORE here than on the website: the member most likely to be
+   * looking at the architect panel is the one flying, with the app open on a second screen. Gating
+   * this behind rank would mean the one person who can see the number cannot write it down.
+   */
+  @Public()
+  @Patch('plans/bodies/:systemId64/:bodyId')
+  async setSlots(
+    @Req() req: FastifyRequest,
+    @Param('systemId64') systemId64: string,
+    @Param('bodyId') bodyId: string,
+    @Body() body: { orbital?: number | null; surface?: number | null },
+  ) {
+    const me = await this.#caller(
+      req,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    await this.plans_.setSlots({
+      systemId64: BigInt(systemId64),
+      bodyId: Number(bodyId),
+      orbital: typeof body.orbital === 'number' ? body.orbital : null,
+      surface: typeof body.surface === 'number' ? body.surface : null,
+      callerId: me.userId,
+    });
+    return { ok: true };
+  }
+
+  @Public()
+  @Post('plans/:id/sites')
+  async addPlanSite(
+    @Req() req: FastifyRequest,
+    @Param('id') id: string,
+    @Body()
+    body: {
+      version?: number;
+      bodyId?: number | null;
+      location?: string;
+      buildTypeId?: string | null;
+    },
+  ) {
+    const me = await this.#caller(
+      req,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+    const mask = await this.permissions.effectiveMask(me.userId);
+
+    return this.plans_.addSite({
+      planId: id,
+      callerId: me.userId,
+      callerMask: mask,
+      version: typeof body.version === 'number' ? body.version : 0,
+      bodyId: typeof body.bodyId === 'number' ? body.bodyId : null,
+      location: body.location === 'surface' ? 'surface' : 'orbital',
+      buildTypeId:
+        typeof body.buildTypeId === 'string' && body.buildTypeId !== '' ? body.buildTypeId : null,
+    });
+  }
+
+  @Public()
+  @Delete('plans/:id/sites/:siteId')
+  async removePlanSite(
+    @Req() req: FastifyRequest,
+    @Param('id') id: string,
+    @Param('siteId') siteId: string,
+    @Query('version') version?: string,
+  ) {
+    const me = await this.#caller(
+      req,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+    const mask = await this.permissions.effectiveMask(me.userId);
+
+    return this.plans_.removeSite({
+      planId: id,
+      siteId,
+      callerId: me.userId,
+      callerMask: mask,
+      version: numberOr(version, 0),
+    });
+  }
+
+  /** The whole build order at once, which is what the up and down buttons send. */
+  @Public()
+  @Patch('plans/:id/order')
+  async reorderPlan(
+    @Req() req: FastifyRequest,
+    @Param('id') id: string,
+    @Body() body: { version?: number; siteIds?: string[] },
+  ) {
+    const me = await this.#caller(
+      req,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+    const mask = await this.permissions.effectiveMask(me.userId);
+
+    return this.plans_.reorder({
+      planId: id,
+      siteIds: Array.isArray(body.siteIds) ? body.siteIds : [],
+      callerId: me.userId,
+      callerMask: mask,
+      version: typeof body.version === 'number' ? body.version : 0,
+    });
+  }
+
+  @Public()
+  @Delete('plans/:id')
+  async removePlan(@Req() req: FastifyRequest, @Param('id') id: string) {
+    const me = await this.#caller(
+      req,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+    const mask = await this.permissions.effectiveMask(me.userId);
+
+    await this.plans_.remove(id, me.userId, mask);
     return { ok: true };
   }
 }

@@ -4,6 +4,7 @@ import type { JSX } from 'preact';
 import type { OverlayLayout } from '../overlay-config.js';
 import { Button, C, Card, Empty, Problem, Section, Stat } from './ui.js';
 import { ColonyBoardPage, ColonyNewPage } from './colonisation.js';
+import { PlanningPage } from './planning.js';
 import { BuildTypesPage } from './build-types.js';
 import { GroupIcon } from './icons.js';
 // The shapes come from the hub client, which is where they are defined — re-exporting them through
@@ -68,6 +69,7 @@ interface AppState {
 
 type Page =
   | 'status'
+  | 'colony-planning'
   | 'colony-build-types'
   | 'colony-new'
   | 'colony-squadron'
@@ -115,6 +117,17 @@ const NAV: ReadonlyArray<NavItem | NavGroup> = [
        * website exactly. It is also the right order for how the feature is used: you look up what a
        * build costs BEFORE committing to posting one.
        */
+      /*
+       * ★ PLANNING FIRST, MIRRORING THE WEBSITE — SQUADRON OWNER, 2026-08-03 ★
+       *
+       * "ensure the Companion app matches and has all the same pages in colonization that the
+       * website has please! must be a mirror!"
+       *
+       * The order is the website's order, not a second opinion about it. It is also the order the
+       * work happens in: you plan a system, look up what the pieces cost, then post the one you
+       * have started building.
+       */
+      { id: 'colony-planning', label: 'Planning', hint: 'Lay out a whole system before you build' },
       { id: 'colony-build-types', label: 'Build types', hint: 'What each kind of site costs' },
       // "Start New Project" here too, so the app and the website do not call the same destination
       // two different things. A verb says it is something you DO; a noun reads as a list of them.
@@ -313,6 +326,7 @@ function App(): JSX.Element {
 
       <main style={{ flex: 1, overflowY: 'auto', padding: '22px 26px' }}>
         {page === 'status' ? <Status state={state} /> : null}
+        {page === 'colony-planning' ? <PlanningPage /> : null}
         {page === 'colony-build-types' ? (
           <BuildTypesPage dockedSystem={state.dockedAt?.systemName ?? null} />
         ) : null}

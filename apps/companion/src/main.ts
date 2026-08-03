@@ -14,7 +14,15 @@ import {
   colonyAssign,
   colonyAtMarket,
   colonyBuildType,
+  addPlanSite,
   colonyBuildTypes,
+  colonyPlan,
+  colonyPlans,
+  createColonyPlan,
+  removeColonyPlan,
+  removePlanSite,
+  reorderPlan,
+  setPlanSlots,
   colonyJoin,
   colonyLeave,
   colonyProject,
@@ -1429,6 +1437,74 @@ if (!app.requestSingleInstanceLock()) {
         notes: text('notes'),
       });
     });
+
+
+    /*
+     * ★ THE PLANNER — SQUADRON OWNER, 2026-08-03 ★
+     *
+     * "ensure the Companion app matches and has all the same pages in colonization that the website
+     * has please! must be a mirror!"
+     *
+     * Every argument is re-read here rather than trusted. The renderer is the only caller today,
+     * but it is also the surface a rendering bug reaches — and a body id arriving as a string would
+     * become NaN in a column the tree nests by.
+     */
+    const asNum = (v: unknown, fallback: number): number =>
+      typeof v === 'number' && Number.isFinite(v) ? v : fallback;
+    const asText = (v: unknown): string => (typeof v === 'string' ? v : '');
+
+    ipcMain.handle('colonyPlans', () => colonyPlans(hub()));
+    ipcMain.handle('colonyPlan', (_e, id: unknown) =>
+      asText(id) === ''
+        ? { ok: false as const, error: 'No plan asked for.' }
+        : colonyPlan(hub(), asText(id)),
+    );
+
+    ipcMain.handle('colonyPlanCreate', (_e, body: unknown) => {
+      const b = (body ?? {}) as Record<string, unknown>;
+      return createColonyPlan(hub(), {
+        owner: b['owner'] === 'squadron' ? 'squadron' : 'personal',
+        title: asText(b['title']),
+        systemName: asText(b['systemName']),
+      });
+    });
+
+    ipcMain.handle('colonyPlanSlots', (_e, systemId64: unknown, bodyId: unknown, body: unknown) => {
+      const b = (body ?? {}) as Record<string, unknown>;
+      // A blank field means "we do not know", which is a real answer and must survive the trip as
+      // null rather than becoming zero — zero slots is a different claim entirely.
+      const count = (v: unknown): number | null =>
+        typeof v === 'number' && Number.isFinite(v) ? v : null;
+      return setPlanSlots(hub(), asText(systemId64), asNum(bodyId, -1), {
+        orbital: count(b['orbital']),
+        surface: count(b['surface']),
+      });
+    });
+
+    ipcMain.handle('colonyPlanAddSite', (_e, id: unknown, body: unknown) => {
+      const b = (body ?? {}) as Record<string, unknown>;
+      return addPlanSite(hub(), asText(id), {
+        version: asNum(b['version'], 0),
+        bodyId: typeof b['bodyId'] === 'number' ? b['bodyId'] : null,
+        location: b['location'] === 'surface' ? 'surface' : 'orbital',
+        buildTypeId: asText(b['buildTypeId']) === '' ? null : asText(b['buildTypeId']),
+      });
+    });
+
+    ipcMain.handle('colonyPlanRemoveSite', (_e, id: unknown, siteId: unknown, version: unknown) =>
+      removePlanSite(hub(), asText(id), asText(siteId), asNum(version, 0)),
+    );
+
+    ipcMain.handle('colonyPlanReorder', (_e, id: unknown, body: unknown) => {
+      const b = (body ?? {}) as Record<string, unknown>;
+      const raw = Array.isArray(b['siteIds']) ? (b['siteIds'] as unknown[]) : [];
+      return reorderPlan(hub(), asText(id), {
+        version: asNum(b['version'], 0),
+        siteIds: raw.filter((v): v is string => typeof v === 'string'),
+      });
+    });
+
+    ipcMain.handle('colonyPlanRemove', (_e, id: unknown) => removeColonyPlan(hub(), asText(id)));
 
     ipcMain.handle('setOverlays', (_e, layout: unknown) => {
       const applied = setLayout(layout);

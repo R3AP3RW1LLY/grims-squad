@@ -94,7 +94,12 @@ type Answer<T> = { ok: true; data: T } | { ok: false; error: string };
 export async function hubColony<T>(
   call: HubCall,
   path: string,
-  init?: { method: 'POST' | 'PATCH'; body: unknown },
+  /*
+   * A DELETE carries no body, and that is not a detail — Fastify REFUSES a request that declares
+   * `content-type: application/json` and then sends nothing, with a 400 that reads like a server
+   * fault. So the header is attached to the body, not to the method.
+   */
+  init?: { method: 'POST' | 'PATCH' | 'DELETE'; body?: unknown },
 ): Promise<Answer<T>> {
   if (call.deviceToken === '') return { ok: false, error: 'Pair this device first.' };
 
@@ -107,9 +112,9 @@ export async function hubColony<T>(
       method: init?.method ?? 'GET',
       headers: {
         authorization: `Bearer ${call.deviceToken}`,
-        ...(init === undefined ? {} : { 'content-type': 'application/json' }),
+        ...(init?.body === undefined ? {} : { 'content-type': 'application/json' }),
       },
-      ...(init === undefined ? {} : { body: JSON.stringify(init.body) }),
+      ...(init?.body === undefined ? {} : { body: JSON.stringify(init.body) }),
       signal: ac.signal,
     });
 
@@ -153,6 +158,67 @@ export async function hubColony<T>(
   } finally {
     clearTimeout(timer);
   }
+}
+
+
+/**
+ * ★ THE PLANNER, IN THE APP — SQUADRON OWNER, 2026-08-03 ★
+ *
+ * "ensure the Companion app matches and has all the same pages in colonization that the website
+ * has please! must be a mirror!"
+ *
+ * Same shapes the website reads, because they come off the same routes. Declared here rather than
+ * imported from the web app: the two do not share a package, and a copy that the compiler checks
+ * against real responses is safer than a dependency edge between two apps that ship separately.
+ */
+export interface PlanBody {
+  bodyId: number;
+  name: string;
+  kind: string;
+  subType: string | null;
+  isLandable: boolean;
+  gravity: number | null;
+  temperature: number | null;
+  distanceLs: number | null;
+  hasRings: boolean;
+  terraformable: boolean;
+  /** What this orbits, so a moon draws under its planet. Null for the primary star. */
+  parentBodyId: number | null;
+  orbitalSlots: number | null;
+  surfaceSlots: number | null;
+  slotsBy: string | null;
+}
+
+/** One intended build, in one slot, on one body. */
+export interface PlanSite {
+  id: string;
+  bodyId: number | null;
+  location: 'orbital' | 'surface';
+  buildTypeId: string | null;
+  buildTypeName: string | null;
+  tier: number | null;
+  totalTonnes: number | null;
+  position: number;
+  /** The system's first station. The game charges nothing for it. */
+  isPrimary: boolean;
+  projectId: string | null;
+}
+
+export interface ColonyPlan {
+  id: string;
+  owner: 'squadron' | 'personal';
+  title: string;
+  systemName: string;
+  systemId64: string | null;
+  notes: string | null;
+  /** Optimistic concurrency. Every write carries the version it started from. */
+  version: number;
+  postedBy: string | null;
+  postedById: string;
+  updatedAt: string;
+  bodies: PlanBody[];
+  bodiesFetchedAt: string | null;
+  sites: PlanSite[];
 }
 
 export const colonyProjects = (
@@ -297,3 +363,68 @@ export const postColonyProject = (
   },
 ): Promise<Answer<{ id: string }>> =>
   hubColony(call, '/projects', { method: 'POST', body });
+
+/** Every plan the member may see, squadron and personal together. */
+export const colonyPlans = (call: HubCall): Promise<Answer<{ plans: ColonyPlan[] }>> =>
+  hubColony(call, '/plans');
+
+export const colonyPlan = (call: HubCall, id: string): Promise<Answer<{ plan: ColonyPlan }>> =>
+  hubColony(call, `/plans/${encodeURIComponent(id)}`);
+
+export const createColonyPlan = (
+  call: HubCall,
+  body: { owner: 'squadron' | 'personal'; title: string; systemName: string },
+): Promise<Answer<{ id: string }>> => hubColony(call, '/plans', { method: 'POST', body });
+
+/**
+ * Slot counts, read off the in-game architect view.
+ *
+ * Keyed on the SYSTEM and the BODY rather than on the plan, because that is what it is: a fact
+ * about the galaxy. Two plans for the same system see the same numbers, and the second person to
+ * fly there does not have to type them again.
+ */
+export const setPlanSlots = (
+  call: HubCall,
+  systemId64: string,
+  bodyId: number,
+  body: { orbital: number | null; surface: number | null },
+): Promise<Answer<{ ok: true }>> =>
+  hubColony(call, `/plans/bodies/${encodeURIComponent(systemId64)}/${bodyId}`, {
+    method: 'PATCH',
+    body,
+  });
+
+export const addPlanSite = (
+  call: HubCall,
+  id: string,
+  body: {
+    version: number;
+    bodyId: number | null;
+    location: 'orbital' | 'surface';
+    buildTypeId: string | null;
+  },
+): Promise<Answer<{ version: number }>> =>
+  hubColony(call, `/plans/${encodeURIComponent(id)}/sites`, { method: 'POST', body });
+
+export const removePlanSite = (
+  call: HubCall,
+  id: string,
+  siteId: string,
+  version: number,
+): Promise<Answer<{ version: number }>> =>
+  hubColony(
+    call,
+    `/plans/${encodeURIComponent(id)}/sites/${encodeURIComponent(siteId)}?version=${version}`,
+    { method: 'DELETE' },
+  );
+
+/** The whole build order at once, which is what the up and down buttons send. */
+export const reorderPlan = (
+  call: HubCall,
+  id: string,
+  body: { version: number; siteIds: string[] },
+): Promise<Answer<{ version: number }>> =>
+  hubColony(call, `/plans/${encodeURIComponent(id)}/order`, { method: 'PATCH', body });
+
+export const removeColonyPlan = (call: HubCall, id: string): Promise<Answer<{ ok: true }>> =>
+  hubColony(call, `/plans/${encodeURIComponent(id)}`, { method: 'DELETE' });

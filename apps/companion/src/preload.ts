@@ -132,4 +132,20 @@ contextBridge.exposeInMainWorld('colony', {
   /** Claim a commodity, or assign one to somebody else. The hub decides whether you may. */
   assign: (id: string, body: unknown) => ipcRenderer.invoke('colonyAssign', id, body),
   unassign: (id: string, body: unknown) => ipcRenderer.invoke('colonyUnassign', id, body),
+
+  /**
+   * The planner. Squadron owner, 2026-08-03: "ensure the Companion app matches and has all the same
+   * pages in colonization that the website has please! must be a mirror!"
+   */
+  plans: () => ipcRenderer.invoke('colonyPlans'),
+  plan: (id: string) => ipcRenderer.invoke('colonyPlan', id),
+  planCreate: (body: unknown) => ipcRenderer.invoke('colonyPlanCreate', body),
+  /** Slot counts read off the game. Keyed on the system and body, not the plan. */
+  planSlots: (systemId64: string, bodyId: number, body: unknown) =>
+    ipcRenderer.invoke('colonyPlanSlots', systemId64, bodyId, body),
+  planAddSite: (id: string, body: unknown) => ipcRenderer.invoke('colonyPlanAddSite', id, body),
+  planRemoveSite: (id: string, siteId: string, version: number) =>
+    ipcRenderer.invoke('colonyPlanRemoveSite', id, siteId, version),
+  planReorder: (id: string, body: unknown) => ipcRenderer.invoke('colonyPlanReorder', id, body),
+  planRemove: (id: string) => ipcRenderer.invoke('colonyPlanRemove', id),
 });
