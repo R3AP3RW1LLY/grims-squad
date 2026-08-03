@@ -10,6 +10,7 @@ import { ColonyDeviceController } from './colony-device.controller.js';
 import { ColonyService } from './colony.service.js';
 import { ColonyCatalogueService } from './colony-catalogue.service.js';
 import { ColonyPlanService } from './colony-plan.service.js';
+import { ColonyCarrierService } from './colony-carrier.service.js';
 import { ColonyRosterService } from './colony-roster.service.js';
 import { PrismaMarketStore, type MarketStore } from './market.store.js';
 import { MARKET_STORE } from './logistics.tokens.js';
@@ -70,6 +71,16 @@ import { MARKET_STORE } from './logistics.tokens.js';
           const response = await fetch(url);
           return { ok: response.ok, status: response.status, text: () => response.text() };
         }),
+    },
+    {
+      /*
+       * Carriers. No injected fetcher, because everything it reads is already in our own market
+       * mirror — see the note at the top of the service on why the hold comes from EDDN rather than
+       * from somebody's journal.
+       */
+      provide: ColonyCarrierService,
+      inject: [PrismaClient],
+      useFactory: (db: PrismaClient) => new ColonyCarrierService(db),
     },
     {
       provide: ColonyCatalogueService,

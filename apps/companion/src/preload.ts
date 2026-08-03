@@ -133,6 +133,12 @@ contextBridge.exposeInMainWorld('colony', {
   assign: (id: string, body: unknown) => ipcRenderer.invoke('colonyAssign', id, body),
   unassign: (id: string, body: unknown) => ipcRenderer.invoke('colonyUnassign', id, body),
 
+  /** Fleet carriers helping with a build, and what each is holding. */
+  carriers: (id: string, q: string) => ipcRenderer.invoke('colonyCarriers', id, q),
+  carrierAdd: (id: string, body: unknown) => ipcRenderer.invoke('colonyCarrierAdd', id, body),
+  carrierRemove: (id: string, marketId: string) =>
+    ipcRenderer.invoke('colonyCarrierRemove', id, marketId),
+
   /**
    * The planner. Squadron owner, 2026-08-03: "ensure the Companion app matches and has all the same
    * pages in colonization that the website has please! must be a mirror!"

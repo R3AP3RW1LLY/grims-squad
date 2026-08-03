@@ -6,6 +6,7 @@ import { PermissionService } from '../authz/permission.service.js';
 import { ColonyService, type ColonyOwner, type ColonyVisibility } from './colony.service.js';
 import { ColonyRosterService } from './colony-roster.service.js';
 import { ColonyCatalogueService } from './colony-catalogue.service.js';
+import { ColonyCarrierService } from './colony-carrier.service.js';
 import { ColonyPlanService } from './colony-plan.service.js';
 import { MARKET_STORE } from './logistics.tokens.js';
 import type { MarketStore } from './market.store.js';
@@ -39,6 +40,7 @@ export class ColonyController {
     // in one place, so the two surfaces cannot disagree.
     @Inject(ColonyRosterService) private readonly rosters: ColonyRosterService,
     @Inject(ColonyCatalogueService) private readonly catalogue: ColonyCatalogueService,
+    @Inject(ColonyCarrierService) private readonly carriers: ColonyCarrierService,
     // `plans_` because `plans` is the route method below it, and a field cannot share its name.
     @Inject(ColonyPlanService) private readonly plans_: ColonyPlanService,
   ) {}
@@ -133,7 +135,7 @@ export class ColonyController {
     const origin =
       (await this.#origin(near)) ?? (await this.#origin(project.systemName));
 
-    const [needs, haulers, shopping, deliveries, chart] = await Promise.all([
+    const [needs, haulers, shopping, deliveries, chart, carriers] = await Promise.all([
       this.colony.needs(id),
       this.colony.haulers(id),
       this.colony.shoppingList(id, {
@@ -146,6 +148,10 @@ export class ColonyController {
       // different histories of the same build is the failure this whole controller exists to avoid.
       this.colony.deliveries(id),
       this.colony.deliveryChart(id),
+      // What is already sitting in a hold. It changes what "remaining" means for a member deciding
+      // whether to launch — twenty thousand tonnes on a carrier parked at the site is not the same
+      // build as twenty thousand tonnes nobody has bought yet.
+      this.carriers.forProject(id),
     ]);
 
     return {
@@ -155,6 +161,7 @@ export class ColonyController {
       shopping,
       deliveries,
       chart,
+      carriers,
       /*
        * ★ WHAT THIS READER MAY DO, DECIDED HERE ★
        *
@@ -295,6 +302,75 @@ export class ColonyController {
    * shape of a system somebody intends to build. Read is COLONY_VIEW; who may CHANGE one is decided
    * by whose plan it is, in the service, exactly as it is for projects.
    */
+  /**
+   * ★ FLEET CARRIERS ON A BUILD — SQUADRON OWNER, 2026-08-02 ★
+   *
+   * "we also need a way to add fleet carriers to the project like raven colonial does", and
+   * "squadron carriers too".
+   *
+   * COLONY_VIEW to look and to attach: a member offering their own carrier to somebody else's build
+   * is the case this exists for, and gating it behind rank would mean the person with the cargo
+   * cannot say so. Marking one as the SQUADRON'S needs COLONY_MANAGE — that is a claim about whose
+   * it is, checked in the service.
+   */
+  @Get('projects/:id/carriers')
+  async carrierSearch(
+    @User() caller: CurrentUser | undefined,
+    @Param('id') id: string,
+    @Query('q') q?: string,
+  ) {
+    await this.#assert(
+      caller,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+    return { carriers: await this.carriers.search(id, q ?? '') };
+  }
+
+  @Post('projects/:id/carriers')
+  async attachCarrier(
+    @User() caller: CurrentUser | undefined,
+    @Param('id') id: string,
+    @Body() body: { marketId?: string; isSquadron?: boolean },
+  ) {
+    const me = this.#requireSession(caller);
+    const mask = await this.#assert(
+      caller,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    return this.carriers.attach({
+      projectId: id,
+      marketId: (body.marketId ?? '').trim(),
+      isSquadron: body.isSquadron === true,
+      callerId: me.userId,
+      callerMask: mask,
+    });
+  }
+
+  @Delete('projects/:id/carriers/:marketId')
+  async detachCarrier(
+    @User() caller: CurrentUser | undefined,
+    @Param('id') id: string,
+    @Param('marketId') marketId: string,
+  ) {
+    const me = this.#requireSession(caller);
+    const mask = await this.#assert(
+      caller,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    await this.carriers.detach({
+      projectId: id,
+      marketId,
+      callerId: me.userId,
+      callerMask: mask,
+    });
+    return { ok: true };
+  }
+
   @Get('plans')
   async plans(@User() caller: CurrentUser | undefined, @Query('owner') owner?: string) {
     const me = this.#requireSession(caller);

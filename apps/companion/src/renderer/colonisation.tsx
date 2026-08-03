@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 import type {
+  AttachedCarrier,
   BuildTypeDetail,
   BuildTypeRow,
+  CarrierMatch,
   ColonyPlan,
   RosterEntry,
   ColonyHauler,
@@ -31,6 +33,7 @@ import {
   credits,
   inputStyle,
   tonnes,
+  Copy,
   Guard,
   Tabs,
 } from './ui.js';
@@ -82,6 +85,14 @@ declare global {
         id: string,
         body: { commodity: string; userId?: string },
       ): Promise<Answer<{ ok: true }>>;
+
+      /** Fleet carriers helping with a build, and what each is holding. */
+      carriers(id: string, q: string): Promise<Answer<{ carriers: CarrierMatch[] }>>;
+      carrierAdd(
+        id: string,
+        body: { marketId: string; isSquadron: boolean },
+      ): Promise<Answer<{ marketId: string }>>;
+      carrierRemove(id: string, marketId: string): Promise<Answer<{ ok: true }>>;
 
       /*
        * The planner. Declared here with the rest of the bridge for the reason stated above:
@@ -136,6 +147,13 @@ export interface Delivery {
 
 export interface ProjectDetailData {
   project: ColonyProject;
+  /**
+   * Fleet carriers on this build.
+   *
+   * Read from the market mirror rather than from anybody's journal — a carrier's market is public,
+   * so this sees every squadron carrier rather than only the one whose owner has the app open.
+   */
+  carriers: AttachedCarrier[];
   needs: ColonyNeed[];
   haulers: ColonyHauler[];
   shopping: ColonyShoppingRow[];
@@ -605,6 +623,9 @@ const PROJECT_TABS = [
   { key: 'needs', label: 'Needs' },
   { key: 'buy', label: 'Where to buy' },
   { key: 'crew', label: 'Crew' },
+  // After Crew and before Deliveries: who is helping, then what is already aboard, then what has
+  // landed. That is the order somebody reads a build in.
+  { key: 'carriers', label: 'Carriers' },
   { key: 'deliveries', label: 'Deliveries' },
   { key: 'haulers', label: 'Haulers' },
 ] as const;
@@ -972,6 +993,15 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
       </Section>
       )}
 
+      {tab !== 'carriers' ? null : (
+        <CarrierPanel
+          projectId={data.project.id}
+          carriers={data.carriers}
+          needs={data.needs}
+          onChanged={() => void reloadDetail()}
+        />
+      )}
+
       {tab !== 'crew' ? null : (
       <>
       {/*
@@ -1186,6 +1216,247 @@ function ClaimRow({
         })}
       </span>
     </div>
+  );
+}
+
+/**
+ * Fleet carriers helping with a build.
+ *
+ * ★ SQUADRON OWNER, 2026-08-02 ★
+ *
+ * "we also need a way to add fleet carriers to the project like raven colonial does", and
+ * "squadron carriers too".
+ *
+ * ★ WHAT IS IN A HOLD CHANGES WHAT "REMAINING" MEANS ★
+ *
+ * Twenty thousand tonnes sitting on a carrier parked at the site is not the same build as twenty
+ * thousand tonnes nobody has bought yet. The headline is therefore how much of what is still wanted
+ * is already aboard — the one number that answers "do we need another shopping trip".
+ *
+ * ★ AND THE READING HAS AN AGE ★
+ *
+ * A carrier is the one station that can be somewhere else tomorrow, so a stale reading of its hold
+ * is worth far less than a stale reading of a starport's. The date is on every row.
+ */
+function CarrierPanel({
+  projectId,
+  carriers,
+  needs,
+  onChanged,
+}: {
+  projectId: string;
+  carriers: readonly AttachedCarrier[];
+  needs: readonly ColonyNeed[];
+  onChanged: () => void;
+}): JSX.Element {
+  const [term, setTerm] = useState('');
+  const [matches, setMatches] = useState<readonly CarrierMatch[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const act = (fn: () => Promise<Answer<unknown>>): void => {
+    setBusy(true);
+    void fn().then((a) => {
+      setBusy(false);
+      if (a.ok) {
+        setError(null);
+        setMatches(null);
+        setTerm('');
+        onChanged();
+      } else {
+        // The hub's own sentence. "Nobody has reported that carrier's market yet" tells somebody
+        // what to do next; "something went wrong" does not.
+        setError(a.error);
+      }
+    });
+  };
+
+  const look = (): void => {
+    setBusy(true);
+    void window.colony.carriers(projectId, term).then((a) => {
+      setBusy(false);
+      if (a.ok) {
+        setMatches(a.data.carriers);
+        setError(null);
+      } else {
+        setError(a.error);
+      }
+    });
+  };
+
+  const covered = new Map<string, number>();
+  for (const c of carriers)
+    for (const h of c.holds) covered.set(h.commodity, (covered.get(h.commodity) ?? 0) + h.tonnes);
+
+  const outstanding = needs.filter((n) => n.remaining > 0);
+  const aboard = outstanding.reduce(
+    (sum, n) => sum + Math.min(n.remaining, covered.get(n.commodity) ?? 0),
+    0,
+  );
+  const wanted = outstanding.reduce((sum, n) => sum + n.remaining, 0);
+
+  return (
+    <Section title="Fleet carriers on this build">
+      {error === null ? null : (
+        <div style={{ marginBottom: '12px' }}>
+          <Problem>{error}</Problem>
+        </div>
+      )}
+
+      {carriers.length === 0 ? (
+        <Empty>
+          No carriers on this build yet. Anything a squadron carrier is already holding counts
+          towards what is still needed.
+        </Empty>
+      ) : (
+        <>
+          <p style={{ margin: '0 0 10px', fontSize: '12px', color: C.dim }}>
+            {tonnes(aboard)} of the {tonnes(wanted)} still wanted is already in a hold.
+          </p>
+          {carriers.map((c) => (
+            <Card key={c.marketId}>
+              <div
+                style={{
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  alignItems: 'baseline',
+                  justifyContent: 'space-between',
+                  gap: '10px',
+                }}
+              >
+                <span style={{ fontSize: '14px' }}>
+                  {c.name}
+                  {c.isSquadron ? (
+                    <span
+                      style={{
+                        marginLeft: '8px',
+                        fontSize: '9px',
+                        letterSpacing: '0.18em',
+                        color: C.orange,
+                      }}
+                    >
+                      SQUADRON
+                    </span>
+                  ) : null}
+                  <span style={{ marginLeft: '8px', fontSize: '11px', color: C.faint }}>
+                    {c.systemName ?? 'somewhere we have not seen'} · {seenAgo(c.seenAt)}
+                  </span>
+                  {c.systemName === null ? null : <Copy value={c.systemName} />}
+                </span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <span style={{ fontSize: '12px', color: C.dim }}>{tonnes(c.totalTonnes)}</span>
+                  <Button
+                    tone="danger"
+                    disabled={busy}
+                    onClick={() => act(() => window.colony.carrierRemove(projectId, c.marketId))}
+                  >
+                    Take off
+                  </Button>
+                </span>
+              </div>
+
+              {c.holds.length === 0 ? (
+                <p style={{ margin: '6px 0 0', fontSize: '11px', color: C.faint }}>
+                  {/* Distinguished on purpose: "holding nothing this build wants" is a fact about
+                      the carrier; "we have never seen its market" is our own gap. */}
+                  {c.seenAt === null
+                    ? 'Nobody has reported its market, so we cannot say what is aboard.'
+                    : 'Nothing aboard that this build still wants.'}
+                </p>
+              ) : (
+                <div style={{ marginTop: '8px' }}>
+                  {c.holds.map((h) => (
+                    <Row key={h.commodity} left={h.commodity} right={tonnes(h.tonnes)} />
+                  ))}
+                </div>
+              )}
+            </Card>
+          ))}
+        </>
+      )}
+
+      <div
+        style={{
+          marginTop: '14px',
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          gap: '8px',
+        }}
+      >
+        <input
+          value={term}
+          onInput={(e) => setTerm((e.target as HTMLInputElement).value)}
+          placeholder="callsign, or leave blank for whoever is carrying most"
+          style={{ ...inputStyle, maxWidth: '320px' }}
+        />
+        <Button disabled={busy} onClick={look}>
+          {busy ? 'Looking…' : 'Find carriers'}
+        </Button>
+      </div>
+
+      {matches === null ? null : matches.length === 0 ? (
+        <p style={{ margin: '10px 0 0', fontSize: '12px', color: C.dim }}>
+          No carrier we have seen is holding anything this build still wants.
+        </p>
+      ) : (
+        <div style={{ marginTop: '10px' }}>
+          {matches.map((m) => (
+            <div
+              key={m.marketId}
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                alignItems: 'baseline',
+                justifyContent: 'space-between',
+                gap: '10px',
+                borderTop: `1px solid ${C.subtle}`,
+                padding: '8px 0',
+              }}
+            >
+              <span style={{ fontSize: '13px' }}>
+                {m.name}
+                <span style={{ marginLeft: '8px', fontSize: '11px', color: C.faint }}>
+                  {m.systemName} · {seenAgo(m.seenAt)}
+                </span>
+              </span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ fontSize: '12px', color: C.dim }}>
+                  {tonnes(m.matchingTonnes)} across {m.matchingCommodities}
+                </span>
+                <Button
+                  disabled={busy}
+                  onClick={() =>
+                    act(() =>
+                      window.colony.carrierAdd(projectId, {
+                        marketId: m.marketId,
+                        isSquadron: false,
+                      }),
+                    )
+                  }
+                >
+                  Add
+                </Button>
+                <Button
+                  tone="primary"
+                  disabled={busy}
+                  onClick={() =>
+                    act(() =>
+                      window.colony.carrierAdd(projectId, {
+                        marketId: m.marketId,
+                        isSquadron: true,
+                      }),
+                    )
+                  }
+                >
+                  Add as squadron
+                </Button>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </Section>
   );
 }
 

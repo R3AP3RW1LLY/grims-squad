@@ -15,7 +15,10 @@ import {
   colonyAtMarket,
   colonyBuildType,
   addPlanSite,
+  attachCarrier,
   colonyBuildTypes,
+  colonyCarrierSearch,
+  detachCarrier,
   colonyPlan,
   colonyPlans,
   createColonyPlan,
@@ -1452,6 +1455,24 @@ if (!app.requestSingleInstanceLock()) {
     const asNum = (v: unknown, fallback: number): number =>
       typeof v === 'number' && Number.isFinite(v) ? v : fallback;
     const asText = (v: unknown): string => (typeof v === 'string' ? v : '');
+
+    /*
+     * Fleet carriers. Squadron owner, 2026-08-02: "we also need a way to add fleet carriers to the
+     * project like raven colonial does", and "squadron carriers too".
+     */
+    ipcMain.handle('colonyCarriers', (_e, id: unknown, q: unknown) =>
+      colonyCarrierSearch(hub(), projectId(id), typeof q === 'string' ? q : ''),
+    );
+    ipcMain.handle('colonyCarrierAdd', (_e, id: unknown, body: unknown) => {
+      const b = (body ?? {}) as Record<string, unknown>;
+      return attachCarrier(hub(), projectId(id), {
+        marketId: typeof b['marketId'] === 'string' ? b['marketId'] : '',
+        isSquadron: b['isSquadron'] === true,
+      });
+    });
+    ipcMain.handle('colonyCarrierRemove', (_e, id: unknown, marketId: unknown) =>
+      detachCarrier(hub(), projectId(id), typeof marketId === 'string' ? marketId : ''),
+    );
 
     ipcMain.handle('colonyPlans', () => colonyPlans(hub()));
     ipcMain.handle('colonyPlan', (_e, id: unknown) =>

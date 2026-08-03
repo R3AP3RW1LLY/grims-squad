@@ -1771,6 +1771,36 @@ export interface ColonyCharts {
   haulers: ColonyHaulerStack[];
 }
 
+/** What one carrier is holding of the things a build still wants. */
+export interface CarrierHold {
+  commodity: string;
+  tonnes: number;
+  seenAt: string | null;
+}
+
+export interface AttachedCarrier {
+  marketId: string;
+  name: string;
+  callsign: string | null;
+  isSquadron: boolean;
+  addedBy: string | null;
+  /** Where it was when somebody last looked. Null when the mirror has never seen it. */
+  systemName: string | null;
+  seenAt: string | null;
+  holds: CarrierHold[];
+  totalTonnes: number;
+}
+
+/** A carrier somebody could attach, ranked by how much of THIS build's list it is carrying. */
+export interface CarrierMatch {
+  marketId: string;
+  name: string;
+  systemName: string;
+  seenAt: string | null;
+  matchingCommodities: number;
+  matchingTonnes: number;
+}
+
 export interface ColonyDetail {
   project: ColonyProject;
   needs: ColonyNeed[];
@@ -1785,6 +1815,13 @@ export interface ColonyDetail {
    */
   deliveries: ColonyDelivery[];
   chart: ColonyCharts;
+  /**
+   * Fleet carriers helping with this build, and what each is holding of what it still wants.
+   *
+   * Read from the market mirror rather than from anybody's journal — a carrier's market is public,
+   * so this sees every squadron carrier rather than only the one whose owner has the app open.
+   */
+  carriers: AttachedCarrier[];
   /** What this reader may do to the project. A rendering hint — every write re-checks. */
   can: { manage: boolean; isPoster: boolean };
   origin: { system: string } | null;

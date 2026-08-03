@@ -20,6 +20,7 @@ import { ColonyService, type ColonyOwner } from './colony.service.js';
 import { ColonyRosterService } from './colony-roster.service.js';
 import { ColonyCatalogueService } from './colony-catalogue.service.js';
 import { ColonyPlanService } from './colony-plan.service.js';
+import { ColonyCarrierService } from './colony-carrier.service.js';
 import { MARKET_STORE } from './logistics.tokens.js';
 import type { MarketStore } from './market.store.js';
 
@@ -61,6 +62,7 @@ export class ColonyDeviceController {
     // Trailing underscore for the same reason the website's controller has one: `plans` is already
     // a route method on this class, and a field of that name would shadow it.
     @Inject(ColonyPlanService) private readonly plans_: ColonyPlanService,
+    @Inject(ColonyCarrierService) private readonly carriers: ColonyCarrierService,
     @Inject(MARKET_STORE) private readonly market: MarketStore,
     @Inject(PermissionService) private readonly permissions: PermissionService,
     @Inject(PAIRING_SERVICE) private readonly pairing: PairingService,
@@ -225,7 +227,7 @@ export class ColonyDeviceController {
     const origin = typed === '' ? project.systemName : typed;
     const coords = origin === '' ? null : await this.market.systemCoords(origin);
 
-    const [needs, haulers, shopping, deliveries, chart] = await Promise.all([
+    const [needs, haulers, shopping, deliveries, chart, carriers] = await Promise.all([
       this.colony.needs(id),
       this.colony.haulers(id),
       this.colony.shoppingList(id, {
@@ -246,6 +248,9 @@ export class ColonyDeviceController {
       // render it in three stages, each shifting the layout under whoever is reading.
       this.colony.deliveries(id),
       this.colony.deliveryChart(id),
+      // What is already sitting in a hold. The app gets it because the website does — a member
+      // reading the same build in two places must not be told two different things about it.
+      this.carriers.forProject(id),
     ]);
 
     return {
@@ -255,6 +260,7 @@ export class ColonyDeviceController {
       shopping,
       deliveries,
       chart,
+      carriers,
       // Echoed so the page can say where it is measuring from — a distance column with no stated
       // origin is a number nobody can check.
       shoppingFrom: coords === null ? null : origin,
@@ -466,6 +472,61 @@ export class ColonyDeviceController {
     );
 
     await this.colony.setPriority(id, body.isPriority === true);
+    return { ok: true };
+  }
+
+  /**
+   * Fleet carriers, for the app. Same service, same rules — see the note on the planner routes.
+   */
+  @Public()
+  @Get('projects/:id/carriers')
+  async carrierSearch(@Req() req: FastifyRequest, @Param('id') id: string, @Query('q') q?: string) {
+    await this.#caller(
+      req,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+    return { carriers: await this.carriers.search(id, q ?? '') };
+  }
+
+  @Public()
+  @Post('projects/:id/carriers')
+  async attachCarrier(
+    @Req() req: FastifyRequest,
+    @Param('id') id: string,
+    @Body() body: { marketId?: string; isSquadron?: boolean },
+  ) {
+    const me = await this.#caller(
+      req,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+    const mask = await this.permissions.effectiveMask(me.userId);
+
+    return this.carriers.attach({
+      projectId: id,
+      marketId: (body.marketId ?? '').trim(),
+      isSquadron: body.isSquadron === true,
+      callerId: me.userId,
+      callerMask: mask,
+    });
+  }
+
+  @Public()
+  @Delete('projects/:id/carriers/:marketId')
+  async detachCarrier(
+    @Req() req: FastifyRequest,
+    @Param('id') id: string,
+    @Param('marketId') marketId: string,
+  ) {
+    const me = await this.#caller(
+      req,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+    const mask = await this.permissions.effectiveMask(me.userId);
+
+    await this.carriers.detach({ projectId: id, marketId, callerId: me.userId, callerMask: mask });
     return { ok: true };
   }
 

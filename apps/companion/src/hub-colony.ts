@@ -75,6 +75,36 @@ export interface ColonyShoppingRow {
   } | null;
 }
 
+/** What one carrier is holding of the things a build still wants. */
+export interface CarrierHold {
+  readonly commodity: string;
+  readonly tonnes: number;
+  readonly seenAt: string | null;
+}
+
+export interface AttachedCarrier {
+  readonly marketId: string;
+  readonly name: string;
+  readonly callsign: string | null;
+  readonly isSquadron: boolean;
+  readonly addedBy: string | null;
+  /** Where it was when somebody last looked. Null when the mirror has never seen it. */
+  readonly systemName: string | null;
+  readonly seenAt: string | null;
+  readonly holds: readonly CarrierHold[];
+  readonly totalTonnes: number;
+}
+
+/** A carrier somebody could attach, ranked by how much of THIS build's list it is carrying. */
+export interface CarrierMatch {
+  readonly marketId: string;
+  readonly name: string;
+  readonly systemName: string;
+  readonly seenAt: string | null;
+  readonly matchingCommodities: number;
+  readonly matchingTonnes: number;
+}
+
 export interface ColonyRights {
   readonly post: boolean;
   readonly manage: boolean;
@@ -513,3 +543,35 @@ export const reorderPlan = (
 
 export const removeColonyPlan = (call: HubCall, id: string): Promise<Answer<{ ok: true }>> =>
   hubColony(call, `/plans/${encodeURIComponent(id)}`, { method: 'DELETE' });
+
+/**
+ * Fleet carriers on a build.
+ *
+ * The hold is read from the market mirror rather than from anybody's journal — a carrier's market
+ * is public, so this sees every squadron carrier rather than only the one whose owner has the app
+ * open. See the note at the top of the API's carrier service.
+ */
+export const colonyCarrierSearch = (
+  call: HubCall,
+  id: string,
+  q: string,
+): Promise<Answer<{ carriers: CarrierMatch[] }>> =>
+  hubColony(call, `/projects/${encodeURIComponent(id)}/carriers?q=${encodeURIComponent(q)}`);
+
+export const attachCarrier = (
+  call: HubCall,
+  id: string,
+  body: { marketId: string; isSquadron: boolean },
+): Promise<Answer<{ marketId: string }>> =>
+  hubColony(call, `/projects/${encodeURIComponent(id)}/carriers`, { method: 'POST', body });
+
+export const detachCarrier = (
+  call: HubCall,
+  id: string,
+  marketId: string,
+): Promise<Answer<{ ok: true }>> =>
+  hubColony(
+    call,
+    `/projects/${encodeURIComponent(id)}/carriers/${encodeURIComponent(marketId)}`,
+    { method: 'DELETE' },
+  );

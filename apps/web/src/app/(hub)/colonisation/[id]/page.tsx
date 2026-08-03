@@ -10,6 +10,7 @@ import { NoAccess, AdminUnavailable } from '../../app/no-access';
 import { getColonyProject } from '../../../../lib/api';
 import { NeedsTable } from './needs-table';
 import { ShoppingList } from './shopping-list';
+import { Carriers } from './carriers';
 import { HaulerBoard } from './hauler-board';
 import { DeliveryTimeline } from './delivery-charts';
 import { DeliveryLedger } from './delivery-ledger';
@@ -64,8 +65,18 @@ export default async function ColonyProjectPage({
     return <AdminUnavailable />;
   }
 
-  const { project, needs, haulers, shopping, deliveries, chart, can, origin, unknownSystem } =
-    read.data;
+  const {
+    project,
+    needs,
+    haulers,
+    shopping,
+    deliveries,
+    chart,
+    carriers,
+    can,
+    origin,
+    unknownSystem,
+  } = read.data;
   const delivered = Math.max(0, project.required - project.remaining);
 
   return (
@@ -161,6 +172,19 @@ export default async function ColonyProjectPage({
         */}
         <Section title="Who is on this build">
           <Crew projectId={project.id} needs={needs} />
+        </Section>
+
+        {/*
+          Above "Where to buy", deliberately. What is already in a hold changes what still needs
+          buying, so reading the shopping list first is reading it against the wrong number.
+        */}
+        <Section title="Fleet carriers on this build">
+          <Carriers
+            projectId={project.id}
+            carriers={carriers}
+            needs={needs}
+            canManage={can.manage}
+          />
         </Section>
 
         <Section title="Where to buy it">
