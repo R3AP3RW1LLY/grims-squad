@@ -12,18 +12,62 @@ import { commandForPid, isPidGame } from './game-process.js';
  * they are wrong — so those are what is pinned.
  */
 
+/**
+ * Shorthand. Every case states only what it is about; the rest is "playing normally".
+ */
+function show(over: Partial<Parameters<typeof overlaysShouldShow>[0]>) {
+  return overlaysShouldShow({
+    gameRunning: true,
+    gameIsForeground: true,
+    ourWindowFocused: false,
+    editing: false,
+    ...over,
+  });
+}
+
 describe('when the overlays are on screen', () => {
-  it('shows them while the game is in front', () => {
-    expect(
-      overlaysShouldShow({ gameIsForeground: true, ourWindowFocused: false, editing: false }),
-    ).toBe(true);
+  it('shows everything while the game is in front', () => {
+    expect(show({})).toEqual({ overGame: true, detached: true });
   });
 
-  it('hides them when something else is in front', () => {
-    // The reported bug: minimise the game and the panels stay up over the desktop.
-    expect(
-      overlaysShouldShow({ gameIsForeground: false, ourWindowFocused: false, editing: false }),
-    ).toBe(false);
+  it('hides the over-game panels when something else is in front', () => {
+    // The first report: minimise the game and the panels stay up over the desktop.
+    expect(show({ gameIsForeground: false })).toEqual({ overGame: false, detached: true });
+  });
+
+  it('HIDES EVERYTHING when the game is not running at all', () => {
+    /*
+     * ★ THE CASE THE FIRST VERSION MISSED — SQUADRON OWNER, 2026-08-03 ★
+     *
+     * "the overlays still appear even if the game is not open at all if the launcher is open!"
+     *
+     * The gate only covered `over-game` panels, on the reasoning that a detached one was a
+     * deliberate second-monitor choice. But `destinationFor()` FORCES every panel to detached in
+     * exclusive fullscreen and whenever DisplaySettings.xml cannot be read — so for anybody in
+     * fullscreen, nothing was gated and the feature did nothing whatsoever.
+     */
+    expect(show({ gameRunning: false, gameIsForeground: false })).toEqual({
+      overGame: false,
+      detached: false,
+    });
+  });
+
+  it('hides everything with the launcher in front and no game running', () => {
+    // Exactly the reported scenario. EDLaunch.exe is not the game — `isPidGame` rejects it — so the
+    // foreground is not Elite AND nothing is running.
+    expect(show({ gameRunning: false, gameIsForeground: false })).toEqual({
+      overGame: false,
+      detached: false,
+    });
+  });
+
+  it('keeps a detached panel up while the game runs behind a browser', () => {
+    // A second-monitor panel is still worth reading while somebody alt-tabs to look something up.
+    // Only the ones drawn OVER the game have to go.
+    expect(show({ gameRunning: true, gameIsForeground: false })).toEqual({
+      overGame: false,
+      detached: true,
+    });
   });
 
   it('KEEPS THEM UP while our own window has focus', () => {
@@ -32,28 +76,31 @@ describe('when the overlays are on screen', () => {
      * Without it, clicking the companion window to arrange your panels makes every panel you are
      * trying to drag disappear — the feature destroying the only workflow that needs it.
      */
-    expect(
-      overlaysShouldShow({ gameIsForeground: false, ourWindowFocused: true, editing: false }),
-    ).toBe(true);
+    expect(show({ gameRunning: false, gameIsForeground: false, ourWindowFocused: true })).toEqual({
+      overGame: true,
+      detached: true,
+    });
   });
 
-  it('keeps them up in arrange mode whatever has focus', () => {
-    expect(
-      overlaysShouldShow({ gameIsForeground: false, ourWindowFocused: false, editing: true }),
-    ).toBe(true);
+  it('keeps them up in arrange mode whatever else is true', () => {
+    expect(show({ gameRunning: false, gameIsForeground: false, editing: true })).toEqual({
+      overGame: true,
+      detached: true,
+    });
   });
 
-  it('leaves them up when it cannot tell what is in front', () => {
+  it('leaves them up when it cannot tell', () => {
     /*
      * ★ FAILS OPEN, DELIBERATELY ★
      *
      * Null is "no native binding", or no foreground window at all during a desktop switch or a lock
      * screen. A member whose overlays stop hiding has a small annoyance; a member whose overlays
-     * vanish for good has a broken app and no way to tell why.
+     * vanish for good has a broken app and no way to find out why.
      */
-    expect(
-      overlaysShouldShow({ gameIsForeground: null, ourWindowFocused: false, editing: false }),
-    ).toBe(true);
+    expect(show({ gameRunning: null, gameIsForeground: null })).toEqual({
+      overGame: true,
+      detached: true,
+    });
   });
 });
 

@@ -87,7 +87,7 @@ export class OverlayWindows {
    * Starts true so nothing changes for anybody until the runtime says otherwise — and so a build
    * where the native foreground reader will not load behaves exactly as it always did.
    */
-  #visible = true;
+  #visible = { overGame: true, detached: true };
   #mode: DisplayMode = 'unknown';
 
   constructor(private readonly host: OverlayHost) {}
@@ -204,7 +204,10 @@ export class OverlayWindows {
      * the desktop, which is the exact bug being fixed.
      */
     window.once('ready-to-show', () => {
-      if (this.#visible || this.#shapes.get(id) !== 'over-game') window.showInactive();
+      const shape = this.#shapes.get(id);
+      if (shape === 'over-game' ? this.#visible.overGame : this.#visible.detached) {
+        window.showInactive();
+      }
     });
 
     /*
@@ -315,16 +318,26 @@ export class OverlayWindows {
    * An invisible window at opacity zero is still in the z-order and still hittable, so an unlocked
    * panel would go on eating clicks while nobody could see it. And the compositing work continues.
    */
-  setVisible(on: boolean): void {
-    if (this.#visible === on) return;
-    this.#visible = on;
+  setVisible(next: { overGame: boolean; detached: boolean }): void {
+    if (this.#visible.overGame === next.overGame && this.#visible.detached === next.detached) {
+      return;
+    }
+    this.#visible = { ...next };
 
     for (const [id, window] of this.#windows) {
-      if (this.#shapes.get(id) !== 'over-game') continue;
       if (window.isDestroyed()) continue;
+
+      const overGame = this.#shapes.get(id) === 'over-game';
+      const on = overGame ? next.overGame : next.detached;
 
       if (!on) {
         window.hide();
+        continue;
+      }
+
+      if (!overGame) {
+        // A detached panel is an ordinary window. It needs no topmost dance and no click-through.
+        window.showInactive();
         continue;
       }
 
@@ -347,7 +360,7 @@ export class OverlayWindows {
     this.#windows.clear();
     this.#shapes.clear();
     // Back to the default, so a new session does not inherit a hidden state from the old one.
-    this.#visible = true;
+    this.#visible = { overGame: true, detached: true };
   }
 
   /** Re-applies the current layout — used when displays change or the game's mode does. */

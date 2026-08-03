@@ -5,7 +5,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { app, BrowserWindow, ipcMain, screen } from 'electron';
 import { foregroundWindow, overlaysShouldShow } from './foreground.js';
-import { isPidGame } from './game-process.js';
+import { isGameRunning, isPidGame } from './game-process.js';
 import {
   parseDisplaySettings,
   UNKNOWN_DISPLAY,
@@ -152,7 +152,16 @@ const listProcesses = async (
 const DISPLAY_EVERY = DISPLAY_POLL_MS / FOCUS_POLL_MS;
 
 let displayTimer: NodeJS.Timeout | null = null;
-let ticks = 0;
+
+/**
+ * Starts one short of the slow cadence, on purpose.
+ *
+ * The slow tick is what answers "is Elite running at all", and `gameRunning` is unknown until it
+ * has. Unknown means leave the panels up — so starting at zero would show every overlay for the
+ * first fifteen seconds of a session where only the launcher is open, which is exactly the case
+ * being fixed. Beginning one short makes the very first 500ms tick do the slow work too.
+ */
+let ticks = DISPLAY_EVERY - 1;
 
 /**
  * The last foreground PID we resolved, and whether it was Elite.
@@ -169,6 +178,24 @@ let foregroundIsGame: boolean | null = null;
 /** True while a `tasklist` is in flight, so a slow one cannot stack. */
 let resolving = false;
 
+/**
+ * Whether Elite is running AT ALL, as distinct from having focus.
+ *
+ * ★ SQUADRON OWNER, 2026-08-03 ★
+ *
+ * "the overlays still appear even if the game is not open at all if the launcher is open!"
+ *
+ * Focus alone could not answer this. In exclusive fullscreen — or when DisplaySettings.xml cannot
+ * be read — `destinationFor()` forces every panel to `detached`, because we genuinely cannot draw
+ * over the game then. The focus gate deliberately left detached panels alone, so for anybody in
+ * fullscreen nothing was gated at all and the feature did nothing.
+ *
+ * Refreshed on the slow tick rather than the fast one: `tasklist` costs 190ms, and the answer
+ * changes when somebody launches or quits a game rather than between frames.
+ */
+let gameRunning: boolean | null = null;
+let checkingRunning = false;
+
 export function startOverlays(h: OverlayRuntimeHost): void {
   host = h;
 
@@ -184,8 +211,24 @@ export function startOverlays(h: OverlayRuntimeHost): void {
   displayTimer = setInterval(() => {
     followTheGame();
 
-    // The display settings, on the same timer but at their original cadence. One timer, two jobs.
+    // The display settings and the is-it-running check, on the same timer at their own cadence.
+    // One timer, three jobs.
     if (++ticks % DISPLAY_EVERY !== 0) return;
+
+    if (!checkingRunning) {
+      checkingRunning = true;
+      void isGameRunning(process.platform, listProcesses)
+        .then((yes) => {
+          gameRunning = yes;
+        })
+        .catch(() => {
+          // Unknown rather than false: a failed lookup must not hide somebody's panels for good.
+          gameRunning = null;
+        })
+        .finally(() => {
+          checkingRunning = false;
+        });
+    }
 
     const next = readDisplaySettings().mode;
     if (next === mode) return;
@@ -254,7 +297,15 @@ function followTheGame(): void {
       });
   }
 
+  /*
+   * The foreground window belonging to Elite is proof it is running, and it is free — so the
+   * expensive check is skipped entirely while somebody is actually playing, which is most of the
+   * time the overlays are on screen.
+   */
+  if (foregroundIsGame === true) gameRunning = true;
+
   const show = overlaysShouldShow({
+    gameRunning,
     // A minimised game is never the foreground window, so this covers minimise for free — but the
     // flag is read anyway because "minimised" and "alt-tabbed" are different things to be sure of.
     gameIsForeground: front === null ? null : foregroundIsGame === true && !front.minimised,
@@ -331,9 +382,11 @@ export function stopOverlays(): void {
   displayTimer = null;
   // Forgotten with the windows, so a new session resolves the foreground fresh rather than trusting
   // a PID that may since have been recycled by an unrelated process.
-  ticks = 0;
+  // Reset to the same primed value, so a restart re-checks immediately rather than after 15s.
+  ticks = DISPLAY_EVERY - 1;
   lastForegroundPid = 0;
   foregroundIsGame = null;
+  gameRunning = null;
   // Dropped with the windows. Replaying a build from a previous session into a fresh one would be
   // the overlay's own version of stale data.
   lastData = null;

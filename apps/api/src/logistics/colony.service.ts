@@ -31,7 +31,26 @@ export interface ProjectRow {
    * the same reasoning as the tonnage totals on the market rows.
    */
   readonly marketId: string;
+  /** Whatever the member typed when they posted it. Free text, and often blank. */
   readonly buildType: string | null;
+  /**
+   * What the site actually is, worked out from what it asks for.
+   *
+   * ★ NOT THE SAME FIELD AS `buildType` ABOVE ★
+   *
+   * That one is a string somebody typed. This one is the catalogue row its requirement fingerprints
+   * to — twenty-odd commodities at exact tonnages, which no two build types share. Null until
+   * somebody has docked there, and null for a build type we have not recorded yet, which is
+   * information rather than an error.
+   */
+  readonly identified: {
+    readonly id: string;
+    readonly displayName: string;
+    readonly tier: number;
+    readonly padSize: string;
+    readonly location: string;
+    readonly totalTonnes: number;
+  } | null;
   readonly notes: string | null;
   readonly visibility: ColonyVisibility;
   readonly shareToken: string | null;
@@ -265,6 +284,11 @@ export class ColonyService {
     const rows = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
       `SELECT p.id, p.owner::text AS owner, p.title, p.system_name, p.station_name, p.build_type,
               p.market_id::text AS market_id,
+              -- What the site's own requirement fingerprinted to. Null until somebody has docked
+              -- there, and null for a build type we have not recorded — which is information.
+              p.build_type_id, bt.display_name AS build_type_name, bt.tier AS build_tier,
+              bt.pad_size AS build_pad, bt.location AS build_location,
+              bt.total_tonnes AS build_total,
               p.notes, p.visibility::text AS visibility, p.share_token, p.is_priority,
               p.completed_at, p.posted_by_id, p.updated_at,
               u.display_name AS posted_by,
@@ -272,6 +296,7 @@ export class ColonyService {
               COALESCE(SUM(n.required), 0)::bigint  AS required,
               COUNT(n.commodity)::int               AS need_count
          FROM colony_projects p
+         LEFT JOIN colony_build_types bt ON bt.id = p.build_type_id
          JOIN users u ON u.id = p.posted_by_id
          LEFT JOIN colony_needs n ON n.project_id = p.id
         WHERE ($1 = 'all' OR p.owner::text = $1)
@@ -340,6 +365,11 @@ export class ColonyService {
     const rows = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
       `SELECT p.id, p.owner::text AS owner, p.title, p.system_name, p.station_name, p.build_type,
               p.market_id::text AS market_id,
+              -- What the site's own requirement fingerprinted to. Null until somebody has docked
+              -- there, and null for a build type we have not recorded — which is information.
+              p.build_type_id, bt.display_name AS build_type_name, bt.tier AS build_tier,
+              bt.pad_size AS build_pad, bt.location AS build_location,
+              bt.total_tonnes AS build_total,
               p.notes, p.visibility::text AS visibility, p.share_token, p.is_priority,
               p.completed_at, p.posted_by_id, p.updated_at,
               u.display_name AS posted_by,
@@ -347,6 +377,7 @@ export class ColonyService {
               COALESCE(SUM(n.required), 0)::bigint  AS required,
               COUNT(n.commodity)::int               AS need_count
          FROM colony_projects p
+         LEFT JOIN colony_build_types bt ON bt.id = p.build_type_id
          JOIN users u ON u.id = p.posted_by_id
          LEFT JOIN colony_needs n ON n.project_id = p.id
         -- The visibility test as well as the token: revoking a share must actually revoke it, and a
@@ -370,6 +401,17 @@ export class ColonyService {
       stationName: r['station_name'] === null ? null : String(r['station_name']),
       marketId: String(r['market_id'] ?? ''),
       buildType: r['build_type'] === null ? null : String(r['build_type']),
+      identified:
+        r['build_type_id'] === null || r['build_type_id'] === undefined
+          ? null
+          : {
+              id: String(r['build_type_id']),
+              displayName: String(r['build_type_name'] ?? ''),
+              tier: Number(r['build_tier'] ?? 0),
+              padSize: String(r['build_pad'] ?? 'none'),
+              location: String(r['build_location'] ?? 'orbital'),
+              totalTonnes: Number(r['build_total'] ?? 0),
+            },
       notes: r['notes'] === null ? null : String(r['notes']),
       visibility: String(r['visibility']) as ColonyVisibility,
       shareToken: r['share_token'] === null ? null : String(r['share_token']),

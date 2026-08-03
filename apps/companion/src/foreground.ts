@@ -111,24 +111,59 @@ export function foregroundWindow(platform: NodeJS.Platform = process.platform): 
   }
 }
 
+/** What should be on screen. The two kinds of panel are gated differently — see below. */
+export interface OverlayVisibility {
+  /** Panels drawn over the game itself. */
+  readonly overGame: boolean;
+  /** Panels the member put on a second monitor, or that we forced there because we cannot overlay. */
+  readonly detached: boolean;
+}
+
 /**
  * Whether the overlays should be on screen.
  *
- * ★ THE SECOND TERM IS THE ONE PEOPLE FORGET ★
+ * ★ TWO TIERS, AND THE SECOND ONE WAS MISSING — SQUADRON OWNER, 2026-08-03 ★
+ *
+ * "the overlays still appear even if the game is not open at all if the launcher is open!"
+ *
+ * The first version gated `over-game` panels on the game having focus, and left `detached` ones
+ * alone on the reasoning that a member had deliberately put those on a second monitor.
+ *
+ * That reasoning was wrong for the case that matters. `destinationFor()` FORCES every panel to
+ * detached when Elite is in exclusive fullscreen or when DisplaySettings.xml cannot be read —
+ * because we genuinely cannot draw over the game then. So for anybody in fullscreen, every panel
+ * was detached, nothing was gated, and the feature did nothing at all. Which is precisely the
+ * report.
+ *
+ * So: whether the game is RUNNING gates everything, and whether it has FOCUS gates only the panels
+ * drawn over it. An overlay of either kind is only useful while somebody is playing; a detached
+ * panel on a second monitor is still worth leaving up while they alt-tab to a browser.
+ *
+ * ★ THE TERM PEOPLE FORGET ★
  *
  * SrvSurvey's rule is `focusElite || focusSrvSurvey`, and the second half is load-bearing: without
  * it, a member who clicks the companion window to arrange their panels watches every panel they are
- * trying to drag disappear. Arrange mode counts for the same reason, one step further — the panels
- * must stay up while somebody is positioning them even if focus lands somewhere odd mid-drag.
+ * trying to drag disappear. Arrange mode counts for the same reason, one step further.
  *
- * `gameIsForeground` null means "we could not tell", and the answer is to leave things visible.
- * Hiding on an unknown reading would make a failed binding look like broken overlays.
+ * ★ NULL MEANS LEAVE IT ALONE ★
+ *
+ * `gameRunning` or `gameIsForeground` null is "we could not tell" — no native binding, or no
+ * foreground window at all during a desktop switch. Hiding on an unknown reading would make a
+ * failed lookup look like broken overlays, and a member whose panels vanish for good has no way to
+ * find out why.
  */
 export function overlaysShouldShow(input: {
+  readonly gameRunning: boolean | null;
   readonly gameIsForeground: boolean | null;
   readonly ourWindowFocused: boolean;
   readonly editing: boolean;
-}): boolean {
-  if (input.editing || input.ourWindowFocused) return true;
-  return input.gameIsForeground !== false;
+}): OverlayVisibility {
+  // Arranging, or working in the app itself. Everything stays up, whatever the game is doing —
+  // otherwise the panels being positioned disappear the moment somebody clicks to position them.
+  if (input.editing || input.ourWindowFocused) return { overGame: true, detached: true };
+
+  // Not running at all. Nothing an overlay says is worth reading, wherever it is drawn.
+  if (input.gameRunning === false) return { overGame: false, detached: false };
+
+  return { overGame: input.gameIsForeground !== false, detached: true };
 }
