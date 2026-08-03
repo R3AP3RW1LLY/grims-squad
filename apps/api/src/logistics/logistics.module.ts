@@ -9,6 +9,7 @@ import { ColonyController } from './colony.controller.js';
 import { ColonyDeviceController } from './colony-device.controller.js';
 import { ColonyService } from './colony.service.js';
 import { ColonyCatalogueService } from './colony-catalogue.service.js';
+import { ColonyPlanService } from './colony-plan.service.js';
 import { ColonyRosterService } from './colony-roster.service.js';
 import { PrismaMarketStore, type MarketStore } from './market.store.js';
 import { MARKET_STORE } from './logistics.tokens.js';
@@ -58,6 +59,19 @@ import { MARKET_STORE } from './logistics.tokens.js';
        * does a Coriolis cost near me" is the same question as "where do I buy this project's
        * remaining steel" asked before the project exists.
        */
+      /*
+       * The planner. Its fetcher is the global `fetch`, injected rather than imported so the
+       * service can be tested without a network — the same seam every other outward call here uses.
+       */
+      provide: ColonyPlanService,
+      inject: [PrismaClient],
+      useFactory: (db: PrismaClient) =>
+        new ColonyPlanService(db, async (url: string) => {
+          const response = await fetch(url);
+          return { ok: response.ok, status: response.status, text: () => response.text() };
+        }),
+    },
+    {
       provide: ColonyCatalogueService,
       inject: [PrismaClient, MARKET_STORE],
       useFactory: (db: PrismaClient, market: MarketStore) =>

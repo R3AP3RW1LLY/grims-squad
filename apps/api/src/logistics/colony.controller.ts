@@ -6,6 +6,7 @@ import { PermissionService } from '../authz/permission.service.js';
 import { ColonyService, type ColonyOwner, type ColonyVisibility } from './colony.service.js';
 import { ColonyRosterService } from './colony-roster.service.js';
 import { ColonyCatalogueService } from './colony-catalogue.service.js';
+import { ColonyPlanService } from './colony-plan.service.js';
 import { MARKET_STORE } from './logistics.tokens.js';
 import type { MarketStore } from './market.store.js';
 
@@ -38,6 +39,8 @@ export class ColonyController {
     // in one place, so the two surfaces cannot disagree.
     @Inject(ColonyRosterService) private readonly rosters: ColonyRosterService,
     @Inject(ColonyCatalogueService) private readonly catalogue: ColonyCatalogueService,
+    // `plans_` because `plans` is the route method below it, and a field cannot share its name.
+    @Inject(ColonyPlanService) private readonly plans_: ColonyPlanService,
   ) {}
 
   async #mask(caller: CurrentUser | undefined): Promise<bigint> {
@@ -282,6 +285,180 @@ export class ColonyController {
    *
    * COLONY_VIEW, like the boards: it is squadron planning material, not public reference.
    */
+  /**
+   * ★ THE PLANNER — SQUADRON OWNER, 2026-08-03 ★
+   *
+   * "a layout of the system, with spots on each planet that we can settle etc ... add a new page to
+   * colonization called Planning."
+   *
+   * A plan is not a project: a project tracks a construction site that exists, and a plan is the
+   * shape of a system somebody intends to build. Read is COLONY_VIEW; who may CHANGE one is decided
+   * by whose plan it is, in the service, exactly as it is for projects.
+   */
+  @Get('plans')
+  async plans(@User() caller: CurrentUser | undefined, @Query('owner') owner?: string) {
+    const me = this.#requireSession(caller);
+    await this.#assert(
+      caller,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    const scope = owner === 'squadron' || owner === 'personal' ? owner : 'all';
+    return { plans: await this.plans_.list(scope, me.userId) };
+  }
+
+  @Get('plans/:id')
+  async plan(@User() caller: CurrentUser | undefined, @Param('id') id: string) {
+    const me = this.#requireSession(caller);
+    await this.#assert(
+      caller,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    const plan = await this.plans_.byId(id, me.userId);
+    if (plan === null) {
+      throw new AppError(ErrorCode.RESOURCE_NOT_VISIBLE, 'That plan is not available.');
+    }
+    return { plan };
+  }
+
+  @Post('plans')
+  async createPlan(
+    @User() caller: CurrentUser | undefined,
+    @Body() body: { owner?: string; title?: string; systemName?: string },
+  ) {
+    const me = this.#requireSession(caller);
+    const mask = await this.#assert(
+      caller,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    return this.plans_.create({
+      owner: body.owner === 'squadron' ? 'squadron' : 'personal',
+      title: body.title ?? '',
+      systemName: body.systemName ?? '',
+      callerId: me.userId,
+      callerMask: mask,
+    });
+  }
+
+  /**
+   * How many slots a body has, as read off the in-game architect view.
+   *
+   * COLONY_VIEW only. It is an observation about the galaxy rather than a decision about the
+   * squadron, and gating it behind rank would mean the one member who actually flew there could not
+   * write down what they saw.
+   */
+  @Patch('plans/bodies/:systemId64/:bodyId')
+  async setSlots(
+    @User() caller: CurrentUser | undefined,
+    @Param('systemId64') systemId64: string,
+    @Param('bodyId') bodyId: string,
+    @Body() body: { orbital?: number | null; surface?: number | null },
+  ) {
+    const me = this.#requireSession(caller);
+    await this.#assert(
+      caller,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    await this.plans_.setSlots({
+      systemId64: BigInt(systemId64),
+      bodyId: Number(bodyId),
+      orbital: typeof body.orbital === 'number' ? body.orbital : null,
+      surface: typeof body.surface === 'number' ? body.surface : null,
+      callerId: me.userId,
+    });
+    return { ok: true };
+  }
+
+  @Post('plans/:id/sites')
+  async addPlanSite(
+    @User() caller: CurrentUser | undefined,
+    @Param('id') id: string,
+    @Body()
+    body: { version?: number; bodyId?: number | null; location?: string; buildTypeId?: string | null },
+  ) {
+    const me = this.#requireSession(caller);
+    const mask = await this.#assert(
+      caller,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    return this.plans_.addSite({
+      planId: id,
+      callerId: me.userId,
+      callerMask: mask,
+      version: typeof body.version === 'number' ? body.version : 0,
+      bodyId: typeof body.bodyId === 'number' ? body.bodyId : null,
+      location: body.location === 'surface' ? 'surface' : 'orbital',
+      buildTypeId: typeof body.buildTypeId === 'string' && body.buildTypeId !== '' ? body.buildTypeId : null,
+    });
+  }
+
+  @Delete('plans/:id/sites/:siteId')
+  async removePlanSite(
+    @User() caller: CurrentUser | undefined,
+    @Param('id') id: string,
+    @Param('siteId') siteId: string,
+    @Query('version') version?: string,
+  ) {
+    const me = this.#requireSession(caller);
+    const mask = await this.#assert(
+      caller,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    return this.plans_.removeSite({
+      planId: id,
+      siteId,
+      callerId: me.userId,
+      callerMask: mask,
+      version: Number(version ?? 0),
+    });
+  }
+
+  /** The whole build order at once, which is what a drag produces. */
+  @Patch('plans/:id/order')
+  async reorderPlan(
+    @User() caller: CurrentUser | undefined,
+    @Param('id') id: string,
+    @Body() body: { version?: number; siteIds?: string[] },
+  ) {
+    const me = this.#requireSession(caller);
+    const mask = await this.#assert(
+      caller,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    return this.plans_.reorder({
+      planId: id,
+      siteIds: Array.isArray(body.siteIds) ? body.siteIds : [],
+      callerId: me.userId,
+      callerMask: mask,
+      version: typeof body.version === 'number' ? body.version : 0,
+    });
+  }
+
+  @Delete('plans/:id')
+  async removePlan(@User() caller: CurrentUser | undefined, @Param('id') id: string) {
+    const me = this.#requireSession(caller);
+    const mask = await this.#assert(
+      caller,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+    await this.plans_.remove(id, me.userId, mask);
+    return { ok: true };
+  }
+
   @Get('build-types')
   async buildTypes(@User() caller: CurrentUser | undefined) {
     await this.#assert(
