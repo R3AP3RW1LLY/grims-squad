@@ -309,7 +309,7 @@ export class ColonyService {
             OR ($2::uuid IS NOT NULL AND p.visibility = 'squadron')
             OR ($2::uuid IS NOT NULL AND p.posted_by_id = $2::uuid)
           )
-        GROUP BY p.id, u.display_name
+        GROUP BY p.id, u.display_name, bt.id
         -- Priority first, then live before finished, then most recently touched.
         ORDER BY p.is_priority DESC, (p.completed_at IS NOT NULL), p.updated_at DESC`,
       owner,
@@ -384,7 +384,7 @@ export class ColonyService {
         -- token that still worked after the member set the project back to private would be a link
         -- they believed they had taken back.
         WHERE p.share_token = $1 AND p.visibility = 'public'
-        GROUP BY p.id, u.display_name`,
+        GROUP BY p.id, u.display_name, bt.id`,
       token,
     );
 
