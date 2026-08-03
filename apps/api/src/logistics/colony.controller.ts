@@ -4,6 +4,7 @@ import { Public } from '../auth/auth.guard.js';
 import { User, type CurrentUser } from '../auth/current-user.js';
 import { PermissionService } from '../authz/permission.service.js';
 import { ColonyService, type ColonyOwner, type ColonyVisibility } from './colony.service.js';
+import { ColonyRosterService } from './colony-roster.service.js';
 import { MARKET_STORE } from './logistics.tokens.js';
 import type { MarketStore } from './market.store.js';
 
@@ -32,6 +33,9 @@ export class ColonyController {
     @Inject(ColonyService) private readonly colony: ColonyService,
     @Inject(MARKET_STORE) private readonly market: MarketStore,
     @Inject(PermissionService) private readonly permissions: PermissionService,
+    // The same roster service the companion controller uses: one rule about who may direct a build,
+    // in one place, so the two surfaces cannot disagree.
+    @Inject(ColonyRosterService) private readonly rosters: ColonyRosterService,
   ) {}
 
   async #mask(caller: CurrentUser | undefined): Promise<bigint> {
@@ -251,6 +255,113 @@ export class ColonyController {
       // the failure a clear message rather than a generic refusal.
       mayPublish: (mask & Permission.COLONY_SHARE_PUBLIC) === Permission.COLONY_SHARE_PUBLIC,
     });
+  }
+
+  /**
+   * The roster, on the website.
+   *
+   * ★ THE WHOLE FEATURE WAS COMPANION-ONLY ★
+   *
+   * Join, leave, claim and assign were built, tested and reachable only from the desktop app —
+   * this controller had no roster routes at all. So a member reading the board on the website could
+   * see what a build needed and had no way to say they would bring any of it, and an officer could
+   * not hand work out without alt-tabbing into a different application.
+   *
+   * The same service the companion uses, so the two surfaces cannot disagree about who is on a
+   * build or who may direct it.
+   */
+  @Get('projects/:id/roster')
+  async roster(@User() caller: CurrentUser | undefined, @Param('id') id: string) {
+    const me = this.#requireSession(caller);
+    await this.#assert(
+      caller,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+    return { roster: await this.rosters.roster(id, me.userId) };
+  }
+
+  /** Volunteering is not a privilege — COLONY_VIEW is the whole bar. */
+  @Post('projects/:id/join')
+  async join(@User() caller: CurrentUser | undefined, @Param('id') id: string) {
+    const me = this.#requireSession(caller);
+    await this.#assert(
+      caller,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+    await this.rosters.join(id, me.userId);
+    return { ok: true };
+  }
+
+  @Post('projects/:id/leave')
+  async leave(@User() caller: CurrentUser | undefined, @Param('id') id: string) {
+    const me = this.#requireSession(caller);
+    await this.#assert(
+      caller,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+    await this.rosters.leave(id, me.userId);
+    return { ok: true };
+  }
+
+  /**
+   * Claim a commodity, or put one on somebody else.
+   *
+   * Gated on COLONY_VIEW here rather than something stronger, because the interesting check is not
+   * the caller's rank in general — it is whose build this is, and the service makes it. A member
+   * claiming for themselves needs no permission beyond seeing the board.
+   */
+  @Post('projects/:id/assign')
+  async assign(
+    @User() caller: CurrentUser | undefined,
+    @Param('id') id: string,
+    @Body() body: { userId?: string; commodity?: string; tonnes?: number },
+  ) {
+    const me = this.#requireSession(caller);
+    const mask = await this.#assert(
+      caller,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    await this.rosters.assign({
+      projectId: id,
+      callerId: me.userId,
+      callerMask: mask,
+      // Absent means "me". The common case is a member claiming something, and making the page send
+      // its own id back to identify itself would be a value it could get wrong.
+      targetUserId: typeof body.userId === 'string' && body.userId !== '' ? body.userId : me.userId,
+      commodity: body.commodity ?? '',
+      tonnes: typeof body.tonnes === 'number' ? body.tonnes : null,
+    });
+
+    return { ok: true };
+  }
+
+  @Post('projects/:id/unassign')
+  async unassign(
+    @User() caller: CurrentUser | undefined,
+    @Param('id') id: string,
+    @Body() body: { userId?: string; commodity?: string },
+  ) {
+    const me = this.#requireSession(caller);
+    const mask = await this.#assert(
+      caller,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    await this.rosters.unassign({
+      projectId: id,
+      callerId: me.userId,
+      callerMask: mask,
+      targetUserId: typeof body.userId === 'string' && body.userId !== '' ? body.userId : me.userId,
+      commodity: body.commodity ?? '',
+    });
+
+    return { ok: true };
   }
 
   /**

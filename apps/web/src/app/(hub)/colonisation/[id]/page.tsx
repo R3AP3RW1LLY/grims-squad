@@ -14,6 +14,7 @@ import { HaulerBoard } from './hauler-board';
 import { DeliveryTimeline, HaulerChart } from './delivery-charts';
 import { DeliveryLedger } from './delivery-ledger';
 import { ProjectActions } from './project-actions';
+import { Crew } from './crew';
 
 /**
  * One colonisation project.
@@ -108,6 +109,16 @@ export default async function ColonyProjectPage({
 
         <Section title="What it still needs">
           <NeedsTable needs={needs} />
+        </Section>
+
+        {/*
+          ★ WHO IS ON THIS, AND WHO IS COVERING WHAT ★
+
+          Above the shopping list on purpose: this is what is GOING to happen, and everything below
+          is detail about how. Somebody opening a build in order to help wants the first.
+        */}
+        <Section title="Who is on this build">
+          <Crew projectId={project.id} needs={needs} />
         </Section>
 
         <Section title="Where to buy it">
