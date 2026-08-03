@@ -171,6 +171,14 @@ export interface ShoppingRow {
   readonly supply: number | null;
   readonly distance: number | null;
   /**
+   * When somebody last saw this price, so the page can say how much to trust it.
+   *
+   * Shown rather than used as a filter. Half our mirror is older than three months, and a page that
+   * hid everything stale would tell a member "nobody sells this" about commodities that are on a
+   * shelf right now — which is worse than an old number they can weigh for themselves.
+   */
+  readonly seenAt: Date | null;
+  /**
    * The nearest place that sells this AT ALL, when nothing inside the radius does.
    *
    * ★ SQUADRON OWNER, 2026-08-03 ★
@@ -193,6 +201,7 @@ export interface ShoppingRow {
     readonly price: number;
     readonly supply: number;
     readonly distance: number | null;
+    readonly seenAt: Date | null;
   } | null;
   /** Credits to buy the outstanding tonnage at that price. Null when nowhere sells it. */
   readonly cost: number | null;
@@ -237,13 +246,50 @@ function distanceBand(ly: number | null): number {
   return 4;
 }
 
+/**
+ * How old a price is, in bands rather than in days.
+ *
+ * ★ MEASURED, NOT ASSUMED — 2026-08-03 ★
+ *
+ * Of the ten million rows in our market mirror, 6.4% were seen within a week, 27% within a month,
+ * and 46.6% are older than three months. The oldest is from June 2020. Nothing in the shopping list
+ * knew that, so a station whose shelf was last looked at eleven months ago outranked one somebody
+ * flew through yesterday whenever it was a few credits cheaper.
+ *
+ * That is not a cosmetic problem. A price is a claim about STOCK, and stock is the thing a member
+ * is flying forty light years to collect. An old reading is not slightly worse information — it is
+ * a different kind of statement, and the trip it sends somebody on can be entirely wasted.
+ *
+ * Bands rather than a continuous decay, for the same reason distance is banded: nobody flying cares
+ * about the difference between a nine-day-old reading and an eleven-day-old one, and a continuous
+ * score would reshuffle the list every time the clock ticked past a threshold.
+ */
+export function freshnessBand(seenAt: Date | null, now: number): number {
+  if (seenAt === null) return 3;
+  const days = (now - seenAt.getTime()) / 86_400_000;
+  if (days <= 7) return 0;
+  if (days <= 30) return 1;
+  if (days <= 90) return 2;
+  return 3;
+}
+
 /** Orders candidate stations by what the member asked for. */
-function rankPlaces<T extends { readonly distance: number | null; readonly price: number }>(
-  places: readonly T[],
-  sort: 'local' | 'cheapest' | 'closest',
-): readonly T[] {
+function rankPlaces<
+  T extends {
+    readonly distance: number | null;
+    readonly price: number;
+    readonly seenAt: Date | null;
+  },
+>(places: readonly T[], sort: 'local' | 'cheapest' | 'closest', now: number): readonly T[] {
   const by = [...places];
 
+  /*
+   * ★ FRESHNESS DOES NOT OVERRIDE THE SORT SOMEBODY ASKED FOR ★
+   *
+   * A member who chose "cheapest" gets the cheapest. Quietly demoting it because the reading is old
+   * would be answering a different question than the one on the control they just used — the page
+   * shows the age instead, and lets them decide.
+   */
   if (sort === 'cheapest') {
     return by.sort((a, b) => a.price - b.price || (a.distance ?? Infinity) - (b.distance ?? Infinity));
   }
@@ -251,10 +297,18 @@ function rankPlaces<T extends { readonly distance: number | null; readonly price
     return by.sort((a, b) => (a.distance ?? Infinity) - (b.distance ?? Infinity) || a.price - b.price);
   }
 
-  // 'local' — the default, and the one the owner asked for.
+  /*
+   * 'local' — the default, and the one the owner asked for.
+   *
+   * Distance still comes first: "always prioritize local markets before sending out of system" was
+   * an instruction, not a preference. Freshness sits BETWEEN distance and price, so within the same
+   * trip a reading somebody took this week beats one from three months ago even when the old one is
+   * cheaper — because the old one may be describing a shelf that is now empty.
+   */
   return by.sort(
     (a, b) =>
       distanceBand(a.distance) - distanceBand(b.distance) ||
+      freshnessBand(a.seenAt, now) - freshnessBand(b.seenAt, now) ||
       a.price - b.price ||
       (a.distance ?? Infinity) - (b.distance ?? Infinity),
   );
@@ -639,6 +693,7 @@ export class ColonyService {
     },
   ): Promise<readonly ShoppingRow[]> {
     const needs = await this.needs(projectId);
+    const now = Date.now();
 
     const query: Omit<PlaceQuery, 'near'> = {
       limit: 1,
@@ -694,7 +749,9 @@ export class ColonyService {
         return true;
       });
 
-      const place = rankPlaces(candidates, opts.sort ?? 'local')[0];
+      // One clock for the whole list. Reading it per row would let two commodities land in
+      // different bands mid-loop, which is a reordering nobody could reproduce.
+      const place = rankPlaces(candidates, opts.sort ?? 'local', now)[0];
 
       /*
        * ★ WHEN NOTHING IS IN RANGE, SAY WHERE IT IS ANYWAY ★
@@ -730,6 +787,7 @@ export class ColonyService {
         price: place?.price ?? null,
         supply: place?.quantity ?? null,
         distance: place?.distance ?? null,
+        seenAt: place?.seenAt ?? null,
         nearestOutOfRange:
           nearestOutOfRange === null
             ? null
@@ -739,6 +797,7 @@ export class ColonyService {
                 price: nearestOutOfRange.price,
                 supply: nearestOutOfRange.quantity,
                 distance: nearestOutOfRange.distance,
+                seenAt: nearestOutOfRange.seenAt,
               },
         /*
          * The whole outstanding tonnage at that price, not what is on that station's shelf. It

@@ -148,6 +148,30 @@ export interface ProjectDetailData {
   };
 }
 
+/**
+ * How old a price is, in words.
+ *
+ * ★ SHOWN, NOT HIDDEN — MEASURED 2026-08-03 ★
+ *
+ * Of the ten million rows in our market mirror, 6.4% were seen within a week and 46.6% are older
+ * than three months; the oldest is from 2020. A price is a claim about STOCK, and stock is what
+ * somebody is flying forty light years to collect.
+ *
+ * Filtering the old ones out would tell a member "nobody sells this" about commodities sitting on a
+ * shelf right now, which is worse than an old number they can weigh for themselves. So the age goes
+ * on the line, and the ranking already prefers a fresh reading within the same trip.
+ */
+export function seenAgo(at: string | null): string {
+  if (at === null) return 'never dated';
+
+  const days = Math.floor((Date.now() - new Date(at).getTime()) / 86_400_000);
+  if (days <= 0) return 'seen today';
+  if (days === 1) return 'seen yesterday';
+  if (days < 30) return `seen ${days}d ago`;
+  if (days < 365) return `seen ${Math.floor(days / 30)}mo ago`;
+  return `seen ${Math.floor(days / 365)}y ago`;
+}
+
 /** Where the commander is docked, handed down from the app's state. */
 export interface DockedAt {
   readonly marketId: string;
@@ -926,8 +950,9 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
                         `${r.nearestOutOfRange.systemName}` +
                         (r.nearestOutOfRange.distance === null
                           ? ''
-                          : ` · ${Math.round(r.nearestOutOfRange.distance)} ly`)
-                    : `${r.stationName} · ${r.systemName}`
+                          : ` · ${Math.round(r.nearestOutOfRange.distance)} ly`) +
+                        ` · ${seenAgo(r.nearestOutOfRange.seenAt)}`
+                    : `${r.stationName} · ${r.systemName} · ${seenAgo(r.seenAt)}`
                 }
                 subTone={r.stationName === null ? C.warn : C.faint}
                 right={r.cost === null ? '—' : credits(r.cost)}
@@ -1196,6 +1221,14 @@ function Roster({
     }
   };
 
+  /*
+   * ★ RE-READ ON EVERY VISIT, ON PURPOSE ★
+   *
+   * The tab strip unmounts the panel it is not showing, so coming back here refetches. That is the
+   * behaviour worth having: a roster is the one thing on this page that changes because of somebody
+   * ELSE, and showing a member a claim list from ten minutes ago is how two people end up hauling
+   * the same commodity. The cost is one small request; the alternative is a wrong answer.
+   */
   useEffect(() => {
     void load();
   }, [projectId]);
@@ -1218,7 +1251,36 @@ function Roster({
     onChanged();
   };
 
-  if (roster === null) return <Empty>Loading…</Empty>;
+  /*
+   * ★ A FAILED FIRST LOAD IS NOT "LOADING" ★
+   *
+   * This used to return the loading placeholder whenever `roster` was null, which is exactly the
+   * state a FAILED first load leaves it in. So a member whose device had been unpaired, or whose
+   * rank did not reach the roster, sat looking at "Loading…" for ever — the error was captured in
+   * state and then thrown away by the line that rendered before it.
+   *
+   * The banner already exists and already carries the hub's own sentence. It just has to be
+   * reached, and there has to be a way back from it.
+   */
+  if (roster === null) {
+    if (error === null) return <Empty>Loading…</Empty>;
+    return (
+      <div>
+        <Problem>{error}</Problem>
+        <div style={{ marginTop: '10px' }}>
+          <Button
+            disabled={busy}
+            onClick={() => {
+              setBusy(true);
+              void load().finally(() => setBusy(false));
+            }}
+          >
+            Try again
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   const claimed = new Set(roster.flatMap((m) => m.assignments.map((a) => a.commodity)));
   const uncovered = needs.filter((n) => n.remaining > 0 && !claimed.has(n.commodity));

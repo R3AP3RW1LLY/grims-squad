@@ -26,6 +26,58 @@ const FIELD =
   'rounded-md border border-[var(--color-border-hairline)] bg-[var(--color-surface-void)] ' +
   'px-3 py-2 text-sm text-[var(--color-text-primary)] outline-none focus:border-[var(--color-border-subtle)]';
 
+/**
+ * How old a price is, in words.
+ *
+ * ★ SHOWN, NOT HIDDEN — MEASURED 2026-08-03 ★
+ *
+ * Of the ten million rows in our market mirror, 6.4% were seen within a week and 46.6% are older
+ * than three months; the oldest is from 2020. A price is a claim about STOCK, and stock is the
+ * thing somebody is flying forty light years to collect.
+ *
+ * Filtering the old ones out would tell a member "nobody sells this" about commodities sitting on a
+ * shelf right now, which is worse than an old number they can weigh for themselves. So the age is
+ * printed, and anything past a month is marked.
+ */
+function Seen({ at }: { at: string | null }) {
+  if (at === null) {
+    return (
+      <span className="ml-1.5 font-mono text-[10px] text-[var(--color-semantic-warning)]">
+        never dated
+      </span>
+    );
+  }
+
+  const days = Math.floor((Date.now() - new Date(at).getTime()) / 86_400_000);
+  const text =
+    days <= 0
+      ? 'seen today'
+      : days === 1
+        ? 'seen yesterday'
+        : days < 30
+          ? `seen ${days}d ago`
+          : days < 365
+            ? `seen ${Math.floor(days / 30)}mo ago`
+            : `seen ${Math.floor(days / 365)}y ago`;
+
+  return (
+    <span
+      className={
+        days > 30
+          ? 'ml-1.5 font-mono text-[10px] text-[var(--color-semantic-warning)]'
+          : 'ml-1.5 font-mono text-[10px] text-[var(--color-text-dim)]'
+      }
+      title={
+        days > 30
+          ? 'Nobody has reported this market recently. The stock may be long gone.'
+          : undefined
+      }
+    >
+      {text}
+    </span>
+  );
+}
+
 export function ShoppingList({
   rows,
   projectId,
@@ -207,6 +259,7 @@ export function ShoppingList({
                                   : `${r.nearestOutOfRange.distance.toFixed(0)} ly · `}
                                 {r.nearestOutOfRange.price.toLocaleString()} cr ·{' '}
                                 {r.nearestOutOfRange.supply.toLocaleString()} in stock
+                                <Seen at={r.nearestOutOfRange.seenAt} />
                               </span>
                             </div>
                           )}
@@ -223,6 +276,7 @@ export function ShoppingList({
                           {r.systemName === null ? null : (
                             <CopySystem system={r.systemName} size="small" />
                           )}
+                          <Seen at={r.seenAt} />
                         </>
                       )}
                     </td>

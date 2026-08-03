@@ -51,6 +51,13 @@ export interface ColonyShoppingRow {
   readonly systemName: string | null;
   readonly price: number | null;
   readonly supply: number | null;
+  /**
+   * When somebody last saw this price.
+   *
+   * Shown rather than filtered on. Half our market mirror is older than three months, and hiding
+   * the stale rows would tell a member "nobody sells this" about commodities on a shelf right now.
+   */
+  readonly seenAt: string | null;
   readonly cost: number | null;
   /**
    * The nearest place selling this AT ALL, when nothing inside the radius does.
@@ -64,6 +71,7 @@ export interface ColonyShoppingRow {
     readonly price: number;
     readonly supply: number;
     readonly distance: number | null;
+    readonly seenAt: string | null;
   } | null;
 }
 
