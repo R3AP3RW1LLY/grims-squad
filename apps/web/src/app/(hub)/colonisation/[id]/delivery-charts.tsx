@@ -134,8 +134,26 @@ function StackedBars({
  * Both stackings arrive in the same payload, so the switch is instant. A toggle that waits on the
  * network to redraw bars the page already holds reads as broken.
  */
+/**
+ * How the chart is cut.
+ *
+ *   commodity     time on the x-axis, stacked by what went in
+ *   commander     the same bars, stacked by who put it in
+ *   perCommander  one bar per person, stacked by what they brought
+ *
+ * ★ THE THIRD USED TO BE ITS OWN CHART ON ITS OWN TAB — SQUADRON OWNER, 2026-08-03 ★
+ *
+ * "it looks like we're giving duplicate charts in the Deliveries and in the Haulers tabs."
+ *
+ * They were not the same picture — one had time on the x-axis and the other had people — but they
+ * were two stacked bar charts with commander names in both, sitting next to each other, and that
+ * reads as duplication whatever the axes say. All three cuts live on one toggle now, and the
+ * leaderboard stays where it was because a chart cannot answer "am I third or fourth".
+ */
+type StackBy = 'commodity' | 'commander' | 'perCommander';
+
 export function DeliveryTimeline({ chart }: { chart: ColonyCharts }) {
-  const [stackBy, setStackBy] = useState<'commodity' | 'commander'>('commodity');
+  const [stackBy, setStackBy] = useState<StackBy>('commodity');
   const buckets = stackBy === 'commodity' ? chart.byCommodity : chart.byCommander;
 
   /*
@@ -175,7 +193,7 @@ export function DeliveryTimeline({ chart }: { chart: ColonyCharts }) {
         to be opened to find out what the alternative is hides half the feature.
       */}
       <div className="mb-3 flex gap-1">
-        {(['commodity', 'commander'] as const).map((option) => (
+        {(['commodity', 'commander', 'perCommander'] as const).map((option) => (
           <button
             key={option}
             type="button"
@@ -187,53 +205,35 @@ export function DeliveryTimeline({ chart }: { chart: ColonyCharts }) {
                 : 'rounded border border-transparent px-2.5 py-1 font-mono text-[11px] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
             }
           >
-            by {option}
+            {/* "per commander" rather than "perCommander" — the key is code, the label is English. */}
+            {option === 'perCommander' ? 'per commander' : `by ${option}`}
           </button>
         ))}
       </div>
 
-      <StackedBars
-        labels={labels}
-        stacks={stacks}
-        height={220}
-        /* The bucket is stated: a chart whose bars mean "an hour" and one whose bars mean "a day"
-           look identical and describe very different builds. So is the stacking, because the two
-           views share their axes and mean completely different things. */
-        note={`One bar per ${chart.bucket} · stacked by ${stackBy} · ${buckets.length} ${
-          chart.bucket === 'hour' ? 'hours' : 'days'
-        } with deliveries`}
-      />
+      {stackBy === 'perCommander' ? (
+        <StackedBars
+          labels={chart.haulers.map((h) => h.commander)}
+          stacks={chart.haulers.map((h) => h.byCommodity)}
+          height={Math.max(180, Math.min(320, chart.haulers.length * 46))}
+          note={`${chart.haulers.length} commander${
+            chart.haulers.length === 1 ? '' : 's'
+          } · stacked by commodity`}
+        />
+      ) : (
+        <StackedBars
+          labels={labels}
+          stacks={stacks}
+          height={220}
+          /* The bucket is stated: a chart whose bars mean "an hour" and one whose bars mean "a
+             day" look identical and describe very different builds. So is the stacking, because
+             the two views share their axes and mean completely different things. */
+          note={`One bar per ${chart.bucket} · stacked by ${stackBy} · ${buckets.length} ${
+            chart.bucket === 'hour' ? 'hours' : 'days'
+          } with deliveries`}
+        />
+      )}
     </div>
   );
 }
 
-/**
- * One column per commander, stacked by commodity.
- *
- * ★ WHAT THE RANKED LIST CANNOT SAY ★
- *
- * A tally says somebody brought forty thousand tonnes. It does not say whether that was forty
- * thousand tonnes of steel or a share of everything — the difference between covering a commodity
- * and doing a bit of each run. The list stays underneath, because a chart cannot be read to the
- * tonne and "am I third or fourth" is a question people genuinely have about their own name.
- */
-export function HaulerChart({ chart }: { chart: ColonyCharts }) {
-  // Memoised above the empty state for the same two reasons as the timeline above.
-  const labels = useMemo(() => chart.haulers.map((h) => h.commander), [chart.haulers]);
-  const stacks = useMemo(() => chart.haulers.map((h) => h.byCommodity), [chart.haulers]);
-
-  if (chart.haulers.length === 0) return null;
-
-  return (
-    <div className="mb-4">
-      <StackedBars
-        labels={labels}
-        stacks={stacks}
-        height={Math.max(180, Math.min(320, chart.haulers.length * 46))}
-        note={`${chart.haulers.length} commander${
-          chart.haulers.length === 1 ? '' : 's'
-        } · stacked by commodity`}
-      />
-    </div>
-  );
-}

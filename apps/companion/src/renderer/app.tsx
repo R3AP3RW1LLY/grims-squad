@@ -53,6 +53,8 @@ interface AppState {
   activity?: Array<{ at: string; text: string }>;
   totals?: { sent: number; duplicates: number; journalsRead: number; since: string | null };
   gameRunning?: boolean;
+  /** Epoch millis of the last successful upload. Moves the moment a delivery reaches the hub. */
+  lastTransferAt?: number;
   error?: string | null;
   /** Where the commander is docked, when it is recent enough to trust. Null otherwise. */
   dockedAt: import('./colonisation.js').DockedAt | null;

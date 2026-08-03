@@ -530,6 +530,18 @@ const PROJECT_TABS = [
 
 type ProjectTab = (typeof PROJECT_TABS)[number]['key'];
 
+/**
+ * How the delivery chart is cut.
+ *
+ *   commodity     time on the x-axis, stacked by what went in
+ *   commander     the same bars, stacked by who put it in
+ *   perCommander  one bar per person, stacked by what they brought
+ *
+ * The third used to be its own chart on its own tab. Same data, adjacent tab, two stacked bar
+ * charts with commander names in both — which reads as duplication however different the axes are.
+ */
+type StackBy = 'commodity' | 'commander' | 'perCommander';
+
 function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.Element {
   const [data, setData] = useState<ProjectDetailData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -541,7 +553,7 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
    * than refetched, because both stackings arrive in the same payload — a toggle that waits on the
    * network to redraw bars it already has reads as broken.
    */
-  const [stackBy, setStackBy] = useState<'commodity' | 'commander'>('commodity');
+  const [stackBy, setStackBy] = useState<StackBy>('commodity');
   /*
    * ★ THE TAB LIVES HERE, NOT IN A ROUTER AND NOT IN THE PARENT ★
    *
@@ -563,16 +575,52 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
     if (answer.ok) setData(answer.data);
   };
 
+  /** When the page last had an answer from the hub, so staleness is never invisible. */
+  const [readAt, setReadAt] = useState<number | null>(null);
+
   useEffect(() => {
     let live = true;
     const load = async (): Promise<void> => {
       const answer = await window.colony.project(id);
       if (!live) return;
-      if (answer.ok) setData(answer.data);
-      else setError(answer.error);
+      if (answer.ok) {
+        setData(answer.data);
+        setReadAt(Date.now());
+      } else {
+        setError(answer.error);
+      }
     };
     void load();
-    const timer = setInterval(() => void load(), 60_000);
+
+    /*
+     * ★ REFRESHED WHEN A DELIVERY IS UPLOADED, NOT ONLY ON A TIMER ★
+     *
+     * ★ SQUADRON OWNER, 2026-08-03 ★
+     *
+     * "we made a delivery of aluminum, it shows in the every delivery, but its not showing on the
+     * Deliveries over time charts ... we need these to be working beyond reliably as this can cause
+     * someone to buy materials when they may not be needed!"
+     *
+     * That last sentence is the whole argument. A stale needs list does not merely look wrong — it
+     * sends somebody to buy forty thousand tonnes of something already delivered.
+     *
+     * The app knows the exact moment it uploads: `lastTransferAt` moves on every successful send.
+     * So the page listens for that rather than waiting out a poll — a member who has just handed
+     * cargo over sees it while they are still on the pad.
+     *
+     * The interval stays as the backstop, at twenty seconds rather than sixty. It covers deliveries
+     * made by OTHER members, which this app never observes and cannot be told about any other way.
+     */
+    let lastSeenTransfer = 0;
+    window.companion.onState((next) => {
+      const at = typeof next.lastTransferAt === 'number' ? next.lastTransferAt : 0;
+      if (at > lastSeenTransfer) {
+        lastSeenTransfer = at;
+        void load();
+      }
+    });
+
+    const timer = setInterval(() => void load(), 20_000);
     // Cleared on unmount AND guarded with `live`: a slow request that resolves after the member has
     // gone back would otherwise set state on a component that is no longer there.
     return () => {
@@ -671,6 +719,13 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
       <div style={{ margin: '20px 0 0' }}>
         <Tabs tabs={PROJECT_TABS} current={tab} onChange={setTab} label="Project sections" />
       </div>
+      {/*
+        ★ WHEN THIS WAS LAST TRUE ★
+        Every number on this page is a snapshot, and a page that cannot say how old it is asks
+        somebody to trust it blindly — which is exactly what leads to buying what has already been
+        delivered.
+      */}
+      {readAt === null ? null : <Freshness at={readAt} />}
       {/* The rule under the strip is what makes it read as a strip rather than as five buttons. */}
       <div class="rule-glow" style={{ margin: '0 0 22px' }} />
 
@@ -738,11 +793,27 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
         aside={<Toggle value={stackBy} onChange={setStackBy} />}
       >
         <Card>
-          <DeliveryChart
-            buckets={stackBy === 'commodity' ? chart.byCommodity : chart.byCommander}
-            bucket={chart.bucket}
-            by={stackBy}
-          />
+          {/*
+            ★ THREE VIEWS OF ONE CHART — SQUADRON OWNER, 2026-08-03 ★
+
+            "it looks like we're giving duplicate charts in the Deliveries and in the Haulers tabs."
+
+            They were not the same picture — one had time on the x-axis and the other had people —
+            but they were two stacked bar charts with commander names in both, on adjacent tabs, and
+            that reads as duplication whatever the axes say.
+
+            So all three cuts live here on one toggle, and the Haulers tab keeps the ranked list,
+            which a chart cannot replace: "am I third or fourth" is a question a bar does not answer.
+          */}
+          {stackBy === 'perCommander' ? (
+            <HaulerChart haulers={chart.haulers} />
+          ) : (
+            <DeliveryChart
+              buckets={stackBy === 'commodity' ? chart.byCommodity : chart.byCommander}
+              bucket={chart.bucket}
+              by={stackBy}
+            />
+          )}
         </Card>
       </Section>
 
@@ -851,28 +922,46 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
         {haulers.length === 0 ? (
           <Empty>No deliveries recorded yet.</Empty>
         ) : (
-          <>
-            <Card>
-              <HaulerChart haulers={chart.haulers} />
-            </Card>
-            <div style={{ marginTop: '12px' }}>
-              <Card>
-                {haulers.map((h, i) => (
-                  <Row
-                    key={`${h.name}-${i}`}
-                    left={`${i + 1}. ${h.name}`}
-                    right={tonnes(h.tonnes)}
-                  />
-                ))}
-              </Card>
-            </div>
-          </>
+          <Card>
+            {haulers.map((h, i) => (
+              <Row key={`${h.name}-${i}`} left={`${i + 1}. ${h.name}`} right={tonnes(h.tonnes)} />
+            ))}
+          </Card>
         )}
       </Section>
       )}
         </Guard>
       </div>
     </div>
+  );
+}
+
+/**
+ * How long ago the page last heard from the hub.
+ *
+ * Its own component with its own ticking clock, so the whole project page does not re-render once a
+ * second to move one line of text — which would rebuild both Chart.js canvases every tick.
+ */
+function Freshness({ at }: { at: number }): JSX.Element {
+  const [, tick] = useState(0);
+
+  useEffect(() => {
+    const timer = setInterval(() => tick((n) => n + 1), 5_000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const seconds = Math.max(0, Math.round((Date.now() - at) / 1000));
+  const said =
+    seconds < 10
+      ? 'just now'
+      : seconds < 90
+        ? `${seconds} seconds ago`
+        : `${Math.round(seconds / 60)} minutes ago`;
+
+  return (
+    <p style={{ margin: '6px 0 0', fontSize: '10px', color: C.faint, fontFamily: 'var(--font-mono)' }}>
+      Updated {said} · refreshes the moment you hand cargo over
+    </p>
   );
 }
 
@@ -886,10 +975,10 @@ function Toggle({
   value,
   onChange,
 }: {
-  value: 'commodity' | 'commander';
-  onChange: (next: 'commodity' | 'commander') => void;
+  value: StackBy;
+  onChange: (next: StackBy) => void;
 }): JSX.Element {
-  const options: ReadonlyArray<'commodity' | 'commander'> = ['commodity', 'commander'];
+  const options: readonly StackBy[] = ['commodity', 'commander', 'perCommander'];
 
   return (
     <div style={{ display: 'flex', gap: '4px' }}>
@@ -909,7 +998,8 @@ function Toggle({
             fontFamily: 'inherit',
           }}
         >
-          by {option}
+          {/* "per commander" rather than "perCommander" — the key is code, the label is English. */}
+          {option === 'perCommander' ? 'per commander' : `by ${option}`}
         </button>
       ))}
     </div>

@@ -11,7 +11,7 @@ import { getColonyProject } from '../../../../lib/api';
 import { NeedsTable } from './needs-table';
 import { ShoppingList } from './shopping-list';
 import { HaulerBoard } from './hauler-board';
-import { DeliveryTimeline, HaulerChart } from './delivery-charts';
+import { DeliveryTimeline } from './delivery-charts';
 import { DeliveryLedger } from './delivery-ledger';
 import { ProjectActions } from './project-actions';
 import { Crew } from './crew';
@@ -194,8 +194,13 @@ export default async function ColonyProjectPage({
           <DeliveryLedger deliveries={deliveries} />
         </Section>
 
+        {/*
+          The ranked list only. Its chart moved onto the Deliveries toggle as a third view — two
+          stacked bar charts with commander names in both, on adjacent sections, read as duplication
+          however different their axes were. A leaderboard is not replaceable by a bar: "am I third
+          or fourth" is a question people genuinely have about their own name.
+        */}
         <Section title="Who has hauled">
-          <HaulerChart chart={chart} />
           <HaulerBoard haulers={haulers} />
         </Section>
       </PageBody>

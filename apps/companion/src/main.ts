@@ -887,6 +887,15 @@ function mergedDock(): DockedAt | null {
 function state(): Record<string, unknown> {
   return {
     paired: config.deviceToken !== '',
+    /*
+     * ★ THE MOMENT A DELIVERY REACHED THE HUB ★
+     *
+     * Sent to the window so the colonisation pages can refresh the instant cargo is handed over,
+     * rather than waiting out a poll. Squadron owner, 2026-08-03: a stale needs list "can cause
+     * someone to buy materials when they may not be needed" — which is a wasted evening, not a
+     * cosmetic problem.
+     */
+    lastTransferAt,
     linking,
     activity,
     linkCode: activeLink?.code ?? null,
