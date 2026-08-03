@@ -38,6 +38,22 @@ directories:
 files:
   - dist/**/*
   - package.json
+  # koffi is `external` in build.mjs — it resolves a platform-specific .node at runtime and esbuild
+  # cannot bundle one — so the module itself has to be shipped rather than compiled in.
+  - node_modules/koffi/**/*
+  - node_modules/@koromix/**/*
+
+# ★ THE NATIVE BINARY CANNOT LIVE INSIDE THE ASAR ★
+#
+# An asar is a single archive file. `dlopen` needs a real path on disk, so a .node packed into one
+# fails at load with an error that names the archive rather than the cause. asarUnpack leaves these
+# on the filesystem beside it.
+#
+# What this buys: the companion can ask Windows which window is in front, which is what lets the
+# overlays hide when the game is minimised.
+asarUnpack:
+  - node_modules/koffi/**/*
+  - node_modules/@koromix/**/*
 
 # ---------------------------------------------------------------- Windows
 # Where almost every member is. NSIS gives a normal installer that a

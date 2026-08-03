@@ -22,7 +22,18 @@ const common = {
   target: 'node22',
   // Provided by the runtime. Bundling it would pull a copy of Electron's own
   // API surface into the file, which does not work and is not small.
-  external: ['electron'],
+  /*
+   * ★ koffi STAYS OUTSIDE THE BUNDLE ★
+   *
+   * It resolves a platform-specific `.node` binary at runtime, and esbuild has no loader for one —
+   * bundling it fails outright. External means the require survives into dist/main.cjs and Node
+   * resolves it from node_modules the way koffi expects, picking the right prebuild for the
+   * platform.
+   *
+   * Consequence for packaging: electron-builder must NOT pack it into the asar. See asarUnpack in
+   * electron-builder.yml — a `.node` inside an asar cannot be dlopen'd.
+   */
+  external: ['electron', 'koffi'],
   logLevel: 'info',
 };
 

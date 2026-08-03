@@ -48,6 +48,18 @@ allowBuilds:
   # rather than at install. Dockerfile.eddn-collector closes that: it loads the
   # module during the build and fails there, not in production.
   zeromq: false
+  # DECLINED, deliberately, and for the same reason as zeromq. koffi is what lets the companion ask
+  # Windows which window is in front, so the overlays can hide when the game is minimised. It ships
+  # PREBUILT binaries for win32 x86/x64/ARM64, linux glibc and musl, macOS x64 and ARM64, FreeBSD
+  # and OpenBSD — its own documentation is explicit that it installs without a C++ compiler.
+  #
+  # Verified rather than assumed: `koffi.load('user32.dll')` was called with the build script
+  # blocked and returned a working foreground reading (10,000 samples in 16ms) before this line was
+  # written.
+  #
+  # `true` would mean compiling from source and adding a toolchain requirement to every developer
+  # machine and to CI, to produce a binary identical to the prebuild already on disk.
+  koffi: false
 
 onlyBuiltDependencies:
   - esbuild

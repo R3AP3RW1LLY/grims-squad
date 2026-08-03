@@ -82,6 +82,46 @@ export function commandFor(
  * message, the launcher, a truncated name — is testable without a machine that
  * happens to be playing Elite.
  */
+/**
+ * Is the process with this id Elite Dangerous?
+ *
+ * ★ ASKED ONLY WHEN THE FOREGROUND WINDOW CHANGES OWNER ★
+ *
+ * The overlays need to know whether the window in front belongs to the game, twice a second.
+ * Spawning `tasklist` twice a second is not possible — it measures at 190ms. But the ANSWER only
+ * changes when a human alt-tabs, so the caller samples the cheap thing (the foreground process id,
+ * about 1.6 microseconds) constantly and asks this only when that id is one it has not seen.
+ *
+ * Filtered by PID rather than by image name, so this answers "is that particular process the game"
+ * and not "is the game running somewhere" — which is a different question, and the one that was
+ * already being asked elsewhere.
+ */
+export function commandForPid(
+  platform: NodeJS.Platform,
+  pid: number,
+): { command: string; args: readonly string[] } | null {
+  if (platform !== 'win32') return null;
+  return { command: 'tasklist', args: ['/FI', `PID eq ${pid}`, '/NH', '/FO', 'CSV'] };
+}
+
+export async function isPidGame(
+  pid: number,
+  platform: NodeJS.Platform,
+  run: ProcessLister,
+): Promise<boolean> {
+  const cmd = commandForPid(platform, pid);
+  if (cmd === null) return false;
+
+  try {
+    const { stdout } = await run(cmd.command, cmd.args);
+    // The same parser, so the launcher exclusion holds here too: EDLaunch.exe owning the foreground
+    // window is emphatically not the game, and drawing panels over the launcher would be wrong.
+    return listingHasGame(stdout);
+  } catch {
+    return false;
+  }
+}
+
 export function listingHasGame(stdout: string): boolean {
   return stdout
     .split(/\r?\n/)

@@ -80,6 +80,14 @@ export class OverlayWindows {
    */
   readonly #shapes = new Map<OverlayId, OverlayDestination>();
   #layout: OverlayLayout | null = null;
+
+  /**
+   * Whether the over-game panels are currently on screen.
+   *
+   * Starts true so nothing changes for anybody until the runtime says otherwise — and so a build
+   * where the native foreground reader will not load behaves exactly as it always did.
+   */
+  #visible = true;
   #mode: DisplayMode = 'unknown';
 
   constructor(private readonly host: OverlayHost) {}
@@ -181,9 +189,23 @@ export class OverlayWindows {
 
     void window.loadFile(this.host.htmlPath, { query: { id } });
 
-    // Shown only once the page has painted. Otherwise a transparent window flashes its background
-    // colour over the game for a frame, which reads as a glitch in the game rather than in us.
-    window.once('ready-to-show', () => window.show());
+    /*
+     * Shown only once the page has painted. Otherwise a transparent window flashes its background
+     * colour over the game for a frame, which reads as a glitch in the game rather than in us.
+     *
+     * ★ showInactive, NEVER show ★
+     *
+     * Electron's `show()` is documented as "Shows and gives focus to the window" — so every rebuild
+     * (a display-mode change, a layout edit) would yank focus out of the game mid-flight.
+     * `focusable: false` masks that on over-game windows and does NOT on detached ones. This path
+     * fires on every rebuild, so it has to be the safe call.
+     *
+     * And it respects the gate: a window recreated while the game is minimised must not pop up over
+     * the desktop, which is the exact bug being fixed.
+     */
+    window.once('ready-to-show', () => {
+      if (this.#visible || this.#shapes.get(id) !== 'over-game') window.showInactive();
+    });
 
     /*
      * Saved on the way out of a drag, not during it. `move` fires continuously while a window is
@@ -273,10 +295,59 @@ export class OverlayWindows {
     return this.#windows.size > 0;
   }
 
+  /**
+   * Puts the over-game panels on screen, or takes them off it.
+   *
+   * ★ SQUADRON OWNER, 2026-08-02 ★
+   *
+   * "the overlays need to only sit ontop of the game — if i minimize the game the overlays stay up
+   * on the screen."
+   *
+   * ★ ONLY THE over-game ONES ★
+   *
+   * A `detached` panel is an ordinary window a member deliberately put on a second monitor. Hiding
+   * those when Elite loses focus would be a second bug report, and `destinationFor()` already
+   * guarantees that somebody in exclusive fullscreen has nothing but detached panels — so they are
+   * correctly unaffected.
+   *
+   * ★ hide(), NOT setOpacity(0) ★
+   *
+   * An invisible window at opacity zero is still in the z-order and still hittable, so an unlocked
+   * panel would go on eating clicks while nobody could see it. And the compositing work continues.
+   */
+  setVisible(on: boolean): void {
+    if (this.#visible === on) return;
+    this.#visible = on;
+
+    for (const [id, window] of this.#windows) {
+      if (this.#shapes.get(id) !== 'over-game') continue;
+      if (window.isDestroyed()) continue;
+
+      if (!on) {
+        window.hide();
+        continue;
+      }
+
+      window.showInactive();
+      /*
+       * Re-asserted after every show, and this is not belt-and-braces.
+       *
+       * The WS_EX_TOPMOST style survives a hide, but z-order AMONG topmost windows does not: a game
+       * restoring from minimised re-asserts itself topmost and can land above a panel that was
+       * already there. Idempotent and free.
+       */
+      window.setAlwaysOnTop(true, 'screen-saver');
+      const state = this.#layout?.[id];
+      if (state !== undefined) this.#applyLock(window, state, 'over-game');
+    }
+  }
+
   closeAll(): void {
     for (const window of this.#windows.values()) window.destroy();
     this.#windows.clear();
     this.#shapes.clear();
+    // Back to the default, so a new session does not inherit a hidden state from the old one.
+    this.#visible = true;
   }
 
   /** Re-applies the current layout — used when displays change or the game's mode does. */

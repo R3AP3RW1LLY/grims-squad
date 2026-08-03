@@ -1,7 +1,11 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { app, ipcMain, screen } from 'electron';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { app, BrowserWindow, ipcMain, screen } from 'electron';
+import { foregroundWindow, overlaysShouldShow } from './foreground.js';
+import { isPidGame } from './game-process.js';
 import {
   parseDisplaySettings,
   UNKNOWN_DISPLAY,
@@ -117,7 +121,53 @@ let editing = false;
  * nothing to a disk.
  */
 const DISPLAY_POLL_MS = 15_000;
+
+/**
+ * How often the game's foreground state is sampled.
+ *
+ * ★ SQUADRON OWNER, 2026-08-02 ★
+ *
+ * "the overlays need to only sit ontop of the game — if i minimize the game the overlays stay up on
+ * the screen."
+ *
+ * Half a second is the worst-case staleness a member sees after minimising. SrvSurvey uses 200ms
+ * and EDMCOverlay 1000ms, so this sits squarely between two shipped Elite overlays. The sample
+ * itself costs about 1.6 microseconds, so the interval is chosen for how it FEELS rather than for
+ * what it costs.
+ */
+const FOCUS_POLL_MS = 500;
+
+/*
+ * `windowsHide` so no console flashes when the foreground owner changes, and a short timeout so a
+ * wedged `tasklist` cannot hold the resolver flag for ever.
+ */
+const runProcess = promisify(execFile);
+const listProcesses = async (
+  command: string,
+  args: readonly string[],
+): Promise<{ stdout: string }> =>
+  runProcess(command, [...args], { timeout: 2_000, windowsHide: true });
+
+/** Display settings are read every Nth focus tick, so there is still only one timer. */
+const DISPLAY_EVERY = DISPLAY_POLL_MS / FOCUS_POLL_MS;
+
 let displayTimer: NodeJS.Timeout | null = null;
+let ticks = 0;
+
+/**
+ * The last foreground PID we resolved, and whether it was Elite.
+ *
+ * ★ THE PID IS CHEAP AND THE NAME IS NOT ★
+ *
+ * Reading the foreground PID is a microsecond. Turning a PID into "is that Elite Dangerous" means
+ * spawning `tasklist`, measured at 190ms — impossible twice a second and unnecessary, because the
+ * answer only changes when a human alt-tabs. So the PID is sampled every tick and the name is
+ * resolved only when the PID is one we have not seen.
+ */
+let lastForegroundPid = 0;
+let foregroundIsGame: boolean | null = null;
+/** True while a `tasklist` is in flight, so a slow one cannot stack. */
+let resolving = false;
 
 export function startOverlays(h: OverlayRuntimeHost): void {
   host = h;
@@ -132,6 +182,11 @@ export function startOverlays(h: OverlayRuntimeHost): void {
   windows.apply(h.layout(), mode);
 
   displayTimer = setInterval(() => {
+    followTheGame();
+
+    // The display settings, on the same timer but at their original cadence. One timer, two jobs.
+    if (++ticks % DISPLAY_EVERY !== 0) return;
+
     const next = readDisplaySettings().mode;
     if (next === mode) return;
     /*
@@ -142,7 +197,7 @@ export function startOverlays(h: OverlayRuntimeHost): void {
     mode = next;
     windows?.refresh(mode);
     host?.changed();
-  }, DISPLAY_POLL_MS);
+  }, FOCUS_POLL_MS);
 
   /*
    * Displays come and go: a laptop docked or undocked, a monitor switched off, a resolution change.
@@ -160,6 +215,54 @@ export function startOverlays(h: OverlayRuntimeHost): void {
     // And its data, which it missed by not existing yet. See the note on `lastData`.
     if (lastData !== null) windows?.broadcast('overlay:data', lastData);
   });
+}
+
+/**
+ * Shows or hides the over-game panels to match where the game is.
+ *
+ * ★ THE RULE, AND THE TERM PEOPLE FORGET ★
+ *
+ * SrvSurvey's is `focusElite || focusSrvSurvey`, and the second half is load-bearing: without it, a
+ * member who clicks the companion window to arrange their panels watches every panel they are
+ * trying to drag vanish. Arrange mode counts for the same reason, one step further.
+ *
+ * An unknown foreground — no native binding, no foreground window during a desktop switch — leaves
+ * everything visible. A member whose overlays stop hiding has a small annoyance; one whose overlays
+ * disappear for good has a broken app.
+ */
+function followTheGame(): void {
+  const front = foregroundWindow();
+
+  if (front !== null && front.pid !== lastForegroundPid && !resolving) {
+    lastForegroundPid = front.pid;
+    resolving = true;
+    /*
+     * The expensive question, asked only when a human has alt-tabbed. Not awaited: the tick must
+     * not block, and the previous answer stays in force for the ~190ms it takes — which is one
+     * tick, and invisible.
+     */
+    void isPidGame(front.pid, process.platform, listProcesses)
+      .then((yes) => {
+        foregroundIsGame = yes;
+      })
+      .catch(() => {
+        // Unknown rather than false. See the note above on failing open.
+        foregroundIsGame = null;
+      })
+      .finally(() => {
+        resolving = false;
+      });
+  }
+
+  const show = overlaysShouldShow({
+    // A minimised game is never the foreground window, so this covers minimise for free — but the
+    // flag is read anyway because "minimised" and "alt-tabbed" are different things to be sure of.
+    gameIsForeground: front === null ? null : foregroundIsGame === true && !front.minimised,
+    ourWindowFocused: BrowserWindow.getFocusedWindow() !== null,
+    editing,
+  });
+
+  windows?.setVisible(show);
 }
 
 function rememberPlacement(id: OverlayId, placement: OverlayPlacement): void {
@@ -226,6 +329,11 @@ export function pushOverlayData(data: OverlayData): void {
 export function stopOverlays(): void {
   if (displayTimer !== null) clearInterval(displayTimer);
   displayTimer = null;
+  // Forgotten with the windows, so a new session resolves the foreground fresh rather than trusting
+  // a PID that may since have been recycled by an unrelated process.
+  ticks = 0;
+  lastForegroundPid = 0;
+  foregroundIsGame = null;
   // Dropped with the windows. Replaying a build from a previous session into a fresh one would be
   // the overlay's own version of stale data.
   lastData = null;
