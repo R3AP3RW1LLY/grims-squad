@@ -200,6 +200,22 @@ const NAV: readonly NavDefinition[] = [
    * BEFORE you commit to posting one, and a member who has never done this needs the reference more
    * than they need the form.
    */
+  /*
+   * ★ PLANNING — SQUADRON OWNER, 2026-08-03 ★
+   *
+   * "add a new page to colonization called Planning."
+   *
+   * First in the group, because it is where a system starts: you lay one out before you fly there
+   * to post the first construction site, and the two boards below are what that plan becomes.
+   */
+  {
+    href: '/colonisation/planning',
+    label: 'Planning',
+    section: 'squadron',
+    subsection: 'Colonisation',
+    blurb: 'Lay out a whole system before you build any of it.',
+    requires: Permission.COLONY_VIEW,
+  },
   {
     href: '/colonisation/build-types',
     label: 'Build types',

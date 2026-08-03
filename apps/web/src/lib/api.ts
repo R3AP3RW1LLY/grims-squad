@@ -1828,6 +1828,65 @@ export interface ColonyBuildTypeDetail extends ColonyBuildType {
   unsourced: number;
 }
 
+/** One body in a system, with the slot counts somebody read off the in-game architect view. */
+export interface PlanBody {
+  bodyId: number;
+  name: string;
+  kind: string;
+  subType: string | null;
+  isLandable: boolean;
+  gravity: number | null;
+  temperature: number | null;
+  distanceLs: number | null;
+  hasRings: boolean;
+  terraformable: boolean;
+  /** What this orbits, so a moon draws under its planet. Null for the primary star. */
+  parentBodyId: number | null;
+  orbitalSlots: number | null;
+  surfaceSlots: number | null;
+  slotsBy: string | null;
+}
+
+/** One intended build, in one slot, on one body. */
+export interface PlanSite {
+  id: string;
+  bodyId: number | null;
+  location: 'orbital' | 'surface';
+  buildTypeId: string | null;
+  buildTypeName: string | null;
+  tier: number | null;
+  totalTonnes: number | null;
+  position: number;
+  /** The system's first station. The game charges nothing for it. */
+  isPrimary: boolean;
+  projectId: string | null;
+}
+
+export interface ColonyPlan {
+  id: string;
+  owner: 'squadron' | 'personal';
+  title: string;
+  systemName: string;
+  systemId64: string | null;
+  notes: string | null;
+  /** Optimistic concurrency. Every write carries the version it started from. */
+  version: number;
+  postedBy: string | null;
+  postedById: string;
+  updatedAt: string;
+  bodies: PlanBody[];
+  bodiesFetchedAt: string | null;
+  sites: PlanSite[];
+}
+
+export const getColonyPlans = (
+  owner: 'squadron' | 'personal' | 'all' = 'all',
+): Promise<AdminRead<{ plans: ColonyPlan[] }>> =>
+  getAdmin(`/v1/logistics/colony/plans?owner=${owner}`);
+
+export const getColonyPlan = (id: string): Promise<AdminRead<{ plan: ColonyPlan }>> =>
+  getAdmin(`/v1/logistics/colony/plans/${encodeURIComponent(id)}`);
+
 export const getBuildTypes = (): Promise<AdminRead<{ buildTypes: ColonyBuildType[] }>> =>
   getAdmin('/v1/logistics/colony/build-types');
 
