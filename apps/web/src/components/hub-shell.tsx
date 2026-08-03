@@ -28,6 +28,8 @@ import {
   AcademicCapIcon,
   SparklesIcon,
   WrenchScrewdriverIcon,
+  TruckIcon,
+  BuildingOffice2Icon,
 } from '@heroicons/react/24/outline';
 import { ChevronDownIcon } from '@heroicons/react/20/solid';
 import { ViewAsBanner } from './view-as-banner';
@@ -95,6 +97,30 @@ const ICONS: Record<string, typeof HomeIcon> = {
   '/app/training': AcademicCapIcon,
   '/gmsd-ai/ask': ChatBubbleLeftRightIcon,
   '/gmsd-ai/train': SparklesIcon,
+};
+
+/**
+ * An icon per subcategory.
+ *
+ * ★ SQUADRON OWNER, 2026-08-03 ★
+ *
+ * "find better icons for the Shipyard, Logistics & Trade and Colonization categories."
+ *
+ * They were all a wrench — the subcategory heading rendered `WrenchScrewdriverIcon` hardcoded,
+ * whatever the subcategory was. Three groups with the same icon is three groups with no icon: the
+ * only thing distinguishing them was the text, which is what the icon is there to save you reading.
+ *
+ * Keyed on the label rather than carried in the nav payload, for the same reason the route icons
+ * are: the API has no business knowing what a Heroicon is. An unlisted subcategory falls back to
+ * the wrench, so adding one is never a crash.
+ */
+const SUBSECTION_ICONS: Record<string, typeof HomeIcon> = {
+  // Outfitting and building ships. The wrench genuinely belongs to this one.
+  Shipyard: WrenchScrewdriverIcon,
+  // Commodities and the Freight Office — both about moving cargo for profit.
+  'Logistics & Trade': TruckIcon,
+  // Construction sites, which is what the whole category is about building.
+  Colonisation: BuildingOffice2Icon,
 };
 
 const SECTION_LABELS: Record<NavItem['section'], string> = {
@@ -319,7 +345,10 @@ function SidebarContents({ me, current }: { me: MeResponse; current: string }) {
                         className="flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-xs/5 font-medium tracking-wide text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-panel-hover)] hover:text-[var(--color-text-primary)]"
                       >
                         <span className="flex items-center gap-x-2.5">
-                          <WrenchScrewdriverIcon aria-hidden="true" className="size-4 shrink-0" />
+                          {(() => {
+                            const SubIcon = SUBSECTION_ICONS[sub] ?? WrenchScrewdriverIcon;
+                            return <SubIcon aria-hidden="true" className="size-4 shrink-0" />;
+                          })()}
                           {sub}
                         </span>
                         <ChevronDownIcon

@@ -5,6 +5,7 @@ import type { OverlayLayout } from '../overlay-config.js';
 import { Button, C, Card, Empty, Problem, Section, Stat } from './ui.js';
 import { ColonyBoardPage, ColonyNewPage } from './colonisation.js';
 import { BuildTypesPage } from './build-types.js';
+import { GroupIcon } from './icons.js';
 // The shapes come from the hub client, which is where they are defined — re-exporting them through
 // the component file would be a second name for one type.
 import type { ColonyProject, ColonyRights } from '../hub-colony.js';
@@ -260,6 +261,15 @@ function App(): JSX.Element {
                 <span style={{ fontSize: '9px', color: C.faint, width: '8px' }}>
                   {colonyOpen ? '▾' : '▸'}
                 </span>
+                {/*
+                  ★ THE SAME ICON THE WEBSITE DRAWS — SQUADRON OWNER, 2026-08-03 ★
+
+                  "ensure the icons match the web icons in the companion app please!"
+
+                  Literally the same outline: the Heroicon path data is transcribed into icons.tsx
+                  rather than the React library being pulled into a Preact app to render one shape.
+                */}
+                <GroupIcon label={entry.label} />
                 {entry.label}
               </button>
 
