@@ -1,5 +1,6 @@
 import type { DockedAt } from './docked.js';
 import { isFresh, projectTitleFrom } from './docked.js';
+import { markWanted, type Hold } from './cargo.js';
 import type { OverlayData } from './renderer/overlay.js';
 
 /**
@@ -37,6 +38,10 @@ export interface OverlayInput {
   readonly lastTransferAt: number;
   /** Whether Elite is actually running. */
   readonly gameRunning: boolean;
+  /** What is in the hold, from Cargo.json. Null when we have not managed to read one. */
+  readonly hold: Hold | null;
+  /** Tonnes the ship can carry, from Loadout. Null until a Loadout has been seen. */
+  readonly capacity: number | null;
   /** Now, injected so the freshness rule is testable. */
   readonly now: number;
 }
@@ -56,17 +61,7 @@ export function buildOverlayData(input: OverlayInput): OverlayData {
      * what the app's own Trade runs page already says.
      */
     route: null,
-    /*
-     * ★ CARGO: NOT AVAILABLE IN-PROCESS ★
-     *
-     * The journal's routine `Cargo` lines carry a vessel and a count, not the inventory; Frontier
-     * writes the live hold to `Cargo.json` beside the journals, and nothing here reads it. Capacity
-     * comes from `Loadout.CargoCapacity`, which the watcher passes over.
-     *
-     * Sending an empty hold would be worse than sending nothing: the panel reads `items: []` as
-     * "Hold empty." and would tell a member with a full hold that it was empty.
-     */
-    cargo: null,
+    cargo: cargoPanel(input),
     status: {
       sending: input.sending,
       /*
@@ -80,6 +75,49 @@ export function buildOverlayData(input: OverlayInput): OverlayData {
         input.lastTransferAt === 0 ? null : new Date(input.lastTransferAt).toISOString(),
       gameRunning: input.gameRunning,
     },
+  };
+}
+
+/**
+ * What is in the hold, and how much of it the site in front of you wants.
+ *
+ * ★ SQUADRON OWNER, 2026-08-03 ★
+ *
+ * "i have a full hold and it is not showing what i am carrying, its value, nothing at all!"
+ *
+ * ★ null AND AN EMPTY HOLD ARE DIFFERENT ANSWERS ★
+ *
+ * Null renders "Waiting for your hold" and means we could not read one. An empty list renders
+ * "Hold empty" and is a claim about the member's ship. Sending the second when we mean the first is
+ * how a member with 1,040 tonnes aboard gets told they are carrying nothing — so the distinction is
+ * kept all the way down from the file read.
+ *
+ * ★ `wanted` IS THE POINT ★
+ *
+ * A list of what is in the hold is something the game already shows. What it cannot show is which
+ * of it the site you are docked at is actually asking for, so a member hauling a mixed load knows
+ * what to hand over and what they are carrying for nothing.
+ */
+function cargoPanel(input: OverlayInput): OverlayData['cargo'] {
+  if (input.hold === null) return null;
+
+  /*
+   * Matched against the site's REMAINING requirement, not its total: a commodity the build has
+   * already had enough of is not wanted, however much of it somebody is carrying.
+   */
+  const site = input.dock !== null && isFresh(input.dock, input.now) ? input.dock.site : null;
+  const wanted = new Set(
+    (site?.resources ?? [])
+      .filter((r) => r.required - r.provided > 0)
+      .map((r) => r.commodity),
+  );
+
+  const marked = markWanted(input.hold, wanted);
+
+  return {
+    items: marked.items,
+    used: marked.used,
+    capacity: input.capacity,
   };
 }
 

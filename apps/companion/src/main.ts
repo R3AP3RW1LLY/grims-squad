@@ -50,6 +50,7 @@ import {
   SEED_TAIL_BYTES,
   type DockedAt,
 } from './docked.js';
+import { capacityFrom, parseCargo, type Hold } from './cargo.js';
 import { accumulate } from './totals.js';
 import { isGameRunning, isActivelyPlaying } from './game-process.js';
 import { startAutoUpdate } from './auto-update.js';
@@ -170,6 +171,24 @@ let dockedAt: DockedAt | null = null;
 let seededDock: DockedAt | null = null;
 
 /**
+ * What is in the hold, and how big the hold is.
+ *
+ * ★ SQUADRON OWNER, 2026-08-03 ★
+ *
+ * "the cargo hold overlay is not working as it is intended. i have a full hold and it is not
+ * showing what i am carrying, its value, nothing at all!"
+ *
+ * It was sending null on purpose, because nothing in the app had ever read a hold. The contents
+ * come from `Cargo.json` — Frontier's sidecar beside the journals, rewritten every time the hold
+ * changes — and the capacity from `Loadout.CargoCapacity`, which is the only place it exists.
+ *
+ * Both live here rather than in the config: they describe right now, and persisting them would be
+ * a disk write to record something worthless the moment the app closes.
+ */
+let hold: Hold | null = null;
+let cargoCapacity: number | null = null;
+
+/**
  * Rebuilds `dockedAt` from the tail of the newest journal, ignoring saved offsets.
  *
  * ★ WHY THIS HAS TO EXIST — REPORTED FROM A LIVE GAME, 2026-08-02 ★
@@ -201,7 +220,16 @@ async function seedDock(): Promise<void> {
     try {
       const buffer = Buffer.alloc(size - from);
       await handle.read(buffer, 0, buffer.length, from);
-      const seeded = seedFromJournal(buffer.toString('utf8'));
+      const tail = buffer.toString('utf8');
+      const seeded = seedFromJournal(tail);
+
+      /*
+       * Capacity, out of the same read. `Loadout` fires on boarding and on every refit, so the LAST
+       * one in the tail describes the ship they are flying now — and taking it from a read we were
+       * already doing costs nothing.
+       */
+      const capacity = capacityFrom(tail);
+      if (capacity !== null) cargoCapacity = capacity;
       /*
        * Kept rather than adopted. `state()` merges it with whatever the live pass holds, so the
        * name survives every nameless heartbeat instead of being overwritten by the next one.
@@ -536,6 +564,26 @@ async function tick(): Promise<void> {
       sending = false;
     }
     dockedAt = pass.outcome.dockedAt;
+
+    /*
+     * ★ THE HOLD, READ FROM FRONTIER'S OWN SIDECAR ★
+     *
+     * `Cargo.json` sits beside the journals and is rewritten every time the hold changes. It is a
+     * few hundred bytes, so reading it on every pass costs nothing measurable — and unlike the
+     * journal's `Cargo` events it carries the actual inventory rather than a bare count.
+     *
+     * Never allowed to throw: a member's journal upload must not fail because a sidecar was being
+     * written at the moment we looked at it. A failed read leaves the previous hold in place, which
+     * is closer to the truth than nothing.
+     */
+    try {
+      const text = await readFile(join(dir, 'Cargo.json'), 'utf8');
+      const read = parseCargo(text);
+      if (read !== null) hold = read;
+    } catch {
+      // Missing before the first time the game writes one, which is normal on a fresh install.
+    }
+
     const nextConfig = pass.config;
     let outcome = pass.outcome;
 
@@ -662,13 +710,31 @@ async function tick(): Promise<void> {
        * one request every half hour rather than a member's whole session.
        */
       backoff = onUnauthorised(backoff, Date.now());
-    } else if (outcome.newFilesRead > 0 && outcome.txBytes === 0) {
+    } else if (outcome.error !== null) {
       /*
        * ★ A FAILED SEND IS NOT A SUCCESSFUL PASS ★
        *
        * This was a bare `else` calling `onSuccess()`, so ONLY an unauthorised reply armed the
        * backoff. Every other failure — the hub down, DNS gone, a 500, a timeout — landed here and
        * CLEARED the throttle, and the app went on hammering at full cadence for ever.
+       *
+       * ★ AND THE FIRST FIX FOR THAT WAS WRONG — SQUADRON OWNER, 2026-08-03 ★
+       *
+       * "on the status page of the companion app we get this message: Elite is not running. Sending
+       * since 8/2/2026. -- but it is running and active!"
+       *
+       * My condition was `newFilesRead > 0 && txBytes === 0` — read new journal lines and sent
+       * nothing. That is not a failure at all: it is the NORMAL case. Most journal lines are events
+       * we do not track, or are in a category the member has switched off, so a pass routinely
+       * reads new bytes and has nothing worth sending.
+       *
+       * So a member playing normally armed the backoff, the next passes were skipped, and the skip
+       * path reports the last known `gameRunning` — which never got refreshed, because the passes
+       * that would have refreshed it were the ones being skipped. The app told somebody sitting in
+       * their cockpit that Elite was not running.
+       *
+       * The real signal is an ERROR. `outcome.error` is set by the uploader when a send genuinely
+       * failed, and by nothing else.
        *
        * That is also what made the freeze compound: a failed upload does not advance the file
        * offset, so every pass re-read and re-parsed the entire unsent journal, and nothing was
@@ -786,6 +852,8 @@ function push(): void {
       sending,
       lastTransferAt,
       gameRunning: wasPlaying,
+      hold,
+      capacity: cargoCapacity,
       now: Date.now(),
     }),
   );

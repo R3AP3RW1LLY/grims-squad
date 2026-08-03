@@ -41,6 +41,10 @@ function input(overrides: Partial<OverlayInput> = {}): OverlayInput {
     sending: false,
     lastTransferAt: 0,
     gameRunning: true,
+    // Null by default: most cases here are about the build panel, and "we could not read a hold" is
+    // the honest resting state rather than an empty one.
+    hold: null,
+    capacity: null,
     now: NOW,
     ...overrides,
   };
@@ -103,17 +107,75 @@ describe('the overlay payload', () => {
 
   /* ------------------------------------------------------------ honest nulls */
 
-  it('sends no cargo at all rather than an empty hold', () => {
-    const { cargo } = buildOverlayData(input());
-
+  it('sends no cargo at all when it could not read a hold', () => {
     /*
      * ★ THE ONE THAT MATTERS ★
      *
-     * The panel reads `items: []` as "Hold empty." and `null` as "Waiting for your hold." Only the
-     * second is true today — nothing in the app reads Cargo.json — and telling a member with a full
-     * hold that it is empty is the kind of wrong that makes somebody stop trusting the whole app.
+     * The panel reads `items: []` as "Hold empty." and `null` as "Waiting for your hold." Telling a
+     * member with 1,040 tonnes aboard that they are carrying nothing is the kind of wrong that makes
+     * somebody stop trusting the whole app, so the distinction survives all the way from the file
+     * read to the panel.
      */
-    expect(cargo).toBeNull();
+    expect(buildOverlayData(input({ hold: null })).cargo).toBeNull();
+  });
+
+  it('reports a real hold, biggest first, with the capacity', () => {
+    const { cargo } = buildOverlayData(
+      input({
+        hold: {
+          used: 1040,
+          at: '2026-08-03T17:00:00Z',
+          items: [
+            { commodity: 'Steel', count: 800, wanted: false },
+            { commodity: 'Titanium', count: 240, wanted: false },
+          ],
+        },
+        capacity: 1040,
+      }),
+    );
+
+    expect(cargo?.used).toBe(1040);
+    expect(cargo?.capacity).toBe(1040);
+    expect(cargo?.items.map((i) => i.commodity)).toEqual(['Steel', 'Titanium']);
+  });
+
+  it('marks what the site in front of you actually wants', () => {
+    /*
+     * The reason the panel is worth drawing at all. The game already shows a hold; what it cannot
+     * show is which of it the build you are docked at is asking for — so somebody hauling a mixed
+     * load knows what to hand over and what they are carrying for nothing.
+     */
+    const { cargo } = buildOverlayData(
+      input({
+        hold: {
+          used: 1000,
+          at: null,
+          items: [
+            { commodity: 'Steel', count: 600, wanted: false },
+            { commodity: 'Gold', count: 400, wanted: false },
+          ],
+        },
+      }),
+    );
+
+    expect(cargo?.items.find((i) => i.commodity === 'Steel')?.wanted).toBe(true);
+    // Gold is not on the site's list, so it is dead weight and says so.
+    expect(cargo?.items.find((i) => i.commodity === 'Gold')?.wanted).toBe(false);
+  });
+
+  it('does not mark a commodity the build has already had enough of', () => {
+    // Titanium is fully delivered in the fixture, so carrying more of it is carrying it for nothing.
+    const { cargo } = buildOverlayData(
+      input({
+        hold: {
+          used: 100,
+          at: null,
+          items: [{ commodity: 'Titanium', count: 100, wanted: false }],
+        },
+      }),
+    );
+
+    expect(cargo?.items[0]?.wanted).toBe(false);
   });
 
   it('sends no route, because nothing records the run somebody picked', () => {
