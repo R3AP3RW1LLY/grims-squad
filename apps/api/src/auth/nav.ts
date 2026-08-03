@@ -191,9 +191,28 @@ const NAV: readonly NavDefinition[] = [
    * these three sitting together, after the Logistics & Trade entries, is what puts the group in
    * the right place.
    */
+  /*
+   * ★ THE CATALOGUE COMES FIRST — SQUADRON OWNER, 2026-08-03 ★
+   *
+   * "move the build types link in the navbar to be above New Project."
+   *
+   * Which is the right order for how the feature is actually used: you look up what a build costs
+   * BEFORE you commit to posting one, and a member who has never done this needs the reference more
+   * than they need the form.
+   */
+  {
+    href: '/colonisation/build-types',
+    label: 'Build types',
+    section: 'squadron',
+    subsection: 'Colonisation',
+    blurb: 'What every kind of construction site costs to build.',
+    requires: Permission.COLONY_VIEW,
+  },
   {
     href: '/colonisation/new',
-    label: 'New project',
+    // "Start New Project", not "New project": a verb says it is something you DO, where a noun
+    // reads as a place that lists them.
+    label: 'Start New Project',
     section: 'squadron',
     subsection: 'Colonisation',
     blurb: 'Post a construction site so the squadron can help build it.',
@@ -205,14 +224,6 @@ const NAV: readonly NavDefinition[] = [
     section: 'squadron',
     subsection: 'Colonisation',
     blurb: 'What the squadron is building, and what it still needs hauled.',
-    requires: Permission.COLONY_VIEW,
-  },
-  {
-    href: '/colonisation/build-types',
-    label: 'Build types',
-    section: 'squadron',
-    subsection: 'Colonisation',
-    blurb: 'What every kind of construction site costs to build.',
     requires: Permission.COLONY_VIEW,
   },
   {

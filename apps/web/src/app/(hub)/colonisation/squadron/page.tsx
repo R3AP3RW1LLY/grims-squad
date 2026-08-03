@@ -60,7 +60,7 @@ export default async function SquadronProjectsPage() {
         <Section title="Squadron projects">
           <ProjectBoard
             projects={squadron}
-            emptyMessage="No squadron projects yet. An officer can post one from New project."
+            emptyMessage="No squadron projects yet. An officer can post one from Start New Project."
           />
         </Section>
       </PageBody>

@@ -4,6 +4,7 @@ import type { JSX } from 'preact';
 import type { OverlayLayout } from '../overlay-config.js';
 import { Button, C, Card, Empty, Problem, Section, Stat } from './ui.js';
 import { ColonyBoardPage, ColonyNewPage } from './colonisation.js';
+import { BuildTypesPage } from './build-types.js';
 // The shapes come from the hub client, which is where they are defined — re-exporting them through
 // the component file would be a second name for one type.
 import type { ColonyProject, ColonyRights } from '../hub-colony.js';
@@ -66,6 +67,7 @@ interface AppState {
 
 type Page =
   | 'status'
+  | 'colony-build-types'
   | 'colony-new'
   | 'colony-squadron'
   | 'colony-members'
@@ -105,7 +107,17 @@ const NAV: ReadonlyArray<NavItem | NavGroup> = [
     label: 'Colonisation',
     children: [
       // The order the owner asked for: new project first, then squadron above members.
-      { id: 'colony-new', label: 'New project', hint: 'Post the site you are docked at' },
+      /*
+       * ★ THE CATALOGUE FIRST — SQUADRON OWNER, 2026-08-03 ★
+       *
+       * "move the build types link in the navbar to be above New Project", and the app mirrors the
+       * website exactly. It is also the right order for how the feature is used: you look up what a
+       * build costs BEFORE committing to posting one.
+       */
+      { id: 'colony-build-types', label: 'Build types', hint: 'What each kind of site costs' },
+      // "Start New Project" here too, so the app and the website do not call the same destination
+      // two different things. A verb says it is something you DO; a noun reads as a list of them.
+      { id: 'colony-new', label: 'Start New Project', hint: 'Post the site you are docked at' },
       { id: 'colony-squadron', label: 'Squadron projects', hint: 'What the squadron is building' },
       { id: 'colony-members', label: 'Members’ projects', hint: 'What members have asked help with' },
     ],
@@ -291,6 +303,10 @@ function App(): JSX.Element {
 
       <main style={{ flex: 1, overflowY: 'auto', padding: '22px 26px' }}>
         {page === 'status' ? <Status state={state} /> : null}
+        {page === 'colony-build-types' ? (
+          <BuildTypesPage dockedSystem={state.dockedAt?.systemName ?? null} />
+        ) : null}
+
         {page === 'colony-new' ? (
           <ColonyNewPage
             dockedAt={state.dockedAt}

@@ -7,6 +7,7 @@ import { PAIRING_SERVICE } from '../telemetry/telemetry.tokens.js';
 import type { PairingService } from '../telemetry/pairing.service.js';
 import { ColonyService, type ColonyOwner } from './colony.service.js';
 import { ColonyRosterService } from './colony-roster.service.js';
+import { ColonyCatalogueService } from './colony-catalogue.service.js';
 import { MARKET_STORE } from './logistics.tokens.js';
 import type { MarketStore } from './market.store.js';
 
@@ -44,6 +45,7 @@ export class ColonyDeviceController {
   constructor(
     @Inject(ColonyService) private readonly colony: ColonyService,
     @Inject(ColonyRosterService) private readonly rosters: ColonyRosterService,
+    @Inject(ColonyCatalogueService) private readonly catalogue: ColonyCatalogueService,
     @Inject(MARKET_STORE) private readonly market: MarketStore,
     @Inject(PermissionService) private readonly permissions: PermissionService,
     @Inject(PAIRING_SERVICE) private readonly pairing: PairingService,
@@ -76,6 +78,67 @@ export class ColonyDeviceController {
 
   /** Both boards, exactly as the website's sidebar shows them. */
   @Public()
+  /**
+   * The build catalogue, for the companion app.
+   *
+   * ★ SQUADRON OWNER, 2026-08-03 ★
+   *
+   * "ensure the Companion app matches and has all the same pages in colonization that the website
+   * has please! must be a mirror!"
+   *
+   * The website had this and the app did not, which is exactly the split the owner has objected to
+   * twice now — a member reading the board in one place could answer "what does a Coriolis cost"
+   * and the same member in the other could not.
+   *
+   * Same service as the website's, so the two cannot give different numbers for the same build.
+   */
+  @Public()
+  @Get('build-types')
+  async buildTypes(@Req() req: FastifyRequest) {
+    await this.#caller(
+      req,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+    return { buildTypes: await this.catalogue.list() };
+  }
+
+  @Public()
+  @Get('build-types/:id')
+  async buildType(
+    @Req() req: FastifyRequest,
+    @Param('id') id: string,
+    @Query('near') near?: string,
+  ) {
+    await this.#caller(
+      req,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    /*
+     * No origin means no prices. A cheapest-anywhere figure is a number nobody can act on and looks
+     * like a real quote — the app asks where you are buying from rather than inventing one.
+     */
+    /*
+     * Resolved straight off the market store, the same way the shopping list does it a few methods
+     * down. A system we cannot place comes back null, and the caller is told which name failed
+     * rather than being shown unpriced rows with no explanation.
+     */
+    const wanted = near?.trim() ?? '';
+    const coords = wanted === '' ? null : await this.market.systemCoords(wanted);
+    const detail = await this.catalogue.byId(id, coords);
+    if (detail === null) {
+      throw new AppError(ErrorCode.RESOURCE_NOT_VISIBLE, 'No such build type.');
+    }
+
+    return {
+      buildType: detail,
+      origin: coords === null ? null : { system: wanted },
+      unknownSystem: wanted !== '' && coords === null ? wanted : null,
+    };
+  }
+
   @Get('projects')
   async projects(@Req() req: FastifyRequest, @Query('owner') owner?: string) {
     const me = await this.#caller(

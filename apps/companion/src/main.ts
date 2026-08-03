@@ -13,6 +13,8 @@ import { explain } from './display-mode.js';
 import {
   colonyAssign,
   colonyAtMarket,
+  colonyBuildType,
+  colonyBuildTypes,
   colonyJoin,
   colonyLeave,
   colonyProject,
@@ -1382,6 +1384,15 @@ if (!app.requestSingleInstanceLock()) {
      * process attaches the credential, so the device token never reaches the page.
      */
     const projectId = (v: unknown): string => (typeof v === 'string' ? v : '');
+
+    /*
+     * The build catalogue. Squadron owner, 2026-08-03: "ensure the Companion app matches and has all
+     * the same pages in colonization that the website has please! must be a mirror!"
+     */
+    ipcMain.handle('colonyBuildTypes', () => colonyBuildTypes(hub()));
+    ipcMain.handle('colonyBuildType', (_e, id: unknown, near: unknown) =>
+      colonyBuildType(hub(), projectId(id), typeof near === 'string' ? near : ''),
+    );
 
     ipcMain.handle('colonyRoster', (_e, id: unknown) => colonyRoster(hub(), projectId(id)));
     ipcMain.handle('colonyJoin', (_e, id: unknown) => colonyJoin(hub(), projectId(id)));

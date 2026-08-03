@@ -55,7 +55,7 @@ export default async function MemberProjectsPage() {
         <Section title="Members’ projects">
           <ProjectBoard
             projects={personal}
-            emptyMessage="Nobody has posted a project yet. Post yours from New project and the squadron can see what you need."
+            emptyMessage="Nobody has posted a project yet. Post yours from Start New Project and the squadron can see what you need."
           />
         </Section>
       </PageBody>

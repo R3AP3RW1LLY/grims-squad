@@ -223,6 +223,64 @@ export const colonyUnassign = (
 ): Promise<Answer<{ ok: true }>> =>
   hubColony(call, `/projects/${encodeURIComponent(id)}/unassign`, { method: 'POST', body });
 
+/** One kind of construction site, and what it costs to build. */
+export interface BuildTypeRow {
+  readonly id: string;
+  readonly displayName: string;
+  readonly category: string;
+  readonly tier: number;
+  readonly location: 'orbital' | 'surface';
+  readonly padSize: 'none' | 'small' | 'medium' | 'large';
+  readonly totalTonnes: number;
+  readonly commodities: number;
+  /**
+   * `community` or `observed`.
+   *
+   * Frontier publishes none of these figures. Every one is either somebody's gathered number or a
+   * measurement from one of our own builds, and a member deciding whether to commit a fortnight of
+   * hauling deserves to know which.
+   */
+  readonly source: 'community' | 'observed';
+  readonly confirmations: number;
+}
+
+export interface BuildCostLine {
+  readonly commodity: string;
+  readonly tonnes: number;
+  readonly price: number | null;
+  readonly stationName: string | null;
+  readonly systemName: string | null;
+  readonly distance: number | null;
+  readonly cost: number | null;
+}
+
+export interface BuildTypeDetail extends BuildTypeRow {
+  readonly layouts: readonly string[];
+  readonly costs: readonly BuildCostLine[];
+  readonly total: number;
+  readonly unsourced: number;
+}
+
+export const colonyBuildTypes = (
+  call: HubCall,
+): Promise<Answer<{ buildTypes: BuildTypeRow[] }>> => hubColony(call, '/build-types');
+
+export const colonyBuildType = (
+  call: HubCall,
+  id: string,
+  near: string,
+): Promise<
+  Answer<{
+    buildType: BuildTypeDetail;
+    origin: { system: string } | null;
+    unknownSystem: string | null;
+  }>
+> =>
+  hubColony(
+    call,
+    `/build-types/${encodeURIComponent(id)}${near === '' ? '' : `?near=${encodeURIComponent(near)}`}`,
+  );
+
 export const postColonyProject = (
   call: HubCall,
   body: {

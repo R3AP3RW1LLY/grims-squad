@@ -121,6 +121,10 @@ contextBridge.exposeInMainWorld('colony', {
   at: (marketId: string) => ipcRenderer.invoke('colonyAt', marketId),
   post: (body: unknown) => ipcRenderer.invoke('colonyPost', body),
 
+  /** Every kind of construction site, and what one costs near a system you name. */
+  buildTypes: () => ipcRenderer.invoke('colonyBuildTypes'),
+  buildType: (id: string, near: string) => ipcRenderer.invoke('colonyBuildType', id, near),
+
   /** Who is on a build, what they have taken on, and what they have delivered. */
   roster: (id: string) => ipcRenderer.invoke('colonyRoster', id),
   join: (id: string) => ipcRenderer.invoke('colonyJoin', id),

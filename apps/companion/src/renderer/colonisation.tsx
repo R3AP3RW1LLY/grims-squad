@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 import type {
+  BuildTypeDetail,
+  BuildTypeRow,
   RosterEntry,
   ColonyHauler,
   ColonyNeed,
@@ -52,6 +54,22 @@ declare global {
       project(id: string): Promise<Answer<ProjectDetailData>>;
       at(marketId: string): Promise<Answer<{ project: ColonyProject | null; needs: ColonyNeed[] }>>;
       post(body: unknown): Promise<Answer<{ id: string }>>;
+      /*
+       * The build catalogue. Declared here with the rest of the bridge rather than beside the page
+       * that uses it — `window.colony` is one object, and a second `declare global` for it is a
+       * conflicting declaration rather than an addition.
+       */
+      buildTypes(): Promise<Answer<{ buildTypes: BuildTypeRow[] }>>;
+      buildType(
+        id: string,
+        near: string,
+      ): Promise<
+        Answer<{
+          buildType: BuildTypeDetail;
+          origin: { system: string } | null;
+          unknownSystem: string | null;
+        }>
+      >;
       roster(id: string): Promise<Answer<{ roster: RosterEntry[] }>>;
       join(id: string): Promise<Answer<{ ok: true }>>;
       leave(id: string): Promise<Answer<{ ok: true }>>;
