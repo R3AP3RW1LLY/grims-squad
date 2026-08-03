@@ -208,6 +208,14 @@ const NAV: readonly NavDefinition[] = [
     requires: Permission.COLONY_VIEW,
   },
   {
+    href: '/colonisation/build-types',
+    label: 'Build types',
+    section: 'squadron',
+    subsection: 'Colonisation',
+    blurb: 'What every kind of construction site costs to build.',
+    requires: Permission.COLONY_VIEW,
+  },
+  {
     href: '/colonisation/members',
     label: 'Members’ projects',
     section: 'squadron',

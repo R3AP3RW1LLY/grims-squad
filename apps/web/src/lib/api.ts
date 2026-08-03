@@ -1667,6 +1667,20 @@ export interface ColonyProject {
   visibility: 'private' | 'squadron' | 'public';
   shareToken: string | null;
   isPriority: boolean;
+  /**
+   * What the site actually is, worked out from what it asks for.
+   *
+   * Not the free-text `buildType` somebody typed — this is the catalogue row the requirement
+   * fingerprints to. Null until somebody has docked there.
+   */
+  identified: {
+    id: string;
+    displayName: string;
+    tier: number;
+    padSize: string;
+    location: string;
+    totalTonnes: number;
+  } | null;
   completedAt: string | null;
   postedBy: string | null;
   postedById: string;
@@ -1775,6 +1789,63 @@ export interface ColonyRights {
   manage: boolean;
   publish: boolean;
 }
+
+/** One kind of construction site, and what it costs to build. */
+export interface ColonyBuildType {
+  id: string;
+  displayName: string;
+  category: string;
+  tier: number;
+  location: 'orbital' | 'surface';
+  padSize: 'none' | 'small' | 'medium' | 'large';
+  totalTonnes: number;
+  commodities: number;
+  /**
+   * Where the numbers came from.
+   *
+   * Frontier publishes none of this, so every figure is either community-gathered or a measurement
+   * from one of our own builds — and somebody deciding whether to commit a fortnight of hauling to
+   * a plan deserves to know which.
+   */
+  source: 'community' | 'observed';
+  confirmations: number;
+}
+
+export interface ColonyBuildCostLine {
+  commodity: string;
+  tonnes: number;
+  price: number | null;
+  stationName: string | null;
+  systemName: string | null;
+  distance: number | null;
+  cost: number | null;
+}
+
+export interface ColonyBuildTypeDetail extends ColonyBuildType {
+  layouts: string[];
+  costs: ColonyBuildCostLine[];
+  total: number;
+  unsourced: number;
+}
+
+export const getBuildTypes = (): Promise<AdminRead<{ buildTypes: ColonyBuildType[] }>> =>
+  getAdmin('/v1/logistics/colony/build-types');
+
+export const getBuildType = (
+  id: string,
+  query: Record<string, string> = {},
+): Promise<
+  AdminRead<{
+    buildType: ColonyBuildTypeDetail;
+    origin: { system: string } | null;
+    unknownSystem: string | null;
+  }>
+> => {
+  const qs = new URLSearchParams(query).toString();
+  return getAdmin(
+    `/v1/logistics/colony/build-types/${encodeURIComponent(id)}${qs === '' ? '' : `?${qs}`}`,
+  );
+};
 
 export const getColonyProjects = (
   owner: 'squadron' | 'personal' | 'all' = 'all',

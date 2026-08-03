@@ -90,6 +90,33 @@ export default async function ColonyProjectPage({
         {project.stationName === null ? null : <span className="ml-2">· {project.stationName}</span>}
       </p>
       <PageBody wide>
+        {/*
+          ★ WHAT THE SITE ACTUALLY IS ★
+
+          Worked out from what it asks for, not from anything anybody typed. The journal never says
+          what is being built — but a build type's bill of materials is twenty-odd commodities at
+          exact tonnages and no two share one, so the requirement identifies it.
+
+          Absent until somebody has docked there, and absent for a build type we have not recorded,
+          which is information rather than a gap.
+        */}
+        {project.identified === null ? null : (
+          <p className="m-0 mb-6 flex flex-wrap items-baseline gap-x-2 text-sm text-[var(--color-text-secondary)]">
+            <span>This is a</span>
+            <a
+              href={`/colonisation/build-types/${encodeURIComponent(project.identified.id)}`}
+              className="text-[var(--color-brand-cyan-bright)] no-underline hover:underline"
+            >
+              {project.identified.displayName}
+            </a>
+            <span className="font-mono text-[11px] uppercase tracking-[0.16em]">
+              tier {project.identified.tier} · {project.identified.location}
+              {project.identified.padSize === 'none' ? '' : ` · ${project.identified.padSize} pad`} ·{' '}
+              {project.identified.totalTonnes.toLocaleString()} t in total
+            </span>
+          </p>
+        )}
+
         <StatGrid>
           <StatTile
             label="Still needed"
