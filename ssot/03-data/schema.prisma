@@ -508,6 +508,8 @@ model User {
   /// Colonisation. Projects they posted, and cargo they hauled to anybody's — two relations
   /// because helping with somebody else's build is the common case, not the exception.
   colonyProjects       ColonyProject[]      @relation("ColonyProjectPoster")
+  /// Plans this member drew up. See ColonyPlan — a plan is a system's shape before it is built.
+  colonyPlans          ColonyPlan[]
   colonyContributions  ColonyContribution[] @relation("ColonyContributor")
   /// Projects they have joined, what they have taken on, what they have handed out, and carriers
   /// they have offered. Four relations because they are four different acts.
@@ -2328,7 +2330,13 @@ model ColonyProject {
   /// identifies the build. Nobody picks from a dropdown, and the catalogue is checked against
   /// reality on the same read.
   buildTypeId String?          @map("build_type_id")
-  buildType   ColonyBuildType? @relation(fields: [buildTypeId], references: [id], onDelete: SetNull)
+  /// Named `identifiedType`, not `buildType`: the free-text `buildType` above is what somebody
+  /// TYPED when they posted, and this is what the site's requirement actually fingerprints to. Two
+  /// fields with one name is how they get confused for each other, and Prisma refuses it outright.
+  identifiedType ColonyBuildType? @relation(fields: [buildTypeId], references: [id], onDelete: SetNull)
+  /// Plan entries that became this project. A planned site links to the real build once it exists,
+  /// so a plan can show its own progress rather than only its intention.
+  plannedAs      ColonyPlanSite[]
 
   needs         ColonyNeed[]
   contributions ColonyContribution[]
@@ -2368,6 +2376,161 @@ model ColonyNeed {
   @@id([projectId, commodity])
   @@index([commodity])
   @@map("colony_needs")
+}
+
+/// A star system's bodies, cached from EDSM.
+///
+/// ★ SQUADRON OWNER, 2026-08-03 ★
+///
+/// "ideally what we would like is the same interface that raven gives us, a layout of the system,
+/// with spots on each planet that we can settle etc."
+///
+/// ★ WE HELD NO BODY DATA AT ALL ★
+///
+/// Not one table, anywhere. The EDDN collector consumes `commodity/3` and discards the `Scan`
+/// events that carry bodies — which are 34.7% of the firehose — so a planner had nothing to lay out.
+///
+/// EDSM answers this on demand: one request per system, no paging (173 bodies came back in a single
+/// response), every field a planner needs, and a measured 720-per-hour token bucket. So bodies are
+/// fetched when somebody first plans a system and cached here rather than bulk-imported. A squadron
+/// plans a handful of systems, not the galaxy.
+model ColonySystem {
+  /// Frontier's own 64-bit address. The join key EDSM, Spansh and the journal all agree on.
+  id64 BigInt @id
+
+  name String @unique
+
+  /// What EDSM believes the system holds, so a partial scan can say so.
+  bodyCount Int?
+
+  /// When we last asked. Shown on the page — a body list nobody can date is one nobody can trust.
+  fetchedAt DateTime @map("fetched_at") @db.Timestamptz(6)
+
+  bodies ColonyBody[]
+  plans  ColonyPlan[]
+
+  @@map("colony_systems")
+}
+
+/// One body in a system, with the slot counts a member read off the in-game map.
+///
+/// ★ SLOT COUNTS ARE ENTERED, NOT PREDICTED — SQUADRON OWNER, 2026-08-03 ★
+///
+/// A community formula exists for SURFACE slots and none exists for orbital: RavenColonial predicts
+/// the first and asks the member for the second. The owner chose to ask for both, which is the
+/// stricter and more honest answer — every number on the planner is then something somebody read
+/// off their own screen rather than something we inferred.
+///
+/// They live on the BODY rather than on a plan, because how many slots a body has is a fact about
+/// the system. One member reads it once and every plan of that system has it.
+model ColonyBody {
+  systemId64 BigInt @map("system_id64")
+  /// EDSM's `bodyId`, stable within a system.
+  bodyId     Int    @map("body_id")
+
+  name    String
+  /// `Star`, `Planet` or `Belt`.
+  kind    String
+  /// EDSM's `subType` — "High metal content world", "Class I gas giant", and so on.
+  subType String? @map("sub_type")
+
+  isLandable    Boolean @default(false) @map("is_landable")
+  /// In g. Above 2.7 nothing can be built on the surface.
+  gravity       Float?
+  /// In K. Above 700 nothing can be built on the surface.
+  temperature   Float?
+  /// Light seconds from the arrival point — how far somebody has to fly after they drop in.
+  distanceLs    Float?  @map("distance_ls")
+  radiusKm      Float?  @map("radius_km")
+  hasRings      Boolean @default(false) @map("has_rings")
+  terraformable Boolean @default(false)
+  hasAtmosphere Boolean @default(false) @map("has_atmosphere")
+  hasVolcanism  Boolean @default(false) @map("has_volcanism")
+
+  /// The body this orbits, so a moon can be drawn under its planet. Null for the primary star.
+  parentBodyId Int? @map("parent_body_id")
+
+  /// Read off the in-game architect view. Null until somebody has looked.
+  orbitalSlots Int? @map("orbital_slots")
+  surfaceSlots Int? @map("surface_slots")
+  /// Who entered them and when, so a wrong number has an author rather than being anonymous.
+  slotsById    String?   @map("slots_by_id") @db.Uuid
+  slotsAt      DateTime? @map("slots_at") @db.Timestamptz(6)
+
+  system ColonySystem     @relation(fields: [systemId64], references: [id64], onDelete: Cascade)
+  sites  ColonyPlanSite[]
+
+  @@id([systemId64, bodyId])
+  @@index([systemId64, parentBodyId])
+  @@map("colony_bodies")
+}
+
+/// A plan for colonising a whole system, before any of it is built.
+///
+/// ★ THE THING A PROJECT CANNOT BE ★
+///
+/// A project tracks ONE construction site that already exists in the game. A plan is the shape of a
+/// system somebody intends to build — thirty sites across a dozen bodies, ordered, costed, and
+/// argued over on Discord long before the first beacon is dropped.
+model ColonyPlan {
+  id String @id @default(uuid()) @db.Uuid
+
+  /// Squadron or personal, and it governs who may edit — the same rule projects use.
+  owner ColonyOwner
+
+  title      String
+  systemName String  @map("system_name")
+  systemId64 BigInt? @map("system_id64")
+  notes      String?
+
+  /// Optimistic concurrency. Two officers editing one plan must not silently overwrite each other.
+  version Int @default(1)
+
+  postedById String   @map("posted_by_id") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  postedBy User          @relation(fields: [postedById], references: [id], onDelete: Cascade)
+  system   ColonySystem? @relation(fields: [systemId64], references: [id64], onDelete: SetNull)
+  sites    ColonyPlanSite[]
+
+  @@index([owner])
+  @@index([systemId64])
+  @@map("colony_plans")
+}
+
+/// One intended build, in one slot, on one body.
+model ColonyPlanSite {
+  id     String @id @default(uuid()) @db.Uuid
+  planId String @map("plan_id") @db.Uuid
+
+  /// Which body it goes on. Null while somebody is still deciding where to put it.
+  systemId64 BigInt? @map("system_id64")
+  bodyId     Int?    @map("body_id")
+
+  /// `orbital` or `surface`. Decides which pool of slots it consumes.
+  location String
+
+  /// The catalogue row. Null for a slot somebody has reserved without choosing what goes in it.
+  buildTypeId String? @map("build_type_id")
+
+  /// Where it sits in the build order. Tier points are earned and spent in this sequence.
+  position Int
+
+  /// True for the system's FIRST station, which the game treats specially and charges nothing for.
+  isPrimary Boolean @default(false) @map("is_primary")
+
+  /// Set once this intention became a real construction site, so a plan can show its own progress.
+  projectId String? @map("project_id") @db.Uuid
+
+  plan      ColonyPlan       @relation(fields: [planId], references: [id], onDelete: Cascade)
+  body      ColonyBody?      @relation(fields: [systemId64, bodyId], references: [systemId64, bodyId], onDelete: SetNull)
+  buildType ColonyBuildType? @relation(fields: [buildTypeId], references: [id], onDelete: SetNull)
+  project   ColonyProject?   @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  @@index([planId, position])
+  @@index([buildTypeId])
+  @@map("colony_plan_sites")
 }
 
 /// What a construction site of a given kind costs to build.
@@ -2422,8 +2585,9 @@ model ColonyBuildType {
 
   updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
 
-  costs    ColonyBuildCost[]
-  projects ColonyProject[]
+  costs     ColonyBuildCost[]
+  projects  ColonyProject[]
+  planSites ColonyPlanSite[]
 
   @@index([category])
   @@index([tier])

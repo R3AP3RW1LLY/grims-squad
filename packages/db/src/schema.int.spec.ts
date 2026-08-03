@@ -164,7 +164,18 @@ describe('P0.2 database schema', () => {
     // The costs carry DISPLAY commodity names for exactly that reason. Seeded from community
     // figures, then corrected by our own depot readings — which caught one wrong name on the first
     // comparison, so the mechanism is not theoretical.
-    expect(Number(r[0]?.n)).toBe(93);
+    //
+    // 97 as of 2026-08-03: colony_systems, colony_bodies, colony_plans, colony_plan_sites. The
+    // system planner — a system's bodies, and the plans drawn on them.
+    //
+    // We held no body data at all before this: the EDDN collector consumes commodity/3 and discards
+    // the Scan events that carry bodies, which are 34.7% of the whole firehose. Bodies come from
+    // EDSM on demand and are cached, because a squadron plans a handful of systems rather than the
+    // galaxy.
+    //
+    // Slot counts live on the BODY rather than on a plan, because how many slots a body has is a
+    // fact about the system — one member reads it off the in-game map once and every plan has it.
+    expect(Number(r[0]?.n)).toBe(97);
   });
 
   describe('hand-written DDL that Prisma cannot express', () => {
