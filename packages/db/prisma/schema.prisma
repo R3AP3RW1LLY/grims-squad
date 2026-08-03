@@ -2317,6 +2317,19 @@ model ColonyProject {
   updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   postedBy      User                 @relation("ColonyProjectPoster", fields: [postedById], references: [id], onDelete: Cascade)
+  /// Which build type this site is, once its requirement has been fingerprinted against the
+  /// catalogue.
+  ///
+  /// ★ THE JOURNAL NEVER SAYS WHAT IS BEING BUILT ★
+  ///
+  /// `ColonisationConstructionDepot` reports what a site still wants and nothing about its kind,
+  /// and the station name is whatever the architect typed. But a build type's requirement is a
+  /// vector of twenty-odd commodities at exact tonnages and no two share one — so the requirement
+  /// identifies the build. Nobody picks from a dropdown, and the catalogue is checked against
+  /// reality on the same read.
+  buildTypeId String?          @map("build_type_id")
+  buildType   ColonyBuildType? @relation(fields: [buildTypeId], references: [id], onDelete: SetNull)
+
   needs         ColonyNeed[]
   contributions ColonyContribution[]
   members       ColonyMember[]
@@ -2355,6 +2368,83 @@ model ColonyNeed {
   @@id([projectId, commodity])
   @@index([commodity])
   @@map("colony_needs")
+}
+
+/// What a construction site of a given kind costs to build.
+///
+/// ★ SQUADRON OWNER, 2026-08-02 ★
+///
+/// "ensure our baseline colonization setup we have now meets and exceeds the current feature and
+/// system of raven colonial."
+///
+/// Nothing could be planned or pre-costed without this. A project had no needs at all until
+/// somebody physically flew to the site and docked, so "what will this cost me" was unanswerable
+/// before committing to it — which is exactly when it is worth asking.
+///
+/// ★ WHERE THE NUMBERS COME FROM, AND WHY EVERY ROW SAYS SO ★
+///
+/// Frontier publishes none of this. Every figure in circulation is community-gathered, originally
+/// out of their own forum threads, and the lists disagree with each other at the edges. So the
+/// source is recorded per row rather than assumed, and our OWN depot readings are treated as the
+/// better authority: when a member docks at a site whose requirement matches one of these, the row
+/// is confirmed against reality, and where it disagrees, reality wins.
+///
+/// That makes this the one table that gets more accurate the more the squadron builds — which a
+/// hand-curated list cannot do.
+model ColonyBuildType {
+  /// Frontier's own symbol where we know it (`no_truss`), otherwise a slug of the name.
+  id String @id
+
+  /// What a member calls it. "Coriolis Starport".
+  displayName String @map("display_name")
+  /// The family it belongs to, for grouping a long list. "Coriolis", "Outpost", "Settlement".
+  category String
+  /// 1, 2 or 3. What the game charges in construction points.
+  tier Int
+  /// `orbital` or `surface`. Decides which bodies it can go on and how it is hauled to.
+  location String
+  /// `none`, `small`, `medium` or `large`. The pad you can actually land on when it is finished.
+  padSize String @map("pad_size")
+
+  /// Every name this has been seen under, so a station name can be matched back to a type.
+  layouts String[]
+
+  /// Total tonnage across every commodity. Denormalised because every list and sort wants it.
+  totalTonnes Int @map("total_tonnes")
+
+  /// `community` or `observed`. See the note above — `observed` outranks `community`.
+  source String
+
+  /// When one of OUR OWN depot readings last agreed with this row, exactly. Null until it has.
+  confirmedAt DateTime? @map("confirmed_at") @db.Timestamptz(6)
+  /// How many distinct sites of ours have matched it. A row confirmed six times is not a guess.
+  confirmations Int @default(0)
+
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  costs    ColonyBuildCost[]
+  projects ColonyProject[]
+
+  @@index([category])
+  @@index([tier])
+  @@map("colony_build_types")
+}
+
+/// One commodity in one build type's bill of materials.
+///
+/// Commodity names are DISPLAY names ("CMM Composite"), matching `colony_needs` and
+/// `market_entries` — so a build type joins straight against the market mirror to be priced, and
+/// against a live project's needs to be recognised. A symbol here would join against nothing.
+model ColonyBuildCost {
+  buildTypeId String @map("build_type_id")
+  commodity   String
+  tonnes      Int
+
+  buildType ColonyBuildType @relation(fields: [buildTypeId], references: [id], onDelete: Cascade)
+
+  @@id([buildTypeId, commodity])
+  @@index([commodity])
+  @@map("colony_build_costs")
 }
 
 /// Who delivered what.

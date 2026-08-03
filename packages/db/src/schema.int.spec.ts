@@ -154,7 +154,17 @@ describe('P0.2 database schema', () => {
     // Joining a build, taking on a commodity, and offering a carrier to it. `carrier_cargo` is
     // keyed on the CARRIER rather than the project, because a carrier has one hold and attaching it
     // to two builds must not produce two sets of cargo.
-    expect(Number(r[0]?.n)).toBe(91);
+    //
+    // 93 as of 2026-08-03: colony_build_types, colony_build_costs. The build catalogue — what a
+    // construction site of each kind costs. Two tables rather than one JSON column because the
+    // costs are joined against BOTH `market_entries` (to price a build before anybody flies there)
+    // and `colony_needs` (to identify what a site is from what it asks for), and neither join is
+    // possible against a blob.
+    //
+    // The costs carry DISPLAY commodity names for exactly that reason. Seeded from community
+    // figures, then corrected by our own depot readings — which caught one wrong name on the first
+    // comparison, so the mechanism is not theoretical.
+    expect(Number(r[0]?.n)).toBe(93);
   });
 
   describe('hand-written DDL that Prisma cannot express', () => {

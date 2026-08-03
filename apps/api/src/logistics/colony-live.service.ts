@@ -1,4 +1,5 @@
 import {
+  identifyBuildTypes,
   PrismaColonyStore,
   syncColonyProjects,
   type PrismaClient,
@@ -46,6 +47,17 @@ export class ColonyLiveService {
   async applyAt(marketId: bigint): Promise<void> {
     try {
       await syncColonyProjects(new OneSiteStore(this.db, marketId));
+
+      /*
+       * ★ AND WORK OUT WHAT IT IS ★
+       *
+       * Straight after the needs land, because that is the only moment the requirement is both
+       * present and new. A build type's bill of materials is a fingerprint no two share, so this
+       * tells the project what it is building without anybody choosing from a dropdown — and tells
+       * the catalogue that its figures were right, which is what turns a community number into a
+       * measurement.
+       */
+      await identifyBuildTypes(this.db);
     } catch {
       // Swallowed deliberately. See above: the ingest has already stored the truth.
     }

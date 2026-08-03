@@ -10,7 +10,8 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    }
+    },
+    "./colony-build-seed.json": "./src/colony-build-seed.json"
   },
   "scripts": {
     "build": "tsc -b",

@@ -1,0 +1,5313 @@
+[
+ {
+  "id": "no_truss",
+  "displayName": "Coriolis Starport",
+  "category": "Coriolis",
+  "tier": 2,
+  "location": "orbital",
+  "padSize": "large",
+  "layouts": [
+   "Coriolis",
+   "Dual Truss",
+   "No Truss",
+   "Quad Truss",
+   "dual_truss",
+   "no_truss",
+   "quad_truss"
+  ],
+  "totalTonnes": 53723,
+  "costs": [
+   {
+    "commodity": "Aluminium",
+    "tonnes": 10055
+   },
+   {
+    "commodity": "CMM Composite",
+    "tonnes": 11261
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 1207
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 145
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 644
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 242
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 145
+   },
+   {
+    "commodity": "Insulating Membrane",
+    "tonnes": 644
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 3781
+   },
+   {
+    "commodity": "Medical Diagnostic Equipment",
+    "tonnes": 25
+   },
+   {
+    "commodity": "Non-Lethal Weapons",
+    "tonnes": 25
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 1046
+   },
+   {
+    "commodity": "Power Generators",
+    "tonnes": 65
+   },
+   {
+    "commodity": "Semiconductors",
+    "tonnes": 161
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 14076
+   },
+   {
+    "commodity": "Superconductors",
+    "tonnes": 282
+   },
+   {
+    "commodity": "Titanium",
+    "tonnes": 8205
+   },
+   {
+    "commodity": "Water",
+    "tonnes": 1609
+   },
+   {
+    "commodity": "Water Purifiers",
+    "tonnes": 105
+   }
+  ]
+ },
+ {
+  "id": "asteroid",
+  "displayName": "Asteroid Base",
+  "category": "Asteroid Base",
+  "tier": 2,
+  "location": "orbital",
+  "padSize": "large",
+  "layouts": [
+   "Asteroid"
+  ],
+  "totalTonnes": 53723,
+  "costs": [
+   {
+    "commodity": "Aluminium",
+    "tonnes": 10055
+   },
+   {
+    "commodity": "CMM Composite",
+    "tonnes": 11261
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 1207
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 145
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 644
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 242
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 145
+   },
+   {
+    "commodity": "Insulating Membrane",
+    "tonnes": 644
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 3781
+   },
+   {
+    "commodity": "Medical Diagnostic Equipment",
+    "tonnes": 25
+   },
+   {
+    "commodity": "Non-Lethal Weapons",
+    "tonnes": 25
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 1046
+   },
+   {
+    "commodity": "Power Generators",
+    "tonnes": 65
+   },
+   {
+    "commodity": "Semiconductors",
+    "tonnes": 161
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 14076
+   },
+   {
+    "commodity": "Superconductors",
+    "tonnes": 282
+   },
+   {
+    "commodity": "Titanium",
+    "tonnes": 8205
+   },
+   {
+    "commodity": "Water",
+    "tonnes": 1609
+   },
+   {
+    "commodity": "Water Purifiers",
+    "tonnes": 105
+   }
+  ]
+ },
+ {
+  "id": "dodec",
+  "displayName": "Dodec Starport",
+  "category": "Dodec",
+  "tier": 3,
+  "location": "orbital",
+  "padSize": "large",
+  "layouts": [
+   "dec_truss",
+   "dodec",
+   "quint_truss"
+  ],
+  "totalTonnes": 236304,
+  "costs": [
+   {
+    "commodity": "Aluminium",
+    "tonnes": 45248
+   },
+   {
+    "commodity": "Auto-Fabricators",
+    "tonnes": 314
+   },
+   {
+    "commodity": "CMM Composite",
+    "tonnes": 50675
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 5432
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 363
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 2898
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 605
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 363
+   },
+   {
+    "commodity": "Insulating Membrane",
+    "tonnes": 1610
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 17015
+   },
+   {
+    "commodity": "Medical Diagnostic Equipment",
+    "tonnes": 63
+   },
+   {
+    "commodity": "Non-Lethal Weapons",
+    "tonnes": 63
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 2615
+   },
+   {
+    "commodity": "Power Generators",
+    "tonnes": 163
+   },
+   {
+    "commodity": "Semiconductors",
+    "tonnes": 403
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 63342
+   },
+   {
+    "commodity": "Superconductors",
+    "tonnes": 705
+   },
+   {
+    "commodity": "Titanium",
+    "tonnes": 36923
+   },
+   {
+    "commodity": "Water",
+    "tonnes": 7241
+   },
+   {
+    "commodity": "Water Purifiers",
+    "tonnes": 263
+   }
+  ]
+ },
+ {
+  "id": "ocellus",
+  "displayName": "Ocellus Starport",
+  "category": "Ocellus",
+  "tier": 3,
+  "location": "orbital",
+  "padSize": "large",
+  "layouts": [
+   "Ocellus"
+  ],
+  "totalTonnes": 209122,
+  "costs": [
+   {
+    "commodity": "Aluminium",
+    "tonnes": 40220
+   },
+   {
+    "commodity": "CMM Composite",
+    "tonnes": 45044
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 4828
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 290
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 2576
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 484
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 290
+   },
+   {
+    "commodity": "Insulating Membrane",
+    "tonnes": 1288
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 15124
+   },
+   {
+    "commodity": "Medical Diagnostic Equipment",
+    "tonnes": 50
+   },
+   {
+    "commodity": "Non-Lethal Weapons",
+    "tonnes": 50
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 2092
+   },
+   {
+    "commodity": "Power Generators",
+    "tonnes": 130
+   },
+   {
+    "commodity": "Semiconductors",
+    "tonnes": 322
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 56304
+   },
+   {
+    "commodity": "Superconductors",
+    "tonnes": 564
+   },
+   {
+    "commodity": "Titanium",
+    "tonnes": 32820
+   },
+   {
+    "commodity": "Water",
+    "tonnes": 6436
+   },
+   {
+    "commodity": "Water Purifiers",
+    "tonnes": 210
+   }
+  ]
+ },
+ {
+  "id": "apollo",
+  "displayName": "Orbis Starport",
+  "category": "Orbis",
+  "tier": 3,
+  "location": "orbital",
+  "padSize": "large",
+  "layouts": [
+   "Apollo",
+   "Artemis"
+  ],
+  "totalTonnes": 209122,
+  "costs": [
+   {
+    "commodity": "Aluminium",
+    "tonnes": 40220
+   },
+   {
+    "commodity": "CMM Composite",
+    "tonnes": 45044
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 4828
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 290
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 2576
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 484
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 290
+   },
+   {
+    "commodity": "Insulating Membrane",
+    "tonnes": 1288
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 15124
+   },
+   {
+    "commodity": "Medical Diagnostic Equipment",
+    "tonnes": 50
+   },
+   {
+    "commodity": "Non-Lethal Weapons",
+    "tonnes": 50
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 2092
+   },
+   {
+    "commodity": "Power Generators",
+    "tonnes": 130
+   },
+   {
+    "commodity": "Semiconductors",
+    "tonnes": 322
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 56304
+   },
+   {
+    "commodity": "Superconductors",
+    "tonnes": 564
+   },
+   {
+    "commodity": "Titanium",
+    "tonnes": 32820
+   },
+   {
+    "commodity": "Water",
+    "tonnes": 6436
+   },
+   {
+    "commodity": "Water Purifiers",
+    "tonnes": 210
+   }
+  ]
+ },
+ {
+  "id": "plutus",
+  "displayName": "Commercial Outpost",
+  "category": "Commercial Outpost",
+  "tier": 1,
+  "location": "orbital",
+  "padSize": "medium",
+  "layouts": [
+   "Plutus"
+  ],
+  "totalTonnes": 18473,
+  "costs": [
+   {
+    "commodity": "CMM Composite",
+    "tonnes": 3912
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 497
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 50
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 218
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 94
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 50
+   },
+   {
+    "commodity": "Insulating Membrane",
+    "tonnes": 311
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 1553
+   },
+   {
+    "commodity": "Medical Diagnostic Equipment",
+    "tonnes": 13
+   },
+   {
+    "commodity": "Non-Lethal Weapons",
+    "tonnes": 13
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 497
+   },
+   {
+    "commodity": "Power Generators",
+    "tonnes": 19
+   },
+   {
+    "commodity": "Semiconductors",
+    "tonnes": 56
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 5588
+   },
+   {
+    "commodity": "Superconductors",
+    "tonnes": 100
+   },
+   {
+    "commodity": "Titanium",
+    "tonnes": 4843
+   },
+   {
+    "commodity": "Water",
+    "tonnes": 621
+   },
+   {
+    "commodity": "Water Purifiers",
+    "tonnes": 38
+   }
+  ]
+ },
+ {
+  "id": "vulcan",
+  "displayName": "Industrial Outpost",
+  "category": "Industrial Outpost",
+  "tier": 1,
+  "location": "orbital",
+  "padSize": "medium",
+  "layouts": [
+   "Vulcan"
+  ],
+  "totalTonnes": 18473,
+  "costs": [
+   {
+    "commodity": "CMM Composite",
+    "tonnes": 3912
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 497
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 50
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 218
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 94
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 50
+   },
+   {
+    "commodity": "Insulating Membrane",
+    "tonnes": 311
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 1553
+   },
+   {
+    "commodity": "Medical Diagnostic Equipment",
+    "tonnes": 13
+   },
+   {
+    "commodity": "Non-Lethal Weapons",
+    "tonnes": 13
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 497
+   },
+   {
+    "commodity": "Power Generators",
+    "tonnes": 19
+   },
+   {
+    "commodity": "Semiconductors",
+    "tonnes": 56
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 5588
+   },
+   {
+    "commodity": "Superconductors",
+    "tonnes": 100
+   },
+   {
+    "commodity": "Titanium",
+    "tonnes": 4843
+   },
+   {
+    "commodity": "Water",
+    "tonnes": 621
+   },
+   {
+    "commodity": "Water Purifiers",
+    "tonnes": 38
+   }
+  ]
+ },
+ {
+  "id": "dysnomia",
+  "displayName": "Pirate Outpost",
+  "category": "Criminal Outpost",
+  "tier": 1,
+  "location": "orbital",
+  "padSize": "medium",
+  "layouts": [
+   "Dysnomia"
+  ],
+  "totalTonnes": 18473,
+  "costs": [
+   {
+    "commodity": "CMM Composite",
+    "tonnes": 3912
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 497
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 50
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 218
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 94
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 50
+   },
+   {
+    "commodity": "Insulating Membrane",
+    "tonnes": 311
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 1553
+   },
+   {
+    "commodity": "Medical Diagnostic Equipment",
+    "tonnes": 13
+   },
+   {
+    "commodity": "Non-Lethal Weapons",
+    "tonnes": 13
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 497
+   },
+   {
+    "commodity": "Power Generators",
+    "tonnes": 19
+   },
+   {
+    "commodity": "Semiconductors",
+    "tonnes": 56
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 5588
+   },
+   {
+    "commodity": "Superconductors",
+    "tonnes": 100
+   },
+   {
+    "commodity": "Titanium",
+    "tonnes": 4843
+   },
+   {
+    "commodity": "Water",
+    "tonnes": 621
+   },
+   {
+    "commodity": "Water Purifiers",
+    "tonnes": 38
+   }
+  ]
+ },
+ {
+  "id": "vesta",
+  "displayName": "Civilian Outpost",
+  "category": "Civilian Outpost",
+  "tier": 1,
+  "location": "orbital",
+  "padSize": "medium",
+  "layouts": [
+   "Vesta"
+  ],
+  "totalTonnes": 18473,
+  "costs": [
+   {
+    "commodity": "CMM Composite",
+    "tonnes": 3912
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 497
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 50
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 218
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 94
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 50
+   },
+   {
+    "commodity": "Insulating Membrane",
+    "tonnes": 311
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 1553
+   },
+   {
+    "commodity": "Medical Diagnostic Equipment",
+    "tonnes": 13
+   },
+   {
+    "commodity": "Non-Lethal Weapons",
+    "tonnes": 13
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 497
+   },
+   {
+    "commodity": "Power Generators",
+    "tonnes": 19
+   },
+   {
+    "commodity": "Semiconductors",
+    "tonnes": 56
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 5588
+   },
+   {
+    "commodity": "Superconductors",
+    "tonnes": 100
+   },
+   {
+    "commodity": "Titanium",
+    "tonnes": 4843
+   },
+   {
+    "commodity": "Water",
+    "tonnes": 621
+   },
+   {
+    "commodity": "Water Purifiers",
+    "tonnes": 38
+   }
+  ]
+ },
+ {
+  "id": "prometheus",
+  "displayName": "Scientific Outpost",
+  "category": "Scientific Outpost",
+  "tier": 1,
+  "location": "orbital",
+  "padSize": "medium",
+  "layouts": [
+   "Prometheus"
+  ],
+  "totalTonnes": 18473,
+  "costs": [
+   {
+    "commodity": "CMM Composite",
+    "tonnes": 3912
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 497
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 50
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 218
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 94
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 50
+   },
+   {
+    "commodity": "Insulating Membrane",
+    "tonnes": 311
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 1553
+   },
+   {
+    "commodity": "Medical Diagnostic Equipment",
+    "tonnes": 13
+   },
+   {
+    "commodity": "Non-Lethal Weapons",
+    "tonnes": 13
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 497
+   },
+   {
+    "commodity": "Power Generators",
+    "tonnes": 19
+   },
+   {
+    "commodity": "Semiconductors",
+    "tonnes": 56
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 5588
+   },
+   {
+    "commodity": "Superconductors",
+    "tonnes": 100
+   },
+   {
+    "commodity": "Titanium",
+    "tonnes": 4843
+   },
+   {
+    "commodity": "Water",
+    "tonnes": 621
+   },
+   {
+    "commodity": "Water Purifiers",
+    "tonnes": 38
+   }
+  ]
+ },
+ {
+  "id": "nemesis",
+  "displayName": "Military Outpost",
+  "category": "Military Outpost",
+  "tier": 1,
+  "location": "orbital",
+  "padSize": "medium",
+  "layouts": [
+   "Nemesis"
+  ],
+  "totalTonnes": 10080,
+  "costs": [
+   {
+    "commodity": "Aluminium",
+    "tonnes": 1317
+   },
+   {
+    "commodity": "Basic Medicines",
+    "tonnes": 24
+   },
+   {
+    "commodity": "Battle Weapons",
+    "tonnes": 30
+   },
+   {
+    "commodity": "CMM Composite",
+    "tonnes": 356
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 238
+   },
+   {
+    "commodity": "Combat Stabilisers",
+    "tonnes": 48
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 42
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 131
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 107
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 48
+   },
+   {
+    "commodity": "Insulating Membrane",
+    "tonnes": 178
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 1424
+   },
+   {
+    "commodity": "Micro Controllers",
+    "tonnes": 18
+   },
+   {
+    "commodity": "Military Grade Fabrics",
+    "tonnes": 36
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 416
+   },
+   {
+    "commodity": "Power Generators",
+    "tonnes": 18
+   },
+   {
+    "commodity": "Reactive Armour",
+    "tonnes": 30
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 2966
+   },
+   {
+    "commodity": "Titanium",
+    "tonnes": 2373
+   },
+   {
+    "commodity": "Water",
+    "tonnes": 238
+   },
+   {
+    "commodity": "Water Purifiers",
+    "tonnes": 42
+   }
+  ]
+ },
+ {
+  "id": "hermes",
+  "displayName": "Satellite Installation",
+  "category": "Satellite",
+  "tier": 1,
+  "location": "orbital",
+  "padSize": "none",
+  "layouts": [
+   "Angelia",
+   "Eirene",
+   "Hermes"
+  ],
+  "totalTonnes": 6721,
+  "costs": [
+   {
+    "commodity": "Aluminium",
+    "tonnes": 1322
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 85
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 22
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 85
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 26
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 9
+   },
+   {
+    "commodity": "Insulating Membrane",
+    "tonnes": 106
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 678
+   },
+   {
+    "commodity": "Micro Controllers",
+    "tonnes": 13
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 170
+   },
+   {
+    "commodity": "Power Generators",
+    "tonnes": 9
+   },
+   {
+    "commodity": "Semiconductors",
+    "tonnes": 34
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 2542
+   },
+   {
+    "commodity": "Superconductors",
+    "tonnes": 60
+   },
+   {
+    "commodity": "Titanium",
+    "tonnes": 1525
+   },
+   {
+    "commodity": "Water",
+    "tonnes": 22
+   },
+   {
+    "commodity": "Water Purifiers",
+    "tonnes": 13
+   }
+  ]
+ },
+ {
+  "id": "pistis",
+  "displayName": "Comms Installation",
+  "category": "Communication Station",
+  "tier": 1,
+  "location": "orbital",
+  "padSize": "none",
+  "layouts": [
+   "Aletheia",
+   "Pistis",
+   "Soter"
+  ],
+  "totalTonnes": 6721,
+  "costs": [
+   {
+    "commodity": "Aluminium",
+    "tonnes": 1322
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 85
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 22
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 85
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 26
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 9
+   },
+   {
+    "commodity": "Insulating Membrane",
+    "tonnes": 106
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 678
+   },
+   {
+    "commodity": "Micro Controllers",
+    "tonnes": 13
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 170
+   },
+   {
+    "commodity": "Power Generators",
+    "tonnes": 9
+   },
+   {
+    "commodity": "Semiconductors",
+    "tonnes": 34
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 2542
+   },
+   {
+    "commodity": "Superconductors",
+    "tonnes": 60
+   },
+   {
+    "commodity": "Titanium",
+    "tonnes": 1525
+   },
+   {
+    "commodity": "Water",
+    "tonnes": 22
+   },
+   {
+    "commodity": "Water Purifiers",
+    "tonnes": 13
+   }
+  ]
+ },
+ {
+  "id": "demeter",
+  "displayName": "Agricultural Installation",
+  "category": "Space Farm",
+  "tier": 1,
+  "location": "orbital",
+  "padSize": "none",
+  "layouts": [
+   "Demeter"
+  ],
+  "totalTonnes": 6722,
+  "costs": [
+   {
+    "commodity": "Agricultural Medicines",
+    "tonnes": 115
+   },
+   {
+    "commodity": "Aluminium",
+    "tonnes": 842
+   },
+   {
+    "commodity": "Biowaste",
+    "tonnes": 153
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 77
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 12
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 46
+   },
+   {
+    "commodity": "Crop Harvesters",
+    "tonnes": 77
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 46
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 69
+   },
+   {
+    "commodity": "Grain",
+    "tonnes": 92
+   },
+   {
+    "commodity": "Insulating Membrane",
+    "tonnes": 192
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 1071
+   },
+   {
+    "commodity": "Pesticides",
+    "tonnes": 123
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 230
+   },
+   {
+    "commodity": "Power Generators",
+    "tonnes": 8
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 1912
+   },
+   {
+    "commodity": "Titanium",
+    "tonnes": 1453
+   },
+   {
+    "commodity": "Water",
+    "tonnes": 173
+   },
+   {
+    "commodity": "Water Purifiers",
+    "tonnes": 31
+   }
+  ]
+ },
+ {
+  "id": "apate",
+  "displayName": "Pirate Installation",
+  "category": "Pirate Base",
+  "tier": 1,
+  "location": "orbital",
+  "padSize": "none",
+  "layouts": [
+   "Apate",
+   "Laverna"
+  ],
+  "totalTonnes": 6721,
+  "costs": [
+   {
+    "commodity": "Aluminium",
+    "tonnes": 1233
+   },
+   {
+    "commodity": "Battle Weapons",
+    "tonnes": 23
+   },
+   {
+    "commodity": "Beer",
+    "tonnes": 380
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 95
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 19
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 57
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 61
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 16
+   },
+   {
+    "commodity": "Insulating Membrane",
+    "tonnes": 95
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 911
+   },
+   {
+    "commodity": "Liquor",
+    "tonnes": 228
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 190
+   },
+   {
+    "commodity": "Power Generators",
+    "tonnes": 8
+   },
+   {
+    "commodity": "Reactive Armour",
+    "tonnes": 23
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 1707
+   },
+   {
+    "commodity": "Titanium",
+    "tonnes": 1594
+   },
+   {
+    "commodity": "Water",
+    "tonnes": 65
+   },
+   {
+    "commodity": "Water Purifiers",
+    "tonnes": 16
+   }
+  ]
+ },
+ {
+  "id": "euthenia",
+  "displayName": "Industrial Installation",
+  "category": "Mining Outpost",
+  "tier": 1,
+  "location": "orbital",
+  "padSize": "none",
+  "layouts": [
+   "Euthenia",
+   "Phorcys"
+  ],
+  "totalTonnes": 6723,
+  "costs": [
+   {
+    "commodity": "Aluminium",
+    "tonnes": 921
+   },
+   {
+    "commodity": "Bioreducing Lichen",
+    "tonnes": 172
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 86
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 13
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 52
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 52
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 18
+   },
+   {
+    "commodity": "Geological Equipment",
+    "tonnes": 26
+   },
+   {
+    "commodity": "Hazardous Environment Suits",
+    "tonnes": 13
+   },
+   {
+    "commodity": "Insulating Membrane",
+    "tonnes": 129
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 1028
+   },
+   {
+    "commodity": "Muon Imager",
+    "tonnes": 43
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 215
+   },
+   {
+    "commodity": "Power Generators",
+    "tonnes": 9
+   },
+   {
+    "commodity": "Resonating Separators",
+    "tonnes": 22
+   },
+   {
+    "commodity": "Robotics",
+    "tonnes": 60
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 2141
+   },
+   {
+    "commodity": "Titanium",
+    "tonnes": 1628
+   },
+   {
+    "commodity": "Water",
+    "tonnes": 73
+   },
+   {
+    "commodity": "Water Purifiers",
+    "tonnes": 22
+   }
+  ]
+ },
+ {
+  "id": "enodia",
+  "displayName": "Relay Installation",
+  "category": "Relay Station",
+  "tier": 1,
+  "location": "orbital",
+  "padSize": "none",
+  "layouts": [
+   "Enodia",
+   "Ichnaea"
+  ],
+  "totalTonnes": 6721,
+  "costs": [
+   {
+    "commodity": "Aluminium",
+    "tonnes": 1033
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 98
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 25
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 88
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 30
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 10
+   },
+   {
+    "commodity": "Insulating Membrane",
+    "tonnes": 122
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 780
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 195
+   },
+   {
+    "commodity": "Power Generators",
+    "tonnes": 10
+   },
+   {
+    "commodity": "Semiconductors",
+    "tonnes": 39
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 2437
+   },
+   {
+    "commodity": "Superconductors",
+    "tonnes": 59
+   },
+   {
+    "commodity": "Titanium",
+    "tonnes": 1755
+   },
+   {
+    "commodity": "Water",
+    "tonnes": 25
+   },
+   {
+    "commodity": "Water Purifiers",
+    "tonnes": 15
+   }
+  ]
+ },
+ {
+  "id": "vacuna",
+  "displayName": "Military Installation",
+  "category": "Military",
+  "tier": 2,
+  "location": "orbital",
+  "padSize": "none",
+  "layouts": [
+   "Alastor",
+   "Vacuna"
+  ],
+  "totalTonnes": 10080,
+  "costs": [
+   {
+    "commodity": "Aluminium",
+    "tonnes": 1317
+   },
+   {
+    "commodity": "Basic Medicines",
+    "tonnes": 24
+   },
+   {
+    "commodity": "Battle Weapons",
+    "tonnes": 30
+   },
+   {
+    "commodity": "CMM Composite",
+    "tonnes": 356
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 238
+   },
+   {
+    "commodity": "Combat Stabilisers",
+    "tonnes": 48
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 42
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 131
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 107
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 48
+   },
+   {
+    "commodity": "Insulating Membrane",
+    "tonnes": 178
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 1424
+   },
+   {
+    "commodity": "Micro Controllers",
+    "tonnes": 18
+   },
+   {
+    "commodity": "Military Grade Fabrics",
+    "tonnes": 36
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 416
+   },
+   {
+    "commodity": "Power Generators",
+    "tonnes": 18
+   },
+   {
+    "commodity": "Reactive Armour",
+    "tonnes": 30
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 2966
+   },
+   {
+    "commodity": "Titanium",
+    "tonnes": 2373
+   },
+   {
+    "commodity": "Water",
+    "tonnes": 238
+   },
+   {
+    "commodity": "Water Purifiers",
+    "tonnes": 42
+   }
+  ]
+ },
+ {
+  "id": "dicaeosyne",
+  "displayName": "Security Installation",
+  "category": "Security Station",
+  "tier": 2,
+  "location": "orbital",
+  "padSize": "none",
+  "layouts": [
+   "Dicaeosyne",
+   "Eunomia",
+   "Nomos",
+   "Poena"
+  ],
+  "totalTonnes": 10082,
+  "costs": [
+   {
+    "commodity": "Aluminium",
+    "tonnes": 1774
+   },
+   {
+    "commodity": "Battle Weapons",
+    "tonnes": 19
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 122
+   },
+   {
+    "commodity": "Combat Stabilisers",
+    "tonnes": 25
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 31
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 122
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 37
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 13
+   },
+   {
+    "commodity": "Insulating Membrane",
+    "tonnes": 183
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 1458
+   },
+   {
+    "commodity": "Military Grade Fabrics",
+    "tonnes": 19
+   },
+   {
+    "commodity": "Non-Lethal Weapons",
+    "tonnes": 19
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 243
+   },
+   {
+    "commodity": "Power Generators",
+    "tonnes": 13
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 3645
+   },
+   {
+    "commodity": "Titanium",
+    "tonnes": 2309
+   },
+   {
+    "commodity": "Water",
+    "tonnes": 31
+   },
+   {
+    "commodity": "Water Purifiers",
+    "tonnes": 19
+   }
+  ]
+ },
+ {
+  "id": "harmonia",
+  "displayName": "Government Installation",
+  "category": "Government",
+  "tier": 2,
+  "location": "orbital",
+  "padSize": "none",
+  "layouts": [
+   "Harmonia"
+  ],
+  "totalTonnes": 10077,
+  "costs": [
+   {
+    "commodity": "Aluminium",
+    "tonnes": 1959
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 154
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 13
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 93
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 93
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 37
+   },
+   {
+    "commodity": "Insulating Membrane",
+    "tonnes": 247
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 1479
+   },
+   {
+    "commodity": "Non-Lethal Weapons",
+    "tonnes": 13
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 370
+   },
+   {
+    "commodity": "Power Generators",
+    "tonnes": 13
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 3080
+   },
+   {
+    "commodity": "Titanium",
+    "tonnes": 2341
+   },
+   {
+    "commodity": "Water",
+    "tonnes": 154
+   },
+   {
+    "commodity": "Water Purifiers",
+    "tonnes": 31
+   }
+  ]
+ },
+ {
+  "id": "asclepius",
+  "displayName": "Medical Installation",
+  "category": "Medical",
+  "tier": 2,
+  "location": "orbital",
+  "padSize": "none",
+  "layouts": [
+   "Asclepius",
+   "Eupraxia"
+  ],
+  "totalTonnes": 10081,
+  "costs": [
+   {
+    "commodity": "Aluminium",
+    "tonnes": 1357
+   },
+   {
+    "commodity": "Basic Medicines",
+    "tonnes": 50
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 155
+   },
+   {
+    "commodity": "Combat Stabilisers",
+    "tonnes": 19
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 31
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 112
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 75
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 50
+   },
+   {
+    "commodity": "Hazardous Environment Suits",
+    "tonnes": 25
+   },
+   {
+    "commodity": "Insulating Membrane",
+    "tonnes": 309
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 1727
+   },
+   {
+    "commodity": "Medical Diagnostic Equipment",
+    "tonnes": 99
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 371
+   },
+   {
+    "commodity": "Power Generators",
+    "tonnes": 19
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 3084
+   },
+   {
+    "commodity": "Titanium",
+    "tonnes": 2282
+   },
+   {
+    "commodity": "Water",
+    "tonnes": 278
+   },
+   {
+    "commodity": "Water Purifiers",
+    "tonnes": 38
+   }
+  ]
+ },
+ {
+  "id": "astraeus",
+  "displayName": "Scientific Installation",
+  "category": "Research Station",
+  "tier": 2,
+  "location": "orbital",
+  "padSize": "none",
+  "layouts": [
+   "Astraeus",
+   "Coeus",
+   "Dione",
+   "Dodona"
+  ],
+  "totalTonnes": 10083,
+  "costs": [
+   {
+    "commodity": "Advanced Catalysers",
+    "tonnes": 44
+   },
+   {
+    "commodity": "Aluminium",
+    "tonnes": 1380
+   },
+   {
+    "commodity": "Basic Medicines",
+    "tonnes": 13
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 157
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 38
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 126
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 76
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 26
+   },
+   {
+    "commodity": "Geological Equipment",
+    "tonnes": 26
+   },
+   {
+    "commodity": "Hazardous Environment Suits",
+    "tonnes": 32
+   },
+   {
+    "commodity": "Insulating Membrane",
+    "tonnes": 314
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 1506
+   },
+   {
+    "commodity": "Medical Diagnostic Equipment",
+    "tonnes": 51
+   },
+   {
+    "commodity": "Micro Controllers",
+    "tonnes": 13
+   },
+   {
+    "commodity": "Muon Imager",
+    "tonnes": 38
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 377
+   },
+   {
+    "commodity": "Power Generators",
+    "tonnes": 13
+   },
+   {
+    "commodity": "Semiconductors",
+    "tonnes": 51
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 3136
+   },
+   {
+    "commodity": "Superconductors",
+    "tonnes": 88
+   },
+   {
+    "commodity": "Titanium",
+    "tonnes": 2383
+   },
+   {
+    "commodity": "Water",
+    "tonnes": 157
+   },
+   {
+    "commodity": "Water Purifiers",
+    "tonnes": 38
+   }
+  ]
+ },
+ {
+  "id": "hedone",
+  "displayName": "Tourist Installation",
+  "category": "Tourist",
+  "tier": 2,
+  "location": "orbital",
+  "padSize": "none",
+  "layouts": [
+   "Hedone",
+   "Opora",
+   "Pasithea"
+  ],
+  "totalTonnes": 10078,
+  "costs": [
+   {
+    "commodity": "Aluminium",
+    "tonnes": 1269
+   },
+   {
+    "commodity": "Animal Meat",
+    "tonnes": 78
+   },
+   {
+    "commodity": "Beer",
+    "tonnes": 389
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 130
+   },
+   {
+    "commodity": "Coffee",
+    "tonnes": 130
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 13
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 78
+   },
+   {
+    "commodity": "Fish",
+    "tonnes": 39
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 65
+   },
+   {
+    "commodity": "Insulating Membrane",
+    "tonnes": 259
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 1813
+   },
+   {
+    "commodity": "Liquor",
+    "tonnes": 195
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 324
+   },
+   {
+    "commodity": "Power Generators",
+    "tonnes": 13
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 2589
+   },
+   {
+    "commodity": "Tea",
+    "tonnes": 259
+   },
+   {
+    "commodity": "Titanium",
+    "tonnes": 1813
+   },
+   {
+    "commodity": "Water",
+    "tonnes": 324
+   },
+   {
+    "commodity": "Water Purifiers",
+    "tonnes": 39
+   },
+   {
+    "commodity": "Wine",
+    "tonnes": 259
+   }
+  ]
+ },
+ {
+  "id": "dionysus",
+  "displayName": "Space Bar",
+  "category": "Bar",
+  "tier": 2,
+  "location": "orbital",
+  "padSize": "none",
+  "layouts": [
+   "Bacchus",
+   "Dionysus"
+  ],
+  "totalTonnes": 10085,
+  "costs": [
+   {
+    "commodity": "Aluminium",
+    "tonnes": 1217
+   },
+   {
+    "commodity": "Animal Meat",
+    "tonnes": 38
+   },
+   {
+    "commodity": "Beer",
+    "tonnes": 497
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 125
+   },
+   {
+    "commodity": "Coffee",
+    "tonnes": 63
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 13
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 75
+   },
+   {
+    "commodity": "Fish",
+    "tonnes": 19
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 38
+   },
+   {
+    "commodity": "Insulating Membrane",
+    "tonnes": 249
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 1738
+   },
+   {
+    "commodity": "Liquor",
+    "tonnes": 311
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 311
+   },
+   {
+    "commodity": "Power Generators",
+    "tonnes": 13
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 2483
+   },
+   {
+    "commodity": "Tea",
+    "tonnes": 187
+   },
+   {
+    "commodity": "Titanium",
+    "tonnes": 1738
+   },
+   {
+    "commodity": "Water",
+    "tonnes": 311
+   },
+   {
+    "commodity": "Water Purifiers",
+    "tonnes": 38
+   },
+   {
+    "commodity": "Wine",
+    "tonnes": 621
+   }
+  ]
+ },
+ {
+  "id": "hestia",
+  "displayName": "Civilian Settlement",
+  "category": "Outpost",
+  "tier": 1,
+  "location": "surface",
+  "padSize": "large",
+  "layouts": [
+   "Atropos",
+   "Clotho",
+   "Decima",
+   "Hestia",
+   "Lachesis",
+   "Nona"
+  ],
+  "totalTonnes": 36829,
+  "costs": [
+   {
+    "commodity": "Aluminium",
+    "tonnes": 7047
+   },
+   {
+    "commodity": "Building Fabricators",
+    "tonnes": 407
+   },
+   {
+    "commodity": "CMM Composite",
+    "tonnes": 6776
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 814
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 102
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 407
+   },
+   {
+    "commodity": "Emergency Power Cells",
+    "tonnes": 68
+   },
+   {
+    "commodity": "Evacuation Shelter",
+    "tonnes": 204
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 136
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 95
+   },
+   {
+    "commodity": "Land Enrichment Systems",
+    "tonnes": 68
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 2372
+   },
+   {
+    "commodity": "Medical Diagnostic Equipment",
+    "tonnes": 48
+   },
+   {
+    "commodity": "Non-Lethal Weapons",
+    "tonnes": 34
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 678
+   },
+   {
+    "commodity": "Power Generators",
+    "tonnes": 68
+   },
+   {
+    "commodity": "Semiconductors",
+    "tonnes": 102
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 10164
+   },
+   {
+    "commodity": "Structural Regulators",
+    "tonnes": 678
+   },
+   {
+    "commodity": "Superconductors",
+    "tonnes": 136
+   },
+   {
+    "commodity": "Surface Stabilisers",
+    "tonnes": 610
+   },
+   {
+    "commodity": "Survival Equipment",
+    "tonnes": 55
+   },
+   {
+    "commodity": "Titanium",
+    "tonnes": 5760
+   }
+  ]
+ },
+ {
+  "id": "hephaestus",
+  "displayName": "Industrial Settlement",
+  "category": "Outpost",
+  "tier": 1,
+  "location": "surface",
+  "padSize": "large",
+  "layouts": [
+   "Bia",
+   "Hephaestus",
+   "Mefitis",
+   "Opis",
+   "Ponos",
+   "Tethys"
+  ],
+  "totalTonnes": 36829,
+  "costs": [
+   {
+    "commodity": "Aluminium",
+    "tonnes": 7047
+   },
+   {
+    "commodity": "Building Fabricators",
+    "tonnes": 407
+   },
+   {
+    "commodity": "CMM Composite",
+    "tonnes": 6776
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 814
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 102
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 407
+   },
+   {
+    "commodity": "Emergency Power Cells",
+    "tonnes": 68
+   },
+   {
+    "commodity": "Evacuation Shelter",
+    "tonnes": 204
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 136
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 95
+   },
+   {
+    "commodity": "Land Enrichment Systems",
+    "tonnes": 68
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 2372
+   },
+   {
+    "commodity": "Medical Diagnostic Equipment",
+    "tonnes": 48
+   },
+   {
+    "commodity": "Non-Lethal Weapons",
+    "tonnes": 34
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 678
+   },
+   {
+    "commodity": "Power Generators",
+    "tonnes": 68
+   },
+   {
+    "commodity": "Semiconductors",
+    "tonnes": 102
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 10164
+   },
+   {
+    "commodity": "Structural Regulators",
+    "tonnes": 678
+   },
+   {
+    "commodity": "Superconductors",
+    "tonnes": 136
+   },
+   {
+    "commodity": "Surface Stabilisers",
+    "tonnes": 610
+   },
+   {
+    "commodity": "Survival Equipment",
+    "tonnes": 55
+   },
+   {
+    "commodity": "Titanium",
+    "tonnes": 5760
+   }
+  ]
+ },
+ {
+  "id": "necessitas",
+  "displayName": "Scientific Settlement",
+  "category": "Outpost",
+  "tier": 1,
+  "location": "surface",
+  "padSize": "large",
+  "layouts": [
+   "Ananke",
+   "Antevorta",
+   "Fauna",
+   "Necessitas",
+   "Porrima",
+   "Providentia"
+  ],
+  "totalTonnes": 36829,
+  "costs": [
+   {
+    "commodity": "Aluminium",
+    "tonnes": 7047
+   },
+   {
+    "commodity": "Building Fabricators",
+    "tonnes": 407
+   },
+   {
+    "commodity": "CMM Composite",
+    "tonnes": 6776
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 814
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 102
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 407
+   },
+   {
+    "commodity": "Emergency Power Cells",
+    "tonnes": 68
+   },
+   {
+    "commodity": "Evacuation Shelter",
+    "tonnes": 204
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 136
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 95
+   },
+   {
+    "commodity": "Land Enrichment Systems",
+    "tonnes": 68
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 2372
+   },
+   {
+    "commodity": "Medical Diagnostic Equipment",
+    "tonnes": 48
+   },
+   {
+    "commodity": "Non-Lethal Weapons",
+    "tonnes": 34
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 678
+   },
+   {
+    "commodity": "Power Generators",
+    "tonnes": 68
+   },
+   {
+    "commodity": "Semiconductors",
+    "tonnes": 102
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 10164
+   },
+   {
+    "commodity": "Structural Regulators",
+    "tonnes": 678
+   },
+   {
+    "commodity": "Superconductors",
+    "tonnes": 136
+   },
+   {
+    "commodity": "Surface Stabilisers",
+    "tonnes": 610
+   },
+   {
+    "commodity": "Survival Equipment",
+    "tonnes": 55
+   },
+   {
+    "commodity": "Titanium",
+    "tonnes": 5760
+   }
+  ]
+ },
+ {
+  "id": "zeus",
+  "displayName": "Port Surface Outpost",
+  "category": "Port",
+  "tier": 3,
+  "location": "surface",
+  "padSize": "large",
+  "layouts": [
+   "Aphrodite",
+   "Hera",
+   "Poseidon",
+   "Zeus"
+  ],
+  "totalTonnes": 216030,
+  "costs": [
+   {
+    "commodity": "Aluminium",
+    "tonnes": 42282
+   },
+   {
+    "commodity": "Building Fabricators",
+    "tonnes": 2442
+   },
+   {
+    "commodity": "CMM Composite",
+    "tonnes": 40656
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 4884
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 408
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 2442
+   },
+   {
+    "commodity": "Emergency Power Cells",
+    "tonnes": 272
+   },
+   {
+    "commodity": "Evacuation Shelter",
+    "tonnes": 816
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 544
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 380
+   },
+   {
+    "commodity": "Land Enrichment Systems",
+    "tonnes": 272
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 14232
+   },
+   {
+    "commodity": "Medical Diagnostic Equipment",
+    "tonnes": 192
+   },
+   {
+    "commodity": "Non-Lethal Weapons",
+    "tonnes": 136
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 2712
+   },
+   {
+    "commodity": "Power Generators",
+    "tonnes": 272
+   },
+   {
+    "commodity": "Semiconductors",
+    "tonnes": 408
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 60984
+   },
+   {
+    "commodity": "Structural Regulators",
+    "tonnes": 2712
+   },
+   {
+    "commodity": "Superconductors",
+    "tonnes": 544
+   },
+   {
+    "commodity": "Surface Stabilisers",
+    "tonnes": 3660
+   },
+   {
+    "commodity": "Survival Equipment",
+    "tonnes": 220
+   },
+   {
+    "commodity": "Titanium",
+    "tonnes": 34560
+   }
+  ]
+ },
+ {
+  "id": "consus",
+  "displayName": "Agricultural Settlement - Small",
+  "category": "Agriculture Tier 1",
+  "tier": 1,
+  "location": "surface",
+  "padSize": "small",
+  "layouts": [
+   "Consus"
+  ],
+  "totalTonnes": 2839,
+  "costs": [
+   {
+    "commodity": "Aluminium",
+    "tonnes": 559
+   },
+   {
+    "commodity": "Biowaste",
+    "tonnes": 280
+   },
+   {
+    "commodity": "Building Fabricators",
+    "tonnes": 42
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 28
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 14
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 21
+   },
+   {
+    "commodity": "Crop Harvesters",
+    "tonnes": 210
+   },
+   {
+    "commodity": "Emergency Power Cells",
+    "tonnes": 84
+   },
+   {
+    "commodity": "Evacuation Shelter",
+    "tonnes": 14
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 42
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 63
+   },
+   {
+    "commodity": "Grain",
+    "tonnes": 77
+   },
+   {
+    "commodity": "Land Enrichment Systems",
+    "tonnes": 70
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 224
+   },
+   {
+    "commodity": "Pesticides",
+    "tonnes": 126
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 91
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 768
+   },
+   {
+    "commodity": "Structural Regulators",
+    "tonnes": 56
+   },
+   {
+    "commodity": "Surface Stabilisers",
+    "tonnes": 56
+   },
+   {
+    "commodity": "Survival Equipment",
+    "tonnes": 14
+   }
+  ]
+ },
+ {
+  "id": "picumnus",
+  "displayName": "Agricultural Settlement - Medium",
+  "category": "Agriculture Tier 1",
+  "tier": 1,
+  "location": "surface",
+  "padSize": "large",
+  "layouts": [
+   "Annona",
+   "Picumnus"
+  ],
+  "totalTonnes": 5678,
+  "costs": [
+   {
+    "commodity": "Aluminium",
+    "tonnes": 1118
+   },
+   {
+    "commodity": "Biowaste",
+    "tonnes": 560
+   },
+   {
+    "commodity": "Building Fabricators",
+    "tonnes": 84
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 56
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 28
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 42
+   },
+   {
+    "commodity": "Crop Harvesters",
+    "tonnes": 420
+   },
+   {
+    "commodity": "Emergency Power Cells",
+    "tonnes": 168
+   },
+   {
+    "commodity": "Evacuation Shelter",
+    "tonnes": 28
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 84
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 126
+   },
+   {
+    "commodity": "Grain",
+    "tonnes": 154
+   },
+   {
+    "commodity": "Land Enrichment Systems",
+    "tonnes": 140
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 448
+   },
+   {
+    "commodity": "Pesticides",
+    "tonnes": 252
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 182
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 1536
+   },
+   {
+    "commodity": "Structural Regulators",
+    "tonnes": 112
+   },
+   {
+    "commodity": "Surface Stabilisers",
+    "tonnes": 112
+   },
+   {
+    "commodity": "Survival Equipment",
+    "tonnes": 28
+   }
+  ]
+ },
+ {
+  "id": "ceres",
+  "displayName": "Agricultural Settlement - Large",
+  "category": "Agriculture Tier 2",
+  "tier": 2,
+  "location": "surface",
+  "padSize": "large",
+  "layouts": [
+   "Ceres",
+   "Fornax"
+  ],
+  "totalTonnes": 8517,
+  "costs": [
+   {
+    "commodity": "Aluminium",
+    "tonnes": 1677
+   },
+   {
+    "commodity": "Biowaste",
+    "tonnes": 840
+   },
+   {
+    "commodity": "Building Fabricators",
+    "tonnes": 126
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 84
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 42
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 63
+   },
+   {
+    "commodity": "Crop Harvesters",
+    "tonnes": 630
+   },
+   {
+    "commodity": "Emergency Power Cells",
+    "tonnes": 252
+   },
+   {
+    "commodity": "Evacuation Shelter",
+    "tonnes": 42
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 126
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 189
+   },
+   {
+    "commodity": "Grain",
+    "tonnes": 231
+   },
+   {
+    "commodity": "Land Enrichment Systems",
+    "tonnes": 210
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 672
+   },
+   {
+    "commodity": "Pesticides",
+    "tonnes": 378
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 273
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 2304
+   },
+   {
+    "commodity": "Structural Regulators",
+    "tonnes": 168
+   },
+   {
+    "commodity": "Surface Stabilisers",
+    "tonnes": 168
+   },
+   {
+    "commodity": "Survival Equipment",
+    "tonnes": 42
+   }
+  ]
+ },
+ {
+  "id": "ourea",
+  "displayName": "Extraction Settlement - Small",
+  "category": "Extraction Tier 1",
+  "tier": 1,
+  "location": "surface",
+  "padSize": "small",
+  "layouts": [
+   "Ourea"
+  ],
+  "totalTonnes": 2845,
+  "costs": [
+   {
+    "commodity": "Aluminium",
+    "tonnes": 632
+   },
+   {
+    "commodity": "Bioreducing Lichen",
+    "tonnes": 162
+   },
+   {
+    "commodity": "Building Fabricators",
+    "tonnes": 59
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 59
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 30
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 30
+   },
+   {
+    "commodity": "Emergency Power Cells",
+    "tonnes": 96
+   },
+   {
+    "commodity": "Evacuation Shelter",
+    "tonnes": 30
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 45
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 30
+   },
+   {
+    "commodity": "Geological Equipment",
+    "tonnes": 52
+   },
+   {
+    "commodity": "Hazardous Environment Suits",
+    "tonnes": 15
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 177
+   },
+   {
+    "commodity": "Muon Imager",
+    "tonnes": 45
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 118
+   },
+   {
+    "commodity": "Robotics",
+    "tonnes": 59
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 1028
+   },
+   {
+    "commodity": "Structural Regulators",
+    "tonnes": 74
+   },
+   {
+    "commodity": "Surface Stabilisers",
+    "tonnes": 89
+   },
+   {
+    "commodity": "Survival Equipment",
+    "tonnes": 15
+   }
+  ]
+ },
+ {
+  "id": "mantus",
+  "displayName": "Extraction Settlement - Medium",
+  "category": "Extraction Tier 1",
+  "tier": 1,
+  "location": "surface",
+  "padSize": "large",
+  "layouts": [
+   "Mantus",
+   "Orcus"
+  ],
+  "totalTonnes": 5690,
+  "costs": [
+   {
+    "commodity": "Aluminium",
+    "tonnes": 1264
+   },
+   {
+    "commodity": "Bioreducing Lichen",
+    "tonnes": 324
+   },
+   {
+    "commodity": "Building Fabricators",
+    "tonnes": 118
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 118
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 60
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 60
+   },
+   {
+    "commodity": "Emergency Power Cells",
+    "tonnes": 192
+   },
+   {
+    "commodity": "Evacuation Shelter",
+    "tonnes": 60
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 90
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 60
+   },
+   {
+    "commodity": "Geological Equipment",
+    "tonnes": 104
+   },
+   {
+    "commodity": "Hazardous Environment Suits",
+    "tonnes": 30
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 354
+   },
+   {
+    "commodity": "Muon Imager",
+    "tonnes": 90
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 236
+   },
+   {
+    "commodity": "Robotics",
+    "tonnes": 118
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 2056
+   },
+   {
+    "commodity": "Structural Regulators",
+    "tonnes": 148
+   },
+   {
+    "commodity": "Surface Stabilisers",
+    "tonnes": 178
+   },
+   {
+    "commodity": "Survival Equipment",
+    "tonnes": 30
+   }
+  ]
+ },
+ {
+  "id": "erebus",
+  "displayName": "Extraction Settlement - Large",
+  "category": "Extraction Tier 2",
+  "tier": 2,
+  "location": "surface",
+  "padSize": "large",
+  "layouts": [
+   "Aerecura",
+   "Erebus"
+  ],
+  "totalTonnes": 8535,
+  "costs": [
+   {
+    "commodity": "Aluminium",
+    "tonnes": 1896
+   },
+   {
+    "commodity": "Bioreducing Lichen",
+    "tonnes": 486
+   },
+   {
+    "commodity": "Building Fabricators",
+    "tonnes": 177
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 177
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 90
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 90
+   },
+   {
+    "commodity": "Emergency Power Cells",
+    "tonnes": 288
+   },
+   {
+    "commodity": "Evacuation Shelter",
+    "tonnes": 90
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 135
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 90
+   },
+   {
+    "commodity": "Geological Equipment",
+    "tonnes": 156
+   },
+   {
+    "commodity": "Hazardous Environment Suits",
+    "tonnes": 45
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 531
+   },
+   {
+    "commodity": "Muon Imager",
+    "tonnes": 135
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 354
+   },
+   {
+    "commodity": "Robotics",
+    "tonnes": 177
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 3084
+   },
+   {
+    "commodity": "Structural Regulators",
+    "tonnes": 222
+   },
+   {
+    "commodity": "Surface Stabilisers",
+    "tonnes": 267
+   },
+   {
+    "commodity": "Survival Equipment",
+    "tonnes": 45
+   }
+  ]
+ },
+ {
+  "id": "fontus",
+  "displayName": "Industrial Settlement - Small",
+  "category": "Industrial Tier 1",
+  "tier": 1,
+  "location": "surface",
+  "padSize": "small",
+  "layouts": [
+   "Fontus"
+  ],
+  "totalTonnes": 2845,
+  "costs": [
+   {
+    "commodity": "Advanced Catalysers",
+    "tonnes": 41
+   },
+   {
+    "commodity": "Aluminium",
+    "tonnes": 585
+   },
+   {
+    "commodity": "Building Fabricators",
+    "tonnes": 55
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 55
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 28
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 28
+   },
+   {
+    "commodity": "Emergency Power Cells",
+    "tonnes": 28
+   },
+   {
+    "commodity": "Evacuation Shelter",
+    "tonnes": 21
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 41
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 28
+   },
+   {
+    "commodity": "Hazardous Environment Suits",
+    "tonnes": 14
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 272
+   },
+   {
+    "commodity": "Micro Controllers",
+    "tonnes": 14
+   },
+   {
+    "commodity": "Microbial Furnaces",
+    "tonnes": 82
+   },
+   {
+    "commodity": "Mineral Extractors",
+    "tonnes": 164
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 109
+   },
+   {
+    "commodity": "Resonating Separators",
+    "tonnes": 14
+   },
+   {
+    "commodity": "Robotics",
+    "tonnes": 55
+   },
+   {
+    "commodity": "Semiconductors",
+    "tonnes": 14
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 1019
+   },
+   {
+    "commodity": "Structural Regulators",
+    "tonnes": 68
+   },
+   {
+    "commodity": "Superconductors",
+    "tonnes": 14
+   },
+   {
+    "commodity": "Surface Stabilisers",
+    "tonnes": 68
+   },
+   {
+    "commodity": "Survival Equipment",
+    "tonnes": 14
+   },
+   {
+    "commodity": "Thermal Cooling Units",
+    "tonnes": 14
+   }
+  ]
+ },
+ {
+  "id": "meteope",
+  "displayName": "Industrial Settlement - Medium",
+  "category": "Industrial Tier 1",
+  "tier": 1,
+  "location": "surface",
+  "padSize": "large",
+  "layouts": [
+   "Meteope",
+   "Minthe",
+   "Palici"
+  ],
+  "totalTonnes": 5690,
+  "costs": [
+   {
+    "commodity": "Advanced Catalysers",
+    "tonnes": 82
+   },
+   {
+    "commodity": "Aluminium",
+    "tonnes": 1170
+   },
+   {
+    "commodity": "Building Fabricators",
+    "tonnes": 110
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 110
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 56
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 56
+   },
+   {
+    "commodity": "Emergency Power Cells",
+    "tonnes": 56
+   },
+   {
+    "commodity": "Evacuation Shelter",
+    "tonnes": 42
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 82
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 56
+   },
+   {
+    "commodity": "Hazardous Environment Suits",
+    "tonnes": 28
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 544
+   },
+   {
+    "commodity": "Micro Controllers",
+    "tonnes": 28
+   },
+   {
+    "commodity": "Microbial Furnaces",
+    "tonnes": 164
+   },
+   {
+    "commodity": "Mineral Extractors",
+    "tonnes": 328
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 218
+   },
+   {
+    "commodity": "Resonating Separators",
+    "tonnes": 28
+   },
+   {
+    "commodity": "Robotics",
+    "tonnes": 110
+   },
+   {
+    "commodity": "Semiconductors",
+    "tonnes": 28
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 2038
+   },
+   {
+    "commodity": "Structural Regulators",
+    "tonnes": 136
+   },
+   {
+    "commodity": "Superconductors",
+    "tonnes": 28
+   },
+   {
+    "commodity": "Surface Stabilisers",
+    "tonnes": 136
+   },
+   {
+    "commodity": "Survival Equipment",
+    "tonnes": 28
+   },
+   {
+    "commodity": "Thermal Cooling Units",
+    "tonnes": 28
+   }
+  ]
+ },
+ {
+  "id": "gaea",
+  "displayName": "Industrial Settlement - Large",
+  "category": "Industrial Tier 2",
+  "tier": 2,
+  "location": "surface",
+  "padSize": "large",
+  "layouts": [
+   "Gaea"
+  ],
+  "totalTonnes": 8535,
+  "costs": [
+   {
+    "commodity": "Advanced Catalysers",
+    "tonnes": 123
+   },
+   {
+    "commodity": "Aluminium",
+    "tonnes": 1755
+   },
+   {
+    "commodity": "Building Fabricators",
+    "tonnes": 165
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 165
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 84
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 84
+   },
+   {
+    "commodity": "Emergency Power Cells",
+    "tonnes": 84
+   },
+   {
+    "commodity": "Evacuation Shelter",
+    "tonnes": 63
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 123
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 84
+   },
+   {
+    "commodity": "Hazardous Environment Suits",
+    "tonnes": 42
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 816
+   },
+   {
+    "commodity": "Micro Controllers",
+    "tonnes": 42
+   },
+   {
+    "commodity": "Microbial Furnaces",
+    "tonnes": 246
+   },
+   {
+    "commodity": "Mineral Extractors",
+    "tonnes": 492
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 327
+   },
+   {
+    "commodity": "Resonating Separators",
+    "tonnes": 42
+   },
+   {
+    "commodity": "Robotics",
+    "tonnes": 165
+   },
+   {
+    "commodity": "Semiconductors",
+    "tonnes": 42
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 3057
+   },
+   {
+    "commodity": "Structural Regulators",
+    "tonnes": 204
+   },
+   {
+    "commodity": "Superconductors",
+    "tonnes": 42
+   },
+   {
+    "commodity": "Surface Stabilisers",
+    "tonnes": 204
+   },
+   {
+    "commodity": "Survival Equipment",
+    "tonnes": 42
+   },
+   {
+    "commodity": "Thermal Cooling Units",
+    "tonnes": 42
+   }
+  ]
+ },
+ {
+  "id": "ioke",
+  "displayName": "Military Settlement - Small",
+  "category": "Military Tier 1",
+  "tier": 1,
+  "location": "surface",
+  "padSize": "medium",
+  "layouts": [
+   "Ioke"
+  ],
+  "totalTonnes": 2842,
+  "costs": [
+   {
+    "commodity": "Aluminium",
+    "tonnes": 593
+   },
+   {
+    "commodity": "Basic Medicines",
+    "tonnes": 36
+   },
+   {
+    "commodity": "Battle Weapons",
+    "tonnes": 24
+   },
+   {
+    "commodity": "Building Fabricators",
+    "tonnes": 60
+   },
+   {
+    "commodity": "CMM Composite",
+    "tonnes": 356
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 60
+   },
+   {
+    "commodity": "Combat Stabilisers",
+    "tonnes": 36
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 42
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 30
+   },
+   {
+    "commodity": "Emergency Power Cells",
+    "tonnes": 24
+   },
+   {
+    "commodity": "Evacuation Shelter",
+    "tonnes": 36
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 36
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 24
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 172
+   },
+   {
+    "commodity": "Micro Controllers",
+    "tonnes": 12
+   },
+   {
+    "commodity": "Military Grade Fabrics",
+    "tonnes": 24
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 119
+   },
+   {
+    "commodity": "Reactive Armour",
+    "tonnes": 24
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 949
+   },
+   {
+    "commodity": "Structural Regulators",
+    "tonnes": 101
+   },
+   {
+    "commodity": "Surface Stabilisers",
+    "tonnes": 60
+   },
+   {
+    "commodity": "Survival Equipment",
+    "tonnes": 24
+   }
+  ]
+ },
+ {
+  "id": "bellona",
+  "displayName": "Military Settlement - Medium",
+  "category": "Military Tier 1",
+  "tier": 1,
+  "location": "surface",
+  "padSize": "medium",
+  "layouts": [
+   "Bellona",
+   "Enyo",
+   "Polemos"
+  ],
+  "totalTonnes": 5684,
+  "costs": [
+   {
+    "commodity": "Aluminium",
+    "tonnes": 1186
+   },
+   {
+    "commodity": "Basic Medicines",
+    "tonnes": 72
+   },
+   {
+    "commodity": "Battle Weapons",
+    "tonnes": 48
+   },
+   {
+    "commodity": "Building Fabricators",
+    "tonnes": 120
+   },
+   {
+    "commodity": "CMM Composite",
+    "tonnes": 712
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 120
+   },
+   {
+    "commodity": "Combat Stabilisers",
+    "tonnes": 72
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 84
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 60
+   },
+   {
+    "commodity": "Emergency Power Cells",
+    "tonnes": 48
+   },
+   {
+    "commodity": "Evacuation Shelter",
+    "tonnes": 72
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 72
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 48
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 344
+   },
+   {
+    "commodity": "Micro Controllers",
+    "tonnes": 24
+   },
+   {
+    "commodity": "Military Grade Fabrics",
+    "tonnes": 48
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 238
+   },
+   {
+    "commodity": "Reactive Armour",
+    "tonnes": 48
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 1898
+   },
+   {
+    "commodity": "Structural Regulators",
+    "tonnes": 202
+   },
+   {
+    "commodity": "Surface Stabilisers",
+    "tonnes": 120
+   },
+   {
+    "commodity": "Survival Equipment",
+    "tonnes": 48
+   }
+  ]
+ },
+ {
+  "id": "minerva",
+  "displayName": "Military Settlement - Large",
+  "category": "Military Tier 2",
+  "tier": 2,
+  "location": "surface",
+  "padSize": "large",
+  "layouts": [
+   "Minerva"
+  ],
+  "totalTonnes": 8526,
+  "costs": [
+   {
+    "commodity": "Aluminium",
+    "tonnes": 1779
+   },
+   {
+    "commodity": "Basic Medicines",
+    "tonnes": 108
+   },
+   {
+    "commodity": "Battle Weapons",
+    "tonnes": 72
+   },
+   {
+    "commodity": "Building Fabricators",
+    "tonnes": 180
+   },
+   {
+    "commodity": "CMM Composite",
+    "tonnes": 1068
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 180
+   },
+   {
+    "commodity": "Combat Stabilisers",
+    "tonnes": 108
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 126
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 90
+   },
+   {
+    "commodity": "Emergency Power Cells",
+    "tonnes": 72
+   },
+   {
+    "commodity": "Evacuation Shelter",
+    "tonnes": 108
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 108
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 72
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 516
+   },
+   {
+    "commodity": "Micro Controllers",
+    "tonnes": 36
+   },
+   {
+    "commodity": "Military Grade Fabrics",
+    "tonnes": 72
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 357
+   },
+   {
+    "commodity": "Reactive Armour",
+    "tonnes": 72
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 2847
+   },
+   {
+    "commodity": "Structural Regulators",
+    "tonnes": 303
+   },
+   {
+    "commodity": "Surface Stabilisers",
+    "tonnes": 180
+   },
+   {
+    "commodity": "Survival Equipment",
+    "tonnes": 72
+   }
+  ]
+ },
+ {
+  "id": "pheobe",
+  "displayName": "High Tech Settlement - Small",
+  "category": "Research Bio Tier 2",
+  "tier": 2,
+  "location": "surface",
+  "padSize": "small",
+  "layouts": [
+   "Pheobe"
+  ],
+  "totalTonnes": 2841,
+  "costs": [
+   {
+    "commodity": "Advanced Catalysers",
+    "tonnes": 95
+   },
+   {
+    "commodity": "Aluminium",
+    "tonnes": 607
+   },
+   {
+    "commodity": "Basic Medicines",
+    "tonnes": 14
+   },
+   {
+    "commodity": "Building Fabricators",
+    "tonnes": 54
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 41
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 41
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 34
+   },
+   {
+    "commodity": "Emergency Power Cells",
+    "tonnes": 27
+   },
+   {
+    "commodity": "Evacuation Shelter",
+    "tonnes": 27
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 41
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 27
+   },
+   {
+    "commodity": "Geological Equipment",
+    "tonnes": 27
+   },
+   {
+    "commodity": "Hazardous Environment Suits",
+    "tonnes": 27
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 351
+   },
+   {
+    "commodity": "Medical Diagnostic Equipment",
+    "tonnes": 41
+   },
+   {
+    "commodity": "Micro Controllers",
+    "tonnes": 14
+   },
+   {
+    "commodity": "Muon Imager",
+    "tonnes": 95
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 115
+   },
+   {
+    "commodity": "Semiconductors",
+    "tonnes": 21
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 945
+   },
+   {
+    "commodity": "Structural Regulators",
+    "tonnes": 81
+   },
+   {
+    "commodity": "Superconductors",
+    "tonnes": 21
+   },
+   {
+    "commodity": "Surface Stabilisers",
+    "tonnes": 81
+   },
+   {
+    "commodity": "Survival Equipment",
+    "tonnes": 14
+   }
+  ]
+ },
+ {
+  "id": "asteria",
+  "displayName": "High Tech Settlement - Medium",
+  "category": "Research Bio Tier 2",
+  "tier": 2,
+  "location": "surface",
+  "padSize": "small",
+  "layouts": [
+   "Asteria",
+   "Caerus"
+  ],
+  "totalTonnes": 5682,
+  "costs": [
+   {
+    "commodity": "Advanced Catalysers",
+    "tonnes": 190
+   },
+   {
+    "commodity": "Aluminium",
+    "tonnes": 1214
+   },
+   {
+    "commodity": "Basic Medicines",
+    "tonnes": 28
+   },
+   {
+    "commodity": "Building Fabricators",
+    "tonnes": 108
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 82
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 82
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 68
+   },
+   {
+    "commodity": "Emergency Power Cells",
+    "tonnes": 54
+   },
+   {
+    "commodity": "Evacuation Shelter",
+    "tonnes": 54
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 82
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 54
+   },
+   {
+    "commodity": "Geological Equipment",
+    "tonnes": 54
+   },
+   {
+    "commodity": "Hazardous Environment Suits",
+    "tonnes": 54
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 702
+   },
+   {
+    "commodity": "Medical Diagnostic Equipment",
+    "tonnes": 82
+   },
+   {
+    "commodity": "Micro Controllers",
+    "tonnes": 28
+   },
+   {
+    "commodity": "Muon Imager",
+    "tonnes": 190
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 230
+   },
+   {
+    "commodity": "Semiconductors",
+    "tonnes": 42
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 1890
+   },
+   {
+    "commodity": "Structural Regulators",
+    "tonnes": 162
+   },
+   {
+    "commodity": "Superconductors",
+    "tonnes": 42
+   },
+   {
+    "commodity": "Surface Stabilisers",
+    "tonnes": 162
+   },
+   {
+    "commodity": "Survival Equipment",
+    "tonnes": 28
+   }
+  ]
+ },
+ {
+  "id": "chronos",
+  "displayName": "High Tech Settlement - Large",
+  "category": "Research Bio Tier 2",
+  "tier": 2,
+  "location": "surface",
+  "padSize": "large",
+  "layouts": [
+   "Chronos"
+  ],
+  "totalTonnes": 8523,
+  "costs": [
+   {
+    "commodity": "Advanced Catalysers",
+    "tonnes": 285
+   },
+   {
+    "commodity": "Aluminium",
+    "tonnes": 1821
+   },
+   {
+    "commodity": "Basic Medicines",
+    "tonnes": 42
+   },
+   {
+    "commodity": "Building Fabricators",
+    "tonnes": 162
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 123
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 123
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 102
+   },
+   {
+    "commodity": "Emergency Power Cells",
+    "tonnes": 81
+   },
+   {
+    "commodity": "Evacuation Shelter",
+    "tonnes": 81
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 123
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 81
+   },
+   {
+    "commodity": "Geological Equipment",
+    "tonnes": 81
+   },
+   {
+    "commodity": "Hazardous Environment Suits",
+    "tonnes": 81
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 1053
+   },
+   {
+    "commodity": "Medical Diagnostic Equipment",
+    "tonnes": 123
+   },
+   {
+    "commodity": "Micro Controllers",
+    "tonnes": 42
+   },
+   {
+    "commodity": "Muon Imager",
+    "tonnes": 285
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 345
+   },
+   {
+    "commodity": "Semiconductors",
+    "tonnes": 63
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 2835
+   },
+   {
+    "commodity": "Structural Regulators",
+    "tonnes": 243
+   },
+   {
+    "commodity": "Superconductors",
+    "tonnes": 63
+   },
+   {
+    "commodity": "Surface Stabilisers",
+    "tonnes": 243
+   },
+   {
+    "commodity": "Survival Equipment",
+    "tonnes": 42
+   }
+  ]
+ },
+ {
+  "id": "aergia",
+  "displayName": "Tourism Settlement - Small",
+  "category": "Tourism Tier 1",
+  "tier": 2,
+  "location": "surface",
+  "padSize": "medium",
+  "layouts": [
+   "Aergia"
+  ],
+  "totalTonnes": 2846,
+  "costs": [
+   {
+    "commodity": "Aluminium",
+    "tonnes": 509
+   },
+   {
+    "commodity": "Animal Meat",
+    "tonnes": 71
+   },
+   {
+    "commodity": "Beer",
+    "tonnes": 311
+   },
+   {
+    "commodity": "Building Fabricators",
+    "tonnes": 29
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 43
+   },
+   {
+    "commodity": "Coffee",
+    "tonnes": 71
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 15
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 22
+   },
+   {
+    "commodity": "Emergency Power Cells",
+    "tonnes": 15
+   },
+   {
+    "commodity": "Evacuation Shelter",
+    "tonnes": 22
+   },
+   {
+    "commodity": "Fish",
+    "tonnes": 36
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 71
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 227
+   },
+   {
+    "commodity": "Liquor",
+    "tonnes": 128
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 114
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 707
+   },
+   {
+    "commodity": "Structural Regulators",
+    "tonnes": 57
+   },
+   {
+    "commodity": "Surface Stabilisers",
+    "tonnes": 57
+   },
+   {
+    "commodity": "Survival Equipment",
+    "tonnes": 15
+   },
+   {
+    "commodity": "Tea",
+    "tonnes": 170
+   },
+   {
+    "commodity": "Wine",
+    "tonnes": 156
+   }
+  ]
+ },
+ {
+  "id": "comus",
+  "displayName": "Tourism Settlement - Medium",
+  "category": "Tourism Tier 1",
+  "tier": 2,
+  "location": "surface",
+  "padSize": "large",
+  "layouts": [
+   "Comus",
+   "Gelos"
+  ],
+  "totalTonnes": 5692,
+  "costs": [
+   {
+    "commodity": "Aluminium",
+    "tonnes": 1018
+   },
+   {
+    "commodity": "Animal Meat",
+    "tonnes": 142
+   },
+   {
+    "commodity": "Beer",
+    "tonnes": 622
+   },
+   {
+    "commodity": "Building Fabricators",
+    "tonnes": 58
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 86
+   },
+   {
+    "commodity": "Coffee",
+    "tonnes": 142
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 30
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 44
+   },
+   {
+    "commodity": "Emergency Power Cells",
+    "tonnes": 30
+   },
+   {
+    "commodity": "Evacuation Shelter",
+    "tonnes": 44
+   },
+   {
+    "commodity": "Fish",
+    "tonnes": 72
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 142
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 454
+   },
+   {
+    "commodity": "Liquor",
+    "tonnes": 256
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 228
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 1414
+   },
+   {
+    "commodity": "Structural Regulators",
+    "tonnes": 114
+   },
+   {
+    "commodity": "Surface Stabilisers",
+    "tonnes": 114
+   },
+   {
+    "commodity": "Survival Equipment",
+    "tonnes": 30
+   },
+   {
+    "commodity": "Tea",
+    "tonnes": 340
+   },
+   {
+    "commodity": "Wine",
+    "tonnes": 312
+   }
+  ]
+ },
+ {
+  "id": "fufluns",
+  "displayName": "Tourism Settlement - Large",
+  "category": "Tourism Tier 2",
+  "tier": 2,
+  "location": "surface",
+  "padSize": "large",
+  "layouts": [
+   "Fufluns"
+  ],
+  "totalTonnes": 8538,
+  "costs": [
+   {
+    "commodity": "Aluminium",
+    "tonnes": 1527
+   },
+   {
+    "commodity": "Animal Meat",
+    "tonnes": 213
+   },
+   {
+    "commodity": "Beer",
+    "tonnes": 933
+   },
+   {
+    "commodity": "Building Fabricators",
+    "tonnes": 87
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 129
+   },
+   {
+    "commodity": "Coffee",
+    "tonnes": 213
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 45
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 66
+   },
+   {
+    "commodity": "Emergency Power Cells",
+    "tonnes": 45
+   },
+   {
+    "commodity": "Evacuation Shelter",
+    "tonnes": 66
+   },
+   {
+    "commodity": "Fish",
+    "tonnes": 108
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 213
+   },
+   {
+    "commodity": "Liquid oxygen",
+    "tonnes": 681
+   },
+   {
+    "commodity": "Liquor",
+    "tonnes": 384
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 342
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 2121
+   },
+   {
+    "commodity": "Structural Regulators",
+    "tonnes": 171
+   },
+   {
+    "commodity": "Surface Stabilisers",
+    "tonnes": 171
+   },
+   {
+    "commodity": "Survival Equipment",
+    "tonnes": 45
+   },
+   {
+    "commodity": "Tea",
+    "tonnes": 510
+   },
+   {
+    "commodity": "Wine",
+    "tonnes": 468
+   }
+  ]
+ },
+ {
+  "id": "tartarus",
+  "displayName": "Extraction Hub",
+  "category": "Extraction",
+  "tier": 2,
+  "location": "surface",
+  "padSize": "none",
+  "layouts": [
+   "Tartarus"
+  ],
+  "totalTonnes": 9919,
+  "costs": [
+   {
+    "commodity": "Aluminium",
+    "tonnes": 2352
+   },
+   {
+    "commodity": "Bioreducing Lichen",
+    "tonnes": 714
+   },
+   {
+    "commodity": "Building Fabricators",
+    "tonnes": 210
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 252
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 38
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 84
+   },
+   {
+    "commodity": "Emergency Power Cells",
+    "tonnes": 42
+   },
+   {
+    "commodity": "Evacuation Shelter",
+    "tonnes": 51
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 51
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 34
+   },
+   {
+    "commodity": "Geological Equipment",
+    "tonnes": 210
+   },
+   {
+    "commodity": "Hazardous Environment Suits",
+    "tonnes": 126
+   },
+   {
+    "commodity": "Muon Imager",
+    "tonnes": 160
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 672
+   },
+   {
+    "commodity": "Power Generators",
+    "tonnes": 26
+   },
+   {
+    "commodity": "Robotics",
+    "tonnes": 252
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 3359
+   },
+   {
+    "commodity": "Structural Regulators",
+    "tonnes": 504
+   },
+   {
+    "commodity": "Surface Stabilisers",
+    "tonnes": 756
+   },
+   {
+    "commodity": "Survival Equipment",
+    "tonnes": 26
+   }
+  ]
+ },
+ {
+  "id": "aegle",
+  "displayName": "Civilian Hub",
+  "category": "Civilian",
+  "tier": 2,
+  "location": "surface",
+  "padSize": "none",
+  "layouts": [
+   "Aegle"
+  ],
+  "totalTonnes": 9924,
+  "costs": [
+   {
+    "commodity": "Agricultural Medicines",
+    "tonnes": 235
+   },
+   {
+    "commodity": "Aluminium",
+    "tonnes": 2433
+   },
+   {
+    "commodity": "Biowaste",
+    "tonnes": 630
+   },
+   {
+    "commodity": "Building Fabricators",
+    "tonnes": 84
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 126
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 21
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 68
+   },
+   {
+    "commodity": "Crop Harvesters",
+    "tonnes": 210
+   },
+   {
+    "commodity": "Emergency Power Cells",
+    "tonnes": 42
+   },
+   {
+    "commodity": "Evacuation Shelter",
+    "tonnes": 68
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 68
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 42
+   },
+   {
+    "commodity": "Land Enrichment Systems",
+    "tonnes": 126
+   },
+   {
+    "commodity": "Pesticides",
+    "tonnes": 378
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 630
+   },
+   {
+    "commodity": "Power Generators",
+    "tonnes": 26
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 3775
+   },
+   {
+    "commodity": "Structural Regulators",
+    "tonnes": 336
+   },
+   {
+    "commodity": "Surface Stabilisers",
+    "tonnes": 588
+   },
+   {
+    "commodity": "Survival Equipment",
+    "tonnes": 38
+   }
+  ]
+ },
+ {
+  "id": "tellus",
+  "displayName": "Exploration Hub",
+  "category": "Exploration",
+  "tier": 2,
+  "location": "surface",
+  "padSize": "none",
+  "layouts": [
+   "Tellus",
+   "Tellus_e"
+  ],
+  "totalTonnes": 9923,
+  "costs": [
+   {
+    "commodity": "Aluminium",
+    "tonnes": 2483
+   },
+   {
+    "commodity": "Building Fabricators",
+    "tonnes": 89
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 134
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 49
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 178
+   },
+   {
+    "commodity": "Emergency Power Cells",
+    "tonnes": 45
+   },
+   {
+    "commodity": "Evacuation Shelter",
+    "tonnes": 36
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 54
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 36
+   },
+   {
+    "commodity": "Geological Equipment",
+    "tonnes": 621
+   },
+   {
+    "commodity": "Hazardous Environment Suits",
+    "tonnes": 249
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 666
+   },
+   {
+    "commodity": "Power Generators",
+    "tonnes": 32
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 3547
+   },
+   {
+    "commodity": "Structural Regulators",
+    "tonnes": 267
+   },
+   {
+    "commodity": "Surface Stabilisers",
+    "tonnes": 1419
+   },
+   {
+    "commodity": "Survival Equipment",
+    "tonnes": 18
+   }
+  ]
+ },
+ {
+  "id": "io",
+  "displayName": "Outpost Hub",
+  "category": "Outpost",
+  "tier": 2,
+  "location": "surface",
+  "padSize": "none",
+  "layouts": [
+   "Io"
+  ],
+  "totalTonnes": 9922,
+  "costs": [
+   {
+    "commodity": "Aluminium",
+    "tonnes": 2797
+   },
+   {
+    "commodity": "Building Fabricators",
+    "tonnes": 290
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 145
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 25
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 78
+   },
+   {
+    "commodity": "Emergency Power Cells",
+    "tonnes": 49
+   },
+   {
+    "commodity": "Evacuation Shelter",
+    "tonnes": 49
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 174
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 87
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 724
+   },
+   {
+    "commodity": "Power Generators",
+    "tonnes": 25
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 4051
+   },
+   {
+    "commodity": "Structural Regulators",
+    "tonnes": 338
+   },
+   {
+    "commodity": "Surface Stabilisers",
+    "tonnes": 1061
+   },
+   {
+    "commodity": "Survival Equipment",
+    "tonnes": 29
+   }
+  ]
+ },
+ {
+  "id": "athena",
+  "displayName": "Scientific Hub",
+  "category": "Scientific",
+  "tier": 2,
+  "location": "surface",
+  "padSize": "none",
+  "layouts": [
+   "Athena",
+   "Caelus"
+  ],
+  "totalTonnes": 9924,
+  "costs": [
+   {
+    "commodity": "Advanced Catalysers",
+    "tonnes": 170
+   },
+   {
+    "commodity": "Aluminium",
+    "tonnes": 2581
+   },
+   {
+    "commodity": "Basic Medicines",
+    "tonnes": 72
+   },
+   {
+    "commodity": "Building Fabricators",
+    "tonnes": 178
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 223
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 67
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 112
+   },
+   {
+    "commodity": "Emergency Power Cells",
+    "tonnes": 63
+   },
+   {
+    "commodity": "Evacuation Shelter",
+    "tonnes": 36
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 54
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 36
+   },
+   {
+    "commodity": "Geological Equipment",
+    "tonnes": 401
+   },
+   {
+    "commodity": "Hazardous Environment Suits",
+    "tonnes": 156
+   },
+   {
+    "commodity": "Medical Diagnostic Equipment",
+    "tonnes": 161
+   },
+   {
+    "commodity": "Micro Controllers",
+    "tonnes": 49
+   },
+   {
+    "commodity": "Muon Imager",
+    "tonnes": 107
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 712
+   },
+   {
+    "commodity": "Power Generators",
+    "tonnes": 36
+   },
+   {
+    "commodity": "Semiconductors",
+    "tonnes": 72
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 3560
+   },
+   {
+    "commodity": "Structural Regulators",
+    "tonnes": 445
+   },
+   {
+    "commodity": "Superconductors",
+    "tonnes": 72
+   },
+   {
+    "commodity": "Surface Stabilisers",
+    "tonnes": 534
+   },
+   {
+    "commodity": "Survival Equipment",
+    "tonnes": 27
+   }
+  ]
+ },
+ {
+  "id": "alala",
+  "displayName": "Military Hub",
+  "category": "Military",
+  "tier": 2,
+  "location": "surface",
+  "padSize": "none",
+  "layouts": [
+   "Alala",
+   "Ares"
+  ],
+  "totalTonnes": 9922,
+  "costs": [
+   {
+    "commodity": "Aluminium",
+    "tonnes": 2414
+   },
+   {
+    "commodity": "Basic Medicines",
+    "tonnes": 109
+   },
+   {
+    "commodity": "Battle Weapons",
+    "tonnes": 42
+   },
+   {
+    "commodity": "Building Fabricators",
+    "tonnes": 333
+   },
+   {
+    "commodity": "CMM Composite",
+    "tonnes": 333
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 375
+   },
+   {
+    "commodity": "Combat Stabilisers",
+    "tonnes": 25
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 75
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 105
+   },
+   {
+    "commodity": "Emergency Power Cells",
+    "tonnes": 63
+   },
+   {
+    "commodity": "Evacuation Shelter",
+    "tonnes": 75
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 125
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 42
+   },
+   {
+    "commodity": "Micro Controllers",
+    "tonnes": 55
+   },
+   {
+    "commodity": "Military Grade Fabrics",
+    "tonnes": 42
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 708
+   },
+   {
+    "commodity": "Power Generators",
+    "tonnes": 38
+   },
+   {
+    "commodity": "Reactive Armour",
+    "tonnes": 42
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 3746
+   },
+   {
+    "commodity": "Structural Regulators",
+    "tonnes": 542
+   },
+   {
+    "commodity": "Surface Stabilisers",
+    "tonnes": 583
+   },
+   {
+    "commodity": "Survival Equipment",
+    "tonnes": 50
+   }
+  ]
+ },
+ {
+  "id": "silenus",
+  "displayName": "Refinery Hub",
+  "category": "Refinery",
+  "tier": 2,
+  "location": "surface",
+  "padSize": "none",
+  "layouts": [
+   "Silenus"
+  ],
+  "totalTonnes": 9919,
+  "costs": [
+   {
+    "commodity": "Advanced Catalysers",
+    "tonnes": 112
+   },
+   {
+    "commodity": "Aluminium",
+    "tonnes": 2697
+   },
+   {
+    "commodity": "Building Fabricators",
+    "tonnes": 233
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 279
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 42
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 93
+   },
+   {
+    "commodity": "Emergency Power Cells",
+    "tonnes": 47
+   },
+   {
+    "commodity": "Evacuation Shelter",
+    "tonnes": 56
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 56
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 38
+   },
+   {
+    "commodity": "Hazardous Environment Suits",
+    "tonnes": 117
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 744
+   },
+   {
+    "commodity": "Power Generators",
+    "tonnes": 28
+   },
+   {
+    "commodity": "Resonating Separators",
+    "tonnes": 84
+   },
+   {
+    "commodity": "Robotics",
+    "tonnes": 419
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 3720
+   },
+   {
+    "commodity": "Structural Regulators",
+    "tonnes": 465
+   },
+   {
+    "commodity": "Surface Stabilisers",
+    "tonnes": 558
+   },
+   {
+    "commodity": "Survival Equipment",
+    "tonnes": 28
+   },
+   {
+    "commodity": "Thermal Cooling Units",
+    "tonnes": 103
+   }
+  ]
+ },
+ {
+  "id": "janus",
+  "displayName": "High Tech Hub",
+  "category": "High Tech",
+  "tier": 2,
+  "location": "surface",
+  "padSize": "none",
+  "layouts": [
+   "Janus"
+  ],
+  "totalTonnes": 9921,
+  "costs": [
+   {
+    "commodity": "Aluminium",
+    "tonnes": 2512
+   },
+   {
+    "commodity": "Building Fabricators",
+    "tonnes": 135
+   },
+   {
+    "commodity": "CMM Composite",
+    "tonnes": 270
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 225
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 68
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 113
+   },
+   {
+    "commodity": "Emergency Power Cells",
+    "tonnes": 59
+   },
+   {
+    "commodity": "Evacuation Shelter",
+    "tonnes": 45
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 54
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 36
+   },
+   {
+    "commodity": "Micro Controllers",
+    "tonnes": 90
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 673
+   },
+   {
+    "commodity": "Power Generators",
+    "tonnes": 27
+   },
+   {
+    "commodity": "Robotics",
+    "tonnes": 449
+   },
+   {
+    "commodity": "Semiconductors",
+    "tonnes": 108
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 3768
+   },
+   {
+    "commodity": "Structural Regulators",
+    "tonnes": 404
+   },
+   {
+    "commodity": "Superconductors",
+    "tonnes": 108
+   },
+   {
+    "commodity": "Surface Stabilisers",
+    "tonnes": 539
+   },
+   {
+    "commodity": "Survival Equipment",
+    "tonnes": 27
+   },
+   {
+    "commodity": "Thermal Cooling Units",
+    "tonnes": 211
+   }
+  ]
+ },
+ {
+  "id": "molae",
+  "displayName": "Industrial Hub",
+  "category": "Industrial",
+  "tier": 2,
+  "location": "surface",
+  "padSize": "none",
+  "layouts": [
+   "Eunostus",
+   "Molae",
+   "Tellus",
+   "Tellus_i"
+  ],
+  "totalTonnes": 9919,
+  "costs": [
+   {
+    "commodity": "Aluminium",
+    "tonnes": 2407
+   },
+   {
+    "commodity": "Building Fabricators",
+    "tonnes": 208
+   },
+   {
+    "commodity": "CMM Composite",
+    "tonnes": 166
+   },
+   {
+    "commodity": "Ceramic Composites",
+    "tonnes": 249
+   },
+   {
+    "commodity": "Computer Components",
+    "tonnes": 38
+   },
+   {
+    "commodity": "Copper",
+    "tonnes": 83
+   },
+   {
+    "commodity": "Emergency Power Cells",
+    "tonnes": 42
+   },
+   {
+    "commodity": "Evacuation Shelter",
+    "tonnes": 50
+   },
+   {
+    "commodity": "Food Cartridges",
+    "tonnes": 50
+   },
+   {
+    "commodity": "Fruit and Vegetables",
+    "tonnes": 34
+   },
+   {
+    "commodity": "Hazardous Environment Suits",
+    "tonnes": 83
+   },
+   {
+    "commodity": "Micro Controllers",
+    "tonnes": 50
+   },
+   {
+    "commodity": "Microbial Furnaces",
+    "tonnes": 415
+   },
+   {
+    "commodity": "Mineral Extractors",
+    "tonnes": 415
+   },
+   {
+    "commodity": "Polymers",
+    "tonnes": 664
+   },
+   {
+    "commodity": "Power Generators",
+    "tonnes": 25
+   },
+   {
+    "commodity": "Robotics",
+    "tonnes": 332
+   },
+   {
+    "commodity": "Semiconductors",
+    "tonnes": 75
+   },
+   {
+    "commodity": "Steel",
+    "tonnes": 3320
+   },
+   {
+    "commodity": "Structural Regulators",
+    "tonnes": 498
+   },
+   {
+    "commodity": "Superconductors",
+    "tonnes": 75
+   },
+   {
+    "commodity": "Surface Stabilisers",
+    "tonnes": 498
+   },
+   {
+    "commodity": "Survival Equipment",
+    "tonnes": 25
+   },
+   {
+    "commodity": "Thermal Cooling Units",
+    "tonnes": 117
+   }
+  ]
+ }
+]

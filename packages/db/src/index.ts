@@ -40,4 +40,5 @@ export { PrismaPromotionStore } from './promotion.store.prisma.js';
  */
 export * from './colony-sync.js';
 export { PrismaColonyStore } from './colony.store.prisma.js';
+export * from './colony-catalogue.js';
 export { DiscordRankApplier, ladderRoleIds } from './rank-applier.discord.js';
