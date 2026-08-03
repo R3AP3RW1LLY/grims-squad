@@ -33,6 +33,29 @@ export interface BuildTypeSeed {
   readonly layouts: readonly string[];
   readonly totalTonnes: number;
   readonly costs: ReadonlyArray<{ readonly commodity: string; readonly tonnes: number }>;
+
+  /** `starport`, `outpost`, `installation`, `settlement` or `hub`. */
+  readonly buildClass: string;
+  /** Construction points this SPENDS. Tier 0 means it costs none. */
+  readonly needsTier: number;
+  readonly needsPoints: number;
+  /** Construction points this EARNS. Tier 0 means it grants none. */
+  readonly givesTier: number;
+  readonly givesPoints: number;
+  /** A prerequisite key that must already exist in the system, or null. */
+  readonly requires: string | null;
+  /** The prerequisite keys this build satisfies for others. Usually empty. */
+  readonly satisfies: readonly string[];
+  /** What a finished build does to the system. Every figure is community-gathered. */
+  readonly effects: {
+    readonly population: number;
+    readonly maxPopulation: number;
+    readonly security: number;
+    readonly technology: number;
+    readonly wealth: number;
+    readonly standardOfLiving: number;
+    readonly development: number;
+  };
 }
 
 export interface SeedReport {
@@ -67,7 +90,44 @@ export async function seedBuildCatalogue(
   let costs = 0;
 
   for (const type of seed) {
-    if (confirmed.has(type.id)) continue;
+    /*
+     * ★ AN OBSERVATION CONFIRMS THE BILL OF MATERIALS, NOT THE RULES ★
+     *
+     * Docking at a finished Coriolis tells us exactly what it cost to haul. It tells us NOTHING
+     * about how many tier-2 construction points the game charged for it, what it grants in return,
+     * or what it needed built first — none of that appears in a depot reading.
+     *
+     * So `observed` protects the tonnage and the commodity list, and nothing else. Skipping the row
+     * outright would leave every build type we have ever measured stuck at `build_class = unknown`
+     * with zero points for ever — the planner silently believing our best-known builds are free.
+     */
+    if (confirmed.has(type.id)) {
+      await db.$executeRawUnsafe(
+        `UPDATE colony_build_types SET
+           build_class = $2, needs_tier = $3, needs_points = $4,
+           gives_tier = $5, gives_points = $6, requires = $7, satisfies = $8::text[],
+           eff_population = $9, eff_max_population = $10, eff_security = $11,
+           eff_technology = $12, eff_wealth = $13, eff_standard_of_living = $14,
+           eff_development = $15, updated_at = now()
+         WHERE id = $1`,
+        type.id,
+        type.buildClass,
+        type.needsTier,
+        type.needsPoints,
+        type.givesTier,
+        type.givesPoints,
+        type.requires,
+        [...type.satisfies],
+        type.effects.population,
+        type.effects.maxPopulation,
+        type.effects.security,
+        type.effects.technology,
+        type.effects.wealth,
+        type.effects.standardOfLiving,
+        type.effects.development,
+      );
+      continue;
+    }
 
     /*
      * Costs are REPLACED rather than merged. A build type's bill of materials is a whole thing —
@@ -78,8 +138,13 @@ export async function seedBuildCatalogue(
     await db.$transaction(async (tx) => {
       await tx.$executeRawUnsafe(
         `INSERT INTO colony_build_types
-           (id, display_name, category, tier, location, pad_size, layouts, total_tonnes, source, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7::text[], $8, 'community', now())
+           (id, display_name, category, tier, location, pad_size, layouts, total_tonnes, source,
+            build_class, needs_tier, needs_points, gives_tier, gives_points, requires, satisfies,
+            eff_population, eff_max_population, eff_security, eff_technology, eff_wealth,
+            eff_standard_of_living, eff_development, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7::text[], $8, 'community',
+                 $9, $10, $11, $12, $13, $14, $15::text[],
+                 $16, $17, $18, $19, $20, $21, $22, now())
          ON CONFLICT (id) DO UPDATE SET
            display_name = EXCLUDED.display_name,
            category     = EXCLUDED.category,
@@ -88,6 +153,20 @@ export async function seedBuildCatalogue(
            pad_size     = EXCLUDED.pad_size,
            layouts      = EXCLUDED.layouts,
            total_tonnes = EXCLUDED.total_tonnes,
+           build_class  = EXCLUDED.build_class,
+           needs_tier   = EXCLUDED.needs_tier,
+           needs_points = EXCLUDED.needs_points,
+           gives_tier   = EXCLUDED.gives_tier,
+           gives_points = EXCLUDED.gives_points,
+           requires     = EXCLUDED.requires,
+           satisfies    = EXCLUDED.satisfies,
+           eff_population         = EXCLUDED.eff_population,
+           eff_max_population     = EXCLUDED.eff_max_population,
+           eff_security           = EXCLUDED.eff_security,
+           eff_technology         = EXCLUDED.eff_technology,
+           eff_wealth             = EXCLUDED.eff_wealth,
+           eff_standard_of_living = EXCLUDED.eff_standard_of_living,
+           eff_development        = EXCLUDED.eff_development,
            updated_at   = now()`,
         type.id,
         type.displayName,
@@ -97,6 +176,20 @@ export async function seedBuildCatalogue(
         type.padSize,
         [...type.layouts],
         type.totalTonnes,
+        type.buildClass,
+        type.needsTier,
+        type.needsPoints,
+        type.givesTier,
+        type.givesPoints,
+        type.requires,
+        [...type.satisfies],
+        type.effects.population,
+        type.effects.maxPopulation,
+        type.effects.security,
+        type.effects.technology,
+        type.effects.wealth,
+        type.effects.standardOfLiving,
+        type.effects.development,
       );
 
       await tx.$executeRawUnsafe(

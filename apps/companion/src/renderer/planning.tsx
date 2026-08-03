@@ -1,6 +1,12 @@
 import { useEffect, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
-import type { BuildTypeRow, ColonyPlan, PlanBody } from '../hub-colony.js';
+import type {
+  BuildTypeRow,
+  ColonyPlan,
+  PlanBody,
+  PlanProblem,
+  PlanSimStep,
+} from '../hub-colony.js';
 import { Button, C, Card, Copy, Empty, Field, Problem, Section, Stat, inputStyle } from './ui.js';
 
 /**
@@ -808,12 +814,173 @@ function AddSite({
 }
 
 /**
- * The order things get built in, with the running total.
+ * Everything wrong with the plan, at the top where it cannot be missed.
+ *
+ * Silence when there is nothing wrong. A permanent "0 problems" banner trains people to ignore the
+ * space, which is the one place a real problem has to appear.
+ */
+function Verdict({ problems }: { problems: readonly PlanProblem[] }): JSX.Element | null {
+  if (problems.length === 0) return null;
+
+  return (
+    <div
+      style={{
+        marginBottom: '14px',
+        border: `1px solid ${C.bad}`,
+        borderRadius: '4px',
+        background: C.badTint,
+        padding: '10px 14px',
+      }}
+    >
+      <p
+        style={{
+          ...MONO,
+          margin: 0,
+          fontSize: '10px',
+          letterSpacing: '0.2em',
+          textTransform: 'uppercase',
+          color: C.bad,
+        }}
+      >
+        This plan cannot be built in this order
+      </p>
+      <ul style={{ margin: '7px 0 0', paddingLeft: '18px', fontSize: '13px', color: C.text }}>
+        {problems.map((p) => (
+          <li key={p.message} style={{ marginTop: '3px' }}>
+            {p.message}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/** What one step costs and earns in construction points. */
+function Cost({ step }: { step: PlanSimStep | undefined }): JSX.Element | null {
+  if (step === undefined || (step.spend === null && step.earn === null)) return null;
+
+  return (
+    <span style={{ ...MONO, fontSize: '10px', color: C.faint }}>
+      {step.spend === null ? null : (
+        <span
+          style={{ color: C.warn }}
+          title={
+            step.surcharge > 0
+              ? `${step.surcharge} of this is the surcharge the game adds to every starport after the second.`
+              : undefined
+          }
+        >
+          −{step.spend.points} T{step.spend.tier}
+          {step.surcharge > 0 ? '*' : ''}
+        </span>
+      )}
+      {step.spend !== null && step.earn !== null ? ' ' : null}
+      {step.earn === null ? null : (
+        <span style={{ color: C.cyan }}>
+          +{step.earn.points} T{step.earn.tier}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** The running balance, in the two currencies the game keeps. */
+function Balance({ step }: { step: PlanSimStep | undefined }): JSX.Element | null {
+  if (step === undefined) return null;
+
+  const cell = (label: string, value: number): JSX.Element => (
+    <span style={{ color: value < 0 ? C.bad : C.dim }}>
+      {label} {value > 0 ? '+' : ''}
+      {value}
+    </span>
+  );
+
+  return (
+    <span style={{ ...MONO, display: 'flex', gap: '7px', fontSize: '10px' }}>
+      {cell('T2', step.tier2)}
+      {cell('T3', step.tier3)}
+    </span>
+  );
+}
+
+/**
+ * What the system becomes if the whole order is built.
+ *
+ * ★ LABELLED AS GATHERED, BECAUSE THAT IS WHAT IT IS ★
+ *
+ * Frontier publishes none of these figures. Every one was measured by players comparing a system
+ * before and after a build, and they are the least corroborated numbers on this page — unlike the
+ * construction-point costs, which two independent sources agree on. A member deciding how to spend
+ * a fortnight is owed that distinction, so it is written next to the numbers rather than buried.
+ */
+function Effects({ plan }: { plan: ColonyPlan }): JSX.Element | null {
+  const e = plan.simulation.effects;
+  if (!Object.values(e).some((v) => v !== 0)) return null;
+
+  const rows: Array<[string, number]> = [
+    ['Population', e.population],
+    ['Max population', e.maxPopulation],
+    ['Security', e.security],
+    ['Technology', e.technology],
+    ['Wealth', e.wealth],
+    ['Standard of living', e.standardOfLiving],
+    ['Development', e.development],
+  ];
+
+  return (
+    <div
+      style={{
+        marginTop: '18px',
+        border: `1px solid ${C.subtle}`,
+        borderRadius: '4px',
+        padding: '10px 14px',
+      }}
+    >
+      <p
+        style={{
+          ...MONO,
+          margin: 0,
+          fontSize: '10px',
+          letterSpacing: '0.2em',
+          textTransform: 'uppercase',
+          color: C.dim,
+        }}
+      >
+        What this would do to the system
+      </p>
+      <div style={{ marginTop: '7px', display: 'flex', flexWrap: 'wrap', gap: '6px 22px' }}>
+        {rows.map(([label, value]) => (
+          <span key={label} style={{ fontSize: '11px', color: C.dim }}>
+            {label}{' '}
+            <span style={{ ...MONO, color: value < 0 ? C.warn : C.text }}>
+              {value > 0 ? '+' : ''}
+              {value}
+            </span>
+          </span>
+        ))}
+      </div>
+      <p style={{ margin: '10px 0 0', fontSize: '11px', color: C.faint }}>
+        These seven are gathered by players, not published by Frontier, and are the least confirmed
+        numbers here — unlike the construction points above, which two independent sources agree on.
+        A large starport really does cost the system security; that is the game, not a mistake.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * The order things get built in, what each step costs, and whether it can be paid for.
  *
  * ★ THE ORDER IS PART OF THE PLAN, NOT A PRESENTATION CHOICE ★
  *
  * The game earns and spends construction points in sequence, so the same set of builds in a
  * different order is a different plan — one that works and one that stalls halfway.
+ *
+ * ★ THE DEFICIT IS SHOWN AT THE STEP IT HAPPENS ★
+ *
+ * A total that balances hides a plan that cannot be built: step four runs out of tier-2 points and
+ * step nine pays them back, so the sum looks fine and the squadron gets stuck at step four with a
+ * fortnight of hauling behind them.
  *
  * Up and down buttons rather than drag and drop: a drag library would be a dependency for a control
  * that does not work with a keyboard, and the buttons send the same whole-order save a drag would.
@@ -851,24 +1018,34 @@ function BuildOrder({
    * alone cannot answer without adding them up by eye.
    */
   let running = 0;
+  const sim = plan.simulation;
 
   return (
     <div>
+      <Verdict problems={sim.problems} />
+
       {plan.sites.map((s, i) => {
         running += s.totalTonnes ?? 0;
         const body = plan.bodies.find((b) => b.bodyId === s.bodyId);
+        const step = sim.steps[i];
+        const broken = (step?.problems.length ?? 0) > 0;
 
         return (
           <div
             key={s.id}
+            style={{
+              borderTop: `1px solid ${broken ? C.bad : C.subtle}`,
+              padding: '8px 0',
+              ...(broken ? { background: C.badTint, paddingLeft: '8px' } : {}),
+            }}
+          >
+          <div
             style={{
               display: 'flex',
               flexWrap: 'wrap',
               alignItems: 'baseline',
               justifyContent: 'space-between',
               gap: '10px',
-              borderTop: `1px solid ${C.subtle}`,
-              padding: '8px 0',
             }}
           >
             <span style={{ fontSize: '13px' }}>
@@ -899,10 +1076,12 @@ function BuildOrder({
             </span>
 
             <span style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <Cost step={step} />
               <span style={{ ...MONO, fontSize: '11px', color: C.dim }}>
                 {s.totalTonnes === null ? '—' : `${s.totalTonnes.toLocaleString()} t`}
                 <span style={{ marginLeft: '8px', color: C.faint }}>Σ {running.toLocaleString()}</span>
               </span>
+              <Balance step={step} />
               <Button disabled={busy || i === 0} onClick={() => move(i, i - 1)}>
                 ↑
               </Button>
@@ -910,6 +1089,13 @@ function BuildOrder({
                 ↓
               </Button>
             </span>
+          </div>
+
+          {(step?.problems ?? []).map((p) => (
+            <p key={p.message} style={{ margin: '4px 0 0', fontSize: '11px', color: C.bad }}>
+              {p.message}
+            </p>
+          ))}
           </div>
         );
       })}
@@ -920,6 +1106,8 @@ function BuildOrder({
         {plan.sites.length} site{plan.sites.length === 1 ? '' : 's'} · {running.toLocaleString()} t in
         total · the first is the primary port, and moving it changes which build that is
       </p>
+
+      <Effects plan={plan} />
     </div>
   );
 }

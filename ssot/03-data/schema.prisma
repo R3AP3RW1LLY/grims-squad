@@ -2578,6 +2578,48 @@ model ColonyBuildType {
   /// `community` or `observed`. See the note above — `observed` outranks `community`.
   source String
 
+  /// ★ THE SIMULATION — WHAT THE GAME CHARGES AND WHAT IT GRANTS ★
+  ///
+  /// Colonisation is not "haul enough and it appears". The game runs an economy of CONSTRUCTION
+  /// POINTS: tier-1 builds EARN tier-2 points, tier-2 builds spend them and earn tier-3 points,
+  /// and tier-3 builds spend those. A plan that ignores this stalls halfway through with a port
+  /// nobody can start, which is the single most expensive mistake a squadron can make — a fortnight
+  /// of hauling against a build that was never legal.
+  ///
+  /// These five columns are what make a plan checkable before anybody undocks.
+  ///
+  /// `starport`, `outpost`, `installation`, `settlement` or `hub`. Decides which rules apply.
+  buildClass String @map("build_class")
+  /// Which tier of points this SPENDS, and how many. Tier 0 means it costs nothing.
+  needsTier   Int @default(0) @map("needs_tier")
+  needsPoints Int @default(0) @map("needs_points")
+  /// Which tier of points this EARNS, and how many. Tier 0 means it grants nothing.
+  givesTier   Int @default(0) @map("gives_tier")
+  givesPoints Int @default(0) @map("gives_points")
+
+  /// A prerequisite key this build needs somewhere in the system first, or null.
+  ///
+  /// A KEY rather than a list of build ids, because the ids that satisfy it live on the other side
+  /// of the relationship — see `satisfies`. Storing "requires a military settlement" once and
+  /// letting each settlement declare that it IS one means adding a build type later is a data
+  /// change and never a code change.
+  requires String?
+  /// The prerequisite keys this build satisfies. Usually empty.
+  satisfies String[]
+
+  /// ★ WHAT A COMPLETED BUILD DOES TO THE SYSTEM ★
+  ///
+  /// Seven scalars the game applies when a site finishes. Frontier publishes none of them: every
+  /// figure is a community measurement, which is why the planner labels them as such on screen
+  /// rather than presenting them as facts. Security is routinely NEGATIVE for a large starport.
+  effPopulation       Int @default(0) @map("eff_population")
+  effMaxPopulation    Int @default(0) @map("eff_max_population")
+  effSecurity         Int @default(0) @map("eff_security")
+  effTechnology       Int @default(0) @map("eff_technology")
+  effWealth           Int @default(0) @map("eff_wealth")
+  effStandardOfLiving Int @default(0) @map("eff_standard_of_living")
+  effDevelopment      Int @default(0) @map("eff_development")
+
   /// When one of OUR OWN depot readings last agreed with this row, exactly. Null until it has.
   confirmedAt DateTime? @map("confirmed_at") @db.Timestamptz(6)
   /// How many distinct sites of ours have matched it. A row confirmed six times is not a guess.

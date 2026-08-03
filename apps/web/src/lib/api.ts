@@ -1862,6 +1862,51 @@ export interface PlanSite {
   projectId: string | null;
 }
 
+/**
+ * What the construction-point rules say about the plan.
+ *
+ * Computed on the SERVER, by the same module the companion's answer comes from. Two
+ * implementations of a rule this fiddly would drift, and the half that drifted would be the one
+ * deciding whether a fortnight of hauling is legal.
+ */
+export interface PlanSimStep {
+  siteId: string;
+  buildTypeId: string | null;
+  spend: { tier: number; points: number } | null;
+  /** How much of the spend is the surcharge on extra starports. Zero when untaxed. */
+  surcharge: number;
+  earn: { tier: number; points: number } | null;
+  /** The balance AFTER this step. Negative means the plan cannot reach here. */
+  tier2: number;
+  tier3: number;
+  isPrimary: boolean;
+  problems: PlanProblem[];
+}
+
+export interface PlanProblem {
+  kind: 'points' | 'prerequisite' | 'unchosen';
+  message: string;
+}
+
+export interface PlanEffects {
+  population: number;
+  maxPopulation: number;
+  security: number;
+  technology: number;
+  wealth: number;
+  standardOfLiving: number;
+  development: number;
+}
+
+export interface PlanSimulation {
+  steps: PlanSimStep[];
+  tier2: number;
+  tier3: number;
+  problems: PlanProblem[];
+  effects: PlanEffects;
+  surchargedPorts: number;
+}
+
 export interface ColonyPlan {
   id: string;
   owner: 'squadron' | 'personal';
@@ -1877,6 +1922,7 @@ export interface ColonyPlan {
   bodies: PlanBody[];
   bodiesFetchedAt: string | null;
   sites: PlanSite[];
+  simulation: PlanSimulation;
 }
 
 export const getColonyPlans = (

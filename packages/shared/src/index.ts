@@ -27,6 +27,26 @@ export {
   promotionsPermitted,
 } from './promotion-floor.js';
 
+/*
+ * The colonisation simulation. Exported from here so the website and the companion app run the
+ * IDENTICAL rules — two copies would drift, and the half that drifted would be the one deciding
+ * whether a fortnight of hauling is legal.
+ */
+export {
+  NO_EFFECTS,
+  prerequisiteName,
+  simulatePlan,
+  surchargedCost,
+} from './colony-simulation.js';
+export type {
+  SimBuildType,
+  SimProblem,
+  SimResult,
+  SimSite,
+  SimStep,
+  SystemEffects,
+} from './colony-simulation.js';
+
 export { NonceService, formatNonce, NONCE_TTL_MS } from './nonce.service.js';
 export type { NonceStore, NonceClaim, CheckResult, CheckOutcome } from './nonce.service.js';
 

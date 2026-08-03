@@ -2,17 +2,24 @@
 
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
-import type { ColonyPlan } from '../../../../../lib/api';
+import type { ColonyPlan, PlanProblem, PlanSimStep } from '../../../../../lib/api';
 import { apiPatch } from '../../../../../lib/api-client';
 
 /**
- * The order things get built in, with the running total.
+ * The order things get built in, what each step costs, and whether it can be paid for.
  *
  * ★ THE ORDER IS PART OF THE PLAN, NOT A PRESENTATION CHOICE ★
  *
  * The game earns and spends construction points in sequence, so the same set of builds in a
  * different order is a different plan — one that works and one that stalls halfway. That is why
  * position is stored rather than derived, and why this list is editable at all.
+ *
+ * ★ THE DEFICIT IS SHOWN AT THE STEP IT HAPPENS ★
+ *
+ * A total that balances hides a plan that cannot be built: step four runs out of tier-2 points and
+ * step nine pays them back, so the sum looks fine and the squadron gets stuck at step four with a
+ * fortnight of hauling behind them. So the balance is printed on every row, and the row that goes
+ * negative says so in a sentence.
  *
  * ★ BUTTONS, NOT DRAG AND DROP ★
  *
@@ -25,6 +32,31 @@ const CHIP =
   'rounded border border-[var(--color-border-hairline)] px-2 py-0.5 font-mono text-[10px] ' +
   'text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-border-active)] ' +
   'hover:text-[var(--color-text-primary)] disabled:opacity-30';
+
+/** The running balance, in the two currencies the game keeps. */
+function Balance({ step }: { step: PlanSimStep | undefined }) {
+  if (step === undefined) return null;
+
+  const cell = (label: string, value: number) => (
+    <span
+      className={
+        value < 0
+          ? 'text-[var(--color-semantic-hostile-bright)]'
+          : 'text-[var(--color-text-secondary)]'
+      }
+    >
+      {label} {value > 0 ? '+' : ''}
+      {value}
+    </span>
+  );
+
+  return (
+    <span className="flex gap-2 font-mono text-[10px] tabular-nums">
+      {cell('T2', step.tier2)}
+      {cell('T3', step.tier3)}
+    </span>
+  );
+}
 
 export function BuildOrder({ plan, canEdit }: { plan: ColonyPlan; canEdit: boolean }) {
   const router = useRouter();
@@ -71,6 +103,7 @@ export function BuildOrder({ plan, canEdit }: { plan: ColonyPlan; canEdit: boole
    * alone cannot answer without adding them up by eye.
    */
   let running = 0;
+  const sim = plan.simulation;
 
   return (
     <div>
@@ -80,9 +113,12 @@ export function BuildOrder({ plan, canEdit }: { plan: ColonyPlan; canEdit: boole
         </p>
       )}
 
+      <Verdict problems={sim.problems} />
+
       <ol className="m-0 list-none p-0">
         {plan.sites.map((s, i) => {
           running += s.totalTonnes ?? 0;
+          const step = sim.steps[i];
           const body = plan.bodies.find((b) => b.bodyId === s.bodyId);
           const shortName =
             body === undefined
@@ -91,63 +127,83 @@ export function BuildOrder({ plan, canEdit }: { plan: ColonyPlan; canEdit: boole
                 ? body.name.slice(plan.systemName.length).trim() || body.name
                 : body.name;
 
+          const broken = (step?.problems.length ?? 0) > 0;
+
           return (
             <li
               key={s.id}
-              className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-t border-[var(--color-border-hairline)] py-2"
+              className={
+                'border-t py-2 ' +
+                (broken
+                  ? 'border-[var(--color-semantic-hostile)] bg-[color-mix(in_srgb,var(--color-semantic-hostile)_5%,transparent)] px-2'
+                  : 'border-[var(--color-border-hairline)]')
+              }
             >
-              <span className="text-sm">
-                <span className="font-mono text-[11px] tabular-nums text-[var(--color-text-dim)]">
-                  {String(i + 1).padStart(2, '0')}
-                </span>{' '}
-                <span className="text-[var(--color-text-primary)]">
-                  {s.buildTypeName ?? 'nothing chosen yet'}
-                </span>
-                <span className="ml-2 text-[11px] text-[var(--color-text-secondary)]">
-                  {shortName} · {s.location}
-                  {s.tier === null ? '' : ` · T${s.tier}`}
-                </span>
-                {s.isPrimary ? (
-                  <span
-                    className="ml-2 font-mono text-[9px] uppercase tracking-[0.16em] text-[var(--color-brand-orange)]"
-                    title="The first station in a system. The game charges no construction points for it."
-                  >
-                    primary
+              <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+                <span className="text-sm">
+                  <span className="font-mono text-[11px] tabular-nums text-[var(--color-text-dim)]">
+                    {String(i + 1).padStart(2, '0')}
+                  </span>{' '}
+                  <span className="text-[var(--color-text-primary)]">
+                    {s.buildTypeName ?? 'nothing chosen yet'}
                   </span>
-                ) : null}
-              </span>
-
-              <span className="flex items-center gap-3">
-                <span className="font-mono text-[11px] tabular-nums text-[var(--color-text-secondary)]">
-                  {s.totalTonnes === null ? '—' : `${s.totalTonnes.toLocaleString()} t`}
-                  <span className="ml-2 text-[var(--color-text-dim)]">
-                    Σ {running.toLocaleString()}
+                  <span className="ml-2 text-[11px] text-[var(--color-text-secondary)]">
+                    {shortName} · {s.location}
+                    {s.tier === null ? '' : ` · T${s.tier}`}
                   </span>
+                  {s.isPrimary ? (
+                    <span
+                      className="ml-2 font-mono text-[9px] uppercase tracking-[0.16em] text-[var(--color-brand-orange)]"
+                      title="The first station in a system. The game charges no construction points for it."
+                    >
+                      primary
+                    </span>
+                  ) : null}
                 </span>
 
-                {canEdit ? (
-                  <span className="flex gap-1">
-                    <button
-                      type="button"
-                      disabled={busy || i === 0}
-                      className={CHIP}
-                      aria-label="Move earlier"
-                      onClick={() => void move(i, i - 1)}
-                    >
-                      ↑
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busy || i === plan.sites.length - 1}
-                      className={CHIP}
-                      aria-label="Move later"
-                      onClick={() => void move(i, i + 1)}
-                    >
-                      ↓
-                    </button>
+                <span className="flex items-center gap-3">
+                  <Cost step={step} />
+                  <span className="font-mono text-[11px] tabular-nums text-[var(--color-text-secondary)]">
+                    {s.totalTonnes === null ? '—' : `${s.totalTonnes.toLocaleString()} t`}
+                    <span className="ml-2 text-[var(--color-text-dim)]">
+                      Σ {running.toLocaleString()}
+                    </span>
                   </span>
-                ) : null}
-              </span>
+                  <Balance step={step} />
+
+                  {canEdit ? (
+                    <span className="flex gap-1">
+                      <button
+                        type="button"
+                        disabled={busy || i === 0}
+                        className={CHIP}
+                        aria-label="Move earlier"
+                        onClick={() => void move(i, i - 1)}
+                      >
+                        ↑
+                      </button>
+                      <button
+                        type="button"
+                        disabled={busy || i === plan.sites.length - 1}
+                        className={CHIP}
+                        aria-label="Move later"
+                        onClick={() => void move(i, i + 1)}
+                      >
+                        ↓
+                      </button>
+                    </span>
+                  ) : null}
+                </span>
+              </div>
+
+              {step?.problems.map((p) => (
+                <p
+                  key={p.message}
+                  className="m-0 mt-1 text-[11px] text-[var(--color-semantic-hostile-bright)]"
+                >
+                  {p.message}
+                </p>
+              ))}
             </li>
           );
         })}
@@ -161,6 +217,117 @@ export function BuildOrder({ plan, canEdit }: { plan: ColonyPlan; canEdit: boole
         {plan.sites.length} site{plan.sites.length === 1 ? '' : 's'} ·{' '}
         {running.toLocaleString()} t in total · the first is the primary port, and moving it changes
         which build that is
+      </p>
+
+      <Effects plan={plan} />
+    </div>
+  );
+}
+
+/** What one step costs and earns in construction points. */
+function Cost({ step }: { step: PlanSimStep | undefined }) {
+  if (step === undefined) return null;
+  if (step.spend === null && step.earn === null) return null;
+
+  return (
+    <span className="font-mono text-[10px] tabular-nums text-[var(--color-text-dim)]">
+      {step.spend === null ? null : (
+        <span
+          className="text-[var(--color-semantic-warning)]"
+          title={
+            step.surcharge > 0
+              ? `${step.surcharge} of this is the surcharge the game adds to every starport after the second.`
+              : undefined
+          }
+        >
+          −{step.spend.points} T{step.spend.tier}
+          {step.surcharge > 0 ? '*' : ''}
+        </span>
+      )}
+      {step.spend !== null && step.earn !== null ? ' ' : null}
+      {step.earn === null ? null : (
+        <span className="text-[var(--color-brand-cyan-bright)]">
+          +{step.earn.points} T{step.earn.tier}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/**
+ * Everything wrong with the plan, at the top where it cannot be missed.
+ *
+ * Silence when there is nothing wrong. A permanent "0 problems" banner trains people to ignore the
+ * space, which is the one place a real problem has to appear.
+ */
+function Verdict({ problems }: { problems: readonly PlanProblem[] }) {
+  if (problems.length === 0) return null;
+
+  return (
+    <div className="mb-4 rounded border border-[var(--color-semantic-hostile)] bg-[color-mix(in_srgb,var(--color-semantic-hostile)_6%,transparent)] px-4 py-3">
+      <p className="m-0 font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--color-semantic-hostile-bright)]">
+        This plan cannot be built in this order
+      </p>
+      <ul className="m-0 mt-2 list-disc space-y-1 pl-5 text-sm text-[var(--color-text-primary)]">
+        {problems.map((p) => (
+          <li key={p.message}>{p.message}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/**
+ * What the system becomes if the whole order is built.
+ *
+ * ★ LABELLED AS GATHERED, BECAUSE THAT IS WHAT IT IS ★
+ *
+ * Frontier publishes none of these figures. Every one was measured by players comparing a system
+ * before and after a build, and they are the least corroborated numbers on this page — unlike the
+ * construction-point costs, which two independent sources agree on. A member deciding how to spend
+ * a fortnight is owed that distinction, so it is written next to the numbers rather than buried.
+ */
+function Effects({ plan }: { plan: ColonyPlan }) {
+  const e = plan.simulation.effects;
+  const anything = Object.values(e).some((v) => v !== 0);
+  if (!anything) return null;
+
+  const rows: Array<[string, number]> = [
+    ['Population', e.population],
+    ['Max population', e.maxPopulation],
+    ['Security', e.security],
+    ['Technology', e.technology],
+    ['Wealth', e.wealth],
+    ['Standard of living', e.standardOfLiving],
+    ['Development', e.development],
+  ];
+
+  return (
+    <div className="mt-6 rounded border border-[var(--color-border-hairline)] px-4 py-3">
+      <p className="m-0 font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-secondary)]">
+        What this would do to the system
+      </p>
+      <div className="mt-2 flex flex-wrap gap-x-6 gap-y-2">
+        {rows.map(([label, value]) => (
+          <span key={label} className="text-[11px] text-[var(--color-text-secondary)]">
+            {label}{' '}
+            <span
+              className={
+                value < 0
+                  ? 'font-mono tabular-nums text-[var(--color-semantic-warning)]'
+                  : 'font-mono tabular-nums text-[var(--color-text-primary)]'
+              }
+            >
+              {value > 0 ? '+' : ''}
+              {value}
+            </span>
+          </span>
+        ))}
+      </div>
+      <p className="m-0 mt-3 text-[11px] text-[var(--color-text-dim)]">
+        These seven are gathered by players, not published by Frontier, and are the least confirmed
+        numbers here — unlike the construction points above, which two independent sources agree on.
+        A large starport really does cost the system security; that is the game, not a mistake.
       </p>
     </div>
   );

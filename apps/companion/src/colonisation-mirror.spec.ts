@@ -25,7 +25,12 @@ import { describe, expect, it } from 'vitest';
  * thing the two genuinely share, and it is also the thing a member sees and compares.
  */
 
-const REPO = join(import.meta.dirname, '..', '..', '..');
+/*
+ * From the working directory rather than `import.meta.dirname`: this package's spec tsconfig emits
+ * CommonJS, where `import.meta` is a compile error. Vitest runs with the cwd set to the package, so
+ * two levels up is the repo — which the readFileSync below proves on every run.
+ */
+const REPO = join(process.cwd(), '..', '..');
 
 const read = (rel: string): string => readFileSync(join(REPO, rel), 'utf8');
 
@@ -36,7 +41,7 @@ function websiteLabels(): string[] {
 
   // Entries are object literals separated by `},` at a known indent. Splitting on the brace keeps
   // this from matching a label in a comment three entries away.
-  for (const chunk of src.split(/\n  \{\n/)) {
+  for (const chunk of src.split(/\n {2}\{\n/)) {
     if (!chunk.includes("subsection: 'Colonisation'")) continue;
     const label = /\n {4}label: '([^']+)'/.exec(chunk);
     if (label?.[1] !== undefined) out.push(label[1]);

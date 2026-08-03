@@ -33,6 +33,29 @@ function type(id: string, costs: Record<string, number>): BuildTypeSeed {
     layouts: [],
     totalTonnes: Object.values(costs).reduce((a, b) => a + b, 0),
     costs: Object.entries(costs).map(([commodity, tonnes]) => ({ commodity, tonnes })),
+
+    /*
+     * The simulation fields, at their neutral values. These tests are about IDENTIFYING a build
+     * from its bill of materials, which the construction-point rules have nothing to do with — so
+     * they are filled in rather than varied, and a fixture that varied them would suggest the
+     * fingerprint depended on them.
+     */
+    buildClass: 'outpost',
+    needsTier: 0,
+    needsPoints: 0,
+    givesTier: 0,
+    givesPoints: 0,
+    requires: null,
+    satisfies: [],
+    effects: {
+      population: 0,
+      maxPopulation: 0,
+      security: 0,
+      technology: 0,
+      wealth: 0,
+      standardOfLiving: 0,
+      development: 0,
+    },
   };
 }
 

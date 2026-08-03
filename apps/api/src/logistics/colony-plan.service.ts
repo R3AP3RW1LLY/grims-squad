@@ -1,5 +1,12 @@
 import type { PrismaClient } from '@grims/db';
-import { AppError, ErrorCode, Permission } from '@grims/shared';
+import {
+  AppError,
+  ErrorCode,
+  Permission,
+  simulatePlan,
+  type SimBuildType,
+  type SimResult,
+} from '@grims/shared';
 import { fetchSystemBodies, type EdsmSystemBodies } from '@grims/ed-clients';
 
 /**
@@ -72,6 +79,17 @@ export interface PlanDetail {
   /** When EDSM was last asked. A body list nobody can date is one nobody can trust. */
   readonly bodiesFetchedAt: Date | null;
   readonly sites: readonly PlanSite[];
+
+  /**
+   * Whether the plan can actually be built, in this order.
+   *
+   * ★ COMPUTED HERE, NOT IN EITHER APP ★
+   *
+   * The website and the companion both draw this, and two implementations of a rule this fiddly
+   * would drift — the half that drifted would be the one deciding whether a fortnight of hauling is
+   * legal. The shared module runs once, on the server, and both ends render the same answer.
+   */
+  readonly simulation: SimResult;
 }
 
 /** Injected so the service is testable without a network. */
@@ -287,7 +305,34 @@ export class ColonyPlanService {
       callerId,
     );
 
-    return rows.map((r) => this.#head(r));
+    /*
+     * ★ THE BOARD WAS READING AN EMPTY LIST ★
+     *
+     * `#head` builds a plan with no sites, and this returned that straight out — so every plan on
+     * the board said "nothing planned yet" no matter what was in it, and the tonnage that is meant
+     * to be the headline was always zero. Found by looking at the page rather than at the types,
+     * which all agreed with each other.
+     *
+     * One query for every plan's sites, not one per plan. A board with twenty plans on it should
+     * not be twenty round trips.
+     */
+    const plans = rows.map((r) => this.#head(r));
+    if (plans.length === 0) return plans;
+
+    const sites = await this.#sitesOfMany(plans.map((p) => p.id));
+    const catalogue = await this.#catalogueFor([...sites.values()].flat().map((s) => s.buildTypeId));
+
+    return plans.map((plan) => {
+      const mine = sites.get(plan.id) ?? [];
+      return {
+        ...plan,
+        sites: mine,
+        simulation: simulatePlan(
+          mine.map((s) => ({ id: s.id, buildTypeId: s.buildTypeId })),
+          catalogue,
+        ),
+      };
+    });
   }
 
   /** One plan, with its system laid out and its sites in build order. */
@@ -309,7 +354,90 @@ export class ColonyPlanService {
     const head = this.#head(row);
     const [bodies, sites] = await Promise.all([this.#bodiesOf(head.systemId64), this.#sitesOf(id)]);
 
-    return { ...head, bodies, sites };
+    return { ...head, bodies, sites, simulation: await this.#simulate(sites) };
+  }
+
+  /** Runs the construction-point rules over one plan's build order. */
+  async #simulate(sites: readonly PlanSite[]): Promise<SimResult> {
+    const catalogue = await this.#catalogueFor(sites.map((s) => s.buildTypeId));
+    return simulatePlan(
+      sites.map((s) => ({ id: s.id, buildTypeId: s.buildTypeId })),
+      catalogue,
+    );
+  }
+
+  /** Every plan's sites, grouped, in one query. */
+  async #sitesOfMany(planIds: readonly string[]): Promise<Map<string, PlanSite[]>> {
+    const rows = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
+      `SELECT s.plan_id::text AS plan_id,
+              s.id, s.body_id, s.location, s.build_type_id, s.position, s.is_primary,
+              s.project_id::text AS project_id,
+              t.display_name AS build_type_name, t.tier, t.total_tonnes
+         FROM colony_plan_sites s
+         LEFT JOIN colony_build_types t ON t.id = s.build_type_id
+        WHERE s.plan_id = ANY($1::uuid[])
+        ORDER BY s.position`,
+      planIds,
+    );
+
+    const out = new Map<string, PlanSite[]>();
+    for (const r of rows) {
+      const key = String(r['plan_id']);
+      const list = out.get(key) ?? [];
+      list.push(this.#site(r));
+      out.set(key, list);
+    }
+    return out;
+  }
+
+  /**
+   * The construction-point rules for a set of builds.
+   *
+   * ★ ONLY THE BUILDS ACTUALLY USED ★
+   *
+   * Fetching the whole catalogue would be fifty-five rows to answer a question about four. The
+   * simulation takes a lookup rather than a list precisely so the caller can decide that.
+   */
+  async #catalogueFor(referenced: ReadonlyArray<string | null>): Promise<Map<string, SimBuildType>> {
+    const ids = [...new Set(referenced.filter((v): v is string => v !== null))];
+    if (ids.length === 0) return new Map();
+
+    const rows = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
+      `SELECT id, display_name, tier, build_class, needs_tier, needs_points,
+              gives_tier, gives_points, requires, satisfies,
+              eff_population, eff_max_population, eff_security, eff_technology,
+              eff_wealth, eff_standard_of_living, eff_development
+         FROM colony_build_types
+        WHERE id = ANY($1::text[])`,
+      ids,
+    );
+
+    return new Map<string, SimBuildType>(
+      rows.map((r) => [
+        String(r['id']),
+        {
+          id: String(r['id']),
+          displayName: String(r['display_name']),
+          tier: Number(r['tier']),
+          buildClass: String(r['build_class']),
+          needsTier: Number(r['needs_tier']),
+          needsPoints: Number(r['needs_points']),
+          givesTier: Number(r['gives_tier']),
+          givesPoints: Number(r['gives_points']),
+          requires: r['requires'] === null ? null : String(r['requires']),
+          satisfies: Array.isArray(r['satisfies']) ? (r['satisfies'] as string[]) : [],
+          effects: {
+            population: Number(r['eff_population']),
+            maxPopulation: Number(r['eff_max_population']),
+            security: Number(r['eff_security']),
+            technology: Number(r['eff_technology']),
+            wealth: Number(r['eff_wealth']),
+            standardOfLiving: Number(r['eff_standard_of_living']),
+            development: Number(r['eff_development']),
+          },
+        },
+      ]),
+    );
   }
 
   async #bodiesOf(systemId64: string | null): Promise<readonly PlanBody[]> {
@@ -357,7 +485,12 @@ export class ColonyPlanService {
       planId,
     );
 
-    return rows.map((r) => ({
+    return rows.map((r) => this.#site(r));
+  }
+
+  /** One site row, read the same way whichever query produced it. */
+  #site(r: Record<string, unknown>): PlanSite {
+    return {
       id: String(r['id']),
       bodyId: r['body_id'] === null ? null : Number(r['body_id']),
       location: r['location'] === 'surface' ? 'surface' : 'orbital',
@@ -368,7 +501,7 @@ export class ColonyPlanService {
       position: Number(r['position']),
       isPrimary: r['is_primary'] === true,
       projectId: r['project_id'] === null ? null : String(r['project_id']),
-    }));
+    };
   }
 
   #head(r: Record<string, unknown>): PlanDetail {
@@ -386,6 +519,9 @@ export class ColonyPlanService {
       bodies: [],
       bodiesFetchedAt: (r['fetched_at'] as Date | null) ?? null,
       sites: [],
+      // The head row alone knows nothing about the build order. Both callers fill this in — `byId`
+      // from the plan's own sites, `list` from one query across every plan.
+      simulation: simulatePlan([], new Map()),
     };
   }
 
