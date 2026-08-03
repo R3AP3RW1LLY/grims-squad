@@ -1680,6 +1680,16 @@ export interface ColonyNeed {
   commodity: string;
   remaining: number;
   required: number | null;
+  /** When the game last reported this. Null before anybody has docked at the site. */
+  observedAt: string | null;
+}
+
+/** One delivery, straight off the append-only ledger. */
+export interface ColonyDelivery {
+  at: string;
+  commander: string;
+  commodity: string;
+  amount: number;
 }
 
 export interface ColonyHauler {
@@ -1731,7 +1741,17 @@ export interface ColonyDetail {
   needs: ColonyNeed[];
   haulers: ColonyHauler[];
   shopping: ColonyShoppingRow[];
+  /*
+   * ★ THE API HAS ALWAYS RETURNED THESE AND THIS TYPE DROPPED THEM ★
+   *
+   * Both controllers send `deliveries` — the literal ledger, newest first — and the website's own
+   * type omitted the field, so "who delivered what and when" was visible in the companion app and
+   * nowhere on the site. Nothing failed; the data simply arrived and was discarded.
+   */
+  deliveries: ColonyDelivery[];
   chart: ColonyCharts;
+  /** What this reader may do to the project. A rendering hint — every write re-checks. */
+  can: { manage: boolean; isPoster: boolean };
   origin: { system: string } | null;
   unknownSystem: string | null;
 }

@@ -12,6 +12,8 @@ import { NeedsTable } from './needs-table';
 import { ShoppingList } from './shopping-list';
 import { HaulerBoard } from './hauler-board';
 import { DeliveryTimeline, HaulerChart } from './delivery-charts';
+import { DeliveryLedger } from './delivery-ledger';
+import { ProjectActions } from './project-actions';
 
 /**
  * One colonisation project.
@@ -60,7 +62,8 @@ export default async function ColonyProjectPage({
     return <AdminUnavailable />;
   }
 
-  const { project, needs, haulers, shopping, chart, origin, unknownSystem } = read.data;
+  const { project, needs, haulers, shopping, deliveries, chart, can, origin, unknownSystem } =
+    read.data;
   const delivered = Math.max(0, project.required - project.remaining);
 
   return (
@@ -88,6 +91,14 @@ export default async function ColonyProjectPage({
             tone={project.completedAt !== null ? 'accent' : 'default'}
           />
         </StatGrid>
+
+        {/*
+          Every one of these had a route and no button. `isPriority` in particular has been stored
+          since the table existed, rendered as a badge in three places, and settable from nowhere.
+        */}
+        <div className="mb-8">
+          <ProjectActions project={project} canManage={can.manage} isPoster={can.isPoster} />
+        </div>
 
         {project.notes === null ? null : (
           <Section title="Notes">
@@ -120,6 +131,14 @@ export default async function ColonyProjectPage({
         */}
         <Section title="Deliveries over time">
           <DeliveryTimeline chart={chart} />
+        </Section>
+
+        {/*
+          The literal ledger. It answers "did my run land", which the leaderboard cannot — and which
+          is the question somebody has in the ninety seconds after they undock.
+        */}
+        <Section title="Every delivery">
+          <DeliveryLedger deliveries={deliveries} />
         </Section>
 
         <Section title="Who has hauled">

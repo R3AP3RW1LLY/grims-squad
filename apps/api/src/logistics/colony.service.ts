@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import type { PrismaClient } from '@grims/db';
-import { AppError, ErrorCode } from '@grims/shared';
+import { AppError, ErrorCode, Permission } from '@grims/shared';
 import type { AclDbService } from '../authz/acl-db.service.js';
 import type { MarketStore, PlaceQuery } from './market.store.js';
 
@@ -50,6 +50,18 @@ export interface NeedDetail {
   readonly commodity: string;
   readonly remaining: number;
   readonly required: number | null;
+  /**
+   * When the game last told us this.
+   *
+   * ★ IT WAS STORED AND NEVER SHOWN, WHICH IS THE WORST OF BOTH ★
+   *
+   * `colony_needs.observedAt` has been written on every sync since the table existed and read by no
+   * route, so no screen could say how old the figures were. A needs list is a snapshot of a depot
+   * reading — it is current if somebody docked there ten minutes ago and a fortnight stale if
+   * nobody has been since. Those look identical without this, and only one of them is worth
+   * planning an evening around.
+   */
+  readonly observedAt: Date | null;
 }
 
 /**
@@ -353,7 +365,7 @@ export class ColonyService {
     const rows = await this.db.colonyNeed.findMany({
       where: { projectId },
       orderBy: { remaining: 'desc' },
-      select: { commodity: true, remaining: true, required: true },
+      select: { commodity: true, remaining: true, required: true, observedAt: true },
     });
     return rows;
   }
@@ -803,6 +815,105 @@ export class ColonyService {
     });
 
     return { shareToken: input.visibility === 'public' ? shareToken : null };
+  }
+
+  /**
+   * Whose build this is, for anything that changes it.
+   *
+   * ★ THE SAME RULE THE ROSTER USES, AND IT HAS TO STAY THE SAME ★
+   *
+   * A squadron project is the squadron's effort, so directing it is an officer's call. A personal
+   * project belongs to whoever posted it, and nobody else decides its fate — not even an officer,
+   * because it is not the squadron's build.
+   */
+  async #mayDirect(projectId: string, callerId: string, mask: bigint): Promise<void> {
+    const db = this.acl.forSystem('checking who may change a colonisation project');
+    const project = await db.colonyProject.findFirst({
+      where: { id: projectId },
+      select: { owner: true, postedById: true },
+    });
+
+    if (project === null) {
+      throw new AppError(ErrorCode.RESOURCE_NOT_VISIBLE, 'That project is not available.');
+    }
+
+    const may =
+      project.owner === 'squadron'
+        ? (mask & Permission.COLONY_MANAGE) === Permission.COLONY_MANAGE
+        : project.postedById === callerId;
+
+    if (!may) {
+      throw new AppError(
+        ErrorCode.PERMISSION_DENIED,
+        project.owner === 'squadron'
+          ? 'Only officers can change a squadron project.'
+          : 'Only the member who posted this project can change it.',
+      );
+    }
+  }
+
+  /**
+   * Closes a build by hand.
+   *
+   * ★ SOMETHING HAS TO BE ABLE TO END A PROJECT THAT NOBODY VISITS AGAIN ★
+   *
+   * Until now only the journal could: a `ConstructionComplete` or `ConstructionFailed` on a depot
+   * reading. That covers a build somebody finished and nothing else. An abandoned site, a project
+   * posted against the wrong market id, a system the squadron walked away from — all of them read
+   * "Live" for ever and sit at the top of a board offering work nobody is doing.
+   *
+   * The ledger is untouched. Closing says the effort is over; it says nothing about the cargo that
+   * was genuinely hauled, and erasing that would understate what people did.
+   */
+  async close(projectId: string, callerId: string, mask: bigint, at = new Date()): Promise<void> {
+    await this.#mayDirect(projectId, callerId, mask);
+
+    const db = this.acl.forSystem('closing a colonisation project');
+    await db.colonyProject.update({
+      where: { id: projectId },
+      // Priority cleared with it: a finished build must not keep pointing the squadron at itself.
+      data: { completedAt: at, isPriority: false },
+    });
+  }
+
+  /** Puts a closed project back on the board — for one closed by mistake. */
+  async reopen(projectId: string, callerId: string, mask: bigint): Promise<void> {
+    await this.#mayDirect(projectId, callerId, mask);
+
+    const db = this.acl.forSystem('reopening a colonisation project');
+    await db.colonyProject.update({ where: { id: projectId }, data: { completedAt: null } });
+  }
+
+  /**
+   * Deletes a project outright.
+   *
+   * ★ REFUSED ONCE ANYBODY HAS HAULED TO IT, AND THAT IS DELIBERATE ★
+   *
+   * The point of delete is the project posted against a mistyped market id — one that will never
+   * receive a depot reading and can only be fixed in SQL today. That project has no ledger.
+   *
+   * A project WITH a ledger is different in kind: the rows are a record of what real people
+   * actually carried, and `onDelete: Cascade` would take them with it. Somebody tidying a board
+   * would silently erase a fortnight of other members' contributions. So it refuses and names the
+   * alternative, rather than asking for a confirmation nobody reads.
+   */
+  async remove(projectId: string, callerId: string, mask: bigint): Promise<void> {
+    await this.#mayDirect(projectId, callerId, mask);
+
+    const [ledger] = await this.db.$queryRawUnsafe<Array<{ n: bigint }>>(
+      `SELECT count(*)::bigint AS n FROM colony_contributions WHERE project_id = $1::uuid`,
+      projectId,
+    );
+
+    if (Number(ledger?.n ?? 0) > 0) {
+      throw new AppError(
+        ErrorCode.VALIDATION_FAILED,
+        'People have already hauled to this build, and deleting it would erase their deliveries. Close it instead.',
+      );
+    }
+
+    const db = this.acl.forSystem('deleting a colonisation project');
+    await db.colonyProject.delete({ where: { id: projectId } });
   }
 
   /** Marks a squadron project as the current effort, or stops doing so. Requires COLONY_MANAGE. */

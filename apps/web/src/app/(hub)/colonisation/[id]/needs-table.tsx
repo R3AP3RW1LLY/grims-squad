@@ -12,6 +12,33 @@ const TH =
   'text-[var(--color-text-secondary)]';
 const TD = 'border-t border-[var(--color-border-hairline)] py-2.5 pr-4 align-middle';
 
+/**
+ * How long ago the game told us this, in words.
+ *
+ * ★ A NEEDS LIST IS A SNAPSHOT, NOT A FEED ★
+ *
+ * It is only as current as the last time somebody docked at the site. Ten minutes old and it is
+ * worth planning an evening around; a fortnight old and half of it may already be delivered. Those
+ * two look identical without this line, which is why `observedAt` being stored and never shown was
+ * worse than not storing it.
+ */
+function freshness(needs: readonly ColonyNeed[]): string | null {
+  const stamps = needs
+    .map((n) => (n.observedAt === null ? null : Date.parse(n.observedAt)))
+    .filter((t): t is number => t !== null && Number.isFinite(t));
+
+  if (stamps.length === 0) return null;
+
+  const minutes = Math.floor((Date.now() - Math.max(...stamps)) / 60_000);
+  if (minutes < 2) return 'Read from the site moments ago.';
+  if (minutes < 90) return `Read from the site ${minutes} minutes ago.`;
+
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `Read from the site ${hours} hours ago.`;
+
+  return `Read from the site ${Math.round(hours / 24)} days ago — somebody docking there refreshes it.`;
+}
+
 export function NeedsTable({ needs }: { needs: readonly ColonyNeed[] }) {
   if (needs.length === 0) {
     return (
@@ -97,6 +124,13 @@ export function NeedsTable({ needs }: { needs: readonly ColonyNeed[] }) {
           })}
         </tbody>
       </table>
+
+      {/* Design principle: every number carries its provenance. This one is the provenance. */}
+      {freshness(needs) === null ? null : (
+        <p className="m-0 mt-3 font-mono text-[11px] text-[var(--color-text-secondary)]">
+          {freshness(needs)}
+        </p>
+      )}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Inject, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query } from '@nestjs/common';
 import { AppError, ErrorCode, Permission, ROLE_PRESETS } from '@grims/shared';
 import { Public } from '../auth/auth.guard.js';
 import { User, type CurrentUser } from '../auth/current-user.js';
@@ -97,7 +97,7 @@ export class ColonyController {
     @Query('largePad') largePad?: string,
     @Query('sort') sort?: string,
   ) {
-    await this.#assert(
+    const mask = await this.#assert(
       caller,
       Permission.COLONY_VIEW,
       'You do not have access to the colonisation boards.',
@@ -146,6 +146,20 @@ export class ColonyController {
       shopping,
       deliveries,
       chart,
+      /*
+       * ★ WHAT THIS READER MAY DO, DECIDED HERE ★
+       *
+       * The page could not draw a close button because it had no way to know whether the reader was
+       * allowed to press one: the detail payload carried no rights and no identity. Sending the
+       * caller's own id down for the page to compare would be one more value the browser could get
+       * wrong about who it belongs to, so the comparison is made where the session is.
+       *
+       * A hint for rendering only — every write re-checks.
+       */
+      can: {
+        manage: (mask & Permission.COLONY_MANAGE) === Permission.COLONY_MANAGE,
+        isPoster: caller !== undefined && project.postedById === caller.userId,
+      },
       origin: origin === null ? null : { system: origin.system },
       unknownSystem: (near?.trim() ?? '') !== '' && origin === null ? near?.trim() : null,
     };
@@ -237,6 +251,52 @@ export class ColonyController {
       // the failure a clear message rather than a generic refusal.
       mayPublish: (mask & Permission.COLONY_SHARE_PUBLIC) === Permission.COLONY_SHARE_PUBLIC,
     });
+  }
+
+  /**
+   * Closing, reopening and deleting.
+   *
+   * ★ GATED ON COLONY_VIEW HERE, ON PURPOSE ★
+   *
+   * The interesting check is not the caller's rank in general — it is whose build this is, and the
+   * service makes it. A member closing their own project needs no permission beyond seeing the
+   * board; an officer closing the squadron's needs COLONY_MANAGE. One rule, in one place, shared
+   * with the roster.
+   */
+  @Patch('projects/:id/close')
+  async close(@User() caller: CurrentUser | undefined, @Param('id') id: string) {
+    const me = this.#requireSession(caller);
+    const mask = await this.#assert(
+      caller,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+    await this.colony.close(id, me.userId, mask);
+    return { ok: true };
+  }
+
+  @Patch('projects/:id/reopen')
+  async reopen(@User() caller: CurrentUser | undefined, @Param('id') id: string) {
+    const me = this.#requireSession(caller);
+    const mask = await this.#assert(
+      caller,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+    await this.colony.reopen(id, me.userId, mask);
+    return { ok: true };
+  }
+
+  @Delete('projects/:id')
+  async remove(@User() caller: CurrentUser | undefined, @Param('id') id: string) {
+    const me = this.#requireSession(caller);
+    const mask = await this.#assert(
+      caller,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+    await this.colony.remove(id, me.userId, mask);
+    return { ok: true };
   }
 
   @Patch('projects/:id/priority')

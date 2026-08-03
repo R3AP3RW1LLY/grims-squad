@@ -59,6 +59,27 @@ export function ShoppingList({
             className={`${FIELD} w-[200px]`}
           />
         </label>
+        {/*
+          ★ THIS CONTROL EXISTED IN THE API AND NOWHERE ON SCREEN ★
+
+          Squadron owner asked for cheapest-versus-closest on 2026-08-02. Both were implemented end
+          to end on both controllers and no surface ever drew a control, so the only sort anybody
+          could get was the default — which is how a shopping list ended up sending somebody ninety-
+          six light years to save five percent.
+
+          `local` leads because it is the default and the one that is right nearly always: the same
+          system beats leaving it, and within a comparable trip the better price wins.
+        */}
+        <label className="flex flex-col gap-1">
+          <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-secondary)]">
+            Prefer
+          </span>
+          <select name="sort" defaultValue={query['sort'] ?? 'local'} className={FIELD}>
+            <option value="local">Local first</option>
+            <option value="cheapest">Cheapest anywhere</option>
+            <option value="closest">Closest anywhere</option>
+          </select>
+        </label>
         <label className="flex flex-col gap-1">
           <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-secondary)]">
             Within
