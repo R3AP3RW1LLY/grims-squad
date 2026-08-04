@@ -319,6 +319,29 @@ export class PrismaMarketStore implements MarketStore {
        * `order: 'distance'` inverts it, and exists because "close enough by construction" stops
        * being true the moment the radius is wide. Within 100 ly the cheapest row can be ninety
        * jumps from a station in the member's own system that has what they need on the shelf.
+       *
+       * ★ THE SECOND KEY IS LOAD-BEARING FOR SPEED, NOT ONLY FOR TIES — MEASURED 2026-08-04 ★
+       *
+       * It looks like a tiebreak. Delete it and this query goes from 202 ms to 36 SECONDS, measured
+       * on the real 18.6-million-row table:
+       *
+       *     ORDER BY distance ASC, buy_price ASC  LIMIT 8  ->     202 ms, 39,500 buffers
+       *     ORDER BY distance ASC                 LIMIT 8  ->  35,936 ms, 11,426,201 buffers
+       *
+       * The reason is the GiST cube index. `(coords <-> origin) <= r` is a `float8 <= float8`
+       * comparison, which is not in `gist_cube_ops` — so it can only ever be a Filter, never an
+       * Index Cond. With `distance` as the sole sort key the planner can serve the ordering from a
+       * KNN index walk, and a KNN walk stops only when the LIMIT fills or the index is exhausted.
+       * In a sparse region the LIMIT never fills, so it crawls outward past the far side of the
+       * galaxy through all 18.6 million entries, discarding every one, to return seven rows.
+       *
+       * A SECOND sort key makes that impossible: a KNN scan can supply ordering on distance alone,
+       * so any second key forces a Sort node, the planner must cost the whole filtered set either
+       * way, and it therefore picks the cheap `market_entries_buy_idx` path bounded by
+       * `commodity = $1`. That is what keeps this fast, and nothing said so until a measurement
+       * script using the one-key shape had to be killed after ten minutes.
+       *
+       * If you ever find yourself removing a key here because it "does nothing", it does.
        */
       order =
         opts.order === 'distance'
@@ -338,7 +361,16 @@ export class PrismaMarketStore implements MarketStore {
               cube_ll_coord(coords, 3) AS cz
          FROM market_entries
         WHERE ${where.join(' AND ')}
-        ORDER BY ${order}
+        -- ★ station_key LAST, SO THE SAME QUESTION GETS THE SAME ANSWER TWICE ★
+        --
+        -- None of the orderings above is a total order: two stations at the same price and the same
+        -- distance were resolved however the rows happened to arrive, so the shopping list could
+        -- name a different station on two consecutive page loads with nothing in the data changed.
+        -- Caught while measuring the ranking — one pair flipped between runs seconds apart.
+        --
+        -- Somebody plots a route, reloads, and is told to go somewhere else. station_key is
+        -- arbitrary as a preference and perfect as a tiebreak: unique, always present, indexed.
+        ORDER BY ${order}, station_key
         LIMIT $${params.length}`,
       ...params,
     );

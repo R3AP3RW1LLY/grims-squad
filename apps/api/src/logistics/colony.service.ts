@@ -246,39 +246,70 @@ function distanceBand(ly: number | null): number {
   return 4;
 }
 
+/** Past this, a supply figure is not evidence about what is on the shelf today. */
+export const BELIEVABLE_DAYS = 90;
+
 /**
- * How old a price is, in bands rather than in days.
+ * Whether a price is recent enough to be believed at all. 0 = yes, 1 = no.
  *
  * ★ MEASURED, NOT ASSUMED — 2026-08-03 ★
  *
- * Of the ten million rows in our market mirror, 6.4% were seen within a week, 27% within a month,
+ * Of the 18.6 million rows in our market mirror, 6.4% were seen within a week, 27% within a month,
  * and 46.6% are older than three months. The oldest is from June 2020. Nothing in the shopping list
  * knew that, so a station whose shelf was last looked at eleven months ago outranked one somebody
  * flew through yesterday whenever it was a few credits cheaper.
  *
- * That is not a cosmetic problem. A price is a claim about STOCK, and stock is the thing a member
- * is flying forty light years to collect. An old reading is not slightly worse information — it is
- * a different kind of statement, and the trip it sends somebody on can be entirely wasted.
+ * A price is a claim about STOCK, and stock is the thing a member is flying forty light years to
+ * collect. An old reading is not slightly worse information — it is a different kind of statement,
+ * and the trip it sends somebody on can be entirely wasted.
  *
- * Bands rather than a continuous decay, for the same reason distance is banded: nobody flying cares
- * about the difference between a nine-day-old reading and an eleven-day-old one, and a continuous
- * score would reshuffle the list every time the clock ticked past a threshold.
+ * ★ TWO BANDS, NOT FOUR — AND THE TRADE THAT FORCED IT, 2026-08-04 ★
+ *
+ * This was 7 / 30 / 90 day bands, ranked above price. Measuring what that actually did to real
+ * shopping lines — 2,051 sourced (origin, commodity) pairs — showed it changing the named station
+ * on about 37% of them, and the price it paid for that was not defensible:
+ *
+ *     median +15%, p90 +104%, and 121 of 318 flips cost more than a quarter extra.
+ *     The worst: Steel at Tiethay, 410 cr on an EIGHT-day-old reading, replaced by
+ *     3,625 cr on a FOUR-day-old one. An 8.8x price rise to buy four days.
+ *
+ * Both readings were recent. Both were believable. The old bands made a one-day step across an
+ * arbitrary line outrank ANY price difference, however large, and nobody would sanction that trade
+ * if it were put to them in words.
+ *
+ * The thing worth protecting against was never four days versus eight — it was ELEVEN MONTHS. So
+ * this is now a single question with a yes-or-no answer: can this reading be believed? Inside
+ * ninety days, price decides and the age is merely printed. Outside it, the row sits below every
+ * believable option however cheap it looks, because a year-old supply figure is not a bargain, it
+ * is fiction.
+ *
+ * Still shown, never filtered: 46.6% of the mirror is older than this, and hiding it would tell a
+ * member "nobody sells this" about commodities sitting on a shelf right now.
  */
 export function freshnessBand(seenAt: Date | null, now: number): number {
-  if (seenAt === null) return 3;
+  // Unknown is treated as too old rather than as fresh. Sorting an undated row to the front would
+  // promote exactly the rows we know least about to the top of somebody's shopping list.
+  if (seenAt === null) return 1;
   const days = (now - seenAt.getTime()) / 86_400_000;
-  if (days <= 7) return 0;
-  if (days <= 30) return 1;
-  if (days <= 90) return 2;
-  return 3;
+  return days <= BELIEVABLE_DAYS ? 0 : 1;
 }
 
-/** Orders candidate stations by what the member asked for. */
-function rankPlaces<
+/**
+ * Orders candidate stations by what the member asked for.
+ *
+ * ★ EXPORTED SO IT CAN BE MEASURED AGAINST ITSELF ★
+ *
+ * It was module-private, and every attempt to measure what the ranking actually does to real
+ * shopping lines had to TRANSCRIBE it — three separate re-implementations, each of which would have
+ * gone on printing a plausible number against a comparator that no longer existed. A measurement
+ * that cannot fail when the code changes is not measuring the code.
+ */
+export function rankPlaces<
   T extends {
     readonly distance: number | null;
     readonly price: number;
     readonly seenAt: Date | null;
+    readonly stationName: string;
   },
 >(places: readonly T[], sort: 'local' | 'cheapest' | 'closest', now: number): readonly T[] {
   const by = [...places];
@@ -300,17 +331,32 @@ function rankPlaces<
   /*
    * 'local' — the default, and the one the owner asked for.
    *
-   * Distance still comes first: "always prioritize local markets before sending out of system" was
-   * an instruction, not a preference. Freshness sits BETWEEN distance and price, so within the same
-   * trip a reading somebody took this week beats one from three months ago even when the old one is
-   * cheaper — because the old one may be describing a shelf that is now empty.
+   * Distance first: "always prioritize local markets before sending out of system" was an
+   * instruction, not a preference. Then whether the reading can be believed AT ALL — see
+   * `freshnessBand`, and the Tiethay trade that cut it down to one question. Then price.
+   *
+   * Within a trip, two believable readings are separated by price alone, so the four-days-versus-
+   * eight comparison that used to octuple a bill cannot happen. A reading older than three months
+   * sits below every believable one however cheap, because it is not evidence.
    */
   return by.sort(
     (a, b) =>
       distanceBand(a.distance) - distanceBand(b.distance) ||
       freshnessBand(a.seenAt, now) - freshnessBand(b.seenAt, now) ||
       a.price - b.price ||
-      (a.distance ?? Infinity) - (b.distance ?? Infinity),
+      (a.distance ?? Infinity) - (b.distance ?? Infinity) ||
+      /*
+       * ★ A TOTAL ORDER, BECAUSE THE PAGE MUST NOT MOVE UNDER SOMEBODY ★
+       *
+       * Without this the comparator leaves genuine ties unresolved, and the underlying query does
+       * not determine row order either — so the shopping list could name a different station on two
+       * consecutive loads with nothing in the data having changed. Found while measuring: one pair
+       * flipped between two runs seconds apart on a price-and-distance tie.
+       *
+       * The station name is arbitrary as a preference and perfect as a tiebreak: it is stable,
+       * always present, and never equal for two different stations.
+       */
+      a.stationName.localeCompare(b.stationName),
   );
 }
 
