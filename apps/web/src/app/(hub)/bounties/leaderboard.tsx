@@ -18,9 +18,9 @@ const TH =
 const TD = 'border-t border-[var(--color-border-hairline)] py-2.5 pr-4 align-middle';
 
 const TAB_ON =
-  'rounded-md border border-[var(--color-accent)] px-3 py-1.5 text-sm font-medium text-[var(--color-accent)]';
+  'rounded-md border border-[var(--color-semantic-warning)] px-3 py-1.5 text-sm font-medium text-[var(--color-semantic-warning)]';
 const TAB_OFF =
-  'rounded-md border border-[var(--color-border-hairline)] px-3 py-1.5 text-sm text-[var(--color-text-secondary)] hover:border-[var(--color-accent)]/50';
+  'rounded-md border border-[var(--color-border-hairline)] px-3 py-1.5 text-sm text-[var(--color-text-secondary)] hover:border-[var(--color-semantic-warning)]/50';
 
 export function LeaderboardTables({ standings }: { standings: BountyLeaderboard }) {
   const [tab, setTab] = useState<'season' | 'allTime'>('season');

@@ -73,7 +73,7 @@ export function BountyBoardTables({
         onChange={(e) => setQuery(e.target.value)}
         placeholder="Filter by station or system"
         aria-label="Filter bounties by station or system"
-        className="w-full max-w-sm rounded-md border border-[var(--color-border-hairline)] bg-transparent px-3 py-2 text-sm outline-none focus:border-[var(--color-accent)]"
+        className="w-full max-w-sm rounded-md border border-[var(--color-border-hairline)] bg-transparent px-3 py-2 text-sm outline-none focus:border-[var(--color-semantic-warning)]"
       />
       <div className="overflow-x-auto">
         <table className="w-full min-w-[720px] border-collapse text-sm">
@@ -94,7 +94,7 @@ export function BountyBoardTables({
                 <td className={`${TD} font-medium`}>
                   {r.stationName}
                   {r.jackpot ? (
-                    <span className="ml-2 rounded-sm bg-[var(--color-accent)]/15 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.15em] text-[var(--color-accent)]">
+                    <span className="ml-2 rounded-sm bg-[var(--color-semantic-warning)]/15 px-1.5 py-0.5 font-mono text-[10px] uppercase tracking-[0.15em] text-[var(--color-semantic-warning)]">
                       Jackpot ×2
                     </span>
                   ) : null}
@@ -108,7 +108,7 @@ export function BountyBoardTables({
                   </td>
                 ) : null}
                 <td
-                  className={`${TD} ${r.daysStale === null ? 'font-semibold text-[var(--color-accent)]' : ''}`}
+                  className={`${TD} ${r.daysStale === null ? 'font-semibold text-[var(--color-semantic-warning)]' : ''}`}
                 >
                   {ageOf(r)}
                 </td>
