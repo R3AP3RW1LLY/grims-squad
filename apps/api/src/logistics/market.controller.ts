@@ -1,5 +1,4 @@
 import { Controller, Get, Inject, Param, Query } from '@nestjs/common';
-import { PrismaClient } from '@grims/db';
 import {
   AppError,
   ErrorCode,
@@ -12,6 +11,7 @@ import { PermissionService } from '../authz/permission.service.js';
 import { MARKET_STORE } from './logistics.tokens.js';
 import type { Coords, MarketStore, PlaceQuery } from './market.store.js';
 import { planRoutes } from './routes.service.js';
+import { CommanderPositionService, positionAge } from './commander-position.service.js';
 
 /**
  * The commodities market.
@@ -34,8 +34,8 @@ import { planRoutes } from './routes.service.js';
 export class MarketController {
   constructor(
     @Inject(MARKET_STORE) private readonly store: MarketStore,
-    @Inject(PrismaClient) private readonly db: PrismaClient,
     @Inject(PermissionService) private readonly permissions: PermissionService,
+    @Inject(CommanderPositionService) private readonly position: CommanderPositionService,
   ) {}
 
   /**
@@ -64,6 +64,47 @@ export class MarketController {
         'You do not have access to Logistics & Trade.',
       );
     }
+  }
+
+  /**
+   * Where this member was last seen, so a page can measure from it.
+   *
+   * ★ SQUADRON OWNER, 2026-08-04 ★
+   *
+   * "based on the users current or last know position."
+   *
+   * ★ NULL IS A PERFECTLY GOOD ANSWER ★
+   *
+   * A guest, a member who has never paired a device, and a member whose app has not uploaded yet
+   * all get `null` — and every one of those is a normal state, not a failure. The pages fall back
+   * to asking, exactly as they do today. Returning an error instead would make "I have not started
+   * the companion" look like something broke.
+   *
+   * The AGE rides with it and is never optional. A position from six hours ago is useful; one from
+   * three weeks ago looks identical and will send somebody shopping four hundred light years from
+   * where they are.
+   */
+  @Public()
+  @Get('position')
+  async wherever(@User() caller: CurrentUser | undefined) {
+    await this.#assertMarket(caller);
+    if (caller === undefined) return { position: null };
+
+    const found = await this.position.lastKnown(caller.userId);
+    if (found === null) return { position: null };
+
+    const age = positionAge(found.at, Date.now());
+    return {
+      position: {
+        systemName: found.systemName,
+        stationName: found.stationName,
+        at: found.at,
+        source: found.source,
+        hasCoords: found.coords !== null,
+        age: age.text,
+        stale: age.stale,
+      },
+    };
   }
 
   /** Every commodity at the newest recorded hour, with a day's movement. One indexed read. */
@@ -233,7 +274,13 @@ export class MarketController {
 
     return {
       ...plan,
-      origin: { system: origin.system, station: origin.station, from: origin.from },
+      origin: {
+        system: origin.system,
+        station: origin.station,
+        from: origin.from,
+        // Undefined for a typed origin. The page prints the age only when there is one to print.
+        ...(origin.age === undefined ? {} : { age: origin.age, stale: origin.stale === true }),
+      },
       unknownSystem: null,
     };
   }
@@ -263,40 +310,36 @@ export class MarketController {
    *
    * Null for anybody who has not paired a device, which is most people today. The page falls back
    * to the origin box, which works identically for everyone.
+   *
+   * ★ ONE IMPLEMENTATION, AFTER BRIEFLY HAVING TWO ★
+   *
+   * This was a private query here. A second copy was written as a service for the commodities
+   * pages before anybody noticed this one — which is exactly the drift that produces two answers to
+   * "where am I". It now delegates, and the service is the only place that knows.
+   *
+   * The move gained three things this query did not have: `CarrierJump`, which it never looked at;
+   * `StarPos` off an `FSDJump`, which is exact and needs no lookup — so a member in a system our
+   * galaxy dump has never heard of now HAS an origin where before they had none; and the timestamp,
+   * without which no page could say "where you docked three weeks ago".
    */
   async #whereTheyAre(userId: string | null): Promise<Origin | null> {
     if (userId === null) return null;
 
-    const rows = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
-      /*
-       * `Location` (where you logged in), `FSDJump` (where you arrived) and `Docked` (what you
-       * docked at) all carry StarSystem. Newest of the three wins, which is the ship's actual
-       * position — riding the (user_id, occurred_at) index.
-       */
-      `SELECT payload->>'StarSystem' AS system, payload->>'StationName' AS station
-         FROM telemetry_events
-        WHERE user_id = $1::uuid
-          AND event_type IN ('Location', 'FSDJump', 'Docked')
-          AND payload->>'StarSystem' IS NOT NULL
-        ORDER BY occurred_at DESC
-        LIMIT 1`,
-      userId,
-    );
-
-    const r = rows[0];
-    if (r === undefined) return null;
-
-    const system = String(r['system']);
-    const coords = await this.store.systemCoords(system);
+    const found = await this.position.lastKnown(userId);
     // We know the name but hold no coordinates for it — deep space, or a system our galaxy data has
     // not reached. Nothing can be measured from it, so it is not an origin.
-    if (coords === null) return null;
+    if (found === null || found.coords === null) return null;
+
+    const age = positionAge(found.at, Date.now());
 
     return {
-      coords,
-      system,
-      station: r['station'] === null ? null : String(r['station']),
+      coords: found.coords,
+      system: found.systemName,
+      station: found.stationName,
       from: 'journal',
+      at: found.at,
+      age: age.text,
+      stale: age.stale,
     };
   }
 }
@@ -313,6 +356,19 @@ interface Origin {
   readonly system: string;
   readonly station: string | null;
   readonly from: 'typed' | 'journal';
+  /**
+   * When the journal said so, and whether that is old enough to distrust.
+   *
+   * ★ THE OWNER ASKED FOR "CURRENT OR LAST KNOWN", AND THOSE ARE NOT THE SAME THING ★
+   *
+   * A position from six hours ago is useful. One from three weeks ago looks identical on a page and
+   * will plan a member's whole trading run around a place they left — every distance measured from
+   * it wrong, and nothing on screen saying why. Absent for a typed origin, which is current by
+   * definition because they just typed it.
+   */
+  readonly at?: Date;
+  readonly age?: string;
+  readonly stale?: boolean;
 }
 
 function numberOr(raw: string | undefined, fallback: number): number {

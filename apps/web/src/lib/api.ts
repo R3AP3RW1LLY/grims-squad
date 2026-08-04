@@ -1589,7 +1589,20 @@ export interface CommodityDetail {
   buys: MarketPlace[];
   sells: MarketPlace[];
   history: HistoryPoint[];
-  origin: { system: string; station: string | null; from: 'typed' | 'journal' } | null;
+  origin: {
+    system: string;
+    station: string | null;
+    from: 'typed' | 'journal';
+    /**
+     * How long ago the journal said so, and whether that is old enough to distrust.
+     *
+     * Absent for a typed origin — that one is current by definition. Present and possibly `stale`
+     * for a journal one, because "current or last known position" are not the same thing and a
+     * three-week-old position plans a whole trading run around somewhere the member has left.
+     */
+    age?: string;
+    stale?: boolean;
+  } | null;
   /** A system somebody typed that we cannot place — so no radius was applied. Never silent. */
   unknownSystem: string | null;
 }
@@ -1637,7 +1650,20 @@ export interface Route {
 export interface RoutePlan {
   routes: Route[];
   considered: string[];
-  origin: { system: string; station: string | null; from: 'typed' | 'journal' } | null;
+  origin: {
+    system: string;
+    station: string | null;
+    from: 'typed' | 'journal';
+    /**
+     * How long ago the journal said so, and whether that is old enough to distrust.
+     *
+     * Absent for a typed origin — that one is current by definition. Present and possibly `stale`
+     * for a journal one, because "current or last known position" are not the same thing and a
+     * three-week-old position plans a whole trading run around somewhere the member has left.
+     */
+    age?: string;
+    stale?: boolean;
+  } | null;
   unknownSystem: string | null;
 }
 

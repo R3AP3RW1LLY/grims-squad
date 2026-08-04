@@ -57,8 +57,20 @@ export function RunForm({
           <strong className="text-[var(--color-text-primary)]">{plan.origin.system}</strong>
           {plan.origin.station === null ? null : <> ({plan.origin.station})</>} —{' '}
           {plan.origin.from === 'journal'
-            ? 'where your ship last was, from your journal.'
+            ? `where your ship last was${plan.origin.age === undefined ? '' : `, ${plan.origin.age}`}.`
             : 'the system you named.'}
+          {/*
+            ★ A STALE POSITION IS WORSE THAN NO POSITION ★
+
+            It looks exactly as authoritative and quietly plans the whole run around somewhere the
+            member has left — every distance measured from the wrong place, with nothing on screen
+            saying why. Named rather than hidden, and the box above is already there to correct it.
+          */}
+          {plan.origin.stale === true ? (
+            <span className="ml-1 text-[var(--color-semantic-warning)]">
+              That is a while ago — if you have moved, name your system above.
+            </span>
+          ) : null}
         </p>
       ) : null}
 

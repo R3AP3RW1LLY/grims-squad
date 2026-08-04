@@ -11,6 +11,7 @@ import { ColonyService } from './colony.service.js';
 import { ColonyCatalogueService } from './colony-catalogue.service.js';
 import { ColonyPlanService } from './colony-plan.service.js';
 import { ColonyCarrierService } from './colony-carrier.service.js';
+import { CommanderPositionService } from './commander-position.service.js';
 import { ColonyRosterService } from './colony-roster.service.js';
 import { PrismaMarketStore, type MarketStore } from './market.store.js';
 import { MARKET_STORE } from './logistics.tokens.js';
@@ -71,6 +72,16 @@ import { MARKET_STORE } from './logistics.tokens.js';
           const response = await fetch(url);
           return { ok: response.ok, status: response.status, text: () => response.text() };
         }),
+    },
+    {
+      /*
+       * Where a member was last. Takes the market store's own system lookup rather than a second
+       * one — an origin resolved two different ways is two different answers to the same question.
+       */
+      provide: CommanderPositionService,
+      inject: [PrismaClient, MARKET_STORE],
+      useFactory: (db: PrismaClient, market: MarketStore) =>
+        new CommanderPositionService(db, (system: string) => market.systemCoords(system)),
     },
     {
       /*
