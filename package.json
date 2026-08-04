@@ -19,6 +19,7 @@
     "test": "turbo run test",
     "test:unit": "turbo run test:unit",
     "test:invariants": "vitest run --project invariants",
+    "db:ritual": "node tools/db-ritual.mjs",
     "ssot:check": "tsx tools/ssot-drift-check.ts",
     "ssot:sync": "tsx tools/ssot-sync.ts",
     "ai:image:smoke": "tsx tools/ai-image-smoke.ts",

@@ -123,6 +123,10 @@ export default tseslint.config(
       // production box during a deploy — plain Node, no build step — so it
       // reads process.argv and prints like every launcher above it.
       '**/changelog.mjs',
+      // The Prisma dev ritual (`pnpm db:ritual`): kills the tsx children that
+      // hold the engine DLL, migrates, regenerates, rebuilds. Fifth entry to
+      // fail on the same two globals as every one before it.
+      '**/db-ritual.mjs',
     ],
     languageOptions: {
       globals: {
