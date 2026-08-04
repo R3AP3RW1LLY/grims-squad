@@ -69,6 +69,7 @@ const REQ = {
   includeCarriers: false,
   seenSince: null,
   only: null,
+  sort: 'trip' as const,
 };
 
 describe('how much can actually be moved', () => {
@@ -123,6 +124,38 @@ describe('how much can actually be moved', () => {
 });
 
 describe('planning a run', () => {
+  it('lets the member pick which of the three profits leads', async () => {
+    /*
+     * ★ SQUADRON OWNER, 2026-08-04: "Show all three, let me sort." ★
+     *
+     * Two commodities built to disagree: Gold moves a full hold at a thin margin (the best TRIP),
+     * Tea moves six tonnes at a fat margin (the best PER TONNE). Whichever key the member picks
+     * must lead — and every route must carry every number either way.
+     */
+    const h = harness({
+      margins: ['Gold', 'Tea'],
+      buys: {
+        Gold: [PLACE({ price: 1_000 })],
+        Tea: [PLACE({ price: 1_000, quantity: 6 })],
+      },
+      sells: {
+        Gold: [PLACE({ price: 1_900, stationName: 'Bulk Sale' })],
+        Tea: [PLACE({ price: 6_000, stationName: 'Boutique Sale' })],
+      },
+    });
+
+    const byTrip = await planRoutes(h.store, REQ);
+    expect(byTrip.routes[0]?.commodity).toBe('Gold'); // 900 × 720t beats 5,000 × 6t
+
+    const byTonne = await planRoutes(h.store, { ...REQ, sort: 'tonne' });
+    expect(byTonne.routes[0]?.commodity).toBe('Tea');
+
+    // The numbers ride on every route whatever the order.
+    const gold = byTonne.routes.find((r) => r.commodity === 'Gold');
+    expect(gold?.profitPerHour).toBeGreaterThan(0);
+    expect(gold?.tripMinutes).toBeGreaterThan(0);
+  });
+
   it('MANDATORY: measures the second leg from the PICKUP, not from the member', () => {
     /*
      * A sale "within 100 ly" has to mean a hundred light years of CARRYING. Anchored on the origin

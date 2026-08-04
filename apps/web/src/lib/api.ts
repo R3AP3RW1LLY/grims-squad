@@ -1704,11 +1704,16 @@ export interface Route {
   distanceLy: number;
   /** What capped the load — shown, because a bare tonnage never explains itself. */
   limitedBy: 'hold' | 'supply' | 'demand' | 'budget';
+  /** The time model's estimate for the whole run; its assumptions arrive in `RoutePlan.timeModel`. */
+  tripMinutes: number;
+  profitPerHour: number;
 }
 
 export interface RoutePlan {
   routes: Route[];
   considered: string[];
+  /** What the per-hour figures assume. Printed, never implied. */
+  timeModel?: { jumpLy: number; minutesPerJump: number; minutesPerStop: number };
   /**
    * How current the whole market mirror is.
    *

@@ -51,6 +51,17 @@ export function RouteList({ plan }: { plan: RoutePlan }) {
 
   return (
     <div className="grid gap-3">
+      {/*
+        The per-hour figures are estimates and say what they assume, right where they are read —
+        a member in a 60 ly Anaconda reads them as pessimistic, one in a shieldless hauler as
+        generous, and neither has to guess what we guessed.
+      */}
+      {plan.timeModel !== undefined ? (
+        <p className="m-0 text-[11px] text-[var(--color-text-secondary)]">
+          Run times assume a ~{plan.timeModel.jumpLy} ly laden jump and about{' '}
+          {plan.timeModel.minutesPerStop} minutes per stop.
+        </p>
+      ) : null}
       {plan.routes.map((r) => {
         const stale = isStale(r.buy.seenAt) || isStale(r.sell.seenAt);
 
@@ -73,7 +84,7 @@ export function RouteList({ plan }: { plan: RoutePlan }) {
               </p>
             </header>
 
-            <dl className="m-0 mt-3 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4">
+            <dl className="m-0 mt-3 grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-5">
               <div>
                 <dt className="m-0 font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-secondary)]">
                   Load at
@@ -124,6 +135,18 @@ export function RouteList({ plan }: { plan: RoutePlan }) {
                 </dd>
                 <dd className="m-0 text-[11px] text-[var(--color-text-secondary)]">
                   {r.outlay.toLocaleString()} cr up front · {r.distanceLy.toFixed(0)} ly total
+                </dd>
+              </div>
+
+              <div>
+                <dt className="m-0 font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-secondary)]">
+                  Per hour
+                </dt>
+                <dd className="m-0 mt-1 font-mono text-sm text-[var(--color-text-primary)]">
+                  {r.profitPerHour.toLocaleString()} cr
+                </dd>
+                <dd className="m-0 text-[11px] text-[var(--color-text-secondary)]">
+                  ≈{r.tripMinutes} min run
                 </dd>
               </div>
             </dl>

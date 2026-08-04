@@ -164,6 +164,21 @@ export function RunForm({
         </label>
 
         <label className="flex flex-col gap-1">
+          {/*
+            ★ SQUADRON OWNER, 2026-08-04 ★
+
+            Asked how routes should rank: "Show all three, let me sort." Every card carries all
+            three profits; this only chooses which one leads the list.
+          */}
+          <span className={LABEL}>Rank by</span>
+          <select name="sort" defaultValue={val('sort', 'trip')} className={FIELD}>
+            <option value="trip">Best trip</option>
+            <option value="tonne">Best per tonne</option>
+            <option value="hour">Best per hour</option>
+          </select>
+        </label>
+
+        <label className="flex flex-col gap-1">
           <span className={LABEL}>Prices seen</span>
           {/* Default seven days, matching the API. A control whose default disagrees with the
               server's is a control that lies about what produced the answer on screen. */}

@@ -10,7 +10,7 @@ import { User, type CurrentUser } from '../auth/current-user.js';
 import { PermissionService } from '../authz/permission.service.js';
 import { MARKET_STORE } from './logistics.tokens.js';
 import type { Coords, MarketStore, PlaceQuery } from './market.store.js';
-import { planRoutes } from './routes.service.js';
+import { planRoutes, TIME_MODEL, type RouteSort } from './routes.service.js';
 import { CommanderPositionService, positionAge } from './commander-position.service.js';
 
 /**
@@ -261,6 +261,7 @@ export class MarketController {
     @Query('carriers') carriers?: string,
     @Query('freshDays') freshDays?: string,
     @Query('commodity') commodity?: string,
+    @Query('sort') sort?: string,
   ) {
     await this.#assertMarket(caller);
 
@@ -310,6 +311,9 @@ export class MarketController {
        */
       seenSince: daysAgo(numberOr(freshDays, 7)),
       only: commodity?.trim() ?? null,
+      // Anything unrecognised falls back to the default rather than erroring: a sort key is a
+      // preference, and a mistyped preference should never cost somebody their answer.
+      sort: sort === 'tonne' || sort === 'hour' ? (sort as RouteSort) : 'trip',
     });
 
     return {
@@ -323,6 +327,8 @@ export class MarketController {
         ...(origin.age === undefined ? {} : { age: origin.age, stale: origin.stale === true }),
       },
       unknownSystem: null,
+      // The page prints these beside every per-hour figure — an estimate with named assumptions.
+      timeModel: TIME_MODEL,
     };
   }
 

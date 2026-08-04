@@ -44,7 +44,15 @@ export interface RouteRequest {
   readonly seenSince: Date | null;
   /** Plan for one commodity only, rather than searching for the best. */
   readonly only: string | null;
+  /**
+   * Which of the three profits leads. ★ SQUADRON OWNER, 2026-08-04: asked how routes should rank,
+   * chose "Show all three, let me sort" — so every route carries every number and this only
+   * decides the order they arrive in.
+   */
+  readonly sort: RouteSort;
 }
+
+export type RouteSort = 'trip' | 'tonne' | 'hour';
 
 export interface RouteLeg {
   readonly stationName: string;
@@ -74,6 +82,35 @@ export interface Route {
    * most useful thing this page can say, and a bare number never explains itself.
    */
   readonly limitedBy: 'hold' | 'supply' | 'demand' | 'budget';
+  /** The time model's estimate for the whole run. See `tripMinutesOf` for what it assumes. */
+  readonly tripMinutes: number;
+  readonly profitPerHour: number;
+}
+
+/**
+ * Light years into minutes, with every assumption on the table.
+ *
+ * ★ AN ESTIMATE WITH NAMED ASSUMPTIONS BEATS A NUMBER WITH HIDDEN ONES ★
+ *
+ * Profit per hour needs a duration, and a duration needs a ship we cannot see. So the model
+ * assumes a working hauler — a ~22 ly laden jump, three-quarters of a minute per jump for the
+ * charge and the tunnel, and eight minutes per stop for the drop from supercruise, the approach,
+ * the pad and the trade screen. The page prints these assumptions next to the number; a member in
+ * a 60 ly Anaconda knows to read it as pessimistic, one in a shieldless Type-6 as generous.
+ *
+ * What it deliberately ignores: in-system supercruise distance (we do not hold arrival distances
+ * on market rows yet) and fuel stops. Both would refine minutes, neither changes which of two
+ * routes is faster often enough to earn fabricating more constants.
+ */
+export const TIME_MODEL = {
+  jumpLy: 22,
+  minutesPerJump: 0.75,
+  minutesPerStop: 8,
+} as const;
+
+export function tripMinutesOf(distanceLy: number): number {
+  const jumps = Math.max(1, Math.ceil(distanceLy / TIME_MODEL.jumpLy));
+  return Math.round(jumps * TIME_MODEL.minutesPerJump + 2 * TIME_MODEL.minutesPerStop);
 }
 
 /** How many commodities to consider when the member has not named one. */
@@ -198,27 +235,39 @@ export async function planRoutes(
         });
         if (tonnes <= 0) continue;
 
+        const distanceLy = (buy.distance ?? 0) + (sell.distance ?? 0);
+        const totalProfit = profitPerTonne * tonnes;
+        const minutes = tripMinutesOf(distanceLy);
         routes.push({
           commodity,
           buy: leg(buy),
           sell: leg(sell),
           profitPerTonne,
           tonnes,
-          totalProfit: profitPerTonne * tonnes,
+          totalProfit,
           outlay: buy.price * tonnes,
-          distanceLy: (buy.distance ?? 0) + (sell.distance ?? 0),
+          distanceLy,
           limitedBy,
+          tripMinutes: minutes,
+          profitPerHour: Math.round(totalProfit / (minutes / 60)),
         });
       }
     }
   }
 
   /*
-   * Total profit, not profit per tonne. A 4,000-a-tonne margin on a station holding six tonnes is a
+   * The default stays total profit — a 4,000-a-tonne margin on a station holding six tonnes is a
    * worse trip than 900 a tonne on one holding a full hold, and per-tonne sorting is how trade
-   * tools end up recommending the first.
+   * tools end up recommending the first. But the owner chose "show all three, let me sort", so
+   * the member's key wins when they pick one; the other two numbers ride along either way.
    */
-  routes.sort((a, b) => b.totalProfit - a.totalProfit);
+  const keyOf: Record<RouteSort, (r: Route) => number> = {
+    trip: (r) => r.totalProfit,
+    tonne: (r) => r.profitPerTonne,
+    hour: (r) => r.profitPerHour,
+  };
+  const key = keyOf[req.sort];
+  routes.sort((a, b) => key(b) - key(a));
 
   return { routes: routes.slice(0, limit), considered };
 }
