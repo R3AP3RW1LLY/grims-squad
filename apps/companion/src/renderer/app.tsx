@@ -103,13 +103,50 @@ interface NavItem {
 }
 
 interface NavGroup {
-  readonly group: 'colonisation';
+  readonly group: 'colonisation' | 'logistics';
   readonly label: string;
   readonly children: readonly NavItem[];
 }
 
+/**
+ * Which groups are open, remembered across launches.
+ *
+ * ★ THE WEBSITE'S OWN RULES, MIRRORED ★
+ *
+ * Subcategories start CLOSED (the site's stored-preference default), a member's toggle is
+ * remembered (the site uses localStorage for exactly this), and the group holding the current
+ * page can never be closed — landing inside a collapsed group would show a sidebar that does not
+ * contain the page on screen.
+ */
+const NAV_OPEN_KEY = 'gmsd.app.nav.open';
+
+function readOpenGroups(): Set<string> {
+  try {
+    const raw = localStorage.getItem(NAV_OPEN_KEY);
+    if (raw === null) return new Set();
+    const parsed: unknown = JSON.parse(raw);
+    return new Set(Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : []);
+  } catch {
+    return new Set();
+  }
+}
+
 const NAV: ReadonlyArray<NavItem | NavGroup> = [
   { id: 'status', label: 'Status', hint: 'What the app is doing' },
+  {
+    /*
+     * The website's order and the website's name: Commodities then the Freight Office, grouped
+     * under Logistics & Trade, BEFORE colonisation. The app briefly called the planner "Trade
+     * runs", which meant the two surfaces named the same destination differently — the exact
+     * drift the mirror rule exists to stop.
+     */
+    group: 'logistics',
+    label: 'Logistics & Trade',
+    children: [
+      { id: 'commodities', label: 'Commodities', hint: 'What everything is worth, near you' },
+      { id: 'trade', label: 'Freight Office', hint: 'Pick the cargo and the range — get the run' },
+    ],
+  },
   {
     group: 'colonisation',
     label: 'Colonisation',
@@ -143,9 +180,6 @@ const NAV: ReadonlyArray<NavItem | NavGroup> = [
   },
   // The website's order: Data Bounties sits directly under the colonisation pages.
   { id: 'bounties', label: 'Data Bounties', hint: 'Dark stations, and who lights them up' },
-  // The website's Logistics order: the market first, then the planner built on it.
-  { id: 'commodities', label: 'Commodities', hint: 'What everything is worth, near you' },
-  { id: 'trade', label: 'Trade runs', hint: 'Routes from the Freight Office' },
   { id: 'overlays', label: 'Overlays', hint: 'Panels drawn over the game' },
   { id: 'device', label: 'This device', hint: 'Pairing and privacy' },
 ];
@@ -153,7 +187,21 @@ const NAV: ReadonlyArray<NavItem | NavGroup> = [
 function App(): JSX.Element {
   const [state, setState] = useState<AppState | null>(null);
   const [page, setPage] = useState<Page>('status');
-  const [colonyOpen, setColonyOpen] = useState(true);
+  const [openGroups, setOpenGroups] = useState<Set<string>>(readOpenGroups);
+
+  const toggleGroup = (group: string): void => {
+    setOpenGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(group)) next.delete(group);
+      else next.add(group);
+      try {
+        localStorage.setItem(NAV_OPEN_KEY, JSON.stringify([...next]));
+      } catch {
+        // A full or disabled localStorage costs persistence, never the toggle itself.
+      }
+      return next;
+    });
+  };
 
   /*
    * ★ THE PROJECTS LIVE HERE, NOT IN EACH PAGE ★
@@ -258,12 +306,14 @@ function App(): JSX.Element {
             'colony-members': (colony?.projects ?? []).filter((p) => p.owner === 'personal').length,
           };
           const insideOpen = entry.children.some((c) => c.id === page);
+          // The current page's group is always open, whatever the stored choice says.
+          const groupOpen = openGroups.has(entry.group) || insideOpen;
 
           return (
             <div key={entry.group}>
               <button
                 type="button"
-                onClick={() => setColonyOpen((o) => !o)}
+                onClick={() => toggleGroup(entry.group)}
                 style={{
                   width: '100%',
                   textAlign: 'left',
@@ -278,10 +328,10 @@ function App(): JSX.Element {
                   alignItems: 'center',
                   gap: '7px',
                 }}
-                aria-expanded={colonyOpen}
+                aria-expanded={groupOpen}
               >
                 <span style={{ fontSize: '9px', color: C.faint, width: '8px' }}>
-                  {colonyOpen ? '▾' : '▸'}
+                  {groupOpen ? '▾' : '▸'}
                 </span>
                 {/*
                   ★ THE SAME ICON THE WEBSITE DRAWS — SQUADRON OWNER, 2026-08-03 ★
@@ -295,7 +345,7 @@ function App(): JSX.Element {
                 {entry.label}
               </button>
 
-              {colonyOpen
+              {groupOpen
                 ? entry.children.map((child) => (
                     <NavButton
                       key={child.id}

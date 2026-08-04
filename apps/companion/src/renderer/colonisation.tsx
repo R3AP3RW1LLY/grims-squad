@@ -356,6 +356,23 @@ export function ColonyNewPage({
   }
 
   /*
+   * Rights UNKNOWN is not rights GRANTED. `can` is null when the read failed — hub unreachable,
+   * usually — and the form used to render anyway, so the first anybody heard of the problem was
+   * the server refusing their finished post. "Could not check" and "not allowed" are different
+   * sentences, and this page has to know which one it is saying.
+   */
+  if (can === null) {
+    return (
+      <Section title="New project">
+        <Empty>
+          Could not reach the hub to check what your rank may post. This page fills in when the
+          connection comes back.
+        </Empty>
+      </Section>
+    );
+  }
+
+  /*
    * Already on the board: the member is looking at it, not creating it. Offering the form would end
    * in the server answering "already posted as X", which is a worse way to find out.
    *
@@ -434,9 +451,9 @@ export function ColonyNewPage({
         )}
       </Section>
 
-      {dockedAt === null || alreadyPosted ? null : (
+      {alreadyPosted ? null : (
         <Section
-          title="Post it"
+          title={dockedAt === null ? 'Post one by hand' : 'Post it'}
           aside={
             <Button tone={posting ? 'default' : 'primary'} onClick={() => setPosting((x) => !x)}>
               {posting ? 'Cancel' : 'New project'}
@@ -445,13 +462,26 @@ export function ColonyNewPage({
         >
           {posting ? (
             <PostForm
-              canPostSquadron={can?.manage === true}
+              canPostSquadron={can.manage}
               dockedAt={dockedAt}
               onPosted={() => {
                 setPosting(false);
                 onPosted();
               }}
             />
+          ) : dockedAt === null ? (
+            /*
+             * ★ THE HAND-FILL PATH — the website has always had it, the app refused ★
+             *
+             * A member posting from the sofa, with the market id copied out of Discord or a
+             * screenshot, had a form on the website and a dead end in the app. Docking is the
+             * BETTER path — everything fills itself in and the depot snapshot rides along — but
+             * better is not the same as required.
+             */
+            <Empty>
+              Docking at the site fills everything in for you — but a project posts fine by hand
+              too. Press New project and type the system, station and market id.
+            </Empty>
           ) : (
             <Empty>Everything is filled in already — press New project to check it and post.</Empty>
           )}
@@ -2270,6 +2300,29 @@ function PostForm({
   };
 
   async function submit(): Promise<void> {
+    /*
+     * Checked here, not just by the server: the fields are hand-typed on the manual path, and a
+     * round trip to be told "market id required" is a slow way to say something this page already
+     * knows. The market id rule is strict digits because a typo in it produces the worst failure
+     * this feature has — a project that posts fine and then silently never updates.
+     */
+    const cleaned = {
+      ...form,
+      title: form.title.trim(),
+      systemName: form.systemName.trim(),
+      stationName: form.stationName.trim(),
+      marketId: form.marketId.trim(),
+      notes: form.notes.trim(),
+    };
+    if (cleaned.title === '' || cleaned.systemName === '' || cleaned.stationName === '') {
+      setError('A project needs a title, a system and a station.');
+      return;
+    }
+    if (!/^\d+$/.test(cleaned.marketId)) {
+      setError('The market id is the long number the game reports for the site — digits only.');
+      return;
+    }
+
     setBusy(true);
     setError(null);
     /*
@@ -2284,7 +2337,7 @@ function PostForm({
      * whatever the newest journal says, so a stale or hand-edited snapshot cannot poison anything.
      */
     const answer = await window.colony.post({
-      ...form,
+      ...cleaned,
       ...(dockedAt?.site == null
         ? {}
         : {

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 import type { BuildTypeDetail, BuildTypeRow } from '../hub-colony.js';
-import { Button, C, Card, Empty, Problem, Section, Stat, credits, inputStyle, tonnes } from './ui.js';
+import { Button, C, Card, Copy, Empty, Problem, Section, Stat, credits, inputStyle, tonnes } from './ui.js';
 
 /**
  * The build catalogue, in the app.
@@ -39,6 +39,10 @@ export function BuildTypesPage({ dockedSystem }: { dockedSystem: string | null }
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   const [text, setText] = useState('');
+  // The website's three facets, mirrored exactly — same values, same 'all' default.
+  const [tier, setTier] = useState('all');
+  const [where, setWhere] = useState('all');
+  const [pad, setPad] = useState('all');
 
   useEffect(() => {
     void (async () => {
@@ -58,9 +62,12 @@ export function BuildTypesPage({ dockedSystem }: { dockedSystem: string | null }
   const needle = text.trim().toLowerCase();
   const shown = rows.filter(
     (r) =>
-      needle === '' ||
-      r.displayName.toLowerCase().includes(needle) ||
-      r.category.toLowerCase().includes(needle),
+      (needle === '' ||
+        r.displayName.toLowerCase().includes(needle) ||
+        r.category.toLowerCase().includes(needle)) &&
+      (tier === 'all' || String(r.tier) === tier) &&
+      (where === 'all' || r.location === where) &&
+      (pad === 'all' || r.padSize === pad),
   );
   const measured = rows.filter((r) => r.source === 'observed').length;
 
@@ -69,12 +76,36 @@ export function BuildTypesPage({ dockedSystem }: { dockedSystem: string | null }
       <Section
         title="Build types"
         aside={
-          <input
-            value={text}
-            onInput={(e) => setText((e.target as HTMLInputElement).value)}
-            placeholder="find a build"
-            style={{ ...inputStyle, width: '180px' }}
-          />
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            <input
+              value={text}
+              onInput={(e) => setText((e.target as HTMLInputElement).value)}
+              placeholder="find a build"
+              style={{ ...inputStyle, width: '150px' }}
+            />
+            {(
+              [
+                { label: 'tier', value: tier, set: setTier, options: ['1', '2', '3'] },
+                { label: 'where', value: where, set: setWhere, options: ['orbital', 'surface'] },
+                { label: 'pad', value: pad, set: setPad, options: ['none', 'small', 'medium', 'large'] },
+              ] as const
+            ).map((f) => (
+              <select
+                key={f.label}
+                value={f.value}
+                onChange={(e) => f.set((e.target as HTMLSelectElement).value)}
+                aria-label={`Filter by ${f.label}`}
+                style={{ ...inputStyle, width: 'auto' }}
+              >
+                <option value="all">any {f.label}</option>
+                {f.options.map((o) => (
+                  <option key={o} value={o}>
+                    {o}
+                  </option>
+                ))}
+              </select>
+            ))}
+          </div>
         }
       >
         {shown.length === 0 ? (
@@ -106,24 +137,60 @@ export function BuildTypesPage({ dockedSystem }: { dockedSystem: string | null }
                 <span>
                   {r.displayName}
                   <span style={{ marginLeft: '8px', fontSize: '11px', color: C.faint }}>
-                    T{r.tier} · {r.location}
+                    {r.category} · T{r.tier} · {r.location}
                     {r.padSize === 'none' ? '' : ` · ${r.padSize} pad`}
                   </span>
+                  {r.source === 'observed' ? (
+                    <span
+                      style={{
+                        marginLeft: '8px',
+                        fontSize: '10px',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.14em',
+                        color: C.good,
+                      }}
+                      title={`Matched exactly by ${r.confirmations} of our own construction sites`}
+                    >
+                      measured{r.confirmations > 1 ? ` ×${r.confirmations}` : ''}
+                    </span>
+                  ) : (
+                    <span
+                      style={{
+                        marginLeft: '8px',
+                        fontSize: '10px',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.14em',
+                        color: C.faint,
+                      }}
+                      title="A community figure. Nobody has checked it against one of our own builds yet."
+                    >
+                      unchecked
+                    </span>
+                  )}
                 </span>
-                <span
-                  style={{
-                    fontSize: '12px',
-                    color: haulTone(r.totalTonnes),
-                    fontVariantNumeric: 'tabular-nums',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {tonnes(r.totalTonnes)}
+                <span style={{ whiteSpace: 'nowrap' }}>
+                  <span style={{ fontSize: '11px', color: C.faint, marginRight: '10px' }}>
+                    {r.commodities} goods
+                  </span>
+                  <span
+                    style={{
+                      fontSize: '12px',
+                      color: haulTone(r.totalTonnes),
+                      fontVariantNumeric: 'tabular-nums',
+                    }}
+                  >
+                    {tonnes(r.totalTonnes)}
+                  </span>
                 </span>
               </button>
             ))}
           </Card>
         )}
+        {shown.length !== rows.length ? (
+          <p style={{ margin: '8px 0 0', fontSize: '11px', color: C.faint }}>
+            {shown.length} of {rows.length} build types match.
+          </p>
+        ) : null}
       </Section>
 
       {/*
@@ -209,14 +276,15 @@ function BuildTypeDetailPage({
         <Button onClick={onBack}>← Back</Button>
         <span style={{ fontSize: '15px' }}>{b.displayName}</span>
         <span style={{ fontSize: '11px', color: C.faint }}>
-          T{b.tier} · {b.location}
+          {b.category} · T{b.tier} · {b.location}
           {b.padSize === 'none' ? '' : ` · ${b.padSize} pad`}
         </span>
       </div>
 
       <Card hud>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '14px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px' }}>
           <Stat label="To haul" value={tonnes(b.totalTonnes)} />
+          <Stat label="Commodities" value={String(b.costs.length)} />
           <Stat
             label="Cost near you"
             value={data.origin === null ? '—' : credits(Math.round(b.total))}
@@ -224,7 +292,11 @@ function BuildTypeDetailPage({
           />
           <Stat
             label="Figures"
-            value={b.source === 'observed' ? 'Measured' : 'Unchecked'}
+            value={
+              b.source === 'observed'
+                ? `Measured${b.confirmations > 1 ? ` ×${b.confirmations}` : ''}`
+                : 'Unchecked'
+            }
             tone={b.source === 'observed' ? C.good : C.dim}
           />
         </div>
@@ -280,13 +352,20 @@ function BuildTypeDetailPage({
                   </span>
                 </div>
                 <p style={{ margin: '3px 0 0', fontSize: '11px', color: C.faint }}>
-                  {c.stationName === null
-                    ? data.origin === null
-                      ? 'not priced'
-                      : 'nobody in range sells this'
-                    : `${c.stationName} · ${c.systemName}` +
-                      (c.distance === null ? '' : ` · ${Math.round(c.distance)} ly`) +
-                      (c.cost === null ? '' : ` · ${credits(Math.round(c.cost))}`)}
+                  {c.stationName === null ? (
+                    data.origin === null ? (
+                      'not priced'
+                    ) : (
+                      'nobody in range sells this'
+                    )
+                  ) : (
+                    <>
+                      {c.stationName} · {c.systemName} <Copy value={c.systemName ?? ''} />
+                      {c.distance === null ? '' : ` · ${Math.round(c.distance)} ly`}
+                      {c.price === null ? '' : ` · ${credits(c.price)}/t`}
+                      {c.cost === null ? '' : ` · ${credits(Math.round(c.cost))}`}
+                    </>
+                  )}
                 </p>
               </div>
             ))}
@@ -304,6 +383,19 @@ function BuildTypeDetailPage({
             )}
           </Card>
         </Section>
+
+        {b.layouts.length === 0 ? null : (
+          <Section title="Also known as">
+            {/*
+              Every name the game and the community have used for this — the construction menu,
+              the station name and the community lists do not always agree, and somebody matching
+              what is on their screen to this page needs the bridge. Same section as the website.
+            */}
+            <Card>
+              <p style={{ margin: 0, fontSize: '11px', color: C.dim }}>{b.layouts.join(' · ')}</p>
+            </Card>
+          </Section>
+        )}
       </div>
     </div>
   );
