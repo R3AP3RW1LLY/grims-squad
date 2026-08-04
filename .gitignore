@@ -101,3 +101,6 @@ vault-*.enc
 # and attached as workflow artifacts.
 apps/companion/release/
 .local-storage/
+
+# Operations credentials (Cloudflare token, etc). Never in git, per the standing secrets rule.
+.secrets/
