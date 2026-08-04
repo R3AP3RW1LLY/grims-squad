@@ -25,6 +25,24 @@ export interface ColonyProject {
   readonly stationName: string | null;
   readonly marketId: string;
   readonly notes: string | null;
+  /**
+   * What the site actually IS, worked out from what it asks for.
+   *
+   * Not the free-text `buildType` somebody typed — this is the catalogue row the requirement
+   * fingerprints to, because a build's bill of materials is twenty-odd commodities at exact
+   * tonnages and no two share one. Null until somebody has docked there, and null for a build type
+   * we do not hold, which is information rather than a gap.
+   *
+   * Already on the wire from both doors; the app declared it nowhere and dropped it.
+   */
+  readonly identified: {
+    readonly id: string;
+    readonly displayName: string;
+    readonly tier: number;
+    readonly padSize: string;
+    readonly location: string;
+    readonly totalTonnes: number;
+  } | null;
   readonly isPriority: boolean;
   readonly completedAt: string | null;
   readonly postedBy: string | null;
@@ -37,6 +55,15 @@ export interface ColonyNeed {
   readonly commodity: string;
   readonly remaining: number;
   readonly required: number | null;
+  /**
+   * When the site last reported this, which is the only thing that makes the number trustworthy.
+   *
+   * A needs list is only as current as the last time somebody docked there. Ten minutes old and it
+   * is worth planning an evening around; a fortnight old and half of it may already be delivered.
+   * Those two look identical without it — which is why storing it and never showing it was worse
+   * than not storing it.
+   */
+  readonly observedAt: string | null;
 }
 
 export interface ColonyHauler {

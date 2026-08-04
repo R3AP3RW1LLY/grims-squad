@@ -144,6 +144,15 @@ declare global {
 
 type Answer<T> = { ok: true; data: T } | { ok: false; error: string };
 
+/** The small tracked mono the rest of the app uses for a technical aside. */
+const MONO_SMALL: JSX.CSSProperties = {
+  fontFamily: 'var(--font-mono)',
+  fontSize: '10px',
+  letterSpacing: '0.16em',
+  textTransform: 'uppercase',
+  color: C.faint,
+};
+
 /** One delivery, straight off the append-only ledger. */
 export interface Delivery {
   readonly at: string;
@@ -182,6 +191,33 @@ export interface ProjectDetailData {
     byCommander: DeliveryBucket[];
     haulers: HaulerStack[];
   };
+}
+
+/**
+ * How old the SITE reading is, in words.
+ *
+ * ★ A DIFFERENT QUESTION FROM THE ONE `Freshness` ANSWERS ★
+ *
+ * `Freshness` says when this app last spoke to the hub. This says when anybody last docked at the
+ * construction site — which is what decides whether the needs list is worth planning an evening
+ * around. Both can be true and far apart: the app can have synced a second ago and be showing a
+ * fortnight-old depot reading.
+ */
+function siteFreshness(needs: readonly ColonyNeed[]): string | null {
+  const stamps = needs
+    .map((n) => (n.observedAt === null ? null : Date.parse(n.observedAt)))
+    .filter((t): t is number => t !== null && Number.isFinite(t));
+
+  if (stamps.length === 0) return null;
+
+  const minutes = Math.floor((Date.now() - Math.max(...stamps)) / 60_000);
+  if (minutes < 2) return 'Read from the site moments ago.';
+  if (minutes < 90) return `Read from the site ${minutes} minutes ago.`;
+
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `Read from the site ${hours} hours ago.`;
+
+  return `Read from the site ${Math.round(hours / 24)} days ago — somebody docking there refreshes it.`;
 }
 
 /**
@@ -824,11 +860,41 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
         <Button onClick={onBack}>← Back</Button>
         <span style={{ fontSize: '15px' }}>{project.title}</span>
-        <span style={{ fontSize: '11px', color: C.faint }}>
+        <span
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '5px',
+            fontSize: '11px',
+            color: C.faint,
+          }}
+        >
           {project.systemName}
+          {/* The system alone: the galaxy map searches systems, and a station name pasted into it
+              finds nothing. The owner asked for this on the website for the same reason. */}
+          <Copy value={project.systemName} />
           {project.stationName === null ? '' : ` · ${project.stationName}`}
         </span>
       </div>
+
+      {/*
+        ★ WHAT THE SITE ACTUALLY IS ★
+
+        Worked out from what it asks for, not from anything anybody typed — a build's requirement is
+        twenty-odd commodities at exact tonnages and no two share one, so the requirement identifies
+        it. Absent until somebody has docked there, and absent for a build type we do not hold,
+        which is information rather than a gap.
+      */}
+      {project.identified === null ? null : (
+        <p style={{ margin: '0 0 14px', fontSize: '12px', color: C.dim }}>
+          This is a <span style={{ color: C.cyan }}>{project.identified.displayName}</span>
+          <span style={{ ...MONO_SMALL, marginLeft: '8px' }}>
+            tier {project.identified.tier} · {project.identified.location}
+            {project.identified.padSize === 'none' ? '' : ` · ${project.identified.padSize} pad`} ·{' '}
+            {tonnes(project.identified.totalTonnes)} in total
+          </span>
+        </p>
+      )}
 
       {/*
         The summary strip stays OUTSIDE the tabs, because it is true whichever tab is open. Putting
@@ -934,6 +1000,19 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
               <p style={{ margin: '10px 0 0', fontSize: '11px', color: C.faint }}>
                 {done.length} commodit{done.length === 1 ? 'y' : 'ies'} fully delivered:{' '}
                 {done.map((n) => n.commodity).join(', ')}
+              </p>
+            )}
+            {/*
+              ★ WHEN THE SITE ITSELF LAST SAID SO ★
+
+              Not when the app last synced — that is the `Freshness` line above, and it answers a
+              different question. This one decides whether the list is worth planning an evening
+              around: ten minutes old and it is, a fortnight old and half of it may already be
+              delivered. Without it the two look identical.
+            */}
+            {siteFreshness(needs) === null ? null : (
+              <p style={{ margin: '6px 0 0', fontSize: '11px', color: C.faint }}>
+                {siteFreshness(needs)}
               </p>
             )}
           </Card>
