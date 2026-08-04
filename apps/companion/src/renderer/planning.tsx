@@ -9,7 +9,19 @@ import type {
   PlanSite,
   SiteEconomy,
 } from '../hub-colony.js';
-import { Button, C, Card, Copy, Empty, Field, Problem, Section, Stat, inputStyle } from './ui.js';
+import {
+  Button,
+  C,
+  Card,
+  Copy,
+  Empty,
+  Field,
+  Problem,
+  Section,
+  Stat,
+  Tabs,
+  inputStyle,
+} from './ui.js';
 
 /**
  * Colonisation planning, in the companion app.
@@ -82,6 +94,26 @@ const shortName = (name: string, system: string): string =>
   name.startsWith(system) ? name.slice(system.length).trim() || name : name;
 
 const MONO: JSX.CSSProperties = { fontFamily: 'var(--font-mono)', fontVariantNumeric: 'tabular-nums' };
+
+/**
+ * The plan page's two halves, as tabs.
+ *
+ * ★ THE SAME TREATMENT THE PROJECT PAGE ALREADY HAS ★
+ *
+ * "tab this out please so the project pages are nice and clean and crisp and clear" was said about
+ * the project page, and the reason applies here at least as strongly: THE SYSTEM is a tree of every
+ * body in a system — Nervi is twenty-two rows, a large system is over a hundred — and BUILD ORDER
+ * sits underneath it, which on any real plan means scrolling past the whole galaxy to reach it.
+ *
+ * They also answer different questions. The system answers "where can this go"; the build order
+ * answers "in what order, and can we afford it". Nobody is reading both at once.
+ */
+const PLAN_TABS = [
+  { key: 'system', label: 'The system' },
+  { key: 'order', label: 'Build order' },
+] as const;
+
+type PlanTab = (typeof PLAN_TABS)[number]['key'];
 
 // ---------------------------------------------------------------------------- the page
 
@@ -348,6 +380,7 @@ function PlanDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.Ele
    * the same predicate the refusal uses, so the two cannot disagree.
    */
   const [canEdit, setCanEdit] = useState(false);
+  const [tab, setTab] = useState<PlanTab>('system');
   const [buildTypes, setBuildTypes] = useState<readonly BuildTypeRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -497,19 +530,31 @@ function PlanDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.Ele
         </p>
       )}
 
-      <Section title="The system">
-        <SystemTree
-          plan={plan}
-          buildTypes={buildTypes}
-          busy={busy}
-          canEdit={canEdit}
-          act={act}
-        />
-      </Section>
+      {/*
+        The strip sits below the stats and the provenance line, both of which are true whichever tab
+        is open — the same placement the project page uses, and for the same reason.
+      */}
+      <div style={{ margin: '4px 0 16px' }}>
+        <Tabs tabs={PLAN_TABS} current={tab} onChange={setTab} label="Plan sections" />
+      </div>
 
-      <Section title="Build order">
-        <BuildOrder plan={plan} busy={busy} canEdit={canEdit} act={act} />
-      </Section>
+      {tab !== 'system' ? null : (
+        <Section title="The system">
+          <SystemTree
+            plan={plan}
+            buildTypes={buildTypes}
+            busy={busy}
+            canEdit={canEdit}
+            act={act}
+          />
+        </Section>
+      )}
+
+      {tab !== 'order' ? null : (
+        <Section title="Build order">
+          <BuildOrder plan={plan} busy={busy} canEdit={canEdit} act={act} />
+        </Section>
+      )}
     </div>
   );
 }

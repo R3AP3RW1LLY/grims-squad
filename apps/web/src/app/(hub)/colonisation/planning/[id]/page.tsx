@@ -9,6 +9,7 @@ import {
 import { NoAccess, AdminUnavailable } from '../../../app/no-access';
 import { getBuildTypes, getColonyPlan } from '../../../../../lib/api';
 import { CopySystem } from '../../../../../components/copy-system';
+import { PageTabs, resolveTab, type PageTab } from '../../../../../components/page-tabs';
 import { SystemTree } from './system-tree';
 import { BuildOrder } from './build-order';
 
@@ -31,8 +32,35 @@ export const metadata: Metadata = {
 
 export const dynamic = 'force-dynamic';
 
-export default async function PlanPage({ params }: { params: Promise<{ id: string }> }) {
+/**
+ * The plan page's two halves, as tabs — the app's keys and labels, in the app's order.
+ *
+ * The project page took the app's tabs on 2026-08-04 so a member switching between the two finds
+ * the same things in the same places. A plan page that stayed a single scrolling column would have
+ * reintroduced exactly the split that change closed.
+ *
+ * It earns them on its own merits too: THE SYSTEM is a tree of every body in the system, and BUILD
+ * ORDER sat underneath it — so on any real plan, reading the order meant scrolling past the whole
+ * galaxy to reach it.
+ */
+const TABS: readonly PageTab[] = [
+  { key: 'system', label: 'The system' },
+  { key: 'order', label: 'Build order' },
+];
+
+export default async function PlanPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const { id } = await params;
+  const sp = await searchParams;
+
+  // A real URL, not client state: a tab survives a refresh and can be sent to somebody.
+  const raw = sp['tab'];
+  const tab = resolveTab(TABS, Array.isArray(raw) ? raw[0] : raw);
 
   /*
    * Both at once. The catalogue is what fills the "add a build" lists, and fetching it after the
@@ -76,6 +104,13 @@ export default async function PlanPage({ params }: { params: Promise<{ id: strin
       <PageHeader
         eyebrow={plan.owner === 'squadron' ? 'Squadron plan' : 'Your plan'}
         title={plan.title.toUpperCase()}
+        tabs={
+          <PageTabs
+            tabs={TABS}
+            current={tab}
+            basePath={`/colonisation/planning/${encodeURIComponent(id)}`}
+          />
+        }
       />
       <p className="-mt-4 mb-8 flex flex-wrap items-center gap-x-1 text-sm text-[var(--color-text-secondary)]">
         <span className="text-[var(--color-text-primary)]">{plan.systemName}</span>
@@ -118,13 +153,17 @@ export default async function PlanPage({ params }: { params: Promise<{ id: strin
           </p>
         )}
 
-        <Section title="The system">
-          <SystemTree plan={plan} buildTypes={buildTypes} canEdit={canEdit} />
-        </Section>
+        {tab !== 'system' ? null : (
+          <Section title="The system">
+            <SystemTree plan={plan} buildTypes={buildTypes} canEdit={canEdit} />
+          </Section>
+        )}
 
-        <Section title="Build order">
-          <BuildOrder plan={plan} canEdit={canEdit} />
-        </Section>
+        {tab !== 'order' ? null : (
+          <Section title="Build order">
+            <BuildOrder plan={plan} canEdit={canEdit} />
+          </Section>
+        )}
       </PageBody>
     </>
   );
