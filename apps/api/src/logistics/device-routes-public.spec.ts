@@ -28,6 +28,22 @@ import { describe, expect, it } from 'vitest';
  * decorator. Nothing about the omission is visible to the compiler: the file typechecks, lints, and
  * the route works perfectly from a browser. Reading the file is what catches it, and it is what
  * would have caught it the day it happened.
+ *
+ * ★ WHY THIS RULE IS SCOPED TO ONE FILE AND NOT APPLIED EVERYWHERE ★
+ *
+ * The other two controllers a device touches were audited when this was written, and neither can
+ * take the same blanket rule:
+ *
+ *   - `telemetry/telemetry.controller.ts` MIXES the two. Its device routes — links, poll, settings,
+ *     journal — are `@Public()`; its `me/devices` and `me/telemetry-consent` routes are the
+ *     website's and must stay behind the session guard. "All of them" would be wrong there, and
+ *     a rule that has to list exceptions is a rule that gets edited rather than obeyed.
+ *   - `companion/companion.controller.ts` is not a device surface at all. Its routes take `@User()`
+ *     and are called by the WEBSITE to decide whether to announce a release; nothing in
+ *     `apps/companion/src` calls them.
+ *
+ * This controller is the one place where every single route exists for the app, which is exactly
+ * what makes an exceptionless rule enforceable here.
  */
 
 const REPO = join(process.cwd(), '..', '..');
