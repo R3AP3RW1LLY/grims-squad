@@ -14,6 +14,7 @@ import type {
   ColonyShoppingRow,
 } from '../hub-colony.js';
 import { projectTitleFrom } from '../docked.js';
+import { DEFAULT_SHOPPING, type ShoppingFilters } from '../hub-colony.js';
 import {
   DeliveryChart,
   HaulerChart,
@@ -55,7 +56,7 @@ declare global {
   interface Window {
     readonly colony: {
       projects(): Promise<Answer<{ projects: ColonyProject[]; can: ColonyRights }>>;
-      project(id: string): Promise<Answer<ProjectDetailData>>;
+      project(id: string, filters?: ShoppingFilters): Promise<Answer<ProjectDetailData>>;
       at(marketId: string): Promise<Answer<{ project: ColonyProject | null; needs: ColonyNeed[] }>>;
       post(body: unknown): Promise<Answer<{ id: string }>>;
       /*
@@ -171,6 +172,9 @@ export interface ProjectDetailData {
   needs: ColonyNeed[];
   haulers: ColonyHauler[];
   shopping: ColonyShoppingRow[];
+  /** Echoed by the hub so the tab can say where it measured from. Null when the name was unknown. */
+  shoppingFrom: string | null;
+  shoppingSort: string;
   deliveries: Delivery[];
   chart: {
     bucket: 'hour' | 'day';
@@ -671,6 +675,17 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
    */
   const [stackBy, setStackBy] = useState<StackBy>('commodity');
   /*
+   * The shopping filters live here rather than inside the tab, because changing one refetches the
+   * WHOLE project — the hub answers the shopping list as part of the detail read, so a filter is a
+   * property of the request, not of the panel.
+   */
+  const [filters, setFilters] = useState<ShoppingFilters>(DEFAULT_SHOPPING);
+  /*
+   * True while a read is in flight. Without it the Update button looks inert on a query that can
+   * take a moment against eighteen million rows, and a member presses it again.
+   */
+  const [refreshing, setRefreshing] = useState(false);
+  /*
    * ★ THE TAB LIVES HERE, NOT IN A ROUTER AND NOT IN THE PARENT ★
    *
    * `data`, `error`, `stackBy` and the 60-second poll all belong to this component and the effect
@@ -687,7 +702,7 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
    * reported its own error, and a second message about the same action reads as two problems.
    */
   const reloadDetail = async (): Promise<void> => {
-    const answer = await window.colony.project(id);
+    const answer = await window.colony.project(id, filters);
     if (answer.ok) setData(answer.data);
   };
 
@@ -697,8 +712,10 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
   useEffect(() => {
     let live = true;
     const load = async (): Promise<void> => {
-      const answer = await window.colony.project(id);
+      setRefreshing(true);
+      const answer = await window.colony.project(id, filters);
       if (!live) return;
+      setRefreshing(false);
       if (answer.ok) {
         setData(answer.data);
         setReadAt(Date.now());
@@ -743,7 +760,9 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
       live = false;
       clearInterval(timer);
     };
-  }, [id]);
+    // Filters are a property of the request, so changing one re-runs the whole read rather than
+    // filtering a list the hub already narrowed.
+  }, [id, filters]);
 
   if (error !== null) {
     return (
@@ -982,38 +1001,36 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
 
       {tab !== 'buy' ? null : (
       <Section title="Where to buy it">
+        <ShoppingControls value={filters} busy={refreshing} onApply={setFilters} />
+
+        {/*
+          ★ WHERE THE PRICES ARE MEASURED FROM, SAID OUT LOUD ★
+
+          The tab printed distances with no stated origin, which is a number nobody can check. The
+          hub has been echoing `shoppingFrom` all along and the app parsed it and threw it away.
+        */}
+        {data.shoppingFrom === null ? (
+          <p style={{ margin: '0 0 10px', fontSize: '11px', color: C.warn }}>
+            We hold no system called “{filters.near}”, so these are the best prices anywhere rather
+            than the best near you.
+          </p>
+        ) : (
+          <p style={{ margin: '0 0 10px', fontSize: '11px', color: C.dim }}>
+            {data.shoppingSort === 'cheapest'
+              ? 'Cheapest anywhere in range of '
+              : data.shoppingSort === 'closest'
+                ? 'Closest to '
+                : 'Local first, within range of '}
+            <span style={{ color: C.text }}>{data.shoppingFrom}</span>.
+          </p>
+        )}
+
         {shopping.length === 0 ? (
           <Empty>Nothing to buy.</Empty>
         ) : (
           <Card>
             {shopping.map((r) => (
-              <Row
-                key={r.commodity}
-                left={r.commodity}
-                sub={
-                  /*
-                   * ★ NOT A DEAD END — SQUADRON OWNER, 2026-08-03 ★
-                   *
-                   * "if a commodty is listed as 'nobody in range sells this' can we display the
-                   * actual nearest location that does sell it, with an estimated light years in
-                   * distance please."
-                   *
-                   * The old line said the search failed and nothing about what to do next.
-                   */
-                  r.stationName === null
-                    ? r.nearestOutOfRange === null
-                      ? 'nobody anywhere we know of sells this'
-                      : `none in range · nearest ${r.nearestOutOfRange.stationName} · ` +
-                        `${r.nearestOutOfRange.systemName}` +
-                        (r.nearestOutOfRange.distance === null
-                          ? ''
-                          : ` · ${Math.round(r.nearestOutOfRange.distance)} ly`) +
-                        ` · ${seenAgo(r.nearestOutOfRange.seenAt)}`
-                    : `${r.stationName} · ${r.systemName} · ${seenAgo(r.seenAt)}`
-                }
-                subTone={r.stationName === null ? C.warn : C.faint}
-                right={r.cost === null ? '—' : credits(r.cost)}
-              />
+              <ShoppingRow key={r.commodity} row={r} />
             ))}
             <p style={{ margin: '10px 0 0', fontSize: '11px', color: C.dim }}>
               {/*
@@ -1626,6 +1643,166 @@ function ProjectActions({
           <Problem>{error}</Problem>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * The filters the app could not set.
+ *
+ * ★ SQUADRON OWNER, 2026-08-04: "full feature parridy" ★
+ *
+ * The device route has accepted these four since the website got them, and the app sent none — so
+ * its Where-to-buy tab was pinned to "local, 100 ly, any pad, measured from the build", and nothing
+ * on screen said that was a choice somebody had made rather than the only answer.
+ *
+ * Applied on a button rather than on every keystroke: each change is a fresh query against an
+ * 18-million-row table, and a member typing a system name would otherwise fire one per letter.
+ */
+function ShoppingControls({
+  value,
+  busy,
+  onApply,
+}: {
+  value: ShoppingFilters;
+  busy: boolean;
+  onApply: (next: ShoppingFilters) => void;
+}): JSX.Element {
+  const [draft, setDraft] = useState(value);
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexWrap: 'wrap',
+        alignItems: 'flex-end',
+        gap: '8px',
+        marginBottom: '12px',
+      }}
+    >
+      <div style={{ minWidth: '150px' }}>
+        <Field label="Buying from">
+          <input
+            value={draft.near}
+            onInput={(e) => setDraft({ ...draft, near: (e.target as HTMLInputElement).value })}
+            placeholder="the build’s own system"
+            style={inputStyle}
+          />
+        </Field>
+      </div>
+
+      <Field label="Prefer">
+        <select
+          value={draft.sort}
+          onChange={(e) => {
+            const v = (e.target as HTMLSelectElement).value;
+            setDraft({ ...draft, sort: v === 'cheapest' || v === 'closest' ? v : 'local' });
+          }}
+          style={inputStyle}
+        >
+          <option value="local">Local first</option>
+          <option value="cheapest">Cheapest anywhere</option>
+          <option value="closest">Closest anywhere</option>
+        </select>
+      </Field>
+
+      <Field label="Within">
+        <select
+          value={String(draft.withinLy)}
+          onChange={(e) =>
+            setDraft({ ...draft, withinLy: Number((e.target as HTMLSelectElement).value) })
+          }
+          style={inputStyle}
+        >
+          {[50, 100, 200, 500].map((ly) => (
+            <option key={ly} value={String(ly)}>
+              {ly} ly
+            </option>
+          ))}
+        </select>
+      </Field>
+
+      <label
+        style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', color: C.dim }}
+      >
+        <input
+          type="checkbox"
+          checked={draft.largePadOnly}
+          onChange={(e) => setDraft({ ...draft, largePadOnly: (e.target as HTMLInputElement).checked })}
+        />
+        Large pad only
+      </label>
+
+      <Button tone="primary" disabled={busy} onClick={() => onApply(draft)}>
+        {busy ? 'Looking…' : 'Update'}
+      </Button>
+    </div>
+  );
+}
+
+/**
+ * One line of the shopping list.
+ *
+ * ★ THREE COLUMNS THE APP WAS DROPPING ★
+ *
+ * It showed the commodity, where to get it and the total cost. It did NOT show how much is needed,
+ * what a tonne costs, or how much is on the shelf — and the last of those is the number that decides
+ * how many trips this is. All three were already on the wire and unused.
+ */
+function ShoppingRow({ row }: { row: ColonyShoppingRow }): JSX.Element {
+  const place =
+    row.stationName === null
+      ? row.nearestOutOfRange === null
+        ? 'nobody anywhere we know of sells this'
+        : `none in range · nearest ${row.nearestOutOfRange.stationName} · ${row.nearestOutOfRange.systemName}` +
+          (row.nearestOutOfRange.distance === null
+            ? ''
+            : ` · ${Math.round(row.nearestOutOfRange.distance)} ly`) +
+          ` · ${seenAgo(row.nearestOutOfRange.seenAt)}`
+      : `${row.stationName} · ${row.systemName} · ${seenAgo(row.seenAt)}`;
+
+  const system = row.stationName === null ? row.nearestOutOfRange?.systemName : row.systemName;
+
+  return (
+    <div style={{ borderTop: `1px solid ${C.subtle}`, padding: '8px 0' }}>
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'baseline',
+          justifyContent: 'space-between',
+          gap: '10px',
+        }}
+      >
+        <span style={{ fontSize: '13px', color: C.text }}>
+          {row.commodity}
+          <span style={{ marginLeft: '8px', fontSize: '11px', color: C.dim }}>
+            {tonnes(row.remaining)} needed
+          </span>
+        </span>
+        <span style={{ fontSize: '12px', color: C.dim }}>
+          {row.price === null ? '—' : `${row.price.toLocaleString()} cr/t`}
+          {row.supply === null ? '' : ` · ${tonnes(row.supply)} in stock`}
+          <span style={{ marginLeft: '8px', color: C.text }}>
+            {row.cost === null ? '—' : credits(row.cost)}
+          </span>
+        </span>
+      </div>
+      <p
+        style={{
+          margin: '3px 0 0',
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'center',
+          gap: '5px',
+          fontSize: '11px',
+          color: row.stationName === null ? C.warn : C.faint,
+        }}
+      >
+        <span>{place}</span>
+        {/* The system alone, because the galaxy map searches systems — a station name finds nothing. */}
+        {system === undefined || system === null ? null : <Copy value={system} />}
+      </p>
     </div>
   );
 }

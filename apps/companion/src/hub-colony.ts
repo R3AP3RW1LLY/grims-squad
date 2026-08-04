@@ -341,17 +341,55 @@ export const colonyProjects = (
 ): Promise<Answer<{ projects: ColonyProject[]; can: ColonyRights }>> =>
   hubColony(call, '/projects');
 
+/**
+ * One project, with its shopping list answered the way the member asked.
+ *
+ * ★ THE APP COULD ONLY EVER SEE THE DEFAULT ANSWER ★
+ *
+ * The device route has accepted `near`, `withinLy`, `sort` and `largePad` since the day the website
+ * got those controls, and this function sent none of them — so the app's Where-to-buy tab was
+ * permanently pinned to "local, 100 ly, any pad, measured from the build". A member in the app
+ * could not ask the question the website answers, and had no way to tell that they could not.
+ */
+export interface ShoppingFilters {
+  /** Measure from here instead of the build's own system. Empty means the build. */
+  readonly near: string;
+  readonly withinLy: number;
+  readonly sort: 'local' | 'cheapest' | 'closest';
+  readonly largePadOnly: boolean;
+}
+
+export const DEFAULT_SHOPPING: ShoppingFilters = {
+  near: '',
+  withinLy: 100,
+  sort: 'local',
+  largePadOnly: false,
+};
+
 export const colonyProject = (
   call: HubCall,
   id: string,
+  filters: ShoppingFilters = DEFAULT_SHOPPING,
 ): Promise<
   Answer<{
     project: ColonyProject;
     needs: ColonyNeed[];
     haulers: ColonyHauler[];
     shopping: ColonyShoppingRow[];
+    /** Echoed so the tab can say where it measured from — a distance with no origin is uncheckable. */
+    shoppingFrom: string | null;
+    shoppingSort: string;
+    can: { manage: boolean; isPoster: boolean };
   }>
-> => hubColony(call, `/projects/${encodeURIComponent(id)}`);
+> => {
+  const q = new URLSearchParams({
+    withinLy: String(filters.withinLy),
+    sort: filters.sort,
+    ...(filters.near.trim() === '' ? {} : { near: filters.near.trim() }),
+    ...(filters.largePadOnly ? { largePad: '1' } : {}),
+  });
+  return hubColony(call, `/projects/${encodeURIComponent(id)}?${q.toString()}`);
+};
 
 /** The project for the site the member is docked at, if the squadron holds one. */
 export const colonyAtMarket = (

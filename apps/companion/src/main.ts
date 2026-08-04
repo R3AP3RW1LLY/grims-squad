@@ -18,6 +18,7 @@ import {
   attachCarrier,
   colonyBuildTypes,
   colonyClose,
+  DEFAULT_SHOPPING,
   colonyPriority,
   colonyRemove,
   colonyReopen,
@@ -1393,11 +1394,28 @@ if (!app.requestSingleInstanceLock()) {
     });
 
     ipcMain.handle('colonyProjects', () => colonyProjects(hub()));
-    ipcMain.handle('colonyProject', (_e, id: unknown) =>
-      typeof id === 'string' && id !== ''
-        ? colonyProject(hub(), id)
-        : { ok: false as const, error: 'No project asked for.' },
-    );
+    ipcMain.handle('colonyProject', (_e, id: unknown, filters: unknown) => {
+      if (typeof id !== 'string' || id === '') {
+        return { ok: false as const, error: 'No project asked for.' };
+      }
+
+      /*
+       * Re-read rather than trusted. The renderer is the only caller today, but it is also the
+       * surface a rendering bug reaches, and a radius arriving as a string would become NaN in a
+       * query the hub uses to bound a search.
+       */
+      const f = (filters ?? {}) as Record<string, unknown>;
+      const sort = f['sort'];
+      return colonyProject(hub(), id, {
+        near: typeof f['near'] === 'string' ? f['near'] : '',
+        withinLy:
+          typeof f['withinLy'] === 'number' && Number.isFinite(f['withinLy'])
+            ? f['withinLy']
+            : DEFAULT_SHOPPING.withinLy,
+        sort: sort === 'cheapest' || sort === 'closest' ? sort : 'local',
+        largePadOnly: f['largePadOnly'] === true,
+      });
+    });
     ipcMain.handle('colonyAt', (_e, marketId: unknown) =>
       typeof marketId === 'string' && marketId !== ''
         ? colonyAtMarket(hub(), marketId)

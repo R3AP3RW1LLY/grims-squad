@@ -115,8 +115,8 @@ contextBridge.exposeInMainWorld('overlays', {
 contextBridge.exposeInMainWorld('colony', {
   /** Both boards, plus what this member is allowed to do with them. */
   projects: () => ipcRenderer.invoke('colonyProjects'),
-  /** One project in full: needs, haulers, and where to buy the rest. */
-  project: (id: string) => ipcRenderer.invoke('colonyProject', id),
+  /** One project in full: needs, haulers, and where to buy the rest, filtered as asked. */
+  project: (id: string, filters?: unknown) => ipcRenderer.invoke('colonyProject', id, filters),
   /** The project for a construction site, by market id. Null when nobody has posted it. */
   at: (marketId: string) => ipcRenderer.invoke('colonyAt', marketId),
   post: (body: unknown) => ipcRenderer.invoke('colonyPost', body),
