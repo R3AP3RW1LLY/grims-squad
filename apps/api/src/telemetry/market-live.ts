@@ -1,4 +1,5 @@
 import type { PrismaClient } from '@grims/db';
+import { ensureLiveStation } from '@grims/db';
 
 /**
  * Keeping station markets current from members' own journals.
@@ -39,8 +40,11 @@ export class PrismaMarketUpdater {
     this.#db = db;
   }
 
-  async apply(event: Record<string, unknown> & { event: string }): Promise<number> {
-    return applyMarketEvent(this.#db, event as MarketEvent);
+  async apply(
+    event: Record<string, unknown> & { event: string },
+    memberId?: string,
+  ): Promise<number> {
+    return applyMarketEvent(this.#db, event as MarketEvent, memberId ?? null);
   }
 }
 
@@ -53,6 +57,9 @@ export interface MarketEvent {
   readonly Type?: unknown;
   readonly Count?: unknown;
   readonly Items?: unknown;
+  /** Carried by the Market snapshot event, and exactly what a provisional station needs. */
+  readonly StationName?: unknown;
+  readonly StarSystem?: unknown;
 }
 
 /** A station we were able to resolve a MarketID to. */
@@ -71,7 +78,11 @@ interface Station {
  * something rather than silently matching nothing — which is exactly what a missing `marketId`
  * would have looked like.
  */
-export async function applyMarketEvent(db: PrismaClient, ev: MarketEvent): Promise<number> {
+export async function applyMarketEvent(
+  db: PrismaClient,
+  ev: MarketEvent,
+  memberId: string | null = null,
+): Promise<number> {
   /*
    * Frontier writes MarketID as a number, but a journal that has been through JSON round-trips
    * elsewhere can carry it as a string. Both are accepted; anything else is not a market event we
@@ -85,7 +96,18 @@ export async function applyMarketEvent(db: PrismaClient, ev: MarketEvent): Promi
         : null;
   if (marketId === null) return 0;
 
-  if (ev.event === 'Market') return applySnapshot(db, marketId, ev.Items);
+  if (ev.event === 'Market') {
+    return applySnapshot(
+      db,
+      marketId,
+      ev.Items,
+      {
+        stationName: typeof ev.StationName === 'string' ? ev.StationName : null,
+        systemName: typeof ev.StarSystem === 'string' ? ev.StarSystem : null,
+      },
+      memberId,
+    );
+  }
   if (ev.event === 'MarketBuy') return applyDelta(db, marketId, ev, 'supply');
   if (ev.event === 'MarketSell') return applyDelta(db, marketId, ev, 'demand');
   return 0;
@@ -100,7 +122,13 @@ export async function applyMarketEvent(db: PrismaClient, ev: MarketEvent): Promi
  * absent from the event is one the station has STOPPED trading, and merging would leave that row
  * behind indefinitely — routing members to sell a cargo hold of something nobody there buys.
  */
-async function applySnapshot(db: PrismaClient, marketId: number, items: unknown): Promise<number> {
+async function applySnapshot(
+  db: PrismaClient,
+  marketId: number,
+  items: unknown,
+  place: { stationName: string | null; systemName: string | null },
+  memberId: string | null = null,
+): Promise<number> {
   if (!Array.isArray(items) || items.length === 0) return 0;
 
   const rows = items
@@ -131,15 +159,33 @@ async function applySnapshot(db: PrismaClient, marketId: number, items: unknown)
 
   if (rows.length === 0) return 0;
 
-  const station = await stationFor(db, marketId);
-  if (station === null) return 0;
+  /*
+   * ★ AN UNKNOWN STATION IS ADDED, NOT SKIPPED — SQUADRON OWNER, 2026-08-04 ★
+   *
+   * This returned 0 for a station we did not hold — quietly discarding the market a MEMBER had
+   * just docked at and uploaded. And the station a member is most likely to be first at is the
+   * squadron's own newest construction site. Same non-negotiable as the EDDN path, through the
+   * same shared module, so the two writers cannot disagree about what an unknown station becomes.
+   *
+   * Without a station name there is nothing usable to add; that case keeps the old behaviour and
+   * the event's own name has been carried since the day this could create stations.
+   */
+  let station = await stationFor(db, marketId);
+  if (station === null) {
+    if (place.stationName === null || place.stationName === '') return 0;
+    station = await ensureLiveStation(db, {
+      marketId,
+      stationName: place.stationName,
+      systemName: place.systemName ?? '',
+    });
+  }
 
   /*
    * Delete and insert inside ONE transaction. Between the two statements the station has no market
    * rows at all, and a route query running in that window would report the station trades nothing —
    * a wrong answer rather than a stale one.
    */
-  return db.$transaction(async (tx) => {
+  const written = await db.$transaction(async (tx) => {
     await tx.$executeRawUnsafe(`DELETE FROM market_entries WHERE station_key = $1`, station.key);
 
     const values: string[] = [];
@@ -152,21 +198,65 @@ async function applySnapshot(db: PrismaClient, marketId: number, items: unknown)
         `($1,$2,$3,$4,` +
           // Coordinates come from the station's own knowledge row: the journal does not carry them,
           // and a NULL here would drop the station out of every "within N light years" search.
-          `(SELECT coords FROM knowledge_items WHERE source='galaxy' AND kind='station' AND ext_key=$1),` +
-          `$5,$${i + 1},$${i + 2},$${i + 3},$${i + 4},$${i + 5},$${i + 6},now())`,
+          // Source-agnostic: a provisional station's coordinates live on its own 'eddn' row.
+          `(SELECT coords FROM knowledge_items WHERE kind='station' AND ext_key=$1 LIMIT 1),` +
+          `$5,$${i + 1},$${i + 2},$${i + 3},$${i + 4},$${i + 5},$${i + 6},now(),'journal')`,
       );
     }
 
     await tx.$executeRawUnsafe(
       `INSERT INTO market_entries (station_key, station_name, system_name, station_type, coords,
                                    large_pads, commodity, category, buy_price, sell_price,
-                                   supply, demand, market_seen_at)
+                                   supply, demand, market_seen_at, source)
        VALUES ${values.join(',')}`,
       ...params,
     );
 
     return rows.length;
   });
+
+  // The snapshot is in. If this station was on the bounty board, this member just earned it.
+  if (written > 0 && memberId !== null) await awardBounty(db, station.key, memberId);
+  return written;
+}
+
+/**
+ * Paying a data bounty, automatically.
+ *
+ * ★ SQUADRON OWNER, 2026-08-04 ★
+ *
+ * "any time something goes stale it should automatically be added to the list, turn this into our
+ * first offical Data Runner Leaderboard" — credit chosen as automatic on companion upload, no
+ * claiming. The member's act of docking and opening the market screen IS the claim: this snapshot
+ * is what refreshed the data the bounty existed for.
+ *
+ * ★ ONE STATEMENT, FIRST COME FIRST SERVED ★
+ *
+ * DELETE .. RETURNING feeds the INSERT: whoever's snapshot lands first consumes the board row and
+ * the ledger row is written from what the board promised at that moment. A second member docking
+ * five minutes later finds no row and earns nothing — a bounty pays exactly once. The half-hourly
+ * board rebuild cannot resurrect it, because the rebuild reads market data this snapshot has
+ * already freshened.
+ *
+ * ★ NEVER ALLOWED TO FAIL THE UPLOAD ★
+ *
+ * The market rows are already written when this runs. Points are decoration on top of the real
+ * work; a bounty table hiccup must not turn a successful upload into an error.
+ */
+async function awardBounty(db: PrismaClient, stationKey: string, memberId: string): Promise<void> {
+  await db
+    .$executeRawUnsafe(
+      `WITH won AS (
+         DELETE FROM data_bounties WHERE station_key = $1
+         RETURNING station_name, system_name, points, jackpot, days_stale
+       )
+       INSERT INTO bounty_claims
+         (user_id, station_key, station_name, system_name, points, jackpot, days_stale)
+       SELECT $2::uuid, $1, station_name, system_name, points, jackpot, days_stale FROM won`,
+      stationKey,
+      memberId,
+    )
+    .catch(() => undefined);
 }
 
 /**

@@ -439,6 +439,7 @@ model User {
   inaraLink           InaraLink?
   inaraProfile        InaraCommanderProfile?
   cmdrVerifications   CmdrVerification[]
+  bountyClaims        BountyClaim[]
   userRoles           UserRole[]            @relation("UserRoleHolder")
   rolesGranted        UserRole[]            @relation("UserRoleGrantor")
   refreshFamilies     RefreshTokenFamily[]
@@ -3892,6 +3893,193 @@ model ShipBuild {
 /// So the sighting is recorded here, which is one cheap upsert, and a worker job resolves them at
 /// a pace the upstream will tolerate. Nothing is written to `knowledge_items` until it is complete,
 /// which is what "no stubs" means.
+/// ═══════════════ THE REST OF THE EDDN RELAY, RECORDED ═══════════════
+///
+/// Squadron owner, 2026-08-04: "Capture and leverage all information that we can use on our system
+/// from EDDN! ... non-negotiable!" — all four schema families chosen. The collector consumed one
+/// schema (commodity/3, 2.6% of messages); these eight tables take the rest. Written by the
+/// collector in raw SQL; modelled here because the schema is law (ADR-019).
+
+/// What a station SELLS beyond commodities — outfitting/2. Replaced wholesale per message.
+model StationOutfitting {
+  marketId BigInt   @id @map("market_id")
+  modules  String[]
+  seenAt   DateTime @default(now()) @map("seen_at") @db.Timestamptz(6)
+
+  @@map("station_outfitting")
+}
+
+/// Ships on a station's shipyard list — shipyard/2.
+model StationShipyard {
+  marketId BigInt   @id @map("market_id")
+  ships    String[]
+  seenAt   DateTime @default(now()) @map("seen_at") @db.Timestamptz(6)
+
+  @@map("station_shipyard")
+}
+
+/// Bio/geo signal counts per body — two of the colonisation economy model's three blind spots.
+model BodySignals {
+  systemAddress BigInt   @map("system_address")
+  bodyId        Int      @map("body_id")
+  bodyName      String?  @map("body_name")
+  biological    Int      @default(0)
+  geological    Int      @default(0)
+  seenAt        DateTime @default(now()) @map("seen_at") @db.Timestamptz(6)
+
+  @@id([systemAddress, bodyId])
+  @@map("body_signals")
+}
+
+/// Ground settlements with surface coordinates — approachsettlement/1, the only public source.
+model Settlement {
+  systemAddress BigInt   @map("system_address")
+  name          String
+  bodyName      String?  @map("body_name")
+  marketId      BigInt?  @map("market_id")
+  latitude      Float?
+  longitude     Float?
+  seenAt        DateTime @default(now()) @map("seen_at") @db.Timestamptz(6)
+
+  @@id([systemAddress, name])
+  @@map("settlements")
+}
+
+/// Where a fleet carrier actually is, live. The only stations that MOVE, and our stalest data —
+/// this is what lets a page say "that carrier left two hours ago; its listing is void".
+model CarrierPosition {
+  marketId      BigInt   @id @map("market_id")
+  callsign      String
+  systemName    String   @map("system_name")
+  systemAddress BigInt?  @map("system_address")
+  event         String
+  seenAt        DateTime @default(now()) @map("seen_at") @db.Timestamptz(6)
+
+  @@index([systemName])
+  @@map("carrier_positions")
+}
+
+/// The carrier bartender's materials market — fcmaterials_journal/1.
+model FcBartender {
+  marketId BigInt   @map("market_id")
+  item     String
+  price    Int      @default(0)
+  stock    Int      @default(0)
+  demand   Int      @default(0)
+  seenAt   DateTime @default(now()) @map("seen_at") @db.Timestamptz(6)
+
+  @@id([marketId, item])
+  @@map("fc_bartender")
+}
+
+/// Jumps flown and routes plotted per system per hour. Predicts how fresh data STAYS, and feeds
+/// Data Bounty scoring — a bounty nobody's traffic will refresh is worth more.
+model SystemTraffic {
+  systemAddress BigInt   @map("system_address")
+  hour          DateTime @db.Timestamptz(6)
+  jumps         Int      @default(0)
+  routed        Int      @default(0)
+
+  @@id([systemAddress, hour])
+  @@map("system_traffic")
+}
+
+/// Arrival counts for EVERY schema, so "record everything" is literally true even for schemas with
+/// no feature yet — and their real volume is known before one earns a table.
+model EddnSchemaStat {
+  schema   String
+  hour     DateTime @db.Timestamptz(6)
+  messages Int      @default(0)
+
+  @@id([schema, hour])
+  @@map("eddn_schema_stats")
+}
+
+/// ═══════════════ DATA BOUNTIES — THE DATA RUNNER LEADERBOARD ═══════════════
+///
+/// Squadron owner, 2026-08-04: "create a new page under squadrons called Data bounty's and create a
+/// list of all stations and systems we need to dock at to shore up market data ... any time
+/// something goes stale it should automatically be added to the list, turn this into our first
+/// offical Data Runner Leaderboard please! gamify this too" — scoring staleness-weighted with
+/// jackpots, credit automatic on companion upload, monthly seasons plus all-time, squadron space
+/// ranked above the galaxy tail.
+
+/// The bounty board: one row per station whose market data is missing or past the believability
+/// band. REBUILT by the worker every half hour — going stale IS how a station gets listed, and a
+/// fresh observation from anyone (member or relay) is how it leaves. Claiming deletes the row
+/// mid-cycle so a bounty pays exactly once.
+model DataBounty {
+  stationKey  String    @id @map("station_key")
+  stationName String    @map("station_name")
+  systemName  String    @map("system_name")
+  stationType String?   @map("station_type")
+  largePads   Int?      @map("large_pads")
+  /// Newest market observation we hold. Null is the biggest bounty of all: never seen.
+  lastSeenAt  DateTime? @map("last_seen_at") @db.Timestamptz(6)
+  daysStale   Int?      @map("days_stale")
+  points      Int
+  /// Doubled points, worn as a badge: in squadron space and either a year stale or never seen.
+  jackpot     Boolean   @default(false)
+  /// Within 200 ly of an active colonisation project — the space the squadron actually flies.
+  inOps       Boolean   @map("in_ops")
+  /// Light-years from the nearest ops anchor. Null on the galaxy tail.
+  distanceLy  Float?    @map("distance_ly")
+  computedAt  DateTime  @map("computed_at") @db.Timestamptz(6)
+
+  @@index([inOps, points])
+  @@map("data_bounties")
+}
+
+/// A bounty paid. Permanent — the board is rebuilt on a timer, this is the ledger the leaderboard
+/// sums. Credit is automatic: the companion upload that refreshed a bountied station names its
+/// member, and nobody files anything.
+model BountyClaim {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  stationKey  String   @map("station_key")
+  stationName String   @map("station_name")
+  systemName  String   @map("system_name")
+  points      Int
+  jackpot     Boolean  @default(false)
+  /// How stale the data was when this member refreshed it. Null: never seen before them.
+  daysStale   Int?     @map("days_stale")
+  claimedAt   DateTime @default(now()) @map("claimed_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, claimedAt])
+  @@index([claimedAt])
+  @@map("bounty_claims")
+}
+
+/// An operational alert on its way to a human.
+///
+/// ★ WHY A TABLE AND NOT A NOTIFY — 2026-08-04 ★
+///
+/// The collector stopped for two days and the galaxy ingest could never finish, and nothing said a
+/// word either time. The owner's instruction: a dead collector or a failed dump "must announce
+/// itself", by Discord DM. A pg_notify would be lost the moment the bot was down — and an alert
+/// about infrastructure being down must survive infrastructure being down. A row persists until
+/// the bot has actually delivered it, however long that takes.
+model OpsAlert {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  /// `collector-stalled`, `galaxy-stale`, `collector-recovered`... — the dedupe key, so a broken
+  /// thing alerts once per incident rather than once per check.
+  kind    String
+  message String
+
+  /// Who should hear about it. Only `webmaster` today; a column so the next audience is data.
+  audience String @default("webmaster")
+
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  /// Set once the bot has sent the DMs. Undelivered rows are retried on every poll.
+  deliveredAt DateTime? @map("delivered_at") @db.Timestamptz(6)
+
+  @@index([kind, createdAt])
+  @@map("ops_alerts")
+}
+
 model PendingStation {
   /// Frontier's market id. The key EDDN and our station records both use.
   marketId  BigInt @id @map("market_id")

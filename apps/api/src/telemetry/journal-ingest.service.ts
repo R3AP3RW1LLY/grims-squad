@@ -50,7 +50,12 @@ export interface IncomingEvent {
  * entirely, which is what the unit tests use.
  */
 export interface MarketUpdater {
-  apply(event: Record<string, unknown> & { event: string }): Promise<number>;
+  /**
+   * `memberId` names WHO uploaded, so a snapshot that refreshes a bountied station can credit
+   * them on the Data Runner leaderboard. Optional because the EDDN relay path has no member —
+   * anonymous data pays no bounty, which is the design rather than a gap.
+   */
+  apply(event: Record<string, unknown> & { event: string }, memberId?: string): Promise<number>;
 }
 
 export interface IngestStore {
@@ -483,7 +488,7 @@ export class JournalIngestService {
          * either way, and a station we have not ingested yet is a normal
          * result rather than a failure.
          */
-        await this.market.apply(m.raw).catch(() => 0);
+        await this.market.apply(m.raw, userId).catch(() => 0);
       }
     }
 

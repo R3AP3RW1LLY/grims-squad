@@ -10,6 +10,9 @@ import { announce } from './jobs/job-log.js';
 import { rollUpCommodities } from './jobs/commodity-rollup.js';
 import { PrismaRollupStore } from './jobs/commodity-rollup.wiring.js';
 import { takeJobLock } from './lib/job-lock.js';
+import { resolveStations } from './jobs/resolve-stations.js';
+import { rebuildBountyBoard } from './jobs/bounty-board.js';
+import { EdsmStationSource, PrismaStationStore } from './jobs/resolve-stations.wiring.js';
 
 /**
  * The resident worker: runs an ingest when somebody asks for one.
@@ -322,6 +325,9 @@ function startScheduler(db: PrismaClient): void {
 
   startColonySync(db);
   startCommodityRollup(db);
+  startIngestionWatch(db);
+  startStationResolver(db);
+  startBountyBoard(db);
 }
 
 /**
@@ -420,6 +426,180 @@ function startCommodityRollup(db: PrismaClient): void {
   // hour's point immediately rather than waiting up to an hour for the next tick.
   void run();
   setInterval(() => void run(), COMMODITY_ROLLUP_MS);
+}
+
+/**
+ * The pulse-taker, and the thing that finally ANNOUNCES a dead feed.
+ *
+ * ★ SQUADRON OWNER, 2026-08-04 ★
+ *
+ * "restart all AI and ingestion services immediately please! ... this always needs to be on" — and,
+ * asked how a failure should announce itself: Discord DM plus the site banner.
+ *
+ * Twice in two days something in this pipeline died silently: the collector stopped for 33 hours
+ * (nothing said anything; every page just aged uniformly), and the galaxy download failed nightly
+ * for as long as it has existed (a 30s deadline on a 4 GB file). Both were found by accident, days
+ * later, by reading the database. This watch exists so the THIRD failure is a DM within minutes.
+ *
+ * ★ IT WRITES A ROW, NOT A MESSAGE ★
+ *
+ * The bot delivers the DM by polling `ops_alerts` for undelivered rows. An alert about
+ * infrastructure being down must survive infrastructure being down — a row waits for the bot
+ * however long the bot takes, where a fire-and-forget notify would vanish into the outage it was
+ * reporting.
+ *
+ * ★ TRANSITIONS, NOT STATES ★
+ *
+ * A dead collector is one incident, not one alert per ten-minute check. Each kind re-alerts only
+ * after six quiet hours, and recovery posts its own row — because "it fixed itself at 05:40" is
+ * exactly what somebody reading the incident at breakfast needs to know.
+ */
+const INGESTION_WATCH_MS = 10 * 60_000;
+/** A healthy collector closes a window every fifteen minutes; thirty means two missed. */
+const COLLECTOR_STALL_MS = 30 * 60_000;
+/** Spansh rebuilds nightly; thirty hours means a whole rebuild came and went without us. */
+const GALAXY_STALL_MS = 30 * 60 * 60_000;
+
+function startIngestionWatch(db: PrismaClient): void {
+  const alert = async (kind: string, message: string): Promise<void> => {
+    const [recent] = await db.$queryRawUnsafe<Array<{ n: number }>>(
+      `SELECT count(*)::int AS n FROM ops_alerts
+        WHERE kind = $1 AND created_at > now() - interval '6 hours'`,
+      kind,
+    );
+    if ((recent?.n ?? 0) > 0) return;
+
+    await db.$executeRawUnsafe(
+      `INSERT INTO ops_alerts (kind, message) VALUES ($1, $2)`,
+      kind,
+      message,
+    );
+    console.error(`daemon: ALERT ${kind} — ${message}`);
+  };
+
+  /* Whether each thing was healthy at the LAST check, so recovery is a transition too. */
+  const wasHealthy: Record<string, boolean> = { collector: true, galaxy: true };
+
+  const run = async (): Promise<void> => {
+    try {
+      // The collector's own heartbeat: it updates progress_at on a timer while a window is open.
+      const [eddn] = await db.$queryRawUnsafe<Array<{ newest: Date | null }>>(
+        `SELECT max(progress_at) AS newest FROM knowledge_ingests WHERE source = 'eddn'`,
+      );
+      const collectorAge =
+        eddn?.newest == null ? Number.POSITIVE_INFINITY : Date.now() - eddn.newest.getTime();
+      const collectorHealthy = collectorAge < COLLECTOR_STALL_MS;
+
+      if (!collectorHealthy && wasHealthy['collector']) {
+        await alert(
+          'collector-stalled',
+          `Market ingestion has stopped. The EDDN collector last did work ` +
+            `${Math.round(collectorAge / 60_000)} minutes ago (threshold 30). ` +
+            `Every price on the site is ageing from this moment.`,
+        );
+      } else if (collectorHealthy && !wasHealthy['collector']) {
+        await alert('collector-recovered', 'The EDDN collector is receiving again.');
+      }
+      wasHealthy['collector'] = collectorHealthy;
+
+      // The galaxy baseline: the last galaxy ingest that finished, from its own run history.
+      const [galaxy] = await db.$queryRawUnsafe<Array<{ newest: Date | null }>>(
+        `SELECT max(finished_at) AS newest FROM knowledge_ingests
+          WHERE source = 'galaxy' AND error IS NULL`,
+      );
+      const galaxyAge =
+        galaxy?.newest == null ? Number.POSITIVE_INFINITY : Date.now() - galaxy.newest.getTime();
+      const galaxyHealthy = galaxyAge < GALAXY_STALL_MS;
+
+      if (!galaxyHealthy && wasHealthy['galaxy']) {
+        await alert(
+          'galaxy-stale',
+          `The Spansh galaxy baseline has not refreshed in ` +
+            `${Math.round(galaxyAge / 3_600_000)} hours (threshold 30). ` +
+            `Stations nobody visits live are ageing without a floor under them.`,
+        );
+      } else if (galaxyHealthy && !wasHealthy['galaxy']) {
+        await alert('galaxy-recovered', 'The galaxy baseline has refreshed.');
+      }
+      wasHealthy['galaxy'] = galaxyHealthy;
+    } catch (e) {
+      // The watchdog must not die of a transient error — a dead watchdog is the disease it treats.
+      console.error(`daemon: ingestion watch failed (${e instanceof Error ? e.message : String(e)})`);
+    }
+  };
+
+  void run();
+  setInterval(() => void run(), INGESTION_WATCH_MS);
+}
+
+/**
+ * The pending-stations drainer, finally scheduled.
+ *
+ * The resolver has existed since 2026-08-02 and was scheduled ONLY in a crontab the repo's own
+ * test says was never installed — so the queue sat at 1,323 rows with zero attempts, for ever.
+ * The daemon is the one thing guaranteed to be running wherever the platform runs, which is the
+ * same argument that put the colony sync and the rollup here.
+ *
+ * Every thirty minutes, small batches: EDSM is donated hardware and a backlog is not urgent — the
+ * markets themselves are no longer lost while stations wait, only their enrichment is.
+ */
+const STATION_RESOLVE_MS = 30 * 60_000;
+
+function startStationResolver(db: PrismaClient): void {
+  const run = async (): Promise<void> => {
+    const lock = await takeJobLock('resolve-stations');
+    if (lock === null) return;
+    try {
+      const report = await resolveStations(
+        new PrismaStationStore(db),
+        new EdsmStationSource(),
+        Number(process.env['STATION_RESOLVE_BATCH'] ?? '50'),
+      );
+      if (report.resolved > 0 || report.abandoned > 0) {
+        console.log(
+          `daemon: station resolver — ${report.resolved} resolved, ` +
+            `${report.stillUnknown} still unknown, ${report.abandoned} abandoned ` +
+            `of ${report.considered}`,
+        );
+      }
+    } catch (e) {
+      console.error(`daemon: station resolver failed (${e instanceof Error ? e.message : String(e)})`);
+    } finally {
+      await lock.release();
+    }
+  };
+
+  void run();
+  setInterval(() => void run(), STATION_RESOLVE_MS);
+}
+
+/**
+ * The Data Bounty board, rebuilt every half hour. See jobs/bounty-board.ts for the why of every
+ * number; the daemon owns only the cadence and the lock. Same reasoning as the resolver above for
+ * why it lives here: the daemon is the one process guaranteed to be running wherever the platform
+ * runs.
+ */
+const BOUNTY_BOARD_MS = 30 * 60_000;
+
+function startBountyBoard(db: PrismaClient): void {
+  const run = async (): Promise<void> => {
+    const lock = await takeJobLock('bounty-board');
+    if (lock === null) return;
+    try {
+      const report = await rebuildBountyBoard(db);
+      console.log(
+        `daemon: bounty board — ${report.ops} in squadron space, ${report.galaxy} galaxy tail, ${report.jackpots} jackpots`,
+      );
+    } catch (e) {
+      // A failed rebuild keeps the previous board — stale bounties, not an empty page.
+      console.error(`daemon: bounty board failed (${e instanceof Error ? e.message : String(e)})`);
+    } finally {
+      await lock.release();
+    }
+  };
+
+  void run();
+  setInterval(() => void run(), BOUNTY_BOARD_MS);
 }
 
 async function main(): Promise<void> {

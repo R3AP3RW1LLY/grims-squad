@@ -251,6 +251,23 @@ const NAV: readonly NavDefinition[] = [
     requires: Permission.COLONY_VIEW,
   },
   {
+    /*
+     * ★ SQUADRON OWNER, 2026-08-04 ★
+     *
+     * "create a new page under squadrons called Data bounty's and create a list of all stations
+     * and systems we need to dock at to shore up market data ... turn this into our first offical
+     * Data Runner Leaderboard please!"
+     *
+     * Gated on TRADE_QUERY like the market pages it feeds: the board is market metadata, and one
+     * mask governing both means taking the market away takes the bounty hunt with it.
+     */
+    href: '/bounties',
+    label: 'Data Bounties',
+    section: 'squadron',
+    blurb: 'Stations whose market data has gone dark. Dock, open the market, collect the points.',
+    requires: Permission.TRADE_QUERY,
+  },
+  {
     href: '/ops',
     label: 'Operations',
     section: 'squadron',

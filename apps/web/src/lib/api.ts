@@ -1629,6 +1629,58 @@ export const getCommodity = (
   );
 };
 
+/** One station on the Data Bounty board. */
+export interface BountyRow {
+  stationKey: string;
+  stationName: string;
+  systemName: string;
+  stationType: string | null;
+  largePads: number | null;
+  lastSeenAt: string | null;
+  /** Null means never seen at all — the biggest bounty there is. */
+  daysStale: number | null;
+  points: number;
+  jackpot: boolean;
+  /** Light-years from the nearest active project. Null on the galaxy tail. */
+  distanceLy: number | null;
+}
+
+export interface BountyBoard {
+  computedAt: string | null;
+  /** Within 200 ly of an active colonisation project. Listed first, as asked. */
+  ops: BountyRow[];
+  galaxy: BountyRow[];
+  /** The signed-in member's own running totals; null for a guest. */
+  me: {
+    monthPoints: number;
+    monthClaims: number;
+    allTimePoints: number;
+    allTimeClaims: number;
+  } | null;
+}
+
+export interface BountyLeaderboardEntry {
+  handle: string;
+  displayName: string;
+  points: number;
+  claims: number;
+  jackpots: number;
+}
+
+export interface BountyLeaderboard {
+  month: string;
+  season: BountyLeaderboardEntry[];
+  allTime: BountyLeaderboardEntry[];
+}
+
+export const getBounties = (): Promise<BountyBoard | null> =>
+  get('/v1/bounties', { authed: true });
+
+export const getBountyLeaderboard = (month?: string): Promise<BountyLeaderboard | null> =>
+  get(`/v1/bounties/leaderboard${month === undefined ? '' : `?month=${encodeURIComponent(month)}`}`, {
+    authed: true,
+  });
+
 /** One leg of a planned run. */
 export interface RouteLeg {
   stationName: string;
