@@ -29,11 +29,19 @@ export interface ChangelogRelease {
   fromSha: string;
   toSha: string;
   generatedAt: string;
+  version: string | null;
   commitCount: number;
   websiteMd: string;
   companionMd: string;
   platformMd: string;
   entries: ChangelogEntry[];
+}
+
+/** The deploy announcement's three member-facing texts — see buildAnnouncement. */
+export interface DeployAnnouncement {
+  content: string;
+  forumTitle: string;
+  forumBody: string;
 }
 
 export declare const GIT_LOG_FORMAT: string;
@@ -47,6 +55,12 @@ export declare function buildRelease(input: {
   toSha: string;
   commits: ChangelogCommit[];
   generatedAt: string;
+  version?: string | null;
 }): ChangelogRelease;
 export declare function renderMarkdown(release: ChangelogRelease): string;
 export declare function renderSql(release: ChangelogRelease): string;
+export declare function buildAnnouncement(
+  release: ChangelogRelease,
+  publicUrl: string,
+): DeployAnnouncement;
+export declare function renderAnnounceSql(release: ChangelogRelease, publicUrl: string): string;

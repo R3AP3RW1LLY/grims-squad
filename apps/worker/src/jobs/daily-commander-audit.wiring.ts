@@ -1,5 +1,5 @@
 import type { PrismaClient } from '@grims/db';
-import { notifyMembers, notifySquadron } from '@grims/db';
+import { announceMemberVerified, notifyMembers, notifySquadron } from '@grims/db';
 import { notificationNudge } from '../lib/live-notify.js';
 import type { DiscordAdapter, InaraAdapter } from '@grims/ed-clients';
 import type { TokenCipher } from '@grims/shared/server';
@@ -194,6 +194,13 @@ export class PrismaAuditStore implements AuditStore {
           },
           notificationNudge,
         );
+
+        /*
+         * And the Discord channel — through the shared announce door in @grims/db, so all three
+         * confirm paths post identical words without a fourth mirrored copy. Channel only, no
+         * forum carbon-copy: the squadron feed above already carries it on-site.
+         */
+        await announceMemberVerified(this.db, userId);
       } catch {
         // See above: the verification stands whether or not the bell rang.
       }

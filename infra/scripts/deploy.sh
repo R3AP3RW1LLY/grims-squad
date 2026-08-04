@@ -109,6 +109,14 @@ REQUIRED=(
   # change there (infra/cutover-grims-squad.md). Until the cutover, set both to
   # https://45-63-35-93.sslip.io; this preflight failing is the reminder.
   PUBLIC_URL PUBLIC_SITE_URL
+  # ★ THE ANNOUNCEMENT PIPELINE'S THREE SETTINGS, REQUIRED FROM NOW ON ★
+  #
+  # Squadron owner, 2026-08-04: the announcement wiring must be part of the
+  # deploy sequence, not an operator memory. Unset channels make the bot queue
+  # rows silently — a deploy announcement that never arrives and never errors —
+  # so a deploy is refused until /srv/grims/.env names both channels and the
+  # forum author (infra/cutover-grims-squad.md §7.1 has the values).
+  DISCORD_ANNOUNCE_CHANNEL_ID DISCORD_PROMOTIONS_CHANNEL_ID ANNOUNCE_FORUM_AUTHOR_HANDLE
 )
 
 missing=()
@@ -328,6 +336,20 @@ elif command -v node >/dev/null 2>&1; then
     | $COMPOSE exec -T postgres psql -q -v ON_ERROR_STOP=1 \
         -U "$(envval POSTGRES_USER)" -d "$(envval POSTGRES_DB)" >/dev/null 2>&1; then
     ok "changelog recorded: ${PREVIOUS_SHA:0:8} → ${TARGET_SHA:0:8}"
+
+    # The deploy ANNOUNCEMENT — a durable `announcements` row the bot posts to
+    # Discord and the API carbon-copies into the forum, both within a minute.
+    # Only attempted once the changelog row it links to actually landed, and
+    # non-fatal for the same reason: the site is already up, and the row can be
+    # inserted by hand afterwards.
+    if node "$REPO/tools/changelog.mjs" --repo "$REPO" --from "$PREVIOUS_SHA" --to "$TARGET_SHA" \
+        --announce-sql --public-url "$PUBLIC_URL" \
+      | $COMPOSE exec -T postgres psql -q -v ON_ERROR_STOP=1 \
+          -U "$(envval POSTGRES_USER)" -d "$(envval POSTGRES_DB)" >/dev/null 2>&1; then
+      ok "deploy announcement queued — the bot and the forum pick it up within a minute"
+    else
+      ok "announcement insert FAILED — recover with: node tools/changelog.mjs --from $PREVIOUS_SHA --announce-sql --public-url $PUBLIC_URL | psql (deploy itself is complete)"
+    fi
   else
     ok "changelog insert FAILED — recover with: node tools/changelog.mjs --from $PREVIOUS_SHA --sql | psql (deploy itself is complete)"
   fi

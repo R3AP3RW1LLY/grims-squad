@@ -120,5 +120,15 @@ import { VoteService } from './vote.service.js';
       ) => new ThreadService(categories, reindex, notify, screening),
     },
   ],
+  /*
+   * ★ ThreadService IS EXPORTED FOR EXACTLY ONE CONSUMER ★
+   *
+   * The announcements module's forum carbon-copy poller creates threads through THIS instance —
+   * sanitiser, screening, ACL and all — because a carbon-copy written by any other path would be
+   * a second thread-creation code route, and the second one is the one that skips a rule. Every
+   * method still demands an AclBoundClient, so the export widens who may call, never what a call
+   * may do.
+   */
+  exports: [ThreadService],
 })
 export class ForumModule {}

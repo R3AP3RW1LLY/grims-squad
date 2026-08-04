@@ -1,7 +1,9 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import {
+  announcePromotionOrders,
   DiscordRankApplier,
+  monthYearLabel,
   notifyMembers,
   PrismaClient,
   PrismaPromotionStore,
@@ -226,6 +228,27 @@ export class PromotionsService {
       await this.#announcePromotion(p.userId, p.from, p.to);
     }
 
+    /*
+     * ★ THE PROMOTION ORDERS — ONE ANNOUNCEMENT PER RUN, NEVER ONE PER MEMBER ★
+     *
+     * The personal notices above tell each member privately; this one row tells the squadron,
+     * publicly, in the promotions channel and as a forum thread. One row for the whole run,
+     * because five separate "orders" for one run reads like five ceremonies for one parade.
+     * The list is the same eligible-minus-refused set as the notices: a member Discord refused
+     * was NOT promoted, and orders naming them would be a lie the next reconciliation exposes.
+     *
+     * Dated with the SCOPED month when the officer pressed a month button, and today's month
+     * for an unscoped run — the same clock the rollups are keyed on. `announcePromotionOrders`
+     * swallows its own failures: the ranks are granted by now.
+     */
+    await announcePromotionOrders(
+      this.db,
+      report.wouldPromote
+        .filter((p) => !refused.has(p.userId))
+        .map((p) => ({ userId: p.userId, to: p.to })),
+      monthYearLabel(this.#throughMonth(month) ?? new Date()),
+    );
+
     return report;
   }
 
@@ -386,6 +409,18 @@ export class PromotionsService {
     // The rank is applied and audited; the member hears about it the same way an earned
     // promotion tells them. The copy deliberately reads identically — see #announcePromotion.
     await this.#announcePromotion(userId, standing.currentRank, standing.nextRank);
+
+    /*
+     * And the squadron hears the same orders an earned promotion would produce — one run, one
+     * announcement, and this run promoted one member. Deliberately indistinguishable from the
+     * batch path's orders: whether the rules or an officer moved somebody is the audit log's
+     * business, not the parade ground's.
+     */
+    await announcePromotionOrders(
+      this.db,
+      [{ userId, to: standing.nextRank }],
+      monthYearLabel(new Date()),
+    );
 
     return { from: standing.currentRank, to: standing.nextRank };
   }

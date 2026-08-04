@@ -1,5 +1,11 @@
 import { AppError, ErrorCode } from '@grims/shared';
-import { notifyMembers, notifySquadron, type LiveNudge, type PrismaClient } from '@grims/db';
+import {
+  announceMemberVerified,
+  notifyMembers,
+  notifySquadron,
+  type LiveNudge,
+  type PrismaClient,
+} from '@grims/db';
 import type { TokenCipher } from '@grims/shared/server';
 import type { InaraLinkStore, LinkRecord } from './inara-link.service.js';
 
@@ -289,6 +295,13 @@ export async function announceVerification(
       },
       nudge,
     );
+
+    /*
+     * And the Discord channel hears it too — the shared announce door in @grims/db, so all
+     * three confirm paths post identical words without a fourth mirrored copy. Channel only,
+     * no forum carbon-copy: the squadron feed above already carries it on-site.
+     */
+    await announceMemberVerified(db, userId);
   } catch {
     // See the header: the verification stands whatever the bell manages.
   }

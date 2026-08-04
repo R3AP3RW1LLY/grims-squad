@@ -47,4 +47,10 @@ export * from './colony-catalogue.js';
  */
 export * from './live-stations.js';
 export * from './notify.js';
+/*
+ * Announcements — Discord channel posts and forum carbon-copies, produced in three processes
+ * (API, worker, deploy script) and delivered by two pollers. Shared here for the same reason
+ * notify.ts is: one wording, one write path, whatever process happens to be announcing.
+ */
+export * from './announce.js';
 export { DiscordRankApplier, ladderRoleIds } from './rank-applier.discord.js';

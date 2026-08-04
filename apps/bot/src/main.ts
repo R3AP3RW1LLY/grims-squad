@@ -51,13 +51,16 @@ interface BackfillableChannel {
 }
 import { PrismaActivityStore, PrismaCheckpointStore } from './activity.store.prisma.js';
 import { startOpsAlertDelivery } from './ops-alerts.js';
+import { startAnnouncementDelivery } from './announcements.js';
 
 /**
- * The squadron bot. Phase 1: it records activity and does nothing else.
+ * The squadron bot. It records activity, DMs ops alerts, and posts announcements.
  *
- * It grants no roles, promotes nobody and sends no messages. Promotion lands
- * later, in dry-run first — a defect here would move 49 people at once,
- * publicly, and is tedious to unwind by hand.
+ * It grants no roles and promotes nobody. Phase 1 kept it entirely mute; the
+ * owner has since approved exactly two ways of speaking, both delivery of rows
+ * other processes wrote: ops-alert DMs to the webmaster, and announcement posts
+ * into the channels named by environment (announcements.ts). It still answers
+ * no commands and composes no copy of its own.
  */
 
 const logger = pino({
@@ -797,6 +800,11 @@ client.on(Events.ClientReady, (c) => {
   // The ops-alert DM poller. Independent of the role/backfill sweep below on purpose: a delivery
   // path for "the pipeline is down" must not wait behind, or die with, anything else.
   startOpsAlertDelivery(c, prisma, logger);
+
+  // The announcement poller — deploys, promotion orders and verified-member welcomes, from the
+  // `announcements` table into the channels named by environment. Same independence, same reason:
+  // the deploy announcement is written during the exact window this process is being restarted.
+  startAnnouncementDelivery(c, prisma, logger);
 
   // Roles FIRST, and until they load. The scope rule cannot classify a channel without them, and
   // classifying against an empty role list marks every channel admin-gated and records nothing at

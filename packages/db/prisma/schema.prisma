@@ -4332,3 +4332,53 @@ model ChangelogRelease {
   @@index([deployedAt])
   @@map("changelog_releases")
 }
+
+/// ═══════════════ ANNOUNCEMENTS — WHAT THE SQUADRON IS TOLD ═══════════════
+///
+/// A durable row per thing worth announcing, written by the producers (the deploy
+/// script, the promotion runs, the verification confirm paths) and DELIVERED by two
+/// independent pollers: the bot posts `content` to the Discord channel its kind maps
+/// to, and the API carbon-copies rows that carry a forum half into the forum's
+/// Announcements category, then rings every member's bell.
+///
+/// The same doctrine as `ops_alerts`, for the same reason: an announcement written
+/// while the bot is down must survive the outage and post when it returns. Neither
+/// poller ever composes copy — `content` arrives final, mentions already interpolated
+/// as `<@id>` tokens by the producer, because only the producer knows who it is about.
+///
+/// No channel ids live here or anywhere in code (INV-008): the bot resolves the
+/// destination from DISCORD_ANNOUNCE_CHANNEL_ID / DISCORD_PROMOTIONS_CHANNEL_ID at
+/// delivery time, and an unset variable means that kind simply waits — default silent,
+/// the same shape as the DM allowlist.
+model Announcement {
+  id   BigInt @id @default(autoincrement())
+  /// 'deploy' | 'promotion' | 'member-verified' — decides which channel env the bot posts to.
+  kind String
+
+  /// The final Discord markdown. The bot sends this verbatim (truncated to Discord's
+  /// 2000-char limit with a pointer to the site when a changelog runs long).
+  content String
+
+  /// The forum half. Both set = a carbon-copy thread is wanted; both null = channel only.
+  /// Verifications deliberately carry no forum half — the squadron feed already has them on-site.
+  forumTitle String? @map("forum_title")
+  /// The thread's opening post, as the same markdown the forum's composer accepts.
+  forumBody  String? @map("forum_body")
+
+  /// Set when the bot has posted to Discord. Null rows are retried every poll.
+  postedAt DateTime? @map("posted_at") @db.Timestamptz(6)
+
+  /// Set when the API has created the forum thread — BEFORE the bell fan-out, so a
+  /// failed bell can never cause a second thread.
+  forumPostedAt DateTime? @map("forum_posted_at") @db.Timestamptz(6)
+  /// The thread the carbon-copy became, for tracing an announcement to its discussion.
+  forumThreadId String? @map("forum_thread_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  /// The two pollers' queues are partial indexes on (created_at) WHERE the relevant
+  /// posted stamp IS NULL — hand-written in the migration, as Prisma cannot express
+  /// them. This one serves the history reads.
+  @@index([kind, createdAt])
+  @@map("announcements")
+}

@@ -1,4 +1,4 @@
-import { notifyMembers, notifySquadron, PrismaClient } from '@grims/db';
+import { announceMemberVerified, notifyMembers, notifySquadron, PrismaClient } from '@grims/db';
 import { InaraAdapter, INARA_APP_NAME, INARA_APP_VERSION } from '@grims/ed-clients';
 import { expectedSquadronName, sameSquadron } from '@grims/shared';
 import { TokenCipher, createKeyring } from '@grims/shared/server';
@@ -153,6 +153,13 @@ async function main(): Promise<number> {
           },
           notificationNudge,
         );
+
+        /*
+         * And the Discord channel — through the shared announce door in @grims/db, so all three
+         * confirm paths post identical words without a fourth mirrored copy. Channel only, no
+         * forum carbon-copy: the squadron feed above already carries it on-site.
+         */
+        await announceMemberVerified(prismaForSquadron, userId);
       } catch {
         // One member's unreadable name must not cost the rest their welcome.
       }

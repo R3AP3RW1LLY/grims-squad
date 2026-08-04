@@ -53,6 +53,16 @@ be committed, echoed into shell history on the server, or pasted into chat.
 
 ## 1. Issue the Cloudflare Origin CA certificate
 
+> **✅ DONE 2026-08-04 — nothing to run here.** The certificate was issued via
+> the API (id `2800257103…`, apex + `*.grims-squad.com`, expires 2041-07-31)
+> and is installed on the VPS as `/etc/ssl/grims-squad.com/{cert,key}.pem`,
+> modulus-verified as a matching pair. The key also sits (gitignored) at
+> `.secrets/origin-ca/` on the dev machine. Alongside it, three zone settings
+> were pre-set the same day: **Always Use HTTPS on**, **minimum TLS 1.2**
+> (was 1.0), automatic HTTPS rewrites already on. The `www` CNAME → apex
+> (proxied) already exists. The steps below stay as the record of HOW, for the
+> next domain.
+
 The browser's TLS terminates at Cloudflare; this certificate only secures
 Cloudflare's connection back to our origin, which is why a fifteen-year
 API-issued pair is the right tool and public-CA issuance is not.
@@ -108,6 +118,11 @@ rm /tmp/grims-squad.csr
 
 ## 2. Enable the grims-squad.com server block
 
+> **✅ STAGED 2026-08-04.** `/srv/grims/caddy/grims-squad.com.caddy` is already
+> on the box — copied ahead of time, inert until the deploy ships the compose
+> file that mounts `/srv/grims/caddy` and the Caddyfile that imports it. Only
+> the `up -d caddy` / reload half of this section remains to run at cutover.
+
 The block is already on the box (the repo is the Caddy mount); enabling it is
 copying it into the operator-owned directory the Caddyfile imports from:
 
@@ -139,16 +154,28 @@ block is untouched either way.
 
 ## 3. Point DNS at the origin (the actual flip)
 
-Two records, both proxied (orange cloud), via the API:
+> **Zone facts as of 2026-08-04** (zone id `38ed982206d0772e8312e4a7094a910a`):
+> the apex holds **two proxied GoDaddy parking A records** (15.197.148.33,
+> 3.33.130.190) that must be DELETED, and `www` → apex (proxied) **already
+> exists** — do not POST a second one. A stray `_domainconnect` CNAME from
+> GoDaddy can be deleted at the same time or left; nothing reads it.
+
+Delete the parking records, then create ours (proxied, orange cloud):
 
 ```sh
+# The two parking record ids:
+curl -sS "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records?type=A&name=grims-squad.com" \
+  -H "Authorization: Bearer $CF_API_TOKEN" | python3 -c \
+  'import json,sys;[print(r["id"], r["content"]) for r in json.load(sys.stdin)["result"]]'
+
+# Delete each (twice, once per id from above):
+curl -sS -X DELETE "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records/<id>" \
+  -H "Authorization: Bearer $CF_API_TOKEN"
+
+# Create the origin record:
 curl -sS -X POST "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records" \
   -H "Authorization: Bearer $CF_API_TOKEN" -H "Content-Type: application/json" \
   --data '{"type":"A","name":"grims-squad.com","content":"45.63.35.93","proxied":true,"ttl":1}'
-
-curl -sS -X POST "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records" \
-  -H "Authorization: Bearer $CF_API_TOKEN" -H "Content-Type: application/json" \
-  --data '{"type":"CNAME","name":"www","content":"grims-squad.com","proxied":true,"ttl":1}'
 ```
 
 Then set the zone's TLS mode to **Full (strict)** — anything weaker lets
@@ -164,9 +191,11 @@ curl -sS -X PATCH "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/settings/
 Verify from anywhere: `curl -sSI https://grims-squad.com/v1/health` → 200, and
 the certificate the browser sees is Cloudflare's, which is correct.
 
-Undo: DELETE the two DNS records
-(`curl -X DELETE .../dns_records/<record_id>`, ids are in the POST responses)
-— the site continues on sslip.io as though nothing happened.
+Undo: DELETE the A record just created
+(`curl -X DELETE .../dns_records/<record_id>`, id is in the POST response)
+— the domain goes dark but the site continues on sslip.io as though nothing
+happened. (The parking records are not worth restoring; they advertised
+GoDaddy, not us.)
 
 ---
 
@@ -239,7 +268,123 @@ mode the browser check exists to catch.
 
 ---
 
-## 7. Rollback (any point after step 3)
+## 7. Announce the new home (one-time, after the health checks pass)
+
+The announcements pipeline delivers durable `announcements` rows two ways: the
+bot posts each row's content into the Discord channel its kind maps to, and the
+API carbon-copies rows carrying a forum half into the forum's Announcements
+category (authored by the account below) and rings every member's bell. Every
+future deploy queues its own announcement automatically (deploy.sh's record
+step); this section configures the pipeline and fires the inaugural message.
+
+### 7.1 The env section — `/srv/grims/.env`
+
+Three additions. No channel id lives in code (INV-008); these variables are the
+only place the destinations exist, and an unset variable means that kind of
+announcement simply WAITS, logged once — the same default-silent doctrine as
+the DM allowlist.
+
+```
+# Where the bot posts 'deploy' and 'member-verified' announcements.
+DISCORD_ANNOUNCE_CHANNEL_ID=1532113020388511794
+# Where the bot posts 'promotion' announcements (the monthly orders).
+DISCORD_PROMOTIONS_CHANNEL_ID=1532113079196717307
+# Whose account authors the forum carbon-copies. A handle, not an id — the
+# API resolves it case-insensitively against `users.handle`.
+ANNOUNCE_FORUM_AUTHOR_HANDLE=r3ap3ractual_22545
+```
+
+Then restart the bot and the API so both pick the variables up (the step 4
+redeploy already did this if the variables were added before it ran). The
+`announcements` table itself arrives with the ordinary migration step of any
+deploy — nothing to run by hand.
+
+Verify the quiet state: with the variables set and no rows pending,
+`docker compose ... logs bot | grep announcement` shows no complaints. An
+"announcement channel not configured" warning names exactly which variable is
+missing.
+
+### 7.2 The inaugural announcement — one psql INSERT, run once
+
+The owner's approved text, verbatim. Kind `deploy`, with the forum carbon-copy
+titled `GRIMS-SQUAD.COM IS LIVE`. The bot posts it to the announcements channel
+and the API creates the forum thread and notifies every member, both within a
+minute of the INSERT.
+
+The INSERT is a SELECT so the "DM Pebblemerchant" line resolves the owner's real
+Discord id from `discord_identities` at run time — no snowflake lives in this
+file (INV-008 discipline, applied to the runbook too). In the channel copy the
+mention `<@id>` is itself the DM affordance; in the forum copy it is a
+`discord.com/users/<id>` link, which opens a DM for anyone signed into Discord.
+
+```sh
+cd /srv/grims/repo
+PGUSER=$(sed -n 's/^POSTGRES_USER=//p' /srv/grims/.env | head -n1)
+PGDB=$(sed -n 's/^POSTGRES_DB=//p' /srv/grims/.env | head -n1)
+docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env \
+  exec -T postgres psql -U "$PGUSER" -d "$PGDB" -v ON_ERROR_STOP=1 <<'SQL'
+INSERT INTO announcements (kind, content, forum_title, forum_body)
+SELECT
+  'deploy',
+  replace($grims$# 🚀 GRIMS-SQUAD.COM IS LIVE
+
+Commanders — the hub has a new home: **https://grims-squad.com**
+
+This is the biggest update we have ever shipped. **v0.5.0** brings, among 250+ changes:
+
+⚔️ **Leaderboards** — Data Runners, Colony Builders, Trade Barons. Monthly seasons, all-time honour rolls, and ranks worth earning: will you be the first **Void Cartographer**? The first **Trade Baron** needs 10 billion in profit.
+🗺️ **Data Bounties** — dock somewhere dark, get paid. Jackpots pay double.
+🏗️ **The Colonisation Planner** — pick your stations, simulate what they do to the system, see what they'll actually trade. Attach your fleet carriers and the shopping list knows what's already aboard.
+🔔 **Notifications** — the bell knows when your answer is accepted, your bounty banks, your badge lands.
+📦 **The Companion App v0.5.0** — full mirror: Shipyard, markets, trade planner, live overlays that follow your build.
+
+Every detail: https://grims-squad.com/changelog
+
+🛟 **Need a hand getting set up?** Whether it's signing in, Inara verification, or pairing the companion app — DM __OWNER_MENTION__ and we'll get you flying.
+
+Fly dangerous. o7$grims$, '__OWNER_MENTION__', '<@' || di.discord_id || '>'),
+  'GRIMS-SQUAD.COM IS LIVE',
+  replace($grims$# 🚀 GRIMS-SQUAD.COM IS LIVE
+
+Commanders — the hub has a new home: **https://grims-squad.com**
+
+This is the biggest update we have ever shipped. **v0.5.0** brings, among 250+ changes:
+
+⚔️ **Leaderboards** — Data Runners, Colony Builders, Trade Barons. Monthly seasons, all-time honour rolls, and ranks worth earning: will you be the first **Void Cartographer**? The first **Trade Baron** needs 10 billion in profit.
+🗺️ **Data Bounties** — dock somewhere dark, get paid. Jackpots pay double.
+🏗️ **The Colonisation Planner** — pick your stations, simulate what they do to the system, see what they'll actually trade. Attach your fleet carriers and the shopping list knows what's already aboard.
+🔔 **Notifications** — the bell knows when your answer is accepted, your bounty banks, your badge lands.
+📦 **The Companion App v0.5.0** — full mirror: Shipyard, markets, trade planner, live overlays that follow your build.
+
+Every detail: https://grims-squad.com/changelog
+
+🛟 **Need a hand getting set up?** Whether it's signing in, Inara verification, or pairing the companion app — [DM Pebblemerchant](__OWNER_DM_URL__) and we'll get you flying.
+
+Fly dangerous. o7$grims$, '__OWNER_DM_URL__', 'https://discord.com/users/' || di.discord_id)
+FROM users u
+JOIN discord_identities di ON di.user_id = u.id
+WHERE u.handle = 'r3ap3ractual_22545';
+SQL
+```
+
+The SELECT inserts exactly one row when the handle resolves and ZERO rows when
+it does not — check psql's `INSERT 0 1` tail. `INSERT 0 0` means the handle has
+no Discord identity row, and nothing was announced.
+
+Verify: the message appears in the announcements channel within a minute; the
+forum's Announcements category gains the thread, authored by the account named
+above; the bell badge lights for a signed-in member. If the channel post never
+arrives, check the bot's logs for which variable it says is missing; if the
+forum copy never arrives, the API's logs name the gap (no author, or no
+category called "announcements") — create the category or fix the handle, and
+the same row delivers on the next minute's poll. Nothing needs re-inserting.
+
+Undo: there is no unsaying an announcement; that is why this step runs after
+the health checks rather than before them.
+
+---
+
+## 8. Rollback (any point after step 3)
 
 1. **DNS back:** delete the `grims-squad.com` A record and the `www` CNAME
    (step 3's undo). Members on the new name lose it as caches expire; the

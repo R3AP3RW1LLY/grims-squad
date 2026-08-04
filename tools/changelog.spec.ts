@@ -7,6 +7,8 @@ import {
   buildRelease,
   renderMarkdown,
   renderSql,
+  buildAnnouncement,
+  renderAnnounceSql,
   type ChangelogCommit,
 } from './changelog.mjs';
 
@@ -187,5 +189,150 @@ describe('the assembled release', () => {
     expect(sql).toContain('$grimslogx$');
     expect(sql).toContain('INSERT INTO changelog_releases');
     expect(sql).toContain(`'${'e'.repeat(40)}'`);
+  });
+});
+
+describe('the deploy announcement — what the whole squadron is told', () => {
+  const commits: ChangelogCommit[] = [
+    {
+      sha: 'a'.repeat(40),
+      subject: 'feat(web): a website change',
+      body: 'Why the website changed.',
+      files: ['apps/web/src/x.tsx'],
+    },
+    {
+      sha: 'b'.repeat(40),
+      subject: 'feat(companion): a companion change',
+      body: 'Why the companion changed.',
+      files: ['apps/companion/src/y.ts'],
+    },
+    {
+      sha: 'c'.repeat(40),
+      subject: 'feat(api): a platform change',
+      body: 'Why the API changed.',
+      files: ['apps/api/src/z.ts'],
+    },
+  ];
+
+  const release = buildRelease({
+    fromSha: 'e'.repeat(40),
+    toSha: 'f'.repeat(40),
+    commits,
+    generatedAt: '2026-08-04T00:00:00.000Z',
+    version: '0.5.1',
+  });
+
+  it('MANDATORY: the approved content shape — headline, count, one bullet per member-facing shelf, link', () => {
+    const { content } = buildAnnouncement(release, 'https://grims-squad.com');
+    expect(content).toBe(
+      [
+        '📡 **The hub just updated — v0.5.1**',
+        '',
+        '3 changes are live, including:',
+        '• A website change',
+        '• A companion change',
+        '',
+        'Full changelog: https://grims-squad.com/changelog',
+      ].join('\n'),
+    );
+  });
+
+  it('the forum copy is titled per version and condenses every section to subject bullets', () => {
+    const { forumTitle, forumBody } = buildAnnouncement(release, 'https://grims-squad.com');
+    expect(forumTitle).toBe('Hub update — v0.5.1');
+    expect(forumBody).toContain('## Website\n\n- A website change');
+    expect(forumBody).toContain('## Companion App\n\n- A companion change');
+    expect(forumBody).toContain('## Platform\n\n- A platform change');
+    // The Discord message leads the forum copy, so both audiences read the same opening.
+    expect(forumBody.startsWith('📡 **The hub just updated — v0.5.1**')).toBe(true);
+  });
+
+  it('a commit landing in both member-facing sections is bulleted once, not stuttered', () => {
+    const shared = buildRelease({
+      fromSha: 'e'.repeat(40),
+      toSha: 'f'.repeat(40),
+      commits: [
+        {
+          sha: 'a'.repeat(40),
+          subject: 'feat: one number for both surfaces',
+          body: '',
+          files: ['apps/web/src/x.tsx', 'apps/companion/src/y.ts'],
+        },
+        {
+          sha: 'b'.repeat(40),
+          subject: 'feat(companion): a companion-only change',
+          body: '',
+          files: ['apps/companion/src/z.ts'],
+        },
+      ],
+      generatedAt: '2026-08-04T00:00:00.000Z',
+      version: '0.5.1',
+    });
+    const { content } = buildAnnouncement(shared, 'https://grims-squad.com');
+    expect(content).toContain('• One number for both surfaces');
+    expect(content).toContain('• A companion-only change');
+    expect(content.match(/• One number for both surfaces/g)).toHaveLength(1);
+  });
+
+  it('a platform-only deploy announces honestly, without inventing bullets', () => {
+    const platformOnly = buildRelease({
+      fromSha: 'e'.repeat(40),
+      toSha: 'f'.repeat(40),
+      commits: [commits[2] as ChangelogCommit],
+      generatedAt: '2026-08-04T00:00:00.000Z',
+      version: '0.5.1',
+    });
+    const { content } = buildAnnouncement(platformOnly, 'https://grims-squad.com');
+    expect(content).toContain('1 change is live.');
+    expect(content).not.toContain('•');
+    expect(content).not.toContain('including:');
+  });
+
+  it('MANDATORY truncation-safety: a monstrous subject cannot push the message past Discord', () => {
+    const monstrous = buildRelease({
+      fromSha: 'e'.repeat(40),
+      toSha: 'f'.repeat(40),
+      commits: [
+        {
+          sha: 'a'.repeat(40),
+          subject: `feat(web): ${'x'.repeat(5000)}`,
+          body: '',
+          files: ['apps/web/src/x.tsx'],
+        },
+      ],
+      generatedAt: '2026-08-04T00:00:00.000Z',
+      version: '0.5.1',
+    });
+    const { content } = buildAnnouncement(monstrous, 'https://grims-squad.com');
+    // The bot's truncateForDiscord is the hard 2000 guarantee; this clamp is what
+    // keeps the message READABLE rather than merely deliverable.
+    expect(content.length).toBeLessThan(2000);
+    expect(content).toContain('…');
+  });
+
+  it('a version-less range still announces, keyed on the revision rather than a fiction', () => {
+    const unversioned = buildRelease({
+      fromSha: 'e'.repeat(40),
+      toSha: 'f'.repeat(40),
+      commits: [commits[0] as ChangelogCommit],
+      generatedAt: '2026-08-04T00:00:00.000Z',
+      version: null,
+    });
+    const { content, forumTitle } = buildAnnouncement(unversioned, 'https://grims-squad.com');
+    expect(content).toContain('📡 **The hub just updated**');
+    expect(forumTitle).toBe(`Hub update — ${'f'.repeat(8)}`);
+  });
+
+  it('MANDATORY: the announce SQL dollar-quotes everything member-visible and targets announcements', () => {
+    const sql = renderAnnounceSql(release, "https://grims-squad.com/it's$grimslog$");
+    expect(sql).toContain('INSERT INTO announcements');
+    expect(sql).toContain(`'deploy'`);
+    // The hostile URL contains the default tag, so the quoting must have moved it.
+    expect(sql).toContain('$grimslogx$');
+  });
+
+  it('trims a trailing slash from the public URL rather than linking //changelog', () => {
+    const { content } = buildAnnouncement(release, 'https://grims-squad.com/');
+    expect(content).toContain('Full changelog: https://grims-squad.com/changelog');
   });
 });

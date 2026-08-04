@@ -1,6 +1,6 @@
 import { resolve, join, dirname } from 'node:path';
 import { existsSync } from 'node:fs';
-import { notifyMembers, PrismaClient } from '@grims/db';
+import { announcePromotionOrders, monthYearLabel, notifyMembers, PrismaClient } from '@grims/db';
 import { notificationNudge } from './lib/live-notify.js';
 import { DiscordAdapter } from '@grims/ed-clients';
 import { promotionsPermitted, EARLIEST_PROMOTION_AT } from '@grims/shared';
@@ -147,6 +147,26 @@ async function main(): Promise<number> {
           notificationNudge,
         );
       }
+
+      /*
+       * ★ THE PROMOTION ORDERS — ONE ANNOUNCEMENT PER RUN, LIVE RUNS ONLY ★
+       *
+       * The same eligible-minus-refused list as the personal notices above, written once into
+       * `announcements` for the bot to post in the promotions channel and the API to carbon-copy
+       * into the forum. A dry run promoted nobody and announces nothing — identical reasoning to
+       * the --post gate below, one audience wider. The wording is shared with the admin console's
+       * path through @grims/db, so a member cannot tell which door ran the ceremony.
+       *
+       * `announcePromotionOrders` swallows its own failures: the ranks are granted by now, and an
+       * announcement must never turn a completed run into a non-zero exit.
+       */
+      await announcePromotionOrders(
+        prisma,
+        report.wouldPromote
+          .filter((p) => !refused.has(p.userId))
+          .map((p) => ({ userId: p.userId, to: p.to })),
+        monthYearLabel(new Date()),
+      );
     }
 
     console.log(text);

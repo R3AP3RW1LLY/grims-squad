@@ -3,7 +3,8 @@
  * The changelog generator.
  *
  *   node tools/changelog.mjs [--from <ref>] [--to <ref>] [--repo <path>]
- *                            [--json | --sql | --write-pending]
+ *                            [--json | --sql | --write-pending
+ *                             | --announce-sql [--public-url <url>]]
  *
  * Reads `git log <from>..<to>` and turns it into the member-facing changelog:
  * every commit classified by the files it touched (apps/web → Website,
@@ -37,6 +38,11 @@
  *   --write-pending  writes .changelog-pending.json at the repo root
  *                    (gitignored), which GET /v1/changelog/pending serves to
  *                    webmasters as the "built but not deployed" preview
+ *   --announce-sql   an INSERT into `announcements` (kind 'deploy', with the
+ *                    forum carbon-copy half), for piping into psql right after
+ *                    the changelog INSERT — the bot and the API deliver it
+ *                    from there. Takes --public-url (or $PUBLIC_URL) for the
+ *                    changelog link members are sent to
  */
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -225,15 +231,116 @@ function sqlVersion(version) {
   return version !== null && /^[0-9A-Za-z.-]+$/.test(version) ? `'${version}'` : 'NULL';
 }
 
+/** The dollar-quoter both SQL modes share — see renderSql's header for why not escaping. */
+function dollarQuote(text) {
+  let tag = 'grimslog';
+  while (text.includes(`$${tag}$`)) tag += 'x';
+  return `$${tag}$${text}$${tag}$`;
+}
+
 export function renderSql(release) {
-  const quote = (text) => {
-    let tag = 'grimslog';
-    while (text.includes(`$${tag}$`)) tag += 'x';
-    return `$${tag}$${text}$${tag}$`;
-  };
   return [
     `INSERT INTO changelog_releases (from_sha, to_sha, version, website_md, companion_md, platform_md)`,
-    `VALUES ('${release.fromSha}', '${release.toSha}', ${sqlVersion(release.version)}, ${quote(release.websiteMd)}, ${quote(release.companionMd)}, ${quote(release.platformMd)});`,
+    `VALUES ('${release.fromSha}', '${release.toSha}', ${sqlVersion(release.version)}, ${dollarQuote(release.websiteMd)}, ${dollarQuote(release.companionMd)}, ${dollarQuote(release.platformMd)});`,
+    '',
+  ].join('\n');
+}
+
+/* ─────────────────────────────────────────── the deploy announcement */
+
+/**
+ * The longest a bullet's subject may run in the Discord announcement.
+ *
+ * Discord rejects — not trims — any message over 2000 characters, and the bot's own truncation
+ * is the hard guarantee. Clamping here as well keeps the announcement READABLE rather than
+ * merely deliverable: a commit subject is a sentence, and two sentences plus the frame sit
+ * comfortably inside the limit whatever anybody writes.
+ */
+const ANNOUNCE_SUBJECT_MAX = 200;
+
+function clampSubject(subject) {
+  return subject.length <= ANNOUNCE_SUBJECT_MAX
+    ? subject
+    : `${subject.slice(0, ANNOUNCE_SUBJECT_MAX - 1)}…`;
+}
+
+/**
+ * The deploy announcement — the owner's approved copy, one per deploy.
+ *
+ * The Discord content leads with one website subject and one companion subject, because those
+ * are the two shelves members feel; the platform work is in the full changelog the link points
+ * to. The forum body is the same message plus every subject, condensed to a bullet list per
+ * section — a browsable summary, with the site's changelog page remaining the whole story.
+ */
+export function buildAnnouncement(release, publicUrl) {
+  const base = publicUrl.replace(/\/+$/, '');
+  const headline =
+    release.version === null
+      ? '📡 **The hub just updated**'
+      : `📡 **The hub just updated — v${release.version}**`;
+
+  /*
+   * One commit routinely lands in BOTH member-facing sections (a shared component moves), and
+   * naming it twice reads like a stutter. The companion bullet therefore takes the first
+   * companion subject the website bullet did not already claim.
+   */
+  const firstIn = (key, taken = null) => {
+    const entry = release.entries.find(
+      (e) => e.sections.includes(key) && clampSubject(e.subject) !== taken,
+    );
+    return entry === undefined ? null : clampSubject(entry.subject);
+  };
+  const webSubject = firstIn('website');
+  const bullets = [webSubject, firstIn('companion', webSubject)]
+    .filter((subject) => subject !== null)
+    .map((subject) => `• ${subject}`);
+
+  const countLine =
+    release.commitCount === 1 ? '1 change is live' : `${release.commitCount} changes are live`;
+
+  const content = [
+    headline,
+    '',
+    // A deploy with nothing member-facing still announces honestly, just without bullets.
+    bullets.length === 0 ? `${countLine}.` : `${countLine}, including:`,
+    ...bullets,
+    '',
+    `Full changelog: ${base}/changelog`,
+  ].join('\n');
+
+  const section = (title, key) => {
+    const subjects = release.entries
+      .filter((e) => e.sections.includes(key))
+      .map((e) => `- ${e.subject}`);
+    return subjects.length === 0 ? null : `## ${title}\n\n${subjects.join('\n')}`;
+  };
+  const sections = [
+    section('Website', 'website'),
+    section('Companion App', 'companion'),
+    section('Platform', 'platform'),
+  ].filter((s) => s !== null);
+
+  return {
+    content,
+    forumTitle:
+      release.version === null
+        ? `Hub update — ${release.toSha.slice(0, 8)}`
+        : `Hub update — v${release.version}`,
+    forumBody: [content, ...sections].join('\n\n'),
+  };
+}
+
+/**
+ * The INSERT the deploy script pipes into psql AFTER the changelog row lands.
+ *
+ * Everything member-visible travels dollar-quoted, same doctrine as renderSql: commit prose can
+ * contain any quoting a person can type, and so can a URL somebody put in an env file.
+ */
+export function renderAnnounceSql(release, publicUrl) {
+  const announcement = buildAnnouncement(release, publicUrl);
+  return [
+    `INSERT INTO announcements (kind, content, forum_title, forum_body)`,
+    `VALUES ('deploy', ${dollarQuote(announcement.content)}, ${dollarQuote(announcement.forumTitle)}, ${dollarQuote(announcement.forumBody)});`,
     '',
   ].join('\n');
 }
@@ -251,7 +358,7 @@ function fail(message) {
 
 function main() {
   const argv = process.argv.slice(2);
-  const opts = { from: null, to: 'HEAD', repo: null, mode: 'markdown' };
+  const opts = { from: null, to: 'HEAD', repo: null, mode: 'markdown', publicUrl: null };
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -260,6 +367,8 @@ function main() {
     else if (arg === '--repo') opts.repo = argv[(i += 1)];
     else if (arg === '--json') opts.mode = 'json';
     else if (arg === '--sql') opts.mode = 'sql';
+    else if (arg === '--announce-sql') opts.mode = 'announce';
+    else if (arg === '--public-url') opts.publicUrl = argv[(i += 1)];
     else if (arg === '--write-pending') opts.mode = 'pending';
     else fail(`unknown argument: ${arg}`);
   }
@@ -315,9 +424,10 @@ function main() {
     version: readPlatformVersion(repoRoot),
   });
 
-  if (opts.mode === 'sql' && commits.length === 0) {
+  if ((opts.mode === 'sql' || opts.mode === 'announce') && commits.length === 0) {
     // A redeploy of the same revision must not write an empty release row —
-    // an entry that says "nothing changed" is clutter, not a changelog.
+    // an entry that says "nothing changed" is clutter, not a changelog. The
+    // same holds a fortiori for announcing it to the whole squadron.
     process.stdout.write(`-- no commits between ${fromSha} and ${toSha}; nothing to record\n`);
     return;
   }
@@ -326,6 +436,17 @@ function main() {
     process.stdout.write(`${JSON.stringify(release, null, 2)}\n`);
   } else if (opts.mode === 'sql') {
     process.stdout.write(renderSql(release));
+  } else if (opts.mode === 'announce') {
+    /*
+     * The link in the announcement must be the address MEMBERS use, which only the caller
+     * knows. deploy.sh passes its own PUBLIC_URL; the env fallback covers a by-hand recovery
+     * run on the production box, where the variable is already exported.
+     */
+    const publicUrl = opts.publicUrl ?? process.env.PUBLIC_URL ?? null;
+    if (publicUrl === null || publicUrl === '') {
+      fail('--announce-sql needs --public-url <url> (or $PUBLIC_URL) for the changelog link');
+    }
+    process.stdout.write(renderAnnounceSql(release, publicUrl));
   } else if (opts.mode === 'pending') {
     const target = resolve(repoRoot, '.changelog-pending.json');
     writeFileSync(target, `${JSON.stringify(release, null, 2)}\n`, 'utf8');
