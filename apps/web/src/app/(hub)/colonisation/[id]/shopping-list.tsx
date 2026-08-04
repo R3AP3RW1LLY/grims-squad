@@ -80,12 +80,27 @@ function Seen({ at }: { at: string | null }) {
 
 export function ShoppingList({
   rows,
+  onCarriers,
   projectId,
   origin,
   unknownSystem,
   query,
 }: {
   rows: readonly ColonyShoppingRow[];
+  /**
+   * Tonnes already sitting in an attached carrier's hold.
+   *
+   * ★ THE ARGUMENT A TAB STRIP DISSOLVED ★
+   *
+   * Carriers used to sit immediately above this table in one column, with a comment explaining
+   * why: what is already in a hold changes what still needs buying, so reading the shopping list
+   * first is reading it against the wrong number.
+   *
+   * Tabs have no adjacency — nobody reads them left to right — so that placement stopped carrying
+   * the point the moment the page was tabbed. The point is worth more than the layout trick was,
+   * so it is now said in words on the table it applies to.
+   */
+  onCarriers: number;
   projectId: string;
   origin: { system: string } | null;
   unknownSystem: string | null;
@@ -174,6 +189,19 @@ export function ShoppingList({
         <p className="m-0 mb-3 text-sm text-[var(--color-text-secondary)]">
           Cheapest within range of{' '}
           <strong className="text-[var(--color-text-primary)]">{origin.system}</strong>.
+        </p>
+      )}
+
+      {/*
+        Said here rather than arranged for. Carriers are a tab away now, and a member reading this
+        table has no way of knowing that twenty thousand tonnes of it is already parked at the site
+        unless somebody tells them.
+      */}
+      {onCarriers === 0 ? null : (
+        <p className="m-0 mb-3 text-sm text-[var(--color-text-secondary)]">
+          {onCarriers.toLocaleString()} t of what this build wants is already in an attached
+          carrier&rsquo;s hold. These figures do not subtract it — check{' '}
+          <span className="text-[var(--color-text-primary)]">Carriers</span> before you buy.
         </p>
       )}
 

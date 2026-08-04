@@ -6,6 +6,7 @@ import {
   StatGrid,
   StatTile,
 } from '../../../../components/hub-page';
+import { PageTabs, resolveTab, type PageTab } from '../../../../components/page-tabs';
 import { NoAccess, AdminUnavailable } from '../../app/no-access';
 import { getColonyProject } from '../../../../lib/api';
 import { NeedsTable } from './needs-table';
@@ -33,6 +34,39 @@ export const metadata: Metadata = {
 };
 
 export const dynamic = 'force-dynamic';
+
+/**
+ * The project page's sections, as tabs.
+ *
+ * ★ SQUADRON OWNER, 2026-08-04 ★
+ *
+ * "ensure that the colonization pages on the website match the layout and look including tabs on
+ * the companion app! were aiming for full parridy please!"
+ *
+ * These are the app's `PROJECT_TABS` verbatim — same keys, same labels, same order — because the
+ * whole point is that a member switching between the two finds the same six things in the same six
+ * places. The app got tabs first, at the owner's request: "tab this out please so the project pages
+ * are nice and clean and crisp and clear." It was seven sections in one column, two of which are
+ * forty-row tables.
+ *
+ * ★ THE ORDER IS THE APP'S, AND THAT MEANS DROPPING AN ARGUMENT THIS PAGE USED TO MAKE ★
+ *
+ * Carriers used to sit immediately above "Where to buy", with a comment explaining why: what is
+ * already in a hold changes what still needs buying, so reading the shopping list first is reading
+ * it against the wrong number.
+ *
+ * That argument is about ADJACENCY IN A COLUMN, and a tab strip has none — nobody reads tabs left
+ * to right. So the ordering trick no longer delivers the thing it was defending, and the fact it
+ * was defending is now said out loud on the shopping list itself instead.
+ */
+const TABS: readonly PageTab[] = [
+  { key: 'needs', label: 'Needs' },
+  { key: 'buy', label: 'Where to buy' },
+  { key: 'crew', label: 'Crew' },
+  { key: 'carriers', label: 'Carriers' },
+  { key: 'deliveries', label: 'Deliveries' },
+  { key: 'haulers', label: 'Haulers' },
+];
 
 type Search = Record<string, string | string[] | undefined>;
 
@@ -69,6 +103,19 @@ export default async function ColonyProjectPage({
     if (v !== '') query[key] = v;
   }
 
+  /*
+   * A real URL, not client state. `PageTabs` renders anchors, so a tab survives a refresh, can be
+   * linked to — "look at the Carriers tab" is a URL rather than an instruction — and works before
+   * any JavaScript has loaded.
+   */
+  const tab = resolveTab(TABS, one(sp['tab']));
+
+  /*
+   * Carried onto every tab link. A member who set a 200 ly radius and then opened Carriers should
+   * not come back to Where to buy and find it silently reset to the default.
+   */
+  const filters = new URLSearchParams(query).toString();
+
   const read = await getColonyProject(id, query);
 
   if (read.state === 'forbidden') {
@@ -97,6 +144,18 @@ export default async function ColonyProjectPage({
       <PageHeader
         eyebrow={project.owner === 'squadron' ? 'Squadron project' : 'Members’ project'}
         title={project.title.toUpperCase()}
+        /*
+         * Through the header, which renders them ABOVE the rule — the placement the owner asked to
+         * be the default for this kind of tab. The query the filters live in is carried along, so
+         * switching tabs does not silently reset somebody's shopping radius.
+         */
+        tabs={
+          <PageTabs
+            tabs={TABS}
+            current={tab}
+            basePath={`/colonisation/${encodeURIComponent(id)}${filters === '' ? '' : `?${filters}`}`}
+          />
+        }
       />
       {/*
         ★ THE SYSTEM, WITH A COPY BUTTON — SQUADRON OWNER, 2026-08-03 ★
@@ -173,42 +232,41 @@ export default async function ColonyProjectPage({
           </Section>
         )}
 
-        <Section title="What it still needs">
-          <NeedsTable needs={needs} />
-        </Section>
+        {tab !== 'needs' ? null : (
+          <Section title="What it still needs">
+            <NeedsTable needs={needs} />
+          </Section>
+        )}
 
-        {/*
-          ★ WHO IS ON THIS, AND WHO IS COVERING WHAT ★
+        {tab !== 'crew' ? null : (
+          <Section title="Who is on this build">
+            <Crew projectId={project.id} needs={needs} />
+          </Section>
+        )}
 
-          Above the shopping list on purpose: this is what is GOING to happen, and everything below
-          is detail about how. Somebody opening a build in order to help wants the first.
-        */}
-        <Section title="Who is on this build">
-          <Crew projectId={project.id} needs={needs} />
-        </Section>
+        {tab !== 'carriers' ? null : (
+          <Section title="Fleet carriers on this build">
+            <Carriers
+              projectId={project.id}
+              carriers={carriers}
+              needs={needs}
+              canManage={can.manage}
+            />
+          </Section>
+        )}
 
-        {/*
-          Above "Where to buy", deliberately. What is already in a hold changes what still needs
-          buying, so reading the shopping list first is reading it against the wrong number.
-        */}
-        <Section title="Fleet carriers on this build">
-          <Carriers
-            projectId={project.id}
-            carriers={carriers}
-            needs={needs}
-            canManage={can.manage}
-          />
-        </Section>
-
-        <Section title="Where to buy it">
-          <ShoppingList
-            rows={shopping}
-            projectId={project.id}
-            origin={origin}
-            unknownSystem={unknownSystem}
-            query={query}
-          />
-        </Section>
+        {tab !== 'buy' ? null : (
+          <Section title="Where to buy it">
+            <ShoppingList
+              rows={shopping}
+              projectId={project.id}
+              origin={origin}
+              unknownSystem={unknownSystem}
+              query={query}
+              onCarriers={carriers.reduce((sum, c) => sum + c.totalTonnes, 0)}
+            />
+          </Section>
+        )}
 
         {/*
           ★ SQUADRON OWNER, 2026-08-02 ★
@@ -219,17 +277,21 @@ export default async function ColonyProjectPage({
           Above the leaderboard rather than below it: the shape of a build — did it go in over one
           night or three weeks, and did it stall — is the thing somebody opens this page to see.
         */}
-        <Section title="Deliveries over time">
-          <DeliveryTimeline chart={chart} />
-        </Section>
+        {tab !== 'deliveries' ? null : (
+          <Section title="Deliveries over time">
+            <DeliveryTimeline chart={chart} />
+          </Section>
+        )}
 
         {/*
           The literal ledger. It answers "did my run land", which the leaderboard cannot — and which
           is the question somebody has in the ninety seconds after they undock.
         */}
-        <Section title="Every delivery">
-          <DeliveryLedger deliveries={deliveries} />
-        </Section>
+        {tab !== 'deliveries' ? null : (
+          <Section title="Every delivery">
+            <DeliveryLedger deliveries={deliveries} />
+          </Section>
+        )}
 
         {/*
           The ranked list only. Its chart moved onto the Deliveries toggle as a third view — two
@@ -237,9 +299,11 @@ export default async function ColonyProjectPage({
           however different their axes were. A leaderboard is not replaceable by a bar: "am I third
           or fourth" is a question people genuinely have about their own name.
         */}
-        <Section title="Who has hauled">
-          <HaulerBoard haulers={haulers} />
-        </Section>
+        {tab !== 'haulers' ? null : (
+          <Section title="Who has hauled">
+            <HaulerBoard haulers={haulers} />
+          </Section>
+        )}
       </PageBody>
     </>
   );
