@@ -112,7 +112,7 @@ interface NavItem {
 }
 
 interface NavGroup {
-  readonly group: 'colonisation' | 'logistics' | 'shipyard' | 'leaderboards';
+  readonly group: 'colonisation' | 'logistics' | 'shipyard' | 'answer-the-call' | 'leaderboards';
   readonly label: string;
   readonly children: readonly NavItem[];
 }
@@ -200,8 +200,20 @@ const NAV: ReadonlyArray<NavItem | NavGroup> = [
       { id: 'colony-members', label: 'Members’ projects', hint: 'What members have asked help with' },
     ],
   },
-  // The website's order: Data Bounties sits directly under the colonisation pages.
-  { id: 'bounties', label: 'Data Bounties', hint: 'Dark stations, and who lights them up' },
+  {
+    /*
+     * ★ ANSWER THE CALL — SQUADRON OWNER, 2026-08-04 ★
+     *
+     * "Put the data bounties nav link under a new category called Answer the Call ... it should
+     * be placed under the Colonization category. add this to the companion app too." One entry
+     * today; the category exists because more calls to answer are coming.
+     */
+    group: 'answer-the-call',
+    label: 'Answer the Call',
+    children: [
+      { id: 'bounties', label: 'Data Bounties', hint: 'Dark stations, and who lights them up' },
+    ],
+  },
   {
     /*
      * ★ SQUADRON OWNER, 2026-08-04 ★

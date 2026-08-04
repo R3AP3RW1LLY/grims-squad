@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import {
   LEADERBOARDS,
   LEADERBOARD_BADGES,
-  TIER_THRESHOLDS,
+  TIER_LADDERS,
   type LeaderboardDef,
   type LeaderboardKey,
 } from '@grims/shared';
@@ -300,8 +300,10 @@ function MeStat({ label, value }: { label: string; value: string }) {
 }
 
 /**
- * Bronze to Platinum for THIS board, from the shared catalogue — the same defs the awarding sweep
- * walks, so the ladder on screen cannot promise a threshold the sweep will not pay.
+ * The board's own ladder — Courier to Trade Baron, Bricklayer to Worldshaper — from the shared
+ * catalogue: the same defs the awarding sweep walks, so the ladder on screen cannot promise a
+ * threshold the sweep will not pay, and every rank NAME is unique across boards (the owner's
+ * instruction: a rank must say which board it was earned on).
  */
 function TierLadder({
   boardKey,
@@ -311,7 +313,7 @@ function TierLadder({
   /** Null while the standings are unreachable — the ladder still shows what the tiers take. */
   lifetimePoints: number | null;
 }) {
-  const tiers = TIER_THRESHOLDS.map(({ tier, at }) => ({
+  const tiers = TIER_LADDERS[boardKey].map(({ tier, at }) => ({
     tier,
     at,
     badge: LEADERBOARD_BADGES.find((b) => b.key === `${boardKey}-${tier}`) ?? null,

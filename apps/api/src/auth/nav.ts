@@ -261,9 +261,18 @@ const NAV: readonly NavDefinition[] = [
      * Gated on TRADE_QUERY like the market pages it feeds: the board is market metadata, and one
      * mask governing both means taking the market away takes the bounty hunt with it.
      */
+    /*
+     * ★ ANSWER THE CALL — SQUADRON OWNER, 2026-08-04 ★
+     *
+     * "Put the data bounties nav link under a new category called Answer the Call please ...
+     * it should be placed under the Colonization category." A group appears where its first
+     * member appears, so this entry sitting after the Colonisation block IS the placement.
+     * One entry today; the category exists because more calls to answer are coming.
+     */
     href: '/bounties',
     label: 'Data Bounties',
     section: 'squadron',
+    subsection: 'Answer the Call',
     blurb: 'Stations whose market data has gone dark. Dock, open the market, collect the points.',
     requires: Permission.TRADE_QUERY,
   },

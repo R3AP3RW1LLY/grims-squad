@@ -177,7 +177,7 @@ export {
   COLONY_LINE_CLOSER_BONUS,
   COLONY_PRIORITY_MULTIPLIER,
   LEADERBOARDS,
-  TIER_THRESHOLDS,
+  TIER_LADDERS,
   TRADE_CREDITS_PER_POINT,
   badgeByKey,
   badgeDisplay,
@@ -186,6 +186,7 @@ export {
   type BadgeDef,
   type BadgeDisplay,
   type BadgeTier,
+  type TierStep,
   type LeaderboardDef,
   type LeaderboardKey,
 } from './leaderboards.js';

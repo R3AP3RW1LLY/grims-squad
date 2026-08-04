@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   LEADERBOARD_BADGES,
   LEADERBOARDS,
-  TIER_THRESHOLDS,
+  TIER_LADDERS,
   badgeByKey,
   badgeDisplay,
   showcase,
@@ -21,24 +21,39 @@ describe('the badge catalogue', () => {
     for (const b of LEADERBOARD_BADGES) expect(boards.has(b.board)).toBe(true);
   });
 
-  it('every board carries the full tier ladder', () => {
+  it('every board carries a full four-rung ladder with themed names', () => {
     for (const l of LEADERBOARDS) {
       const tiers = LEADERBOARD_BADGES.filter((b) => b.board === l.key && b.kind === 'tier');
-      expect(tiers).toHaveLength(TIER_THRESHOLDS.length);
+      expect(tiers).toHaveLength(TIER_LADDERS[l.key].length);
+      // "bronze, silver, gold are very boring! and we cant identify them if someone has the same
+      // rank across several leaderboards" — no rank NAME repeats anywhere, ever.
+      for (const t of tiers) expect(t.name).not.toMatch(/bronze|silver|gold|platinum/i);
+    }
+    const names = LEADERBOARD_BADGES.filter((b) => b.kind === 'tier').map((b) => b.name);
+    expect(new Set(names).size).toBe(names.length);
+  });
+
+  it('every ladder ascends — a member can never earn Magnate before Merchant', () => {
+    for (const l of LEADERBOARDS) {
+      const ladder = TIER_LADDERS[l.key];
+      for (let i = 1; i < ladder.length; i += 1) {
+        expect(ladder[i]!.at).toBeGreaterThan(ladder[i - 1]!.at);
+      }
     }
   });
 
-  it('tier thresholds ascend — a member can never earn Gold before Silver', () => {
-    for (let i = 1; i < TIER_THRESHOLDS.length; i += 1) {
-      expect(TIER_THRESHOLDS[i]!.at).toBeGreaterThan(TIER_THRESHOLDS[i - 1]!.at);
-    }
-  });
-
-  it('tiersEarned pays exactly the thresholds crossed', () => {
+  it('tiersEarned pays exactly the rungs crossed, per board ladder', () => {
     expect(tiersEarned('colony', 0)).toHaveLength(0);
-    expect(tiersEarned('colony', 500).map((b) => b.key)).toEqual(['colony-bronze']);
-    expect(tiersEarned('colony', 99_999)).toHaveLength(3);
-    expect(tiersEarned('colony', 100_000)).toHaveLength(4);
+    expect(tiersEarned('colony', 1_000).map((b) => b.key)).toEqual(['colony-bronze']);
+    expect(tiersEarned('colony', 199_999)).toHaveLength(3);
+    expect(tiersEarned('colony', 200_000)).toHaveLength(4);
+    // The first live run proved the boards price points differently: 282k is the TOP colony rung
+    // and only the THIRD trade rung.
+    expect(tiersEarned('trade', 282_586).map((b) => b.key)).toEqual([
+      'trade-bronze',
+      'trade-silver',
+      'trade-gold',
+    ]);
   });
 
   it('badgeByKey answers for real keys and null for junk', () => {
@@ -54,7 +69,7 @@ describe('the forum showcase', () => {
       3,
     );
     expect(shown.map((b) => b.key)).toEqual([
-      'bounties-gold', // highest tier held, highest threshold first
+      'bounties-gold', // Beacon Keeper at 25k outranks Foreman at 10k
       'colony-silver',
       'trade-first-profit',
     ]);

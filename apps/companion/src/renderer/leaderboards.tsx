@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 import {
   LEADERBOARD_BADGES,
-  TIER_THRESHOLDS,
+  TIER_LADDERS,
   type LeaderboardKey,
 } from '@grims/shared';
 import type { LeaderboardBoard, LeaderboardEntry } from '../hub-leaderboards.js';
@@ -141,8 +141,8 @@ function TierLadder({
   lifetimePoints: number;
 }): JSX.Element {
   const tiers = LEADERBOARD_BADGES.filter((b) => b.board === board && b.kind === 'tier');
-  const next = TIER_THRESHOLDS.find((t) => t.at > lifetimePoints) ?? null;
-  const held = [...TIER_THRESHOLDS].reverse().find((t) => t.at <= lifetimePoints) ?? null;
+  const next = TIER_LADDERS[board].find((t) => t.at > lifetimePoints) ?? null;
+  const held = [...TIER_LADDERS[board]].reverse().find((t) => t.at <= lifetimePoints) ?? null;
 
   return (
     <div>

@@ -31,6 +31,7 @@ import {
   TruckIcon,
   BuildingOffice2Icon,
   TrophyIcon,
+  MegaphoneIcon,
   MapIcon,
 } from '@heroicons/react/24/outline';
 import { ChevronDownIcon } from '@heroicons/react/20/solid';
@@ -128,6 +129,8 @@ const SUBSECTION_ICONS: Record<string, typeof HomeIcon> = {
   Colonisation: BuildingOffice2Icon,
   // Standings and the badges they pay out. A trophy is the one thing all three boards award.
   Leaderboards: TrophyIcon,
+  // The call going out — the category is a summons, and a megaphone is what a summons looks like.
+  'Answer the Call': MegaphoneIcon,
 };
 
 const SECTION_LABELS: Record<NavItem['section'], string> = {
@@ -332,16 +335,11 @@ function SidebarContents({ me, current }: { me: MeResponse; current: string }) {
 
                   return (
                     /*
-                      Inset from the section's own links, and set smaller than them.
-
-                      Squadron owner, 2026-08-01: "make the sub cagegory text smaller please. and
-                      inset it a bit."
-
-                      Size is doing the same job here that indentation is: a subcategory heading at
-                      the same weight as the links around it competes with them for the eye, when
-                      what it needs to say is "the things under me are a level down". The icon
-                      shrinks with the text, because an icon left at full size next to smaller type
-                      is the thing that then looks wrong.
+                      Inset from the section's own links — and since 2026-08-04, the SAME SIZE as
+                      them: "make all navlinks the same size as the categories please. so this all
+                      looks uniform." (This reverses the 2026-08-01 smaller-subs instruction; the
+                      indentation and the border alone carry the nesting now, which they were
+                      already doing most of the work for.)
                     */
                     <li key={sub} className="mt-1 ml-2">
                       <button
@@ -349,12 +347,12 @@ function SidebarContents({ me, current }: { me: MeResponse; current: string }) {
                         onClick={() => toggleSub(sub)}
                         aria-expanded={subOpen}
                         aria-controls={subId}
-                        className="flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-xs/5 font-medium tracking-wide text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-panel-hover)] hover:text-[var(--color-text-primary)]"
+                        className="flex w-full items-center justify-between gap-2 rounded p-2 text-sm/6 font-medium tracking-wide text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-panel-hover)] hover:text-[var(--color-text-primary)]"
                       >
                         <span className="flex items-center gap-x-2.5">
                           {(() => {
                             const SubIcon = SUBSECTION_ICONS[sub] ?? WrenchScrewdriverIcon;
-                            return <SubIcon aria-hidden="true" className="size-4 shrink-0" />;
+                            return <SubIcon aria-hidden="true" className="size-5 shrink-0" />;
                           })()}
                           {sub}
                         </span>
@@ -386,7 +384,7 @@ function SidebarContents({ me, current }: { me: MeResponse; current: string }) {
                                 href={item.href}
                                 aria-current={active ? 'page' : undefined}
                                 className={cx(
-                                  'group flex gap-x-3 rounded px-2 py-1.5 text-xs/5 transition-colors',
+                                  'group flex gap-x-3 rounded p-2 text-sm/6 transition-colors',
                                   active
                                     ? 'bg-[color-mix(in_srgb,var(--color-brand-orange)_14%,transparent)] text-[var(--color-brand-orange-bright)]'
                                     : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-panel-hover)] hover:text-[var(--color-text-primary)]',

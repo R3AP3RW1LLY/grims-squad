@@ -76,15 +76,56 @@ export const TRADE_CREDITS_PER_POINT = 10_000;
 
 export type BadgeTier = 'bronze' | 'silver' | 'gold' | 'platinum';
 
+export interface TierStep {
+  /** The internal rung — stable, and the tail of the badge KEY. Never shown to members. */
+  readonly tier: BadgeTier;
+  /** The rank a member actually holds, themed to its board. */
+  readonly name: string;
+  /** Lifetime points on that board. */
+  readonly at: number;
+}
+
 /**
- * The same ladder on every board, on purpose — see the header. Thresholds are lifetime points.
+ * ★ PER-BOARD LADDERS, PER-BOARD NAMES — SQUADRON OWNER, 2026-08-04 ★
+ *
+ * "restructure the points to match the points system on the various things that give points ...
+ * give the points gategories better names themed to the leaderboard category please! bronze,
+ * silver, gold are very boring! and we cant identify them if someone has the same rank across
+ * several leaderboards" — which reverses this file's original identical-ladder design, and the
+ * owner is right on both counts: the first live scoring run priced the three boards' points so
+ * differently that one member's ordinary trading history cleared the top trade rung the moment
+ * the sweep ran, and "Gold" said nothing about WHICH board it was gold on.
+ *
+ * The thresholds are tuned to what a point costs on each board:
+ *   bounties — claims run ~90–3,650 pts; a hard season ≈ 25k. Void Cartographer is seasons of it.
+ *   colony   — a point a tonne (×2 priority); one large build ≈ 60k t squadron-wide. Architect
+ *              is a serious share of a big build; Worldshaper is several.
+ *   trade    — a point per 10,000 cr of realized profit: Magnate is 2.5 billion earned,
+ *              Trade Baron — the board's own name, worn by whoever earns it — is 10 billion.
+ *
+ * The KEYS stay `<board>-<tier>` for ever: awards in member_badges reference keys, and renaming
+ * a rank must never strand one.
  */
-export const TIER_THRESHOLDS: ReadonlyArray<{ tier: BadgeTier; at: number }> = [
-  { tier: 'bronze', at: 500 },
-  { tier: 'silver', at: 5_000 },
-  { tier: 'gold', at: 25_000 },
-  { tier: 'platinum', at: 100_000 },
-] as const;
+export const TIER_LADDERS: Record<LeaderboardKey, readonly TierStep[]> = {
+  bounties: [
+    { tier: 'bronze', name: 'Signal Scout', at: 500 },
+    { tier: 'silver', name: 'Wayfinder', at: 5_000 },
+    { tier: 'gold', name: 'Beacon Keeper', at: 25_000 },
+    { tier: 'platinum', name: 'Void Cartographer', at: 100_000 },
+  ],
+  colony: [
+    { tier: 'bronze', name: 'Bricklayer', at: 1_000 },
+    { tier: 'silver', name: 'Foreman', at: 10_000 },
+    { tier: 'gold', name: 'Architect', at: 50_000 },
+    { tier: 'platinum', name: 'Worldshaper', at: 200_000 },
+  ],
+  trade: [
+    { tier: 'bronze', name: 'Courier', at: 5_000 },
+    { tier: 'silver', name: 'Merchant', at: 50_000 },
+    { tier: 'gold', name: 'Magnate', at: 250_000 },
+    { tier: 'platinum', name: 'Trade Baron', at: 1_000_000 },
+  ],
+} as const;
 
 export interface BadgeDef {
   /** Stable key, stored in member_badges beside the forum badges. Never renamed. */
@@ -107,12 +148,12 @@ const TIER_ICONS: Record<BadgeTier, string> = {
 };
 
 function tierBadges(board: LeaderboardKey, boardName: string): BadgeDef[] {
-  return TIER_THRESHOLDS.map(({ tier, at }) => ({
+  return TIER_LADDERS[board].map(({ tier, name, at }) => ({
     key: `${board}-${tier}`,
     board,
     kind: 'tier' as const,
-    name: `${boardName} — ${tier.charAt(0).toUpperCase()}${tier.slice(1)}`,
-    description: `${at.toLocaleString()} lifetime points on the ${boardName} board.`,
+    name,
+    description: `${name}: ${at.toLocaleString()} lifetime points on the ${boardName} board.`,
     icon: TIER_ICONS[tier],
     threshold: at,
   }));
