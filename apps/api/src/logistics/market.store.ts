@@ -339,11 +339,34 @@ export class PrismaMarketStore implements MarketStore {
     }
 
     /*
+     * ★ A DEAD ROW'S PRICE NEVER MOVES, SO DEAD ROWS SYSTEMATICALLY WIN — MEASURED 2026-08-04 ★
+     *
+     * The ranking was pure price. Live prices drift with the game's economy; a row nobody has
+     * re-observed keeps its price for ever — so the top slot selects FOR staleness. The top answer
+     * for "where to buy Titanium near Diaguandri" was a station last seen 1,883 days ago with 19
+     * tonnes on a shelf nobody has looked at in five years. Eight of the ten most-stocked
+     * commodities' cheapest rows were over three months old.
+     *
+     * Same rule the colonisation shopping list already adopted, for the same measured reason: one
+     * question with a yes-or-no answer — can this reading be believed at all? Inside ninety days
+     * price decides and the age is printed; outside it the row sorts below every believable one,
+     * however cheap it looks, because a five-year-old supply figure is not a bargain, it is
+     * fiction. Still shown, never filtered: hiding it would say "nobody sells this" about
+     * commodities sitting on a shelf right now.
+     *
+     * As a leading ORDER BY expression this costs the index-supplied ordering: the planner filters
+     * on the (commodity, price) index and top-N sorts the matches. Measured on Gold — the worst
+     * case, 71k tradeable rows — at 84 ms against 9 ms before, on a page that spends hundreds of
+     * milliseconds rendering. The colonisation path pays nothing: it re-ranks in rankPlaces.
+     */
+    const stale = `(market_seen_at IS NULL OR market_seen_at < now() - interval '90 days')`;
+
+    /*
      * Distance is computed with the cube operator against the GiST index. `<->` is the operator
      * that index supports; computing it by hand in SQL would work and would scan.
      */
     let distanceSelect = 'NULL::float8 AS distance';
-    let order = buying ? `buy_price ASC` : `sell_price DESC`;
+    let order = `${stale} ASC, ` + (buying ? `buy_price ASC` : `sell_price DESC`);
 
     if (opts.near !== null) {
       params.push(opts.near.x, opts.near.y, opts.near.z);
@@ -383,12 +406,19 @@ export class PrismaMarketStore implements MarketStore {
        *
        * If you ever find yourself removing a key here because it "does nothing", it does.
        */
+      /*
+       * The believability band leads inside the radius too — EXCEPT on the distance ordering,
+       * where it must come second: `distance` staying the FIRST key is what lets the planner
+       * choose between the KNN walk and the price index (see the 202ms/36s note above), and
+       * "nearest first" with stale rows demoted WITHIN each band answers the question a
+       * distance sort is asking.
+       */
       order =
         opts.order === 'distance'
-          ? `distance ASC, ${buying ? 'buy_price ASC' : 'sell_price DESC'}`
+          ? `distance ASC, ${stale} ASC, ${buying ? 'buy_price ASC' : 'sell_price DESC'}`
           : buying
-            ? `buy_price ASC, distance ASC`
-            : `sell_price DESC, distance ASC`;
+            ? `${stale} ASC, buy_price ASC, distance ASC`
+            : `${stale} ASC, sell_price DESC, distance ASC`;
     }
 
     params.push(opts.limit);
