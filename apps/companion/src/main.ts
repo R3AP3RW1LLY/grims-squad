@@ -79,7 +79,13 @@ import {
 import { fetchHubSettings, type HubSettings } from './hub-settings.js';
 import { updateAvailable } from './update-check.js';
 import { searchForJournalDir, searchRootsFor, type SearchFs } from './journal-search.js';
-import { append as appendActivity, gameLine, linesFor, type ActivityLine } from './activity.js';
+import {
+  append as appendActivity,
+  gameLine,
+  linesFor,
+  pairingLine,
+  type ActivityLine,
+} from './activity.js';
 
 /**
  * The Electron half: a window, a tray icon, and a timer.
@@ -676,6 +682,9 @@ async function tick(): Promise<void> {
       wasPlaying = playing;
     }
 
+    // Read BEFORE `lastOutcome` is replaced: the recovery line depends on what the PREVIOUS pass
+    // did, and reading it afterwards would always compare the pass against itself.
+    const wasRefused = lastOutcome?.unauthorised === true;
     lastOutcome = outcome;
 
     /*
@@ -686,7 +695,7 @@ async function tick(): Promise<void> {
      * which is what keeps the panel worth looking at.
      */
     const now = Date.now();
-    const fresh = linesFor(outcome, now);
+    const fresh = linesFor(outcome, now, wasRefused);
     const transition = gameLine(gameWasRunning, outcome.gameRunning, now);
     gameWasRunning = outcome.gameRunning;
     activity = appendActivity(activity, transition === null ? fresh : [transition, ...fresh]);
@@ -1619,6 +1628,20 @@ if (!app.requestSingleInstanceLock()) {
         config = { ...config, deviceToken: outcome.token, enabled: true };
         saveConfig(app.getPath('userData'), config);
         lastOutcome = null;
+        /*
+         * ★ AND CLEAR THE FEED — REPORTED 2026-08-04 ★
+         *
+         * "even after unpairing and repairing the app to the web portal it still says this device is
+         * no longer connected."
+         *
+         * `lastOutcome = null` already fixed the tray. The activity log was left holding every line
+         * from the old pairing, including the refusal that sent the member here in the first place —
+         * so the app went on displaying "no longer connected" about a device that had just been
+         * connected. The lines belong to a session that has ended; keeping them is keeping an
+         * explanation of a problem that no longer exists, at the top of the one panel a member
+         * checks to find out whether it worked.
+         */
+        activity = [pairingLine('paired', Date.now())];
         // Registration follows consent, and consent has just been given.
         applyAutoStart();
         startPolling();
@@ -1656,6 +1679,13 @@ if (!app.requestSingleInstanceLock()) {
       applyAutoStart();
       stopPolling();
       refreshTray();
+      /*
+       * Same reasoning as pairing: the log describes a connection that has just ended, and the
+       * one line worth keeping is the one saying so — including the part members do not expect,
+       * that the server still trusts the token until they revoke it on the website.
+       */
+      lastOutcome = null;
+      activity = [pairingLine('unpaired', Date.now())];
       /*
        * ★ AND TELL THE WINDOW — SQUADRON OWNER, 2026-08-03 ★
        *

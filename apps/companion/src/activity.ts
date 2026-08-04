@@ -71,7 +71,28 @@ export function bytes(n: number): string {
  * and that rule is the entire feature. A version of this that logged every pass would still look
  * correct in a screenshot and be useless in practice.
  */
-export function linesFor(outcome: WatchOutcome, at: number): ActivityLine[] {
+export function linesFor(
+  outcome: WatchOutcome,
+  at: number,
+  /**
+   * Whether the PREVIOUS pass was refused.
+   *
+   * ★ A LOG THAT NEVER TAKES ANYTHING BACK IS A LOG THAT LIES — REPORTED 2026-08-04 ★
+   *
+   * "even after unpairing and repairing the app to the web portal it still says this device is no
+   * longer connected."
+   *
+   * It did, and the device was connected the whole time. A refusal wrote one line here, and this
+   * buffer only ever grows — so the line sat there being read as a current state long after it
+   * stopped being true. Nothing pushed it out either, because a quiet pass deliberately logs
+   * nothing: on an evening when the game is closed the last thing written can stay on screen for
+   * days.
+   *
+   * So recovery is now an EVENT, exactly as failure is. The first good pass after a refused one
+   * says so, and the member sees the feed correct itself without having to unpair anything.
+   */
+  wasRefused = false,
+): ActivityLine[] {
   const lines: ActivityLine[] = [];
   const add = (level: ActivityLevel, text: string): void => {
     lines.push({ at, level, text });
@@ -86,6 +107,10 @@ export function linesFor(outcome: WatchOutcome, at: number): ActivityLine[] {
     add('error', 'This device is no longer connected. Sign in again to reconnect it.');
   } else if (outcome.error !== null) {
     add('error', `Could not reach the squadron: ${outcome.error}`);
+  } else if (wasRefused) {
+    // Only on the TRANSITION. A line every pass saying "still fine" is the noise this whole module
+    // exists to avoid, and it would bury the errors it sits next to.
+    add('info', 'Reconnected to the squadron — sending again.');
   }
 
   if (outcome.sent > 0) {
@@ -142,6 +167,26 @@ export function gameLine(was: boolean, now: boolean, at: number): ActivityLine |
     at,
     level: 'info',
     text: now ? 'Elite Dangerous is running — watching for new entries' : 'Elite Dangerous closed',
+  };
+}
+
+/**
+ * The line to write when a device is paired or unpaired.
+ *
+ * Pairing is the one thing a member does to this app that they expect to SEE happen. Without a line
+ * for it the feed's newest entry stays whatever went wrong before — which is exactly how a fixed
+ * device goes on looking broken.
+ */
+export function pairingLine(event: 'paired' | 'unpaired', at: number): ActivityLine {
+  return {
+    at,
+    level: 'info',
+    text:
+      event === 'paired'
+        ? 'Device connected to the squadron.'
+        : // Said plainly, because it is a surprise otherwise: forgetting the token here does NOT
+          // revoke it on the server. That needs the website, where the member is properly signed in.
+          'Device disconnected here. The squadron still trusts this token until you revoke it on the website.',
   };
 }
 

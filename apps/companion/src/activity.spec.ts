@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ACTIVITY_MAX, append, bytes, gameLine, linesFor } from './activity.js';
+import { ACTIVITY_MAX, append, bytes, gameLine, linesFor, pairingLine } from './activity.js';
 import type { WatchOutcome } from './watcher.js';
 
 /**
@@ -124,5 +124,69 @@ describe('bytes', () => {
     expect(bytes(900)).toBe('900 B');
     expect(bytes(4_300)).toBe('4.2 KB');
     expect(bytes(15_000_000)).toBe('14 MB');
+  });
+});
+
+/**
+ * A log that never takes anything back is a log that lies.
+ *
+ * ★ REPORTED 2026-08-04 ★
+ *
+ * "even after unpairing and repairing the app to the web portal it still says this device is no
+ * longer connected."
+ *
+ * It did, and the device was connected the whole time — the token checked in four minutes after it
+ * was minted. One refusal wrote a line, the buffer only ever grew, and a quiet pass deliberately
+ * writes nothing, so on an evening with the game closed that line could stay newest for days.
+ */
+describe('recovering from a refusal', () => {
+  const REFUSED: WatchOutcome = { ...QUIET, unauthorised: true };
+
+  it('says so when a good pass follows a refused one', () => {
+    const lines = linesFor(QUIET, AT, true);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.level).toBe('info');
+    expect(lines[0]?.text).toContain('Reconnected');
+  });
+
+  it('says it only on the transition, not on every quiet pass afterwards', () => {
+    /*
+     * The whole module exists to keep a quiet pass silent. A "still fine" line every twenty seconds
+     * would bury the errors it sits beside — which is the failure this log was built to avoid.
+     */
+    expect(linesFor(QUIET, AT, false)).toEqual([]);
+  });
+
+  it('does not claim recovery on a pass that is still refused', () => {
+    const lines = linesFor(REFUSED, AT, true);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.level).toBe('error');
+  });
+
+  it('does not claim recovery while some other failure is happening', () => {
+    // Reachability and authorisation are different problems. A device that is still paired but
+    // cannot reach the hub has not "reconnected", and saying so would be the same lie inverted.
+    const lines = linesFor({ ...QUIET, error: 'network down' }, AT, true);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]?.level).toBe('error');
+    expect(lines[0]?.text).toContain('Could not reach');
+  });
+});
+
+describe('pairing writes its own line', () => {
+  it('marks a device connected', () => {
+    expect(pairingLine('paired', AT).text).toContain('connected');
+    expect(pairingLine('paired', AT).level).toBe('info');
+  });
+
+  it('warns that unpairing here does NOT revoke the token', () => {
+    /*
+     * The surprise worth naming. `unpair` forgets the token locally and deliberately does not
+     * revoke it server-side — the usual reason to unpair is that it is already dead, and revoking
+     * needs a valid token. A member who thinks they have withdrawn access has not.
+     */
+    const line = pairingLine('unpaired', AT);
+    expect(line.text).toContain('revoke');
+    expect(line.text).toContain('website');
   });
 });
