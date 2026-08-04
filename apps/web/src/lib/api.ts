@@ -1375,6 +1375,12 @@ export interface SquadronNotification {
  * through it with the cursor; the dashboard is a server component that shows the first page
  * only, which is why this goes through `get` and takes no cursor at all.
  */
+/** The member's own recent happenings — the bell's Personal tab, for the dashboard feed. */
+export const getPersonalActivity = (): Promise<{
+  items: PersonalNotification[];
+  nextCursor: string | null;
+} | null> => get('/v1/notifications', { authed: true });
+
 export const getSquadronActivity = (): Promise<{
   items: SquadronNotification[];
   nextCursor: string | null;

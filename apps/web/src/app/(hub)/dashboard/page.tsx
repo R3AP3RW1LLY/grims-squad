@@ -7,6 +7,7 @@ import {
   getMyDevices,
   getMyCommander,
   getMyBadges,
+  getPersonalActivity,
   getSquadronActivity,
 } from '../../../lib/api';
 import { kindIcon, notificationAge } from '../../../components/notifications-format';
@@ -54,7 +55,7 @@ export const dynamic = 'force-dynamic';
  */
 
 export default async function DashboardPage() {
-  const [status, inara, stats, me, devices, commander, badges, activity] = await Promise.all([
+  const [status, inara, stats, me, devices, commander, badges, activity, personal] = await Promise.all([
     getAccountStatus(),
     getInaraStatus(),
     getSquadronStats(),
@@ -63,6 +64,7 @@ export default async function DashboardPage() {
     getMyCommander(),
     getMyBadges(),
     getSquadronActivity(),
+    getPersonalActivity(),
   ]);
 
   const verified = inara?.cmdrName ?? null;
@@ -257,30 +259,78 @@ export default async function DashboardPage() {
           then everybody. (Section renders its title uppercase, so the sentence-case strings here
           arrive on screen exactly as the owner spelled them.)
         */}
+        {/*
+          ★ AN ACTIVITY SECTION THAT SHOWS ACTIVITY — SQUADRON OWNER, 2026-08-04 ★
+
+          "this is kind of weird for an activity tracker!" — it was: the section held a paragraph
+          about how the rank check works and a device count, which is settings prose wearing an
+          activity heading. Now it leads with the member's own recent happenings — the same rows
+          the bell's Personal tab reads, so the two can never disagree — and the rank-check
+          machinery shrinks to the one-line footnote it always deserved to be. Reading it here
+          marks nothing read: glancing at a dashboard is not opening the bell.
+        */}
         <Section
           title="Your activity"
-          description="The monthly rank check looks for two things: taking part in Discord, and an Elite session. The first is counted for everybody automatically; the second comes from the companion app."
+          description="What has just happened to you: badges, bounties, answers, your builds."
         >
-          {activeDevices === 0 ? (
-            <p className="max-w-[68ch] text-sm leading-relaxed text-[var(--color-text-secondary)]">
-              Nothing is reporting your sessions yet, so your months read as{' '}
-              <strong>unknown</strong> rather than as inactive.{' '}
-              <a href="/settings/devices" className="text-[var(--color-brand-cyan-bright)]">
-                Install the companion app
-              </a>{' '}
-              and it keeps your ranks, ships and monthly activity current on its own.
+          {personal === null ? (
+            <p className="mb-4 max-w-[68ch] text-sm leading-relaxed text-[var(--color-text-secondary)]">
+              Your activity could not be loaded just now. It returns on its own.
+            </p>
+          ) : personal.items.length === 0 ? (
+            <p className="mb-4 max-w-[68ch] text-sm leading-relaxed text-[var(--color-text-secondary)]">
+              Nothing yet — your bounty banks, badges, accepted answers and build events land here
+              as they happen.
             </p>
           ) : (
-            <p className="max-w-[68ch] text-sm leading-relaxed text-[var(--color-text-secondary)]">
-              {activeDevices === 1 ? 'One device is' : `${activeDevices} devices are`} paired and
-              sending. Your sessions, ranks and ships update themselves whenever the app is
-              running.{' '}
-              <a href="/settings/devices" className="text-[var(--color-brand-cyan-bright)]">
-                Manage devices
-              </a>
-              .
-            </p>
+            <ul className="m-0 mb-4 list-none divide-y divide-[var(--color-border-subtle)] overflow-hidden rounded-lg border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel)] p-0">
+              {personal.items.slice(0, 8).map((item) => (
+                <li key={item.id} className="flex items-start gap-3 px-4 py-3">
+                  <span aria-hidden="true" className="shrink-0 text-base leading-5">
+                    {kindIcon(item.kind)}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    {item.link === null ? (
+                      <span className="block text-sm leading-5 text-[var(--color-text-primary)]">
+                        {item.title}
+                      </span>
+                    ) : (
+                      <a
+                        href={item.link}
+                        className="block text-sm leading-5 text-[var(--color-text-primary)] transition-colors hover:text-[var(--color-brand-orange-bright)]"
+                      >
+                        {item.title}
+                      </a>
+                    )}
+                    <p className="m-0 mt-1 font-mono text-[10px] tracking-wide text-[var(--color-text-dim)]">
+                      {notificationAge(item.createdAt)}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ul>
           )}
+
+          {/* The rank-check machinery, demoted to the footnote it is. */}
+          <p className="m-0 max-w-[68ch] font-mono text-[11px] leading-relaxed text-[var(--color-text-dim)]">
+            {activeDevices === 0 ? (
+              <>
+                The monthly rank check counts Discord automatically; game sessions need the{' '}
+                <a href="/settings/devices" className="text-[var(--color-brand-cyan-bright)]">
+                  companion app
+                </a>{' '}
+                — nothing is reporting yours yet, so your months read as unknown.
+              </>
+            ) : (
+              <>
+                Rank check: Discord counted automatically · game sessions from your{' '}
+                {activeDevices === 1 ? 'paired device' : `${activeDevices} paired devices`} ·{' '}
+                <a href="/settings/devices" className="text-[var(--color-brand-cyan-bright)]">
+                  manage devices
+                </a>
+              </>
+            )}
+          </p>
         </Section>
 
         <Section
