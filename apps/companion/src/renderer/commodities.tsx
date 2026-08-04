@@ -3,6 +3,7 @@ import type { JSX } from 'preact';
 import type { CommoditiesIndex, CommodityRow } from '../hub-trade.js';
 import { Button, C, Card, Empty, Problem, Section, inputStyle } from './ui.js';
 import { useLive } from './use-live.js';
+import { CommodityDetailPage } from './commodity-detail.js';
 
 /**
  * The commodities market, in the app.
@@ -52,6 +53,7 @@ export function CommoditiesPage(): JSX.Element {
   const [near, setNear] = useState('');
   const [query, setQuery] = useState('');
   const [sort, setSort] = useState<SortKey>('spread');
+  const [open, setOpen] = useState<string | null>(null);
 
   const load = (measureFrom?: string): void => {
     void window.trade.commodities(measureFrom).then((a) => {
@@ -70,6 +72,11 @@ export function CommoditiesPage(): JSX.Element {
   useLive(() => load(near.trim() === '' ? undefined : near));
 
   const hasNear = index?.nearWithinLy != null;
+
+  if (open !== null) {
+    // The website's detail page, in place — same back-button pattern as the build catalogue.
+    return <CommodityDetailPage name={open} onBack={() => setOpen(null)} />;
+  }
 
   const shown = useMemo(() => {
     if (index === null) return [];
@@ -173,7 +180,25 @@ export function CommoditiesPage(): JSX.Element {
                     const spread = spreadOf(r);
                     return (
                       <tr key={r.commodity}>
-                        <td style={{ ...TD, color: C.text }}>{r.commodity}</td>
+                        <td style={{ ...TD, color: C.text }}>
+                          <button
+                            type="button"
+                            onClick={() => setOpen(r.commodity)}
+                            style={{
+                              border: 'none',
+                              background: 'transparent',
+                              color: C.text,
+                              cursor: 'pointer',
+                              fontFamily: 'inherit',
+                              fontSize: 'inherit',
+                              padding: 0,
+                              textDecoration: 'underline',
+                              textDecorationColor: C.hairline,
+                            }}
+                          >
+                            {r.commodity}
+                          </button>
+                        </td>
                         <td style={NUM}>{cr(r.avgBuy)}</td>
                         <td style={NUM}>{cr(r.avgSell)}</td>
                         <td style={{ ...NUM, color: spread !== null && spread > 0 ? C.good : C.dim }}>

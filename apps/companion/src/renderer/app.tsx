@@ -7,6 +7,8 @@ import { ColonyBoardPage, ColonyNewPage } from './colonisation.js';
 import { BountiesPage } from './bounties.js';
 import { TradePage } from './trade.js';
 import { CommoditiesPage } from './commodities.js';
+import { OutfitterPage } from './shipyard-outfitter.js';
+import { BuildBoardsPage } from './shipyard-boards.js';
 import { PlanningPage } from './planning.js';
 import { BuildTypesPage } from './build-types.js';
 import { GroupIcon } from './icons.js';
@@ -80,6 +82,9 @@ type Page =
   | 'bounties'
   | 'commodities'
   | 'trade'
+  | 'outfitter'
+  | 'builds-squadron'
+  | 'builds-public'
   | 'overlays'
   | 'device';
 
@@ -103,7 +108,7 @@ interface NavItem {
 }
 
 interface NavGroup {
-  readonly group: 'colonisation' | 'logistics';
+  readonly group: 'colonisation' | 'logistics' | 'shipyard';
   readonly label: string;
   readonly children: readonly NavItem[];
 }
@@ -133,6 +138,19 @@ function readOpenGroups(): Set<string> {
 
 const NAV: ReadonlyArray<NavItem | NavGroup> = [
   { id: 'status', label: 'Status', hint: 'What the app is doing' },
+  {
+    /*
+     * ★ SQUADRON OWNER, 2026-08-04: "add the Shipyard and Logistics and Trade categories ...
+     * full mirror with the website" ★ — the website's order puts the Shipyard block first.
+     */
+    group: 'shipyard',
+    label: 'Shipyard',
+    children: [
+      { id: 'outfitter', label: 'Outfitter', hint: 'Outfit a ship, or let the assistant fit one' },
+      { id: 'builds-squadron', label: 'Squadron builds', hint: 'What the squadron has published' },
+      { id: 'builds-public', label: 'Public builds', hint: 'Builds shared with everybody' },
+    ],
+  },
   {
     /*
      * The website's order and the website's name: Commodities then the Freight Office, grouped
@@ -416,6 +434,9 @@ function App(): JSX.Element {
         ) : null}
         {page === 'bounties' ? <BountiesPage /> : null}
         {page === 'commodities' ? <CommoditiesPage /> : null}
+        {page === 'outfitter' ? <OutfitterPage /> : null}
+        {page === 'builds-squadron' ? <BuildBoardsPage scope="squadron" /> : null}
+        {page === 'builds-public' ? <BuildBoardsPage scope="public" /> : null}
         {page === 'trade' ? <TradePage /> : null}
         {page === 'overlays' ? (
           <OverlaysPanel
