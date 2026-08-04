@@ -3,8 +3,15 @@
 import { useMemo, useState } from 'react';
 import { computeStats, fitShip, type CatalogueModule, type FitRole } from '@grims/ed-clients/builds';
 import type { ShipBuild, FittedModule } from '@grims/shared/ship-build';
-import { catalogueFrom, optionsFor, slotCategory, type OutfitPayload } from './outfitter-catalogue';
-import { moduleFacts, moduleDescription, moduleSummary } from './module-facts';
+import {
+  catalogueFrom,
+  optionsFor,
+  slotCategory,
+  moduleFacts,
+  moduleDescription,
+  moduleSummary,
+  type OutfitPayload,
+} from '@grims/ed-clients/builds';
 import { SaveBuild } from './save-build';
 
 /**

@@ -115,6 +115,16 @@ contextBridge.exposeInMainWorld('overlays', {
 contextBridge.exposeInMainWorld('trade', {
   routes: (query: unknown) => ipcRenderer.invoke('tradeRoutes', query),
   commodities: (near?: string) => ipcRenderer.invoke('tradeCommodities', near),
+  commodity: (name: string, query?: unknown) => ipcRenderer.invoke('tradeCommodity', name, query),
+});
+
+contextBridge.exposeInMainWorld('shipyard', {
+  ships: () => ipcRenderer.invoke('shipyardShips'),
+  outfit: (shipId: string) => ipcRenderer.invoke('shipyardOutfit', shipId),
+  fit: (body: unknown) => ipcRenderer.invoke('shipyardFit', body),
+  builds: (scope: string) => ipcRenderer.invoke('shipyardBuilds', scope),
+  build: (token: string) => ipcRenderer.invoke('shipyardBuild', token),
+  save: (body: unknown) => ipcRenderer.invoke('shipyardSave', body),
 });
 
 contextBridge.exposeInMainWorld('bounties', {

@@ -23,4 +23,14 @@ export {
   type SlotCategory,
 } from './catalogue.js';
 export { computeStats, type BuildStats } from './stats.js';
+// The outfitter's payload adapter and fact tables — shared by the website and the companion app,
+// so the two surfaces cannot disagree about a dropdown's contents or a module's figures.
+export {
+  catalogueFrom,
+  optionsFor,
+  slotCategory,
+  type OutfitPayload,
+  type RawModule,
+} from './outfit-payload.js';
+export { moduleFacts, moduleDescription, moduleSummary } from './module-facts.js';
 export { fitForRole, fitShip, type FitRole, type FitRequest, type FitResult } from './fit.js';

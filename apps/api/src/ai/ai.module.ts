@@ -309,6 +309,10 @@ export class ModelWarmer implements OnModuleInit, OnModuleDestroy {
     ReviewQueueService,
     ReportService,
     AiStreamService,
+    // For the companion's shipyard door (ShipyardDeviceModule): same services, different
+    // authentication — never a second implementation of the catalogue or the save rules.
+    ShipyardService,
+    ShipBuildService,
   ],
 })
 export class AiModule {}

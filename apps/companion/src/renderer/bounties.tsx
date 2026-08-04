@@ -6,6 +6,7 @@ import type {
   BountyRow,
 } from '../hub-bounties.js';
 import { C, Card, Empty, Problem, Section, Stat, Tabs, inputStyle } from './ui.js';
+import { useLive } from './use-live.js';
 
 /**
  * Data Bounties, in the app.
@@ -197,7 +198,7 @@ export function BountiesPage(): JSX.Element {
   const [standings, setStandings] = useState<BountyLeaderboard | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const load = (): void => {
     void window.bounties.board().then((a) => {
       if (a.ok) {
         setBoard(a.data);
@@ -207,7 +208,12 @@ export function BountiesPage(): JSX.Element {
     void window.bounties.leaderboard().then((a) => {
       if (a.ok) setStandings(a.data);
     });
-  }, []);
+  };
+
+  useEffect(load, []);
+  // A bounty a wingmate just claimed must not sit on this screen looking claimable — the board
+  // and the standings re-read themselves every minute and on window focus.
+  useLive(load);
 
   return (
     <div>

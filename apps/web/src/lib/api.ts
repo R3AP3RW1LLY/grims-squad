@@ -1533,7 +1533,7 @@ export interface SavedBuildRow {
 
 export const getShipyardOutfitGated = (
   shipId: string,
-): Promise<AdminRead<import('../app/(hub)/shipyard/outfitter-catalogue').OutfitPayload>> =>
+): Promise<AdminRead<import('@grims/ed-clients/builds').OutfitPayload>> =>
   getAdmin(`/v1/ai/shipyard/outfit/${encodeURIComponent(shipId)}`);
 
 // ── Logistics & Trade ────────────────────────────────────────────────────────

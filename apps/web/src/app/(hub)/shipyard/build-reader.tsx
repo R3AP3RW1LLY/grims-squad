@@ -1,7 +1,7 @@
 import { Section } from '../../../components/hub-page';
-import { catalogueFrom, slotCategory, type OutfitPayload } from './outfitter-catalogue';
+import { catalogueFrom, slotCategory, type OutfitPayload } from '@grims/ed-clients/builds';
 import type { CatalogueModule } from '@grims/ed-clients/builds';
-import { moduleFacts } from './module-facts';
+import { moduleFacts } from '@grims/ed-clients/builds';
 import type { SharedBuild } from '../../../lib/api';
 
 /**

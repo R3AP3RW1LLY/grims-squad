@@ -1,4 +1,13 @@
-import type { BuildCatalogue, CatalogueModule, CatalogueShip, SlotCategory } from '@grims/ed-clients/builds';
+import type { BuildCatalogue, CatalogueModule, CatalogueShip, SlotCategory } from './catalogue.js';
+
+/*
+ * ★ LIFTED OUT OF THE WEB APP, 2026-08-04 ★
+ *
+ * This adapter lived beside the website's outfitter. The moment the companion app grew the same
+ * screen there were about to be two copies of the payload-to-catalogue translation — and two
+ * copies of THIS file is two ideas of which bucket a module lands in, which does not throw, it
+ * just silently empties a dropdown on one surface. One adapter, imported by both windows.
+ */
 
 /**
  * A catalogue built from what the Shipyard endpoint sent, for the browser.

@@ -197,6 +197,9 @@ importers:
       '@grims/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@grims/ed-clients':
+        specifier: workspace:*
+        version: link:../../packages/ed-clients
       electron:
         specifier: ^43.2.0
         version: 43.2.0(supports-color@7.2.0)

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 import type { TradePlan, TradeRoute } from '../hub-trade.js';
 import { Button, C, Card, Empty, Problem, Section, inputStyle } from './ui.js';
+import { useLive } from './use-live.js';
 
 /**
  * The Freight Office, in the app.
@@ -32,6 +33,10 @@ declare global {
       commodities(
         near?: string,
       ): Promise<Answer<import('../hub-trade.js').CommoditiesIndex>>;
+      commodity(
+        name: string,
+        query?: unknown,
+      ): Promise<Answer<import('../hub-trade.js').CommodityDetail>>;
     };
   }
 }
@@ -129,6 +134,17 @@ export function TradePage(): JSX.Element {
 
   // The first plan needs nothing typed — the journal knows where the ship is. Once, on mount.
   useEffect(run, []);
+
+  /*
+   * ★ "all data updated in realtime" — squadron owner, 2026-08-04 ★
+   *
+   * A standing plan re-quotes itself every minute with the member's own parameters: prices drain
+   * while a run sits on screen, and the whole point of the believability work is that a stale
+   * quote is worse than a fresh one. Nothing refires while a plan is still being computed.
+   */
+  useLive(() => {
+    if (plan !== null && !busy) run();
+  });
 
   return (
     <div>

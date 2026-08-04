@@ -89,6 +89,38 @@ export interface CommoditiesIndex {
   readonly nearWithinLy: number | null;
 }
 
+/** One station trading one commodity — the store's MarketPlace, serialized. */
+export interface TradePlace {
+  readonly stationName: string;
+  readonly systemName: string;
+  readonly stationType: string | null;
+  readonly largePads: number;
+  readonly price: number;
+  readonly quantity: number;
+  readonly seenAt: string | null;
+  readonly distance: number | null;
+  readonly arrivalLs: number | null;
+}
+
+export interface HistoryPoint {
+  readonly observedAt: string;
+  readonly avgBuy: number | null;
+  readonly avgSell: number | null;
+  readonly minBuy: number | null;
+  readonly maxSell: number | null;
+  readonly buyMarkets: number;
+  readonly sellMarkets: number;
+}
+
+export interface CommodityDetail {
+  readonly commodity: CommodityRow | null;
+  readonly buys: TradePlace[];
+  readonly sells: TradePlace[];
+  readonly history: HistoryPoint[];
+  readonly origin: TradePlan['origin'];
+  readonly unknownSystem: string | null;
+}
+
 type Answer<T> = { ok: true; data: T } | { ok: false; error: string };
 
 /** Same failure-becomes-a-sentence contract as the other hub readers. */
@@ -106,6 +138,23 @@ export function tradeCommodities(call: HubCall, near?: string): Promise<Answer<C
   return tradeGet<CommoditiesIndex>(
     call,
     `/commodities${trimmed === '' ? '' : `?near=${encodeURIComponent(trimmed)}`}`,
+  );
+}
+
+/** One commodity in full. `query` carries the page's filters verbatim, like the website. */
+export function tradeCommodity(
+  call: HubCall,
+  name: string,
+  query: Record<string, string> = {},
+): Promise<Answer<CommodityDetail>> {
+  const qs = new URLSearchParams();
+  for (const [k, v] of Object.entries(query)) {
+    if (v.trim() !== '') qs.set(k, v.trim());
+  }
+  const suffix = qs.toString();
+  return tradeGet<CommodityDetail>(
+    call,
+    `/commodities/${encodeURIComponent(name)}${suffix === '' ? '' : `?${suffix}`}`,
   );
 }
 

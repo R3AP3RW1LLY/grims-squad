@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 import type { CommoditiesIndex, CommodityRow } from '../hub-trade.js';
 import { Button, C, Card, Empty, Problem, Section, inputStyle } from './ui.js';
+import { useLive } from './use-live.js';
 
 /**
  * The commodities market, in the app.
@@ -63,6 +64,10 @@ export function CommoditiesPage(): JSX.Element {
 
   // First load measures from the journal — the app's own advantage.
   useEffect(() => load(), []);
+
+  // "all data updated in realtime": the index re-reads itself every minute with whatever origin
+  // is currently chosen, and again the moment the window comes back from the game.
+  useLive(() => load(near.trim() === '' ? undefined : near));
 
   const hasNear = index?.nearWithinLy != null;
 

@@ -40,7 +40,15 @@ import {
   postColonyProject,
 } from './hub-colony.js';
 import { bountyBoard, bountyLeaderboard } from './hub-bounties.js';
-import { tradeCommodities, tradeRoutes, type TradeQuery } from './hub-trade.js';
+import { tradeCommodities, tradeCommodity, tradeRoutes, type TradeQuery } from './hub-trade.js';
+import {
+  shipyardBuild,
+  shipyardBuilds,
+  shipyardFit,
+  shipyardOutfit,
+  shipyardSave,
+  shipyardShips,
+} from './hub-shipyard.js';
 import { readdir, readFile, stat, open } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -1414,6 +1422,53 @@ if (!app.requestSingleInstanceLock()) {
 
     ipcMain.handle('colonyProjects', () => colonyProjects(hub()));
     ipcMain.handle('bountyBoard', () => bountyBoard(hub()));
+    ipcMain.handle('tradeCommodity', (_e, name: unknown, query: unknown) => {
+      if (typeof name !== 'string' || name === '') {
+        return { ok: false as const, error: 'No commodity asked for.' };
+      }
+      const q = (query ?? {}) as Record<string, unknown>;
+      const clean: Record<string, string> = {};
+      for (const k of ['near', 'withinLy', 'carriers', 'largePad', 'minQty', 'freshDays', 'hours']) {
+        const v = q[k];
+        if (typeof v === 'string') clean[k] = v;
+      }
+      return tradeCommodity(hub(), name, clean);
+    });
+    ipcMain.handle('shipyardShips', () => shipyardShips(hub()));
+    ipcMain.handle('shipyardOutfit', (_e, shipId: unknown) =>
+      typeof shipId === 'string' && shipId !== ''
+        ? shipyardOutfit(hub(), shipId)
+        : { ok: false as const, error: 'No ship asked for.' },
+    );
+    ipcMain.handle('shipyardFit', (_e, body: unknown) => {
+      const b = (body ?? {}) as Record<string, unknown>;
+      return shipyardFit(hub(), {
+        role: typeof b['role'] === 'string' ? b['role'] : '',
+        ...(typeof b['budget'] === 'number' && Number.isFinite(b['budget'])
+          ? { budget: b['budget'] }
+          : {}),
+        ...(typeof b['shipId'] === 'string' && b['shipId'] !== '' ? { shipId: b['shipId'] } : {}),
+      });
+    });
+    ipcMain.handle('shipyardBuilds', (_e, scope: unknown) =>
+      shipyardBuilds(
+        hub(),
+        scope === 'mine' || scope === 'squadron' ? scope : 'public',
+      ),
+    );
+    ipcMain.handle('shipyardBuild', (_e, token: unknown) =>
+      typeof token === 'string' && token !== ''
+        ? shipyardBuild(hub(), token)
+        : { ok: false as const, error: 'No build asked for.' },
+    );
+    ipcMain.handle('shipyardSave', (_e, body: unknown) => {
+      const b = (body ?? {}) as Record<string, unknown>;
+      return shipyardSave(hub(), {
+        build: b['build'],
+        buildName: typeof b['buildName'] === 'string' && b['buildName'].trim() !== '' ? b['buildName'] : null,
+        visibility: typeof b['visibility'] === 'string' ? b['visibility'] : '',
+      });
+    });
     ipcMain.handle('tradeCommodities', (_e, near: unknown) =>
       tradeCommodities(hub(), typeof near === 'string' ? near : undefined),
     );

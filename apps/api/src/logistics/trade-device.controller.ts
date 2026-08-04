@@ -1,4 +1,4 @@
-import { Controller, Get, Inject, Query, Req } from '@nestjs/common';
+import { Controller, Get, Inject, Param, Query, Req } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
 import { AppError, ErrorCode, Permission } from '@grims/shared';
 import { Public } from '../auth/auth.guard.js';
@@ -6,7 +6,7 @@ import { PermissionService } from '../authz/permission.service.js';
 import { PAIRING_SERVICE } from '../telemetry/telemetry.tokens.js';
 import type { PairingService } from '../telemetry/pairing.service.js';
 import { MARKET_STORE } from './logistics.tokens.js';
-import type { MarketStore } from './market.store.js';
+import type { MarketStore, PlaceQuery } from './market.store.js';
 import { planRoutes, TIME_MODEL, type RouteSort } from './routes.service.js';
 import { CommanderPositionService, positionAge } from './commander-position.service.js';
 
@@ -114,6 +114,91 @@ export class TradeDeviceController {
       },
       unknownSystem: null,
       nearWithinLy: NEAR_LY,
+    };
+  }
+
+  /**
+   * One commodity in full: headline row, price history, and where to trade it — the website's
+   * detail page through the device door, with the same parameters and the same defaults, except
+   * that the origin falls back to the device's member instead of nothing.
+   */
+  @Public()
+  @Get('commodities/:name')
+  async commodity(
+    @Req() req: FastifyRequest,
+    @Param('name') name: string,
+    @Query('near') near?: string,
+    @Query('withinLy') withinLy?: string,
+    @Query('carriers') carriers?: string,
+    @Query('largePad') largePad?: string,
+    @Query('minQty') minQty?: string,
+    @Query('freshDays') freshDays?: string,
+    @Query('hours') hours?: string,
+  ) {
+    const caller = await this.#caller(req);
+
+    const row = await this.store.one(name);
+    if (row === null) return { commodity: null };
+
+    const typed = near?.trim() ?? '';
+    let origin: {
+      coords: { x: number; y: number; z: number };
+      system: string;
+      station: string | null;
+      from: 'typed' | 'journal';
+      age?: string;
+      stale?: boolean;
+    } | null = null;
+
+    if (typed !== '') {
+      const coords = await this.store.systemCoords(typed);
+      if (coords !== null) origin = { coords, system: typed, station: null, from: 'typed' };
+    } else {
+      const known = await this.position.lastKnown(caller.userId);
+      if (known !== null && known.coords !== null) {
+        const age = positionAge(known.at, Date.now());
+        origin = {
+          coords: known.coords,
+          system: known.systemName,
+          station: known.stationName,
+          from: 'journal',
+          age: age.text,
+          stale: age.stale,
+        };
+      }
+    }
+
+    const opts: PlaceQuery = {
+      limit: 25,
+      excludeCarriers: carriers !== '1',
+      largePadOnly: largePad === '1',
+      minQuantity: numberOr(minQty, 0),
+      seenSince: daysAgo(numberOr(freshDays, 0)),
+      near: origin?.coords ?? null,
+      withinLy: clamp(numberOr(withinLy, 50), 1, 1000),
+    };
+
+    const [buys, sells, history] = await Promise.all([
+      this.store.bestBuys(name, opts),
+      this.store.bestSells(name, opts),
+      this.store.history(name, clamp(numberOr(hours, 168), 1, 24 * 90)),
+    ]);
+
+    return {
+      commodity: row,
+      buys,
+      sells,
+      history,
+      origin:
+        origin === null
+          ? null
+          : {
+              system: origin.system,
+              station: origin.station,
+              from: origin.from,
+              ...(origin.age === undefined ? {} : { age: origin.age, stale: origin.stale === true }),
+            },
+      unknownSystem: typed !== '' && origin === null ? typed : null,
     };
   }
 

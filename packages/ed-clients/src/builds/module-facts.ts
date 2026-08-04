@@ -1,4 +1,4 @@
-import type { CatalogueModule } from '@grims/ed-clients/builds';
+import type { CatalogueModule } from './catalogue.js';
 
 /**
  * What a module actually does, in words.
