@@ -24,7 +24,15 @@ const TH =
 
 const TD = 'border-t border-[var(--color-border-hairline)] py-2.5 pr-4 align-middle';
 
-type SortKey = 'commodity' | 'avgBuy' | 'avgSell' | 'spread' | 'supply' | 'demand';
+type SortKey =
+  | 'commodity'
+  | 'avgBuy'
+  | 'avgSell'
+  | 'minBuy'
+  | 'trend'
+  | 'spread'
+  | 'supply'
+  | 'demand';
 
 /**
  * What a commodity is worth carrying: sell high minus buy low.
@@ -89,6 +97,15 @@ export function MarketTable({ rows }: { rows: readonly MarketRow[] }) {
           return num(b.avgBuy) - num(a.avgBuy);
         case 'avgSell':
           return num(b.avgSell) - num(a.avgSell);
+        case 'minBuy': {
+          // ASCENDING — "cheapest to buy" is the one column read from the small end. Nulls still
+          // sort last, which needs the opposite sentinel from every descending column.
+          const asc = (v: number | null): number => (v === null ? Number.POSITIVE_INFINITY : v);
+          return asc(a.minBuy) - asc(b.minBuy);
+        }
+        case 'trend':
+          // Biggest movement either way: a 12% crash matters exactly as much as a 12% spike.
+          return Math.abs(num(b.sellTrend)) - Math.abs(num(a.sellTrend));
         case 'supply':
           return Number(b.supply) - Number(a.supply);
         case 'demand':
@@ -132,6 +149,8 @@ export function MarketTable({ rows }: { rows: readonly MarketRow[] }) {
           <option value="spread">Best margin</option>
           <option value="avgSell">Highest sell price</option>
           <option value="avgBuy">Highest buy price</option>
+          <option value="minBuy">Cheapest to buy</option>
+          <option value="trend">Biggest movers</option>
           <option value="supply">Most supply</option>
           <option value="demand">Most demand</option>
           <option value="commodity">Name</option>
@@ -149,7 +168,7 @@ export function MarketTable({ rows }: { rows: readonly MarketRow[] }) {
         </p>
       ) : (
         <div className="max-h-[70vh] overflow-auto rounded-lg border border-[var(--color-border-hairline)]">
-          <table className="w-full min-w-[860px] border-collapse text-sm">
+          <table className="w-full min-w-[1000px] border-collapse text-sm">
             <thead>
               <tr>
                 <th scope="col" className={`${TH} pl-4`}>
@@ -166,6 +185,12 @@ export function MarketTable({ rows }: { rows: readonly MarketRow[] }) {
                 </th>
                 <th scope="col" className={`${TH} text-right`}>
                   Margin
+                </th>
+                <th scope="col" className={`${TH} text-right`}>
+                  Best buy
+                </th>
+                <th scope="col" className={`${TH} text-right`}>
+                  24h move
                 </th>
                 <th scope="col" className={`${TH} text-right`}>
                   Supply
@@ -201,6 +226,26 @@ export function MarketTable({ rows }: { rows: readonly MarketRow[] }) {
                       }`}
                     >
                       {spread === null ? '—' : `${spread > 0 ? '+' : ''}${spread.toLocaleString()}`}
+                    </td>
+                    <td
+                      className={`${TD} text-right font-mono tabular-nums`}
+                      title="The single cheapest market anywhere — the number to beat"
+                    >
+                      {cr(r.minBuy)}
+                    </td>
+                    <td
+                      className={`${TD} text-right font-mono tabular-nums ${
+                        r.sellTrend === null
+                          ? 'text-[var(--color-text-secondary)]'
+                          : r.sellTrend >= 0
+                            ? 'text-[var(--color-brand-cyan-bright)]'
+                            : 'text-[var(--color-semantic-warning)]'
+                      }`}
+                      title="Movement in the average sell price over the last day"
+                    >
+                      {r.sellTrend === null
+                        ? '—'
+                        : `${r.sellTrend > 0 ? '▲' : r.sellTrend < 0 ? '▼' : ''} ${(Math.abs(r.sellTrend) * 100).toFixed(1)}%`}
                     </td>
                     <td
                       className={`${TD} text-right font-mono tabular-nums text-[var(--color-text-secondary)]`}
