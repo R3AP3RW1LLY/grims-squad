@@ -6,7 +6,8 @@
   "description": "discord.js v14. Role sync, slash commands, notifications.",
   "scripts": {
     "build": "tsc -b",
-    "dev": "tsx watch --env-file-if-exists=../api/.env src/main.ts",
+    "dev": "node ../../tools/keep-alive.mjs bot -- tsx watch --env-file-if-exists=../api/.env src/main.ts",
+    "dev:once": "tsx watch --env-file-if-exists=../api/.env src/main.ts",
     "start": "node dist/main.js",
     "typecheck": "tsc -b --noEmit false --emitDeclarationOnly && tsc -p tsconfig.spec.json",
     "test": "vitest run --passWithNoTests",

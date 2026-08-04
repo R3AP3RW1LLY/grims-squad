@@ -112,6 +112,11 @@ contextBridge.exposeInMainWorld('overlays', {
  * renderer that could talk to the hub directly would need the device token in the page, where any
  * rendering bug that can read the DOM can read it too.
  */
+contextBridge.exposeInMainWorld('bounties', {
+  board: () => ipcRenderer.invoke('bountyBoard'),
+  leaderboard: (month?: string) => ipcRenderer.invoke('bountyLeaderboard', month),
+});
+
 contextBridge.exposeInMainWorld('colony', {
   /** Both boards, plus what this member is allowed to do with them. */
   projects: () => ipcRenderer.invoke('colonyProjects'),

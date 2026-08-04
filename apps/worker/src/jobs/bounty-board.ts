@@ -85,7 +85,7 @@ export async function rebuildBountyBoard(db: PrismaClient): Promise<BountyBoardR
        */
       await tx.$executeRawUnsafe(`
         CREATE TEMP TABLE bounty_seen ON COMMIT DROP AS
-        SELECT station_key, max(market_seen_at) AS last_seen
+        SELECT station_key, max(market_seen_at) AS last_seen, max(station_type) AS station_type
           FROM market_entries
          GROUP BY station_key`);
 
@@ -154,15 +154,20 @@ export async function rebuildBountyBoard(db: PrismaClient): Promise<BountyBoardR
           NULL,
           now()
         FROM (
+          /*
+           * Carriers are excluded BEFORE the candidate window, not after. The first board proved
+           * why: the stalest keys in the whole table are almost all carriers, so filtering after
+           * the LIMIT left six real stations out of four hundred candidates.
+           */
           SELECT station_key, last_seen
             FROM bounty_seen
            WHERE last_seen IS NOT NULL
              AND last_seen < now() - interval '${BELIEVABLE_DAYS} days'
+             AND (station_type IS NULL OR station_type NOT ILIKE '%carrier%')
            ORDER BY last_seen ASC, station_key
            LIMIT ${GALAXY_LIMIT * 2}
         ) pick
         JOIN knowledge_items k ON k.kind = 'station' AND k.ext_key = pick.station_key
-        WHERE (k.data->>'type' IS NULL OR k.data->>'type' NOT ILIKE '%carrier%')
         ORDER BY pick.last_seen ASC
         LIMIT ${GALAXY_LIMIT}
         ON CONFLICT (station_key) DO NOTHING`);

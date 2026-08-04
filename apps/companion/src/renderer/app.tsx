@@ -4,6 +4,7 @@ import type { JSX } from 'preact';
 import type { OverlayLayout } from '../overlay-config.js';
 import { Button, C, Card, Empty, Problem, Section, Stat } from './ui.js';
 import { ColonyBoardPage, ColonyNewPage } from './colonisation.js';
+import { BountiesPage } from './bounties.js';
 import { PlanningPage } from './planning.js';
 import { BuildTypesPage } from './build-types.js';
 import { GroupIcon } from './icons.js';
@@ -74,6 +75,7 @@ type Page =
   | 'colony-new'
   | 'colony-squadron'
   | 'colony-members'
+  | 'bounties'
   | 'trade'
   | 'overlays'
   | 'device';
@@ -136,6 +138,8 @@ const NAV: ReadonlyArray<NavItem | NavGroup> = [
       { id: 'colony-members', label: 'Members’ projects', hint: 'What members have asked help with' },
     ],
   },
+  // The website's order: Data Bounties sits directly under the colonisation pages.
+  { id: 'bounties', label: 'Data Bounties', hint: 'Dark stations, and who lights them up' },
   { id: 'trade', label: 'Trade runs', hint: 'Routes from the Freight Office' },
   { id: 'overlays', label: 'Overlays', hint: 'Panels drawn over the game' },
   { id: 'device', label: 'This device', hint: 'Pairing and privacy' },
@@ -355,6 +359,7 @@ function App(): JSX.Element {
             onReload={loadColony}
           />
         ) : null}
+        {page === 'bounties' ? <BountiesPage /> : null}
         {page === 'trade' ? <TradeRuns /> : null}
         {page === 'overlays' ? (
           <OverlaysPanel

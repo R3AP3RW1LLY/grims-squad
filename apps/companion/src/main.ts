@@ -39,6 +39,7 @@ import {
   colonyUnassign,
   postColonyProject,
 } from './hub-colony.js';
+import { bountyBoard, bountyLeaderboard } from './hub-bounties.js';
 import { readdir, readFile, stat, open } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -1411,6 +1412,10 @@ if (!app.requestSingleInstanceLock()) {
     });
 
     ipcMain.handle('colonyProjects', () => colonyProjects(hub()));
+    ipcMain.handle('bountyBoard', () => bountyBoard(hub()));
+    ipcMain.handle('bountyLeaderboard', (_e, month: unknown) =>
+      bountyLeaderboard(hub(), typeof month === 'string' && month !== '' ? month : undefined),
+    );
     ipcMain.handle('colonyProject', (_e, id: unknown, filters: unknown) => {
       if (typeof id !== 'string' || id === '') {
         return { ok: false as const, error: 'No project asked for.' };
