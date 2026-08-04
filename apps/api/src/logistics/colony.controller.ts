@@ -135,6 +135,13 @@ export class ColonyController {
     const origin =
       (await this.#origin(near)) ?? (await this.#origin(project.systemName));
 
+    /*
+     * The delivery chart is bucketed in the VIEWER's zone (see deliveryChart), so their stored
+     * timezone is read first — one indexed lookup, UTC for a guest. Resolved before the parallel
+     * block rather than inside it because the chart read cannot start without it.
+     */
+    const tz = await this.colony.viewerTimezone(caller?.userId ?? null);
+
     const [needs, haulers, shopping, deliveries, chart, carriers] = await Promise.all([
       this.colony.needs(id),
       this.colony.haulers(id),
@@ -147,7 +154,7 @@ export class ColonyController {
       // The same two the app gets. One service, one shape — the website and the companion showing
       // different histories of the same build is the failure this whole controller exists to avoid.
       this.colony.deliveries(id),
-      this.colony.deliveryChart(id),
+      this.colony.deliveryChart(id, tz),
       // What is already sitting in a hold. It changes what "remaining" means for a member deciding
       // whether to launch — twenty thousand tonnes on a carrier parked at the site is not the same
       // build as twenty thousand tonnes nobody has bought yet.

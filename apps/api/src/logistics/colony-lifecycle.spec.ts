@@ -177,3 +177,75 @@ describe('deleting a project', () => {
     expect(del).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * The delivery chart's zone handling.
+ *
+ * ★ WHY THIS SITS NEXT TO THE LIFECYCLE TESTS ★
+ *
+ * Same service, same mocked-client harness — and the rule being pinned is a service rule, not a
+ * SQL one: the viewer's zone travels into the query, the axis labels are authored HERE from the
+ * zone-local key, and a zone the runtime refuses degrades to UTC rather than to a 500. The query
+ * itself is proven against a real Postgres in colony-queries.int.spec.ts, including the 23:30-local
+ * delivery that used to land on UTC's next day.
+ */
+function chartServiceFor(opts: {
+  hours: number;
+  rows: Array<{ at: string; commodity: string; commander: string | null; amount: bigint }>;
+}) {
+  // First read is the span that picks hour-or-day buckets; second is the bucketed ledger.
+  const raw = vi
+    .fn()
+    .mockResolvedValueOnce([{ hours: opts.hours }])
+    .mockResolvedValueOnce(opts.rows);
+
+  const db = { $queryRawUnsafe: raw } as unknown as ConstructorParameters<typeof ColonyService>[0];
+  const acl = {
+    forSystem: () => ({}),
+    forCaller: async () => ({}),
+  } as unknown as ConstructorParameters<typeof ColonyService>[2];
+
+  return { service: new ColonyService(db, {} as MarketStore, acl), raw };
+}
+
+describe('the delivery chart, cut in the viewer’s zone', () => {
+  it('sends the viewer’s zone into the SQL, echoes it back, and authors the day label itself', async () => {
+    const { service, raw } = chartServiceFor({
+      hours: 100, // Over the 48-hour switch, so the buckets are days.
+      rows: [{ at: '2026-08-03T00:00', commodity: 'Steel', commander: 'Vex', amount: 42n }],
+    });
+
+    const chart = await service.deliveryChart('p1', 'America/Denver');
+
+    // The zone is the bucket query's third parameter — the `AT TIME ZONE` operand.
+    expect(raw.mock.calls[1]?.[3]).toBe('America/Denver');
+    // Echoed so the clients can caption the axis with the zone the SQL really used.
+    expect(chart.tz).toBe('America/Denver');
+    // The label arrives finished. A client that renders it verbatim cannot shift the day the way
+    // the old `new Date(bucket)` reparse did for every viewer west of UTC.
+    expect(chart.byCommodity[0]).toMatchObject({ at: '2026-08-03T00:00', label: '3 Aug' });
+  });
+
+  it('labels an hour bucket with the wall clock the key already holds', async () => {
+    const { service } = chartServiceFor({
+      hours: 10,
+      rows: [{ at: '2026-08-03T23:00', commodity: 'Steel', commander: 'Vex', amount: 1n }],
+    });
+
+    const chart = await service.deliveryChart('p1', 'Europe/London');
+
+    expect(chart.bucket).toBe('hour');
+    expect(chart.byCommodity[0]?.label).toBe('23:00');
+  });
+
+  it('degrades a zone the runtime refuses to UTC rather than failing the chart', async () => {
+    const { service, raw } = chartServiceFor({ hours: 100, rows: [] });
+
+    const chart = await service.deliveryChart('p1', 'Mars/Olympus_Mons');
+
+    // A garbage preference string costs the member their zone, never their chart — and the
+    // caption stays honest, naming the zone that was actually used.
+    expect(raw.mock.calls[1]?.[3]).toBe('UTC');
+    expect(chart.tz).toBe('UTC');
+  });
+});

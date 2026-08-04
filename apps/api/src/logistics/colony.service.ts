@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { completeColonyProject, notifySquadron, type LiveNudge, type PrismaClient } from '@grims/db';
 import { AppError, ErrorCode, Permission } from '@grims/shared';
+import { DEFAULT_TIMEZONE, isValidTimezone } from '../common/timezone.js';
 import type { AclDbService } from '../authz/acl-db.service.js';
 import type { MarketStore, PlaceQuery } from './market.store.js';
 
@@ -123,9 +124,21 @@ export interface DeliveryRow {
  * called `byCommodity` any more: the same bar is stacked by commodity in one view and by commander
  * in the other, and a field named for one of them while holding the other is the kind of lie that
  * costs somebody an hour.
+ *
+ * ★ `at` IS A NAIVE LOCAL KEY AND `label` IS THE ONLY THING A CLIENT MAY DRAW — 2026-08-04 ★
+ *
+ * The buckets used to travel as instants, and both clients reparsed them with `new Date()` and
+ * labelled them in whatever zone the DEVICE happened to be in. West of UTC that put a whole
+ * evening's hauling on the previous day's bar — a member watched today's deliveries stack onto
+ * yesterday. So the bucket is cut in the viewer's own zone (see `deliveryChart`), the key is the
+ * zone-local wall time `YYYY-MM-DDTHH:MM` with no offset for a client to misapply, and the axis
+ * text is authored HERE. A client that never parses a bucket cannot re-shift one.
  */
 export interface DeliveryBucket {
-  readonly at: Date;
+  /** The bucket's wall time in the chart's own zone. An opaque, sortable key — never parsed. */
+  readonly at: string;
+  /** Rendered on the axis verbatim: `23:00` for an hour bucket, `4 Aug` for a day bucket. */
+  readonly label: string;
   readonly bySeries: Readonly<Record<string, number>>;
   readonly total: number;
 }
@@ -148,6 +161,11 @@ export interface HaulerStack {
 /** Everything the two charts on a project page need, in one read. */
 export interface DeliveryCharts {
   readonly bucket: 'hour' | 'day';
+  /**
+   * The IANA zone the buckets were actually cut in, so both clients can caption the axis with it.
+   * Usually the viewer's stored zone; UTC when the viewer has none or their zone was refused.
+   */
+  readonly tz: string;
   /** Time on the x-axis, stacked by commodity. */
   readonly byCommodity: readonly DeliveryBucket[];
   /** The same time buckets, stacked by commander. */
@@ -616,8 +634,25 @@ export class ColonyService {
    *
    * `date_trunc` rather than arithmetic in Node: bucketing in SQL means one row per bar rather than
    * every contribution crossing the wire to be counted here.
+   *
+   * ★ BUCKETED IN THE VIEWER'S OWN ZONE — REPORTED 2026-08-04 ★
+   *
+   * `date_trunc` on a timestamptz truncates in the SESSION's zone, which is UTC — so a "day" bar
+   * was midnight-to-midnight UTC, and every client then labelled that bar in the DEVICE's zone.
+   * For anybody west of Greenwich the two disagreed all evening: a delivery at 21:00 their time
+   * sat in UTC's next day, drawn under a label naming the previous one. `AT TIME ZONE $3` shifts
+   * each delivery to the viewer's wall clock BEFORE truncating, so a member's day bar means the
+   * day they actually flew.
    */
-  async deliveryChart(projectId: string): Promise<DeliveryCharts> {
+  async deliveryChart(projectId: string, tz: string = DEFAULT_TIMEZONE): Promise<DeliveryCharts> {
+    /*
+     * Refused zones become UTC rather than errors, in two layers. This check catches anything the
+     * runtime does not recognise before it can reach SQL; the retry below catches the rarer case
+     * of a zone Node knows and this Postgres's older tzdata does not. Either way the member gets
+     * a chart — in UTC, honestly captioned as UTC — rather than a 500 for a preference string.
+     */
+    let zone = isValidTimezone(tz) ? tz : DEFAULT_TIMEZONE;
+
     const span = await this.db.$queryRawUnsafe<Array<{ hours: number | null }>>(
       `SELECT EXTRACT(EPOCH FROM (max(delivered_at) - min(delivered_at))) / 3600 AS hours
          FROM colony_contributions WHERE project_id = $1::uuid`,
@@ -645,35 +680,73 @@ export class ColonyService {
      * over a fortnight is a few hundred rows, because most commanders never touch most commodities
      * on most days.
      */
-    const rows = await this.db.$queryRawUnsafe<
-      Array<{ at: Date; commodity: string; commander: string | null; amount: bigint }>
-    >(
-      `SELECT date_trunc($2, c.delivered_at) AS at,
-              c.commodity,
-              u.display_name AS commander,
-              SUM(c.amount)::bigint AS amount
-         FROM colony_contributions c
-         LEFT JOIN users u ON u.id = c.user_id
-        WHERE c.project_id = $1::uuid
-        GROUP BY 1, 2, 3
-        ORDER BY 1`,
-      projectId,
-      bucket,
-    );
+    /*
+     * ★ THE BUCKET LEAVES POSTGRES AS TEXT, ON PURPOSE ★
+     *
+     * `date_trunc(..., ts AT TIME ZONE zone)` yields a zone-local NAIVE timestamp, and a naive
+     * timestamp handed to a Date-typed driver gets reinterpreted as UTC — the exact reparse this
+     * fix removes from the clients, reintroduced one layer down. `to_char` freezes the wall time
+     * into a string the moment it is correct, and nothing downstream ever parses it again.
+     */
+    const read = (): Promise<
+      Array<{ at: string; commodity: string; commander: string | null; amount: bigint }>
+    > =>
+      this.db.$queryRawUnsafe(
+        `SELECT to_char(date_trunc($2, c.delivered_at AT TIME ZONE $3), 'YYYY-MM-DD"T"HH24:MI') AS at,
+                c.commodity,
+                u.display_name AS commander,
+                SUM(c.amount)::bigint AS amount
+           FROM colony_contributions c
+           LEFT JOIN users u ON u.id = c.user_id
+          WHERE c.project_id = $1::uuid
+          GROUP BY 1, 2, 3
+          ORDER BY 1`,
+        projectId,
+        bucket,
+        zone,
+      );
+
+    let rows: Awaited<ReturnType<typeof read>>;
+    try {
+      rows = await read();
+    } catch (error) {
+      // The second layer of the fallback above: Node accepted the zone and Postgres did not.
+      if (zone === DEFAULT_TIMEZONE) throw error;
+      zone = DEFAULT_TIMEZONE;
+      rows = await read();
+    }
+
+    /*
+     * The axis text, authored where the zone is known. Day buckets go through Intl pinned to UTC —
+     * the key is already the viewer's wall time, so UTC here means "format the parts as written",
+     * and `en-GB` keeps the label identical to every other date the site renders. Hour buckets are
+     * a substring: the key IS the wall clock.
+     */
+    const dayLabel = new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'UTC',
+      day: 'numeric',
+      month: 'short',
+    });
+    const labelOf = (at: string): string =>
+      bucket === 'hour' ? `${at.slice(11, 13)}:00` : dayLabel.format(new Date(`${at}:00Z`));
 
     /** Accumulates a stacked series onto a bucket keyed by time. */
     const stackByTime = (pick: (r: (typeof rows)[number]) => string): DeliveryBucket[] => {
-      const map = new Map<number, { at: Date; bySeries: Record<string, number>; total: number }>();
+      const map = new Map<
+        string,
+        { at: string; label: string; bySeries: Record<string, number>; total: number }
+      >();
       for (const r of rows) {
-        const key = r.at.getTime();
-        const slice = map.get(key) ?? { at: r.at, bySeries: {}, total: 0 };
+        const slice = map.get(r.at) ?? { at: r.at, label: labelOf(r.at), bySeries: {}, total: 0 };
         const amount = Number(r.amount);
         const series = pick(r);
         slice.bySeries[series] = (slice.bySeries[series] ?? 0) + amount;
         slice.total += amount;
-        map.set(key, slice);
+        map.set(r.at, slice);
       }
-      return [...map.values()].sort((a, b) => a.at.getTime() - b.at.getTime());
+      // `YYYY-MM-DDTHH:MM` sorts lexicographically in time order, which is why the key keeps
+      // that shape rather than anything friendlier.
+      return [...map.values()].sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
     };
 
     /*
@@ -695,6 +768,9 @@ export class ColonyService {
 
     return {
       bucket,
+      // The zone the buckets were REALLY cut in — after both fallbacks — so the caption a client
+      // prints can never claim a zone the SQL did not use.
+      tz: zone,
       byCommodity: stackByTime((r) => r.commodity),
       byCommander: stackByTime(commanderOf),
       // Biggest first. A ranked axis is read top-down and answers "who is carrying this build"
@@ -703,6 +779,29 @@ export class ColonyService {
         .map(([commander, stack]) => ({ commander, ...stack }))
         .sort((a, b) => b.total - a.total),
     };
+  }
+
+  /**
+   * The zone a member reads times in, for the chart above.
+   *
+   * ★ ONE INDEXED READ, RESOLVED WHERE THE SESSION IS ★
+   *
+   * The platform stores every member's timezone precisely so a server can answer "whose evening is
+   * this" without trusting a device clock (see common/timezone.ts). Both colony controllers call
+   * this rather than each reading `users` themselves — one rule about what an absent or unusable
+   * zone means, in the same file as the query that depends on the answer. Guests read UTC, which
+   * is also what the column defaults to.
+   */
+  async viewerTimezone(userId: string | null): Promise<string> {
+    if (userId === null) return DEFAULT_TIMEZONE;
+
+    const user = await this.db.user.findUnique({
+      where: { id: userId },
+      select: { timezone: true },
+    });
+
+    const tz = user?.timezone ?? DEFAULT_TIMEZONE;
+    return isValidTimezone(tz) ? tz : DEFAULT_TIMEZONE;
   }
 
   /**

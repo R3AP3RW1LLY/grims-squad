@@ -75,3 +75,49 @@ describe('the colonisation project reads', () => {
     ).resolves.toBeInstanceOf(Array);
   });
 });
+
+/**
+ * The delivery chart read, the same shape `ColonyService.deliveryChart` runs — `$3` is the
+ * viewer's IANA zone, and `to_char` freezes the zone-local bucket into text so no driver or
+ * client can reinterpret it as an instant again.
+ */
+const CHART_SELECT = `
+  SELECT to_char(date_trunc($2, c.delivered_at AT TIME ZONE $3), 'YYYY-MM-DD"T"HH24:MI') AS at,
+         c.commodity,
+         u.display_name AS commander,
+         SUM(c.amount)::bigint AS amount
+    FROM colony_contributions c
+    LEFT JOIN users u ON u.id = c.user_id
+   WHERE c.project_id = $1::uuid
+   GROUP BY 1, 2, 3
+   ORDER BY 1`;
+
+describe('the delivery chart bucketing', () => {
+  it('runs the tz-aware chart query Postgres actually has to accept', async () => {
+    // The project id matches nothing on purpose — the value is the query being ACCEPTED, exactly
+    // as the reads above are tested, not in whatever rows this database happens to hold.
+    await expect(
+      db.$queryRawUnsafe(CHART_SELECT, '00000000-0000-0000-0000-000000000000', 'day', 'America/Denver'),
+    ).resolves.toBeInstanceOf(Array);
+  });
+
+  it('puts a 23:30-local delivery in the viewer’s local day, not UTC’s next day', async () => {
+    /*
+     * ★ THE REPORTED BUG, REDUCED TO ONE ROW ★
+     *
+     * 05:30 UTC on 4 August IS 23:30 on 3 August in Denver. Truncated the old way — in the
+     * session's zone, UTC — that delivery lands on the 4th, and a member who hauled all evening
+     * watched their bars stack onto yesterday. Truncated in the viewer's zone it lands on the
+     * 3rd, the evening they actually flew. Fixed instants, so no seed data and no flakiness;
+     * asserting BOTH sides proves the `AT TIME ZONE` is doing the work rather than the test
+     * passing vacuously.
+     */
+    const rows = await db.$queryRawUnsafe<Array<{ denver: string; utc: string }>>(`
+      SELECT to_char(date_trunc('day', t AT TIME ZONE 'America/Denver'), 'YYYY-MM-DD"T"HH24:MI') AS denver,
+             to_char(date_trunc('day', t AT TIME ZONE 'UTC'), 'YYYY-MM-DD"T"HH24:MI') AS utc
+        FROM (SELECT TIMESTAMPTZ '2026-08-04 05:30:00+00' AS t) delivery`);
+
+    expect(rows[0]?.denver).toBe('2026-08-03T00:00');
+    expect(rows[0]?.utc).toBe('2026-08-04T00:00');
+  });
+});

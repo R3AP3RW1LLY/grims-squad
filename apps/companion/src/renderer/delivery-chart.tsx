@@ -44,9 +44,18 @@ Chart.register(BarController, BarElement, CategoryScale, LinearScale, Tooltip, L
  * `bySeries` rather than `byCommodity`: the same bar is stacked by commodity in one view and by
  * commander in the other, and a field named for one of them while holding the other is the kind of
  * lie that costs somebody an hour.
+ *
+ * ★ `at` IS AN OPAQUE KEY, AND `label` IS WHAT THE AXIS DRAWS — 2026-08-04 ★
+ *
+ * The hub cuts the buckets in the MEMBER's stored timezone and sends the wall time with no offset
+ * attached. Running `at` through `new Date()` reinterprets it in the machine's zone — the exact
+ * reparse that used to stack an evening's deliveries onto the previous day's bar for anybody west
+ * of UTC. Render `label`; never parse `at`.
  */
 export interface DeliveryBucket {
   readonly at: string;
+  /** Hub-authored axis text: `23:00` for an hour bucket, `4 Aug` for a day bucket. */
+  readonly label: string;
   readonly bySeries: Record<string, number>;
   readonly total: number;
 }
@@ -249,10 +258,13 @@ export function DeliveryChart({
   buckets,
   bucket,
   by,
+  tz,
 }: {
   buckets: readonly DeliveryBucket[];
   bucket: 'hour' | 'day';
   by: 'commodity' | 'commander';
+  /** The IANA zone the hub cut the buckets in — stated in the footer, never re-derived here. */
+  tz: string;
 }): JSX.Element {
   /*
    * ★ MEMOISED, AND NOT AS AN OPTIMISATION ★
@@ -262,17 +274,15 @@ export function DeliveryChart({
    * down and reconstructed on each one, animating from zero every time anything on the page moves.
    * That is the same shape of bug as the overlay rebuild loop: correct-looking code whose only
    * symptom is that something never settles.
+   *
+   * ★ THE HUB'S LABELS, VERBATIM — REPORTED 2026-08-04 ★
+   *
+   * This used to `new Date(b.at)` and format in the machine's zone while the hub had bucketed in
+   * UTC, so a member west of Greenwich watched today's deliveries stack onto yesterday's bar. The
+   * buckets now arrive cut in the member's stored zone with their axis text already written, and
+   * parsing `at` here would reintroduce the exact shift this removed.
    */
-  const labels = useMemo(
-    () =>
-      buckets.map((b) => {
-        const d = new Date(b.at);
-        return bucket === 'hour'
-          ? `${String(d.getHours()).padStart(2, '0')}:00`
-          : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
-      }),
-    [buckets, bucket],
-  );
+  const labels = useMemo(() => buckets.map((b) => b.label), [buckets]);
   const stacks = useMemo(() => buckets.map((b) => b.bySeries), [buckets]);
 
   if (buckets.length === 0) {
@@ -289,10 +299,12 @@ export function DeliveryChart({
       stacks={stacks}
       /* The bucket is stated: a chart whose bars mean "an hour" and one whose bars mean "a day"
          look identical and describe very different builds. So is the stacking, because the two
-         views have the same axes and completely different meanings. */
+         views have the same axes and completely different meanings. And so is the ZONE the
+         buckets were cut in — "4 Aug" is a claim about somebody's midnight, and a member quoting
+         the chart to a squadmate abroad needs to know whose. */
       note={`One bar per ${bucket} · stacked by ${by} · ${buckets.length} ${
         bucket === 'hour' ? 'hours' : 'days'
-      } with deliveries`}
+      } with deliveries · times in ${tz}`}
     />
   );
 }

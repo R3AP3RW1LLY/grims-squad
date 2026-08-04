@@ -1,4 +1,5 @@
 import type { ColonyDelivery } from '../../../../lib/api';
+import { formatLocal, zoneLabel } from '../../../../lib/time';
 
 /**
  * Every delivery, newest first.
@@ -25,7 +26,14 @@ const TD = 'border-t border-[var(--color-border-hairline)] py-2.5 pr-4 align-mid
 /** How many rows before it stops being a page and starts being a database dump. */
 const SHOWN = 40;
 
-export function DeliveryLedger({ deliveries }: { deliveries: readonly ColonyDelivery[] }) {
+export function DeliveryLedger({
+  deliveries,
+  tz,
+}: {
+  deliveries: readonly ColonyDelivery[];
+  /** The viewer's stored IANA zone. Every "when" below renders in it, and the caption says so. */
+  tz: string;
+}) {
   if (deliveries.length === 0) {
     return (
       <p className="m-0 text-sm text-[var(--color-text-secondary)]">
@@ -62,13 +70,14 @@ export function DeliveryLedger({ deliveries }: { deliveries: readonly ColonyDeli
                     The full timestamp, not "3 hours ago". A relative time is friendlier and is the
                     wrong tool here: somebody checking whether their own run registered is comparing
                     against a clock, and "3 hours ago" cannot be compared to anything.
+
+                    ★ THE MEMBER'S STORED ZONE, NOT A BARE toLocaleString — REPORTED 2026-08-04 ★
+
+                    This is a server component, so a bare `toLocaleString` was the SERVER's clock —
+                    an unlabelled time that looked local and wasn't. `formatLocal` takes the stored
+                    zone explicitly, and the caption under the table names it.
                   */}
-                  {new Date(d.at).toLocaleString('en-GB', {
-                    day: 'numeric',
-                    month: 'short',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })}
+                  {formatLocal(d.at, tz)}
                 </td>
               </tr>
             ))}
@@ -82,6 +91,16 @@ export function DeliveryLedger({ deliveries }: { deliveries: readonly ColonyDeli
           Showing the {SHOWN} most recent of {deliveries.length.toLocaleString()}.
         </p>
       ) : null}
+
+      <p className="m-0 mt-3 font-mono text-[11px] text-[var(--color-text-secondary)]">
+        {/*
+          The zone, stated — the same reason the audit log stamps UTC on every line. A time with
+          no zone reads as whatever clock the reader assumes, and this table exists to be compared
+          against one ("did my 23:30 run land?"). The offset rides along because a member quoting
+          a row to a squadmate abroad needs it.
+        */}
+        Times in {tz} ({zoneLabel(tz)}).
+      </p>
     </div>
   );
 }

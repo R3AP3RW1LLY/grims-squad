@@ -244,6 +244,13 @@ export class ColonyDeviceController {
     const origin = typed === '' ? project.systemName : typed;
     const coords = origin === '' ? null : await this.market.systemCoords(origin);
 
+    /*
+     * The chart is bucketed in the MEMBER's stored zone, exactly as the website's controller does
+     * it — the device's own clock is never consulted, because a laptop set to another country is
+     * how the day bars ended up wrong in the first place (see deliveryChart).
+     */
+    const tz = await this.colony.viewerTimezone(me.userId);
+
     const [needs, haulers, shopping, deliveries, chart, carriers] = await Promise.all([
       this.colony.needs(id),
       this.colony.haulers(id),
@@ -264,7 +271,7 @@ export class ColonyDeviceController {
       // rather than on their own routes: the page shows them together, and three round trips would
       // render it in three stages, each shifting the layout under whoever is reading.
       this.colony.deliveries(id),
-      this.colony.deliveryChart(id),
+      this.colony.deliveryChart(id, tz),
       // What is already sitting in a hold. The app gets it because the website does — a member
       // reading the same build in two places must not be told two different things about it.
       this.carriers.forProject(id),

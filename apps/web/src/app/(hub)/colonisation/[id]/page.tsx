@@ -8,7 +8,7 @@ import {
 } from '../../../../components/hub-page';
 import { PageTabs, resolveTab, type PageTab } from '../../../../components/page-tabs';
 import { NoAccess, AdminUnavailable } from '../../app/no-access';
-import { getColonyProject } from '../../../../lib/api';
+import { getColonyProject, getMe } from '../../../../lib/api';
 import { NeedsTable } from './needs-table';
 import { ShoppingList } from './shopping-list';
 import { Carriers } from './carriers';
@@ -116,7 +116,17 @@ export default async function ColonyProjectPage({
    */
   const filters = new URLSearchParams(query).toString();
 
-  const read = await getColonyProject(id, query);
+  /*
+   * ★ THE MEMBER'S STORED TIMEZONE, NEVER THE SERVER'S — REPORTED 2026-08-04 ★
+   *
+   * The delivery ledger is server-rendered, and it used to format its timestamps with a bare
+   * `toLocaleString` — which on a server is the SERVER's zone, unlabelled: a plausible time that
+   * is simply wrong for anyone living elsewhere. The stored zone is known before the first byte
+   * of HTML (see lib/time.ts), so the ledger renders the member's own clock with no flicker and
+   * no hydration mismatch. Fetched alongside the project read because neither waits on the other.
+   */
+  const [read, me] = await Promise.all([getColonyProject(id, query), getMe()]);
+  const viewerTz = me.user?.timezone ?? 'UTC';
 
   if (read.state === 'forbidden') {
     return <NoAccess what="this colonisation project" permission="COLONY_VIEW" />;
@@ -289,7 +299,7 @@ export default async function ColonyProjectPage({
         */}
         {tab !== 'deliveries' ? null : (
           <Section title="Every delivery">
-            <DeliveryLedger deliveries={deliveries} />
+            <DeliveryLedger deliveries={deliveries} tz={viewerTz} />
           </Section>
         )}
 

@@ -193,6 +193,8 @@ export interface ProjectDetailData {
   deliveries: Delivery[];
   chart: {
     bucket: 'hour' | 'day';
+    /** The IANA zone the hub cut the buckets in — the member's stored one, never this machine's. */
+    tz: string;
     byCommodity: DeliveryBucket[];
     byCommander: DeliveryBucket[];
     haulers: HaulerStack[];
@@ -930,10 +932,20 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
    * some window. Missing arrays therefore become empty ones and the panel says "nothing yet", which
    * is honest and legible. The <Guard> below catches whatever this does not anticipate.
    */
+  /*
+   * The same mismatched-pair defense, applied to the axis text: buckets from an older hub carry
+   * an instant and no `label`, and mapping those straight onto the axis draws "undefined" per
+   * bar. The key's own text is a legible clock until the hub deploy that authors real labels.
+   */
+  const labelled = (buckets: DeliveryBucket[]): DeliveryBucket[] =>
+    buckets.map((b) => (typeof b.label === 'string' ? b : { ...b, label: b.at.slice(0, 16) }));
+
   const chart = {
     bucket: data.chart?.bucket ?? 'hour',
-    byCommodity: data.chart?.byCommodity ?? [],
-    byCommander: data.chart?.byCommander ?? [],
+    // An older hub bucketed in UTC and sent no zone, so UTC is the one honest default here.
+    tz: data.chart?.tz ?? 'UTC',
+    byCommodity: labelled(data.chart?.byCommodity ?? []),
+    byCommander: labelled(data.chart?.byCommander ?? []),
     haulers: data.chart?.haulers ?? [],
   };
   const outstanding = needs.filter((n) => n.remaining > 0);
@@ -1135,6 +1147,7 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
               buckets={stackBy === 'commodity' ? chart.byCommodity : chart.byCommander}
               bucket={chart.bucket}
               by={stackBy}
+              tz={chart.tz}
             />
           )}
         </Card>
@@ -1150,7 +1163,12 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
               <Row
                 key={`${d.at}-${d.commodity}-${i}`}
                 left={d.commodity}
-                sub={`${d.commander} · ${new Date(d.at).toLocaleString()}`}
+                /*
+                  This machine's zone, and SAID so. The device is on the member's own desk, so
+                  its clock is the right one for "did my run land" — but an unlabelled local time
+                  quoted to a squadmate abroad is a wrong time, so the zone name travels with it.
+                */
+                sub={`${d.commander} · ${new Date(d.at).toLocaleString(undefined, { timeZoneName: 'short' })}`}
                 right={tonnes(d.amount)}
               />
             ))}

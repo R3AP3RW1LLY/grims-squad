@@ -166,16 +166,15 @@ export function DeliveryTimeline({ chart }: { chart: ColonyCharts }) {
    * changes its hook count between renders and React refuses at exactly the moment the first
    * delivery lands and the panel switches from words to a chart.
    */
-  const labels = useMemo(
-    () =>
-      buckets.map((b) => {
-        const d = new Date(b.at);
-        return chart.bucket === 'hour'
-          ? `${String(d.getHours()).padStart(2, '0')}:00`
-          : d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
-      }),
-    [buckets, chart.bucket],
-  );
+  /*
+   * ★ THE SERVER'S LABELS, VERBATIM — REPORTED 2026-08-04 ★
+   *
+   * This used to `new Date(b.at)` and format in the browser's zone, while the SQL had bucketed in
+   * UTC — so a viewer west of Greenwich watched an evening's deliveries stack onto the PREVIOUS
+   * day's bar. The buckets are now cut in the member's stored zone and arrive with their axis text
+   * already written; parsing `at` here would reintroduce the exact shift this removed.
+   */
+  const labels = useMemo(() => buckets.map((b) => b.label), [buckets]);
   const stacks = useMemo(() => buckets.map((b) => b.bySeries), [buckets]);
 
   if (buckets.length === 0) {
@@ -227,10 +226,12 @@ export function DeliveryTimeline({ chart }: { chart: ColonyCharts }) {
           height={220}
           /* The bucket is stated: a chart whose bars mean "an hour" and one whose bars mean "a
              day" look identical and describe very different builds. So is the stacking, because
-             the two views share their axes and mean completely different things. */
+             the two views share their axes and mean completely different things. And so is the
+             ZONE the buckets were cut in — "4 Aug" is a claim about somebody's midnight, and a
+             member quoting the chart to a squadmate abroad needs to know whose. */
           note={`One bar per ${chart.bucket} · stacked by ${stackBy} · ${buckets.length} ${
             chart.bucket === 'hour' ? 'hours' : 'days'
-          } with deliveries`}
+          } with deliveries · times in ${chart.tz}`}
         />
       )}
     </div>

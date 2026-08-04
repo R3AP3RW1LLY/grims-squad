@@ -32,12 +32,7 @@ export {
  * IDENTICAL rules — two copies would drift, and the half that drifted would be the one deciding
  * whether a fortnight of hauling is legal.
  */
-export {
-  NO_EFFECTS,
-  prerequisiteName,
-  simulatePlan,
-  surchargedCost,
-} from './colony-simulation.js';
+export { NO_EFFECTS, prerequisiteName, simulatePlan, surchargedCost } from './colony-simulation.js';
 export type {
   SimBuildType,
   SimProblem,
@@ -65,6 +60,20 @@ export type {
   EconomyScores,
   SiteEconomy,
 } from './colony-economy.js';
+
+export {
+  ECONOMY_MARKETS,
+  MAJOR_FRACTION,
+  MARKET_COMMODITIES,
+  marketScale,
+  predictMarket,
+} from './colony-market.js';
+export type {
+  EconomySlate,
+  MarketStationType,
+  PredictedCommodity,
+  PredictedMarket,
+} from './colony-market.js';
 
 export { NonceService, formatNonce, NONCE_TTL_MS } from './nonce.service.js';
 export type { NonceStore, NonceClaim, CheckResult, CheckOutcome } from './nonce.service.js';

@@ -125,6 +125,18 @@ export function PriceHistory({ points }: { points: readonly HistoryPoint[] }) {
             ticks: {
               ...TICKS,
               maxTicksLimit: 6,
+              /*
+               * ★ INSTANTS, LABELLED IN THE BROWSER'S OWN ZONE — AUDITED 2026-08-04 ★
+               *
+               * The axis is linear over epoch milliseconds, so every point's POSITION is
+               * zone-independent — this chart had no yesterday-shift to fix. Only the labels
+               * have a zone, and the browser's is the right one here: this is a client
+               * component, so the machine rendering it is the one the reader is sitting at.
+               * The one trap is below — across two days the label drops the clock, so a
+               * reading taken near local midnight wears a bare day label. That is why the
+               * tooltip title always keeps hour and minute, in this same zone: the day tick
+               * is never the only witness to when a point was.
+               */
               callback: (value) =>
                 new Date(Number(value)).toLocaleString('en-GB', {
                   day: 'numeric',
@@ -150,6 +162,9 @@ export function PriceHistory({ points }: { points: readonly HistoryPoint[] }) {
           tooltip: {
             ...TOOLTIP_DARK,
             callbacks: {
+              // The clock stays here even when the axis ticks have dropped it — a point near
+              // local midnight is otherwise identified by a day label alone, and the day is the
+              // one part of the timestamp that straddling midnight gets wrong.
               title: (items) =>
                 new Date(Number(items[0]?.parsed.x ?? 0)).toLocaleString('en-GB', {
                   day: 'numeric',

@@ -2016,9 +2016,18 @@ export interface ColonyShoppingRow {
  *
  * `bySeries` rather than `byCommodity`: the same bar is stacked by commodity in one view and by
  * commander in the other, and a field named for one of them while holding the other is a lie.
+ *
+ * ★ `at` IS AN OPAQUE KEY, AND `label` IS WHAT THE AXIS DRAWS — 2026-08-04 ★
+ *
+ * The buckets are cut in the VIEWER's stored timezone on the server, and `at` is the bucket's
+ * wall time in that zone with no offset attached. Running it through `new Date()` reinterprets
+ * it in the browser's zone — which is precisely the reparse that used to stack today's
+ * deliveries onto yesterday's bar for anybody west of UTC. Render `label`; never parse `at`.
  */
 export interface ColonyDeliveryBucket {
   at: string;
+  /** Server-authored axis text: `23:00` for an hour bucket, `4 Aug` for a day bucket. */
+  label: string;
   bySeries: Record<string, number>;
   total: number;
 }
@@ -2033,6 +2042,8 @@ export interface ColonyHaulerStack {
 /** Both charts on a project page, in one read. Switching between them costs no round trip. */
 export interface ColonyCharts {
   bucket: 'hour' | 'day';
+  /** The IANA zone the buckets were cut in, so the footer can say whose day a bar means. */
+  tz: string;
   byCommodity: ColonyDeliveryBucket[];
   byCommander: ColonyDeliveryBucket[];
   haulers: ColonyHaulerStack[];
