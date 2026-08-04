@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { PageHeader, PageBody, Section } from '../../../../components/hub-page';
+import { LiveRefresh } from '../../../../components/live-refresh';
 import { NoAccess, AdminUnavailable } from '../../app/no-access';
 import { getColonyProjects } from '../../../../lib/api';
 import { ProjectBoard } from '../project-board';
@@ -53,11 +54,22 @@ export default async function SquadronProjectsPage() {
         title="SQUADRON PROJECTS"
         subtitle="What the squadron is building, and what it still needs"
       />
+      {/*
+        ★ A BOARD LEFT OPEN GOES QUIETLY WRONG ★
+
+        Progress moves whenever ANY member hauls, and the companion re-reads both boards every
+        sixty seconds for exactly that reason. The website only ever refreshed on a manual reload,
+        so a board open on a second monitor showed tonnages that were true an hour ago.
+
+        `telemetry` is the right signal rather than a new one: it fires when a device uploads its
+        journal, and a colonisation delivery IS a journal upload.
+      */}
+      <LiveRefresh types={['telemetry']} />
       <PageBody
         wide
         lead="Every site the squadron has taken on. Open one to see what it still needs, who has hauled to it, and where to buy the rest."
       >
-        <Section title="Squadron projects">
+        <Section title={`Squadron projects (${squadron.length})`}>
           <ProjectBoard
             projects={squadron}
             emptyMessage="No squadron projects yet. An officer can post one from Start New Project."

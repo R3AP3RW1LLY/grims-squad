@@ -451,6 +451,26 @@ body.scanlines::after {
   color: #e8eef5;
 }
 
+/*
+ * A panel that opens something.
+ *
+ * ★ IT HAD NO HOVER AND NO FOCUS RING AT ALL ★
+ *
+ * The board row was a div with an inline `cursor: pointer` and nothing else — so there was no
+ * feedback on hover, and once it became keyboard-reachable there was nothing to show WHERE the
+ * keyboard was. accessibility.md treats a missing focus indicator as review-blocking, and it is
+ * right to: a member tabbing through a list of projects could not tell which one Enter would open.
+ *
+ * Not inline, for the reason at the top of this file: an inline value outranks these rules and
+ * freezes the control.
+ */
+.row-open {
+  transition: border-color 150ms ease;
+}
+.row-open:hover {
+  border-color: rgba(255, 113, 0, 0.55);
+}
+
 /* A chip somebody can claim. Same idea as .tab, on a control that is not selectable. */
 .chip {
   border-radius: 4px;

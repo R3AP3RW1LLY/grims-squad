@@ -316,10 +316,16 @@ export function ColonyBoardPage({
         <Board
           projects={mine}
           onOpen={setOpenId}
+          /*
+           * The website's strings, verbatim. The app's said "New project" for a destination its own
+           * sidebar calls "Start New Project", and dropped the members-board instruction entirely —
+           * on the one screen where the instruction matters most, because an empty board that does
+           * not say what to do next is a dead end.
+           */
           empty={
             owner === 'squadron'
-              ? 'No squadron projects yet. An officer can post one from New project.'
-              : 'Nobody has posted a project yet.'
+              ? 'No squadron projects yet. An officer can post one from Start New Project.'
+              : 'Nobody has posted a project yet. Post yours from Start New Project and the squadron can see what you need.'
           }
         />
       </Section>
@@ -591,12 +597,36 @@ function Board({
           key={p.id}
           onClick={() => onOpen(p.id)}
           /*
+           * ★ REACHABLE WITHOUT A MOUSE ★
+           *
+           * This was a bare `<div onClick>`: no role, no tab stop, no key handler. It is the ONLY
+           * way into a project in the app, so the entire colonisation feature was unreachable by
+           * keyboard and announced to a screen reader as a meaningless group of text. The website's
+           * equivalent has always been a real anchor.
+           *
+           * A div with button semantics rather than a real `<button>` because the row contains a
+           * progress bar and a copy control, and a button may not contain interactive children —
+           * nesting them is invalid markup that browsers resolve unpredictably.
+           *
+           * Space is prevented as well as handled: on a focused control it scrolls the page, so
+           * without that the row would open AND jump.
+           */
+          role="button"
+          tabIndex={0}
+          aria-label={`Open ${p.title}`}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              onOpen(p.id);
+            }
+          }}
+          /*
            * The same glass as every other panel. These rows were left as opaque rounded boxes when
            * the theme landed, which put flat rectangles with invisible edges directly under a
            * chamfered translucent card — the one screen that is the main way into colonisation,
            * looking like it belonged to a different application.
            */
-          class="panel"
+          class="panel row-open"
           style={{
             cursor: 'pointer',
             padding: '12px 14px',
@@ -625,7 +655,28 @@ function Board({
                 </span>
               ) : null}
             </span>
-            <span style={{ fontSize: '11px', color: C.faint }}>{p.systemName}</span>
+            {/*
+              System, site and who posted it — all three already on the wire and none of them
+              rendered. The station is the only thing telling two builds in the same system apart,
+              and the copy button is the owner's own ask: "so its easier to drop them into the
+              galaxy / system maps".
+            */}
+            <span
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px',
+                fontSize: '11px',
+                color: C.faint,
+              }}
+              /* The row is a button; a click on the copy control inside it must not also open it. */
+              onClick={(e) => e.stopPropagation()}
+            >
+              {p.systemName}
+              <Copy value={p.systemName} />
+              {p.stationName === null ? '' : `· ${p.stationName}`}
+              {p.postedBy === null ? '' : `· by ${p.postedBy}`}
+            </span>
           </div>
 
           <div style={{ marginTop: '8px' }}>

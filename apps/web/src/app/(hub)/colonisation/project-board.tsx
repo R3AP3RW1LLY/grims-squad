@@ -40,10 +40,16 @@ export function ProjectBoard({
         return (
           <article
             key={p.id}
-            className={`rounded-lg border bg-[var(--color-surface-panel)] p-4 ${
-              p.isPriority
-                ? 'border-[var(--color-brand-orange)]'
-                : 'border-[var(--color-border-hairline)]'
+            /*
+             * ★ THE GLASS THE SITE ALREADY SHIPS ★
+             *
+             * These were opaque rounded boxes while the companion's equivalent rows used the
+             * chamfered translucent panel — on the two surfaces the owner asked to look alike, on
+             * the main way into colonisation. `.panel` and `.panel-interactive` have been in
+             * globals.css the whole time and were simply not applied here.
+             */
+            className={`panel panel-interactive p-4 ${
+              p.isPriority ? 'border-[var(--color-brand-orange)]' : ''
             }`}
           >
             <header className="flex flex-wrap items-baseline justify-between gap-2">
