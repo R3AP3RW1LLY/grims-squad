@@ -463,14 +463,28 @@ export class PrismaMarketStore implements MarketStore {
   }
 
   /**
-   * The pulse. One indexed max, cheap enough for every page that shows a price.
+   * The pulse — read from the COLLECTOR'S OWN BOOKKEEPING, not from the market table.
    *
-   * Deliberately NOT cached: a cached pulse that goes stale is the exact failure this exists to
-   * detect, and the query is a single index lookup.
+   * ★ THE FIRST VERSION OF THIS TOOK THE WHOLE MODULE DOWN ★
+   *
+   * It was `SELECT max(market_seen_at) FROM market_entries`, and its comment called that "one
+   * indexed max". There is no index on `market_seen_at` — the two indexes on this table are
+   * `(commodity, buy_price)` and `(commodity, sell_price)`, both partial. So it was a sequential
+   * scan of eighteen and a half million rows, on a table the EDDN collector is writing to
+   * continuously, on EVERY request that showed a price.
+   *
+   * The scans piled up, held their connections, and starved the pool: within minutes every route in
+   * this module answered 500, including ones that touch none of this. Reported as "an unexpected
+   * error occurred ... the project wont open anymore".
+   *
+   * `knowledge_ingests` already carries the answer and is a few hundred rows. The collector opens a
+   * window, updates `progress_at` on a timer, and closes it — so the newest eddn row is exactly
+   * "when the collector last did work", which is a BETTER answer than the old one anyway: it
+   * distinguishes a stopped collector from a quiet galaxy, where a max over prices cannot.
    */
   async feedHealth(): Promise<FeedHealth> {
     const [row] = await this.db.$queryRawUnsafe<Array<{ newest: Date | null }>>(
-      `SELECT max(market_seen_at) AS newest FROM market_entries`,
+      `SELECT max(progress_at) AS newest FROM knowledge_ingests WHERE source = 'eddn'`,
     );
 
     const newestAt = row?.newest ?? null;
