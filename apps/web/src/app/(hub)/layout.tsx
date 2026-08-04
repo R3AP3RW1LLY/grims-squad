@@ -54,6 +54,8 @@ import { getMe, getMyPrivacy } from '../../lib/api';
 const PUBLIC_PATHS: readonly string[] = [
   '/shipyard',
   '/shipyard/public',
+  // The site describing itself — public per the owner, 2026-08-04.
+  '/changelog',
   /*
    * Squadron owner, 2026-08-01: the public navbar's Forum link must take people "to the forum page
    * and only show them publically viewable forum categories".

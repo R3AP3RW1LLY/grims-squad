@@ -11,6 +11,10 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./version": {
+      "types": "./dist/version.d.ts",
+      "default": "./dist/version.js"
+    },
     "./leaderboards": {
       "types": "./dist/leaderboards.d.ts",
       "default": "./dist/leaderboards.js"

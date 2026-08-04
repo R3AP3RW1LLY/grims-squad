@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useId, useRef, useState } from 'react';
+import { PLATFORM_VERSION } from '@grims/shared/version';
 import {
   Dialog,
   DialogBackdrop,
@@ -33,6 +34,7 @@ import {
   BuildingOffice2Icon,
   TrophyIcon,
   MegaphoneIcon,
+  NewspaperIcon,
   MapIcon,
 } from '@heroicons/react/24/outline';
 import { ChevronDownIcon } from '@heroicons/react/20/solid';
@@ -105,6 +107,8 @@ const ICONS: Record<string, typeof HomeIcon> = {
   // Stations gone dark on the map, which is what a runner is fixing. This entry was missing and
   // the board fell back to HomeIcon — two "home" entries in one section, neither of them home.
   '/bounties': MapIcon,
+  // Release notes read like news, and a newspaper is what news looks like.
+  '/changelog': NewspaperIcon,
 };
 
 /**
@@ -443,6 +447,18 @@ function SidebarContents({ me, current }: { me: MeResponse; current: string }) {
               </a>
               <a href="/terms" className="hover:text-[var(--color-text-primary)]">
                 Terms
+              </a>
+              {/*
+                ★ ONE VERSION, BOTH SURFACES — SQUADRON OWNER, 2026-08-04 ★
+                The same PLATFORM_VERSION the companion app prints; the version-sync spec keeps
+                the two equal, the changelog stamps it on every release, and it links there
+                because "what is this version" is exactly what the changelog answers.
+              */}
+              <a
+                href="/changelog"
+                className="ml-auto font-mono text-[10px] tracking-[0.18em] text-[var(--color-text-dim)] hover:text-[var(--color-text-primary)]"
+              >
+                v{PLATFORM_VERSION}
               </a>
             </p>
           </li>

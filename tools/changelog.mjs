@@ -40,7 +40,7 @@
  */
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
+import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 /* ────────────────────────────────────────────────── pure, tested functions */
@@ -152,7 +152,22 @@ export function parseGitLog(raw) {
  * The whole release, built from parsed commits: one entry per commit per
  * section, and the three per-section markdown documents the database stores.
  */
-export function buildRelease({ fromSha, toSha, commits, generatedAt }) {
+/**
+ * The platform version, read from the companion's package.json — the copy the version-sync spec
+ * holds equal to PLATFORM_VERSION, and the one file this tool can reach without importing
+ * TypeScript. Null when unreadable rather than a crash: a changelog without a version is still a
+ * changelog.
+ */
+export function readPlatformVersion(repo) {
+  try {
+    const pkg = JSON.parse(readFileSync(join(repo, 'apps', 'companion', 'package.json'), 'utf8'));
+    return typeof pkg.version === 'string' && pkg.version !== '' ? pkg.version : null;
+  } catch {
+    return null;
+  }
+}
+
+export function buildRelease({ fromSha, toSha, commits, generatedAt, version = null }) {
   const entries = commits.map((commit) => ({
     sha: commit.sha,
     subject: humanizeSubject(commit.subject),
@@ -172,6 +187,7 @@ export function buildRelease({ fromSha, toSha, commits, generatedAt }) {
     fromSha,
     toSha,
     generatedAt,
+    version,
     commitCount: commits.length,
     websiteMd: sectionMd('website'),
     companionMd: sectionMd('companion'),
@@ -186,7 +202,7 @@ export function renderMarkdown(release) {
     `## ${title}\n\n${md === '' ? `_${emptyLine}_` : md}`;
 
   return [
-    `# Grim's Squad changelog — ${release.fromSha.slice(0, 8)}..${release.toSha.slice(0, 8)}`,
+    `# Grim's Squad changelog — ${release.version === null ? '' : `v${release.version}, `}${release.fromSha.slice(0, 8)}..${release.toSha.slice(0, 8)}`,
     `_${release.commitCount} commit${release.commitCount === 1 ? '' : 's'}, generated ${release.generatedAt}._`,
     section('Website', release.websiteMd, 'Nothing in this range touched the website.'),
     section('Companion App', release.companionMd, 'Nothing in this range touched the companion app.'),
@@ -204,6 +220,11 @@ export function renderMarkdown(release) {
  * 40-hex before they get near this string, so the single quotes around them
  * are safe by construction.
  */
+/** Version quoted only when it is provably plain semver-ish text — same doctrine as the SHAs. */
+function sqlVersion(version) {
+  return version !== null && /^[0-9A-Za-z.-]+$/.test(version) ? `'${version}'` : 'NULL';
+}
+
 export function renderSql(release) {
   const quote = (text) => {
     let tag = 'grimslog';
@@ -211,8 +232,8 @@ export function renderSql(release) {
     return `$${tag}$${text}$${tag}$`;
   };
   return [
-    `INSERT INTO changelog_releases (from_sha, to_sha, website_md, companion_md, platform_md)`,
-    `VALUES ('${release.fromSha}', '${release.toSha}', ${quote(release.websiteMd)}, ${quote(release.companionMd)}, ${quote(release.platformMd)});`,
+    `INSERT INTO changelog_releases (from_sha, to_sha, version, website_md, companion_md, platform_md)`,
+    `VALUES ('${release.fromSha}', '${release.toSha}', ${sqlVersion(release.version)}, ${quote(release.websiteMd)}, ${quote(release.companionMd)}, ${quote(release.platformMd)});`,
     '',
   ].join('\n');
 }
@@ -291,6 +312,7 @@ function main() {
     toSha,
     commits,
     generatedAt: new Date().toISOString(),
+    version: readPlatformVersion(repoRoot),
   });
 
   if (opts.mode === 'sql' && commits.length === 0) {

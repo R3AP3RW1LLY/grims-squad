@@ -1,5 +1,6 @@
 import { Controller, Get, Inject } from '@nestjs/common';
 import { Permission } from '@grims/shared';
+import { Public } from '../auth/auth.guard.js';
 import { RequiresPermission } from '../authz/requires-permission.guard.js';
 import { ChangelogStore } from './changelog.store.js';
 import { readPendingChangelog } from './pending.js';
@@ -27,7 +28,15 @@ import { readPendingChangelog } from './pending.js';
 export class ChangelogController {
   constructor(@Inject(ChangelogStore) private readonly store: ChangelogStore) {}
 
-  /** Every recorded release, newest first. */
+  /**
+   * Every recorded release, newest first.
+   *
+   * ★ @Public — SQUADRON OWNER, 2026-08-04: "make the changelog public viewable please so people
+   * can see it when they are not logged in at all!" ★ A changelog is the site describing itself;
+   * every word in it is commit prose about features visitors can already see. The PENDING preview
+   * below stays gated — an undeployed build's contents are operations, not publicity.
+   */
+  @Public()
   @Get()
   async list() {
     return { releases: await this.store.releases() };

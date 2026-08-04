@@ -22,6 +22,7 @@ interface ReleaseRow {
   id: string;
   fromSha: string;
   toSha: string;
+  version: string | null;
   deployedAt: Date;
   websiteMd: string;
   companionMd: string;
@@ -60,6 +61,7 @@ export class ChangelogStore {
         SELECT id,
                from_sha     AS "fromSha",
                to_sha       AS "toSha",
+               version,
                deployed_at  AS "deployedAt",
                website_md   AS "websiteMd",
                companion_md AS "companionMd",

@@ -181,6 +181,8 @@ export {
   type BuildVisibility,
 } from './ship-build.js';
 
+export { PLATFORM_VERSION } from './version.js';
+
 export {
   LEADERBOARD_BADGES,
   COLONY_LINE_CLOSER_BONUS,

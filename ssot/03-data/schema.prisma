@@ -4317,6 +4317,9 @@ model ChangelogRelease {
   fromSha     String   @map("from_sha")
   /// The revision this deploy shipped.
   toSha       String   @map("to_sha")
+  /// The platform version this deploy shipped as (PLATFORM_VERSION at deploy time). Null on
+  /// rows recorded before versions were stamped — inventing them would be fiction.
+  version    String?
   deployedAt  DateTime @default(now()) @map("deployed_at") @db.Timestamptz(6)
   /// What changed on the website (apps/web). Empty string when the deploy touched none of it.
   websiteMd   String   @map("website_md")

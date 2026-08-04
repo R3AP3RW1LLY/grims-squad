@@ -2417,6 +2417,8 @@ export interface ChangelogRelease {
   id: string;
   fromSha: string;
   toSha: string;
+  /** The platform version this deploy shipped as. Null on rows recorded before stamping. */
+  version: string | null;
   deployedAt: string;
   websiteMd: string;
   companionMd: string;
@@ -2427,6 +2429,7 @@ export interface ChangelogRelease {
 export interface PendingChangelog {
   fromSha: string;
   toSha: string;
+  version: string | null;
   generatedAt: string;
   commitCount: number;
   websiteMd: string;

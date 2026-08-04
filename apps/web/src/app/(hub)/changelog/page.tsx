@@ -110,11 +110,19 @@ function ReleaseGroups({
     );
   }
 
+  /*
+   * ★ THE WIDTH IS FILLED WITH DIFFERENT CONTENT — hub-page's own doctrine, applied ★
+   *
+   * The first cut rendered the three groups stacked in the narrow reading column, which on a
+   * wide screen sat "all smashed to the left" (the owner's words). Website, Companion App and
+   * Platform are three parallel answers to the same deploy, so they sit as three columns — each
+   * its own readable measure — collapsing to a stack only where the viewport forces it.
+   */
   return (
-    <div className="space-y-6">
+    <div className={`grid gap-8 ${groups.length > 1 ? 'lg:grid-cols-2 xl:grid-cols-3' : ''}`}>
       {groups.map((group) => (
-        <section key={group.title}>
-          <h3 className="font-mono text-[10px] uppercase tracking-[0.24em] text-[var(--color-brand-cyan-bright)]">
+        <section key={group.title} className="min-w-0">
+          <h3 className="mb-3 border-b border-[var(--color-border-hairline)] pb-2 font-mono text-[10px] uppercase tracking-[0.24em] text-[var(--color-brand-cyan-bright)]">
             {group.title}
           </h3>
           <ChangelogMarkdown md={group.md} />
@@ -138,8 +146,9 @@ function Release({ release, viewerTz }: { release: ChangelogRelease; viewerTz: s
           className="text-lg text-[var(--color-brand-orange)]"
           style={{ fontFamily: 'var(--font-display)' }}
         >
-          {/* The instant it went live is the release's name — members experienced it as a date, not a version number. */}
-          Deployed {bothTimes(release.deployedAt, viewerTz)}
+          {/* The version leads when a release has one; the deploy instant always rides with it. */}
+          {release.version === null ? 'Deployed' : `v${release.version} —`}{' '}
+          {bothTimes(release.deployedAt, viewerTz)}
         </h2>
         <span className="font-mono text-[11px] text-[var(--color-text-secondary)]">
           {release.fromSha.slice(0, 8)} → {release.toSha.slice(0, 8)}
@@ -158,6 +167,7 @@ function PendingRelease({ pending, viewerTz }: { pending: PendingChangelog; view
   return (
     <Panel tone="warning" title="Pending — built, not yet deployed">
       <p className="mb-4 text-sm leading-relaxed text-[var(--color-text-primary)]">
+        {pending.version === null ? '' : `Version ${pending.version}: `}
         {pending.commitCount} commit{pending.commitCount === 1 ? '' : 's'} sit between production
         ({pending.fromSha.slice(0, 8)}) and this build ({pending.toSha.slice(0, 8)}). Nothing below
         is on the site yet — this preview exists so the release can be read before it ships, and it
@@ -190,7 +200,7 @@ export default async function ChangelogPage() {
         title="Changelog"
         subtitle="What each deploy changed"
       />
-      <PageBody lead="Every deploy is recorded here the moment it goes live: what changed on the website, what changed in the companion app, and what changed in the platform behind them — in the words of the people who built it, newest first.">
+      <PageBody wide lead="Every deploy is recorded here the moment it goes live: what changed on the website, what changed in the companion app, and what changed in the platform behind them — in the words of the people who built it, newest first.">
         {pending !== null && (
           <div className="mb-8">
             <PendingRelease pending={pending} viewerTz={viewerTz} />

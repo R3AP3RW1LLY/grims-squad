@@ -7,6 +7,7 @@ import { ColonyBoardPage, ColonyNewPage } from './colonisation.js';
 import { BountiesPage } from './bounties.js';
 import { TradePage } from './trade.js';
 import { CommoditiesPage } from './commodities.js';
+import { PLATFORM_VERSION } from '@grims/shared/version';
 import { OutfitterPage } from './shipyard-outfitter.js';
 import { BuildBoardsPage } from './shipyard-boards.js';
 import { PlanningPage } from './planning.js';
@@ -447,6 +448,10 @@ function App(): JSX.Element {
               {state.enabled ? 'Sending' : 'Paused'}
             </span>
           </div>
+          {/* The same PLATFORM_VERSION the website prints — one number, both surfaces. */}
+          <p style={{ margin: '6px 0 0', fontSize: '10px', letterSpacing: '0.2em', color: C.faint }}>
+            v{PLATFORM_VERSION}
+          </p>
         </div>
       </nav>
 
