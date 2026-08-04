@@ -440,6 +440,8 @@ model User {
   inaraProfile        InaraCommanderProfile?
   cmdrVerifications   CmdrVerification[]
   bountyClaims        BountyClaim[]
+  leaderboardEvents   LeaderboardEvent[]
+  currentBuild        CurrentBuild?
   userRoles           UserRole[]            @relation("UserRoleHolder")
   rolesGranted        UserRole[]            @relation("UserRoleGrantor")
   refreshFamilies     RefreshTokenFamily[]
@@ -1148,6 +1150,16 @@ model PrivacySetting {
   showActivity       Boolean             @default(true) @map("show_activity")
   showOnPublicRoster Boolean             @default(true) @map("show_on_public_roster")
   showOnLeaderboard  Boolean             @default(true) @map("show_on_leaderboard")
+  /// ★ PER-BOARD, UNDER THE MASTER — squadron owner, 2026-08-04 ★
+  ///
+  /// "show each leaderboard there and add all future leaderboards here too, default all
+  /// leaderboard participation on for all commanders please!" The master switch above still
+  /// gates everything at once; these narrow it board by board. A new leaderboard gets a new
+  /// column here, defaulting on, and appears in the settings list by being in the shared
+  /// LEADERBOARDS catalogue.
+  showLbBounties     Boolean             @default(true) @map("show_lb_bounties")
+  showLbColony       Boolean             @default(true) @map("show_lb_colony")
+  showLbTrade        Boolean             @default(true) @map("show_lb_trade")
 
   /// The font this member's own new posts start in. Null means the site face.
   ///
@@ -2340,6 +2352,7 @@ model ColonyProject {
   plannedAs      ColonyPlanSite[]
 
   needs         ColonyNeed[]
+  currentBuilds CurrentBuild[]
   contributions ColonyContribution[]
   members       ColonyMember[]
   assignments   ColonyAssignment[]
@@ -4050,6 +4063,66 @@ model BountyClaim {
   @@index([userId, claimedAt])
   @@index([claimedAt])
   @@map("bounty_claims")
+}
+
+/// ═══════════════ LEADERBOARDS, XP AND BADGES ═══════════════
+///
+/// Squadron owner, 2026-08-04: "make a new category called leaderboards ... gamify the
+/// colonization leaderboard, make badges ect the same way were doing it for databounties ...
+/// then we also need to make a leaderboard and gamify it for Trade routes ... default all
+/// leaderboard participation on for all commanders". Badge RULES live in code
+/// (@grims/shared/leaderboards — a badge is a rule, and rules ship with the code that applies
+/// them); these tables hold only what is genuinely data: points earned and badges awarded.
+
+/// One point-earning deed on a gamified board. Colony and trade write here (bounties keeps its
+/// own richer ledger in bounty_claims); sourceKey makes every scorer idempotent — a contribution
+/// or a sale scores exactly once however many times the job replays it.
+model LeaderboardEvent {
+  id     BigInt @id @default(autoincrement())
+  userId String @map("user_id") @db.Uuid
+  /// 'colony' | 'trade'. Never 'bounties' — see above.
+  board  String
+  points Int
+  /// The row this scored: a colony_contributions id, a telemetry event key. Unique per board.
+  sourceKey String @map("source_key")
+  /// What earned it, for the member's own history: commodity, tonnes, project, profit.
+  meta Json?
+  /// When the deed happened in the GAME (journal time) — seasons cut on this, not on when the
+  /// scorer got around to it.
+  occurredAt DateTime @map("occurred_at") @db.Timestamptz(6)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([board, sourceKey])
+  @@index([board, occurredAt])
+  @@index([userId, board, occurredAt])
+  @@map("leaderboard_events")
+}
+
+/// The build a member has declared they are currently on — at most one per member, which is the
+/// whole meaning of "current". Drives the companion's pinned project overlay.
+model CurrentBuild {
+  userId    String   @id @map("user_id") @db.Uuid
+  projectId String   @map("project_id") @db.Uuid
+  setAt     DateTime @default(now()) @map("set_at") @db.Timestamptz(6)
+
+  user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project ColonyProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@map("current_builds")
+}
+
+/// A scorer's high-water mark. Generic on purpose: every incremental job that walks an
+/// append-only source needs exactly one string of state, and a table per job is how a schema
+/// fills with near-duplicates.
+model WorkerCursor {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("worker_cursors")
 }
 
 /// An operational alert on its way to a human.

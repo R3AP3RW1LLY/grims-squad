@@ -171,3 +171,21 @@ export {
   SHARE_TOKEN_LENGTH,
   type BuildVisibility,
 } from './ship-build.js';
+
+export {
+  LEADERBOARD_BADGES,
+  COLONY_LINE_CLOSER_BONUS,
+  COLONY_PRIORITY_MULTIPLIER,
+  LEADERBOARDS,
+  TIER_THRESHOLDS,
+  TRADE_CREDITS_PER_POINT,
+  badgeByKey,
+  badgeDisplay,
+  showcase,
+  tiersEarned,
+  type BadgeDef,
+  type BadgeDisplay,
+  type BadgeTier,
+  type LeaderboardDef,
+  type LeaderboardKey,
+} from './leaderboards.js';

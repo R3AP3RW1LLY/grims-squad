@@ -12,6 +12,7 @@ import { PrismaRollupStore } from './jobs/commodity-rollup.wiring.js';
 import { takeJobLock } from './lib/job-lock.js';
 import { resolveStations } from './jobs/resolve-stations.js';
 import { rebuildBountyBoard } from './jobs/bounty-board.js';
+import { scoreLeaderboards } from './jobs/leaderboard-scores.js';
 import { EdsmStationSource, PrismaStationStore } from './jobs/resolve-stations.wiring.js';
 
 /**
@@ -328,6 +329,7 @@ function startScheduler(db: PrismaClient): void {
   startIngestionWatch(db);
   startStationResolver(db);
   startBountyBoard(db);
+  startLeaderboardScoring(db);
 }
 
 /**
@@ -600,6 +602,34 @@ function startBountyBoard(db: PrismaClient): void {
 
   void run();
   setInterval(() => void run(), BOUNTY_BOARD_MS);
+}
+
+/**
+ * The leaderboard scorers, every five minutes — the same cadence as the colony sync they feed
+ * from, and fast enough that telemetry's 30-day purge can never outrun the trade scorer.
+ */
+const LEADERBOARD_SCORE_MS = 5 * 60_000;
+
+function startLeaderboardScoring(db: PrismaClient): void {
+  const run = async (): Promise<void> => {
+    const lock = await takeJobLock('leaderboard-scores');
+    if (lock === null) return;
+    try {
+      const report = await scoreLeaderboards(db);
+      if (report.colonyEvents > 0 || report.tradeEvents > 0 || report.badgesAwarded > 0) {
+        console.log(
+          `daemon: leaderboards — ${report.colonyEvents} colony, ${report.tradeEvents} trade, ${report.badgesAwarded} badges awarded`,
+        );
+      }
+    } catch (e) {
+      console.error(`daemon: leaderboard scoring failed (${e instanceof Error ? e.message : String(e)})`);
+    } finally {
+      await lock.release();
+    }
+  };
+
+  void run();
+  setInterval(() => void run(), LEADERBOARD_SCORE_MS);
 }
 
 async function main(): Promise<void> {

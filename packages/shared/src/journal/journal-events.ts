@@ -231,8 +231,14 @@ export const EVENT_FIELDS: Record<JournalEventName, readonly string[]> = {
   FactionKillBond: ['AwardingFaction', 'VictimFaction', 'Reward'],
   PVPKill: ['CombatRank'],
 
-  MarketBuy: ['Type', 'Type_Localised', 'Count', 'TotalCost', 'MarketID'],
-  MarketSell: ['Type', 'Type_Localised', 'Count', 'TotalSale', 'MarketID'],
+  /*
+   * BuyPrice / SellPrice / AvgPricePaid joined on 2026-08-04 for the Trade Barons leaderboard:
+   * realized profit is TotalSale minus AvgPricePaid×Count, and AvgPricePaid is Frontier's OWN
+   * average across every buy the member ever made — including ones this app never saw. The same
+   * sensitivity class as the totals already kept: the member's own money, nobody else's.
+   */
+  MarketBuy: ['Type', 'Type_Localised', 'Count', 'BuyPrice', 'TotalCost', 'MarketID'],
+  MarketSell: ['Type', 'Type_Localised', 'Count', 'SellPrice', 'TotalSale', 'AvgPricePaid', 'MarketID'],
   /*
    * ★ DELIBERATELY NOT `Items` ★
    *
