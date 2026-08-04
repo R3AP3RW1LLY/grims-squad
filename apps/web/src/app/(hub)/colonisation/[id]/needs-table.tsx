@@ -39,7 +39,69 @@ function freshness(needs: readonly ColonyNeed[]): string | null {
   return `Read from the site ${Math.round(hours / 24)} days ago — somebody docking there refreshes it.`;
 }
 
-export function NeedsTable({ needs }: { needs: readonly ColonyNeed[] }) {
+/**
+ * The three-segment progress bar: delivered (filled), aboard attached carriers (yellow), still to
+ * source (empty track).
+ *
+ * ★ THE MIDDLE SEGMENT IS THE ONE THAT CHANGES DECISIONS ★
+ *
+ * A two-state bar makes 20,000 t on a carrier parked at the site look identical to 20,000 t nobody
+ * has bought — and those are different builds to plan an evening around. The staged tonnage is the
+ * server's effective figure (manual beats journal beats mirror), capped so the bar never claims
+ * more than the site still wants.
+ */
+export function SegmentedBar({
+  delivered,
+  staged,
+  required,
+}: {
+  delivered: number;
+  staged: number;
+  required: number;
+}) {
+  if (required <= 0) return null;
+  const deliveredPct = Math.max(0, Math.min(100, (delivered / required) * 100));
+  const stagedPct = Math.max(0, Math.min(100 - deliveredPct, (staged / required) * 100));
+
+  return (
+    <div className="flex h-1.5 w-full overflow-hidden rounded-full bg-[var(--color-surface-panel-sunken)]">
+      <div className="h-full bg-[var(--color-brand-cyan)]" style={{ width: `${deliveredPct}%` }} />
+      <div
+        className="h-full bg-[var(--color-semantic-warning)]"
+        style={{ width: `${stagedPct}%` }}
+      />
+    </div>
+  );
+}
+
+/** The legend the segmented bar earns, printed once per table rather than per row. */
+export function BarLegend() {
+  return (
+    <p className="m-0 mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[10px] text-[var(--color-text-secondary)]">
+      <span className="inline-flex items-center gap-1.5">
+        <span className="inline-block h-1.5 w-4 rounded-full bg-[var(--color-brand-cyan)]" />
+        delivered
+      </span>
+      <span className="inline-flex items-center gap-1.5">
+        <span className="inline-block h-1.5 w-4 rounded-full bg-[var(--color-semantic-warning)]" />
+        aboard attached carriers
+      </span>
+      <span className="inline-flex items-center gap-1.5">
+        <span className="inline-block h-1.5 w-4 rounded-full bg-[var(--color-surface-panel-sunken)]" />
+        still to source
+      </span>
+    </p>
+  );
+}
+
+export function NeedsTable({
+  needs,
+  carrierCover,
+}: {
+  needs: readonly ColonyNeed[];
+  /** Effective tonnes aboard attached carriers per commodity, from the server's merge. */
+  carrierCover: Readonly<Record<string, number>>;
+}) {
   if (needs.length === 0) {
     return (
       <p className="m-0 text-sm text-[var(--color-text-secondary)]">
@@ -80,12 +142,10 @@ export function NeedsTable({ needs }: { needs: readonly ColonyNeed[] }) {
         </thead>
         <tbody>
           {outstanding.map((n) => {
-            // Null rather than zero when the total is unknown: a bar drawn at 0% claims nothing has
-            // been delivered, which is a different statement from "we do not know the total".
-            const pct =
-              n.required !== null && n.required > 0
-                ? Math.max(0, Math.min(100, ((n.required - n.remaining) / n.required) * 100))
-                : null;
+            // A bar drawn with an unknown total claims nothing has been delivered, which is a
+            // different statement from "we do not know the total" — so it stays "unknown".
+            const knowsTotal = n.required !== null && n.required > 0;
+            const staged = Math.min(n.remaining, Math.max(0, carrierCover[n.commodity] ?? 0));
 
             return (
               <tr key={n.commodity} className="hover:bg-[var(--color-surface-panel)]">
@@ -99,6 +159,14 @@ export function NeedsTable({ needs }: { needs: readonly ColonyNeed[] }) {
                 </td>
                 <td className={`${TD} text-right font-mono tabular-nums`}>
                   {n.remaining.toLocaleString()} t
+                  {staged > 0 ? (
+                    <span
+                      className="ml-1.5 text-[11px] text-[var(--color-semantic-warning)]"
+                      title="Effective tonnes already aboard the build's attached carriers."
+                    >
+                      {staged.toLocaleString()} t aboard
+                    </span>
+                  ) : null}
                 </td>
                 <td
                   className={`${TD} text-right font-mono tabular-nums text-[var(--color-text-secondary)]`}
@@ -108,15 +176,14 @@ export function NeedsTable({ needs }: { needs: readonly ColonyNeed[] }) {
                     : `${(n.required - n.remaining).toLocaleString()} / ${n.required.toLocaleString()}`}
                 </td>
                 <td className={TD}>
-                  {pct === null ? (
+                  {!knowsTotal ? (
                     <span className="text-[11px] text-[var(--color-text-secondary)]">unknown</span>
                   ) : (
-                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--color-surface-panel-sunken)]">
-                      <div
-                        className="h-full bg-[var(--color-brand-cyan)]"
-                        style={{ width: `${pct}%` }}
-                      />
-                    </div>
+                    <SegmentedBar
+                      delivered={(n.required ?? 0) - n.remaining}
+                      staged={staged}
+                      required={n.required ?? 0}
+                    />
                   )}
                 </td>
               </tr>
@@ -124,6 +191,8 @@ export function NeedsTable({ needs }: { needs: readonly ColonyNeed[] }) {
           })}
         </tbody>
       </table>
+
+      <BarLegend />
 
       {/* Design principle: every number carries its provenance. This one is the provenance. */}
       {freshness(needs) === null ? null : (

@@ -107,6 +107,20 @@ export const JOURNAL_EVENTS = {
   /** Fleet carrier jumps and finances, for the squadron's own carrier. */
   CarrierJump: 'carrier',
   CarrierStats: 'carrier',
+  /**
+   * Cargo moved between the member's ship and their own carrier.
+   *
+   * ★ JOINED 2026-08-04, FOR THE COLONISATION CARRIER HOLDS ★
+   *
+   * A carrier staged for a build holds exactly the cargo its owner has NOT put up for sale, which
+   * is the part the public market mirror cannot see — so the shopping list kept telling members to
+   * buy steel the squadron already owned. This event is the only record of that cargo existing.
+   *
+   * Same category as the other carrier events because it is the same disclosure: what the member's
+   * own carrier is doing. Only the OWNER can transfer to a carrier, so nothing here is ever about
+   * somebody else's ship.
+   */
+  CargoTransfer: 'carrier',
 
   /**
    * The suit and weapons a commander takes on foot.
@@ -266,6 +280,15 @@ export const EVENT_FIELDS: Record<JournalEventName, readonly string[]> = {
 
   CarrierJump: ['StarSystem', 'SystemAddress', 'StationName', 'CarrierID'],
   CarrierStats: ['CarrierID', 'Callsign', 'Name', 'DockingAccess', 'JumpRangeCurr'],
+  /*
+   * `Transfers` joined on 2026-08-04 for the colonisation carrier holds. It is a handful of
+   * entries — {Type, Type_Localised, Count, Direction} for the contents of one lift, not a market
+   * — and it is the ONLY record that cargo staged on a carrier exists at all: the public mirror
+   * sees sell orders, and staged cargo is exactly what is not on sale. The same sensitivity class
+   * as the trade events already kept: the member's own cargo, nobody else's — and carriers carry
+   * no prices in this event, so there is nothing here for `stripMoney` to miss.
+   */
+  CargoTransfer: ['Transfers'],
 
   /*
    * ★ THE SUIT AND WHAT IS IN IT, AND NOTHING ELSE ★

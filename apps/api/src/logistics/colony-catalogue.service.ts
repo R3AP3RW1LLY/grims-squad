@@ -15,6 +15,17 @@ import type { MarketStore } from './market.store.js';
  * somebody docks at it.
  */
 
+/** What a completed build of this kind does to its system — the seven Raven-style scalars. */
+export interface BuildTypeEffects {
+  readonly population: number;
+  readonly maxPopulation: number;
+  readonly security: number;
+  readonly technology: number;
+  readonly wealth: number;
+  readonly standardOfLiving: number;
+  readonly development: number;
+}
+
 export interface BuildTypeRow {
   readonly id: string;
   readonly displayName: string;
@@ -33,6 +44,21 @@ export interface BuildTypeRow {
    */
   readonly source: 'community' | 'observed';
   readonly confirmations: number;
+  /**
+   * What finishing one does to the system.
+   *
+   * ★ THE COLUMNS WERE THERE AND THE PAGES COULD NOT SEE THEM ★
+   *
+   * The seven eff_* scalars have been seeded for all fifty-five types since the simulation
+   * shipped, summed on every plan — and absent from this row, so a member PICKING a type had to
+   * add one to a plan to find out what it does. Community-measured, like everything here; the
+   * pages say so where they print them.
+   */
+  readonly effects: BuildTypeEffects;
+  /** What it feeds the port that receives it. `none` for the many that feed nothing. */
+  readonly economyInfluence: string;
+  /** Set when the build's OWN economy is locked regardless of surroundings. */
+  readonly economyFixed: string | null;
 }
 
 export interface BuildCostLine {
@@ -72,22 +98,12 @@ export class ColonyCatalogueService {
 
   /** Every build type, biggest haul last — the order somebody scanning for "what can I afford" wants. */
   async list(): Promise<readonly BuildTypeRow[]> {
-    const rows = await this.db.$queryRawUnsafe<
-      Array<{
-        id: string;
-        display_name: string;
-        category: string;
-        tier: number;
-        location: string;
-        pad_size: string;
-        total_tonnes: number;
-        commodities: bigint;
-        source: string;
-        confirmations: number;
-      }>
-    >(
+    const rows = await this.db.$queryRawUnsafe<Array<CatalogueRowRecord>>(
       `SELECT b.id, b.display_name, b.category, b.tier, b.location, b.pad_size,
               b.total_tonnes, b.source, b.confirmations,
+              b.eff_population, b.eff_max_population, b.eff_security, b.eff_technology,
+              b.eff_wealth, b.eff_standard_of_living, b.eff_development,
+              b.economy_influence, b.economy_fixed,
               count(c.commodity) AS commodities
          FROM colony_build_types b
          LEFT JOIN colony_build_costs c ON c.build_type_id = b.id
@@ -119,21 +135,13 @@ export class ColonyCatalogueService {
    */
   async byId(id: string, near: { x: number; y: number; z: number } | null): Promise<BuildTypeDetail | null> {
     const [head] = await this.db.$queryRawUnsafe<
-      Array<{
-        id: string;
-        display_name: string;
-        category: string;
-        tier: number;
-        location: string;
-        pad_size: string;
-        total_tonnes: number;
-        layouts: string[];
-        source: string;
-        confirmations: number;
-      }>
+      Array<Omit<CatalogueRowRecord, 'commodities'> & { layouts: string[] }>
     >(
       `SELECT id, display_name, category, tier, location, pad_size, total_tonnes,
-              layouts, source, confirmations
+              layouts, source, confirmations,
+              eff_population, eff_max_population, eff_security, eff_technology,
+              eff_wealth, eff_standard_of_living, eff_development,
+              economy_influence, economy_fixed
          FROM colony_build_types WHERE id = $1`,
       id,
     );
@@ -201,18 +209,7 @@ export class ColonyCatalogueService {
     };
   }
 
-  #row(r: {
-    id: string;
-    display_name: string;
-    category: string;
-    tier: number;
-    location: string;
-    pad_size: string;
-    total_tonnes: number;
-    commodities: bigint;
-    source: string;
-    confirmations: number;
-  }): BuildTypeRow {
+  #row(r: CatalogueRowRecord): BuildTypeRow {
     return {
       id: r.id,
       displayName: r.display_name,
@@ -228,6 +225,40 @@ export class ColonyCatalogueService {
       commodities: Number(r.commodities),
       source: r.source === 'observed' ? 'observed' : 'community',
       confirmations: r.confirmations,
+      effects: {
+        population: r.eff_population,
+        maxPopulation: r.eff_max_population,
+        security: r.eff_security,
+        technology: r.eff_technology,
+        wealth: r.eff_wealth,
+        standardOfLiving: r.eff_standard_of_living,
+        development: r.eff_development,
+      },
+      economyInfluence: r.economy_influence,
+      economyFixed: r.economy_fixed,
     };
   }
+}
+
+/** One catalogue row as the SQL returns it. Shared by the list and the head read. */
+interface CatalogueRowRecord {
+  id: string;
+  display_name: string;
+  category: string;
+  tier: number;
+  location: string;
+  pad_size: string;
+  total_tonnes: number;
+  commodities: bigint;
+  source: string;
+  confirmations: number;
+  eff_population: number;
+  eff_max_population: number;
+  eff_security: number;
+  eff_technology: number;
+  eff_wealth: number;
+  eff_standard_of_living: number;
+  eff_development: number;
+  economy_influence: string;
+  economy_fixed: string | null;
 }

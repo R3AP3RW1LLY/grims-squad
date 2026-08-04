@@ -7,6 +7,7 @@ import type {
   ColonyPlan,
   PlanBody,
   PlanSite,
+  PredictedSiteMarket,
   SiteEconomy,
 } from '../../../../../lib/api';
 import { apiDelete, apiPatch, apiPost } from '../../../../../lib/api-client';
@@ -103,6 +104,57 @@ function SiteEconomyLine({
   );
 }
 
+/**
+ * What the planned station's market would buy and sell.
+ *
+ * ★ THE COMMODITY LIST, NOT THE ADJECTIVE ★
+ *
+ * The economy line above says "industrial"; nobody hauls tonnes for an adjective. This is the
+ * slate that mix implies — computed on the server by the shared predictMarket, so the app shows
+ * the identical shop. Majors are bold: they are the lines the driving economy stands behind.
+ * Rendered only when there is a market to speak of; installations already say what they feed.
+ */
+function SiteMarketLine({ market }: { market: PredictedSiteMarket | undefined }) {
+  if (market === undefined) return null;
+  if (market.exports.length === 0 && market.imports.length === 0) return null;
+
+  const chips = (lines: PredictedSiteMarket['exports']) =>
+    lines.map((line) => (
+      <span
+        key={line.commodity}
+        title={`${line.strength} — from its ${line.fromEconomy} economy`}
+        className={
+          line.strength === 'major'
+            ? 'font-semibold text-[var(--color-text-primary)]'
+            : 'text-[var(--color-text-secondary)]'
+        }
+      >
+        {line.commodity}
+      </span>
+    ));
+
+  return (
+    <div className="mt-1 space-y-0.5 pl-5 text-[11px]">
+      {market.exports.length === 0 ? null : (
+        <p className="m-0 flex flex-wrap gap-x-2 gap-y-0.5">
+          <span className="font-mono text-[9px] uppercase tracking-[0.16em] text-[var(--color-text-dim)]">
+            sells
+          </span>
+          {chips(market.exports)}
+        </p>
+      )}
+      {market.imports.length === 0 ? null : (
+        <p className="m-0 flex flex-wrap gap-x-2 gap-y-0.5">
+          <span className="font-mono text-[9px] uppercase tracking-[0.16em] text-[var(--color-text-dim)]">
+            buys
+          </span>
+          {chips(market.imports)}
+        </p>
+      )}
+    </div>
+  );
+}
+
 /** Nests bodies under their parents. Anything whose parent is missing is treated as a root. */
 function tree(bodies: readonly PlanBody[]): Array<{ body: PlanBody; depth: number }> {
   const byParent = new Map<number | null, PlanBody[]>();
@@ -175,6 +227,18 @@ export function SystemTree({
 
   const rows = tree(plan.bodies);
   const sitesOn = (bodyId: number): PlanSite[] => plan.sites.filter((s) => s.bodyId === bodyId);
+
+  /*
+   * The market prediction's epistemics, ONCE for the page rather than under every port. Distinct
+   * notes because a micro-market (settlement pads) carries an extra clause about trimmed lines.
+   */
+  const marketNotes = [
+    ...new Set(
+      plan.markets
+        .filter((m) => m.market.exports.length + m.market.imports.length > 0)
+        .map((m) => m.market.note),
+    ),
+  ];
 
   if (plan.bodies.length === 0) {
     return (
@@ -260,44 +324,46 @@ export function SystemTree({
                     {list.length === 0 ? null : (
                       <ul className="m-0 mt-1 list-none space-y-0.5 p-0">
                         {list.map((s) => (
-                          <li
-                            key={s.id}
-                            className="flex items-baseline justify-between gap-3 text-xs text-[var(--color-text-secondary)]"
-                          >
-                            <span>
-                              <span className="font-mono text-[10px] text-[var(--color-text-dim)]">
-                                #{s.position + 1}
-                              </span>{' '}
-                              {s.buildTypeName ?? 'nothing chosen yet'}
-                              {s.isPrimary ? (
-                                <span className="ml-2 font-mono text-[9px] uppercase tracking-[0.16em] text-[var(--color-brand-orange)]">
-                                  primary
-                                </span>
+                          <li key={s.id} className="text-xs text-[var(--color-text-secondary)]">
+                            <div className="flex items-baseline justify-between gap-3">
+                              <span>
+                                <span className="font-mono text-[10px] text-[var(--color-text-dim)]">
+                                  #{s.position + 1}
+                                </span>{' '}
+                                {s.buildTypeName ?? 'nothing chosen yet'}
+                                {s.isPrimary ? (
+                                  <span className="ml-2 font-mono text-[9px] uppercase tracking-[0.16em] text-[var(--color-brand-orange)]">
+                                    primary
+                                  </span>
+                                ) : null}
+                                {s.totalTonnes === null ? null : (
+                                  <span className="ml-2 font-mono tabular-nums text-[var(--color-text-dim)]">
+                                    {s.totalTonnes.toLocaleString()} t
+                                  </span>
+                                )}
+                                <SiteEconomyLine
+                                  site={s}
+                                  economy={plan.economies.sites.find((e) => e.siteId === s.id)}
+                                />
+                              </span>
+                              {canEdit ? (
+                                <button
+                                  type="button"
+                                  disabled={busy}
+                                  className={CHIP}
+                                  onClick={() =>
+                                    void act(() =>
+                                      apiDelete(`${base}/sites/${s.id}?version=${plan.version}`),
+                                    )
+                                  }
+                                >
+                                  Remove
+                                </button>
                               ) : null}
-                              {s.totalTonnes === null ? null : (
-                                <span className="ml-2 font-mono tabular-nums text-[var(--color-text-dim)]">
-                                  {s.totalTonnes.toLocaleString()} t
-                                </span>
-                              )}
-                              <SiteEconomyLine
-                                site={s}
-                                economy={plan.economies.sites.find((e) => e.siteId === s.id)}
-                              />
-                            </span>
-                            {canEdit ? (
-                              <button
-                                type="button"
-                                disabled={busy}
-                                className={CHIP}
-                                onClick={() =>
-                                  void act(() =>
-                                    apiDelete(`${base}/sites/${s.id}?version=${plan.version}`),
-                                  )
-                                }
-                              >
-                                Remove
-                              </button>
-                            ) : null}
+                            </div>
+                            <SiteMarketLine
+                              market={plan.markets.find((m) => m.siteId === s.id)?.market}
+                            />
                           </li>
                         ))}
                       </ul>
@@ -327,6 +393,12 @@ export function SystemTree({
           );
         })}
       </ol>
+
+      {marketNotes.length === 0 ? null : (
+        <p className="m-0 mt-3 text-[11px] text-[var(--color-text-dim)]">
+          {marketNotes.join(' ')}
+        </p>
+      )}
     </div>
   );
 }
@@ -434,6 +506,9 @@ function AddSite({
 }) {
   const [choice, setChoice] = useState('');
   const [open, setOpen] = useState(false);
+  // The catalogue facets, mirrored from the build-types page: same values, same 'all' default.
+  const [tier, setTier] = useState('all');
+  const [pad, setPad] = useState('all');
 
   /*
    * ★ THE PICKER IS BUILT WHEN IT IS OPENED, NOT WHEN THE PAGE IS ★
@@ -454,12 +529,39 @@ function AddSite({
   /*
    * Filtered by where it can actually go. An orbital list offering surface settlements is a list
    * somebody has to know the game to read — and the whole point of this page is that they should
-   * not have to.
+   * not have to. Tier and pad narrow it further: fifty-five rows is a scroll, and "a tier-2 with a
+   * large pad" is how people actually think about the choice.
    */
-  const usable = buildTypes.filter((b) => b.location === where);
+  const usable = buildTypes.filter(
+    (b) =>
+      b.location === where &&
+      (tier === 'all' || String(b.tier) === tier) &&
+      (pad === 'all' || b.padSize === pad),
+  );
 
   return (
     <div className="mt-1 flex flex-wrap items-center gap-2">
+      {(
+        [
+          { label: 'tier', value: tier, set: setTier, options: ['1', '2', '3'] },
+          { label: 'pad', value: pad, set: setPad, options: ['none', 'small', 'medium', 'large'] },
+        ] as const
+      ).map((f) => (
+        <select
+          key={f.label}
+          value={f.value}
+          onChange={(e) => f.set(e.target.value)}
+          aria-label={`Filter builds by ${f.label}`}
+          className={FIELD}
+        >
+          <option value="all">any {f.label}</option>
+          {f.options.map((o) => (
+            <option key={o} value={o}>
+              {o}
+            </option>
+          ))}
+        </select>
+      ))}
       <select
         value={choice}
         onChange={(e) => setChoice(e.target.value)}
@@ -471,7 +573,8 @@ function AddSite({
         <option value="">add a build…</option>
         {usable.map((b) => (
           <option key={b.id} value={b.id}>
-            {b.displayName} · T{b.tier} · {b.totalTonnes.toLocaleString()} t
+            {b.displayName} · T{b.tier}
+            {b.padSize === 'none' ? '' : ` · ${b.padSize} pad`} · {b.totalTonnes.toLocaleString()} t
           </option>
         ))}
       </select>

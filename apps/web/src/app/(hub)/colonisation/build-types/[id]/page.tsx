@@ -76,6 +76,53 @@ export default async function BuildTypePage({
         </StatGrid>
 
         {/*
+          ★ WHAT FINISHING ONE DOES TO A SYSTEM ★
+
+          The seven Raven-style scalars, on the page where a member PICKS a type — they were seeded
+          for every build since the simulation shipped and visible only after adding one to a plan,
+          which is the wrong side of the decision. Labelled as gathered, because that is what they
+          are.
+        */}
+        <Section title="What it does to a system">
+          <div className="flex flex-wrap gap-x-6 gap-y-2">
+            {(
+              [
+                ['Population', b.effects.population],
+                ['Max population', b.effects.maxPopulation],
+                ['Security', b.effects.security],
+                ['Technology', b.effects.technology],
+                ['Wealth', b.effects.wealth],
+                ['Standard of living', b.effects.standardOfLiving],
+                ['Development', b.effects.development],
+              ] as const
+            ).map(([label, value]) => (
+              <span key={label} className="text-sm text-[var(--color-text-secondary)]">
+                {label}{' '}
+                <span
+                  className={
+                    value < 0
+                      ? 'font-mono tabular-nums text-[var(--color-semantic-warning)]'
+                      : 'font-mono tabular-nums text-[var(--color-text-primary)]'
+                  }
+                >
+                  {value > 0 ? '+' : ''}
+                  {value}
+                </span>
+              </span>
+            ))}
+          </div>
+          <p className="m-0 mt-3 text-[11px] text-[var(--color-text-secondary)]">
+            {b.economyFixed !== null
+              ? `Its own economy is locked: ${b.economyFixed}, wherever it stands.`
+              : b.economyInfluence === 'none'
+                ? 'It feeds no economy into the port that receives it.'
+                : `It feeds ${b.economyInfluence} into the port that receives it.`}{' '}
+            All seven figures are gathered by players, not published by Frontier — a negative
+            security on a big starport is the game, not a mistake.
+          </p>
+        </Section>
+
+        {/*
           Where prices are measured from. A GET form so the answer is in the URL and can be shared —
           "what would this cost from Shinrarta" is a link somebody can paste into Discord.
         */}

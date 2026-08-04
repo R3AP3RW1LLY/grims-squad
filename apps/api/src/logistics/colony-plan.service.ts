@@ -3,10 +3,12 @@ import {
   AppError,
   ErrorCode,
   Permission,
+  predictMarket,
   resolveEconomies,
   simulatePlan,
   type EconBuildType,
   type EconomyResult,
+  type PredictedMarket,
   type SimBuildType,
   type SimResult,
 } from '@grims/shared';
@@ -107,6 +109,18 @@ export interface PlanDetail {
    * of the whole system rather than on the port alone — which is precisely what a planner is for.
    */
   readonly economies: EconomyResult;
+
+  /**
+   * What each planned station's market would actually buy and sell.
+   *
+   * ★ THE STEP PAST THE ADJECTIVE ★
+   *
+   * `economies` answers "what kind of shop" — which is where Raven Colonial stops. Nobody hauls
+   * tonnes for an adjective; this is the commodity list the mix implies, computed by the shared
+   * predictMarket ON THE SERVER for the same reason the simulation is: two surfaces rendering one
+   * answer, never two computations that drift. Empty on the board, where bodies are not loaded.
+   */
+  readonly markets: ReadonlyArray<{ readonly siteId: string; readonly market: PredictedMarket }>;
 }
 
 /** Injected so the service is testable without a network. */
@@ -376,7 +390,52 @@ export class ColonyPlanService {
       this.#economies(sites, bodies),
     ]);
 
-    return { ...head, bodies, sites, simulation, economies };
+    // Markets follow from the economies, so they cannot join the parallel block above.
+    const markets = await this.#markets(sites, economies);
+
+    return { ...head, bodies, sites, simulation, economies, markets };
+  }
+
+  /**
+   * What each chosen site's market would trade, from its resolved economy mix.
+   *
+   * One small query for the station shapes — location, pad and tier decide market breadth — over
+   * only the builds this plan references, then the shared predictMarket per site. Installations
+   * get their honest "no market of its own" answer from the model itself, so every CHOSEN site
+   * appears here and the pages decide what is worth drawing.
+   */
+  async #markets(
+    sites: readonly PlanSite[],
+    economies: EconomyResult,
+  ): Promise<Array<{ siteId: string; market: PredictedMarket }>> {
+    const ids = [...new Set(sites.map((s) => s.buildTypeId).filter((v): v is string => v !== null))];
+    if (ids.length === 0) return [];
+
+    const rows = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
+      `SELECT id, location, pad_size, tier FROM colony_build_types WHERE id = ANY($1::text[])`,
+      ids,
+    );
+
+    const shapes = new Map(
+      rows.map((r) => [
+        String(r['id']),
+        {
+          location: r['location'] === 'surface' ? ('surface' as const) : ('orbital' as const),
+          padSize: String(r['pad_size']),
+          tier: Number(r['tier']),
+        },
+      ]),
+    );
+
+    const out: Array<{ siteId: string; market: PredictedMarket }> = [];
+    for (const site of sites) {
+      if (site.buildTypeId === null) continue;
+      const shape = shapes.get(site.buildTypeId);
+      const economy = economies.sites.find((e) => e.siteId === site.id);
+      if (shape === undefined || economy === undefined) continue;
+      out.push({ siteId: site.id, market: predictMarket(economy, shape) });
+    }
+    return out;
   }
 
   /** Runs the construction-point rules over one plan's build order. */
@@ -617,6 +676,8 @@ export class ColonyPlanService {
        * authoritative and is arrived at from half the inputs.
        */
       economies: resolveEconomies([], [], new Map()),
+      // Markets follow the economies, so the board leaves them empty for the same reason.
+      markets: [],
     };
   }
 

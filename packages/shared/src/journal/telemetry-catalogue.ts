@@ -195,6 +195,12 @@ export const TELEMETRY_CATALOGUE: readonly CatalogueGroup[] = [
     entries: [
       { event: 'CarrierJump', label: 'Carrier jumps', reveals: 'Where your carrier jumped to.' },
       { event: 'CarrierStats', label: 'Carrier status', reveals: 'Its name, services and balance.' },
+      {
+        event: 'CargoTransfer',
+        label: 'Carrier cargo moves',
+        reveals:
+          'Cargo you move between your ship and your own carrier. When that carrier is attached to a colonisation build, this is what keeps its declared hold current.',
+      },
     ],
   },
   {

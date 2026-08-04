@@ -7,6 +7,7 @@ import type {
   PlanProblem,
   PlanSimStep,
   PlanSite,
+  PredictedSiteMarket,
   SiteEconomy,
 } from '../hub-colony.js';
 import {
@@ -615,6 +616,58 @@ function SiteEconomyLine({
 }
 
 /**
+ * What the planned station's market would buy and sell.
+ *
+ * ★ THE COMMODITY LIST, NOT THE ADJECTIVE — SAME NUMBERS AS THE WEBSITE ★
+ *
+ * The economy line says "industrial"; nobody hauls tonnes for an adjective. This is the slate the
+ * mix implies, computed once on the hub by the shared predictMarket and rendered here verbatim.
+ * Majors are bold: they are the lines the driving economy stands behind.
+ */
+function SiteMarketLine({ market }: { market: PredictedSiteMarket | undefined }): JSX.Element | null {
+  if (market === undefined) return null;
+  if (market.exports.length === 0 && market.imports.length === 0) return null;
+
+  const chips = (lines: PredictedSiteMarket['exports']): JSX.Element[] =>
+    lines.map((line) => (
+      <span
+        key={line.commodity}
+        title={`${line.strength} — from its ${line.fromEconomy} economy`}
+        style={
+          line.strength === 'major' ? { color: C.text, fontWeight: 600 } : { color: C.dim }
+        }
+      >
+        {line.commodity}
+      </span>
+    ));
+
+  const label: JSX.CSSProperties = {
+    ...MONO,
+    fontSize: '9px',
+    letterSpacing: '0.16em',
+    textTransform: 'uppercase',
+    color: C.faint,
+  };
+
+  return (
+    <div style={{ marginTop: '3px', paddingLeft: '18px', fontSize: '11px' }}>
+      {market.exports.length === 0 ? null : (
+        <p style={{ margin: 0, display: 'flex', flexWrap: 'wrap', gap: '2px 8px' }}>
+          <span style={label}>sells</span>
+          {chips(market.exports)}
+        </p>
+      )}
+      {market.imports.length === 0 ? null : (
+        <p style={{ margin: '2px 0 0', display: 'flex', flexWrap: 'wrap', gap: '2px 8px' }}>
+          <span style={label}>buys</span>
+          {chips(market.imports)}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
  * The system, laid out.
  *
  * ★ A VERTICAL INDENTED TREE, NOT AN ORRERY ★
@@ -646,6 +699,19 @@ function SystemTree({
       </Empty>
     );
   }
+
+  /*
+   * The market prediction's epistemics, ONCE for the page rather than under every port — the same
+   * single rendering the website does. Distinct notes because a micro-market carries an extra
+   * clause about trimmed lines.
+   */
+  const marketNotes = [
+    ...new Set(
+      (plan.markets ?? [])
+        .filter((m) => m.market.exports.length + m.market.imports.length > 0)
+        .map((m) => m.market.note),
+    ),
+  ];
 
   return (
     <div>
@@ -724,58 +790,61 @@ function SystemTree({
                   </p>
 
                   {list.map((s) => (
-                    <div
-                      key={s.id}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'baseline',
-                        justifyContent: 'space-between',
-                        gap: '10px',
-                        fontSize: '12px',
-                        color: C.dim,
-                        marginTop: '3px',
-                      }}
-                    >
-                      <span>
-                        <span style={{ ...MONO, fontSize: '10px', color: C.faint }}>
-                          #{s.position + 1}
-                        </span>{' '}
-                        {s.buildTypeName ?? 'nothing chosen yet'}
-                        {s.isPrimary ? (
-                          <span
-                            style={{
-                              ...MONO,
-                              marginLeft: '7px',
-                              fontSize: '9px',
-                              letterSpacing: '0.16em',
-                              textTransform: 'uppercase',
-                              color: C.orangeBright,
-                            }}
+                    <div key={s.id} style={{ marginTop: '3px' }}>
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'baseline',
+                          justifyContent: 'space-between',
+                          gap: '10px',
+                          fontSize: '12px',
+                          color: C.dim,
+                        }}
+                      >
+                        <span>
+                          <span style={{ ...MONO, fontSize: '10px', color: C.faint }}>
+                            #{s.position + 1}
+                          </span>{' '}
+                          {s.buildTypeName ?? 'nothing chosen yet'}
+                          {s.isPrimary ? (
+                            <span
+                              style={{
+                                ...MONO,
+                                marginLeft: '7px',
+                                fontSize: '9px',
+                                letterSpacing: '0.16em',
+                                textTransform: 'uppercase',
+                                color: C.orangeBright,
+                              }}
+                            >
+                              primary
+                            </span>
+                          ) : null}
+                          {s.totalTonnes === null ? null : (
+                            <span style={{ ...MONO, marginLeft: '7px', color: C.faint }}>
+                              {s.totalTonnes.toLocaleString()} t
+                            </span>
+                          )}
+                          <SiteEconomyLine
+                            site={s}
+                            economy={plan.economies.sites.find((e) => e.siteId === s.id)}
+                          />
+                        </span>
+                        {canEdit ? (
+                          <Button
+                            tone="danger"
+                            disabled={busy}
+                            onClick={() =>
+                              act(() => window.colony.planRemoveSite(plan.id, s.id, plan.version))
+                            }
                           >
-                            primary
-                          </span>
+                            Remove
+                          </Button>
                         ) : null}
-                        {s.totalTonnes === null ? null : (
-                          <span style={{ ...MONO, marginLeft: '7px', color: C.faint }}>
-                            {s.totalTonnes.toLocaleString()} t
-                          </span>
-                        )}
-                        <SiteEconomyLine
-                          site={s}
-                          economy={plan.economies.sites.find((e) => e.siteId === s.id)}
-                        />
-                      </span>
-                      {canEdit ? (
-                        <Button
-                          tone="danger"
-                          disabled={busy}
-                          onClick={() =>
-                            act(() => window.colony.planRemoveSite(plan.id, s.id, plan.version))
-                          }
-                        >
-                          Remove
-                        </Button>
-                      ) : null}
+                      </div>
+                      <SiteMarketLine
+                        market={(plan.markets ?? []).find((m) => m.siteId === s.id)?.market}
+                      />
                     </div>
                   ))}
 
@@ -802,6 +871,12 @@ function SystemTree({
           </div>
         );
       })}
+
+      {marketNotes.length === 0 ? null : (
+        <p style={{ margin: '10px 0 0', fontSize: '11px', color: C.faint }}>
+          {marketNotes.join(' ')}
+        </p>
+      )}
     </div>
   );
 }
@@ -939,6 +1014,9 @@ function AddSite({
 }): JSX.Element {
   const [choice, setChoice] = useState('');
   const [open, setOpen] = useState(false);
+  // The catalogue facets, mirrored from the build-types page: same values, same 'all' default.
+  const [tier, setTier] = useState('all');
+  const [pad, setPad] = useState('all');
 
   if (!open) {
     return (
@@ -950,7 +1028,13 @@ function AddSite({
 
   // Filtered by where it can actually go. An orbital list offering surface settlements is a list
   // somebody has to know the game to read — and the point of this page is that they should not.
-  const usable = buildTypes.filter((b) => b.location === where);
+  // Tier and pad narrow it further: "a tier-2 with a large pad" is how people think about the pick.
+  const usable = buildTypes.filter(
+    (b) =>
+      b.location === where &&
+      (tier === 'all' || String(b.tier) === tier) &&
+      (pad === 'all' || b.padSize === pad),
+  );
 
   return (
     <div
@@ -962,6 +1046,27 @@ function AddSite({
         gap: '7px',
       }}
     >
+      {(
+        [
+          { label: 'tier', value: tier, set: setTier, options: ['1', '2', '3'] },
+          { label: 'pad', value: pad, set: setPad, options: ['none', 'small', 'medium', 'large'] },
+        ] as const
+      ).map((f) => (
+        <select
+          key={f.label}
+          value={f.value}
+          onChange={(e) => f.set((e.target as HTMLSelectElement).value)}
+          aria-label={`Filter builds by ${f.label}`}
+          style={{ ...inputStyle, width: 'auto', padding: '5px 8px' }}
+        >
+          <option value="all">any {f.label}</option>
+          {f.options.map((o) => (
+            <option key={o} value={o}>
+              {o}
+            </option>
+          ))}
+        </select>
+      ))}
       <select
         value={choice}
         onChange={(e) => setChoice((e.target as HTMLSelectElement).value)}
@@ -973,7 +1078,8 @@ function AddSite({
         <option value="">add a build…</option>
         {usable.map((b) => (
           <option key={b.id} value={b.id}>
-            {b.displayName} · T{b.tier} · {b.totalTonnes.toLocaleString()} t
+            {b.displayName} · T{b.tier}
+            {b.padSize === 'none' ? '' : ` · ${b.padSize} pad`} · {b.totalTonnes.toLocaleString()} t
           </option>
         ))}
       </select>
@@ -1116,6 +1222,11 @@ function Effects({ plan }: { plan: ColonyPlan }): JSX.Element | null {
         padding: '10px 14px',
       }}
     >
+      {/*
+        "Dropping this plan into the system", not "the plan's effects" — the website's wording,
+        verbatim: the deltas are before → after statements about the system the plan lands in,
+        accrued across the whole build order above.
+      */}
       <p
         style={{
           ...MONO,
@@ -1126,13 +1237,16 @@ function Effects({ plan }: { plan: ColonyPlan }): JSX.Element | null {
           color: C.dim,
         }}
       >
-        What this would do to the system
+        What dropping this plan into the system does
       </p>
       <div style={{ marginTop: '7px', display: 'flex', flexWrap: 'wrap', gap: '6px 22px' }}>
         {rows.map(([label, value]) => (
           <span key={label} style={{ fontSize: '11px', color: C.dim }}>
             {label}{' '}
-            <span style={{ ...MONO, color: value < 0 ? C.warn : C.text }}>
+            <span
+              style={{ ...MONO, color: value < 0 ? C.warn : C.text }}
+              title={`The system's ${label.toLowerCase()} after this plan = what it is now ${value >= 0 ? '+' : '−'} ${Math.abs(value)}.`}
+            >
               {value > 0 ? '+' : ''}
               {value}
             </span>
@@ -1140,9 +1254,11 @@ function Effects({ plan }: { plan: ColonyPlan }): JSX.Element | null {
         ))}
       </div>
       <p style={{ margin: '10px 0 0', fontSize: '11px', color: C.faint }}>
-        These seven are gathered by players, not published by Frontier, and are the least confirmed
-        numbers here — unlike the construction points above, which two independent sources agree on.
-        A large starport really does cost the system security; that is the game, not a mistake.
+        Each figure is a shift against whatever the system is today, counted cumulatively across
+        every step of the build order above. These seven are gathered by players, not published by
+        Frontier, and are the least confirmed numbers here — unlike the construction points, which
+        two independent sources agree on. A large starport really does cost the system security;
+        that is the game, not a mistake.
       </p>
     </div>
   );

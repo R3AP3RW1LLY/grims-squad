@@ -323,7 +323,20 @@ export function Stat({
 }
 
 /** Progress, drawn only when the total is genuinely known. See the note in `Bar`. */
-export function Bar({ done, total }: { done: number; total: number }): JSX.Element | null {
+export function Bar({
+  done,
+  total,
+  staged = 0,
+}: {
+  done: number;
+  total: number;
+  /**
+   * Tonnes STAGED rather than delivered — aboard attached carriers, in colonisation's case. A
+   * second, yellow segment after the filled one, so "bought and parked at the site" stops looking
+   * identical to "nobody has bought this". Zero draws the classic single-segment bar.
+   */
+  staged?: number;
+}): JSX.Element | null {
   /*
    * Null rather than an empty bar when the total is unknown. A bar at 0% is a claim that nothing has
    * been delivered, which is a different statement from "we do not know how much this build wants" —
@@ -332,6 +345,7 @@ export function Bar({ done, total }: { done: number; total: number }): JSX.Eleme
   if (total <= 0) return null;
 
   const pct = Math.max(0, Math.min(100, (done / total) * 100));
+  const stagedPct = Math.max(0, Math.min(100 - pct, (staged / total) * 100));
   return (
     <div
       style={{
@@ -341,12 +355,20 @@ export function Bar({ done, total }: { done: number; total: number }): JSX.Eleme
         background: C.subtle,
         borderRadius: '999px',
         overflow: 'hidden',
+        display: 'flex',
       }}
       role="img"
-      aria-label={`${Math.round(pct)} per cent delivered`}
+      aria-label={
+        stagedPct > 0
+          ? `${Math.round(pct)} per cent delivered, ${Math.round(stagedPct)} per cent aboard carriers`
+          : `${Math.round(pct)} per cent delivered`
+      }
     >
       <div
         style={{ height: '100%', width: `${pct}%`, background: C.cyan, transition: 'width 200ms ease' }}
+      />
+      <div
+        style={{ height: '100%', width: `${stagedPct}%`, background: C.warn, transition: 'width 200ms ease' }}
       />
     </div>
   );

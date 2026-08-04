@@ -22,6 +22,8 @@ function pass(over: Partial<WatchOutcome> = {}): WatchOutcome {
     dockedAt: null,
     // An empty trip, for the same reason.
     trip: { lots: {}, lastSale: null, since: 'start' },
+    // And an empty carrier hold — totals count uploads, not cargo.
+    carrierHold: { carrier: null, hold: {}, dockedCarrierId: null },
     gameRunning: false,
     filesRead: 0,
     newFilesRead: 0,

@@ -183,6 +183,21 @@ export interface HaulerTally {
 export interface ShoppingRow {
   readonly commodity: string;
   readonly remaining: number;
+  /** The site's total ask, when the journal has given it. What the three-segment bar divides by. */
+  readonly required: number | null;
+  /**
+   * Effective tonnes of this already aboard the build's attached carriers, capped at `remaining`.
+   *
+   * ★ THE NUMBER THAT STOPS A WASTED SHOPPING TRIP ★
+   *
+   * The list used to quote the full outstanding tonnage and print a caveat telling members to go
+   * and check the Carriers tab themselves. Twenty thousand tonnes parked at the site is not
+   * something a footnote should be in charge of — so the quantity every quote uses is `toBuy`,
+   * and this is what was subtracted to get it.
+   */
+  readonly onCarriers: number;
+  /** What actually needs buying: max(0, remaining − onCarriers). Zero means the carriers cover it. */
+  readonly toBuy: number;
   readonly stationName: string | null;
   readonly systemName: string | null;
   readonly price: number | null;
@@ -840,10 +855,17 @@ export class ColonyService {
        * knows which they are doing, so it is a toggle rather than a cleverer default.
        */
       sort?: 'local' | 'cheapest' | 'closest';
+      /**
+       * Effective tonnes per commodity already aboard the build's attached carriers — the merge of
+       * manual, journal and mirror the carrier service computes. Passed in rather than fetched
+       * here, because the controller already holds the carriers for the same page.
+       */
+      carrierCover?: Readonly<Record<string, number>>;
     },
   ): Promise<readonly ShoppingRow[]> {
     const needs = await this.needs(projectId);
     const now = Date.now();
+    const cover = opts.carrierCover ?? {};
 
     const query: Omit<PlaceQuery, 'near'> = {
       limit: 1,
@@ -861,6 +883,41 @@ export class ColonyService {
     for (const need of needs) {
       // Settled lines are dropped rather than shown at zero: a shopping list is what to go and buy.
       if (need.remaining <= 0) continue;
+
+      /*
+       * ★ WHAT THE CARRIERS ALREADY HOLD IS NOT SOMETHING TO BUY ★
+       *
+       * The old list quoted the full outstanding tonnage with a footnote saying carriers exist. So
+       * the quantity every quote below uses is what is left AFTER the attached holds: capped at the
+       * remaining need (a carrier holding more than the build wants covers it, not more than it),
+       * and a fully covered line skips the market entirely — quoting a station for cargo the
+       * squadron already owns is exactly the trip this exists to prevent.
+       */
+      const onCarriers = Math.min(
+        need.remaining,
+        Math.max(0, Math.trunc(Number(cover[need.commodity] ?? 0))),
+      );
+      const toBuy = need.remaining - onCarriers;
+
+      if (toBuy <= 0) {
+        out.push({
+          commodity: need.commodity,
+          remaining: need.remaining,
+          required: need.required,
+          onCarriers,
+          toBuy: 0,
+          stationName: null,
+          systemName: null,
+          price: null,
+          supply: null,
+          distance: null,
+          seenAt: null,
+          nearestOutOfRange: null,
+          // Zero, not null: null means "nowhere sells it", and this line needs nothing bought.
+          cost: 0,
+        });
+        continue;
+      }
 
       /*
        * ★ TWO CANDIDATE SETS, AND THE REASON IS A REAL BUG — SQUADRON OWNER, 2026-08-02 ★
@@ -932,6 +989,9 @@ export class ColonyService {
       out.push({
         commodity: need.commodity,
         remaining: need.remaining,
+        required: need.required,
+        onCarriers,
+        toBuy,
         stationName: place?.stationName ?? null,
         systemName: place?.systemName ?? null,
         price: place?.price ?? null,
@@ -950,11 +1010,11 @@ export class ColonyService {
                 seenAt: nearestOutOfRange.seenAt,
               },
         /*
-         * The whole outstanding tonnage at that price, not what is on that station's shelf. It
-         * answers "what will finishing this cost me", which is the question — and a member reading
-         * it can see the supply column and work out how many trips.
+         * The tonnage that still needs BUYING at that price — after the carriers — not what is on
+         * that station's shelf. It answers "what will finishing this cost me", and a member can
+         * see the supply column and work out how many trips.
          */
-        cost: place === undefined ? null : place.price * need.remaining,
+        cost: place === undefined ? null : place.price * toBuy,
       });
     }
 

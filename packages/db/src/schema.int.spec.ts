@@ -175,7 +175,15 @@ describe('P0.2 database schema', () => {
     //
     // Slot counts live on the BODY rather than on a plan, because how many slots a body has is a
     // fact about the system — one member reads it off the in-game map once and every plan has it.
-    expect(Number(r[0]?.n)).toBe(97);
+    //
+    // 114 as of 2026-08-04, one very long day: ops_alerts (a feed that announces its own death),
+    // the eight EDDN full-capture tables (outfitting, shipyards, body signals, settlements,
+    // carrier positions, the bartender, traffic, schema stats), data_bounties + bounty_claims
+    // (the Data Runner board), leaderboard_events + current_builds + worker_cursors (the gamified
+    // boards and the pinned build), squadron_activity (the shared feed behind the bell),
+    // changelog_releases (the deploy notes), and colony_carrier_cargo (what the squadron's
+    // carriers hold, journal-witnessed and hand-corrected).
+    expect(Number(r[0]?.n)).toBe(114);
   });
 
   describe('hand-written DDL that Prisma cannot express', () => {

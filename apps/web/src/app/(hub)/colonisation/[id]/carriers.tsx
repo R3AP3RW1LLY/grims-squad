@@ -3,7 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import type { AttachedCarrier, CarrierMatch, ColonyNeed } from '../../../../lib/api';
-import { apiDelete, apiGet, apiPost } from '../../../../lib/api-client';
+import { apiDelete, apiGet, apiPatch, apiPost } from '../../../../lib/api-client';
 import { CopySystem } from '../../../../components/copy-system';
 
 /**
@@ -57,12 +57,18 @@ export function Carriers({
   projectId,
   carriers,
   needs,
+  carrierCover,
   canManage,
+  isCrew,
 }: {
   projectId: string;
   carriers: readonly AttachedCarrier[];
   needs: readonly ColonyNeed[];
+  /** The server's effective cover per commodity — manual beats journal beats mirror. */
+  carrierCover: Readonly<Record<string, number>>;
   canManage: boolean;
+  /** Declaring a hold is crew work; the pen is drawn only for members on the roster. */
+  isCrew: boolean;
 }) {
   const router = useRouter();
   const [term, setTerm] = useState('');
@@ -105,17 +111,16 @@ export function Carriers({
   };
 
   /*
-   * What the carriers cover, per commodity. Summed here rather than on the server because it is a
-   * join of two things the page already has — and a member reading it can check the arithmetic
-   * against the rows above it, which is the point of showing both.
+   * ★ THE SERVER'S EFFECTIVE COVER, NOT A CLIENT RE-DERIVATION ★
+   *
+   * This used to sum the mirror holds locally, which was two of three sources short: the mirror
+   * sees only sell orders, and the declared rows (journal + manual) are exactly the cargo that is
+   * not on sale. The merge rule — manual beats journal beats mirror — lives with the shopping
+   * maths on the server, and this headline must agree with the shopping list to the tonne.
    */
-  const covered = new Map<string, number>();
-  for (const c of carriers) {
-    for (const h of c.holds) covered.set(h.commodity, (covered.get(h.commodity) ?? 0) + h.tonnes);
-  }
   const outstanding = needs.filter((n) => n.remaining > 0);
   const totalCovered = outstanding.reduce(
-    (sum, n) => sum + Math.min(n.remaining, covered.get(n.commodity) ?? 0),
+    (sum, n) => sum + Math.min(n.remaining, Math.max(0, carrierCover[n.commodity] ?? 0)),
     0,
   );
   const totalRemaining = outstanding.reduce((sum, n) => sum + n.remaining, 0);
@@ -202,7 +207,7 @@ export function Carriers({
                           both render as an empty row. */}
                       {c.seenAt === null
                         ? 'Nobody has reported its market, so we cannot say what is aboard.'
-                        : 'Nothing aboard that this build still wants.'}
+                        : 'Nothing on its market that this build still wants.'}
                     </p>
                   ) : (
                     <ul className="m-0 mt-2 list-none space-y-0.5 p-0">
@@ -219,6 +224,15 @@ export function Carriers({
                       ))}
                     </ul>
                   )}
+
+                  <DeclaredHold
+                    projectId={projectId}
+                    carrier={c}
+                    needs={needs}
+                    isCrew={isCrew}
+                    busy={busy}
+                    act={act}
+                  />
                 </li>
               );
             })}
@@ -245,7 +259,8 @@ export function Carriers({
 
       {matches === null ? null : matches.length === 0 ? (
         <p className="m-0 mt-3 text-sm text-[var(--color-text-secondary)]">
-          No carrier we have seen is holding anything this build still wants.
+          No carrier we have seen is selling anything this build still wants — but a hold can still
+          be declared once one is attached.
         </p>
       ) : (
         <ul className="m-0 mt-3 list-none space-y-1 p-0">
@@ -293,6 +308,209 @@ export function Carriers({
           })}
         </ul>
       )}
+    </div>
+  );
+}
+
+/**
+ * The declared hold: what the journals watched and what the crew has typed, per carrier.
+ *
+ * ★ THREE SOURCES, ONE RULE, SAID ON SCREEN ★
+ *
+ * The mirror rows above are the carrier's public SELL ORDERS. These rows are the other two
+ * sources — the owner's own journal (read-only here, with its age) and the crew's hand (editable).
+ * The merge the shopping list reads is: manual beats journal beats mirror, and a manual ZERO is a
+ * real statement that retires a stale figure.
+ *
+ * Crew members only: declaring what is aboard is crew work, and the server refuses anybody else —
+ * so the pen is only drawn for the crew, rather than teaching everybody else the page is broken.
+ */
+function DeclaredHold({
+  projectId,
+  carrier,
+  needs,
+  isCrew,
+  busy,
+  act,
+}: {
+  projectId: string;
+  carrier: AttachedCarrier;
+  needs: readonly ColonyNeed[];
+  isCrew: boolean;
+  busy: boolean;
+  act: (fn: () => Promise<unknown>) => Promise<void>;
+}) {
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [adding, setAdding] = useState('');
+  const [addTonnes, setAddTonnes] = useState('');
+
+  const cargoUrl = `/v1/logistics/colony/projects/${encodeURIComponent(projectId)}/carriers/${encodeURIComponent(carrier.marketId)}/cargo`;
+
+  const save = (commodity: string, tonnes: number | null): void => {
+    void act(() => apiPatch(cargoUrl, { commodity, tonnes }));
+  };
+
+  const journal = carrier.declared.filter((d) => d.source === 'journal');
+  const manual = carrier.declared.filter((d) => d.source === 'manual');
+  const manualNames = new Set(manual.map((d) => d.commodity));
+
+  // What the add-control offers: the build's outstanding commodities not already declared by hand.
+  const addable = needs
+    .filter((n) => n.remaining > 0 && !manualNames.has(n.commodity))
+    .map((n) => n.commodity);
+
+  if (!isCrew && carrier.declared.length === 0) return null;
+
+  return (
+    <div className="mt-3 border-t border-[var(--color-border-hairline)] pt-2">
+      <p className="m-0 font-mono text-[9px] uppercase tracking-[0.18em] text-[var(--color-text-dim)]">
+        Declared hold
+      </p>
+
+      {carrier.declared.length === 0 ? (
+        <p className="m-0 mt-1 text-[11px] text-[var(--color-text-dim)]">
+          Nothing declared yet. The owner&rsquo;s companion app fills this as it watches cargo move;
+          anything it missed can be typed in below.
+        </p>
+      ) : (
+        <ul className="m-0 mt-1.5 list-none space-y-1 p-0">
+          {journal.map((d) => {
+            const age = seenAgo(d.updatedAt);
+            const overridden = manualNames.has(d.commodity);
+            return (
+              <li
+                key={`journal-${d.commodity}`}
+                className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 text-xs text-[var(--color-text-secondary)]"
+              >
+                <span>
+                  {d.commodity}
+                  <span className="ml-1.5 font-mono text-[9px] uppercase tracking-[0.14em] text-[var(--color-text-dim)]">
+                    journal
+                  </span>
+                  <span
+                    className={
+                      age.stale
+                        ? 'ml-1.5 font-mono text-[10px] text-[var(--color-semantic-warning)]'
+                        : 'ml-1.5 font-mono text-[10px] text-[var(--color-text-dim)]'
+                    }
+                  >
+                    {age.text}
+                  </span>
+                  {overridden ? (
+                    <span
+                      className="ml-1.5 font-mono text-[10px] text-[var(--color-text-dim)]"
+                      title="A crew member's figure below outranks this one."
+                    >
+                      overridden
+                    </span>
+                  ) : null}
+                </span>
+                {/* Read-only on purpose: this line is the owner's app reporting what it watched,
+                    and nobody else's to edit. The correction path is a manual figure below. */}
+                <span className={`font-mono tabular-nums ${overridden ? 'line-through opacity-50' : ''}`}>
+                  {d.tonnes.toLocaleString()} t
+                </span>
+              </li>
+            );
+          })}
+
+          {manual.map((d) => (
+            <li
+              key={`manual-${d.commodity}`}
+              className="flex flex-wrap items-center justify-between gap-x-4 gap-y-0.5 text-xs text-[var(--color-text-secondary)]"
+            >
+              <span>
+                {d.commodity}
+                <span className="ml-1.5 font-mono text-[9px] uppercase tracking-[0.14em] text-[var(--color-brand-orange)]">
+                  by hand
+                </span>
+                {d.updatedBy === null ? null : (
+                  <span className="ml-1.5 font-mono text-[10px] text-[var(--color-text-dim)]">
+                    {d.updatedBy} · {seenAgo(d.updatedAt).text}
+                  </span>
+                )}
+              </span>
+              {isCrew ? (
+                <span className="flex items-center gap-1.5">
+                  <input
+                    value={drafts[d.commodity] ?? String(d.tonnes)}
+                    onChange={(e) =>
+                      setDrafts((prev) => ({ ...prev, [d.commodity]: e.target.value }))
+                    }
+                    inputMode="numeric"
+                    aria-label={`Tonnes of ${d.commodity} aboard ${carrier.name}`}
+                    className={`${FIELD} w-24 py-1 text-right font-mono tabular-nums`}
+                  />
+                  <button
+                    type="button"
+                    disabled={busy || !/^\d+$/.test((drafts[d.commodity] ?? String(d.tonnes)).trim())}
+                    className={CHIP}
+                    onClick={() => save(d.commodity, Number((drafts[d.commodity] ?? String(d.tonnes)).trim()))}
+                  >
+                    Save
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    className={CHIP}
+                    title="Remove the hand-typed figure. The journal and market readings stand again."
+                    onClick={() => save(d.commodity, null)}
+                  >
+                    Clear
+                  </button>
+                </span>
+              ) : (
+                <span className="font-mono tabular-nums">{d.tonnes.toLocaleString()} t</span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {isCrew ? (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          <select
+            value={adding}
+            onChange={(e) => setAdding(e.target.value)}
+            aria-label={`Declare a commodity aboard ${carrier.name}`}
+            className={`${FIELD} max-w-[220px] py-1`}
+          >
+            <option value="">declare a commodity…</option>
+            {addable.map((commodity) => (
+              <option key={commodity} value={commodity}>
+                {commodity}
+              </option>
+            ))}
+          </select>
+          <input
+            value={addTonnes}
+            onChange={(e) => setAddTonnes(e.target.value)}
+            inputMode="numeric"
+            placeholder="tonnes"
+            aria-label="Tonnes aboard"
+            className={`${FIELD} w-24 py-1 text-right font-mono tabular-nums`}
+          />
+          <button
+            type="button"
+            disabled={busy || adding === '' || !/^\d+$/.test(addTonnes.trim())}
+            className={CHIP}
+            onClick={() => {
+              save(adding, Number(addTonnes.trim()));
+              setAdding('');
+              setAddTonnes('');
+            }}
+          >
+            Declare
+          </button>
+          <span className="text-[10px] text-[var(--color-text-dim)]">
+            zero is a real figure — it says the hold has none
+          </span>
+        </div>
+      ) : carrier.declared.length > 0 ? (
+        <p className="m-0 mt-1.5 text-[10px] text-[var(--color-text-dim)]">
+          Join the build&rsquo;s crew to declare or correct these figures.
+        </p>
+      ) : null}
     </div>
   );
 }

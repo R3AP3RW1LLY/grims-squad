@@ -106,6 +106,15 @@ declare global {
         body: { marketId: string; isSquadron: boolean },
       ): Promise<Answer<{ marketId: string }>>;
       carrierRemove(id: string, marketId: string): Promise<Answer<{ ok: true }>>;
+      /**
+       * Sets or clears a MANUAL tonnage on an attached carrier — the crew's own hand, for whatever
+       * the journals missed. `tonnes: null` clears; zero is a real figure ("none aboard").
+       */
+      carrierCargoSet(
+        id: string,
+        marketId: string,
+        body: { commodity: string; tonnes: number | null },
+      ): Promise<Answer<{ ok: true }>>;
 
       /*
        * The planner. Declared here with the rest of the bridge for the reason stated above:
@@ -176,14 +185,21 @@ export interface ProjectDetailData {
    * attached, "Add as squadron" to a member with no rank. A control that exists in order to be
    * refused teaches people to distrust the page.
    */
-  can: { manage: boolean; isPoster: boolean };
+  can: { manage: boolean; isPoster: boolean; isCrew: boolean };
   /**
    * Fleet carriers on this build.
    *
    * Read from the market mirror rather than from anybody's journal — a carrier's market is public,
    * so this sees every squadron carrier rather than only the one whose owner has the app open.
+   * `declared` on each carrier adds the two sources the mirror cannot see: the owner's journal and
+   * a crew member's hand.
    */
   carriers: AttachedCarrier[];
+  /**
+   * Effective tonnes aboard the attached carriers per commodity — manual beats journal beats
+   * mirror, summed by the hub. The yellow segment of every three-segment bar.
+   */
+  carrierCover: Record<string, number>;
   needs: ColonyNeed[];
   haulers: ColonyHauler[];
   shopping: ColonyShoppingRow[];
@@ -950,8 +966,23 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
   };
   const outstanding = needs.filter((n) => n.remaining > 0);
   const done = needs.filter((n) => n.remaining <= 0);
+  /*
+   * The effective carrier cover, with the same mismatched-pair defense as the chart above it: an
+   * older hub sends no `carrierCover` and no `toBuy`, and the honest reading of that is "no cover",
+   * which is exactly what the old numbers meant.
+   */
+  const cover: Record<string, number> = data.carrierCover ?? {};
+  const toBuyOf = (r: ColonyShoppingRow): number =>
+    Number.isFinite(r.toBuy) ? r.toBuy : r.remaining;
   const total = shopping.reduce((sum, r) => sum + (r.cost ?? 0), 0);
-  const unsourced = shopping.filter((r) => r.price === null).length;
+  /*
+   * ★ THREE KINDS OF SHOPPING LINE, COUNTED APART ★
+   *
+   * `toBuy === 0` is a line the carriers already cover — good news, costing nothing — and lumping
+   * it in with "nobody sells this" would turn the squadron's own cargo into a warning.
+   */
+  const covered = shopping.filter((r) => toBuyOf(r) === 0).length;
+  const unsourced = shopping.filter((r) => toBuyOf(r) > 0 && r.price === null).length;
   const delivered = project.required - project.remaining;
 
   return (
@@ -1093,8 +1124,9 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
         ) : (
           <Card>
             {outstanding.map((n) => (
-              <CommodityRow key={n.commodity} need={n} />
+              <CommodityRow key={n.commodity} need={n} aboard={cover[n.commodity] ?? 0} />
             ))}
+            <BarLegendLine />
             {done.length === 0 ? null : (
               <p style={{ margin: '10px 0 0', fontSize: '11px', color: C.faint }}>
                 {done.length} commodit{done.length === 1 ? 'y' : 'ies'} fully delivered:{' '}
@@ -1216,14 +1248,17 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
             {shopping.map((r) => (
               <ShoppingRow key={r.commodity} row={r} />
             ))}
+            <BarLegendLine />
             <p style={{ margin: '10px 0 0', fontSize: '11px', color: C.dim }}>
               {/*
                 Qualified whenever it is incomplete. A confident total that silently omits four
-                commodities nobody sells is worse than no total.
+                commodities nobody sells is worse than no total — and a line the carriers cover is
+                stated as covered, never counted against the total.
               */}
               {unsourced === 0
-                ? `About ${credits(total)} in cargo to finish.`
+                ? `About ${credits(total)} in cargo to buy.`
                 : `About ${credits(total)} for what can be bought — ${unsourced} not sold in range, so the real total is higher.`}
+              {covered === 0 ? '' : ` ${covered} fully covered by the attached carriers.`}
             </p>
           </Card>
         )}
@@ -1235,7 +1270,9 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
           projectId={data.project.id}
           carriers={data.carriers}
           needs={data.needs}
+          carrierCover={cover}
           canManage={data.can.manage}
+          isCrew={data.can.isCrew === true}
           onChanged={() => void reloadDetail()}
         />
       )}
@@ -1363,9 +1400,11 @@ function Toggle({
  * what to haul next wants the short one, and finding it by reading pairs of five-digit numbers is
  * slower than seeing it.
  */
-function CommodityRow({ need }: { need: ColonyNeed }): JSX.Element {
+function CommodityRow({ need, aboard = 0 }: { need: ColonyNeed; aboard?: number }): JSX.Element {
   const required = need.required ?? 0;
   const provided = Math.max(0, required - need.remaining);
+  // Capped at what is still wanted: a carrier holding more than the build needs covers it, not more.
+  const staged = Math.min(need.remaining, Math.max(0, aboard));
 
   return (
     <div style={{ padding: '6px 0', borderTop: `1px solid ${C.hairline}` }}>
@@ -1373,19 +1412,51 @@ function CommodityRow({ need }: { need: ColonyNeed }): JSX.Element {
         <span style={{ fontSize: '13px' }}>{need.commodity}</span>
         <span style={{ fontSize: '13px', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
           {tonnes(need.remaining)} left
+          {staged > 0 ? (
+            <span
+              style={{ marginLeft: '7px', fontSize: '11px', color: C.warn }}
+              title="Effective tonnes already aboard the build's attached carriers."
+            >
+              {tonnes(staged)} aboard
+            </span>
+          ) : null}
         </span>
       </div>
       {required <= 0 ? null : (
         <>
           <div style={{ marginTop: '4px' }}>
-            <Bar done={provided} total={required} />
+            <Bar done={provided} total={required} staged={staged} />
           </div>
           <p style={{ margin: '3px 0 0', fontSize: '11px', color: C.faint }}>
             {provided.toLocaleString()} of {required.toLocaleString()} delivered
+            {staged > 0 ? ` · ${staged.toLocaleString()} aboard carriers` : ''}
           </p>
         </>
       )}
     </div>
+  );
+}
+
+/** The legend the segmented bars earn — once per list, not once per row. */
+function BarLegendLine(): JSX.Element {
+  const swatch = (color: string): JSX.CSSProperties => ({
+    display: 'inline-block',
+    width: '14px',
+    height: '4px',
+    borderRadius: '999px',
+    background: color,
+    marginRight: '5px',
+    verticalAlign: 'middle',
+  });
+  return (
+    <p style={{ margin: '10px 0 0', fontSize: '10px', color: C.faint, fontFamily: 'var(--font-mono)' }}>
+      <span style={swatch(C.cyan)} />
+      delivered
+      <span style={{ ...swatch(C.warn), marginLeft: '14px' }} />
+      aboard attached carriers
+      <span style={{ ...swatch(C.subtle), marginLeft: '14px' }} />
+      still to source
+    </p>
   );
 }
 
@@ -1480,13 +1551,19 @@ function CarrierPanel({
   projectId,
   carriers,
   needs,
+  carrierCover,
   canManage,
+  isCrew,
   onChanged,
 }: {
   projectId: string;
   carriers: readonly AttachedCarrier[];
   needs: readonly ColonyNeed[];
+  /** The hub's effective cover per commodity — manual beats journal beats mirror. */
+  carrierCover: Readonly<Record<string, number>>;
   canManage: boolean;
+  /** Declaring a hold is crew work; the pen is drawn only for members on the roster. */
+  isCrew: boolean;
   onChanged: () => void;
 }): JSX.Element {
   const [term, setTerm] = useState('');
@@ -1524,13 +1601,17 @@ function CarrierPanel({
     });
   };
 
-  const covered = new Map<string, number>();
-  for (const c of carriers)
-    for (const h of c.holds) covered.set(h.commodity, (covered.get(h.commodity) ?? 0) + h.tonnes);
-
+  /*
+   * ★ THE HUB'S EFFECTIVE COVER, NOT A LOCAL RE-DERIVATION ★
+   *
+   * This used to sum the mirror holds, which was two of three sources short: the mirror sees only
+   * sell orders, and the declared rows are exactly the cargo that is not on sale. The merge —
+   * manual beats journal beats mirror — lives on the hub with the shopping maths, and this
+   * headline must agree with the shopping list to the tonne.
+   */
   const outstanding = needs.filter((n) => n.remaining > 0);
   const aboard = outstanding.reduce(
-    (sum, n) => sum + Math.min(n.remaining, covered.get(n.commodity) ?? 0),
+    (sum, n) => sum + Math.min(n.remaining, Math.max(0, carrierCover[n.commodity] ?? 0)),
     0,
   );
   const wanted = outstanding.reduce((sum, n) => sum + n.remaining, 0);
@@ -1606,7 +1687,7 @@ function CarrierPanel({
                       the carrier; "we have never seen its market" is our own gap. */}
                   {c.seenAt === null
                     ? 'Nobody has reported its market, so we cannot say what is aboard.'
-                    : 'Nothing aboard that this build still wants.'}
+                    : 'Nothing on its market that this build still wants.'}
                 </p>
               ) : (
                 <div style={{ marginTop: '8px' }}>
@@ -1615,6 +1696,15 @@ function CarrierPanel({
                   ))}
                 </div>
               )}
+
+              <CarrierDeclared
+                projectId={projectId}
+                carrier={c}
+                needs={needs}
+                isCrew={isCrew}
+                busy={busy}
+                act={act}
+              />
             </Card>
           ))}
         </>
@@ -1709,6 +1799,235 @@ function CarrierPanel({
   );
 }
 
+
+/**
+ * The declared hold: what the journals watched and what the crew has typed, per carrier.
+ *
+ * ★ THE COMPANION IS WHERE THE JOURNAL ROWS COME FROM ★
+ *
+ * This very app, running on the carrier owner's machine, folds their CargoTransfer events and
+ * pushes the reading the `journal` rows show — so a member reading this panel next to the game is
+ * often looking at their own wake. Journal rows are read-only with their age; the crew's `manual`
+ * rows are the correction path, and a manual ZERO is a real statement that retires a stale figure.
+ * The merge the shopping maths reads: manual beats journal beats mirror.
+ */
+function CarrierDeclared({
+  projectId,
+  carrier,
+  needs,
+  isCrew,
+  busy,
+  act,
+}: {
+  projectId: string;
+  carrier: AttachedCarrier;
+  needs: readonly ColonyNeed[];
+  isCrew: boolean;
+  busy: boolean;
+  act: (fn: () => Promise<Answer<unknown>>) => void;
+}): JSX.Element | null {
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [adding, setAdding] = useState('');
+  const [addTonnes, setAddTonnes] = useState('');
+
+  // Older-hub defense, like every panel here: no `declared` on the wire means none exist yet.
+  const declared = carrier.declared ?? [];
+  const journal = declared.filter((d) => d.source === 'journal');
+  const manual = declared.filter((d) => d.source === 'manual');
+  const manualNames = new Set(manual.map((d) => d.commodity));
+
+  const addable = needs
+    .filter((n) => n.remaining > 0 && !manualNames.has(n.commodity))
+    .map((n) => n.commodity);
+
+  if (!isCrew && declared.length === 0) return null;
+
+  const save = (commodity: string, value: number | null): void =>
+    act(() => window.colony.carrierCargoSet(projectId, carrier.marketId, { commodity, tonnes: value }));
+
+  const smallInput: JSX.CSSProperties = {
+    ...inputStyle,
+    width: '76px',
+    padding: '3px 7px',
+    textAlign: 'right',
+    fontVariantNumeric: 'tabular-nums',
+  };
+
+  return (
+    <div style={{ marginTop: '10px', borderTop: `1px solid ${C.hairline}`, paddingTop: '7px' }}>
+      <p style={{ ...MONO_SMALL, margin: 0, fontSize: '9px', letterSpacing: '0.18em' }}>
+        Declared hold
+      </p>
+
+      {declared.length === 0 ? (
+        <p style={{ margin: '5px 0 0', fontSize: '11px', color: C.faint }}>
+          Nothing declared yet. The owner&rsquo;s companion app fills this as it watches cargo move;
+          anything it missed can be typed in below.
+        </p>
+      ) : (
+        <div style={{ marginTop: '5px' }}>
+          {journal.map((d) => {
+            const overridden = manualNames.has(d.commodity);
+            return (
+              <div
+                key={`journal-${d.commodity}`}
+                style={{
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  alignItems: 'baseline',
+                  justifyContent: 'space-between',
+                  gap: '8px',
+                  padding: '3px 0',
+                  fontSize: '12px',
+                  color: C.dim,
+                }}
+              >
+                <span>
+                  {d.commodity}
+                  <span style={{ ...MONO_SMALL, marginLeft: '7px', fontSize: '9px' }}>journal</span>
+                  <span style={{ marginLeft: '7px', fontSize: '10px', color: C.faint }}>
+                    {seenAgo(d.updatedAt)}
+                  </span>
+                  {overridden ? (
+                    <span
+                      style={{ marginLeft: '7px', fontSize: '10px', color: C.faint }}
+                      title="A crew member's figure below outranks this one."
+                    >
+                      overridden
+                    </span>
+                  ) : null}
+                </span>
+                {/* Read-only on purpose: the owner's app reporting what it watched is nobody
+                    else's to edit. The correction path is a manual figure below. */}
+                <span
+                  style={{
+                    fontVariantNumeric: 'tabular-nums',
+                    ...(overridden ? { textDecoration: 'line-through', opacity: 0.5 } : {}),
+                  }}
+                >
+                  {tonnes(d.tonnes)}
+                </span>
+              </div>
+            );
+          })}
+
+          {manual.map((d) => (
+            <div
+              key={`manual-${d.commodity}`}
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '8px',
+                padding: '3px 0',
+                fontSize: '12px',
+                color: C.dim,
+              }}
+            >
+              <span>
+                {d.commodity}
+                <span
+                  style={{ ...MONO_SMALL, marginLeft: '7px', fontSize: '9px', color: C.orange }}
+                >
+                  by hand
+                </span>
+                {d.updatedBy === null ? null : (
+                  <span style={{ marginLeft: '7px', fontSize: '10px', color: C.faint }}>
+                    {d.updatedBy} · {seenAgo(d.updatedAt)}
+                  </span>
+                )}
+              </span>
+              {isCrew ? (
+                <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                  <input
+                    value={drafts[d.commodity] ?? String(d.tonnes)}
+                    onInput={(e) =>
+                      setDrafts((prev) => ({
+                        ...prev,
+                        [d.commodity]: (e.target as HTMLInputElement).value,
+                      }))
+                    }
+                    inputMode="numeric"
+                    aria-label={`Tonnes of ${d.commodity} aboard ${carrier.name}`}
+                    style={smallInput}
+                  />
+                  <Button
+                    disabled={
+                      busy || !/^\d+$/.test((drafts[d.commodity] ?? String(d.tonnes)).trim())
+                    }
+                    onClick={() =>
+                      save(d.commodity, Number((drafts[d.commodity] ?? String(d.tonnes)).trim()))
+                    }
+                  >
+                    Save
+                  </Button>
+                  <Button disabled={busy} onClick={() => save(d.commodity, null)}>
+                    Clear
+                  </Button>
+                </span>
+              ) : (
+                <span style={{ fontVariantNumeric: 'tabular-nums' }}>{tonnes(d.tonnes)}</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {isCrew ? (
+        <div
+          style={{
+            marginTop: '7px',
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            gap: '6px',
+          }}
+        >
+          <select
+            value={adding}
+            onChange={(e) => setAdding((e.target as HTMLSelectElement).value)}
+            aria-label={`Declare a commodity aboard ${carrier.name}`}
+            style={{ ...inputStyle, width: 'auto', maxWidth: '210px', padding: '4px 7px' }}
+          >
+            <option value="">declare a commodity…</option>
+            {addable.map((commodity) => (
+              <option key={commodity} value={commodity}>
+                {commodity}
+              </option>
+            ))}
+          </select>
+          <input
+            value={addTonnes}
+            onInput={(e) => setAddTonnes((e.target as HTMLInputElement).value)}
+            inputMode="numeric"
+            placeholder="tonnes"
+            aria-label="Tonnes aboard"
+            style={smallInput}
+          />
+          <Button
+            tone="primary"
+            disabled={busy || adding === '' || !/^\d+$/.test(addTonnes.trim())}
+            onClick={() => {
+              save(adding, Number(addTonnes.trim()));
+              setAdding('');
+              setAddTonnes('');
+            }}
+          >
+            Declare
+          </Button>
+          <span style={{ fontSize: '10px', color: C.faint }}>
+            zero is a real figure — it says the hold has none
+          </span>
+        </div>
+      ) : declared.length > 0 ? (
+        <p style={{ margin: '5px 0 0', fontSize: '10px', color: C.faint }}>
+          Join the build&rsquo;s crew to declare or correct these figures.
+        </p>
+      ) : null}
+    </div>
+  );
+}
 
 /**
  * Closing, reopening, deleting, and flagging the squadron's current effort.
@@ -1934,8 +2253,20 @@ function ShoppingControls({
  * how many trips this is. All three were already on the wire and unused.
  */
 function ShoppingRow({ row }: { row: ColonyShoppingRow }): JSX.Element {
-  const place =
-    row.stationName === null
+  // Older-hub defense, same as the totals above: no `toBuy` on the wire means no cover existed.
+  const toBuy = Number.isFinite(row.toBuy) ? row.toBuy : row.remaining;
+  const aboard = Number.isFinite(row.onCarriers) ? row.onCarriers : 0;
+  const fullyCovered = toBuy === 0;
+
+  const place = fullyCovered
+    ? /*
+       * ★ FULLY COVERED SAYS SO — IT DOES NOT QUOTE A MARKET ★
+       *
+       * Naming a station here would send somebody to buy cargo the squadron already owns, which is
+       * the exact trip this feature exists to prevent.
+       */
+      'already aboard the attached carriers — nothing to buy'
+    : row.stationName === null
       ? row.nearestOutOfRange === null
         ? 'nobody anywhere we know of sells this'
         : `none in range · nearest ${row.nearestOutOfRange.stationName} · ${row.nearestOutOfRange.systemName}` +
@@ -1960,18 +2291,42 @@ function ShoppingRow({ row }: { row: ColonyShoppingRow }): JSX.Element {
       >
         <span style={{ fontSize: '13px', color: C.text }}>
           {row.commodity}
+          {/* "to buy", not "needed": the carriers are already subtracted, and a figure that quietly
+              changed meaning under its old word would be read as the old one. */}
           <span style={{ marginLeft: '8px', fontSize: '11px', color: C.dim }}>
-            {tonnes(row.remaining)} needed
+            {tonnes(toBuy)} to buy
           </span>
+          {aboard > 0 ? (
+            <span
+              style={{ marginLeft: '7px', fontSize: '11px', color: C.warn }}
+              title="Effective tonnes already aboard the build's attached carriers, subtracted from the quantity to buy."
+            >
+              {tonnes(aboard)} aboard
+            </span>
+          ) : null}
         </span>
         <span style={{ fontSize: '12px', color: C.dim }}>
-          {row.price === null ? '—' : `${row.price.toLocaleString()} cr/t`}
-          {row.supply === null ? '' : ` · ${tonnes(row.supply)} in stock`}
+          {fullyCovered ? null : (
+            <>
+              {row.price === null ? '—' : `${row.price.toLocaleString()} cr/t`}
+              {row.supply === null ? '' : ` · ${tonnes(row.supply)} in stock`}
+            </>
+          )}
           <span style={{ marginLeft: '8px', color: C.text }}>
             {row.cost === null ? '—' : credits(row.cost)}
           </span>
         </span>
       </div>
+      {/* The three-segment picture, where the site has stated a total. */}
+      {row.required !== null && row.required > 0 ? (
+        <div style={{ marginTop: '4px' }}>
+          <Bar
+            done={Math.max(0, row.required - row.remaining)}
+            total={row.required}
+            staged={Math.min(row.remaining, aboard)}
+          />
+        </div>
+      ) : null}
       <p
         style={{
           margin: '3px 0 0',
@@ -1980,12 +2335,12 @@ function ShoppingRow({ row }: { row: ColonyShoppingRow }): JSX.Element {
           alignItems: 'center',
           gap: '5px',
           fontSize: '11px',
-          color: row.stationName === null ? C.warn : C.faint,
+          color: fullyCovered ? C.good : row.stationName === null ? C.warn : C.faint,
         }}
       >
         <span>{place}</span>
         {/* The system alone, because the galaxy map searches systems — a station name finds nothing. */}
-        {system === undefined || system === null ? null : <Copy value={system} />}
+        {fullyCovered || system === undefined || system === null ? null : <Copy value={system} />}
       </p>
     </div>
   );

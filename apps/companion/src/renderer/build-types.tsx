@@ -303,6 +303,54 @@ function BuildTypeDetailPage({
       </Card>
 
       <div style={{ marginTop: '20px' }}>
+        {/*
+          ★ WHAT FINISHING ONE DOES TO A SYSTEM — the website's section, mirrored ★
+
+          The seven Raven-style scalars, on the page where a member PICKS a type; they were seeded
+          for every build since the simulation shipped and visible only after adding one to a plan,
+          which is the wrong side of the decision.
+        */}
+        <Section title="What it does to a system">
+          <Card>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 22px' }}>
+              {(
+                [
+                  ['Population', b.effects.population],
+                  ['Max population', b.effects.maxPopulation],
+                  ['Security', b.effects.security],
+                  ['Technology', b.effects.technology],
+                  ['Wealth', b.effects.wealth],
+                  ['Standard of living', b.effects.standardOfLiving],
+                  ['Development', b.effects.development],
+                ] as const
+              ).map(([label, value]) => (
+                <span key={label} style={{ fontSize: '12px', color: C.dim }}>
+                  {label}{' '}
+                  <span
+                    style={{
+                      fontFamily: 'var(--font-mono)',
+                      fontVariantNumeric: 'tabular-nums',
+                      color: value < 0 ? C.warn : C.text,
+                    }}
+                  >
+                    {value > 0 ? '+' : ''}
+                    {value}
+                  </span>
+                </span>
+              ))}
+            </div>
+            <p style={{ margin: '10px 0 0', fontSize: '11px', color: C.faint, lineHeight: 1.6 }}>
+              {b.economyFixed !== null
+                ? `Its own economy is locked: ${b.economyFixed}, wherever it stands.`
+                : b.economyInfluence === 'none'
+                  ? 'It feeds no economy into the port that receives it.'
+                  : `It feeds ${b.economyInfluence} into the port that receives it.`}{' '}
+              All seven figures are gathered by players, not published by Frontier — a negative
+              security on a big starport is the game, not a mistake.
+            </p>
+          </Card>
+        </Section>
+
         <Section title="Price it from">
           <Card>
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>

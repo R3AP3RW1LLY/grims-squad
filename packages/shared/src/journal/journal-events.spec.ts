@@ -97,6 +97,14 @@ describe('the event allowlist', () => {
 
     expect(optional).toEqual([
       'Bounty',
+      /*
+       * Added 2026-08-04 for the colonisation carrier holds. Under `carrier` with the other
+       * own-carrier events: cargo moved between a member's ship and their own carrier is the only
+       * record that staged build cargo exists — the public mirror sees only sell orders. The
+       * retained field is the `Transfers` array alone (Type, Count, Direction); it carries no
+       * prices and names nobody else.
+       */
+      'CargoTransfer',
       'CarrierJump',
       'CarrierStats',
       /*

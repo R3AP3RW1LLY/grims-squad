@@ -39,6 +39,20 @@ export interface CarrierHold {
   readonly seenAt: Date | null;
 }
 
+/**
+ * What a carrier's hold DECLARES it is carrying, per commodity — the two sources the market
+ * mirror cannot see. `journal` rows are written by the owner's companion app from what it watched;
+ * `manual` rows are typed by crew. See the merge rule on `effectiveTonnes`.
+ */
+export interface DeclaredCargo {
+  readonly commodity: string;
+  readonly tonnes: number;
+  readonly source: 'journal' | 'manual';
+  /** Who typed a manual figure. Null for journal rows — the app writes those, not a person. */
+  readonly updatedBy: string | null;
+  readonly updatedAt: Date;
+}
+
 export interface AttachedCarrier {
   readonly marketId: string;
   readonly name: string;
@@ -51,6 +65,67 @@ export interface AttachedCarrier {
   readonly holds: readonly CarrierHold[];
   /** Everything it holds of what this build wants, added up. */
   readonly totalTonnes: number;
+  /** Journal-watched and hand-declared cargo, alongside the mirror's sell orders above. */
+  readonly declared: readonly DeclaredCargo[];
+}
+
+/**
+ * ★ THE MERGE RULE, IN ONE PLACE ★
+ *
+ * Three sources can speak about one commodity in one hold, and they are not equals:
+ *
+ *   manual   a crew member's own hand. The only source that can say "this figure is wrong",
+ *            so it wins outright — including a manual ZERO, which retires a stale claim.
+ *   journal  what the owner's app actually watched move. A floor: it misses whatever moved
+ *            while the app was closed.
+ *   mirror   the carrier's public sell orders. Also a floor: staged cargo is exactly the
+ *            cargo that is not on sale.
+ *
+ * Two floors argue by size — the larger is the better floor — and the hand beats both. Exported
+ * pure so the rule is spec-tested without a database, and so nobody re-derives it in a component.
+ */
+export function effectiveTonnes(sources: {
+  readonly manual: number | null;
+  readonly journal: number | null;
+  readonly mirror: number | null;
+}): number {
+  if (sources.manual !== null) return Math.max(0, sources.manual);
+  return Math.max(0, sources.journal ?? 0, sources.mirror ?? 0);
+}
+
+/**
+ * What the attached carriers effectively cover, per commodity — the merge rule applied per
+ * (carrier, commodity) and summed across carriers. Pure: it reads only what `forProject` already
+ * fetched, so the detail read costs no extra query and a spec can hold the arithmetic still.
+ */
+export function carrierCover(
+  carriers: ReadonlyArray<Pick<AttachedCarrier, 'holds' | 'declared'>>,
+): Record<string, number> {
+  const cover: Record<string, number> = {};
+
+  for (const carrier of carriers) {
+    const commodities = new Set<string>([
+      ...carrier.holds.map((h) => h.commodity),
+      ...carrier.declared.map((d) => d.commodity),
+    ]);
+
+    for (const commodity of commodities) {
+      const manual = carrier.declared.find((d) => d.source === 'manual' && d.commodity === commodity);
+      const journal = carrier.declared.find(
+        (d) => d.source === 'journal' && d.commodity === commodity,
+      );
+      const mirror = carrier.holds.find((h) => h.commodity === commodity);
+
+      const tonnes = effectiveTonnes({
+        manual: manual?.tonnes ?? null,
+        journal: journal?.tonnes ?? null,
+        mirror: mirror?.tonnes ?? null,
+      });
+      if (tonnes > 0) cover[commodity] = (cover[commodity] ?? 0) + tonnes;
+    }
+  }
+
+  return cover;
 }
 
 /** A carrier somebody could attach, found by callsign or name. */
@@ -270,25 +345,56 @@ export class ColonyCarrierService {
 
     const ids = carriers.map((c) => String(c['market_id']));
 
-    const holds = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
-      `WITH carriers AS (${CARRIER_STATION})
-       SELECT c.market_id, m.system_name, m.commodity, m.supply, m.market_seen_at
-         FROM market_entries m
-         JOIN carriers c ON c.ext_key = m.station_key
-         JOIN colony_needs n ON n.commodity = m.commodity
-        WHERE m.supply > 0
-          AND n.project_id = $1::uuid
-          AND n.remaining > 0
-          AND c.market_id = ANY($2::text[])
-        ORDER BY m.supply DESC`,
-      projectId,
-      ids,
-    );
+    const [holds, declared] = await Promise.all([
+      this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
+        `WITH carriers AS (${CARRIER_STATION})
+         SELECT c.market_id, m.system_name, m.commodity, m.supply, m.market_seen_at
+           FROM market_entries m
+           JOIN carriers c ON c.ext_key = m.station_key
+           JOIN colony_needs n ON n.commodity = m.commodity
+          WHERE m.supply > 0
+            AND n.project_id = $1::uuid
+            AND n.remaining > 0
+            AND c.market_id = ANY($2::text[])
+          ORDER BY m.supply DESC`,
+        projectId,
+        ids,
+      ),
+      /*
+       * The declared rows — the journal's and the crew's word about what is aboard. NOT filtered
+       * to the build's outstanding needs like the mirror holds above: a manual zero on a settled
+       * commodity is still a statement worth showing on the carriers tab.
+       */
+      this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
+        `SELECT g.market_id::text AS market_id, g.commodity, g.source, g.tonnes,
+                g.updated_at, u.display_name AS updated_by
+           FROM colony_carrier_cargo g
+           LEFT JOIN users u ON u.id = g.updated_by_id
+          WHERE g.market_id = ANY($1::bigint[])
+          ORDER BY g.commodity, g.source`,
+        ids,
+      ),
+    ]);
 
     const byCarrier = new Map<string, Array<Record<string, unknown>>>();
     for (const h of holds) {
       const key = String(h['market_id']);
       byCarrier.set(key, [...(byCarrier.get(key) ?? []), h]);
+    }
+
+    const declaredByCarrier = new Map<string, DeclaredCargo[]>();
+    for (const d of declared) {
+      const key = String(d['market_id']);
+      declaredByCarrier.set(key, [
+        ...(declaredByCarrier.get(key) ?? []),
+        {
+          commodity: String(d['commodity']),
+          tonnes: Number(d['tonnes']),
+          source: d['source'] === 'manual' ? 'manual' : 'journal',
+          updatedBy: d['updated_by'] === null ? null : String(d['updated_by']),
+          updatedAt: d['updated_at'] as Date,
+        },
+      ]);
     }
 
     return carriers.map((c) => {
@@ -315,7 +421,141 @@ export class ColonyCarrierService {
           seenAt: (h['market_seen_at'] as Date | null) ?? null,
         })),
         totalTonnes: mine.reduce((sum, h) => sum + Number(h['supply']), 0),
+        declared: declaredByCarrier.get(marketId) ?? [],
       };
     });
+  }
+
+  /**
+   * Sets or clears a MANUAL tonnage on an attached carrier — the crew's hand, for whatever the
+   * journals missed.
+   *
+   * ★ CREW MEMBERS ONLY — THE ROSTER IS THE CHECK ★
+   *
+   * The same membership the roster records is what earns the pen: declaring what is aboard a
+   * build's carrier is crew work, and a passer-by editing the squadron's cargo figures is exactly
+   * what the check refuses. Deliberately NOT rank-gated — the member standing on the carrier's
+   * deck counting the hold is rarely the one with COLONY_MANAGE.
+   *
+   * `tonnes: null` clears the override; ZERO is a real figure ("none of this is aboard") and
+   * overrides journal and mirror alike — that is the entire point of a manual row.
+   */
+  async setManual(input: {
+    projectId: string;
+    marketId: string;
+    commodity: string;
+    tonnes: number | null;
+    callerId: string;
+  }): Promise<void> {
+    if (!/^\d+$/.test(input.marketId)) {
+      throw new AppError(ErrorCode.VALIDATION_FAILED, 'That is not a carrier we can identify.');
+    }
+    const commodity = input.commodity.trim();
+    if (commodity === '') {
+      throw new AppError(ErrorCode.VALIDATION_FAILED, 'Name the commodity.');
+    }
+
+    const [attached] = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
+      `SELECT 1 AS yes FROM colony_carriers
+        WHERE project_id = $1::uuid AND market_id = $2::bigint`,
+      input.projectId,
+      input.marketId,
+    );
+    if (attached === undefined) {
+      throw new AppError(
+        ErrorCode.RESOURCE_NOT_VISIBLE,
+        'That carrier is not on this build. Attach it first.',
+      );
+    }
+
+    const [member] = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
+      `SELECT 1 AS yes FROM colony_members
+        WHERE project_id = $1::uuid AND user_id = $2::uuid`,
+      input.projectId,
+      input.callerId,
+    );
+    if (member === undefined) {
+      throw new AppError(
+        ErrorCode.PERMISSION_DENIED,
+        'Join the build’s crew first — declaring a carrier’s cargo is crew work.',
+      );
+    }
+
+    if (input.tonnes === null) {
+      await this.db.$executeRawUnsafe(
+        `DELETE FROM colony_carrier_cargo
+          WHERE market_id = $1::bigint AND commodity = $2 AND source = 'manual'`,
+        input.marketId,
+        commodity,
+      );
+      return;
+    }
+
+    if (!Number.isFinite(input.tonnes) || input.tonnes < 0) {
+      throw new AppError(ErrorCode.VALIDATION_FAILED, 'Tonnes must be zero or more.');
+    }
+
+    await this.db.$executeRawUnsafe(
+      `INSERT INTO colony_carrier_cargo (market_id, commodity, source, tonnes, updated_by_id, updated_at)
+       VALUES ($1::bigint, $2, 'manual', $3, $4::uuid, now())
+       ON CONFLICT (market_id, commodity, source) DO UPDATE SET
+         tonnes = EXCLUDED.tonnes, updated_by_id = EXCLUDED.updated_by_id, updated_at = now()`,
+      input.marketId,
+      commodity,
+      Math.trunc(input.tonnes),
+      input.callerId,
+    );
+  }
+
+  /**
+   * The companion app's reading of its member's OWN carrier hold.
+   *
+   * ★ A WITNESS STATEMENT, NOT AN INVENTORY — AND STORED ON THOSE TERMS ★
+   *
+   * The fold behind this starts empty on every app launch and reports only what it WATCHED move
+   * (see apps/companion/src/carrier-hold.ts). So rows are UPSERTED per commodity rather than the
+   * carrier's journal set being replaced wholesale: the app overwrites what it witnessed and stays
+   * silent about what it did not, and a figure from last week keeps its own date rather than being
+   * deleted by this week's ignorance. Manual rows are untouched entirely — a journal update landing
+   * two minutes after a member corrected a figure by hand must not undo the correction.
+   *
+   * Stored only for a carrier attached to at least one build. Anything else is dropped without
+   * error — the app pushes optimistically and does not hold the attachment list.
+   */
+  async journalSnapshot(input: {
+    marketId: string;
+    commodities: ReadonlyArray<{ commodity?: unknown; tonnes?: unknown }>;
+  }): Promise<{ stored: boolean }> {
+    if (!/^\d+$/.test(input.marketId)) return { stored: false };
+
+    const rows = input.commodities
+      .slice(0, 200)
+      .map((c) => ({
+        commodity: typeof c.commodity === 'string' ? c.commodity.trim() : '',
+        tonnes: Number(c.tonnes),
+      }))
+      .filter((c) => c.commodity !== '' && Number.isFinite(c.tonnes) && c.tonnes >= 0)
+      .map((c) => ({ commodity: c.commodity, tonnes: Math.trunc(c.tonnes) }));
+    if (rows.length === 0) return { stored: false };
+
+    const [attached] = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
+      `SELECT 1 AS yes FROM colony_carriers WHERE market_id = $1::bigint LIMIT 1`,
+      input.marketId,
+    );
+    if (attached === undefined) return { stored: false };
+
+    for (const row of rows) {
+      await this.db.$executeRawUnsafe(
+        `INSERT INTO colony_carrier_cargo (market_id, commodity, source, tonnes, updated_by_id, updated_at)
+         VALUES ($1::bigint, $2, 'journal', $3, NULL, now())
+         ON CONFLICT (market_id, commodity, source) DO UPDATE SET
+           tonnes = EXCLUDED.tonnes, updated_by_id = NULL, updated_at = now()`,
+        input.marketId,
+        row.commodity,
+        row.tonnes,
+      );
+    }
+
+    return { stored: true };
   }
 }

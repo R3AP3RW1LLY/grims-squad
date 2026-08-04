@@ -304,8 +304,13 @@ function Effects({ plan }: { plan: ColonyPlan }) {
 
   return (
     <div className="mt-6 rounded border border-[var(--color-border-hairline)] px-4 py-3">
+      {/*
+        "Dropping this plan into the system", not "the plan's effects": the deltas are BEFORE →
+        AFTER statements about the system the plan lands in, accrued across the whole build order —
+        every step above contributes, and reordering changes when they arrive, not what they sum to.
+      */}
       <p className="m-0 font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-secondary)]">
-        What this would do to the system
+        What dropping this plan into the system does
       </p>
       <div className="mt-2 flex flex-wrap gap-x-6 gap-y-2">
         {rows.map(([label, value]) => (
@@ -317,6 +322,7 @@ function Effects({ plan }: { plan: ColonyPlan }) {
                   ? 'font-mono tabular-nums text-[var(--color-semantic-warning)]'
                   : 'font-mono tabular-nums text-[var(--color-text-primary)]'
               }
+              title={`The system's ${label.toLowerCase()} after this plan = what it is now ${value >= 0 ? '+' : '−'} ${Math.abs(value)}.`}
             >
               {value > 0 ? '+' : ''}
               {value}
@@ -325,9 +331,11 @@ function Effects({ plan }: { plan: ColonyPlan }) {
         ))}
       </div>
       <p className="m-0 mt-3 text-[11px] text-[var(--color-text-dim)]">
-        These seven are gathered by players, not published by Frontier, and are the least confirmed
-        numbers here — unlike the construction points above, which two independent sources agree on.
-        A large starport really does cost the system security; that is the game, not a mistake.
+        Each figure is a shift against whatever the system is today, counted cumulatively across
+        every step of the build order above. These seven are gathered by players, not published by
+        Frontier, and are the least confirmed numbers here — unlike the construction points, which
+        two independent sources agree on. A large starport really does cost the system security;
+        that is the game, not a mistake.
       </p>
     </div>
   );

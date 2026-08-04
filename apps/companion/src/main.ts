@@ -41,6 +41,8 @@ import {
   colonySetCurrent,
   colonyClearCurrent,
   postColonyProject,
+  pushCarrierCargo,
+  setCarrierCargo,
   type CurrentBuild,
 } from './hub-colony.js';
 import { bountyBoard, bountyLeaderboard } from './hub-bounties.js';
@@ -85,6 +87,7 @@ import {
 } from './docked.js';
 import { capacityFrom, parseCargo, type Hold } from './cargo.js';
 import { EMPTY_TRIP, type TripLedger } from './trip-ledger.js';
+import { EMPTY_CARRIER_HOLD, carrierSnapshot, type CarrierHoldState } from './carrier-hold.js';
 import { accumulate } from './totals.js';
 import { isGameRunning, isActivelyPlaying,
   readStatusInGame } from './game-process.js';
@@ -245,6 +248,48 @@ let cargoCapacity: number | null = null;
  * of trip-ledger.ts.
  */
 let trip: TripLedger = EMPTY_TRIP;
+
+/**
+ * The member's own carrier's hold, carried between passes the same way `trip` is.
+ *
+ * Starts empty on purpose — a witness statement, not an inventory; see carrier-hold.ts. The hub
+ * merges what this watched with what crew declare by hand, and the manual figure wins.
+ */
+let carrierHold: CarrierHoldState = EMPTY_CARRIER_HOLD;
+
+/**
+ * The last carrier-hold snapshot the hub ACCEPTED, serialised.
+ *
+ * ★ THE DEBOUNCE IS "ON CHANGE", NOT "ON A TIMER" ★
+ *
+ * Compared against the current snapshot after every pass: identical means silence, different means
+ * one small POST. A failed push leaves this unchanged, so the next pass simply tries again —
+ * self-healing without a retry queue.
+ */
+let lastCarrierPush = '';
+
+/**
+ * Pushes the carrier-hold snapshot to the hub when it has changed.
+ *
+ * Never throws: a member's journal pass must not fail because this POST did. The hub quietly
+ * ignores carriers that are not attached to any build, so the app does not need to know whether
+ * this one is — pushing is cheap and the server holds the attachment list.
+ */
+async function pushCarrierHold(): Promise<void> {
+  if (config.deviceToken === '') return;
+
+  const snapshot = carrierSnapshot(carrierHold);
+  if (snapshot === null) return;
+
+  const serialised = JSON.stringify(snapshot);
+  if (serialised === lastCarrierPush) return;
+
+  const answer = await pushCarrierCargo(
+    { apiBaseUrl: apiBaseUrlFor(config, process.env), deviceToken: config.deviceToken },
+    snapshot,
+  );
+  if (answer.ok) lastCarrierPush = serialised;
+}
 
 /**
  * The member's current build, as the hub last told us.
@@ -618,6 +663,7 @@ async function tick(): Promise<void> {
       error: statusLine(backoff, Date.now()) ?? 'Not sending — retrying shortly.',
       dockedAt,
       trip,
+      carrierHold,
     };
     push();
     refreshTray();
@@ -639,6 +685,7 @@ async function tick(): Promise<void> {
       error: advice(),
       dockedAt,
       trip,
+      carrierHold,
     };
     push();
     return;
@@ -658,7 +705,7 @@ async function tick(): Promise<void> {
     push();
     let pass;
     try {
-      pass = await runWatchPass(nodeFs, dir, config, uploader, dockedAt, trip);
+      pass = await runWatchPass(nodeFs, dir, config, uploader, dockedAt, trip, carrierHold);
     } finally {
       sending = false;
     }
@@ -674,6 +721,11 @@ async function tick(): Promise<void> {
     dockedAt = pass.outcome.dockedAt;
     // The trip ledger, carried the same way — the pass folded this pass's buys and sells over it.
     trip = pass.outcome.trip;
+    // The own-carrier hold, likewise — and pushed to the hub the moment it differs from what the
+    // hub last accepted. Fire-and-forget: a failed push retries on the next pass, and nothing
+    // about a member's journal upload waits on it.
+    carrierHold = pass.outcome.carrierHold;
+    void pushCarrierHold();
 
     /*
      * ★ THE HOLD, READ FROM FRONTIER'S OWN SIDECAR ★
@@ -882,6 +934,7 @@ async function tick(): Promise<void> {
       error: error instanceof Error ? error.message : 'Something went wrong reading your journals.',
       dockedAt,
       trip,
+      carrierHold,
     };
   }
 
@@ -1728,6 +1781,17 @@ if (!app.requestSingleInstanceLock()) {
     });
     ipcMain.handle('colonyCarrierRemove', (_e, id: unknown, marketId: unknown) =>
       detachCarrier(hub(), projectId(id), typeof marketId === 'string' ? marketId : ''),
+    );
+    ipcMain.handle(
+      'colonyCarrierCargoSet',
+      (_e, id: unknown, marketId: unknown, body: unknown) => {
+        const b = (body ?? {}) as Record<string, unknown>;
+        return setCarrierCargo(hub(), projectId(id), typeof marketId === 'string' ? marketId : '', {
+          commodity: typeof b['commodity'] === 'string' ? b['commodity'] : '',
+          // Null clears the manual figure; zero is a real figure. The distinction is the feature.
+          tonnes: typeof b['tonnes'] === 'number' ? b['tonnes'] : null,
+        });
+      },
     );
 
     ipcMain.handle('colonyPlans', () => colonyPlans(hub()));

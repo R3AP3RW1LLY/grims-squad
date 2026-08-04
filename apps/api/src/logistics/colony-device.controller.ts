@@ -20,7 +20,7 @@ import { ColonyService, type ColonyOwner } from './colony.service.js';
 import { ColonyRosterService } from './colony-roster.service.js';
 import { ColonyCatalogueService } from './colony-catalogue.service.js';
 import { ColonyPlanService } from './colony-plan.service.js';
-import { ColonyCarrierService } from './colony-carrier.service.js';
+import { ColonyCarrierService, carrierCover } from './colony-carrier.service.js';
 import { MARKET_STORE } from './logistics.tokens.js';
 import type { MarketStore } from './market.store.js';
 
@@ -251,7 +251,12 @@ export class ColonyDeviceController {
      */
     const tz = await this.colony.viewerTimezone(me.userId);
 
-    const [needs, haulers, shopping, deliveries, chart, carriers] = await Promise.all([
+    // Carriers before the shopping list, exactly as the website's controller orders it: the buy
+    // maths subtracts what the attached holds cover, so the cover must exist before pricing.
+    const carriers = await this.carriers.forProject(id);
+    const cover = carrierCover(carriers);
+
+    const [needs, haulers, shopping, deliveries, chart, isCrew] = await Promise.all([
       this.colony.needs(id),
       this.colony.haulers(id),
       this.colony.shoppingList(id, {
@@ -266,15 +271,16 @@ export class ColonyDeviceController {
          */
         largePadOnly: largePad === '1',
         sort: sort === 'closest' ? 'closest' : sort === 'cheapest' ? 'cheapest' : 'local',
+        carrierCover: cover,
       }),
       // "whos delivered what and when", and the stacked chart over it. Fetched with everything else
       // rather than on their own routes: the page shows them together, and three round trips would
       // render it in three stages, each shifting the layout under whoever is reading.
       this.colony.deliveries(id),
       this.colony.deliveryChart(id, tz),
-      // What is already sitting in a hold. The app gets it because the website does — a member
-      // reading the same build in two places must not be told two different things about it.
-      this.carriers.forProject(id),
+      // Whether the reader is on the crew roster — the carrier-cargo pen is crew work, and the app
+      // should not draw a control the service will refuse.
+      this.rosters.isCrew(id, me.userId),
     ]);
 
     return {
@@ -285,6 +291,9 @@ export class ColonyDeviceController {
       deliveries,
       chart,
       carriers,
+      // The effective per-commodity cover, computed once and sent down — same field, same maths,
+      // same numbers as the website's door.
+      carrierCover: cover,
       /*
        * ★ THE RIGHTS, WHICH THE APP NEVER RECEIVED ★
        *
@@ -299,6 +308,7 @@ export class ColonyDeviceController {
         manage: (await this.permissions.effectiveMask(me.userId) & Permission.COLONY_MANAGE) ===
           Permission.COLONY_MANAGE,
         isPoster: project.postedById === me.userId,
+        isCrew,
       },
       // Echoed so the page can say where it is measuring from — a distance column with no stated
       // origin is a number nobody can check.
@@ -705,6 +715,69 @@ export class ColonyDeviceController {
 
     await this.carriers.detach({ projectId: id, marketId, callerId: me.userId, callerMask: mask });
     return { ok: true };
+  }
+
+  /**
+   * Declares, corrects or clears a MANUAL tonnage on an attached carrier — the app's door for the
+   * same write the website has. Crew membership is checked in the service, where the refusal is.
+   */
+  @Public()
+  @Patch('projects/:id/carriers/:marketId/cargo')
+  async setCarrierCargo(
+    @Req() req: FastifyRequest,
+    @Param('id') id: string,
+    @Param('marketId') marketId: string,
+    @Body() body: { commodity?: string; tonnes?: number | null },
+  ) {
+    const me = await this.#caller(
+      req,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    await this.carriers.setManual({
+      projectId: id,
+      marketId,
+      commodity: body.commodity ?? '',
+      tonnes: typeof body.tonnes === 'number' ? body.tonnes : null,
+      callerId: me.userId,
+    });
+    return { ok: true };
+  }
+
+  /**
+   * The companion app's reading of its member's OWN carrier hold.
+   *
+   * ★ NOT UNDER `projects/`, ON PURPOSE ★
+   *
+   * The app does not know which builds the carrier is attached to, and should not have to: it
+   * watched cargo move on ITS member's carrier and says so. The service stores the reading only
+   * when that carrier is attached to at least one build, and answers `stored: false` otherwise —
+   * not an error, because "your carrier is not helping any build right now" is the ordinary case.
+   *
+   * COLONY_VIEW like every other door here: the write lands in colonisation tables, and a member
+   * whose rank cannot see the boards has no business filling them.
+   */
+  @Public()
+  @Post('carrier-cargo')
+  async carrierCargo(
+    @Req() req: FastifyRequest,
+    @Body()
+    body: {
+      marketId?: string;
+      commodities?: Array<{ commodity?: unknown; tonnes?: unknown }>;
+    },
+  ) {
+    await this.#caller(
+      req,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    return this.carriers.journalSnapshot({
+      marketId: (body.marketId ?? '').trim(),
+      commodities: Array.isArray(body.commodities) ? body.commodities : [],
+    });
   }
 
   /**

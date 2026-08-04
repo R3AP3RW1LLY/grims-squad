@@ -143,6 +143,7 @@ export default async function ColonyProjectPage({
     deliveries,
     chart,
     carriers,
+    carrierCover,
     can,
     origin,
     unknownSystem,
@@ -244,7 +245,7 @@ export default async function ColonyProjectPage({
 
         {tab !== 'needs' ? null : (
           <Section title="What it still needs">
-            <NeedsTable needs={needs} />
+            <NeedsTable needs={needs} carrierCover={carrierCover} />
           </Section>
         )}
 
@@ -260,7 +261,9 @@ export default async function ColonyProjectPage({
               projectId={project.id}
               carriers={carriers}
               needs={needs}
+              carrierCover={carrierCover}
               canManage={can.manage}
+              isCrew={can.isCrew}
             />
           </Section>
         )}
@@ -273,7 +276,6 @@ export default async function ColonyProjectPage({
               origin={origin}
               unknownSystem={unknownSystem}
               query={query}
-              onCarriers={carriers.reduce((sum, c) => sum + c.totalTonnes, 0)}
             />
           </Section>
         )}

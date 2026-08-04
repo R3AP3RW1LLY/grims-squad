@@ -163,6 +163,21 @@ export class ColonyRosterService {
     }));
   }
 
+  /**
+   * Whether this member is on the build's crew roster.
+   *
+   * A rendering hint for the carrier-cargo pen: declaring what is aboard is crew work, and a page
+   * should not offer a control the service will refuse. The refusal itself lives with the write
+   * (ColonyCarrierService.setManual) — this only decides whether to draw the pen.
+   */
+  async isCrew(projectId: string, userId: string): Promise<boolean> {
+    const found = await this.db.colonyMember.findUnique({
+      where: { projectId_userId: { projectId, userId } },
+      select: { userId: true },
+    });
+    return found !== null;
+  }
+
   /** Puts the caller on the roster. Idempotent — pressing Join twice is one intention. */
   async join(projectId: string, userId: string): Promise<void> {
     const project = await this.#project(projectId, userId);

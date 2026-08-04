@@ -1982,6 +1982,16 @@ export interface ColonyHauler {
 export interface ColonyShoppingRow {
   commodity: string;
   remaining: number;
+  /** The site's total ask, when the journal has given it. What the three-segment bar divides by. */
+  required: number | null;
+  /**
+   * Effective tonnes already aboard the build's attached carriers, capped at `remaining`.
+   * Manual beats journal beats mirror — the merge lives on the server, and the buy maths below
+   * has already subtracted it.
+   */
+  onCarriers: number;
+  /** What actually needs buying: max(0, remaining − onCarriers). The quantity every quote uses. */
+  toBuy: number;
   stationName: string | null;
   systemName: string | null;
   price: number | null;
@@ -2056,6 +2066,20 @@ export interface CarrierHold {
   seenAt: string | null;
 }
 
+/**
+ * What a carrier's hold DECLARES, per commodity — from the owner's journal or a crew member's
+ * hand. The market mirror sees only sell orders; these rows are the cargo staged for the build.
+ */
+export interface DeclaredCargo {
+  commodity: string;
+  tonnes: number;
+  /** `journal` rows are the owner's app reporting what it watched; `manual` rows are typed. */
+  source: 'journal' | 'manual';
+  /** Who typed a manual row. Null for journal rows. */
+  updatedBy: string | null;
+  updatedAt: string;
+}
+
 export interface AttachedCarrier {
   marketId: string;
   name: string;
@@ -2067,6 +2091,8 @@ export interface AttachedCarrier {
   seenAt: string | null;
   holds: CarrierHold[];
   totalTonnes: number;
+  /** Journal-watched and hand-declared cargo, alongside the mirror's sell orders in `holds`. */
+  declared: DeclaredCargo[];
 }
 
 /** A carrier somebody could attach, ranked by how much of THIS build's list it is carrying. */
@@ -2100,8 +2126,13 @@ export interface ColonyDetail {
    * so this sees every squadron carrier rather than only the one whose owner has the app open.
    */
   carriers: AttachedCarrier[];
+  /**
+   * Effective tonnes aboard the attached carriers per commodity — manual beats journal beats
+   * mirror, summed on the server so every surface stages the same yellow tonnage.
+   */
+  carrierCover: Record<string, number>;
   /** What this reader may do to the project. A rendering hint — every write re-checks. */
-  can: { manage: boolean; isPoster: boolean };
+  can: { manage: boolean; isPoster: boolean; isCrew: boolean };
   origin: { system: string } | null;
   unknownSystem: string | null;
 }
@@ -2111,6 +2142,17 @@ export interface ColonyRights {
   post: boolean;
   manage: boolean;
   publish: boolean;
+}
+
+/** What a completed build of this kind does to its system — the seven Raven-style scalars. */
+export interface ColonyBuildTypeEffects {
+  population: number;
+  maxPopulation: number;
+  security: number;
+  technology: number;
+  wealth: number;
+  standardOfLiving: number;
+  development: number;
 }
 
 /** One kind of construction site, and what it costs to build. */
@@ -2132,6 +2174,12 @@ export interface ColonyBuildType {
    */
   source: 'community' | 'observed';
   confirmations: number;
+  /** What finishing one does to the system. Community-measured, like everything here. */
+  effects: ColonyBuildTypeEffects;
+  /** What it feeds the port that receives it. `none` for the many that feed nothing. */
+  economyInfluence: string;
+  /** Set when the build's OWN economy is locked regardless of surroundings. */
+  economyFixed: string | null;
 }
 
 export interface ColonyBuildCostLine {
@@ -2260,6 +2308,32 @@ export interface PlanSimulation {
   surchargedPorts: number;
 }
 
+/** One line of a predicted market: what the station would trade, and which economy put it there. */
+export interface PredictedCommodityLine {
+  commodity: string;
+  side: 'exports' | 'imports';
+  /** Rendered bold: the driving economy is at least half the leading score. */
+  strength: 'major' | 'minor';
+  fromEconomy: string;
+}
+
+/**
+ * What a planned station's market would buy and sell — the step past the economy adjective.
+ * Computed on the SERVER by the shared predictMarket, exactly like the simulation, so the website
+ * and the companion cannot show two different shops for one plan.
+ */
+export interface PredictedSiteMarket {
+  exports: PredictedCommodityLine[];
+  imports: PredictedCommodityLine[];
+  /** The honest epistemics, in one sentence, rendered once per page. */
+  note: string;
+}
+
+export interface PlanSiteMarket {
+  siteId: string;
+  market: PredictedSiteMarket;
+}
+
 export interface ColonyPlan {
   id: string;
   owner: 'squadron' | 'personal';
@@ -2277,6 +2351,8 @@ export interface ColonyPlan {
   sites: PlanSite[];
   simulation: PlanSimulation;
   economies: PlanEconomies;
+  /** Per chosen site, what its market would trade. Empty on the board — bodies are not loaded there. */
+  markets: PlanSiteMarket[];
 }
 
 export const getColonyPlans = (

@@ -2832,6 +2832,57 @@ model CarrierCargo {
   @@map("carrier_cargo")
 }
 
+/// What an attached carrier's hold DECLARES it is carrying for a build — from the journal, or
+/// from a crew member's own hand.
+///
+/// ★ WHY THE MARKET MIRROR ALONE WAS NOT ENOUGH ★
+///
+/// The mirror sees a carrier's SELL ORDERS, which is only the part of the hold the owner has put
+/// up for sale. Cargo staged for a build is exactly the cargo that is usually NOT on sale — so the
+/// board told members to go and buy steel the squadron already owned. Two more sources close that:
+/// the owner's own journal (`CargoTransfer`, and buys/sells at the carrier's market), and a crew
+/// member typing in what they know is aboard.
+///
+/// ★ KEYED ON THE CARRIER, LIKE `CarrierCargo` ★
+///
+/// A carrier has one hold; attaching it to two builds must not mean two sets of cargo. A project
+/// sums whatever its attached carriers declare.
+///
+/// ★ ONE ROW PER (CARRIER, COMMODITY, SOURCE), AND THE MERGE RULE IS WRITTEN DOWN ★
+///
+/// `journal` rows are replaced by the owner's companion app from what it actually watched;
+/// `manual` rows are typed by crew. They deliberately do not overwrite each other: a journal
+/// update landing two minutes after a member corrected a figure by hand must not undo the
+/// correction. The EFFECTIVE value — what the shopping maths reads — is:
+///
+///     manual if declared, else max(journal, market-mirror supply)
+///
+/// Manual wins outright because it is the only source that can say "this figure is wrong"; the
+/// other two are both floors (the journal misses whatever moved while the app was closed, the
+/// mirror sees only sell orders), and the larger of two floors is the better floor.
+model ColonyCarrierCargo {
+  marketId  BigInt @map("market_id")
+  commodity String
+  /// `journal` or `manual`. See the merge rule above.
+  source String
+
+  /// Tonnes aboard, as this source last declared it. Zero is a real statement — "none of this is
+  /// aboard" — and not the same as the row being absent, which says nothing.
+  tonnes Int
+
+  /// Who typed it. Null for `journal` rows, which the owner's app writes without a person acting.
+  /// No FK, same reasoning as `ColonyBody.slotsById`: an author worth naming, not a relation
+  /// anything traverses.
+  updatedById String? @map("updated_by_id") @db.Uuid
+
+  /// When this source last spoke. A declared figure with no date is one nobody can weigh.
+  updatedAt DateTime @map("updated_at") @db.Timestamptz(6)
+
+  @@id([marketId, commodity, source])
+  @@index([commodity])
+  @@map("colony_carrier_cargo")
+}
+
 /// One hour of the galaxy's trade in one commodity — the series behind "price over time".
 ///
 /// ★ WHY THIS EXISTS RATHER THAN `MarketHistory` — SQUADRON OWNER, 2026-08-02 ★

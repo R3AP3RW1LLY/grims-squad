@@ -6,7 +6,7 @@ import { PermissionService } from '../authz/permission.service.js';
 import { ColonyService, type ColonyOwner, type ColonyVisibility } from './colony.service.js';
 import { ColonyRosterService } from './colony-roster.service.js';
 import { ColonyCatalogueService } from './colony-catalogue.service.js';
-import { ColonyCarrierService } from './colony-carrier.service.js';
+import { ColonyCarrierService, carrierCover } from './colony-carrier.service.js';
 import { ColonyPlanService } from './colony-plan.service.js';
 import { MARKET_STORE } from './logistics.tokens.js';
 import type { MarketStore } from './market.store.js';
@@ -142,7 +142,18 @@ export class ColonyController {
      */
     const tz = await this.colony.viewerTimezone(caller?.userId ?? null);
 
-    const [needs, haulers, shopping, deliveries, chart, carriers] = await Promise.all([
+    /*
+     * ★ CARRIERS BEFORE THE SHOPPING LIST, ON PURPOSE ★
+     *
+     * The buy maths subtracts what the attached holds effectively cover, so the cover has to exist
+     * before the market is priced. One small indexed read ahead of the parallel block — the same
+     * shape as the timezone above it, and for the same reason: the next read cannot start without
+     * it.
+     */
+    const carriers = await this.carriers.forProject(id);
+    const cover = carrierCover(carriers);
+
+    const [needs, haulers, shopping, deliveries, chart, isCrew] = await Promise.all([
       this.colony.needs(id),
       this.colony.haulers(id),
       this.colony.shoppingList(id, {
@@ -150,15 +161,15 @@ export class ColonyController {
         withinLy: clamp(numberOr(withinLy, 100), 1, 500),
         largePadOnly: largePad === '1',
         sort: sort === 'closest' ? 'closest' : sort === 'cheapest' ? 'cheapest' : 'local',
+        carrierCover: cover,
       }),
       // The same two the app gets. One service, one shape — the website and the companion showing
       // different histories of the same build is the failure this whole controller exists to avoid.
       this.colony.deliveries(id),
       this.colony.deliveryChart(id, tz),
-      // What is already sitting in a hold. It changes what "remaining" means for a member deciding
-      // whether to launch — twenty thousand tonnes on a carrier parked at the site is not the same
-      // build as twenty thousand tonnes nobody has bought yet.
-      this.carriers.forProject(id),
+      // Whether the reader is on the crew roster, because declaring a carrier's cargo is crew work
+      // and the page should not offer a pen the service will refuse.
+      caller === undefined ? Promise.resolve(false) : this.rosters.isCrew(id, caller.userId),
     ]);
 
     return {
@@ -169,6 +180,12 @@ export class ColonyController {
       deliveries,
       chart,
       carriers,
+      /*
+       * The effective per-commodity cover — manual beats journal beats mirror, summed across the
+       * attached carriers. Computed ONCE here and sent down, so the needs bars, the shopping list
+       * and the carriers tab all stage the same yellow tonnage rather than three re-derivations.
+       */
+      carrierCover: cover,
       /*
        * ★ WHAT THIS READER MAY DO, DECIDED HERE ★
        *
@@ -182,6 +199,7 @@ export class ColonyController {
       can: {
         manage: (mask & Permission.COLONY_MANAGE) === Permission.COLONY_MANAGE,
         isPoster: caller !== undefined && project.postedById === caller.userId,
+        isCrew,
       },
       origin: origin === null ? null : { system: origin.system },
       unknownSystem: (near?.trim() ?? '') !== '' && origin === null ? near?.trim() : null,
@@ -374,6 +392,36 @@ export class ColonyController {
       marketId,
       callerId: me.userId,
       callerMask: mask,
+    });
+    return { ok: true };
+  }
+
+  /**
+   * Declares, corrects or clears a MANUAL tonnage on an attached carrier.
+   *
+   * COLONY_VIEW here; the interesting check — crew membership — is the service's, because
+   * "who may say what is aboard" is a fact about the build's roster, not about rank.
+   */
+  @Patch('projects/:id/carriers/:marketId/cargo')
+  async setCarrierCargo(
+    @User() caller: CurrentUser | undefined,
+    @Param('id') id: string,
+    @Param('marketId') marketId: string,
+    @Body() body: { commodity?: string; tonnes?: number | null },
+  ) {
+    const me = this.#requireSession(caller);
+    await this.#assert(
+      caller,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    await this.carriers.setManual({
+      projectId: id,
+      marketId,
+      commodity: body.commodity ?? '',
+      tonnes: typeof body.tonnes === 'number' ? body.tonnes : null,
+      callerId: me.userId,
     });
     return { ok: true };
   }

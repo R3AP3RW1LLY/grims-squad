@@ -172,6 +172,9 @@ contextBridge.exposeInMainWorld('colony', {
   carrierAdd: (id: string, body: unknown) => ipcRenderer.invoke('colonyCarrierAdd', id, body),
   carrierRemove: (id: string, marketId: string) =>
     ipcRenderer.invoke('colonyCarrierRemove', id, marketId),
+  /** A crew member's manual figure for what is aboard. Null clears; zero is a real figure. */
+  carrierCargoSet: (id: string, marketId: string, body: unknown) =>
+    ipcRenderer.invoke('colonyCarrierCargoSet', id, marketId, body),
 
   /**
    * The planner. Squadron owner, 2026-08-03: "ensure the Companion app matches and has all the same

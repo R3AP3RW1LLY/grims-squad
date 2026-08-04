@@ -1,5 +1,6 @@
 import type { ColonyShoppingRow } from '../../../../lib/api';
 import { CopySystem } from '../../../../components/copy-system';
+import { BarLegend, SegmentedBar } from './needs-table';
 
 /**
  * Where to buy what a project still needs.
@@ -80,34 +81,28 @@ function Seen({ at }: { at: string | null }) {
 
 export function ShoppingList({
   rows,
-  onCarriers,
   projectId,
   origin,
   unknownSystem,
   query,
 }: {
   rows: readonly ColonyShoppingRow[];
-  /**
-   * Tonnes already sitting in an attached carrier's hold.
-   *
-   * ★ THE ARGUMENT A TAB STRIP DISSOLVED ★
-   *
-   * Carriers used to sit immediately above this table in one column, with a comment explaining
-   * why: what is already in a hold changes what still needs buying, so reading the shopping list
-   * first is reading it against the wrong number.
-   *
-   * Tabs have no adjacency — nobody reads them left to right — so that placement stopped carrying
-   * the point the moment the page was tabbed. The point is worth more than the layout trick was,
-   * so it is now said in words on the table it applies to.
-   */
-  onCarriers: number;
   projectId: string;
   origin: { system: string } | null;
   unknownSystem: string | null;
   query: Record<string, string>;
 }) {
   const total = rows.reduce((sum, r) => sum + (r.cost ?? 0), 0);
-  const unsourced = rows.filter((r) => r.price === null).length;
+  /*
+   * ★ THREE KINDS OF LINE, COUNTED APART ★
+   *
+   * A line with no quoted station used to mean one thing; now it means two. `toBuy === 0` is a
+   * line the carriers already cover — good news, costing nothing — and lumping it in with "nobody
+   * sells this" would turn the squadron's own cargo into a warning.
+   */
+  const covered = rows.filter((r) => r.toBuy === 0).length;
+  const unsourced = rows.filter((r) => r.toBuy > 0 && r.price === null).length;
+  const onCarriers = rows.reduce((sum, r) => sum + r.onCarriers, 0);
 
   return (
     <div>
@@ -193,15 +188,18 @@ export function ShoppingList({
       )}
 
       {/*
-        Said here rather than arranged for. Carriers are a tab away now, and a member reading this
-        table has no way of knowing that twenty thousand tonnes of it is already parked at the site
-        unless somebody tells them.
+        ★ THE FIGURES NOW SUBTRACT THE CARRIERS, AND SAY SO ★
+
+        This line used to warn that they did not — "check Carriers before you buy" — which put a
+        member in charge of arithmetic the server can do. Every quantity and cost below is what
+        still needs BUYING after the attached holds; the Carriers tab is where the holds themselves
+        are declared and corrected.
       */}
       {onCarriers === 0 ? null : (
         <p className="m-0 mb-3 text-sm text-[var(--color-text-secondary)]">
-          {onCarriers.toLocaleString()} t of what this build wants is already in an attached
-          carrier&rsquo;s hold. These figures do not subtract it — check{' '}
-          <span className="text-[var(--color-text-primary)]">Carriers</span> before you buy.
+          {onCarriers.toLocaleString()} t of what this build wants is already aboard its attached
+          carriers. The quantities and costs below have subtracted it — declare or correct a hold on{' '}
+          <span className="text-[var(--color-text-primary)]">Carriers</span>.
         </p>
       )}
 
@@ -225,8 +223,10 @@ export function ShoppingList({
                   <th scope="col" className={TH}>
                     Commodity
                   </th>
+                  {/* "To buy", not "Needed": the carriers are already subtracted, and a column
+                      that quietly changed meaning under its old name would be read as the old one. */}
                   <th scope="col" className={`${TH} text-right`}>
-                    Needed
+                    To buy
                   </th>
                   <th scope="col" className={TH}>
                     Cheapest at
@@ -252,12 +252,44 @@ export function ShoppingList({
                       >
                         {r.commodity}
                       </a>
+                      {/*
+                        The three-segment bar, on the surface where buying is decided: delivered,
+                        aboard attached carriers, still to source. Only when the site has stated a
+                        total — a bar against an unknown total is a claim, not a picture.
+                      */}
+                      {r.required !== null && r.required > 0 ? (
+                        <div className="mt-1.5 max-w-[220px]">
+                          <SegmentedBar
+                            delivered={r.required - r.remaining}
+                            staged={r.onCarriers}
+                            required={r.required}
+                          />
+                        </div>
+                      ) : null}
                     </td>
                     <td className={`${TD} text-right font-mono tabular-nums`}>
-                      {r.remaining.toLocaleString()} t
+                      {r.toBuy.toLocaleString()} t
+                      {r.onCarriers > 0 ? (
+                        <div
+                          className="text-[11px] text-[var(--color-semantic-warning)]"
+                          title="Effective tonnes already aboard the build's attached carriers, subtracted from the quantity to buy."
+                        >
+                          {r.onCarriers.toLocaleString()} t aboard
+                        </div>
+                      ) : null}
                     </td>
                     <td className={`${TD} text-[var(--color-text-secondary)]`}>
-                      {r.stationName === null ? (
+                      {r.toBuy === 0 ? (
+                        /*
+                         * ★ FULLY COVERED SAYS SO — IT DOES NOT QUOTE A MARKET ★
+                         *
+                         * Naming a station here would send somebody to buy cargo the squadron
+                         * already owns, which is the exact trip this feature exists to prevent.
+                         */
+                        <span className="text-[var(--color-semantic-success)]">
+                          already aboard the attached carriers — nothing to buy
+                        </span>
+                      ) : r.stationName === null ? (
                         /*
                          * ★ NOT A DEAD END — SQUADRON OWNER, 2026-08-03 ★
                          *
@@ -325,16 +357,27 @@ export function ShoppingList({
             </table>
           </div>
 
+          <BarLegend />
+
           <p className="m-0 mt-3 border-t border-[var(--color-border-hairline)] pt-3 font-mono text-[11px] text-[var(--color-text-secondary)]">
             {/*
               The total is qualified whenever it is incomplete. A confident "38,000,000 cr" that
-              silently omits four commodities nobody sells is worse than no total at all.
+              silently omits four commodities nobody sells is worse than no total at all — and a
+              line the carriers cover is stated as covered, not counted against the total.
             */}
             {unsourced === 0
-              ? `Finishing this costs about ${total.toLocaleString()} cr in cargo.`
+              ? `Finishing this costs about ${total.toLocaleString()} cr in cargo to buy${
+                  covered === 0
+                    ? '.'
+                    : ` — ${covered} commodit${covered === 1 ? 'y is' : 'ies are'} fully covered by the attached carriers.`
+                }`
               : `About ${total.toLocaleString()} cr for what can be bought — ${unsourced} commodit${
                   unsourced === 1 ? 'y is' : 'ies are'
-                } not sold anywhere in range, so the real total is higher.`}
+                } not sold anywhere in range, so the real total is higher.${
+                  covered === 0
+                    ? ''
+                    : ` ${covered} commodit${covered === 1 ? 'y is' : 'ies are'} fully covered by the attached carriers.`
+                }`}
           </p>
         </>
       )}

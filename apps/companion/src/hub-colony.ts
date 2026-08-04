@@ -74,6 +74,16 @@ export interface ColonyHauler {
 export interface ColonyShoppingRow {
   readonly commodity: string;
   readonly remaining: number;
+  /** The site's total ask, when the journal has given it. What the three-segment bar divides by. */
+  readonly required: number | null;
+  /**
+   * Effective tonnes already aboard the build's attached carriers, capped at `remaining`.
+   * The hub computes it (manual beats journal beats mirror); the row's buy maths already
+   * subtracts it — see `toBuy`.
+   */
+  readonly onCarriers: number;
+  /** What actually needs buying: max(0, remaining − onCarriers). The quantity every quote uses. */
+  readonly toBuy: number;
   readonly stationName: string | null;
   readonly systemName: string | null;
   readonly price: number | null;
@@ -109,6 +119,20 @@ export interface CarrierHold {
   readonly seenAt: string | null;
 }
 
+/**
+ * What a carrier's hold DECLARES, per commodity — from the owner's journal or a crew member's
+ * hand. The mirror sees only sell orders; these rows are the cargo staged for the build.
+ */
+export interface DeclaredCargo {
+  readonly commodity: string;
+  readonly tonnes: number;
+  /** `journal` rows are the owner's app reporting what it watched; `manual` rows are typed. */
+  readonly source: 'journal' | 'manual';
+  /** Who typed a manual row. Null for journal rows. */
+  readonly updatedBy: string | null;
+  readonly updatedAt: string;
+}
+
 export interface AttachedCarrier {
   readonly marketId: string;
   readonly name: string;
@@ -120,6 +144,8 @@ export interface AttachedCarrier {
   readonly seenAt: string | null;
   readonly holds: readonly CarrierHold[];
   readonly totalTonnes: number;
+  /** Journal-watched and hand-declared cargo. The merge rule lives on the hub; see carrierCover. */
+  readonly declared: readonly DeclaredCargo[];
 }
 
 /** A carrier somebody could attach, ranked by how much of THIS build's list it is carrying. */
@@ -344,6 +370,32 @@ export interface PlanSimulation {
   surchargedPorts: number;
 }
 
+/** One line of a predicted market: what the station would trade, and which economy put it there. */
+export interface PredictedCommodityLine {
+  commodity: string;
+  side: 'exports' | 'imports';
+  /** Bold on the page: the driving economy is at least half the leading score. */
+  strength: 'major' | 'minor';
+  fromEconomy: string;
+}
+
+/**
+ * What a planned station's market would buy and sell — the step past the economy adjective.
+ * Computed on the SERVER by the shared predictMarket, exactly like the simulation, so the website
+ * and this app cannot show two different shops for one plan.
+ */
+export interface PredictedSiteMarket {
+  exports: PredictedCommodityLine[];
+  imports: PredictedCommodityLine[];
+  /** The honest epistemics, in one sentence, rendered once per page. */
+  note: string;
+}
+
+export interface PlanSiteMarket {
+  siteId: string;
+  market: PredictedSiteMarket;
+}
+
 export interface ColonyPlan {
   id: string;
   owner: 'squadron' | 'personal';
@@ -361,6 +413,8 @@ export interface ColonyPlan {
   sites: PlanSite[];
   simulation: PlanSimulation;
   economies: PlanEconomies;
+  /** Per chosen site, what its market would trade. Empty on the board — bodies are not loaded there. */
+  markets: PlanSiteMarket[];
 }
 
 export const colonyProjects = (
@@ -403,10 +457,16 @@ export const colonyProject = (
     needs: ColonyNeed[];
     haulers: ColonyHauler[];
     shopping: ColonyShoppingRow[];
+    carriers: AttachedCarrier[];
+    /**
+     * Effective tonnes aboard the attached carriers per commodity — manual beats journal beats
+     * mirror, summed across carriers. What the three-segment bars stage in yellow.
+     */
+    carrierCover: Record<string, number>;
     /** Echoed so the tab can say where it measured from — a distance with no origin is uncheckable. */
     shoppingFrom: string | null;
     shoppingSort: string;
-    can: { manage: boolean; isPoster: boolean };
+    can: { manage: boolean; isPoster: boolean; isCrew: boolean };
   }>
 > => {
   const q = new URLSearchParams({
@@ -513,6 +573,17 @@ export const colonyUnassign = (
 ): Promise<Answer<{ ok: true }>> =>
   hubColony(call, `/projects/${encodeURIComponent(id)}/unassign`, { method: 'POST', body });
 
+/** What a completed build of this kind does to its system — the seven Raven-style scalars. */
+export interface BuildTypeEffects {
+  readonly population: number;
+  readonly maxPopulation: number;
+  readonly security: number;
+  readonly technology: number;
+  readonly wealth: number;
+  readonly standardOfLiving: number;
+  readonly development: number;
+}
+
 /** One kind of construction site, and what it costs to build. */
 export interface BuildTypeRow {
   readonly id: string;
@@ -532,6 +603,12 @@ export interface BuildTypeRow {
    */
   readonly source: 'community' | 'observed';
   readonly confirmations: number;
+  /** What finishing one does to the system. Community-measured, like everything here. */
+  readonly effects: BuildTypeEffects;
+  /** What it feeds the port that receives it. `none` for the many that feed nothing. */
+  readonly economyInfluence: string;
+  /** Set when the build's OWN economy is locked regardless of surroundings. */
+  readonly economyFixed: string | null;
 }
 
 export interface BuildCostLine {
@@ -686,6 +763,38 @@ export const detachCarrier = (
     call,
     `/projects/${encodeURIComponent(id)}/carriers/${encodeURIComponent(marketId)}`,
     { method: 'DELETE' },
+  );
+
+/**
+ * The app's own reading of the member's carrier hold, pushed whenever it changes.
+ *
+ * Not tied to any project: the hub knows which builds the carrier is attached to, and quietly
+ * ignores one that is attached to none. The app's only job is to say what it watched.
+ */
+export const pushCarrierCargo = (
+  call: HubCall,
+  body: {
+    marketId: string;
+    commodities: ReadonlyArray<{ commodity: string; tonnes: number }>;
+  },
+): Promise<Answer<{ stored: boolean }>> =>
+  hubColony(call, '/carrier-cargo', { method: 'POST', body });
+
+/**
+ * Sets or clears a MANUAL tonnage on an attached carrier — the crew's own hand, for whatever the
+ * journals missed. `tonnes: null` clears the override; zero is a real figure ("none aboard").
+ * Crew members only; the hub is where that is decided.
+ */
+export const setCarrierCargo = (
+  call: HubCall,
+  id: string,
+  marketId: string,
+  body: { commodity: string; tonnes: number | null },
+): Promise<Answer<{ ok: true }>> =>
+  hubColony(
+    call,
+    `/projects/${encodeURIComponent(id)}/carriers/${encodeURIComponent(marketId)}/cargo`,
+    { method: 'PATCH', body },
   );
 
 /**
