@@ -5,8 +5,10 @@ import {
   isGameRunning,
   isActivelyPlaying,
   journalIsFresh,
+  statusSaysInGame,
   GAME_PROCESS,
   JOURNAL_FRESH_MS,
+  STATUS_FRESH_MS,
 } from './game-process.js';
 
 /**
@@ -173,5 +175,55 @@ describe('in-game, not merely open', () => {
     // Otherwise a skewed clock pins somebody online permanently and nothing
     // ever clears it.
     expect(journalIsFresh(NOW + 60 * MIN, NOW)).toBe(false);
+  });
+});
+
+/**
+ * Status.json's half of the answer — the signal that ended the false-offline.
+ *
+ * Reported live, 2026-08-04: a member hauling a full hold, Status.json 0.2 seconds old, shown
+ * "Elite is not running" because the journal had been quiet past the fifteen-minute window.
+ */
+describe('statusSaysInGame', () => {
+  const now = 1_000_000_000;
+
+  it('MANDATORY: a fresh file with live flags is in-game — the quiet-journal session', () => {
+    expect(statusSaysInGame(now - 5_000, 689963032, 0, now)).toBe(true);
+  });
+
+  it('the main menu — fresh file, zero flags — is open, not in', () => {
+    expect(statusSaysInGame(now - 5_000, 0, 0, now)).toBe(false);
+  });
+
+  it('on foot counts: Flags 0 but Flags2 live is Odyssey walking around', () => {
+    expect(statusSaysInGame(now - 5_000, 0, 90113, now)).toBe(true);
+  });
+
+  it('a stale file is a session that ended, whatever its flags say', () => {
+    expect(statusSaysInGame(now - STATUS_FRESH_MS, 689963032, 0, now)).toBe(false);
+  });
+
+  it('a file stamped in the future is a clock problem, not a live session', () => {
+    expect(statusSaysInGame(now + 60_000, 689963032, 0, now)).toBe(false);
+  });
+
+  it('no file at all is no evidence', () => {
+    expect(statusSaysInGame(null, 689963032, 0, now)).toBe(false);
+  });
+});
+
+describe('isActivelyPlaying with the status sidecar', () => {
+  const now = 1_000_000_000;
+
+  it('MANDATORY: process + live status carries a quiet journal — the outfitting session', () => {
+    expect(isActivelyPlaying(true, now - JOURNAL_FRESH_MS - 1, now, true)).toBe(true);
+  });
+
+  it('status evidence without the process is still a session that ended', () => {
+    expect(isActivelyPlaying(false, null, now, true)).toBe(false);
+  });
+
+  it('the old contract stands: process + fresh journal needs no sidecar', () => {
+    expect(isActivelyPlaying(true, now - 1_000, now)).toBe(true);
   });
 });

@@ -2,7 +2,7 @@ import { render } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 import type { OverlayLayout } from '../overlay-config.js';
-import { Button, C, Card, Empty, Problem, Section, Stat } from './ui.js';
+import { Button, C, Card, Empty, Problem, Section, Stat, Tabs } from './ui.js';
 import { ColonyBoardPage, ColonyNewPage } from './colonisation.js';
 import { BountiesPage } from './bounties.js';
 import { TradePage } from './trade.js';
@@ -89,6 +89,7 @@ type Page =
   | 'outfitter'
   | 'builds-squadron'
   | 'builds-public'
+  | 'settings'
   | 'overlays'
   | 'device';
 
@@ -231,8 +232,6 @@ const NAV: ReadonlyArray<NavItem | NavGroup> = [
       { id: 'lb-trade', label: 'Trade Barons', hint: 'Who is banking real trading profit' },
     ],
   },
-  { id: 'overlays', label: 'Overlays', hint: 'Panels drawn over the game' },
-  { id: 'device', label: 'This device', hint: 'Pairing and privacy' },
 ];
 
 function App(): JSX.Element {
@@ -413,7 +412,24 @@ function App(): JSX.Element {
           );
         })}
 
-        <div style={{ marginTop: 'auto', paddingLeft: '8px' }}>
+        {/*
+          ★ SETTINGS AT THE VERY BOTTOM — SQUADRON OWNER, 2026-08-04 ★
+
+          "create a settings nav link at the very bottom of the sidebar in the companion app right
+          above the sending element ... this settings page is where we want all future settings for
+          the companion app to live." Anchored with the uplink block rather than listed with the
+          destinations, because it configures the app rather than being somewhere you go in it.
+        */}
+        <div style={{ marginTop: 'auto' }}>
+          <NavButton
+            label="Settings"
+            hint="This device, overlays, and every future setting"
+            active={page === 'settings'}
+            onClick={() => setPage('settings')}
+          />
+        </div>
+
+        <div style={{ paddingLeft: '8px', marginTop: '8px' }}>
           {/*
             The uplink state, always visible whichever section is open. It is the one thing somebody
             opens this app to check, and making them navigate to it would be the wrong default.
@@ -474,7 +490,36 @@ function App(): JSX.Element {
         {page === 'builds-squadron' ? <BuildBoardsPage scope="squadron" /> : null}
         {page === 'builds-public' ? <BuildBoardsPage scope="public" /> : null}
         {page === 'trade' ? <TradePage /> : null}
-        {page === 'overlays' ? (
+        {page === 'settings' ? <SettingsPage state={state} /> : null}
+      </main>
+    </div>
+  );
+}
+
+/**
+ * ★ THE SETTINGS PAGE — every companion setting's home from here on ★
+ *
+ * Two tabs today (the former This device and Overlays pages, unchanged inside); the next setting
+ * this app grows belongs on a new tab here rather than a new sidebar destination — that is the
+ * whole reason this page exists.
+ */
+function SettingsPage({ state }: { state: AppState }): JSX.Element {
+  const [tab, setTab] = useState<'device' | 'overlays'>('device');
+
+  return (
+    <div>
+      <Tabs
+        current={tab}
+        onChange={setTab}
+        label="Settings sections"
+        tabs={[
+          { key: 'device', label: 'This device' },
+          { key: 'overlays', label: 'Overlays' },
+        ]}
+      />
+      <div style={{ marginTop: '16px' }}>
+        {tab === 'device' ? <Device state={state} /> : null}
+        {tab === 'overlays' ? (
           <OverlaysPanel
             layout={state.overlays}
             editing={state.overlayEditing}
@@ -482,8 +527,7 @@ function App(): JSX.Element {
             displayMode={state.displayMode}
           />
         ) : null}
-        {page === 'device' ? <Device state={state} /> : null}
-      </main>
+      </div>
     </div>
   );
 }

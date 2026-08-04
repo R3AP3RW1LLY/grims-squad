@@ -86,7 +86,8 @@ import {
 import { capacityFrom, parseCargo, type Hold } from './cargo.js';
 import { EMPTY_TRIP, type TripLedger } from './trip-ledger.js';
 import { accumulate } from './totals.js';
-import { isGameRunning, isActivelyPlaying } from './game-process.js';
+import { isGameRunning, isActivelyPlaying,
+  readStatusInGame } from './game-process.js';
 import { startAutoUpdate } from './auto-update.js';
 import {
   FRESH,
@@ -730,7 +731,14 @@ async function tick(): Promise<void> {
        */
       const processRunning = await isGameRunning(platform(), listProcesses);
       const playing =
-        outcome.gameRunning || isActivelyPlaying(processRunning, await newestJournalWriteAt(dir));
+        outcome.gameRunning ||
+        isActivelyPlaying(
+          processRunning,
+          await newestJournalWriteAt(dir),
+          Date.now(),
+          // Status.json catches the quiet-journal sessions the fifteen-minute window loses.
+          await readStatusInGame(dir),
+        );
 
       if (playing && !outcome.gameRunning) {
         // The journal did not grow this pass but they are demonstrably in the

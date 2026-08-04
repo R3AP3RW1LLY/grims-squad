@@ -194,17 +194,68 @@ export function journalIsFresh(newestWriteAt: number | null, now: number = Date.
 }
 
 /**
- * Both halves. Neither alone is enough.
+ * ★ Status.json — THE SIGNAL THE JOURNAL CANNOT GIVE ★
  *
- * Process without a fresh journal is the game sitting at a menu. A fresh
- * journal without the process is a session that has just ended — the last write
- * is still recent, and reporting that as live is exactly the lag members notice
- * when they quit.
+ * Reported live, 2026-08-04: a member IN THE GAME, hauling a full hold, shown "Elite is not
+ * running" — because outfitting, the galaxy map and a long supercruise write no journal lines,
+ * and the fifteen-minute freshness window ran out. Frontier writes `Status.json` beside the
+ * journals EVERY FEW SECONDS while a commander is actually in a session, with a nonzero Flags
+ * word (Flags2 for on-foot). At the main menu the file goes stale and its flags read zero — so
+ * this is exactly the in-game-not-merely-open distinction the 2026-07-29 decision demanded,
+ * without the false-offline the journal window causes.
+ */
+export const STATUS_FRESH_MS = 2 * 60_000;
+
+export function statusSaysInGame(
+  mtime: number | null,
+  flags: number,
+  flags2: number,
+  now: number = Date.now(),
+): boolean {
+  if (mtime === null) return false;
+  const age = now - mtime;
+  if (age < 0 || age >= STATUS_FRESH_MS) return false;
+  // Flags 0 AND Flags2 0 is the main menu (or commander select) — open, not in.
+  return flags !== 0 || flags2 !== 0;
+}
+
+/**
+ * The process, plus EITHER recent journal writes OR a live Status.json. Neither half alone is
+ * enough: process without any in-session evidence is the game sitting at a menu; in-session
+ * evidence without the process is a session that has just ended.
  */
 export function isActivelyPlaying(
   processRunning: boolean,
   newestWriteAt: number | null,
   now: number = Date.now(),
+  statusInGame = false,
 ): boolean {
-  return processRunning && journalIsFresh(newestWriteAt, now);
+  return processRunning && (journalIsFresh(newestWriteAt, now) || statusInGame);
+}
+
+/**
+ * Reads Status.json's half of the answer. Never throws — a missing or garbled sidecar (the game
+ * rewrites it constantly, so torn reads happen) is simply "no evidence", and the journal window
+ * still gets its say.
+ */
+export async function readStatusInGame(
+  journalDir: string,
+  now: number = Date.now(),
+): Promise<boolean> {
+  try {
+    const { stat, readFile } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+    const path = join(journalDir, 'Status.json');
+    const st = await stat(path);
+    const raw = (await readFile(path, 'utf8')).replace(/^\uFEFF/, '');
+    const parsed = JSON.parse(raw) as { Flags?: unknown; Flags2?: unknown };
+    return statusSaysInGame(
+      st.mtimeMs,
+      typeof parsed.Flags === 'number' ? parsed.Flags : 0,
+      typeof parsed.Flags2 === 'number' ? parsed.Flags2 : 0,
+      now,
+    );
+  } catch {
+    return false;
+  }
 }
