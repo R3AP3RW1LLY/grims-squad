@@ -48,6 +48,18 @@ const DEFAULT_URL =
  */
 const IDLE_TIMEOUT_MS = 120_000;
 
+/**
+ * What identifies the dump currently on disk, for the "already ingested this one" check.
+ *
+ * The Last-Modified Spansh sent when we downloaded it — the same value the skip-unchanged check
+ * compares against upstream. Null when no dump (or no meta) is on disk, which callers must treat
+ * as "cannot prove anything; do the work".
+ */
+export function dumpFingerprint(file: string): string | null {
+  const meta = readMeta(file);
+  return meta?.lastModified ?? null;
+}
+
 export interface GalaxyRefresh {
   /** A new dump was downloaded. */
   readonly changed: boolean;

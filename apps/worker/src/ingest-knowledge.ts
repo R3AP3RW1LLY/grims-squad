@@ -1,9 +1,9 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { PrismaClient } from '@grims/db';
 import { readCoriolis } from './jobs/ingest-coriolis.js';
 import { refreshCoriolis } from './jobs/coriolis-refresh.js';
 import { streamGalaxy } from './jobs/ingest-galaxy.js';
-import { refreshGalaxyDump } from './jobs/galaxy-download.js';
+import { dumpFingerprint, refreshGalaxyDump } from './jobs/galaxy-download.js';
 import { writeBatch, beginIngest, finishIngest, progressIngest } from './jobs/knowledge-writer.js';
 import { rebuildMarketEntries } from './jobs/market-flatten.js';
 import { readInaraKnowledge } from './jobs/ingest-inara.js';
@@ -33,6 +33,31 @@ import { announce } from './jobs/job-log.js';
 /** Where the downloaded data lives. Overridable so a second machine need not match this one. */
 const CORIOLIS_DIR = process.env['KNOWLEDGE_CORIOLIS_DIR'] ?? 'D:/ai/knowledge/coriolis-data-master';
 const GALAXY_FILE = process.env['KNOWLEDGE_GALAXY_FILE'] ?? 'D:/ai/knowledge/galaxy_populated.json.gz';
+
+/**
+ * Which dump version was last ingested TO COMPLETION. Distinct from the download's own `.meta` —
+ * that says what is on disk; this says what has actually made it through the flatten. A run that
+ * dies between download and flatten leaves the two different, which is exactly the state that must
+ * be re-done rather than skipped.
+ */
+const INGEST_MARKER = `${GALAXY_FILE}.ingested`;
+
+function readIngestMarker(): string | null {
+  try {
+    return readFileSync(INGEST_MARKER, 'utf8').trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+function writeIngestMarker(fingerprint: string | null): void {
+  if (fingerprint === null) return;
+  try {
+    writeFileSync(INGEST_MARKER, fingerprint, 'utf8');
+  } catch {
+    // Best effort: a missing marker only costs one redundant re-ingest, never data.
+  }
+}
 
 /** Rows per statement. See knowledge-writer for why this number and not one or a million. */
 const BATCH = 2_000;
@@ -118,6 +143,29 @@ async function ingestGalaxy(db: PrismaClient): Promise<void> {
      * quieter one was wrong.
      */
     const dump = await refreshGalaxyDump(GALAXY_FILE);
+
+    /*
+     * ★ THE SAME DUMP WAS BEING RE-INGESTED EVERY HOUR — MEASURED 2026-08-04 ★
+     *
+     * This job runs hourly (REFRESH_HOURS.galaxy = 1) and the download correctly skips when
+     * upstream is unchanged — but nothing then skipped the INGEST. So the identical on-disk dump
+     * was re-streamed, re-written and re-FLATTENED every hour: nine full rebuilds on 2026-08-02
+     * alone, each one TRUNCATE-ing the market table and destroying every live observation
+     * collected since the last. EDDN wrote 398,877 rows between 04:59 and 06:21; after the 06:39
+     * rebuild the table contained zero of them.
+     *
+     * The marker records which dump version was last ingested TO COMPLETION — written only after
+     * the flatten commits, so a run that died halfway is re-done rather than skipped. Hourly runs
+     * against an unchanged dump now cost one HEAD request and nothing else, and the flatten runs
+     * exactly once per Spansh rebuild, which is once a night.
+     */
+    const fingerprint = dumpFingerprint(GALAXY_FILE);
+    if (!dump.changed && fingerprint !== null && fingerprint === readIngestMarker()) {
+      console.log('galaxy: dump unchanged since the last completed ingest — nothing to do');
+      await finishIngest(db, run, { rows: 0, source: 'galaxy' });
+      return;
+    }
+
     if (dump.changed) {
       console.log(`galaxy: downloaded a new dump (${(dump.bytes ?? 0) / 1e9} GB)`);
       await announce(db, { level: 'info', kind: 'ingest', message: 'galaxy: downloaded a fresh Spansh dump' });
@@ -194,6 +242,9 @@ async function ingestGalaxy(db: PrismaClient): Promise<void> {
      */
     const flat = await rebuildMarketEntries(db);
     console.log(`markets: ${flat} rows flattened for route-finding`);
+
+    // Only now is this dump version "done" — a crash anywhere above re-runs it next hour.
+    writeIngestMarker(fingerprint ?? dumpFingerprint(GALAXY_FILE));
 
     await finishIngest(db, run, { rows: written, ...tally, source: 'galaxy' });
     await announce(db, {

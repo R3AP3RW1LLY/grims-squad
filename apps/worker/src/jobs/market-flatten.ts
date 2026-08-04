@@ -79,6 +79,28 @@ export async function rebuildMarketEntries(db: PrismaClient): Promise<number> {
        * Inside the transaction, so readers keep seeing the old table until the new one is committed.
        * A member asking for a route mid-rebuild gets yesterday's answer rather than no answer.
        */
+      /*
+       * ★ LIVE OBSERVATIONS SURVIVE THE REBUILD — THE FIX FOR AN HOURLY DATA MASSACRE ★
+       *
+       * Measured 2026-08-04: EDDN wrote 398,877 market rows between 04:59 and 06:21; after the
+       * 06:39 rebuild the table contained ZERO of them. The dump's own freshest row is over a day
+       * old at the moment it lands (its median station age is 118 days), so every rebuild replaced
+       * live data with older data, wholesale, and the "real time" market the owner asked for could
+       * never exist for longer than the gap between two rebuilds.
+       *
+       * The rule is per STATION, and it is "keep whichever observation is newer" — not "keep
+       * everything live". A live row from March loses to a dump row from yesterday, exactly as it
+       * should: provenance says where a row came from, the timestamp says whether it still wins.
+       *
+       * TEMP ON COMMIT DROP, inside this same transaction, so the backup lives exactly as long as
+       * the rebuild and a crash cannot leave it behind. Prisma's interactive transaction runs on
+       * one connection, which is what makes a TEMP table usable here at all.
+       */
+      await tx.$executeRawUnsafe(
+        `CREATE TEMP TABLE live_keep ON COMMIT DROP AS
+           SELECT * FROM market_entries WHERE source <> 'dump'`,
+      );
+
       await tx.$executeRawUnsafe(`TRUNCATE TABLE market_entries`);
 
       /*
@@ -121,7 +143,7 @@ export async function rebuildMarketEntries(db: PrismaClient): Promise<number> {
       const written = await tx.$executeRawUnsafe(`
         INSERT INTO market_entries (
           station_key, station_name, system_name, station_type, coords, large_pads,
-          commodity, category, buy_price, sell_price, supply, demand, market_seen_at)
+          commodity, category, buy_price, sell_price, supply, demand, source, market_seen_at)
         SELECT
           k.ext_key,
           k.name,
@@ -135,6 +157,7 @@ export async function rebuildMarketEntries(db: PrismaClient): Promise<number> {
           COALESCE((c->>'sellPrice')::int, 0),
           COALESCE((c->>'supply')::int, 0),
           COALESCE((c->>'demand')::int, 0),
+          'dump',
           /*
            * Spansh gives this per market as an ISO string. Cast defensively: one unparseable
            * timestamp must not abort a rebuild of the entire galaxy.
@@ -185,6 +208,40 @@ export async function rebuildMarketEntries(db: PrismaClient): Promise<number> {
                      OR COALESCE((c->>'sellPrice')::int, 0) > 0))
           )
       `);
+
+      /*
+       * The merge: for each station that has live rows, compare its newest live observation with
+       * the newest thing the dump just wrote for it. Whichever is fresher keeps the station —
+       * whole-station, because every writer here replaces whole stations, and mixing a dump row
+       * with a live row for one station would resurrect exactly the stopped-trading commodities
+       * the replace semantics exist to kill.
+       *
+       * Runs BEFORE the indexes are recreated, so the restore insert is a plain heap append.
+       */
+      await tx.$executeRawUnsafe(
+        `CREATE TEMP TABLE keep_stations ON COMMIT DROP AS
+           SELECT lk.station_key
+             FROM (SELECT station_key, max(market_seen_at) AS live_max
+                     FROM live_keep GROUP BY station_key) lk
+             LEFT JOIN (SELECT station_key, max(market_seen_at) AS dump_max
+                          FROM market_entries
+                         WHERE station_key IN (SELECT DISTINCT station_key FROM live_keep)
+                         GROUP BY station_key) dk USING (station_key)
+            WHERE dk.dump_max IS NULL OR lk.live_max > dk.dump_max`,
+      );
+
+      await tx.$executeRawUnsafe(
+        `DELETE FROM market_entries
+          WHERE station_key IN (SELECT station_key FROM keep_stations)`,
+      );
+      const preserved = await tx.$executeRawUnsafe(
+        `INSERT INTO market_entries
+           SELECT * FROM live_keep
+            WHERE station_key IN (SELECT station_key FROM keep_stations)`,
+      );
+      if (preserved > 0) {
+        console.log(`markets: preserved ${preserved} live rows fresher than the dump`);
+      }
 
       for (const ddl of INDEX_DDL) {
         await tx.$executeRawUnsafe(ddl);

@@ -1,4 +1,5 @@
 import type { PrismaClient } from '@grims/db';
+import { ensureLiveStation } from '@grims/db';
 import type { EddnMarket } from './message.js';
 import type { CommodityNames } from './names.js';
 import type { StationCache } from './stations.js';
@@ -48,26 +49,46 @@ export async function applyMarket(
   names: CommodityNames,
   stations: StationCache,
 ): Promise<ApplyResult> {
-  const station = await stations.lookup(db, market.marketId);
+  let station = await stations.lookup(db, market.marketId);
   /*
-   * Resolved BEFORE any name work: an unknown station means nothing can be written whatever the
-   * commodities say, and doing it the other way round would burn the name lookups for the many
-   * carriers and construction sites we do not hold.
+   * Resolved BEFORE any name work: doing it the other way round would burn the name lookups for
+   * the many carriers and construction sites we have never held.
    */
+  let unknownStation = false;
   if (station === null) {
+    unknownStation = true;
+
     /*
-     * ★ RECORDED, NOT JUST COUNTED — SQUADRON OWNER, 2026-08-02 ★
+     * ★ ADDED IN FULL, NOT DISCARDED — SQUADRON OWNER, 2026-08-04 ★
      *
-     * "add the stations we do not hold". Until now this was a number in a log line and the market
-     * was dropped; about 111 a window, for ever.
+     * "if we dont know the station we need to add it in full!! this is non-negotiable! this is
+     * data we can use to grow and leverage our system!"
      *
-     * One cheap upsert, and no HTTP. Asked what an unknown station should become, the owner chose
-     * "look each one up before creating it" — so the sighting is queued and a worker job resolves
-     * it against the galaxy source at a pace that upstream tolerates. Doing the lookup HERE would
-     * stall a loop that has to keep up with a message a second behind a rate-limited third party.
+     * The previous design queued the sighting and DROPPED every price in the message — about a
+     * hundred markets a window, for ever, and the queue's drainer was only ever scheduled in a
+     * crontab that was never installed (1,323 rows, zero attempts). The stations affected are
+     * exactly the interesting ones: carriers that jumped since the last dump, construction sites
+     * laid down this morning.
      *
-     * Failure is swallowed: the market is already lost either way, and losing the whole window
-     * because a queue insert failed would turn a small gap into a large one.
+     * `ensureLiveStation` creates a provisional station keyed on the market id — the one
+     * identifier every source shares — with coordinates when the system name is unambiguous, and
+     * the market is written under it immediately. A later journal Docked enriches it with type
+     * and pads; the galaxy dump retiring it migrates the rows. Nothing is lost while we wait.
+     */
+    station = await ensureLiveStation(db, {
+      marketId: market.marketId,
+      stationName: market.stationName,
+      systemName: market.systemName,
+    });
+
+    // Cached so the station's NEXT message this hour skips both queries. Provisional entries
+    // expire like misses, so the cache re-checks for a galaxy row once an hour.
+    stations.put(market.marketId, station);
+
+    /*
+     * The queue keeps its purpose — the Spansh-side resolver can still enrich a provisional
+     * station nobody has docked at — but it is bookkeeping now, not the market's last chance.
+     * Failure is swallowed for the same reason it always was.
      */
     await db.pendingStation
       .upsert({
@@ -77,8 +98,6 @@ export async function applyMarket(
           stationName: market.stationName,
           systemName: market.systemName,
         },
-        // The name can change — carriers are renamed — and `lastSeenAt` is what tells an officer
-        // whether a station nobody can resolve is still out there being reported.
         update: {
           stationName: market.stationName,
           systemName: market.systemName,
@@ -86,8 +105,6 @@ export async function applyMarket(
         },
       })
       .catch(() => undefined);
-
-    return { ...NOTHING, unknownStation: true };
   }
 
   let unresolved = 0;
@@ -179,15 +196,20 @@ export async function applyMarket(
            * station would still be in the table and simply stop being found, which is the kind of
            * failure nobody reports because nothing looks broken.
            */
-          `(SELECT coords FROM knowledge_items WHERE source='galaxy' AND kind='station' AND ext_key=$1),` +
-          `$5,$${i + 1},$${i + 2},$${i + 3},$${i + 4},$${i + 5},$${i + 6},$6)`,
+          /*
+           * Source-agnostic on purpose: a provisional station's coordinates live on its own
+           * 'eddn' knowledge row. The old source='galaxy' filter would leave every provisional
+           * market NULL-coorded even after we had learned where it is.
+           */
+          `(SELECT coords FROM knowledge_items WHERE kind='station' AND ext_key=$1 LIMIT 1),` +
+          `$5,$${i + 1},$${i + 2},$${i + 3},$${i + 4},$${i + 5},$${i + 6},$6,'eddn')`,
       );
     }
 
     await tx.$executeRawUnsafe(
       `INSERT INTO market_entries (station_key, station_name, system_name, station_type, coords,
                                    large_pads, commodity, category, buy_price, sell_price,
-                                   supply, demand, market_seen_at)
+                                   supply, demand, market_seen_at, source)
        VALUES ${values.join(',')}`,
       ...params,
     );
@@ -204,7 +226,8 @@ export async function applyMarket(
     // Net, and floored at zero: a station that ADDED commodities has a negative difference, which
     // is not "minus three removed" — it is none removed and three new.
     removed: Math.max(0, deleted - rows.length),
-    unknownStation: false,
+    // Still reported, but it now means "written under a provisional station" rather than "lost".
+    unknownStation,
     unresolved,
   };
 }

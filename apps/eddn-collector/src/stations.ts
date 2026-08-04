@@ -1,4 +1,5 @@
 import type { PrismaClient } from '@grims/db';
+import { PROVISIONAL_PREFIX, lookupByMarketId, type LiveStation } from '@grims/db';
 
 /**
  * Resolving an EDDN `marketId` to a station we hold.
@@ -27,13 +28,8 @@ import type { PrismaClient } from '@grims/db';
  * exists, and the entry is dropped when the cache is trimmed like any other.
  */
 
-export interface Station {
-  readonly key: string;
-  readonly name: string;
-  readonly system: string;
-  readonly type: string | null;
-  readonly pads: number;
-}
+/** Re-exported from the shared module so both market writers agree on the shape. */
+export type Station = LiveStation;
 
 /** How long to remember that we do NOT hold a station, before asking again. */
 export const MISS_TTL_MS = 60 * 60 * 1000;
@@ -73,8 +69,16 @@ export class StationCache {
   async lookup(db: PrismaClient, marketId: number, now = Date.now()): Promise<Station | null> {
     const cached = this.#entries.get(marketId);
     if (cached !== undefined) {
-      // A hit never goes stale; a miss does. See the note above about the nightly ingest.
-      if (cached.station !== null || now - cached.at < MISS_TTL_MS) {
+      /*
+       * A REAL hit never goes stale; a miss does — and so does a PROVISIONAL hit. A provisional
+       * station is one the galaxy dump may learn properly at any ingest, and a cache entry that
+       * never expired would keep writing its market under the `live:` key long after the galaxy
+       * row (with coordinates and pads) existed. Expiring it hourly means the upgrade is found
+       * within the same window the old miss-retry logic already promised.
+       */
+      const durable =
+        cached.station !== null && !cached.station.key.startsWith(PROVISIONAL_PREFIX);
+      if (durable || now - cached.at < MISS_TTL_MS) {
         this.#hits += 1;
         return cached.station;
       }
@@ -83,28 +87,17 @@ export class StationCache {
     this.#misses += 1;
     this.#queries += 1;
 
-    const rows = await db.$queryRawUnsafe<
-      Array<{ ext_key: string; name: string; system: string | null; type: string | null; pads: number }>
-    >(
-      `SELECT ext_key, name,
-              data->>'system' AS system,
-              data->>'type'   AS type,
-              COALESCE((data->'landingPads'->>'large')::int, 0) AS pads
-         FROM knowledge_items
-        WHERE source = 'galaxy' AND kind = 'station'
-          AND data->>'marketId' = $1
-        LIMIT 1`,
-      String(marketId),
-    );
-
-    const r = rows[0];
-    const station: Station | null =
-      r === undefined
-        ? null
-        : { key: r.ext_key, name: r.name, system: r.system ?? '', type: r.type, pads: Number(r.pads) };
+    // The shared lookup, so the collector and the journal path can never resolve the same market
+    // id to two different stations. Galaxy preferred; provisional rows found too.
+    const station = await lookupByMarketId(db, marketId);
 
     this.#remember(marketId, station, now);
     return station;
+  }
+
+  /** Caches a station this process just CREATED, so its next message skips the round trip. */
+  put(marketId: number, station: Station, at = Date.now()): void {
+    this.#remember(marketId, station, at);
   }
 
   #remember(marketId: number, station: Station | null, at: number): void {

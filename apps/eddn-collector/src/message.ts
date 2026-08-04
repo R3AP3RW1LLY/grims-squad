@@ -1,4 +1,4 @@
-import { inflateSync } from 'node:zlib';
+import { decodeEnvelope, type Envelope } from './extras.js';
 
 /**
  * Reading one EDDN message.
@@ -49,20 +49,18 @@ export interface EddnMarket {
  * schemas we do not consume, and an exception is not a reasonable way to express "not this one".
  */
 export function decodeMarket(frame: Buffer): EddnMarket | null {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(inflateSync(frame).toString('utf8'));
-  } catch {
-    return null;
-  }
+  const env = decodeEnvelope(frame);
+  return env === null ? null : marketFromEnvelope(env);
+}
 
-  if (typeof parsed !== 'object' || parsed === null) return null;
-  const env = parsed as Record<string, unknown>;
-  if (env['$schemaRef'] !== COMMODITY_SCHEMA) return null;
-
-  const msg = env['message'];
-  if (typeof msg !== 'object' || msg === null) return null;
-  const m = msg as Record<string, unknown>;
+/**
+ * The envelope is decoded ONCE, in the ingest loop, now that more than one schema is consumed —
+ * inflating a frame twice per message at a message a second would be pure waste. This half takes
+ * the already-parsed envelope; `decodeMarket` above survives as the one-shot form the specs use.
+ */
+export function marketFromEnvelope(env: Envelope): EddnMarket | null {
+  if (env.schema !== COMMODITY_SCHEMA) return null;
+  const m = env.message;
 
   const marketId = asNumber(m['marketId']);
   const stationName = asString(m['stationName']);

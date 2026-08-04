@@ -50,6 +50,7 @@ interface BackfillableChannel {
   };
 }
 import { PrismaActivityStore, PrismaCheckpointStore } from './activity.store.prisma.js';
+import { startOpsAlertDelivery } from './ops-alerts.js';
 
 /**
  * The squadron bot. Phase 1: it records activity and does nothing else.
@@ -792,6 +793,10 @@ async function seedVoiceOccupancy(): Promise<void> {
  */
 client.on(Events.ClientReady, (c) => {
   logger.info({ tag: c.user.tag, guilds: c.guilds.cache.size }, 'bot connected');
+
+  // The ops-alert DM poller. Independent of the role/backfill sweep below on purpose: a delivery
+  // path for "the pipeline is down" must not wait behind, or die with, anything else.
+  startOpsAlertDelivery(c, prisma, logger);
 
   // Roles FIRST, and until they load. The scope rule cannot classify a channel without them, and
   // classifying against an empty role list marks every channel admin-gated and records nothing at

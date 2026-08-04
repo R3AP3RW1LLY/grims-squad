@@ -2,7 +2,8 @@ import * as zmq from 'zeromq';
 import { Client } from 'pg';
 import { PrismaClient } from '@grims/db';
 import { announce } from '@grims/shared';
-import { decodeMarket, type EddnMarket } from './message.js';
+import { marketFromEnvelope, type EddnMarket } from './message.js';
+import { applyExtras, decodeEnvelope, ExtrasTally } from './extras.js';
 import { CommodityNames } from './names.js';
 import { StationCache } from './stations.js';
 import { applyMarket } from './apply.js';
@@ -260,7 +261,7 @@ async function collect(db: PrismaClient, url: string): Promise<void> {
 
   const sock = new zmq.Subscriber();
   sock.connect(RELAY);
-  sock.subscribe(''); // Everything; the schema filter is in `decodeMarket`.
+  sock.subscribe(''); // Everything — and since 2026-08-04, everything is CONSUMED (see extras.ts).
   current = sock;
 
   await announce(db, {
@@ -287,6 +288,7 @@ async function collect(db: PrismaClient, url: string): Promise<void> {
   let window = await openWindow(db);
   let windowStarted = Date.now();
   let counts = emptyCounts();
+  const tally = new ExtrasTally();
   let lastMessage = Date.now();
   let lastBeat = Date.now();
 
@@ -312,12 +314,15 @@ async function collect(db: PrismaClient, url: string): Promise<void> {
   try {
     for await (const [frame] of sock) {
       lastMessage = Date.now();
-      if (frame !== undefined) await ingest(db, frame, names, stations, counts);
+      if (frame !== undefined) await ingest(db, frame, names, stations, counts, tally);
 
       const now = Date.now();
 
       if (now - lastBeat >= BEAT_MS) {
         await beat(db, window, counts.rows);
+        // The high-rate extras (traffic, schema stats) land here as one statement per table. A
+        // failed flush keeps its counts and tries again next beat.
+        await tally.flush(db).catch(() => undefined);
         lastBeat = now;
       }
 
@@ -362,6 +367,7 @@ async function collect(db: PrismaClient, url: string): Promise<void> {
      * reconnect.
      */
     await closeWindow(db, window, counts, windowStarted).catch(() => undefined);
+    await tally.flush(db).catch(() => undefined);
     // Already closed if the watchdog fired or a signal arrived; closing twice raises.
     if (!silent && !stopping) sock.close();
     current = null;
@@ -376,22 +382,42 @@ async function ingest(
   names: CommodityNames,
   stations: StationCache,
   counts: WindowCounts,
+  tally: ExtrasTally,
 ): Promise<void> {
+  const env = decodeEnvelope(frame);
+  if (env === null) return; // Not readable. One skipped message, never the process.
+
   let market: EddnMarket | null;
   try {
-    market = decodeMarket(frame);
+    market = marketFromEnvelope(env);
   } catch {
-    return; // Not our schema, or not readable. Ninety-five per cent of the feed is the former.
+    return;
   }
-  if (market === null) return;
+
+  if (market === null) {
+    /*
+     * Not a market — one of the other nine schemas. Failures here are counted but kept OUT of
+     * `failureStreak`: the streak exists to detect the market rebuild's lock on market_entries,
+     * which the extras tables never contend with, and extras successes resetting it would mask
+     * exactly the failures it watches for.
+     */
+    try {
+      await applyExtras(db, env, tally);
+    } catch {
+      counts.failed += 1;
+    }
+    return;
+  }
 
   try {
     const result = await applyMarket(db, market, names, stations);
     counts.unresolved += result.unresolved;
-    if (result.unknownStation) {
-      counts.unknownStations += 1;
-      return;
-    }
+    /*
+     * `unknownStation` no longer means "dropped" — since the provisional-station work the rows are
+     * WRITTEN, under a `live:` key, so they count as a market like any other. The counter survives
+     * as the measure of how often the galaxy baseline was not enough.
+     */
+    if (result.unknownStation) counts.unknownStations += 1;
     if (result.rows > 0) {
       counts.markets += 1;
       counts.rows += result.rows;
