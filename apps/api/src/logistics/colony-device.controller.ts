@@ -93,8 +93,6 @@ export class ColonyDeviceController {
     return { userId: device.userId };
   }
 
-  /** Both boards, exactly as the website's sidebar shows them. */
-  @Public()
   /**
    * The build catalogue, for the companion app.
    *
@@ -156,6 +154,25 @@ export class ColonyDeviceController {
     };
   }
 
+  /**
+   * Both boards, exactly as the website's sidebar shows them.
+   *
+   * ★ THE ONE ROUTE HERE THAT LOST ITS `@Public()`, AND WHAT IT COST ★
+   *
+   * Reported 2026-08-04: "I still get 'This device is no longer paired'", and "the one member
+   * colonisation project that appears on the website no longer appears in the companion app".
+   *
+   * Both were this. `@Public()` and this method's doc comment were adjacent; the build catalogue
+   * routes were later inserted BETWEEN them, so the decorator attached itself to `build-types`
+   * (which then carried two) and this route was left with none. A route without it is judged by the
+   * session guard, which wants a cookie the app has never had — so the board answered 401, the app
+   * translated that to "no longer paired", and the project vanished from a device that was in fact
+   * connected and uploading the whole time.
+   *
+   * Nothing failed loudly. Typecheck cannot see a missing decorator, and the route still worked
+   * perfectly from a browser. `device-routes-public.spec.ts` now fails the build for it.
+   */
+  @Public()
   @Get('projects')
   async projects(@Req() req: FastifyRequest, @Query('owner') owner?: string) {
     const me = await this.#caller(
