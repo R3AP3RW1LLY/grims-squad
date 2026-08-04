@@ -58,11 +58,24 @@ export interface OverlayData {
     readonly tonnes: number;
   } | null;
   readonly cargo: {
-    readonly items: ReadonlyArray<{ commodity: string; count: number; wanted: boolean }>;
+    readonly items: ReadonlyArray<{
+      commodity: string;
+      count: number;
+      wanted: boolean;
+      /** What the watched buys paid for this line. Null: mined/mission cargo, no watched buy. */
+      paid: number | null;
+    }>;
     readonly used: number;
     readonly capacity: number | null;
-    /** This trip's buying and selling. Null when nothing has moved — the line hides entirely. */
-    readonly trip: { readonly spent: number; readonly earned: number } | null;
+    /** Total watched spend aboard. Zero when nothing was bought under the app's eye. */
+    readonly totalPaid: number;
+    /** The till receipt — persists across undocks until the next sale replaces it. */
+    readonly lastSale: {
+      readonly commodity: string;
+      readonly units: number;
+      readonly sale: number;
+      readonly paid: number | null;
+    } | null;
   } | null;
   readonly status: {
     readonly sending: boolean;
@@ -346,10 +359,16 @@ function CargoPanel({
    * something has actually been bought or sold this trip.
    */
   if (data.items.length === 0) {
+    /*
+     * ★ THE LAST SALE SURVIVES AN EMPTY HOLD ★
+     *
+     * Seconds after selling everything is exactly when the receipt matters most — the owner's
+     * words: "keep it on screen as the last transaction until they reload and sell".
+     */
     return (
       <div>
         <Waiting what="Hold empty." />
-        <TripLine trip={data.trip} />
+        <LastSaleLine sale={data.lastSale} />
       </div>
     );
   }
@@ -374,7 +393,14 @@ function CargoPanel({
                 >
                   {c.commodity}
                 </span>
-                <span style={{ fontVariantNumeric: 'tabular-nums' }}>{c.count.toLocaleString()}</span>
+                <span style={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
+                  {c.count.toLocaleString()}
+                  {/* What was paid for this line, when the app watched it bought. A dash would be
+                      noise on every mined stack; absence says the same thing quietly. */}
+                  {c.paid === null ? '' : (
+                    <span style={{ color: C.dim }}> · {c.paid.toLocaleString()} cr</span>
+                  )}
+                </span>
               </div>
             ))
         : null}
@@ -386,37 +412,45 @@ function CargoPanel({
         </p>
       ) : null}
 
-      <TripLine trip={data.trip} />
+      {data.totalPaid > 0 ? (
+        <p style={{ margin: '4px 0 0', fontSize: '0.8em', color: C.dim }}>
+          Paid {data.totalPaid.toLocaleString()} cr for what is aboard
+        </p>
+      ) : null}
+      <LastSaleLine sale={data.lastSale} />
     </div>
   );
 }
 
 /**
- * This trip's money: what went out at the buy screens, what came back at the sell screens, and
- * the difference. Hidden entirely — not shown as zeros — until something has moved, so the line
- * only ever appears when it has something to say.
+ * The till receipt: the most recent completed sale, held on screen across undocks until the next
+ * one replaces it. Hidden entirely until a first sale has happened — a receipt for nothing says
+ * nothing.
  */
-function TripLine({
-  trip,
+function LastSaleLine({
+  sale,
 }: {
-  trip: NonNullable<OverlayData['cargo']>['trip'];
+  sale: NonNullable<OverlayData['cargo']>['lastSale'];
 }): preact.JSX.Element | null {
-  if (trip === null) return null;
+  if (sale === null) return null;
 
-  const net = trip.earned - trip.spent;
+  const profit = sale.paid === null ? null : sale.sale - sale.paid;
   return (
     <p style={{ margin: '4px 0 0', fontSize: '0.8em', color: C.dim }}>
-      Bought {trip.spent.toLocaleString()} cr · Sold {trip.earned.toLocaleString()} cr ·{' '}
-      <span
-        style={{
-          fontVariantNumeric: 'tabular-nums',
-          // Green in profit, red in the hole, and the resting dim at exactly break-even.
-          color: net > 0 ? C.good : net < 0 ? C.bad : C.dim,
-        }}
-      >
-        Net {net < 0 ? '−' : '+'}
-        {Math.abs(net).toLocaleString()} cr
-      </span>
+      Sold {sale.units.toLocaleString()} {sale.commodity} · {sale.sale.toLocaleString()} cr
+      {profit === null ? null : (
+        <span
+          style={{
+            fontVariantNumeric: 'tabular-nums',
+            // Green in profit, red in the hole, and the resting dim at exactly break-even.
+            color: profit > 0 ? C.good : profit < 0 ? C.bad : C.dim,
+          }}
+        >
+          {' '}
+          ({profit < 0 ? '−' : '+'}
+          {Math.abs(profit).toLocaleString()} cr)
+        </span>
+      )}
     </p>
   );
 }

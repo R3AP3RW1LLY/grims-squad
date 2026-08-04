@@ -1,98 +1,118 @@
 import { describe, expect, it } from 'vitest';
-import { EMPTY_TRIP, foldTrip } from './trip-ledger.js';
+import { EMPTY_TRIP, foldTrip, type TripLedger } from './trip-ledger.js';
 import type { ParsedLike } from './docked.js';
 
 /**
- * The trip P&L.
- *
- * ★ WHAT THESE TESTS ARE GUARDING ★
- *
- * The overlay prints "Net +Z cr" over somebody's cockpit, and the cheap mistakes are all
- * arithmetic-adjacent rather than arithmetic: a reset that fires on the wrong event, a journal
- * amount that arrives malformed and turns the running sum to NaN, and a contribution counted as
- * income the game never paid.
+ * The second shape of the ledger: per-commodity cost of what is aboard, plus the till receipt.
+ * Every rule the owner asked for on 2026-08-04 gets a case — including the ones that CHANGED
+ * from the first shape (nothing resets on undock any more), because a surviving old rule is
+ * exactly the regression these exist to catch.
  */
 
-const ev = (name: string, data: Record<string, unknown> = {}): ParsedLike => ({
+const ev = (name: string, data: Record<string, unknown>): ParsedLike => ({
   name,
-  occurredAt: '2026-08-04T10:00:00Z',
   data,
+  occurredAt: '2026-08-04T12:00:00Z',
 });
 
-describe('the trip ledger', () => {
-  it('starts a fresh app on an empty trip, measured from app start', () => {
-    // Nothing is seeded from the journal tail: a ledger rebuilt from half a session would show a
-    // number whose starting point nobody can name. `since` says which kind of zero this is.
-    expect(EMPTY_TRIP).toEqual({ spent: 0, earned: 0, since: 'start' });
+const buy = (type: string, count: number, total: number): ParsedLike =>
+  ev('MarketBuy', { Type: type.toLowerCase(), Type_Localised: type, Count: count, TotalCost: total });
+
+const sell = (type: string, count: number, total: number, avg?: number): ParsedLike =>
+  ev('MarketSell', {
+    Type: type.toLowerCase(),
+    Type_Localised: type,
+    Count: count,
+    TotalSale: total,
+    ...(avg === undefined ? {} : { AvgPricePaid: avg }),
   });
 
-  it('adds a market buy to spent', () => {
-    const trip = foldTrip(EMPTY_TRIP, [ev('MarketBuy', { Type: 'steel', Count: 720, TotalCost: 3_240_000 })]);
-    expect(trip.spent).toBe(3_240_000);
-    expect(trip.earned).toBe(0);
+describe('the lots — what the cargo aboard cost', () => {
+  it('a buy opens a lot; a second buy of the same commodity grows it', () => {
+    let t = foldTrip(EMPTY_TRIP, [buy('Gold', 100, 4_700_000)]);
+    t = foldTrip(t, [buy('Gold', 50, 2_400_000)]);
+    expect(t.lots['gold']).toEqual({ units: 150, paid: 7_100_000 });
   });
 
-  it('adds a market sell to earned', () => {
-    const trip = foldTrip(EMPTY_TRIP, [ev('MarketSell', { Type: 'gold', Count: 100, TotalSale: 4_800_000 })]);
-    expect(trip.earned).toBe(4_800_000);
-    expect(trip.spent).toBe(0);
+  it('MANDATORY: undocking resets NOTHING — the hold does not empty itself at the pad', () => {
+    let t = foldTrip(EMPTY_TRIP, [buy('Gold', 100, 4_700_000)]);
+    t = foldTrip(t, [ev('Undocked', {})]);
+    expect(t.lots['gold']).toEqual({ units: 100, paid: 4_700_000 });
+    expect(t.since).toBe('dock');
   });
 
-  it('accumulates across passes, like the dock tracker', () => {
-    // A member buys in one twenty-second window and sells three windows later; the fold takes the
-    // previous value so the trip survives the passes in between.
-    const bought = foldTrip(EMPTY_TRIP, [ev('MarketBuy', { TotalCost: 1_000 })]);
-    const sold = foldTrip(bought, [ev('MarketSell', { TotalSale: 2_500 })]);
-    expect(sold).toEqual({ spent: 1_000, earned: 2_500, since: 'start' });
+  it('a partial sale spends a proportional share of the lot', () => {
+    let t = foldTrip(EMPTY_TRIP, [buy('Gold', 100, 4_000_000)]);
+    t = foldTrip(t, [sell('Gold', 25, 1_500_000)]);
+    expect(t.lots['gold']).toEqual({ units: 75, paid: 3_000_000 });
   });
 
-  it('adds the credit a colonisation contribution reports, which is usually nothing', () => {
-    /*
-     * The game pays nothing at the depot, and the event carries no credit field — so the honest
-     * answer is zero, not an invented one. If Frontier ever adds a Credit field, it counts.
-     */
-    const unpaid = foldTrip(EMPTY_TRIP, [
-      ev('ColonisationContribution', { MarketID: 3_706_117_632, Contributions: [] }),
+  it('a whole-lot sale clears the lot exactly — no dust rows', () => {
+    let t = foldTrip(EMPTY_TRIP, [buy('Gold', 100, 4_000_000)]);
+    t = foldTrip(t, [sell('Gold', 100, 4_500_000)]);
+    expect(t.lots['gold']).toBeUndefined();
+  });
+
+  it('a construction contribution depletes the lot without touching the receipt', () => {
+    let t = foldTrip(EMPTY_TRIP, [buy('Steel', 700, 2_100_000)]);
+    t = foldTrip(t, [
+      ev('ColonisationContribution', {
+        Contributions: [{ Type: 'steel', Type_Localised: 'Steel', Amount: 700 }],
+      }),
     ]);
-    expect(unpaid).toEqual({ spent: 0, earned: 0, since: 'start' });
-
-    const paid = foldTrip(EMPTY_TRIP, [ev('ColonisationContribution', { Credit: 500 })]);
-    expect(paid.earned).toBe(500);
+    expect(t.lots['steel']).toBeUndefined();
+    expect(t.lastSale).toBeNull();
   });
 
-  it('resets the whole trip on Undocked — a trip is since leaving the last dock', () => {
-    const busy = foldTrip(EMPTY_TRIP, [
-      ev('MarketBuy', { TotalCost: 1_000_000 }),
-      ev('MarketSell', { TotalSale: 400_000 }),
+  it('NaN and junk amounts never poison a lot', () => {
+    const t = foldTrip(EMPTY_TRIP, [
+      ev('MarketBuy', { Type: 'gold', Count: 'many', TotalCost: NaN }),
     ]);
-    const departed = foldTrip(busy, [ev('Undocked', { StationName: 'Ambrose Dock' })]);
-    expect(departed).toEqual({ spent: 0, earned: 0, since: 'dock' });
+    expect(t.lots['gold']).toBeUndefined();
+  });
+});
+
+describe('the till receipt — the last sale, persistent', () => {
+  it("MANDATORY: prefers Frontier's AvgPricePaid over the lots for the basis", () => {
+    let t = foldTrip(EMPTY_TRIP, [buy('Gold', 100, 4_000_000)]);
+    // AvgPricePaid says 45,000/unit even though our watched lot says 40,000 — the game has seen
+    // buys this app never did, and its number wins.
+    t = foldTrip(t, [sell('Gold', 100, 5_000_000, 45_000)]);
+    expect(t.lastSale).toEqual({
+      commodity: 'gold',
+      units: 100,
+      sale: 5_000_000,
+      paid: 4_500_000,
+    });
   });
 
-  it('does NOT reset on Docked — the visit’s business belongs to this trip', () => {
-    // Blanking the ledger on landing would erase the buy the member just made on the way in.
-    const bought = foldTrip(EMPTY_TRIP, [ev('MarketBuy', { TotalCost: 1_000 })]);
-    expect(foldTrip(bought, [ev('Docked', { MarketID: 42 })])).toEqual(bought);
+  it('falls back to the lots when the journal gives no average', () => {
+    let t = foldTrip(EMPTY_TRIP, [buy('Gold', 100, 4_000_000)]);
+    t = foldTrip(t, [sell('Gold', 100, 5_000_000)]);
+    expect(t.lastSale?.paid).toBe(4_000_000);
   });
 
-  it('keeps counting after a reset, within one batch', () => {
-    // Undocked mid-batch: the sale before it belonged to the old trip, the buy after to the new.
-    const trip = foldTrip(EMPTY_TRIP, [
-      ev('MarketSell', { TotalSale: 9_000 }),
-      ev('Undocked'),
-      ev('MarketBuy', { TotalCost: 700 }),
-    ]);
-    expect(trip).toEqual({ spent: 700, earned: 0, since: 'dock' });
+  it('mined cargo sold with no basis anywhere reports paid null, never a fake zero', () => {
+    const t = foldTrip(EMPTY_TRIP, [sell('Painite', 20, 9_000_000)]);
+    expect(t.lastSale).toEqual({ commodity: 'painite', units: 20, sale: 9_000_000, paid: null });
   });
 
-  it('ignores malformed amounts rather than poisoning the running sum', () => {
-    // One NaN in a += chain makes every later number NaN, which the overlay would print.
-    const trip = foldTrip(EMPTY_TRIP, [
-      ev('MarketBuy', { TotalCost: 'not a number' }),
-      ev('MarketBuy', {}),
-      ev('MarketSell', { TotalSale: Infinity }),
-      ev('MarketBuy', { TotalCost: 100 }),
-    ]);
-    expect(trip).toEqual({ spent: 100, earned: 0, since: 'start' });
+  it('MANDATORY: the receipt survives an undock and only the NEXT sale replaces it', () => {
+    let t = foldTrip(EMPTY_TRIP, [buy('Gold', 10, 400_000)]);
+    t = foldTrip(t, [sell('Gold', 10, 500_000)]);
+    const first = t.lastSale;
+    t = foldTrip(t, [ev('Undocked', {}), ev('Docked', {})]);
+    expect(t.lastSale).toEqual(first);
+    t = foldTrip(t, [sell('Silver', 5, 250_000, 40_000)]);
+    expect(t.lastSale?.commodity).toBe('silver');
+  });
+
+  it('accumulates across passes, like every fold the watcher threads', () => {
+    let t: TripLedger = EMPTY_TRIP;
+    t = foldTrip(t, [buy('Gold', 50, 2_000_000)]);
+    t = foldTrip(t, [buy('Gold', 50, 2_000_000)]);
+    t = foldTrip(t, [sell('Gold', 100, 4_600_000)]);
+    expect(t.lastSale?.paid).toBe(4_000_000);
+    expect(t.lots['gold']).toBeUndefined();
   });
 });

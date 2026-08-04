@@ -133,21 +133,35 @@ function cargoPanel(input: OverlayInput): OverlayData['cargo'] {
 
   const marked = markWanted(input.hold, wanted);
 
+  /*
+   * ★ WHAT WAS PAID, PER LINE — SQUADRON OWNER, 2026-08-04 ★
+   *
+   * "just only show what the value was paid for the cargo please!" Each hold line carries the
+   * cost of the units the ledger watched being bought, matched by display name. Mined and
+   * mission cargo has no watched buy, so its paid figure is honestly null — the panel prints a
+   * dash, never a fake zero.
+   */
+  const lots = input.trip?.lots ?? {};
+  const items = marked.items.map((item) => {
+    const lot = lots[item.commodity.toLowerCase()];
+    return {
+      ...item,
+      paid: lot === undefined || lot.units <= 0 ? null : lot.paid,
+    };
+  });
+  const totalPaid = items.reduce((sum, i) => sum + (i.paid ?? 0), 0);
+
   return {
-    items: marked.items,
+    items,
     used: marked.used,
     capacity: input.capacity,
+    /** Total watched spend aboard. Zero hides the line — nothing to say. */
+    totalPaid,
     /*
-     * ★ THE TRIP P&L — HIDDEN ENTIRELY AT ZERO ★
-     *
-     * Null both before the watcher has run AND when nothing has been bought or sold: a line
-     * reading "Bought 0 cr · Sold 0 cr" on every launch is a row of noise on a panel over a
-     * cockpit, and its absence says the same for free.
+     * The till receipt: the most recent completed sale, persisting across undocks until the next
+     * one replaces it — the exact behaviour the owner asked for.
      */
-    trip:
-      input.trip === null || (input.trip.spent === 0 && input.trip.earned === 0)
-        ? null
-        : { spent: input.trip.spent, earned: input.trip.earned },
+    lastSale: input.trip?.lastSale ?? null,
   };
 }
 

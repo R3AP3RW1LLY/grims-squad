@@ -14,7 +14,7 @@ const QUIET: WatchOutcome = {
   // Not docked: these cases are about which lines get logged, not about where the ship is.
   dockedAt: null,
   // An empty trip, for the same reason — the activity log says nothing about money.
-  trip: { spent: 0, earned: 0, since: 'start' },
+  trip: { lots: {}, lastSale: null, since: 'start' },
   gameRunning: false,
   filesRead: 0,
   newFilesRead: 0,

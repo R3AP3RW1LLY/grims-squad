@@ -21,7 +21,7 @@ function pass(over: Partial<WatchOutcome> = {}): WatchOutcome {
     // every case in this file about the numbers it is actually testing.
     dockedAt: null,
     // An empty trip, for the same reason.
-    trip: { spent: 0, earned: 0, since: 'start' },
+    trip: { lots: {}, lastSale: null, since: 'start' },
     gameRunning: false,
     filesRead: 0,
     newFilesRead: 0,

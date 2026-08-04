@@ -277,26 +277,47 @@ describe('the overlay payload', () => {
     expect(cargo?.items.find((i) => i.commodity === 'Gold')?.wanted).toBe(false);
   });
 
-  /* ------------------------------------------------------------- the trip P&L */
+  /* --------------------------------------------------- what was paid, and the receipt */
 
-  it('hides the trip line entirely until money has moved', () => {
-    const emptyHold = { used: 0, at: null, items: [] };
-    // Zeros would render "Bought 0 cr · Sold 0 cr" on every launch — a row of noise, so null.
-    expect(
-      buildOverlayData(input({ hold: emptyHold, trip: { spent: 0, earned: 0, since: 'dock' } }))
-        .cargo?.trip,
-    ).toBeNull();
-    expect(buildOverlayData(input({ hold: emptyHold, trip: null })).cargo?.trip).toBeNull();
+  it('prices each hold line from the watched lots, and mined cargo honestly has no price', () => {
+    const { cargo } = buildOverlayData(
+      input({
+        hold: {
+          used: 740,
+          at: null,
+          items: [
+            { commodity: 'Gold', count: 720, wanted: false },
+            { commodity: 'Painite', count: 20, wanted: false },
+          ],
+        },
+        trip: {
+          lots: { gold: { units: 720, paid: 33_840_000 } },
+          lastSale: null,
+          since: 'dock',
+        },
+      }),
+    );
+    const gold = cargo?.items.find((i) => i.commodity === 'Gold');
+    const painite = cargo?.items.find((i) => i.commodity === 'Painite');
+    expect(gold?.paid).toBe(33_840_000);
+    // Mined: no watched buy, no invented zero.
+    expect(painite?.paid).toBeNull();
+    expect(cargo?.totalPaid).toBe(33_840_000);
   });
 
-  it('reports the trip’s spend and take once something has been bought or sold', () => {
+  it('keeps the last sale on screen even over an empty hold — the till receipt persists', () => {
     const { cargo } = buildOverlayData(
       input({
         hold: { used: 0, at: null, items: [] },
-        trip: { spent: 3_240_000, earned: 4_000_000, since: 'dock' },
+        trip: {
+          lots: {},
+          lastSale: { commodity: 'gold', units: 720, sale: 43_200_000, paid: 33_840_000 },
+          since: 'dock',
+        },
       }),
     );
-    expect(cargo?.trip).toEqual({ spent: 3_240_000, earned: 4_000_000 });
+    expect(cargo?.lastSale?.sale).toBe(43_200_000);
+    expect(cargo?.totalPaid).toBe(0);
   });
 
   it('sends no route, because nothing records the run somebody picked', () => {

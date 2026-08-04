@@ -1,40 +1,64 @@
 import type { ParsedLike } from './docked.js';
 
 /**
- * What this trip has cost and earned, folded straight off the journal.
+ * What the cargo aboard actually cost, and how the last sale went.
  *
- * ★ SQUADRON OWNER'S CHOICE, 2026-08-04: FULL TRIP P&L ★
+ * ★ SQUADRON OWNER, 2026-08-04 — THE SECOND SHAPE OF THIS FILE ★
  *
- * The cargo overlay shows what is aboard; this is the other half of the question a hauler actually
- * has — "is this run making money". Bought, sold, and the net between them, reset every time the
- * ship leaves a pad, because a trip is what happens between leaving one dock and leaving the next.
+ * The first shape was a whole-trip P&L: bought, sold, net, reset on undock. The owner's verdict
+ * on seeing it fly: "just only show what the value was paid for the cargo ... the rest of the
+ * displayed info aside from the quantity of material is useless as it does not track sold,
+ * unless we can make that all persistent ... keep it on screen as the last transaction". So:
  *
- * ★ A PURE FOLD, LIKE trackDocked, FOR THE SAME REASON ★
+ *   lots      — per commodity, how many units aboard were bought while the app watched, and what
+ *               was paid for them. Depleted by sales and by construction contributions; NOT reset
+ *               on undock, because the hold does not empty itself at the pad — cargo persists
+ *               until it actually leaves the ship.
+ *   lastSale  — the most recent completed sale, held on screen across undocks until the next one
+ *               replaces it. Standard till-receipt behaviour: the last transaction stays visible.
  *
- * No Electron, no filesystem — events in, state out. Every rule here is a decision worth a test,
- * and the watcher threads it through its pass exactly the way the dock tracker is threaded.
+ * ★ COST BASIS PREFERS FRONTIER'S OWN NUMBER ★
  *
- * ★ NOTHING IS SEEDED AT STARTUP, DELIBERATELY ★
+ * MarketSell carries AvgPricePaid — the game's average over every buy the member ever made,
+ * including ones this app never saw. When present it prices the sale's basis; the lots ledger is
+ * the fallback (and always the per-commodity display, since Frontier publishes no per-hold cost).
+ * Mined and mission cargo was never bought: its paid figure is honestly absent, never zero.
  *
- * A fresh app start begins an EMPTY trip. The journal tail could be replayed to reconstruct one,
- * but a ledger rebuilt from half a session would show a number whose starting point nobody can
- * name — and a P&L that cannot say what it is measuring from is worse than one that honestly
- * starts at zero. `since` says which kind of zero this is.
+ * ★ STILL A PURE FOLD, STILL UNSEEDED ★
+ *
+ * Events in, state out, threaded through the watcher pass like trackDocked. A fresh app start
+ * begins empty: a ledger rebuilt from half a session would show costs whose starting point nobody
+ * can name. `since` says which kind of empty this was.
  */
 
-export interface TripLedger {
-  /** Credits paid at market buy screens since the trip began. */
-  readonly spent: number;
-  /** Credits received from sales since the trip began. */
-  readonly earned: number;
+export interface CargoLot {
+  readonly units: number;
+  /** Credits paid for those units at the buy screens the app watched. */
+  readonly paid: number;
+}
+
+export interface LastSale {
+  /** Display name, lower-cased — the overlay title-cases as it pleases. */
+  readonly commodity: string;
+  readonly units: number;
+  /** Credits received. */
+  readonly sale: number;
   /**
-   * What the zero point is: `dock` after we have watched a departure, `start` when the app was
-   * launched mid-flight and the trip simply began where our knowledge does.
+   * Cost basis for the sold units — AvgPricePaid when the journal gave it, the lots ledger
+   * otherwise. Null when neither could price it (mined cargo sold before any watched buy),
+   * because a fake zero would print a fake profit.
    */
+  readonly paid: number | null;
+}
+
+export interface TripLedger {
+  /** Keyed by lower-cased display name, matching how the cargo panel names the hold. */
+  readonly lots: Readonly<Record<string, CargoLot>>;
+  readonly lastSale: LastSale | null;
   readonly since: 'dock' | 'start';
 }
 
-export const EMPTY_TRIP: TripLedger = { spent: 0, earned: 0, since: 'start' };
+export const EMPTY_TRIP: TripLedger = { lots: {}, lastSale: null, since: 'start' };
 
 /** A journal amount, taken only when it is a real finite number — never NaN into a running sum. */
 function amount(value: unknown): number {
@@ -42,44 +66,125 @@ function amount(value: unknown): number {
   return Number.isFinite(n) && n > 0 ? n : 0;
 }
 
+/** The display name a journal market event carries, in the panel's matching key form. */
+function nameOf(data: Record<string, unknown>): string | null {
+  const localised = data['Type_Localised'];
+  const raw = data['Type'];
+  const name =
+    typeof localised === 'string' && localised !== ''
+      ? localised
+      : typeof raw === 'string' && raw !== ''
+        ? raw
+        : null;
+  return name === null ? null : name.toLowerCase();
+}
+
+function consume(
+  lots: Readonly<Record<string, CargoLot>>,
+  key: string,
+  units: number,
+): { lots: Record<string, CargoLot>; consumedPaid: number; consumedUnits: number } {
+  const next: Record<string, CargoLot> = { ...lots };
+  const held = next[key];
+  if (held === undefined || held.units <= 0 || units <= 0) {
+    return { lots: next, consumedPaid: 0, consumedUnits: 0 };
+  }
+
+  const consumedUnits = Math.min(units, held.units);
+  // Proportional: selling half the lot spends half its cost. Whole-lot sales clear it exactly.
+  const consumedPaid = Math.round((held.paid * consumedUnits) / held.units);
+  const remaining = held.units - consumedUnits;
+
+  if (remaining <= 0) delete next[key];
+  else next[key] = { units: remaining, paid: held.paid - consumedPaid };
+
+  return { lots: next, consumedPaid, consumedUnits };
+}
+
 /**
- * Folds a batch of events over the running trip.
- *
- * Takes the previous value so it works across passes, exactly like `trackDocked` — a member buys
- * in one twenty-second window and sells three windows later.
+ * Folds a batch of events over the running ledger. Takes the previous value so it works across
+ * passes — a member buys in one twenty-second window and sells three windows later.
  */
 export function foldTrip(previous: TripLedger, events: readonly ParsedLike[]): TripLedger {
   let current = previous;
 
   for (const event of events) {
     switch (event.name) {
-      case 'MarketBuy':
-        current = { ...current, spent: current.spent + amount(event.data['TotalCost']) };
+      case 'MarketBuy': {
+        const key = nameOf(event.data);
+        const units = amount(event.data['Count']);
+        const paid = amount(event.data['TotalCost']);
+        if (key === null || units === 0) break;
+        const held = current.lots[key] ?? { units: 0, paid: 0 };
+        current = {
+          ...current,
+          lots: {
+            ...current.lots,
+            [key]: { units: held.units + units, paid: held.paid + paid },
+          },
+        };
         break;
+      }
 
-      case 'MarketSell':
-        current = { ...current, earned: current.earned + amount(event.data['TotalSale']) };
+      case 'MarketSell': {
+        const key = nameOf(event.data);
+        const units = amount(event.data['Count']);
+        const sale = amount(event.data['TotalSale']);
+        if (key === null || units === 0) break;
+
+        const consumed = consume(current.lots, key, units);
+
+        const avg = Number(event.data['AvgPricePaid']);
+        const paid =
+          Number.isFinite(avg) && avg > 0
+            ? Math.round(avg * units)
+            : consumed.consumedUnits > 0
+              ? consumed.consumedPaid
+              : null;
+
+        current = {
+          ...current,
+          lots: consumed.lots,
+          lastSale: { commodity: key, units, sale, paid },
+        };
         break;
+      }
 
       /*
-       * Handing cargo to a construction site. The journal event carries no credit figure today —
-       * the game pays nothing at the depot — so this adds whatever credit the event reports,
-       * which is usually zero, and that is honest: a contribution is spend already counted at the
-       * buy screen, not income.
+       * Handing cargo to a construction site empties the hold without a sale: the lots deplete so
+       * the paid-for display keeps matching what is actually aboard, and lastSale is untouched —
+       * a donation is not a transaction the till-receipt line should overwrite.
        */
-      case 'ColonisationContribution':
-        current = { ...current, earned: current.earned + amount(event.data['Credit']) };
+      case 'ColonisationContribution': {
+        const contributions = event.data['Contributions'];
+        if (!Array.isArray(contributions)) break;
+        let lots = current.lots;
+        for (const raw of contributions) {
+          if (typeof raw !== 'object' || raw === null) continue;
+          const c = raw as Record<string, unknown>;
+          const name =
+            typeof c['Type_Localised'] === 'string' && c['Type_Localised'] !== ''
+              ? c['Type_Localised']
+              : typeof c['Type'] === 'string' && c['Type'] !== ''
+                ? c['Type']
+                : null;
+          if (name === null) continue;
+          lots = consume(lots, name.toLowerCase(), amount(c['Amount'])).lots;
+        }
+        current = { ...current, lots };
         break;
+      }
 
       /*
-       * ★ LEAVING THE PAD IS THE TRIP BOUNDARY ★
+       * ★ UNDOCKING NO LONGER RESETS ANYTHING ★
        *
-       * Reset on `Undocked` rather than on `Docked`: a member sitting at a station buying, selling
-       * and re-planning is still on the business of THIS visit, and blanking the ledger the moment
-       * they landed would erase the sale they came to make. The trip ends when the ship leaves.
+       * The first shape zeroed a trip here. But the hold persists across an undock, so its costs
+       * must too — and the last sale is exactly the thing the owner asked to KEEP on screen while
+       * flying. The only thing departure changes is the honesty marker: from here on, the ledger
+       * has watched a full dock cycle.
        */
       case 'Undocked':
-        current = { spent: 0, earned: 0, since: 'dock' };
+        current = current.since === 'dock' ? current : { ...current, since: 'dock' };
         break;
 
       default:
