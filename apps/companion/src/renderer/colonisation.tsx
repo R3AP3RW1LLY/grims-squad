@@ -86,6 +86,12 @@ declare global {
         body: { commodity: string; userId?: string },
       ): Promise<Answer<{ ok: true }>>;
 
+      /** Closing, reopening, deleting, and flagging the squadron's current effort. */
+      close(id: string): Promise<Answer<{ ok: true }>>;
+      reopen(id: string): Promise<Answer<{ ok: true }>>;
+      remove(id: string): Promise<Answer<{ ok: true }>>;
+      priority(id: string, on: boolean): Promise<Answer<{ ok: true }>>;
+
       /** Fleet carriers helping with a build, and what each is holding. */
       carriers(id: string, q: string): Promise<Answer<{ carriers: CarrierMatch[] }>>;
       carrierAdd(
@@ -147,6 +153,14 @@ export interface Delivery {
 
 export interface ProjectDetailData {
   project: ColonyProject;
+  /**
+   * What this reader may do. A rendering hint — every write re-checks in the service.
+   *
+   * The app had none, so it drew every control to everybody: "Take off" on a carrier somebody else
+   * attached, "Add as squadron" to a member with no rank. A control that exists in order to be
+   * refused teaches people to distrust the page.
+   */
+  can: { manage: boolean; isPoster: boolean };
   /**
    * Fleet carriers on this build.
    *
@@ -803,7 +817,7 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
         to buy — which is the one moment they most want to see it.
       */}
       <Card hud>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '14px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px' }}>
           <Stat
             label="Still needed"
             value={project.needCount === 0 ? '—' : tonnes(project.remaining)}
@@ -815,8 +829,30 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
             tone={C.good}
           />
           <Stat label="Commodities" value={String(project.needCount)} />
+          {/* The website's fourth tile, missing here — so nothing in the app ever said a build was
+              closed, or that it was the squadron's current effort. */}
+          <Stat
+            label="Status"
+            value={
+              project.completedAt !== null
+                ? 'Complete'
+                : project.isPriority
+                  ? 'Current effort'
+                  : 'Live'
+            }
+            {...(project.completedAt !== null ? { tone: C.cyan } : {})}
+          />
         </div>
       </Card>
+
+      <div style={{ marginTop: '16px' }}>
+        <ProjectActions
+          project={project}
+          can={data.can}
+          onChanged={() => void reloadDetail()}
+          onGone={onBack}
+        />
+      </div>
 
       <div style={{ margin: '20px 0 0' }}>
         <Tabs tabs={PROJECT_TABS} current={tab} onChange={setTab} label="Project sections" />
@@ -998,6 +1034,7 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
           projectId={data.project.id}
           carriers={data.carriers}
           needs={data.needs}
+          canManage={data.can.manage}
           onChanged={() => void reloadDetail()}
         />
       )}
@@ -1242,11 +1279,13 @@ function CarrierPanel({
   projectId,
   carriers,
   needs,
+  canManage,
   onChanged,
 }: {
   projectId: string;
   carriers: readonly AttachedCarrier[];
   needs: readonly ColonyNeed[];
+  canManage: boolean;
   onChanged: () => void;
 }): JSX.Element {
   const [term, setTerm] = useState('');
@@ -1345,13 +1384,18 @@ function CarrierPanel({
                 </span>
                 <span style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                   <span style={{ fontSize: '12px', color: C.dim }}>{tonnes(c.totalTonnes)}</span>
-                  <Button
-                    tone="danger"
-                    disabled={busy}
-                    onClick={() => act(() => window.colony.carrierRemove(projectId, c.marketId))}
-                  >
-                    Take off
-                  </Button>
+                  {/* Whoever attached it, or an officer. Anybody being able to detach anybody's
+                      carrier would let one member quietly remove twenty thousand tonnes another
+                      was counting on. */}
+                  {canManage || c.addedBy !== null ? (
+                    <Button
+                      tone="danger"
+                      disabled={busy}
+                      onClick={() => act(() => window.colony.carrierRemove(projectId, c.marketId))}
+                    >
+                      Take off
+                    </Button>
+                  ) : null}
                 </span>
               </div>
 
@@ -1437,26 +1481,152 @@ function CarrierPanel({
                 >
                   Add
                 </Button>
-                <Button
-                  tone="primary"
-                  disabled={busy}
-                  onClick={() =>
-                    act(() =>
-                      window.colony.carrierAdd(projectId, {
-                        marketId: m.marketId,
-                        isSquadron: true,
-                      }),
-                    )
-                  }
-                >
-                  Add as squadron
-                </Button>
+                {/* Marking a carrier as the squadron's is a claim about whose it is, so it is an
+                    officer's call — the hub refuses it either way. */}
+                {canManage ? (
+                  <Button
+                    tone="primary"
+                    disabled={busy}
+                    onClick={() =>
+                      act(() =>
+                        window.colony.carrierAdd(projectId, {
+                          marketId: m.marketId,
+                          isSquadron: true,
+                        }),
+                      )
+                    }
+                  >
+                    Add as squadron
+                  </Button>
+                ) : null}
               </span>
             </div>
           ))}
         </div>
       )}
     </Section>
+  );
+}
+
+
+/**
+ * Closing, reopening, deleting, and flagging the squadron's current effort.
+ *
+ * ★ THE WEBSITE HAD THESE AND THE APP HAD NOTHING ★
+ *
+ * A member who posted a build from the app had to open a browser to close it. The draw rules are
+ * the website's, deliberately identical — a rule that differs between two surfaces is a rule
+ * somebody will eventually be surprised by.
+ */
+function ProjectActions({
+  project,
+  can,
+  onChanged,
+  onGone,
+}: {
+  project: ColonyProject;
+  can: { manage: boolean; isPoster: boolean };
+  onChanged: () => void;
+  onGone: () => void;
+}): JSX.Element | null {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
+
+  // Whose build this is decides everything below. A squadron build is the squadron's, so an officer
+  // directs it; a member's own is theirs.
+  const mayDirect = project.owner === 'squadron' ? can.manage : can.isPoster;
+  if (!mayDirect && !can.manage) return null;
+
+  const closed = project.completedAt !== null;
+
+  const act = (fn: () => Promise<Answer<unknown>>, gone = false): void => {
+    setBusy(true);
+    void fn().then((a) => {
+      setBusy(false);
+      if (!a.ok) {
+        /*
+         * The hub's own sentence. The refusals here are the interesting part — "people have already
+         * hauled to this build, close it instead" is a real explanation, and replacing it with
+         * "something went wrong" throws away the only useful thing said.
+         */
+        setError(a.error);
+        return;
+      }
+      setError(null);
+      setConfirming(false);
+      if (gone) onGone();
+      else onChanged();
+    });
+  };
+
+  return (
+    <div style={{ marginBottom: '14px' }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+        {/* Squadron-only. A member marking their own build as the squadron's priority would be
+            pointing the whole squadron at it, which is not theirs to do. */}
+        {project.owner === 'squadron' && can.manage ? (
+          <Button
+            tone={project.isPriority ? 'primary' : 'default'}
+            disabled={busy}
+            onClick={() => act(() => window.colony.priority(project.id, !project.isPriority))}
+          >
+            {project.isPriority ? 'Current effort' : 'Make current effort'}
+          </Button>
+        ) : null}
+
+        {mayDirect ? (
+          <Button
+            disabled={busy}
+            onClick={() =>
+              act(() =>
+                closed ? window.colony.reopen(project.id) : window.colony.close(project.id),
+              )
+            }
+          >
+            {closed ? 'Reopen' : 'Close this build'}
+          </Button>
+        ) : null}
+
+        {/*
+          Delete is drawn only while nothing has been hauled. The hub refuses either way, but a
+          button that exists in order to be refused teaches people to distrust the page — and
+          `required` is zero exactly when the site has never reported a depot, which is the
+          mistyped-market-id case delete is for.
+        */}
+        {mayDirect && project.required === 0 ? (
+          confirming ? (
+            <>
+              <Button
+                tone="danger"
+                disabled={busy}
+                onClick={() => act(() => window.colony.remove(project.id), true)}
+              >
+                Delete for good
+              </Button>
+              <Button disabled={busy} onClick={() => setConfirming(false)}>
+                Keep it
+              </Button>
+            </>
+          ) : (
+            /*
+             * Two presses, unlike the website's one. There is no browser confirm dialog here and no
+             * undo behind it, and the app is the surface somebody is using with a joystick in the
+             * other hand.
+             */
+            <Button tone="danger" disabled={busy} onClick={() => setConfirming(true)}>
+              Delete
+            </Button>
+          )
+        ) : null}
+      </div>
+
+      {error === null ? null : (
+        <div style={{ marginTop: '10px' }}>
+          <Problem>{error}</Problem>
+        </div>
+      )}
+    </div>
   );
 }
 

@@ -278,6 +278,21 @@ export class ColonyDeviceController {
       deliveries,
       chart,
       carriers,
+      /*
+       * ★ THE RIGHTS, WHICH THE APP NEVER RECEIVED ★
+       *
+       * Without them the app drew every control to everybody: "Take off" on a carrier somebody else
+       * attached, "Add as squadron" to a member with no rank, and — once the actions row exists —
+       * Close and Delete on builds that are not theirs. The website has sent this since the day it
+       * could not draw a close button for want of knowing who was reading.
+       *
+       * A rendering hint only; every write re-checks in the service.
+       */
+      can: {
+        manage: (await this.permissions.effectiveMask(me.userId) & Permission.COLONY_MANAGE) ===
+          Permission.COLONY_MANAGE,
+        isPoster: project.postedById === me.userId,
+      },
       // Echoed so the page can say where it is measuring from — a distance column with no stated
       // origin is a number nobody can check.
       shoppingFrom: coords === null ? null : origin,
@@ -489,6 +504,59 @@ export class ColonyDeviceController {
     );
 
     await this.colony.setPriority(id, body.isPriority === true);
+    return { ok: true };
+  }
+
+  /**
+   * Closing, reopening and deleting — the three the app could not do.
+   *
+   * ★ SQUADRON OWNER, 2026-08-04: "full parridy" ★
+   *
+   * The website has had these since the day the actions row shipped; the app had only `priority`,
+   * so a member who posted a build from the app had to open a browser to close it. That is the exact
+   * split the owner has objected to repeatedly.
+   *
+   * COLONY_VIEW here, on purpose, exactly as on the website: the interesting check is not the
+   * caller's rank in general but whose build this is, and the SERVICE makes it — a member closing
+   * their own needs nothing beyond seeing the board, an officer closing the squadron's needs
+   * COLONY_MANAGE. One rule, in one place, reached through two doors.
+   */
+  @Public()
+  @Patch('projects/:id/close')
+  async close(@Req() req: FastifyRequest, @Param('id') id: string) {
+    const me = await this.#caller(
+      req,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+    const mask = await this.permissions.effectiveMask(me.userId);
+    await this.colony.close(id, me.userId, mask);
+    return { ok: true };
+  }
+
+  @Public()
+  @Patch('projects/:id/reopen')
+  async reopen(@Req() req: FastifyRequest, @Param('id') id: string) {
+    const me = await this.#caller(
+      req,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+    const mask = await this.permissions.effectiveMask(me.userId);
+    await this.colony.reopen(id, me.userId, mask);
+    return { ok: true };
+  }
+
+  @Public()
+  @Delete('projects/:id')
+  async remove(@Req() req: FastifyRequest, @Param('id') id: string) {
+    const me = await this.#caller(
+      req,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+    const mask = await this.permissions.effectiveMask(me.userId);
+    await this.colony.remove(id, me.userId, mask);
     return { ok: true };
   }
 

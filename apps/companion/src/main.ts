@@ -17,6 +17,10 @@ import {
   addPlanSite,
   attachCarrier,
   colonyBuildTypes,
+  colonyClose,
+  colonyPriority,
+  colonyRemove,
+  colonyReopen,
   colonyCarrierSearch,
   detachCarrier,
   colonyPlan,
@@ -1469,6 +1473,17 @@ if (!app.requestSingleInstanceLock()) {
      * Fleet carriers. Squadron owner, 2026-08-02: "we also need a way to add fleet carriers to the
      * project like raven colonial does", and "squadron carriers too".
      */
+    /*
+     * Closing, reopening, deleting and flagging the current effort. The hub decides whether this
+     * member may — the app only asks.
+     */
+    ipcMain.handle('colonyClose', (_e, id: unknown) => colonyClose(hub(), projectId(id)));
+    ipcMain.handle('colonyReopen', (_e, id: unknown) => colonyReopen(hub(), projectId(id)));
+    ipcMain.handle('colonyRemove', (_e, id: unknown) => colonyRemove(hub(), projectId(id)));
+    ipcMain.handle('colonyPriority', (_e, id: unknown, on: unknown) =>
+      colonyPriority(hub(), projectId(id), on === true),
+    );
+
     ipcMain.handle('colonyCarriers', (_e, id: unknown, q: unknown) =>
       colonyCarrierSearch(hub(), projectId(id), typeof q === 'string' ? q : ''),
     );

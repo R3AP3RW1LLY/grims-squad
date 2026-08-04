@@ -133,6 +133,12 @@ contextBridge.exposeInMainWorld('colony', {
   assign: (id: string, body: unknown) => ipcRenderer.invoke('colonyAssign', id, body),
   unassign: (id: string, body: unknown) => ipcRenderer.invoke('colonyUnassign', id, body),
 
+  /** Closing, reopening, deleting, and flagging the squadron's current effort. */
+  close: (id: string) => ipcRenderer.invoke('colonyClose', id),
+  reopen: (id: string) => ipcRenderer.invoke('colonyReopen', id),
+  remove: (id: string) => ipcRenderer.invoke('colonyRemove', id),
+  priority: (id: string, on: boolean) => ipcRenderer.invoke('colonyPriority', id, on),
+
   /** Fleet carriers helping with a build, and what each is holding. */
   carriers: (id: string, q: string) => ipcRenderer.invoke('colonyCarriers', id, q),
   carrierAdd: (id: string, body: unknown) => ipcRenderer.invoke('colonyCarrierAdd', id, body),

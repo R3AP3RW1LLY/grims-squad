@@ -578,3 +578,29 @@ export const detachCarrier = (
     `/projects/${encodeURIComponent(id)}/carriers/${encodeURIComponent(marketId)}`,
     { method: 'DELETE' },
   );
+
+/**
+ * Closing, reopening and deleting a build.
+ *
+ * The website has had these since the actions row shipped and the app had only `priority`, so a
+ * member who posted a build from the app had to open a browser to close it. Same service, same
+ * rules — the hub decides whether this member may, from whose build it is.
+ */
+export const colonyClose = (call: HubCall, id: string): Promise<Answer<{ ok: true }>> =>
+  hubColony(call, `/projects/${encodeURIComponent(id)}/close`, { method: 'PATCH', body: {} });
+
+export const colonyReopen = (call: HubCall, id: string): Promise<Answer<{ ok: true }>> =>
+  hubColony(call, `/projects/${encodeURIComponent(id)}/reopen`, { method: 'PATCH', body: {} });
+
+export const colonyRemove = (call: HubCall, id: string): Promise<Answer<{ ok: true }>> =>
+  hubColony(call, `/projects/${encodeURIComponent(id)}`, { method: 'DELETE' });
+
+export const colonyPriority = (
+  call: HubCall,
+  id: string,
+  isPriority: boolean,
+): Promise<Answer<{ ok: true }>> =>
+  hubColony(call, `/projects/${encodeURIComponent(id)}/priority`, {
+    method: 'PATCH',
+    body: { isPriority },
+  });
