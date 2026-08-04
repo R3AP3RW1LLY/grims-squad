@@ -552,7 +552,16 @@ export class ThreadService {
     caller: { userId: string; mask: bigint },
     /** Defaults to MARKING. Un-marking is the deliberate act and reads better written out. */
     solution = true,
-  ): Promise<void> {
+  ): Promise<{
+    /**
+     * True only when THIS call newly marked the answer. The controller notifies the answer's
+     * author on it, and the transition has to be judged here — re-pressing an idempotent PUT
+     * must not ring the same bell twice, and only this method sees the pre-write state.
+     */
+    accepted: boolean;
+    answerAuthorId: string;
+    threadTitle: string;
+  }> {
     const thread = await this.bySlug(db, categorySlug, threadSlug, caller.mask);
 
     const threadRow = await db.forumThread.findFirst({
@@ -576,7 +585,8 @@ export class ThreadService {
     const post = await db.forumPost.findFirst({
       where: { id: postId, threadId: thread.id, deletedAt: null },
       // The author too, because accepting an answer awards THEM, not the person accepting it.
-      select: { id: true, authorId: true },
+      // isSolution is the pre-write state — what makes "newly accepted" decidable at all.
+      select: { id: true, authorId: true, isSolution: true },
     });
     if (post === null) {
       throw new AppError(ErrorCode.RESOURCE_NOT_VISIBLE, 'Post not found.');
@@ -632,6 +642,14 @@ export class ThreadService {
           ]
         : []),
     ]);
+
+    return {
+      // Newly accepted: this call set the mark on a post that did not carry it. Re-accepting
+      // the same post is the idempotent no-change case and reports false.
+      accepted: solution && !post.isSolution,
+      answerAuthorId: post.authorId,
+      threadTitle: thread.title,
+    };
   }
 
   /**
@@ -646,7 +664,16 @@ export class ThreadService {
     input: CreateThreadInput,
     authorId: string,
     callerMask: bigint,
-  ): Promise<{ id: string; slug: string }> {
+  ): Promise<{
+    id: string;
+    slug: string;
+    /**
+     * Whether screening HELD the opening post. Returned so the controller can tell the author —
+     * a thread whose first post is invisible looks like a lost post, and the notification is
+     * what turns that into "a reviewer will look at it". Only this method sees the verdict.
+     */
+    held: boolean;
+  }> {
     const title = input.title.trim();
     if (title.length < 3 || title.length > 200) {
       throw new AppError(ErrorCode.VALIDATION_FAILED, 'A title is between 3 and 200 characters.');
@@ -749,7 +776,7 @@ export class ThreadService {
     // the call site is the thing that gets forgotten.
     await this.reindex.enqueue({ kind: 'thread', id: created.id, reason: 'created' });
 
-    return created;
+    return { ...created, held: screened !== null && screened.state === 'held' };
   }
 
   /**

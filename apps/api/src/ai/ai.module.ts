@@ -22,6 +22,9 @@ import { ShipBuildService, ShipBuildQueries, ShipyardService } from './ship-buil
 import { CorpusService } from './corpus.service.js';
 import { JobLogListener } from './job-log.listener.js';
 import { ArtworkController } from './artwork.controller.js';
+import { LIVE_SERVICE } from '../live/live.tokens.js';
+import { liveNudgeOf } from '../live/live-nudge.js';
+import type { LiveService } from '../live/live.service.js';
 
 /**
  * The AI, wired.
@@ -270,8 +273,11 @@ export class ModelWarmer implements OnModuleInit, OnModuleDestroy {
       // AclDbService as well as the plain client: builds carry a visibility, so every read of them
       // is bound to whoever is asking (INV-002). The plain client remains for the catalogue reads,
       // which are ingested reference data and carry no ACL.
-      inject: [PrismaClient, AclDbService],
-      useFactory: (db: PrismaClient, acl: AclDbService) => new ShipBuildService(db, acl),
+      // LIVE_SERVICE optional: the publish notice is decoration, and a wiring without the live
+      // module must still save builds. `liveNudgeOf` tolerates null.
+      inject: [PrismaClient, AclDbService, { token: LIVE_SERVICE, optional: true }],
+      useFactory: (db: PrismaClient, acl: AclDbService, live?: LiveService) =>
+        new ShipBuildService(db, acl, liveNudgeOf(live)),
     },
     {
       provide: ShipBuildQueries,

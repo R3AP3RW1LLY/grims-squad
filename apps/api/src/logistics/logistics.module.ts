@@ -16,6 +16,9 @@ import { CommanderPositionService } from './commander-position.service.js';
 import { ColonyRosterService } from './colony-roster.service.js';
 import { PrismaMarketStore, type MarketStore } from './market.store.js';
 import { MARKET_STORE } from './logistics.tokens.js';
+import { LIVE_SERVICE } from '../live/live.tokens.js';
+import { liveNudgeOf } from '../live/live-nudge.js';
+import type { LiveService } from '../live/live.service.js';
 
 /**
  * Logistics & Trade — the commodities market, and the Freight Office built on it.
@@ -47,8 +50,14 @@ import { MARKET_STORE } from './logistics.tokens.js';
       // where ColonyService's are about the build. Folding them together would put two unrelated
       // authorisation stories in one file.
       provide: ColonyRosterService,
-      inject: [PrismaClient, AclDbService],
-      useFactory: (db: PrismaClient, acl: AclDbService) => new ColonyRosterService(db, acl),
+      /*
+       * LIVE_SERVICE is optional in the factory for the same reason producers take the nudge as
+       * an optional parameter: the crew notices are decoration, and a wiring where the live
+       * module were absent must still serve the roster. `liveNudgeOf` tolerates null.
+       */
+      inject: [PrismaClient, AclDbService, { token: LIVE_SERVICE, optional: true }],
+      useFactory: (db: PrismaClient, acl: AclDbService, live?: LiveService) =>
+        new ColonyRosterService(db, acl, liveNudgeOf(live)),
     },
     {
       /*
@@ -105,9 +114,9 @@ import { MARKET_STORE } from './logistics.tokens.js';
       // AclDbService as well: projects carry a visibility, so every read of one is bound to whoever
       // is asking (INV-002). The plain client is for `colony_needs` and the contribution ledger,
       // which carry no ACL column and are only ever reached through a resolved project.
-      inject: [PrismaClient, MARKET_STORE, AclDbService],
-      useFactory: (db: PrismaClient, market: MarketStore, acl: AclDbService) =>
-        new ColonyService(db, market, acl),
+      inject: [PrismaClient, MARKET_STORE, AclDbService, { token: LIVE_SERVICE, optional: true }],
+      useFactory: (db: PrismaClient, market: MarketStore, acl: AclDbService, live?: LiveService) =>
+        new ColonyService(db, market, acl, liveNudgeOf(live)),
     },
   ],
 })

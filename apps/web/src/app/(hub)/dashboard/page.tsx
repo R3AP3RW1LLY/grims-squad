@@ -7,7 +7,9 @@ import {
   getMyDevices,
   getMyCommander,
   getMyBadges,
+  getSquadronActivity,
 } from '../../../lib/api';
+import { kindIcon, notificationAge } from '../../../components/notifications-format';
 import { PilotRanks, Location, Fleet, Balance } from './commander-panels';
 import { BadgeCase } from './badge-case';
 import { Avatar } from '../../../components/account-menu';
@@ -52,7 +54,7 @@ export const dynamic = 'force-dynamic';
  */
 
 export default async function DashboardPage() {
-  const [status, inara, stats, me, devices, commander, badges] = await Promise.all([
+  const [status, inara, stats, me, devices, commander, badges, activity] = await Promise.all([
     getAccountStatus(),
     getInaraStatus(),
     getSquadronStats(),
@@ -60,6 +62,7 @@ export default async function DashboardPage() {
     getMyDevices(),
     getMyCommander(),
     getMyBadges(),
+    getSquadronActivity(),
   ]);
 
   const verified = inara?.cmdrName ?? null;
@@ -114,7 +117,13 @@ export default async function DashboardPage() {
         Squadron owner, 2026-07-29: verifications must show instantly across the
         app. This is the page they land on.
       */}
-      <LiveRefresh types={['telemetry', 'verification']} />
+      {/*
+        `notification` joined the list on 2026-08-04, when SQUADRON ACTIVITY below started
+        rendering the live feed. Not a contradiction of the "only what this page shows" rule
+        above — it is that rule: the feed is now ON the page, and each event is a row this page
+        displays, coalesced by LiveRefresh so a burst still costs one refresh.
+      */}
+      <LiveRefresh types={['telemetry', 'verification', 'notification']} />
 
       {/*
         ★ A GREETING, NOT A CONTROL PANEL ★
@@ -240,6 +249,14 @@ export default async function DashboardPage() {
         */}
         <BadgeCase badges={badges?.badges ?? null} />
 
+        {/*
+          ★ RENAMED IN THE 2026-08-04 NOTIFICATIONS PASS — A PAIR, ON PURPOSE ★
+
+          YOUR ACTIVITY above SQUADRON ACTIVITY: the same word carried by both headings is what
+          says these two sections answer the same question about two different subjects — you,
+          then everybody. (Section renders its title uppercase, so the sentence-case strings here
+          arrive on screen exactly as the owner spelled them.)
+        */}
         <Section
           title="Your activity"
           description="The monthly rank check looks for two things: taking part in Discord, and an Elite session. The first is counted for everybody automatically; the second comes from the companion app."
@@ -267,9 +284,64 @@ export default async function DashboardPage() {
         </Section>
 
         <Section
-          title="The squadron"
-          description="How the rest of us are doing."
+          title="Squadron activity"
+          description="What has just happened across the squadron, and how the rest of us are doing."
         >
+          {/*
+            ★ THE FEED LEADS, THE FIGURES FOLLOW ★
+
+            This section was 'The squadron' and held only the four tiles. The feed goes ABOVE
+            them because it is the part that changes between two visits — the member counts move
+            weekly, the feed moves nightly — and the tiles keep their place below rather than
+            leaving: the feed says what happened, the tiles say what we are, and the section
+            needs both to earn its heading.
+
+            Ten entries, from the same endpoint the bell's Squadron tab reads, so the two can
+            never disagree about what counts as squadron news. Reading it here does NOT advance
+            the seen marker — glancing at a dashboard is not opening the feed, and a member who
+            saw three rows in passing has not read them.
+          */}
+          {activity === null ? (
+            <p className="mb-8 max-w-[68ch] text-sm leading-relaxed text-[var(--color-text-secondary)]">
+              The squadron feed could not be loaded just now. It returns on its own — this page
+              refreshes as events arrive.
+            </p>
+          ) : activity.items.length === 0 ? (
+            <p className="mb-8 max-w-[68ch] text-sm leading-relaxed text-[var(--color-text-secondary)]">
+              The squadron feed is empty for now. What members post, build and claim appears here
+              as it happens.
+            </p>
+          ) : (
+            <ul className="m-0 mb-8 list-none divide-y divide-[var(--color-border-subtle)] overflow-hidden rounded-lg border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel)] p-0">
+              {activity.items.slice(0, 10).map((item) => (
+                <li key={item.id} className="flex items-start gap-3 px-4 py-3">
+                  <span aria-hidden="true" className="shrink-0 text-base leading-5">
+                    {kindIcon(item.kind)}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    {item.link === null ? (
+                      <span className="block text-sm leading-5 text-[var(--color-text-primary)]">
+                        {item.title}
+                      </span>
+                    ) : (
+                      <a
+                        href={item.link}
+                        className="block text-sm leading-5 text-[var(--color-text-primary)] transition-colors hover:text-[var(--color-brand-orange-bright)]"
+                      >
+                        {item.title}
+                      </a>
+                    )}
+                    <p className="m-0 mt-1 font-mono text-[10px] tracking-wide text-[var(--color-text-dim)]">
+                      {item.actor === null
+                        ? notificationAge(item.createdAt)
+                        : `${item.actor.displayName} · ${notificationAge(item.createdAt)}`}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+
           <StatGrid>
             <StatTile
             label="Squadron"
@@ -317,9 +389,11 @@ export default async function DashboardPage() {
             {/*
               Leaderboards left this list on 2026-08-04 — the three boards are live under
               /leaderboards, and a page cannot both link a feature and call it "soon".
+              Notifications followed the same day: the bell is live in the top bar and the
+              squadron feed renders above, so calling it "soon" here would be the page
+              contradicting itself.
             */}
             {[
-              ['Notifications', 'Replies, promotions and operations you signed up for.'],
               ['Operations', 'Wings forming up, who has signed on, and what they still need.'],
               ['The faction', 'Our systems, their state, and this week’s orders.'],
             ].map(([title, blurb]) => (

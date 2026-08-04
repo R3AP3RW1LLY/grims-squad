@@ -2,6 +2,7 @@ import {
   identifyBuildTypes,
   PrismaColonyStore,
   syncColonyProjects,
+  type LiveNudge,
   type PrismaClient,
   type TrackedProject,
 } from '@grims/db';
@@ -35,7 +36,16 @@ import {
  * would be able to say which was right.
  */
 export class ColonyLiveService {
-  constructor(private readonly db: PrismaClient) {}
+  constructor(
+    private readonly db: PrismaClient,
+    /**
+     * How a completion detected on THIS pass nudges live bell badges. The sync announces a
+     * finished build from its markComplete transition (see completeColonyProject), and this
+     * process reaches browsers through its own SSE service rather than the worker's Redis
+     * bridge — so the caller supplies the translation. Optional: rows land without it.
+     */
+    private readonly nudge?: LiveNudge,
+  ) {}
 
   /**
    * Applies everything known about one construction site.
@@ -46,7 +56,7 @@ export class ColonyLiveService {
    */
   async applyAt(marketId: bigint): Promise<void> {
     try {
-      await syncColonyProjects(new OneSiteStore(this.db, marketId));
+      await syncColonyProjects(new OneSiteStore(this.db, marketId, this.nudge));
 
       /*
        * ★ AND WORK OUT WHAT IT IS ★
@@ -74,8 +84,10 @@ class OneSiteStore extends PrismaColonyStore {
   constructor(
     db: PrismaClient,
     private readonly marketId: bigint,
+    nudge?: LiveNudge,
   ) {
-    super(db);
+    // The nudge rides to the parent, whose markComplete is where a completion announces itself.
+    super(db, nudge);
   }
 
   override async tracked(): Promise<readonly TrackedProject[]> {

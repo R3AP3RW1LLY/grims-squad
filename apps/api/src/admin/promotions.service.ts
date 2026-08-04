@@ -1,6 +1,12 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { PrismaClient, PrismaPromotionStore, DiscordRankApplier } from '@grims/db';
+import {
+  DiscordRankApplier,
+  notifyMembers,
+  PrismaClient,
+  PrismaPromotionStore,
+  type LiveNudge,
+} from '@grims/db';
 import { DiscordAdapter } from '@grims/ed-clients';
 import {
   AppError,
@@ -47,7 +53,40 @@ export interface PromotionStanding {
 export class PromotionsService {
   #rungs: LadderRung[] | null = null;
 
-  constructor(private readonly db: PrismaClient) {}
+  constructor(
+    private readonly db: PrismaClient,
+    /**
+     * How a promotion notice nudges live bell badges. Optional so every existing test constructs
+     * the service exactly as before; rows still land without it (notify.ts).
+     */
+    private readonly nudge?: LiveNudge,
+  ) {}
+
+  /**
+   * Tells a member their rank moved.
+   *
+   * ★ THE MEMBER, AND ONLY THE MEMBER ★
+   *
+   * A promotion is already announced to the squadron through the monthly report and Discord
+   * roles; the personal row is the one place the member themselves is told directly, on the
+   * platform, with a timestamp they can find again. The copy names no actor — an earned
+   * promotion has none, and an override is the officer's entry in the audit log, not a thing to
+   * hang over the member's congratulations. `notifyMembers` swallows failure: the rank is
+   * already granted, and a bell must never un-grant it.
+   */
+  async #announcePromotion(userId: string, from: string, to: string): Promise<void> {
+    await notifyMembers(
+      this.db,
+      [userId],
+      {
+        kind: 'promotion.rank',
+        title: `Promoted to ${to}`,
+        body: `Your rank has advanced from ${from} to ${to}. Congratulations, Commander.`,
+        link: '/roster',
+      },
+      this.nudge,
+    );
+  }
 
   /**
    * The ladder, read once.
@@ -171,7 +210,23 @@ export class PromotionsService {
       );
     }
 
-    return this.#engine(month).run({ dryRun: false });
+    const report = await this.#engine(month).run({ dryRun: false });
+
+    /*
+     * ★ WHO WAS ACTUALLY PROMOTED: THE ELIGIBLE LIST MINUS THE REFUSALS ★
+     *
+     * The engine (frozen in @grims/shared) applies `wouldPromote` one by one and moves anyone
+     * Discord refuses into `failed` — so on a live run the difference between the two lists is
+     * exactly the set whose rank genuinely changed. A member in `failed` was NOT promoted, and
+     * congratulating them would be the bell telling a lie the next reconciliation exposes.
+     */
+    const refused = new Set(report.failed.map((f) => f.userId));
+    for (const p of report.wouldPromote) {
+      if (refused.has(p.userId)) continue;
+      await this.#announcePromotion(p.userId, p.from, p.to);
+    }
+
+    return report;
   }
 
   /**
@@ -327,6 +382,10 @@ export class PromotionsService {
         monthsRequired: standing.monthsRequired,
       },
     });
+
+    // The rank is applied and audited; the member hears about it the same way an earned
+    // promotion tells them. The copy deliberately reads identically — see #announcePromotion.
+    await this.#announcePromotion(userId, standing.currentRank, standing.nextRank);
 
     return { from: standing.currentRank, to: standing.nextRank };
   }

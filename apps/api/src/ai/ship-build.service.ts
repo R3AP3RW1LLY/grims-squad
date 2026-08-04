@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { AclDbService } from '../authz/acl-db.service.js';
-import { Prisma, type PrismaClient } from '@grims/db';
+import { notifySquadron, Prisma, type LiveNudge, type PrismaClient } from '@grims/db';
 import {
   AppError,
   ErrorCode,
@@ -77,7 +77,43 @@ export class ShipBuildService {
   constructor(
     private readonly db: PrismaClient,
     private readonly acl: AclDbService,
+    /**
+     * How a build-published notice nudges live bell badges. Optional so the telemetry module's
+     * loadout-import construction, and every existing test, stays exactly as it was; rows still
+     * land without it (notify.ts).
+     */
+    private readonly nudge?: LiveNudge,
   ) {}
+
+  /**
+   * Tells the squadron a build became visible to it.
+   *
+   * ★ FROM THE SERVICE, NOT A CONTROLLER — TWO DOORS, ONE BELL ★
+   *
+   * The website's outfitter and the companion's shipyard door both save through this service, so
+   * a notice here covers both without either controller remembering. Journal loadout imports do
+   * NOT pass through `save`/`setVisibility` and therefore never announce — automatic refits are
+   * volume, not news. `notifySquadron` swallows failure: the build is saved by now.
+   */
+  async #announcePublished(
+    build: { shipName: string; buildName: string | null; shareToken: string | null },
+    authorId: string,
+  ): Promise<void> {
+    await notifySquadron(
+      this.db,
+      {
+        kind: 'shipyard.build-published',
+        title:
+          build.buildName === null
+            ? `${build.shipName} build published`
+            : `${build.shipName} build published: ${build.buildName}`,
+        body: 'A fitted ship is now on the squadron shipyard for anybody to open and fly.',
+        ...(build.shareToken === null ? {} : { link: `/shipyard/build/${build.shareToken}` }),
+        actorUserId: authorId,
+      },
+      this.nudge,
+    );
+  }
 
   /**
    * The ship and module tables, rebuilt when they go stale.
@@ -410,6 +446,14 @@ export class ShipBuildService {
       select: { id: true, shareToken: true, visibility: true },
     });
 
+    // Saved shared is published: the build was visible to the squadron from its first moment.
+    if (input.visibility !== 'private') {
+      await this.#announcePublished(
+        { shipName: input.build.shipName, buildName: input.buildName, shareToken: row.shareToken },
+        ownerId,
+      );
+    }
+
     return {
       id: row.id,
       shareToken: row.shareToken,
@@ -445,7 +489,9 @@ export class ShipBuildService {
 
     const row = await db.shipBuild.findFirst({
       where: { id },
-      select: { submittedById: true, shareToken: true },
+      // The pre-change state rides along: the publish notice below fires on the private→shared
+      // TRANSITION, and only what was stored before the update can witness one.
+      select: { submittedById: true, shareToken: true, visibility: true, shipName: true, buildName: true },
     });
 
     if (row === null) throw new AppError(ErrorCode.RESOURCE_NOT_VISIBLE, 'No such build.');
@@ -466,6 +512,20 @@ export class ShipBuildService {
       data: { visibility, shareToken },
       select: { shareToken: true, visibility: true },
     });
+
+    /*
+     * ★ ANNOUNCED ONLY ON THE PRIVATE→SHARED TRANSITION ★
+     *
+     * A build leaving the drawer is publication; squadron→public widens an audience that was
+     * already told, and re-sharing after an unshare would re-announce a build the feed already
+     * carries. The transition test — was private, now is not — is the narrowest true statement.
+     */
+    if (row.visibility === 'private' && visibility !== 'private') {
+      await this.#announcePublished(
+        { shipName: row.shipName, buildName: row.buildName, shareToken: updated.shareToken },
+        actorId,
+      );
+    }
 
     return {
       shareToken: updated.visibility === 'private' ? null : updated.shareToken,

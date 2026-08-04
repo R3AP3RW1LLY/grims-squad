@@ -1,5 +1,5 @@
 import { AppError, ErrorCode } from '@grims/shared';
-import type { PrismaClient } from '@grims/db';
+import { notifyMembers, notifySquadron, type LiveNudge, type PrismaClient } from '@grims/db';
 import type { TokenCipher } from '@grims/shared/server';
 import type { InaraLinkStore, LinkRecord } from './inara-link.service.js';
 
@@ -14,10 +14,13 @@ import type { InaraLinkStore, LinkRecord } from './inara-link.service.js';
 export class PrismaInaraLinkStore implements InaraLinkStore {
   readonly #db: PrismaClient;
   readonly #cipher: TokenCipher;
+  readonly #nudge: LiveNudge | undefined;
 
-  constructor(db: PrismaClient, cipher: TokenCipher) {
+  constructor(db: PrismaClient, cipher: TokenCipher, nudge?: LiveNudge) {
     this.#db = db;
     this.#cipher = cipher;
+    // How the confirmation notices below nudge live bell badges. Optional: rows land without it.
+    this.#nudge = nudge;
   }
 
   #context(userId: string): string {
@@ -111,6 +114,22 @@ export class PrismaInaraLinkStore implements InaraLinkStore {
     matched: boolean,
     at: Date,
   ): Promise<void> {
+    /*
+     * ★ THE TRANSITION IS READ BEFORE THE WRITE, BECAUSE THE WRITE ERASES IT ★
+     *
+     * "Became fully verified" is `matched` landing on a row whose squadronVerifiedAt was still
+     * null — and every re-check after that stamps the column again, so only the state BEFORE
+     * this update can tell a confirmation from a routine re-confirmation. This is the API-side
+     * confirm path (link, refresh, and the claim's immediate re-check all come through here);
+     * the worker's sweep detects the same transition through its own awaiting list.
+     */
+    const before = matched
+      ? await this.#db.cmdrVerification.findFirst({
+          where: { userId, isVerified: true, revokedAt: null },
+          select: { squadronVerifiedAt: true },
+        })
+      : null;
+
     await this.#db.cmdrVerification.updateMany({
       where: { userId, isVerified: true, revokedAt: null },
       data: {
@@ -119,6 +138,10 @@ export class PrismaInaraLinkStore implements InaraLinkStore {
         squadronCheckedAt: at,
       },
     });
+
+    if (matched && before !== null && before.squadronVerifiedAt === null) {
+      await announceVerification(this.#db, userId, this.#nudge);
+    }
   }
 
   /**
@@ -215,5 +238,58 @@ export class PrismaInaraLinkStore implements InaraLinkStore {
         after: entry['after'] as never,
       },
     });
+  }
+}
+
+/**
+ * The two notices a completed verification produces, from the one transition.
+ *
+ * ★ MIRRORED IN apps/worker/src/inara-sync.ts — KEEP THE COPY IDENTICAL ★
+ *
+ * The worker's squadron sweep confirms members this process never sees (they closed the tab, as
+ * the page told them they could), and the worker cannot import from the API. Two small copies
+ * with matching wording were chosen over a shared home, because the only shared package these
+ * processes both reach is @grims/db and this is not database code. If you change a word here,
+ * change it there.
+ *
+ * Never throws: the member IS verified by the time this runs, whatever the bell manages.
+ */
+export async function announceVerification(
+  db: PrismaClient,
+  userId: string,
+  nudge?: LiveNudge,
+): Promise<void> {
+  try {
+    await notifyMembers(
+      db,
+      [userId],
+      {
+        kind: 'verification.confirmed',
+        title: 'Your commander is fully verified',
+        body: 'Inara confirms your commander and your squadron membership. Every member area is open to you.',
+        link: '/settings/commander',
+      },
+      nudge,
+    );
+
+    const member = await db.user.findUnique({
+      where: { id: userId },
+      select: { displayName: true, handle: true },
+    });
+    const name = member?.displayName ?? member?.handle ?? 'A new member';
+
+    await notifySquadron(
+      db,
+      {
+        kind: 'member.verified',
+        title: `${name} is verified — welcome them aboard`,
+        body: 'Their commander and squadron membership are confirmed.',
+        link: '/roster',
+        actorUserId: userId,
+      },
+      nudge,
+    );
+  } catch {
+    // See the header: the verification stands whatever the bell manages.
   }
 }

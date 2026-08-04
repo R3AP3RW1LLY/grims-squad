@@ -30,6 +30,9 @@
  * converge on the same answer.
  */
 
+import type { PrismaClient } from './index.js';
+import { notifyMembers, notifySquadron, type LiveNudge } from './notify.js';
+
 /** A construction depot as the member's journal reported it. */
 export interface DepotReading {
   readonly marketId: bigint;
@@ -73,7 +76,16 @@ export interface ColonyStore {
   latestDepot(marketId: bigint): Promise<DepotReading | null>;
   /** Replaces a project's needs wholesale, in one transaction. */
   replaceNeeds(projectId: string, needs: readonly NeedRow[], observedAt: Date): Promise<void>;
-  markComplete(projectId: string, at: Date): Promise<void>;
+  /**
+   * Closes a project, returning whether THIS call closed it.
+   *
+   * A boolean rather than void because the completion is announced (the squadron feed, and the
+   * personal rows for everybody on the build) and the sync runs from four places — the worker
+   * daemon, the worker cron entry, the API's per-upload pass, and the manual close route. The
+   * transition happening exactly once is what stops four processes saying the same thing four
+   * times, so the store has to say whether the row actually moved.
+   */
+  markComplete(projectId: string, at: Date): Promise<boolean>;
   /** Every delivery reported for a site. The ledger dedupes by event key. */
   contributionsFor(marketId: bigint): Promise<readonly ContributionReading[]>;
   /** Records one delivery. Returns false when the ledger already held it. */
@@ -135,10 +147,29 @@ export async function syncColonyProjects(store: ColonyStore): Promise<ColonyRepo
          * A finished build whose card still says "8,940 of 21,620" is how a board stops being
          * trusted. `ConstructionFailed` closes it too: the site is equally gone, and leaving it
          * open would have members hauling to somewhere that no longer exists.
+         *
+         * ★ AND CLOSED AT 100%, EVEN WHEN THE FLAG NEVER ARRIVES ★
+         *
+         * `ConstructionComplete` is only observed if somebody docks at the depot AFTER the last
+         * tonne lands — and the member who delivers the last tonne is usually the last visitor.
+         * So a build that reads "every resource provided" is finished by the game's own
+         * arithmetic, and waiting for a flag nobody will ever fetch leaves it live for ever.
+         *
+         * ★ THE ROW-COUNT GUARD IS MANDATORY ★
+         *
+         * `every()` over an EMPTY array is vacuously true, and an empty resources list means "no
+         * needs known", not "all needs met" — a depot reading from before the site listed its
+         * demands would otherwise close a project nobody has hauled a tonne to. The two states
+         * are indistinguishable without the length check, so the length check is the rule.
          */
-        if ((depot.complete || depot.failed) && project.completedAt === null) {
-          await store.markComplete(project.id, depot.observedAt);
-          completed += 1;
+        const everyLineDelivered =
+          depot.resources.length > 0 &&
+          depot.resources.every((r) => r.provided >= r.required);
+
+        if ((depot.complete || depot.failed || everyLineDelivered) && project.completedAt === null) {
+          // Counted only when the store says the row moved: a second process racing this one
+          // closed it first, and its run is the one that owns the announcement too.
+          if (await store.markComplete(project.id, depot.observedAt)) completed += 1;
         }
       }
 
@@ -173,6 +204,98 @@ export async function syncColonyProjects(store: ColonyStore): Promise<ColonyRepo
     awaitingFirstVisit,
     failed,
   };
+}
+
+/**
+ * Closes a project — the ONE transition point, and the one place completion is announced.
+ *
+ * ★ WHY THE ANNOUNCEMENT LIVES ON THE TRANSITION AND NOT AT ANY CALLER ★
+ *
+ * Four paths can end a build: the worker daemon's five-minute pass, the worker's cron entry, the
+ * API's apply-on-upload pass, and an officer or poster closing it by hand. Each of them reaches
+ * this function, and the guarded `updateMany` (completedAt still null) means exactly one of them
+ * observes the transition — so the squadron hears about a finished build exactly once, however
+ * many processes noticed it in the same minute.
+ *
+ * Returns whether THIS call closed it. Everything after the guard is decoration on a deed that
+ * has already succeeded, so a failure to read the roster or write a bell row never propagates —
+ * the project is closed either way, and the return value stays true.
+ */
+export async function completeColonyProject(
+  db: PrismaClient,
+  projectId: string,
+  at: Date,
+  nudge?: LiveNudge,
+): Promise<boolean> {
+  const closed = await db.colonyProject.updateMany({
+    // Only a live project can transition. A second caller finds zero rows and says nothing.
+    where: { id: projectId, completedAt: null },
+    // isPriority cleared with it: a finished build must not keep pointing the squadron at itself.
+    data: { completedAt: at, isPriority: false },
+  });
+  if (closed.count === 0) return false;
+
+  try {
+    const project = await db.colonyProject.findUnique({
+      where: { id: projectId },
+      select: {
+        title: true,
+        systemName: true,
+        stationName: true,
+        visibility: true,
+        postedById: true,
+      },
+    });
+    if (project === null) return true;
+
+    const where = project.stationName === null || project.stationName === ''
+      ? project.systemName
+      : `${project.stationName}, ${project.systemName}`;
+
+    /*
+     * Everybody with a stake in the build: whoever posted it, everybody on its roster, and
+     * everybody whose "current build" pin points at it. `notifyMembers` deduplicates, so a
+     * poster who also crewed and pinned it hears once.
+     */
+    const [crew, pinned] = await Promise.all([
+      db.colonyMember.findMany({ where: { projectId }, select: { userId: true } }),
+      db.currentBuild.findMany({ where: { projectId }, select: { userId: true } }),
+    ]);
+
+    await notifyMembers(
+      db,
+      [project.postedById, ...crew.map((m) => m.userId), ...pinned.map((p) => p.userId)],
+      {
+        kind: 'colony.current-build-events',
+        title: `${project.title} is finished`,
+        body: `The build at ${where} has closed and needs no more deliveries.`,
+        link: `/colonisation/${projectId}`,
+      },
+      nudge,
+    );
+
+    /*
+     * The squadron feed is visible to every signed-in member, so a PRIVATE personal project's
+     * title must not appear in it. The people on the build were told above; the feed only
+     * carries what the feed's readers were already allowed to see.
+     */
+    if (project.visibility !== 'private') {
+      await notifySquadron(
+        db,
+        {
+          kind: 'colony.project-completed',
+          title: `${project.title} — colonisation project complete`,
+          body: `The build at ${where} has closed and needs no more deliveries.`,
+          link: `/colonisation/${projectId}`,
+        },
+        nudge,
+      );
+    }
+  } catch {
+    // The close already happened; a bell must never un-happen it.
+  }
+
+  return true;
 }
 
 /**

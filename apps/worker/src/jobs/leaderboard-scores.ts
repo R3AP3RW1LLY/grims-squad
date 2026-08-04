@@ -1,8 +1,9 @@
-import type { PrismaClient } from '@grims/db';
+import { notifyMembers, notifySquadron, type LiveNudge, type PrismaClient } from '@grims/db';
 import {
   COLONY_LINE_CLOSER_BONUS,
   COLONY_PRIORITY_MULTIPLIER,
   TRADE_CREDITS_PER_POINT,
+  badgeDisplay,
   tiersEarned,
   type LeaderboardKey,
 } from '@grims/shared';
@@ -66,9 +67,19 @@ async function saveCursor(db: PrismaClient, key: string, value: bigint): Promise
 
 // ─────────────────────────────────────────────────────────────────── colony
 
-async function scoreColony(db: PrismaClient): Promise<number> {
+/** A commodity line somebody just closed, carried out of the scoring loop for the notices. */
+interface LineClosure {
+  readonly projectId: string;
+  readonly projectTitle: string;
+  readonly commodity: string;
+  /** Who hauled the closing tonnes — excluded from the notice; it is their own deed. */
+  readonly closedBy: string;
+}
+
+async function scoreColony(db: PrismaClient, nudge?: LiveNudge): Promise<number> {
   let written = 0;
   let cursor = await cursorOf(db, CURSORS.colony);
+  const closures: LineClosure[] = [];
 
   for (;;) {
     const rows = await db.$queryRawUnsafe<
@@ -76,6 +87,7 @@ async function scoreColony(db: PrismaClient): Promise<number> {
         id: bigint;
         user_id: string;
         project_id: string;
+        title: string;
         commodity: string;
         amount: number;
         delivered_at: Date;
@@ -84,7 +96,7 @@ async function scoreColony(db: PrismaClient): Promise<number> {
         latest_id: bigint | null;
       }>
     >(
-      `SELECT c.id, c.user_id, c.project_id, c.commodity, c.amount, c.delivered_at,
+      `SELECT c.id, c.user_id, c.project_id, p.title, c.commodity, c.amount, c.delivered_at,
               p.is_priority,
               n.remaining,
               latest.latest_id
@@ -115,7 +127,7 @@ async function scoreColony(db: PrismaClient): Promise<number> {
         r.amount * (priority ? COLONY_PRIORITY_MULTIPLIER : 1) +
         (lineCloser ? COLONY_LINE_CLOSER_BONUS : 0);
 
-      written += await db.$executeRawUnsafe(
+      const wrote = await db.$executeRawUnsafe(
         `INSERT INTO leaderboard_events (user_id, board, points, source_key, meta, occurred_at)
          VALUES ($1::uuid, 'colony', $2, $3, $4::jsonb, $5)
          ON CONFLICT (board, source_key) DO NOTHING`,
@@ -131,6 +143,23 @@ async function scoreColony(db: PrismaClient): Promise<number> {
         }),
         r.delivered_at,
       );
+      written += wrote;
+
+      /*
+       * ★ ONLY WHEN THE LEDGER ROW IS NEW ★
+       *
+       * The insert's ON CONFLICT is the scorer's replay armour, and it doubles as the notice's:
+       * a rewound cursor re-reads the same contribution, writes nothing, and therefore says
+       * nothing. Without this gate, every replayed batch would re-announce old closures.
+       */
+      if (wrote > 0 && lineCloser) {
+        closures.push({
+          projectId: r.project_id,
+          projectTitle: r.title,
+          commodity: r.commodity,
+          closedBy: r.user_id,
+        });
+      }
       cursor = r.id;
     }
 
@@ -138,7 +167,52 @@ async function scoreColony(db: PrismaClient): Promise<number> {
     if (rows.length < BATCH) break;
   }
 
+  await announceLineClosures(db, closures, nudge);
   return written;
+}
+
+/**
+ * Tells everybody whose CURRENT build a commodity just closed on.
+ *
+ * ★ CURRENT-BUILD HOLDERS, NOT THE WHOLE ROSTER ★
+ *
+ * "Current" means "I am hauling to this right now" — the one pin the overlay shows — so a line
+ * closing is exactly the news that changes what that member loads next. The roster is people who
+ * signed up for the build at some point; telling all of them about every line would be volume
+ * that trains people to ignore the bell. The member who closed the line is skipped: it is their
+ * own delivery, and the forum's rule (never notify somebody about their own act) holds here too.
+ *
+ * Never throws — the points are banked by the time this runs, and both the roster read and the
+ * notify write are decoration on that.
+ */
+async function announceLineClosures(
+  db: PrismaClient,
+  closures: readonly LineClosure[],
+  nudge?: LiveNudge,
+): Promise<void> {
+  for (const closure of closures) {
+    try {
+      const pinned = await db.currentBuild.findMany({
+        where: { projectId: closure.projectId },
+        select: { userId: true },
+      });
+      const holders = pinned.map((p) => p.userId).filter((id) => id !== closure.closedBy);
+
+      await notifyMembers(
+        db,
+        holders,
+        {
+          kind: 'colony.current-build-events',
+          title: `${closure.commodity} is covered on ${closure.projectTitle}`,
+          body: 'The last tonnes of it have been delivered. Check the needs list before your next load.',
+          link: `/colonisation/${closure.projectId}`,
+        },
+        nudge,
+      );
+    } catch {
+      // One unreadable roster must not cost the remaining closures their notices.
+    }
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────── trade
@@ -231,8 +305,15 @@ async function scoreTrade(db: PrismaClient): Promise<number> {
  * (user, badge), and nothing here ever revokes — a badge earned under an old rule is history,
  * not an error.
  */
-async function sweepBadges(db: PrismaClient): Promise<number> {
+async function sweepBadges(db: PrismaClient, nudge?: LiveNudge): Promise<number> {
   let awarded = 0;
+  /*
+   * The pairs THIS sweep newly wrote, threaded out for the notices below. The insert's
+   * ON CONFLICT is what makes the sweep idempotent, and its affected-row count is therefore the
+   * one honest "this is new" signal — a re-run re-derives every badge and inserts nothing, so it
+   * announces nothing.
+   */
+  const fresh: Array<{ userId: string; badgeKey: string }> = [];
 
   /*
    * Awards land in member_badges — the FORUM reputation system's table, on purpose. One badge
@@ -240,12 +321,14 @@ async function sweepBadges(db: PrismaClient): Promise<number> {
    * collide on a key, and neither sweep touches the other's rows (both are append-only).
    */
   const award = async (userId: string, badgeKey: string): Promise<void> => {
-    awarded += await db.$executeRawUnsafe(
+    const wrote = await db.$executeRawUnsafe(
       `INSERT INTO member_badges (user_id, badge_key) VALUES ($1::uuid, $2)
        ON CONFLICT (user_id, badge_key) DO NOTHING`,
       userId,
       badgeKey,
     );
+    awarded += wrote;
+    if (wrote > 0) fresh.push({ userId, badgeKey });
   };
 
   // ---- lifetime points per member per board, from each board's own ledger ----
@@ -321,13 +404,97 @@ async function sweepBadges(db: PrismaClient): Promise<number> {
   );
   for (const c of champions) await award(c.user_id, c.badge);
 
+  await announceBadges(db, fresh, nudge);
   return awarded;
 }
 
-export async function scoreLeaderboards(db: PrismaClient): Promise<ScoreReport> {
-  const colonyEvents = await scoreColony(db);
+/**
+ * The notices a badge sweep produces, from the pairs it NEWLY wrote.
+ *
+ * Three shapes from one list, per the approved catalog:
+ *   badge.earned                 personal — every fresh badge, whatever it is. Tier climbs are
+ *                                tier BADGES, so "leaderboard.tier-climbed" is this row and is
+ *                                deliberately not a second one.
+ *   leaderboards.season-champion squadron — a `-season-champion` key landing is the board
+ *                                crowning a month's winner, and the squadron hears it.
+ *   leaderboards.platinum        squadron — a `-platinum` key is a board's top rank
+ *                                ("<member> is now a Trade Baron"), rare enough to be news.
+ *
+ * Never throws: the badges are in member_badges by the time this runs, and a sweep that awarded
+ * eleven badges but could not reach the users table has still done its job.
+ */
+async function announceBadges(
+  db: PrismaClient,
+  fresh: ReadonlyArray<{ userId: string; badgeKey: string }>,
+  nudge?: LiveNudge,
+): Promise<void> {
+  if (fresh.length === 0) return;
+
+  try {
+    // One read for every name the notices below need, not one per badge.
+    const users = await db.user.findMany({
+      where: { id: { in: [...new Set(fresh.map((f) => f.userId))] } },
+      select: { id: true, displayName: true, handle: true },
+    });
+    const nameOf = new Map(users.map((u) => [u.id, u.displayName ?? u.handle]));
+
+    for (const { userId, badgeKey } of fresh) {
+      // A key the catalogue no longer carries cannot be described, so it is not announced.
+      // The award itself stands either way — see the sweep's append-only rule.
+      const display = badgeDisplay(badgeKey);
+      if (display === null) continue;
+
+      await notifyMembers(
+        db,
+        [userId],
+        {
+          kind: 'badge.earned',
+          title: `Badge earned: ${display.name}`,
+          body: `${display.icon} ${display.description}`,
+          link: '/leaderboards',
+        },
+        nudge,
+      );
+
+      const memberName = nameOf.get(userId) ?? 'A member';
+
+      if (badgeKey.endsWith('-season-champion')) {
+        await notifySquadron(
+          db,
+          {
+            kind: 'leaderboards.season-champion',
+            title: `${memberName} — ${display.name}`,
+            body: display.description,
+            link: '/leaderboards',
+            actorUserId: userId,
+          },
+          nudge,
+        );
+      }
+
+      if (badgeKey.endsWith('-platinum')) {
+        await notifySquadron(
+          db,
+          {
+            kind: 'leaderboards.platinum',
+            title: `${memberName} is now a ${display.name}`,
+            body: display.description,
+            link: '/leaderboards',
+            actorUserId: userId,
+          },
+          nudge,
+        );
+      }
+    }
+  } catch {
+    // See the header: the awards already landed, and a bell must never un-land them.
+  }
+}
+
+export async function scoreLeaderboards(db: PrismaClient, nudge?: LiveNudge): Promise<ScoreReport> {
+  const colonyEvents = await scoreColony(db, nudge);
   const tradeEvents = await scoreTrade(db);
-  const badgesAwarded = await sweepBadges(db);
+  const badgesAwarded = await sweepBadges(db, nudge);
   return { colonyEvents, tradeEvents, badgesAwarded };
 }
 

@@ -1,6 +1,7 @@
 import { resolve, join, dirname } from 'node:path';
 import { existsSync } from 'node:fs';
-import { PrismaClient } from '@grims/db';
+import { notifyMembers, PrismaClient } from '@grims/db';
+import { notificationNudge } from './lib/live-notify.js';
 import { DiscordAdapter } from '@grims/ed-clients';
 import { promotionsPermitted, EARLIEST_PROMOTION_AT } from '@grims/shared';
 import { PromotionEngine, formatReport } from './jobs/promotion-run.js';
@@ -117,6 +118,36 @@ async function main(): Promise<number> {
     // is the default, and going live takes a deliberate act.
     const report = await engine.run({ dryRun: !live });
     const text = formatReport(report);
+
+    /*
+     * ★ promotion.rank — THE MEMBERS THEMSELVES, ON A LIVE RUN ONLY ★
+     *
+     * A dry run promoted nobody and must say nothing — the same reasoning as the --post gate
+     * below, one layer more personal. Who was ACTUALLY promoted is the eligible list minus the
+     * refusals: the engine moves anyone Discord refused into `failed`, and their rank did not
+     * change. Same wording as the admin console's path (promotions.service.ts) on purpose — a
+     * member must not be able to tell which door promoted them from the notice.
+     *
+     * `notifyMembers` swallows its own failures; the promotions are written by now, and a bell
+     * must never turn a completed run into a non-zero exit.
+     */
+    if (live) {
+      const refused = new Set(report.failed.map((f) => f.userId));
+      for (const p of report.wouldPromote) {
+        if (refused.has(p.userId)) continue;
+        await notifyMembers(
+          prisma,
+          [p.userId],
+          {
+            kind: 'promotion.rank',
+            title: `Promoted to ${p.to}`,
+            body: `Your rank has advanced from ${p.from} to ${p.to}. Congratulations, Commander.`,
+            link: '/roster',
+          },
+          notificationNudge,
+        );
+      }
+    }
 
     console.log(text);
     console.log(`\nSkipped (${report.skipped.length}):`);

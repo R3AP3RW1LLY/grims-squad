@@ -1,4 +1,4 @@
-import type { PrismaClient } from '@grims/db';
+import { notifyMembers, type LiveNudge, type PrismaClient } from '@grims/db';
 import { AppError, ErrorCode, Permission } from '@grims/shared';
 import type { AclDbService } from '../authz/acl-db.service.js';
 
@@ -68,6 +68,11 @@ export class ColonyRosterService {
   constructor(
     private readonly db: PrismaClient,
     private readonly acl: AclDbService,
+    /**
+     * How the crew notices below nudge live bell badges. Optional so every existing test
+     * constructs the service exactly as before; rows still land without it (notify.ts).
+     */
+    private readonly nudge?: LiveNudge,
   ) {}
 
   /**
@@ -80,11 +85,13 @@ export class ColonyRosterService {
   async #project(
     projectId: string,
     userId: string,
-  ): Promise<{ owner: string; postedById: string; completedAt: Date | null }> {
+  ): Promise<{ owner: string; postedById: string; completedAt: Date | null; title: string }> {
     const db = await this.acl.forCaller(userId);
     const found = await db.colonyProject.findFirst({
       where: { id: projectId },
-      select: { owner: true, postedById: true, completedAt: true },
+      // The title rides along for the crew notices — a second read per join would be a query
+      // for a string this lookup already had in hand.
+      select: { owner: true, postedById: true, completedAt: true, title: true },
     });
 
     if (found === null) {
@@ -168,10 +175,37 @@ export class ColonyRosterService {
       throw new AppError(ErrorCode.VALIDATION_FAILED, 'That build is already finished.');
     }
 
-    await this.db.colonyMember.createMany({
+    const added = await this.db.colonyMember.createMany({
       data: [{ projectId, userId }],
       skipDuplicates: true,
     });
+
+    /*
+     * ★ THE POSTER HEARS ABOUT A NEW CREW MEMBER — AND NOBODY ELSE ★
+     *
+     * `added.count` gates it: pressing Join twice is one intention, and must be one notice. The
+     * joiner hears nothing (they did it), and a poster joining their own build is likewise not
+     * news to themselves. The joiner is NAMED, because volunteering is good news with a face —
+     * unlike leaving, below.
+     */
+    if (added.count > 0 && userId !== project.postedById) {
+      const joiner = await this.db.user
+        .findUnique({ where: { id: userId }, select: { displayName: true, handle: true } })
+        .catch(() => null);
+      const name = joiner?.displayName ?? joiner?.handle ?? 'A member';
+
+      await notifyMembers(
+        this.db,
+        [project.postedById],
+        {
+          kind: 'colony.crew',
+          title: `${name} joined ${project.title}`,
+          body: 'They are now on the build’s crew roster.',
+          link: `/colonisation/${projectId}`,
+        },
+        this.nudge,
+      );
+    }
   }
 
   /**
@@ -184,12 +218,32 @@ export class ColonyRosterService {
    * progress below what was actually delivered.
    */
   async leave(projectId: string, userId: string): Promise<void> {
-    await this.#project(projectId, userId);
+    const project = await this.#project(projectId, userId);
 
-    await this.db.$transaction([
+    const [, removed] = await this.db.$transaction([
       this.db.colonyAssignment.deleteMany({ where: { projectId, userId } }),
       this.db.colonyMember.deleteMany({ where: { projectId, userId } }),
     ]);
+
+    /*
+     * The poster hears the roster changed — and the notice deliberately does NOT name who left.
+     * Leaving is allowed, ordinary, and nobody's to answer for; a notification that names the
+     * leaver reads as a report on them. The roster page has the current list for anybody who
+     * needs it. Gated on `removed.count` so leaving a build you were never on says nothing.
+     */
+    if (removed.count > 0 && userId !== project.postedById) {
+      await notifyMembers(
+        this.db,
+        [project.postedById],
+        {
+          kind: 'colony.crew',
+          title: `The crew on ${project.title} changed`,
+          body: 'A member has left the build’s crew roster.',
+          link: `/colonisation/${projectId}`,
+        },
+        this.nudge,
+      );
+    }
   }
 
   /**

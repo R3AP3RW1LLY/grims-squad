@@ -1,4 +1,4 @@
-import { PrismaClient } from '@grims/db';
+import { notifyMembers, notifySquadron, PrismaClient } from '@grims/db';
 import { InaraAdapter, INARA_APP_NAME, INARA_APP_VERSION } from '@grims/ed-clients';
 import { expectedSquadronName, sameSquadron } from '@grims/shared';
 import { TokenCipher, createKeyring } from '@grims/shared/server';
@@ -10,7 +10,7 @@ import {
 import { syncInaraRanks } from './jobs/inara-rank-sync.js';
 import { AdapterInaraSource, PrismaInaraRankStore } from './jobs/inara-rank-sync.wiring.js';
 import { loadMemberKeys } from './jobs/member-key-pool.js';
-import { notifyLive } from './lib/live-notify.js';
+import { notificationNudge, notifyLive } from './lib/live-notify.js';
 
 /**
  * The Inara sweep. One shot, every fifteen minutes.
@@ -106,6 +106,57 @@ async function main(): Promise<number> {
         ? [{ type: 'roster' as const, userId: null }]
         : []),
     ]);
+
+    /*
+     * ★ verification.confirmed + member.verified — THE SWEEP'S HALF OF THE CONFIRM PATH ★
+     *
+     * `confirmedUserIds` is a genuine transition list: `listAwaiting` only returns members whose
+     * squadron half was still unconfirmed, so anybody in it just BECAME verified on this pass.
+     * The API-side confirm (link / refresh / the claim's immediate re-check) detects the same
+     * transition in PrismaInaraLinkStore.recordSquadron.
+     *
+     * ★ MIRRORED IN apps/api/src/cmdr/inara-link.store.prisma.ts — KEEP THE COPY IDENTICAL ★
+     *
+     * The worker cannot import from the API, and the only package both reach is @grims/db, which
+     * is database code. Two small copies with matching wording, cross-referenced; if you change
+     * a word here, change it there. Failure is swallowed per notice: the members ARE verified,
+     * and the job's exit code must keep reporting the sweep, not the bell.
+     */
+    for (const userId of confirmedUserIds) {
+      try {
+        await notifyMembers(
+          prismaForSquadron,
+          [userId],
+          {
+            kind: 'verification.confirmed',
+            title: 'Your commander is fully verified',
+            body: 'Inara confirms your commander and your squadron membership. Every member area is open to you.',
+            link: '/settings/commander',
+          },
+          notificationNudge,
+        );
+
+        const member = await prismaForSquadron.user.findUnique({
+          where: { id: userId },
+          select: { displayName: true, handle: true },
+        });
+        const name = member?.displayName ?? member?.handle ?? 'A new member';
+
+        await notifySquadron(
+          prismaForSquadron,
+          {
+            kind: 'member.verified',
+            title: `${name} is verified — welcome them aboard`,
+            body: 'Their commander and squadron membership are confirmed.',
+            link: '/roster',
+            actorUserId: userId,
+          },
+          notificationNudge,
+        );
+      } catch {
+        // One member's unreadable name must not cost the rest their welcome.
+      }
+    }
 
     // `notified` is what was actually published, not what we hoped to publish.
     // A log that says 11 when Redis was down is worse than no log.

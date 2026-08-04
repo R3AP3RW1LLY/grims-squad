@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { PrismaClient } from '@grims/db';
+import { notifyMembers, PrismaClient } from '@grims/db';
 import { DatabaseModule } from '../database.module.js';
 import { ShipBuildService } from '../ai/ship-build.service.js';
 import { ColonyLiveService } from '../logistics/colony-live.service.js';
@@ -13,6 +13,9 @@ import { ConsentService } from './consent.service.js';
 import { PrismaPairingStore, PrismaIngestStore, PrismaConsentStore } from './telemetry.store.prisma.js';
 import { PrismaMarketUpdater } from './market-live.js';
 import { PAIRING_SERVICE, INGEST_SERVICE, CONSENT_SERVICE } from './telemetry.tokens.js';
+import { LIVE_SERVICE } from '../live/live.tokens.js';
+import { liveNudgeOf } from '../live/live-nudge.js';
+import type { LiveService } from '../live/live.service.js';
 
 @Module({
   /*
@@ -24,8 +27,34 @@ import { PAIRING_SERVICE, INGEST_SERVICE, CONSENT_SERVICE } from './telemetry.to
   providers: [
     {
       provide: PAIRING_SERVICE,
-      inject: [PrismaClient],
-      useFactory: (db: PrismaClient) => new PairingService(new PrismaPairingStore(db)),
+      inject: [PrismaClient, { token: LIVE_SERVICE, optional: true }],
+      useFactory: (db: PrismaClient, live?: LiveService) =>
+        new PairingService(new PrismaPairingStore(db), async (userId, event, label) => {
+          /*
+           * The device.security notice, for both doors (the pasted token and the browser-approved
+           * link both come through the pairing service). A credential appearing or disappearing
+           * on an account is the one change a member should hear about even when they caused it —
+           * because the time it matters is the time they did not.
+           */
+          await notifyMembers(
+            db,
+            [userId],
+            event === 'paired'
+              ? {
+                  kind: 'device.security',
+                  title: 'A device was paired to your account',
+                  body: `“${label}” can now upload journal data for your commander. If this was not you, remove it and speak to an officer.`,
+                  link: '/settings/devices',
+                }
+              : {
+                  kind: 'device.security',
+                  title: 'A device was removed from your account',
+                  body: `“${label}” can no longer upload journal data. If this was not you, speak to an officer.`,
+                  link: '/settings/devices',
+                },
+            liveNudgeOf(live),
+          );
+        }),
     },
     /*
      * Linking the companion app without anybody copying a credential. Uses the pairing service to
@@ -34,8 +63,8 @@ import { PAIRING_SERVICE, INGEST_SERVICE, CONSENT_SERVICE } from './telemetry.to
     DeviceLinkService,
     {
       provide: INGEST_SERVICE,
-      inject: [PrismaClient, AclDbService],
-      useFactory: (db: PrismaClient, acl: AclDbService) =>
+      inject: [PrismaClient, AclDbService, { token: LIVE_SERVICE, optional: true }],
+      useFactory: (db: PrismaClient, acl: AclDbService, live?: LiveService) =>
         /*
          * The market updater is passed in here and nowhere else. It is what
          * turns a member opening a commodity screen into a price the whole
@@ -44,7 +73,9 @@ import { PAIRING_SERVICE, INGEST_SERVICE, CONSENT_SERVICE } from './telemetry.to
          */
         new JournalIngestService(
           new PrismaIngestStore(db),
-          new PrismaMarketUpdater(db),
+          // The nudge is how a banked data bounty reaches the bell of the member whose upload
+          // paid it, in the tab they are watching while still docked.
+          new PrismaMarketUpdater(db, liveNudgeOf(live)),
           /*
            * ★ THEIR OWN SHIPS, IMPORTED AS THEY FLY ★
            *
@@ -72,7 +103,9 @@ import { PAIRING_SERVICE, INGEST_SERVICE, CONSENT_SERVICE } from './telemetry.to
            * that must be up for the events to have arrived at all, so it is the one place the
            * conversion cannot be missed. The worker's scheduled pass stays as the backstop.
            */
-          new ColonyLiveService(db),
+          // The nudge rides to the sync's markComplete transition, so a build finished by THIS
+          // upload announces itself through this process's own SSE service.
+          new ColonyLiveService(db, liveNudgeOf(live)),
         ),
     },
     {

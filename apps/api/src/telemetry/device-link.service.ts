@@ -139,7 +139,11 @@ export class DeviceLinkService {
     });
 
     if (claimed.count === 0) {
-      await this.pairing.revoke(userId, paired.deviceId).catch(() => undefined);
+      // Silent: this device lost the race before the member ever saw it, and a "device
+      // unlinked" notice about a ghost would read as somebody else acting on their account.
+      await this.pairing
+        .revoke(userId, paired.deviceId, new Date(), { silent: true })
+        .catch(() => undefined);
       throw new AppError(ErrorCode.VALIDATION_FAILED, 'That code has already been used.');
     }
 

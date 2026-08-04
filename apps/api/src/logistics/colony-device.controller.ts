@@ -580,13 +580,15 @@ export class ColonyDeviceController {
     @Param('id') id: string,
     @Body() body: { isPriority?: boolean },
   ) {
-    await this.#caller(
+    const officer = await this.#caller(
       req,
       Permission.COLONY_MANAGE,
       'Only officers can set the squadron’s current effort.',
     );
 
-    await this.colony.setPriority(id, body.isPriority === true);
+    // The actor travels for the squadron feed, exactly as the website's door passes it — the
+    // notice must read the same whichever surface the officer used.
+    await this.colony.setPriority(id, body.isPriority === true, officer.userId);
     return { ok: true };
   }
 

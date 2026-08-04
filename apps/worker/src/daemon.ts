@@ -14,6 +14,7 @@ import { resolveStations } from './jobs/resolve-stations.js';
 import { rebuildBountyBoard } from './jobs/bounty-board.js';
 import { scoreLeaderboards } from './jobs/leaderboard-scores.js';
 import { EdsmStationSource, PrismaStationStore } from './jobs/resolve-stations.wiring.js';
+import { notificationNudge } from './lib/live-notify.js';
 
 /**
  * The resident worker: runs an ingest when somebody asks for one.
@@ -356,7 +357,9 @@ const COLONY_SYNC_MS = 5 * 60_000;
 function startColonySync(db: PrismaClient): void {
   const run = async (): Promise<void> => {
     try {
-      const report = await syncColonyProjects(new PrismaColonyStore(db));
+      // The nudge rides to the sync's markComplete transition: a build this pass finishes
+      // announces itself, and connected browsers hear about it through the Redis bridge.
+      const report = await syncColonyProjects(new PrismaColonyStore(db, notificationNudge));
       // Only worth a line when something changed. A squadron with no live projects would otherwise
       // print an identical zero every five minutes for ever.
       if (report.needsUpdated > 0 || report.contributionsAdded > 0 || report.completed > 0) {
@@ -615,7 +618,8 @@ function startLeaderboardScoring(db: PrismaClient): void {
     const lock = await takeJobLock('leaderboard-scores');
     if (lock === null) return;
     try {
-      const report = await scoreLeaderboards(db);
+      // The nudge lets a badge or line-closure notice reach open tabs through the Redis bridge.
+      const report = await scoreLeaderboards(db, notificationNudge);
       if (report.colonyEvents > 0 || report.tradeEvents > 0 || report.badgesAwarded > 0) {
         console.log(
           `daemon: leaderboards — ${report.colonyEvents} colony, ${report.tradeEvents} trade, ${report.badgesAwarded} badges awarded`,

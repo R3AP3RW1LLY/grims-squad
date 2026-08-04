@@ -143,14 +143,49 @@ export class ReviewQueueService {
     postId: string,
     decision: 'release' | 'refuse',
     reviewer: { userId: string; mask: bigint },
-  ): Promise<void> {
+  ): Promise<{
+    /**
+     * Who wrote the decided post, and where it lives — what the controller needs to tell the
+     * author their words were published or refused. Returned rather than re-read there, because
+     * this method is the ONE place the held→decided transition is observed.
+     */
+    authorId: string;
+    threadTitle: string;
+    categorySlug: string;
+    threadSlug: string;
+    /*
+     * The retro-announcement coordinates. A held post that gets RELEASED was invisible when it
+     * was written, so its birth announcements never ran — the controller replays them, and it
+     * needs to know which kind of birth this was and who else the post concerned.
+     */
+    threadId: string;
+    /** True when this post opened its thread — releasing it releases the THREAD. */
+    isOpeningPost: boolean;
+    categoryId: string;
+    categoryName: string;
+    replyToAuthorId: string | null;
+  }> {
     this.#assertMayReview(reviewer.mask);
 
     const post = await db.forumPost.findFirst({
       where: { id: postId, screenState: 'held', deletedAt: null },
       // The body and the verdict come back too: this decision becomes a labelled example, and the
       // example needs the text that was judged and what the model said about it.
-      select: { id: true, bodyMd: true, screenVerdict: true },
+      select: {
+        id: true,
+        bodyMd: true,
+        screenVerdict: true,
+        authorId: true,
+        threadId: true,
+        replyTo: { select: { authorId: true } },
+        thread: {
+          select: {
+            title: true,
+            slug: true,
+            category: { select: { id: true, slug: true, name: true } },
+          },
+        },
+      },
     });
     if (post === null) {
       /*
@@ -196,6 +231,25 @@ export class ReviewQueueService {
         decidedBy: reviewer.userId,
       })
       .catch(() => undefined);
+
+    // The thread's earliest surviving post IS the opening post; identity, not heuristics.
+    const first = await db.forumPost.findFirst({
+      where: { threadId: post.threadId, deletedAt: null },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    });
+
+    return {
+      authorId: post.authorId,
+      threadTitle: post.thread.title,
+      categorySlug: post.thread.category.slug,
+      threadSlug: post.thread.slug,
+      threadId: post.threadId,
+      isOpeningPost: first !== null && first.id === post.id,
+      categoryId: post.thread.category.id,
+      categoryName: post.thread.category.name,
+      replyToAuthorId: post.replyTo?.authorId ?? null,
+    };
   }
 
   /**

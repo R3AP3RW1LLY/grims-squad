@@ -1323,6 +1323,63 @@ export interface DmPreferences {
 export const getDmPreferences = (): Promise<DmPreferences | null> =>
   get('/v1/me/notifications', { authed: true });
 
+// ── Notifications: the bell ──────────────────────────────────────────────────
+//
+// Squadron owner, 2026-08-04: "create a notifications dropdown in a bell icon ... this should also
+// have a badge system with a read all option and should work like standard social media
+// notifications" — approved with the panel as a right-edge slide-in.
+//
+// Two feeds with two read models, mirroring the API's notifications.service: a PERSONAL row
+// carries its own readAt, while the SQUADRON feed is one shared row per event and "read" is the
+// member's own seen marker, advanced when the tab opens. The badge is the sum of both.
+
+/** The bell's badge, split by tab. `total` is the number on the pill. */
+export interface NotificationCounts {
+  personal: number;
+  squadron: number;
+  total: number;
+}
+
+/** One row of the Personal tab. Unread exactly while `readAt` is null. */
+export interface PersonalNotification {
+  id: string;
+  /**
+   * Namespaced by producer — 'forum.answer-accepted', 'badge.earned', and the forum fan-out's
+   * original 'forum_direct_reply' spelling. Drives the row icon; see notifications-format.ts.
+   */
+  kind: string;
+  title: string;
+  body: string | null;
+  /** A deep link into the site, or null for news with no destination. */
+  link: string | null;
+  readAt: string | null;
+  createdAt: string;
+}
+
+/** One entry of the shared squadron feed. No per-row read state — the seen marker carries it. */
+export interface SquadronNotification {
+  id: string;
+  kind: string;
+  title: string;
+  body: string | null;
+  link: string | null;
+  /** Who did the thing, or null for events the system raised on its own. */
+  actor: { handle: string; displayName: string } | null;
+  createdAt: string;
+}
+
+/**
+ * The newest page of the squadron feed, for the dashboard's SQUADRON ACTIVITY section.
+ *
+ * The bell's panel reads the same endpoint from the BROWSER (through api-client) and pages
+ * through it with the cursor; the dashboard is a server component that shows the first page
+ * only, which is why this goes through `get` and takes no cursor at all.
+ */
+export const getSquadronActivity = (): Promise<{
+  items: SquadronNotification[];
+  nextCursor: string | null;
+} | null> => get('/v1/notifications?tab=squadron', { authed: true });
+
 /**
  * One conversation with GMSD AI, as the review screen lists them.
  *

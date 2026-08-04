@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import {
   Dialog,
   DialogBackdrop,
@@ -13,6 +13,7 @@ import {
 } from '@headlessui/react';
 import {
   Bars3Icon,
+  BellIcon,
   XMarkIcon,
   HomeIcon,
   UsersIcon,
@@ -52,6 +53,7 @@ import {
 } from './nav-sections';
 import type { MeResponse, NavItem } from '../lib/api';
 import { Avatar } from './account-menu';
+import { NotificationsPanel, useNotificationCounts } from './notifications-panel';
 
 /**
  * The members' area shell — sidebar, mobile drawer, top bar.
@@ -67,14 +69,14 @@ import { Avatar } from './account-menu';
  * than from Tailwind's grey scale — so a change in ssot/07-design/tokens.json
  * still moves this the way it moves everything else.
  *
- * ★ WHAT WAS DELIBERATELY LEFT OUT ★
+ * ★ WHAT WAS DELIBERATELY LEFT OUT — AND WHAT HAS SINCE GONE IN ★
  *
- * The reference carries a search box and a notification bell. We have neither:
- * Meilisearch is wired for a health check and nothing else, and there is no
- * notification model yet. Shipping the controls anyway would have put two dead
- * affordances in the most prominent strip of the page — an interface that
- * offers things it cannot do teaches people to stop trusting the rest of it.
- * They go in when the features behind them do.
+ * The reference carries a search box and a notification bell. The search box is
+ * still out: Meilisearch is wired for a health check and nothing else, and a
+ * dead affordance in the most prominent strip of the page teaches people to
+ * stop trusting the rest of it. The bell went in on 2026-08-04, when the
+ * notifications system behind it landed — which is the bargain the original
+ * note struck: they go in when the features behind them do.
  */
 
 /**
@@ -463,6 +465,64 @@ export function HubShell({
   const user = me.user;
   const personal = me.nav.filter((i) => i.section === 'personal');
 
+  /*
+   * ★ THE BELL'S STATE LIVES HERE, NOT IN THE PANEL ★
+   *
+   * The badge renders whether or not the panel is open, and the tab pills inside the panel are
+   * the same three numbers. One hook instance in the shell means both surfaces read one state —
+   * a badge saying 3 over a panel saying 1 reads as a bug even in the moment both are true.
+   *
+   * The shell is also the one component on every hub page, which makes it the right owner of the
+   * badge's live stream: pages that refresh themselves keep their own LiveRefresh subscription,
+   * and the two do not fight over what an event means.
+   */
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const bellRef = useRef<HTMLButtonElement>(null);
+  const notificationsRef = useRef<HTMLElement>(null);
+  const { counts, refetch, apply } = useNotificationCounts();
+
+  /*
+   * Escape closes the panel and puts focus back on the bell that opened it — the mobile-nav
+   * idiom. Without the return, a keyboard user is dumped at the top of the document and has to
+   * tab all the way back to where they were.
+   */
+  useEffect(() => {
+    if (!notificationsOpen) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') {
+        setNotificationsOpen(false);
+        bellRef.current?.focus();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [notificationsOpen]);
+
+  /*
+   * A click anywhere else dismisses it. The bell is excluded because its own click already
+   * toggles — without the exclusion, clicking the bell while open would close-then-reopen.
+   */
+  useEffect(() => {
+    if (!notificationsOpen) return;
+    const onDown = (e: PointerEvent): void => {
+      const t = e.target as Node;
+      if (!notificationsRef.current?.contains(t) && !bellRef.current?.contains(t)) {
+        setNotificationsOpen(false);
+      }
+    };
+    document.addEventListener('pointerdown', onDown);
+    return () => document.removeEventListener('pointerdown', onDown);
+  }, [notificationsOpen]);
+
+  /*
+   * Focus moves INTO the panel as it opens, so the next Tab press lands on the first tab button
+   * rather than wherever the pointer happened to leave it. The panel is `inert` while closed, so
+   * this cannot run early — the effect fires after the attribute is gone.
+   */
+  useEffect(() => {
+    if (notificationsOpen) notificationsRef.current?.focus();
+  }, [notificationsOpen]);
+
   async function signOut() {
     try {
       // POST with CSRF, never a link: a GET /logout can be fired by an <img>
@@ -571,6 +631,49 @@ export function HubShell({
               </a>
             )}
 
+            {/*
+              ★ THE BELL — SQUADRON OWNER, 2026-08-04 ★
+
+              "create a notifications dropdown in a bell icon at the top right of the site ...
+              this should also have a badge system with a read all option". Immediately left of
+              the account menu, because that corner is where every site keeps it and a bell
+              anywhere else is a bell people search for.
+
+              The badge is the TOTAL across both feeds, capped at 99+ — three digits on a pill
+              this size stop being a number and start being noise — and hidden entirely at zero,
+              because a grey "0" is a control begging to be clicked with nothing behind it. It
+              updates live: the counts hook refetches on every `notification` SSE event, and
+              again each time the panel opens.
+
+              Signed-in only, same condition as the account menu beside it: the endpoints need a
+              session, and a bell for nobody would 401 on arrival.
+            */}
+            {user !== null && (
+              <button
+                ref={bellRef}
+                type="button"
+                onClick={() => setNotificationsOpen((v) => !v)}
+                aria-expanded={notificationsOpen}
+                aria-controls="notifications-panel"
+                className="relative -m-1.5 p-1.5 text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)]"
+              >
+                <span className="sr-only">
+                  {counts !== null && counts.total > 0
+                    ? `Notifications, ${counts.total} unread`
+                    : 'Notifications'}
+                </span>
+                <BellIcon aria-hidden="true" className="size-6" />
+                {counts !== null && counts.total > 0 && (
+                  <span
+                    aria-hidden="true"
+                    className="absolute -top-0.5 -right-0.5 min-w-4 rounded-full bg-[var(--color-brand-orange)] px-1 text-center font-mono text-[9px] leading-4 text-[var(--color-text-on-accent)]"
+                  >
+                    {counts.total > 99 ? '99+' : counts.total}
+                  </span>
+                )}
+              </button>
+            )}
+
             {user !== null && (
               <Menu as="div" className="relative">
                 <MenuButton className="relative flex items-center gap-x-3">
@@ -628,6 +731,51 @@ export function HubShell({
             )}
           </div>
         </div>
+
+        {/*
+          ★ THE NOTIFICATIONS PANEL — THE OWNER'S EXACT SHAPE ★
+
+          It slides in from the RIGHT EDGE and runs exactly from the base of the navbar to the
+          bottom of the viewport. `top-[var(--nav-h)]` with `bottom-0` IS that spec: the top bar
+          above is `sticky top-0` with `h-[var(--nav-h)]`, so its base sits exactly --nav-h from
+          the viewport top at BOTH values the token takes (4rem, and 4.5rem from `sm` up — see
+          globals.css). A hard-coded h-16 twin would have drifted on the first screen wider than
+          640px.
+
+          ★ A SIBLING OF THE TOP BAR, NEVER A CHILD ★
+
+          The top bar carries backdrop-blur, and a backdrop-filter establishes a containing block
+          — `fixed` inside it would measure from the BAR rather than the viewport, and the panel
+          would pin itself inside a 4rem strip.
+
+          z-30 on the shell's ladder: under the top bar (z-40) and the sidebars (z-50) so the
+          chrome stays in charge, over everything the page renders. Width is 400px against the
+          right edge, full-width below `sm` where 400px IS the viewport.
+
+          The transition is transform-only — right-to-left translate, 200ms — so it composites on
+          the GPU, and the global prefers-reduced-motion rule in globals.css collapses it to an
+          instant show/hide. The panel must still APPEAR; disabling motion cannot disable
+          notifications. `inert` while closed keeps its buttons out of the tab order the same way
+          the mobile nav's links are kept out.
+        */}
+        <aside
+          id="notifications-panel"
+          ref={notificationsRef}
+          role="dialog"
+          aria-label="Notifications"
+          tabIndex={-1}
+          inert={!notificationsOpen}
+          className={`fixed top-[var(--nav-h)] right-0 bottom-0 z-30 w-full border-l border-[var(--color-border-hairline)] bg-[color-mix(in_srgb,var(--color-surface-panel)_92%,transparent)] shadow-xl backdrop-blur-md outline-hidden transition-transform duration-200 ease-out sm:w-[400px] ${
+            notificationsOpen ? 'translate-x-0' : 'translate-x-full'
+          }`}
+        >
+          <NotificationsPanel
+            open={notificationsOpen}
+            counts={counts}
+            refetchCounts={refetch}
+            applyCounts={apply}
+          />
+        </aside>
 
         <main id="main" className="py-10">
           <div className="px-4 sm:px-6 lg:px-8">{children}</div>

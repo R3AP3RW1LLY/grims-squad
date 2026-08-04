@@ -29,7 +29,17 @@
  */
 
 /** Deliberately identical to the API's `LiveEventType`. */
-export type LiveEventType = 'telemetry' | 'presence' | 'roster' | 'activity' | 'verification';
+export type LiveEventType =
+  | 'telemetry'
+  | 'presence'
+  | 'roster'
+  | 'activity'
+  | 'verification'
+  /*
+   * The bell. Per-member for personal rows, userId null for a squadron entry — the browser
+   * re-reads its counts through the normal endpoint either way; the event carries nothing.
+   */
+  | 'notification';
 
 export interface LiveEvent {
   readonly type: LiveEventType;
@@ -102,6 +112,25 @@ export async function publishEvents(
  * Returns how many were published so a caller can log it honestly rather than
  * claiming a success it did not observe.
  */
+/**
+ * The nudge every worker-side notification producer hands to `notifyMembers` / `notifySquadron`.
+ *
+ * ★ ONE TRANSLATION, NOT ONE PER JOB ★
+ *
+ * The notify module in @grims/db is process-neutral and asks its caller how to reach live badges.
+ * In this process the answer is always the same — the Redis bridge — and each job restating the
+ * mapping from "these members" to `{type:'notification'}` events would be the drift the module's
+ * callback design exists to avoid. Failure is already swallowed inside `notifyLive`: rows have
+ * landed by the time this runs, and a badge that updates on the next navigation is the whole cost.
+ */
+export async function notificationNudge(userIds: readonly string[] | 'everyone'): Promise<void> {
+  await notifyLive(
+    userIds === 'everyone'
+      ? [{ type: 'notification', userId: null }]
+      : userIds.map((userId) => ({ type: 'notification' as const, userId })),
+  );
+}
+
 export async function notifyLive(events: readonly LiveEvent[]): Promise<number> {
   // No events, no connection. The common case for most jobs is nothing changed.
   if (events.length === 0) return 0;

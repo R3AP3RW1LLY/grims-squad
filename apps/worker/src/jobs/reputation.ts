@@ -1,5 +1,5 @@
-import type { PrismaClient } from '@grims/db';
-import { XP_AWARDS, BADGES, earnedBadges } from '@grims/shared';
+import { notifyMembers, type LiveNudge, type PrismaClient } from '@grims/db';
+import { XP_AWARDS, BADGES, badgeDisplay, earnedBadges } from '@grims/shared';
 
 /**
  * Nightly reputation: experience for showing up, and badges for what that adds to.
@@ -84,7 +84,10 @@ export async function awardPlayDays(db: PrismaClient): Promise<number> {
  * What is STORED is the badge and the date. Recomputing the date on read would say a member earned
  * it today, every day, and "since March" is most of what a badge is worth.
  */
-export async function awardBadges(db: PrismaClient): Promise<{ awarded: number; members: number }> {
+export async function awardBadges(
+  db: PrismaClient,
+  nudge?: LiveNudge,
+): Promise<{ awarded: number; members: number }> {
   /*
    * One query for everybody's totals rather than one per member.
    *
@@ -151,13 +154,64 @@ export async function awardBadges(db: PrismaClient): Promise<{ awarded: number; 
    * whole batch and loses everybody else's badges too.
    */
   const result = await db.memberBadge.createMany({ data: fresh, skipDuplicates: true });
+
+  /*
+   * ★ badge.earned — TOLD FROM THE `fresh` LIST, WHICH IS THE DIFF ★
+   *
+   * `fresh` is exactly what this run computed as newly earned: everything a member holds minus
+   * the `held` set read above, so a nightly re-run announces nothing twice. The rare race two
+   * overlapping runs can produce — both computing the same diff before either writes — costs a
+   * repeated notice, the same rows `skipDuplicates` already tolerates; a notification is the one
+   * artefact here that has no unique key to lean on, and that trade is accepted.
+   *
+   * Grouped per member: a first sweep over a veteran's history can land four badges at once, and
+   * four rows beat four separate pushes nobody reads. Never allowed to fail the sweep — the
+   * badges are in the table by now.
+   */
+  try {
+    const byMember = new Map<string, string[]>();
+    for (const f of fresh) {
+      byMember.set(f.userId, [...(byMember.get(f.userId) ?? []), f.badgeKey]);
+    }
+
+    for (const [userId, keys] of byMember) {
+      const displays = keys
+        .map((key) => badgeDisplay(key))
+        .filter((d): d is NonNullable<typeof d> => d !== null);
+      if (displays.length === 0) continue;
+
+      const first = displays[0];
+      if (first === undefined) continue;
+
+      await notifyMembers(
+        db,
+        [userId],
+        {
+          kind: 'badge.earned',
+          title:
+            displays.length === 1
+              ? `Badge earned: ${first.name}`
+              : `Badges earned: ${displays.map((d) => d.name).join(', ')}`,
+          body:
+            displays.length === 1
+              ? `${first.icon} ${first.description}`
+              : 'Your forum and activity record crossed new thresholds tonight.',
+          link: '/leaderboards',
+        },
+        nudge,
+      );
+    }
+  } catch {
+    // The awards already landed; a bell must never un-land them.
+  }
+
   return { awarded: result.count, members: totals.length };
 }
 
 /** Both, in the order they depend on each other: play-days feed the `daysPlayed` badges. */
-export async function runReputation(db: PrismaClient): Promise<ReputationReport> {
+export async function runReputation(db: PrismaClient, nudge?: LiveNudge): Promise<ReputationReport> {
   const playDays = await awardPlayDays(db);
-  const { awarded, members } = await awardBadges(db);
+  const { awarded, members } = await awardBadges(db, nudge);
   return { playDays, badges: awarded, members };
 }
 

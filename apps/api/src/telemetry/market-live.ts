@@ -1,5 +1,5 @@
-import type { PrismaClient } from '@grims/db';
-import { ensureLiveStation } from '@grims/db';
+import type { LiveNudge, PrismaClient } from '@grims/db';
+import { ensureLiveStation, notifyMembers, notifySquadron } from '@grims/db';
 
 /**
  * Keeping station markets current from members' own journals.
@@ -35,16 +35,19 @@ import { ensureLiveStation } from '@grims/db';
 /** Binds the functions below to a client. See `MarketUpdater` in the ingest service. */
 export class PrismaMarketUpdater {
   readonly #db: PrismaClient;
+  readonly #nudge: LiveNudge | undefined;
 
-  constructor(db: PrismaClient) {
+  constructor(db: PrismaClient, nudge?: LiveNudge) {
     this.#db = db;
+    // How a banked bounty nudges live bell badges. Optional: rows land without it (notify.ts).
+    this.#nudge = nudge;
   }
 
   async apply(
     event: Record<string, unknown> & { event: string },
     memberId?: string,
   ): Promise<number> {
-    return applyMarketEvent(this.#db, event as MarketEvent, memberId ?? null);
+    return applyMarketEvent(this.#db, event as MarketEvent, memberId ?? null, this.#nudge);
   }
 }
 
@@ -82,6 +85,7 @@ export async function applyMarketEvent(
   db: PrismaClient,
   ev: MarketEvent,
   memberId: string | null = null,
+  nudge?: LiveNudge,
 ): Promise<number> {
   /*
    * Frontier writes MarketID as a number, but a journal that has been through JSON round-trips
@@ -106,6 +110,7 @@ export async function applyMarketEvent(
         systemName: typeof ev.StarSystem === 'string' ? ev.StarSystem : null,
       },
       memberId,
+      nudge,
     );
   }
   if (ev.event === 'MarketBuy') return applyDelta(db, marketId, ev, 'supply');
@@ -128,6 +133,7 @@ async function applySnapshot(
   items: unknown,
   place: { stationName: string | null; systemName: string | null },
   memberId: string | null = null,
+  nudge?: LiveNudge,
 ): Promise<number> {
   if (!Array.isArray(items) || items.length === 0) return 0;
 
@@ -216,7 +222,7 @@ async function applySnapshot(
   });
 
   // The snapshot is in. If this station was on the bounty board, this member just earned it.
-  if (written > 0 && memberId !== null) await awardBounty(db, station.key, memberId);
+  if (written > 0 && memberId !== null) await awardBounty(db, station.key, memberId, nudge);
   return written;
 }
 
@@ -243,20 +249,72 @@ async function applySnapshot(
  * The market rows are already written when this runs. Points are decoration on top of the real
  * work; a bounty table hiccup must not turn a successful upload into an error.
  */
-async function awardBounty(db: PrismaClient, stationKey: string, memberId: string): Promise<void> {
-  await db
-    .$executeRawUnsafe(
+async function awardBounty(
+  db: PrismaClient,
+  stationKey: string,
+  memberId: string,
+  nudge?: LiveNudge,
+): Promise<void> {
+  /*
+   * `$queryRawUnsafe` with a RETURNING on the insert, where this used to be `$executeRawUnsafe`.
+   * The row coming back is the transition detector: no board row meant no claim, and the bell
+   * below must only ring for the member whose snapshot ACTUALLY consumed one — a second member
+   * docking five minutes later gets an empty result and hears nothing, which is the truth.
+   */
+  const claimed = await db
+    .$queryRawUnsafe<Array<{ station_name: string; points: number; jackpot: boolean }>>(
       `WITH won AS (
          DELETE FROM data_bounties WHERE station_key = $1
          RETURNING station_name, system_name, points, jackpot, days_stale
+       ),
+       banked AS (
+         INSERT INTO bounty_claims
+           (user_id, station_key, station_name, system_name, points, jackpot, days_stale)
+         SELECT $2::uuid, $1, station_name, system_name, points, jackpot, days_stale FROM won
+         RETURNING station_name, points, jackpot
        )
-       INSERT INTO bounty_claims
-         (user_id, station_key, station_name, system_name, points, jackpot, days_stale)
-       SELECT $2::uuid, $1, station_name, system_name, points, jackpot, days_stale FROM won`,
+       SELECT station_name, points, jackpot FROM banked`,
       stationKey,
       memberId,
     )
-    .catch(() => undefined);
+    .catch(() => []);
+
+  const claim = claimed[0];
+  if (claim === undefined) return;
+
+  // The points are already banked; everything from here is a bell on a deed that succeeded, and
+  // both notify calls swallow their own failures for exactly that reason.
+  await notifyMembers(
+    db,
+    [memberId],
+    {
+      kind: 'bounty.banked',
+      title: `Data bounty banked: ${claim.station_name}`,
+      body:
+        `${claim.points.toLocaleString()} points for refreshing this station’s market data` +
+        `${claim.jackpot ? ' — a jackpot claim' : ''}.`,
+      link: '/bounties',
+    },
+    nudge,
+  );
+
+  /*
+   * A jackpot is the board's headline event, so the whole squadron hears it — with the claimer
+   * as the actor, because a jackpot is a credit worth a face.
+   */
+  if (claim.jackpot) {
+    await notifySquadron(
+      db,
+      {
+        kind: 'bounties.jackpot',
+        title: `Jackpot claimed: ${claim.station_name}`,
+        body: `${claim.points.toLocaleString()} points banked for refreshing this station’s market data.`,
+        link: '/bounties',
+        actorUserId: memberId,
+      },
+      nudge,
+    );
+  }
 }
 
 /**

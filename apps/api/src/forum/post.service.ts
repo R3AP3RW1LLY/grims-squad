@@ -32,6 +32,12 @@ export interface PostWritten {
   readonly id: string;
   readonly bodyHtml: string;
   readonly editCount: number;
+  /**
+   * Whether screening HELD this write. The controller notifies the author on it — an invisible
+   * post with no explanation reads as the forum eating their words, and only the write path
+   * knows the verdict. `false` covers both "cleared" and "screening not configured".
+   */
+  readonly held: boolean;
 }
 
 /**
@@ -252,7 +258,12 @@ export class PostService {
      * URL, and giving it those would make a write path depend on presentation. The controller has
      * both and does the fan-out — which also keeps a slow Discord call off the transaction.
      */
-    return { ...post, replyToAuthorId, mentions };
+    return {
+      ...post,
+      held: screened !== null && screened.state === 'held',
+      replyToAuthorId,
+      mentions,
+    };
   }
 
   /**
@@ -387,11 +398,12 @@ export class PostService {
     body: string | { doc: unknown },
     editorId: string,
     callerMask: bigint,
-  ): Promise<PostWritten> {
+  ): Promise<PostWritten & { threadId: string }> {
     const post = await db.forumPost.findFirst({
       where: { id: postId, deletedAt: null },
       select: {
         id: true,
+        threadId: true,
         authorId: true,
         bodyMd: true,
         createdAt: true,
@@ -461,7 +473,9 @@ export class PostService {
         where: { id: postId },
         select: { id: true, bodyHtml: true, editCount: true },
       });
-      return unchanged;
+      // Nothing was re-screened, so nothing was newly held — whatever state the post is in, this
+      // call did not put it there, and no notice should claim otherwise.
+      return { ...unchanged, threadId: post.threadId, held: false };
     }
 
     const withinGrace = Date.now() - post.createdAt.getTime() < GRACE_MS && isAuthor;
@@ -515,7 +529,10 @@ export class PostService {
 
     this.reindex.enqueue({ kind: 'post', id: post.id, reason: 'edited' });
 
-    return updated;
+    // A re-screened edit can be held exactly as a fresh post can, and the author is told the
+    // same way — the words they can no longer see are the same kind of surprise either time.
+    // `threadId` rides along so the caller can name where, without a query of its own.
+    return { ...updated, threadId: post.threadId, held: rescreened !== null && rescreened.state === 'held' };
   }
 
   /**

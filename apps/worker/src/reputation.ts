@@ -1,5 +1,6 @@
 import { PrismaClient } from '@grims/db';
 import { runReputation } from './jobs/reputation.js';
+import { notificationNudge } from './lib/live-notify.js';
 
 /**
  * Nightly reputation.
@@ -11,7 +12,8 @@ import { runReputation } from './jobs/reputation.js';
 async function main(): Promise<void> {
   const db = new PrismaClient();
   try {
-    const report = await runReputation(db);
+    // The nudge lets a freshly-earned badge reach any open tab through the Redis bridge.
+    const report = await runReputation(db, notificationNudge);
     console.log(
       `reputation: ${report.playDays} play-days awarded, ${report.badges} badges earned across ${report.members} members`,
     );

@@ -19,6 +19,9 @@ import { LEADERSHIP_CEILING } from '../members/members.store.js';
 import { CMDR_SERVICE, NONCE_SERVICE, INARA_LINK, NICKNAME_SERVICE } from './cmdr.tokens.js';
 import { NicknameService } from './nickname.service.js';
 import { logger } from '../logging.js';
+import { LIVE_SERVICE } from '../live/live.tokens.js';
+import { liveNudgeOf } from '../live/live-nudge.js';
+import type { LiveService } from '../live/live.service.js';
 
 /**
  * Builds the nickname reconciler, or nothing.
@@ -195,8 +198,10 @@ function nicknameReconciler(prisma: PrismaClient): NicknameSyncService | undefin
     },
     {
       provide: INARA_LINK,
-      inject: [PrismaClient],
-      useFactory: (db: PrismaClient): InaraLinkService => {
+      // LIVE_SERVICE optional: the confirmation notices are decoration on a verification that
+      // already happened, and a wiring without the live module must still verify people.
+      inject: [PrismaClient, { token: LIVE_SERVICE, optional: true }],
+      useFactory: (db: PrismaClient, live?: LiveService): InaraLinkService => {
         const keyring = process.env['TOKEN_ENCRYPTION_KEYRING'] ?? '';
         if (keyring === '') {
           // INV-012 has no degraded mode. Refusing to construct is better than
@@ -209,7 +214,7 @@ function nicknameReconciler(prisma: PrismaClient): NicknameSyncService | undefin
         }
 
         return new InaraLinkService(
-          new PrismaInaraLinkStore(db, new TokenCipher(createKeyring(keyring))),
+          new PrismaInaraLinkStore(db, new TokenCipher(createKeyring(keyring)), liveNudgeOf(live)),
           // The adapter's OWN key is irrelevant to verification: every check
           // runs with the MEMBER's key, which is exactly what makes the
           // returned name proof rather than a claim.

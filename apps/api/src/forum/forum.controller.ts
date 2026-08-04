@@ -1,8 +1,13 @@
-import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Query, Req, Inject } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Query, Req, Inject, Optional } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
-import { AppError, ErrorCode } from '@grims/shared';
+import { AppError, ErrorCode, ROLE_PRESETS } from '@grims/shared';
 import type { SignatureInput, SignatureView } from '@grims/shared';
+import { notifyMembers, notifySquadron, PrismaClient } from '@grims/db';
 import type { BannerIdentity } from './banner-identity.js';
+import { satisfiesMask } from './category.service.js';
+import { LIVE_SERVICE } from '../live/live.tokens.js';
+import { liveNudgeOf } from '../live/live-nudge.js';
+import type { LiveService } from '../live/live.service.js';
 
 /*
  * Facts about THIS squadron, in one place.
@@ -74,7 +79,46 @@ export class ForumController {
     @Inject(ReviewQueueService) private readonly review: ReviewQueueService,
     @Inject(ReportService) private readonly reports: ReportService,
     @Inject(LeaderboardsService) private readonly leaderboards: LeaderboardsService,
+    /*
+     * ★ THE PLAIN CLIENT, FOR NOTIFICATION ROWS ONLY ★
+     *
+     * This module's rule is that every FORUM read goes through a bound client, and that stands:
+     * `notifications` and `squadron_activity` carry no ACL column and are written through the
+     * shared notify module, whose door takes the plain PrismaClient. The static guard
+     * (acl-usage.spec.ts) still scans this file — an ACL-bearing model reached through this
+     * client would fail the build, which is the enforcement the module header relies on.
+     */
+    @Inject(PrismaClient) private readonly prisma: PrismaClient,
+    /*
+     * OPTIONAL, like every other consumer of the live service: a missing nudge costs a badge
+     * refresh, never a request — and the controller's own tests construct it without one.
+     */
+    @Optional() @Inject(LIVE_SERVICE) private readonly live: LiveService | null = null,
   ) {}
+
+  /**
+   * Tells a post's author their words are waiting for review.
+   *
+   * ★ ONE VOICE FOR THREE DOORS ★
+   *
+   * A reply, an edited post and a new thread's opening post can each land held, and the author
+   * should read the same sentence from all three. The copy explains what happens next and names
+   * nobody — being screened is the board's process, not an accusation. Failures are swallowed:
+   * the post is stored and the queue has it, whatever the bell manages.
+   */
+  async #tellAuthorHeld(authorId: string, link: string | null): Promise<void> {
+    await notifyMembers(
+      this.prisma,
+      [authorId],
+      {
+        kind: 'forum.moderation',
+        title: 'Your post is waiting for review',
+        body: 'It is not on the board yet. A reviewer will look at it and publish it, and you will hear the outcome here.',
+        ...(link === null ? {} : { link }),
+      },
+      liveNudgeOf(this.live),
+    );
+  }
 
   /**
    * The DM sender, built per request from the environment.
@@ -283,7 +327,30 @@ export class ForumController {
     const mask = await this.#mask(caller);
     const solution = (body as { solution?: unknown } | null)?.solution !== false;
 
-    await this.threads.markSolution(db, slug, threadSlug, postId, { userId: caller.userId, mask }, solution);
+    const marked = await this.threads.markSolution(db, slug, threadSlug, postId, { userId: caller.userId, mask }, solution);
+
+    /*
+     * ★ forum.answer-accepted — TO THE ANSWER'S AUTHOR, ON THE TRANSITION ONLY ★
+     *
+     * `accepted` is true only when this call newly set the mark, so re-pressing the idempotent
+     * PUT stays silent. Self-accepting your own answer is skipped for the same reason the XP
+     * award skips it: it is not news to yourself. The asker is deliberately not named in the
+     * copy — the fact that matters to the author is that their answer worked.
+     */
+    if (marked.accepted && marked.answerAuthorId !== caller.userId) {
+      await notifyMembers(
+        this.prisma,
+        [marked.answerAuthorId],
+        {
+          kind: 'forum.answer-accepted',
+          title: 'Your answer was accepted',
+          body: `Your reply in “${marked.threadTitle}” was marked as the answer.`,
+          link: `/forum/${slug}/${threadSlug}`,
+        },
+        liveNudgeOf(this.live),
+      );
+    }
+
     return { ok: true };
   }
 
@@ -369,12 +436,52 @@ export class ForumController {
      */
     await this.moderation.assertMayPost(db, caller.userId);
 
-    return this.threads.create(
+    const created = await this.threads.create(
       db,
       { categoryId: category.id, title, body: openingPost },
       caller.userId,
       mask,
     );
+
+    if (created.held) {
+      // The opening post was held: the author sees a thread whose body is missing, and this row
+      // is what says why. The squadron entry below is skipped — announcing a thread whose only
+      // post is invisible would send members to an empty page.
+      await this.#tellAuthorHeld(caller.userId, `/forum/${slug}/${created.slug}`);
+    } else {
+      /*
+       * ★ forum.thread — ONLY FOR BOARDS THE MEMBER BASE MAY READ (INV-039'S RULE, APPLIED HERE) ★
+       *
+       * The squadron feed is one shared list every signed-in member reads, so it may only carry
+       * titles from categories the ORDINARY member mask satisfies. A thread on the officers'
+       * board would otherwise put its title — which is the disclosure, exactly as the fan-out
+       * header explains — in front of people who cannot open the board. Checked against the
+       * member PRESET rather than the author's own mask: the author can read what they posted,
+       * and that says nothing about who else can.
+       */
+      const board = await db.forumCategory.findFirst({
+        where: { id: category.id },
+        select: { viewPerm: true },
+      });
+      const required =
+        board === null || board.viewPerm === null ? null : BigInt(board.viewPerm.toFixed(0));
+
+      if (board !== null && satisfiesMask(ROLE_PRESETS.member, required)) {
+        await notifySquadron(
+          this.prisma,
+          {
+            kind: 'forum.thread',
+            title: title.trim(),
+            body: `A new thread in ${category.name}.`,
+            link: `/forum/${slug}/${created.slug}`,
+            actorUserId: caller.userId,
+          },
+          liveNudgeOf(this.live),
+        );
+      }
+    }
+
+    return { id: created.id, slug: created.slug };
   }
 
   /*
@@ -496,10 +603,87 @@ export class ForumController {
     }
 
     const db = await this.acl.forCaller(c.userId);
-    await this.review.decide(db, postId, decision, {
+    const decided = await this.review.decide(db, postId, decision, {
       userId: c.userId,
       mask: await this.#mask(caller),
     });
+
+    /*
+     * ★ forum.moderation — THE OUTCOME, TO THE AUTHOR, FROM THE ONE DECISION POINT ★
+     *
+     * The hold told them a reviewer would look; this is the reviewer having looked. The copy
+     * names no reviewer — the decision is the board's, and hanging a person on a refusal
+     * invites an argument with that person instead of with the rule. A refusal carries no link:
+     * there is nothing to open. Swallowed by notifyMembers on failure; the decision stands.
+     */
+    await notifyMembers(
+      this.prisma,
+      [decided.authorId],
+      decision === 'release'
+        ? {
+            kind: 'forum.moderation',
+            title: 'Your post is now on the board',
+            body: `A reviewer published your post in “${decided.threadTitle}”.`,
+            link: `/forum/${decided.categorySlug}/${decided.threadSlug}`,
+          }
+        : {
+            kind: 'forum.moderation',
+            title: 'Your post was not published',
+            body: `A reviewer looked at your post in “${decided.threadTitle}” and it will stay off the board. Speak to an officer if you would like to understand the decision.`,
+          },
+      liveNudgeOf(this.live),
+    );
+
+    /*
+     * ★ A RELEASE IS A LATE BIRTH — THE ANNOUNCEMENTS THE HOLD SUPPRESSED RUN NOW ★
+     *
+     * Squadron owner, 2026-08-04: everything in the catalogue wired, no scoping gaps. A post that
+     * was held was invisible when it was written, so its birth announcements were deliberately
+     * skipped. Releasing it is the moment it actually appears to readers, so this is when the
+     * squadron hears about an opening post (same member-mask gate as the create path — a
+     * restricted board's title still never reaches the shared feed) and when a reply's watchers
+     * finally get their fan-out. Mentions are the one thing not replayed: they were parsed from
+     * the document at write time and re-deriving them here would be a second parser to drift —
+     * the replied-to author and every watcher are the audience that matters.
+     */
+    if (decision === 'release') {
+      if (decided.isOpeningPost) {
+        const board = await db.forumCategory.findFirst({
+          where: { id: decided.categoryId },
+          select: { viewPerm: true },
+        });
+        const required =
+          board === null || board.viewPerm === null ? null : BigInt(board.viewPerm.toFixed(0));
+        if (board !== null && satisfiesMask(ROLE_PRESETS.member, required)) {
+          await notifySquadron(
+            this.prisma,
+            {
+              kind: 'forum.thread',
+              title: decided.threadTitle,
+              body: `A new thread in ${decided.categoryName}.`,
+              link: `/forum/${decided.categorySlug}/${decided.threadSlug}`,
+              actorUserId: decided.authorId,
+            },
+            liveNudgeOf(this.live),
+          );
+        }
+      } else {
+        await this.#fanOut(
+          db,
+          {
+            threadId: decided.threadId,
+            threadTitle: decided.threadTitle,
+            categorySlug: decided.categorySlug,
+            threadSlug: decided.threadSlug,
+            actorId: decided.authorId,
+            replyToAuthorId: decided.replyToAuthorId,
+            mentionedUserIds: [],
+          },
+          decided.threadTitle,
+        );
+      }
+    }
+
     return { ok: true };
   }
 
@@ -718,7 +902,15 @@ export class ForumController {
      */
     const thread = await this.threads.notificationTarget(db, threadId);
 
-    if (thread !== null) {
+    if (post.held) {
+      // A held reply reaches nobody, so the reply fan-out below would announce words no reader
+      // can open. The author alone is told what happened; the fan-out runs when a reviewer
+      // releases it into a visible state — or not at all.
+      await this.#tellAuthorHeld(
+        c.userId,
+        thread === null ? null : `/forum/${thread.categorySlug}/${thread.slug}`,
+      );
+    } else if (thread !== null) {
       await this.#fanOut(
         db,
         {
@@ -768,7 +960,23 @@ export class ForumController {
     const bodyMd = readBody(body);
 
     const db = await this.acl.forCaller(c.userId);
-    return this.posts.edit(db, postId, bodyMd, c.userId, await this.#mask(caller));
+    const edited = await this.posts.edit(db, postId, bodyMd, c.userId, await this.#mask(caller));
+
+    if (edited.held) {
+      /*
+       * An edit is re-screened, and a hold takes the post OFF the board mid-conversation — more
+       * surprising than a held reply, because it was visible a moment ago. The link is resolved
+       * through the service (the controller does not query threads itself); a link that cannot
+       * be resolved still leaves the author told, which is the part that matters.
+       */
+      const target = await this.threads.notificationTarget(db, edited.threadId);
+      await this.#tellAuthorHeld(
+        c.userId,
+        target === null ? null : `/forum/${target.categorySlug}/${target.slug}`,
+      );
+    }
+
+    return { id: edited.id, bodyHtml: edited.bodyHtml, editCount: edited.editCount };
   }
 
   /**

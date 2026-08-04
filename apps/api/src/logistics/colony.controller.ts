@@ -753,14 +753,15 @@ export class ColonyController {
     @Param('id') id: string,
     @Body() body: { isPriority?: boolean },
   ) {
-    this.#requireSession(caller);
+    const me = this.#requireSession(caller);
     await this.#assert(
       caller,
       Permission.COLONY_MANAGE,
       'Only officers can set the squadron’s current effort.',
     );
 
-    await this.colony.setPriority(id, body.isPriority === true);
+    // The actor travels so the squadron feed can put a face on "the current effort changed".
+    await this.colony.setPriority(id, body.isPriority === true, me.userId);
     return { ok: true };
   }
 

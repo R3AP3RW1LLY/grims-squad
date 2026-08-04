@@ -2,12 +2,14 @@ import { createHash } from 'node:crypto';
 import type { PrismaClient } from '@prisma/client';
 import {
   commodityName,
+  completeColonyProject,
   type ColonyStore,
   type ContributionReading,
   type DepotReading,
   type NeedRow,
   type TrackedProject,
 } from './colony-sync.js';
+import type { LiveNudge } from './notify.js';
 
 /**
  * Reading colonisation events out of telemetry, and writing project records.
@@ -43,7 +45,15 @@ function num(v: unknown): number {
 }
 
 export class PrismaColonyStore implements ColonyStore {
-  constructor(private readonly db: PrismaClient) {}
+  constructor(
+    private readonly db: PrismaClient,
+    /**
+     * How to nudge live badges when a completion is announced. Optional and process-specific:
+     * the worker publishes through the Redis bridge, the API publishes to its own SSE service,
+     * and a test passes nothing. Rows still land without it — see notify.ts.
+     */
+    private readonly nudge?: LiveNudge,
+  ) {}
 
   async tracked(): Promise<readonly TrackedProject[]> {
     const rows = await this.db.colonyProject.findMany({
@@ -139,12 +149,13 @@ export class PrismaColonyStore implements ColonyStore {
     });
   }
 
-  async markComplete(projectId: string, at: Date): Promise<void> {
-    await this.db.colonyProject.update({
-      where: { id: projectId },
-      // isPriority cleared with it: a finished build must not keep pointing the squadron at itself.
-      data: { completedAt: at, isPriority: false },
-    });
+  async markComplete(projectId: string, at: Date): Promise<boolean> {
+    /*
+     * The guarded transition AND the announcement live in `completeColonyProject`, shared with
+     * the manual close route — one place decides what "a build finished" means, whichever of the
+     * four paths noticed it first.
+     */
+    return completeColonyProject(this.db, projectId, at, this.nudge);
   }
 
   async contributionsFor(marketId: bigint): Promise<readonly ContributionReading[]> {

@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import type { PrismaClient } from '@grims/db';
+import { completeColonyProject, notifySquadron, type LiveNudge, type PrismaClient } from '@grims/db';
 import { AppError, ErrorCode, Permission } from '@grims/shared';
 import type { AclDbService } from '../authz/acl-db.service.js';
 import type { MarketStore, PlaceQuery } from './market.store.js';
@@ -365,6 +365,11 @@ export class ColonyService {
     private readonly db: PrismaClient,
     private readonly market: MarketStore,
     private readonly acl: AclDbService,
+    /**
+     * How the notification producers below nudge live bell badges. Optional so every existing
+     * test constructs the service exactly as before; rows still land without it (notify.ts).
+     */
+    private readonly nudge?: LiveNudge,
   ) {}
 
   /**
@@ -936,6 +941,28 @@ export class ColonyService {
       await this.#writeSnapshot(created.id, input.snapshot).catch(() => undefined);
     }
 
+    /*
+     * ★ THE SQUADRON HEARS ABOUT A NEW BUILD, ONCE, FROM THE CREATE ★
+     *
+     * A project is created `squadron`-visible (the schema default), so the feed entry shows the
+     * feed's readers something they could already open. `notifySquadron` swallows its own
+     * failures — the project exists by now, and a bell must not un-post it.
+     */
+    await notifySquadron(
+      this.db,
+      {
+        kind: 'colony.project-started',
+        title: `${title} — new colonisation project`,
+        body:
+          input.stationName === null || input.stationName.trim() === ''
+            ? input.systemName.trim()
+            : `${input.stationName.trim()}, ${input.systemName.trim()}`,
+        link: `/colonisation/${created.id}`,
+        actorUserId: input.userId,
+      },
+      this.nudge,
+    );
+
     return created;
   }
 
@@ -1075,12 +1102,13 @@ export class ColonyService {
   async close(projectId: string, callerId: string, mask: bigint, at = new Date()): Promise<void> {
     await this.#mayDirect(projectId, callerId, mask);
 
-    const db = this.acl.forSystem('closing a colonisation project');
-    await db.colonyProject.update({
-      where: { id: projectId },
-      // Priority cleared with it: a finished build must not keep pointing the squadron at itself.
-      data: { completedAt: at, isPriority: false },
-    });
+    /*
+     * The SAME transition the sync's depot-flag and 100% paths use, so all four ways a build can
+     * end announce it from one place — and announce it once, because the guarded update inside
+     * only moves a row whose completedAt is still null. Closing an already-closed project stays
+     * a quiet no-op, exactly as the plain update before it was.
+     */
+    await completeColonyProject(this.db, projectId, at, this.nudge);
   }
 
   /** Puts a closed project back on the board — for one closed by mistake. */
@@ -1124,7 +1152,7 @@ export class ColonyService {
   }
 
   /** Marks a squadron project as the current effort, or stops doing so. Requires COLONY_MANAGE. */
-  async setPriority(projectId: string, isPriority: boolean): Promise<void> {
+  async setPriority(projectId: string, isPriority: boolean, actorId?: string): Promise<void> {
     /*
      * forSystem, and it is narrow: the caller has already been checked for COLONY_MANAGE, and an
      * officer setting the squadron's effort must be able to reach a project regardless of whose it
@@ -1135,7 +1163,7 @@ export class ColonyService {
 
     const project = await db.colonyProject.findFirst({
       where: { id: projectId },
-      select: { owner: true },
+      select: { owner: true, isPriority: true, title: true, systemName: true, stationName: true },
     });
     if (project === null) {
       throw new AppError(ErrorCode.RESOURCE_NOT_VISIBLE, 'That project is not available.');
@@ -1153,5 +1181,29 @@ export class ColonyService {
     }
 
     await db.colonyProject.update({ where: { id: projectId }, data: { isPriority } });
+
+    /*
+     * ★ ANNOUNCED ONLY ON THE OFF→ON TRANSITION ★
+     *
+     * Turning priority ON is the squadron being pointed at a build, which is news. Re-pressing
+     * the switch on an already-priority project changes nothing anybody needs to hear about, and
+     * turning it OFF is bookkeeping — the feed says where to haul, not where to stop.
+     */
+    if (isPriority && !project.isPriority) {
+      await notifySquadron(
+        this.db,
+        {
+          kind: 'colony.priority',
+          title: `${project.title} is the squadron’s current effort`,
+          body:
+            project.stationName === null || project.stationName === ''
+              ? `Deliveries to ${project.systemName} count double on the colonisation board.`
+              : `Deliveries to ${project.stationName}, ${project.systemName} count double on the colonisation board.`,
+          link: `/colonisation/${projectId}`,
+          ...(actorId === undefined ? {} : { actorUserId: actorId }),
+        },
+        this.nudge,
+      );
+    }
   }
 }

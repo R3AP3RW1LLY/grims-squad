@@ -2,6 +2,7 @@ import { PrismaClient } from '@grims/db';
 import { announce } from '@grims/shared';
 import { PrismaColonyStore, syncColonyProjects } from '@grims/db';
 import { takeJobLock } from './lib/job-lock.js';
+import { notificationNudge } from './lib/live-notify.js';
 
 /**
  * Colonisation projects, kept current from members' journals.
@@ -34,7 +35,9 @@ async function main(): Promise<number> {
   const started = Date.now();
 
   try {
-    const report = await syncColonyProjects(new PrismaColonyStore(prisma));
+    // The nudge rides to the sync's markComplete transition: a build this run finishes
+    // announces itself, and connected browsers hear about it through the Redis bridge.
+    const report = await syncColonyProjects(new PrismaColonyStore(prisma, notificationNudge));
     const ms = Date.now() - started;
 
     console.error(JSON.stringify({ msg: 'colony sync complete', ...report, ms }));

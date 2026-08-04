@@ -71,7 +71,17 @@ function harness(opts: {
       needs.push({ projectId, needs: n });
     },
     markComplete: async (projectId, at) => {
+      /*
+       * The real store's guarded update returns whether the row actually moved; the fake mirrors
+       * that with the tracked list, so the "already closed" test exercises the same contract the
+       * announcement relies on — a second closer is told false and stays silent.
+       */
+      const project = (opts.projects ?? [PROJECT()]).find((p) => p.id === projectId);
+      if (project?.completedAt != null || completed.some((c) => c.projectId === projectId)) {
+        return false;
+      }
       completed.push({ projectId, at });
+      return true;
     },
     contributionsFor: async () => opts.contributions ?? [],
     recordContribution: async (projectId, c, item) => {
@@ -158,6 +168,73 @@ describe('closing a project', () => {
 
     expect((await syncColonyProjects(h.store)).completed).toBe(0);
     expect(h.completed).toEqual([]);
+  });
+
+  it('MANDATORY: closes at 100% even when the completion flag never arrives', async () => {
+    /*
+     * `ConstructionComplete` is only observed if somebody docks AFTER the last tonne lands — and
+     * the member who delivers it is usually the last visitor. A depot reading where every
+     * resource is fully provided is finished by the game's own arithmetic, and waiting for a
+     * flag nobody will ever fetch leaves the build "Live" for ever.
+     */
+    const h = harness({
+      depot: DEPOT({
+        complete: false,
+        resources: [
+          { commodity: 'Steel', required: 5_000, provided: 5_000 },
+          // Over-delivery still counts as met: provided may legitimately exceed required.
+          { commodity: 'Titanium', required: 800, provided: 820 },
+        ],
+      }),
+    });
+
+    expect((await syncColonyProjects(h.store)).completed).toBe(1);
+    expect(h.completed[0]?.projectId).toBe('p1');
+  });
+
+  it('MANDATORY: an EMPTY resources list never reads as complete — the row-count guard', async () => {
+    /*
+     * `every()` over an empty array is vacuously true, and an empty list means "no needs known",
+     * not "all needs met" — the two are indistinguishable without the length check. Without the
+     * guard, a depot reading from before the site listed its demands would close a project
+     * nobody has hauled a tonne to, silently, on the next scheduled pass.
+     */
+    const h = harness({ depot: DEPOT({ resources: [] }) });
+
+    expect((await syncColonyProjects(h.store)).completed).toBe(0);
+    expect(h.completed).toEqual([]);
+  });
+
+  it('does not close a build with any line still short', async () => {
+    // 99.9% is not 100%: one commodity short of its requirement keeps the project live.
+    const h = harness({
+      depot: DEPOT({
+        resources: [
+          { commodity: 'Steel', required: 5_000, provided: 5_000 },
+          { commodity: 'Titanium', required: 800, provided: 799 },
+        ],
+      }),
+    });
+
+    expect((await syncColonyProjects(h.store)).completed).toBe(0);
+  });
+
+  it('counts a completion only when the store says the row actually moved', async () => {
+    /*
+     * Four paths can close a build (two worker passes, the API's per-upload pass, the manual
+     * close route), and markComplete's boolean is what keeps the announcement single. A store
+     * that reports "already closed" must leave the report at zero, or two racing processes
+     * would both claim — and announce — the same completion.
+     */
+    const h = harness({ depot: DEPOT({ complete: true }) });
+
+    const first = await syncColonyProjects(h.store);
+    // The fake's markComplete remembers the transition, as the real guarded update does.
+    const second = await syncColonyProjects(h.store);
+
+    expect(first.completed).toBe(1);
+    expect(second.completed).toBe(0);
+    expect(h.completed).toHaveLength(1);
   });
 });
 

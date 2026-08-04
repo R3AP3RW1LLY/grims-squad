@@ -20,6 +20,9 @@ import {
   PROMOTIONS_SERVICE,
 } from './admin.tokens.js';
 import { PrismaDashboardStore } from './dashboard.store.js';
+import { LIVE_SERVICE } from '../live/live.tokens.js';
+import { liveNudgeOf } from '../live/live-nudge.js';
+import type { LiveService } from '../live/live.service.js';
 
 /**
  * Imports AuthModule for TotpService: the AdminGateGuard resolves it, and a
@@ -36,8 +39,11 @@ const cache = (): Redis => new Redis(process.env['REDIS_URL'] ?? 'redis://localh
       // Promotions, for the month button and the per-member override. Reads the ladder from the
       // SSOT file and applies rank changes to Discord as well as to our rows.
       provide: PROMOTIONS_SERVICE,
-      inject: [PrismaClient],
-      useFactory: (db: PrismaClient) => new PromotionsService(db),
+      // LIVE_SERVICE optional: the promotion notice is decoration, and a wiring without the live
+      // module must still promote. `liveNudgeOf` tolerates null.
+      inject: [PrismaClient, { token: LIVE_SERVICE, optional: true }],
+      useFactory: (db: PrismaClient, live?: LiveService) =>
+        new PromotionsService(db, liveNudgeOf(live)),
     },
     {
       provide: DASHBOARD_STORE,
