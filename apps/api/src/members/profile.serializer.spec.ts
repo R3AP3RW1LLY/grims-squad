@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   serializeProfile,
+  resolvePrivacy,
   PRIVACY_FIELDS,
   DEFAULT_PRIVACY,
   type PrivacySettings,
@@ -54,7 +55,7 @@ const SOURCE: ProfileSource = {
   activity: { messages: 412, voiceJoins: 37, forumPosts: 9, gameObserved: true },
 };
 
-/** Every toggle off. This is what a member who has never touched settings gets. */
+/** Every toggle off — a member who explicitly switched everything off, boards included. */
 const ALL_PRIVATE: PrivacySettings = {
   showLocation: false,
   showCredits: false,
@@ -62,6 +63,9 @@ const ALL_PRIVATE: PrivacySettings = {
   showActivity: false,
   showOnPublicRoster: false,
   showOnLeaderboard: false,
+  showLbBounties: false,
+  showLbColony: false,
+  showLbTrade: false,
       plainFonts: false,
 };
 
@@ -72,6 +76,9 @@ const ALL_PUBLIC: PrivacySettings = {
   showActivity: true,
   showOnPublicRoster: true,
   showOnLeaderboard: true,
+  showLbBounties: true,
+  showLbColony: true,
+  showLbTrade: true,
       plainFonts: false,
 };
 
@@ -156,10 +163,36 @@ describe('defaults are conservative', () => {
     expect(out).not.toHaveProperty('activity');
   });
 
-  it('every default toggle is false', () => {
+  it('every default FIELD toggle is false; only the leaderboard participation trio is on', () => {
+    /*
+     * The exception is deliberate and owner-instructed ("default all leaderboard participation
+     * on for all commanders", 2026-08-04): the showLb* switches govern PARTICIPATION in the
+     * gamified standings, not visibility of a fact about the member, and their schema columns
+     * default TRUE. Everything that hides a field stays conservative.
+     */
+    const PARTICIPATION = new Set(['showLbBounties', 'showLbColony', 'showLbTrade']);
     for (const [field, value] of Object.entries(DEFAULT_PRIVACY)) {
-      expect(value, `${field} must default to private`).toBe(false);
+      if (PARTICIPATION.has(field)) {
+        expect(value, `${field} must default to participating`).toBe(true);
+      } else {
+        expect(value, `${field} must default to private`).toBe(false);
+      }
     }
+  });
+
+  it('a partial row missing the participation trio resolves to participating, not private', () => {
+    /*
+     * Every row written before 2026-08-04 predates these columns. The database backfills them
+     * TRUE, but a partial object read through an old select must resolve the same way — the
+     * standings SQL reads COALESCE(col, true), and code disagreeing with schema here would report
+     * a member as opted out while the board still listed them.
+     */
+    const resolved = resolvePrivacy({ showLocation: true });
+    expect(resolved.showLbBounties).toBe(true);
+    expect(resolved.showLbColony).toBe(true);
+    expect(resolved.showLbTrade).toBe(true);
+    // An explicit OFF still wins — the switch is real, only its default changed.
+    expect(resolvePrivacy({ showLbTrade: false }).showLbTrade).toBe(false);
   });
 
   it('a partial privacy row falls back to private for the missing toggles', () => {

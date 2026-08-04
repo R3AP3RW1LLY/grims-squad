@@ -267,6 +267,48 @@ const NAV: readonly NavDefinition[] = [
     blurb: 'Stations whose market data has gone dark. Dock, open the market, collect the points.',
     requires: Permission.TRADE_QUERY,
   },
+  /*
+   * ★ LEADERBOARDS — SQUADRON OWNER, 2026-08-04 ★
+   *
+   * "make a new category called leaderboards ... gamify the colonization leaderboard, make badges
+   * ect the same way were doing it for databounties ... then we also need to make a leaderboard and
+   * gamify it for Trade routes make this work like the other ones too."
+   *
+   * One subsection, three boards, directly after the Data Bounties entry — the bounty hunt is what
+   * feeds the first of them, and a group renders where its FIRST member appears (see the
+   * Colonisation note above), so sitting here is what keeps the boards beside the game that scores
+   * them.
+   *
+   * The three entries share one gate, TRADE_QUERY, and that is deliberate rather than lazy: the
+   * boards are standings computed from market claims, colony deliveries and trade profit — squadron
+   * activity data of the same sensitivity as the bounty board and the market pages, and one mask
+   * governing all of it means taking the market away takes the scoreboards with it. Per-board
+   * VISIBILITY of a member is their own choice, made in Commander Management, not here.
+   */
+  {
+    href: '/leaderboards/bounties',
+    label: 'Data Runners',
+    section: 'squadron',
+    subsection: 'Leaderboards',
+    blurb: 'Who has been lighting up dark stations — staler pays more, jackpots pay double.',
+    requires: Permission.TRADE_QUERY,
+  },
+  {
+    href: '/leaderboards/colony',
+    label: 'Colony Builders',
+    section: 'squadron',
+    subsection: 'Leaderboards',
+    blurb: 'Who has hauled the most to colonisation projects, tonne by delivered tonne.',
+    requires: Permission.TRADE_QUERY,
+  },
+  {
+    href: '/leaderboards/trade',
+    label: 'Trade Barons',
+    section: 'squadron',
+    subsection: 'Leaderboards',
+    blurb: 'Who has banked the most realized trading profit — earned credits, not moved cargo.',
+    requires: Permission.TRADE_QUERY,
+  },
   {
     href: '/ops',
     label: 'Operations',

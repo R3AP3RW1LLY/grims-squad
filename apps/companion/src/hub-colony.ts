@@ -440,6 +440,14 @@ export interface RosterEntry {
   readonly delivered: number;
   /** True for your own row. Decided by the hub — the app holds a device token, not a user id. */
   readonly you: boolean;
+  /**
+   * True when this build is the one the member has marked as their current effort.
+   *
+   * One per member, held by the hub — it is what keeps the build overlay populated wherever they
+   * fly, and the roster shows it so a crew can see who is actually ON this build tonight rather
+   * than merely signed up to it.
+   */
+  readonly current: boolean;
 }
 
 export const colonyRoster = (
@@ -453,6 +461,42 @@ export const colonyJoin = (call: HubCall, id: string): Promise<Answer<{ ok: true
 
 export const colonyLeave = (call: HubCall, id: string): Promise<Answer<{ ok: true }>> =>
   hubColony(call, `/projects/${encodeURIComponent(id)}/leave`, { method: 'POST', body: {} });
+
+/**
+ * Marking and clearing the member's CURRENT build — the one the overlay follows everywhere.
+ *
+ * The hub holds the choice, not this machine: a member who marks a build on their desktop and
+ * flies on their laptop should find the overlay already following it, and only a server-side
+ * record can make that true.
+ */
+export const colonySetCurrent = (call: HubCall, id: string): Promise<Answer<{ ok: true }>> =>
+  hubColony(call, `/projects/${encodeURIComponent(id)}/current`, { method: 'POST', body: {} });
+
+export const colonyClearCurrent = (call: HubCall, id: string): Promise<Answer<{ ok: true }>> =>
+  hubColony(call, `/projects/${encodeURIComponent(id)}/current`, { method: 'DELETE' });
+
+/**
+ * The member's current build, with the WHOLE project's state.
+ *
+ * This is what the build overlay draws when the member is away from the site: everyone's
+ * deliveries folded in by the hub, not just this machine's own journal — so the numbers move as
+ * ANY member hauls.
+ */
+export interface CurrentBuild {
+  readonly projectId: string;
+  readonly title: string;
+  readonly systemName: string;
+  readonly stationName: string | null;
+  readonly marketId: string;
+  readonly isPriority: boolean;
+  readonly progress: { readonly delivered: number; readonly required: number };
+  readonly needs: readonly ColonyNeed[];
+  readonly haulers: readonly ColonyHauler[];
+}
+
+export const colonyCurrent = (
+  call: HubCall,
+): Promise<Answer<{ current: CurrentBuild | null }>> => hubColony(call, '/current');
 
 /** Claim a commodity, or — with `userId` — put one on somebody else. */
 export const colonyAssign = (

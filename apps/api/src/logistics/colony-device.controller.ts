@@ -431,6 +431,89 @@ export class ColonyDeviceController {
   }
 
   /**
+   * Declares this build the caller's current one, from the app. Same service and same bar as the
+   * website's route — COLONY_VIEW, because saying which build you are hauling to is not a
+   * privilege — so the two doors cannot disagree about what "current" means.
+   */
+  @Public()
+  @Post('projects/:id/current')
+  async setCurrent(@Req() req: FastifyRequest, @Param('id') id: string) {
+    const me = await this.#caller(
+      req,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+    await this.rosters.setCurrent(id, me.userId);
+    return { ok: true };
+  }
+
+  @Public()
+  @Delete('projects/:id/current')
+  async clearCurrent(@Req() req: FastifyRequest, @Param('id') id: string) {
+    const me = await this.#caller(
+      req,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+    await this.rosters.clearCurrent(id, me.userId);
+    return { ok: true };
+  }
+
+  /**
+   * The build the member has pinned, with everything the overlay needs to draw it.
+   *
+   * ★ ONE READ, SHAPED FOR A 30-SECOND POLL ★
+   *
+   * The app asks this on a timer while the member plays, so it deliberately reuses the project,
+   * needs and haulers reads the detail route already runs and SKIPS the expensive extras — the
+   * shopping list, the delivery charts, the carrier holds. A poll that priced the galaxy twice a
+   * minute would be most of the API's work for a panel that only says what is still wanted.
+   *
+   * `{ current: null }` covers all three empty cases as ONE answer — nothing pinned, the pinned
+   * build deleted, the pinned build no longer visible to this member. The app draws no overlay;
+   * which of the three it was is not the overlay's business, and the third must not leak a title
+   * through a side door that the project routes would refuse.
+   */
+  @Public()
+  @Get('current')
+  async current(@Req() req: FastifyRequest) {
+    const me = await this.#caller(
+      req,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    const held = await this.rosters.currentFor(me.userId);
+    if (held === null) return { current: null };
+
+    // Re-read through the caller's own visibility, exactly like the detail route.
+    const project = await this.colony.byId(held.projectId, me);
+    if (project === null) return { current: null };
+
+    const [needs, haulers] = await Promise.all([
+      this.colony.needs(project.id),
+      this.colony.haulers(project.id),
+    ]);
+
+    return {
+      current: {
+        projectId: project.id,
+        title: project.title,
+        systemName: project.systemName,
+        stationName: project.stationName,
+        // A string end to end — a market id exceeds 2^53, same reasoning as the project rows.
+        marketId: project.marketId,
+        isPriority: project.isPriority,
+        // Delivered is DERIVED from the same two figures the progress bar divides, so the
+        // overlay and the project page cannot disagree about how far along the build is.
+        progress: { delivered: project.required - project.remaining, required: project.required },
+        needs,
+        haulers,
+      },
+    };
+  }
+
+  /**
    * Claim a commodity, or put one on somebody else.
    *
    * Gated on COLONY_VIEW here rather than something stronger, because the interesting check is not

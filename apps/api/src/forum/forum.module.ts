@@ -13,6 +13,7 @@ import { RecruitmentService } from './recruitment.service.js';
 import { PendingReindexQueue } from './reindex.port.js';
 import { UploadService } from '../media/upload.service.js';
 import { MediaModule } from '../media/media.module.js';
+import { LeaderboardsModule } from '../leaderboards/leaderboards.module.js';
 import { ScreeningService } from '../ai/screening.service.js';
 import { ALL_PERMISSIONS } from '@grims/shared';
 import { SignatureService } from './signature.service.js';
@@ -39,7 +40,15 @@ import { VoteService } from './vote.service.js';
    * directly and never ask the container to wire it — so the break only appeared on the first real
    * start after the thumbnail work. Worth naming: a green suite is not a booted app.
    */
-  imports: [MediaModule],
+  /*
+   * ★ LeaderboardsModule, FOR THE BADGE CHIPS ON THREAD AUTHORS ★
+   *
+   * `LeaderboardsService` is the one badge resolver in the API — the thread endpoint reads each
+   * author's showcase through it rather than growing a second copy of the showcase rules here.
+   * `member_badges` carries no ACL, so the service's plain client is the correct one; nothing
+   * about the forum's bound-client rule (INV-002) is loosened by this import.
+   */
+  imports: [MediaModule, LeaderboardsModule],
   controllers: [ForumController],
   providers: [
     /*

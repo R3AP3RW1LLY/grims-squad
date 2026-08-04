@@ -132,6 +132,11 @@ contextBridge.exposeInMainWorld('bounties', {
   leaderboard: (month?: string) => ipcRenderer.invoke('bountyLeaderboard', month),
 });
 
+contextBridge.exposeInMainWorld('leaderboards', {
+  /** One board — season, all-time, the member's own line. No month means the current season. */
+  board: (board: string, month?: string) => ipcRenderer.invoke('leaderboardBoard', board, month),
+});
+
 contextBridge.exposeInMainWorld('colony', {
   /** Both boards, plus what this member is allowed to do with them. */
   projects: () => ipcRenderer.invoke('colonyProjects'),
@@ -149,6 +154,9 @@ contextBridge.exposeInMainWorld('colony', {
   roster: (id: string) => ipcRenderer.invoke('colonyRoster', id),
   join: (id: string) => ipcRenderer.invoke('colonyJoin', id),
   leave: (id: string) => ipcRenderer.invoke('colonyLeave', id),
+  /** Marking the build the member is on RIGHT NOW — the one the build overlay follows. */
+  setCurrent: (id: string) => ipcRenderer.invoke('colonySetCurrent', id),
+  clearCurrent: (id: string) => ipcRenderer.invoke('colonyClearCurrent', id),
   /** Claim a commodity, or assign one to somebody else. The hub decides whether you may. */
   assign: (id: string, body: unknown) => ipcRenderer.invoke('colonyAssign', id, body),
   unassign: (id: string, body: unknown) => ipcRenderer.invoke('colonyUnassign', id, body),

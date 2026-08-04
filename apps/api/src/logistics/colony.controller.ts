@@ -613,6 +613,37 @@ export class ColonyController {
   }
 
   /**
+   * Declares this build the caller's current one — the one the companion's overlay pins.
+   *
+   * COLONY_VIEW is the whole bar, like join: saying which build you are hauling to is not a
+   * privilege. The service enforces "at most one per member" through the table's key, so setting
+   * a second build moves the pin rather than growing a list.
+   */
+  @Post('projects/:id/current')
+  async setCurrent(@User() caller: CurrentUser | undefined, @Param('id') id: string) {
+    const me = this.#requireSession(caller);
+    await this.#assert(
+      caller,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+    await this.rosters.setCurrent(id, me.userId);
+    return { ok: true };
+  }
+
+  @Delete('projects/:id/current')
+  async clearCurrent(@User() caller: CurrentUser | undefined, @Param('id') id: string) {
+    const me = this.#requireSession(caller);
+    await this.#assert(
+      caller,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+    await this.rosters.clearCurrent(id, me.userId);
+    return { ok: true };
+  }
+
+  /**
    * Claim a commodity, or put one on somebody else.
    *
    * Gated on COLONY_VIEW here rather than something stronger, because the interesting check is not

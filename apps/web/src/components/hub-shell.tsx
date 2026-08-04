@@ -30,6 +30,8 @@ import {
   WrenchScrewdriverIcon,
   TruckIcon,
   BuildingOffice2Icon,
+  TrophyIcon,
+  MapIcon,
 } from '@heroicons/react/24/outline';
 import { ChevronDownIcon } from '@heroicons/react/20/solid';
 import { ViewAsBanner } from './view-as-banner';
@@ -97,6 +99,9 @@ const ICONS: Record<string, typeof HomeIcon> = {
   '/app/training': AcademicCapIcon,
   '/gmsd-ai/ask': ChatBubbleLeftRightIcon,
   '/gmsd-ai/train': SparklesIcon,
+  // Stations gone dark on the map, which is what a runner is fixing. This entry was missing and
+  // the board fell back to HomeIcon — two "home" entries in one section, neither of them home.
+  '/bounties': MapIcon,
 };
 
 /**
@@ -121,6 +126,8 @@ const SUBSECTION_ICONS: Record<string, typeof HomeIcon> = {
   'Logistics & Trade': TruckIcon,
   // Construction sites, which is what the whole category is about building.
   Colonisation: BuildingOffice2Icon,
+  // Standings and the badges they pay out. A trophy is the one thing all three boards award.
+  Leaderboards: TrophyIcon,
 };
 
 const SECTION_LABELS: Record<NavItem['section'], string> = {

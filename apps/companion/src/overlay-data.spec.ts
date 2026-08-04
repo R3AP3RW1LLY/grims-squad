@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildOverlayData, type OverlayInput } from './overlay-data.js';
 import type { DockedAt } from './docked.js';
+import type { CurrentBuild } from './hub-colony.js';
 
 /**
  * The overlay payload.
@@ -45,7 +46,34 @@ function input(overrides: Partial<OverlayInput> = {}): OverlayInput {
     // the honest resting state rather than an empty one.
     hold: null,
     capacity: null,
+    // Null by default too: no current build marked is the journal-fallback state, which is what
+    // every pre-existing case below was written against.
+    currentProject: null,
+    trip: null,
     now: NOW,
+    ...overrides,
+  };
+}
+
+/** The hub's answer for a marked current build. The fixture project is the docked site above. */
+function currentBuild(overrides: Partial<CurrentBuild> = {}): CurrentBuild {
+  return {
+    projectId: 'p-1',
+    title: 'Harry’s Dysfunctional Society',
+    systemName: 'Hyades Sector XJ-Z c18',
+    stationName: 'Planetary Construction Site: Harry’s Dysfunctional Society',
+    marketId: '4359491587',
+    isPriority: true,
+    progress: { delivered: 100_000, required: 137_826 },
+    needs: [
+      { commodity: 'Steel', remaining: 18_000, required: 60_984, observedAt: null },
+      { commodity: 'Aluminium', remaining: 19_826, required: 42_282, observedAt: null },
+      { commodity: 'Titanium', remaining: 0, required: 34_560, observedAt: null },
+    ],
+    haulers: [
+      { name: 'Grim', tonnes: 60_000 },
+      { name: 'Harry', tonnes: 40_000 },
+    ],
     ...overrides,
   };
 }
@@ -103,6 +131,55 @@ describe('the overlay payload', () => {
   it('says nothing about a dock that is not a construction site', () => {
     expect(buildOverlayData(input({ dock: dockedAt({ site: null }) })).build).toBeNull();
     expect(buildOverlayData(input({ dock: null })).build).toBeNull();
+  });
+
+  /* ------------------------------------------------------- the current build */
+
+  it('follows the current build wherever the member is — no dock needed at all', () => {
+    /*
+     * ★ THE OWNER'S COMPLAINT THIS EXISTS FOR ★
+     *
+     * The panel used to empty the moment the member undocked, which is most of a hauling loop.
+     * With a current build marked, the hub's whole-project answer fills it anywhere.
+     */
+    const { build } = buildOverlayData(input({ dock: null, currentProject: currentBuild() }));
+
+    expect(build?.title).toBe('Harry’s Dysfunctional Society');
+    expect(build?.fromHub).toBe(true);
+    expect(build?.delivered).toBe(100_000);
+    expect(build?.required).toBe(137_826);
+    expect(build?.haulers).toBe(2);
+    // Finished lines are dropped here exactly as on the depot path — Titanium is done.
+    expect(build?.needs.map((n) => n.commodity)).toEqual(['Steel', 'Aluminium']);
+  });
+
+  it('prefers the depot reading when docked at the current build itself', () => {
+    // The fixture dock IS the current build's market. The pad's own heartbeat is seconds fresher
+    // than the hub's copy, so its numbers win while the member is standing there.
+    const { build } = buildOverlayData(input({ currentProject: currentBuild() }));
+
+    expect(build?.fromHub).toBe(false);
+    expect(build?.delivered).toBe(92_006);
+    // But the project's TITLE and crew come from the hub — no heartbeat carries either.
+    expect(build?.title).toBe('Harry’s Dysfunctional Society');
+    expect(build?.haulers).toBe(2);
+  });
+
+  it('keeps the hub view when docked at some OTHER construction site', () => {
+    // A member restocking at a different depot is still on the business of THEIR build; the panel
+    // does not defect to whatever pad they happen to be parked on.
+    const elsewhere = dockedAt({ marketId: '999999' } as Partial<DockedAt>);
+    const { build } = buildOverlayData(input({ dock: elsewhere, currentProject: currentBuild() }));
+
+    expect(build?.fromHub).toBe(true);
+    expect(build?.delivered).toBe(100_000);
+  });
+
+  it('falls back to the journal-docked view when no current build is set', () => {
+    // The behaviour the panel has always had, untouched — including for unposted sites.
+    const { build } = buildOverlayData(input({ currentProject: null }));
+    expect(build?.fromHub).toBe(false);
+    expect(build?.delivered).toBe(92_006);
   });
 
   /* ------------------------------------------------------------ honest nulls */
@@ -176,6 +253,50 @@ describe('the overlay payload', () => {
     );
 
     expect(cargo?.items[0]?.wanted).toBe(false);
+  });
+
+  it('marks the hold against the CURRENT build when away from the site', () => {
+    // Loading up three systems away: the hub's needs list says which of the hold the build is
+    // actually waiting for, exactly as the depot list does when docked.
+    const { cargo } = buildOverlayData(
+      input({
+        dock: null,
+        currentProject: currentBuild(),
+        hold: {
+          used: 700,
+          at: null,
+          items: [
+            { commodity: 'Steel', count: 600, wanted: false },
+            { commodity: 'Gold', count: 100, wanted: false },
+          ],
+        },
+      }),
+    );
+
+    expect(cargo?.items.find((i) => i.commodity === 'Steel')?.wanted).toBe(true);
+    expect(cargo?.items.find((i) => i.commodity === 'Gold')?.wanted).toBe(false);
+  });
+
+  /* ------------------------------------------------------------- the trip P&L */
+
+  it('hides the trip line entirely until money has moved', () => {
+    const emptyHold = { used: 0, at: null, items: [] };
+    // Zeros would render "Bought 0 cr · Sold 0 cr" on every launch — a row of noise, so null.
+    expect(
+      buildOverlayData(input({ hold: emptyHold, trip: { spent: 0, earned: 0, since: 'dock' } }))
+        .cargo?.trip,
+    ).toBeNull();
+    expect(buildOverlayData(input({ hold: emptyHold, trip: null })).cargo?.trip).toBeNull();
+  });
+
+  it('reports the trip’s spend and take once something has been bought or sold', () => {
+    const { cargo } = buildOverlayData(
+      input({
+        hold: { used: 0, at: null, items: [] },
+        trip: { spent: 3_240_000, earned: 4_000_000, since: 'dock' },
+      }),
+    );
+    expect(cargo?.trip).toEqual({ spent: 3_240_000, earned: 4_000_000 });
   });
 
   it('sends no route, because nothing records the run somebody picked', () => {

@@ -40,6 +40,19 @@ export interface PrivacySettings {
   readonly showOnPublicRoster: boolean;
   readonly showOnLeaderboard: boolean;
   /**
+   * Per-board participation, under the master switch above.
+   *
+   * ★ SQUADRON OWNER, 2026-08-04 ★
+   *
+   * "show each leaderboard there and add all future leaderboards here too, default all
+   * leaderboard participation on for all commanders please!" `showOnLeaderboard` still turns
+   * everything off at once; these narrow it board by board. A member appears on a board only
+   * when the master switch AND that board's switch agree.
+   */
+  readonly showLbBounties: boolean;
+  readonly showLbColony: boolean;
+  readonly showLbTrade: boolean;
+  /**
    * Render every post and signature in the site face, whatever their author chose.
    *
    * ★ A READING SETTING, NOT A PRIVACY ONE ★
@@ -55,10 +68,10 @@ export interface PrivacySettings {
 /**
  * What a member gets before they have ever opened the settings page.
  *
- * Every value is false, and that is the whole point: the privacy row is created
- * lazily, so in production most members have no row at all. This object is what
- * `null` resolves to, which makes "no row" mean "fully private" rather than
- * "unconfigured, so show everything".
+ * Every FIELD toggle is false, and that is the whole point: the privacy row is
+ * created lazily, so in production most members have no row at all. This object
+ * is what `null` resolves to, which makes "no row" mean "fully private" rather
+ * than "unconfigured, so show everything".
  */
 export const DEFAULT_PRIVACY: PrivacySettings = {
   showLocation: false,
@@ -67,6 +80,21 @@ export const DEFAULT_PRIVACY: PrivacySettings = {
   showActivity: false,
   showOnPublicRoster: false,
   showOnLeaderboard: false,
+  /*
+   * ★ ON, AGAINST EVERY OTHER DEFAULT IN THIS OBJECT — AND NOT A MISTAKE ★
+   *
+   * The field toggles above hide FACTS about a member — where they are, what
+   * they own — so their conservative default is off. These three are
+   * PARTICIPATION switches for the gamified boards, the schema columns default
+   * TRUE, and the squadron owner's instruction was explicit: "default all
+   * leaderboard participation on for all commanders". Code and schema must
+   * tell the same story, or a member with no row would participate in the
+   * standings SQL (which reads COALESCE(col, true)) while this object reported
+   * them opted out.
+   */
+  showLbBounties: true,
+  showLbColony: true,
+  showLbTrade: true,
   // Off: an author's chosen font is shown unless a reader says otherwise. Turning them all off by
   // default would silently discard something every member deliberately picked.
   plainFonts: false,
@@ -208,6 +236,15 @@ export function resolvePrivacy(stored: Partial<PrivacySettings> | null | undefin
     showActivity: stored.showActivity === true,
     showOnPublicRoster: stored.showOnPublicRoster === true,
     showOnLeaderboard: stored.showOnLeaderboard === true,
+    /*
+     * `!== false` where everything above is `=== true`, because these DEFAULT ON (see
+     * DEFAULT_PRIVACY). A partial row missing one of them must resolve to participating —
+     * exactly as the database column default and the standings SQL's COALESCE(col, true)
+     * already decide — not fall to private through a check written for the field toggles.
+     */
+    showLbBounties: stored.showLbBounties !== false,
+    showLbColony: stored.showLbColony !== false,
+    showLbTrade: stored.showLbTrade !== false,
     plainFonts: stored.plainFonts === true,
   };
 }

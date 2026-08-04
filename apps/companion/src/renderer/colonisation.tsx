@@ -78,6 +78,12 @@ declare global {
       roster(id: string): Promise<Answer<{ roster: RosterEntry[] }>>;
       join(id: string): Promise<Answer<{ ok: true }>>;
       leave(id: string): Promise<Answer<{ ok: true }>>;
+      /**
+       * Marking the build the member is hauling to RIGHT NOW. One per member, held by the hub —
+       * it is what the build overlay follows wherever they fly.
+       */
+      setCurrent(id: string): Promise<Answer<{ ok: true }>>;
+      clearCurrent(id: string): Promise<Answer<{ ok: true }>>;
       assign(
         id: string,
         body: { commodity: string; tonnes?: number; userId?: string },
@@ -2078,7 +2084,27 @@ function Roster({
           roster.map((m) => (
             <div key={m.userId} style={{ padding: '7px 0', borderTop: `1px solid ${C.hairline}` }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
-                <span style={{ fontSize: '13px' }}>{m.name}</span>
+                <span style={{ fontSize: '13px', display: 'inline-flex', alignItems: 'baseline', gap: '8px' }}>
+                  {m.name}
+                  {/*
+                    Who is actually ON this build tonight, not merely signed up to it. Your own
+                    row says it through the toggle below instead — a marker AND a control saying
+                    the same thing would be the page telling you twice.
+                  */}
+                  {m.current && !m.you ? (
+                    <span
+                      style={{
+                        fontFamily: 'var(--font-mono)',
+                        fontSize: '9px',
+                        letterSpacing: '0.14em',
+                        textTransform: 'uppercase',
+                        color: C.cyan,
+                      }}
+                    >
+                      on this build
+                    </span>
+                  ) : null}
+                </span>
                 <span style={{ fontSize: '12px', color: C.dim, fontVariantNumeric: 'tabular-nums' }}>
                   {m.delivered > 0 ? `${tonnes(m.delivered)} delivered` : 'nothing yet'}
                 </span>
@@ -2159,15 +2185,48 @@ function Roster({
           The hub decides who you are — `you` comes back on the roster row — because the app holds a
           device token rather than a user id and should not be guessing at its own identity.
         */}
-        <div style={{ marginTop: '12px' }}>
+        <div style={{ marginTop: '12px', display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
           {roster.some((m) => m.you) ? (
-            <Button
-              tone="danger"
-              disabled={busy}
-              onClick={() => void act(() => window.colony.leave(projectId))}
-            >
-              Leave this build
-            </Button>
+            <>
+              <Button
+                tone="danger"
+                disabled={busy}
+                onClick={() => void act(() => window.colony.leave(projectId))}
+              >
+                Leave this build
+              </Button>
+              {/*
+                ★ THE CURRENT BUILD — SQUADRON OWNER, 2026-08-04 ★
+
+                One build per member, held by the hub. This is what the build overlay follows
+                wherever the member flies: mark it here and the tracker stays populated three
+                systems away, moving as ANY member hauls. Ticking it on another build moves the
+                mark — the hub keeps exactly one.
+              */}
+              <label
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '9px',
+                  fontSize: '13px',
+                  color: C.dim,
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={roster.some((m) => m.you && m.current)}
+                  disabled={busy}
+                  onChange={(e) =>
+                    void act(() =>
+                      (e.target as HTMLInputElement).checked
+                        ? window.colony.setCurrent(projectId)
+                        : window.colony.clearCurrent(projectId),
+                    )
+                  }
+                />
+                This is my current build
+              </label>
+            </>
           ) : (
             <Button
               tone="primary"

@@ -1,4 +1,5 @@
 import { notFound } from 'next/navigation';
+import { badgeDisplay, type BadgeDisplay } from '@grims/shared';
 import { PageHeader, PageBody, Panel, RailStat } from '../../../../../components/hub-page';
 import {
   getHubThread,
@@ -53,6 +54,25 @@ export default async function ThreadPage({
 
   const { thread, posts, signatures, identities } = data;
   const access = await getThreadGrants(thread.id);
+
+  /*
+   * ★ BADGE KEYS ARE RESOLVED HERE, ON THE SERVER ★
+   *
+   * The thread response carries up to three showcased badge KEYS per author; what a key looks
+   * like lives in the shared catalogue. `Conversation` is a client component, and a client bundle
+   * may not import runtime values from the `@grims/shared` barrel — it drags in `node:crypto` and
+   * fails the build (see client-imports.spec.ts) — so the lookup happens here and the chips travel
+   * as resolved display data. A key the catalogue no longer knows resolves to null and is dropped
+   * silently: an old award is not worth an "unknown badge" chip on somebody's post.
+   */
+  const badges: Record<string, BadgeDisplay[]> = {};
+  for (const [authorId, keys] of Object.entries(data.badges ?? {})) {
+    const resolved = keys
+      .slice(0, 3)
+      .map((key) => badgeDisplay(key))
+      .filter((b): b is BadgeDisplay => b !== null);
+    if (resolved.length > 0) badges[authorId] = resolved;
+  }
 
   /*
    * ★ THE MEMBER'S STORED TIMEZONE, NEVER THE BROWSER'S ★
@@ -180,6 +200,7 @@ export default async function ThreadPage({
           threadSlug={threadSlug}
           signatures={signatures}
           identities={identities}
+          badges={badges}
         />
       </PageBody>
     </>

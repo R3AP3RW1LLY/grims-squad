@@ -54,6 +54,14 @@ export interface RosterEntry {
    * to "should this button say Join or Leave", which had better not be a guess.
    */
   readonly you: boolean;
+  /**
+   * True when this member has declared THIS build their current one.
+   *
+   * Joining says "count me in"; current says "this is the one I am hauling to right now", and a
+   * member holds at most one. Both surfaces read it off the roster so "who is on the build" and
+   * "who is on the build NOW" come from the same response rather than a second round trip.
+   */
+  readonly current: boolean;
 }
 
 export class ColonyRosterService {
@@ -89,7 +97,7 @@ export class ColonyRosterService {
   async roster(projectId: string, callerId: string): Promise<readonly RosterEntry[]> {
     await this.#project(projectId, callerId);
 
-    const [members, assignments, delivered] = await Promise.all([
+    const [members, assignments, delivered, current] = await Promise.all([
       this.db.$queryRawUnsafe<Array<{ user_id: string; name: string; joined_at: Date }>>(
         `SELECT m.user_id, u.display_name AS name, m.joined_at
            FROM colony_members m
@@ -119,15 +127,23 @@ export class ColonyRosterService {
           GROUP BY user_id`,
         projectId,
       ),
+      // Who has declared THIS build their current one. One small read for the whole roster,
+      // rather than a per-member lookup — the same N+1 reasoning as the delivered totals above.
+      this.db.currentBuild.findMany({
+        where: { projectId },
+        select: { userId: true },
+      }),
     ]);
 
     const byUser = new Map(delivered.map((d) => [d.user_id, Number(d.tonnes)]));
+    const onIt = new Set(current.map((c) => c.userId));
 
     return members.map((m) => ({
       userId: m.user_id,
       name: m.name,
       joinedAt: m.joined_at,
       you: m.user_id === callerId,
+      current: onIt.has(m.user_id),
       assignments: assignments
         .filter((a) => a.user_id === m.user_id)
         .map((a) => ({
@@ -174,6 +190,67 @@ export class ColonyRosterService {
       this.db.colonyAssignment.deleteMany({ where: { projectId, userId } }),
       this.db.colonyMember.deleteMany({ where: { projectId, userId } }),
     ]);
+  }
+
+  /**
+   * Declares this build the caller's current one.
+   *
+   * ★ AT MOST ONE PER MEMBER, ENFORCED BY THE KEY ★
+   *
+   * `current_builds` is keyed on the USER, so declaring a second build silently replaces the
+   * first rather than accumulating a list — "current" that can be plural is not current. The
+   * upsert is what makes pressing the button on a new build one gesture instead of clear-then-set.
+   *
+   * Visibility goes through the same `#project` read join and leave use: a project the caller
+   * cannot see answers "not available", never "exists but is not yours".
+   */
+  async setCurrent(projectId: string, userId: string): Promise<void> {
+    const project = await this.#project(projectId, userId);
+
+    // The same refusal as join, for the same reason: a finished build is simply over, and
+    // declaring yourself currently on it would put a truth nobody can act on in the overlay.
+    if (project.completedAt !== null) {
+      throw new AppError(ErrorCode.VALIDATION_FAILED, 'That build is already finished.');
+    }
+
+    await this.db.currentBuild.upsert({
+      where: { userId },
+      create: { userId, projectId },
+      // `setAt` refreshed on the move: it answers "since when has this been current", and
+      // carrying the old build's timestamp onto the new one would be a wrong answer.
+      update: { projectId, setAt: new Date() },
+    });
+  }
+
+  /**
+   * Clears the caller's current build, if it is this one.
+   *
+   * ★ NO VISIBILITY CHECK, DELIBERATELY — UNLIKE EVERY METHOD ABOVE ★
+   *
+   * Clearing is scoped to the caller's OWN row and discloses nothing about any project: the
+   * delete matches on (user, project) and succeeds identically whether the id is real, invisible
+   * or invented. Requiring `#project` here would trap a member whose current build was made
+   * private after they declared it — still pinned to something they can no longer even name, with
+   * the one route out refusing them. Pointing at a DIFFERENT build is not an error either;
+   * the state the caller asked for ("not current on :id") already holds.
+   */
+  async clearCurrent(projectId: string, userId: string): Promise<void> {
+    await this.db.currentBuild.deleteMany({ where: { userId, projectId } });
+  }
+
+  /**
+   * The build this member is currently on, or null.
+   *
+   * The project itself is NOT resolved here — the caller re-reads it through their own
+   * visibility (ColonyService.byId), so a pointer at a build somebody has since hidden answers
+   * "no current build" rather than leaking its title through a side door.
+   */
+  async currentFor(userId: string): Promise<{ projectId: string; setAt: Date } | null> {
+    const row = await this.db.currentBuild.findUnique({
+      where: { userId },
+      select: { projectId: true, setAt: true },
+    });
+    return row ?? null;
   }
 
   /**

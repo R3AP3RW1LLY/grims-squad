@@ -42,6 +42,11 @@ export interface OverlayData {
     readonly delivered: number;
     readonly required: number;
     readonly haulers: number;
+    /**
+     * True when these numbers are the hub's whole-project answer — everyone's deliveries, moving
+     * while ANY member hauls. False when they come off the depot pad in front of the member.
+     */
+    readonly fromHub: boolean;
   } | null;
   readonly route: {
     readonly commodity: string;
@@ -56,6 +61,8 @@ export interface OverlayData {
     readonly items: ReadonlyArray<{ commodity: string; count: number; wanted: boolean }>;
     readonly used: number;
     readonly capacity: number | null;
+    /** This trip's buying and selling. Null when nothing has moved — the line hides entirely. */
+    readonly trip: { readonly spent: number; readonly earned: number } | null;
   } | null;
   readonly status: {
     readonly sending: boolean;
@@ -228,7 +235,9 @@ function BuildPanel({
   accent: string;
   show: (f: string) => boolean;
 }): preact.JSX.Element {
-  if (data === null) return <Waiting what="Dock at a posted construction site." />;
+  // Both ways the panel fills, said out loud: the hub path follows a marked build everywhere, the
+  // journal path lights up the moment the member docks at any construction site.
+  if (data === null) return <Waiting what="Mark a current build, or dock at a construction site." />;
 
   const pct = data.required > 0 ? Math.round((data.delivered / data.required) * 100) : null;
   // The four biggest shortfalls. A construction site wants around thirty commodities and an overlay
@@ -262,6 +271,9 @@ function BuildPanel({
           <p style={{ margin: '3px 0 0', fontSize: '0.8em', color: C.dim }}>
             {data.delivered.toLocaleString()} of {data.required.toLocaleString()} t · {pct}%
             {show('haulers') && data.haulers > 0 ? ` · ${data.haulers} hauling` : ''}
+            {/* Says where these numbers come from: the whole squadron's deliveries, not just
+                this machine's journal — which is why they move while the member is elsewhere. */}
+            {data.fromHub ? ' · live from the squadron' : ''}
           </p>
         </div>
       ) : null}
@@ -324,7 +336,23 @@ function CargoPanel({
   show: (f: string) => boolean;
 }): preact.JSX.Element {
   if (data === null) return <Waiting what="Waiting for your hold." />;
-  if (data.items.length === 0) return <Waiting what="Hold empty." />;
+
+  /*
+   * ★ THE TRIP P&L SURVIVES AN EMPTY HOLD ★
+   *
+   * An empty hold plus a P&L line is the state a hauler is in seconds after selling everything —
+   * which is exactly when the net is the number they want. The early "Hold empty." return used to
+   * end the panel; now the ledger line rides below it. It is null — and completely hidden — until
+   * something has actually been bought or sold this trip.
+   */
+  if (data.items.length === 0) {
+    return (
+      <div>
+        <Waiting what="Hold empty." />
+        <TripLine trip={data.trip} />
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -357,7 +385,39 @@ function CargoPanel({
           {data.capacity === null ? '' : ` / ${data.capacity.toLocaleString()}`} t
         </p>
       ) : null}
+
+      <TripLine trip={data.trip} />
     </div>
+  );
+}
+
+/**
+ * This trip's money: what went out at the buy screens, what came back at the sell screens, and
+ * the difference. Hidden entirely — not shown as zeros — until something has moved, so the line
+ * only ever appears when it has something to say.
+ */
+function TripLine({
+  trip,
+}: {
+  trip: NonNullable<OverlayData['cargo']>['trip'];
+}): preact.JSX.Element | null {
+  if (trip === null) return null;
+
+  const net = trip.earned - trip.spent;
+  return (
+    <p style={{ margin: '4px 0 0', fontSize: '0.8em', color: C.dim }}>
+      Bought {trip.spent.toLocaleString()} cr · Sold {trip.earned.toLocaleString()} cr ·{' '}
+      <span
+        style={{
+          fontVariantNumeric: 'tabular-nums',
+          // Green in profit, red in the hole, and the resting dim at exactly break-even.
+          color: net > 0 ? C.good : net < 0 ? C.bad : C.dim,
+        }}
+      >
+        Net {net < 0 ? '−' : '+'}
+        {Math.abs(net).toLocaleString()} cr
+      </span>
+    </p>
   );
 }
 

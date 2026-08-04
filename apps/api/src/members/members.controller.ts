@@ -3,6 +3,7 @@ import type { FastifyRequest } from 'fastify';
 import { AppError, ErrorCode } from '@grims/shared';
 import { User, type CurrentUser } from '../auth/current-user.js';
 import { verifyCsrf, readCsrfCookie } from '../common/csrf.js';
+import { LeaderboardsService, type BadgeView } from '../leaderboards/leaderboards.service.js';
 import { MEMBERS_STORE, type MembersStore } from './members.tokens.js';
 import { LEADERSHIP_CEILING } from './members.store.js';
 import { WeaponsStore, type WeaponsChart } from './weapons.store.js';
@@ -31,10 +32,12 @@ const TOGGLES = Object.keys(DEFAULT_PRIVACY) as Array<keyof PrivacySettings>;
 /**
  * Reads a privacy patch out of an untrusted body.
  *
- * Only the six known toggles are read, and only when the value is a real
- * boolean. A string "false" is rejected rather than coerced: it arrives from a
- * form that forgot to parse its own checkbox, and coercing it would silently
- * turn a member's OFF into an ON — the exact direction INV-027 cares about.
+ * Only the known toggles are read — TOGGLES derives from DEFAULT_PRIVACY, so a
+ * toggle added there is accepted here without a second list to update — and
+ * only when the value is a real boolean. A string "false" is rejected rather
+ * than coerced: it arrives from a form that forgot to parse its own checkbox,
+ * and coercing it would silently turn a member's OFF into an ON — the exact
+ * direction INV-027 cares about.
  */
 function readPatch(body: unknown): Partial<PrivacySettings> {
   if (typeof body !== 'object' || body === null) {
@@ -61,6 +64,9 @@ export class MembersController {
   constructor(
     @Inject(MEMBERS_STORE) private readonly store: MembersStore,
     @Inject(WeaponsStore) private readonly weapons: WeaponsStore,
+    // The one badge resolver in the API — the dashboard's list and the forum's chips read
+    // through the same service, so the two surfaces cannot disagree about what somebody earned.
+    @Inject(LeaderboardsService) private readonly leaderboards: LeaderboardsService,
   ) {}
 
   /**
@@ -99,15 +105,24 @@ export class MembersController {
    * endpoint that reads anybody's.
    */
   @Get('me/commander')
-  async myCommander(@User() caller: CurrentUser | undefined): Promise<CommanderProfile> {
+  async myCommander(
+    @User() caller: CurrentUser | undefined,
+  ): Promise<CommanderProfile & { badges: BadgeView[] }> {
     if (caller === undefined) {
       throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in to see your commander.');
     }
 
-    const [events, inara, handle] = await Promise.all([
+    const [events, inara, handle, badges] = await Promise.all([
       this.store.profileEvents(caller.userId),
       this.store.inaraRanks([caller.userId]),
       this.store.handleOf(caller.userId),
+      /*
+       * The FULL list, name and icon resolved, newest first — this is the member's own trophy
+       * shelf, not the space-constrained showcase the forum chips use. Their own data, so no
+       * privacy filter applies here either: opting out of a board hides them from the standings,
+       * never their badges from themselves.
+       */
+      this.leaderboards.badgesOf(caller.userId),
     ]);
 
     // The verified name comes from the member row. Two reads rather than one
@@ -116,11 +131,14 @@ export class MembersController {
     const row = handle === null ? null : await this.store.byHandle(handle);
 
     const cached = inara.get(caller.userId);
-    return buildCommanderProfile(
-      events,
-      row?.source.cmdrName ?? null,
-      cached === undefined ? null : { ranks: [...cached.ranks], fetchedAt: cached.fetchedAt },
-    );
+    return {
+      ...buildCommanderProfile(
+        events,
+        row?.source.cmdrName ?? null,
+        cached === undefined ? null : { ranks: [...cached.ranks], fetchedAt: cached.fetchedAt },
+      ),
+      badges,
+    };
   }
 
   @Get('members')

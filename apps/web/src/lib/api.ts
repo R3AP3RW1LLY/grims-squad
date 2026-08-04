@@ -1,5 +1,5 @@
 import { cookies } from 'next/headers';
-import type { SignatureView } from '@grims/shared';
+import type { LeaderboardKey, SignatureView } from '@grims/shared';
 import type { BannerIdentity } from '../components/forum/banner-render';
 
 /**
@@ -90,6 +90,15 @@ export interface PrivacySettings {
   showOnLeaderboard: boolean;
   /** Render every post and signature in the site face, whatever their author chose. */
   plainFonts: boolean;
+  /*
+   * One switch per leaderboard, all defaulting ON — squadron owner, 2026-08-04: "default all
+   * leaderboard participation on for all commanders." Per-board rather than one master switch,
+   * because hiding from the trade standings while staying on the colony board is a choice a
+   * member can reasonably make. The names come from the shared LEADERBOARDS catalogue.
+   */
+  showLbBounties: boolean;
+  showLbColony: boolean;
+  showLbTrade: boolean;
 }
 
 /**
@@ -1083,6 +1092,13 @@ export const getHubThread = (
    * stop updating every banner its author has ever posted.
    */
   identities: Record<string, BannerIdentity>;
+  /**
+   * Up to three showcased badge KEYS per author, keyed by author id like the signatures — and per
+   * AUTHOR rather than per post for the same reason: a thread's badge weight grows with the number
+   * of people in it, not with how much they said. Keys only; the page resolves them against the
+   * shared catalogue, and a key the catalogue no longer knows is skipped rather than drawn wrong.
+   */
+  badges: Record<string, string[]>;
 } | null> =>
   get(
     `/v1/forum/categories/${encodeURIComponent(slug)}/threads/${encodeURIComponent(threadSlug)}`,
@@ -1705,6 +1721,70 @@ export const getBountyLeaderboard = (month?: string): Promise<BountyLeaderboard 
   get(`/v1/bounties/leaderboard${month === undefined ? '' : `?month=${encodeURIComponent(month)}`}`, {
     authed: true,
   });
+
+// ── Leaderboards ─────────────────────────────────────────────────────────────
+//
+// Squadron owner, 2026-08-04: "make a new category called leaderboards." Three boards — Data
+// Runners, Colony Builders, Trade Barons — each with a monthly season and an all-time honour roll.
+// The CATALOGUE (names, what the points measure, tier thresholds) lives in @grims/shared; this
+// endpoint returns only the STANDINGS, so the two cannot disagree about what a board is called.
+
+/** One row of a standings table. `claims` counts scoring events — docks, deliveries, sales. */
+export interface LeaderboardEntry {
+  handle: string;
+  displayName: string;
+  points: number;
+  claims: number;
+}
+
+/** One board's standings: the running season, the all-time roll, and the caller's own line. */
+export interface LeaderboardStandings {
+  key: LeaderboardKey;
+  name: string;
+  /** What the points measure, in the catalogue's own sentence. Printed as the page lead. */
+  measures: string;
+  season: LeaderboardEntry[];
+  allTime: LeaderboardEntry[];
+  /**
+   * The signed-in caller's own numbers, whether or not they made the table. Null for a caller
+   * with nothing scored on this board.
+   *
+   * `seasonRank` is typed nullable defensively: the contract lists the field without saying what
+   * a member with lifetime points but no season activity ranks AS, and rendering "#null" would be
+   * worse than rendering nothing.
+   */
+  me: { seasonPoints: number; lifetimePoints: number; seasonRank: number | null } | null;
+}
+
+export interface LeaderboardsResponse {
+  /** The season the tables describe, `YYYY-MM`. Echoed so "?month=" typos cannot mislabel a table. */
+  month: string;
+  boards: LeaderboardStandings[];
+}
+
+/** Every board's standings in one read. The board pages each pick their own out of it. */
+export const getLeaderboards = (month?: string): Promise<LeaderboardsResponse | null> =>
+  get(`/v1/leaderboards${month === undefined ? '' : `?month=${encodeURIComponent(month)}`}`, {
+    authed: true,
+  });
+
+/**
+ * One badge the caller has earned, arriving ready to draw.
+ *
+ * The display fields are resolved SERVER-side from the shared catalogue rather than looked up
+ * here, so a retired key still renders whatever it meant when it was awarded.
+ */
+export interface EarnedBadge {
+  key: string;
+  name: string;
+  description: string;
+  /** One emoji — renders identically in the app, the site and Discord. */
+  icon: string;
+  earnedAt: string;
+}
+
+export const getMyBadges = (): Promise<{ badges: EarnedBadge[] } | null> =>
+  get('/v1/leaderboards/badges/me', { authed: true });
 
 /** One leg of a planned run. */
 export interface RouteLeg {

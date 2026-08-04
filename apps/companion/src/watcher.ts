@@ -1,5 +1,6 @@
 import { readJournalChunk, journalFilesInOrder } from './journal-reader.js';
 import { trackDocked, type DockedAt } from './docked.js';
+import { foldTrip, EMPTY_TRIP, type TripLedger } from './trip-ledger.js';
 import type { CompanionConfig } from './config.js';
 import type { Uploader } from './uploader.js';
 
@@ -88,6 +89,12 @@ export interface WatchOutcome {
    * Null means "not docked, as far as we know", which is also what a first run reports.
    */
   readonly dockedAt: DockedAt | null;
+  /**
+   * The trip P&L, folded over every event this pass read — the same plumbing as `dockedAt`, for
+   * the same reason: this is the only place the journal is parsed, and a second reader would be a
+   * second set of offsets that drift.
+   */
+  readonly trip: TripLedger;
 }
 
 /**
@@ -122,11 +129,16 @@ export async function runWatchPass(
    * parameter rather than a global.
    */
   dockedBefore: DockedAt | null = null,
+  /*
+   * The running trip, threaded the same way. Defaults to the empty trip: a fresh app start begins
+   * an empty ledger on purpose — nothing is seeded from the tail, see trip-ledger.ts.
+   */
+  tripBefore: TripLedger = EMPTY_TRIP,
 ): Promise<{ outcome: WatchOutcome; config: CompanionConfig }> {
   if (!config.enabled || config.deviceToken === '') {
     // Not an error. The app is installed and waiting, which is the state it
     // ships in — being installed is not consent to transmit.
-    return { outcome: empty(), config };
+    return { outcome: empty(null, tripBefore), config };
   }
 
   const all = journalFilesInOrder(await fs.listFiles(journalDir));
@@ -148,6 +160,8 @@ export async function runWatchPass(
   // Seeded from what the caller already believed, so a station docked at ten minutes ago survives
   // the passes in between that mention nothing.
   let docked: DockedAt | null = dockedBefore;
+  // Likewise: a buy from three passes ago is still this trip's spend until an Undocked closes it.
+  let trip: TripLedger = tripBefore;
   let sent = 0;
   let duplicates = 0;
   const refused: Record<string, number> = {};
@@ -202,6 +216,12 @@ export async function runWatchPass(
      * Nothing about this leaves the machine. It is used to pre-fill a form the member is looking at.
      */
     docked = trackDocked(docked, result.events);
+    /*
+     * The trip P&L, folded in the same breath and before the same "nothing to send" return, for
+     * the same reason as the dock: what a member paid at a buy screen is needed by the app's own
+     * overlay whether or not any of these events is in a category the squadron receives.
+     */
+    trip = foldTrip(trip, result.events);
 
     if (result.events.length === 0) {
       /*
@@ -233,7 +253,7 @@ export async function runWatchPass(
       // picks up exactly where it left off.
       return {
         outcome: {
-          ...empty(docked),
+          ...empty(docked, trip),
           gameRunning,
           filesRead,
           newFilesRead,
@@ -255,7 +275,7 @@ export async function runWatchPass(
        */
       return {
         outcome: {
-          ...empty(docked),
+          ...empty(docked, trip),
           gameRunning,
           filesRead,
           newFilesRead,
@@ -298,6 +318,7 @@ export async function runWatchPass(
   return {
     outcome: {
       dockedAt: docked,
+      trip,
       gameRunning,
       filesRead,
       newFilesRead,
@@ -333,9 +354,10 @@ export function pruneOffsets(config: CompanionConfig, present: readonly string[]
   return { ...config, offsets, sessionLive };
 }
 
-function empty(dockedAt: DockedAt | null = null): WatchOutcome {
+function empty(dockedAt: DockedAt | null = null, trip: TripLedger = EMPTY_TRIP): WatchOutcome {
   return {
     dockedAt,
+    trip,
     gameRunning: false,
     filesRead: 0,
     newFilesRead: 0,

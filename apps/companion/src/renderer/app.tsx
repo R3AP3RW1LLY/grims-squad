@@ -11,6 +11,7 @@ import { OutfitterPage } from './shipyard-outfitter.js';
 import { BuildBoardsPage } from './shipyard-boards.js';
 import { PlanningPage } from './planning.js';
 import { BuildTypesPage } from './build-types.js';
+import { LeaderboardPage } from './leaderboards.js';
 import { GroupIcon } from './icons.js';
 // The shapes come from the hub client, which is where they are defined — re-exporting them through
 // the component file would be a second name for one type.
@@ -80,6 +81,9 @@ type Page =
   | 'colony-squadron'
   | 'colony-members'
   | 'bounties'
+  | 'lb-bounties'
+  | 'lb-colony'
+  | 'lb-trade'
   | 'commodities'
   | 'trade'
   | 'outfitter'
@@ -108,7 +112,7 @@ interface NavItem {
 }
 
 interface NavGroup {
-  readonly group: 'colonisation' | 'logistics' | 'shipyard';
+  readonly group: 'colonisation' | 'logistics' | 'shipyard' | 'leaderboards';
   readonly label: string;
   readonly children: readonly NavItem[];
 }
@@ -198,6 +202,23 @@ const NAV: ReadonlyArray<NavItem | NavGroup> = [
   },
   // The website's order: Data Bounties sits directly under the colonisation pages.
   { id: 'bounties', label: 'Data Bounties', hint: 'Dark stations, and who lights them up' },
+  {
+    /*
+     * ★ SQUADRON OWNER, 2026-08-04 ★
+     *
+     * "make a new category called leaderboards ... gamify the colonization leaderboard, make
+     * badges ect the same way were doing it for databounties ... then we also need to make a
+     * leaderboard and gamify it for Trade routes" — mirrored from the website, directly under
+     * Data Bounties, which is where the first of the three boards was born.
+     */
+    group: 'leaderboards',
+    label: 'Leaderboards',
+    children: [
+      { id: 'lb-bounties', label: 'Data Runners', hint: 'Who is lighting up dark stations' },
+      { id: 'lb-colony', label: 'Colony Builders', hint: 'Who is hauling the squadron’s builds' },
+      { id: 'lb-trade', label: 'Trade Barons', hint: 'Who is banking real trading profit' },
+    ],
+  },
   { id: 'overlays', label: 'Overlays', hint: 'Panels drawn over the game' },
   { id: 'device', label: 'This device', hint: 'Pairing and privacy' },
 ];
@@ -433,6 +454,9 @@ function App(): JSX.Element {
           />
         ) : null}
         {page === 'bounties' ? <BountiesPage /> : null}
+        {page === 'lb-bounties' ? <LeaderboardPage board="bounties" /> : null}
+        {page === 'lb-colony' ? <LeaderboardPage board="colony" /> : null}
+        {page === 'lb-trade' ? <LeaderboardPage board="trade" /> : null}
         {page === 'commodities' ? <CommoditiesPage /> : null}
         {page === 'outfitter' ? <OutfitterPage /> : null}
         {page === 'builds-squadron' ? <BuildBoardsPage scope="squadron" /> : null}

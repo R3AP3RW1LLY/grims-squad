@@ -32,6 +32,7 @@ import { SignatureService } from './signature.service.js';
 import { VoteService } from './vote.service.js';
 import { ReviewQueueService, type HeldPost } from '../ai/review-queue.service.js';
 import { ReportService, REPORTED_MESSAGE } from '../ai/report.service.js';
+import { LeaderboardsService } from '../leaderboards/leaderboards.service.js';
 
 /**
  * The forum's HTTP surface.
@@ -72,6 +73,7 @@ export class ForumController {
     @Inject(SignatureDesignService) private readonly signatureDesign: SignatureDesignService,
     @Inject(ReviewQueueService) private readonly review: ReviewQueueService,
     @Inject(ReportService) private readonly reports: ReportService,
+    @Inject(LeaderboardsService) private readonly leaderboards: LeaderboardsService,
   ) {}
 
   /**
@@ -190,6 +192,7 @@ export class ForumController {
     posts: PostView[];
     signatures: Record<string, SignatureView>;
     identities: Record<string, BannerIdentity>;
+    badges: Record<string, string[]>;
   }> {
     const db = await this.acl.forCaller(caller?.userId);
     const mask = await this.#mask(caller);
@@ -224,7 +227,7 @@ export class ForumController {
      * Deduplicated before the query, so this is ONE read however long the thread is.
      */
     const authorIds = [...new Set(posts.map((p) => p.authorId))];
-    const [signatures, identities] = await Promise.all([
+    const [signatures, identities, badges] = await Promise.all([
       this.signatures.forUsers(db, authorIds),
       /*
        * ★ WITHOUT THIS, EVERY SOURCED LAYER RENDERS AS NOTHING ★
@@ -235,6 +238,18 @@ export class ForumController {
        * feature that did not work.
        */
       this.signatures.identitiesFor(db, authorIds, SQUADRON_NAME, SQUADRON_ALLEGIANCE),
+      /*
+       * ★ BADGE CHIPS, KEYED BY AUTHOR LIKE THE SIGNATURES ABOVE ★
+       *
+       * The same dedup serves all three maps: one read for the whole thread however long it is.
+       * `showcaseFor` applies the shared showcase ranking SERVER-SIDE and caps at three keys per
+       * author, so the wire never carries a member's full trophy cabinet forty posts over — and
+       * every surface truncates identically, because none of them truncates.
+       *
+       * Keys only, resolved to names and icons by the shared catalogue on the client — sending
+       * the display fields per post would repeat the catalogue once per author per thread.
+       */
+      this.leaderboards.showcaseFor(authorIds, 3),
     ]);
 
     return {
@@ -242,6 +257,7 @@ export class ForumController {
       posts,
       signatures: Object.fromEntries(signatures),
       identities: Object.fromEntries(identities),
+      badges: Object.fromEntries(badges),
     };
   }
 

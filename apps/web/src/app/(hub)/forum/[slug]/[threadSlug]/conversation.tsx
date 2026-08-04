@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useMemo, useRef, useState } from 'react';
-import type { RichDocument, SignatureView } from '@grims/shared';
+import type { BadgeDisplay, RichDocument, SignatureView } from '@grims/shared';
 import type { HubPost } from '../../../../../lib/api';
 import { formatLocal } from '../../../../../lib/time';
 import { Avatar } from '../../../../../components/forum/identity';
@@ -46,6 +46,7 @@ export function Conversation({
   threadSlug,
   signatures,
   identities,
+  badges,
 }: {
   readonly posts: readonly HubPost[];
   readonly viewerTz: string;
@@ -60,6 +61,12 @@ export function Conversation({
   readonly signatures: Record<string, SignatureView>;
   /** What each author's banner layers resolve to. Without it every sourced layer draws empty. */
   readonly identities: Record<string, BannerIdentity>;
+  /**
+   * Up to three showcased badges per author, keyed by author id like the signatures. Already
+   * resolved to display data by the page — the catalogue lookup cannot run in a client bundle
+   * (see the note there), and unknown keys have already been dropped.
+   */
+  readonly badges: Record<string, BadgeDisplay[]>;
 }) {
   const [replyTo, setReplyTo] = useState<{ postId: string; displayName: string } | null>(null);
   const [insert, setInsert] = useState<{ nonce: number; doc: RichDocument } | undefined>(undefined);
@@ -134,6 +141,7 @@ export function Conversation({
             {...(identities[solution.authorId] === undefined
               ? {}
               : { identity: identities[solution.authorId] })}
+            badges={badges[solution.authorId] ?? []}
             /* A copy, floated for scanning. The original stays in sequence below. */
             floated
           />
@@ -160,6 +168,7 @@ export function Conversation({
             {...(identities[post.authorId] === undefined
               ? {}
               : { identity: identities[post.authorId] })}
+            badges={badges[post.authorId] ?? []}
           />
         ))}
       </div>
@@ -189,6 +198,7 @@ function PostCard({
   registerBody,
   signature,
   identity,
+  badges,
   floated = false,
 }: {
   readonly post: HubPost;
@@ -203,6 +213,8 @@ function PostCard({
   readonly registerBody: (el: HTMLDivElement | null) => void;
   readonly signature?: SignatureView;
   readonly identity?: BannerIdentity;
+  /** This author's showcased badges, already resolved and capped. Empty renders nothing. */
+  readonly badges: readonly BadgeDisplay[];
   readonly floated?: boolean;
 }) {
   const [reactions, setReactions] = useState(post.reactions);
@@ -305,6 +317,26 @@ function PostCard({
               {formatLocal(post.createdAt, viewerTz)}
               {post.editedAt !== null && ' · edited'}
             </span>
+            {/*
+              The author's showcased leaderboard badges, capped at three server-side. Icons only,
+              with the name on the tooltip — a post header is the reader's space, and three named
+              chips would out-shout the name they decorate.
+            */}
+            {badges.length > 0 && (
+              <span className="mt-1 flex flex-wrap gap-1">
+                {badges.map((b) => (
+                  <span
+                    key={b.key}
+                    role="img"
+                    aria-label={b.name}
+                    title={b.name}
+                    className="cursor-default rounded-full border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel-hover)] px-1.5 py-0.5 text-[13px] leading-none"
+                  >
+                    {b.icon}
+                  </span>
+                ))}
+              </span>
+            )}
           </span>
         </span>
 

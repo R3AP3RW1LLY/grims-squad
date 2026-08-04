@@ -37,9 +37,14 @@ import {
   colonyProjects,
   colonyRoster,
   colonyUnassign,
+  colonyCurrent,
+  colonySetCurrent,
+  colonyClearCurrent,
   postColonyProject,
+  type CurrentBuild,
 } from './hub-colony.js';
 import { bountyBoard, bountyLeaderboard } from './hub-bounties.js';
+import { leaderboardBoard } from './hub-leaderboards.js';
 import { tradeCommodities, tradeCommodity, tradeRoutes, type TradeQuery } from './hub-trade.js';
 import {
   shipyardBuild,
@@ -79,6 +84,7 @@ import {
   type DockedAt,
 } from './docked.js';
 import { capacityFrom, parseCargo, type Hold } from './cargo.js';
+import { EMPTY_TRIP, type TripLedger } from './trip-ledger.js';
 import { accumulate } from './totals.js';
 import { isGameRunning, isActivelyPlaying } from './game-process.js';
 import { startAutoUpdate } from './auto-update.js';
@@ -229,6 +235,54 @@ let departedDock = false;
  */
 let hold: Hold | null = null;
 let cargoCapacity: number | null = null;
+
+/**
+ * This trip's buying and selling, carried between passes the same way `dockedAt` is.
+ *
+ * Starts empty ON PURPOSE — nothing is seeded from the journal tail at launch, because a ledger
+ * rebuilt from half a session shows a number whose starting point nobody can name. See the header
+ * of trip-ledger.ts.
+ */
+let trip: TripLedger = EMPTY_TRIP;
+
+/**
+ * The member's current build, as the hub last told us.
+ *
+ * ★ SQUADRON OWNER, 2026-08-04: THE BUILD OVERLAY MUST NOT GO DARK WHEN THEY LEAVE THE SITE ★
+ *
+ * Module state exactly the way `mergedDock` works: refreshed on a timer, pushed to the overlays on
+ * every change, and read by `push()` whenever anything else changes. This is what keeps the build
+ * tracker populated wherever the member flies — the hub folds in EVERY member's deliveries, so the
+ * numbers move while this machine's journal says nothing at all.
+ *
+ * A fetch failure keeps the last good answer: a dropped connection is not news about the build.
+ */
+let currentProject: CurrentBuild | null = null;
+
+/** How often to ask the hub about the current build. Its numbers move on other members' hauling. */
+const CURRENT_BUILD_MS = 60_000;
+
+async function refreshCurrentProject(): Promise<void> {
+  if (config.deviceToken === '') {
+    if (currentProject !== null) {
+      currentProject = null;
+      push();
+    }
+    return;
+  }
+
+  const answer = await colonyCurrent({
+    apiBaseUrl: apiBaseUrlFor(config, process.env),
+    deviceToken: config.deviceToken,
+  });
+  if (!answer.ok) return;
+
+  // Pushed only on a real change: the overlays are told the moment another member's delivery
+  // lands, and a minute of "nothing moved" costs no broadcast at all.
+  const changed = JSON.stringify(answer.data.current) !== JSON.stringify(currentProject);
+  currentProject = answer.data.current;
+  if (changed) push();
+}
 
 /**
  * Rebuilds `dockedAt` from the tail of the newest journal, ignoring saved offsets.
@@ -562,6 +616,7 @@ async function tick(): Promise<void> {
       unauthorised: true,
       error: statusLine(backoff, Date.now()) ?? 'Not sending — retrying shortly.',
       dockedAt,
+      trip,
     };
     push();
     refreshTray();
@@ -582,6 +637,7 @@ async function tick(): Promise<void> {
       unauthorised: false,
       error: advice(),
       dockedAt,
+      trip,
     };
     push();
     return;
@@ -601,7 +657,7 @@ async function tick(): Promise<void> {
     push();
     let pass;
     try {
-      pass = await runWatchPass(nodeFs, dir, config, uploader, dockedAt);
+      pass = await runWatchPass(nodeFs, dir, config, uploader, dockedAt, trip);
     } finally {
       sending = false;
     }
@@ -615,6 +671,8 @@ async function tick(): Promise<void> {
     // the seed is where a name comes from until a `Docked` supplies one.
     if (pass.outcome.dockedAt !== null) departedDock = false;
     dockedAt = pass.outcome.dockedAt;
+    // The trip ledger, carried the same way — the pass folded this pass's buys and sells over it.
+    trip = pass.outcome.trip;
 
     /*
      * ★ THE HOLD, READ FROM FRONTIER'S OWN SIDECAR ★
@@ -815,6 +873,7 @@ async function tick(): Promise<void> {
       unauthorised: false,
       error: error instanceof Error ? error.message : 'Something went wrong reading your journals.',
       dockedAt,
+      trip,
     };
   }
 
@@ -908,6 +967,10 @@ function push(): void {
       gameRunning: wasPlaying,
       hold,
       capacity: cargoCapacity,
+      // The hub's whole-project answer rides every push, so the build tracker updates the moment
+      // ANYTHING changes — a journal pass, a settings refresh, or the sixty-second hub refetch.
+      currentProject,
+      trip,
       now: Date.now(),
     }),
   );
@@ -1361,6 +1424,19 @@ if (!app.requestSingleInstanceLock()) {
      */
     void seedDock().then(() => push());
 
+    /*
+     * ★ THE CURRENT BUILD'S OWN CLOCK — DELIBERATELY NOT INSIDE tick() ★
+     *
+     * The journal poll runs only while sending is enabled; the build overlay must follow the
+     * member's current build even when sending is paused, because pausing uploads is not a
+     * statement about wanting the tracker dark. Sixty seconds, because the numbers move on OTHER
+     * members' hauling — this machine's own deliveries arrive through the depot heartbeat, which
+     * the panel already prefers when docked at the site. `refreshCurrentProject` answers without a
+     * request while unpaired, so the idle cost is nothing.
+     */
+    setInterval(() => void refreshCurrentProject(), CURRENT_BUILD_MS);
+    void refreshCurrentProject();
+
     startOverlays({
       layout: () => config.overlays,
       save: (overlays) => {
@@ -1489,6 +1565,16 @@ if (!app.requestSingleInstanceLock()) {
     ipcMain.handle('bountyLeaderboard', (_e, month: unknown) =>
       bountyLeaderboard(hub(), typeof month === 'string' && month !== '' ? month : undefined),
     );
+    /*
+     * The leaderboards. One channel for all three boards — the key is re-read rather than trusted,
+     * like every renderer-supplied value, and an unknown key is refused in a sentence instead of
+     * being forwarded to the hub as a guess.
+     */
+    ipcMain.handle('leaderboardBoard', (_e, board: unknown, month: unknown) =>
+      board === 'bounties' || board === 'colony' || board === 'trade'
+        ? leaderboardBoard(hub(), board, typeof month === 'string' && month !== '' ? month : undefined)
+        : { ok: false as const, error: 'No board asked for.' },
+    );
     ipcMain.handle('colonyProject', (_e, id: unknown, filters: unknown) => {
       if (typeof id !== 'string' || id === '') {
         return { ok: false as const, error: 'No project asked for.' };
@@ -1534,6 +1620,31 @@ if (!app.requestSingleInstanceLock()) {
     ipcMain.handle('colonyRoster', (_e, id: unknown) => colonyRoster(hub(), projectId(id)));
     ipcMain.handle('colonyJoin', (_e, id: unknown) => colonyJoin(hub(), projectId(id)));
     ipcMain.handle('colonyLeave', (_e, id: unknown) => colonyLeave(hub(), projectId(id)));
+
+    /*
+     * ★ THE CURRENT BUILD — SQUADRON OWNER, 2026-08-04 ★
+     *
+     * Marking a build as "mine right now" is what keeps the build overlay populated wherever the
+     * member flies. The hub holds the choice; on success the cached copy is refreshed IMMEDIATELY
+     * rather than waiting out the sixty-second clock, because a member who just pressed the toggle
+     * is looking at the overlay to see it change.
+     */
+    ipcMain.handle('colonySetCurrent', async (_e, id: unknown) => {
+      const answer = await colonySetCurrent(hub(), projectId(id));
+      if (answer.ok) await refreshCurrentProject();
+      return answer;
+    });
+    ipcMain.handle('colonyClearCurrent', async (_e, id: unknown) => {
+      const answer = await colonyClearCurrent(hub(), projectId(id));
+      if (answer.ok) {
+        // Cleared is knowledge, not a failed fetch — dropped at once, then confirmed by a refetch
+        // so a build marked from another device is picked up rather than left blank.
+        currentProject = null;
+        push();
+        await refreshCurrentProject();
+      }
+      return answer;
+    });
 
     ipcMain.handle('colonyAssign', (_e, id: unknown, body: unknown) => {
       const b = (body ?? {}) as Record<string, unknown>;
@@ -1773,6 +1884,8 @@ if (!app.requestSingleInstanceLock()) {
         // Registration follows consent, and consent has just been given.
         applyAutoStart();
         startPolling();
+        // The freshly-paired member's current build, without waiting out the sixty-second clock.
+        void refreshCurrentProject();
         refreshTray();
         return { ok: true };
       } finally {
@@ -1814,6 +1927,9 @@ if (!app.requestSingleInstanceLock()) {
        */
       lastOutcome = null;
       activity = [pairingLine('unpaired', Date.now())];
+      // An unpaired device holds no hub data: the build overlay must not keep drawing a project
+      // read with a token the member has just told us to forget.
+      currentProject = null;
       /*
        * ★ AND TELL THE WINDOW — SQUADRON OWNER, 2026-08-03 ★
        *

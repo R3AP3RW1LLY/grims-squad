@@ -95,7 +95,7 @@ async function scoreColony(db: PrismaClient): Promise<number> {
            SELECT max(c2.id) AS latest_id FROM colony_contributions c2
             WHERE c2.project_id = c.project_id AND c2.commodity = c.commodity
          ) latest ON true
-        WHERE c.id > $1 AND c.user_id IS NOT NULL AND c.amount > 0
+        WHERE c.id > $1::bigint AND c.user_id IS NOT NULL AND c.amount > 0
         ORDER BY c.id
         LIMIT ${BATCH}`,
       String(cursor),
@@ -160,7 +160,7 @@ async function scoreTrade(db: PrismaClient): Promise<number> {
     >(
       `SELECT id, user_id, event_key, occurred_at, payload
          FROM telemetry_events
-        WHERE event_type = 'MarketSell' AND id > $1
+        WHERE event_type = 'MarketSell' AND id > $1::bigint
         ORDER BY id
         LIMIT ${BATCH}`,
       String(cursor),

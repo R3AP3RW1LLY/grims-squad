@@ -1,6 +1,8 @@
 import type { DockedAt } from './docked.js';
 import { isFresh, projectTitleFrom } from './docked.js';
 import { markWanted, type Hold } from './cargo.js';
+import type { CurrentBuild } from './hub-colony.js';
+import type { TripLedger } from './trip-ledger.js';
 import type { OverlayData } from './renderer/overlay.js';
 
 /**
@@ -42,6 +44,14 @@ export interface OverlayInput {
   readonly hold: Hold | null;
   /** Tonnes the ship can carry, from Loadout. Null until a Loadout has been seen. */
   readonly capacity: number | null;
+  /**
+   * The member's current build, from the hub — whole-project needs with everyone's deliveries
+   * folded in. Null when no current build is set, which is what makes the journal fallback below
+   * reachable at all.
+   */
+  readonly currentProject: CurrentBuild | null;
+  /** This trip's buying and selling, folded off the journal. Null before the watcher has run. */
+  readonly trip: TripLedger | null;
   /** Now, injected so the freshness rule is testable. */
   readonly now: number;
 }
@@ -104,13 +114,22 @@ function cargoPanel(input: OverlayInput): OverlayData['cargo'] {
   /*
    * Matched against the site's REMAINING requirement, not its total: a commodity the build has
    * already had enough of is not wanted, however much of it somebody is carrying.
+   *
+   * The docked depot reading wins when there is one; away from the site, the member's CURRENT
+   * build supplies the list — so a hold being loaded three systems away still shows which of it
+   * the build is actually waiting for.
    */
   const site = input.dock !== null && isFresh(input.dock, input.now) ? input.dock.site : null;
-  const wanted = new Set(
-    (site?.resources ?? [])
-      .filter((r) => r.required - r.provided > 0)
-      .map((r) => r.commodity),
-  );
+  const wanted =
+    site !== null
+      ? new Set(
+          site.resources.filter((r) => r.required - r.provided > 0).map((r) => r.commodity),
+        )
+      : new Set(
+          (input.currentProject?.needs ?? [])
+            .filter((n) => n.remaining > 0)
+            .map((n) => n.commodity),
+        );
 
   const marked = markWanted(input.hold, wanted);
 
@@ -118,21 +137,46 @@ function cargoPanel(input: OverlayInput): OverlayData['cargo'] {
     items: marked.items,
     used: marked.used,
     capacity: input.capacity,
+    /*
+     * ★ THE TRIP P&L — HIDDEN ENTIRELY AT ZERO ★
+     *
+     * Null both before the watcher has run AND when nothing has been bought or sold: a line
+     * reading "Bought 0 cr · Sold 0 cr" on every launch is a row of noise on a panel over a
+     * cockpit, and its absence says the same for free.
+     */
+    trip:
+      input.trip === null || (input.trip.spent === 0 && input.trip.earned === 0)
+        ? null
+        : { spent: input.trip.spent, earned: input.trip.earned },
   };
 }
 
 /**
- * The build tracker, from the depot heartbeat alone.
+ * The build tracker: the member's current build wherever they fly, the depot heartbeat when they
+ * are standing at it.
  *
- * ★ THE SITE'S OWN TRUTH, NOT THE HUB'S COPY OF IT ★
+ * ★ SQUADRON OWNER, 2026-08-04: THE OVERLAY MUST NOT GO DARK WHEN THEY LEAVE ★
+ *
+ * This used to render from the journal's docked heartbeat alone, so it emptied the moment the
+ * member undocked and stayed empty everywhere else — which is most of a hauling loop. The hub's
+ * `current` answer is the fix: whole-project needs with EVERY member's deliveries folded in,
+ * refreshed every minute in the main process, so the numbers move while the member is three
+ * systems away buying the next load.
+ *
+ * ★ BUT THE DEPOT READING WINS AT THE SITE ITSELF ★
  *
  * `ColonisationConstructionDepot` fires every fifteen seconds while docked and carries the whole
- * requirement, so this needs no network, is never stale by more than a heartbeat, and works for a
- * construction site nobody has posted a project for. Asking the hub instead would be slower, would
- * fail offline, and would show nothing at an unposted site — for the same numbers.
+ * requirement — it is seconds fresher than the hub's copy, needs no network, and works at a site
+ * nobody has posted. So when the member is physically docked at their current build, the panel
+ * prefers the reading coming off the pad in front of them; the hub still supplies the project's
+ * TITLE and hauler count, which no heartbeat carries.
+ *
+ * The journal-only view stays as the fallback for a member with no current build set, docked at a
+ * construction site: same behaviour this panel has always had.
  */
 function buildPanel(input: OverlayInput): OverlayData['build'] {
   const dock = input.dock;
+  const current = input.currentProject;
 
   /*
    * Twelve hours is the freshness rule, shared with the rest of the app. A dock from a session two
@@ -140,8 +184,48 @@ function buildPanel(input: OverlayInput): OverlayData['build'] {
    * on Tuesday is worse than one that admits it does not know.
    */
   const site = dock !== null && isFresh(dock, input.now) ? dock.site : null;
-  if (site === null || dock === null) return null;
 
+  if (current !== null) {
+    // Physically at the current build, with a live depot reading: prefer it — see the header.
+    if (site !== null && dock !== null && dock.marketId === current.marketId) {
+      return {
+        ...fromDepot(dock, site),
+        // The project's own name and crew, which the heartbeat cannot supply.
+        title: current.title,
+        haulers: current.haulers.length,
+        fromHub: false,
+      };
+    }
+
+    return {
+      title: current.title,
+      needs: current.needs
+        .map((n) => ({
+          commodity: n.commodity,
+          // Floored for the same reason as the depot path: an over-delivered line can report a
+          // negative remainder, and "-40 t still needed" is worse than saying nothing.
+          remaining: Math.max(0, n.remaining),
+          required: n.required,
+        }))
+        .filter((n) => n.remaining > 0),
+      delivered: current.progress.delivered,
+      required: current.progress.required,
+      haulers: current.haulers.length,
+      // The footer says "live from the squadron", because that is what these numbers are.
+      fromHub: true,
+    };
+  }
+
+  // No current build set: the journal-docked behaviour this panel has always had.
+  if (site === null || dock === null) return null;
+  return { ...fromDepot(dock, site), fromHub: false };
+}
+
+/** The panel's numbers, straight off a depot heartbeat. Shared by both docked paths above. */
+function fromDepot(
+  dock: DockedAt,
+  site: NonNullable<DockedAt['site']>,
+): Omit<NonNullable<OverlayData['build']>, 'fromHub'> {
   const title = projectTitleFrom(dock.stationName);
 
   return {
@@ -162,11 +246,8 @@ function buildPanel(input: OverlayInput): OverlayData['build'] {
     delivered: site.resources.reduce((sum, r) => sum + r.provided, 0),
     required: site.resources.reduce((sum, r) => sum + r.required, 0),
     /*
-     * Zero, and the panel hides the row at zero.
-     *
-     * Only the hub knows how many people have hauled here, and asking would be the main process's
-     * first unprompted colony call — one request per member every twenty seconds, for ever, for a
-     * number that changes hourly. Worth doing behind a TTL cache later; not worth the traffic now.
+     * Zero at an unposted site, and the panel hides the row at zero. Only the hub knows how many
+     * people have hauled to a POSTED build, and both hub-aware paths above supply it.
      */
     haulers: 0,
   };

@@ -6,8 +6,10 @@ import {
   getMe,
   getMyDevices,
   getMyCommander,
+  getMyBadges,
 } from '../../../lib/api';
 import { PilotRanks, Location, Fleet, Balance } from './commander-panels';
+import { BadgeCase } from './badge-case';
 import { Avatar } from '../../../components/account-menu';
 import {
   PageHeader,
@@ -50,13 +52,14 @@ export const dynamic = 'force-dynamic';
  */
 
 export default async function DashboardPage() {
-  const [status, inara, stats, me, devices, commander] = await Promise.all([
+  const [status, inara, stats, me, devices, commander, badges] = await Promise.all([
     getAccountStatus(),
     getInaraStatus(),
     getSquadronStats(),
     getMe(),
     getMyDevices(),
     getMyCommander(),
+    getMyBadges(),
   ]);
 
   const verified = inara?.cmdrName ?? null;
@@ -230,6 +233,13 @@ export default async function DashboardPage() {
           </>
         )}
 
+        {/*
+          Outside the commander branch above, on purpose: badges are earned on the leaderboards,
+          not read from the journal, and a member whose commander profile failed to load has not
+          also lost their badge case.
+        */}
+        <BadgeCase badges={badges?.badges ?? null} />
+
         <Section
           title="Your activity"
           description="The monthly rank check looks for two things: taking part in Discord, and an Elite session. The first is counted for everybody automatically; the second comes from the companion app."
@@ -304,11 +314,14 @@ export default async function DashboardPage() {
           description="Named rather than mocked up. Nothing on this page is invented — every figure above is read from live data, and a feature that does not exist says so instead of showing a plausible number."
         >
           <dl className="m-0 grid gap-x-8 gap-y-3 sm:grid-cols-2">
+            {/*
+              Leaderboards left this list on 2026-08-04 — the three boards are live under
+              /leaderboards, and a page cannot both link a feature and call it "soon".
+            */}
             {[
               ['Notifications', 'Replies, promotions and operations you signed up for.'],
               ['Operations', 'Wings forming up, who has signed on, and what they still need.'],
               ['The faction', 'Our systems, their state, and this week’s orders.'],
-              ['Leaderboards', 'Who is flying what, and how far.'],
             ].map(([title, blurb]) => (
               <div key={title} className="flex gap-3 text-sm">
                 <dt className="shrink-0 font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--color-text-dim)]">
