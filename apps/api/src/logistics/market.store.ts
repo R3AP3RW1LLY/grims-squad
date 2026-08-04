@@ -84,7 +84,47 @@ export interface MarketStore {
   systemCoords(name: string): Promise<Coords | null>;
   /** Systems whose names begin with the fragment, for the origin picker. */
   systemsLike(fragment: string, limit: number): Promise<readonly string[]>;
+  /** How current the whole mirror is. See `FeedHealth`. */
+  feedHealth(): Promise<FeedHealth>;
 }
+
+/**
+ * How fresh the market mirror is, as a whole.
+ *
+ * ★ THE FEED CAN STOP, AND NOTHING SAID SO — FOUND 2026-08-04 ★
+ *
+ * Every price on this platform comes from EDDN, relayed by a collector that runs as its own
+ * service. It stopped, and every page went on presenting its prices exactly as before:
+ *
+ *     newest reading anywhere: 33.2 hours ago
+ *     rows in the last 6 hours: 0
+ *     2026-07-30  425,265 rows      2026-08-02  123,230 rows
+ *     2026-07-31  nothing           2026-08-03  nothing
+ *
+ * A shopping list, a trade route and a commodity chart are all claims about what is on a shelf
+ * right now. When the feed dies they quietly become claims about what was on a shelf on Sunday,
+ * and a member acts on them identically. The per-row age already shown on some pages does not
+ * cover this: EVERY row ages together, so nothing looks unusual — the list just gets quietly and
+ * uniformly wrong.
+ *
+ * So the platform now reads its own pulse and says it out loud.
+ */
+export interface FeedHealth {
+  /** The newest reading we hold, from anywhere. Null on an empty mirror. */
+  readonly newestAt: Date | null;
+  /** Hours since then. Infinity when we hold nothing at all. */
+  readonly hoursBehind: number;
+  /**
+   * Whether prices should be presented with a warning.
+   *
+   * Six hours, because EDDN carries a busy region's markets continuously — a healthy collector
+   * produces rows every few minutes, so six quiet hours is already far outside normal and well
+   * inside the window where somebody is still deciding what to fly.
+   */
+  readonly stale: boolean;
+}
+
+export const FEED_STALE_HOURS = 6;
 
 export interface Coords {
   readonly x: number;
@@ -420,6 +460,24 @@ export class PrismaMarketStore implements MarketStore {
       limit,
     );
     return rows.map((r) => r.commodity);
+  }
+
+  /**
+   * The pulse. One indexed max, cheap enough for every page that shows a price.
+   *
+   * Deliberately NOT cached: a cached pulse that goes stale is the exact failure this exists to
+   * detect, and the query is a single index lookup.
+   */
+  async feedHealth(): Promise<FeedHealth> {
+    const [row] = await this.db.$queryRawUnsafe<Array<{ newest: Date | null }>>(
+      `SELECT max(market_seen_at) AS newest FROM market_entries`,
+    );
+
+    const newestAt = row?.newest ?? null;
+    const hoursBehind =
+      newestAt === null ? Number.POSITIVE_INFINITY : (Date.now() - newestAt.getTime()) / 3_600_000;
+
+    return { newestAt, hoursBehind, stale: hoursBehind > FEED_STALE_HOURS };
   }
 
   async systemCoords(name: string): Promise<Coords | null> {

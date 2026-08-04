@@ -50,6 +50,9 @@ function harness(opts: {
     },
     systemCoords: async () => HERE,
     systemsLike: async () => [],
+    // The planner never asks the feed's pulse — that is the controller's job, for the page banner.
+    // Stubbed so the fake satisfies the interface without pretending to answer it.
+    feedHealth: async () => ({ newestAt: new Date(), hoursBehind: 0, stale: false }),
   };
 
   return { store, sellQueries };

@@ -48,6 +48,19 @@ export function RunForm({
   return (
     <div>
       {/*
+        ★ THE FEED'S OWN PULSE ★
+
+        Every price here comes from a collector that can stop, and when it does every row ages
+        together — so nothing looks unusual and the whole list is quietly wrong. A per-row age
+        cannot catch that; only the pulse can. Silent while it is healthy.
+      */}
+      {plan?.feed?.stale === true ? (
+        <p className="m-0 mb-3 rounded-md border border-[var(--color-semantic-warning)] bg-[var(--color-surface-panel)] px-3 py-2 text-sm text-[var(--color-semantic-warning)]">
+          {plan.feed.text} Everything below is what was true then, not what is true now.
+        </p>
+      ) : null}
+
+      {/*
         Where the plan is measured from, and how we knew. A member with a paired device never typed
         anything, and needs to see that their journal supplied it.
       */}
@@ -152,7 +165,9 @@ export function RunForm({
 
         <label className="flex flex-col gap-1">
           <span className={LABEL}>Prices seen</span>
-          <select name="freshDays" defaultValue={val('freshDays', '0')} className={FIELD}>
+          {/* Default seven days, matching the API. A control whose default disagrees with the
+              server's is a control that lies about what produced the answer on screen. */}
+          <select name="freshDays" defaultValue={val('freshDays', '7')} className={FIELD}>
             <option value="0">Any age</option>
             <option value="1">Within a day</option>
             <option value="7">Within a week</option>

@@ -30,6 +30,31 @@ import { CommanderPositionService, positionAge } from './commander-position.serv
  * That distinction is what lets an officer take the market away from a rank later without touching
  * a line of this file.
  */
+
+/**
+ * The feed's pulse, in the words a page prints.
+ *
+ * ★ EVERY SURFACE THAT SHOWS A PRICE SHOWS THIS ★
+ *
+ * When the collector stops, every row ages together — so nothing on a page looks unusual and the
+ * whole list is quietly, uniformly wrong. The per-row age cannot catch it; only the pulse can.
+ */
+function feedBanner(health: { newestAt: Date | null; hoursBehind: number; stale: boolean }) {
+  if (health.newestAt === null) {
+    return { stale: true, text: 'We hold no market prices at all yet.', newestAt: null };
+  }
+
+  const h = health.hoursBehind;
+  const text =
+    h < 1
+      ? 'Prices are live.'
+      : h < 24
+        ? `Newest price is ${Math.floor(h)} hour${Math.floor(h) === 1 ? '' : 's'} old.`
+        : `Newest price is ${Math.floor(h / 24)} day${Math.floor(h / 24) === 1 ? '' : 's'} old — the market feed has stopped.`;
+
+  return { stale: health.stale, text, newestAt: health.newestAt };
+}
+
 @Controller('v1/logistics')
 export class MarketController {
   constructor(
@@ -268,12 +293,28 @@ export class MarketController {
       budget: budget === undefined || budget.trim() === '' ? null : Math.max(0, numberOr(budget, 0)),
       largePadOnly: largePad === '1',
       includeCarriers: carriers === '1',
-      seenSince: daysAgo(numberOr(freshDays, 0)),
+      /*
+       * ★ SEVEN DAYS, NOT "ANY AGE" — MEASURED 2026-08-04 ★
+       *
+       * The default was 0, meaning no limit, and it produced exactly the run you would expect: the
+       * planner's top pick paired an 86-DAY-OLD buy price with a 13-day-old sell and called it
+       * 17,919 cr/t. Neither leg was a claim about today, and the sell station had no large pad.
+       *
+       * A route is a commitment to fly somewhere specific, which is a stronger claim than "where
+       * could I buy this" — so it gets a stronger default than the shopping list's.
+       *
+       * Seven days is measured, not chosen: 258 of the 369 tradeable commodities still have BOTH a
+       * fresh buy and a fresh sell inside a week, against 337 inside a month and 0 inside a day.
+       * A week keeps 70% of the market and throws away the fiction. Any age is still one click
+       * away for somebody who knows what they are looking at.
+       */
+      seenSince: daysAgo(numberOr(freshDays, 7)),
       only: commodity?.trim() ?? null,
     });
 
     return {
       ...plan,
+      feed: feedBanner(await this.store.feedHealth()),
       origin: {
         system: origin.system,
         station: origin.station,

@@ -1589,6 +1589,13 @@ export interface CommodityDetail {
   buys: MarketPlace[];
   sells: MarketPlace[];
   history: HistoryPoint[];
+  /**
+   * How current the whole market mirror is.
+   *
+   * Distinct from any single row's age: when the collector stops, every row ages together, so
+   * nothing on the page looks unusual and the whole list is quietly, uniformly wrong.
+   */
+  feed?: { stale: boolean; text: string; newestAt: string | null };
   origin: {
     system: string;
     station: string | null;
@@ -1650,6 +1657,13 @@ export interface Route {
 export interface RoutePlan {
   routes: Route[];
   considered: string[];
+  /**
+   * How current the whole market mirror is.
+   *
+   * Distinct from any single row's age: when the collector stops, every row ages together, so
+   * nothing on the page looks unusual and the whole list is quietly, uniformly wrong.
+   */
+  feed?: { stale: boolean; text: string; newestAt: string | null };
   origin: {
     system: string;
     station: string | null;
