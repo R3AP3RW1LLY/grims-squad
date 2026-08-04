@@ -4246,3 +4246,35 @@ model EdsyId {
   @@id([kind, edsyId])
   @@map("edsy_ids")
 }
+
+/// ═══════════════ THE CHANGELOG ═══════════════
+///
+/// One row per production deploy, written by the deploy script's final step
+/// (infra/scripts/deploy.sh step 8) from `tools/changelog.mjs --sql`. The
+/// generator classifies every commit between the previously deployed revision
+/// and the new one by the files it touched, and the three markdown columns
+/// are that classification rendered per audience — the commit messages' own
+/// prose, never a summary of it.
+///
+/// Markdown as COLUMNS rather than a normalised entries table, deliberately:
+/// the unit members care about is "what did this deploy change for me", the
+/// row is written once and never edited, and the page renders each column
+/// whole. Normalising would buy joins nobody performs.
+model ChangelogRelease {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// The revision members were on before this deploy — the deploy script's PREVIOUS_SHA.
+  fromSha     String   @map("from_sha")
+  /// The revision this deploy shipped.
+  toSha       String   @map("to_sha")
+  deployedAt  DateTime @default(now()) @map("deployed_at") @db.Timestamptz(6)
+  /// What changed on the website (apps/web). Empty string when the deploy touched none of it.
+  websiteMd   String   @map("website_md")
+  /// What changed in the companion app (apps/companion).
+  companionMd String   @map("companion_md")
+  /// Everything else — API, worker, bot, collector, packages, infra, tooling.
+  platformMd  String   @map("platform_md")
+
+  /// The page reads newest-first; this is that read.
+  @@index([deployedAt])
+  @@map("changelog_releases")
+}

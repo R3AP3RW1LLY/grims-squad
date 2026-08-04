@@ -29,6 +29,10 @@
 *.tsbuildinfo
 *~
 .DS_Store
+# Written by `tools/changelog.mjs --write-pending`; served to webmasters by
+# GET /v1/changelog/pending as the not-yet-deployed preview. Regenerated at
+# will, so committing one would only freeze a stale preview into the repo.
+.changelog-pending.json
 .cloudflared/
 .env
 .env.*

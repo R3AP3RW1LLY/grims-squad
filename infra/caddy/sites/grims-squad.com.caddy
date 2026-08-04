@@ -1,0 +1,89 @@
+# The grims-squad.com server block — STAGED IN GIT, LOADED ONLY WHEN THE
+# OPERATOR ENABLES IT.
+#
+# ★ WHY THIS FILE IS NOT LOADED FROM WHERE IT SITS ★
+#
+# Everything under infra/caddy is bind-mounted into the container at /etc/caddy,
+# so the moment a deploy pulls this commit the file is physically inside the
+# proxy — but the Caddyfile imports /etc/caddy-sites/*.caddy, which is a
+# DIFFERENT mount (/srv/grims/caddy on the host), and this file is not there
+# until the operator copies it. That indirection is the whole design: the `tls`
+# line below names certificate files, Caddy refuses to load a config whose
+# certificate files do not exist, and an import that fired straight from the
+# repo would therefore break every deploy between this commit landing and the
+# certificates being installed.
+#
+# To enable (full order in infra/cutover-grims-squad.md):
+#
+#   1. Install the Cloudflare Origin CA pair at
+#      /etc/ssl/grims-squad.com/{cert,key}.pem on the HOST (the compose file
+#      mounts that directory into the container read-only).
+#   2. cp /srv/grims/repo/infra/caddy/sites/grims-squad.com.caddy /srv/grims/caddy/
+#   3. docker compose ... exec caddy caddy reload --config /etc/caddy/Caddyfile
+#
+# To roll back: rm /srv/grims/caddy/grims-squad.com.caddy and reload. The
+# sslip.io block in the main Caddyfile is untouched either way — BOTH names
+# serve during the cutover, which is what lets DNS move with no downtime and
+# lets companion apps built against the sslip.io address keep updating until a
+# release pointed at the new domain ships.
+grims-squad.com, www.grims-squad.com {
+	# ★ A CLOUDFLARE ORIGIN CA PAIR, NOT LET'S ENCRYPT ★
+	#
+	# grims-squad.com sits behind Cloudflare's proxy, so the browser's TLS
+	# terminates at Cloudflare and this certificate only ever has to satisfy
+	# Cloudflare's connection back to the origin. An Origin CA certificate is
+	# issued in seconds by the Cloudflare API, lasts up to fifteen years, and
+	# needs no ACME challenge — which also means grims-squad.com must NOT be
+	# added to SITE_HOSTNAMES, because that block would try to obtain a Let's
+	# Encrypt certificate for a name whose traffic Cloudflare intercepts.
+	#
+	# The pair is mounted read-only from the host; issuance and installation are
+	# in infra/cutover-grims-squad.md.
+	tls /etc/ssl/grims-squad.com/cert.pem /etc/ssl/grims-squad.com/key.pem
+
+	encode zstd gzip
+
+	# The same reasoning as the sslip.io block: an edge proxy that logs nothing
+	# turns every support question into guesswork. Its OWN file rather than
+	# sharing /data/access.log, because two site blocks each rolling one file
+	# would fight over the rotation — and during the cutover "which hostname did
+	# the member use" is exactly the question the log is for.
+	log {
+		output file /data/access-grims-squad.log {
+			roll_size 20MiB
+			roll_keep 10
+		}
+		format json
+	}
+
+	# Security headers applied at the edge, identical to the sslip.io block, so
+	# a member gets the same protections whichever name they arrive on.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
+
+	# Same proxy targets as the sslip.io block — the containers do not know or
+	# care which hostname the request arrived on. The retry settings carry over
+	# unchanged, and the reasoning lives with the original block in the main
+	# Caddyfile: `lb_try_duration` holds a request across a container swap, and
+	# there is deliberately NO `fail_duration` because blacklisting the only
+	# upstream turns a two-second gap into a nine-second outage.
+	handle /v1/* {
+		reverse_proxy api:5001 {
+			lb_try_duration 45s
+			lb_try_interval 250ms
+		}
+	}
+
+	handle {
+		reverse_proxy web:5000 {
+			lb_try_duration 45s
+			lb_try_interval 250ms
+		}
+	}
+}

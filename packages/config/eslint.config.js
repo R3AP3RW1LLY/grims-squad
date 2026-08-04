@@ -119,6 +119,10 @@ export default tseslint.config(
       // and a dead EDDN subscriber is invisible. Fourth entry, failing on the same two globals as
       // every one before it — the list is explicit by design, and this is the design working.
       '**/keep-alive.mjs',
+      // The changelog generator runs as `node tools/changelog.mjs` on the
+      // production box during a deploy — plain Node, no build step — so it
+      // reads process.argv and prints like every launcher above it.
+      '**/changelog.mjs',
     ],
     languageOptions: {
       globals: {

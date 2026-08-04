@@ -16,6 +16,7 @@ import { NotificationsModule } from './notifications/notifications.module.js';
 import { TelemetryModule } from './telemetry/telemetry.module.js';
 import { CompanionModule } from './companion/companion.module.js';
 import { ForumModule } from './forum/forum.module.js';
+import { ChangelogModule } from './changelog/changelog.module.js';
 import { AiModule } from './ai/ai.module.js';
 import { LiveModule } from './live/live.module.js';
 import { MediaModule } from './media/media.module.js';
@@ -24,7 +25,7 @@ import { RequiresPermissionGuard } from './authz/requires-permission.guard.js';
 import { ViewAsGuard } from './authz/view-as.guard.js';
 
 @Module({
-  imports: [DatabaseModule, AuthzModule, AuthModule, MembersModule, CmdrModule, AdminModule, PublicModule, LogisticsModule, BountiesModule, LeaderboardsModule, ShipyardDeviceModule, NotificationsModule, TelemetryModule, MediaModule, CompanionModule, LiveModule, AiModule, ForumModule],
+  imports: [DatabaseModule, AuthzModule, AuthModule, MembersModule, CmdrModule, AdminModule, PublicModule, LogisticsModule, BountiesModule, LeaderboardsModule, ShipyardDeviceModule, NotificationsModule, TelemetryModule, MediaModule, CompanionModule, LiveModule, AiModule, ForumModule, ChangelogModule],
   controllers: [HealthController],
   providers: [
     /*

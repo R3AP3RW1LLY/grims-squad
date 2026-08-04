@@ -2328,3 +2328,44 @@ export const getSharedColonyProject = (
   token: string,
 ): Promise<{ project: ColonyProject; needs: ColonyNeed[] } | null> =>
   get(`/v1/logistics/colony/shared/${encodeURIComponent(token)}`, { authed: true });
+
+/* ─────────────────────────────────────────────────────────── the changelog */
+
+/**
+ * One deployed release: the span of commits it shipped and that span rendered
+ * per audience, in the commit messages' own prose. The markdown grammar is
+ * narrow by construction — `### Subject` headings with plain paragraphs —
+ * because `tools/changelog.mjs` is the only writer.
+ */
+export interface ChangelogRelease {
+  id: string;
+  fromSha: string;
+  toSha: string;
+  deployedAt: string;
+  websiteMd: string;
+  companionMd: string;
+  platformMd: string;
+}
+
+/** The same shape before it has deployed, straight from the generator. */
+export interface PendingChangelog {
+  fromSha: string;
+  toSha: string;
+  generatedAt: string;
+  commitCount: number;
+  websiteMd: string;
+  companionMd: string;
+  platformMd: string;
+}
+
+/** Every recorded release, newest first. Any signed-in member may read this. */
+export const getChangelog = (): Promise<{ releases: ChangelogRelease[] } | null> =>
+  get('/v1/changelog', { authed: true });
+
+/**
+ * The not-yet-deployed preview. Gated (SITE_CONFIG) because it describes work
+ * the site has not shipped yet — the page renders it only for whoever the API
+ * says may see it, and the gated read is what carries that answer.
+ */
+export const getChangelogPendingGated = (): Promise<AdminRead<{ pending: PendingChangelog | null }>> =>
+  getAdmin('/v1/changelog/pending');

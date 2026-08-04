@@ -339,6 +339,28 @@ const NAV: readonly NavDefinition[] = [
     blurb: 'Ships, builds, and what the doctrine asks for.',
     requires: Permission.FLEET_VIEW,
   },
+  /*
+   * ★ THE CHANGELOG — EVERY MEMBER, NO GATE ★
+   *
+   * `requires: null` is deliberate: everything on this page is a description
+   * of features members can already see by using the site, so a permission
+   * here would refuse through one door what every other door gives away. The
+   * one privileged thing on the page — the preview of a build that has NOT
+   * deployed yet — is gated by the API (SITE_CONFIG on /v1/changelog/pending),
+   * not by hiding the page.
+   *
+   * Under `squadron` and last in the section: it is about the platform the
+   * squadron shares, but it is reference rather than a daily destination, and
+   * placing it above the roster or the ops board would cost them attention
+   * they earn every day.
+   */
+  {
+    href: '/changelog',
+    label: 'Changelog',
+    section: 'squadron',
+    blurb: 'What each deploy changed — on the website, in the companion app, and behind the scenes.',
+    requires: null,
+  },
 
 
   // ---- personal ------------------------------------------------------------

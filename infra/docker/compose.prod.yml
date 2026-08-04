@@ -31,6 +31,22 @@ services:
       #
       # Mounting the directory means a replaced file is visible immediately.
       - ../caddy:/etc/caddy:ro
+      # ★ OPERATOR-ENABLED SITES — OUTSIDE THE REPO MOUNT, DELIBERATELY ★
+      #
+      # The Caddyfile imports /etc/caddy-sites/*.caddy. Site blocks with
+      # prerequisites a deploy cannot satisfy (grims-squad.com needs its Origin
+      # CA certificate pair installed first) are staged in infra/caddy/sites/
+      # and copied here by the operator when they are ready to load. If this
+      # directory imported from the repo mount instead, the next `git pull`
+      # would load a block whose certificates do not exist and fail the whole
+      # config. Docker creates the host directory empty on first up, and an
+      # empty import glob is a no-op.
+      - /srv/grims/caddy:/etc/caddy-sites:ro
+      # The Cloudflare Origin CA pair for grims-squad.com. Empty until the
+      # cutover (infra/cutover-grims-squad.md) — mounting an empty directory
+      # costs nothing, and having the mount in place BEFORE the certificates
+      # arrive means installing them needs no compose change, only a reload.
+      - /etc/ssl/grims-squad.com:/etc/ssl/grims-squad.com:ro
       - caddy_data:/data # certificates and ACME account — MUST persist
       - caddy_config:/config
     environment:

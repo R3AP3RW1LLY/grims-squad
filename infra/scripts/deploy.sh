@@ -25,7 +25,9 @@ set -Eeuo pipefail
 REPO=/srv/grims/repo
 ENV_FILE=/srv/grims/.env
 COMPOSE="docker compose -f $REPO/infra/docker/compose.prod.yml --env-file $ENV_FILE"
-PUBLIC_URL="${PUBLIC_URL:-https://45-63-35-93.sslip.io}"
+# Resolved in the preflight, AFTER the env file is readable: the shell wins,
+# then /srv/grims/.env, then the sslip.io fallback. See the note there.
+PUBLIC_URL="${PUBLIC_URL:-}"
 REF=main
 
 while [[ $# -gt 0 ]]; do
@@ -54,6 +56,18 @@ say "Preflight"
 # Read from the file rather than the environment: that is what compose does,
 # and a variable exported in this shell would produce a false pass.
 envval() { sed -n "s/^$1=//p" "$ENV_FILE" | head -n1; }
+
+# ★ THE PUBLIC URL COMES FROM /srv/grims/.env, NOT FROM THIS FILE ★
+#
+# This used to be a hard-coded sslip.io default resolved before the env file
+# was even read, which meant the verify step would keep probing the OLD name
+# after a domain cutover — reporting a healthy site by asking a hostname
+# members were no longer using. The shell still wins (so a cutover can be
+# rehearsed against either name explicitly), the env file is the normal
+# answer, and the sslip.io literal survives only as the fallback for a box
+# that predates PUBLIC_URL being required.
+PUBLIC_URL="${PUBLIC_URL:-$(envval PUBLIC_URL)}"
+PUBLIC_URL="${PUBLIC_URL:-https://45-63-35-93.sslip.io}"
 
 REQUIRED=(
   POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB
@@ -84,6 +98,17 @@ REQUIRED=(
   # Its own variable, deliberately. Sharing S3_BUCKET would put database dumps
   # in the media bucket — the arrangement the squadron owner ruled out.
   BACKUP_S3_BUCKET
+  # ★ ADDED FOR THE grims-squad.com CUTOVER, AND REQUIRED FROM NOW ON ★
+  #
+  # PUBLIC_URL is what the API stamps into every absolute link it writes
+  # (forum notifications, the joining guide) and what this script's verify step
+  # probes; PUBLIC_SITE_URL is baked into the web build as og:image and canonical
+  # URLs. Both had sslip.io fallbacks scattered through the stack, which meant a
+  # domain cutover was N edits in M files. They are now REQUIRED so the answer
+  # lives in exactly one place — /srv/grims/.env — and the cutover is a one-line
+  # change there (infra/cutover-grims-squad.md). Until the cutover, set both to
+  # https://45-63-35-93.sslip.io; this preflight failing is the reminder.
+  PUBLIC_URL PUBLIC_SITE_URL
 )
 
 missing=()
@@ -269,5 +294,45 @@ fi
 # Members-only, so a redirect to sign-in is the CORRECT answer. A 200 here would
 # mean the gate had come off.
 check /roster 307
+
+# ─────────────────────────────────────────────────────────── 8. record
+#
+# ★ AFTER the verify, deliberately ★
+#
+# Everything in this section is bookkeeping about a deploy that has already
+# succeeded. The marker names the revision members are NOW being served, so
+# writing it before the health gate would record a deploy that might yet be
+# rolled back — and the changelog describes what shipped, which is only true
+# once it has actually shipped.
+say "Recording the release"
+
+# The deployed-revision marker. `tools/changelog.mjs` reads this as its default
+# --from, and it is the one answer to "what is production running" that does
+# not require the repo checkout to be trusted (a hotfix `git reset` between
+# deploys would silently move HEAD without deploying anything).
+printf '%s\n' "$TARGET_SHA" > /srv/grims/deployed.sha
+ok "deployed revision recorded → /srv/grims/deployed.sha"
+
+# The changelog release row: what changed between the revision members WERE on
+# and the one they are on now, grouped Website / Companion App / Platform, and
+# served by GET /v1/changelog. Generated here because this is the only moment
+# that knows both SHAs and has git, node and the database in one place.
+#
+# `|| true` throughout: a changelog that failed to record must never turn a
+# healthy deploy into a reported failure — the row can be inserted by hand
+# afterwards (tools/changelog.mjs --sql | psql), and the site is already up.
+if [[ "$PREVIOUS_SHA" == "$TARGET_SHA" ]]; then
+  ok "same revision as before — no changelog entry to record"
+elif command -v node >/dev/null 2>&1; then
+  if node "$REPO/tools/changelog.mjs" --repo "$REPO" --from "$PREVIOUS_SHA" --to "$TARGET_SHA" --sql \
+    | $COMPOSE exec -T postgres psql -q -v ON_ERROR_STOP=1 \
+        -U "$(envval POSTGRES_USER)" -d "$(envval POSTGRES_DB)" >/dev/null 2>&1; then
+    ok "changelog recorded: ${PREVIOUS_SHA:0:8} → ${TARGET_SHA:0:8}"
+  else
+    ok "changelog insert FAILED — recover with: node tools/changelog.mjs --from $PREVIOUS_SHA --sql | psql (deploy itself is complete)"
+  fi
+else
+  ok "node is not on this host — record the changelog by hand: node tools/changelog.mjs --from $PREVIOUS_SHA --sql | psql"
+fi
 
 say "Deployed ${TARGET_SHA:0:8} with no downtime"
