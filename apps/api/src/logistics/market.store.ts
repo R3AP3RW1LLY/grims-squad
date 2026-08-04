@@ -53,6 +53,14 @@ export interface MarketPlace {
   /** Light years from the system asked about. Null when no origin was given. */
   readonly distance: number | null;
   /**
+   * Light SECONDS from the arrival star to the pad — the supercruise leg the jump count cannot
+   * see. Null when the station's knowledge row does not carry it. Read from knowledge_items at
+   * query time rather than copied onto 18.6M market rows: the join is two index probes per
+   * RETURNED row, and a copy would need a backfill and then be one more thing the rebuild could
+   * lose.
+   */
+  readonly arrivalLs: number | null;
+  /**
    * Where this station is, so it can become the origin of the NEXT leg.
    *
    * The Freight Office plans a run as buy-here then sell-there, and the second query has to be
@@ -426,6 +434,13 @@ export class PrismaMarketStore implements MarketStore {
     const rows = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
       `SELECT station_name, system_name, station_type, large_pads,
               ${priceCol} AS price, ${qtyCol} AS quantity, market_seen_at, ${distanceSelect},
+              -- Projected AFTER the sort and limit (it is not a sort key), so it costs two index
+              -- probes for each row RETURNED, not for each row considered.
+              (SELECT NULLIF(ki.data->>'distanceToArrival', '')::float
+                 FROM knowledge_items ki
+                WHERE ki.kind = 'station' AND ki.source IN ('galaxy', 'eddn')
+                  AND ki.ext_key = market_entries.station_key
+                LIMIT 1) AS arrival_ls,
               cube_ll_coord(coords, 1) AS cx,
               cube_ll_coord(coords, 2) AS cy,
               cube_ll_coord(coords, 3) AS cz
@@ -454,6 +469,7 @@ export class PrismaMarketStore implements MarketStore {
       quantity: int(r['quantity']) ?? 0,
       seenAt: (r['market_seen_at'] as Date | null) ?? null,
       distance: r['distance'] === null ? null : Number(r['distance']),
+      arrivalLs: r['arrival_ls'] === null ? null : Math.round(Number(r['arrival_ls'])),
       coords:
         r['cx'] === null || r['cy'] === null || r['cz'] === null
           ? null

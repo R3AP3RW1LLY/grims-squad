@@ -64,6 +64,8 @@ export interface RouteLeg {
   readonly seenAt: Date | null;
   /** Light years from the previous point of the run. */
   readonly distance: number | null;
+  /** Light seconds from the arrival star — the in-system leg. Null when unknown. */
+  readonly arrivalLs: number | null;
 }
 
 export interface Route {
@@ -106,11 +108,36 @@ export const TIME_MODEL = {
   jumpLy: 22,
   minutesPerJump: 0.75,
   minutesPerStop: 8,
+  /** A stop's eight minutes already cover a station this close to the star. */
+  nearStationLs: 500,
 } as const;
 
-export function tripMinutesOf(distanceLy: number): number {
+/**
+ * The supercruise surcharge for a far station, in minutes.
+ *
+ * ★ THIS IS WHY TWO ROUTES WITH THE SAME LIGHT YEARS ARE NOT THE SAME TRIP ★
+ *
+ * Hutton Orbital is one jump and ninety minutes. The jump count cannot see the in-system leg, and
+ * before this the per-hour column happily ranked a 200,000 Ls outpost above a station on the
+ * arrival star. The curve is logarithmic where acceleration dominates and linear once the ship
+ * rides its ~2001c ceiling, fitted to the times commanders actually report (≈4 extra minutes at
+ * 5,000 Ls, ≈8 at 20,000, ≈12 at 100,000, ≈80 at Hutton's 6.9M) — and it is an ESTIMATE, printed
+ * as one, like the rest of the model.
+ */
+export function supercruiseMinutes(arrivalLs: number | null): number {
+  if (arrivalLs === null || arrivalLs <= TIME_MODEL.nearStationLs) return 0;
+  const log = 2.2 * Math.log(arrivalLs / TIME_MODEL.nearStationLs);
+  const linear = arrivalLs / 120_000;
+  return log + linear;
+}
+
+export function tripMinutesOf(
+  distanceLy: number,
+  arrivals: ReadonlyArray<number | null> = [],
+): number {
   const jumps = Math.max(1, Math.ceil(distanceLy / TIME_MODEL.jumpLy));
-  return Math.round(jumps * TIME_MODEL.minutesPerJump + 2 * TIME_MODEL.minutesPerStop);
+  const cruise = arrivals.reduce((sum: number, ls) => sum + supercruiseMinutes(ls), 0);
+  return Math.round(jumps * TIME_MODEL.minutesPerJump + 2 * TIME_MODEL.minutesPerStop + cruise);
 }
 
 /** How many commodities to consider when the member has not named one. */
@@ -169,6 +196,7 @@ function leg(p: MarketPlace): RouteLeg {
     quantity: p.quantity,
     seenAt: p.seenAt,
     distance: p.distance,
+    arrivalLs: p.arrivalLs,
   };
 }
 
@@ -237,7 +265,7 @@ export async function planRoutes(
 
         const distanceLy = (buy.distance ?? 0) + (sell.distance ?? 0);
         const totalProfit = profitPerTonne * tonnes;
-        const minutes = tripMinutesOf(distanceLy);
+        const minutes = tripMinutesOf(distanceLy, [buy.arrivalLs, sell.arrivalLs]);
         routes.push({
           commodity,
           buy: leg(buy),
@@ -269,5 +297,19 @@ export async function planRoutes(
   const key = keyOf[req.sort];
   routes.sort((a, b) => key(b) - key(a));
 
-  return { routes: routes.slice(0, limit), considered };
+  /*
+   * The same physical run must appear once, however it was found. Two shortlist entries or two
+   * market rows resolving to one station pair would print the identical trip twice — observed
+   * once in the wild on 2026-08-04 (two indistinguishable Silver runs), cause transient, insurance
+   * permanent. The first survivor wins, which after the sort above is also the best-ranked one.
+   */
+  const seen = new Set<string>();
+  const unique = routes.filter((r) => {
+    const k = `${r.commodity}|${r.buy.stationName}|${r.buy.systemName}|${r.sell.stationName}|${r.sell.systemName}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+
+  return { routes: unique.slice(0, limit), considered };
 }

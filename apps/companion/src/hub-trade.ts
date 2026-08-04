@@ -19,6 +19,7 @@ export interface TradeLeg {
   readonly quantity: number;
   readonly seenAt: string | null;
   readonly distance: number | null;
+  readonly arrivalLs: number | null;
 }
 
 export interface TradeRoute {

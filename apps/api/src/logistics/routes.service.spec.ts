@@ -28,6 +28,7 @@ const PLACE = (over: Partial<MarketPlace> = {}): MarketPlace => ({
   seenAt: new Date('2026-08-01T00:00:00Z'),
   distance: 10,
   coords: THERE,
+  arrivalLs: null,
   ...over,
 });
 
@@ -124,6 +125,43 @@ describe('how much can actually be moved', () => {
 });
 
 describe('planning a run', () => {
+  it('prints the same physical run once, however many ways it was found', async () => {
+    // Two shortlist entries that resolve to the identical station pair — the transient duplicate
+    // observed live on 2026-08-04, reproduced deliberately.
+    const h = harness({
+      margins: ['Silver', 'Silver'],
+    });
+    const plan = await planRoutes(h.store, REQ);
+    const keys = plan.routes.map(
+      (r) => `${r.commodity}|${r.buy.stationName}|${r.sell.stationName}`,
+    );
+    expect(new Set(keys).size).toBe(keys.length);
+  });
+
+  it('charges a far station its supercruise leg — Hutton is one jump and ninety minutes', async () => {
+    const h = harness({
+      margins: ['Gold', 'Tea'],
+      buys: {
+        Gold: [PLACE({ arrivalLs: 300 })],
+        Tea: [PLACE({ arrivalLs: 300 })],
+      },
+      sells: {
+        Gold: [PLACE({ price: 2_000, stationName: 'Close Sale', arrivalLs: 200 })],
+        Tea: [PLACE({ price: 2_000, stationName: 'Hutton-like', arrivalLs: 200_000 })],
+      },
+    });
+    const plan = await planRoutes(h.store, REQ);
+    const close = plan.routes.find((r) => r.sell.stationName === 'Close Sale');
+    const far = plan.routes.find((r) => r.sell.stationName === 'Hutton-like');
+    expect(close).toBeDefined();
+    expect(far).toBeDefined();
+    // Identical light years, very different trips: the far sale pays for its in-system leg.
+    expect(far!.tripMinutes).toBeGreaterThan(close!.tripMinutes + 10);
+    expect(far!.profitPerHour).toBeLessThan(close!.profitPerHour);
+    // And the leg carries the number so a page can print WHY.
+    expect(far!.sell.arrivalLs).toBe(200_000);
+  });
+
   it('lets the member pick which of the three profits leads', async () => {
     /*
      * ★ SQUADRON OWNER, 2026-08-04: "Show all three, let me sort." ★

@@ -37,6 +37,12 @@ const LABEL: JSX.CSSProperties = {
   marginBottom: '4px',
 };
 
+function ls(v: number | null): string {
+  if (v === null) return '';
+  const text = v >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}M Ls` : `${Math.round(v).toLocaleString()} Ls`;
+  return ` · ${text}`;
+}
+
 const CAP: Record<TradeRoute['limitedBy'], string> = {
   hold: 'your hold',
   supply: 'the shelf',
@@ -58,15 +64,15 @@ function RouteCard({ r }: { r: TradeRoute }): JSX.Element {
           <span style={LABEL}>Load at</span>
           <span style={{ color: C.text }}>{r.buy.stationName}</span>
           <br />
-          {r.buy.systemName} · {r.buy.distance === null ? '—' : `${r.buy.distance.toFixed(1)} ly`} ·{' '}
-          {r.buy.price.toLocaleString()} cr/t
+          {r.buy.systemName} · {r.buy.distance === null ? '—' : `${r.buy.distance.toFixed(1)} ly`}
+          {ls(r.buy.arrivalLs)} · {r.buy.price.toLocaleString()} cr/t
         </div>
         <div>
           <span style={LABEL}>Sell at</span>
           <span style={{ color: C.text }}>{r.sell.stationName}</span>
           <br />
-          {r.sell.systemName} · {r.sell.distance === null ? '—' : `${r.sell.distance.toFixed(1)} ly`} ·{' '}
-          {r.sell.price.toLocaleString()} cr/t
+          {r.sell.systemName} · {r.sell.distance === null ? '—' : `${r.sell.distance.toFixed(1)} ly`}
+          {ls(r.sell.arrivalLs)} · {r.sell.price.toLocaleString()} cr/t
         </div>
         <div>
           <span style={LABEL}>Carrying</span>
@@ -210,8 +216,9 @@ export function TradePage(): JSX.Element {
           ) : (
             <div style={{ display: 'grid', gap: '10px' }}>
               <p style={{ margin: 0, fontSize: '11px', color: C.faint }}>
-                Run times assume a ~{plan.timeModel.jumpLy} ly laden jump and about{' '}
-                {plan.timeModel.minutesPerStop} minutes per stop.
+                Run times assume a ~{plan.timeModel.jumpLy} ly laden jump, about{' '}
+                {plan.timeModel.minutesPerStop} minutes per stop, and add supercruise time from
+                each station's arrival distance when we hold it.
               </p>
               {plan.routes.map((r) => (
                 <RouteCard key={`${r.commodity}/${r.buy.stationName}/${r.sell.stationName}`} r={r} />

@@ -28,6 +28,13 @@ function ago(iso: string | null): string {
   return `${Math.round(days / 30)}mo ago`;
 }
 
+/** `287 Ls` close in, `1.4M Ls` for the Hutton-likes. Null stays silent — absence is not zero. */
+function ls(v: number | null): string {
+  if (v === null) return '';
+  const text = v >= 1_000_000 ? `${(v / 1_000_000).toFixed(1)}M Ls` : `${Math.round(v).toLocaleString()} Ls`;
+  return ` · ${text}`;
+}
+
 /** Thirty days: roughly long enough for a market to have been restocked, repriced or fought over. */
 const STALE_DAYS = 30;
 
@@ -58,8 +65,9 @@ export function RouteList({ plan }: { plan: RoutePlan }) {
       */}
       {plan.timeModel !== undefined ? (
         <p className="m-0 text-[11px] text-[var(--color-text-secondary)]">
-          Run times assume a ~{plan.timeModel.jumpLy} ly laden jump and about{' '}
-          {plan.timeModel.minutesPerStop} minutes per stop.
+          Run times assume a ~{plan.timeModel.jumpLy} ly laden jump, about{' '}
+          {plan.timeModel.minutesPerStop} minutes per stop, and add supercruise time from each
+          station's arrival distance when we hold it.
         </p>
       ) : null}
       {plan.routes.map((r) => {
@@ -94,8 +102,8 @@ export function RouteList({ plan }: { plan: RoutePlan }) {
                 </dd>
                 <dd className="m-0 text-[11px] text-[var(--color-text-secondary)]">
                   {r.buy.systemName} ·{' '}
-                  {r.buy.distance === null ? '—' : `${r.buy.distance.toFixed(1)} ly`} ·{' '}
-                  {r.buy.price.toLocaleString()} cr/t
+                  {r.buy.distance === null ? '—' : `${r.buy.distance.toFixed(1)} ly`}
+                  {ls(r.buy.arrivalLs)} · {r.buy.price.toLocaleString()} cr/t
                 </dd>
               </div>
 
@@ -108,8 +116,8 @@ export function RouteList({ plan }: { plan: RoutePlan }) {
                 </dd>
                 <dd className="m-0 text-[11px] text-[var(--color-text-secondary)]">
                   {r.sell.systemName} ·{' '}
-                  {r.sell.distance === null ? '—' : `${r.sell.distance.toFixed(1)} ly`} ·{' '}
-                  {r.sell.price.toLocaleString()} cr/t
+                  {r.sell.distance === null ? '—' : `${r.sell.distance.toFixed(1)} ly`}
+                  {ls(r.sell.arrivalLs)} · {r.sell.price.toLocaleString()} cr/t
                 </dd>
               </div>
 

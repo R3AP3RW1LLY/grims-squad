@@ -1691,6 +1691,8 @@ export interface RouteLeg {
   quantity: number;
   seenAt: string | null;
   distance: number | null;
+  /** Light seconds from the arrival star — the in-system leg the jump count cannot see. */
+  arrivalLs: number | null;
 }
 
 export interface Route {
