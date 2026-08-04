@@ -193,6 +193,14 @@ let dockedAt: DockedAt | null = null;
  * a name across a different market id.
  */
 let seededDock: DockedAt | null = null;
+/**
+ * Whether we have watched the member leave, as opposed to simply not knowing where they are.
+ *
+ * The startup seed is a snapshot from app-start that is never recomputed, so without this a
+ * departure fell back to it and the build tracker reverted to the delivery figures as they stood
+ * when the app was launched. See the note on `mergeDock`.
+ */
+let departedDock = false;
 
 /**
  * What is in the hold, and how big the hold is.
@@ -587,6 +595,15 @@ async function tick(): Promise<void> {
     } finally {
       sending = false;
     }
+    /*
+     * A transition from somewhere to nowhere is a DEPARTURE, and the only way it happens is the
+     * watcher reading an `Undocked` or an `FSDJump` — it carries the previous dock forward
+     * otherwise. That makes this the one place that can tell "they left" from "we do not know".
+     */
+    if (dockedAt !== null && pass.outcome.dockedAt === null) departedDock = true;
+    // Docking again makes the seed relevant once more: the heartbeat carries no station name, and
+    // the seed is where a name comes from until a `Docked` supplies one.
+    if (pass.outcome.dockedAt !== null) departedDock = false;
     dockedAt = pass.outcome.dockedAt;
 
     /*
@@ -908,7 +925,7 @@ function autoUpdaterQuitAndInstall(): void {
  * merge rule is two chances for the app to tell somebody two different things about where they are.
  */
 function mergedDock(): DockedAt | null {
-  return mergeDock(dockedAt, seededDock);
+  return mergeDock(dockedAt, seededDock, departedDock);
 }
 
 function state(): Record<string, unknown> {
@@ -954,7 +971,7 @@ function state(): Record<string, unknown> {
        * matching market id, so the form gets a name even when the only thing arriving is a depot
        * heartbeat that carries none.
        */
-      const merged = mergeDock(dockedAt, seededDock);
+      const merged = mergeDock(dockedAt, seededDock, departedDock);
       return isFresh(merged, Date.now()) ? merged : null;
     })(),
     overlays: config.overlays,

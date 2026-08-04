@@ -356,7 +356,38 @@ export function seedFromJournal(text: string): DockedAt | null {
  * The two are not competing answers. The heartbeat knows WHERE and WHAT; the seed knows what it is
  * CALLED. Merging on a matching market id takes each from whichever actually has it.
  */
-export function mergeDock(live: DockedAt | null, seeded: DockedAt | null): DockedAt | null {
+export function mergeDock(
+  live: DockedAt | null,
+  seeded: DockedAt | null,
+  /**
+   * True once we have WATCHED the member leave, rather than merely not knowing where they are.
+   *
+   * ★ THE BUG THIS FIXES — REPORTED FROM A LIVE GAME, 2026-08-04 ★
+   *
+   * "the build tracker overlay is not updating and staying updated, its changing everytime i land
+   * to be updated, but when i leave its reverting to old values."
+   *
+   * Exactly that, and the cause is a `null` that meant two different things. `Undocked` and
+   * `FSDJump` set the live dock to null — correctly, the member is not on a pad any more — and this
+   * function read that null as "the live path knows nothing" and fell back to the seed.
+   *
+   * The seed is a snapshot taken from the tail of the journal ONCE, when the app started, and never
+   * recomputed. So every departure resurrected a construction site as it stood at app-start, with
+   * its delivery figures frozen at that moment. Landing refreshed it from the depot heartbeat;
+   * leaving threw that away and put the old snapshot back. The member watched the same numbers
+   * regress every time they undocked.
+   *
+   * "Not docked" and "we have no idea" are different facts and cannot share a representation. This
+   * is the distinction, passed in by the caller that can actually observe it.
+   */
+  departed = false,
+): DockedAt | null {
+  /*
+   * A departure is knowledge, and it beats the seed outright. The seed is a memory of where somebody
+   * WAS; once we have seen them leave, it is not a claim about where they are.
+   */
+  if (departed) return live;
+
   if (seeded === null) return live;
   if (live === null) return seeded;
 

@@ -395,6 +395,48 @@ describe('merging the seed with the live pass', () => {
     expect(merged?.site?.progress).toBeCloseTo(0.42);
   });
 
+  it('★ MANDATORY: a departure is not a gap — the seed must not resurrect the site ★', () => {
+    /*
+     * ★ REPORTED FROM A LIVE GAME, 2026-08-04 ★
+     *
+     * "the build tracker overlay is not updating and staying updated, its changing everytime i land
+     * to be updated, but when i leave its reverting to old values."
+     *
+     * The sequence, exactly as it happened:
+     *
+     *   1. app starts while docked  -> the seed is captured, with the site as it stands THEN
+     *   2. member hauls, the depot heartbeat updates the live dock -> overlay is correct
+     *   3. member undocks           -> `Undocked` sets the live dock to null
+     *   4. mergeDock read that null as "we know nothing" and returned the SEED
+     *   5. the overlay redrew with delivery figures frozen at app-start
+     *
+     * The seed is taken once, from the tail of the journal, and never recomputed — so step 5 could
+     * put back numbers that were hours old, every single time somebody left the pad.
+     *
+     * "Not docked" and "we have no idea" cannot share a representation.
+     */
+    const stale: DockedAt = {
+      ...fromSeed,
+      site: { progress: 0.11, complete: false, failed: false, resources: [] },
+    };
+
+    // Without the flag — the old behaviour, and the bug.
+    expect(mergeDock(null, stale)?.site?.progress).toBeCloseTo(0.11);
+
+    // Having watched them leave, there is nothing to report and the snapshot stays buried.
+    expect(mergeDock(null, stale, true)).toBeNull();
+  });
+
+  it('still fills the name in once they dock again', () => {
+    /*
+     * The flag must not be sticky past a re-dock, or the fix would break the thing the seed exists
+     * for: the heartbeat carries no station name, so the seed is where one comes from until a
+     * `Docked` supplies it.
+     */
+    const merged = mergeDock(heartbeatOnly, fromSeed, false);
+    expect(merged?.stationName).toBe("Planetary Construction Site: Harry's Dysfunctional Society");
+  });
+
   it('MANDATORY: refuses a name from a station the member has left', () => {
     // Different market: the live answer wins outright, blank name and all. A stale name on a fresh
     // id would put the wrong station on a project.
