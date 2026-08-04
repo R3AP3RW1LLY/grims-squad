@@ -5,6 +5,7 @@ import type { OverlayLayout } from '../overlay-config.js';
 import { Button, C, Card, Empty, Problem, Section, Stat } from './ui.js';
 import { ColonyBoardPage, ColonyNewPage } from './colonisation.js';
 import { BountiesPage } from './bounties.js';
+import { TradePage } from './trade.js';
 import { PlanningPage } from './planning.js';
 import { BuildTypesPage } from './build-types.js';
 import { GroupIcon } from './icons.js';
@@ -360,7 +361,7 @@ function App(): JSX.Element {
           />
         ) : null}
         {page === 'bounties' ? <BountiesPage /> : null}
-        {page === 'trade' ? <TradeRuns /> : null}
+        {page === 'trade' ? <TradePage /> : null}
         {page === 'overlays' ? (
           <OverlaysPanel
             layout={state.overlays}
@@ -551,25 +552,6 @@ function Status({ state }: { state: AppState }): JSX.Element {
  *
  * So it says what it is for and offers the door to the thing that works today.
  */
-function TradeRuns(): JSX.Element {
-  return (
-    <Section title="Trade runs">
-      <Card>
-        <p style={{ margin: 0, fontSize: '13px', color: C.dim }}>
-          Plan a run in the Freight Office on the website and it will appear here, with the next hop
-          on an overlay while you fly it.
-        </p>
-        <p style={{ margin: '10px 0 0', fontSize: '12px', color: C.faint }}>
-          Saving a run to come back to is not built yet — the planner works, but nothing keeps your
-          choice. This panel fills in when it does.
-        </p>
-        <div style={{ marginTop: '14px' }}>
-          <Button onClick={() => void window.companion.openHub()}>Open the Freight Office</Button>
-        </div>
-      </Card>
-    </Section>
-  );
-}
 
 function Device({ state }: { state: AppState }): JSX.Element {
   return (

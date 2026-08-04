@@ -40,6 +40,7 @@ import {
   postColonyProject,
 } from './hub-colony.js';
 import { bountyBoard, bountyLeaderboard } from './hub-bounties.js';
+import { tradeRoutes, type TradeQuery } from './hub-trade.js';
 import { readdir, readFile, stat, open } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -1413,6 +1414,20 @@ if (!app.requestSingleInstanceLock()) {
 
     ipcMain.handle('colonyProjects', () => colonyProjects(hub()));
     ipcMain.handle('bountyBoard', () => bountyBoard(hub()));
+    ipcMain.handle('tradeRoutes', (_e, query: unknown) => {
+      /*
+       * Re-read rather than trusted, like every renderer-supplied value: only known keys pass,
+       * and only as strings — the hub does its own clamping, but a number arriving as an object
+       * would still become "[object Object]" in a query string without this.
+       */
+      const q = (query ?? {}) as Record<string, unknown>;
+      const clean: Record<string, string> = {};
+      for (const k of ['near', 'cargo', 'buyWithinLy', 'sellWithinLy', 'budget', 'commodity', 'sort']) {
+        const v = q[k];
+        if (typeof v === 'string') clean[k] = v;
+      }
+      return tradeRoutes(hub(), clean as TradeQuery);
+    });
     ipcMain.handle('bountyLeaderboard', (_e, month: unknown) =>
       bountyLeaderboard(hub(), typeof month === 'string' && month !== '' ? month : undefined),
     );

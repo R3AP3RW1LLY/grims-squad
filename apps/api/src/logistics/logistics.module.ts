@@ -7,6 +7,7 @@ import { AclDbService } from '../authz/acl-db.service.js';
 import { MarketController } from './market.controller.js';
 import { ColonyController } from './colony.controller.js';
 import { ColonyDeviceController } from './colony-device.controller.js';
+import { TradeDeviceController } from './trade-device.controller.js';
 import { ColonyService } from './colony.service.js';
 import { ColonyCatalogueService } from './colony-catalogue.service.js';
 import { ColonyPlanService } from './colony-plan.service.js';
@@ -34,7 +35,7 @@ import { MARKET_STORE } from './logistics.tokens.js';
   // token rather than a session, and the colonisation routes it reaches resolve it the same way
   // the telemetry upload does.
   imports: [DatabaseModule, AuthzModule, TelemetryModule],
-  controllers: [MarketController, ColonyController, ColonyDeviceController],
+  controllers: [MarketController, ColonyController, ColonyDeviceController, TradeDeviceController],
   providers: [
     {
       provide: MARKET_STORE,
