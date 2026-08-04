@@ -7,6 +7,9 @@ import { JOB_REQUEST_CHANNEL } from '@grims/shared';
 import { dueSources, lastRuns, TICK_MS } from './scheduler.js';
 import { PrismaColonyStore, syncColonyProjects } from '@grims/db';
 import { announce } from './jobs/job-log.js';
+import { rollUpCommodities } from './jobs/commodity-rollup.js';
+import { PrismaRollupStore } from './jobs/commodity-rollup.wiring.js';
+import { takeJobLock } from './lib/job-lock.js';
 
 /**
  * The resident worker: runs an ingest when somebody asks for one.
@@ -318,6 +321,7 @@ function startScheduler(db: PrismaClient): void {
   setInterval(() => void tick(), TICK_MS);
 
   startColonySync(db);
+  startCommodityRollup(db);
 }
 
 /**
@@ -360,6 +364,62 @@ function startColonySync(db: PrismaClient): void {
 
   void run();
   setInterval(() => void run(), COLONY_SYNC_MS);
+}
+
+/**
+ * How often to take the galaxy's price a snapshot.
+ *
+ * ★ THE ONE JOB WHERE A MISSED RUN IS PERMANENT — MEASURED 2026-08-04 ★
+ *
+ * Every other scheduled job here can catch up. This one cannot: `market_entries` holds only the
+ * CURRENT price, so an hour nobody recorded is an hour no chart will ever have. The job's own
+ * header says so — "every hour it does not run is a hole nothing can backfill".
+ *
+ * It had a crontab entry and no daemon entry, which is the same omission `startColonySync` above
+ * was added to fix, and it cost more. Two days after the owner asked to "start recording now, show
+ * charts as they fill", the table held exactly TWO hourly buckets — 05:00 and 20:00 on one day,
+ * 392 commodities each, and nothing since. Zero commodities had enough history to draw a line.
+ * Every commodity chart on the site was going to be two dots for ever.
+ *
+ * A resident daemon is the one thing guaranteed to be running wherever the platform runs. The
+ * crontab entry stays — it covers the daemon being down — and running twice is free: the job takes
+ * an advisory lock and the write is an idempotent upsert on the truncated hour.
+ */
+const COMMODITY_ROLLUP_MS = 60 * 60_000;
+
+function startCommodityRollup(db: PrismaClient): void {
+  const run = async (): Promise<void> => {
+    /*
+     * The lock is the whole safety story. Cron may fire at the same minute, and two copies would
+     * aggregate 398 commodities twice against the table the entire site reads — harmless to the
+     * data, expensive to everybody looking at a page.
+     */
+    const lock = await takeJobLock('commodity-rollup');
+    if (lock === null) return;
+
+    try {
+      const report = await rollUpCommodities(new PrismaRollupStore(db), new Date());
+      console.log(
+        `daemon: commodity rollup — ${report.commodities} commodities` +
+          `${report.untraded > 0 ? `, ${report.untraded} untraded` : ''}` +
+          `${report.failed > 0 ? `, ${report.failed} FAILED` : ''}`,
+      );
+    } catch (e) {
+      /*
+       * Logged and swallowed. A failed hour is one missing point on a chart; a throw here would
+       * take down the interval and cost every hour after it, which is the failure this job exists
+       * to prevent.
+       */
+      console.error(`daemon: commodity rollup failed (${e instanceof Error ? e.message : String(e)})`);
+    } finally {
+      await lock.release();
+    }
+  };
+
+  // At startup as well as on the hour: a worker restarted after being down should take the current
+  // hour's point immediately rather than waiting up to an hour for the next tick.
+  void run();
+  setInterval(() => void run(), COMMODITY_ROLLUP_MS);
 }
 
 async function main(): Promise<void> {
