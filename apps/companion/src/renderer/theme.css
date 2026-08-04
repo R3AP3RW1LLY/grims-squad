@@ -381,7 +381,7 @@ body.scanlines::after {
   border-radius: 4px;
   padding: 9px 12px;
   font-family: inherit;
-  font-size: 13px;
+  font-size: 12.5px;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -395,10 +395,11 @@ body.scanlines::after {
 }
 /* A child destination inside a collapsible group. Indented and a shade quieter. */
 .nav-item-sub {
-  /* Same size as the category rows since 2026-08-04 ("so this all looks uniform") — only the
-     left inset says "a level down" now, matching the website's revised sidebar. */
-  padding: 9px 12px 9px 26px;
-  font-size: 13px;
+  /* One size everywhere, the SMALL one — the owner's 2026-08-04 clarification after the first
+     uniformity attempt enlarged rows instead ("this looks really bad"). Only the left inset
+     says "a level down", matching the website's sidebar. */
+  padding: 7px 12px 7px 26px;
+  font-size: 12.5px;
 }
 .nav-item:not([aria-current='page']):hover {
   background-color: #18202a;

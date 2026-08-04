@@ -316,13 +316,13 @@ function SidebarContents({ me, current }: { me: MeResponse; current: string }) {
                           href={item.href}
                           aria-current={active ? 'page' : undefined}
                           className={cx(
-                            'group flex gap-x-3 rounded p-2 text-sm/6 transition-colors',
+                            'group flex gap-x-3 rounded px-2 py-1.5 text-xs/5 transition-colors',
                             active
                               ? 'bg-[color-mix(in_srgb,var(--color-brand-orange)_14%,transparent)] text-[var(--color-brand-orange-bright)]'
                               : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-panel-hover)] hover:text-[var(--color-text-primary)]',
                           )}
                         >
-                          <Icon aria-hidden="true" className="size-5 shrink-0" />
+                          <Icon aria-hidden="true" className="size-4 shrink-0" />
                           {item.label}
                         </a>
                       </li>
@@ -335,11 +335,11 @@ function SidebarContents({ me, current }: { me: MeResponse; current: string }) {
 
                   return (
                     /*
-                      Inset from the section's own links — and since 2026-08-04, the SAME SIZE as
-                      them: "make all navlinks the same size as the categories please. so this all
-                      looks uniform." (This reverses the 2026-08-01 smaller-subs instruction; the
-                      indentation and the border alone carry the nesting now, which they were
-                      already doing most of the work for.)
+                      One size everywhere, and it is the SMALL one. The owner asked for uniformity
+                      on 2026-08-04 and the first attempt enlarged the sub-rows to match the links
+                      — "this looks really bad" — so the links came down instead: every row in the
+                      sidebar now sits at the category-heading size, and only the inset and the
+                      border say "a level down".
                     */
                     <li key={sub} className="mt-1 ml-2">
                       <button
@@ -347,12 +347,12 @@ function SidebarContents({ me, current }: { me: MeResponse; current: string }) {
                         onClick={() => toggleSub(sub)}
                         aria-expanded={subOpen}
                         aria-controls={subId}
-                        className="flex w-full items-center justify-between gap-2 rounded p-2 text-sm/6 font-medium tracking-wide text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-panel-hover)] hover:text-[var(--color-text-primary)]"
+                        className="flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-xs/5 font-medium tracking-wide text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-panel-hover)] hover:text-[var(--color-text-primary)]"
                       >
                         <span className="flex items-center gap-x-2.5">
                           {(() => {
                             const SubIcon = SUBSECTION_ICONS[sub] ?? WrenchScrewdriverIcon;
-                            return <SubIcon aria-hidden="true" className="size-5 shrink-0" />;
+                            return <SubIcon aria-hidden="true" className="size-4 shrink-0" />;
                           })()}
                           {sub}
                         </span>
@@ -384,7 +384,7 @@ function SidebarContents({ me, current }: { me: MeResponse; current: string }) {
                                 href={item.href}
                                 aria-current={active ? 'page' : undefined}
                                 className={cx(
-                                  'group flex gap-x-3 rounded p-2 text-sm/6 transition-colors',
+                                  'group flex gap-x-3 rounded px-2 py-1.5 text-xs/5 transition-colors',
                                   active
                                     ? 'bg-[color-mix(in_srgb,var(--color-brand-orange)_14%,transparent)] text-[var(--color-brand-orange-bright)]'
                                     : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-panel-hover)] hover:text-[var(--color-text-primary)]',
