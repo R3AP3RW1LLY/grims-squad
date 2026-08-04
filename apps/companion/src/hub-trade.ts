@@ -64,16 +64,53 @@ export interface TradeQuery {
   readonly sort?: string;
 }
 
+/** One commodity as the index lists it — the website's row shape, near columns included. */
+export interface CommodityRow {
+  readonly commodity: string;
+  readonly category: string | null;
+  readonly avgBuy: number | null;
+  readonly avgSell: number | null;
+  readonly minBuy: number | null;
+  readonly maxSell: number | null;
+  readonly supply: string;
+  readonly demand: string;
+  readonly buyMarkets: number;
+  readonly sellMarkets: number;
+  readonly sellTrend: number | null;
+  readonly nearBuy?: number | null;
+  readonly nearSell?: number | null;
+  readonly nearMarkets?: number;
+}
+
+export interface CommoditiesIndex {
+  readonly commodities: CommodityRow[];
+  readonly origin: TradePlan['origin'];
+  readonly unknownSystem: string | null;
+  readonly nearWithinLy: number | null;
+}
+
 type Answer<T> = { ok: true; data: T } | { ok: false; error: string };
 
 /** Same failure-becomes-a-sentence contract as the other hub readers. */
 export async function tradeRoutes(call: HubCall, query: TradeQuery): Promise<Answer<TradePlan>> {
-  if (call.deviceToken === '') return { ok: false, error: 'Pair this device first.' };
-
   const qs = new URLSearchParams();
   for (const [k, v] of Object.entries(query)) {
     if (typeof v === 'string' && v.trim() !== '') qs.set(k, v.trim());
   }
+  return tradeGet<TradePlan>(call, `/routes?${qs.toString()}`);
+}
+
+/** The commodities index, near columns measured from the device's member unless `near` names elsewhere. */
+export function tradeCommodities(call: HubCall, near?: string): Promise<Answer<CommoditiesIndex>> {
+  const trimmed = near?.trim() ?? '';
+  return tradeGet<CommoditiesIndex>(
+    call,
+    `/commodities${trimmed === '' ? '' : `?near=${encodeURIComponent(trimmed)}`}`,
+  );
+}
+
+async function tradeGet<T>(call: HubCall, path: string): Promise<Answer<T>> {
+  if (call.deviceToken === '') return { ok: false, error: 'Pair this device first.' };
 
   const doFetch = call.fetchImpl ?? fetch;
   const ac = new AbortController();
@@ -82,7 +119,7 @@ export async function tradeRoutes(call: HubCall, query: TradeQuery): Promise<Ans
 
   try {
     const res = await doFetch(
-      `${call.apiBaseUrl.replace(/\/+$/, '')}/v1/companion/trade/routes?${qs.toString()}`,
+      `${call.apiBaseUrl.replace(/\/+$/, '')}/v1/companion/trade${path}`,
       {
         headers: { authorization: `Bearer ${call.deviceToken}` },
         signal: ac.signal,
@@ -95,7 +132,7 @@ export async function tradeRoutes(call: HubCall, query: TradeQuery): Promise<Ans
       return { ok: false, error: body?.error?.message ?? `The hub answered ${res.status}.` };
     }
 
-    const data = (await res.json().catch(() => null)) as TradePlan | null;
+    const data = (await res.json().catch(() => null)) as T | null;
     if (data === null) return { ok: false, error: 'The hub sent something we could not read.' };
     return { ok: true, data };
   } catch (error) {

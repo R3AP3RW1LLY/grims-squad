@@ -53,6 +53,71 @@ export class TradeDeviceController {
   }
 
   /**
+   * The commodities index, with near-you enrichment. Mirrors the website's list exactly — same
+   * store calls, same 50 ly radius — except the origin falls back to the DEVICE's member, who
+   * always exists here.
+   */
+  @Public()
+  @Get('commodities')
+  async commodities(@Req() req: FastifyRequest, @Query('near') near?: string) {
+    const caller = await this.#caller(req);
+    const commodities = await this.store.list();
+
+    const typed = near?.trim() ?? '';
+    let origin: {
+      coords: { x: number; y: number; z: number };
+      system: string;
+      station: string | null;
+      from: 'typed' | 'journal';
+      age?: string;
+      stale?: boolean;
+    } | null = null;
+
+    if (typed !== '') {
+      const coords = await this.store.systemCoords(typed);
+      if (coords !== null) origin = { coords, system: typed, station: null, from: 'typed' };
+    } else {
+      const known = await this.position.lastKnown(caller.userId);
+      if (known !== null && known.coords !== null) {
+        const age = positionAge(known.at, Date.now());
+        origin = {
+          coords: known.coords,
+          system: known.systemName,
+          station: known.stationName,
+          from: 'journal',
+          age: age.text,
+          stale: age.stale,
+        };
+      }
+    }
+
+    if (origin === null) {
+      return {
+        commodities,
+        origin: null,
+        unknownSystem: typed === '' ? null : typed,
+        nearWithinLy: null,
+      };
+    }
+
+    const nearRows = await this.store.listNear(origin.coords, NEAR_LY);
+    return {
+      commodities: commodities.map((c) => ({
+        ...c,
+        ...(nearRows.get(c.commodity) ?? { nearBuy: null, nearSell: null, nearMarkets: 0 }),
+      })),
+      origin: {
+        system: origin.system,
+        station: origin.station,
+        from: origin.from,
+        ...(origin.age === undefined ? {} : { age: origin.age, stale: origin.stale === true }),
+      },
+      unknownSystem: null,
+      nearWithinLy: NEAR_LY,
+    };
+  }
+
+  /**
    * Plan a run. Parameters, clamps and defaults MATCH the website's route in MarketController —
    * the app is a mirror, and two doors quoting different answers for the same inputs is the drift
    * the mirror rule exists to prevent.
@@ -141,6 +206,9 @@ export class TradeDeviceController {
     };
   }
 }
+
+/** The same radius the website's index measures. One number, two doors. */
+const NEAR_LY = 50;
 
 // Mirrors of MarketController's local helpers, kept private to each door on purpose: they are
 // three lines each, and a shared "controller-utils" file is how unrelated routes grow entangled.

@@ -114,6 +114,7 @@ contextBridge.exposeInMainWorld('overlays', {
  */
 contextBridge.exposeInMainWorld('trade', {
   routes: (query: unknown) => ipcRenderer.invoke('tradeRoutes', query),
+  commodities: (near?: string) => ipcRenderer.invoke('tradeCommodities', near),
 });
 
 contextBridge.exposeInMainWorld('bounties', {

@@ -24,6 +24,14 @@ declare global {
   interface Window {
     readonly trade: {
       routes(query: unknown): Promise<Answer<TradePlan>>;
+      /*
+       * The commodities page's half of the bridge, declared here with the rest of `window.trade`
+       * for the same reason window.colony keeps one declaration: a second `declare global` for
+       * one object conflicts rather than adds.
+       */
+      commodities(
+        near?: string,
+      ): Promise<Answer<import('../hub-trade.js').CommoditiesIndex>>;
     };
   }
 }

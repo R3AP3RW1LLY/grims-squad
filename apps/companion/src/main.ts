@@ -40,7 +40,7 @@ import {
   postColonyProject,
 } from './hub-colony.js';
 import { bountyBoard, bountyLeaderboard } from './hub-bounties.js';
-import { tradeRoutes, type TradeQuery } from './hub-trade.js';
+import { tradeCommodities, tradeRoutes, type TradeQuery } from './hub-trade.js';
 import { readdir, readFile, stat, open } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -1414,6 +1414,9 @@ if (!app.requestSingleInstanceLock()) {
 
     ipcMain.handle('colonyProjects', () => colonyProjects(hub()));
     ipcMain.handle('bountyBoard', () => bountyBoard(hub()));
+    ipcMain.handle('tradeCommodities', (_e, near: unknown) =>
+      tradeCommodities(hub(), typeof near === 'string' ? near : undefined),
+    );
     ipcMain.handle('tradeRoutes', (_e, query: unknown) => {
       /*
        * Re-read rather than trusted, like every renderer-supplied value: only known keys pass,
