@@ -2006,7 +2006,9 @@ export const getColonyPlans = (
 ): Promise<AdminRead<{ plans: ColonyPlan[] }>> =>
   getAdmin(`/v1/logistics/colony/plans?owner=${owner}`);
 
-export const getColonyPlan = (id: string): Promise<AdminRead<{ plan: ColonyPlan }>> =>
+export const getColonyPlan = (
+  id: string,
+): Promise<AdminRead<{ plan: ColonyPlan; can: { edit: boolean } }>> =>
   getAdmin(`/v1/logistics/colony/plans/${encodeURIComponent(id)}`);
 
 export const getBuildTypes = (): Promise<AdminRead<{ buildTypes: ColonyBuildType[] }>> =>

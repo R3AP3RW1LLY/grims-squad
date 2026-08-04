@@ -483,7 +483,10 @@ export const postColonyProject = (
 export const colonyPlans = (call: HubCall): Promise<Answer<{ plans: ColonyPlan[] }>> =>
   hubColony(call, '/plans');
 
-export const colonyPlan = (call: HubCall, id: string): Promise<Answer<{ plan: ColonyPlan }>> =>
+export const colonyPlan = (
+  call: HubCall,
+  id: string,
+): Promise<Answer<{ plan: ColonyPlan; can: { edit: boolean } }>> =>
   hubColony(call, `/plans/${encodeURIComponent(id)}`);
 
 export const createColonyPlan = (

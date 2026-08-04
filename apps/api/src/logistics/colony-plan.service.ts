@@ -671,6 +671,36 @@ export class ColonyPlanService {
    * The same rule projects use: a squadron plan is the squadron's, so an officer directs it; a
    * personal one belongs to whoever started it, and rank does not change that.
    */
+  /**
+   * Whether this caller may change this plan — the same question `#mayEdit` throws over.
+   *
+   * ★ THE PAGE WAS GUESSING, AND ITS GUESS WAS ALWAYS YES ★
+   *
+   * The website computed `canEdit = plan.owner === 'personal' || plan.postedBy !== null`. That
+   * looked like the projects rule and was not one: `postedBy` is a display name from an INNER join
+   * on `posted_by_id`, a NOT NULL column — so it is never null, so the expression is always true.
+   * Every member was shown the full editing UI for every squadron plan, and every click came back
+   * "Only officers can change a squadron plan."
+   *
+   * Nothing was ever at risk — the service refuses on every write — but being offered a control
+   * that cannot work is worse than not being offered it, because it reads as a broken app rather
+   * than as a rank you do not hold.
+   *
+   * So the answer is computed HERE, from the same predicate the refusal uses, and sent to both
+   * surfaces. A rendering hint that disagrees with the rule it is hinting at is not a hint.
+   */
+  async mayEdit(planId: string, callerId: string, mask: bigint): Promise<boolean> {
+    const [plan] = await this.db.$queryRawUnsafe<Array<{ owner: string; posted_by_id: string }>>(
+      `SELECT owner::text AS owner, posted_by_id FROM colony_plans WHERE id = $1::uuid`,
+      planId,
+    );
+    if (plan === undefined) return false;
+
+    return plan.owner === 'squadron'
+      ? (mask & Permission.COLONY_MANAGE) === Permission.COLONY_MANAGE
+      : plan.posted_by_id === callerId;
+  }
+
   async #mayEdit(planId: string, callerId: string, mask: bigint): Promise<{ version: number }> {
     const [plan] = await this.db.$queryRawUnsafe<
       Array<{ owner: string; posted_by_id: string; version: number }>

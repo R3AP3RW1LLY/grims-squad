@@ -101,7 +101,7 @@ declare global {
        * refuses two different types for the same property.
        */
       plans(): Promise<Answer<{ plans: ColonyPlan[] }>>;
-      plan(id: string): Promise<Answer<{ plan: ColonyPlan }>>;
+      plan(id: string): Promise<Answer<{ plan: ColonyPlan; can: { edit: boolean } }>>;
       planCreate(body: {
         owner: 'squadron' | 'personal';
         title: string;

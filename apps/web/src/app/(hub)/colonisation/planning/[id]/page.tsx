@@ -58,10 +58,18 @@ export default async function PlanPage({ params }: { params: Promise<{ id: strin
   ).length;
 
   /*
-   * A rendering hint only — every write re-checks. A squadron plan is the squadron's so an officer
-   * directs it; a personal one belongs to whoever started it. The same rule projects use.
+   * ★ THE SERVER'S ANSWER, NOT THIS PAGE'S GUESS ★
+   *
+   * This was `plan.owner === 'personal' || plan.postedBy !== null`, which looked like the projects
+   * rule and was always TRUE: `postedBy` is a display name from an inner join on a NOT NULL column,
+   * so it is never null. Every member saw the full editing UI for every squadron plan, and every
+   * click came back "Only officers can change a squadron plan."
+   *
+   * Still only a rendering hint — every write re-checks — but a hint that disagrees with the rule
+   * it is hinting at is worse than none, because it reads as a broken app rather than as a rank you
+   * do not hold.
    */
-  const canEdit = plan.owner === 'personal' || plan.postedBy !== null;
+  const canEdit = read.data.can.edit;
 
   return (
     <>

@@ -51,7 +51,20 @@ export default async function ColonyProjectPage({
   const sp = await searchParams;
 
   const query: Record<string, string> = {};
-  for (const key of ['near', 'withinLy', 'largePad']) {
+  /*
+   * ★ `sort` WAS MISSING FROM THIS LIST, AND THAT MADE THE CONTROL A PROP ★
+   *
+   * The Prefer select has offered Local first / Cheapest anywhere / Closest anywhere since the day
+   * the local-first work shipped. Choosing one submitted the form, put `?sort=cheapest` in the URL,
+   * and then this loop dropped it on the floor — so the API never saw it, the answer never changed,
+   * and the select snapped back to "Local first" on every submit because its `defaultValue` reads
+   * from the same `query` object.
+   *
+   * The whole point of that control is recorded at shopping-list.tsx: a shopping list once sent
+   * somebody ninety-six light years to save five percent. The control that exists so a member can
+   * ask for exactly that was wired to nothing.
+   */
+  for (const key of ['near', 'withinLy', 'largePad', 'sort']) {
     const v = one(sp[key]);
     if (v !== '') query[key] = v;
   }

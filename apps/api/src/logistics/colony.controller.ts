@@ -387,7 +387,7 @@ export class ColonyController {
   @Get('plans/:id')
   async plan(@User() caller: CurrentUser | undefined, @Param('id') id: string) {
     const me = this.#requireSession(caller);
-    await this.#assert(
+    const mask = await this.#assert(
       caller,
       Permission.COLONY_VIEW,
       'You do not have access to the colonisation boards.',
@@ -397,7 +397,8 @@ export class ColonyController {
     if (plan === null) {
       throw new AppError(ErrorCode.RESOURCE_NOT_VISIBLE, 'That plan is not available.');
     }
-    return { plan };
+    // The real rule, not the page's guess at it. See `mayEdit`.
+    return { plan, can: { edit: await this.plans_.mayEdit(id, me.userId, mask) } };
   }
 
   @Post('plans')

@@ -586,7 +586,11 @@ export class ColonyDeviceController {
     if (plan === null) {
       throw new AppError(ErrorCode.RESOURCE_NOT_VISIBLE, 'That plan is not available.');
     }
-    return { plan };
+
+    // The same rights the website gets. The app drew every editing control unconditionally, so a
+    // member with no rank was offered a full editor whose every click was refused.
+    const mask = await this.permissions.effectiveMask(me.userId);
+    return { plan, can: { edit: await this.plans_.mayEdit(id, me.userId, mask) } };
   }
 
   @Public()

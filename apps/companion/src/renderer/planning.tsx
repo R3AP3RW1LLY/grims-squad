@@ -121,8 +121,17 @@ export function PlanningPage(): JSX.Element {
     );
   }
 
-  const squadron = (plans ?? []).filter((p) => p.owner === 'squadron');
-  const personal = (plans ?? []).filter((p) => p.owner === 'personal');
+  /*
+   * ★ NOT YET READ IS NOT THE SAME AS EMPTY ★
+   *
+   * `plans` starts null and was coerced straight to `[]`, so both boards announced "The squadron
+   * has not planned a system yet" before the request had returned — a confident wrong answer in the
+   * window where the right one was still on its way.
+   */
+  if (plans === null) return <Empty>Reading the plans…</Empty>;
+
+  const squadron = plans.filter((p) => p.owner === 'squadron');
+  const personal = plans.filter((p) => p.owner === 'personal');
 
   return (
     <div>
@@ -327,6 +336,18 @@ function NewPlan({ onMade }: { onMade: (id: string) => void }): JSX.Element {
 
 function PlanDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.Element {
   const [plan, setPlan] = useState<ColonyPlan | null>(null);
+  /*
+   * ★ THE APP OFFERED EVERY EDITING CONTROL TO EVERYBODY ★
+   *
+   * Remove, "+ add a build", the orb/surf slot fields and the reorder arrows were all rendered
+   * unconditionally, so a member looking at a squadron plan they cannot change was given a full
+   * editor whose every click came back "Only officers can change a squadron plan."
+   *
+   * Nothing was at risk — the hub refuses each write — but a control that cannot work reads as a
+   * broken app rather than as a rank you do not hold. The answer comes from the hub, computed from
+   * the same predicate the refusal uses, so the two cannot disagree.
+   */
+  const [canEdit, setCanEdit] = useState(false);
   const [buildTypes, setBuildTypes] = useState<readonly BuildTypeRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -335,6 +356,7 @@ function PlanDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.Ele
     void window.colony.plan(id).then((a) => {
       if (a.ok) {
         setPlan(a.data.plan);
+        setCanEdit(a.data.can.edit);
         setError(null);
       } else {
         setError(a.error);
@@ -391,6 +413,20 @@ function PlanDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.Ele
       <Button onClick={onBack}>← Back to plans</Button>
 
       <div style={{ margin: '14px 0 4px' }}>
+        {/* Whose plan it is, as the website says it. Opening one from either board otherwise
+            leaves nothing on screen telling a squadron plan from a personal one. */}
+        <p
+          style={{
+            ...MONO,
+            margin: 0,
+            fontSize: '10px',
+            letterSpacing: '0.2em',
+            textTransform: 'uppercase',
+            color: C.dim,
+          }}
+        >
+          {plan.owner === 'squadron' ? 'Squadron plan' : 'Your plan'}
+        </p>
         <h2 style={{ margin: 0, fontFamily: 'var(--font-display)', fontSize: '22px', color: C.text }}>
           {plan.title.toUpperCase()}
         </h2>
@@ -462,11 +498,17 @@ function PlanDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.Ele
       )}
 
       <Section title="The system">
-        <SystemTree plan={plan} buildTypes={buildTypes} busy={busy} act={act} />
+        <SystemTree
+          plan={plan}
+          buildTypes={buildTypes}
+          busy={busy}
+          canEdit={canEdit}
+          act={act}
+        />
       </Section>
 
       <Section title="Build order">
-        <BuildOrder plan={plan} busy={busy} act={act} />
+        <BuildOrder plan={plan} busy={busy} canEdit={canEdit} act={act} />
       </Section>
     </div>
   );
@@ -540,11 +582,13 @@ function SystemTree({
   plan,
   buildTypes,
   busy,
+  canEdit,
   act,
 }: {
   plan: ColonyPlan;
   buildTypes: readonly BuildTypeRow[];
   busy: boolean;
+  canEdit: boolean;
   act: (fn: () => Promise<Answer<unknown>>) => void;
 }): JSX.Element {
   if (plan.bodies.length === 0) {
@@ -612,7 +656,7 @@ function SystemTree({
               )}
             </div>
 
-            <Slots body={body} plan={plan} act={act} />
+            <Slots body={body} plan={plan} canEdit={canEdit} act={act} />
 
             {(['orbital', 'surface'] as const).map((where) => {
               const list = here.filter((s) => s.location === where);
@@ -676,19 +720,21 @@ function SystemTree({
                           economy={plan.economies.sites.find((e) => e.siteId === s.id)}
                         />
                       </span>
-                      <Button
-                        tone="danger"
-                        disabled={busy}
-                        onClick={() =>
-                          act(() => window.colony.planRemoveSite(plan.id, s.id, plan.version))
-                        }
-                      >
-                        Remove
-                      </Button>
+                      {canEdit ? (
+                        <Button
+                          tone="danger"
+                          disabled={busy}
+                          onClick={() =>
+                            act(() => window.colony.planRemoveSite(plan.id, s.id, plan.version))
+                          }
+                        >
+                          Remove
+                        </Button>
+                      ) : null}
                     </div>
                   ))}
 
-                  {cap === null || list.length < cap ? (
+                  {canEdit && (cap === null || list.length < cap) ? (
                     <AddSite
                       buildTypes={buildTypes}
                       where={where}
@@ -727,12 +773,14 @@ function SystemTree({
 function Slots({
   body,
   plan,
+  canEdit,
   act,
 }: {
   body: PlanBody;
   plan: ColonyPlan;
+  canEdit: boolean;
   act: (fn: () => Promise<Answer<unknown>>) => void;
-}): JSX.Element {
+}): JSX.Element | null {
   const [orbital, setOrbital] = useState(body.orbitalSlots?.toString() ?? '');
   const [surface, setSurface] = useState(body.surfaceSlots?.toString() ?? '');
 
@@ -755,6 +803,21 @@ function Slots({
       }),
     );
   };
+
+  /*
+   * Read-only when the member cannot edit, and NOTHING at all when there is also nothing to read —
+   * the same three states the website has. Two dead input boxes on a plan somebody is only looking
+   * at invite a change that will be refused.
+   */
+  if (!canEdit) {
+    if (body.orbitalSlots === null && body.surfaceSlots === null) return null;
+    return (
+      <p style={{ ...MONO, margin: '5px 0 0', fontSize: '10px', color: C.faint }}>
+        {body.orbitalSlots ?? '?'} orbital · {body.surfaceSlots ?? '?'} surface
+        {body.slotsBy === null ? '' : ` · read by ${body.slotsBy}`}
+      </p>
+    );
+  }
 
   const box: JSX.CSSProperties = { ...inputStyle, width: '46px', padding: '4px 6px', textAlign: 'center' };
 
@@ -1060,10 +1123,12 @@ function Effects({ plan }: { plan: ColonyPlan }): JSX.Element | null {
 function BuildOrder({
   plan,
   busy,
+  canEdit,
   act,
 }: {
   plan: ColonyPlan;
   busy: boolean;
+  canEdit: boolean;
   act: (fn: () => Promise<Answer<unknown>>) => void;
 }): JSX.Element {
   if (plan.sites.length === 0) {
@@ -1154,12 +1219,19 @@ function BuildOrder({
                 <span style={{ marginLeft: '8px', color: C.faint }}>Σ {running.toLocaleString()}</span>
               </span>
               <Balance step={step} />
-              <Button disabled={busy || i === 0} onClick={() => move(i, i - 1)}>
-                ↑
-              </Button>
-              <Button disabled={busy || i === plan.sites.length - 1} onClick={() => move(i, i + 1)}>
-                ↓
-              </Button>
+              {canEdit ? (
+                <>
+                  <Button disabled={busy || i === 0} onClick={() => move(i, i - 1)}>
+                    ↑
+                  </Button>
+                  <Button
+                    disabled={busy || i === plan.sites.length - 1}
+                    onClick={() => move(i, i + 1)}
+                  >
+                    ↓
+                  </Button>
+                </>
+              ) : null}
             </span>
           </div>
 
