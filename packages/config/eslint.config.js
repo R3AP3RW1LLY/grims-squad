@@ -115,6 +115,10 @@ export default tseslint.config(
       // `process` and `console` exactly as `prod.mjs` did — which is the third time this list has
       // proved it is explicit by design rather than by accident.
       '**/prebuild.mjs',
+      // Supervises the resident ingestion services in development, because turbo starts them once
+      // and a dead EDDN subscriber is invisible. Fourth entry, failing on the same two globals as
+      // every one before it — the list is explicit by design, and this is the design working.
+      '**/keep-alive.mjs',
     ],
     languageOptions: {
       globals: {
@@ -126,6 +130,8 @@ export default tseslint.config(
         // nobody can debug. `dev.mjs` never printed anything, so this was
         // missing until a launcher needed to announce which hub it had chosen.
         console: 'readonly',
+        // A supervisor's whole job is to wait before trying again. Absent until one needed it.
+        setTimeout: 'readonly',
       },
     },
   },
