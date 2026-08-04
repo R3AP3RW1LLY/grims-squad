@@ -132,12 +132,53 @@ export class MarketController {
     };
   }
 
-  /** Every commodity at the newest recorded hour, with a day's movement. One indexed read. */
+  /** How far "near you" reaches on the index page. One honest number, printed on the page. */
+  static readonly NEAR_LY = 50;
+
+  /*
+   * ★ SQUADRON OWNER, 2026-08-04: the market pages measure from the member ★
+   *
+   * "based on the users current or last know position" — resolved exactly the way the Freight
+   * Office does it: a typed system wins, else the journal's last word with its age printed, else
+   * nothing and the page simply shows the galaxy-wide numbers it always showed — one indexed
+   * read, as before. The near columns are enrichment, never a gate.
+   */
   @Public()
   @Get('commodities')
-  async list(@User() caller: CurrentUser | undefined) {
+  async list(@User() caller: CurrentUser | undefined, @Query('near') near?: string) {
     await this.#assertMarket(caller);
-    return { commodities: await this.store.list() };
+    const commodities = await this.store.list();
+
+    const typed = near?.trim() ?? '';
+    const origin: Origin | null =
+      typed !== ''
+        ? await this.#typedOrigin(typed)
+        : await this.#whereTheyAre(caller?.userId ?? null);
+
+    if (origin === null) {
+      return {
+        commodities,
+        origin: null,
+        unknownSystem: typed === '' ? null : typed,
+        nearWithinLy: null,
+      };
+    }
+
+    const nearRows = await this.store.listNear(origin.coords, MarketController.NEAR_LY);
+    return {
+      commodities: commodities.map((c) => ({
+        ...c,
+        ...(nearRows.get(c.commodity) ?? { nearBuy: null, nearSell: null, nearMarkets: 0 }),
+      })),
+      origin: {
+        system: origin.system,
+        station: origin.station,
+        from: origin.from,
+        ...(origin.age === undefined ? {} : { age: origin.age, stale: origin.stale === true }),
+      },
+      unknownSystem: null,
+      nearWithinLy: MarketController.NEAR_LY,
+    };
   }
 
   /**

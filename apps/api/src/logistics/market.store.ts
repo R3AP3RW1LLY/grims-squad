@@ -80,8 +80,22 @@ export interface HistoryPoint {
   readonly sellMarkets: number;
 }
 
+/** One commodity's market as seen from somewhere specific. */
+export interface NearRow {
+  /** Cheapest believable buy within the radius. Null: nobody near sells it. */
+  readonly nearBuy: number | null;
+  /** Best believable sale within the radius. Null: nobody near buys it. */
+  readonly nearSell: number | null;
+  readonly nearMarkets: number;
+}
+
 export interface MarketStore {
   list(): Promise<readonly MarketRow[]>;
+  /**
+   * Per-commodity best prices within `withinLy` of an origin, keyed by commodity name.
+   * Believable rows only (the 90-day band): a "best near you" from 2021 is not near anybody.
+   */
+  listNear(origin: Coords, withinLy: number): Promise<ReadonlyMap<string, NearRow>>;
   /** Commodities worth carrying, widest average margin first. Narrows the route search. */
   topMargins(limit: number): Promise<readonly string[]>;
   one(commodity: string): Promise<MarketRow | null>;
@@ -227,6 +241,65 @@ export class PrismaMarketStore implements MarketStore {
     );
 
     return rows.map((r) => this.#row(r));
+  }
+
+  /*
+   * ★ CACHED, BECAUSE THE AGGREGATE COSTS A SECOND ★
+   *
+   * A 50 ly ball around anywhere in the bubble intersects a serious fraction of 18.6M rows, and
+   * the aggregate measured 1.1s. That is fine once and absurd per page view — so results are held
+   * for five minutes, keyed on the origin rounded to a 10 ly grid: two members in neighbouring
+   * systems share an entry, and prices simply do not move enough in five minutes to matter (the
+   * believability band is ninety DAYS).
+   */
+  #nearCache = new Map<string, { at: number; rows: Map<string, NearRow> }>();
+
+  async listNear(origin: Coords, withinLy: number): Promise<ReadonlyMap<string, NearRow>> {
+    const key = [
+      Math.round(origin.x / 10),
+      Math.round(origin.y / 10),
+      Math.round(origin.z / 10),
+      withinLy,
+    ].join('|');
+
+    const hit = this.#nearCache.get(key);
+    if (hit !== undefined && Date.now() - hit.at < 5 * 60_000) return hit.rows;
+
+    const rows = await this.db.$queryRawUnsafe<
+      Array<{ commodity: string; near_buy: number | null; near_sell: number | null; near_markets: number }>
+    >(
+      `SELECT commodity,
+              min(buy_price) FILTER (WHERE ${BUYABLE}) AS near_buy,
+              max(sell_price) FILTER (WHERE ${SELLABLE}) AS near_sell,
+              count(DISTINCT station_key)::int AS near_markets
+         FROM market_entries
+        WHERE coords IS NOT NULL
+          AND coords <@ cube_enlarge(cube(ARRAY[$1::float8, $2::float8, $3::float8]), $4, 3)
+          AND (coords <-> cube(ARRAY[$1::float8, $2::float8, $3::float8])) <= $4
+          AND market_seen_at >= now() - interval '90 days'
+        GROUP BY commodity`,
+      origin.x,
+      origin.y,
+      origin.z,
+      withinLy,
+    );
+
+    const map = new Map<string, NearRow>();
+    for (const r of rows) {
+      map.set(r.commodity, {
+        nearBuy: r.near_buy === null ? null : int(r.near_buy),
+        nearSell: r.near_sell === null ? null : int(r.near_sell),
+        nearMarkets: int(r.near_markets) ?? 0,
+      });
+    }
+
+    // Bounded: fifty grid cells is plenty for one process, and eviction is "oldest goes".
+    if (this.#nearCache.size >= 50) {
+      const oldest = [...this.#nearCache.entries()].sort((a, b) => a[1].at - b[1].at)[0];
+      if (oldest !== undefined) this.#nearCache.delete(oldest[0]);
+    }
+    this.#nearCache.set(key, { at: Date.now(), rows: map });
+    return map;
   }
 
   async one(commodity: string): Promise<MarketRow | null> {

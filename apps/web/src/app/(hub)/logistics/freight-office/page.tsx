@@ -45,6 +45,7 @@ const KEYS = [
   'carriers',
   'freshDays',
   'commodity',
+  'sort',
 ];
 
 export default async function FreightOfficePage({

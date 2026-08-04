@@ -41,6 +41,7 @@ function harness(opts: {
 
   const store: MarketStore = {
     list: async () => [] as readonly MarketRow[],
+    listNear: async () => new Map(),
     one: async () => null,
     history: async () => [],
     topMargins: async (n) => (opts.margins ?? ['Gold']).slice(0, n),

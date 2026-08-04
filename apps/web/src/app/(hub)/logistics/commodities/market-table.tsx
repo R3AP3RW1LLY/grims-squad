@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import type { MarketRow } from '../../../../lib/api';
+import type { NearMarketRow } from '../../../../lib/api';
 
 /**
  * Every commodity, searchable and sortable.
@@ -32,7 +32,9 @@ type SortKey =
   | 'trend'
   | 'spread'
   | 'supply'
-  | 'demand';
+  | 'demand'
+  | 'nearBuy'
+  | 'nearSell';
 
 /**
  * What a commodity is worth carrying: sell high minus buy low.
@@ -47,7 +49,7 @@ type SortKey =
  * Null unless BOTH sides are known. A commodity nobody stocks has no spread — not a spread of zero,
  * which would sort it in among the genuinely worthless.
  */
-function spreadOf(r: MarketRow): number | null {
+function spreadOf(r: NearMarketRow): number | null {
   return r.avgBuy !== null && r.avgSell !== null ? r.avgSell - r.avgBuy : null;
 }
 
@@ -64,7 +66,14 @@ function tonnes(raw: string): string {
   return n.toLocaleString();
 }
 
-export function MarketTable({ rows }: { rows: readonly MarketRow[] }) {
+export function MarketTable({
+  rows,
+  nearWithinLy = null,
+}: {
+  rows: readonly NearMarketRow[];
+  /** Non-null when the rows carry near-you enrichment; drives the two extra columns. */
+  nearWithinLy?: number | null;
+}) {
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('');
   const [sort, setSort] = useState<SortKey>('spread');
@@ -97,6 +106,13 @@ export function MarketTable({ rows }: { rows: readonly MarketRow[] }) {
           return num(b.avgBuy) - num(a.avgBuy);
         case 'avgSell':
           return num(b.avgSell) - num(a.avgSell);
+        case 'nearBuy': {
+          const asc = (v: number | null | undefined): number =>
+            v == null ? Number.POSITIVE_INFINITY : v;
+          return asc(a.nearBuy) - asc(b.nearBuy);
+        }
+        case 'nearSell':
+          return num(b.nearSell ?? null) - num(a.nearSell ?? null);
         case 'minBuy': {
           // ASCENDING — "cheapest to buy" is the one column read from the small end. Nulls still
           // sort last, which needs the opposite sentinel from every descending column.
@@ -151,6 +167,12 @@ export function MarketTable({ rows }: { rows: readonly MarketRow[] }) {
           <option value="avgBuy">Highest buy price</option>
           <option value="minBuy">Cheapest to buy</option>
           <option value="trend">Biggest movers</option>
+          {nearWithinLy !== null ? (
+            <>
+              <option value="nearBuy">Cheapest near you</option>
+              <option value="nearSell">Best sale near you</option>
+            </>
+          ) : null}
           <option value="supply">Most supply</option>
           <option value="demand">Most demand</option>
           <option value="commodity">Name</option>
@@ -189,6 +211,16 @@ export function MarketTable({ rows }: { rows: readonly MarketRow[] }) {
                 <th scope="col" className={`${TH} text-right`}>
                   Best buy
                 </th>
+                {nearWithinLy !== null ? (
+                  <>
+                    <th scope="col" className={`${TH} text-right`}>
+                      Near buy
+                    </th>
+                    <th scope="col" className={`${TH} text-right`}>
+                      Near sell
+                    </th>
+                  </>
+                ) : null}
                 <th scope="col" className={`${TH} text-right`}>
                   24h move
                 </th>
@@ -233,6 +265,22 @@ export function MarketTable({ rows }: { rows: readonly MarketRow[] }) {
                     >
                       {cr(r.minBuy)}
                     </td>
+                    {nearWithinLy !== null ? (
+                      <>
+                        <td
+                          className={`${TD} text-right font-mono tabular-nums`}
+                          title={`Cheapest believable price within ${nearWithinLy} ly of you`}
+                        >
+                          {cr(r.nearBuy ?? null)}
+                        </td>
+                        <td
+                          className={`${TD} text-right font-mono tabular-nums`}
+                          title={`Best believable sale within ${nearWithinLy} ly of you`}
+                        >
+                          {cr(r.nearSell ?? null)}
+                        </td>
+                      </>
+                    ) : null}
                     <td
                       className={`${TD} text-right font-mono tabular-nums ${
                         r.sellTrend === null

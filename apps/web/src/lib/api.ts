@@ -1614,8 +1614,33 @@ export interface CommodityDetail {
   unknownSystem: string | null;
 }
 
-export const getCommodities = (): Promise<{ commodities: MarketRow[] } | null> =>
-  get('/v1/logistics/commodities', { authed: true });
+/** MarketRow plus what it costs near the member, when a position was resolvable. */
+export type NearMarketRow = MarketRow & {
+  nearBuy?: number | null;
+  nearSell?: number | null;
+  nearMarkets?: number;
+};
+
+export interface CommoditiesIndex {
+  commodities: NearMarketRow[];
+  /** Same shape the Freight Office resolves: typed system, or the journal's last word with age. */
+  origin: {
+    system: string;
+    station: string | null;
+    from: 'typed' | 'journal';
+    age?: string;
+    stale?: boolean;
+  } | null;
+  unknownSystem: string | null;
+  /** The radius the near columns measured, or null when no position was resolvable. */
+  nearWithinLy: number | null;
+}
+
+export const getCommodities = (near?: string): Promise<CommoditiesIndex | null> =>
+  get(
+    `/v1/logistics/commodities${near === undefined || near === '' ? '' : `?near=${encodeURIComponent(near)}`}`,
+    { authed: true },
+  );
 
 /** One commodity, with where to trade it. `query` carries the filters verbatim. */
 export const getCommodity = (
