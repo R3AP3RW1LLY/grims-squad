@@ -46,4 +46,5 @@ export * from './colony-catalogue.js';
  * path — so an unknown station is added the same way whichever feed sees it first.
  */
 export * from './live-stations.js';
+export * from './notify.js';
 export { DiscordRankApplier, ladderRoleIds } from './rank-applier.discord.js';

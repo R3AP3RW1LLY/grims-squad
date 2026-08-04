@@ -29,7 +29,12 @@ export type LiveEventType =
   | 'presence'
   | 'roster'
   | 'activity'
-  | 'verification';
+  | 'verification'
+  /*
+   * The bell. Per-member for personal rows, userId null for a squadron entry — either way the
+   * client re-reads its counts through the normal endpoint; the event carries nothing.
+   */
+  | 'notification';
 
 export interface LiveEvent {
   readonly type: LiveEventType;

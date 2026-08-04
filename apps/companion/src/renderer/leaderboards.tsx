@@ -4,7 +4,7 @@ import {
   LEADERBOARD_BADGES,
   TIER_LADDERS,
   type LeaderboardKey,
-} from '@grims/shared';
+} from '@grims/shared/leaderboards';
 import type { LeaderboardBoard, LeaderboardEntry } from '../hub-leaderboards.js';
 import { Bar, C, Card, Empty, Problem, Section, Stat, Tabs, inputStyle } from './ui.js';
 import { useLive } from './use-live.js';

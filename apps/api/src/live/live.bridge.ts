@@ -50,6 +50,7 @@ const ACCEPTED: ReadonlySet<string> = new Set<LiveEventType>([
   'roster',
   'activity',
   'verification',
+  'notification',
 ]);
 
 /** Parses one message. Returns null for anything it does not recognise. */

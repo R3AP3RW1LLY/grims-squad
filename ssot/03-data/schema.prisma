@@ -338,6 +338,10 @@ model User {
   bio         String?
   /// IANA zone. Every user-facing time renders in this AND UTC (INV-025).
   timezone    String     @default("UTC")
+  /// The newest squadron_activity row this member has SEEN (opened the bell's squadron tab).
+  /// The unread badge counts rows beyond it; null means everything is new, which is true.
+  squadronSeenAt DateTime? @map("squadron_seen_at") @db.Timestamptz(6)
+
   /// Last moment the companion app saw the member's journal still being WRITTEN.
   ///
   /// Not "last event received" — Elite's journal clusters at session start and then goes quiet for
@@ -442,6 +446,7 @@ model User {
   bountyClaims        BountyClaim[]
   leaderboardEvents   LeaderboardEvent[]
   currentBuild        CurrentBuild?
+  squadronActivityActed SquadronActivity[] @relation("SquadronActivityActor")
   userRoles           UserRole[]            @relation("UserRoleHolder")
   rolesGranted        UserRole[]            @relation("UserRoleGrantor")
   refreshFamilies     RefreshTokenFamily[]
@@ -3664,6 +3669,36 @@ model Notification {
   @@index([userId, readAt, createdAt])
   @@index([state, createdAt])
   @@map("notifications")
+}
+
+/// ═══════════════ SQUADRON ACTIVITY — THE SHARED FEED ═══════════════
+///
+/// Squadron owner, 2026-08-04: "we need to add the Personal and Squadron Activity notifications
+/// and the notifications system that notifies users of various activities." Personal rows live in
+/// `notifications` above (per-member, with read state); squadron-wide events live HERE, once each
+/// — a project starting is one fact, not a hundred and seven copies of it. Each member's unread
+/// badge counts rows newer than their own `users.squadronSeenAt` marker.
+model SquadronActivity {
+  id    BigInt  @id @default(autoincrement())
+  /// 'colony.project-started' | 'colony.project-completed' | 'colony.priority' |
+  /// 'shipyard.build-published' | 'bounties.jackpot' | 'leaderboards.season-champion' |
+  /// 'leaderboards.platinum' | 'member.verified' | 'forum.thread' | ...
+  kind  String
+  title String
+  body  String?
+  /// Deep link into the site.
+  link  String?
+  /// Who did it, when the deed has a face. Null for system events; SetNull keeps history when an
+  /// account goes.
+  actorUserId String? @map("actor_user_id") @db.Uuid
+  meta        Json?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  actor User? @relation("SquadronActivityActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([kind, createdAt])
+  @@map("squadron_activity")
 }
 
 /// Idempotency records for mutating endpoints (INV-010). Replay of a key returns the stored
