@@ -85,13 +85,33 @@ function readMeta(file: string): Meta | null {
  * can proceed anyway. A downloader that throws would abort a run that could have used yesterday's
  * copy perfectly well.
  */
-export async function refreshGalaxyDump(file: string, url = DEFAULT_URL): Promise<GalaxyRefresh> {
+export interface GalaxyDownloadOptions {
+  /**
+   * How long to wait for RESPONSE HEADERS. Injectable only so a test can use a real socket.
+   *
+   * The bug this file now guards against cannot be reproduced against a mocked `fetch` — the
+   * semantics that broke it are undici's, so the only honest test is a real HTTP server that
+   * answers quickly and then dribbles a body. That needs a deadline measured in milliseconds
+   * rather than thirty seconds.
+   */
+  readonly headersTimeoutMs?: number;
+  /** How long with no bytes before the transfer is declared dead. Injectable for the same reason. */
+  readonly idleTimeoutMs?: number;
+}
+
+export async function refreshGalaxyDump(
+  file: string,
+  url = DEFAULT_URL,
+  options: GalaxyDownloadOptions = {},
+): Promise<GalaxyRefresh> {
+  const headersTimeoutMs = options.headersTimeoutMs ?? 30_000;
+  const idleTimeoutMs = options.idleTimeoutMs ?? IDLE_TIMEOUT_MS;
   const onDisk = existsSync(file);
   const meta = readMeta(file);
 
   let head: Response;
   try {
-    head = await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(30_000) });
+    head = await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(headersTimeoutMs) });
   } catch (e) {
     return {
       changed: false,
@@ -129,15 +149,42 @@ export async function refreshGalaxyDump(file: string, url = DEFAULT_URL): Promis
   mkdirSync(dirname(file), { recursive: true });
   rmSync(part, { force: true });
 
+  /*
+   * ★ THE TIMEOUT THAT MADE THIS JOB IMPOSSIBLE — FOUND 2026-08-04 ★
+   *
+   * This was `fetch(url, { signal: AbortSignal.timeout(30_000) })`, and the comment below it said
+   * that timeout "covers getting the response; from here the body can legitimately take a long
+   * time". That is not what the signal does. It stays armed for the WHOLE request — headers AND
+   * body — so thirty seconds after the request began, the download was aborted no matter how well
+   * it was going.
+   *
+   * The file is a multi-gigabyte gzip of populated space. It cannot arrive in thirty seconds on any
+   * connection the squadron owns, so the job could not succeed, ever. It failed exactly as the
+   * signal promises — "The operation was aborted due to timeout" — and the whole elaborate idle
+   * watchdog below it never got the chance to do its job.
+   *
+   * The intent was right and only the mechanism was wrong: a total timeout IS the wrong shape for a
+   * huge download. So the deadline now covers only what it was meant to cover. It is cleared the
+   * moment the response headers arrive, and from there the idle watchdog is the sole authority —
+   * which is the design the comment already described.
+   */
+  const controller = new AbortController();
+  const headers = setTimeout(() => {
+    controller.abort(new Error(`Spansh did not send response headers within ${headersTimeoutMs}ms`));
+  }, headersTimeoutMs);
+
   try {
-    const res = await fetch(url, { signal: AbortSignal.timeout(30_000) });
+    const res = await fetch(url, { signal: controller.signal });
+    // Headers are in. Everything from here is measured by PROGRESS, not by elapsed time.
+    clearTimeout(headers);
+
     if (!res.ok || res.body === null) {
       return { changed: false, skipped: `Spansh answered ${res.status}`, available: onDisk, bytes: null };
     }
 
     /*
-     * The idle watchdog. `AbortSignal.timeout` above covers getting the response; from here the
-     * body can legitimately take a long time, so what is watched is whether it is still arriving.
+     * The idle watchdog. A connection that has delivered nothing for two minutes is not slow, it is
+     * gone — and unlike a total deadline, this cannot punish a healthy transfer for being large.
      */
     let lastByteAt = Date.now();
     const source = Readable.fromWeb(res.body as Parameters<typeof Readable.fromWeb>[0]);
@@ -145,10 +192,10 @@ export async function refreshGalaxyDump(file: string, url = DEFAULT_URL): Promis
       lastByteAt = Date.now();
     });
     const watchdog = setInterval(() => {
-      if (Date.now() - lastByteAt > IDLE_TIMEOUT_MS) {
-        source.destroy(new Error(`no data for ${IDLE_TIMEOUT_MS / 1000}s`));
+      if (Date.now() - lastByteAt > idleTimeoutMs) {
+        source.destroy(new Error(`no data for ${idleTimeoutMs / 1000}s`));
       }
-    }, IDLE_TIMEOUT_MS / 4);
+    }, Math.max(10, idleTimeoutMs / 4));
 
     try {
       await pipeline(source, createWriteStream(part));
@@ -183,5 +230,9 @@ export async function refreshGalaxyDump(file: string, url = DEFAULT_URL): Promis
       available: onDisk,
       bytes: null,
     };
+  } finally {
+    // Also on the success path and on every early return above, or a completed download would keep
+    // the process alive for the remainder of the thirty seconds.
+    clearTimeout(headers);
   }
 }
