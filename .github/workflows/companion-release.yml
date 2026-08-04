@@ -36,18 +36,31 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # The patterns carry the auto-update artifacts too: `latest*.yml` is the manifest
+          # electron-updater asks for FIRST, and the `.blockmap` is its differential index.
+          # Without them in the bucket, every installed app checks hourly, gets a 404, and
+          # swallows it silently — auto-update that looks shipped and never runs.
           - os: windows-latest
             target: --win
             artifact: windows-installer
-            pattern: 'apps/companion/release/*.exe'
+            pattern: |
+              apps/companion/release/*.exe
+              apps/companion/release/*.exe.blockmap
+              apps/companion/release/latest.yml
           - os: macos-latest
             target: --mac
             artifact: macos-dmg
-            pattern: 'apps/companion/release/*.dmg'
+            pattern: |
+              apps/companion/release/*.dmg
+              apps/companion/release/*.zip
+              apps/companion/release/*.blockmap
+              apps/companion/release/latest-mac.yml
           - os: ubuntu-latest
             target: --linux
             artifact: linux-appimage
-            pattern: 'apps/companion/release/*.AppImage'
+            pattern: |
+              apps/companion/release/*.AppImage
+              apps/companion/release/latest-linux.yml
 
     runs-on: ${{ matrix.os }}
 
@@ -149,14 +162,24 @@ jobs:
           VERSION="${GITHUB_REF_NAME#companion-v}"
           echo "publishing version ${VERSION}"
 
-          # Installers only. The blockmap is electron-builder's differential
-          # update index and the yml is its update manifest — both sit beside
-          # the installer and neither is a thing anybody should click.
+          # Installers, plus the auto-update artifacts. The `latest*.yml` manifests are what
+          # electron-updater fetches first, and the blockmaps are its differential indexes —
+          # without them in the bucket the installed apps 404 hourly and swallow it, so
+          # auto-update looks shipped and never runs. The manifests are never LISTED on the
+          # download page (the API's isInstaller filter keeps them off it); they are only served.
           mapfile -t FILES < <(find dist -type f \
-            \( -name '*.exe' -o -name '*.dmg' -o -name '*.AppImage' \) | sort)
+            \( -name '*.exe' -o -name '*.dmg' -o -name '*.AppImage' -o -name '*.zip' \) | sort)
+
+          mapfile -t UPDATE_FILES < <(find dist -type f \
+            \( -name 'latest*.yml' -o -name '*.blockmap' \) | sort)
 
           if [ "${#FILES[@]}" -eq 0 ]; then
             echo "::error::No installers found. Refusing to prune the bucket."
+            exit 1
+          fi
+
+          if [ "${#UPDATE_FILES[@]}" -eq 0 ]; then
+            echo "::error::No latest*.yml manifests found — auto-update would silently die. Refusing to publish."
             exit 1
           fi
 
@@ -180,8 +203,12 @@ jobs:
           done
 
           # ---- UPLOAD FIRST -------------------------------------------------
+          #
+          # Installers first, manifests LAST. The manifest is the updater's pointer: uploading it
+          # before the installer it names would hand a checking app a manifest for a file that is
+          # not there yet.
           KEPT=()
-          for f in "${FILES[@]}"; do
+          for f in "${FILES[@]}" "${UPDATE_FILES[@]}"; do
             name="$(basename "$f")"
             echo "  uploading ${name}"
             aws s3 cp "$f" "s3://${BUCKET}/companion/${name}" \

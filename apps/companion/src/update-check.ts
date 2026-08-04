@@ -1,16 +1,14 @@
 /**
  * Is there a newer build than the one running?
  *
- * ★ A BANNER, NOT AN UPDATER ★
+ * ★ THE COMPARISON, NOT THE UPDATER ★
  *
- * Squadron owner's decision, 2026-07-29: no over-the-air updates. Shipping an
- * auto-updater needs a code-signing certificate to be worth anything — without
- * one, an app that downloads and runs a binary on its own is a worse idea than
- * one that asks the member to fetch it from a page they can see.
- *
- * So this decides ONE thing: whether to show a banner. Nothing is downloaded,
- * nothing is executed, and the button opens the website in the member's own
- * browser where the address bar is visible.
+ * The 2026-07-29 "banner, not an updater" ruling was superseded a day later by the owner's ask
+ * for silent auto-update — `auto-update.ts` downloads and installs on its own now, through the
+ * members-only feed with the device token as its key. What SURVIVES here is the version
+ * arithmetic both stories always needed: the website's nudge banner and the hub settings
+ * handshake still ask "is this build behind", and this answers only that. Nothing in this file
+ * downloads or executes anything.
  */
 
 /**

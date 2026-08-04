@@ -32,7 +32,9 @@ export const OVERLAY_LABELS: Record<OverlayId, string> = {
  * a panel trying to render something that no longer exists.
  */
 export const OVERLAY_FIELDS: Record<OverlayId, readonly string[]> = {
-  build: ['title', 'needs', 'progress', 'haulers', 'eta'],
+  // No 'eta': nothing computes one, so the checkbox was a promise the panel could never keep.
+  // Saved configs that still carry it are cleaned on load by exactly the validation named above.
+  build: ['title', 'needs', 'progress', 'haulers'],
   route: ['commodity', 'buy', 'sell', 'profit', 'cargo'],
   cargo: ['items', 'capacity', 'matched'],
   status: ['sending', 'queued', 'lastUpload', 'gameState'],

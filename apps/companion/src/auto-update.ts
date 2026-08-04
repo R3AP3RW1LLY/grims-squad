@@ -33,6 +33,14 @@ export interface UpdateHooks {
   readonly onPending: (version: string) => void;
   /** Applies the update. Separated so it can be tested without quitting the process. */
   readonly install: () => void;
+  /**
+   * The device token, read fresh each check so a re-pair mid-run is picked up.
+   *
+   * The release feed is members-only and the updater has no session cookie — the token the app
+   * already holds is its proof. Empty string means unpaired, and an unpaired app skips the check
+   * entirely rather than knocking hourly on a door that will refuse it.
+   */
+  readonly deviceToken: () => string;
 }
 
 /** How often to look for an update. Hourly: a squadron app is not a browser. */
@@ -99,6 +107,9 @@ export function startAutoUpdate(hooks: UpdateHooks): () => void {
   }
 
   const check = (): void => {
+    const token = hooks.deviceToken();
+    if (token === '') return;
+    autoUpdater.requestHeaders = { authorization: `Bearer ${token}` };
     void autoUpdater.checkForUpdates().catch(() => undefined);
   };
 

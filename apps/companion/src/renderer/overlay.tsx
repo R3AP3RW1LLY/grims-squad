@@ -491,6 +491,17 @@ function StatusPanel({
         </div>
       ) : null}
 
+      {/* Hidden until the first upload lands rather than showing "never" — a fresh install's
+          panel should not open with a word that reads like a fault. */}
+      {show('lastUpload') && data.lastUploadAt !== null ? (
+        <div style={ROW}>
+          <span>Last upload</span>
+          <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+            {new Date(data.lastUploadAt).toLocaleTimeString()}
+          </span>
+        </div>
+      ) : null}
+
       {show('gameState') ? (
         <p style={{ margin: '4px 0 0', fontSize: '0.8em', color: C.dim }}>
           {data.gameRunning ? 'Elite is running' : 'Elite is not running'}

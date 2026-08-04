@@ -82,6 +82,46 @@ export function isInstaller(file: string): boolean {
   return INSTALLER_EXTENSIONS.has(extname(file).toLowerCase()) && platformOf(file) !== null;
 }
 
+/**
+ * True for the files electron-updater fetches that are NOT downloads for a person.
+ *
+ * ★ SERVED, NEVER LISTED ★
+ *
+ * The updater's first request is `latest.yml` (or `latest-mac.yml` / `latest-linux.yml`), and its
+ * differential download wants the `.blockmap` beside the installer. Refusing them was what made
+ * auto-update silently dead: the app checked hourly, got "No such download.", and swallowed it —
+ * by design — forever. `builder-debug.yml` is build diagnostics and stays refused; a manifest is
+ * exactly `latest*.yml` and nothing looser, so the allowlist cannot drift into serving whatever
+ * else lands beside a build.
+ */
+export function isUpdateArtifact(file: string): boolean {
+  const lower = file.toLowerCase();
+  if (lower.endsWith('.blockmap')) return isInstaller(lower.slice(0, -'.blockmap'.length));
+  return /^latest(-[a-z0-9]+)?\.yml$/.test(lower);
+}
+
+/** What `open()` will stream: a member's installer, or the updater's manifest and blockmap. */
+export function isServable(file: string): boolean {
+  return isInstaller(file) || isUpdateArtifact(file);
+}
+
+/**
+ * Hides the updater's zips from the download page when a real installer exists for the platform.
+ *
+ * macOS publishes a dmg for people AND a zip for electron-updater (Squirrel.Mac cannot apply a
+ * dmg). Listing both offers a member two "Download for macOS" cards where one is a file they
+ * would have to unpack by hand. The zip stays servable through `open()` — it is hidden, not gone.
+ */
+export function dropUpdaterZips(assets: ReleaseAsset[]): ReleaseAsset[] {
+  return assets.filter(
+    (a) =>
+      extname(a.file).toLowerCase() !== '.zip' ||
+      !assets.some(
+        (other) => other.platform === a.platform && extname(other.file).toLowerCase() !== '.zip',
+      ),
+  );
+}
+
 export interface ReleaseStore {
   list(): Promise<ReleaseAsset[]>;
   /** The bytes of one installer, streamed. Null for anything it will not serve. */
@@ -136,7 +176,7 @@ export class BucketReleaseStore implements ReleaseStore {
 
     // Newest first. CI prunes older builds, but a failed prune must not leave
     // members downloading last month's.
-    return assets.sort((a, b) => b.builtAt.localeCompare(a.builtAt));
+    return dropUpdaterZips(assets.sort((a, b) => b.builtAt.localeCompare(a.builtAt)));
   }
 
   async open(file: string) {
@@ -150,7 +190,7 @@ export class BucketReleaseStore implements ReleaseStore {
      * refused unless it looks like an installer.
      */
     const safe = basename(file);
-    if (!isInstaller(safe)) return null;
+    if (!isServable(safe)) return null;
 
     return this.bucket.openObject(`${RELEASE_PREFIX}${safe}`).catch(() => null);
   }
@@ -204,12 +244,12 @@ export class DirectoryReleaseStore implements ReleaseStore {
       }
     }
 
-    return assets.sort((a, b) => b.builtAt.localeCompare(a.builtAt));
+    return dropUpdaterZips(assets.sort((a, b) => b.builtAt.localeCompare(a.builtAt)));
   }
 
   async open(file: string) {
     const safe = basename(file);
-    if (!isInstaller(safe)) return null;
+    if (!isServable(safe)) return null;
 
     const full = resolve(this.#dir, safe);
     // Belt and braces: basename alone has been defeated before by encodings

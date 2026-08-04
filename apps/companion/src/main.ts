@@ -1127,6 +1127,17 @@ function state(): Record<string, unknown> {
     journalPath: config.journalPathOverride ?? config.discoveredJournalPath,
     last: lastOutcome,
     /*
+     * ★ THE STATUS PAGE READS THESE TWO AT THE TOP LEVEL ★
+     *
+     * `wasPlaying` is the combined verdict the tick already computes — journal growth OR the
+     * process check with a fresh journal or a live Status.json. It existed only inside the
+     * overlay payload, so the Status page's "Elite is running." line could never render and its
+     * problem banner never appeared. The renderer reads `state.gameRunning` and `state.error`;
+     * publishing anything less leaves the page lying about a game that is demonstrably up.
+     */
+    gameRunning: wasPlaying,
+    error: lastOutcome?.error ?? null,
+    /*
      * The lifetime tally, which is what the panel actually shows. `last` stays
      * because the error and the refusal list come from it — but the numbers a
      * member reads are these.
@@ -2134,6 +2145,8 @@ if (!app.requestSingleInstanceLock()) {
      */
     stopAutoUpdate = startAutoUpdate({
       gameRunning: async () => isGameRunning(platform(), listProcesses),
+      // Read fresh each check: pairing after launch must not wait for a restart to start updating.
+      deviceToken: () => config.deviceToken,
       onPending: (version) => {
         pendingUpdate = version;
         push();

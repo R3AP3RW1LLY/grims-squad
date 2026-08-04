@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { Module } from '@nestjs/common';
 import { PrismaClient } from '@grims/db';
 import { CompanionController, type DeviceVersionReader } from './companion.controller.js';
@@ -50,6 +51,20 @@ import { DatabaseModule } from '../database.module.js';
             select: { appVersion: true },
           });
           return rows.map((r) => r.appVersion ?? null);
+        },
+        /*
+         * The download door's second key. Same SHA-256-of-the-raw-token rule as
+         * PairingService — the token is stored only as its hash — but reimplemented
+         * over the one table rather than injected, for the same circular-dependency
+         * reason `versionsFor` is (telemetry already imports this module).
+         */
+        async tokenActive(token: string): Promise<boolean> {
+          const tokenHash = createHash('sha256').update(token).digest('hex');
+          const row = await db.deviceToken.findUnique({
+            where: { tokenHash },
+            select: { revokedAt: true },
+          });
+          return row !== null && row.revokedAt === null;
         },
       }),
     },

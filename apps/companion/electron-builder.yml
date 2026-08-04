@@ -93,6 +93,11 @@ mac:
   target:
     - target: dmg
       arch: [arm64, x64]
+    # The zip exists for electron-updater, which cannot apply a dmg — latest-mac.yml points at it.
+    # The download page never lists it: a zip beside a dmg is dropped from the listing so members
+    # are offered the installer a Mac user recognises.
+    - target: zip
+      arch: [arm64, x64]
   category: public.app-category.utilities
   # Both architectures: a Mac running Elite through CrossOver is as likely to
   # be Apple Silicon as Intel, and Rosetta is not something to make somebody
@@ -140,6 +145,11 @@ linux:
 # update, which is the failure mode the old comment here was rightly worried about.
 publish:
   provider: generic
-  url: https://45-63-35-93.sslip.io/v1/companion/download
+  # The squadron's own domain. Baked into each build's app-update.yml at pack time, so installers
+  # must be built AFTER grims-squad.com is live (the cutover precedes the release tag) — an app
+  # checking a domain that does not resolve just retries in an hour, but there is no reason to
+  # ship one. The old sslip.io site stays up in Caddy, so builds that predate the domain still
+  # reach their feed.
+  url: https://grims-squad.com/v1/companion/download
   # Not a channel we publish to; it just has to match what the client asks for.
   channel: latest

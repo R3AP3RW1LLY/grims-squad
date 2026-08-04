@@ -39,16 +39,18 @@ export function UpdateBannerView({ version, days }: { version: string; days: num
             Companion v{version}
           </span>{' '}
           {/*
-            ★ NO AUTOMATIC UPDATER, SO SAY WHAT TO DO ★
+            ★ THE APP UPDATES ITSELF NOW, SO SAY SO ★
 
-            The app cannot update itself — there is no signing certificate, so
-            an in-app updater would be asking members to run an unsigned binary
-            fetched over the wire. The download page is the whole mechanism, and
-            a banner that announced a release without saying where to get it
-            would be an announcement nobody could act on.
+            Since 2026-08-04 the app checks its feed hourly, downloads quietly,
+            and installs the moment Elite is closed. This banner is the nudge
+            for the impatient and the fallback for a machine whose app is not
+            running — so it offers the manual path without pretending it is
+            the only one. The old text ("the app cannot update itself") was
+            written before the updater existed and outlived it.
           */}
-          A new version of the companion app is available. Download it from your devices page and
-          run the installer over the top — your pairing and settings are kept.
+          A new version of the companion app is out. The app updates itself the next time it is
+          running with Elite closed — or download it from your devices page and run the installer
+          over the top. Your pairing and settings are kept either way.
         </p>
 
         <div className="ml-auto flex shrink-0 items-center gap-2">

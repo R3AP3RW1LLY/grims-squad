@@ -138,8 +138,8 @@ function cargoPanel(input: OverlayInput): OverlayData['cargo'] {
    *
    * "just only show what the value was paid for the cargo please!" Each hold line carries the
    * cost of the units the ledger watched being bought, matched by display name. Mined and
-   * mission cargo has no watched buy, so its paid figure is honestly null — the panel prints a
-   * dash, never a fake zero.
+   * mission cargo has no watched buy, so its paid figure is honestly null — the panel omits the
+   * figure entirely, never a fake zero.
    */
   const lots = input.trip?.lots ?? {};
   const items = marked.items.map((item) => {
