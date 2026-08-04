@@ -79,19 +79,21 @@ export const DEFAULT_PRIVACY: PrivacySettings = {
   showFleet: false,
   showActivity: false,
   showOnPublicRoster: false,
-  showOnLeaderboard: false,
   /*
    * ★ ON, AGAINST EVERY OTHER DEFAULT IN THIS OBJECT — AND NOT A MISTAKE ★
    *
    * The field toggles above hide FACTS about a member — where they are, what
-   * they own — so their conservative default is off. These three are
+   * they own — so their conservative default is off. These four are
    * PARTICIPATION switches for the gamified boards, the schema columns default
    * TRUE, and the squadron owner's instruction was explicit: "default all
    * leaderboard participation on for all commanders". Code and schema must
    * tell the same story, or a member with no row would participate in the
    * standings SQL (which reads COALESCE(col, true)) while this object reported
-   * them opted out.
+   * them opted out — which is exactly what the MASTER switch did until
+   * 2026-08-04: it sat here as false, so the settings page showed "off" to
+   * every member who was in fact on the boards.
    */
+  showOnLeaderboard: true,
   showLbBounties: true,
   showLbColony: true,
   showLbTrade: true,
@@ -235,13 +237,14 @@ export function resolvePrivacy(stored: Partial<PrivacySettings> | null | undefin
     showFleet: stored.showFleet === true,
     showActivity: stored.showActivity === true,
     showOnPublicRoster: stored.showOnPublicRoster === true,
-    showOnLeaderboard: stored.showOnLeaderboard === true,
     /*
      * `!== false` where everything above is `=== true`, because these DEFAULT ON (see
      * DEFAULT_PRIVACY). A partial row missing one of them must resolve to participating —
      * exactly as the database column default and the standings SQL's COALESCE(col, true)
      * already decide — not fall to private through a check written for the field toggles.
+     * The master switch is one of them: it defaults on with the boards it governs.
      */
+    showOnLeaderboard: stored.showOnLeaderboard !== false,
     showLbBounties: stored.showLbBounties !== false,
     showLbColony: stored.showLbColony !== false,
     showLbTrade: stored.showLbTrade !== false,

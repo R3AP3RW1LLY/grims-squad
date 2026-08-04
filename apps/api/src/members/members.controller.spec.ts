@@ -294,12 +294,15 @@ describe('privacy settings', () => {
   it('returns the defaults when no row exists — fields private, board participation on', async () => {
     store.stored = null;
     /*
-     * Not simply PRIVATE any more: the showLb* trio defaults ON (owner's instruction, 2026-08-04
-     * — "default all leaderboard participation on for all commanders"), so a member who has
-     * never opened settings participates in the standings while every FIELD stays hidden.
+     * Not simply PRIVATE any more: every leaderboard participation switch — the master included —
+     * defaults ON (owner's instruction, 2026-08-04 — "default all leaderboard participation on
+     * for all commanders"), so a member who has never opened settings participates in the
+     * standings while every FIELD stays hidden. The master was briefly pinned false here, which
+     * made the settings page contradict the standings SQL's COALESCE(col, true).
      */
     expect(await ctl.myPrivacy({ userId: 'u-1' })).toEqual({
       ...PRIVATE,
+      showOnLeaderboard: true,
       showLbBounties: true,
       showLbColony: true,
       showLbTrade: true,

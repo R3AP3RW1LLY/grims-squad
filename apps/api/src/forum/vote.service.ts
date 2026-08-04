@@ -130,6 +130,13 @@ export class VoteService {
       });
 
       if (xp.length > 0) {
+        /*
+         * No skipDuplicates, deliberately: these are signed LEDGER rows — a second upvoter's +10
+         * and a withdrawal's −10 share a (user, reason, subject) key with earlier rows and must
+         * all land. The xp_events_once_idx unique index names the one-shot reasons explicitly
+         * (20260805110000_xp_once_narrowed) and the vote reasons are not among them; before it
+         * was narrowed, the second such row violated it and rolled the whole vote back.
+         */
         await tx.xpEvent.createMany({
           data: xp.map((e) => ({ userId: authorId, reason: e.reason, amount: e.amount, subject: e.subject })),
         });

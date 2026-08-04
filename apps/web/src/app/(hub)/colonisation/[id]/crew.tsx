@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import type { ColonyNeed } from '../../../../lib/api';
-import { apiGet, apiPost } from '../../../../lib/api-client';
+import { apiDelete, apiGet, apiPost } from '../../../../lib/api-client';
 
 /**
  * Who is on this build, and who is covering what.
@@ -36,6 +36,8 @@ interface RosterEntry {
   delivered: number;
   /** True for your own row. Decided by the server — the page must not guess at its own identity. */
   you: boolean;
+  /** True when this build is the one the member's companion overlay follows. */
+  current: boolean;
 }
 
 const BTN =
@@ -190,16 +192,40 @@ export function Crew({ projectId, needs }: { projectId: string; needs: readonly 
           Which button is showing IS the answer to "am I on this build", so drawing both would leave
           somebody who had already joined with no way to tell.
         */}
-        <div className="mt-5">
+        <div className="mt-5 flex flex-wrap items-center gap-4">
           {onIt ? (
-            <button
-              type="button"
-              disabled={busy}
-              className={`${BTN} border-[var(--color-semantic-hostile-bright)] text-[var(--color-semantic-hostile-bright)] hover:bg-[color-mix(in_srgb,var(--color-semantic-hostile-bright)_12%,transparent)]`}
-              onClick={() => void act(() => apiPost(`${route}/leave`))}
-            >
-              Leave this build
-            </button>
+            <>
+              <button
+                type="button"
+                disabled={busy}
+                className={`${BTN} border-[var(--color-semantic-hostile-bright)] text-[var(--color-semantic-hostile-bright)] hover:bg-[color-mix(in_srgb,var(--color-semantic-hostile-bright)_12%,transparent)]`}
+                onClick={() => void act(() => apiPost(`${route}/leave`))}
+              >
+                Leave this build
+              </button>
+              {/*
+                ★ THE CURRENT BUILD — SQUADRON OWNER, 2026-08-04 ★
+
+                One build per member, held by the hub. This is what the companion's build overlay
+                follows wherever the member flies. Ticking it on another build moves the mark —
+                the hub keeps exactly one — which is why this is a checkbox and not a toggle pair.
+              */}
+              <label className="flex items-center gap-2.5 text-sm text-[var(--color-text-secondary)]">
+                <input
+                  type="checkbox"
+                  checked={members.some((m) => m.you && m.current)}
+                  disabled={busy}
+                  onChange={(e) =>
+                    void act(() =>
+                      e.target.checked
+                        ? apiPost(`${route}/current`)
+                        : apiDelete(`${route}/current`),
+                    )
+                  }
+                />
+                This is my current build
+              </label>
+            </>
           ) : (
             <button
               type="button"

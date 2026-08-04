@@ -163,14 +163,24 @@ describe('defaults are conservative', () => {
     expect(out).not.toHaveProperty('activity');
   });
 
-  it('every default FIELD toggle is false; only the leaderboard participation trio is on', () => {
+  it('every default FIELD toggle is false; only the leaderboard participation switches are on', () => {
     /*
      * The exception is deliberate and owner-instructed ("default all leaderboard participation
-     * on for all commanders", 2026-08-04): the showLb* switches govern PARTICIPATION in the
+     * on for all commanders", 2026-08-04): the leaderboard switches govern PARTICIPATION in the
      * gamified standings, not visibility of a fact about the member, and their schema columns
      * default TRUE. Everything that hides a field stays conservative.
+     *
+     * The MASTER switch belongs to this set — it governs the same boards its three children do.
+     * This spec once held it to false, which pinned the exact lie the standings SQL exposed: a
+     * member with no privacy row participated (COALESCE(col, true)) while the settings page
+     * showed the switch off.
      */
-    const PARTICIPATION = new Set(['showLbBounties', 'showLbColony', 'showLbTrade']);
+    const PARTICIPATION = new Set([
+      'showOnLeaderboard',
+      'showLbBounties',
+      'showLbColony',
+      'showLbTrade',
+    ]);
     for (const [field, value] of Object.entries(DEFAULT_PRIVACY)) {
       if (PARTICIPATION.has(field)) {
         expect(value, `${field} must default to participating`).toBe(true);

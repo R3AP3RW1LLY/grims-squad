@@ -124,7 +124,17 @@ export class BountiesService {
                 count(*) FILTER (WHERE c.jackpot)::int AS jackpots
            FROM bounty_claims c
            JOIN users u ON u.id = c.user_id
+           /*
+            * The same participation rule as /leaderboards/bounties, or the two pages disagree:
+            * a member who switched off the Data Runners board was vanishing there and still
+            * standing here. COALESCE makes a missing privacy row mean "participating", exactly
+            * as the schema defaults do; opted-out members are filtered, not blanked, and
+            * everybody below them moves up.
+            */
+           LEFT JOIN privacy_settings ps ON ps.user_id = u.id
           ${where}
+          ${where === '' ? 'WHERE' : 'AND'} COALESCE(ps.show_on_leaderboard, true)
+            AND COALESCE(ps.show_lb_bounties, true)
           GROUP BY u.handle, u.display_name
           ORDER BY points DESC, claims DESC, u.handle
           LIMIT 50`,

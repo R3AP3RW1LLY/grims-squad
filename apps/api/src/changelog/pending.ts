@@ -21,6 +21,12 @@ export interface PendingChangelog {
   readonly toSha: string;
   readonly generatedAt: string;
   readonly commitCount: number;
+  /**
+   * The platform version this build would ship as. Null for a file written by
+   * an older generator — dropping the key here while the web type promised it
+   * is what once rendered the literal text "Version undefined:" on the panel.
+   */
+  readonly version: string | null;
   readonly websiteMd: string;
   readonly companionMd: string;
   readonly platformMd: string;
@@ -83,6 +89,7 @@ export function readPendingChangelog(): PendingChangelog | null {
         toSha: p['toSha'],
         generatedAt: p['generatedAt'],
         commitCount: p['commitCount'],
+        version: str(p['version']) ? p['version'] : null,
         websiteMd: p['websiteMd'],
         companionMd: p['companionMd'],
         platformMd: p['platformMd'],

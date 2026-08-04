@@ -795,7 +795,9 @@ export function signatureHtml(share: SignatureShare): string {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;');
 
-  const img = `<img src="${esc(share.bannerUrl)}" alt="${esc(share.tagline ?? 'Signature')}" width="600" height="120">`;
+  // Dimensions from BANNER, not literals — the hard-coded 120 survived the banner's move to 160
+  // and quietly squashed every published copy by a quarter.
+  const img = `<img src="${esc(share.bannerUrl)}" alt="${esc(share.tagline ?? 'Signature')}" width="${BANNER.width}" height="${BANNER.height}">`;
   /*
    * `rel="noopener noreferrer"` even here. It is markup we are handing somebody to paste on a site
    * we do not control, and shipping a link without it teaches the habit by example.

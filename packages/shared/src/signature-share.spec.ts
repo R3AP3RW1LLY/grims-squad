@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { signatureBBCode, signatureHtml, signatureMarkdown } from './forum-signature.js';
+import { BANNER, signatureBBCode, signatureHtml, signatureMarkdown } from './forum-signature.js';
 
 /**
  * Markup handed to members to paste on OTHER forums.
@@ -152,7 +152,12 @@ describe('signature HTML', () => {
 
   it('states the banner dimensions so the target page does not reflow', () => {
     const out = signatureHtml(share);
-    expect(out).toContain('width="600"');
-    expect(out).toContain('height="120"');
+    /*
+     * Against BANNER, not literals. This spec once pinned height="120" — the pre-160 size — and
+     * dutifully held the HTML snippet to squashing every published banner by a quarter. The claim
+     * worth pinning is "the snippet states the REAL dimensions", whatever the banner grows to.
+     */
+    expect(out).toContain(`width="${BANNER.width}"`);
+    expect(out).toContain(`height="${BANNER.height}"`);
   });
 });

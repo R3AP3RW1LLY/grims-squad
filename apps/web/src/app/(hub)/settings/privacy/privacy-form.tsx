@@ -57,7 +57,9 @@ const TOGGLES: readonly Toggle[] = [
   {
     key: 'showOnLeaderboard',
     label: 'Include me on leaderboards',
-    help: 'Off by default. Leaderboards are opt-in, separately from the roster.',
+    // On for everyone — the owner's ruling, and what the standings SQL already does. The old text
+    // claimed "Off by default. Leaderboards are opt-in", which was never how the boards behaved.
+    help: 'On for every commander. Switching it off takes your name off every board at once.',
   },
   {
     /*
