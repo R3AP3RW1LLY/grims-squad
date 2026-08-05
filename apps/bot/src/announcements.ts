@@ -86,7 +86,12 @@ export function channelEnvFor(
    * "record the changelog by hand" branch and skipped both. Silently, and with a tick beside it.
    * Installed 2026-08-05; from here the deploy writes them itself.
    */
-  if (kind === 'deploy') return 'DISCORD_RELEASE_CHANNEL_ID';
+  /*
+   * A companion release goes to the SAME channel as a website deploy — squadron owner, 2026-08-05:
+   * "same channel as the web announcements". They are the same question to a member ("what changed
+   * and do I need to do anything"), and splitting them would make somebody watch two rooms.
+   */
+  if (kind === 'deploy' || kind === 'app-release') return 'DISCORD_RELEASE_CHANNEL_ID';
   /*
    * ★ COLONISATION HAS ITS OWN CHANNEL — SQUADRON OWNER, 2026-08-05 ★
    *

@@ -17,6 +17,8 @@ import {
 describe('channelEnvFor — which variable names the destination', () => {
   it('MANDATORY: deploys and verifications share the announcements channel', () => {
     expect(channelEnvFor('deploy')).toBe('DISCORD_RELEASE_CHANNEL_ID');
+    // The app release rides the same channel, by the owner's instruction.
+    expect(channelEnvFor('app-release')).toBe('DISCORD_RELEASE_CHANNEL_ID');
     expect(channelEnvFor('member-verified')).toBe('DISCORD_ANNOUNCE_CHANNEL_ID');
   });
 

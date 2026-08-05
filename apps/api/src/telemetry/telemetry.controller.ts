@@ -1,6 +1,7 @@
 import { Optional, Controller, Post, Get, Put, Delete, Body, Param, Req, Inject } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
 import { AppError, ErrorCode } from '@grims/shared';
+import { PrismaClient, announceCompanionRelease } from '@grims/db';
 import { Public } from '../auth/auth.guard.js';
 import { User, type CurrentUser } from '../auth/current-user.js';
 import { verifyCsrf, readCsrfCookie } from '../common/csrf.js';
@@ -34,6 +35,12 @@ export class TelemetryController {
      */
     @Optional() @Inject(RELEASE_STORE) private readonly releases: ReleaseStore | null = null,
     @Optional() @Inject(DeviceLinkService) private readonly links: DeviceLinkService | null = null,
+    /*
+     * OPTIONAL, for the same reason as the two above: this controller's job is to accept a
+     * member's telemetry, and it must not refuse to start because the announcement path — which is
+     * decoration on a release that has already happened — has nothing wired to it in a test.
+     */
+    @Optional() @Inject(PrismaClient) private readonly db: PrismaClient | null = null,
   ) {}
 
   // ------------------------------------------------------------- device links
@@ -313,6 +320,26 @@ export class TelemetryController {
       this.releases?.list().catch(() => []) ?? Promise.resolve([]),
     ]);
 
+    /*
+     * ★ THE APP'S OWN POLL IS THE TRIGGER — SQUADRON OWNER, 2026-08-05 ★
+     *
+     * "we need to make an announcement too everytime the companion app is updated please!"
+     *
+     * Every paired app asks for these settings every five minutes, and this call already works out
+     * the newest published build from the release bucket. So a release announces itself on the next
+     * poll after it lands — no cron entry to install, no CI secret to keep, and no second place that
+     * has to agree about which version is current.
+     *
+     * Fire-and-forget, and idempotent by an atomic claim on `site_config`: dozens of apps see the
+     * new version in the same minute and exactly one of them writes the announcement. Nothing about
+     * a settings read may wait on it (INV-018), and a member polling must never be shown an error
+     * because an announcement failed.
+     */
+    const published = newestVersion(assets);
+    if (this.db !== null) {
+      void announceCompanionRelease(this.db, published, webBase()).catch(() => undefined);
+    }
+
     return {
       optOutCategories: state.categories,
       optOutEvents: state.events,
@@ -343,7 +370,7 @@ export class TelemetryController {
        * website uses, so the app and the site can no longer disagree about
        * which build is current.
        */
-      latestVersion: newestVersion(assets),
+      latestVersion: published,
     };
   }
 
