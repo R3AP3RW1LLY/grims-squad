@@ -31,8 +31,22 @@ import { announce } from './jobs/job-log.js';
  */
 
 /** Where the downloaded data lives. Overridable so a second machine need not match this one. */
-const CORIOLIS_DIR = process.env['KNOWLEDGE_CORIOLIS_DIR'] ?? 'D:/ai/knowledge/coriolis-data-master';
-const GALAXY_FILE = process.env['KNOWLEDGE_GALAXY_FILE'] ?? 'D:/ai/knowledge/galaxy_populated.json.gz';
+/*
+ * ★ THESE DEFAULTED TO ONE DEVELOPER'S WINDOWS DRIVE ★
+ *
+ * `D:/ai/knowledge/...` was the fallback, so production — where neither variable was set — went
+ * looking for a Windows path on a Linux server. The galaxy baseline therefore never refreshed
+ * once, and the coriolis ingest failed nightly with ENOENT naming a drive letter the server has
+ * never had. The ops watch reported it honestly ("has never reported at all"); nobody had read it.
+ *
+ * The default is now a path that exists in the container and is backed by a volume, so the
+ * pipeline works where it runs. A developer keeping the files elsewhere still sets the variable.
+ */
+const KNOWLEDGE_DIR = process.env['KNOWLEDGE_DIR'] ?? '/srv/knowledge';
+const CORIOLIS_DIR =
+  process.env['KNOWLEDGE_CORIOLIS_DIR'] ?? `${KNOWLEDGE_DIR}/coriolis-data-master`;
+const GALAXY_FILE =
+  process.env['KNOWLEDGE_GALAXY_FILE'] ?? `${KNOWLEDGE_DIR}/galaxy_populated.json.gz`;
 
 /**
  * Which dump version was last ingested TO COMPLETION. Distinct from the download's own `.meta` —

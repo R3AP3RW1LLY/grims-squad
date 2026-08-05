@@ -12,7 +12,21 @@
 #
 # Built from the REPO ROOT as context, like the others: pnpm workspaces need the lockfile and every
 # workspace manifest to resolve the same graph CI tested.
-FROM node:24-slim AS base
+# ★ NODE 22, AND ZEROMQ IS THE WHOLE REASON ★
+#
+# Every other image here is node:24-slim. This one cannot be, and the failure is silent about why:
+# `zeromq@6.5.0` ships PREBUILT binaries per Node ABI, and for linux/x64 it carries 72, 115 and 127
+# — Node 12, 20 and 22. Node 24 is ABI 137, and there is no build for it, so `import('zeromq')`
+# finds no addon and the collector's own load guard below refuses to package an image that could
+# never subscribe.
+#
+# The alternative is compiling libzmq from source, which means adding a C++ toolchain to this image
+# to produce a binary identical to a prebuild that already exists one ABI down — and pnpm's
+# allowBuilds deliberately declines zeromq's build script for exactly that reason
+# (see pnpm-workspace.yaml). Pinning the runtime is the smaller, honest change.
+#
+# Revisit when zeromq publishes a Node 24 prebuild: raise this line and delete this comment.
+FROM node:22-slim AS base
 RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH
