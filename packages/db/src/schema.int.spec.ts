@@ -204,7 +204,14 @@ describe('P0.2 database schema', () => {
     // kanban, readable by every member at /roadmap. The same migration seeds the
     // feature-requests board — a category row, not a table, which is why the count moves by
     // exactly two.
-    expect(Number(r[0]?.n)).toBe(120);
+    //
+    // 121 as of the carrier whole-hold reading: colony_carrier_hold. The companion's cargo fold is
+    // a WITNESS — it knows what it watched move — and production held exactly one commodity row
+    // for the squadron's carrier, printed as though it were the manifest. `CarrierStats` gives the
+    // game's own total tonnage aboard, so a page can state the gap instead of implying there is
+    // none. Its own table because it is one fact about a CARRIER: per-commodity would invite two
+    // rows to disagree, and (project, market) would repeat it once per build it is helping.
+    expect(Number(r[0]?.n)).toBe(121);
   });
 
   describe('hand-written DDL that Prisma cannot express', () => {
