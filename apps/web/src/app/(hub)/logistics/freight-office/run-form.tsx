@@ -1,5 +1,8 @@
 'use client';
 
+// The SUBPATH, not the barrel: this is a client component, and one integer is not worth
+// shipping permissions and the rich-document schema to a browser.
+import { MAX_CARGO_TONNES } from '@grims/shared/logistics';
 import type { RoutePlan } from '../../../../lib/api';
 
 /**
@@ -107,7 +110,7 @@ export function RunForm({
             name="cargo"
             type="number"
             min={1}
-            max={794}
+            max={MAX_CARGO_TONNES}
             defaultValue={val('cargo', '64')}
             className={`${FIELD} w-[110px]`}
             list="hull-holds"

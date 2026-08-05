@@ -4,6 +4,7 @@ import {
   ErrorCode,
   Permission,
   ROLE_PRESETS,
+  MAX_CARGO_TONNES,
 } from '@grims/shared';
 import { Public } from '../auth/auth.guard.js';
 import { User, type CurrentUser } from '../auth/current-user.js';
@@ -325,11 +326,17 @@ export class MarketController {
       origin: origin.coords,
       originName: origin.system,
       /*
-       * Clamped, not trusted. 794 is the largest hold in the game (a fully fitted Type-9 style
-       * hauler is around there), and a member typing 99999999 would otherwise be quoted a total
-       * profit that is pure fiction — the one number on this page nobody double-checks.
+       * Clamped, not trusted — but at the CARRIER's capacity now, not a ship's.
+       *
+       * This was 794, the biggest hold a ship can carry, which meant a member planning a fleet
+       * carrier run was quietly planned for 794 tonnes and quoted the profit of a run nobody was
+       * doing. Squadron owner, 2026-08-05: "max out the cargo T text entry so there is no max".
+       *
+       * The bound survives because it was never about ships. Route profit is a per-tonne figure
+       * multiplied by this, so 99999999 is quoted a total that is pure fiction — and it is the one
+       * number on this page nobody double-checks. A ceiling no real hold can reach costs nothing.
        */
-      cargo: clamp(numberOr(cargo, 64), 1, 794),
+      cargo: clamp(numberOr(cargo, 64), 1, MAX_CARGO_TONNES),
       buyWithinLy: clamp(numberOr(buyWithinLy, 50), 1, 500),
       sellWithinLy: clamp(numberOr(sellWithinLy, 100), 1, 500),
       budget: budget === undefined || budget.trim() === '' ? null : Math.max(0, numberOr(budget, 0)),

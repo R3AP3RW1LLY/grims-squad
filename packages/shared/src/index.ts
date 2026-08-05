@@ -4,6 +4,7 @@ export * from './permissions.js';
 export * from './rich-document.js';
 export * from './forum-signature.js';
 export * from './fonts.js';
+export * from './logistics.js';
 export * from './ship-names.js';
 export * from './ai.js';
 export * from './ai-image.js';

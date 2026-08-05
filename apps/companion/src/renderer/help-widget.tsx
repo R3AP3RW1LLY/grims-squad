@@ -49,7 +49,36 @@ declare global {
   }
 }
 
+/**
+ * How often the panel re-reads while it is OPEN — somebody is watching a conversation.
+ */
 const POLL_MS = 30_000;
+
+/**
+ * How often the launcher's dot is re-checked while the panel is CLOSED.
+ *
+ * ★ IT USED TO BE NEVER — SQUADRON OWNER, 2026-08-05 ★
+ *
+ * "the support and ai responses are not seeming to flow back to the companion app when an officer
+ * responds to a support ticket"
+ *
+ * They did not, and the transcript was never the problem: the hub returns every message, officers'
+ * included, and the panel re-reads it happily while open. The poll gave up before that. It began
+ * `if (!openRef.current) return` — "a closed widget costs the hub nothing" — so after the single
+ * load at launch, a member with the app running and the panel shut never asked again. An officer
+ * could answer, and the app had no way to find out until the member opened the panel on a hunch,
+ * which is the one thing an unanswered-looking ticket makes nobody do.
+ *
+ * The WEBSITE widget has always had this right, two cadences with the reasoning written next to
+ * them: "eagerly while the panel is open, lazily for the launcher dot while it is not". This is
+ * that, in the app.
+ *
+ * Two minutes rather than the website's one: this runs in a desktop app that stays open for a
+ * whole session, and the closed-panel read exists to light a dot rather than to carry a
+ * conversation. One indexed query per member every two minutes is not a cost worth the silence
+ * it replaces.
+ */
+const IDLE_POLL_MS = 120_000;
 
 /** The client-side courtesy copy of the hub's 4000 cap — the hub is the control. */
 const MAX_CHARS = 4000;
@@ -439,16 +468,33 @@ export function HelpWidget(): JSX.Element {
     });
   };
 
+  /*
+   * ★ THE LIST ALWAYS; THE TRANSCRIPT ONLY WHEN SOMEBODY IS READING IT ★
+   *
+   * The list is what the launcher's dot is computed from, so it has to keep being read whether or
+   * not the panel is open — that is the whole point of a dot. The transcript is a bigger read that
+   * nobody can see while the panel is shut, so it stays gated.
+   */
   const load = (): void => {
-    if (!openRef.current) return; // A closed widget costs the hub nothing.
     loadList();
+    if (!openRef.current) return;
     const id = activeRef.current;
     if (id !== null) loadTranscript(id);
   };
 
   // One load at launch, so the launcher's dot is honest before the panel is ever opened.
   useEffect(loadList, []);
-  useLive(load, POLL_MS);
+  /*
+   * Two subscriptions rather than one, because `useLive` keeps the cadence it was given and the
+   * two cases want different ones. Each checks `open` itself, so exactly one of them does any work
+   * at a time and opening the panel does not leave the idle timer also firing.
+   */
+  useLive(() => {
+    if (openRef.current) load();
+  }, POLL_MS);
+  useLive(() => {
+    if (!openRef.current) loadList();
+  }, IDLE_POLL_MS);
 
   // Opening asks fresh; a panel drawn from minutes-old rows reads as being ignored.
   useEffect(() => {
