@@ -19,7 +19,17 @@ RUN pnpm --filter @grims/db exec prisma generate
 # its `main` to dist/, which does not exist until tsc has run — the exact
 # omission that broke the web image with "Module not found" for a package
 # plainly listed in its package.json.
+#
+# ★ ed-clients IS BUILT HERE BECAUSE @grims/db NOW REACHES IT ★
+#
+# The bot does not import ed-clients itself, which is why this line was absent. But `packages/db`
+# gained `rank-applier.discord.ts`, which imports a DiscordAdapter type from it — and `tsc -b`
+# builds project references, so db cannot compile until ed-clients has emitted its declarations.
+# The api and worker images already built it and kept working; this one failed the moment that
+# import landed, and it failed in the image build rather than in CI, where the packages are built
+# from the workspace root and the order resolves itself.
 RUN pnpm --filter @grims/shared build \
+ && pnpm --filter @grims/ed-clients build \
  && pnpm --filter @grims/db build \
  && pnpm --filter @grims/bot exec tsc -b
 
