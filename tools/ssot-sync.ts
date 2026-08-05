@@ -25,6 +25,7 @@ const COPIES: ReadonlyArray<{ source: string; copy: string }> = [
     copy: 'packages/shared/src/forum-signature.ts',
   },
   { source: 'ssot/04-contracts/fonts.ts', copy: 'packages/shared/src/fonts.ts' },
+  { source: 'ssot/04-contracts/logistics.ts', copy: 'packages/shared/src/logistics.ts' },
   { source: 'ssot/04-contracts/ship-names.ts', copy: 'packages/shared/src/ship-names.ts' },
   { source: 'ssot/04-contracts/ai.ts', copy: 'packages/shared/src/ai.ts' },
   { source: 'ssot/04-contracts/ai-image.ts', copy: 'packages/shared/src/ai-image.ts' },

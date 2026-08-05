@@ -1,6 +1,6 @@
 import { Controller, Get, Inject, Param, Query, Req } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
-import { AppError, ErrorCode, Permission } from '@grims/shared';
+import { AppError, ErrorCode, Permission, MAX_CARGO_TONNES } from '@grims/shared';
 import { Public } from '../auth/auth.guard.js';
 import { PermissionService } from '../authz/permission.service.js';
 import { PAIRING_SERVICE } from '../telemetry/telemetry.tokens.js';
@@ -267,7 +267,7 @@ export class TradeDeviceController {
     const plan = await planRoutes(this.store, {
       origin: origin.coords,
       originName: origin.system,
-      cargo: clamp(numberOr(cargo, 64), 1, 794),
+      cargo: clamp(numberOr(cargo, 64), 1, MAX_CARGO_TONNES),
       buyWithinLy: clamp(numberOr(buyWithinLy, 50), 1, 500),
       sellWithinLy: clamp(numberOr(sellWithinLy, 100), 1, 500),
       budget: budget === undefined || budget.trim() === '' ? null : Math.max(0, numberOr(budget, 0)),
