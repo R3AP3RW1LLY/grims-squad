@@ -2162,6 +2162,15 @@ export interface ColonyProject {
   remaining: number;
   required: number;
   needCount: number;
+  /**
+   * Deliveries recorded against this build.
+   *
+   * The number Delete actually turns on. The server refuses to remove a project once anybody has
+   * hauled to it — removing it would erase their record — and the page used to hide the button on
+   * `required === 0` instead, which asks whether the site has reported its NEEDS. Different
+   * question, stricter answer, and it left a mistyped market id undeletable.
+   */
+  deliveryCount: number;
 }
 
 export interface ColonyNeed {

@@ -105,6 +105,7 @@ export const COMMANDER_AUDIT_JOB = 'commanders';
  *
  * Neither package depends on the other, so a string spelled in both would drift the first time
  * somebody renamed it, and the reader would silently look up a row that no longer exists — which
- * is the same silent-zero failure the anchor count exists to explain.
+ * is the same silent-zero failure the anchor count exists to explain. Same reasoning as the
+ * channel names above: a name four processes agree on belongs in the contract, not in one of them.
  */
 export const BOUNTY_ANCHOR_COUNT_KEY = 'bounties.anchor_count';

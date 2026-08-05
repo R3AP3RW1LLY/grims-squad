@@ -802,6 +802,37 @@ export class ColonyController {
     return { ok: true };
   }
 
+  /**
+   * Handing a personal project to the squadron, or handing it back.
+   *
+   * Squadron owner, 2026-08-05: "give admins the option after the fact to turn a project into a
+   * squadron project". COLONY_MANAGE, not the poster: adopting a build commits the squadron's
+   * playing time, and that was never the poster's to commit — the same reasoning that stops a
+   * member marking their own build as the squadron's current effort.
+   */
+  @Patch('projects/:id/owner')
+  async setOwner(
+    @User() caller: CurrentUser | undefined,
+    @Param('id') id: string,
+    @Body() body: { owner?: string },
+  ) {
+    const me = this.#requireSession(caller);
+    await this.#assert(
+      caller,
+      Permission.COLONY_MANAGE,
+      'Only officers can change who owns a colonisation project.',
+    );
+
+    if (body.owner !== 'squadron' && body.owner !== 'personal') {
+      throw new AppError(
+        ErrorCode.VALIDATION_FAILED,
+        'Say whether it belongs to the squadron or to the member who posted it.',
+      );
+    }
+
+    return this.colony.setOwner(id, body.owner, me.userId);
+  }
+
   @Patch('projects/:id/priority')
   async priority(
     @User() caller: CurrentUser | undefined,
