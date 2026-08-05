@@ -173,3 +173,98 @@ describe('the snapshot', () => {
     ]);
   });
 });
+
+/**
+ * The two things that made the hold wrong in production.
+ *
+ * ★ SQUADRON OWNER, 2026-08-05 ★
+ *
+ * "carrier hold info is not updating properly in the companion app or the website, we need this
+ * investigated and we need this to be way more accurate than it is currently"
+ *
+ * Production held exactly ONE commodity row for the squadron's carrier. Two separate causes, and
+ * neither was the fold getting its arithmetic wrong.
+ */
+describe('refuelling takes tritium out of the hold', () => {
+  /*
+   * `CarrierDepositFuel` moves tritium from the carrier's CARGO into its fuel tank, and it was not
+   * handled at all. It is the single most common thing an owner does to a carrier, so every tonne
+   * of tritium ever carried aboard stayed on the books for ever and the figure only ever climbed —
+   * a carrier that had long since jumped its tritium away still reported carrying it.
+   */
+  const deposit = (id: number, amount: number): ParsedLike =>
+    ev('CarrierDepositFuel', { CarrierID: id, Amount: amount, Total: 1000 });
+
+  it('MANDATORY: a deposit subtracts from the tritium aboard', () => {
+    const after = foldCarrierHold(EMPTY_CARRIER_HOLD, [
+      stats(3700005632),
+      transfer([{ type: 'Tritium', count: 500, direction: 'tocarrier' }]),
+      deposit(3700005632, 200),
+    ]);
+
+    expect(tonnesOf(after, 'Tritium')).toBe(300);
+  });
+
+  it('clamps at zero — a member can deposit tritium the app never watched arrive', () => {
+    const after = foldCarrierHold(EMPTY_CARRIER_HOLD, [stats(3700005632), deposit(3700005632, 400)]);
+    expect(tonnesOf(after, 'Tritium')).toBe(0);
+  });
+
+  it('somebody else’s carrier is none of our business', () => {
+    const after = foldCarrierHold(EMPTY_CARRIER_HOLD, [
+      stats(3700005632),
+      transfer([{ type: 'Tritium', count: 500, direction: 'tocarrier' }]),
+      deposit(9999999999, 500),
+    ]);
+
+    expect(tonnesOf(after, 'Tritium')).toBe(500);
+  });
+});
+
+describe('the true total, so the gap is visible', () => {
+  /*
+   * The fold is a WITNESS: it knows what it watched move and nothing else, so a carrier holding
+   * twenty commodities shows however many the app happened to see. Nothing said so, and one
+   * commodity presented without comment reads as the whole hold.
+   *
+   * `SpaceUsage.Cargo` is the game's own total tonnage aboard — no breakdown, but true. Keeping it
+   * is what lets the app say "watched 500 t of the 12,400 t aboard" instead of implying the two
+   * are the same number.
+   */
+  const statsWithUsage = (id: number, cargo: number): ParsedLike =>
+    ev('CarrierStats', {
+      CarrierID: id,
+      Callsign: 'K7Q-B4L',
+      Name: 'GRIMS HAULER',
+      SpaceUsage: { TotalCapacity: 25000, Cargo: cargo, FreeSpace: 25000 - cargo },
+    });
+
+  it('MANDATORY: the total is kept, and is not the same as what was watched', () => {
+    const after = foldCarrierHold(EMPTY_CARRIER_HOLD, [
+      statsWithUsage(3700005632, 12400),
+      transfer([{ type: 'Tritium', count: 500, direction: 'tocarrier' }]),
+    ]);
+
+    expect(after.totalTonnes).toBe(12400);
+    expect(tonnesOf(after, 'Tritium')).toBe(500);
+    // The gap IS the point: 11,900 t aboard that this app has never seen move.
+    expect(after.totalTonnes! - 500).toBe(11900);
+  });
+
+  it('is stamped with the JOURNAL’s time, not the clock', () => {
+    // A pass may be replaying a file written hours ago; stamping "now" would present an old
+    // reading as a fresh one, which is the lie the total exists to stop telling.
+    const after = foldCarrierHold(EMPTY_CARRIER_HOLD, [statsWithUsage(3700005632, 900)]);
+    expect(after.totalAt).toBe(Date.parse(at));
+  });
+
+  it('stays null until carrier management is opened — absent, not guessed', () => {
+    const after = foldCarrierHold(EMPTY_CARRIER_HOLD, [
+      stats(3700005632),
+      transfer([{ type: 'Tritium', count: 500, direction: 'tocarrier' }]),
+    ]);
+
+    expect(after.totalTonnes).toBeNull();
+    expect(after.totalAt).toBeNull();
+  });
+});

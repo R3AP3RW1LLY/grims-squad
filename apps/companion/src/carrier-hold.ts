@@ -55,12 +55,25 @@ export interface CarrierHoldState {
   readonly hold: Readonly<Record<string, { readonly commodity: string; readonly tonnes: number }>>;
   /** The carrier pad the member is on right now, when the pad IS a carrier. Identity fuel only. */
   readonly dockedCarrierId: string | null;
+  /**
+   * Total tonnes aboard, from the game rather than from watching — `CarrierStats.SpaceUsage.Cargo`.
+   *
+   * The fold above is a witness statement and cannot know what moved before it was watching. This
+   * is the whole truth about the SIZE of the hold, with no breakdown, and the difference between
+   * the two is the honest measure of how much we have not seen. Null until the member opens carrier
+   * management at least once.
+   */
+  readonly totalTonnes: number | null;
+  /** When that total was read. A stale total is still worth more than none, and this says how stale. */
+  readonly totalAt: number | null;
 }
 
 export const EMPTY_CARRIER_HOLD: CarrierHoldState = {
   carrier: null,
   hold: {},
   dockedCarrierId: null,
+  totalTonnes: null,
+  totalAt: null,
 };
 
 /** A market id as a string. Same reasoning as docked.ts: `String()` on 2^53+ rounds. */
@@ -122,11 +135,65 @@ export function foldCarrierHold(
         if (marketId === '') break;
         const callsign = text(event.data['Callsign']) || null;
         const name = text(event.data['Name']) || null;
+
+        /*
+         * ★ THE ONE TRUE NUMBER THIS EVENT CARRIES — REPORTED 2026-08-05 ★
+         *
+         * "carrier hold info is not updating properly ... we need this to be way more accurate"
+         *
+         * The fold below is a WITNESS: it knows what it watched move and nothing else, so a
+         * carrier holding twenty commodities shows however many the app happened to see. In
+         * production that was literally one row. Nothing said so, and one commodity presented
+         * without comment reads as the whole hold.
+         *
+         * `SpaceUsage.Cargo` is the game's own total tonnage aboard — no breakdown, but a true
+         * figure. Keeping it is what lets the app and the site say "watched 6,600 t of the
+         * 12,400 t aboard" instead of implying the two are the same. An honest gap is far more
+         * useful than a confident wrong total, and it also tells a member when it is worth
+         * opening carrier management to resync.
+         */
+        const usage = event.data['SpaceUsage'];
+        const totalTonnes =
+          typeof usage === 'object' && usage !== null
+            ? count((usage as Record<string, unknown>)['Cargo'])
+            : null;
+
+        const switched = current.carrier !== null && current.carrier.marketId !== marketId;
         current = {
           ...current,
           carrier: { marketId, callsign, name },
-          hold: current.carrier !== null && current.carrier.marketId !== marketId ? {} : current.hold,
+          hold: switched ? {} : current.hold,
+          // Belongs to THIS carrier. Switching carriers must not carry the old one's total over.
+          totalTonnes: totalTonnes === 0 && switched ? 0 : totalTonnes,
+          /*
+           * The JOURNAL's timestamp, not the clock. The pass may be replaying a file written
+           * hours ago, and stamping "now" would present an old reading as a fresh one — which is
+           * the same lie the total exists to stop telling.
+           */
+          totalAt: totalTonnes === null ? current.totalAt : Date.parse(event.occurredAt) || null,
         };
+        break;
+      }
+
+      /*
+       * ★ REFUELLING TAKES TRITIUM OUT OF THE HOLD, AND NOTHING WAS SUBTRACTING IT ★
+       *
+       * `CarrierDepositFuel` moves tritium from the carrier's CARGO into its fuel tank. It is the
+       * single most common thing an owner does to a carrier, and it was not handled at all — so
+       * every tonne of tritium ever transferred aboard stayed on the books for ever, and the
+       * figure only ever climbed. A carrier that had jumped its tritium away still reported
+       * carrying it.
+       *
+       * Clamped at zero by `adjust`, like every other movement: a member who transferred tritium
+       * aboard before the app was watching can deposit more than we ever saw arrive, and a
+       * negative hold is not a thing.
+       */
+      case 'CarrierDepositFuel': {
+        if (current.carrier === null) break;
+        if (marketIdOf(event.data['CarrierID']) !== current.carrier.marketId) break;
+        const amount = count(event.data['Amount']);
+        if (amount === 0) break;
+        current = { ...current, hold: adjust(current.hold, 'Tritium', -amount) };
         break;
       }
 

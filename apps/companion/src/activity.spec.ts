@@ -16,7 +16,7 @@ const QUIET: WatchOutcome = {
   // An empty trip, for the same reason — the activity log says nothing about money.
   trip: { lots: {}, lastSale: null, since: 'start' },
   // And an empty carrier hold: the log has no carrier lines either.
-  carrierHold: { carrier: null, hold: {}, dockedCarrierId: null },
+  carrierHold: { carrier: null, hold: {}, dockedCarrierId: null, totalTonnes: null, totalAt: null },
   gameRunning: false,
   filesRead: 0,
   newFilesRead: 0,
