@@ -81,8 +81,12 @@ jobs:
           # needs it. This job DOES — electron-builder packages that binary.
           ELECTRON_SKIP_BINARY_DOWNLOAD: 0
 
-      - name: build the shared package
-        run: pnpm --filter @grims/shared build
+      # ed-clients as well as shared: the companion imports @grims/ed-clients/builds, and a
+      # workspace package resolves through its `main` to dist/, which does not exist until tsc has
+      # run. This built shared alone and failed the moment the app reached for a second package —
+      # the same omission that stopped the bot and collector images building.
+      - name: build the shared packages
+        run: pnpm --filter @grims/shared build && pnpm --filter @grims/ed-clients build
 
       - name: test
         # The app is about to be handed to members. Packaging a build whose
