@@ -86,7 +86,12 @@ export function Support({
     if (activeId !== null) loadTranscript(activeId);
   });
 
-  const waiting = rows.filter((r) => r.unread).length;
+  /*
+   * Waiting means A PERSON is on the hook: officer-mode conversations with unseen words — the
+   * same rule as the tab badge's count, or the number here and the number on the tab would
+   * disagree within a week. An AI-handled conversation is listed and labelled, not counted.
+   */
+  const waiting = rows.filter((r) => r.unread && r.handledBy === 'officer').length;
 
   if (activeId !== null && transcript !== null) {
     return (
@@ -168,7 +173,8 @@ export function Support({
                 className="w-full rounded border border-[var(--color-border-hairline)] p-4 text-left transition-colors hover:bg-[var(--color-surface-panel-hover)]"
               >
                 <span className="flex flex-wrap items-baseline gap-2">
-                  {row.unread ? (
+                  {/* The dot means a person is on the hook — AI-handled rows wear the label instead. */}
+                  {row.unread && row.handledBy === 'officer' ? (
                     <span
                       aria-hidden
                       className="h-2 w-2 shrink-0 self-center rounded-full bg-[var(--color-brand-orange)]"
@@ -178,6 +184,11 @@ export function Support({
                     {row.subject ?? row.preview}
                   </span>
                   <RequesterBadge requester={row.requester} />
+                  {row.handledBy === 'ai' && row.status === 'open' ? (
+                    <span className="rounded border border-[var(--color-border-hairline)] px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--color-text-secondary)]">
+                      GMSD AI answering
+                    </span>
+                  ) : null}
                   <span className="ml-auto font-mono text-xs text-[var(--color-text-secondary)]">
                     {formatLocal(row.lastMessageAt, viewerTz)}
                   </span>
@@ -344,6 +355,13 @@ function ConsoleConversation({
         </div>
       </div>
 
+      {conversation.handledBy === 'ai' && conversation.status === 'open' ? (
+        <p className="rounded border border-[var(--color-border-hairline)] px-4 py-3 text-sm text-[var(--color-text-secondary)]">
+          GMSD AI is answering this conversation from the help pages. Your reply takes it over —
+          the AI stays out of it from then on.
+        </p>
+      ) : null}
+
       {conversation.subject !== null && (
         <h3 className="text-[var(--color-text-primary)]" style={{ fontFamily: 'var(--font-display)' }}>
           {conversation.subject.toUpperCase()}
@@ -488,7 +506,11 @@ function ConsoleMessageRow({
         ) : null}
         <span className="text-[var(--color-text-primary)]">
           {message.author?.displayName ??
-            (message.authorKind === 'guest' ? (guestName ?? 'Guest') : message.authorKind)}
+            (message.authorKind === 'ai'
+              ? 'GMSD AI'
+              : message.authorKind === 'guest'
+                ? (guestName ?? 'Guest')
+                : message.authorKind)}
         </span>
         · {formatLocal(message.createdAt, viewerTz)}
       </p>

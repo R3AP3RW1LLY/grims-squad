@@ -4,11 +4,13 @@ import { notifyMembers, PrismaClient } from '@grims/db';
 import { LIVE_SERVICE } from '../live/live.tokens.js';
 import { liveNudgeOf } from '../live/live-nudge.js';
 import type { LiveService } from '../live/live.service.js';
+import { SupportAnswerService, type SupportTurn } from '../ai/support-answer.service.js';
 import {
   GUEST_POSTS_PER_WINDOW,
   GUEST_POST_WINDOW_MS,
   GUEST_STARTS_PER_WINDOW,
   GUEST_START_WINDOW_MS,
+  OFFICER_HANDOFF_LINE,
   cleanGuestName,
   cleanMessageBody,
   cleanSubject,
@@ -17,6 +19,7 @@ import {
   postingProblem,
   systemLineFor,
   transitionProblem,
+  type SupportHandledBy,
   type SupportStatus,
 } from './support-chat.js';
 
@@ -63,6 +66,8 @@ export interface SupportMessageView {
 export interface SupportConversationView {
   readonly id: string;
   readonly status: SupportStatus;
+  /** Who answers the next message. Drives the widget's "Talk to an officer" action and hint. */
+  readonly handledBy: SupportHandledBy;
   readonly subject: string | null;
   readonly guestName: string | null;
   readonly createdAt: Date;
@@ -76,6 +81,8 @@ export interface SupportConversationView {
 export interface ConsoleConversationRow {
   readonly id: string;
   readonly status: SupportStatus;
+  /** Who answers the next message — the console labels AI-handled conversations apart. */
+  readonly handledBy: SupportHandledBy;
   readonly subject: string | null;
   readonly requester:
     | { readonly kind: 'member'; readonly id: string; readonly displayName: string }
@@ -139,6 +146,15 @@ export class SupportService {
      * message — and the specs construct this service without one.
      */
     @Optional() @Inject(LIVE_SERVICE) private readonly live: LiveService | null = null,
+    /*
+     * The AI's seat at the desk — Wave 3 of the approved design: AI ANSWERS FIRST, HUMAN ON
+     * DEMAND. Optional too, and for the same reason the AI module treats "unconfigured" as a
+     * working state: this desk answered every conversation with officers before the model
+     * existed, and a wiring without the AI module must keep doing exactly that.
+     */
+    @Optional()
+    @Inject(SupportAnswerService)
+    private readonly answers: SupportAnswerService | null = null,
   ) {}
 
   /**
@@ -180,6 +196,8 @@ export class SupportService {
     });
 
     this.#poke();
+    // The AI takes the first turn — after the member's own POST has already succeeded.
+    void this.#aiRespond(row.id, body);
     return { id: row.id };
   }
 
@@ -190,6 +208,7 @@ export class SupportService {
       select: {
         id: true,
         status: true,
+        handledBy: true,
         subject: true,
         guestName: true,
         createdAt: true,
@@ -202,6 +221,7 @@ export class SupportService {
     return rows.map((r) => ({
       id: r.id,
       status: r.status,
+      handledBy: r.handledBy,
       subject: r.subject,
       guestName: r.guestName,
       createdAt: r.createdAt,
@@ -223,6 +243,7 @@ export class SupportService {
       select: {
         id: true,
         status: true,
+        handledBy: true,
         subject: true,
         guestName: true,
         createdAt: true,
@@ -251,6 +272,7 @@ export class SupportService {
       conversation: {
         id: row.id,
         status: row.status,
+        handledBy: row.handledBy,
         subject: row.subject,
         guestName: row.guestName,
         createdAt: row.createdAt,
@@ -272,7 +294,7 @@ export class SupportService {
 
     const conversation = await this.db.supportConversation.findFirst({
       where: { id: conversationId, userId },
-      select: { id: true, status: true },
+      select: { id: true, status: true, handledBy: true },
     });
     if (conversation === null) throw this.#notAvailable();
     this.#assertOpen(conversation.status);
@@ -287,7 +309,22 @@ export class SupportService {
     });
 
     this.#poke();
+    // Only while the conversation is the AI's. Once a person is on it, the model stays quiet.
+    if (conversation.handledBy === 'ai') void this.#aiRespond(conversation.id, body);
     return message;
+  }
+
+  /**
+   * "Talk to an officer" — the member door. The hand-off half of the owner's ruling.
+   */
+  async escalateForMember(userId: string, conversationId: string): Promise<void> {
+    const row = await this.db.supportConversation.findFirst({
+      where: { id: conversationId, userId },
+      select: { id: true, status: true, handledBy: true },
+    });
+    if (row === null) throw this.#notAvailable();
+    this.#assertOpen(row.status);
+    await this.#handOff(row.id, row.handledBy);
   }
 
   // ── The guest door ─────────────────────────────────────────────────────────
@@ -337,6 +374,8 @@ export class SupportService {
     });
 
     this.#poke();
+    // Guest parity: the same first turn, arriving on their next poll.
+    void this.#aiRespond(row.id, body);
     return { id: row.id, guestToken };
   }
 
@@ -354,6 +393,7 @@ export class SupportService {
       select: {
         id: true,
         status: true,
+        handledBy: true,
         subject: true,
         guestName: true,
         createdAt: true,
@@ -377,6 +417,7 @@ export class SupportService {
       conversation: {
         id: row.id,
         status: row.status,
+        handledBy: row.handledBy,
         subject: row.subject,
         guestName: row.guestName,
         createdAt: row.createdAt,
@@ -392,7 +433,7 @@ export class SupportService {
     const body = this.#body(bodyRaw);
     const row = await this.db.supportConversation.findUnique({
       where: { guestTokenHash: this.#guestHash(token) },
-      select: { id: true, status: true },
+      select: { id: true, status: true, handledBy: true },
     });
     if (row === null) throw this.#notAvailable();
     this.#assertOpen(row.status);
@@ -420,7 +461,22 @@ export class SupportService {
     });
 
     this.#poke();
+    if (row.handledBy === 'ai') void this.#aiRespond(row.id, body);
     return message;
+  }
+
+  /**
+   * "Talk to an officer" — the guest door, addressed by their token exactly as every other
+   * guest act is. Same rules, same silence about which conversations exist.
+   */
+  async escalateForGuest(token: string): Promise<void> {
+    const row = await this.db.supportConversation.findUnique({
+      where: { guestTokenHash: this.#guestHash(token) },
+      select: { id: true, status: true, handledBy: true },
+    });
+    if (row === null) throw this.#notAvailable();
+    this.#assertOpen(row.status);
+    await this.#handOff(row.id, row.handledBy);
   }
 
   // ── The officer console ────────────────────────────────────────────────────
@@ -428,10 +484,21 @@ export class SupportService {
   // Every method below is reached only through doors gated on SUPPORT_AGENT — the console
   // controller's class-level guard, and the device controller's per-route check.
 
-  /** The console badge: open conversations with words no officer has seen yet. */
+  /**
+   * The console badge: open conversations WITH A PERSON ON THE HOOK holding words no officer
+   * has seen yet.
+   *
+   * ★ OFFICER-MODE ONLY, BY DESIGN ★
+   *
+   * An AI-handled conversation nobody asked a human into is not "waiting" — the model already
+   * answered, and counting it would teach every officer that the badge cries wolf. The moment
+   * it genuinely needs a person — the requester presses the button, or the AI cannot take its
+   * turn — the conversation IS officer-mode, and lands here on the same officer_seen_at
+   * semantics the badge has always used.
+   */
   async consoleBadge(): Promise<{ waiting: number }> {
     const rows = await this.db.supportConversation.findMany({
-      where: { status: 'open' },
+      where: { status: 'open', handledBy: 'officer' },
       select: { lastMessageAt: true, officerSeenAt: true },
     });
     return { waiting: rows.filter((r) => isUnread(r.lastMessageAt, r.officerSeenAt)).length };
@@ -444,6 +511,7 @@ export class SupportService {
       select: {
         id: true,
         status: true,
+        handledBy: true,
         subject: true,
         guestName: true,
         createdAt: true,
@@ -457,6 +525,7 @@ export class SupportService {
     return rows.map((r) => ({
       id: r.id,
       status: r.status,
+      handledBy: r.handledBy,
       subject: r.subject,
       requester:
         r.user === null
@@ -479,6 +548,7 @@ export class SupportService {
       select: {
         id: true,
         status: true,
+        handledBy: true,
         subject: true,
         guestName: true,
         createdAt: true,
@@ -506,6 +576,7 @@ export class SupportService {
       conversation: {
         id: row.id,
         status: row.status,
+        handledBy: row.handledBy,
         subject: row.subject,
         requester:
           row.user === null
@@ -546,6 +617,15 @@ export class SupportService {
       body,
       attachmentId,
       seen: 'officer',
+      /*
+       * ★ A HUMAN TOOK OVER — PERMANENTLY ★
+       *
+       * Any officer reply flips the conversation to officer mode, in the same write that lands
+       * the reply: from here the AI never speaks in this conversation again, because a model
+       * talking over the person who joined is worse than no model at all. Written
+       * unconditionally — on an already-officer conversation it is the same value.
+       */
+      handledBy: 'officer',
     });
 
     if (conversation.userId !== null) {
@@ -647,6 +727,8 @@ export class SupportService {
       body: string;
       attachmentId: string | null;
       seen: 'requester' | 'officer';
+      /** Set by the officer door only: their reply makes the conversation theirs for good. */
+      handledBy?: SupportHandledBy;
     },
   ): Promise<SupportMessageView> {
     const now = new Date();
@@ -667,10 +749,157 @@ export class SupportService {
       data: {
         lastMessageAt: now,
         ...(turn.seen === 'requester' ? { requesterSeenAt: now } : { officerSeenAt: now }),
+        ...(turn.handledBy === undefined ? {} : { handledBy: turn.handledBy }),
       },
     });
 
     return messageView(row);
+  }
+
+  /**
+   * The one-way flip to officer mode, shared by both requester doors.
+   *
+   * ★ IDEMPOTENT, NOT STRICT — UNLIKE close/reopen, AND DELIBERATELY ★
+   *
+   * The transition edges are strict because a stale CONSOLE screen belongs to an officer who
+   * should be told. This button belongs to the requester, and their screen can be honestly
+   * stale through no act of theirs: the AI-down fallback flips conversations silently, and a
+   * polling guest is always a few seconds behind. Refusing "talk to an officer" with an error
+   * — for asking for a person who is already coming — would read as the desk breaking at the
+   * exact moment somebody reached for a human. Pressing it twice lands ONE system line: the
+   * conditional update below wins the race exactly once.
+   */
+  async #handOff(conversationId: string, current: SupportHandledBy): Promise<void> {
+    if (current === 'officer') return;
+
+    const now = new Date();
+    const flipped = await this.db.supportConversation.updateMany({
+      // Conditional on still being the AI's, so two presses — or a press racing an officer's
+      // reply — cannot write two system lines.
+      where: { id: conversationId, handledBy: 'ai' },
+      data: {
+        handledBy: 'officer',
+        lastMessageAt: now,
+        // The requester pressed the button; the room's answer must not read as unread to them.
+        // The OFFICER mark stays put — that is what makes the badge count this conversation.
+        requesterSeenAt: now,
+      },
+    });
+
+    if (flipped.count > 0) {
+      await this.db.supportMessage.create({
+        data: {
+          conversationId,
+          authorKind: 'system',
+          body: OFFICER_HANDOFF_LINE,
+          createdAt: now,
+        },
+      });
+    }
+
+    this.#poke();
+  }
+
+  /**
+   * The AI's turn, after a requester message has already landed.
+   *
+   * ★ FIRE-AND-FORGET, LIKE notify.ts, AND FOR THE SAME REASON ★
+   *
+   * Every caller invokes this with `void` — the requester's own POST returned before the model
+   * was even asked, because an answer that takes twenty seconds must cost the model twenty
+   * seconds, never the person. And NOTHING here may throw: an AI turn is decoration on a
+   * message that already succeeded.
+   *
+   * ★ WHEN THE AI CANNOT ANSWER, A PERSON DOES ★
+   *
+   * `answer()` returning null means unconfigured, unreachable or timed out. The conversation
+   * silently becomes the officers' — no error shown to the requester, no AI turn, and the
+   * waiting badge starts counting it. A member must never be stranded talking to a dead model.
+   *
+   * ★ AND THE LAST WORD ON WHETHER IT SPEAKS IS ATOMIC ★
+   *
+   * The model can take thirty seconds, and in thirty seconds an officer can reply or the
+   * requester can press the button. The conditional update below claims the conversation FOR
+   * this turn only if it is still open and still the AI's; losing that race drops the reply
+   * unsent, which is exactly what "the AI never talks over a person" means.
+   */
+  async #aiRespond(conversationId: string, question: string): Promise<void> {
+    try {
+      if (this.answers === null) return;
+
+      const row = await this.db.supportConversation.findFirst({
+        where: { id: conversationId },
+        select: { id: true, status: true, handledBy: true, userId: true },
+      });
+      if (row === null || row.status !== 'open' || row.handledBy !== 'ai') return;
+
+      const history = await this.#historyFor(conversationId, question);
+      const reply = await this.answers.answer(question, history, {
+        conversationId,
+        userId: row.userId,
+      });
+
+      if (reply === null) {
+        await this.db.supportConversation.updateMany({
+          where: { id: conversationId, handledBy: 'ai' },
+          // ONLY the mode. The requester's message already carries the clock, and it is older
+          // than any officer_seen_at bump would be — which is what lights the badge.
+          data: { handledBy: 'officer' },
+        });
+        this.#poke();
+        return;
+      }
+
+      const now = new Date();
+      const claimed = await this.db.supportConversation.updateMany({
+        where: { id: conversationId, status: 'open', handledBy: 'ai' },
+        // officer_seen_at moves WITH the AI turn: the desk's automated half has answered, and
+        // an answered conversation must not sit in any officer's queue as unseen work.
+        data: { lastMessageAt: now, officerSeenAt: now },
+      });
+      if (claimed.count === 0) return;
+
+      await this.db.supportMessage.create({
+        data: { conversationId, authorKind: 'ai', authorId: null, body: reply, createdAt: now },
+      });
+
+      // No personal bell, deliberately: the requester asked seconds ago and the widget hears
+      // the poke (members) or the next poll (guests). Bells are for the human replies.
+      this.#poke();
+    } catch {
+      // The requester's message already landed. Nothing about its answer may un-succeed it.
+    }
+  }
+
+  /**
+   * The conversation so far, as model turns: requester words as 'user', the AI's as
+   * 'assistant'. System lines carry no meaning to a model and officer turns cannot exist while
+   * a conversation is still the AI's — both are skipped rather than mislabelled. The requester
+   * message that TRIGGERED this turn is dropped off the end: it rides in the prompt as the
+   * question, and a model handed the same words twice answers them twice.
+   */
+  async #historyFor(conversationId: string, question: string): Promise<SupportTurn[]> {
+    const recent = await this.db.supportMessage.findMany({
+      where: { conversationId },
+      orderBy: { createdAt: 'desc' },
+      // Bounded: the answer service carries six turns at most, and a long transcript's early
+      // pages pull answers towards whatever was discussed first.
+      take: 13,
+      select: { authorKind: true, body: true },
+    });
+
+    const turns: SupportTurn[] = [];
+    for (const m of recent.reverse()) {
+      if (m.authorKind === 'member' || m.authorKind === 'guest') {
+        turns.push({ role: 'user', content: m.body });
+      } else if (m.authorKind === 'ai') {
+        turns.push({ role: 'assistant', content: m.body });
+      }
+    }
+
+    const last = turns[turns.length - 1];
+    if (last !== undefined && last.role === 'user' && last.content === question) turns.pop();
+    return turns;
   }
 
   /**

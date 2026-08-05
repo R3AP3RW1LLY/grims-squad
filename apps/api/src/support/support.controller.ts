@@ -69,6 +69,22 @@ export class SupportController {
     return { message: await this.support.postAsMember(userId, id, body.body, body.attachmentId) };
   }
 
+  /**
+   * "Talk to an officer" — the human-on-demand half of the approved design. Flips the
+   * conversation to officer mode for good; the AI does not speak in it again.
+   */
+  @Post('conversations/:id/escalate')
+  async escalate(
+    @User() caller: CurrentUser | undefined,
+    @Req() req: FastifyRequest,
+    @Param('id') id: string,
+  ) {
+    const userId = this.#me(caller);
+    csrf(req);
+    await this.support.escalateForMember(userId, id);
+    return { ok: true };
+  }
+
   // ── The guest door ─────────────────────────────────────────────────────────
 
   /**
@@ -98,6 +114,17 @@ export class SupportController {
   @Post('guest/messages')
   async guestPost(@Req() req: FastifyRequest, @Body() body: { body?: string }) {
     return { message: await this.support.postAsGuest(bearer(req), body.body) };
+  }
+
+  /**
+   * "Talk to an officer", through the guest's token door. No id parameter, like every guest
+   * route: the token names the conversation, so there is nothing to enumerate.
+   */
+  @Public()
+  @Post('guest/escalate')
+  async guestEscalate(@Req() req: FastifyRequest) {
+    await this.support.escalateForGuest(bearer(req));
+    return { ok: true };
   }
 }
 

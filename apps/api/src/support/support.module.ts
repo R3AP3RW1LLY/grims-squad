@@ -14,9 +14,11 @@ import { SupportService } from './support.service.js';
  *   SupportDeviceController   the same console for the companion app, by paired device token —
  *                             which is what TelemetryModule is imported for (PAIRING_SERVICE).
  *
- * The AI's first-responder turn is a later wave. The seam it will use already exists: the
- * `ai` author kind in the schema, and SupportService.#append, which any future responder calls
- * exactly as the officer door does today.
+ * The AI's first-responder turn (Wave 3) rides the seam Wave 1 left: SupportAnswerService —
+ * exported by the @Global AiModule, so it needs no import here — is injected OPTIONALLY into
+ * SupportService, which appends its answers as `ai` turns. AI ANSWERS FIRST, HUMAN ON DEMAND:
+ * every conversation starts AI-handled, and "Talk to an officer" (or any officer's reply, or
+ * the model being unreachable) hands it to a person for good.
  */
 @Module({
   imports: [DatabaseModule, TelemetryModule],

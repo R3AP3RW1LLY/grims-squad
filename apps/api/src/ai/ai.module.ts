@@ -18,6 +18,7 @@ import { AiController } from './ai.controller.js';
 import { TrainingStatusService } from './training.service.js';
 import { KnowledgeService } from './knowledge.service.js';
 import { AssistantService } from './assistant.service.js';
+import { SupportAnswerService } from './support-answer.service.js';
 import { ShipBuildService, ShipBuildQueries, ShipyardService } from './ship-build.service.js';
 import { CorpusService } from './corpus.service.js';
 import { JobLogListener } from './job-log.listener.js';
@@ -258,6 +259,19 @@ export class ModelWarmer implements OnModuleInit, OnModuleDestroy {
         builds: ShipBuildService,
       ) => new AssistantService(db, ai, knowledge, log, builds),
     },
+    /*
+     * The help chat's answer leg — GMSD AI reading the help corpus and nothing else. Constructed
+     * explicitly for the same reason AssistantService is: `AiLog` is an abstract class used as a
+     * token, and Nest only resolves it when the dependency list says so. SupportService receives
+     * this through the module being @Global, and receives it OPTIONALLY — the chat answered
+     * conversations before the AI existed and must keep doing so wherever this is absent.
+     */
+    {
+      provide: SupportAnswerService,
+      inject: [PrismaClient, AiClient, EmbedClient, AiLog],
+      useFactory: (db: PrismaClient, ai: AiClient, embed: EmbedClient, log: AiLog) =>
+        new SupportAnswerService(db, ai, embed, log),
+    },
     // Help Train the Bot. Never touches bytes — the media pipeline does that.
     CorpusService,
     /*
@@ -306,6 +320,8 @@ export class ModelWarmer implements OnModuleInit, OnModuleDestroy {
     AiClient,
     KnowledgeService,
     AssistantService,
+    // For the support module's AI-first turn — same global-export path as the screener.
+    SupportAnswerService,
     DecisionStore,
     EmbedClient,
     ImageClient,

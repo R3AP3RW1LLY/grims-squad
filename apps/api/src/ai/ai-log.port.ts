@@ -21,8 +21,13 @@ export interface AiCallRecord {
    * `signature` is an ARTWORK generation and counts against the image quota. `signature-design` is
    * the text-model brief behind the AI designer — a few seconds of the language model, no GPU
    * picture — and deliberately does not.
+   *
+   * `support` is GMSD AI answering the help chat from the help corpus. Its own kind rather than
+   * `assistant`, so the assistant review screen (which filters on kind) does not interleave two
+   * different products — and its threadId is the SUPPORT CONVERSATION's id, whose transcript is
+   * already readable in the console.
    */
-  readonly kind: 'screen' | 'assistant' | 'signature' | 'signature-design';
+  readonly kind: 'screen' | 'assistant' | 'signature' | 'signature-design' | 'support';
   /** `web`, `discord`, or `public`. */
   readonly surface: string;
   readonly prompt: string;

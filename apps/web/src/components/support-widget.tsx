@@ -29,6 +29,8 @@ import { notificationAge } from './notifications-format';
 interface ConversationSummary {
   readonly id: string;
   readonly status: 'open' | 'closed';
+  /** Who answers next: GMSD AI, or the officers once anybody asked for a person. One-way. */
+  readonly handledBy: 'ai' | 'officer';
   readonly subject: string | null;
   readonly lastMessageAt: string;
   readonly unread: boolean;
@@ -137,7 +139,8 @@ export function SupportWidget({ signedIn }: { signedIn: boolean }) {
             Help &amp; Support
           </p>
           <p className="mt-0.5 text-xs text-[var(--color-text-secondary)]">
-            Your question goes to the squadron&rsquo;s officers. Replies land right here.
+            GMSD AI answers first, from the help pages. The squadron&rsquo;s officers take over
+            whenever you ask.
           </p>
         </header>
 
@@ -231,6 +234,12 @@ function MemberChat({
     loadTranscript(activeId);
   };
 
+  const escalate = async (): Promise<void> => {
+    if (activeId === null) return;
+    await apiPost(`/v1/support/conversations/${activeId}/escalate`);
+    loadTranscript(activeId);
+  };
+
   if (composing || (conversations !== null && conversations.length === 0 && activeId === null)) {
     return (
       <StartForm
@@ -251,6 +260,7 @@ function MemberChat({
           loadList();
         }}
         onSend={send}
+        onEscalate={escalate}
         canAttach
       />
     );
@@ -410,6 +420,11 @@ function GuestChat({ open, onUnread }: { open: boolean; onUnread: (unread: boole
           await guestCall('POST', '/v1/support/guest/messages', held, { body });
           load();
         }}
+        onEscalate={async () => {
+          const held = window.localStorage.getItem(GUEST_TOKEN_KEY) ?? '';
+          await guestCall('POST', '/v1/support/guest/escalate', held);
+          load();
+        }}
         onStartFresh={() => {
           window.localStorage.removeItem(GUEST_TOKEN_KEY);
           setToken('');
@@ -528,6 +543,7 @@ function ConversationPane({
   selfKinds,
   onBack,
   onSend,
+  onEscalate,
   canAttach,
   onStartFresh,
 }: {
@@ -535,11 +551,13 @@ function ConversationPane({
   selfKinds: readonly Message['authorKind'][];
   onBack: (() => void) | null;
   onSend: (body: string, attachmentId: string | null) => Promise<void>;
+  onEscalate: () => Promise<void>;
   canAttach: boolean;
   onStartFresh?: () => void;
 }) {
   const [body, setBody] = useState('');
   const [sending, setSending] = useState(false);
+  const [escalating, setEscalating] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [attachment, setAttachment] = useState<{ id: string; path: string } | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -563,6 +581,18 @@ function ConversationPane({
         setProblem(err instanceof Error ? err.message : 'That could not be sent. Try again.');
       })
       .finally(() => setSending(false));
+  };
+
+  const escalate = (): void => {
+    setEscalating(true);
+    setProblem(null);
+    onEscalate()
+      .catch((err: unknown) => {
+        setProblem(
+          err instanceof Error ? err.message : 'That did not go through. Press it again.',
+        );
+      })
+      .finally(() => setEscalating(false));
   };
 
   const attach = (file: File): void => {
@@ -623,6 +653,31 @@ function ConversationPane({
         ))}
         <div ref={endRef} />
       </ol>
+
+      {/*
+        ★ THE STANDING HINT — THE "HUMAN ON DEMAND" HALF OF THE APPROVED DESIGN ★
+
+        Shown the whole time a conversation is the AI's, in the chrome rather than in any
+        message body: a sentence inside the transcript scrolls away, and the promise "a person
+        is one press away" has to hold on every screen, not just the one where the AI said it.
+        Pressing the button flips the conversation to the officers for good — the AI does not
+        speak in it again, and the transcript says so where both sides can read it.
+      */}
+      {transcript.conversation.status === 'open' && transcript.conversation.handledBy === 'ai' ? (
+        <div className="flex items-center justify-between gap-2 border-t border-[var(--color-border-hairline)] bg-[var(--color-surface-panel-sunken)] px-3 py-2">
+          <p className="text-[11px] text-[var(--color-text-secondary)]">
+            GMSD AI is answering. An officer is one press away.
+          </p>
+          <button
+            type="button"
+            onClick={escalate}
+            disabled={escalating}
+            className="shrink-0 rounded-[var(--radius-sm)] border border-[var(--color-brand-cyan)] px-2.5 py-1.5 text-xs text-[var(--color-brand-cyan-bright)] transition-colors hover:bg-[color-mix(in_srgb,var(--color-brand-cyan)_12%,transparent)] disabled:opacity-50"
+          >
+            {escalating ? 'Asking…' : 'Talk to an officer'}
+          </button>
+        </div>
+      ) : null}
 
       {problem !== null ? (
         <p role="alert" className="px-3 pb-1 text-xs text-[var(--color-semantic-hostile-bright)]">
@@ -746,14 +801,17 @@ function MessageRow({
    * Officers answer as themselves, and a SIGNED-IN member's own messages carry their own
    * Discord identity too — display name and stored avatar, the same `/v1/media/avatars` route
    * on both sides of the conversation. A guest's turns wear the commander name they gave when
-   * the chat began; there is no account behind it, so there is no avatar to draw.
+   * the chat began; there is no account behind it, so there is no avatar to draw. The AI's
+   * turns wear ITS name, plainly: a model's answer must never read as a person's.
    */
   const identity =
     message.author !== null
       ? { name: message.author.displayName, avatarId: message.author.id }
-      : message.authorKind === 'guest' && guestName !== null
-        ? { name: guestName, avatarId: null }
-        : null;
+      : message.authorKind === 'ai'
+        ? { name: 'GMSD AI', avatarId: null }
+        : message.authorKind === 'guest' && guestName !== null
+          ? { name: guestName, avatarId: null }
+          : null;
 
   return (
     <li className={`flex flex-col gap-1 ${self ? 'items-end' : 'items-start'}`}>

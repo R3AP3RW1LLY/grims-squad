@@ -5,10 +5,10 @@ import { createHash, randomBytes } from 'node:crypto';
  *
  * ★ THE APPROVED DESIGN, BRIEFLY ★
  *
- * The chat is usable by EVERYONE, signed-out guests included; every conversation goes to the
- * officers, who answer as themselves. A later wave puts the AI on the first turn, which is why
- * the author vocabulary already has an `ai` seat — the model's first answer must be a value that
- * exists, not a migration.
+ * The chat is usable by EVERYONE, signed-out guests included. GMSD AI answers first, from the
+ * help corpus, in the `ai` seat Wave 1 reserved for exactly this; the officers answer as
+ * themselves the moment anybody asks for a person — or the moment they simply reply. Who is
+ * answering is the `SupportHandledBy` state below.
  *
  * ★ PURE, LIKE device-link.ts, AND FOR THE SAME REASON ★
  *
@@ -112,6 +112,32 @@ export function cleanSubject(raw: unknown): string | null {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export type SupportStatus = 'open' | 'closed';
+
+/**
+ * Who answers the next requester message — the owner's ruling made a state: AI ANSWERS FIRST,
+ * HUMAN ON DEMAND.
+ *
+ * Every conversation starts at 'ai'. The flip to 'officer' is ONE-WAY, and there are exactly
+ * three edges onto it:
+ *
+ *   the requester presses "Talk to an officer"   a system line says so in the transcript
+ *   any officer replies                          a human took over; the AI does not talk over them
+ *   the AI could not take its turn               silent — the requester is never shown an error
+ *                                                for a model being off, they simply get a person
+ *
+ * There is deliberately no edge back to 'ai': a conversation a person has joined must never be
+ * handed back to a model mid-thread.
+ */
+export type SupportHandledBy = 'ai' | 'officer';
+
+/**
+ * What the room says when the requester asks for a person.
+ *
+ * A `system` line, like close and reopen: the hand-off is the desk's act, not a sentence in
+ * anybody's voice. It states what happens next, because the person who pressed the button is
+ * watching this exact spot for the answer.
+ */
+export const OFFICER_HANDOFF_LINE = 'An officer will pick this up and reply right here.';
 
 /** Why a message may not be posted, or null when it may. One sentence, shown as written. */
 export function postingProblem(status: SupportStatus): string | null {
