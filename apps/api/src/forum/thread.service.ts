@@ -681,7 +681,7 @@ export class ThreadService {
      */
     held: boolean;
   }> {
-    return this.#create(db, input, authorId, callerMask, false);
+    return this.#create(db, input, authorId, callerMask, false, false);
   }
 
   /**
@@ -703,7 +703,33 @@ export class ThreadService {
     authorId: string,
     callerMask: bigint,
   ): Promise<{ id: string; slug: string; held: boolean }> {
-    return this.#create(db, input, authorId, callerMask, true);
+    return this.#create(db, input, authorId, callerMask, true, false);
+  }
+
+  /**
+   * The platform recording something that has ALREADY happened, under a name members recognise.
+   *
+   * ★ WHY THIS IS NOT `createViaPublish` ★
+   *
+   * That door still checks `post_perm`, deliberately, and a spec holds it there — a webmaster who
+   * cannot post on a board gets the same refusal a browser would. The announcement carbon-copy is
+   * a different case: the announcements board demands FORUM_POST_OFFICER, the webmaster preset
+   * excludes every squadron-standing permission by design, and the event is not a request to post.
+   * In production this meant the Discord announcement went out while its forum copy retried once a
+   * minute, for ever.
+   *
+   * So the bypass is named for what it is and kept to one caller (ForumCcService), rather than
+   * quietly widening the publish door and taking the suggestion box's guarantee with it.
+   * Everything else is unchanged: the sanitiser, the screener, and the board's own locked check
+   * all still apply.
+   */
+  async createAsSystem(
+    db: AclBoundClient,
+    input: CreateThreadInput,
+    authorId: string,
+    callerMask: bigint,
+  ): Promise<{ id: string; slug: string; held: boolean }> {
+    return this.#create(db, input, authorId, callerMask, true, true);
   }
 
   async #create(
@@ -712,6 +738,7 @@ export class ThreadService {
     authorId: string,
     callerMask: bigint,
     viaPublish: boolean,
+    asSystem: boolean,
   ): Promise<{ id: string; slug: string; held: boolean }> {
     const title = input.title.trim();
     if (title.length < 3 || title.length > 200) {
@@ -767,7 +794,7 @@ export class ThreadService {
 
     const postPerm =
       category.postPerm === null ? null : BigInt(category.postPerm.toFixed(0));
-    if (!satisfiesMask(callerMask, postPerm)) {
+    if (!asSystem && !satisfiesMask(callerMask, postPerm)) {
       throw new AppError(ErrorCode.PERMISSION_DENIED, 'You cannot post in this category.');
     }
 
