@@ -40,6 +40,9 @@ done
 say()  { printf '\n\033[1m▸ %s\033[0m\n' "$*"; }
 die()  { printf '\n\033[31m✖ %s\033[0m\n' "$*" >&2; exit 1; }
 ok()   { printf '  \033[32m✓\033[0m %s\n' "$*"; }
+# Between ok and die: something went wrong, and stopping the deploy over it would cost more than
+# the thing itself. Yellow and on stderr, so it survives a `| tail` of a log somebody skims.
+warn() { printf '  \033[33m!\033[0m %s\n' "$*" >&2; }
 
 PREVIOUS_SHA="$(git -C "$REPO" rev-parse HEAD)"
 
@@ -195,6 +198,37 @@ say "Applying migrations"
 $COMPOSE --profile jobs run --rm --entrypoint sh worker \
   -c "pnpm --filter @grims/db exec prisma migrate deploy"
 ok "schema up to date"
+
+# ─────────────────────────────── 5b. reference data the schema does not carry
+#
+# ★ A MIGRATION MAKES THE TABLE; SOMETHING STILL HAS TO FILL IT ★
+#
+# `colony_build_types` and `colony_build_costs` are created by a migration and populated by
+# nothing. `seed-catalogue.ts` exists to do it, its own header says "RUN ON DEPLOY", and it was
+# in no cron entry and no deploy step — so production carried the empty tables the migration made
+# and `/colonisation/build-types` rendered a page with no rows in it. Reported by the squadron
+# owner on 2026-08-05: "not loading with the appropriate data (its empty)".
+#
+# Nothing was broken. The seed is correct, the page is correct, the migration is correct, and
+# there was simply no moment at which the two were introduced to each other.
+#
+# ★ WHY IT IS SAFE TO RUN ON EVERY DEPLOY ★
+#
+# `seedBuildCatalogue` skips any build type marked `source = 'observed'` — a bill of materials the
+# squadron measured by actually building the thing. Community figures only ever fill rows nothing
+# of ours has confirmed, so a deploy cannot overwrite what members learned by flying.
+#
+# ★ AND WHY IT IS NOT FATAL ★
+#
+# This runs BEFORE the swap, where a non-zero exit would abort the deploy and roll back. A stale
+# catalogue is a page listing yesterday's figures; a failed deploy is the whole site not shipping.
+# Those are not the same cost, so this warns and carries on — loudly enough to be seen.
+say "Seeding reference data"
+if $COMPOSE --profile jobs run --rm worker node apps/worker/dist/seed-catalogue.js; then
+  ok "build catalogue seeded (observed figures preserved)"
+else
+  warn "the build catalogue did NOT seed — /colonisation/build-types may be stale or empty"
+fi
 
 # ─────────────────────────────────────────────────────────── 6. swap
 #
