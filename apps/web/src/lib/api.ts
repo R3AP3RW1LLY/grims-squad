@@ -594,6 +594,28 @@ export const getAiHealth = (): Promise<{
   image: { configured: boolean; reachable: boolean; tookMs: number };
 } | null> => get('/v1/ai/health', { authed: true });
 
+/** One conversation as the support console lists it. Dates arrive as ISO strings. */
+export interface SupportConsoleRow {
+  id: string;
+  status: 'open' | 'closed';
+  subject: string | null;
+  /** Who is asking — a member with an account, or a guest with only a name. */
+  requester:
+    | { kind: 'member'; id: string; displayName: string }
+    | { kind: 'guest'; name: string };
+  preview: string;
+  createdAt: string;
+  lastMessageAt: string;
+  /** Whether words landed since ANY officer last opened it — the console is one shared queue. */
+  unread: boolean;
+}
+
+/** The support console's queue. Null when the caller may not work it, rendered as no-access. */
+export const getSupportConsole = (
+  status: 'open' | 'closed',
+): Promise<{ conversations: SupportConsoleRow[] } | null> =>
+  get(`/v1/support/console/conversations?status=${status}`, { authed: true });
+
 export interface SquadronStats {
   /** People in the Discord guild, bots excluded. THIS is the squadron. */
   members: number;
@@ -1218,6 +1240,15 @@ export const getAdminDashboardGated = (month?: string): Promise<AdminRead<AdminD
    * URL unencoded is a value somebody will eventually put a slash in.
    */
   getAdmin(month === undefined ? '/v1/admin/dashboard' : `/v1/admin/dashboard?month=${encodeURIComponent(month)}`);
+
+/*
+ * The Support tab's own probe, because its gate is SUPPORT_AGENT rather than MEMBER_MANAGE.
+ * Probing the dashboard for it would tell a future support-only role it lacks a permission it
+ * does not need, and send them asking an officer for the wrong bit.
+ */
+export const getSupportConsoleGated = (): Promise<
+  AdminRead<{ conversations: SupportConsoleRow[] }>
+> => getAdmin('/v1/support/console/conversations?status=open');
 
 /**
  * What GMSD AI has learned, per source.

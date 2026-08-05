@@ -7,6 +7,9 @@ import {
   getHeldPosts,
   getAdminDashboard,
   getAdminDashboardGated,
+  getMe,
+  getSupportConsole,
+  getSupportConsoleGated,
   type AdminActivityRow,
 } from '../../../lib/api';
 import { StepUp } from './step-up';
@@ -18,6 +21,8 @@ import { PageTabs, resolveTab, type PageTab } from '../../../components/page-tab
 import { MonthTabs } from './month-tabs';
 import { PromotionRun } from './promotion-run';
 import { Moderation } from './moderation';
+import { Support } from './support';
+import { SupportTabBadge } from './support-tab-badge';
 import { ActivityTable } from './activity-table';
 import { LiveRefresh } from '../../../components/live-refresh';
 
@@ -65,6 +70,14 @@ const TABS: readonly PageTab[] = [
    * no officer can — which is worse than having no screening at all.
    */
   { key: 'moderation', label: 'Moderation' },
+  /*
+   * ★ THE HELP DESK'S ANSWERING SIDE ★
+   *
+   * The chat widget promises every visitor — guests included — that the officers answer.
+   * This tab is where that promise is kept. Gated on SUPPORT_AGENT rather than the console's
+   * MEMBER_MANAGE, because answering questions and managing members are different jobs.
+   */
+  { key: 'support', label: 'Support' },
   { key: 'roles', label: 'Roles & permissions' },
 ];
 
@@ -94,7 +107,7 @@ export default async function AdminPage({
    * though — every tab needs to know whether the second factor is fresh, and
    * a null from any admin read is that answer.
    */
-  const [dashboard, activity, audit, held, aiHealth] = await Promise.all([
+  const [dashboard, activity, audit, held, aiHealth, support, me] = await Promise.all([
     /*
      * Fetched for the ACTIVITY tab too, and only for its `availableMonths`.
      *
@@ -114,6 +127,12 @@ export default async function AdminPage({
      * not answer — and neither is a reason to hide a queue that loaded fine.
      */
     tab === 'moderation' ? getAiHealth() : Promise.resolve(null),
+    tab === 'support' ? getSupportConsole('open') : Promise.resolve(null),
+    /*
+     * For the support tab's clock only. INV-025 wants the queue's absolute times in the
+     * OFFICER's stored timezone, and that zone lives on /v1/me.
+     */
+    tab === 'support' ? getMe() : Promise.resolve(null),
   ]);
 
   /*
@@ -134,12 +153,23 @@ export default async function AdminPage({
     (tab === 'dashboard' && dashboard === null) ||
     (tab === 'activity' && activity === null) ||
     (tab === 'audit' && audit === null) ||
-    (tab === 'moderation' && held === null);
+    (tab === 'moderation' && held === null) ||
+    (tab === 'support' && support === null);
 
   if (locked) {
-    const why = await getAdminDashboardGated(monthParam);
+    /*
+     * The support tab probes ITS OWN gate. Its bit is SUPPORT_AGENT, not MEMBER_MANAGE, and a
+     * probe against the dashboard would tell a future support-only role to ask for the wrong
+     * permission.
+     */
+    const why =
+      tab === 'support' ? await getSupportConsoleGated() : await getAdminDashboardGated(monthParam);
     if (why.state === 'forbidden') {
-      return <NoAccess what="the admin console" permission="MEMBER_MANAGE" />;
+      return tab === 'support' ? (
+        <NoAccess what="the support console" permission="SUPPORT_AGENT" />
+      ) : (
+        <NoAccess what="the admin console" permission="MEMBER_MANAGE" />
+      );
     }
     if (why.state === 'unavailable') return <AdminUnavailable />;
     // 'needs-step-up', 'signed-out', or the probe succeeding while the tab's own read did
@@ -166,7 +196,21 @@ export default async function AdminPage({
       <PageHeader
         eyebrow="Squadron leadership"
         title="ADMIN CONSOLE"
-        tabs={<PageTabs tabs={TABS} current={tab} basePath="/app" />}
+        tabs={
+          <PageTabs
+            /*
+             * The Support tab wears the waiting count ON ITS LABEL — officers get no
+             * per-message notifications, so this pill is their entire bell, and it has to be
+             * audible from every tab of the console. Attached at render rather than stored in
+             * TABS, which stays a plain serialisable list.
+             */
+            tabs={TABS.map((t) =>
+              t.key === 'support' ? { ...t, badge: <SupportTabBadge /> } : t,
+            )}
+            current={tab}
+            basePath="/app"
+          />
+        }
       />
 
       {tab === 'dashboard' && dashboard !== null && (
@@ -230,6 +274,18 @@ export default async function AdminPage({
           description="Posts the screener held before anybody could read them. Nothing here is public — releasing a post is what publishes it."
         >
           <Moderation initial={held.posts} total={held.total} health={aiHealth} />
+        </Section>
+      )}
+
+      {tab === 'support' && support !== null && (
+        <Section
+          title="Support"
+          description="Every help conversation, member or guest, lands here. Replies go out under your own name and avatar — the person asking sees exactly who answered."
+        >
+          <Support
+            initial={support.conversations}
+            viewerTz={me?.user?.timezone ?? 'UTC'}
+          />
         </Section>
       )}
     </>

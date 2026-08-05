@@ -20,6 +20,14 @@
 export interface PageTab {
   readonly key: string;
   readonly label: string;
+  /**
+   * Rendered after the label, inside the link — a live counter pill, typically.
+   *
+   * A NODE rather than a number, so a tab whose count must stay current (the admin console's
+   * Support tab rides the SSE stream) can bring its own client component while these tabs stay
+   * server-rendered links. Absent for the tabs that are just names, which is nearly all of them.
+   */
+  readonly badge?: React.ReactNode;
 }
 
 /**
@@ -68,6 +76,7 @@ export function PageTabs({
             }
           >
             {tab.label}
+            {tab.badge}
           </a>
         );
       })}

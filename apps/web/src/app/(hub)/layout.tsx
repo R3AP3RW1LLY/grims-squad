@@ -4,6 +4,7 @@ import { HubShell } from '../../components/hub-shell';
 import { UpdateBanner } from '../../components/update-banner';
 import { SecureAccountBanner } from '../../components/secure-account-banner';
 import { VerifyPromptBanner } from '../../components/verify-prompt-banner';
+import { SupportWidget } from '../../components/support-widget';
 import { getMe, getMyPrivacy } from '../../lib/api';
 
 /**
@@ -169,6 +170,14 @@ export default async function HubLayout({ children }: { children: React.ReactNod
       <UpdateBanner />
       {children}
     </HubShell>
+    {/*
+      The help door, here as well as on the public site — a SIBLING of the shell,
+      like the notifications aside, because the shell's blurred top bar would
+      establish a containing block and break the widget's fixed positioning.
+      `me.user` can be null under this layout on the public paths, and the widget
+      serves that visitor the guest door exactly as the site layout does.
+    */}
+    <SupportWidget signedIn={me.user !== null} />
     </div>
   );
 }

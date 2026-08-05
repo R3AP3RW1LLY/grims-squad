@@ -105,8 +105,33 @@ export interface ApiCallOptions {
    */
   readonly rawBody?: Blob;
   readonly contentType?: string;
+  /**
+   * A bearer credential, for the doors that are not cookie-authenticated — the guest support
+   * chat presents its one-time token here. Cookie routes never set it; going through this
+   * function anyway is what keeps the content-type rule in ONE place, which is the entire
+   * reason this file exists.
+   */
+  readonly authorization?: string;
   /** Shown if the server does not supply a better one. */
   readonly fallbackMessage?: string;
+}
+
+/**
+ * What apiCall throws.
+ *
+ * Still an Error carrying the server's own sentence — every existing `catch (e) { e.message }`
+ * reads it exactly as before. The STATUS rides along for the callers that must tell "gone"
+ * from "broken": the guest chat treats a 404 as "start fresh" and anything else as "try again",
+ * and matching the refusal SENTENCE instead would couple the client to copy that is allowed
+ * to be reworded.
+ */
+export class ApiCallError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
 }
 
 /**
@@ -133,6 +158,7 @@ export async function apiCall<T>(
     headers['content-type'] = options.contentType;
   }
   if (MUTATING.has(upper)) headers['x-csrf-token'] = readCsrf();
+  if (options.authorization !== undefined) headers['authorization'] = options.authorization;
 
   const init: RequestInit = {
     method: upper,
@@ -185,7 +211,7 @@ export async function apiCall<T>(
     // The API answers with an ENVELOPE — { error: { message } }. Reading
     // `json.message` off the top level always yields undefined and throws away
     // the real reason, which is a mistake this codebase has already made once.
-    throw new Error((await errorFromResponse(res, options.fallbackMessage)).message);
+    throw new ApiCallError((await errorFromResponse(res, options.fallbackMessage)).message, res.status);
   }
 
   // 204, or a body that is not JSON. Callers expecting nothing get an empty

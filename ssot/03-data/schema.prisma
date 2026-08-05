@@ -530,6 +530,13 @@ model User {
 
   /// Screening decisions this member made as a moderator.
   screenDecisions ScreenDecision[]
+
+  /// Help & Support. Conversations they opened, conversations they closed as an officer, and
+  /// messages they wrote on either side of the desk — three relations because they are three
+  /// different acts.
+  supportConversations SupportConversation[] @relation("SupportRequester")
+  supportClosed        SupportConversation[] @relation("SupportCloser")
+  supportMessages      SupportMessage[]      @relation("SupportAuthor")
 }
 
 /// 1:1 link to a Discord account. `guildRoles` is the input to the entire authorization model.
@@ -1378,6 +1385,10 @@ model MediaUpload {
 
   /// Training submissions built on this upload.
   trainingImages TrainingImage[]
+
+  /// Support messages carrying this image. SetNull: deleting the upload leaves the message,
+  /// merely picture-less — the same rule as the signature images above.
+  supportAttachments SupportMessage[] @relation("SupportAttachment")
 
   /// "What has this member uploaded, newest first" - the quota and moderation query.
   @@index([uploaderId, createdAt])
@@ -4381,4 +4392,107 @@ model Announcement {
   /// them. This one serves the history reads.
   @@index([kind, createdAt])
   @@map("announcements")
+}
+
+/// ═══════════════ HELP & SUPPORT — THE LIVE CHAT ═══════════════
+///
+/// The approved design: a help chat usable by EVERYONE, signed-out guests included, answered by
+/// the officers from a Support console on the site and in the companion app. A later wave puts
+/// the AI on the first turn; in this one every conversation goes to the officers.
+///
+/// Guests hold no account, so their door is a TOKEN: minted when the conversation starts, shown
+/// once to that browser and stored only as a SHA-256 hash — the same discipline as device tokens
+/// and recovery codes. The token IS the address of the conversation: presenting it names exactly
+/// one row, so a wrong token reads as "no such conversation" and confirms nothing about which
+/// tokens exist.
+
+/// Conversation lifecycle. Closed is an answered question, not a deleted one — the transcript
+/// stays readable by whoever it belongs to, and an officer can reopen it.
+enum SupportConversationStatus {
+  open
+  closed
+}
+
+/// Who wrote a support message.
+///
+/// `ai` is the assistant's seat at the table, reserved NOW so its first answer is an enum value
+/// rather than a migration — the thread model must not need reshaping when the AI starts taking
+/// the first turn. `system` is the room itself speaking ("This conversation was closed."), which
+/// is nobody's words and must never wear anybody's face.
+enum SupportAuthorKind {
+  member
+  officer
+  guest
+  ai
+  system
+}
+
+/// One help conversation: a member's or a guest's, worked by the officers.
+model SupportConversation {
+  id     String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  status SupportConversationStatus @default(open)
+  /// What it is about, if the opener said. Null renders as the opening message's first words.
+  subject String?
+
+  /// The signed-in member who opened it. Null means a guest conversation.
+  userId String? @map("user_id") @db.Uuid
+
+  /// SHA-256 of the guest's token, and the only way a guest can reach their conversation.
+  /// Unique because a lookup BY HASH must name at most one row. Null on member conversations.
+  guestTokenHash String? @unique @map("guest_token_hash")
+  /// What the guest asked to be called. Display only; it authenticates nothing.
+  guestName      String? @map("guest_name")
+
+  /// Denormalised from messages so the console can order by activity without a join per row.
+  lastMessageAt DateTime @default(now()) @map("last_message_at") @db.Timestamptz(6)
+
+  /// Read high-water marks, one per side — the repo's notification shape, kept simple.
+  ///
+  /// A single officer mark rather than one per officer: the console is a shared queue, and
+  /// "somebody has seen this" is what its unread indicator means. Per-officer read state would
+  /// be a row per officer per conversation to answer a question nobody asked.
+  officerSeenAt   DateTime? @map("officer_seen_at") @db.Timestamptz(6)
+  /// When the member or guest last opened the transcript. Drives the widget's unread dot.
+  requesterSeenAt DateTime? @map("requester_seen_at") @db.Timestamptz(6)
+
+  closedAt   DateTime? @map("closed_at") @db.Timestamptz(6)
+  /// The officer who closed it. SetNull: the closure outlives the officer's account.
+  closedById String?   @map("closed_by_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user     User?            @relation("SupportRequester", fields: [userId], references: [id], onDelete: Cascade)
+  closedBy User?            @relation("SupportCloser", fields: [closedById], references: [id], onDelete: SetNull)
+  messages SupportMessage[]
+
+  /// The console's queue: conversations by state, newest activity first.
+  @@index([status, lastMessageAt])
+  /// "My conversations", for the member widget.
+  @@index([userId, lastMessageAt])
+  @@map("support_conversations")
+}
+
+/// One turn in a support conversation.
+model SupportMessage {
+  id             String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  conversationId String            @map("conversation_id") @db.Uuid
+  authorKind     SupportAuthorKind @map("author_kind")
+  /// The member or officer who wrote it. Null for guest, system and (later) ai turns — a guest
+  /// has no account row to point at, and inventing one per conversation would be accounts nobody
+  /// owns. SetNull keeps the transcript when an author's account goes.
+  authorId       String?           @map("author_id") @db.Uuid
+  /// Plain text. Capped at 4000 characters in the service — long enough to describe any problem,
+  /// short enough that the cap is never met by accident.
+  body           String
+  /// One image, through the hardened media path. There is deliberately no second upload route.
+  attachmentId   String?           @map("attachment_media_id") @db.Uuid
+  createdAt      DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  conversation SupportConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  author       User?               @relation("SupportAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  attachment   MediaUpload?        @relation("SupportAttachment", fields: [attachmentId], references: [id], onDelete: SetNull)
+
+  /// The transcript read, oldest first.
+  @@index([conversationId, createdAt])
+  @@map("support_messages")
 }

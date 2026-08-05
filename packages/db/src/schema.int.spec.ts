@@ -183,7 +183,16 @@ describe('P0.2 database schema', () => {
     // boards and the pinned build), squadron_activity (the shared feed behind the bell),
     // changelog_releases (the deploy notes), and colony_carrier_cargo (what the squadron's
     // carriers hold, journal-witnessed and hand-corrected).
-    expect(Number(r[0]?.n)).toBe(114);
+    //
+    // 115 as of 2026-08-05: announcements — the durable rows behind the Discord channel posts and
+    // their forum carbon-copies. Landed a day before this count was next read, which is how the
+    // ledger above briefly stopped at 114 while the database had moved on: the deliberate
+    // mirroring failing in the direction it is supposed to.
+    //
+    // 117 as of the Help & Support chat: support_conversations + support_messages. The live chat
+    // every visitor can open — guests addressed by a hashed one-time token, members by their
+    // account — and the officers' console that answers it.
+    expect(Number(r[0]?.n)).toBe(117);
   });
 
   describe('hand-written DDL that Prisma cannot express', () => {
@@ -390,6 +399,17 @@ describe('seeded roles', () => {
      * Both look like a stale build. Neither is. The list is local by design; see the note above.
      */
     71, 72, 73, 74,
+    /*
+     * ★ BIT 80 ADDED FOR HELP & SUPPORT: SUPPORT_AGENT ★
+     *
+     * Working the support console — reading members' and guests' help conversations and
+     * answering them. Granted by `20260805120000_support_chat` to the roles that already carry
+     * MEMBER_MANAGE (the officer tier, webmaster included), NOT to `perm_mask > 0` like the
+     * member-tier bits: it opens other people's private conversations.
+     *
+     * The deliberate mirroring, one more time. The list is local by design; see the note above.
+     */
+    80,
   ].reduce((acc, bit) => acc | (1n << BigInt(bit)), 0n);
 
   /**

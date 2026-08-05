@@ -151,6 +151,8 @@ export const DESCRIBES: Readonly<Record<string, string>> = {
     'Site configuration, integration keys, feature flags and the assistant kill switches.',
   TELEMETRY_WRITE:
     'Pair a device and send journal data. Gates the CAPABILITY only — what is actually stored is decided by the member’s own settings.',
+  SUPPORT_AGENT:
+    'Work the Help & Support console: read every help conversation — members’ and guests’ — and answer under their own name. Asking for help needs no permission at all; this is the other side of the desk.',
 };
 
 interface PermissionGroup {
@@ -304,6 +306,19 @@ const PERMISSION_GROUPS: readonly PermissionGroup[] = [
   {
     title: 'Devices',
     items: [['TELEMETRY_WRITE', 70]],
+  },
+  {
+    /*
+     * ★ ITS OWN GROUP, AND NOT UNDER ADMINISTRATION ★
+     *
+     * Answering the help chat reads other people's private conversations, which earns the bit a
+     * two-factor obligation — but it changes nothing about what anybody else may do, which is
+     * what the Administration group's warning says. A support role somebody creates later should
+     * be grantable without the word "danger" appearing beside it.
+     */
+    title: 'Support',
+    note: 'Who answers the help chat. The chat itself is open to everyone, guests included — this gates the console that reads and answers it.',
+    items: [['SUPPORT_AGENT', 80]],
   },
 ];
 

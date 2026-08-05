@@ -47,6 +47,15 @@ import {
 } from './hub-colony.js';
 import { bountyBoard, bountyLeaderboard } from './hub-bounties.js';
 import { leaderboardBoard } from './hub-leaderboards.js';
+import {
+  supportAccess,
+  supportBadge,
+  supportClose,
+  supportConversation,
+  supportConversations,
+  supportReopen,
+  supportReply,
+} from './hub-support.js';
 import { tradeCommodities, tradeCommodity, tradeRoutes, type TradeQuery } from './hub-trade.js';
 import {
   shipyardBuild,
@@ -1636,6 +1645,39 @@ if (!app.requestSingleInstanceLock()) {
     });
     ipcMain.handle('bountyLeaderboard', (_e, month: unknown) =>
       bountyLeaderboard(hub(), typeof month === 'string' && month !== '' ? month : undefined),
+    );
+    /*
+     * ★ THE SUPPORT CONSOLE, FOR SUPPORT_AGENT HOLDERS ★
+     *
+     * The hub decides who that is — the app only asks. `supportAccess` is the sidebar's
+     * non-throwing question; everything else refuses in a sentence when the member's rank
+     * cannot work the console. Renderer args are re-read, never trusted, like every handler
+     * in this block.
+     */
+    ipcMain.handle('supportAccess', () => supportAccess(hub()));
+    ipcMain.handle('supportBadge', () => supportBadge(hub()));
+    ipcMain.handle('supportConversations', (_e, status: unknown) =>
+      supportConversations(hub(), status === 'closed' ? 'closed' : 'open'),
+    );
+    ipcMain.handle('supportConversation', (_e, id: unknown) =>
+      typeof id === 'string' && id !== ''
+        ? supportConversation(hub(), id)
+        : { ok: false as const, error: 'No conversation asked for.' },
+    );
+    ipcMain.handle('supportReply', (_e, id: unknown, body: unknown) =>
+      typeof id === 'string' && id !== '' && typeof body === 'string' && body.trim() !== ''
+        ? supportReply(hub(), id, body)
+        : { ok: false as const, error: 'Write a message first.' },
+    );
+    ipcMain.handle('supportClose', (_e, id: unknown) =>
+      typeof id === 'string' && id !== ''
+        ? supportClose(hub(), id)
+        : { ok: false as const, error: 'No conversation asked for.' },
+    );
+    ipcMain.handle('supportReopen', (_e, id: unknown) =>
+      typeof id === 'string' && id !== ''
+        ? supportReopen(hub(), id)
+        : { ok: false as const, error: 'No conversation asked for.' },
     );
     /*
      * The leaderboards. One channel for all three boards — the key is re-read rather than trusted,

@@ -290,6 +290,27 @@ export const Permission = {
    * effort is a claim on everybody's playing time.
    */
   COLONY_MANAGE: 1n << 74n,
+
+  // ── Support ──────────────────────────────────────────────────────────────
+  /**
+   * Ring 2. Work the Help & Support console: read every conversation, reply as yourself,
+   * close and reopen.
+   *
+   * ★ ONE BIT, BECAUSE THE CONSOLE IS ONE JOB ★
+   *
+   * Asking for help needs no permission at all — the chat is open to everyone, guests included,
+   * which is the entire point of a help door. The bit gates the OTHER side of the desk: the
+   * console reads members' and guests' private conversations, and answering one puts the
+   * officer's own name and face on the reply. Reading and answering are the same job here;
+   * splitting them would create a role that can watch people ask for help and never respond.
+   *
+   * Opens bit 80 — the first of a fresh decade, because support is its own domain and borrowing
+   * a gap in somebody else's would put the next support bit forty positions away.
+   *
+   * Held by the officer ranks; the webmaster holds it automatically, being outside
+   * SQUADRON_STANDING_PERMISSIONS — whoever runs the website answers questions about it.
+   */
+  SUPPORT_AGENT: 1n << 80n,
 } as const;
 
 export type PermissionName = keyof typeof Permission;
@@ -324,7 +345,14 @@ export const PRIVILEGED_PERMISSIONS: PermissionMask =
   Permission.FORUM_MODERATE |
   Permission.OPS_MANAGE |
   Permission.BGS_SET_ORDERS |
-  Permission.FLEET_APPROVE_DOCTRINE;
+  Permission.FLEET_APPROVE_DOCTRINE |
+  /*
+   * The support console reads members' and guests' private help conversations — other people's
+   * words, by the test above. Every holder today is an officer already obliged by MEMBER_MANAGE,
+   * so this changes nobody's enrolment; it exists for the support role somebody creates later,
+   * which must not be a way to read private conversations on one factor.
+   */
+  Permission.SUPPORT_AGENT;
 
 /*
  * ★ SHIPYARD_SHARE_PUBLIC IS DELIBERATELY *NOT* PRIVILEGED — READ BEFORE ADDING IT ★
@@ -557,7 +585,12 @@ const OFFICER: PermissionMask =
   P.FLEET_APPROVE_DOCTRINE |
   P.BGS_SET_ORDERS |
   P.MEMBER_MANAGE |
-  P.AUDIT_VIEW;
+  P.AUDIT_VIEW |
+  /*
+   * The Help & Support console. Officers are who the owner named to answer the chat — "a human
+   * on demand" is a human with squadron standing, and the console queue is theirs to work.
+   */
+  P.SUPPORT_AGENT;
 
 /** Officer plus role management — the ability to grant any other permission. */
 const COMMANDER: PermissionMask = OFFICER | P.ROLE_MANAGE;

@@ -137,6 +137,23 @@ contextBridge.exposeInMainWorld('leaderboards', {
   board: (board: string, month?: string) => ipcRenderer.invoke('leaderboardBoard', board, month),
 });
 
+/**
+ * The Help & Support console, for members holding SUPPORT_AGENT.
+ *
+ * The hub decides who that is — `access` is the sidebar's question, and every other call
+ * refuses in a sentence for anybody else. Same token discipline as everything above: the
+ * credential is attached in the main process and never reaches the page.
+ */
+contextBridge.exposeInMainWorld('support', {
+  access: () => ipcRenderer.invoke('supportAccess'),
+  badge: () => ipcRenderer.invoke('supportBadge'),
+  conversations: (status: string) => ipcRenderer.invoke('supportConversations', status),
+  conversation: (id: string) => ipcRenderer.invoke('supportConversation', id),
+  reply: (id: string, body: string) => ipcRenderer.invoke('supportReply', id, body),
+  close: (id: string) => ipcRenderer.invoke('supportClose', id),
+  reopen: (id: string) => ipcRenderer.invoke('supportReopen', id),
+});
+
 contextBridge.exposeInMainWorld('colony', {
   /** Both boards, plus what this member is allowed to do with them. */
   projects: () => ipcRenderer.invoke('colonyProjects'),

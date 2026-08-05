@@ -34,7 +34,13 @@ export type LiveEventType =
    * The bell. Per-member for personal rows, userId null for a squadron entry — either way the
    * client re-reads its counts through the normal endpoint; the event carries nothing.
    */
-  | 'notification';
+  | 'notification'
+  /*
+   * Help & Support. Always squadron-wide (userId null): a new message concerns "whoever holds
+   * the console open", which no producer can name — and the event carries nothing, so the worst
+   * a broadcast costs any tab is re-reading a list it was already allowed to read.
+   */
+  | 'support';
 
 export interface LiveEvent {
   readonly type: LiveEventType;

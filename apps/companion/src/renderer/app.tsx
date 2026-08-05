@@ -13,6 +13,7 @@ import { BuildBoardsPage } from './shipyard-boards.js';
 import { PlanningPage } from './planning.js';
 import { BuildTypesPage } from './build-types.js';
 import { LeaderboardPage } from './leaderboards.js';
+import { SupportPage } from './support.js';
 import { GroupIcon } from './icons.js';
 // The shapes come from the hub client, which is where they are defined — re-exporting them through
 // the component file would be a second name for one type.
@@ -90,6 +91,7 @@ type Page =
   | 'outfitter'
   | 'builds-squadron'
   | 'builds-public'
+  | 'support'
   | 'settings'
   | 'overlays'
   | 'device';
@@ -265,6 +267,17 @@ function App(): JSX.Element {
   const [colony, setColony] = useState<{ projects: ColonyProject[]; can: ColonyRights } | null>(null);
   const [colonyError, setColonyError] = useState<string | null>(null);
 
+  /*
+   * ★ THE SUPPORT ENTRY IS THE HUB'S DECISION ★
+   *
+   * Most members do not hold SUPPORT_AGENT, and a sidebar entry whose every click is refused
+   * teaches people the app is broken. So the shell asks the hub, on the same cadence as the
+   * colony counts, and the entry exists only while the hub says yes. While the answer is
+   * unknown — first seconds after launch, or the hub unreachable — the entry is absent, which
+   * for a page most members never had is the honest default.
+   */
+  const [support, setSupport] = useState<{ agent: boolean; waiting: number } | null>(null);
+
   const loadColony = (): void => {
     void window.colony.projects().then((answer) => {
       if (answer.ok) {
@@ -273,6 +286,15 @@ function App(): JSX.Element {
       } else {
         setColonyError(answer.error);
       }
+    });
+    void window.support.access().then((answer) => {
+      if (!answer.ok || !answer.data.agent) {
+        setSupport(answer.ok ? { agent: false, waiting: 0 } : null);
+        return;
+      }
+      void window.support.badge().then((b) => {
+        setSupport({ agent: true, waiting: b.ok ? b.data.waiting : 0 });
+      });
     });
   };
 
@@ -414,6 +436,25 @@ function App(): JSX.Element {
         })}
 
         {/*
+          ★ SUPPORT, FOR THE MEMBERS WHO ANSWER IT ★
+
+          Rendered outside the NAV literal, like Settings below, because it is the one entry
+          that is not for everybody: the shell asks the hub whether this member holds
+          SUPPORT_AGENT, and the button exists only while the answer is yes. The count is the
+          console badge — conversations no officer has seen yet — which is the only bell noise
+          officers get.
+        */}
+        {support?.agent === true ? (
+          <NavButton
+            label="Support"
+            hint="The help desk — answer members and guests as yourself"
+            active={page === 'support'}
+            count={support.waiting > 0 ? support.waiting : undefined}
+            onClick={() => setPage('support')}
+          />
+        ) : null}
+
+        {/*
           ★ SETTINGS AT THE VERY BOTTOM — SQUADRON OWNER, 2026-08-04 ★
 
           "create a settings nav link at the very bottom of the sidebar in the companion app right
@@ -495,6 +536,7 @@ function App(): JSX.Element {
         {page === 'builds-squadron' ? <BuildBoardsPage scope="squadron" /> : null}
         {page === 'builds-public' ? <BuildBoardsPage scope="public" /> : null}
         {page === 'trade' ? <TradePage /> : null}
+        {page === 'support' ? <SupportPage /> : null}
         {page === 'settings' ? <SettingsPage state={state} /> : null}
       </main>
     </div>
