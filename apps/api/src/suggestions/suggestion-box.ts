@@ -29,6 +29,42 @@ export const SUGGESTION_MAX_CHARS = 2000;
  *  board appearing on everyone's forum must be a decision, not a side effect). */
 export const FEATURE_REQUESTS_SLUG = 'feature-requests';
 
+/** The board's human name, the publish flow's fallback when the slug has been re-cut. */
+export const FEATURE_REQUESTS_NAME = 'feature requests';
+
+/**
+ * ★ ONE RESOLUTION, TWO FORMS ★
+ *
+ * Publish finds the board by QUERY; the thread page's promote panel and the roadmap's promote
+ * route ask the same question of a row already IN HAND. Both derive from the same two
+ * constants above, so "is this the Feature Requests board" cannot quietly mean two different
+ * things — the drift that had the panel comparing a URL literal while publish matched slug OR
+ * name, case-insensitively.
+ */
+
+/** The Prisma WHERE that finds the board — slug or name, case-insensitive. */
+export function featureRequestsWhere(): {
+  OR: Array<{ slug?: { equals: string; mode: 'insensitive' }; name?: { equals: string; mode: 'insensitive' } }>;
+} {
+  return {
+    OR: [
+      { slug: { equals: FEATURE_REQUESTS_SLUG, mode: 'insensitive' } },
+      { name: { equals: FEATURE_REQUESTS_NAME, mode: 'insensitive' } },
+    ],
+  };
+}
+
+/** The same test, for a category row already fetched. */
+export function isFeatureRequestsBoard(category: {
+  readonly slug: string;
+  readonly name: string;
+}): boolean {
+  return (
+    category.slug.toLowerCase() === FEATURE_REQUESTS_SLUG ||
+    category.name.toLowerCase() === FEATURE_REQUESTS_NAME
+  );
+}
+
 /** Cleans one suggestion body, or says what is wrong with it in a sentence a human can act on. */
 export function cleanSuggestionBody(raw: unknown): { body: string } | { problem: string } {
   if (typeof raw !== 'string') return { problem: 'Write the suggestion first.' };

@@ -24,14 +24,15 @@ import { apiPost } from '../../../../../lib/api-client';
 export function ReplyComposer({
   threadId,
   locked,
-  canPost,
+  canReply,
   replyTo = null,
   onClearReplyTo,
   insert,
 }: {
   readonly threadId: string;
   readonly locked: boolean;
-  readonly canPost: boolean;
+  /** The server's `canReply` — reply_perm falling back to post_perm. Re-checked on write. */
+  readonly canReply: boolean;
   /**
    * The post being answered, when the reader picked one.
    *
@@ -63,7 +64,7 @@ export function ReplyComposer({
     );
   }
 
-  if (!canPost) {
+  if (!canReply) {
     return (
       <div className="mt-10 rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel)] px-4 py-3">
         <p className="text-sm leading-relaxed text-[var(--color-text-secondary)]">

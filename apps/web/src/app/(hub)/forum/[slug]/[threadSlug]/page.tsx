@@ -111,11 +111,15 @@ export default async function ThreadPage({
 
   /*
    * "Promote to board", fetched-not-inferred like the access panel above: the API answers only
-   * a SITE_CONFIG holder, so `null` here means no panel and no reasoning about masks in the
-   * browser. Asked only on the Feature Requests board — the button exists to move a VOTED-ON
-   * ask onto the roadmap, so on every other board there is nothing to ask.
+   * a stepped-up SITE_CONFIG holder, so `null` here means no panel and no reasoning about
+   * masks in the browser. Asked on EVERY thread page, because whether this thread belongs to
+   * the Feature Requests board is the SERVER's call — the same slug-or-name resolution publish
+   * uses — not a comparison against the URL literal, which would die the day the board was
+   * renamed. For everybody without the webmaster's bit the request is the one gated fetch this
+   * page already makes for the access panel: refused, collapsed to null, no panel.
    */
-  const roadmap = slug === 'feature-requests' ? await getRoadmapThreadCard(thread.id) : null;
+  const roadmap = await getRoadmapThreadCard(thread.id);
+  const showRoadmapPanel = roadmap !== null && (roadmap.promotable || roadmap.card !== null);
 
   return (
     <>
@@ -172,7 +176,7 @@ export default async function ThreadPage({
               </Panel>
             )}
 
-            {roadmap !== null && (
+            {showRoadmapPanel && (
               <Panel title="Roadmap">
                 <PromoteToBoard threadId={thread.id} initialCard={roadmap.card} />
               </Panel>
@@ -209,7 +213,13 @@ export default async function ThreadPage({
           viewerTz={viewerTz}
           threadId={thread.id}
           locked={thread.isLocked}
-          canPost={board?.category.canPost ?? false}
+          /*
+           * `canReply`, not `canPost`: the composer on THIS page writes replies, and the two
+           * are separate gates now — on Feature Requests a member replies (reply_perm) while
+           * nobody, webmaster included, starts a thread through the composer. The server
+           * computes both; the board page's "New thread" keeps `canPost`.
+           */
+          canReply={board?.category.canReply ?? false}
           /* Server-decided. See `ThreadView.canMarkSolution` for why it is not computed here. */
           canMarkSolution={thread.canMarkSolution}
           boardSlug={slug}

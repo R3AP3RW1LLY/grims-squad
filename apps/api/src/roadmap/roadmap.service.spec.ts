@@ -49,7 +49,16 @@ interface Recorded {
   boundThreadQueries: Array<Record<string, unknown>>;
 }
 
-function stub(cards: CardRow[], visibleThreads: Array<{ id: string; slug: string; categorySlug: string }> = []) {
+function stub(
+  cards: CardRow[],
+  visibleThreads: Array<{
+    id: string;
+    slug: string;
+    categorySlug: string;
+    /** The board's display name, for the slug-or-name resolution. Defaults to the slug. */
+    categoryName?: string;
+  }> = [],
+) {
   const rec: Recorded = { updates: [], creates: [], transactions: 0, boundThreadQueries: [] };
 
   const matches = (row: CardRow, where: Record<string, unknown>): boolean => {
@@ -113,7 +122,11 @@ function stub(cards: CardRow[], visibleThreads: Array<{ id: string; slug: string
         const t = visibleThreads.find((v) => v.id === a.where.id);
         return t === undefined
           ? null
-          : { id: t.id, title: `Thread ${t.id}`, category: { slug: t.categorySlug } };
+          : {
+              id: t.id,
+              title: `Thread ${t.id}`,
+              category: { slug: t.categorySlug, name: t.categoryName ?? t.categorySlug },
+            };
       },
     },
   };
@@ -234,6 +247,73 @@ describe('promote to board', () => {
     const { svc } = stub([], []);
     await expect(svc.promote('webmaster-1', 'th-hidden')).rejects.toMatchObject({
       code: ErrorCode.RESOURCE_NOT_VISIBLE,
+    });
+  });
+
+  it('the board is recognised by NAME too, however the slug was re-cut — the publish resolution', async () => {
+    const { svc, rec } = stub(
+      [],
+      [{ id: 'th3', slug: 'asks', categorySlug: 'asks', categoryName: 'Feature Requests' }],
+    );
+    await expect(svc.promote('webmaster-1', 'th3')).resolves.toMatchObject({
+      alreadyPromoted: false,
+    });
+    expect(rec.creates).toHaveLength(1);
+  });
+});
+
+describe('the thread page panel — cardForThread answers for ANY thread, server-resolved', () => {
+  it('MANDATORY: a Feature Requests thread is promotable; its card rides along when it has one', async () => {
+    const { svc } = stub(
+      [card('a', 'building', 0, { sourceThreadId: 'th1' })],
+      [
+        { id: 'th1', slug: 'dark-mode-abc', categorySlug: 'feature-requests' },
+        { id: 'th2', slug: 'voice-attack', categorySlug: 'feature-requests' },
+      ],
+    );
+
+    // Promoted: the panel shows where it sits on the board.
+    await expect(svc.cardForThread('webmaster-1', 'th1')).resolves.toEqual({
+      promotable: true,
+      card: { id: 'a', column: 'building' },
+    });
+    // Not yet promoted: the panel shows the promote button.
+    await expect(svc.cardForThread('webmaster-1', 'th2')).resolves.toEqual({
+      promotable: true,
+      card: null,
+    });
+  });
+
+  it('MANDATORY: a thread on any OTHER board gets promotable false — the page draws no panel', async () => {
+    /*
+     * The fix for the URL-literal comparison: the page now asks about every thread, and the
+     * SERVER answers with the same slug-or-name resolution publish uses. A general-board
+     * thread earns no panel however its URL reads.
+     */
+    const { svc } = stub([], [{ id: 'th4', slug: 'chat', categorySlug: 'general' }]);
+    await expect(svc.cardForThread('webmaster-1', 'th4')).resolves.toEqual({
+      promotable: false,
+      card: null,
+    });
+  });
+
+  it('a thread the caller cannot see answers exactly like a non-board thread', async () => {
+    // Read through the CALLER's bound client: invisible and "not that board" are one answer,
+    // so the panel's absence discloses nothing.
+    const { svc } = stub([], []);
+    await expect(svc.cardForThread('webmaster-1', 'th-hidden')).resolves.toEqual({
+      promotable: false,
+      card: null,
+    });
+  });
+
+  it('the board is recognised by NAME here too — rename the slug and the panel survives', async () => {
+    const { svc } = stub(
+      [],
+      [{ id: 'th5', slug: 'asks', categorySlug: 'asks', categoryName: 'Feature Requests' }],
+    );
+    await expect(svc.cardForThread('webmaster-1', 'th5')).resolves.toMatchObject({
+      promotable: true,
     });
   });
 });

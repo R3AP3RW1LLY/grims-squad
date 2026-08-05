@@ -1223,6 +1223,17 @@ model ForumCategory {
   viewPerm         Decimal? @map("view_perm") @db.Decimal(40, 0)
   /// Permission mask required to POST.
   postPerm         Decimal? @map("post_perm") @db.Decimal(40, 0)
+  /// Permission mask required to REPLY in an existing thread. NULL means "same as post_perm" —
+  /// one mask gating both, which is what every board did before this column existed and what
+  /// every board keeps doing until somebody sets it. Exists for Feature Requests, where thread
+  /// CREATION is the webmaster's publish flow and REPLIES are the squadron's.
+  replyPerm        Decimal? @map("reply_perm") @db.Decimal(40, 0)
+  /// Threads on this board arrive ONLY through the suggestion-box publish flow — the normal
+  /// composer refuses every caller, the webmaster included (squadron owner, 2026-08-04: "they
+  /// must be published via the webmaster approval only"). A category property, not a slug check
+  /// in code, so renaming the board cannot silently reopen the door. Default false: every other
+  /// board is untouched.
+  threadsViaPublish Boolean @default(false) @map("threads_via_publish")
   isLocked         Boolean  @default(false) @map("is_locked")
   /// Optional thread-level Discord bridge target. Message-level mirroring is rejected (ADR-006).
   discordChannelId String?  @map("discord_channel_id")

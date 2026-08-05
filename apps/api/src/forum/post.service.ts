@@ -106,7 +106,7 @@ export class PostService {
       select: {
         id: true,
         isLocked: true,
-        category: { select: { postPerm: true, isLocked: true } },
+        category: { select: { postPerm: true, replyPerm: true, isLocked: true } },
       },
     });
     if (thread === null) {
@@ -130,8 +130,24 @@ export class PostService {
       );
     }
 
+    /*
+     * ★ REPLIES ARE GATED ON reply_perm, FALLING BACK TO post_perm ★
+     *
+     * Squadron owner, 2026-08-04: on Feature Requests, "people can reply to the thread like a
+     * normal forum" while thread creation stays the publish flow's. So the two acts have two
+     * masks: `reply_perm` decides replies HERE, and a NULL `reply_perm` means "same as
+     * post_perm" — one mask gating both, which is what every board did before the column
+     * existed. Announcements never sets it, so it stays exactly as read-only as it was.
+     *
+     * `?? null` because older fakes and rows predate the column; absent behaves as NULL.
+     */
+    const replyPerm = thread.category.replyPerm ?? null;
     const required =
-      thread.category.postPerm === null ? null : BigInt(thread.category.postPerm.toFixed(0));
+      replyPerm !== null
+        ? BigInt(replyPerm.toFixed(0))
+        : thread.category.postPerm === null
+          ? null
+          : BigInt(thread.category.postPerm.toFixed(0));
     if (!satisfiesMask(callerMask, required)) {
       throw new AppError(ErrorCode.PERMISSION_DENIED, 'You cannot post in this board.');
     }

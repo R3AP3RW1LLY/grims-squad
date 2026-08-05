@@ -45,8 +45,20 @@ export interface CategoryView {
   readonly description: string | null;
   readonly position: number;
   readonly isLocked: boolean;
-  /** Whether THIS caller may start a thread here. Computed, never a raw mask. */
+  /**
+   * Whether THIS caller may start a thread here. Computed, never a raw mask.
+   *
+   * False for EVERYBODY on a `threads_via_publish` board — the webmaster included: threads
+   * there arrive through the suggestion-box publish flow, so there is no "New thread" button
+   * to show anyone (squadron owner, 2026-08-04).
+   */
   readonly canPost: boolean;
+  /**
+   * Whether THIS caller may REPLY in threads here. Computed from `reply_perm`, falling back to
+   * `post_perm` when NULL — the split that lets Feature Requests take members' replies while
+   * thread creation stays the publish flow's. Presentation only; the post service re-checks.
+   */
+  readonly canReply: boolean;
 }
 
 export interface CategoryInput {
@@ -212,6 +224,8 @@ export class CategoryService {
         position: true,
         isLocked: true,
         postPerm: true,
+        replyPerm: true,
+        threadsViaPublish: true,
       },
     });
 
@@ -231,8 +245,23 @@ export class CategoryService {
        * mask would tell a member exactly which bit they are missing, which is a
        * map of the permission model handed to anybody curious enough to open the
        * network tab.
+       *
+       * A `threads_via_publish` board answers false for everyone — the composer door is
+       * closed there, however strong the mask (the flag postdates older fakes, so absent
+       * reads as false).
        */
-      canPost: !r.isLocked && satisfiesMask(callerMask, maskOf(r.postPerm)),
+      canPost:
+        !r.isLocked &&
+        !(r.threadsViaPublish ?? false) &&
+        satisfiesMask(callerMask, maskOf(r.postPerm)),
+      /*
+       * Replies follow `reply_perm`, and NULL means "same as post_perm" — the exact rule the
+       * post service enforces, computed here only so the thread page knows whether to draw
+       * the composer.
+       */
+      canReply:
+        !r.isLocked &&
+        satisfiesMask(callerMask, maskOf(r.replyPerm ?? null) ?? maskOf(r.postPerm)),
     }));
   }
 

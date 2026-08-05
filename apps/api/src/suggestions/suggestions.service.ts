@@ -8,8 +8,8 @@ import { LIVE_SERVICE } from '../live/live.tokens.js';
 import { liveNudgeOf } from '../live/live-nudge.js';
 import type { LiveService } from '../live/live.service.js';
 import {
-  FEATURE_REQUESTS_SLUG,
   cleanSuggestionBody,
+  featureRequestsWhere,
   openingPostFor,
   reviewProblem,
   titleFrom,
@@ -72,10 +72,14 @@ export class SuggestionsService {
     const cleaned = cleanSuggestionBody(bodyRaw);
     if ('problem' in cleaned) throw new AppError(ErrorCode.VALIDATION_FAILED, cleaned.problem);
 
-    return this.db.suggestion.create({
+    const created = await this.db.suggestion.create({
       data: { userId, body: cleaned.body },
       select: { id: true },
     });
+
+    // The webmaster's tab badge, rung the moment the queue grows — the support desk's rule.
+    this.#poke();
+    return created;
   }
 
   /** The member's own suggestions, newest first, with a link to any that made the board. */
@@ -118,6 +122,17 @@ export class SuggestionsService {
   //
   // Every method below is reached only through the inbox controller, gated on SITE_CONFIG at
   // the class — the support-console shape, one tier up.
+
+  /**
+   * The tab badge: how many suggestions await a verdict.
+   *
+   * A bare COUNT, the support-console shape — cheap enough to answer on every console render
+   * and every `suggestions` nudge. Reached only through the SITE_CONFIG door, like the inbox
+   * it summarises.
+   */
+  async inboxBadge(): Promise<{ waiting: number }> {
+    return { waiting: await this.db.suggestion.count({ where: { status: 'new' } }) };
+  }
 
   /** New suggestions, oldest first: a queue is worked in arrival order. */
   async inbox(): Promise<SuggestionInboxRow[]> {
@@ -163,14 +178,10 @@ export class SuggestionsService {
     const mask = await this.permissions.effectiveMask(webmasterId);
 
     const category = await db.forumCategory.findFirst({
-      // By slug, the forum-cc shape. Never invented here: the board is seeded by migration,
-      // and a board appearing on everyone's forum must be a decision, not a side effect.
-      where: {
-        OR: [
-          { slug: { equals: FEATURE_REQUESTS_SLUG, mode: 'insensitive' } },
-          { name: { equals: 'feature requests', mode: 'insensitive' } },
-        ],
-      },
+      // By slug or name, the ONE resolution in suggestion-box.ts — the same test the promote
+      // panel and the roadmap use. Never invented here: the board is seeded by migration, and
+      // a board appearing on everyone's forum must be a decision, not a side effect.
+      where: featureRequestsWhere(),
       select: { id: true, slug: true },
     });
     if (category === null) {
@@ -180,42 +191,75 @@ export class SuggestionsService {
       );
     }
 
-    const senderName = suggestion.user.displayName;
-    const thread = await this.threads.create(
-      db,
-      {
-        categoryId: category.id,
-        title: titleFrom(suggestion.body, senderName),
-        body: openingPostFor(suggestion.body, senderName),
-      },
-      webmasterId,
-      mask,
-    );
-
     /*
-     * ★ CLAIMED CONDITIONALLY, AFTER THE THREAD EXISTS ★
+     * ★ CLAIMED CONDITIONALLY, BEFORE THE THREAD EXISTS ★
      *
-     * Stamped on `status = 'new'`, so two webmasters racing the same row resolve to one
-     * winner: the loser is told the screen was stale rather than silently double-publishing.
-     * The loser's thread is already created by then — the cost of that rare race is one
-     * duplicate thread for a moderator to remove, which beats the other order's failure mode
-     * (a suggestion marked published whose thread never landed, unfixable from the console).
+     * Stamped on `status = 'new'`, so two webmasters racing the same row resolve to one winner
+     * BEFORE either creates anything: the loser's conditional update claims nothing, they are
+     * told the screen was stale, and no duplicate thread is ever attempted. The first build
+     * claimed after creating, and the losing reviewer minted a thread before discovering the
+     * claim was lost.
+     *
+     * The claim is `published` with a NULL thread id — a shape `listMine` already renders
+     * honestly (status without a link, the same face a moderation-removed thread wears) for
+     * the moment it takes the thread to land. If thread creation then THROWS, the catch below
+     * reverts the claim to `new`, so a failed publish leaves the suggestion back in the queue
+     * rather than stranded. Only if the revert itself also fails does a `published` row with
+     * no thread persist — a double failure the state machine tolerates by design.
      */
     const claimed = await this.db.suggestion.updateMany({
       where: { id: suggestion.id, status: 'new' },
-      data: {
-        status: 'published',
-        reviewedAt: new Date(),
-        reviewedById: webmasterId,
-        publishedThreadId: thread.id,
-      },
+      data: { status: 'published', reviewedAt: new Date(), reviewedById: webmasterId },
     });
     if (claimed.count === 0) {
       throw new AppError(
         ErrorCode.VALIDATION_FAILED,
-        'A colleague reviewed this suggestion while you were reading it. Refresh the inbox — and check the board for a duplicate thread.',
+        'A colleague reviewed this suggestion while you were reading it. Refresh the inbox.',
       );
     }
+
+    const senderName = suggestion.user.displayName;
+    let thread: { id: string; slug: string; held: boolean };
+    try {
+      /*
+       * ★ createViaPublish — THE ONE DOOR INTO A PUBLISH-ONLY BOARD ★
+       *
+       * Feature Requests carries `threads_via_publish`, which closes the normal composer to
+       * everybody, the webmaster included. This is the single sanctioned exception, and it is
+       * still every inch a real thread: same sanitiser, same screening, same mask check.
+       */
+      thread = await this.threads.createViaPublish(
+        db,
+        {
+          categoryId: category.id,
+          title: titleFrom(suggestion.body, senderName),
+          body: openingPostFor(suggestion.body, senderName),
+        },
+        webmasterId,
+        mask,
+      );
+    } catch (creationFailed) {
+      // The claim is released so the suggestion is not stranded mid-publish. Conditional on
+      // OUR half-done shape, so a concurrent decline (impossible once claimed, but cheap to
+      // respect) or a finished publish is never unwound. The revert's own failure is
+      // swallowed: the original error is the one worth reporting.
+      await this.db.suggestion
+        .updateMany({
+          where: { id: suggestion.id, status: 'published', publishedThreadId: null, reviewedById: webmasterId },
+          data: { status: 'new', reviewedAt: null, reviewedById: null },
+        })
+        .catch(() => undefined);
+      throw creationFailed;
+    }
+
+    // The thread landed; the claim gets its address.
+    await this.db.suggestion.updateMany({
+      where: { id: suggestion.id, status: 'published' },
+      data: { publishedThreadId: thread.id },
+    });
+
+    // Other webmasters' badges clear live — the queue just shrank on every open console.
+    this.#poke();
 
     const threadLink = `/forum/${category.slug}/${thread.slug}`;
 
@@ -257,6 +301,9 @@ export class SuggestionsService {
       );
     }
 
+    // The queue shrank: every other webmaster's tab badge is stale until this lands.
+    this.#poke();
+
     /*
      * Told personally, and honestly: read by a person, not taken up, box still open. No reason
      * field — a one-click decline with a mandatory essay becomes a queue nobody clears, and a
@@ -275,6 +322,22 @@ export class SuggestionsService {
   }
 
   // ── Shared internals ───────────────────────────────────────────────────────
+
+  /**
+   * Rings every open console's `suggestions` badge — the support desk's `#poke`, one tier up.
+   *
+   * Squadron-wide (userId null) because the event concerns "whoever holds the SITE_CONFIG tab
+   * open", which no producer can name — and it carries nothing, so the worst it costs any tab
+   * is re-reading a count it was already allowed to read. Swallowed on failure: a badge
+   * refresh is never worth failing a submission or a verdict over.
+   */
+  #poke(): void {
+    try {
+      this.live?.publish({ type: 'suggestions', userId: null });
+    } catch {
+      // A dead subscriber must not fail the write that poked it.
+    }
+  }
 
   async #byId(id: string): Promise<{
     id: string;

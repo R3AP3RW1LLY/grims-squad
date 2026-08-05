@@ -681,6 +681,38 @@ export class ThreadService {
      */
     held: boolean;
   }> {
+    return this.#create(db, input, authorId, callerMask, false);
+  }
+
+  /**
+   * ★ THE ONE SANCTIONED CREATOR ON A PUBLISH-ONLY BOARD ★
+   *
+   * Squadron owner, 2026-08-04: "dont allow anyone to start a new thread in the Feature
+   * requests category! they must be published via the webmaster approval only!"
+   *
+   * A board with `threads_via_publish` refuses `create` for EVERY caller — the webmaster
+   * included, because the webmaster typing a thread there would be a suggestion nobody sent.
+   * This method is the single exception, and its single caller is the suggestion box's publish
+   * flow (SuggestionsService.publish). Everything else is identical to `create`: same
+   * sanitiser, same screening, same mask check against `post_perm` — so "the webmaster cannot
+   * post there" still surfaces as the same refusal a browser would get.
+   */
+  async createViaPublish(
+    db: AclBoundClient,
+    input: CreateThreadInput,
+    authorId: string,
+    callerMask: bigint,
+  ): Promise<{ id: string; slug: string; held: boolean }> {
+    return this.#create(db, input, authorId, callerMask, true);
+  }
+
+  async #create(
+    db: AclBoundClient,
+    input: CreateThreadInput,
+    authorId: string,
+    callerMask: bigint,
+    viaPublish: boolean,
+  ): Promise<{ id: string; slug: string; held: boolean }> {
     const title = input.title.trim();
     if (title.length < 3 || title.length > 200) {
       throw new AppError(ErrorCode.VALIDATION_FAILED, 'A title is between 3 and 200 characters.');
@@ -705,7 +737,7 @@ export class ThreadService {
      */
     const category = await db.forumCategory.findFirst({
       where: { id: input.categoryId },
-      select: { id: true, isLocked: true, postPerm: true },
+      select: { id: true, isLocked: true, postPerm: true, threadsViaPublish: true },
     });
     if (category === null) {
       throw new AppError(ErrorCode.RESOURCE_NOT_VISIBLE, 'Category not found.');
@@ -713,6 +745,24 @@ export class ThreadService {
 
     if (category.isLocked) {
       throw new AppError(ErrorCode.PERMISSION_DENIED, 'This category is locked.');
+    }
+
+    /*
+     * ★ A PUBLISH-ONLY BOARD REFUSES THE COMPOSER, WHOEVER IS TYPING ★
+     *
+     * Checked BEFORE the mask, because no mask fixes it: the refusal is about how threads reach
+     * this board, not about who the caller is. Feature Requests threads are published from the
+     * suggestion box so every one of them is a member's credited idea — a thread typed straight
+     * onto the board, even by the webmaster, would be a suggestion nobody sent.
+     *
+     * `?? false` because the flag postdates the column-less fakes in older suites; a category
+     * that has never heard of the flag behaves as every board always has.
+     */
+    if ((category.threadsViaPublish ?? false) && !viaPublish) {
+      throw new AppError(
+        ErrorCode.PERMISSION_DENIED,
+        'Threads on this board arrive through the suggestion box — send a suggestion, and the webmaster publishes it here for the squadron to vote on.',
+      );
     }
 
     const postPerm =

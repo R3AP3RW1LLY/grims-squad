@@ -40,7 +40,14 @@ export type LiveEventType =
    * the console open", which no producer can name — and the event carries nothing, so the worst
    * a broadcast costs any tab is re-reading a list it was already allowed to read.
    */
-  | 'support';
+  | 'support'
+  /*
+   * The suggestion box. Same shape as `support` for the same reason: a new suggestion — or a
+   * verdict clearing one — concerns whichever webmaster holds the console open. The tab badge
+   * re-reads its count through the SITE_CONFIG-gated endpoint; everybody else's re-read is
+   * refused, which costs them nothing.
+   */
+  | 'suggestions';
 
 export interface LiveEvent {
   readonly type: LiveEventType;

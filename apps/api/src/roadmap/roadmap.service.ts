@@ -2,7 +2,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import { AppError, ErrorCode } from '@grims/shared';
 import { PrismaClient } from '@grims/db';
 import { AclDbService } from '../authz/acl-db.service.js';
-import { FEATURE_REQUESTS_SLUG } from '../suggestions/suggestion-box.js';
+import { isFeatureRequestsBoard } from '../suggestions/suggestion-box.js';
 import {
   cleanCardBody,
   cleanCardTitle,
@@ -260,10 +260,11 @@ export class RoadmapService {
     const db = await this.acl.forCaller(webmasterId);
     const thread = await db.forumThread.findFirst({
       where: { id: threadIdRaw, deletedAt: null },
-      select: { id: true, title: true, category: { select: { slug: true } } },
+      select: { id: true, title: true, category: { select: { slug: true, name: true } } },
     });
     if (thread === null) throw this.#notAvailable();
-    if (thread.category.slug.toLowerCase() !== FEATURE_REQUESTS_SLUG) {
+    // The ONE board test, shared with publish and the thread page's panel (suggestion-box.ts).
+    if (!isFeatureRequestsBoard(thread.category)) {
       throw new AppError(
         ErrorCode.VALIDATION_FAILED,
         'Only Feature Requests threads go on the roadmap — the board tracks what the squadron voted for.',
@@ -294,14 +295,45 @@ export class RoadmapService {
     return { card: view(row, await this.#linksFor(webmasterId, [row])), alreadyPromoted: false };
   }
 
-  /** The card a thread became, for the thread page's promote panel. Null means not promoted. */
-  async cardForThread(threadId: string): Promise<{ id: string; column: RoadmapColumn } | null> {
-    if (typeof threadId !== 'string' || threadId === '') return null;
+  /**
+   * What the thread page's promote panel renders from, for ANY thread.
+   *
+   * ★ THE SERVER RESOLVES THE BOARD, NOT THE URL ★
+   *
+   * The page used to ask only when the URL slug was literally 'feature-requests', which is a
+   * copy of the board resolution living in a browser — rename the board and the panel dies
+   * while publish carries on. Now the page asks unconditionally and THIS answers: `promotable`
+   * is true only when the thread's category IS the Feature Requests board, resolved by the
+   * same test publish uses (suggestion-box.ts). The thread is read through the WEBMASTER'S
+   * bound client — a thread they cannot see gets `promotable: false`, indistinguishable from
+   * any other non-board thread.
+   *
+   *   promotable false, card null  → not that board (or not visible): no panel at all.
+   *   promotable true,  card null  → a Feature Requests thread not yet promoted: the button.
+   *   card non-null                → already on the board, wherever the thread lives now.
+   */
+  async cardForThread(
+    callerId: string,
+    threadId: string,
+  ): Promise<{ promotable: boolean; card: { id: string; column: RoadmapColumn } | null }> {
+    const none = { promotable: false, card: null };
+    if (typeof threadId !== 'string' || threadId === '') return none;
+
+    const db = await this.acl.forCaller(callerId);
+    const thread = await db.forumThread.findFirst({
+      where: { id: threadId, deletedAt: null },
+      select: { id: true, category: { select: { slug: true, name: true } } },
+    });
+    if (thread === null) return none;
+
     const row = await this.db.roadmapCard.findFirst({
       where: { sourceThreadId: threadId },
       select: { id: true, column: true },
     });
-    return row === null ? null : { id: row.id, column: row.column as RoadmapColumn };
+    return {
+      promotable: isFeatureRequestsBoard(thread.category),
+      card: row === null ? null : { id: row.id, column: row.column as RoadmapColumn },
+    };
   }
 
   // ── Shared internals ───────────────────────────────────────────────────────

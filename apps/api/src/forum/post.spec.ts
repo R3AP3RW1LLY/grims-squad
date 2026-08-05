@@ -196,6 +196,81 @@ describe('creating a post', () => {
     });
   });
 
+  describe('the reply gate — reply_perm, falling back to post_perm', () => {
+    /*
+     * Squadron owner, 2026-08-04: on Feature Requests, "people can reply to the thread like a
+     * normal forum". So a REPLY checks `reply_perm` first, and only a NULL reply_perm falls
+     * back to `post_perm` — which is what every board did before the column existed.
+     */
+    const featureRequestsThread = (over: Record<string, unknown> = {}) => ({
+      id: 't1',
+      isLocked: false,
+      category: {
+        // The board's shape after the migration: creation is the publish flow's
+        // (post_perm = SITE_CONFIG), replies are the members' (reply_perm = FORUM_POST_MEMBER).
+        postPerm: { toFixed: () => Permission.SITE_CONFIG.toString() },
+        replyPerm: { toFixed: () => MEMBER_POST.toString() },
+        isLocked: false,
+        ...over,
+      },
+    });
+
+    it('MANDATORY: a member mask may reply where reply_perm says members and post_perm says webmaster', async () => {
+      const db = createDb({
+        forumThread: { findFirst: async () => featureRequestsThread(), update: vi.fn(async () => ({})) },
+      });
+      const svc = new PostService(recordingQueue(), allowAll());
+      await expect(svc.create(db, 't1', 'I want this too', 'member-1', MEMBER_POST)).resolves.toMatchObject(
+        { id: 'p1' },
+      );
+    });
+
+    it('and a mask below the reply bar is still refused', async () => {
+      const db = createDb({
+        forumThread: { findFirst: async () => featureRequestsThread(), update: vi.fn(async () => ({})) },
+      });
+      const svc = new PostService(recordingQueue(), allowAll());
+      await expect(svc.create(db, 't1', 'hi', 'guest-1', 0n)).rejects.toMatchObject({
+        code: ErrorCode.PERMISSION_DENIED,
+      });
+    });
+
+    it('MANDATORY: a NULL reply_perm falls back to post_perm — Announcements stays read-only for members', async () => {
+      /*
+       * The pin every existing board depends on: reply_perm was added NULLABLE and NULL means
+       * "same as post_perm", so a board that never set it (Announcements: post_perm =
+       * FORUM_POST_OFFICER) refuses a member's reply exactly as it did before the column.
+       */
+      const db = createDb({
+        forumThread: {
+          findFirst: async () =>
+            featureRequestsThread({
+              postPerm: { toFixed: () => Permission.FORUM_POST_OFFICER.toString() },
+              replyPerm: null,
+            }),
+          update: vi.fn(async () => ({})),
+        },
+      });
+      const svc = new PostService(recordingQueue(), allowAll());
+      await expect(svc.create(db, 't1', 'hi', 'member-1', MEMBER_POST)).rejects.toMatchObject({
+        code: ErrorCode.PERMISSION_DENIED,
+      });
+      // And the officer's own bit still opens it, same as ever.
+      await expect(
+        svc.create(db, 't1', 'Squadron news.', 'officer-1', Permission.FORUM_POST_OFFICER),
+      ).resolves.toMatchObject({ id: 'p1' });
+    });
+
+    it('a category that has never heard of reply_perm behaves as it always has', async () => {
+      // `openThread` above carries no replyPerm at all — absent reads as NULL, one mask,
+      // both acts. Every pre-existing test in this file rides that; this one states it.
+      const svc = new PostService(recordingQueue(), allowAll());
+      await expect(svc.create(createDb(), 't1', 'hello', 'author', MEMBER_POST)).resolves.toMatchObject(
+        { id: 'p1' },
+      );
+    });
+  });
+
   it('MANDATORY: an invisible thread is a 404, cloaked', async () => {
     // `findFirst` returning null IS the ACL predicate having filtered the row.
     const db = createDb({ forumThread: { findFirst: async () => null } });

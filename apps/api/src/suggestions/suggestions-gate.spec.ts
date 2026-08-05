@@ -32,6 +32,17 @@ describe('the suggestion inbox is gated at the class', () => {
     );
   });
 
+  it('MANDATORY: and behind the second factor — the admin console idiom, on the class', () => {
+    /*
+     * The inbox reads members' private words; enrolment alone is what a stolen session cookie
+     * has. The pair must sit together directly above the @Controller line, where they cover
+     * every route — the same adjacency rule as the permission gate below them.
+     */
+    expect(source).toMatch(
+      /@UseGuards\(AdminGateGuard\)\s*\n@RequiresTwoFactor\(\)\s*\n@Controller\('v1\/suggestions\/inbox'\)/,
+    );
+  });
+
   it('holds exactly one controller class, so the class gate covers every route in the file', () => {
     expect(source.match(/@Controller\(/g)).toHaveLength(1);
     expect(source.match(/export class /g)).toHaveLength(1);
@@ -47,12 +58,21 @@ describe('the roadmap manage board is gated at the class', () => {
     );
   });
 
+  it('MANDATORY: and behind the second factor — the admin console idiom, on the class', () => {
+    // What this board says is what the squadron is told is being built. Same pair, same
+    // adjacency, same reason as the inbox.
+    expect(source).toMatch(
+      /@UseGuards\(AdminGateGuard\)\s*\n@RequiresTwoFactor\(\)\s*\n@Controller\('v1\/roadmap\/manage'\)/,
+    );
+  });
+
   it('the member-facing read carries NO permission decorator — every signed-in member may look', () => {
     /*
      * The other direction matters too: /roadmap is the squadron's window onto the plan, and a
      * gate quietly appearing on it would hide the board from the very people it reports to.
      * Asserted by ADJACENCY, like the gates above: the read controller's class declaration sits
-     * directly under its bare @Controller line, with no decorator between them — and it still
+     * directly under its bare @Controller line, with no decorator between them — no permission
+     * bit and NO second factor, because reading the roadmap is every member's — and it still
      * authenticates.
      */
     expect(source).toMatch(/@Controller\('v1\/roadmap'\)\s*\nexport class RoadmapController/);

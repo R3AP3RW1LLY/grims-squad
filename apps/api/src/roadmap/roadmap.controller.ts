@@ -1,7 +1,8 @@
-import { Body, Controller, Get, Inject, Param, Patch, Post, Req } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Param, Patch, Post, Req, UseGuards } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
 import { AppError, ErrorCode, Permission } from '@grims/shared';
 import { RequiresPermission } from '../authz/requires-permission.guard.js';
+import { AdminGateGuard, RequiresTwoFactor } from '../auth/admin-gate.guard.js';
 import { User, type CurrentUser } from '../auth/current-user.js';
 import { verifyCsrf, readCsrfCookie } from '../common/csrf.js';
 import { RoadmapService } from './roadmap.service.js';
@@ -37,7 +38,16 @@ export class RoadmapController {
  * SITE_CONFIG for the same reason as the suggestion inbox: the owner made the kanban
  * WEBMASTER-ONLY management, and one bit covering the inbox, the publish flow and the board
  * means the pipeline cannot drift across tiers.
+ *
+ * ★ AND BEHIND THE SECOND FACTOR, LIKE THE ADMIN CONSOLE ★
+ *
+ * The admin controller's exact idiom — `AdminGateGuard` + `@RequiresTwoFactor()`. What this
+ * board says is what the whole squadron is told is being built; rewriting it is admin-console
+ * work, and enrolment without a fresh code in THIS session is what a stolen cookie has. The
+ * member-facing read below carries neither decorator: reading the roadmap is every member's.
  */
+@UseGuards(AdminGateGuard)
+@RequiresTwoFactor()
 @Controller('v1/roadmap/manage')
 @RequiresPermission(Permission.SITE_CONFIG)
 export class RoadmapManageController {
@@ -130,14 +140,15 @@ export class RoadmapManageController {
   }
 
   /**
-   * Whether a thread is already on the board — what the thread page's panel renders from.
-   * Refused (as every route here is) for anybody without the webmaster's bit, which is exactly
-   * how the panel stays invisible to everyone else: the page treats the refusal as "no panel".
+   * The promote panel's answer, for ANY thread — whether this one belongs to the Feature
+   * Requests board (`promotable`, resolved server-side by the same test publish uses) and the
+   * card it already became, if any. Refused (as every route here is) for anybody without the
+   * webmaster's bit and a fresh second factor, which is exactly how the panel stays invisible
+   * to everyone else: the page treats the refusal as "no panel".
    */
   @Get('thread/:threadId')
   async cardForThread(@User() caller: CurrentUser | undefined, @Param('threadId') threadId: string) {
-    this.#me(caller);
-    return { card: await this.roadmap.cardForThread(threadId) };
+    return this.roadmap.cardForThread(this.#me(caller), threadId);
   }
 }
 

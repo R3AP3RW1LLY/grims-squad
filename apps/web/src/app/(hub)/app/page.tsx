@@ -26,6 +26,7 @@ import { PromotionRun } from './promotion-run';
 import { Moderation } from './moderation';
 import { Support } from './support';
 import { SupportTabBadge } from './support-tab-badge';
+import { SuggestionsTabBadge } from './suggestions-tab-badge';
 import { Suggestions } from './suggestions';
 import { RoadmapBoard } from './roadmap-board';
 import { ActivityTable } from './activity-table';
@@ -241,13 +242,19 @@ export default async function AdminPage({
         tabs={
           <PageTabs
             /*
-             * The Support tab wears the waiting count ON ITS LABEL — officers get no
-             * per-message notifications, so this pill is their entire bell, and it has to be
-             * audible from every tab of the console. Attached at render rather than stored in
-             * TABS, which stays a plain serialisable list.
+             * The Support and Suggestions tabs wear their waiting counts ON THE LABEL —
+             * neither queue rings per-item notifications, so these pills are the whole bell,
+             * and a bell has to be audible from every tab of the console. Attached at render
+             * rather than stored in TABS, which stays a plain serialisable list. Each pill
+             * asks its own gated endpoint and renders nothing on refusal, so an officer
+             * without SITE_CONFIG sees a Support pill and no Suggestions one.
              */
             tabs={TABS.map((t) =>
-              t.key === 'support' ? { ...t, badge: <SupportTabBadge /> } : t,
+              t.key === 'support'
+                ? { ...t, badge: <SupportTabBadge /> }
+                : t.key === 'suggestions'
+                  ? { ...t, badge: <SuggestionsTabBadge /> }
+                  : t,
             )}
             current={tab}
             basePath="/app"

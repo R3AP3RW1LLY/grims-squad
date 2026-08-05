@@ -24,6 +24,8 @@ interface Recorded {
   notifications: Array<Record<string, unknown>>;
   threadInputs: Array<Record<string, unknown>>;
   threadAuthors: string[];
+  /** Everything put on the live stream — `suggestions` badge pokes and bell nudges alike. */
+  events: Array<{ type: string; userId: string | null }>;
 }
 
 const SENDER = { id: 'member-1', displayName: 'Halsey' };
@@ -40,6 +42,7 @@ function stub(over: {
     notifications: [],
     threadInputs: [],
     threadAuthors: [],
+    events: [],
   };
 
   const db = {
@@ -82,7 +85,12 @@ function stub(over: {
   } as unknown as PermissionService;
 
   const threads = {
-    create: async (
+    /*
+     * `createViaPublish`, DELIBERATELY — the publish flow is the single caller allowed through
+     * a `threads_via_publish` board, and a stub exposing plain `create` would let this suite
+     * go green while the service used the door forum.spec.ts proves is shut.
+     */
+    createViaPublish: async (
       _db: unknown,
       input: Record<string, unknown>,
       authorId: string,
@@ -93,7 +101,14 @@ function stub(over: {
     },
   } as unknown as ThreadService;
 
-  return { svc: new SuggestionsService(db, acl, permissions, threads), rec };
+  // A recording live service, so the badge pokes can be asserted rather than assumed.
+  const live = {
+    publish: (e: { type: string; userId: string | null }) => {
+      rec.events.push(e);
+    },
+  } as never;
+
+  return { svc: new SuggestionsService(db, acl, permissions, threads, live), rec };
 }
 
 describe('the member door', () => {
@@ -110,6 +125,13 @@ describe('the member door', () => {
     const created = await svc.submit('member-1', 'Dark mode for the roster');
     expect(created.id).toBe('s1');
     expect(rec.suggestions[0]).toMatchObject({ userId: 'member-1' });
+  });
+
+  it('a landed suggestion pokes the `suggestions` badge, squadron-wide', async () => {
+    // The webmaster's tab pill is the whole bell — no per-suggestion notifications exist.
+    const { svc, rec } = stub({});
+    await svc.submit('member-1', 'Dark mode for the roster');
+    expect(rec.events).toContainEqual({ type: 'suggestions', userId: null });
   });
 
   it("MANDATORY: a member's list is scoped to them in the query itself", async () => {
@@ -145,15 +167,27 @@ describe('publish — one click, one real thread, one credited sender', () => {
     expect(result.held).toBe(false);
   });
 
-  it('MANDATORY: stamps published_thread_id, the verdict and the reviewer — conditionally on still being new', async () => {
+  it('MANDATORY: claims the row FIRST — conditionally on still being new — then stamps the thread', async () => {
+    /*
+     * The order is the fix for the duplicate-thread race: the conditional claim resolves the
+     * two-webmasters race BEFORE any thread exists, so the loser never creates one. The
+     * thread id is stamped in a second write once the thread has landed.
+     */
     const { svc, rec } = stub({});
     await svc.publish('webmaster-1', 's1');
 
     expect(rec.updates[0]).toMatchObject({
       where: { id: 's1', status: 'new' },
-      data: { status: 'published', reviewedById: 'webmaster-1', publishedThreadId: 'th1' },
+      data: { status: 'published', reviewedById: 'webmaster-1' },
     });
+    // The claim carries NO thread id — nothing exists yet to name.
+    expect(rec.updates[0]?.data['publishedThreadId']).toBeUndefined();
     expect(rec.updates[0]?.data['reviewedAt']).toBeInstanceOf(Date);
+
+    expect(rec.updates[1]).toMatchObject({
+      where: { id: 's1', status: 'published' },
+      data: { publishedThreadId: 'th1' },
+    });
   });
 
   it("MANDATORY: rings the sender's bell — kind suggestion.published, linking the thread", async () => {
@@ -173,7 +207,7 @@ describe('publish — one click, one real thread, one credited sender', () => {
     const result = await svc.publish('webmaster-1', 's1');
 
     expect(result.held).toBe(true);
-    expect(rec.updates).toHaveLength(1); // The stamp still lands: the thread exists.
+    expect(rec.updates).toHaveLength(2); // Claim and stamp both land: the thread exists.
     expect(rec.notifications).toHaveLength(0);
   });
 
@@ -186,12 +220,71 @@ describe('publish — one click, one real thread, one credited sender', () => {
     });
   });
 
-  it('a racing colleague wins the conditional stamp and the loser is told, not doubled', async () => {
+  it('MANDATORY: a racing colleague wins the conditional claim and the loser creates NOTHING', async () => {
     const { svc, rec } = stub({ updateCount: 0 });
     await expect(svc.publish('webmaster-1', 's1')).rejects.toMatchObject({
       code: ErrorCode.VALIDATION_FAILED,
     });
-    // No bell for a publish that did not claim the row.
+    // The whole point of claiming first: the loser is told before any thread exists, so the
+    // race can no longer mint a duplicate for a moderator to clean up.
+    expect(rec.threadInputs).toHaveLength(0);
+    // And no bell for a publish that did not claim the row.
+    expect(rec.notifications).toHaveLength(0);
+  });
+
+  it('MANDATORY: two concurrent publishes attempt exactly ONE thread creation', async () => {
+    /*
+     * The race itself, not a stand-in: both callers pass the pre-read (both see `new`), and
+     * the stateful conditional update — the database's semantics, modelled honestly — lets
+     * exactly one through. The other is refused BEFORE ThreadService is touched.
+     */
+    const { svc, rec } = stub({});
+    let status = 'new';
+    const db = (svc as unknown as { db: { suggestion: Record<string, unknown> } }).db;
+    db.suggestion['updateMany'] = async (a: {
+      where: Record<string, unknown>;
+      data: Record<string, unknown>;
+    }) => {
+      rec.updates.push(a);
+      if (a.where['status'] === 'new') {
+        if (status !== 'new') return { count: 0 }; // The claim: only one winner.
+        status = 'published';
+        return { count: 1 };
+      }
+      return { count: 1 }; // The stamp.
+    };
+
+    const results = await Promise.allSettled([
+      svc.publish('webmaster-1', 's1'),
+      svc.publish('webmaster-2', 's1'),
+    ]);
+
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    expect(results.filter((r) => r.status === 'rejected')).toHaveLength(1);
+    // ONE thread was ever attempted — the loser lost before creating anything.
+    expect(rec.threadInputs).toHaveLength(1);
+    expect(rec.notifications).toHaveLength(1);
+  });
+
+  it('MANDATORY: a thread creation failure RELEASES the claim — the suggestion is not stranded', async () => {
+    const { svc, rec } = stub({});
+    const threads = (svc as unknown as { threads: Record<string, unknown> }).threads;
+    threads['createViaPublish'] = async () => {
+      throw new Error('screening is down');
+    };
+
+    await expect(svc.publish('webmaster-1', 's1')).rejects.toThrow('screening is down');
+
+    // The claim went on, and came off: back to `new`, review stamp cleared, queue intact.
+    expect(rec.updates[0]).toMatchObject({
+      where: { id: 's1', status: 'new' },
+      data: { status: 'published' },
+    });
+    expect(rec.updates[1]).toMatchObject({
+      where: { id: 's1', status: 'published', publishedThreadId: null, reviewedById: 'webmaster-1' },
+      data: { status: 'new', reviewedAt: null, reviewedById: null },
+    });
+    // Nobody was told about a thread that never landed.
     expect(rec.notifications).toHaveLength(0);
   });
 
@@ -201,6 +294,33 @@ describe('publish — one click, one real thread, one credited sender', () => {
       code: ErrorCode.VALIDATION_FAILED,
     });
     expect(rec.threadInputs).toHaveLength(0);
+    // And nothing was claimed: the board check precedes the claim, so a missing board never
+    // takes a suggestion out of the queue.
+    expect(rec.updates).toHaveLength(0);
+  });
+
+  it("a verdict pokes the `suggestions` badge — the queue shrank on every other webmaster's console", async () => {
+    const { svc, rec } = stub({});
+    await svc.publish('webmaster-1', 's1');
+    expect(rec.events.filter((e) => e.type === 'suggestions')).toEqual([
+      { type: 'suggestions', userId: null },
+    ]);
+  });
+});
+
+describe('the inbox badge', () => {
+  it('is a bare count of what awaits a verdict', async () => {
+    const { svc } = stub({});
+    const wheres: Array<Record<string, unknown>> = [];
+    const db = (svc as unknown as { db: { suggestion: Record<string, unknown> } }).db;
+    db.suggestion['count'] = async (a: { where: Record<string, unknown> }) => {
+      wheres.push(a.where);
+      return 3;
+    };
+
+    await expect(svc.inboxBadge()).resolves.toEqual({ waiting: 3 });
+    // Counted in the WHERE, never filtered after — the cheap read the tab re-runs on a nudge.
+    expect(wheres).toEqual([{ status: 'new' }]);
   });
 });
 
@@ -219,6 +339,8 @@ describe('decline — reviewed, told, box still open', () => {
     });
     // Honest, and kind: read by a person, not taken up, and the box has not closed on them.
     expect(String(rec.notifications[0]?.['body'])).toContain('send the next one');
+    // And the queue shrank, so every other webmaster's badge is poked too.
+    expect(rec.events).toContainEqual({ type: 'suggestions', userId: null });
   });
 
   it('declining the declined is a stale screen, and says so', async () => {

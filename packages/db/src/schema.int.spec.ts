@@ -517,16 +517,25 @@ describe('seeded roles', () => {
   });
 
   /**
-   * The Feature Requests board: members read and vote, only the webmaster tier posts.
+   * The Feature Requests board: members read, vote AND reply; threads arrive only by publish.
    *
    * Voting rides VISIBILITY (vote.service.ts reads the post through the voter's bound client),
-   * so view_perm = FORUM_VIEW_MEMBER is what opens the vote rail to the squadron. post_perm =
-   * SITE_CONFIG is what makes thread creation the publish flow's job — the officer-board
-   * pattern (Announcements: view 4, post 64) applied one tier up, replies included.
+   * so view_perm = FORUM_VIEW_MEMBER is what opens the vote rail to the squadron. Squadron
+   * owner, 2026-08-04: "people can reply to the thread like a normal forum but can not start
+   * it that way" — so reply_perm = FORUM_POST_MEMBER opens replies to members, and
+   * threads_via_publish closes the composer to EVERYONE, the webmaster included: the
+   * suggestion-box publish flow is the board's only thread creator. post_perm = SITE_CONFIG
+   * still names who publishes, so the inbox and the board cannot drift to different tiers.
    */
-  it('the Feature Requests board gates posting on SITE_CONFIG and viewing on FORUM_VIEW_MEMBER', async () => {
-    const r = await rows<{ post_perm: string | null; view_perm: string | null }>(
-      `select post_perm::text, view_perm::text from forum_categories where slug = 'feature-requests'`,
+  it('the Feature Requests board: post SITE_CONFIG, view MEMBER, reply MEMBER, threads via publish', async () => {
+    const r = await rows<{
+      post_perm: string | null;
+      view_perm: string | null;
+      reply_perm: string | null;
+      threads_via_publish: boolean;
+    }>(
+      `select post_perm::text, view_perm::text, reply_perm::text, threads_via_publish
+       from forum_categories where slug = 'feature-requests'`,
     );
     // Skipped rather than failed when the board has not been seeded in this database — the
     // assertion is about its shape, not about it existing (the officers-board precedent above).
@@ -534,6 +543,23 @@ describe('seeded roles', () => {
 
     expect(BigInt(r[0]!.post_perm ?? '0')).toBe(1n << 63n); // SITE_CONFIG
     expect(BigInt(r[0]!.view_perm ?? '0')).toBe(1n << 2n); // FORUM_VIEW_MEMBER
+    expect(BigInt(r[0]!.reply_perm ?? '0')).toBe(1n << 3n); // FORUM_POST_MEMBER
+    expect(r[0]!.threads_via_publish).toBe(true);
+  });
+
+  /**
+   * And ONLY that board changed. reply_perm was added NULLABLE (NULL = "same as post_perm")
+   * and threads_via_publish defaults false, so every board the migration did not name behaves
+   * exactly as it did before the columns existed — Announcements stays read-only for members,
+   * General takes threads as ever. This is the pin the migration's promise rests on.
+   */
+  it('MANDATORY: every other board is untouched — reply_perm NULL, threads_via_publish false', async () => {
+    const r = await rows<{ n: string }>(
+      `select count(*)::text as n from forum_categories
+       where slug <> 'feature-requests'
+         and (reply_perm is not null or threads_via_publish = true)`,
+    );
+    expect(Number(r[0]!.n)).toBe(0);
   });
 
   it('webmaster is mapped to NO Discord role', async () => {

@@ -1,7 +1,8 @@
-import { Controller, Get, Inject, Param, Post, Req } from '@nestjs/common';
+import { Controller, Get, Inject, Param, Post, Req, UseGuards } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
 import { AppError, ErrorCode, Permission } from '@grims/shared';
 import { RequiresPermission } from '../authz/requires-permission.guard.js';
+import { AdminGateGuard, RequiresTwoFactor } from '../auth/admin-gate.guard.js';
 import { User, type CurrentUser } from '../auth/current-user.js';
 import { verifyCsrf, readCsrfCookie } from '../common/csrf.js';
 import { SuggestionsService } from './suggestions.service.js';
@@ -21,7 +22,17 @@ import { SuggestionsService } from './suggestions.service.js';
  * and using the same bit for the inbox means the reviewer and the publisher cannot drift to
  * different tiers. SUPPORT_AGENT would hand every officer a queue the owner addressed to one
  * role; MEMBER_MANAGE is about people, not the platform.
+ *
+ * ★ AND BEHIND THE SECOND FACTOR, LIKE THE ADMIN CONSOLE ★
+ *
+ * `AdminGateGuard` + `@RequiresTwoFactor()` — the admin controller's exact idiom. The inbox
+ * reads members' private words before any verdict, which is admin-console material: enrolment
+ * alone would let a stolen session cookie read the queue, and the third check is the one that
+ * mechanism cannot see anything wrong with. The /app console already steps the webmaster up,
+ * so the honest cost is nothing; a session without a fresh code gets the gate's own sentence.
  */
+@UseGuards(AdminGateGuard)
+@RequiresTwoFactor()
 @Controller('v1/suggestions/inbox')
 @RequiresPermission(Permission.SITE_CONFIG)
 export class SuggestionsInboxController {
@@ -39,6 +50,18 @@ export class SuggestionsInboxController {
   async list(@User() caller: CurrentUser | undefined) {
     this.#me(caller);
     return { suggestions: await this.suggestions.inbox() };
+  }
+
+  /**
+   * The tab badge: how many suggestions await a verdict. The support console's badge shape —
+   * a bare count the /app tab label re-reads on every `suggestions` nudge, refused (like every
+   * route here) for anybody without the webmaster's bit or a fresh second factor, which the
+   * badge renders as no pill at all.
+   */
+  @Get('badge')
+  async badge(@User() caller: CurrentUser | undefined) {
+    this.#me(caller);
+    return this.suggestions.inboxBadge();
   }
 
   /** One click: a Feature Requests thread, credited to the sender, who is told personally. */

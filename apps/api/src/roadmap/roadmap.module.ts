@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AuthModule } from '../auth/auth.module.js';
 import { DatabaseModule } from '../database.module.js';
 import { RoadmapController, RoadmapManageController } from './roadmap.controller.js';
 import { RoadmapService } from './roadmap.service.js';
@@ -7,14 +8,16 @@ import { RoadmapService } from './roadmap.service.js';
  * The roadmap: two doors onto one service.
  *
  *   RoadmapController        the reading side — every signed-in member, at /roadmap.
- *   RoadmapManageController  the kanban, behind SITE_CONFIG.
+ *   RoadmapManageController  the kanban, behind SITE_CONFIG and the second factor.
  *
  * No forum import: promotion READS a thread (through the caller's bound client, which the
  * @Global authz module provides) rather than creating one — the thread already exists, made by
- * the suggestion publish flow. Creating threads stays ThreadService's monopoly.
+ * the suggestion publish flow. Creating threads stays ThreadService's monopoly. AuthModule is
+ * here for TotpService, which the manage controller's AdminGateGuard resolves — the same
+ * import the admin module carries for the same reason.
  */
 @Module({
-  imports: [DatabaseModule],
+  imports: [DatabaseModule, AuthModule],
   controllers: [RoadmapController, RoadmapManageController],
   providers: [RoadmapService],
 })

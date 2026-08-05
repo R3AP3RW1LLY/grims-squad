@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
+  FEATURE_REQUESTS_NAME,
+  FEATURE_REQUESTS_SLUG,
   SUGGESTION_MAX_CHARS,
   cleanSuggestionBody,
+  featureRequestsWhere,
+  isFeatureRequestsBoard,
   openingPostFor,
   reviewProblem,
   titleFrom,
@@ -82,5 +86,36 @@ describe('what a published suggestion becomes', () => {
     // Every line of the member's words rides as a quote, so the webmaster's mechanical
     // authorship of the thread never reads as authorship of the idea.
     expect(post).toContain('> It burns at night.');
+  });
+});
+
+describe('one board resolution, two forms', () => {
+  /*
+   * Publish finds the board by QUERY (`featureRequestsWhere`); the promote panel and the
+   * roadmap test a row already in hand (`isFeatureRequestsBoard`). Both must mean the same
+   * thing, or the panel and the publish flow drift apart — which is exactly how the panel
+   * once ended up comparing a URL literal.
+   */
+  it('MANDATORY: the predicate accepts the board by slug or by name, case-insensitively', () => {
+    expect(isFeatureRequestsBoard({ slug: 'feature-requests', name: 'Feature Requests' })).toBe(true);
+    expect(isFeatureRequestsBoard({ slug: 'Feature-Requests', name: 'Renamed' })).toBe(true);
+    expect(isFeatureRequestsBoard({ slug: 'asks', name: 'FEATURE REQUESTS' })).toBe(true);
+    expect(isFeatureRequestsBoard({ slug: 'general', name: 'General' })).toBe(false);
+  });
+
+  it('MANDATORY: the query form asks the database the SAME question', () => {
+    /*
+     * Asserted structurally: both clauses are case-insensitive equals on the same two
+     * constants the predicate reads. A change to one form that forgets the other fails here.
+     */
+    expect(featureRequestsWhere()).toEqual({
+      OR: [
+        { slug: { equals: FEATURE_REQUESTS_SLUG, mode: 'insensitive' } },
+        { name: { equals: FEATURE_REQUESTS_NAME, mode: 'insensitive' } },
+      ],
+    });
+    // And the predicate is built from those same constants.
+    expect(isFeatureRequestsBoard({ slug: FEATURE_REQUESTS_SLUG, name: 'x' })).toBe(true);
+    expect(isFeatureRequestsBoard({ slug: 'x', name: FEATURE_REQUESTS_NAME })).toBe(true);
   });
 });

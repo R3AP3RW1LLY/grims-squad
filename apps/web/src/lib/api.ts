@@ -1044,7 +1044,14 @@ export interface HubCategory {
   slug: string;
   name: string;
   description: string | null;
+  /** Whether THIS member may start a thread here. False for everyone on a publish-only board. */
   canPost: boolean;
+  /**
+   * Whether THIS member may reply in existing threads here. Computed server-side from
+   * `reply_perm` (falling back to `post_perm`) — the split that lets members reply on Feature
+   * Requests while thread creation stays the webmaster's publish flow.
+   */
+  canReply: boolean;
   /** Threads with activity this member has not seen. Absent or 0 for an anonymous visitor. */
   unreadCount?: number;
 }
@@ -1322,14 +1329,19 @@ export const getRoadmapManageGated = (): Promise<
 > => getAdmin('/v1/roadmap/manage');
 
 /**
- * Whether a thread is already on the roadmap — the thread page's promote panel renders from
- * this. Null for everybody without the webmaster's bit, which is what keeps the panel
- * invisible to everyone else: the API refuses, `get()` collapses it, and no panel is drawn.
+ * The promote panel's answer for ANY thread — asked unconditionally on thread pages, because
+ * the SERVER resolves whether this thread belongs to the Feature Requests board (the same
+ * slug-or-name, case-insensitive test publish uses), not the URL. Null for everybody without
+ * the webmaster's bit or a fresh step-up, which is what keeps the panel invisible to everyone
+ * else: the API refuses, `get()` collapses it, and no panel is drawn.
  */
 export const getRoadmapThreadCard = (
   threadId: string,
-): Promise<{ card: { id: string; column: RoadmapCard['column'] } | null } | null> =>
-  get(`/v1/roadmap/manage/thread/${encodeURIComponent(threadId)}`, { authed: true });
+): Promise<{
+  /** True only when the thread's category IS the Feature Requests board. */
+  promotable: boolean;
+  card: { id: string; column: RoadmapCard['column'] } | null;
+} | null> => get(`/v1/roadmap/manage/thread/${encodeURIComponent(threadId)}`, { authed: true });
 
 /**
  * What GMSD AI has learned, per source.

@@ -41,6 +41,10 @@ function boundClient(
     name: string;
     viewPerm: bigint | null;
     postPerm: bigint | null;
+    /** NULL means "same as postPerm" — the reply gate's fallback, pinned below. */
+    replyPerm?: bigint | null;
+    /** Threads arrive only via the suggestion-box publish flow. Defaults false, pinned below. */
+    threadsViaPublish?: boolean;
     parentId?: string | null;
     isLocked?: boolean;
   }>,
@@ -68,6 +72,8 @@ function boundClient(
           position: 0,
           isLocked: r.isLocked ?? false,
           postPerm: dec(r.postPerm),
+          replyPerm: dec(r.replyPerm ?? null),
+          threadsViaPublish: r.threadsViaPublish ?? false,
           viewPerm: dec(r.viewPerm),
         })),
       /*
@@ -96,6 +102,8 @@ function boundClient(
               id: r.id,
               isLocked: r.isLocked ?? false,
               postPerm: dec(r.postPerm),
+              replyPerm: dec(r.replyPerm ?? null),
+              threadsViaPublish: r.threadsViaPublish ?? false,
               viewPerm: dec(r.viewPerm),
             };
       },
@@ -219,6 +227,81 @@ describe('CategoryService', () => {
     );
     const list = await svc.list(db as never, POST_MEMBER);
     expect(list[0]?.canPost).toBe(false);
+  });
+
+  describe('canReply — the reply gate, split from thread creation', () => {
+    /*
+     * The Feature Requests shape: members reply (reply_perm = FORUM_POST_MEMBER) while thread
+     * creation belongs to the publish flow (threads_via_publish), whose fallback publisher
+     * check is post_perm = SITE_CONFIG.
+     */
+    const FEATURE = {
+      id: 'fr',
+      slug: 'feature-requests',
+      name: 'Feature Requests',
+      viewPerm: null,
+      postPerm: Permission.SITE_CONFIG,
+      replyPerm: POST_MEMBER,
+      threadsViaPublish: true,
+    };
+
+    it('MANDATORY: a member may REPLY on the publish-only board but may not START a thread', async () => {
+      const db = boundClient([FEATURE], POST_MEMBER);
+      const list = await svc.list(db as never, POST_MEMBER);
+      expect(list[0]?.canReply).toBe(true);
+      expect(list[0]?.canPost).toBe(false);
+    });
+
+    it('MANDATORY: canPost is false on a publish-only board even for SITE_CONFIG — the webmaster included', async () => {
+      /*
+       * Squadron owner, 2026-08-04: "they must be published via the webmaster approval only!"
+       * A webmaster typing a thread onto the board would be a suggestion nobody sent, so the
+       * "New thread" button (which this boolean drives) exists for no one.
+       */
+      const db = boundClient([FEATURE], Permission.SITE_CONFIG);
+      const list = await svc.list(db as never, Permission.SITE_CONFIG);
+      expect(list[0]?.canPost).toBe(false);
+    });
+
+    it('MANDATORY: a NULL reply_perm means "same as post_perm" — Announcements stays read-only', async () => {
+      /*
+       * The pin the migration depends on: every board that never sets reply_perm behaves
+       * EXACTLY as before the column existed. Announcements (view: members, post: officers,
+       * reply_perm never set) still refuses a member's reply.
+       */
+      const ANNOUNCEMENTS = {
+        id: 'ann',
+        slug: 'announcements',
+        name: 'Announcements',
+        viewPerm: null,
+        postPerm: Permission.FORUM_POST_OFFICER,
+        replyPerm: null,
+      };
+      const db = boundClient([ANNOUNCEMENTS, ...TREE], POST_MEMBER);
+      const list = await svc.list(db as never, POST_MEMBER);
+      const announcements = list.find((c) => c.slug === 'announcements');
+      expect(announcements?.canReply).toBe(false);
+      expect(announcements?.canPost).toBe(false);
+      // And where the one mask allows posting, it allows replying — identical to before.
+      expect(list.find((c) => c.slug === 'general')?.canReply).toBe(true);
+    });
+
+    it('a board that never heard of the new columns behaves as it always has', async () => {
+      // Absent replyPerm/threadsViaPublish (older fakes, pre-migration rows mid-deploy) read
+      // as NULL/false: one mask, both acts.
+      const db = boundClient(TREE, POST_MEMBER);
+      const list = await svc.list(db as never, POST_MEMBER);
+      const general = list.find((c) => c.slug === 'general');
+      expect(general?.canPost).toBe(true);
+      expect(general?.canReply).toBe(true);
+    });
+
+    it('the raw reply mask never leaves the server either', async () => {
+      const db = boundClient([FEATURE], POST_MEMBER);
+      const list = await svc.list(db as never, POST_MEMBER);
+      expect(JSON.stringify(list)).not.toContain('replyPerm');
+      expect(JSON.stringify(list)).not.toContain('threadsViaPublish');
+    });
   });
 
   it('MANDATORY: an invisible category is NOT FOUND, never forbidden', async () => {
@@ -376,6 +459,76 @@ describe('ThreadService', () => {
     await expect(
       svc.create(db as never, { categoryId: 'off', title: 'Sneaking in', body: 'The opening post.' }, 'a', POST_MEMBER),
     ).rejects.toMatchObject({ code: ErrorCode.RESOURCE_NOT_VISIBLE });
+  });
+
+  describe('a publish-only board — threads arrive via the suggestion box, never the composer', () => {
+    /*
+     * Squadron owner, 2026-08-04: "dont allow anyone to start a new thread in the Feature
+     * requests category! they must be published via the webmaster approval only!"
+     */
+    const PUBLISH_ONLY = [
+      {
+        id: 'fr',
+        slug: 'feature-requests',
+        name: 'Feature Requests',
+        viewPerm: null,
+        postPerm: Permission.SITE_CONFIG,
+        replyPerm: POST_MEMBER,
+        threadsViaPublish: true,
+      },
+    ];
+    const INPUT = { categoryId: 'fr', title: 'Typed straight in', body: 'The opening post.' };
+
+    it('MANDATORY: the normal door refuses even a SITE_CONFIG holder — the webmaster included', async () => {
+      const db = boundClient(PUBLISH_ONLY, Permission.SITE_CONFIG);
+      await expect(
+        svc.create(db as never, INPUT, 'webmaster-1', Permission.SITE_CONFIG),
+      ).rejects.toMatchObject({ code: ErrorCode.PERMISSION_DENIED });
+      expect(db.threads).toHaveLength(0);
+    });
+
+    it('and refuses a member, with the sentence that says where threads come from', async () => {
+      const db = boundClient(PUBLISH_ONLY, POST_MEMBER);
+      const problem = await svc
+        .create(db as never, INPUT, 'member-1', POST_MEMBER)
+        .catch((e: Error) => e.message);
+      expect(problem).toContain('suggestion box');
+    });
+
+    it('MANDATORY: createViaPublish — the publish flow\'s door — succeeds where create refuses', async () => {
+      /*
+       * The single sanctioned exception, used only by SuggestionsService.publish. Everything
+       * else about the thread is identical — same mask check against post_perm included, so
+       * the webmaster still needs the publisher's bit.
+       */
+      const db = boundClient(PUBLISH_ONLY, Permission.SITE_CONFIG);
+      await expect(
+        svc.createViaPublish(db as never, INPUT, 'webmaster-1', Permission.SITE_CONFIG),
+      ).resolves.toMatchObject({ id: 'new-thread' });
+      expect(db.threads).toHaveLength(1);
+    });
+
+    it('createViaPublish still refuses a caller without the board\'s post permission', async () => {
+      // "The webmaster cannot post there" must surface as the same refusal a browser gets —
+      // the exception opens the composer door, never the permission one.
+      const db = boundClient(PUBLISH_ONLY, POST_MEMBER);
+      await expect(
+        svc.createViaPublish(db as never, INPUT, 'member-1', POST_MEMBER),
+      ).rejects.toMatchObject({ code: ErrorCode.PERMISSION_DENIED });
+    });
+
+    it('MANDATORY: a board without the flag takes composer threads exactly as before', async () => {
+      // The default-false pin: nothing changes anywhere the migration did not touch.
+      const db = boundClient(TREE, POST_MEMBER);
+      await expect(
+        svc.create(
+          db as never,
+          { categoryId: 'pub', title: 'Ordinary thread', body: 'The opening post.' },
+          'member-1',
+          POST_MEMBER,
+        ),
+      ).resolves.toMatchObject({ id: 'new-thread' });
+    });
   });
 
   describe('move', () => {

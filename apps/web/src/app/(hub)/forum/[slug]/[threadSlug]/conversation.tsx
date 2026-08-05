@@ -40,7 +40,7 @@ export function Conversation({
   viewerTz,
   threadId,
   locked,
-  canPost,
+  canReply,
   canMarkSolution,
   boardSlug,
   threadSlug,
@@ -52,7 +52,12 @@ export function Conversation({
   readonly viewerTz: string;
   readonly threadId: string;
   readonly locked: boolean;
-  readonly canPost: boolean;
+  /**
+   * Whether this caller may REPLY here — the server's `canReply`, which follows the
+   * category's `reply_perm` and falls back to `post_perm`. Distinct from starting a thread:
+   * on Feature Requests members reply and vote while creation stays the publish flow's.
+   */
+  readonly canReply: boolean;
   /** Whether this caller may mark the answer. Server-decided; re-checked on write. */
   readonly canMarkSolution: boolean;
   readonly boardSlug: string;
@@ -130,7 +135,7 @@ export function Conversation({
             viewerTz={viewerTz}
             boardSlug={boardSlug}
             threadSlug={threadSlug}
-            canPost={canPost && !locked}
+            canReply={canReply && !locked}
             canMarkSolution={canMarkSolution}
             onReply={setReplyTo}
             onQuote={quote}
@@ -157,7 +162,7 @@ export function Conversation({
             viewerTz={viewerTz}
             boardSlug={boardSlug}
             threadSlug={threadSlug}
-            canPost={canPost && !locked}
+            canReply={canReply && !locked}
             canMarkSolution={canMarkSolution && i > 0}
             onReply={setReplyTo}
             onQuote={quote}
@@ -176,7 +181,7 @@ export function Conversation({
       <ReplyComposer
         threadId={threadId}
         locked={locked}
-        canPost={canPost}
+        canReply={canReply}
         replyTo={replyTo}
         onClearReplyTo={() => setReplyTo(null)}
         {...(insert === undefined ? {} : { insert })}
@@ -191,7 +196,7 @@ function PostCard({
   viewerTz,
   boardSlug,
   threadSlug,
-  canPost,
+  canReply,
   canMarkSolution,
   onReply,
   onQuote,
@@ -206,7 +211,8 @@ function PostCard({
   readonly viewerTz: string;
   readonly boardSlug: string;
   readonly threadSlug: string;
-  readonly canPost: boolean;
+  /** Whether the reader may reply/interact here — the vote rail and reply buttons follow it. */
+  readonly canReply: boolean;
   readonly canMarkSolution: boolean;
   readonly onReply: (r: { postId: string; displayName: string }) => void;
   readonly onQuote: (p: HubPost) => void;
@@ -286,7 +292,7 @@ function PostCard({
     >
       <VoteRail
         post={post}
-        canVote={canPost}
+        canVote={canReply}
         solution={solution}
         canMarkSolution={canMarkSolution && !floated}
         onToggleSolution={() => void toggleSolution()}
@@ -403,7 +409,7 @@ function PostCard({
           </button>
         )}
 
-        {canPost && (
+        {canReply && (
           <span className="ml-auto flex gap-2">
             <button
               type="button"
