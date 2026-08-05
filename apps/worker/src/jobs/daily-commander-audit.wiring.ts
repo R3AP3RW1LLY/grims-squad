@@ -1,11 +1,5 @@
 import type { PrismaClient } from '@grims/db';
-import {
-  announceMemberVerified,
-  notifyMembers,
-  notifySquadron,
-  upsertCmdrVerification,
-  TIER_INARA,
-} from '@grims/db';
+import { announceMemberVerified, notifyMembers, notifySquadron } from '@grims/db';
 import { notificationNudge } from '../lib/live-notify.js';
 import type { DiscordAdapter, InaraAdapter } from '@grims/ed-clients';
 import type { TokenCipher } from '@grims/shared/server';
@@ -14,7 +8,6 @@ import type {
   AuditStore,
   AuditSource,
   AuditableCommander,
-  NameOutcome,
   NicknameSetter,
 } from './daily-commander-audit.js';
 
@@ -134,90 +127,6 @@ export class PrismaAuditStore implements AuditStore {
     });
   }
 
-  /**
-   * Stores the commander name Inara now reports, and tells the member.
-   *
-   * ★ THE SAME TWO WRITES A MEMBER'S OWN RE-CHECK MAKES ★
-   *
-   * `InaraLinkService.refresh()` — the path a member takes when they press the button on their
-   * settings page — does exactly this: `recordSuccess` onto their link row, then the verification
-   * upsert. This is that pair, for the member who never presses anything. The verification half is
-   * literally the same function (`@grims/db`), so the two cannot drift on the part that matters.
-   *
-   * The link row's `cmdrName` is what the roster reads and what `verifiedNameFor` hands the
-   * nickname service. Writing only the verification would leave the member's own settings page
-   * showing the old name, which is the version of this bug that is hardest to believe.
-   */
-  async recordName(userId: string, cmdrName: string, at: Date): Promise<NameOutcome> {
-    try {
-      /*
-       * The verification FIRST, because it is the write that can be refused. If the new name
-       * belongs to another member the partial unique index says so here, and the link row is left
-       * holding the old name — which is the state we want when a rename cannot be completed.
-       */
-      await upsertCmdrVerification(this.db, userId, cmdrName, TIER_INARA);
-
-      /*
-       * `updateMany`, not `update`. A member can be verified without ever holding a key — an
-       * officer vouched for them — and this method is only ever called for somebody who HAS one,
-       * but a row that vanished between the sweep's read and this write is not worth throwing over.
-       *
-       * `verifiedAt` moves because Inara verified this name just now, and `lastError` clears for
-       * the same reason: the key plainly works.
-       */
-      await this.db.inaraLink.updateMany({
-        where: { userId },
-        data: { cmdrName, verifiedAt: at, lastCheckedAt: at, lastError: null },
-      });
-    } catch (cause) {
-      /*
-       * Almost always CMDR_ALREADY_CLAIMED: two members cannot both be one commander (INV-005).
-       *
-       * The message is not interpolated from `cause`. This runs unattended and its output is read
-       * by an officer, and an upstream string is not something to put in front of them verbatim —
-       * the reason is stated in our own words, at the level they can act on.
-       */
-      const code = (cause as { code?: string }).code;
-      return {
-        applied: false,
-        reason:
-          code === 'CMDR_ALREADY_CLAIMED'
-            ? `Another member is already verified as CMDR ${cmdrName}. An officer needs to look at this.`
-            : 'The new name could not be stored. Their previous name still stands.',
-      };
-    }
-
-    /*
-     * ★ THE MEMBER IS TOLD, ONCE ★
-     *
-     * Not a new notification kind for the sake of one: `verification.confirmed` already exists for
-     * "something about your commander changed and here is where to look", and this is the same
-     * family and the same destination. A separate kind would need its own icon, its own place in
-     * the panel, and would say the same thing.
-     *
-     * Nothing here may throw. The rename is DONE by this point — it is in two tables — and a bell
-     * that failed to ring must not report the rename as unapplied and have it attempted again
-     * tomorrow.
-     */
-    try {
-      await notifyMembers(
-        this.db,
-        [userId],
-        {
-          kind: 'verification.confirmed',
-          title: `Your commander name is now ${cmdrName}`,
-          body: 'Inara reports you renamed your commander, so the roster and your Discord nickname have been brought into line.',
-          link: '/settings/commander',
-        },
-        notificationNudge,
-      );
-    } catch {
-      // See above: the name is stored whether or not the bell rang.
-    }
-
-    return { applied: true, reason: null };
-  }
-
   async recordSquadron(
     userId: string,
     reported: string | null,
@@ -335,35 +244,9 @@ export class PrismaAuditStore implements AuditStore {
 export class AdapterAuditSource implements AuditSource {
   constructor(private readonly inara: InaraAdapter) {}
 
-  /**
-   * One request, both facts.
-   *
-   * ★ 'queue', AND IT IS THE WHOLE JOB ★
-   *
-   * `getOwnIdentity` defaults to the REQUEST-PATH wait — eight seconds, then give up — because its
-   * first caller was a member's settings page. The limiter spaces calls thirty seconds apart
-   * (INV-033), so this sweep, which asks about members one after another, was refused a slot for
-   * every member after the first and swallowed each refusal as "Inara did not answer". A hundred
-   * commanders, one of them actually checked, and a report that looked healthy.
-   *
-   * Nothing here waits on a person, so it waits for the slot. That is also the whole of this job's
-   * rate-limit handling and deliberately so: there is ONE limiter in the process, every Inara call
-   * goes through it, and a second notion of pacing living here would be a second thing to get
-   * wrong.
-   *
-   * ★ AND IT IS RESUMABLE BECAUSE IT WRITES AS IT GOES ★
-   *
-   * Each member's name, squadron and nickname are written before the next member is asked about.
-   * A run that dies at member sixty has genuinely finished sixty; the next run re-reads the stored
-   * names and finds nothing to do for them. There is no batch to lose.
-   */
-  async ownIdentity(
-    apiKey: string,
-  ): Promise<{ cmdrName: string; squadronName: string | null } | null> {
-    const identity = await this.inara.getOwnIdentity(apiKey, 'queue');
-    return identity === null
-      ? null
-      : { cmdrName: identity.cmdrName, squadronName: identity.squadronName };
+  async ownSquadron(apiKey: string): Promise<{ squadronName: string | null } | null> {
+    const identity = await this.inara.getOwnIdentity(apiKey);
+    return identity === null ? null : { squadronName: identity.squadronName };
   }
 
   /**

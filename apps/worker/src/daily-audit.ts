@@ -1,4 +1,4 @@
-import { PrismaClient, isRename } from '@grims/db';
+import { PrismaClient } from '@grims/db';
 import { DiscordAdapter, InaraAdapter, INARA_APP_NAME, INARA_APP_VERSION } from '@grims/ed-clients';
 import { composeNickname, expectedSquadronName, sameSquadron } from '@grims/shared';
 import { TokenCipher, createKeyring } from '@grims/shared/server';
@@ -100,12 +100,6 @@ async function audit(): Promise<number> {
       ),
       (reported) => sameSquadron(reported, expectedSquadronName()),
       composeNickname,
-      /*
-       * The SAME rule the verification transaction applies, imported rather than restated. A
-       * second definition of "is this a different commander name" that disagreed by a case fold
-       * would either rewrite every member nightly or never see a rename at all.
-       */
-      isRename,
     );
 
     console.error(JSON.stringify({ msg: 'daily commander audit complete', ...report }));
@@ -115,11 +109,6 @@ async function audit(): Promise<number> {
      * are real findings for an officer, and refused renames are ordinary facts
      * about a guild (the owner cannot be renamed by a bot) — neither is a
      * malfunction. Requests failing IS.
-     *
-     * `renameConflicts` and `namesUncheckable` are deliberately NOT in here either. The first
-     * needs an officer, not an operator, and is in the audit log where officers look; the second
-     * is the ordinary condition of every member who has not linked a key, so alerting on it would
-     * mean alerting every single night about nothing having gone wrong.
      */
     return report.unreachable > 0 ? 1 : 0;
   } finally {

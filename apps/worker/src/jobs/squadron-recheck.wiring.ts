@@ -95,16 +95,8 @@ export class PrismaSquadronRecheckStore implements SquadronRecheckStore {
 export class AdapterSquadronSource implements SquadronSource {
   constructor(private readonly inara: InaraAdapter) {}
 
-  /**
-   * 'queue' — this is a scheduled sweep and nobody is holding a connection open for it.
-   *
-   * The default is the eight-second request-path wait, which the limiter's thirty-second spacing
-   * (INV-033) means only the FIRST member of a pass can ever be served; everybody after them was
-   * refused a slot and counted unreachable. The member on the settings page is the one who cannot
-   * wait. This job can, and the people it checks are waiting on it either way.
-   */
   async ownSquadron(apiKey: string): Promise<{ squadronName: string | null } | null> {
-    const identity = await this.inara.getOwnIdentity(apiKey, 'queue');
+    const identity = await this.inara.getOwnIdentity(apiKey);
     return identity === null ? null : { squadronName: identity.squadronName };
   }
 
