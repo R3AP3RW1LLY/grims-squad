@@ -93,3 +93,18 @@ export async function announce(db: NotifyCapable, line: JobLogLine): Promise<voi
  * members and spending a request budget of two a minute. So it is written once, here.
  */
 export const COMMANDER_AUDIT_JOB = 'commanders';
+
+/**
+ * Where the Data Bounty board records how many project anchors it was built from.
+ *
+ * ★ IT LIVES HERE BECAUSE TWO PROCESSES HAVE TO AGREE ON IT ★
+ *
+ * The WORKER writes it when it rebuilds the board; the API reads it to decide which empty state
+ * the ops section shows — "nothing near our projects is stale" and "there are no projects to be
+ * near" are opposite claims, and the page made the first for both.
+ *
+ * Neither package depends on the other, so a string spelled in both would drift the first time
+ * somebody renamed it, and the reader would silently look up a row that no longer exists — which
+ * is the same silent-zero failure the anchor count exists to explain.
+ */
+export const BOUNTY_ANCHOR_COUNT_KEY = 'bounties.anchor_count';

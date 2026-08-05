@@ -38,7 +38,11 @@ interface Row {
 function fakeDb(rows: Row[]) {
   return {
     trainingImage: {
-      async findMany({ where, orderBy, take }: any) {
+      async findMany({ where, orderBy, take }: {
+        where: { state: string };
+        orderBy: { createdAt: 'asc' | 'desc' };
+        take?: number;
+      }) {
         const matched = rows
           .filter((r) => r.state === where.state)
           .sort((a, b) =>
@@ -59,10 +63,13 @@ function fakeDb(rows: Row[]) {
           user: { handle: 'cmdr', displayName: 'Cmdr', cmdrVerifications: [] },
         }));
       },
-      async count({ where }: any) {
+      async count({ where }: { where: { state: string } }) {
         return rows.filter((r) => r.state === where.state).length;
       },
-      async updateMany({ where, data }: any) {
+      async updateMany({ where, data }: {
+        where: { id: string; state?: string };
+        data: Partial<Row>;
+      }) {
         const hit = rows.filter(
           (r) => r.id === where.id && (where.state === undefined || r.state === where.state),
         );

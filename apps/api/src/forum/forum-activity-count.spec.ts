@@ -36,12 +36,12 @@ function fakeDb(identity: { discordId: string; userId: string } | null) {
   const db = {
     discordIdentity: { findFirst: async () => identity },
     memberActivityDay: {
-      upsert: async (args: any) => {
+      upsert: async (args: Omit<Upserted, 'table'>) => {
         writes.push({ table: 'day', ...args });
       },
     },
     memberActivityMonth: {
-      upsert: async (args: any) => {
+      upsert: async (args: Omit<Upserted, 'table'>) => {
         writes.push({ table: 'month', ...args });
       },
     },

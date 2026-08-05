@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { GlobalExceptionFilter } from './exception.filter.js';
-import { ErrorCode } from '@grims/shared';
+import { ErrorCode, type ErrorEnvelope } from '@grims/shared';
 import type { ArgumentsHost } from '@nestjs/common';
 
 /**
@@ -24,6 +24,11 @@ import type { ArgumentsHost } from '@nestjs/common';
  * something is broken and there is nothing you can do. The companion reads any failure as a
  * refusal, so the second reading is the one the member was shown.
  */
+
+/** Narrows a recorded body to the error envelope, so the assertions need no cast. */
+function envelopeOf(body: unknown): ErrorEnvelope {
+  return body as ErrorEnvelope;
+}
 
 /** A reply that records what the filter did to it. */
 function fakeReply(headers: Record<string, string | number> = {}) {
@@ -87,11 +92,11 @@ describe('a Fastify plugin rejection keeps its status', () => {
   it('a string Retry-After is read too, and a missing one is null rather than a guess', () => {
     const asString = fakeReply({ 'retry-after': '27' });
     new GlobalExceptionFilter().catch(rateLimitError(), hostFor(asString));
-    expect((asString.sent.body as any).error.retryAfterSeconds).toBe(27);
+    expect(envelopeOf(asString.sent.body).error.retryAfterSeconds).toBe(27);
 
     const absent = fakeReply();
     new GlobalExceptionFilter().catch(rateLimitError(), hostFor(absent));
-    expect((absent.sent.body as any).error.retryAfterSeconds).toBeNull();
+    expect(envelopeOf(absent.sent.body).error.retryAfterSeconds).toBeNull();
     // Still a 429 — the status is the part the client acts on.
     expect(absent.sent.status).toBe(429);
   });
