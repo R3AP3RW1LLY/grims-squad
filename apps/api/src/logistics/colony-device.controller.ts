@@ -766,6 +766,8 @@ export class ColonyDeviceController {
     body: {
       marketId?: string;
       commodities?: Array<{ commodity?: unknown; tonnes?: unknown }>;
+      totalTonnes?: unknown;
+      totalAt?: unknown;
     },
   ) {
     await this.#caller(
@@ -777,6 +779,13 @@ export class ColonyDeviceController {
     return this.carriers.journalSnapshot({
       marketId: (body.marketId ?? '').trim(),
       commodities: Array.isArray(body.commodities) ? body.commodities : [],
+      /*
+       * The game's own total, kept apart from the witnessed rows. Validated in the service, like
+       * everything else here — this controller's job is to name the door, not to decide what a
+       * tonnage is.
+       */
+      totalTonnes: typeof body.totalTonnes === 'number' ? body.totalTonnes : null,
+      totalAt: typeof body.totalAt === 'string' ? body.totalAt : null,
     });
   }
 

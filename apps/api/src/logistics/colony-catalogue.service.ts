@@ -90,7 +90,45 @@ export interface BuildTypeDetail extends BuildTypeRow {
  */
 const PRICE_BATCH = 8;
 
+/**
+ * How long a priced build stays good for.
+ *
+ * ★ THE SAME ANSWER, COMPUTED OVER AND OVER — MEASURED 2026-08-05 ★
+ *
+ * Members reported "The hub did not answer in time" from the companion app, and the hub was
+ * answering — in three to seven seconds. Every one of the slow requests was this: a project's
+ * priced shopping list, twenty market lookups against 18.8 million rows.
+ *
+ * Nothing about the query was wrong. The volume was. The companion polls a project page every
+ * sixty seconds, so five members watching one build is a hundred of those lookups a minute, all
+ * returning the same answer — market prices move on the EDDN relay's pace and the nightly rebuild,
+ * not between two polls a minute apart.
+ *
+ * Sixty seconds is deliberately the app's own cadence: a member who refreshes gets fresh work at
+ * most once per poll, and every other reader of the same build rides on it. It cannot serve
+ * anything a member would call stale, because a minute ago is where the previous poll already was.
+ *
+ * ★ WHY NOT MAKE THE QUERY FASTER INSTEAD ★
+ *
+ * Because it is already right. `market.store.ts` carries a measurement showing that removing its
+ * second sort key takes it from 202 ms to THIRTY-SIX SECONDS — the ordering is load-bearing and
+ * the obvious optimisations are the trap. Recomputing less is the honest lever.
+ */
+const PRICED_TTL_MS = 60_000;
+
+/** Bounded so a long-lived process cannot accumulate one entry per (build, origin) for ever. */
+const PRICED_MAX_ENTRIES = 200;
+
 export class ColonyCatalogueService {
+  /*
+   * Keyed on the build AND the origin, because "cheapest near me" is a different answer for every
+   * member — caching on the build alone would hand somebody in Sol a price from somebody else's
+   * corner of the bubble, which is precisely the number this page must never invent.
+   *
+   * In-process, not Redis: it is worth exactly one minute, it costs nothing to lose on a deploy,
+   * and a second store to keep correct would be more moving parts than the problem deserves.
+   */
+  readonly #priced = new Map<string, { at: number; value: BuildTypeDetail | null }>();
   constructor(
     private readonly db: PrismaClient,
     private readonly market: MarketStore,
@@ -134,6 +172,34 @@ export class ColonyCatalogueService {
    * would be a number nobody can act on, and worse, would look like a real quote.
    */
   async byId(id: string, near: { x: number; y: number; z: number } | null): Promise<BuildTypeDetail | null> {
+    /*
+     * Rounded to whole light years. A member drifting in supercruise moves a few hundred metres
+     * between polls, and keying on raw coordinates would miss the cache every single time while
+     * looking like it was working — the worst kind of cache, which costs memory and saves nothing.
+     */
+    const key =
+      near === null
+        ? `${id}|nowhere`
+        : `${id}|${Math.round(near.x)},${Math.round(near.y)},${Math.round(near.z)}`;
+
+    const hit = this.#priced.get(key);
+    if (hit !== undefined && Date.now() - hit.at < PRICED_TTL_MS) return hit.value;
+
+    const value = await this.#priceById(id, near);
+
+    // Oldest out first, so the map cannot grow without bound on a process that runs for weeks.
+    if (this.#priced.size >= PRICED_MAX_ENTRIES) {
+      const oldest = this.#priced.keys().next();
+      if (!oldest.done) this.#priced.delete(oldest.value);
+    }
+    this.#priced.set(key, { at: Date.now(), value });
+    return value;
+  }
+
+  async #priceById(
+    id: string,
+    near: { x: number; y: number; z: number } | null,
+  ): Promise<BuildTypeDetail | null> {
     const [head] = await this.db.$queryRawUnsafe<
       Array<Omit<CatalogueRowRecord, 'commodities'> & { layouts: string[] }>
     >(

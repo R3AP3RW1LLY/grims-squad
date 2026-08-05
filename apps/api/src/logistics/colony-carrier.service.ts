@@ -73,6 +73,21 @@ export interface AttachedCarrier {
   readonly holds: readonly CarrierHold[];
   /** Everything it holds of what this build wants, added up. */
   readonly totalTonnes: number;
+  /**
+   * The game's own tonnage aboard the WHOLE carrier, from `CarrierStats`.
+   *
+   * ★ NOT THE SAME NUMBER AS `totalTonnes`, AND THE DIFFERENCE IS THE POINT ★
+   *
+   * `totalTonnes` is what we have SEEN of what this build wants. This is everything aboard,
+   * whether we have witnessed it or not and whether the build wants it or not. The gap between
+   * them is the honest measure of how much of the hold nobody has watched — which is what turns
+   * "one commodity" from a manifest into a sample.
+   *
+   * Null until the owner has opened carrier management at least once with the app running.
+   */
+  readonly wholeHoldTonnes: number | null;
+  /** When the game reported that figure. A stale total still beats none, and this says how stale. */
+  readonly wholeHoldAt: Date | null;
   /** Journal-watched and hand-declared cargo, alongside the mirror's sell orders above. */
   readonly declared: readonly DeclaredCargo[];
 }
@@ -508,6 +523,23 @@ export class ColonyCarrierService {
 
     const ids = carriers.map((c) => String(c['market_id']));
 
+    /*
+     * The whole-hold figures, read by market id — one row per carrier, not per berth and not per
+     * project, so no collapsing is needed here the way the mirror's keys need it.
+     */
+    const wholeHoldRows = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
+      `SELECT market_id::text AS market_id, total_tonnes, observed_at
+         FROM colony_carrier_hold
+        WHERE market_id = ANY($1::bigint[])`,
+      ids,
+    );
+    const wholeHold = new Map(
+      wholeHoldRows.map((r) => [
+        String(r['market_id']),
+        { tonnes: Number(r['total_tonnes']), at: (r['observed_at'] as Date | null) ?? null },
+      ]),
+    );
+
     const [holds, declared] = await Promise.all([
       this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
         /*
@@ -602,6 +634,8 @@ export class ColonyCarrierService {
           seenAt: (h['market_seen_at'] as Date | null) ?? null,
         })),
         totalTonnes: mine.reduce((sum, h) => sum + Number(h['supply']), 0),
+        wholeHoldTonnes: wholeHold.get(marketId)?.tonnes ?? null,
+        wholeHoldAt: wholeHold.get(marketId)?.at ?? null,
         declared: declaredByCarrier.get(marketId) ?? [],
       };
     });
@@ -706,6 +740,10 @@ export class ColonyCarrierService {
   async journalSnapshot(input: {
     marketId: string;
     commodities: ReadonlyArray<{ commodity?: unknown; tonnes?: unknown }>;
+    /** The game's own total tonnage aboard, from `CarrierStats`. Null when never read. */
+    totalTonnes?: number | null;
+    /** The journal timestamp of that reading. */
+    totalAt?: string | null;
   }): Promise<{ stored: boolean }> {
     if (!/^\d+$/.test(input.marketId)) return { stored: false };
 
@@ -717,7 +755,20 @@ export class ColonyCarrierService {
       }))
       .filter((c) => c.commodity !== '' && Number.isFinite(c.tonnes) && c.tonnes >= 0)
       .map((c) => ({ commodity: c.commodity, tonnes: Math.trunc(c.tonnes) }));
-    if (rows.length === 0) return { stored: false };
+    /*
+     * ★ A TOTAL WITH NO WITNESSED ROWS IS STILL WORTH STORING ★
+     *
+     * This returned early on an empty commodity list, which is right for the list and wrong for
+     * the total: a member who opens carrier management on a hold the app has never watched load
+     * has the single most useful reading there is, and it was being dropped on the floor.
+     */
+    const total =
+      typeof input.totalTonnes === 'number' &&
+      Number.isFinite(input.totalTonnes) &&
+      input.totalTonnes >= 0
+        ? Math.trunc(input.totalTonnes)
+        : null;
+    if (rows.length === 0 && total === null) return { stored: false };
 
     const [attached] = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
       `SELECT 1 AS yes FROM colony_carriers WHERE market_id = $1::bigint LIMIT 1`,
@@ -734,6 +785,41 @@ export class ColonyCarrierService {
         input.marketId,
         row.commodity,
         row.tonnes,
+      );
+    }
+
+    /*
+     * ★ THE WHOLE-HOLD FIGURE, BESIDE THE WITNESSED ROWS RATHER THAN AMONG THEM ★
+     *
+     * Squadron owner, 2026-08-05: the carrier hold needed to be "way more accurate". The rows above
+     * are a WITNESS — what this app watched move — and in production that was one commodity,
+     * presented as though it were the manifest. This is the game's own total, so a page can state
+     * the gap instead of implying there is none.
+     *
+     * `observed_at` is the JOURNAL's timestamp, not now: a pass may be replaying a file written
+     * hours ago, and stamping the present would dress an old reading as a fresh one.
+     *
+     * Guarded on the timestamp so an older reading cannot overwrite a newer one — passes can
+     * arrive out of order after a restart, and a carrier's hold going backwards in time on screen
+     * is worse than one figure late.
+     */
+    if (total !== null) {
+      const observed = input.totalAt === null || input.totalAt === undefined
+        ? new Date()
+        : new Date(input.totalAt);
+      const at = Number.isNaN(observed.getTime()) ? new Date() : observed;
+
+      await this.db.$executeRawUnsafe(
+        `INSERT INTO colony_carrier_hold (market_id, total_tonnes, observed_at, updated_at)
+         VALUES ($1::bigint, $2::int, $3::timestamptz, now())
+         ON CONFLICT (market_id) DO UPDATE SET
+           total_tonnes = EXCLUDED.total_tonnes,
+           observed_at  = EXCLUDED.observed_at,
+           updated_at   = now()
+         WHERE colony_carrier_hold.observed_at <= EXCLUDED.observed_at`,
+        input.marketId,
+        total,
+        at.toISOString(),
       );
     }
 

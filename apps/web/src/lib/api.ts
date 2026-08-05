@@ -2307,6 +2307,17 @@ export interface AttachedCarrier {
   seenAt: string | null;
   holds: CarrierHold[];
   totalTonnes: number;
+  /**
+   * The game's own tonnage aboard the WHOLE carrier, from `CarrierStats`.
+   *
+   * Not the same number as `totalTonnes`, and the difference is the point: that one is what we
+   * have seen of what this build wants, this one is everything aboard. The gap is how much of the
+   * hold nobody has watched — which is what turns a short list from a manifest into a sample.
+   *
+   * Null until the owner has opened carrier management at least once with the app running.
+   */
+  wholeHoldTonnes: number | null;
+  wholeHoldAt: string | null;
   /** Journal-watched and hand-declared cargo, alongside the mirror's sell orders in `holds`. */
   declared: DeclaredCargo[];
 }
