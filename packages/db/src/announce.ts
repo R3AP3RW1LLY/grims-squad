@@ -43,7 +43,7 @@ export interface AnnouncementForum {
 
 export interface AnnouncementInput {
   /** Decides which channel env the bot posts to (see apps/bot/src/announcements.ts). */
-  readonly kind: 'deploy' | 'promotion' | 'member-verified' | 'colony-project';
+  readonly kind: 'deploy' | 'promotion' | 'member-verified' | 'colony-project' | 'app-release';
   /** Final Discord markdown. Mentions already interpolated as `<@id>` tokens. */
   readonly content: string;
   /** Present = a forum carbon-copy is wanted. Verifications deliberately omit it. */
@@ -423,6 +423,100 @@ export async function announceColonyProject(
     });
   } catch {
     // The project exists. The announcement must not un-create it.
+    return false;
+  }
+}
+
+
+/* ────────────────────────────────────── companion app releases ── */
+
+/**
+ * Where the last announced companion version is remembered.
+ *
+ * A `site_config` row rather than a column, for the same reason the bounty anchor count is one: it
+ * describes the SQUADRON's state, not any single record, and it has to survive a container that is
+ * replaced on every deploy.
+ */
+export const COMPANION_ANNOUNCED_KEY = 'companion.announced_version';
+
+/**
+ * The companion release announcement — the owner's approved wording.
+ *
+ * ★ SQUADRON OWNER, 2026-08-05 ★
+ *
+ * "we need to make an announcement too everytime the companion app is updated please! same channel
+ * as the web announcements, provide a link to manually download and update the app if they want
+ * too please!"
+ *
+ * ★ WHY IT SAYS THEY DO NOT HAVE TO DO ANYTHING ★
+ *
+ * The app updates itself — hourly check, silent download, and since 0.5.1 it installs on its own
+ * after a sixty-second warning rather than waiting for the game to close. An announcement that
+ * opened with a download link would read as an instruction, and members would start doing by hand
+ * something that has already happened. So the automatic path is stated first and the link is
+ * offered second, for the cases that genuinely need it: a machine that has been off for a while,
+ * an install that was never paired, or somebody who would simply rather do it themselves.
+ */
+export function appReleaseContent(version: string, siteUrl: string): string {
+  const base = siteUrl.replace(/\/+$/, '');
+  return [
+    `🛰️ **The companion app updated — v${version}**`,
+    '',
+    'Your app installs this on its own, usually within the hour. You do not need to do anything.',
+    '',
+    `If you would rather do it now, or your app has been closed for a while: ${base}/companion`,
+    '',
+    `What changed: ${base}/changelog`,
+  ].join('\n');
+}
+
+/**
+ * Announces a companion release, exactly once per version.
+ *
+ * ★ TRIGGERED BY THE APP'S OWN POLL, NOT BY A SCHEDULER ★
+ *
+ * Every paired app asks the hub for its settings every five minutes, and that call already computes
+ * the newest published version from the release bucket. So the moment a release lands, the next
+ * poll notices — no cron entry to install, no CI secret to keep, and no second place that has to
+ * agree about which build is current.
+ *
+ * ★ EXACTLY ONCE, ACROSS EVERY CALLER ★
+ *
+ * Dozens of apps poll, and they all see the new version at the same time. The guard is the INSERT
+ * itself: `site_config` is written with `WHERE` the stored value still differs, so the first writer
+ * wins and every other caller updates nothing and announces nothing. A read-then-write would race
+ * and post the same release a dozen times.
+ *
+ * Never throws. The release is published whatever this manages — see the module header.
+ */
+export async function announceCompanionRelease(
+  db: PrismaClient,
+  version: string | null,
+  siteUrl: string,
+): Promise<boolean> {
+  if (version === null || version.trim() === '' || siteUrl.trim() === '') return false;
+
+  try {
+    /*
+     * Claim the version first. `ON CONFLICT ... WHERE` makes this the whole mutual exclusion: it
+     * updates only when the stored value differs, and reports how many rows it touched. Zero means
+     * somebody else already claimed this version — including the very first run, where the row is
+     * inserted and the announcement follows.
+     */
+    const claimed = await db.$executeRaw`
+      INSERT INTO site_config (key, value)
+      VALUES (${COMPANION_ANNOUNCED_KEY}, ${version})
+      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+       WHERE site_config.value IS DISTINCT FROM EXCLUDED.value`;
+
+    if (claimed === 0) return false;
+
+    return await announce(db, {
+      kind: 'app-release',
+      content: appReleaseContent(version, siteUrl),
+    });
+  } catch {
+    // The release is out. Failing to say so must not be worse than that.
     return false;
   }
 }

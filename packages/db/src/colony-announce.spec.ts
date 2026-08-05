@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { colonyProjectContent, type ColonyProjectAnnouncement } from './announce.js';
+import {
+  appReleaseContent,
+  colonyProjectContent,
+  type ColonyProjectAnnouncement,
+} from './announce.js';
 
 /**
  * The squadron colonisation announcement, in the wording the owner approved.
@@ -144,5 +148,52 @@ describe('a member who has not linked Discord', () => {
     );
     expect(content).toContain('Started by **Vixie**');
     expect(content).not.toContain('<@');
+  });
+});
+
+/**
+ * The companion release announcement.
+ *
+ * ★ SQUADRON OWNER, 2026-08-05 ★
+ *
+ * "we need to make an announcement too everytime the companion app is updated please! same channel
+ * as the web announcements, provide a link to manually download and update the app if they want
+ * too please!"
+ *
+ * The order of the sentences is the whole design. The app updates itself, so leading with a
+ * download link would read as an instruction and members would start doing by hand something that
+ * has already happened. The automatic path is stated first; the link is offered second, for a
+ * machine that has been off, an install that was never paired, or somebody who would rather.
+ */
+describe('a companion release announcement', () => {
+  const SITE = 'https://grims-squad.com';
+
+  it('MANDATORY: names the version', () => {
+    expect(appReleaseContent('0.5.1', SITE)).toContain('v0.5.1');
+  });
+
+  it('MANDATORY: carries the manual download link the owner asked for', () => {
+    expect(appReleaseContent('0.5.1', SITE)).toContain('https://grims-squad.com/companion');
+  });
+
+  it('MANDATORY: says they do not have to do anything, BEFORE offering the link', () => {
+    /*
+     * A link presented first is an instruction. The app installs this on its own — telling them so
+     * first is what stops a hundred people downloading an installer they did not need.
+     */
+    const content = appReleaseContent('0.5.1', SITE);
+    const reassurance = content.indexOf('do not need to do anything');
+    const link = content.indexOf('/companion');
+
+    expect(reassurance).toBeGreaterThan(-1);
+    expect(reassurance).toBeLessThan(link);
+  });
+
+  it('links the changelog, so "what changed" has an answer', () => {
+    expect(appReleaseContent('0.5.1', SITE)).toContain('https://grims-squad.com/changelog');
+  });
+
+  it('a trailing slash does not double up', () => {
+    expect(appReleaseContent('0.5.1', 'https://grims-squad.com/')).not.toContain('.com//');
   });
 });
