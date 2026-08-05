@@ -354,6 +354,27 @@ const NAV: readonly NavDefinition[] = [
    * placing it above the roster or the ops board would cost them attention
    * they earn every day.
    */
+  /*
+   * ★ THE ROADMAP — EVERY MEMBER, NO GATE ★
+   *
+   * The changelog's forward-looking sibling, and gated identically (`requires: null`) for the
+   * same reason: the board describes what is being built for the platform the whole squadron
+   * shares, and it exists to be READ by the people whose votes feed it — a suggestion published
+   * to Feature Requests is voted on by members, and this is where those votes are seen to land.
+   * The board's MANAGEMENT is a SITE_CONFIG-gated tab on the admin console; this entry is the
+   * read-only window.
+   *
+   * Directly above the changelog, deliberately: "what is coming" reads best beside "what
+   * changed", and both are reference rather than daily destinations, so they sit at the end of
+   * the section where they cost the roster and the ops board nothing.
+   */
+  {
+    href: '/roadmap',
+    label: 'Roadmap',
+    section: 'squadron',
+    blurb: 'What is being built for the platform — from members’ ideas, through your votes, to shipped.',
+    requires: null,
+  },
   {
     href: '/changelog',
     label: 'Changelog',

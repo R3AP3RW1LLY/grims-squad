@@ -121,11 +121,12 @@ import { VoteService } from './vote.service.js';
     },
   ],
   /*
-   * ★ ThreadService IS EXPORTED FOR EXACTLY ONE CONSUMER ★
+   * ★ ThreadService IS EXPORTED FOR EXACTLY TWO CONSUMERS ★
    *
-   * The announcements module's forum carbon-copy poller creates threads through THIS instance —
-   * sanitiser, screening, ACL and all — because a carbon-copy written by any other path would be
-   * a second thread-creation code route, and the second one is the one that skips a rule. Every
+   * The announcements module's forum carbon-copy poller, and the suggestion box's publish flow.
+   * Both create threads through THIS instance — sanitiser, screening, ACL and all — because a
+   * thread written by any other path would be a second thread-creation code route, and the
+   * second one is the one that skips a rule. Every
    * method still demands an AclBoundClient, so the export widens who may call, never what a call
    * may do.
    */

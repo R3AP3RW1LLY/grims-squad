@@ -6,11 +6,13 @@ import {
   getHubThreads,
   getThreadGrants,
   getMe,
+  getRoadmapThreadCard,
   getThreadSubscription,
   getDmPreferences,
 } from '../../../../../lib/api';
 import { formatLocal } from '../../../../../lib/time';
 import { ThreadAccess } from './thread-access';
+import { PromoteToBoard } from './promote-to-board';
 import { Conversation } from './conversation';
 import { NotifyMe } from './notify-me';
 import { ImageUploader } from '../../../../../components/image-uploader';
@@ -107,6 +109,14 @@ export default async function ThreadPage({
     getDmPreferences(),
   ]);
 
+  /*
+   * "Promote to board", fetched-not-inferred like the access panel above: the API answers only
+   * a SITE_CONFIG holder, so `null` here means no panel and no reasoning about masks in the
+   * browser. Asked only on the Feature Requests board — the button exists to move a VOTED-ON
+   * ask onto the roadmap, so on every other board there is nothing to ask.
+   */
+  const roadmap = slug === 'feature-requests' ? await getRoadmapThreadCard(thread.id) : null;
+
   return (
     <>
       {/*
@@ -159,6 +169,12 @@ export default async function ThreadPage({
             {access !== null && (
               <Panel title="Who can read this">
                 <ThreadAccess threadId={thread.id} initialGrants={access.grants} />
+              </Panel>
+            )}
+
+            {roadmap !== null && (
+              <Panel title="Roadmap">
+                <PromoteToBoard threadId={thread.id} initialCard={roadmap.card} />
               </Panel>
             )}
 

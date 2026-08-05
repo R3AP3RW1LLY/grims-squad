@@ -158,7 +158,14 @@ export function slugify(title: string): string {
     .replace(/[̀-ͯ]/g, '')
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
-    .slice(0, 48);
+    .slice(0, 48)
+    /*
+     * Stripped AGAIN after the slice, and the second strip is load-bearing: when the 48-char
+     * cut lands exactly on a word boundary the slice ends in '-', `${stem}-${tail}` then
+     * carries '--', and assertSlug refuses the thread. Found live by the suggestion box —
+     * the first publisher whose 100-character titles regularly meet the cut.
+     */
+    .replace(/-+$/, '');
 
   // A title of nothing but punctuation would produce an empty slug, and an empty
   // slug collides with every other empty slug in the category.

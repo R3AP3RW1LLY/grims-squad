@@ -537,6 +537,11 @@ model User {
   supportConversations SupportConversation[] @relation("SupportRequester")
   supportClosed        SupportConversation[] @relation("SupportCloser")
   supportMessages      SupportMessage[]      @relation("SupportAuthor")
+
+  /// The suggestion box. Ideas they sent, and ideas they reviewed as the webmaster — two
+  /// relations because sending and judging are different acts done by different people.
+  suggestions          Suggestion[]          @relation("SuggestionAuthor")
+  suggestionsReviewed  Suggestion[]          @relation("SuggestionReviewer")
 }
 
 /// 1:1 link to a Discord account. `guildRoles` is the input to the entire authorization model.
@@ -4553,4 +4558,104 @@ model SupportMessage {
   /// The transcript read, oldest first.
   @@index([conversationId, createdAt])
   @@map("support_messages")
+}
+
+/// ═══════════════ THE SUGGESTION BOX ═══════════════
+///
+/// The approved design, Wave 4 of Help & Support: "a suggestion box feature that sends the
+/// webmaster user submitted ideas and suggestions." Members only — a suggestion is credited to
+/// its sender by name when it is published, and credit needs an account; the widget invites a
+/// guest to sign in rather than accepting words it could never attribute.
+///
+/// The webmaster REVIEWS, then PUBLISHES: a new suggestion sits in a private inbox until one
+/// click turns it into a thread in the Feature Requests board — where the squadron votes on it —
+/// or declines it. Either way the sender is told personally.
+
+/// The whole review lifecycle. Exactly three states, and `new` has exactly two exits — publish
+/// and decline, both one-way. There is deliberately no edge back to `new`: a published thread
+/// cannot be unpublished from here (that is forum moderation's job), and un-declining would put
+/// words back in a queue their sender was already told about.
+enum SuggestionStatus {
+  new
+  published
+  declined
+}
+
+/// One idea from a member, on its way to the webmaster.
+model Suggestion {
+  id     String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Who sent it. NOT NULL, structurally: publishing credits the sender by display name, and a
+  /// suggestion nobody can be credited for is the thing the sign-in requirement exists to prevent.
+  userId String           @map("user_id") @db.Uuid
+  /// Plain text, capped at 2000 characters in the service — an idea, not an essay.
+  body   String
+  status SuggestionStatus @default(new)
+
+  /// The review stamp: when, and by whom. SetNull keeps the verdict when the reviewer's account
+  /// goes — the suggestion was still judged, whoever judged it.
+  reviewedAt   DateTime? @map("reviewed_at") @db.Timestamptz(6)
+  reviewedById String?   @map("reviewed_by_id") @db.Uuid
+
+  /// The Feature Requests thread this became, when it was published. A bare uuid rather than a
+  /// relation, the Announcement.forumThreadId precedent: the thread is a trace target, threads
+  /// are soft-deleted rather than removed, and an FK here would be a constraint on moderation.
+  publishedThreadId String? @map("published_thread_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user       User  @relation("SuggestionAuthor", fields: [userId], references: [id], onDelete: Cascade)
+  reviewedBy User? @relation("SuggestionReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  /// The webmaster's inbox: new suggestions, oldest first — a queue is worked in arrival order.
+  @@index([status, createdAt])
+  /// "Your suggestions", for the widget's own list.
+  @@index([userId, createdAt])
+  @@map("suggestions")
+}
+
+/// ═══════════════ THE ROADMAP ═══════════════
+///
+/// Wave 5: the webmaster's kanban — Ideas, Considering, Planned, Building, Shipped — managed
+/// from the admin console and readable by every member at /roadmap. Cards promoted from Feature
+/// Requests threads carry `source_thread_id`, so the board links back to the vote that put them
+/// there.
+
+/// The five columns, in board order. An enum rather than free text so a typo cannot invent a
+/// sixth column that renders nowhere.
+enum RoadmapColumn {
+  ideas
+  considering
+  planned
+  building
+  shipped
+}
+
+/// One card on the roadmap board.
+model RoadmapCard {
+  id    String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Capped at 200 in the service — the same ceiling as a thread title, because promoted cards
+  /// take their title from one.
+  title String
+  body  String?
+
+  /// Which column, and where in it. `column` is a reserved word in SQL, so the database column
+  /// wears a name that never needs quoting in hand-written migrations.
+  column   RoadmapColumn @default(ideas) @map("board_column")
+  position Int           @default(0)
+
+  /// The Feature Requests thread this was promoted from. Unique because one thread is one item
+  /// of work — promoting it twice would put the same ask on the board in two columns. A bare
+  /// uuid rather than a relation, the Announcement.forumThreadId precedent (see Suggestion).
+  sourceThreadId String? @unique @map("source_thread_id") @db.Uuid
+
+  /// Archived cards leave every board view but keep their history. A soft mark rather than a
+  /// delete, because "we are not doing this after all" is itself a fact worth keeping.
+  archivedAt DateTime? @map("archived_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  /// The board read: one column's live cards, in order.
+  @@index([column, position])
+  @@map("roadmap_cards")
 }

@@ -61,9 +61,22 @@ const GUEST_IDLE_POLL_MS = 60_000;
 /** The client-side courtesy copy of the server's 4000 cap — the server is the control. */
 const MAX_CHARS = 4000;
 
+/** The suggestion box's courtesy copy of the server's 2000 cap — an idea, not an essay. */
+const SUGGESTION_MAX_CHARS = 2000;
+
 export function SupportWidget({ signedIn }: { signedIn: boolean }) {
   const [open, setOpen] = useState(false);
   const [unread, setUnread] = useState(false);
+  /*
+   * ★ TWO SURFACES IN ONE PANEL, NEVER MIXED ★
+   *
+   * The chat is a conversation; the suggestion box is a letter to the webmaster. Folding the
+   * second into the first's transcript would put ideas in front of the officers and questions
+   * in front of the webmaster — the owner routed them to different desks, so the panel keeps
+   * them on different views. The chat stays MOUNTED while the box is showing (hidden, not
+   * unmounted), so a guest's poll and a member's unread dot keep working behind it.
+   */
+  const [view, setView] = useState<'chat' | 'suggest'>('chat');
   const panelRef = useRef<HTMLDivElement | null>(null);
   const launcherRef = useRef<HTMLButtonElement | null>(null);
 
@@ -139,18 +152,234 @@ export function SupportWidget({ signedIn }: { signedIn: boolean }) {
             Help &amp; Support
           </p>
           <p className="mt-0.5 text-xs text-[var(--color-text-secondary)]">
-            GMSD AI answers first, from the help pages. The squadron&rsquo;s officers take over
-            whenever you ask.
+            {view === 'chat'
+              ? 'GMSD AI answers first, from the help pages. The squadron’s officers take over whenever you ask.'
+              : 'Ideas land in the webmaster’s inbox. Published ones become Feature Requests threads the squadron votes on — credited to you.'}
           </p>
+          <div className="mt-2 flex gap-1" role="tablist" aria-label="Help and suggestions">
+            {(
+              [
+                ['chat', 'Get help'],
+                ['suggest', 'Send a suggestion'],
+              ] as const
+            ).map(([key, label]) => (
+              <button
+                key={key}
+                type="button"
+                role="tab"
+                aria-selected={view === key}
+                onClick={() => setView(key)}
+                className={`rounded-[var(--radius-sm)] border px-2.5 py-1 text-[11px] transition-colors ${
+                  view === key
+                    ? 'border-[var(--color-border-active)] bg-[color-mix(in_srgb,var(--color-brand-orange)_12%,transparent)] text-[var(--color-text-primary)]'
+                    : 'border-[var(--color-border-hairline)] text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </header>
 
-        {signedIn ? (
-          <MemberChat open={open} requestedId={requestedId} onUnread={setUnread} />
-        ) : (
-          <GuestChat open={open} onUnread={setUnread} />
-        )}
+        {/* Hidden, not unmounted, while the suggestion box is showing — see the `view` note. */}
+        <div className={view === 'chat' ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
+          {signedIn ? (
+            <MemberChat open={open} requestedId={requestedId} onUnread={setUnread} />
+          ) : (
+            <GuestChat open={open} onUnread={setUnread} />
+          )}
+        </div>
+        {view === 'suggest' ? (
+          signedIn ? (
+            <SuggestionBox />
+          ) : (
+            <GuestSuggestInvite />
+          )
+        ) : null}
       </div>
     </>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The suggestion box — a letter to the webmaster, not a chat turn.
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface MySuggestion {
+  readonly id: string;
+  readonly body: string;
+  readonly status: 'new' | 'published' | 'declined';
+  readonly createdAt: string;
+  /** Where it went when it was published — null until then. */
+  readonly threadLink: string | null;
+}
+
+function SuggestionBox() {
+  const [body, setBody] = useState('');
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const [mine, setMine] = useState<readonly MySuggestion[] | null>(null);
+
+  const loadMine = useCallback(() => {
+    apiGet<{ suggestions: MySuggestion[] }>('/v1/suggestions/mine')
+      .then((r) => setMine(r.suggestions))
+      .catch(() => {
+        // The list is furniture; the form is the feature. It retries on the next send.
+      });
+  }, []);
+
+  useEffect(loadMine, [loadMine]);
+
+  const submit = (): void => {
+    setSending(true);
+    setProblem(null);
+    apiPost('/v1/suggestions', { body })
+      .then(() => {
+        setBody('');
+        setSent(true);
+        loadMine();
+      })
+      .catch((err: unknown) => {
+        setSent(false);
+        setProblem(err instanceof Error ? err.message : 'That could not be sent. Try again.');
+      })
+      .finally(() => setSending(false));
+  };
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <form
+        className="border-b border-[var(--color-border-hairline)] p-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (body.trim() !== '' && !sending) submit();
+        }}
+      >
+        <label className="flex flex-col gap-1">
+          <span className="text-xs font-medium text-[var(--color-text-secondary)]">
+            What should the site do?
+          </span>
+          <textarea
+            value={body}
+            onChange={(e) => {
+              setBody(e.currentTarget.value);
+              setSent(false);
+            }}
+            maxLength={SUGGESTION_MAX_CHARS}
+            rows={4}
+            className="w-full resize-none rounded-[var(--radius-sm)] border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel-sunken)] px-3 py-2 text-sm text-[var(--color-text-primary)] outline-none focus:border-[var(--color-border-focus)]"
+          />
+        </label>
+        {problem !== null ? (
+          <p role="alert" className="mt-2 text-xs text-[var(--color-semantic-hostile-bright)]">
+            {problem}
+          </p>
+        ) : null}
+        {sent ? (
+          <p role="status" className="mt-2 text-xs text-[var(--color-brand-cyan-bright)]">
+            Sent. It is in the webmaster&rsquo;s inbox — you hear back either way.
+          </p>
+        ) : null}
+        <button
+          type="submit"
+          disabled={sending || body.trim() === ''}
+          className="mt-3 w-full rounded-[var(--radius-sm)] border border-[var(--color-border-active)] bg-[color-mix(in_srgb,var(--color-brand-orange)_12%,transparent)] px-3 py-2 text-sm text-[var(--color-text-primary)] transition-colors hover:bg-[color-mix(in_srgb,var(--color-brand-orange)_20%,transparent)] disabled:opacity-50"
+        >
+          {sending ? 'Sending…' : 'Send it to the webmaster'}
+        </button>
+      </form>
+
+      <div className="min-h-0 flex-1 overflow-y-auto p-4">
+        <p className="text-[11px] font-medium tracking-wide text-[var(--color-text-secondary)] uppercase">
+          Your suggestions
+        </p>
+        {mine === null ? (
+          <p className="mt-2 text-xs text-[var(--color-text-secondary)]">Loading…</p>
+        ) : mine.length === 0 ? (
+          <p className="mt-2 text-xs text-[var(--color-text-secondary)]">
+            Nothing sent yet. The first one starts the list.
+          </p>
+        ) : (
+          <ul className="mt-2 space-y-3">
+            {mine.map((s) => (
+              <li key={s.id} className="rounded-[var(--radius-sm)] border border-[var(--color-border-hairline)] p-3">
+                <p className="text-xs whitespace-pre-wrap text-[var(--color-text-primary)]">{s.body}</p>
+                <p className="mt-1.5 flex items-center gap-2 text-[10px] text-[var(--color-text-secondary)]">
+                  <SuggestionStatusChip status={s.status} threadLink={s.threadLink} />
+                  <span>{notificationAge(s.createdAt)}</span>
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SuggestionStatusChip({
+  status,
+  threadLink,
+}: {
+  status: MySuggestion['status'];
+  threadLink: string | null;
+}) {
+  if (status === 'published' && threadLink !== null) {
+    return (
+      <a
+        href={threadLink}
+        className="rounded-[var(--radius-pill)] border border-[var(--color-brand-cyan)] px-2 py-0.5 tracking-wide text-[var(--color-brand-cyan-bright)] uppercase transition-colors hover:bg-[color-mix(in_srgb,var(--color-brand-cyan)_12%,transparent)]"
+      >
+        On the board — vote
+      </a>
+    );
+  }
+  if (status === 'published') {
+    return (
+      <span className="rounded-[var(--radius-pill)] border border-[var(--color-brand-cyan)] px-2 py-0.5 tracking-wide text-[var(--color-brand-cyan-bright)] uppercase">
+        Published
+      </span>
+    );
+  }
+  if (status === 'declined') {
+    return (
+      <span className="rounded-[var(--radius-pill)] border border-[var(--color-border-hairline)] px-2 py-0.5 tracking-wide text-[var(--color-text-secondary)] uppercase">
+        Not taken up
+      </span>
+    );
+  }
+  return (
+    <span className="rounded-[var(--radius-pill)] border border-[var(--color-border-hairline)] px-2 py-0.5 tracking-wide text-[var(--color-text-secondary)] uppercase">
+      Waiting for review
+    </span>
+  );
+}
+
+/**
+ * The guest's view of the box: an invitation, not a form.
+ *
+ * A published suggestion credits its sender by name — that is the design — and a guest has no
+ * name to credit. Accepting their words anyway would publish ideas nobody can be thanked for,
+ * so the honest surface is the door to an account.
+ */
+function GuestSuggestInvite() {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col justify-center gap-3 p-6 text-center">
+      <p className="text-sm text-[var(--color-text-primary)]">
+        Suggestions carry their sender&rsquo;s name. When one is published for the squadron to
+        vote on, the credit is yours — which needs an account to point at.
+      </p>
+      <a
+        href="/v1/auth/discord"
+        className="rounded-[var(--radius-sm)] border border-[var(--color-brand-cyan-bright)] px-4 py-2 text-sm text-[var(--color-brand-cyan-bright)] transition-colors hover:bg-[color-mix(in_srgb,var(--color-brand-cyan)_12%,transparent)]"
+      >
+        Sign in with Discord
+      </a>
+      <p className="text-[11px] text-[var(--color-text-secondary)]">
+        Questions need no account — the chat next door answers everyone.
+      </p>
+    </div>
   );
 }
 

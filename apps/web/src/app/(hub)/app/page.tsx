@@ -10,7 +10,10 @@ import {
   getMe,
   getSupportConsole,
   getSupportConsoleGated,
+  getSuggestionInboxGated,
+  getRoadmapManageGated,
   type AdminActivityRow,
+  type AdminRead,
 } from '../../../lib/api';
 import { StepUp } from './step-up';
 import { NoAccess, AdminUnavailable } from './no-access';
@@ -23,6 +26,8 @@ import { PromotionRun } from './promotion-run';
 import { Moderation } from './moderation';
 import { Support } from './support';
 import { SupportTabBadge } from './support-tab-badge';
+import { Suggestions } from './suggestions';
+import { RoadmapBoard } from './roadmap-board';
 import { ActivityTable } from './activity-table';
 import { LiveRefresh } from '../../../components/live-refresh';
 
@@ -78,6 +83,17 @@ const TABS: readonly PageTab[] = [
    * MEMBER_MANAGE, because answering questions and managing members are different jobs.
    */
   { key: 'support', label: 'Support' },
+  /*
+   * ★ THE SUGGESTION BOX'S REVIEWING SIDE, AND THE ROADMAP IT FEEDS ★
+   *
+   * Both webmaster-only (SITE_CONFIG — the owner routed suggestions to the webmaster, and made
+   * the kanban webmaster-managed), and both tabs of THIS console for the same reason Support
+   * is: the pipeline is inbox → publish → vote → promote → board, and scattering its stations
+   * across pages would make one job feel like four. Everybody else reads the finished board at
+   * /roadmap.
+   */
+  { key: 'suggestions', label: 'Suggestions' },
+  { key: 'roadmap', label: 'Roadmap' },
   { key: 'roles', label: 'Roles & permissions' },
 ];
 
@@ -107,7 +123,7 @@ export default async function AdminPage({
    * though — every tab needs to know whether the second factor is fresh, and
    * a null from any admin read is that answer.
    */
-  const [dashboard, activity, audit, held, aiHealth, support, me] = await Promise.all([
+  const [dashboard, activity, audit, held, aiHealth, support, me, suggestions, roadmap] = await Promise.all([
     /*
      * Fetched for the ACTIVITY tab too, and only for its `availableMonths`.
      *
@@ -129,11 +145,37 @@ export default async function AdminPage({
     tab === 'moderation' ? getAiHealth() : Promise.resolve(null),
     tab === 'support' ? getSupportConsole('open') : Promise.resolve(null),
     /*
-     * For the support tab's clock only. INV-025 wants the queue's absolute times in the
-     * OFFICER's stored timezone, and that zone lives on /v1/me.
+     * For the support and suggestions tabs' clocks. INV-025 wants each queue's absolute times
+     * in the VIEWER's stored timezone, and that zone lives on /v1/me.
      */
-    tab === 'support' ? getMe() : Promise.resolve(null),
+    tab === 'support' || tab === 'suggestions' ? getMe() : Promise.resolve(null),
+    /*
+     * The two webmaster tabs fetch through the REASON-KEEPING reader directly, rather than the
+     * null-collapsing one plus a probe: AdminRead existed by the time they were built, so the
+     * two-step dance the older tabs do is history they do not need to repeat.
+     */
+    tab === 'suggestions' ? getSuggestionInboxGated() : Promise.resolve(null),
+    tab === 'roadmap' ? getRoadmapManageGated() : Promise.resolve(null),
   ]);
+
+  /*
+   * The webmaster tabs' own gate handling — SITE_CONFIG, named so a refusal sends whoever hit
+   * it asking for the right bit rather than MEMBER_MANAGE.
+   */
+  const gatedTab: AdminRead<unknown> | null =
+    tab === 'suggestions' ? suggestions : tab === 'roadmap' ? roadmap : null;
+  if (gatedTab !== null && gatedTab.state !== 'ok') {
+    if (gatedTab.state === 'forbidden') {
+      return tab === 'suggestions' ? (
+        <NoAccess what="the suggestion inbox" permission="SITE_CONFIG" />
+      ) : (
+        <NoAccess what="the roadmap board" permission="SITE_CONFIG" />
+      );
+    }
+    if (gatedTab.state === 'unavailable') return <AdminUnavailable />;
+    // 'needs-step-up' or 'signed-out' — a code is the reasonable thing to ask for.
+    return <StepUp />;
+  }
 
   /*
    * ★ WHY THE REASON IS PROBED SEPARATELY ★
@@ -286,6 +328,27 @@ export default async function AdminPage({
             initial={support.conversations}
             viewerTz={me?.user?.timezone ?? 'UTC'}
           />
+        </Section>
+      )}
+
+      {tab === 'suggestions' && suggestions !== null && suggestions.state === 'ok' && (
+        <Section
+          title="Suggestions"
+          description="Members' ideas, oldest first. Publish turns one into a Feature Requests thread the squadron votes on — credited to its sender. Decline records the review. Either way, the sender is told personally."
+        >
+          <Suggestions
+            initial={suggestions.data.suggestions}
+            viewerTz={me?.user?.timezone ?? 'UTC'}
+          />
+        </Section>
+      )}
+
+      {tab === 'roadmap' && roadmap !== null && roadmap.state === 'ok' && (
+        <Section
+          title="Roadmap"
+          description="What is being built for the platform, in five columns. Every member reads this board at /roadmap; this is where it is drawn."
+        >
+          <RoadmapBoard initial={roadmap.data} />
         </Section>
       )}
     </>

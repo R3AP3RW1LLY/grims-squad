@@ -1277,6 +1277,60 @@ export const getSupportConsoleGated = (): Promise<
   AdminRead<{ conversations: SupportConsoleRow[] }>
 > => getAdmin('/v1/support/console/conversations?status=open');
 
+// ── The suggestion box and the roadmap ───────────────────────────────────────
+
+/** One suggestion as the webmaster's inbox lists it. Dates arrive as ISO strings. */
+export interface SuggestionInboxRow {
+  id: string;
+  body: string;
+  sender: { id: string; displayName: string };
+  createdAt: string;
+}
+
+/** The inbox read, with the reason kept when it fails — its gate is SITE_CONFIG. */
+export const getSuggestionInboxGated = (): Promise<
+  AdminRead<{ suggestions: SuggestionInboxRow[] }>
+> => getAdmin('/v1/suggestions/inbox');
+
+/** One card on the roadmap, as every reader sees it. Dates arrive as ISO strings. */
+export interface RoadmapCard {
+  id: string;
+  title: string;
+  body: string | null;
+  column: 'ideas' | 'considering' | 'planned' | 'building' | 'shipped';
+  position: number;
+  /** The Feature Requests thread it was promoted from, when THIS reader may open it. */
+  threadLink: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RoadmapArchivedCard {
+  id: string;
+  title: string;
+  column: RoadmapCard['column'];
+  archivedAt: string;
+}
+
+/** The member-readable board. Null renders as the honest empty state. */
+export const getRoadmap = (): Promise<{ cards: RoadmapCard[] } | null> =>
+  get('/v1/roadmap', { authed: true });
+
+/** The webmaster's board — live cards plus the archive. Its gate is SITE_CONFIG. */
+export const getRoadmapManageGated = (): Promise<
+  AdminRead<{ cards: RoadmapCard[]; archived: RoadmapArchivedCard[] }>
+> => getAdmin('/v1/roadmap/manage');
+
+/**
+ * Whether a thread is already on the roadmap — the thread page's promote panel renders from
+ * this. Null for everybody without the webmaster's bit, which is what keeps the panel
+ * invisible to everyone else: the API refuses, `get()` collapses it, and no panel is drawn.
+ */
+export const getRoadmapThreadCard = (
+  threadId: string,
+): Promise<{ card: { id: string; column: RoadmapCard['column'] } | null } | null> =>
+  get(`/v1/roadmap/manage/thread/${encodeURIComponent(threadId)}`, { authed: true });
+
 /**
  * What GMSD AI has learned, per source.
  *

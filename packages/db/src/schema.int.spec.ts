@@ -197,7 +197,14 @@ describe('P0.2 database schema', () => {
     // purged at 30 days, so "how much telemetry did we get in March" stops being answerable in
     // May — the worker banks each month's per-type counts here while the raw rows still exist,
     // and the dashboard reads the bank for every closed month.
-    expect(Number(r[0]?.n)).toBe(118);
+    //
+    // 120 as of the suggestion box and the roadmap: suggestions + roadmap_cards. Members send
+    // the webmaster ideas; a one-click publish turns one into a Feature Requests thread the
+    // squadron votes on (crediting the sender), and promoted asks live on the webmaster's
+    // kanban, readable by every member at /roadmap. The same migration seeds the
+    // feature-requests board — a category row, not a table, which is why the count moves by
+    // exactly two.
+    expect(Number(r[0]?.n)).toBe(120);
   });
 
   describe('hand-written DDL that Prisma cannot express', () => {
@@ -507,6 +514,26 @@ describe('seeded roles', () => {
 
     expect(BigInt(r[0]!.post_perm ?? '0')).toBe(1n << 6n); // FORUM_POST_OFFICER
     expect(BigInt(r[0]!.view_perm ?? '0')).toBe(1n << 4n); // FORUM_VIEW_OFFICER
+  });
+
+  /**
+   * The Feature Requests board: members read and vote, only the webmaster tier posts.
+   *
+   * Voting rides VISIBILITY (vote.service.ts reads the post through the voter's bound client),
+   * so view_perm = FORUM_VIEW_MEMBER is what opens the vote rail to the squadron. post_perm =
+   * SITE_CONFIG is what makes thread creation the publish flow's job — the officer-board
+   * pattern (Announcements: view 4, post 64) applied one tier up, replies included.
+   */
+  it('the Feature Requests board gates posting on SITE_CONFIG and viewing on FORUM_VIEW_MEMBER', async () => {
+    const r = await rows<{ post_perm: string | null; view_perm: string | null }>(
+      `select post_perm::text, view_perm::text from forum_categories where slug = 'feature-requests'`,
+    );
+    // Skipped rather than failed when the board has not been seeded in this database — the
+    // assertion is about its shape, not about it existing (the officers-board precedent above).
+    if (r.length === 0) return;
+
+    expect(BigInt(r[0]!.post_perm ?? '0')).toBe(1n << 63n); // SITE_CONFIG
+    expect(BigInt(r[0]!.view_perm ?? '0')).toBe(1n << 2n); // FORUM_VIEW_MEMBER
   });
 
   it('webmaster is mapped to NO Discord role', async () => {
