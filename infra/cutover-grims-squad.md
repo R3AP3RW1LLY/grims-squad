@@ -304,7 +304,17 @@ Verify the quiet state: with the variables set and no rows pending,
 "announcement channel not configured" warning names exactly which variable is
 missing.
 
-### 7.2 The inaugural announcement — one psql INSERT, run once
+### 7.2 The inaugural announcement — fired by the deploy itself
+
+> **✅ AUTOMATED 2026-08-04.** The SQL below is already staged on the box as
+> `/srv/grims/announce-once.sql` (mode 600). `deploy.sh` now carries a
+> one-shot hook: after the health gate passes it pipes that file into psql,
+> then renames it `.done.<timestamp>` so a redeploy cannot repeat it. A
+> failure leaves the file in place and the deploy output says exactly what to
+> run by hand. **Nothing here to type at cutover** — deploying with the file
+> present IS the announcement. The block below stays as the record of what is
+> in the file, and the `INSERT 0 1` / `INSERT 0 0` note still applies to the
+> manual-recovery path.
 
 The owner's approved text, verbatim. Kind `deploy`, with the forum carbon-copy
 titled `GRIMS-SQUAD.COM IS LIVE`. The bot posts it to the announcements channel

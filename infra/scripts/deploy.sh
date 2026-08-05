@@ -357,4 +357,24 @@ else
   ok "node is not on this host — record the changelog by hand: node tools/changelog.mjs --from $PREVIOUS_SHA --sql | psql"
 fi
 
+# ★ THE ONE-SHOT ANNOUNCEMENT HOOK ★
+#
+# Squadron owner, 2026-08-04: the inaugural announcement (and any future
+# one-time post) must be part of the deploy sequence, not an operator memory.
+# Stage SQL at /srv/grims/announce-once.sql before deploying; this fires it
+# exactly once AFTER the health gate — success renames the file to .done so a
+# redeploy cannot repeat it, failure leaves it in place and says so. Non-fatal
+# like every record step: the site is already verified up.
+ANNOUNCE_ONCE=/srv/grims/announce-once.sql
+if [[ -f "$ANNOUNCE_ONCE" ]]; then
+  say "Firing the staged one-shot announcement"
+  if $COMPOSE exec -T postgres psql -q -v ON_ERROR_STOP=1 \
+      -U "$(envval POSTGRES_USER)" -d "$(envval POSTGRES_DB)" < "$ANNOUNCE_ONCE" >/dev/null 2>&1; then
+    mv "$ANNOUNCE_ONCE" "${ANNOUNCE_ONCE}.done.$(date -u +%Y%m%dT%H%M%SZ)"
+    ok "one-shot announcement fired and archived — the bot and forum pick it up within a minute"
+  else
+    ok "one-shot announcement FAILED — the file is untouched at $ANNOUNCE_ONCE; fix and run: psql < $ANNOUNCE_ONCE"
+  fi
+fi
+
 say "Deployed ${TARGET_SHA:0:8} with no downtime"
