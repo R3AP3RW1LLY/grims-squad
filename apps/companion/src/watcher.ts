@@ -2,7 +2,7 @@ import { readJournalChunk, journalFilesInOrder } from './journal-reader.js';
 import { trackDocked, type DockedAt } from './docked.js';
 import { foldTrip, EMPTY_TRIP, type TripLedger } from './trip-ledger.js';
 import { foldCarrierHold, EMPTY_CARRIER_HOLD, type CarrierHoldState } from './carrier-hold.js';
-import type { CompanionConfig } from './config.js';
+import { hubKey, apiBaseUrlFor, type CompanionConfig } from './config.js';
 import type { Uploader } from './uploader.js';
 
 /**
@@ -160,10 +160,42 @@ export async function runWatchPass(
    * are considered. On every later run the full list is walked, because by then
    * the offsets say which are already done and re-checking one is a stat call.
    */
-  const isFirstRun = Object.keys(config.offsets).length === 0;
+  /*
+   * ★ THE POSITION IS PER HUB ★
+   *
+   * An offset says how far we have read a file. It never said where those lines were SENT, so a
+   * development run against localhost advanced these numbers and the production hub silently
+   * resumed from where development stopped — a member's whole history skipped, with nothing
+   * anywhere reporting it. Reading is now tracked against the destination, so pointing the app at
+   * a different hub starts that hub from the beginning and it receives everything. The hub
+   * deduplicates, so a re-read costs bandwidth and never a duplicate row.
+   */
+  const hub = hubKey(apiBaseUrlFor(config, process.env));
+  const hubOffsets = config.offsetsByHub[hub] ?? {};
+
+  const isFirstRun = Object.keys(hubOffsets).length === 0;
   const files = isFirstRun ? all.slice(-FIRST_RUN_FILE_LIMIT) : all;
 
-  let next = { ...config, offsets: { ...config.offsets }, sessionLive: { ...config.sessionLive } };
+  /*
+   * The flat map is a WORKING copy for this pass — every line below reads and writes one hub's
+   * positions, exactly as it always did — and `commit` folds it back under the hub key on the way
+   * out. Keeping the loop flat means this change is confined to the two ends of the function.
+   */
+  let next: CompanionConfig & { offsets: Record<string, number> } = {
+    ...config,
+    offsets: { ...hubOffsets },
+    sessionLive: { ...config.sessionLive },
+  };
+
+  const commit = (
+    working: CompanionConfig & { offsets: Record<string, number> },
+  ): CompanionConfig => {
+    const { offsets, ...rest } = working;
+    return {
+      ...rest,
+      offsetsByHub: { ...config.offsetsByHub, [hub]: offsets },
+    };
+  };
   let filesRead = 0;
   let newFilesRead = 0;
   let txBytes = 0;
@@ -207,7 +239,7 @@ export async function runWatchPass(
     filesRead += 1;
     // Read against the ORIGINAL config, not `next` — `next.offsets[name]` has
     // already been written by the time this pass finishes with the file.
-    if (config.offsets[name] === undefined) newFilesRead += 1;
+    if (hubOffsets[name] === undefined) newFilesRead += 1;
     /*
      * The NEWEST file only. An old journal growing is not somebody playing —
      * it cannot happen — whereas a first-run replay reads dozens of old files
@@ -279,7 +311,7 @@ export async function runWatchPass(
           unauthorised: true,
           error: upload.error,
         },
-        config: next,
+        config: commit(next),
       };
     }
 
@@ -303,7 +335,7 @@ export async function runWatchPass(
           refused,
           error: upload.error,
         },
-        config: next,
+        config: commit(next),
       };
     }
 
@@ -348,7 +380,7 @@ export async function runWatchPass(
       unauthorised: false,
       error: null,
     },
-    config: next,
+    config: commit(next),
   };
 }
 
@@ -358,7 +390,10 @@ export async function runWatchPass(
  * Journals accumulate for years and members delete them. Without this the
  * config grows without limit and eventually becomes a slow read on every pass.
  */
-export function pruneOffsets(config: CompanionConfig, present: readonly string[]): CompanionConfig {
+export function pruneOffsets<T extends { offsets: Record<string, number>; sessionLive: Record<string, boolean> }>(
+  config: T,
+  present: readonly string[],
+): T {
   const live = new Set(present);
   const offsets: Record<string, number> = {};
   const sessionLive: Record<string, boolean> = {};

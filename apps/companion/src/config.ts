@@ -31,8 +31,34 @@ export interface CompanionConfig {
   deviceToken: string;
   /** Overrides the detected journal folder. The escape hatch for odd setups. */
   journalPathOverride: string | null;
-  /** Per-file byte offsets, so a restart re-reads nothing. */
-  offsets: Record<string, number>;
+  /**
+   * Per-file byte offsets, so a restart re-reads nothing.
+   *
+   * ★ THEY BELONG TO A HUB, AND USED NOT TO — REPORTED 2026-08-05 ★
+   *
+   * "it appears that not all of my historical journal data was sent ... im wondering if my
+   * development data is not being sent journal wise"
+   *
+   * It was not, and this field is why. An offset records how far we have read a FILE; it said
+   * nothing about where those lines were sent. So a development run against localhost read the
+   * journals, advanced these numbers, and delivered every event to the development database —
+   * and when the app was later pointed at grims-squad.com it resumed from where development had
+   * left off. The production hub never saw a line of it, and nothing anywhere reported a problem,
+   * because from the app's point of view the work was done.
+   *
+   * (Before `productName` was set, the packaged app and a `pnpm start` run also SHARED this file,
+   * which is how one member's development session could advance the offsets of their real
+   * install.)
+   *
+   * `offsetsByHub` is the corrected shape: reading is tracked per destination, so pointing the app
+   * at a different hub starts that hub from the beginning and it receives the whole history. The
+   * hub deduplicates on (device token, timestamp, event, payload), so re-reading costs bandwidth
+   * and never a duplicate row.
+   *
+   * `resetOffsets` in `main.ts` is the manual door for anybody whose history was already skipped
+   * this way — the fix above prevents it happening again, and cannot undo what was missed.
+   */
+  offsetsByHub: Record<string, Record<string, number>>;
   /**
    * Per-file verdict on whether it is the LIVE galaxy.
    *
@@ -160,7 +186,7 @@ export const DEFAULT_CONFIG: CompanionConfig = {
   apiBaseUrl: 'https://grims-squad.com',
   deviceToken: '',
   journalPathOverride: null,
-  offsets: {},
+  offsetsByHub: {},
   sessionLive: {},
   // OFF until the member turns it on. An app that starts transmitting the
   // moment it is installed has not asked, and being installed is not consent.
@@ -220,6 +246,44 @@ export function quarantinePath(userDataDir: string): string {
  * still on disk next to it, and `restoredFrom` tells the UI to say what happened instead of
  * presenting a fresh install as though nothing had.
  */
+/**
+ * Normalises a hub URL into a key.
+ *
+ * Trailing slashes and case differences are the same destination to a member and would be two
+ * separate reading positions here — which is the exact class of mistake this field exists to stop.
+ */
+export function hubKey(apiBaseUrl: string): string {
+  return apiBaseUrl.trim().replace(/\/+$/, '').toLowerCase();
+}
+
+/**
+ * Reads the per-hub offsets, migrating a pre-2026-08-05 flat map onto the hub it was pointed at.
+ *
+ * Both shapes are tolerated because a member can downgrade, and a config written by the older
+ * build must not lose a member's reading position and re-upload a year of journals.
+ */
+function readOffsetsByHub(
+  parsed: Partial<CompanionConfig> & { offsets?: unknown },
+  apiBaseUrl: string,
+): Record<string, Record<string, number>> {
+  const stored = (parsed as { offsetsByHub?: unknown }).offsetsByHub;
+  if (typeof stored === 'object' && stored !== null) {
+    const out: Record<string, Record<string, number>> = {};
+    for (const [hub, files] of Object.entries(stored as Record<string, unknown>)) {
+      if (typeof files === 'object' && files !== null) {
+        out[hubKey(hub)] = files as Record<string, number>;
+      }
+    }
+    return out;
+  }
+
+  const legacy = parsed.offsets;
+  if (typeof legacy === 'object' && legacy !== null) {
+    return { [hubKey(apiBaseUrl)]: legacy as Record<string, number> };
+  }
+  return {};
+}
+
 export function loadConfig(userDataDir: string): CompanionConfig {
   const path = configPath(userDataDir);
   if (!existsSync(path)) return { ...DEFAULT_CONFIG };
@@ -231,7 +295,22 @@ export function loadConfig(userDataDir: string): CompanionConfig {
       deviceToken: typeof parsed.deviceToken === 'string' ? parsed.deviceToken : '',
       journalPathOverride:
         typeof parsed.journalPathOverride === 'string' ? parsed.journalPathOverride : null,
-      offsets: typeof parsed.offsets === 'object' && parsed.offsets !== null ? parsed.offsets : {},
+      /*
+       * ★ MIGRATING THE FLAT MAP ★
+       *
+       * A config written before this change has one offsets map and no record of where it was
+       * sending. Attributed to the hub it is currently pointed at, which is right for the
+       * overwhelming majority — one install, one hub, never moved — and keeps their next launch
+       * from re-uploading months of journals to a hub that already has them.
+       *
+       * It is wrong for exactly the member this bug happened to, and it cannot be right for them:
+       * the file simply does not record where those lines went. That is what the re-send control
+       * exists for, and why this migration does not try to be clever.
+       */
+      offsetsByHub: readOffsetsByHub(
+        parsed,
+        typeof parsed.apiBaseUrl === 'string' ? parsed.apiBaseUrl : DEFAULT_CONFIG.apiBaseUrl,
+      ),
       sessionLive:
         typeof parsed.sessionLive === 'object' && parsed.sessionLive !== null
           ? parsed.sessionLive
