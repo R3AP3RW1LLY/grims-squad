@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { isPlayingNow, nicknameNote } from './roster-card';
+import { isPlayingNow, nicknameNote, titleRoles } from './roster-card';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -266,5 +266,63 @@ describe('the header does not fight itself for width', () => {
     // It used to be conditional on a member holding at least one Discord role.
     // A member with none would then have had no verification state at all.
     expect(source).not.toContain('hasSquadronRows');
+  });
+});
+
+/**
+ * The title line beside the commander name.
+ *
+ * ★ SQUADRON OWNER, 2026-08-04 ★
+ *
+ * "add a founders title where Pebblemerchant says webmaster it should say
+ *  founder for them."
+ *
+ * A card that shows the wrong title still renders a card, so the rule is pinned
+ * here rather than left to be noticed.
+ */
+describe('the founding title', () => {
+  const WEBMASTER = { name: 'Webmaster', colour: null };
+  const MEMBERS = { name: "Grim's Squad members", colour: null };
+
+  it('MANDATORY: replaces the site titles for somebody with founding standing', () => {
+    /*
+     * Pebblemerchant, exactly as production holds them: the webmaster role, the
+     * squadron membership role, and founding standing. The line is one line and
+     * never wraps, so three titles in it would truncate the one the owner asked
+     * to see.
+     */
+    const titles = titleRoles({
+      founder: { title: 'Founder', precedence: 820, foundedSquadron: false },
+      siteRoles: [WEBMASTER, MEMBERS],
+    });
+
+    expect(titles.map((t) => t.name)).toEqual(['Founder']);
+  });
+
+  it('MANDATORY: prints the title the ROLE ROW carries, not a constant', () => {
+    // Renaming "Co-Founder" is an edit on /app -> Roles, not a deploy.
+    const titles = titleRoles({
+      founder: { title: 'Co-Founder', precedence: 810, foundedSquadron: true },
+      siteRoles: [MEMBERS],
+    });
+
+    expect(titles.map((t) => t.name)).toEqual(['Co-Founder']);
+  });
+
+  it('MANDATORY: leaves a member with no founding standing exactly as they were', () => {
+    // The overwhelming majority of the squadron. Nothing about this line moved
+    // for them.
+    expect(titleRoles({ founder: null, siteRoles: [WEBMASTER, MEMBERS] })).toEqual([
+      WEBMASTER,
+      MEMBERS,
+    ]);
+    expect(titleRoles({ founder: null, siteRoles: [] })).toEqual([]);
+  });
+
+  it('MANDATORY: the card renders the line through this function', () => {
+    // A card that mapped `siteRoles` directly would pass every test above and
+    // still print "Webmaster" on the screen the owner was looking at.
+    expect(source).toContain('titleRoles(member)');
+    expect(source).not.toContain('member.siteRoles.map');
   });
 });

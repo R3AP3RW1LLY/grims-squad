@@ -5,7 +5,7 @@ import { PageHeader, PageBody, Panel, RailStat } from '../../../../components/hu
 import { RoleChip } from '../../../../components/role-chip';
 import { SessionTimer } from '../../../../components/session-timer';
 import { LiveRefresh } from '../../../../components/live-refresh';
-import { isPlayingNow } from '../../../../components/roster-card';
+import { isPlayingNow, titleRoles } from '../../../../components/roster-card';
 import { formatLocal } from '../../../../lib/time';
 
 /**
@@ -353,7 +353,13 @@ export default async function MemberPage({ params }: { params: Promise<{ handle:
               {p.cmdrName !== null && (
                 <span className="shrink-0 text-[var(--color-brand-cyan-bright)]">Commander</span>
               )}
-              {p.siteRoles.map((r, i) => (
+              {/*
+                The SAME rule as the roster card, from the same function: a
+                founding title replaces the site ones. A profile that said
+                "Webmaster" while the card that linked to it said "Founder" is
+                the kind of contradiction nobody reports and everybody notices.
+              */}
+              {titleRoles(p).map((r, i) => (
                 <span key={r.name} className="flex min-w-0 items-center gap-2">
                   {(p.cmdrName !== null || i > 0) && (
                     <span aria-hidden="true" className="shrink-0 text-[var(--color-border-active)]">

@@ -152,6 +152,38 @@ describe('grouping roles', () => {
     ]);
   });
 
+  it('MANDATORY: founding roles get their own band, not the platform one', () => {
+    /*
+     * Squadron owner, 2026-08-04. The founding roles carry the titles the roster
+     * prints and the order the founders sit in, so they have to be editable —
+     * and neither neighbouring band would describe them honestly. "Members,
+     * allies and unranked" is everyone who holds no ladder rank, and the
+     * founders all hold one; the platform heading says its roles "confer every
+     * permission on this site and no standing in the squadron whatsoever",
+     * which is the exact opposite of what these are.
+     */
+    const grouped = groupRoles([
+      role({ key: 'co_founder', name: 'Co-Founder', rankOrder: 810, isHierarchical: false }),
+      role({ key: 'founder', name: 'Founder', rankOrder: 800, isHierarchical: false }),
+      role({ key: 'hub_founder', name: 'Founder', rankOrder: 820, isHierarchical: false }),
+      role({ key: 'grims_squad_members', name: "Grim's Squad members", rankOrder: 900, isHierarchical: false }),
+      role({ key: 'webmaster', name: 'Webmaster', rankOrder: 1000, isHierarchical: false }),
+    ]);
+
+    // Ascending, like the appointments: the founder carries the lowest number.
+    expect(grouped.find((g) => g.key === 'founding')?.roles.map((r) => r.key)).toEqual([
+      'founder',
+      'co_founder',
+      'hub_founder',
+    ]);
+    expect(grouped.find((g) => g.key === 'membership')?.roles.map((r) => r.key)).toEqual([
+      'grims_squad_members',
+    ]);
+    expect(grouped.find((g) => g.key === 'platform')?.roles.map((r) => r.key)).toEqual([
+      'webmaster',
+    ]);
+  });
+
   it('omits a group with nothing in it', () => {
     // An empty "General ranks" heading invites the reader to wonder what is
     // missing.

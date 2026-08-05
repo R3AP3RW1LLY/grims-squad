@@ -1,6 +1,6 @@
 import { Fragment } from 'react';
 import { formatLocal } from '../lib/time';
-import type { RosterMember } from '../lib/api';
+import type { RosterMember, FoundingStanding } from '../lib/api';
 import { RoleChip } from './role-chip';
 import { SessionTimer } from './session-timer';
 
@@ -103,6 +103,42 @@ export function nicknameNote(
   }
 
   return nick;
+}
+
+/**
+ * What goes in the title line beside the commander name.
+ *
+ * ★ FOUNDING STANDING WINS THE SLOT — SQUADRON OWNER, 2026-08-04 ★
+ *
+ * "add a founders title where Pebblemerchant says webmaster it should say
+ * founder for them." So where somebody has founding standing, that is the title
+ * this line carries, and the site roles it would otherwise have shown step
+ * aside.
+ *
+ * ★ WHY REPLACE RATHER THAN LEAD WITH IT ★
+ *
+ * The line is deliberately one line and never wraps (see the note at the call
+ * site). Pebblemerchant holds `webmaster` and `grims_squad_members` as well, so
+ * appending would produce three titles in a slot that comfortably holds one —
+ * and the first thing to truncate would be the founding title, which is the one
+ * the owner asked to see.
+ *
+ * Shared with the member profile page, which renders the same line from the same
+ * data. A page that titled somebody "Webmaster" while the card that linked to it
+ * said "Founder" is the kind of contradiction nobody reports and everybody
+ * notices.
+ */
+export function titleRoles(member: {
+  founder: FoundingStanding | null;
+  siteRoles: ReadonlyArray<{ name: string; colour: string | null }>;
+}): ReadonlyArray<{ name: string; colour: string | null }> {
+  if (member.founder !== null) {
+    // The colour is the founding title's own, and there is none: `roles.colour`
+    // is a Discord mirror and nothing sets it for a role Discord does not have.
+    // The line renders every title in the site orange regardless.
+    return [{ name: member.founder.title, colour: null }];
+  }
+  return member.siteRoles;
 }
 
 /**
@@ -280,8 +316,23 @@ export function RosterCard({
               The CMDR label appears only when the heading IS a commander name.
               Falling back to a Discord nickname and labelling it "Commander"
               would assert a verification that has not happened.
+
+              ★ A FOUNDING TITLE REPLACES THE SITE ONES — OWNER, 2026-08-04 ★
+
+              "add a founders title where Pebblemerchant says webmaster it should
+              say founder for them." Replaced rather than appended: this line is
+              deliberately one line and never wraps, and "FOUNDER | WEBMASTER |
+              GRIM'S SQUAD MEMBERS" is three titles competing for a slot that
+              holds one comfortably — at which point the founding title, which is
+              the thing the owner asked to see, is the one that truncates.
+
+              Nothing is lost from the record. The webmaster role still grants
+              every permission it did and still appears on the roles console;
+              this is what the squadron is shown, not what the account holds.
             */}
-            {(member.cmdrName !== null || member.siteRoles.length > 0) && (
+            {(member.cmdrName !== null ||
+              member.founder !== null ||
+              member.siteRoles.length > 0) && (
               /*
                 ★ ONE LINE, NEVER WRAPPED ★
 
@@ -295,7 +346,7 @@ export function RosterCard({
                 {member.cmdrName !== null && (
                   <span className="shrink-0 text-[var(--color-brand-cyan-bright)]">Commander</span>
                 )}
-                {member.siteRoles.map((r, i) => (
+                {titleRoles(member).map((r, i) => (
                   <Fragment key={r.name}>
                     {/*
                       The divider belongs to the item that FOLLOWS it, and is

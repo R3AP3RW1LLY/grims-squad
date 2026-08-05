@@ -24,6 +24,18 @@ import type { AdminRoleRow } from '../../../../lib/api';
 /** Below this is a leadership APPOINTMENT; at or above it is a tenure RANK. */
 export const LEADERSHIP_CEILING = 100;
 
+/**
+ * At or above this a role is FOUNDING standing: honour, not a ladder position
+ * and not a website role.
+ *
+ * Its own band because neither neighbour would describe it honestly. The
+ * membership band is "everyone who holds no ladder rank", and the founders all
+ * hold one; the platform band above says its roles "confer every permission on
+ * this site and no standing in the squadron whatsoever", which is the exact
+ * opposite of what these are.
+ */
+export const FOUNDING_FLOOR = 800;
+
 /** At or above this a role is membership or platform, not a ladder position. */
 export const LADDER_CEILING = 900;
 
@@ -57,6 +69,16 @@ export function groupRoles(all: readonly AdminRoleRow[]): RoleGroup[] {
     (a, b) => b.rankOrder - a.rankOrder,
   );
 
+  /*
+   * Ascending, like the appointments and for the same reason: the founder is the
+   * most senior and carries the lowest number. Taken BEFORE membership so a
+   * founding role can never be swept into "everyone who holds no ladder rank".
+   */
+  const founding = take(
+    (r) => r.rankOrder >= FOUNDING_FLOOR && r.rankOrder < LADDER_CEILING && !r.isHierarchical,
+    (a, b) => a.rankOrder - b.rankOrder,
+  );
+
   const membership = take(
     (r) => r.rankOrder >= LADDER_CEILING && r.rankOrder < PLATFORM_FLOOR,
     (a, b) => a.rankOrder - b.rankOrder,
@@ -81,6 +103,13 @@ export function groupRoles(all: readonly AdminRoleRow[]): RoleGroup[] {
       blurb:
         'The promotion ladder, top to bottom. Earned by qualifying months — time served, never moderation power (INV-046).',
       roles: ranks,
+    },
+    {
+      key: 'founding',
+      title: 'Founders',
+      blurb:
+        'Who founded the squadron, and what their card calls them. The name here is the title shown on the roster, and the order decides who sits where at the top of it — both are edited on this page.',
+      roles: founding,
     },
     {
       key: 'membership',

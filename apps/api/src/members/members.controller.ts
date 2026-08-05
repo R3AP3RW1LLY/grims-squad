@@ -26,6 +26,21 @@ import {
   type PrivacySettings,
   type PublicProfile,
 } from './profile.serializer.js';
+import { foundingStanding, type FoundingStanding } from './founding.js';
+
+/**
+ * The non-hierarchical roles a member wears, as the browser sees them.
+ *
+ * The stored rows carry a key and a rank_order too. Both are internal — the key
+ * is how founding standing is recognised and the rank_order is where the holder
+ * is pinned — and neither is anybody's business on a roster card, so they are
+ * dropped here rather than spread onto the response by accident.
+ */
+function titles(
+  roles: ReadonlyArray<{ name: string; colour: string | null }> | undefined,
+): ReadonlyArray<{ name: string; colour: string | null }> {
+  return (roles ?? []).map(({ name, colour }) => ({ name, colour }));
+}
 
 const TOGGLES = Object.keys(DEFAULT_PRIVACY) as Array<keyof PrivacySettings>;
 
@@ -153,6 +168,12 @@ export class MembersController {
         }>;
         isOfficer: boolean;
         siteRoles: ReadonlyArray<{ name: string; colour: string | null }>;
+        /**
+         * Founding standing, or null for the overwhelming majority who have
+         * none. Drives the Founders tab and the pinned order at the top of the
+         * roster — see `founding.ts`.
+         */
+        founder: FoundingStanding | null;
       }
     >;
     total: number;
@@ -252,7 +273,17 @@ export class MembersController {
           const order = catalogue.get(id)?.rankOrder;
           return order !== null && order !== undefined && order < LEADERSHIP_CEILING;
         }),
-        siteRoles: r.source.siteRoles ?? [],
+        siteRoles: titles(r.source.siteRoles),
+        /*
+         * ★ COMPUTED HERE, NOT INFERRED IN THE BROWSER ★
+         *
+         * The page could have matched on the role NAME — "Founder", "Co-Founder"
+         * — and it would have worked until the first time somebody edited the
+         * label on the roles page, at which point the Founders tab would quietly
+         * empty with nothing to explain it. The KEY never leaves the API, so
+         * this is the only place that can answer the question.
+         */
+        founder: foundingStanding(r.source.siteRoles ?? []),
       })),
       // The COUNT of active members is not private — it is the squadron's size,
       // which is public on Inara anyway. Who they are is the private part.
@@ -317,6 +348,13 @@ export class MembersController {
       }>;
       isOfficer: boolean;
       siteRoles: ReadonlyArray<{ name: string; colour: string | null }>;
+      /**
+       * Founding standing, or null. The same field the roster card reads, for
+       * the same reason: a profile that titled somebody "Webmaster" while the
+       * card that linked to it said "Founder" is the kind of contradiction
+       * nobody reports and everybody notices.
+       */
+      founder: FoundingStanding | null;
       /** When Discord says they joined the squadron. Null when not known. */
       guildJoinedAt: string | null;
     }
@@ -456,7 +494,8 @@ export class MembersController {
        * date — a wrong number presented confidently is worse than an absent one.
        */
       guildJoinedAt: guildJoinedAt?.toISOString() ?? null,
-      siteRoles: row.source.siteRoles ?? [],
+      siteRoles: titles(row.source.siteRoles),
+      founder: foundingStanding(row.source.siteRoles ?? []),
     };
   }
 

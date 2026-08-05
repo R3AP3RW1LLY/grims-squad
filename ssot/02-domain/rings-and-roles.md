@@ -127,6 +127,38 @@ Non-hierarchical (`isHierarchical = false`). They grant specific permissions and
 
 Ownership scoping (`CARRIER_MANAGE` applying only to carriers you own) is a **row-level ownership predicate in the data layer**, not a separate permission. The mask says "may manage carriers"; the repository says "these carriers".
 
+## Founding standing
+
+Non-hierarchical, and **`permMask` is zero on every one of them**. Founding standing is honour, not
+authority: every holder already has whatever they may do through a Discord rank or the `webmaster`
+role, and a title that quietly granted permissions would be a privilege escalation dressed as a
+roster tab.
+
+Squadron owner, 2026-08-04: a Founders tab on `/roster`, a founding title on the card in place of
+the site ones, and a fixed order at the top of the roster.
+
+| Key | Name | Order | On the Founders tab | Purpose |
+|---|---|---|---|---|
+| `founder` | Founder | 800 | yes | Founded the squadron. The #1 spot on the roster, outright. |
+| `co_founder` | Co-Founder | 810 | yes | Co-founded the squadron. Directly after the founder. |
+| `hub_founder` | Founder | 820 | **no** | Founding standing on the hub, titled Founder. Pinned directly after the squadron's founders. |
+
+**Ascending, like the leadership tier** — the lowest number is the most senior, and the reverse of
+the tenure ladder. The 800s are their own band so the roles console can group them: the 900s are
+"everyone who holds no ladder rank", which the founders are not, and the 1000s are website roles
+that "confer every permission on this site and no standing in the squadron whatsoever", which is
+the opposite of what these are.
+
+**`hub_founder` exists because the owner's instruction holds two facts at once.** Pebblemerchant's
+card "should say founder", and the tab gets "only these people" — four names, theirs not among
+them — with Pebblemerchant placed *after* the founders. One role could carry only one of those.
+
+**No `role_mappings` row for any of them.** There is no Discord role behind founding standing, so
+role sync can neither grant nor revoke it; the grants carry source `system` and survive the nightly
+reconciliation. Seeded and granted by `20260805180000_founding_roles`; the title is `roles.name` and
+the roster order is `roles.rank_order`, so both are edited on the roles console rather than deployed.
+What lives in source is only the set of **keys** — `apps/api/src/members/founding.ts`.
+
 ## Discord mapping
 
 `role_mappings` maps Discord role IDs to internal roles. **It is data, not code** (INV-008) — no Discord snowflake appears in application source.

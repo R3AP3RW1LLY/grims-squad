@@ -143,8 +143,20 @@ export interface ProfileSource {
   readonly ranks: ReadonlyArray<{ name: string; colour: string | null }>;
   /** Snowflakes of the Discord roles this member currently holds. Resolved by the caller. */
   readonly guildRoleIds?: readonly string[];
-  /** Platform roles, e.g. webmaster. NOT squadron standing. */
-  readonly siteRoles?: ReadonlyArray<{ name: string; colour: string | null }>;
+  /**
+   * Non-hierarchical roles: platform roles such as webmaster, and founding
+   * standing. NOT squadron rank.
+   *
+   * The `key` and `rankOrder` are internal and must not be spread onto a
+   * response — see `foundingStanding`, which is the only thing that reads them,
+   * and the controller, which maps this to `{ name, colour }` on the way out.
+   */
+  readonly siteRoles?: ReadonlyArray<{
+    key: string;
+    name: string;
+    colour: string | null;
+    rankOrder: number;
+  }>;
   readonly cmdrName: string | null;
   /**
    * Inara confirms BOTH the commander name and that they fly with this
