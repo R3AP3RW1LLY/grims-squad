@@ -120,6 +120,12 @@ REQUIRED=(
   # so a deploy is refused until /srv/grims/.env names both channels and the
   # forum author (infra/cutover-grims-squad.md §7.1 has the values).
   DISCORD_ANNOUNCE_CHANNEL_ID DISCORD_PROMOTIONS_CHANNEL_ID ANNOUNCE_FORUM_AUTHOR_HANDLE
+  # ★ AND THE COLONISATION CHANNEL — SQUADRON OWNER, 2026-08-05 ★
+  #
+  # Squadron colonisation projects announce to their own channel. Required for the same reason as
+  # the two above: unset means the rows queue silently, so the first anybody would know is a
+  # project nobody was told about.
+  DISCORD_COLONY_CHANNEL_ID
 )
 
 missing=()

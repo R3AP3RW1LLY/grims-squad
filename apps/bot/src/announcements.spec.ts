@@ -24,6 +24,17 @@ describe('channelEnvFor — which variable names the destination', () => {
     expect(channelEnvFor('promotion')).toBe('DISCORD_PROMOTIONS_CHANNEL_ID');
   });
 
+  it('MANDATORY: a squadron colonisation project goes to its own channel', () => {
+    /*
+     * Squadron owner, 2026-08-05: colonisation announces to a channel of its own, not the general
+     * one — a call to haul is aimed at the people who want to be told about hauling.
+     *
+     * The ID itself stays out of source (INV-008). This asserts only which VARIABLE is consulted,
+     * which is the part that can silently regress.
+     */
+    expect(channelEnvFor('colony-project')).toBe('DISCORD_COLONY_CHANNEL_ID');
+  });
+
   it('an unknown kind waits on the general channel rather than vanishing', () => {
     // A future producer's rows should block on configuration, not on a string mismatch.
     expect(channelEnvFor('season-finale')).toBe('DISCORD_ANNOUNCE_CHANNEL_ID');

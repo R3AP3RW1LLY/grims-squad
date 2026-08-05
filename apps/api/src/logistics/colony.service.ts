@@ -1,9 +1,31 @@
 import { randomBytes } from 'node:crypto';
-import { completeColonyProject, notifySquadron, type LiveNudge, type PrismaClient } from '@grims/db';
+import {
+  announceColonyProject,
+  completeColonyProject,
+  notifySquadron,
+  type LiveNudge,
+  type PrismaClient,
+} from '@grims/db';
 import { AppError, ErrorCode, Permission } from '@grims/shared';
 import { DEFAULT_TIMEZONE, isValidTimezone } from '../common/timezone.js';
 import type { AclDbService } from '../authz/acl-db.service.js';
 import type { MarketStore, PlaceQuery } from './market.store.js';
+
+/**
+ * Where the site lives, for a link in a Discord message.
+ *
+ * ★ PUBLIC_URL, WITH THE SAME FALLBACK THE TELEMETRY CONTROLLER USES ★
+ *
+ * `WEB_BASE_URL` is the explicit answer where somebody has set one; `PUBLIC_URL` is what the
+ * deploy preflight already requires, so it is the reliable one. A trailing slash is stripped by
+ * the template, and an unset pair produces a relative link rather than a broken absolute one —
+ * ugly in Discord, but it cannot point at the wrong hub.
+ */
+function siteUrl(): string {
+  const explicit = (process.env['WEB_BASE_URL'] ?? '').trim();
+  const fallback = (process.env['PUBLIC_URL'] ?? '').trim();
+  return explicit === '' ? fallback : explicit;
+}
 
 /**
  * Colonisation projects — the squadron's own record.
@@ -1160,6 +1182,23 @@ export class ColonyService {
       this.nudge,
     );
 
+    /*
+     * ★ SQUADRON PROJECTS ANNOUNCE TO DISCORD — SQUADRON OWNER, 2026-08-05 ★
+     *
+     * "when a new squadron colonization project is created, can we send a notification to this
+     * discord channel please ... with a link to the project on the website ... include the name of
+     * the commander who started the squadron project"
+     *
+     * Squadron only. A personal build belongs to the member who posted it, and putting it in a
+     * squadron channel would read as a call to arms nobody issued.
+     *
+     * Fire-and-forget, like the squadron notice above it: the project is created by the time this
+     * runs, and no announcement is worth failing a creation over.
+     */
+    if (input.owner === 'squadron') {
+      void announceColonyProject(this.db, created.id, siteUrl()).catch(() => undefined);
+    }
+
     return created;
   }
 
@@ -1408,6 +1447,16 @@ export class ColonyService {
         ...(owner === 'personal' ? { isPriority: false } : {}),
       },
     });
+
+    /*
+     * An adoption is a new squadron project as far as the colonisation channel is concerned — the
+     * owner approved announcing both, because otherwise the channel misses every build that became
+     * the squadron's effort rather than starting as one. Handing one BACK is not announced: that is
+     * an officer tidying up, not a call to haul.
+     */
+    if (owner === 'squadron') {
+      void announceColonyProject(this.db, projectId, siteUrl(), actorId).catch(() => undefined);
+    }
 
     await db.auditLog.create({
       data: {
