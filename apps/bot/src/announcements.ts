@@ -65,8 +65,28 @@ export function channelEnvFor(
 ):
   | 'DISCORD_ANNOUNCE_CHANNEL_ID'
   | 'DISCORD_PROMOTIONS_CHANNEL_ID'
-  | 'DISCORD_COLONY_CHANNEL_ID' {
+  | 'DISCORD_COLONY_CHANNEL_ID'
+  | 'DISCORD_RELEASE_CHANNEL_ID' {
   if (kind === 'promotion') return 'DISCORD_PROMOTIONS_CHANNEL_ID';
+  /*
+   * ★ RELEASES HAVE THEIR OWN CHANNEL — SQUADRON OWNER, 2026-08-05 ★
+   *
+   * "we also did not make the app update notification in the channel ... like were supposed to do
+   * when we drop a new version of the website or app!"
+   *
+   * A deploy announcement is a release note: what changed on the website and in the app, with a
+   * link to the changelog. That is a different audience from "a commander joined" — people who
+   * want to know what moved, rather than everyone. It carries the COMPANION section too, so an app
+   * release is announced by the same row.
+   *
+   * ★ AND WHY THESE NEVER FIRED AT ALL ★
+   *
+   * Not this routing — the row was never written. `deploy.sh` generates the changelog and the
+   * announcement with `node`, and production had no node installed, so every deploy took the
+   * "record the changelog by hand" branch and skipped both. Silently, and with a tick beside it.
+   * Installed 2026-08-05; from here the deploy writes them itself.
+   */
+  if (kind === 'deploy') return 'DISCORD_RELEASE_CHANNEL_ID';
   /*
    * ★ COLONISATION HAS ITS OWN CHANNEL — SQUADRON OWNER, 2026-08-05 ★
    *
