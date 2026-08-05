@@ -12,6 +12,7 @@ import { PrismaRollupStore } from './jobs/commodity-rollup.wiring.js';
 import { takeJobLock } from './lib/job-lock.js';
 import { resolveStations } from './jobs/resolve-stations.js';
 import { rebuildBountyBoard } from './jobs/bounty-board.js';
+import { refreshEdsyIds } from './jobs/edsy-refresh.js';
 import { scoreLeaderboards } from './jobs/leaderboard-scores.js';
 import { rollUpTelemetry } from './jobs/telemetry-rollup.js';
 import { PrismaTelemetryRollupStore } from './jobs/telemetry-rollup.wiring.js';
@@ -83,6 +84,7 @@ const RUNNABLE: Record<
    * would be refused by its own daemon.
    */
   commanders: { entry: 'daily-audit', args: [], selfLocked: true },
+  edsy: { entry: 'edsy-refresh', args: [] },
 };
 
 /**
@@ -649,6 +651,54 @@ function startBountyBoard(db: PrismaClient): void {
 }
 
 /**
+ * The EDSY id tables, daily.
+ *
+ * ★ WRITTEN, TESTED, AND CALLED BY NOTHING ★
+ *
+ * `refreshEdsyIds` had no caller anywhere in the repository except its own spec — no entrypoint,
+ * no cron line, no key here, no deploy step — while two migrations created and extended `edsy_ids`
+ * on every deploy. Production carried a perfectly-formed EMPTY table, confirmed 2026-08-05 at zero
+ * rows, and pasting an EDSY build link answered with a red box telling the member to ask an
+ * officer to run a job nobody could run.
+ *
+ * The migration's header says the data is "refreshed on a schedule the same way coriolis-data is".
+ * This is that schedule, finally.
+ *
+ * ★ DAILY, AND WHY NOT HOURLY ★
+ *
+ * It is one HTTP GET of a static file on GitHub that changes when Frontier ships a game update —
+ * a few times a year. The job already short-circuits on an unchanged version, so an hourly cadence
+ * would buy nothing and spend somebody else's bandwidth to learn the same answer twenty-four times
+ * a day. Run once at startup as well, which is what fixes an empty table the moment this deploys
+ * rather than up to a day later.
+ */
+const EDSY_REFRESH_MS = 24 * 60 * 60_000;
+
+function startEdsyRefresh(db: PrismaClient): void {
+  const run = async (): Promise<void> => {
+    const lock = await takeJobLock('edsy-refresh');
+    if (lock === null) return;
+    try {
+      const result = await refreshEdsyIds(db);
+      if (result.problem !== undefined) {
+        // Upstream being unreachable leaves the existing table alone — yesterday's ids decode
+        // today's links. Said out loud so a refresh failing for a month is not silent.
+        console.error(`daemon: edsy refresh — ${result.problem}`);
+      } else if (result.changed) {
+        console.log(`daemon: edsy — ${result.ships} ships, ${result.modules} modules`);
+      }
+    } catch (e) {
+      console.error(`daemon: edsy refresh failed (${e instanceof Error ? e.message : String(e)})`);
+    } finally {
+      await lock.release();
+    }
+  };
+
+  void run();
+  setInterval(() => void run(), EDSY_REFRESH_MS);
+}
+
+/**
  * The leaderboard scorers, every five minutes — the same cadence as the colony sync they feed
  * from, and fast enough that telemetry's 30-day purge can never outrun the trade scorer.
  */
@@ -752,6 +802,7 @@ async function main(): Promise<void> {
    * and "overdue" can no longer disagree.
    */
   startScheduler(db);
+  startEdsyRefresh(db);
 
   /*
    * Never returns. The subscription and the reconnect loop live in there, and this process exists

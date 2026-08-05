@@ -12,6 +12,7 @@ import {
   getSupportConsoleGated,
   getSuggestionInboxGated,
   getRoadmapManageGated,
+  getTrainingQueueGated,
   type AdminActivityRow,
   type AdminRead,
 } from '../../../lib/api';
@@ -27,6 +28,8 @@ import { Moderation } from './moderation';
 import { Support } from './support';
 import { SupportTabBadge } from './support-tab-badge';
 import { SuggestionsTabBadge } from './suggestions-tab-badge';
+import { TrainingImagesTabBadge } from './training-images-tab-badge';
+import { TrainingImages } from './training-images';
 import { Suggestions } from './suggestions';
 import { RoadmapBoard } from './roadmap-board';
 import { ActivityTable } from './activity-table';
@@ -95,6 +98,22 @@ const TABS: readonly PageTab[] = [
    */
   { key: 'suggestions', label: 'Suggestions' },
   { key: 'roadmap', label: 'Roadmap' },
+  /*
+   * ★ THE APPROVING HALF OF "HELP TRAIN THE BOT" — SQUADRON OWNER, 2026-08-05 ★
+   *
+   * "where do admins approve images that are submitted on the /gmsd-ai/train page? i can not
+   * find it at all ... we have images waiting to be approved!"
+   *
+   * They could not find it because there was nowhere to find. Members submitted, the uploader
+   * promised an officer would look, and the rows sat in `pending` with no surface on the
+   * platform able to list them — the same shape as screening holding posts with no screen to
+   * release them, which is why Moderation is a tab too.
+   *
+   * Gated on AI_TRAINING rather than the console's MEMBER_MANAGE: the permission's own
+   * definition says "webmaster + AI_TRAINING holders approve", and curation wants the members
+   * who know Elite, not whoever manages the roster.
+   */
+  { key: 'training-images', label: 'Training images' },
   { key: 'roles', label: 'Roles & permissions' },
 ];
 
@@ -124,7 +143,8 @@ export default async function AdminPage({
    * though — every tab needs to know whether the second factor is fresh, and
    * a null from any admin read is that answer.
    */
-  const [dashboard, activity, audit, held, aiHealth, support, me, suggestions, roadmap] = await Promise.all([
+  const [dashboard, activity, audit, held, aiHealth, support, me, suggestions, roadmap, trainingQueue] =
+    await Promise.all([
     /*
      * Fetched for the ACTIVITY tab too, and only for its `availableMonths`.
      *
@@ -149,7 +169,9 @@ export default async function AdminPage({
      * For the support and suggestions tabs' clocks. INV-025 wants each queue's absolute times
      * in the VIEWER's stored timezone, and that zone lives on /v1/me.
      */
-    tab === 'support' || tab === 'suggestions' ? getMe() : Promise.resolve(null),
+    tab === 'support' || tab === 'suggestions' || tab === 'training-images'
+      ? getMe()
+      : Promise.resolve(null),
     /*
      * The two webmaster tabs fetch through the REASON-KEEPING reader directly, rather than the
      * null-collapsing one plus a probe: AdminRead existed by the time they were built, so the
@@ -157,6 +179,7 @@ export default async function AdminPage({
      */
     tab === 'suggestions' ? getSuggestionInboxGated() : Promise.resolve(null),
     tab === 'roadmap' ? getRoadmapManageGated() : Promise.resolve(null),
+    tab === 'training-images' ? getTrainingQueueGated() : Promise.resolve(null),
   ]);
 
   /*
@@ -164,11 +187,24 @@ export default async function AdminPage({
    * it asking for the right bit rather than MEMBER_MANAGE.
    */
   const gatedTab: AdminRead<unknown> | null =
-    tab === 'suggestions' ? suggestions : tab === 'roadmap' ? roadmap : null;
+    tab === 'suggestions'
+      ? suggestions
+      : tab === 'roadmap'
+        ? roadmap
+        : tab === 'training-images'
+          ? trainingQueue
+          : null;
   if (gatedTab !== null && gatedTab.state !== 'ok') {
     if (gatedTab.state === 'forbidden') {
+      /*
+       * Each tab names ITS OWN bit. A shared refusal would send an officer to ask for
+       * SITE_CONFIG when what they actually lack is AI_TRAINING — which is how somebody ends
+       * up granted far more than the job needed.
+       */
       return tab === 'suggestions' ? (
         <NoAccess what="the suggestion inbox" permission="SITE_CONFIG" />
+      ) : tab === 'training-images' ? (
+        <NoAccess what="the training image queue" permission="AI_TRAINING" />
       ) : (
         <NoAccess what="the roadmap board" permission="SITE_CONFIG" />
       );
@@ -254,7 +290,9 @@ export default async function AdminPage({
                 ? { ...t, badge: <SupportTabBadge /> }
                 : t.key === 'suggestions'
                   ? { ...t, badge: <SuggestionsTabBadge /> }
-                  : t,
+                  : t.key === 'training-images'
+                    ? { ...t, badge: <TrainingImagesTabBadge /> }
+                    : t,
             )}
             current={tab}
             basePath="/app"
@@ -345,6 +383,18 @@ export default async function AdminPage({
         >
           <Suggestions
             initial={suggestions.data.suggestions}
+            viewerTz={me?.user?.timezone ?? 'UTC'}
+          />
+        </Section>
+      )}
+
+      {tab === 'training-images' && trainingQueue !== null && trainingQueue.state === 'ok' && (
+        <Section
+          title="Training images"
+          description="Screenshots members have offered for the image models, oldest first. Approving one adds it to the pool the next training run learns from. Refusing one asks for a reason, because the member is shown it — and without it they send the same image again."
+        >
+          <TrainingImages
+            initial={trainingQueue.data.queue}
             viewerTz={me?.user?.timezone ?? 'UTC'}
           />
         </Section>

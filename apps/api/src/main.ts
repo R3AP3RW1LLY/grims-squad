@@ -96,7 +96,26 @@ async function bootstrap(): Promise<void> {
    * removed.
    */
   await app.register(fastifyRateLimit, {
-    max: 300,
+    /*
+     * ★ THE BACKFILL IS LEGITIMATE USE, AND 300 WAS BELOW IT — MEASURED 2026-08-05 ★
+     *
+     * The note above says a limit legitimate use ever touches is a limit that gets removed. It got
+     * touched. A member pairing the companion for the first time uploads their whole journal
+     * history, and that is a burst of one request per batch for as long as the history is long —
+     * they crossed 300 in a minute, were refused, and the app told them the hub had rejected their
+     * upload.
+     *
+     * ★ A FUNCTION, SO THE BULK PATH IS NOT MEASURED AGAINST THE BROWSING PATH ★
+     *
+     * Telemetry is the only route family that is bulk by nature, and it is already keyed per
+     * DEVICE TOKEN rather than per IP — so a generous budget here cannot be spent by anything
+     * except one paired install sending its own journal. Everything else keeps 300, which remains
+     * far above what a person does in a browser.
+     *
+     * 2,000/minute is roughly a first-run backfill finishing in a couple of minutes instead of
+     * failing, and is still an order of magnitude below what an unthrottled script would produce.
+     */
+    max: (req) => (req.url.startsWith('/v1/telemetry/') ? 2_000 : 300),
     timeWindow: '1 minute',
     keyGenerator: (req) => {
       /*

@@ -207,10 +207,48 @@ export function InaraForm() {
           <label htmlFor="inara-key" className="block text-[var(--color-text-primary)]">
             Inara API key
           </label>
-          <p id="inara-help" className="mt-2 max-w-[70ch] text-sm text-[var(--color-text-secondary)]">
-            On Inara, open your profile menu &rarr; <strong>API keys</strong>, generate one, and
-            paste it here. We use it only to ask Inara which commander the key belongs to.
-          </p>
+          {/*
+            ★ THE ROUTE THROUGH INARA, AS IT ACTUALLY IS — SQUADRON OWNER, 2026-08-05 ★
+
+            This said "open your profile menu → API keys", and there is no such menu item. Inara
+            does not put it in the profile menu, and a member following that sentence arrives
+            nowhere and concludes the verification is broken rather than the instructions.
+
+            The real path, walked by the owner: sign in, land on the commander overview (medals and
+            ranks), and in the grey link bar ABOVE the medals click the cog at the far right. That
+            opens settings, where API SETTINGS in the grey button bar leads to the page linked
+            below. If "Your API key" is empty, generate one.
+
+            Every step is named because the two bars look alike and the cog is unlabelled — "go to
+            settings" is exactly the summary that sent people to the wrong bar.
+
+            The link goes straight to the final page, so a member who is already signed in can skip
+            the walk entirely. The walk stays for anybody the link does not land correctly for.
+          */}
+          <div id="inara-help" className="mt-2 max-w-[70ch] text-sm text-[var(--color-text-secondary)]">
+            <p>
+              Go to{' '}
+              <a
+                href="https://inara.cz/elite/cmdr-settings-api/"
+                target="_blank"
+                rel="noreferrer noopener"
+                className="text-[var(--color-brand-cyan-bright)] underline"
+              >
+                Inara&rsquo;s API settings
+              </a>
+              , copy the key from <strong>Your API key</strong>, and paste it here. If that box is
+              empty, press <strong>Generate new key</strong> first.
+            </p>
+            <p className="mt-2">
+              Finding it from scratch: sign in to Inara and you land on your commander overview,
+              where your medals and ranks are. In the grey link bar <em>above</em> the medals,
+              click the cog at the far right. On the page that opens, click{' '}
+              <strong>API SETTINGS</strong> in the grey button bar.
+            </p>
+            <p className="mt-2">
+              We use the key only to ask Inara which commander it belongs to.
+            </p>
+          </div>
           <input
             id="inara-key"
             type="password"

@@ -70,11 +70,27 @@ export function groupRoles(all: readonly AdminRoleRow[]): RoleGroup[] {
   );
 
   /*
-   * Ascending, like the appointments and for the same reason: the founder is the
-   * most senior and carries the lowest number. Taken BEFORE membership so a
-   * founding role can never be swept into "everyone who holds no ladder rank".
+   * ★ TAKEN OUT OF THE POOL, AND NOT SHOWN — SQUADRON OWNER, 2026-08-05 ★
+   *
+   * "remove this from the roles & permissions page! these folks are already officers and there
+   * are not new roles & permisisons that these ranks would get!"
+   *
+   * Which is right: `founder`, `co_founder` and `roster_pin` carry no permission mask anybody
+   * would ever edit. They exist to decide a TITLE and an ORDER on the roster, and listing them on
+   * a page about what people are allowed to do invited the reading that they grant something.
+   *
+   * ★ SO WHY IS THIS `take` STILL HERE ★
+   *
+   * Because it is what keeps them out of everything else. `take` removes what it matches from
+   * `rest`, and the groups below are defined by what is LEFT — so deleting this line does not
+   * hide the founding roles, it moves them into "Members, allies and unranked", which is worse
+   * than where they were. Taken before membership, as the original note said, and now simply not
+   * rendered.
+   *
+   * The roles themselves are untouched. They still drive the Founders tab, the roster order and
+   * the title on a card; none of that is edited here any more.
    */
-  const founding = take(
+  take(
     (r) => r.rankOrder >= FOUNDING_FLOOR && r.rankOrder < LADDER_CEILING && !r.isHierarchical,
     (a, b) => a.rankOrder - b.rankOrder,
   );
@@ -103,13 +119,6 @@ export function groupRoles(all: readonly AdminRoleRow[]): RoleGroup[] {
       blurb:
         'The promotion ladder, top to bottom. Earned by qualifying months — time served, never moderation power (INV-046).',
       roles: ranks,
-    },
-    {
-      key: 'founding',
-      title: 'Founders',
-      blurb:
-        'Who founded the squadron, and what their card calls them. The name here is the title shown on the roster, and the order decides who sits where at the top of it — both are edited on this page.',
-      roles: founding,
     },
     {
       key: 'membership',

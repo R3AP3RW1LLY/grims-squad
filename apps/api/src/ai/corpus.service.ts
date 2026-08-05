@@ -42,6 +42,32 @@ export interface SubmissionView {
   readonly createdAt: string;
 }
 
+/**
+ * One submission as a REVIEWER sees it.
+ *
+ * Everything the member wrote, plus who they are — a caption is judged partly on whether it
+ * describes the picture, and knowing whose it is matters when the same person keeps sending the
+ * same thing. `shipType` and `notes` are here because they are appended to the caption at training
+ * time, so a reviewer approving the row is approving those too.
+ */
+export interface QueuedSubmission {
+  readonly id: string;
+  readonly uploadId: string;
+  readonly category: string;
+  readonly description: string;
+  readonly shipType: string | null;
+  readonly notes: string | null;
+  readonly createdAt: string;
+  readonly submittedBy: {
+    readonly handle: string;
+    readonly displayName: string;
+    readonly cmdrName: string | null;
+  };
+}
+
+/** What a reviewer decided. `withdrawn` is the member's word and is never a reviewer's. */
+export type ReviewDecision = 'approved' | 'rejected';
+
 @Injectable()
 export class CorpusService {
   constructor(@Inject(PrismaClient) private readonly db: PrismaClient) {}
@@ -247,6 +273,135 @@ export class CorpusService {
     });
     if (updated.count === 0) {
       throw new AppError(ErrorCode.RESOURCE_NOT_VISIBLE, 'That submission is not available.');
+    }
+  }
+
+  /**
+   * Everything waiting to be reviewed, oldest first.
+   *
+   * ★ THE HALF OF THIS FEATURE THAT WAS NEVER BUILT ★
+   *
+   * Squadron owner, 2026-07-30: "webmaster + AI_TRAINING holders approve". The permission was
+   * written, the schema carries `state`, `reviewNote`, `reviewedBy` and `reviewedAt`, and
+   * `@@index([state, createdAt])` is commented "the review queue: everything waiting, oldest
+   * first". Every part of the design existed except a way to open it.
+   *
+   * So members submitted, the uploader told them an officer would look, and the images sat in
+   * `pending` with no surface anywhere on the platform that could list them. Reported by the
+   * squadron owner on 2026-08-05: "i can not find it at all and we need this working! ... we have
+   * images waiting to be approved".
+   *
+   * ★ OLDEST FIRST, AND WHY THAT IS NOT ARBITRARY ★
+   *
+   * A newest-first queue starves the bottom: on any day the reviewer does not reach the end, the
+   * same old submissions are the ones skipped, and a member who offered something on a busy day
+   * waits forever while later ones go through. Oldest first means the wait is bounded by the
+   * queue, not by luck.
+   */
+  async queue(limit = 100): Promise<QueuedSubmission[]> {
+    const rows = await this.db.trainingImage.findMany({
+      where: { state: 'pending' },
+      orderBy: { createdAt: 'asc' },
+      take: limit,
+      select: {
+        id: true,
+        uploadId: true,
+        category: true,
+        description: true,
+        shipType: true,
+        notes: true,
+        createdAt: true,
+        user: {
+          select: {
+            handle: true,
+            displayName: true,
+            /*
+             * The proven commander name, when there is one. Officers know each other by CMDR name
+             * far more than by handle, and a queue that identified people by a URL slug would make
+             * "who keeps sending these" a lookup rather than a glance.
+             */
+            cmdrVerifications: {
+              where: { isVerified: true, revokedAt: null },
+              orderBy: { verifiedAt: 'desc' },
+              take: 1,
+              select: { cmdrName: true },
+            },
+          },
+        },
+      },
+    });
+
+    return rows.map((r) => ({
+      id: r.id,
+      uploadId: r.uploadId,
+      category: r.category,
+      description: r.description,
+      shipType: r.shipType,
+      notes: r.notes,
+      createdAt: r.createdAt.toISOString(),
+      submittedBy: {
+        handle: r.user.handle,
+        displayName: r.user.displayName,
+        cmdrName: r.user.cmdrVerifications[0]?.cmdrName ?? null,
+      },
+    }));
+  }
+
+  /** How many are waiting. The number on the console tab, and nothing else. */
+  async waiting(): Promise<number> {
+    return this.db.trainingImage.count({ where: { state: 'pending' } });
+  }
+
+  /**
+   * A reviewer's decision.
+   *
+   * ★ A REJECTION WITHOUT A REASON TEACHES NOBODY ANYTHING ★
+   *
+   * The schema says so in its own comment on `reviewNote`: "Why an officer refused it. Shown to
+   * the member, because a rejection with no reason teaches them nothing and they will submit the
+   * same thing again." So a rejection REQUIRES a note, and the requirement lives here rather than
+   * only in the form — a form is one caller, and the rule is about the data.
+   *
+   * An approval may carry a note and usually will not. There is nothing to explain about yes.
+   *
+   * ★ ONLY PENDING ROWS MOVE ★
+   *
+   * The `state: 'pending'` in the filter is the whole concurrency story. Two officers opening the
+   * queue together both see the same image; whoever decides first wins, and the second gets
+   * "already reviewed" instead of silently overwriting a colleague's judgement. It also stops a
+   * decision landing on something the member withdrew while the tab was open — withdrawal is
+   * theirs and a reviewer must not undo it.
+   */
+  async review(
+    reviewerId: string,
+    id: string,
+    decision: ReviewDecision,
+    note: string | null,
+  ): Promise<void> {
+    const trimmed = (note ?? '').trim();
+
+    if (decision === 'rejected' && trimmed === '') {
+      throw new AppError(
+        ErrorCode.VALIDATION_FAILED,
+        'Say why it was refused — the member is shown this, and without it they will send the same image again.',
+      );
+    }
+
+    const updated = await this.db.trainingImage.updateMany({
+      where: { id, state: 'pending' },
+      data: {
+        state: decision,
+        reviewNote: trimmed === '' ? null : trimmed.slice(0, MAX_DESCRIPTION_CHARS),
+        reviewedBy: reviewerId,
+        reviewedAt: new Date(),
+      },
+    });
+
+    if (updated.count === 0) {
+      throw new AppError(
+        ErrorCode.RESOURCE_NOT_VISIBLE,
+        'That submission is no longer waiting — somebody reviewed it, or the member withdrew it.',
+      );
     }
   }
 

@@ -1,3 +1,4 @@
+import { countForumPost } from './activity-count.js';
 import { AppError, ErrorCode, Permission, XP_AWARDS } from '@grims/shared';
 import type { AclBoundClient } from '../authz/acl-db.service.js';
 import { assertSlug, satisfiesMask, type CategoryService } from './category.service.js';
@@ -859,6 +860,27 @@ export class ThreadService {
     // A new thread has content to index. Enqueued here rather than at P8, because
     // the call site is the thing that gets forgotten.
     await this.reindex.enqueue({ kind: 'thread', id: created.id, reason: 'created' });
+
+    /*
+     * ★ THE OPENING POST IS A POST, AND WAS NOT BEING COUNTED EITHER ★
+     *
+     * Squadron owner, 2026-08-05: "the website is not tracking forum posts in the chart on the
+     * /app page".
+     *
+     * `PostService.create` records every reply against `member_activity_days`. The opening post
+     * never goes through it — it is created NESTED in the insert above — so starting a thread
+     * counted towards nothing: not the activity chart, not the dashboard totals, and not
+     * promotion eligibility. Production held eleven posts across five threads, five of them
+     * openers, and every daily row read zero.
+     *
+     * This is the second bug to come out of that nested create; the screening note above is the
+     * first. Anything that must happen "when a post is written" has to happen HERE as well, and
+     * the shared `countForumPost` exists so the two paths cannot drift.
+     *
+     * Fire-and-forget, exactly as the reply path does it: an activity statistic is not worth
+     * failing a thread over, and the member has already written the thing.
+     */
+    void countForumPost(db, authorId).catch(() => undefined);
 
     return { ...created, held: screened !== null && screened.state === 'held' };
   }

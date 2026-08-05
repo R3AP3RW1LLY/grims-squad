@@ -51,7 +51,12 @@ export class BountiesService {
   constructor(private readonly db: PrismaClient) {}
 
   /** The board, squadron space first — the order the owner asked the page to read in. */
-  async board(): Promise<{ computedAt: Date | null; ops: BountyRow[]; galaxy: BountyRow[] }> {
+  async board(): Promise<{
+    computedAt: Date | null;
+    ops: BountyRow[];
+    galaxy: BountyRow[];
+    activeProjects: number;
+  }> {
     const rows = await this.db.$queryRawUnsafe<
       Array<{
         station_key: string;
@@ -87,10 +92,27 @@ export class BountiesService {
       distanceLy: r.distance_ly,
     });
 
+    /*
+     * ★ AN EMPTY OPS LIST MEANS TWO COMPLETELY DIFFERENT THINGS ★
+     *
+     * Squadron space is everywhere within 200 ly of an ACTIVE colonisation project. With no active
+     * project there is no anchor, so the section is empty because it is undefined — not because
+     * everything near us is fresh.
+     *
+     * The page could not tell those apart and said "squadron space is lit" for both, which is a
+     * claim that all our nearby data is current. Reported by the squadron owner on 2026-08-05:
+     * the section was blank in production, and the copy read as though that were good news.
+     *
+     * A count rather than a boolean: "no active projects" and "three projects and nothing stale"
+     * are different sentences, and the second one is worth being able to say.
+     */
+    const activeProjects = await this.db.colonyProject.count({ where: { completedAt: null } });
+
     return {
       computedAt: rows[0]?.computed_at ?? null,
       ops: rows.filter((r) => r.in_ops).map(shape),
       galaxy: rows.filter((r) => !r.in_ops).map(shape),
+      activeProjects,
     };
   }
 
