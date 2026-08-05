@@ -517,6 +517,21 @@ describe('ThreadService', () => {
       ).rejects.toMatchObject({ code: ErrorCode.PERMISSION_DENIED });
     });
 
+    it('MANDATORY: createAsSystem posts where the author has no post permission — the announcement carbon-copy', async () => {
+      /*
+       * The case that stranded the launch announcement: the Discord half went out, and the forum
+       * copy retried once a minute for ever because the announcements board demands the officer
+       * posting permission and the webmaster preset deliberately excludes it.
+       *
+       * This door exists for the platform RECORDING something that already happened. It is
+       * separate from createViaPublish precisely so the test above keeps its guarantee.
+       */
+      const db = boundClient(PUBLISH_ONLY, POST_MEMBER);
+      await expect(
+        svc.createAsSystem(db as never, INPUT, 'member-1', POST_MEMBER),
+      ).resolves.toMatchObject({ id: 'new-thread' });
+    });
+
     it('MANDATORY: a board without the flag takes composer threads exactly as before', async () => {
       // The default-false pin: nothing changes anywhere the migration did not touch.
       const db = boundClient(TREE, POST_MEMBER);

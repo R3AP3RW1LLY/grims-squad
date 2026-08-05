@@ -175,7 +175,7 @@ export class ForumCcService implements OnModuleInit, OnModuleDestroy {
          * has already happened is the platform recording it under a name members recognise, not
          * that person asking to post; the sanitiser and the screener still apply.
          */
-        const thread = await this.threads.createViaPublish(
+        const thread = await this.threads.createAsSystem(
           db,
           { categoryId: category.id, title: row.forum_title, body: row.forum_body },
           author.id,
