@@ -146,7 +146,18 @@ export const EMPTY_TOTALS: CompanionTotals = {
 };
 
 export const DEFAULT_CONFIG: CompanionConfig = {
-  apiBaseUrl: 'https://45-63-35-93.sslip.io',
+  /*
+   * ★ THE SQUADRON'S OWN ADDRESS, SINCE THE 2026-08-05 CUTOVER ★
+   *
+   * This was the sslip.io address the site launched on, and it kept working after the domain moved
+   * because that origin is still served. But it is the wrong answer to give a member installing the
+   * app today: the address they were sent to, the one on their screen, and the one the app talks to
+   * should be the same, or the first confusing moment has no explanation.
+   *
+   * An existing install keeps whatever is in its own config file — this default is only consulted
+   * when there is none, so upgrading does not move anybody.
+   */
+  apiBaseUrl: 'https://grims-squad.com',
   deviceToken: '',
   journalPathOverride: null,
   offsets: {},
