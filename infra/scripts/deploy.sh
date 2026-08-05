@@ -174,6 +174,17 @@ ok "$(du -h "$DUMP" | cut -f1) → $DUMP"
 #
 # 168h keeps a week, so this does NOT slow a routine deploy: today's layers are all still there.
 docker builder prune --force --filter 'until=168h' >/dev/null 2>&1 || true
+#
+# ★ AND A CEILING, BECAUSE THE WEEK-LONG WINDOW IS NOT ONE — MEASURED 2026-08-05 ★
+#
+# Six deploys in one day, six images each, and every layer inside the 168h window: the build cache
+# reached 188 GB and the disk 76%. The time filter cannot help with that, because the problem is
+# volume within the window rather than age.
+#
+# `--keep-storage` bounds it instead: BuildKit evicts least-recently-used entries beyond the cap,
+# so same-day rebuilds stay fast and the total cannot run away. 40 GB is comfortably more than one
+# full build of all six images and far below anything that threatens the disk.
+docker builder prune --force --keep-storage 40GB >/dev/null 2>&1 || true
 ok "old build cache pruned"
 
 # ★ EVERY SERVICE, NOT THE FOUR THAT FACE A MEMBER ★
@@ -188,8 +199,24 @@ ok "old build cache pruned"
 # executing the old code and kept failing the same way. The deploy reported success every time.
 #
 # `--profile jobs` is still needed: the one-shot `worker` service is behind it.
+# ★ NICED, BECAUSE THE OLD SITE IS STILL SERVING DURING THIS ★
+#
+# The swap is health-gated and the swap was never the problem. The BUILD is: six images compiling
+# TypeScript and Next in parallel took an 8-core box to a load average of 19, and the containers
+# still serving members answered slowly enough to time out. The deploy then reported success —
+# correctly, because the new containers were healthy — while members had spent ten minutes getting
+# INTERNAL_ERROR. Reported by the squadron owner on 2026-08-05: "this is supposed to be zero
+# downtime updates etc! what the fuck!"
+#
+# `nice -n 19` is the lowest priority the scheduler offers, and `ionice -c3` is idle-class disk.
+# Together they mean the build gets whatever is left after the site has taken what it needs — on an
+# idle box it is no slower, and on a busy one it yields instead of competing. Which is exactly the
+# trade a deploy should make: nobody is waiting on the build, and everybody is waiting on the site.
+#
+# The image count is the reason this became necessary. It was four; the ingest daemon and the
+# collector were added when they turned out to be running stale code for a whole day.
 say "Building images"
-$COMPOSE --profile jobs build api web bot worker worker-daemon eddn-collector
+nice -n 19 ionice -c3 $COMPOSE --profile jobs build api web bot worker worker-daemon eddn-collector
 ok "api, web, bot, worker, worker-daemon, eddn-collector built"
 
 # ─────────────────────────────────────────────────────────── 5. migrate

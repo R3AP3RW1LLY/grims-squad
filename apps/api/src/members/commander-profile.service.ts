@@ -102,6 +102,30 @@ export const PROFILE_EVENT_TYPES = [
    */
   'FSDJump',
   'Location',
+  /*
+   * ★ THE FOUR THE SUBLOCATION READS, WHICH THIS LIST DID NOT FETCH ★
+   *
+   * `buildCommanderProfile` picks the newest of Docked / Location / SupercruiseExit /
+   * ApproachSettlement / Undocked to answer "where in the system are they". Only `Location` was
+   * ever fetched, so `latest.get('Docked')` was permanently undefined and the sublocation could
+   * come from exactly one event no matter what the member did.
+   *
+   * Reported by the squadron owner on 2026-08-05: "my location is not updating as it should be in
+   * /dashboard, it shows me at grims sqwuad sanctuary, but i am at a planetary station". Both
+   * events were in the database — a `Docked` at the construction site, and a `Location` at the
+   * Sanctuary twenty-eight minutes older — and the older one won because the newer one was never
+   * loaded.
+   *
+   * The builder was extended to read four events and this allowlist was not, which is a drift a
+   * type cannot catch: `latest.get()` on an unfetched type is a legal `undefined`. `location.spec`
+   * now asserts the two lists agree.
+   *
+   * Cheap: the query is `distinct on (event_type)`, so four more types is four more index seeks.
+   */
+  'Docked',
+  'Undocked',
+  'SupercruiseExit',
+  'ApproachSettlement',
 ] as const;
 
 function asRecord(value: unknown): Record<string, unknown> {
