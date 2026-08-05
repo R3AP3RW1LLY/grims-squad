@@ -47,6 +47,10 @@
       "types": "./dist/permissions.d.ts",
       "default": "./dist/permissions.js"
     },
+    "./carrier": {
+      "types": "./dist/carrier.d.ts",
+      "default": "./dist/carrier.js"
+    },
     "./ship-build": {
       "types": "./dist/ship-build.d.ts",
       "default": "./dist/ship-build.js"

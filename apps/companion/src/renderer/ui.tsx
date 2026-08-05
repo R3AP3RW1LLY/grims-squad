@@ -1,5 +1,5 @@
-import { Component, type ComponentChildren, type JSX } from 'preact';
-import { useState } from 'preact/hooks';
+import { Component, Fragment, type ComponentChildren, type JSX } from 'preact';
+import { useEffect, useRef, useState } from 'preact/hooks';
 
 /**
  * The pieces every panel is built from.
@@ -503,3 +503,166 @@ export class Guard extends Component<
 
 export const tonnes = (n: number): string => `${n.toLocaleString()} t`;
 export const credits = (n: number): string => `${n.toLocaleString()} cr`;
+
+/**
+ * The boxed code control — six characters, drawn as separate cells.
+ *
+ * ★ SQUADRON OWNER, 2026-08-04 ★
+ *
+ * "can we do this in a box that looks like our 2FA input box? but put a dash between the first and
+ * 2nd set of 3 digits? auto search on completion please! ... make this change on both companion app
+ * and web app please!"
+ *
+ * ★ THE SAME CONTROL AS THE WEBSITE'S, BUILT AGAIN RATHER THAN IMPORTED ★
+ *
+ * `apps/web/src/components/code-input.tsx` is a React component using Tailwind classes and the
+ * site's CSS custom properties. This renderer is Preact with inline styles and its own token
+ * object, so the file cannot be shared — but the BEHAVIOUR can be, and every decision below is
+ * deliberately the same one, because a member who learns the control on one surface must not be
+ * surprised by it on the other:
+ *
+ *   - ONE real input, transparent, sitting over cells that are painted from its value. Six separate
+ *     fields break paste, break autofill, and announce six unlabelled boxes to a screen reader.
+ *   - The dash is DECORATION between cells and never a character in the value. Typing one, pasting
+ *     one, or leaving it out all produce the same six characters.
+ *   - It SUBMITS ITSELF the moment the last cell fills, and submits once per distinct value — so a
+ *     value the server rejects, left sitting in the boxes, does not re-fire on every render.
+ *
+ * The rule for that last point is `@grims/shared`'s, not a second implementation: see
+ * `normaliseCallsign`. What is left here is only how it looks.
+ */
+export function CodeBoxes({
+  label,
+  hint,
+  value,
+  onChange,
+  onComplete,
+  length = 6,
+  groupsOf,
+  disabled = false,
+}: {
+  label: string;
+  hint?: string;
+  value: string;
+  onChange: (next: string) => void;
+  /** Called once, the moment a complete value is present. */
+  onComplete: () => void;
+  length?: number;
+  /** Draw a dash after every N cells. Decoration only — never part of the value. */
+  groupsOf?: number;
+  disabled?: boolean;
+}): JSX.Element {
+  const [focused, setFocused] = useState(false);
+  /*
+   * What has already been fired for. Without it the completion effect below sends the same value
+   * again on every render — against an endpoint that is rate-limiting it, with the member watching
+   * an error flicker and no way to stop it but clearing the field.
+   */
+  const sent = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (value.length !== length) {
+      // Re-arm, unless this is simply the value we just sent minus a character.
+      if (sent.current !== null && value !== sent.current) sent.current = null;
+      return;
+    }
+    if (disabled || sent.current === value) return;
+    sent.current = value;
+    onComplete();
+  }, [value, length, disabled, onComplete]);
+
+  const cells = Array.from({ length }, (_, i) => value[i] ?? '');
+
+  /*
+   * ★ maxLength HAS TO LEAVE ROOM FOR THE SEPARATORS, OR PASTE LOSES CHARACTERS ★
+   *
+   * The caller strips the dash, so the VALUE is only ever `length` characters — but the browser
+   * applies `maxLength` to the raw text before any of our code sees it. Pasting `W8K-W1Y` into a
+   * `maxLength={6}` field gives us `W8K-W1`, which normalises to five characters, and the box
+   * quietly never completes. Copying a callsign out of Discord and pasting it is the most likely
+   * way anybody enters one.
+   */
+  const separators = groupsOf === undefined ? 0 : Math.floor((length - 1) / groupsOf);
+  // Where the caret is, so exactly one cell reads as active. Past the end it sits on the last cell
+  // rather than nowhere, which is what a real caret does.
+  const active = Math.min(value.length, length - 1);
+
+  return (
+    <div>
+      <span style={{ ...LABEL, display: 'block', marginBottom: '8px' }}>{label}</span>
+
+      <div style={{ position: 'relative', width: 'fit-content' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '7px' }} aria-hidden="true">
+          {cells.map((ch, i) => (
+            <Fragment key={i}>
+              {groupsOf === undefined || i === 0 || i % groupsOf !== 0 ? null : (
+                <span style={{ fontFamily: 'var(--font-mono)', fontSize: '20px', color: C.faint }}>
+                  &ndash;
+                </span>
+              )}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: '38px',
+                  height: '48px',
+                  borderRadius: R.control,
+                  background: C.sunken,
+                  border: `1px solid ${
+                    focused && i === active && !disabled
+                      ? C.orangeBright
+                      : ch !== ''
+                        ? C.active
+                        : C.hairline
+                  }`,
+                  boxShadow:
+                    focused && i === active && !disabled ? `0 0 0 1px ${C.orangeBright}` : 'none',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '20px',
+                  color: C.text,
+                  opacity: disabled ? 0.5 : 1,
+                }}
+              >
+                {/* A dim placeholder rather than an empty cell: six blank outlines do not read as
+                    "six characters go here" until at least one is filled. */}
+                {ch === '' ? <span style={{ color: C.faint, opacity: 0.6 }}>·</span> : ch}
+              </div>
+            </Fragment>
+          ))}
+        </div>
+
+        {/* The real control. Transparent rather than hidden: a hidden input cannot be focused, and
+            it is what carries paste, autofill and the screen reader's label. */}
+        <input
+          value={value}
+          onInput={(e) => onChange((e.target as HTMLInputElement).value)}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          disabled={disabled}
+          aria-label={label}
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="off"
+          spellcheck={false}
+          maxLength={length + separators}
+          style={{
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+            background: 'transparent',
+            color: 'transparent',
+            caretColor: 'transparent',
+            border: 'none',
+            cursor: 'pointer',
+          }}
+        />
+      </div>
+
+      {hint === undefined ? null : (
+        <p style={{ margin: '8px 0 0', fontSize: '11px', color: C.dim }}>{hint}</p>
+      )}
+    </div>
+  );
+}

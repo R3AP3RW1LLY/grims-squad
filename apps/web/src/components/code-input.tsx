@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useRef, useState } from 'react';
+import { Fragment, useEffect, useId, useRef, useState } from 'react';
 import { decideSubmit, normaliseCode, type Charset } from './code-input-rules';
 
 /**
@@ -49,6 +49,24 @@ export function CodeInput({
   length = 6,
   /** Digits for a TOTP code; alnum for the companion's device code. See `normaliseCode`. */
   charset = 'digits',
+  /**
+   * Draw a literal dash after every N boxes.
+   *
+   * ★ FOR THINGS THAT ARE WRITTEN WITH ONE — SQUADRON OWNER, 2026-08-04 ★
+   *
+   * "can we do this in a box that looks like our 2FA input box? but put a dash between the first
+   * and 2nd set of 3 digits?"
+   *
+   * A fleet carrier's callsign is `W8K-W1Y` everywhere a commander sees it — on the contacts panel,
+   * in the system list, out loud on comms. Six undifferentiated boxes would ask somebody to
+   * transcribe it into a shape it is never written in, which is precisely where a character gets
+   * dropped.
+   *
+   * The dash is DECORATION, not a character: it sits between boxes, it is never in the value, and
+   * `normaliseCode` eats one that gets typed or pasted. So `W8K-W1Y`, `w8kw1y` and a paste of
+   * `W8K-W1Y ` all land as the same six characters.
+   */
+  groupsOf,
 }: {
   value: string;
   onChange: (next: string) => void;
@@ -59,6 +77,7 @@ export function CodeInput({
   autoFocus?: boolean;
   length?: number;
   charset?: Charset;
+  groupsOf?: number;
 }) {
   const id = useId();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -88,6 +107,17 @@ export function CodeInput({
   }, [value, length, disabled, onComplete]);
 
   const digits = Array.from({ length }, (_, i) => value[i] ?? '');
+
+  /*
+   * ★ maxLength HAS TO LEAVE ROOM FOR THE SEPARATORS, OR PASTE LOSES CHARACTERS ★
+   *
+   * `normaliseCode` strips the dash, so the VALUE is only ever `length` characters — but the
+   * browser applies `maxLength` to the raw text before any of our code sees it. Pasting `W8K-W1Y`
+   * into a `maxLength={6}` field gives us `W8K-W1`, which normalises to five characters, and the
+   * box quietly never completes. Copying a callsign out of Discord and pasting it is the most
+   * likely way anybody enters one.
+   */
+  const separators = groupsOf === undefined ? 0 : Math.floor((length - 1) / groupsOf);
   // Where the caret is, so exactly one box reads as active. Past the end it sits on the last box
   // rather than nowhere, which is what a real caret does.
   const active = Math.min(value.length, length - 1);
@@ -104,29 +134,35 @@ export function CodeInput({
         // interactive and does nothing, which is worse than looking inert.
         onClick={() => inputRef.current?.focus()}
       >
-        <div className="flex gap-2 sm:gap-3" aria-hidden="true">
+        <div className="flex items-center gap-2 sm:gap-3" aria-hidden="true">
           {digits.map((d, i) => (
-            <div
-              key={i}
-              className={[
-                'flex h-14 w-11 items-center justify-center rounded border font-mono text-2xl transition-colors sm:h-16 sm:w-12',
-                'bg-[var(--color-surface-void)] text-[var(--color-text-primary)]',
-                focused && i === active && !disabled
-                  ? 'border-[var(--color-brand-cyan-bright)] shadow-[0_0_0_1px_var(--color-brand-cyan-bright)]'
-                  : d !== ''
-                    ? 'border-[var(--color-brand-cyan-bright)]/50'
-                    : 'border-[var(--color-border-hairline)]',
-                disabled ? 'opacity-50' : '',
-              ].join(' ')}
-            >
-              {d === '' ? (
-                // A dim placeholder rather than an empty box: six blank outlines do not read as
-                // "six digits go here" until at least one is filled.
-                <span className="text-[var(--color-text-secondary)] opacity-40">·</span>
-              ) : (
-                d
+            <Fragment key={i}>
+              {groupsOf === undefined || i === 0 || i % groupsOf !== 0 ? null : (
+                <span className="font-mono text-2xl text-[var(--color-text-secondary)] opacity-60">
+                  &ndash;
+                </span>
               )}
-            </div>
+              <div
+                className={[
+                  'flex h-14 w-11 items-center justify-center rounded border font-mono text-2xl transition-colors sm:h-16 sm:w-12',
+                  'bg-[var(--color-surface-void)] text-[var(--color-text-primary)]',
+                  focused && i === active && !disabled
+                    ? 'border-[var(--color-brand-cyan-bright)] shadow-[0_0_0_1px_var(--color-brand-cyan-bright)]'
+                    : d !== ''
+                      ? 'border-[var(--color-brand-cyan-bright)]/50'
+                      : 'border-[var(--color-border-hairline)]',
+                  disabled ? 'opacity-50' : '',
+                ].join(' ')}
+              >
+                {d === '' ? (
+                  // A dim placeholder rather than an empty box: six blank outlines do not read as
+                  // "six digits go here" until at least one is filled.
+                  <span className="text-[var(--color-text-secondary)] opacity-40">·</span>
+                ) : (
+                  d
+                )}
+              </div>
+            </Fragment>
           ))}
         </div>
 
@@ -154,7 +190,7 @@ export function CodeInput({
           autoCorrect="off"
           autoCapitalize="off"
           spellCheck={false}
-          maxLength={length}
+          maxLength={length + separators}
           autoFocus={autoFocus}
           className="absolute inset-0 h-full w-full cursor-pointer rounded bg-transparent text-transparent caret-transparent outline-none"
         />

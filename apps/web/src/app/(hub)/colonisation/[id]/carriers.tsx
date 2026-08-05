@@ -1,9 +1,11 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
+import { CALLSIGN_LENGTH, formatCallsign } from '@grims/shared/carrier';
 import type { AttachedCarrier, CarrierMatch, ColonyNeed } from '../../../../lib/api';
 import { apiDelete, apiGet, apiPatch, apiPost } from '../../../../lib/api-client';
+import { CodeInput } from '../../../../components/code-input';
 import { CopySystem } from '../../../../components/copy-system';
 
 /**
@@ -71,7 +73,8 @@ export function Carriers({
   isCrew: boolean;
 }) {
   const router = useRouter();
-  const [term, setTerm] = useState('');
+  /** What is in the boxes. Six characters, no dash — the dash is drawn, never stored. */
+  const [callsign, setCallsign] = useState('');
   const [matches, setMatches] = useState<readonly CarrierMatch[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -84,7 +87,7 @@ export function Carriers({
       await fn();
       setError(null);
       setMatches(null);
-      setTerm('');
+      setCallsign('');
       router.refresh();
     } catch (err) {
       // The hub's own sentence. "Nobody has reported that carrier's market yet" tells somebody what
@@ -95,20 +98,28 @@ export function Carriers({
     }
   };
 
-  const look = async (q: string): Promise<void> => {
-    setBusy(true);
-    try {
-      const found = await apiGet<{ carriers: CarrierMatch[] }>(
-        `${base}?q=${encodeURIComponent(q)}`,
-      );
-      setMatches(found.carriers);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'That did not work.');
-    } finally {
-      setBusy(false);
-    }
-  };
+  /*
+   * Stable across renders, because `CodeInput` fires this from an effect keyed on it. An identity
+   * that changed every render would re-run that effect constantly — harmless today only because
+   * `decideSubmit` refuses to send the same code twice, and not something to lean on.
+   */
+  const look = useCallback(
+    async (q: string): Promise<void> => {
+      setBusy(true);
+      try {
+        const found = await apiGet<{ carriers: CarrierMatch[] }>(
+          `${base}?q=${encodeURIComponent(q)}`,
+        );
+        setMatches(found.carriers);
+        setError(null);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'That did not work.');
+      } finally {
+        setBusy(false);
+      }
+    },
+    [base],
+  );
 
   /*
    * ★ THE SERVER'S EFFECTIVE COVER, NOT A CLIENT RE-DERIVATION ★
@@ -240,27 +251,59 @@ export function Carriers({
         </>
       )}
 
-      <div className="flex flex-wrap items-center gap-2">
-        <input
-          value={term}
-          onChange={(e) => setTerm(e.target.value)}
-          placeholder="callsign, or leave blank for whoever is carrying most"
-          className={`${FIELD} w-[320px]`}
-        />
-        <button
-          type="button"
+      {/*
+        ★ FIND IT BY THE ONE NAME ITS OWNER CANNOT CHANGE — SQUADRON OWNER, 2026-08-04 ★
+
+        "can we update this so the input is by the carrier id eg W8K-W1Y and can we do this in a box
+        that looks like our 2FA input box ... auto search on completion please!"
+
+        Two controls, because there are two questions and one box was answering them badly. The
+        boxed callsign is "where is MY carrier"; the button underneath is "which carriers could help
+        at all", which is the search that gets used most and is why the blank box existed.
+      */}
+      <div className="mt-2 border-t border-[var(--color-border-hairline)] pt-4">
+        <CodeInput
+          label="Carrier ID"
+          value={callsign}
+          onChange={setCallsign}
+          onComplete={() => void look(formatCallsign(callsign))}
           disabled={busy}
-          className={CHIP}
-          onClick={() => void look(term)}
-        >
-          {busy ? 'Looking…' : 'Find carriers'}
-        </button>
+          length={CALLSIGN_LENGTH}
+          charset="alnum"
+          groupsOf={3}
+        />
+        <p className="m-0 mt-2 text-[11px] text-[var(--color-text-secondary)]">
+          The six-character ID from the carrier&rsquo;s contacts panel, like W8K-W1Y. The search runs
+          the moment the sixth character lands.
+        </p>
+
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            disabled={busy}
+            className={CHIP}
+            onClick={() => {
+              setCallsign('');
+              void look('');
+            }}
+          >
+            {busy ? 'Looking…' : 'Show who is carrying most'}
+          </button>
+          <span className="text-[11px] text-[var(--color-text-dim)]">
+            Ranks every carrier we hold a market for by how much of this build&rsquo;s list is aboard.
+          </span>
+        </div>
       </div>
 
       {matches === null ? null : matches.length === 0 ? (
         <p className="m-0 mt-3 text-sm text-[var(--color-text-secondary)]">
-          No carrier we have seen is selling anything this build still wants — but a hold can still
-          be declared once one is attached.
+          {/* Two different facts, and they were one sentence before. A callsign that matched nothing
+              is "we have no such carrier"; a blank search that matched nothing is "nobody we can see
+              is carrying any of this". Telling somebody the second when they meant the first is how
+              a real carrier reads as a typo. */}
+          {callsign === ''
+            ? 'No carrier we hold a market for is carrying anything this build still wants. A hold can be declared by hand once a carrier is attached.'
+            : `We hold no fleet carrier with the ID ${formatCallsign(callsign)}. Check it against the carrier’s contacts panel — a carrier reaches us once somebody has flown near it or docked at it.`}
         </p>
       ) : (
         <ul className="m-0 mt-3 list-none space-y-1 p-0">

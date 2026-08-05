@@ -1,4 +1,5 @@
 import type { PrismaClient } from '@grims/db';
+import { CARRIER_STATION_TYPES } from '@grims/shared';
 
 /**
  * Reading the commodities market.
@@ -198,8 +199,17 @@ export interface PlaceQuery {
  * All real, all entered by somebody, and all attached to a station that can be somewhere else
  * tomorrow. Sending a member across the bubble to a carrier that has jumped is the single most
  * expensive mistake this page can make, so they are off by default and one toggle away.
+ *
+ * ★ AND THERE ARE TWO SPELLINGS OF THE TYPE ★
+ *
+ * `market_entries.station_type` is denormalised from the catalogue, which holds the galaxy dump's
+ * `"Drake-Class Carrier"` and the journal's `"FleetCarrier"` in the same column. Measured on the
+ * dev mirror: 131,512 carrier market rows under the first spelling and 3,267 under the second.
+ * Excluding only the first meant those 3,267 hand-priced rows were being counted as ordinary
+ * stations — which is how a 2,356 cr Gold that a carrier owner typed reaches a page whose whole
+ * purpose is to keep it out. See `@grims/shared/carrier`.
  */
-const CARRIER_TYPE = 'Drake-Class Carrier';
+const CARRIER_TYPES = CARRIER_STATION_TYPES;
 
 /** The two partial-index predicates, written once so no query can drift off the index. */
 const BUYABLE = 'supply > 0 AND buy_price > 0';
@@ -404,10 +414,14 @@ export class PrismaMarketStore implements MarketStore {
     const where: string[] = [`commodity = $1`, predicate];
 
     if (opts.excludeCarriers) {
-      params.push(CARRIER_TYPE);
-      // IS DISTINCT FROM, not <>: a station whose type we never learned is NULL, and `<>` would
-      // answer NULL for it — dropping every unknown-type station out of the results silently.
-      where.push(`station_type IS DISTINCT FROM $${params.length}`);
+      params.push(CARRIER_TYPES);
+      // The NULL arm is not decoration: a station whose type we never learned is NULL, and
+      // `<> ALL` answers NULL for it — dropping every unknown-type station out of the results
+      // silently. Spelled out rather than relying on `IS DISTINCT FROM`, which takes one value and
+      // this now takes a list.
+      where.push(
+        `(station_type IS NULL OR station_type <> ALL($${params.length}::text[]))`,
+      );
     }
     if (opts.largePadOnly) where.push(`large_pads > 0`);
     if (opts.minQuantity > 0) {

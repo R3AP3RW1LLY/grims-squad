@@ -19,6 +19,7 @@ export * from './orphan-media.js';
 export * from './errors.js';
 export * from './dto/common.js';
 export * from './redirect.js';
+export * from './carrier.js';
 
 export {
   EARLIEST_PROMOTION_AT,

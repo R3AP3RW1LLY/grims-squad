@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'preact/hooks';
+import { isCarrierStationType } from '@grims/shared/carrier';
 import type { JSX } from 'preact';
 import {
   Chart,
@@ -66,8 +67,14 @@ const LABEL: JSX.CSSProperties = {
 
 const cr = (n: number | null): string => (n === null ? '—' : n.toLocaleString());
 
-/** Fleet carriers, which the member has explicitly asked to see if any are here at all. */
-const CARRIER = 'Drake-Class Carrier';
+/*
+ * Fleet carriers, which the member has explicitly asked to see if any are here at all.
+ *
+ * `isCarrierStationType` rather than a string compare, because the type column holds two
+ * vocabularies — the galaxy dump's `"Drake-Class Carrier"` and the journal's `"FleetCarrier"` — and
+ * comparing against one of them labelled real carriers as ordinary stations. See
+ * `@grims/shared/carrier`.
+ */
 
 /** Supply and demand arrive as strings because the totals run into the billions. */
 function bulk(raw: string): string {
@@ -408,7 +415,7 @@ function PlaceTable({
                       color: C.faint,
                     }}
                   >
-                    {p.stationType === CARRIER ? 'carrier' : p.largePads > 0 ? 'L pad' : 'no L pad'}
+                    {isCarrierStationType(p.stationType) ? 'carrier' : p.largePads > 0 ? 'L pad' : 'no L pad'}
                   </span>
                 </td>
                 <td style={TD}>

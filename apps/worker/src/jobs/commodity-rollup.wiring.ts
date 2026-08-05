@@ -1,4 +1,5 @@
 import type { PrismaClient } from '@grims/db';
+import { CARRIER_STATION_TYPES } from '@grims/shared';
 import type { BuyLeg, CommodityHour, RollupStore, SellLeg } from './commodity-rollup.js';
 
 /**
@@ -15,8 +16,14 @@ import type { BuyLeg, CommodityHour, RollupStore, SellLeg } from './commodity-ro
  * takes ~250ms.
  */
 
-/** Carrier prices are set by hand, so they are counted apart from the market. See the model note. */
-const CARRIER_TYPE = 'Drake-Class Carrier';
+/**
+ * Carrier prices are set by hand, so they are counted apart from the market. See the model note.
+ *
+ * BOTH spellings, because `station_type` carries the galaxy dump's `"Drake-Class Carrier"` and the
+ * journal's `"FleetCarrier"` in one column — 3,267 rows of the second in the dev mirror were being
+ * averaged into the honest market. See `@grims/shared/carrier`.
+ */
+const CARRIER_TYPES = CARRIER_STATION_TYPES;
 
 /**
  * Every commodity anybody is trading, by LOOSE INDEX SCAN.
@@ -108,22 +115,22 @@ export class PrismaRollupStore implements RollupStore {
 
   async buyLeg(commodity: string): Promise<BuyLeg> {
     /*
-     * `station_type IS DISTINCT FROM` rather than `<>`: a station whose type we have never learned
-     * carries NULL, and `<>` would answer NULL for it — dropping every unknown-type station out of
-     * the average silently. `IS DISTINCT FROM` treats NULL as "not a carrier", which is the right
-     * default given carriers ALWAYS report their type.
+     * The explicit `IS NULL` arm rather than a bare `<> ALL`: a station whose type we have never
+     * learned carries NULL, and `<> ALL` answers NULL for it — dropping every unknown-type station
+     * out of the average silently. Spelling the NULL case out treats it as "not a carrier", which
+     * is the right default given carriers ALWAYS report their type.
      */
     const rows = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
-      `SELECT count(*) FILTER (WHERE station_type IS DISTINCT FROM $2)              AS markets,
-              avg(buy_price) FILTER (WHERE station_type IS DISTINCT FROM $2)        AS avg_buy,
-              min(buy_price) FILTER (WHERE station_type IS DISTINCT FROM $2)        AS min_buy,
-              sum(supply) FILTER (WHERE station_type IS DISTINCT FROM $2)           AS supply,
-              count(*) FILTER (WHERE station_type = $2)                             AS carrier_markets,
-              min(buy_price) FILTER (WHERE station_type = $2)                       AS carrier_min_buy
+      `SELECT count(*) FILTER (WHERE station_type IS NULL OR station_type <> ALL($2::text[]))              AS markets,
+              avg(buy_price) FILTER (WHERE station_type IS NULL OR station_type <> ALL($2::text[]))        AS avg_buy,
+              min(buy_price) FILTER (WHERE station_type IS NULL OR station_type <> ALL($2::text[]))        AS min_buy,
+              sum(supply) FILTER (WHERE station_type IS NULL OR station_type <> ALL($2::text[]))           AS supply,
+              count(*) FILTER (WHERE station_type = ANY($2::text[]))                             AS carrier_markets,
+              min(buy_price) FILTER (WHERE station_type = ANY($2::text[]))                       AS carrier_min_buy
          FROM market_entries
         WHERE commodity = $1 AND ${BUY_WHERE}`,
       commodity,
-      CARRIER_TYPE,
+      CARRIER_TYPES,
     );
 
     const r = rows[0] ?? {};
@@ -139,16 +146,16 @@ export class PrismaRollupStore implements RollupStore {
 
   async sellLeg(commodity: string): Promise<SellLeg> {
     const rows = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
-      `SELECT count(*) FILTER (WHERE station_type IS DISTINCT FROM $2)              AS markets,
-              avg(sell_price) FILTER (WHERE station_type IS DISTINCT FROM $2)       AS avg_sell,
-              max(sell_price) FILTER (WHERE station_type IS DISTINCT FROM $2)       AS max_sell,
-              sum(demand) FILTER (WHERE station_type IS DISTINCT FROM $2)           AS demand,
-              count(*) FILTER (WHERE station_type = $2)                             AS carrier_markets,
-              max(sell_price) FILTER (WHERE station_type = $2)                      AS carrier_max_sell
+      `SELECT count(*) FILTER (WHERE station_type IS NULL OR station_type <> ALL($2::text[]))              AS markets,
+              avg(sell_price) FILTER (WHERE station_type IS NULL OR station_type <> ALL($2::text[]))       AS avg_sell,
+              max(sell_price) FILTER (WHERE station_type IS NULL OR station_type <> ALL($2::text[]))       AS max_sell,
+              sum(demand) FILTER (WHERE station_type IS NULL OR station_type <> ALL($2::text[]))           AS demand,
+              count(*) FILTER (WHERE station_type = ANY($2::text[]))                             AS carrier_markets,
+              max(sell_price) FILTER (WHERE station_type = ANY($2::text[]))                      AS carrier_max_sell
          FROM market_entries
         WHERE commodity = $1 AND ${SELL_WHERE}`,
       commodity,
-      CARRIER_TYPE,
+      CARRIER_TYPES,
     );
 
     const r = rows[0] ?? {};

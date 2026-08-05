@@ -1,5 +1,13 @@
 import type { PrismaClient } from '@grims/db';
-import { AppError, ErrorCode, Permission } from '@grims/shared';
+import {
+  AppError,
+  CARRIER_STATION_TYPES,
+  CALLSIGN_LENGTH,
+  ErrorCode,
+  Permission,
+  formatCallsign,
+  normaliseCallsign,
+} from '@grims/shared';
 
 /**
  * Fleet carriers helping with a build.
@@ -139,8 +147,6 @@ export interface CarrierMatch {
   readonly matchingTonnes: number;
 }
 
-const CARRIER_TYPE = 'Drake-Class Carrier';
-
 /**
  * ★ `station_key` IS `"<systemAddress>/<stationName>"`, NOT `"<marketId>/…"` ★
  *
@@ -156,11 +162,46 @@ const CARRIER_TYPE = 'Drake-Class Carrier';
  *
  * The market id lives in the galaxy catalogue alongside the key, so that is where it is read from.
  * Nothing here derives an identity from a string it does not own.
+ *
+ * ★ AND THE TYPE IS MATCHED AGAINST BOTH VOCABULARIES ★
+ *
+ * This used to read `data->>'type' = 'Drake-Class Carrier'` and nothing else, which is how the
+ * owner's own carrier became unfindable — see `@grims/shared/carrier`. The list is bound as a
+ * parameter so a future query cannot quietly hard-code one spelling again.
  */
-const CARRIER_STATION = `
-  SELECT ext_key, name, data->>'marketId' AS market_id
+function carrierStation(typesParam: number, extraWhere = ''): string {
+  return `
+  SELECT ext_key, name, data->>'marketId' AS market_id, data->>'system' AS system_name
     FROM knowledge_items
-   WHERE source = 'galaxy' AND kind = 'station' AND data->>'type' = '${CARRIER_TYPE}'`;
+   WHERE source = 'galaxy' AND kind = 'station'
+     AND data->>'type' = ANY($${typesParam}::text[])
+     AND data->>'marketId' IS NOT NULL
+     ${extraWhere}`;
+}
+
+/**
+ * ★ ONE CARRIER IS ONE MARKET ID, AND IT HAS MORE THAN ONE CATALOGUE ROW ★
+ *
+ * The catalogue is keyed `"<systemAddress>/<name>"`, so a carrier gets a NEW row every time it
+ * jumps and keeps the old one for ever. 1,881 carriers in the dev mirror hold two or more keys, and
+ * the owner's W8K-W1Y is one of them: `1310721196/W8K-W1Y` in HIP 23585 and `5031789105826/W8K-W1Y`
+ * in Hyades Sector XJ-Z c18, both market id 3713238272.
+ *
+ * The market mirror keeps rows under both keys, so joining naively counts the hold TWICE — 6,600 t
+ * of CMM Composite at the new berth plus 14,520 t at the old one reads as 21,120 t of a commodity
+ * the carrier holds 6,600 t of. That is the same class of over-count the note above is about,
+ * arrived at from the other direction, and it survived because both figures look plausible.
+ *
+ * A carrier has ONE hold, and the truthful reading of it is the one seen most recently. So every
+ * query here collapses a market id to a SINGLE key — the one whose market we last saw, falling back
+ * to the key itself when no market has ever been reported under either.
+ */
+const FRESHEST_KEY = `
+      LEFT JOIN LATERAL (
+        SELECT max(e.market_seen_at) AS seen_at
+          FROM market_entries e
+         WHERE e.station_key = c.ext_key
+      ) f ON true`;
 
 export class ColonyCarrierService {
   constructor(private readonly db: PrismaClient) {}
@@ -168,53 +209,164 @@ export class ColonyCarrierService {
   /**
    * Carriers matching what somebody typed, ranked by how useful they are to THIS build.
    *
-   * A callsign is four characters and there are 24,525 of them, so a name search alone returns
-   * noise. Ranking by how much of the build's own shopping list a carrier is holding puts the one
-   * they are actually looking for at the top — and makes the search answer a better question than
-   * the one asked: not "which carriers are called this" but "which of them can help".
+   * ★ TWO DIFFERENT QUESTIONS, AND THEY NEED DIFFERENT QUERIES ★
+   *
+   * "Which carriers could help this build" and "where is W8K-W1Y" are not the same question, and
+   * one query answering both is what broke the second one.
+   *
+   * The old query drove from `market_entries` and INNER JOINed the build's outstanding needs, then
+   * filtered by name. That is right for the blank search — a carrier holding nothing on the list is
+   * not an answer to "who can help" — and wrong for a callsign, because it silently required the
+   * named carrier to ALREADY be selling something this specific build wants. A member typing their
+   * own callsign got an empty result that read as "no such carrier".
+   *
+   * So a callsign search drives from the CATALOGUE and treats the hold as an outer join. A carrier
+   * the galaxy data knows is an answer to "where is W8K-W1Y" whether or not anybody has reported
+   * its market — the declared-hold feature exists precisely so the crew can type what is aboard.
    */
   async search(projectId: string, term: string): Promise<readonly CarrierMatch[]> {
-    const q = term.trim();
+    const typed = term.trim();
+    return typed === ''
+      ? this.#bestCarrying(projectId)
+      : this.#byCallsign(projectId, typed);
+  }
 
-    /*
-     * ★ AN EMPTY SEARCH IS THE MOST USEFUL SEARCH ★
-     *
-     * Found by using it: with a name required, a member wanting to know "which carriers could help
-     * this build" had to guess a four-character callsign out of twenty-four thousand. The question
-     * they actually have is the one this can answer best — so an empty box lists the carriers
-     * holding the most of what the build still wants, and typing narrows that.
-     *
-     * The INNER join carries the ranking either way: a carrier holding nothing on the list is not
-     * an answer to either question.
-     */
+  /**
+   * ★ AN EMPTY SEARCH IS THE MOST USEFUL SEARCH ★
+   *
+   * Found by using it: with a name required, a member wanting to know "which carriers could help
+   * this build" had to guess a callsign out of forty-eight thousand. The question they actually
+   * have is the one this can answer best — so an empty box lists the carriers holding the most of
+   * what the build still wants.
+   *
+   * Kept exactly as it was, INNER joins and all, with one correction: the aggregate is per
+   * catalogue KEY, and a carrier that has jumped has several. The rows are collapsed to one per
+   * market id afterwards, so a moved carrier is listed once at its newest berth rather than twice
+   * with its hold split across two systems.
+   */
+  async #bestCarrying(projectId: string): Promise<readonly CarrierMatch[]> {
     const rows = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
-      `WITH carriers AS (${CARRIER_STATION})
-       SELECT c.market_id, m.station_name, m.system_name,
-              max(m.market_seen_at) AS seen_at,
-              count(*)::int AS matching,
-              sum(m.supply)::bigint AS matching_tonnes
-         FROM market_entries m
-         JOIN carriers c ON c.ext_key = m.station_key
-         JOIN colony_needs n
-           ON n.commodity = m.commodity AND n.project_id = $1::uuid AND n.remaining > 0
-        WHERE m.supply > 0
-          AND ($2 = '' OR m.station_name ILIKE $3)
-        GROUP BY c.market_id, m.station_name, m.system_name
-        ORDER BY matching_tonnes DESC, m.station_name
+      `WITH carriers AS (${carrierStation(2)}),
+            per_key AS (
+              SELECT c.market_id, c.ext_key, m.station_name, m.system_name,
+                     max(m.market_seen_at) AS seen_at,
+                     count(*)::int AS matching,
+                     sum(m.supply)::bigint AS matching_tonnes
+                FROM market_entries m
+                JOIN carriers c ON c.ext_key = m.station_key
+                JOIN colony_needs n
+                  ON n.commodity = m.commodity AND n.project_id = $1::uuid AND n.remaining > 0
+               WHERE m.supply > 0
+               GROUP BY c.market_id, c.ext_key, m.station_name, m.system_name
+            ),
+            newest AS (
+              SELECT DISTINCT ON (market_id) *
+                FROM per_key
+               ORDER BY market_id, seen_at DESC NULLS LAST, ext_key
+            )
+       SELECT market_id, station_name AS name, system_name, seen_at, matching, matching_tonnes
+         FROM newest
+        ORDER BY matching_tonnes DESC, station_name
         LIMIT 20`,
       projectId,
-      q,
-      `%${q}%`,
+      CARRIER_STATION_TYPES,
     );
 
-    return rows.map((r) => ({
+    return rows.map((r) => this.#match(r));
+  }
+
+  /**
+   * One carrier, by the identifier nobody can change.
+   *
+   * ★ THE SEARCH IS AGAINST THE CATALOGUE NAME, NOT THE MARKET MIRROR'S ★
+   *
+   * Every carrier's catalogue name IS its callsign: 48,360 of the 48,360 carrier rows in the dev
+   * mirror match `XXX-XXX` exactly, with nothing before or after. So a complete callsign is an
+   * EQUALITY match, which rides `knowledge_items_name_idx` instead of scanning, and a partial one
+   * falls back to a contains match on the trigram index for somebody still typing.
+   *
+   * Both forms of what a person might type resolve to the same thing before they reach here:
+   * `w8k-w1y`, `W8KW1Y` and ` W8K-W1Y ` are one carrier. See `normaliseCallsign`.
+   */
+  async #byCallsign(projectId: string, typed: string): Promise<readonly CarrierMatch[]> {
+    const chars = normaliseCallsign(typed);
+
+    /*
+     * Nothing usable in what was typed at all — a term made entirely of punctuation. Refused as an
+     * empty result rather than by running a match on '' that would return the whole galaxy.
+     */
+    if (chars === '') return [];
+
+    const complete = chars.length === CALLSIGN_LENGTH;
+    const where = complete
+      ? // The dashed form is how it is stored; the bare form is the safety net for a source that
+        // ever writes one without. Both are equalities, so both use the index.
+        `AND name IN ($3, $4)`
+      : `AND name ILIKE $3`;
+
+    /*
+     * ★ THE PARTIAL PATTERN CARRIES THE DASH BACK, AND BOTH REASONS MATTER ★
+     *
+     * The value arrives here with the dash stripped, and the stored name has one — so a raw
+     * `%W8KW1%` matches nothing at all, however much of the right callsign was typed. Putting it
+     * back via `formatCallsign` is what makes a half-typed callsign find anything.
+     *
+     * It is also 2,000x faster. `replace(name, '-', '')` would be equally correct and cannot use
+     * the trigram index on `name`: measured on the dev mirror, 3,024ms against 1.4ms. A search that
+     * takes three seconds per keystroke is a search nobody finishes typing.
+     */
+    const params: unknown[] = complete
+      ? [projectId, CARRIER_STATION_TYPES, formatCallsign(chars), chars]
+      : [projectId, CARRIER_STATION_TYPES, `%${formatCallsign(chars)}%`];
+
+    const rows = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
+      `WITH carriers AS (${carrierStation(2, where)}),
+            keys AS (
+              SELECT DISTINCT ON (c.market_id)
+                     c.market_id, c.ext_key, c.name, c.system_name
+                FROM carriers c${FRESHEST_KEY}
+               ORDER BY c.market_id, f.seen_at DESC NULLS LAST, c.ext_key
+            )
+       SELECT k.market_id, k.name, k.system_name, h.seen_at,
+              COALESCE(h.matching, 0)::int AS matching,
+              COALESCE(h.matching_tonnes, 0)::bigint AS matching_tonnes
+         FROM keys k
+         /*
+          * LEFT, and this is the whole fix. An INNER join here is what made a real carrier report
+          * as "no such carrier" whenever its market was unreported or held nothing on this build's
+          * list. A carrier we hold in the catalogue is an answer; what is aboard it is a separate
+          * fact, and zero of it is a fact rather than an absence of one.
+          */
+         LEFT JOIN LATERAL (
+           SELECT max(m.market_seen_at) AS seen_at,
+                  count(*)::int AS matching,
+                  sum(m.supply)::bigint AS matching_tonnes
+             FROM market_entries m
+             JOIN colony_needs n
+               ON n.commodity = m.commodity AND n.project_id = $1::uuid AND n.remaining > 0
+            WHERE m.station_key = k.ext_key AND m.supply > 0
+         ) h ON true
+        ORDER BY matching_tonnes DESC, k.name
+        LIMIT 20`,
+      ...params,
+    );
+
+    return rows.map((r) => this.#match(r));
+  }
+
+  #match(r: Record<string, unknown>): CarrierMatch {
+    return {
       marketId: String(r['market_id']),
-      name: String(r['station_name']),
-      systemName: String(r['system_name']),
+      name: String(r['name']),
+      /*
+       * A carrier the catalogue holds but the mirror has never placed has no system to print.
+       * Said plainly rather than left blank — an empty cell reads as a rendering fault.
+       */
+      systemName: r['system_name'] === null ? 'somewhere we have not seen' : String(r['system_name']),
       seenAt: (r['seen_at'] as Date | null) ?? null,
       matchingCommodities: Number(r['matching']),
       matchingTonnes: Number(r['matching_tonnes']),
-    }));
+    };
   }
 
   /**
@@ -247,23 +399,34 @@ export class ColonyCarrierService {
     }
 
     const [found] = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
-      `WITH carriers AS (${CARRIER_STATION})
+      `WITH carriers AS (${carrierStation(2)})
        SELECT c.name FROM carriers c WHERE c.market_id = $1 LIMIT 1`,
       input.marketId,
+      CARRIER_STATION_TYPES,
     );
 
     if (found === undefined) {
       /*
-       * Refused rather than stored blind. A carrier nobody has ever uploaded a market for would
-       * attach happily and then show an empty hold for ever, which reads as "this carrier is empty"
-       * rather than "we have never seen it" — and those are very different things to tell somebody
-       * planning a haul.
+       * Refused rather than stored blind — nothing here invents a carrier out of typed text.
+       *
+       * ★ AND THE SENTENCE USED TO NAME THE WRONG CAUSE ★
+       *
+       * It read "Nobody has reported that carrier's market yet. Dock at it once and it will
+       * appear." The check has never been about the market: a carrier the catalogue knows attaches
+       * fine with no market at all, which is exactly what the declared-hold feature is for. The
+       * only thing that reaches this line is a market id we hold no carrier for.
+       *
+       * Worse, the advice was actively wrong. Docking at a carrier stamped the journal's spelling
+       * of the station type over the dump's, and every carrier query asked for the dump's — so
+       * following the instruction was what made a carrier disappear. Fixed in
+       * `@grims/shared/carrier`; the sentence now says the true condition and the true remedy.
        */
       throw new AppError(
         // The catalogue has no bare NOT_FOUND. `RESOURCE_NOT_VISIBLE` is the 404 for anything we
         // hold or do not hold, which is exactly what this is.
         ErrorCode.RESOURCE_NOT_VISIBLE,
-        'Nobody has reported that carrier’s market yet. Dock at it once and it will appear.',
+        'We hold no fleet carrier under that identifier. Check the callsign on the contacts panel — ' +
+          'a carrier reaches us once somebody has flown near it or docked at it.',
       );
     }
 
@@ -347,18 +510,36 @@ export class ColonyCarrierService {
 
     const [holds, declared] = await Promise.all([
       this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
-        `WITH carriers AS (${CARRIER_STATION})
-         SELECT c.market_id, m.system_name, m.commodity, m.supply, m.market_seen_at
+        /*
+         * ★ ONE KEY PER CARRIER, OR THE HOLD IS COUNTED TWICE ★
+         *
+         * An attached carrier that has jumped since we first catalogued it has a row under each
+         * berth, and the mirror keeps market lines under both. Joining every key summed them: the
+         * owner's W8K-W1Y would have reported 21,120 t of CMM Composite — 6,600 t at its current
+         * berth plus 14,520 t at last week's — for a hold of 6,600 t. Both figures are real
+         * readings, which is exactly why the total looked plausible.
+         *
+         * `keys` collapses each market id to the berth we saw most recently, and the hold is read
+         * from that key alone.
+         */
+        `WITH carriers AS (${carrierStation(3)}),
+              keys AS (
+                SELECT DISTINCT ON (c.market_id) c.market_id, c.ext_key
+                  FROM carriers c${FRESHEST_KEY}
+                 WHERE c.market_id = ANY($2::text[])
+                 ORDER BY c.market_id, f.seen_at DESC NULLS LAST, c.ext_key
+              )
+         SELECT k.market_id, m.system_name, m.commodity, m.supply, m.market_seen_at
            FROM market_entries m
-           JOIN carriers c ON c.ext_key = m.station_key
+           JOIN keys k ON k.ext_key = m.station_key
            JOIN colony_needs n ON n.commodity = m.commodity
           WHERE m.supply > 0
             AND n.project_id = $1::uuid
             AND n.remaining > 0
-            AND c.market_id = ANY($2::text[])
           ORDER BY m.supply DESC`,
         projectId,
         ids,
+        CARRIER_STATION_TYPES,
       ),
       /*
        * The declared rows — the journal's and the crew's word about what is aboard. NOT filtered

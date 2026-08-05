@@ -1,4 +1,5 @@
 import type { PrismaClient } from '@prisma/client';
+import { normaliseStationType } from '@grims/shared';
 
 /**
  * Stations learned from the live feeds, added in full.
@@ -140,6 +141,19 @@ export async function ensureLiveStation(
 export async function enrichStationFromDock(db: PrismaClient, dock: DockFacts): Promise<void> {
   const key = `${PROVISIONAL_PREFIX}${dock.marketId}`;
 
+  /*
+   * ★ THE JOURNAL'S WORD FOR THE TYPE IS NOT THE DUMP'S, AND THIS LINE COST US A CARRIER ★
+   *
+   * A `Docked` event says `"FleetCarrier"`; the galaxy dump says `"Drake-Class Carrier"`. Writing
+   * the raw journal word into the galaxy row below meant that DOCKING AT A CARRIER REMOVED IT FROM
+   * THE CARRIER SEARCH — every reader filtered on the dump's spelling. The owner's own W8K-W1Y was
+   * in that state: catalogued, market seen that morning, parked at the build site, and unfindable.
+   *
+   * Normalised to the dump's vocabulary so the column holds one language. Readers still accept both
+   * (see CARRIER_STATION_TYPES) because 673 rows were written the other way before this existed.
+   */
+  const stationType = normaliseStationType(dock.stationType);
+
   const rows = await db.$queryRawUnsafe<Array<{ source: string; ext_key: string }>>(
     `SELECT source, ext_key FROM knowledge_items
       WHERE kind = 'station' AND data->>'marketId' = $1
@@ -166,7 +180,7 @@ export async function enrichStationFromDock(db: PrismaClient, dock: DockFacts): 
          ingested_at = now()
        WHERE source = 'galaxy' AND kind = 'station' AND ext_key = $1`,
       galaxy.ext_key,
-      dock.stationType,
+      stationType,
       dock.largePads,
       dock.distFromStarLs,
     );
@@ -233,10 +247,10 @@ export async function enrichStationFromDock(db: PrismaClient, dock: DockFacts): 
     String(dock.marketId),
     dock.systemName,
     dock.systemAddress === null ? null : String(dock.systemAddress),
-    dock.stationType,
+    stationType,
     dock.largePads,
     dock.distFromStarLs,
-    `${dock.stationName} is a ${dock.stationType ?? 'station'} in ${dock.systemName}, seen live on the journal feed.`,
+    `${dock.stationName} is a ${stationType ?? 'station'} in ${dock.systemName}, seen live on the journal feed.`,
   );
 
   /*

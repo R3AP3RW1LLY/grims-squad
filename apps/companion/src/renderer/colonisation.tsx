@@ -26,6 +26,7 @@ import {
   Button,
   C,
   Card,
+  CodeBoxes,
   Empty,
   Field,
   Problem,
@@ -38,6 +39,7 @@ import {
   Guard,
   Tabs,
 } from './ui.js';
+import { CALLSIGN_LENGTH, formatCallsign, normaliseCallsign } from '@grims/shared/carrier';
 
 /**
  * Colonisation, in the companion app.
@@ -1566,7 +1568,8 @@ function CarrierPanel({
   isCrew: boolean;
   onChanged: () => void;
 }): JSX.Element {
-  const [term, setTerm] = useState('');
+  /** What is in the boxes. Six characters, no dash — the dash is drawn, never stored. */
+  const [callsign, setCallsign] = useState('');
   const [matches, setMatches] = useState<readonly CarrierMatch[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -1578,7 +1581,7 @@ function CarrierPanel({
       if (a.ok) {
         setError(null);
         setMatches(null);
-        setTerm('');
+        setCallsign('');
         onChanged();
       } else {
         // The hub's own sentence. "Nobody has reported that carrier's market yet" tells somebody
@@ -1588,9 +1591,9 @@ function CarrierPanel({
     });
   };
 
-  const look = (): void => {
+  const look = (q: string): void => {
     setBusy(true);
-    void window.colony.carriers(projectId, term).then((a) => {
+    void window.colony.carriers(projectId, q).then((a) => {
       setBusy(false);
       if (a.ok) {
         setMatches(a.data.carriers);
@@ -1710,29 +1713,61 @@ function CarrierPanel({
         </>
       )}
 
-      <div
-        style={{
-          marginTop: '14px',
-          display: 'flex',
-          flexWrap: 'wrap',
-          alignItems: 'center',
-          gap: '8px',
-        }}
-      >
-        <input
-          value={term}
-          onInput={(e) => setTerm((e.target as HTMLInputElement).value)}
-          placeholder="callsign, or leave blank for whoever is carrying most"
-          style={{ ...inputStyle, maxWidth: '320px' }}
+      {/*
+        ★ FIND IT BY THE ONE NAME ITS OWNER CANNOT CHANGE — SQUADRON OWNER, 2026-08-04 ★
+
+        "can we update this so the input is by the carrier id eg W8K-W1Y ... auto search on
+        completion please! ... make this change on both companion app and web app please!"
+
+        Two controls, because there are two questions and one box was answering them badly. The
+        boxed callsign is "where is MY carrier"; the button underneath is "which carriers could help
+        at all", which is the search that gets used most and is why the blank box existed. Copy and
+        behaviour are the website's word for word — see `apps/web/.../carriers.tsx`.
+      */}
+      <div style={{ marginTop: '16px', borderTop: `1px solid ${C.subtle}`, paddingTop: '14px' }}>
+        <CodeBoxes
+          label="Carrier ID"
+          hint="The six-character ID from the carrier’s contacts panel, like W8K-W1Y. The search runs the moment the sixth character lands."
+          value={callsign}
+          onChange={(next) => setCallsign(normaliseCallsign(next))}
+          onComplete={() => look(formatCallsign(callsign))}
+          length={CALLSIGN_LENGTH}
+          groupsOf={3}
+          disabled={busy}
         />
-        <Button disabled={busy} onClick={look}>
-          {busy ? 'Looking…' : 'Find carriers'}
-        </Button>
+
+        <div
+          style={{
+            marginTop: '14px',
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            gap: '10px',
+          }}
+        >
+          <Button
+            disabled={busy}
+            onClick={() => {
+              setCallsign('');
+              look('');
+            }}
+          >
+            {busy ? 'Looking…' : 'Show who is carrying most'}
+          </Button>
+          <span style={{ fontSize: '11px', color: C.faint }}>
+            Ranks every carrier we hold a market for by how much of this build’s list is aboard.
+          </span>
+        </div>
       </div>
 
       {matches === null ? null : matches.length === 0 ? (
         <p style={{ margin: '10px 0 0', fontSize: '12px', color: C.dim }}>
-          No carrier we have seen is holding anything this build still wants.
+          {/* Two different facts, and they were one sentence before. A callsign that matched nothing
+              is "we have no such carrier"; a blank search that matched nothing is "nobody we can see
+              is carrying any of this". */}
+          {callsign === ''
+            ? 'No carrier we hold a market for is carrying anything this build still wants. A hold can be declared by hand once a carrier is attached.'
+            : `We hold no fleet carrier with the ID ${formatCallsign(callsign)}. Check it against the carrier’s contacts panel — a carrier reaches us once somebody has flown near it or docked at it.`}
         </p>
       ) : (
         <div style={{ marginTop: '10px' }}>
