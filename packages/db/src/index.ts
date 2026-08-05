@@ -54,3 +54,10 @@ export * from './notify.js';
  */
 export * from './announce.js';
 export { DiscordRankApplier, ladderRoleIds } from './rank-applier.discord.js';
+/*
+ * Recording a verified commander name. Shared for the same reason as the three above: the API
+ * learns a name when a member links a key, the worker learns one when the nightly sweep asks Inara
+ * what they are called NOW, and the transaction they both need holds the index that stops two
+ * members wearing one commander name.
+ */
+export * from './verified-name.js';

@@ -35,6 +35,36 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 const REQUEST_PATH_WAIT_MS = 8_000;
 
 /**
+ * Who is waiting, and therefore how long they may wait for a rate-limit slot.
+ *
+ * ★ FOUND IN PRODUCTION, 2026-08-05 — THE NIGHTLY SWEEP CHECKED ONE MEMBER ★
+ *
+ * `getOwnIdentity` used to be unconditionally bounded at eight seconds, with the comment "a member
+ * is waiting on this". That is true of the settings page and false of the worker, and the worker is
+ * the caller that loops.
+ *
+ * The limiter spaces dispatches thirty seconds apart (INV-033). A sweep that awaits one member
+ * before asking about the next therefore enqueues call number two roughly a second after call one
+ * dispatched, waits eight seconds, and is refused with `LimiterBusyError` twenty-two seconds before
+ * its slot would have arrived. Every member after the first. The audit swallowed it as "Inara did
+ * not answer" and counted them unreachable, so the sweep reported a full run and had checked one
+ * person.
+ *
+ * So the wait is now the CALLER'S to state, because only the caller knows whether anybody is
+ * watching:
+ *
+ *   'request'  a member is on the other end of an HTTP connection. Give up rather than hold it
+ *              open behind a queue that is legitimately minutes deep.
+ *   'queue'    a scheduled job. Wait for the slot however long it takes — it has nowhere to be,
+ *              and giving up would simply skip the member it was asked about.
+ *
+ * It defaults to 'request', which is the answer that fails safely: a request-path caller that
+ * forgot to say degrades to a spinner and a retry, where a worker that forgot to say would hold a
+ * connection open for an hour.
+ */
+export type InaraWait = 'request' | 'queue';
+
+/**
  * How many commanders one request may ask about.
  *
  * Thirty is a deliberate compromise. Inara publishes no hard cap on events per
@@ -232,13 +262,19 @@ export class InaraAdapter {
    *
    * Returns null when Inara does not recognise the key.
    */
-  async getOwnIdentity(apiKey: string): Promise<{
+  async getOwnIdentity(
+    apiKey: string,
+    wait: InaraWait = 'request',
+  ): Promise<{
     cmdrName: string;
     squadronName: string | null;
     squadronRank: string | null;
   } | null> {
-    // BOUNDED, for the same reason as below: a member is waiting on this.
-    const p = await this.#call(apiKey, undefined, REQUEST_PATH_WAIT_MS);
+    const p = await this.#call(
+      apiKey,
+      undefined,
+      wait === 'request' ? REQUEST_PATH_WAIT_MS : undefined,
+    );
     if (p === null || p.cmdrName === '') return null;
     return { cmdrName: p.cmdrName, squadronName: p.squadronName, squadronRank: p.squadronRank };
   }
