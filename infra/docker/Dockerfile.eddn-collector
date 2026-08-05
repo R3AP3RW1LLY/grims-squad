@@ -52,8 +52,26 @@ RUN pnpm --filter @grims/shared build \
  && pnpm --filter @grims/eddn-collector exec tsc -b
 
 # Fails the BUILD rather than the deploy if the native binding is unusable on this platform.
-RUN node -e "import('zeromq').then(z => { if (typeof z.Subscriber !== 'function') process.exit(1) })" \
-    --input-type=module || (echo 'zeromq did not load — the collector cannot run' && exit 1)
+#
+# ★ RUN FROM THE PACKAGE, AND LET THE ERROR SPEAK ★
+#
+# This ran from /app, the workspace ROOT, where `zeromq` does not resolve: pnpm installs a
+# package's dependencies under that package, so it lives in apps/eddn-collector/node_modules. The
+# check therefore failed on every build that has ever run — the collector image has never been
+# produced, which is why the service was absent in production and market prices only moved when a
+# member's journal supplied them.
+#
+# It also swallowed the reason. `|| (echo … && exit 1)` replaced a real module-resolution error
+# with a sentence blaming the platform, which is what sent the first diagnosis after a Node ABI
+# that was never the problem. The failure now prints what actually went wrong.
+WORKDIR /app/apps/eddn-collector
+RUN node --input-type=module -e "\
+const z = await import('zeromq'); \
+if (typeof z.Subscriber !== 'function') { \
+  console.error('zeromq loaded but exposes no Subscriber — the collector cannot run'); \
+  process.exit(1); \
+}"
+WORKDIR /app
 
 FROM base AS runtime
 WORKDIR /app
