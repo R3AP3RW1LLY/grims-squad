@@ -286,6 +286,22 @@ export function foldCarrierHold(
 export interface CarrierCargoSnapshot {
   readonly marketId: string;
   readonly commodities: ReadonlyArray<{ readonly commodity: string; readonly tonnes: number }>;
+  /**
+   * Tonnes aboard IN TOTAL, from `CarrierStats` rather than from watching.
+   *
+   * ★ THE HALF THAT WAS CAPTURED AND NEVER SENT ★
+   *
+   * The fold learned this and the snapshot dropped it, so the hub went on receiving a list of
+   * witnessed commodities with nothing to weigh it against — and a carrier the app had seen one
+   * commodity move on looked, on screen, like a carrier holding one commodity.
+   *
+   * Null until the member opens carrier management at least once. Absent rather than guessed: a
+   * total invented from the sum of what we watched would be the exact false confidence this
+   * exists to remove.
+   */
+  readonly totalTonnes: number | null;
+  /** The journal timestamp of that reading, so a page can say how old the figure is. */
+  readonly totalAt: string | null;
 }
 
 /**
@@ -301,6 +317,19 @@ export function carrierSnapshot(state: CarrierHoldState): CarrierCargoSnapshot |
   const commodities = Object.values(state.hold)
     .map((h) => ({ commodity: h.commodity, tonnes: h.tonnes }))
     .sort((a, b) => (a.commodity < b.commodity ? -1 : a.commodity > b.commodity ? 1 : 0));
-  if (commodities.length === 0) return null;
-  return { marketId: state.carrier.marketId, commodities };
+  /*
+   * ★ A TOTAL ALONE IS WORTH SENDING ★
+   *
+   * This returned null unless something had been WATCHED move, which is right for a list of
+   * commodities and wrong for the total: a member who opens carrier management on a full hold the
+   * app has never seen load has the most useful reading of all, and it was being discarded.
+   */
+  if (commodities.length === 0 && state.totalTonnes === null) return null;
+
+  return {
+    marketId: state.carrier.marketId,
+    commodities,
+    totalTonnes: state.totalTonnes,
+    totalAt: state.totalAt === null ? null : new Date(state.totalAt).toISOString(),
+  };
 }

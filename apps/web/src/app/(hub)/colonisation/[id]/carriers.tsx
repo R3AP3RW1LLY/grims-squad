@@ -197,6 +197,28 @@ export function Carriers({
                     <span className="flex items-center gap-3">
                       <span className="font-mono text-xs tabular-nums text-[var(--color-text-secondary)]">
                         {c.totalTonnes.toLocaleString()} t towards this build
+                        {/*
+                          ★ THE GAP, SAID OUT LOUD — SQUADRON OWNER, 2026-08-05 ★
+
+                          "carrier hold info is not updating properly ... we need this to be way
+                          more accurate than it is currently"
+
+                          What we hold is a WITNESS statement: the commodities somebody's app
+                          watched move, which in production was one. Printed alone it reads as the
+                          whole manifest. `CarrierStats` gives the game's own total, so the line can
+                          say how much of the hold nobody has seen instead of implying there is
+                          none — and a member reading "of 12,400 t aboard" knows to open carrier
+                          management if the rest matters.
+
+                          Shown only when the total is BIGGER than what we watched. Equal means we
+                          have seen it all, and "500 of 500" is noise.
+                        */}
+                        {c.wholeHoldTonnes !== null && c.wholeHoldTonnes > c.totalTonnes ? (
+                          <span className="opacity-70">
+                            {' '}
+                            · of {c.wholeHoldTonnes.toLocaleString()} t aboard
+                          </span>
+                        ) : null}
                       </span>
                       {canManage || c.addedBy !== null ? (
                         <button

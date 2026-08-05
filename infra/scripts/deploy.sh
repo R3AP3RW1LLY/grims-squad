@@ -186,10 +186,26 @@ docker builder prune --force --filter 'until=168h' >/dev/null 2>&1 || true
 # reached 188 GB and the disk 76%. The time filter cannot help with that, because the problem is
 # volume within the window rather than age.
 #
-# `--keep-storage` bounds it instead: BuildKit evicts least-recently-used entries beyond the cap,
-# so same-day rebuilds stay fast and the total cannot run away. 40 GB is comfortably more than one
-# full build of all six images and far below anything that threatens the disk.
-docker builder prune --force --keep-storage 40GB >/dev/null 2>&1 || true
+# ★ AND --keep-storage DOES NOT DO WHAT I CLAIMED IT DID — MEASURED 2026-08-05 ★
+#
+# It caps the RECLAIMABLE cache, not the total. With 185 GB of cache of which only 24 GB was
+# unused, `--keep-storage 40GB` reclaimed exactly nothing: 24 is already under 40, so there was
+# nothing it considered worth evicting. The disk went on filling — 76% again within three deploys.
+#
+# The honest lever is the unfiltered prune, which drops every layer no current image needs. That
+# reclaimed 24 GB; the remaining 161 GB was cache backing images that were themselves stale, and
+# only `--all` clears it — 157 GB, taking the disk from 79% to 26%.
+#
+# So: prune what is unused on every deploy, and clear the lot when the disk is genuinely tight.
+# `--all` costs one slow build afterwards and nothing else — build cache is a speed optimisation,
+# never data.
+docker builder prune --force >/dev/null 2>&1 || true
+
+used_pct="$(df --output=pcent / | tail -1 | tr -dc '0-9')"
+if [[ -n $used_pct && $used_pct -ge 70 ]]; then
+  warn "disk at ${used_pct}% — clearing the whole build cache, the next build will be slower"
+  docker builder prune --all --force >/dev/null 2>&1 || true
+fi
 ok "old build cache pruned"
 
 # ★ EVERY SERVICE, NOT THE FOUR THAT FACE A MEMBER ★

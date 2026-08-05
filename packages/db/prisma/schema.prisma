@@ -2910,6 +2910,47 @@ model ColonyCarrierCargo {
   @@map("colony_carrier_cargo")
 }
 
+/// How much is aboard a carrier IN TOTAL, from the game rather than from watching.
+///
+/// * WHY THIS IS NOT A COLUMN ON ColonyCarrierCargo *
+///
+/// That table is keyed per COMMODITY, and this is one number about the whole hold. Repeating it on
+/// every commodity row would invite two rows to disagree about a single fact, and it would vanish
+/// entirely for a carrier whose contents we have never witnessed — which is precisely the carrier
+/// this exists to describe.
+///
+/// * WHY IT IS NOT ON ColonyCarrier EITHER *
+///
+/// That one is keyed (project, market) — a carrier helping three builds appears three times, and
+/// the tonnage in its hold has nothing to do with which build it is attached to. Keyed on the
+/// market id alone, because that is what a carrier IS.
+///
+/// * WHAT IT IS FOR - SQUADRON OWNER, 2026-08-05 *
+///
+/// "carrier hold info is not updating properly ... we need this to be way more accurate than it is
+/// currently". The companion's cargo fold is a WITNESS: it knows what it watched move and nothing
+/// else, so production held exactly one commodity row for the squadron carrier and presented it
+/// without comment as though it were the whole manifest.
+///
+/// `CarrierStats` carries the game's own total tonnage aboard - no breakdown, but true. Holding it
+/// beside the witnessed rows is what lets a page say "watched 500 t of the 12,400 t aboard"
+/// instead of implying those are the same number. An honest gap is far more useful than a
+/// confident wrong total, and it tells a member when it is worth opening carrier management.
+model ColonyCarrierHold {
+  marketId BigInt @id @map("market_id")
+
+  /// Tonnes aboard, from `CarrierStats.SpaceUsage.Cargo`. Never a sum of the witnessed rows.
+  totalTonnes Int @map("total_tonnes")
+
+  /// The JOURNAL's timestamp, not the clock: a pass may be replaying a file written hours ago, and
+  /// stamping the present would dress an old reading as a fresh one.
+  observedAt DateTime @map("observed_at") @db.Timestamptz(6)
+
+  updatedAt DateTime @default(now()) @map("updated_at") @db.Timestamptz(6)
+
+  @@map("colony_carrier_hold")
+}
+
 /// One hour of the galaxy's trade in one commodity — the series behind "price over time".
 ///
 /// ★ WHY THIS EXISTS RATHER THAN `MarketHistory` — SQUADRON OWNER, 2026-08-02 ★

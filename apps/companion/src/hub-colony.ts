@@ -776,6 +776,15 @@ export const pushCarrierCargo = (
   body: {
     marketId: string;
     commodities: ReadonlyArray<{ commodity: string; tonnes: number }>;
+    /**
+     * The game's own total tonnage aboard, when the member has opened carrier management.
+     *
+     * Sent beside the witnessed commodities rather than folded into them: the hub needs both to
+     * say "watched this much of that much", and a total mixed into the list would be one more
+     * commodity called Everything.
+     */
+    totalTonnes?: number | null;
+    totalAt?: string | null;
   },
 ): Promise<Answer<{ stored: boolean }>> =>
   hubColony(call, '/carrier-cargo', { method: 'POST', body });

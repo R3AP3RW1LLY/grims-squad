@@ -268,3 +268,57 @@ describe('the true total, so the gap is visible', () => {
     expect(after.totalAt).toBeNull();
   });
 });
+
+
+describe('the snapshot carries the true total', () => {
+  /*
+   * ★ THE HALF THAT WAS CAPTURED AND NEVER SENT ★
+   *
+   * The fold learned `CarrierStats.SpaceUsage.Cargo` and `carrierSnapshot` dropped it, so the hub
+   * received a list of witnessed commodities with nothing to weigh it against — and a carrier the
+   * app had seen one commodity move on looked, on screen, like a carrier holding one commodity.
+   */
+  const statsWithUsage = (id: number, cargo: number): ParsedLike =>
+    ev('CarrierStats', {
+      CarrierID: id,
+      Callsign: 'K7Q-B4L',
+      Name: 'GRIMS HAULER',
+      SpaceUsage: { TotalCapacity: 25000, Cargo: cargo, FreeSpace: 25000 - cargo },
+    });
+
+  it('MANDATORY: sends the total alongside the witnessed commodities', () => {
+    const state = foldCarrierHold(EMPTY_CARRIER_HOLD, [
+      statsWithUsage(3700005632, 12400),
+      transfer([{ type: 'Tritium', count: 500, direction: 'tocarrier' }]),
+    ]);
+
+    const snap = carrierSnapshot(state);
+    expect(snap?.totalTonnes).toBe(12400);
+    expect(snap?.commodities).toEqual([{ commodity: 'Tritium', tonnes: 500 }]);
+    // The gap is the whole point: 11,900 t aboard that nothing has watched.
+    expect((snap?.totalTonnes ?? 0) - 500).toBe(11900);
+  });
+
+  it('MANDATORY: a total with nothing witnessed is still worth sending', () => {
+    /*
+     * This returned null unless something had been watched move — right for a list of commodities,
+     * wrong for the total. A member opening carrier management on a full hold the app never saw
+     * load has the most useful reading there is, and it was discarded.
+     */
+    const state = foldCarrierHold(EMPTY_CARRIER_HOLD, [statsWithUsage(3700005632, 12400)]);
+
+    const snap = carrierSnapshot(state);
+    expect(snap).not.toBeNull();
+    expect(snap?.totalTonnes).toBe(12400);
+    expect(snap?.commodities).toEqual([]);
+  });
+
+  it('the timestamp is the journal’s, sent as ISO', () => {
+    const state = foldCarrierHold(EMPTY_CARRIER_HOLD, [statsWithUsage(3700005632, 900)]);
+    expect(carrierSnapshot(state)?.totalAt).toBe(new Date(at).toISOString());
+  });
+
+  it('no carrier identified is still nothing to say', () => {
+    expect(carrierSnapshot(EMPTY_CARRIER_HOLD)).toBeNull();
+  });
+});
