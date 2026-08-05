@@ -71,10 +71,20 @@ function titleLine(m: RosterMember): string {
 }
 
 describe('what the card prints beside the commander name', () => {
-  it('MANDATORY: the hub founder reads "Founder", and "Webmaster" is gone', () => {
+  it('MANDATORY: the webmaster is pinned, is NOT titled a founder, and keeps both his roles', () => {
     /*
-     * Pebblemerchant, with the three roles the database actually holds against
-     * that account: webmaster, squadron membership, and the founding row.
+     * ★ SQUADRON OWNER, 2026-08-05 ★
+     *
+     * "pebblemerchant should not have anything to do with founder in their name. I am purely
+     * the webmaster! that is it! anything else would be misconstruing this!"
+     *
+     * ...and then, when the title was removed and the card was left printing a bare divider:
+     *
+     * "should be: Commander | Webmaster | Grim's Squad Member. nothing here changed!"
+     *
+     * The account carries a pinned ROSTER POSITION (precedence 820, directly below the four
+     * founders) and no founding title. Both facts are load-bearing and this asserts both: the
+     * word "Founder" must not appear, and the roles that were displaced by it must be back.
      */
     const line = titleLine(
       member({
@@ -82,12 +92,14 @@ describe('what the card prints beside the commander name', () => {
         displayName: 'Pebblemercahnt',
         cmdrName: 'PEBBLEMERCAHNT',
         siteRoles: [WEBMASTER, MEMBERS],
-        founder: { title: 'Founder', precedence: 820, foundedSquadron: false },
+        founder: { title: null, precedence: 820, foundedSquadron: false },
       }),
     );
 
-    expect(line).toBe('Commander | Founder');
-    expect(line).not.toContain('Webmaster');
+    expect(line).toBe("Commander | Webmaster | Grim's Squad members");
+    expect(line).not.toContain('Founder');
+    // The exact shape that was reported: a divider with nothing after it.
+    expect(line.trimEnd()).not.toMatch(/\|$/);
   });
 
   it('MANDATORY: a founder reads "Founder" and a co-founder reads "Co-Founder"', () => {

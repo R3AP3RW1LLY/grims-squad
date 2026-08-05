@@ -346,6 +346,19 @@ describe('GET /v1/members', () => {
       expect(out.members[0]?.founder?.title).toBeNull();
       expect(out.members[0]?.founder?.precedence).toBe(820);
       expect(out.members[0]?.founder?.foundedSquadron).toBe(false);
+
+      /*
+       * ★ AND THE PIN ITSELF IS NOT ONE OF THE TITLES ★
+       *
+       * Reported 2026-08-05: with no founding title to substitute, the card falls back to
+       * these — and "Roster pin" would have gone out beside the commander name as though it
+       * were a rank. It exists to hold an ORDER the owner can edit without a deploy; it is
+       * furniture, and the two real roles are what the line is for.
+       */
+      expect(out.members[0]?.siteRoles).toEqual([
+        { name: 'Webmaster', colour: null },
+        { name: "Grim's Squad members", colour: null },
+      ]);
     });
 
     it('MANDATORY: a member with no founding role gets null', async () => {

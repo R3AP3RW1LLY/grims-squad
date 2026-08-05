@@ -286,17 +286,43 @@ describe('the founding title', () => {
 
   it('MANDATORY: replaces the site titles for somebody with founding standing', () => {
     /*
-     * Pebblemerchant, exactly as production holds them: the webmaster role, the
-     * squadron membership role, and founding standing. The line is one line and
-     * never wraps, so three titles in it would truncate the one the owner asked
-     * to see.
+     * A founder, exactly as production holds one: the squadron membership role and a founding
+     * row that carries a title. The line is one line and never wraps, so three titles in it
+     * would truncate the one the owner asked to see.
      */
     const titles = titleRoles({
-      founder: { title: 'Founder', precedence: 820, foundedSquadron: false },
-      siteRoles: [WEBMASTER, MEMBERS],
+      founder: { title: 'Founder', precedence: 800, foundedSquadron: true },
+      siteRoles: [MEMBERS],
     });
 
     expect(titles.map((t) => t.name)).toEqual(['Founder']);
+  });
+
+  it('MANDATORY: a pinned position with NO title keeps the roles it would have shown', () => {
+    /*
+     * ★ THE WEBMASTER, AND THE BUG HE REPORTED ★
+     *
+     * Standing is a POSITION on the roster; a title is a separate claim. Pebblemerchant holds
+     * the first and not the second — pinned directly below the founders, and not one of them.
+     *
+     * Substituting a null title emptied the slot AND displaced the two roles that belonged in
+     * it, so the card printed "Commander |" and stopped. Nothing steps aside for a title that
+     * does not exist.
+     */
+    expect(
+      titleRoles({
+        founder: { title: null, precedence: 820, foundedSquadron: false },
+        siteRoles: [WEBMASTER, MEMBERS],
+      }).map((t) => t.name),
+    ).toEqual(['Webmaster', "Grim's Squad members"]);
+
+    // An empty string is the same statement as null and must not print either.
+    expect(
+      titleRoles({
+        founder: { title: '', precedence: 820, foundedSquadron: false },
+        siteRoles: [MEMBERS],
+      }),
+    ).toEqual([MEMBERS]);
   });
 
   it('MANDATORY: prints the title the ROLE ROW carries, not a constant', () => {
