@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { GlobalExceptionFilter } from './exception.filter.js';
+import { wantsHtml } from './error-page.js';
 import { ErrorCode, type ErrorEnvelope } from '@grims/shared';
 import type { ArgumentsHost } from '@nestjs/common';
 
@@ -32,12 +33,17 @@ function envelopeOf(body: unknown): ErrorEnvelope {
 
 /** A reply that records what the filter did to it. */
 function fakeReply(headers: Record<string, string | number> = {}) {
-  const sent: { status?: number; body?: unknown } = {};
+  const sent: { status?: number; body?: unknown; contentType?: string } = {};
   return {
     sent,
     getHeader: (name: string) => headers[name.toLowerCase()],
     status(code: number) {
       sent.status = code;
+      return this;
+    },
+    // Fastify's reply is chainable and the filter uses it to set a content type for the HTML path.
+    header(name: string, value: string) {
+      if (name.toLowerCase() === 'content-type') sent.contentType = value;
       return this;
     },
     send(body: unknown) {
@@ -50,7 +56,13 @@ function hostFor(reply: unknown): ArgumentsHost {
   return {
     switchToHttp: () => ({
       getResponse: () => reply,
-      getRequest: () => ({ id: 'req-1', method: 'POST', url: '/v1/telemetry/journal' }),
+      // No `accept`: the companion app's shape, which must keep getting JSON.
+      getRequest: () => ({
+        id: 'req-1',
+        method: 'POST',
+        url: '/v1/telemetry/journal',
+        headers: {},
+      }),
     }),
   } as unknown as ArgumentsHost;
 }
@@ -129,5 +141,103 @@ describe('a Fastify plugin rejection keeps its status', () => {
 
     expect(reply.sent.status).toBe(500);
     spy.mockRestore();
+  });
+});
+
+/**
+ * A browser gets a page; a program gets the envelope.
+ *
+ * ★ SQUADRON OWNER, 2026-08-05 ★
+ *
+ * "we jsut got this error: {"error":{"code":"INTERNAL_ERROR" ... }} no error screen! what the
+ * fuck! we want error screens instead of showing this shit."
+ *
+ * The website's error boundaries could never have covered it. Next's `error.tsx` catches a failure
+ * while REACT renders, and this JSON came from `GET /v1/auth/discord/callback` — a URL the browser
+ * navigates to directly as the last leg of signing in. Next is not involved at any point.
+ *
+ * So the API decides by `Accept`, which is the header that exists for exactly this question. The
+ * companion app and every script keep the envelope, because `retryable` and `retryAfterSeconds`
+ * are a contract the app reads.
+ */
+describe('what a browser is shown', () => {
+  const browser = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8';
+
+  function hostAccepting(reply: unknown, accept: string | undefined): ArgumentsHost {
+    return {
+      switchToHttp: () => ({
+        getResponse: () => reply,
+        getRequest: () => ({
+          id: 'req-1',
+          method: 'GET',
+          url: '/v1/auth/discord/callback',
+          headers: accept === undefined ? {} : { accept },
+        }),
+      }),
+    } as unknown as ArgumentsHost;
+  }
+
+  it('MANDATORY: a browser navigation gets HTML, not the envelope', () => {
+    const reply = fakeReply();
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    new GlobalExceptionFilter().catch(new Error('discord blew up'), hostAccepting(reply, browser));
+
+    expect(reply.sent.status).toBe(500);
+    expect(reply.sent.contentType).toContain('text/html');
+    expect(String(reply.sent.body)).toContain('<!doctype html>');
+    // The requestId survives — it is what gets somebody helped quickly.
+    expect(String(reply.sent.body)).toContain('req-1');
+    // And the internals do not.
+    expect(String(reply.sent.body)).not.toContain('discord blew up');
+    spy.mockRestore();
+  });
+
+  it('MANDATORY: the companion app still gets JSON', () => {
+    /*
+     * The app reads `retryable` and `retryAfterSeconds` and backs off on them. Handing it HTML
+     * would break every client on the platform to fix a screen.
+     */
+    const reply = fakeReply();
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    new GlobalExceptionFilter().catch(new Error('boom'), hostAccepting(reply, 'application/json'));
+
+    expect(reply.sent.body).toMatchObject({ error: { code: ErrorCode.INTERNAL_ERROR } });
+    spy.mockRestore();
+  });
+
+  it('a request with no Accept header gets JSON — the safe default for a program', () => {
+    const reply = fakeReply();
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    new GlobalExceptionFilter().catch(new Error('boom'), hostAccepting(reply, undefined));
+
+    expect(reply.sent.body).toMatchObject({ error: {} });
+    spy.mockRestore();
+  });
+
+  it('a rate limit renders as a page too, when a browser asks', () => {
+    const reply = fakeReply({ 'retry-after': 27 });
+    new GlobalExceptionFilter().catch(rateLimitError(), hostAccepting(reply, browser));
+
+    expect(reply.sent.status).toBe(429);
+    expect(String(reply.sent.body)).toContain('<!doctype html>');
+  });
+});
+
+describe('wantsHtml', () => {
+  it('says yes to a browser and no to everything else', () => {
+    expect(wantsHtml('text/html,application/xhtml+xml,*/*;q=0.8')).toBe(true);
+    expect(wantsHtml('application/json')).toBe(false);
+    expect(wantsHtml('*/*')).toBe(false);
+    expect(wantsHtml(undefined)).toBe(false);
+    expect(wantsHtml('')).toBe(false);
+  });
+
+  it('when both are named, the one asked for FIRST wins', () => {
+    // A client that says "json, or html if you must" wants json.
+    expect(wantsHtml('application/json, text/html')).toBe(false);
+    expect(wantsHtml('text/html, application/json')).toBe(true);
   });
 });
