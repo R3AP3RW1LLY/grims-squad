@@ -167,9 +167,21 @@ ok "$(du -h "$DUMP" | cut -f1) → $DUMP"
 docker builder prune --force --filter 'until=168h' >/dev/null 2>&1 || true
 ok "old build cache pruned"
 
+# ★ EVERY SERVICE, NOT THE FOUR THAT FACE A MEMBER ★
+#
+# This built `api web bot worker` and stopped. The two it left out — the ingest daemon and the EDDN
+# collector — are the two that run unattended, so nobody notices they are stale until something they
+# ingest is wrong, and then the source looks blameless because the fix IS in the repository.
+#
+# Measured 2026-08-05: the daemon had been running an image built at 04:14 for the rest of the day.
+# A fix to the market rebuild's transaction budget was merged, deployed, verified present in the
+# `worker` image — and the daemon, which is the thing that actually runs that rebuild hourly, kept
+# executing the old code and kept failing the same way. The deploy reported success every time.
+#
+# `--profile jobs` is still needed: the one-shot `worker` service is behind it.
 say "Building images"
-$COMPOSE --profile jobs build api web bot worker
-ok "api, web, bot, worker built"
+$COMPOSE --profile jobs build api web bot worker worker-daemon eddn-collector
+ok "api, web, bot, worker, worker-daemon, eddn-collector built"
 
 # ─────────────────────────────────────────────────────────── 5. migrate
 #
@@ -231,8 +243,8 @@ wait_healthy() {
 rollback() {
   printf '\n\033[31m✖ rolling back to %s\033[0m\n' "${PREVIOUS_SHA:0:8}" >&2
   git -C "$REPO" reset --quiet --hard "$PREVIOUS_SHA"
-  $COMPOSE --profile jobs build api web bot worker >/dev/null 2>&1 || true
-  $COMPOSE up -d api web bot >/dev/null 2>&1 || true
+  $COMPOSE --profile jobs build api web bot worker worker-daemon eddn-collector >/dev/null 2>&1 || true
+  $COMPOSE up -d api web bot worker-daemon eddn-collector >/dev/null 2>&1 || true
   printf '\033[31m  rolled back. The database was NOT reverted — %s holds the pre-deploy state.\033[0m\n' "$DUMP" >&2
 }
 trap 'rollback' ERR
@@ -246,6 +258,19 @@ wait_healthy api
 $COMPOSE up -d web bot
 wait_healthy web
 wait_healthy bot
+
+# ★ THE BACKGROUND PAIR, LAST AND DELIBERATELY ★
+#
+# Neither serves a request, so neither belongs in the health-gated window above — but both were
+# missing from the rollout entirely, which meant a freshly built image sat on disk while the old
+# container kept running. Replaced after the member-facing three so that if a new image cannot
+# start, the site is already up and the failure is isolated to ingestion.
+#
+# The collector is `replicas: 1` by design and takes a moment to close its reporting window on
+# SIGTERM; `up -d` honours that. Restarting it costs one reconnect to the relay, nothing more.
+$COMPOSE up -d worker-daemon eddn-collector
+wait_healthy worker-daemon
+wait_healthy eddn-collector
 
 trap - ERR
 
