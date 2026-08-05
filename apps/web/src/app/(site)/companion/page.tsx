@@ -1,4 +1,6 @@
 import type { Metadata } from 'next';
+import { getCompanionReleases } from '../../../lib/api';
+import { CompanionDownload } from '../../(hub)/settings/devices/download';
 
 export const metadata: Metadata = {
   title: "Companion app — Grim's Squad",
@@ -31,7 +33,15 @@ function Row({ what, journal, without }: { what: string; journal: string; withou
   );
 }
 
-export default function CompanionPage() {
+export default async function CompanionPage() {
+  /*
+   * Null when the caller has no session — `getCompanionReleases` asks an authenticated route and
+   * the helper collapses a refusal to null rather than throwing, so a signed-out visitor renders
+   * the sign-in line instead of a failure. An empty `assets` array is a different answer again:
+   * nothing has been published yet, which the download component says in its own words.
+   */
+  const releases = await getCompanionReleases();
+
   return (
     <main id="main" className="mx-auto max-w-[1440px] px-6 py-20">
       <div className="mx-auto max-w-[76ch]">
@@ -125,11 +135,24 @@ export default function CompanionPage() {
           >
             MARKET DATA AND TRADE ROUTES
           </h2>
+          {/*
+            ★ THIS SAID THE OPPOSITE, AND IT WAS WRONG ★
+
+            The page claimed the app "does not do market or route planning, and does not try to".
+            That was true when it was written and stopped being true when the Commodities pages and
+            the Freight Office landed in the app. Squadron owner, 2026-08-05: "our app does do this
+            lol.. we need this fixed!"
+          */}
           <p className="mt-4 text-sm text-[var(--color-text-secondary)]">
-            Our app does not do market or route planning, and does not try to. If you want those,
-            keep using EDMC, EDDiscovery or Inara alongside it — they feed the community data
-            network that the whole game relies on, and ours is happy to sit beside them rather than
-            replace them.
+            The app carries the squadron&rsquo;s market data and its trade planner. Look up what any
+            commodity is worth and where to buy or sell it near you, and plan a run by naming the
+            cargo, the hull and the range — the same numbers the website shows, in a window beside
+            the game. Dock and open the commodities screen and your reading refreshes the
+            squadron&rsquo;s prices for everybody.
+          </p>
+          <p className="mt-3 text-sm text-[var(--color-text-secondary)]">
+            None of that replaces EDMC, EDDiscovery or Inara. They feed the community data network
+            the whole game relies on, and ours is happy to run beside them.
           </p>
         </section>
 
@@ -142,19 +165,36 @@ export default function CompanionPage() {
             GETTING IT
           </h2>
           {/*
-            Honest placeholder. A dead "Download" button is worse than saying it
-            is not ready — one wastes somebody's time and makes the site look
-            broken; the other sets an expectation.
+            ★ THE DOWNLOAD IS ON THIS PAGE NOW ★
+
+            It said "In testing… this page will carry the download" and never did — the installers
+            lived only on /settings/devices, so somebody sent here to get the app found a promise
+            instead. Squadron owner, 2026-08-05: "im on this page /companion but there is no app to
+            download!"
+
+            Still members-only, which is the standing decision: the app pairs to a squadron account
+            and the release feed refuses a caller with no session. So a signed-out visitor is told
+            plainly where the door is rather than being shown a button that would fail.
           */}
-          <p className="mt-4 text-[var(--color-text-primary)]">
-            In testing. It will be announced in Discord when there is a build worth installing, and
-            this page will carry the download.
-          </p>
-          <p className="mt-3 text-sm text-[var(--color-text-secondary)]">
+          <p className="mt-4 text-sm text-[var(--color-text-secondary)]">
             Windows, macOS and Linux. Elite has had no native Mac client since 2015 and none on
             Linux, so players on both run it through CrossOver, Whisky or Proton — the app is a
             normal Mac or Linux program that knows where those put the game&rsquo;s journal files.
           </p>
+          <div className="mt-6">
+            {releases === null ? (
+              <p className="text-[var(--color-text-primary)]">
+                Sign in with Discord to download the app — it pairs to your squadron account, so the
+                installer is kept behind the same door.{' '}
+                <a href="/v1/auth/discord" className="text-[var(--color-brand-cyan-bright)]">
+                  Sign in
+                </a>
+                .
+              </p>
+            ) : (
+              <CompanionDownload assets={releases.assets} />
+            )}
+          </div>
           <p className="mt-6 text-[var(--color-text-primary)]">
             Already have it?{' '}
             <a href="/settings/devices" className="text-[var(--color-brand-cyan-bright)]">
