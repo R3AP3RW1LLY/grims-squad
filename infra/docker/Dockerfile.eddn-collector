@@ -29,7 +29,11 @@ COPY . .
 # clean and then throws at `import` on first start, in production, with no build log to look at.
 RUN pnpm install --frozen-lockfile
 RUN pnpm --filter @grims/db exec prisma generate
+# ed-clients is built because @grims/db reaches it (rank-applier.discord.ts imports a Discord
+# adapter type) and `tsc -b` follows project references — the same omission that stopped the bot
+# image building. The api and worker images already had this line.
 RUN pnpm --filter @grims/shared build \
+ && pnpm --filter @grims/ed-clients build \
  && pnpm --filter @grims/db build \
  && pnpm --filter @grims/eddn-collector exec tsc -b
 
