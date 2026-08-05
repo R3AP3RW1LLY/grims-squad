@@ -256,7 +256,23 @@ export async function rebuildMarketEntries(db: PrismaClient): Promise<number> {
 
       return written;
     },
-    // The galaxy is tens of millions of rows; the default 5s transaction timeout is nowhere near.
-    { timeout: 30 * 60_000, maxWait: 60_000 },
+    /*
+     * The galaxy is tens of millions of rows; the default 5s transaction timeout is nowhere near.
+     *
+     * ★ AND NEITHER WAS THIRTY MINUTES — MEASURED IN PRODUCTION, 2026-08-05 ★
+     *
+     * The first full rebuild on the production box ran 2,086,389 ms — about thirty-five minutes —
+     * and Prisma closed the transaction under it at thirty. The failure is quiet in the worst way:
+     * `market_entries` stays EMPTY, so the EDDN collector finds no commodity names and parks itself
+     * ("no commodity names available — waiting"), the market pages have nothing to show, and the
+     * Data Bounty board has no stations to rank. One expired transaction reads as four broken
+     * features.
+     *
+     * Four hours, not thirty-five minutes: the number has to survive a slower disk, a bigger dump
+     * and a box that is also serving the site, and the cost of being generous is a transaction that
+     * holds its snapshot longer on the rare occasion something really is wrong. The cost of being
+     * tight is the outage above.
+     */
+    { timeout: 4 * 60 * 60_000, maxWait: 60_000 },
   );
 }
