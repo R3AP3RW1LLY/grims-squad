@@ -141,7 +141,7 @@ the site ones, and a fixed order at the top of the roster.
 |---|---|---|---|---|
 | `founder` | Founder | 800 | yes | Founded the squadron. The #1 spot on the roster, outright. |
 | `co_founder` | Co-Founder | 810 | yes | Co-founded the squadron. Directly after the founder. |
-| `hub_founder` | Founder | 820 | **no** | Founding standing on the hub, titled Founder. Pinned directly after the squadron's founders. |
+| `roster_pin` | Roster pin | 820 | **no** | Position only: pins a member directly after the founders on All members, and first on the Members tab. Confers no title. |
 
 **Ascending, like the leadership tier** — the lowest number is the most senior, and the reverse of
 the tenure ladder. The 800s are their own band so the roles console can group them: the 900s are
@@ -149,9 +149,7 @@ the tenure ladder. The 800s are their own band so the roles console can group th
 that "confer every permission on this site and no standing in the squadron whatsoever", which is
 the opposite of what these are.
 
-**`hub_founder` exists because the owner's instruction holds two facts at once.** Pebblemerchant's
-card "should say founder", and the tab gets "only these people" — four names, theirs not among
-them — with Pebblemerchant placed *after* the founders. One role could carry only one of those.
+**`roster_pin` carries position and nothing else.** The squadron owner, 2026-08-05: "pebblemerchant should not have anything to do with founder in their name. i am purely the webmaster! that is it!" An earlier draft titled them Founder, which misread the first request. The pin keeps the order that was asked for — directly behind the founders, first on the Members tab — while their card goes on showing the roles they actually hold.
 
 **No `role_mappings` row for any of them.** There is no Discord role behind founding standing, so
 role sync can neither grant nor revoke it; the grants carry source `system` and survive the nightly

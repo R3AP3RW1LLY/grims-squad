@@ -3,10 +3,21 @@
  *
  * ★ SQUADRON OWNER, 2026-08-04 ★
  *
- * A Founders tab on the roster listing four named people; Pebblemerchant titled
- * "Founder" where their card said "Webmaster"; and a fixed order at the top of
- * the roster — Mr Grimsoul first, then the other founders, then Pebblemerchant,
- * then everybody else.
+ * A Founders tab on the roster listing four named people, and a fixed order at
+ * the top of the roster — Mr Grimsoul first, then the other founders, then
+ * Pebblemerchant, then everybody else.
+ *
+ * ★ AND PEBBLEMERCHANT IS NOT A FOUNDER — SQUADRON OWNER, 2026-08-05 ★
+ *
+ * "pebblemerchant should not have anything to do with founder in their name. i
+ * am purely the webmaster! that is it! anything else would be misconstruing
+ * this!" An earlier reading of the first request gave them a founding title;
+ * that was wrong and is corrected here. They keep the ORDER the owner asked for
+ * — directly behind the founders, first on the Members tab — and their card
+ * says Webmaster, because that is what they are.
+ *
+ * So a role can carry position without carrying a claim: the two are separate
+ * questions, and only the founders answer yes to the second.
  *
  * ★ NOT A LIST OF NAMES ★
  *
@@ -28,30 +39,35 @@
  */
 
 /**
- * Role keys that carry founding standing, whatever their rank_order happens to
- * be. Holding one pins a member to the top of the roster and replaces the site
- * titles on their card with the founding one.
+ * Role keys that pin a member to the top of the roster, whatever their
+ * rank_order happens to be. Position only — a title is a separate question,
+ * answered by TITLED_FOUNDING_ROLE_KEYS below.
  */
-export const FOUNDING_ROLE_KEYS: readonly string[] = ['founder', 'co_founder', 'hub_founder'];
+export const FOUNDING_ROLE_KEYS: readonly string[] = ['founder', 'co_founder', 'roster_pin'];
+
+/**
+ * The keys that also REPLACE the site titles on a member's card.
+ *
+ * `roster_pin` is deliberately absent: it moves somebody up the list and says
+ * nothing about who they are, so the card goes on showing the roles they
+ * actually hold.
+ */
+export const TITLED_FOUNDING_ROLE_KEYS: readonly string[] = ['founder', 'co_founder'];
 
 /**
  * The subset that makes somebody one of the squadron's founders — the Founders
  * tab, and nothing else.
- *
- * ★ WHY `hub_founder` IS NOT HERE ★
- *
- * The owner named four people for the tab and then said Pebblemerchant comes
- * "after the founders" — which reads them as somebody who sits directly behind
- * that group rather than inside it. They are titled Founder because the same
- * instruction says so, and that title is `roles.name` on their own row, so the
- * two facts do not have to fight each other.
  */
 export const SQUADRON_FOUNDING_ROLE_KEYS: readonly string[] = ['founder', 'co_founder'];
 
 /** What one member's founding standing amounts to, once the roles are read. */
 export interface FoundingStanding {
-  /** The title shown in place of their site roles. `roles.name`, verbatim. */
-  readonly title: string;
+  /**
+   * The title shown in place of their site roles — `roles.name`, verbatim — or
+   * null for a role that only carries position, whose holder keeps the titles
+   * they already had.
+   */
+  readonly title: string | null;
   /**
    * Where they sit at the top of the roster. LOWER IS MORE SENIOR — the same
    * direction as the leadership ladder, where Galactic Admiral is 10.
@@ -84,7 +100,7 @@ export function foundingStanding(
   if (top === undefined) return null;
 
   return {
-    title: top.name,
+    title: TITLED_FOUNDING_ROLE_KEYS.includes(top.key) ? top.name : null,
     precedence: top.rankOrder,
     foundedSquadron: SQUADRON_FOUNDING_ROLE_KEYS.includes(top.key),
   };

@@ -243,7 +243,7 @@ export class PrismaMembersStore implements MembersStore {
          * ★ THE KEY AND THE rank_order TRAVEL WITH THEM, AND STOP AT THE API ★
          *
          * Founding standing is one of these roles (`founder`, `co_founder`,
-         * `hub_founder`), and deriving it needs the key to recognise the role
+         * `roster_pin`), and deriving it needs the key to recognise the role
          * and the rank_order to know where the holder is pinned on the roster.
          * Both are stripped in the controller before the response is built —
          * the browser gets the name and the colour it always did.

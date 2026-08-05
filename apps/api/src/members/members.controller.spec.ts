@@ -324,16 +324,17 @@ describe('GET /v1/members', () => {
       });
     });
 
-    it('MANDATORY: the hub founder is titled Founder and off the Founders tab', async () => {
+    it('MANDATORY: the roster pin keeps its holder titled by the roles they hold', async () => {
       // Pebblemerchant as production holds them: webmaster, membership, and the
-      // founding row the owner's instruction added.
+      // position-only pin. Squadron owner, 2026-08-05: "i am purely the
+      // webmaster! that is it!" — so the card must not gain a founding title.
       store.rows = [
         {
           source: base({
             handle: 'hub',
             siteRoles: [
               site('webmaster', 'Webmaster', 1000),
-              site('hub_founder', 'Founder', 820),
+              site('roster_pin', 'Roster pin', 820),
               site('grims_squad_members', "Grim's Squad members", 900),
             ],
           }),
@@ -342,7 +343,8 @@ describe('GET /v1/members', () => {
       ];
 
       const out = await ctl.roster();
-      expect(out.members[0]?.founder?.title).toBe('Founder');
+      expect(out.members[0]?.founder?.title).toBeNull();
+      expect(out.members[0]?.founder?.precedence).toBe(820);
       expect(out.members[0]?.founder?.foundedSquadron).toBe(false);
     });
 

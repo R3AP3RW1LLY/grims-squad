@@ -29,7 +29,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 /** The roles as the migration seeds them. Names and orders are the role row's. */
 const FOUNDER = { key: 'founder', name: 'Founder', rankOrder: 800 };
 const CO_FOUNDER = { key: 'co_founder', name: 'Co-Founder', rankOrder: 810 };
-const HUB_FOUNDER = { key: 'hub_founder', name: 'Founder', rankOrder: 820 };
+const ROSTER_PIN = { key: 'roster_pin', name: 'Roster pin', rankOrder: 820 };
 const WEBMASTER = { key: 'webmaster', name: 'Webmaster', rankOrder: 1000 };
 const MEMBERS = { key: 'grims_squad_members', name: "Grim's Squad members", rankOrder: 900 };
 
@@ -68,16 +68,22 @@ describe('founding standing', () => {
     expect(foundingStanding([CO_FOUNDER])?.foundedSquadron).toBe(true);
   });
 
-  it('MANDATORY: the hub founder is titled Founder and is NOT on the Founders tab', () => {
+  it('MANDATORY: the roster pin carries POSITION and confers no title', () => {
     /*
-     * The owner's instruction holds both halves at once: Pebblemerchant's card
-     * "should say founder", and the tab gets "only these people" — four names,
-     * theirs not among them — with Pebblemerchant placed "after the founders".
+     * ★ SQUADRON OWNER, 2026-08-05 ★
      *
-     * A single role could carry only one of those. Two rows carry both.
+     * "pebblemerchant should not have anything to do with founder in their name.
+     * i am purely the webmaster! that is it! anything else would be misconstruing
+     * this!"
+     *
+     * An earlier build titled them Founder, reading the first request too
+     * broadly. The order they asked for still stands — directly behind the
+     * founders — so the pin moves them and says nothing about who they are. A
+     * null title is what lets the card go on showing Webmaster.
      */
-    const standing = foundingStanding([HUB_FOUNDER, WEBMASTER, MEMBERS]);
-    expect(standing?.title).toBe('Founder');
+    const standing = foundingStanding([ROSTER_PIN, WEBMASTER, MEMBERS]);
+    expect(standing?.title).toBeNull();
+    expect(standing?.precedence).toBe(820);
     expect(standing?.foundedSquadron).toBe(false);
   });
 
@@ -87,7 +93,7 @@ describe('founding standing', () => {
      * should always be directly after them." Lower is more senior, the same
      * direction as the leadership ladder.
      */
-    const order = [FOUNDER, CO_FOUNDER, HUB_FOUNDER].map(
+    const order = [FOUNDER, CO_FOUNDER, ROSTER_PIN].map(
       (r) => foundingStanding([r])?.precedence ?? Number.MAX_SAFE_INTEGER,
     );
     expect(order).toEqual([...order].sort((a, b) => a - b));
@@ -100,8 +106,8 @@ describe('founding standing', () => {
      * first match would make the answer depend on query order, so a member's
      * title could change between two page loads with nothing having moved.
      */
-    expect(foundingStanding([HUB_FOUNDER, CO_FOUNDER, FOUNDER])?.title).toBe('Founder');
-    expect(foundingStanding([HUB_FOUNDER, CO_FOUNDER])?.title).toBe('Co-Founder');
+    expect(foundingStanding([ROSTER_PIN, CO_FOUNDER, FOUNDER])?.title).toBe('Founder');
+    expect(foundingStanding([ROSTER_PIN, CO_FOUNDER])?.title).toBe('Co-Founder');
   });
 
   it('MANDATORY: recognises the standing by KEY, never by name', () => {

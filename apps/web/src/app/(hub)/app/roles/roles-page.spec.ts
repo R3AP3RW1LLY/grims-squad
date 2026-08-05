@@ -165,7 +165,7 @@ describe('grouping roles', () => {
     const grouped = groupRoles([
       role({ key: 'co_founder', name: 'Co-Founder', rankOrder: 810, isHierarchical: false }),
       role({ key: 'founder', name: 'Founder', rankOrder: 800, isHierarchical: false }),
-      role({ key: 'hub_founder', name: 'Founder', rankOrder: 820, isHierarchical: false }),
+      role({ key: 'roster_pin', name: 'Roster pin', rankOrder: 820, isHierarchical: false }),
       role({ key: 'grims_squad_members', name: "Grim's Squad members", rankOrder: 900, isHierarchical: false }),
       role({ key: 'webmaster', name: 'Webmaster', rankOrder: 1000, isHierarchical: false }),
     ]);
@@ -174,7 +174,7 @@ describe('grouping roles', () => {
     expect(grouped.find((g) => g.key === 'founding')?.roles.map((r) => r.key)).toEqual([
       'founder',
       'co_founder',
-      'hub_founder',
+      'roster_pin',
     ]);
     expect(grouped.find((g) => g.key === 'membership')?.roles.map((r) => r.key)).toEqual([
       'grims_squad_members',

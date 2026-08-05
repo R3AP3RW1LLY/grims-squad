@@ -32,11 +32,16 @@
 --
 --   `founder`      Mr Grimsoul. Titled Founder, and the #1 spot outright.
 --   `co_founder`   The three co-founders. Titled Co-Founder, directly after him.
---   `hub_founder`  Pebblemerchant. Titled Founder — "where Pebblemerchant says
---                  webmaster it should say founder for them" — and pinned
---                  DIRECTLY AFTER the founders rather than among them, because
---                  the owner named four people for the Founders tab and then
---                  placed Pebblemerchant after them. Two facts, so two rows.
+--   `roster_pin`   Pebblemerchant. POSITION ONLY: directly after the founders
+--                  on All members, first on the Members tab. It confers no
+--                  title and puts nobody on the Founders tab.
+--
+--                  Squadron owner, 2026-08-05: "pebblemerchant should not have
+--                  anything to do with founder in their name. i am purely the
+--                  webmaster! that is it! anything else would be misconstruing
+--                  this!" An earlier draft of this migration titled them
+--                  Founder; that was a misreading and this is the correction.
+--                  Their card says Webmaster, which is what they are.
 --
 -- The Founders tab lists `founder` and `co_founder`: the four the owner named,
 -- and only those four. See `apps/api/src/members/founding.ts`.
@@ -67,9 +72,9 @@ INSERT INTO roles (id, key, name, rank_order, perm_mask, is_hierarchical, descri
   (gen_random_uuid(), 'co_founder', 'Co-Founder', 810,
    0::numeric(40,0), false,
    'Co-founded Grim''s Squad. Listed on the Founders tab, directly after the founder.'),
-  (gen_random_uuid(), 'hub_founder', 'Founder', 820,
+  (gen_random_uuid(), 'roster_pin', 'Roster pin', 820,
    0::numeric(40,0), false,
-   'Founding standing on the hub itself, titled Founder on the roster. Pinned directly after the squadron''s founders, and not on the Founders tab — the squadron owner named four people for that tab.')
+   'Position only: pins a member directly after the squadron''s founders on the roster, and first on the Members tab. Confers no title and no place on the Founders tab — the card goes on showing whatever roles they actually hold.')
 ON CONFLICT (key) DO NOTHING;
 
 -- No `role_mappings` row for any of them, deliberately. There is no Discord role
@@ -103,7 +108,7 @@ FROM (VALUES
   ('mynameismike187',    'co_founder'),
   ('saintvic',           'co_founder'),
   ('talenmaclir',        'co_founder'),
-  ('r3ap3ractual_22545', 'hub_founder')
+  ('r3ap3ractual_22545', 'roster_pin')
 ) AS g(handle, role_key)
 JOIN users u ON u.handle = g.handle
 JOIN roles r ON r.key = g.role_key
