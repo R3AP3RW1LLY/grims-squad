@@ -71,6 +71,9 @@ let projectId = '';
 /** Setup and teardown budget. Generous on purpose — see the note on the beforeAll below. */
 const HOOK_MS = 60_000;
 
+/** The fixture's own owner. Created and removed by this spec so an empty database is enough. */
+const FIXTURE_HANDLE = 'carrier-search-fixture-owner';
+
 async function cleanup(): Promise<void> {
   await db.$executeRawUnsafe(
     `DELETE FROM market_entries WHERE station_key LIKE '99000000000%/T3%'`,
@@ -99,6 +102,9 @@ async function cleanup(): Promise<void> {
     await db.$executeRawUnsafe(`DELETE FROM colony_carriers WHERE project_id = $1::uuid`, row.id);
     await db.$executeRawUnsafe(`DELETE FROM colony_projects WHERE id = $1::uuid`, row.id);
   }
+
+  // Last, because the projects above point at it.
+  await db.$executeRawUnsafe(`DELETE FROM users WHERE handle = $1`, FIXTURE_HANDLE);
 }
 
 async function catalogue(
@@ -147,10 +153,30 @@ async function market(
 beforeAll(async () => {
   await cleanup();
 
-  const [owner] = await db.$queryRawUnsafe<Array<{ id: string }>>(
-    `SELECT id::text AS id FROM users LIMIT 1`,
+  /*
+   * ★ THE FIXTURE BRINGS ITS OWN OWNER ★
+   *
+   * This borrowed the first row of `users` and threw when there was none — which is every CI run,
+   * where the database is migrated but empty. So the spec passed on a developer's seeded machine
+   * and failed the pull request, which is the worst way round: the machine that gates the merge
+   * was the one that could not run it.
+   *
+   * A project needs an owner, so the fixture makes one and takes it away again (`cleanup` deletes
+   * by the same handle). Borrowing a real member's row was never right either — a spec that writes
+   * projects against whoever happens to be first in the table is a spec whose failures depend on
+   * the seed.
+   */
+  await db.$executeRawUnsafe(
+    `INSERT INTO users (id, handle, display_name, timezone, status, created_at, updated_at)
+     VALUES (gen_random_uuid(), $1, 'Carrier Search Fixture', 'UTC', 'active', now(), now())
+     ON CONFLICT (handle) DO NOTHING`,
+    FIXTURE_HANDLE,
   );
-  if (owner === undefined) throw new Error('no users in the dev database to own a fixture project');
+  const [owner] = await db.$queryRawUnsafe<Array<{ id: string }>>(
+    `SELECT id::text AS id FROM users WHERE handle = $1`,
+    FIXTURE_HANDLE,
+  );
+  if (owner === undefined) throw new Error('could not create the fixture owner');
 
   const [project] = await db.$queryRawUnsafe<Array<{ id: string }>>(
     `INSERT INTO colony_projects
