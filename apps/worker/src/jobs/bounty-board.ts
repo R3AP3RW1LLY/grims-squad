@@ -1,4 +1,7 @@
 import type { PrismaClient } from '@grims/db';
+// A `site_config` row rather than a column: it describes the BOARD, not any one bounty, and
+// `data_bounties` is deleted and rebuilt wholesale every half hour.
+import { BOUNTY_ANCHOR_COUNT_KEY } from '@grims/shared';
 
 /**
  * Rebuilding the Data Bounty board.
@@ -88,6 +91,31 @@ export async function rebuildBountyBoard(db: PrismaClient): Promise<BountyBoardR
         SELECT station_key, max(market_seen_at) AS last_seen, max(station_type) AS station_type
           FROM market_entries
          GROUP BY station_key`);
+
+      /*
+       * ★ RECORDED, BECAUSE AN EMPTY OPS LIST HAS TWO MEANINGS ★
+       *
+       * Squadron space is defined relative to active colonisation projects. With none, the
+       * section is empty because it is UNDEFINED — not because everything near us is fresh — and
+       * the page said "squadron space is lit" for both, which is a claim that all our nearby data
+       * is current. Reported by the squadron owner on 2026-08-05.
+       *
+       * Written here rather than counted at read time, for two reasons. `colony_projects` carries
+       * an ACL and the board endpoint is public, so reading it there would put an ACL-bearing
+       * model behind a plain client (INV-002) — and the honest number is not "how many projects
+       * exist right now" but "how many this board was built from". A project started two minutes
+       * ago is a real third state, and anchoring the sentence to the build keeps it true.
+       */
+      const anchorRows = await tx.$queryRawUnsafe<Array<{ n: bigint }>>(
+        `SELECT count(*)::bigint AS n FROM bounty_anchors`,
+      );
+      const anchors = Number(anchorRows[0]?.n ?? 0);
+      await tx.$executeRawUnsafe(
+        `INSERT INTO site_config (key, value) VALUES ($1, $2)
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+        BOUNTY_ANCHOR_COUNT_KEY,
+        String(anchors),
+      );
 
       await tx.$executeRawUnsafe(`DELETE FROM data_bounties`);
 

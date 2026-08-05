@@ -41,7 +41,11 @@ import type { FitRole } from '@grims/ed-clients';
 import { AiClient, aiHealth } from './ai.client.js';
 import { ImageClient } from './image.client.js';
 import { TrainingStatusService } from './training.service.js';
-import { CorpusService, type SubmissionView } from './corpus.service.js';
+import {
+  CorpusService,
+  type SubmissionView,
+  type QueuedSubmission,
+} from './corpus.service.js';
 import { AssistantService } from './assistant.service.js';
 
 /** Accepted thread ids. An unvalidated string reaching an indexed uuid column fails the insert. */
@@ -744,6 +748,88 @@ export class AiController {
       ...(typeof b['notes'] === 'string' ? { notes: b['notes'] } : {}),
       ...(typeof b['shipType'] === 'string' ? { shipType: b['shipType'] } : {}),
     });
+  }
+
+  /**
+   * The review queue — everything waiting for an officer.
+   *
+   * ★ AI_TRAINING, WHICH ALREADY SAID THIS WAS ITS JOB ★
+   *
+   * The permission's own definition reads "any member may submit screenshots for the image models,
+   * and 'webmaster + AI_TRAINING holders approve'". It gated the training page and nothing else,
+   * because the approving half had no route to gate. This is that route.
+   *
+   * Not MEMBER_MANAGE and not AI_TOOLS_ADMIN: curation is looking at a picture and deciding whether
+   * it belongs, which wants the members who know Elite rather than whoever holds the kill switches.
+   */
+  @Get('corpus/queue')
+  async corpusQueue(@User() caller: CurrentUser | undefined): Promise<{
+    queue: QueuedSubmission[];
+    waiting: number;
+  }> {
+    await this.#assertTraining(caller);
+    const [queue, waiting] = await Promise.all([
+      this.corpusService.queue(),
+      this.corpusService.waiting(),
+    ]);
+    return { queue, waiting };
+  }
+
+  /**
+   * The count on the console tab.
+   *
+   * Separate from the queue itself because the badge is polled by every officer with the console
+   * open, and shipping a hundred captions and submitter records to draw a number would be absurd.
+   * Same shape as the support badge for the same reason.
+   */
+  @Get('corpus/queue/badge')
+  async corpusQueueBadge(@User() caller: CurrentUser | undefined): Promise<{ waiting: number }> {
+    await this.#assertTraining(caller);
+    return { waiting: await this.corpusService.waiting() };
+  }
+
+  /**
+   * Approving or refusing one submission.
+   *
+   * A rejection carries a reason and the service refuses one without it — the member is shown that
+   * note, and a refusal they cannot learn from produces the same image again next week.
+   */
+  @Post('corpus/:id/review')
+  async reviewCorpus(
+    @User() caller: CurrentUser | undefined,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ): Promise<{ ok: true }> {
+    const reviewer = await this.#assertTraining(caller);
+
+    const b = (body ?? {}) as Record<string, unknown>;
+    const decision = b['decision'];
+    if (decision !== 'approved' && decision !== 'rejected') {
+      throw new AppError(ErrorCode.VALIDATION_FAILED, 'Decide either approved or rejected.');
+    }
+
+    await this.corpusService.review(
+      reviewer,
+      id,
+      decision,
+      typeof b['note'] === 'string' ? b['note'] : null,
+    );
+    return { ok: true };
+  }
+
+  /** Signed in, and holds AI_TRAINING. Returns the reviewer's id, which every caller then needs. */
+  async #assertTraining(caller: CurrentUser | undefined): Promise<string> {
+    if (caller === undefined) {
+      throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
+    }
+    const mask = await this.permissions.effectiveMask(caller.userId);
+    if ((mask & Permission.AI_TRAINING) !== Permission.AI_TRAINING) {
+      throw new AppError(
+        ErrorCode.RESOURCE_NOT_VISIBLE,
+        'You do not review training images.',
+      );
+    }
+    return caller.userId;
   }
 
   /** A member changing their mind. Always available, never needs a reason. */

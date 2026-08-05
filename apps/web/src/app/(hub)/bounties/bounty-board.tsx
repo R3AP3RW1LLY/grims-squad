@@ -41,9 +41,12 @@ function padsOf(r: BountyRow): string {
 export function BountyBoardTables({
   rows,
   kind,
+  activeProjects = 0,
 }: {
   rows: readonly BountyRow[];
   kind: 'ops' | 'galaxy';
+  /** Only meaningful for `ops`, where it decides which empty state is the true one. */
+  activeProjects?: number;
 }) {
   const [query, setQuery] = useState('');
 
@@ -57,6 +60,35 @@ export function BountyBoardTables({
   }, [rows, query]);
 
   if (rows.length === 0) {
+    /*
+      ★ EMPTY BECAUSE IT IS CLEAR, OR EMPTY BECAUSE IT IS UNDEFINED ★
+
+      This said "squadron space is lit" whenever the list was empty — a claim that every station
+      near us has been observed inside the believability band. In production it was saying that
+      while there were NO active colonisation projects at all, so there was no squadron space to
+      be lit: the 200 ly radius has nothing to be a radius around.
+
+      Reported by the squadron owner, who reasonably read the blank section as a broken feature.
+      Telling somebody everything is fine is the worst possible response to "why is this empty",
+      because it forecloses the question.
+    */
+    if (kind === 'ops' && activeProjects === 0) {
+      return (
+        <p className="text-sm text-[var(--color-text-secondary)]">
+          Squadron space is everywhere within 200 ly of an active colonisation project, and there
+          are none running — so there is nothing to measure from yet. Start a project on{' '}
+          <a
+            href="/colonisation"
+            className="text-[var(--color-brand-cyan-bright)] underline"
+          >
+            Colonisation
+          </a>{' '}
+          and the stale stations around it appear here at the next rebuild. The galaxy tail below
+          is unaffected and is worth flying in the meantime.
+        </p>
+      );
+    }
+
     return (
       <p className="text-sm text-[var(--color-text-secondary)]">
         {kind === 'ops'

@@ -115,12 +115,46 @@ export function ProjectActions({
         ) : null}
 
         {/*
-          Delete is drawn only while nothing has been hauled. The server refuses either way, but a
-          button that exists in order to be refused is a button that teaches people to distrust the
-          page — and `required` is zero exactly when the site has never reported a depot, which is
-          the mistyped-market-id case delete is for.
+          ★ ADOPTING A BUILD, AND HANDING IT BACK — SQUADRON OWNER, 2026-08-05 ★
+
+          "give admins the option after the fact to turn a project into a squadron project"
+
+          `owner` was decided once at creation and nothing could change it, so a member's build
+          that the squadron then rallied behind could never be made official — and could never be
+          the current effort, because that marker is squadron-only.
+
+          Officers only, in both directions: adopting a build commits the squadron's playing time,
+          which is not the poster's to commit. Whoever posted it keeps the credit either way.
         */}
-        {mayDirect && project.required === 0 ? (
+        {canManage ? (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() =>
+              void call('/owner', 'PATCH', {
+                owner: project.owner === 'squadron' ? 'personal' : 'squadron',
+              })
+            }
+            className={`${BTN} border-[var(--color-border-hairline)] text-[var(--color-text-secondary)] hover:border-[var(--color-border-active)] hover:text-[var(--color-text-primary)]`}
+          >
+            {project.owner === 'squadron' ? 'Hand back to the poster' : 'Make it a squadron project'}
+          </button>
+        ) : null}
+
+        {/*
+          ★ DRAWN ON THE RULE THE SERVER ACTUALLY ENFORCES ★
+
+          This turned on the REQUIRED tonnage — "the site has not reported what it needs yet" — while
+          the server refuses on DELIVERIES, because that is what deleting would erase. The two come
+          apart in the exact case Delete exists for: somebody mistypes a market id, the site reports
+          its needs, nobody hauls a tonne, and the owner is left with a build they cannot remove.
+          Reported by the squadron owner: "we need to be able to delete projects if we own the
+          project".
+
+          Still gated rather than always drawn — a button that exists in order to be refused
+          teaches people to distrust the page — but now on the same question the server asks.
+        */}
+        {mayDirect && project.deliveryCount === 0 ? (
           <button
             type="button"
             disabled={busy}

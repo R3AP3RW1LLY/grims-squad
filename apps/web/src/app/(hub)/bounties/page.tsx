@@ -46,7 +46,11 @@ export default async function BountiesPage() {
           {board === null ? (
             <CouldNotLoad what="the bounty board" />
           ) : (
-            <BountyBoardTables rows={board.ops} kind="ops" />
+            <BountyBoardTables
+              rows={board.ops}
+              kind="ops"
+              activeProjects={board.activeProjects}
+            />
           )}
         </Section>
 

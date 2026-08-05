@@ -64,6 +64,13 @@ export interface ProjectRow {
   readonly remaining: number;
   readonly required: number;
   readonly needCount: number;
+  /**
+   * Deliveries recorded against this build.
+   *
+   * The one number that decides whether it can still be deleted: the server refuses once this is
+   * above zero, because removing the project would erase somebody's hauling record.
+   */
+  readonly deliveryCount: number;
 }
 
 export interface NeedDetail {
@@ -432,7 +439,22 @@ export class ColonyService {
               u.display_name AS posted_by,
               COALESCE(SUM(n.remaining), 0)::bigint AS remaining,
               COALESCE(SUM(n.required), 0)::bigint  AS required,
-              COUNT(n.commodity)::int               AS need_count
+              COUNT(n.commodity)::int               AS need_count,
+              /*
+               * ★ WHAT DELETE ACTUALLY TURNS ON ★
+               *
+               * remove() refuses once anybody has hauled here, because deleting the project would
+               * erase their deliveries. The page was hiding its Delete button on required = 0
+               * instead -- "has this site reported what it needs", which is a different question
+               * and a stricter one. A member who mistyped a market id, let it report its needs and
+               * hauled nothing had no way to remove it, though the server would have allowed it.
+               *
+               * A correlated subquery rather than another LEFT JOIN: joining the ledger into a
+               * statement that already groups over colony_needs would multiply the need rows by
+               * the delivery rows and quietly inflate every total on the page.
+               */
+              (SELECT count(*) FROM colony_contributions c WHERE c.project_id = p.id)::int
+                                                    AS delivery_count
          FROM colony_projects p
          LEFT JOIN colony_build_types bt ON bt.id = p.build_type_id
          JOIN users u ON u.id = p.posted_by_id
@@ -513,7 +535,22 @@ export class ColonyService {
               u.display_name AS posted_by,
               COALESCE(SUM(n.remaining), 0)::bigint AS remaining,
               COALESCE(SUM(n.required), 0)::bigint  AS required,
-              COUNT(n.commodity)::int               AS need_count
+              COUNT(n.commodity)::int               AS need_count,
+              /*
+               * ★ WHAT DELETE ACTUALLY TURNS ON ★
+               *
+               * remove() refuses once anybody has hauled here, because deleting the project would
+               * erase their deliveries. The page was hiding its Delete button on required = 0
+               * instead -- "has this site reported what it needs", which is a different question
+               * and a stricter one. A member who mistyped a market id, let it report its needs and
+               * hauled nothing had no way to remove it, though the server would have allowed it.
+               *
+               * A correlated subquery rather than another LEFT JOIN: joining the ledger into a
+               * statement that already groups over colony_needs would multiply the need rows by
+               * the delivery rows and quietly inflate every total on the page.
+               */
+              (SELECT count(*) FROM colony_contributions c WHERE c.project_id = p.id)::int
+                                                    AS delivery_count
          FROM colony_projects p
          LEFT JOIN colony_build_types bt ON bt.id = p.build_type_id
          JOIN users u ON u.id = p.posted_by_id
@@ -561,6 +598,7 @@ export class ColonyService {
       remaining: Number(r['remaining'] ?? 0),
       required: Number(r['required'] ?? 0),
       needCount: Number(r['need_count'] ?? 0),
+      deliveryCount: Number(r['delivery_count'] ?? 0),
     };
   }
 
@@ -1308,6 +1346,87 @@ export class ColonyService {
 
     const db = this.acl.forSystem('deleting a colonisation project');
     await db.colonyProject.delete({ where: { id: projectId } });
+  }
+
+  /**
+   * Handing a personal project to the squadron, or handing it back.
+   *
+   * ★ SQUADRON OWNER, 2026-08-05 ★
+   *
+   * "give admins the option after the fact to turn a project into a squadron project"
+   *
+   * `owner` was decided once, at creation, by whoever posted it — and nothing anywhere could
+   * change it afterwards. A member who started a build that the squadron then rallied behind had
+   * no way to make that official, and an officer had no way to adopt it: the project could never
+   * be marked as the current effort, because priority is squadron-only.
+   *
+   * ★ OFFICERS ONLY, IN BOTH DIRECTIONS ★
+   *
+   * Adopting a build commits the squadron's playing time, which is not the poster's to commit.
+   * Releasing one back is the same decision reversed and belongs to the same people — and a member
+   * who could hand their own project to the squadron could also point the whole roster at it,
+   * which is precisely what `setPriority` refuses to let them do.
+   *
+   * ★ WHAT MOVES WITH IT, AND WHAT DOES NOT ★
+   *
+   * `postedById` is left exactly as it is. It records who FOUND the site and it is shown on the
+   * page; rewriting history so the squadron appears to have posted it would erase a member's
+   * credit for the one thing they definitely did.
+   *
+   * Going back to personal clears `isPriority`, because a personal project cannot be the
+   * squadron's current effort — leaving the flag set would put a badge on the board that
+   * `setPriority` itself would refuse to have put there.
+   */
+  async setOwner(
+    projectId: string,
+    owner: ColonyOwner,
+    actorId: string,
+  ): Promise<{ owner: ColonyOwner }> {
+    /*
+     * forSystem, and narrow: the caller has already been checked for COLONY_MANAGE, and an officer
+     * adopting a build must be able to reach it whoever posted it. Binding to the caller would
+     * silently refuse on somebody else's private project — exactly the row this exists to act on.
+     */
+    const db = this.acl.forSystem('an officer changing who owns a colonisation project');
+
+    const project = await db.colonyProject.findFirst({
+      where: { id: projectId },
+      select: { owner: true, title: true, systemName: true, stationName: true },
+    });
+    if (project === null) {
+      throw new AppError(ErrorCode.RESOURCE_NOT_VISIBLE, 'That project is not available.');
+    }
+
+    // Already there. A no-op rather than an error: two officers pressing the same button is not a
+    // mistake either of them made.
+    if (project.owner === owner) return { owner };
+
+    await db.colonyProject.update({
+      where: { id: projectId },
+      data: {
+        owner,
+        ...(owner === 'personal' ? { isPriority: false } : {}),
+      },
+    });
+
+    await db.auditLog.create({
+      data: {
+        actorType: 'user',
+        actorId,
+        action: 'colony.project.owner',
+        targetType: 'colony_project',
+        targetId: projectId,
+        before: { owner: project.owner },
+        after: {
+          owner,
+          title: project.title,
+          systemName: project.systemName,
+          stationName: project.stationName,
+        },
+      },
+    }).catch(() => undefined);
+
+    return { owner };
   }
 
   /** Marks a squadron project as the current effort, or stops doing so. Requires COLONY_MANAGE. */

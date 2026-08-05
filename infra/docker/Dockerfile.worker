@@ -35,6 +35,27 @@ COPY --from=build /app /app
 # Non-root, as everywhere else: a container escape from a root process is a far
 # shorter path to the host than one from an unprivileged process.
 RUN useradd -r -u 10001 -m grims && chown -R grims:grims /app
+
+# ★ THE KNOWLEDGE VOLUME HAS TO BE OURS BEFORE IT IS MOUNTED ★
+#
+# `compose.prod.yml` mounts the `knowledge` named volume at /srv/knowledge for this image and the
+# daemon. That path did not exist here, so Docker created the mount point itself — root:root 0755 —
+# and an empty named volume inherits the mount point's ownership. The process runs as uid 10001 and
+# got read and execute, nothing more.
+#
+# Every write then failed with EACCES down a path deliberately built to be quiet: the galaxy
+# download's own contract is "never throws" and returns `{ available: false }`, and
+# `writeIngestMarker` wraps its write in `try {} catch {}` because "a missing marker only costs one
+# redundant re-ingest". So the 4 GB Spansh dump could not land, the Coriolis stamp could never be
+# written, and the reasons were swallowed by error handling that was correct for the failures it
+# was designed for.
+#
+# Creating the directory HERE means Docker copies this ownership into the volume on first mount.
+# It does nothing for a volume that already exists — one of those needed
+# `docker run --rm -v grims_knowledge:/v alpine chown -R 10001:10001 /v`, done by hand on
+# 2026-08-05. This is so the next machine never needs that.
+RUN mkdir -p /srv/knowledge && chown grims:grims /srv/knowledge
+
 USER grims
 
 # ★ NO CMD THAT RUNS ANYTHING BY ITSELF ★

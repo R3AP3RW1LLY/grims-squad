@@ -1339,6 +1339,30 @@ export const getSuggestionInboxGated = (): Promise<
   AdminRead<{ suggestions: SuggestionInboxRow[] }>
 > => getAdmin('/v1/suggestions/inbox');
 
+/**
+ * One training image waiting for a verdict.
+ *
+ * The submitter travels with it because reviewing is partly about the person: the same caption is
+ * read differently from somebody who has sent thirty good ones and from somebody sending their
+ * first. `cmdrName` is null until they verify — officers know each other by CMDR name, and the
+ * display name is the honest fallback rather than a blank.
+ */
+export interface QueuedTrainingImage {
+  id: string;
+  uploadId: string;
+  category: string;
+  description: string;
+  shipType: string | null;
+  notes: string | null;
+  createdAt: string;
+  submittedBy: { handle: string; displayName: string; cmdrName: string | null };
+}
+
+/** The review queue, with the reason kept when it fails — its gate is AI_TRAINING. */
+export const getTrainingQueueGated = (): Promise<
+  AdminRead<{ queue: QueuedTrainingImage[]; waiting: number }>
+> => getAdmin('/v1/ai/corpus/queue');
+
 /** One card on the roadmap, as every reader sees it. Dates arrive as ISO strings. */
 export interface RoadmapCard {
   id: string;
@@ -1929,6 +1953,14 @@ export interface BountyBoard {
   /** Within 200 ly of an active colonisation project. Listed first, as asked. */
   ops: BountyRow[];
   galaxy: BountyRow[];
+  /**
+   * How many colonisation projects are running.
+   *
+   * Squadron space is defined RELATIVE to them, so at zero the ops section is empty because there
+   * is nothing to measure from — a different statement from "nothing near us is stale", and the
+   * one the page used to make for both.
+   */
+  activeProjects: number;
   /** The signed-in member's own running totals; null for a guest. */
   me: {
     monthPoints: number;
@@ -2130,6 +2162,15 @@ export interface ColonyProject {
   remaining: number;
   required: number;
   needCount: number;
+  /**
+   * Deliveries recorded against this build.
+   *
+   * The number Delete actually turns on. The server refuses to remove a project once anybody has
+   * hauled to it — removing it would erase their record — and the page used to hide the button on
+   * `required === 0` instead, which asks whether the site has reported its NEEDS. Different
+   * question, stricter answer, and it left a mistyped market id undeletable.
+   */
+  deliveryCount: number;
 }
 
 export interface ColonyNeed {

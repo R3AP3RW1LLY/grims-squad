@@ -152,15 +152,24 @@ describe('grouping roles', () => {
     ]);
   });
 
-  it('MANDATORY: founding roles get their own band, not the platform one', () => {
+  it('MANDATORY: founding roles are not listed, and do not fall into another band', () => {
     /*
-     * Squadron owner, 2026-08-04. The founding roles carry the titles the roster
-     * prints and the order the founders sit in, so they have to be editable —
-     * and neither neighbouring band would describe them honestly. "Members,
-     * allies and unranked" is everyone who holds no ladder rank, and the
-     * founders all hold one; the platform heading says its roles "confer every
-     * permission on this site and no standing in the squadron whatsoever",
-     * which is the exact opposite of what these are.
+     * ★ SQUADRON OWNER, 2026-08-05 ★
+     *
+     * "remove this from the roles & permissions page! these folks are already officers and there
+     * are not new roles & permisisons that these ranks would get!"
+     *
+     * They had their own band, added a day earlier so they would not be described dishonestly by
+     * a neighbouring heading. The band is gone: `founder`, `co_founder` and `roster_pin` carry no
+     * mask anybody edits, and a page about what people may DO is the wrong place to list them.
+     *
+     * ★ THE HALF THAT IS EASY TO BREAK ★
+     *
+     * They must not simply reappear somewhere else. The groups are defined by what is LEFT after
+     * each `take`, so dropping the founding `take` would silently move all three into "Members,
+     * allies and unranked" — a heading that reads "everyone who holds no ladder rank", printed
+     * over the founders. That is why the call survives with its group deleted, and why this test
+     * asserts BOTH halves rather than only the absence.
      */
     const grouped = groupRoles([
       role({ key: 'co_founder', name: 'Co-Founder', rankOrder: 810, isHierarchical: false }),
@@ -170,12 +179,16 @@ describe('grouping roles', () => {
       role({ key: 'webmaster', name: 'Webmaster', rankOrder: 1000, isHierarchical: false }),
     ]);
 
-    // Ascending, like the appointments: the founder carries the lowest number.
-    expect(grouped.find((g) => g.key === 'founding')?.roles.map((r) => r.key)).toEqual([
-      'founder',
-      'co_founder',
-      'roster_pin',
-    ]);
+    // No band of their own any more.
+    expect(grouped.find((g) => g.key === 'founding')).toBeUndefined();
+
+    // And nowhere else either — not swept into membership, not into platform.
+    const everyKeyShown = grouped.flatMap((g) => g.roles.map((r) => r.key));
+    for (const key of ['founder', 'co_founder', 'roster_pin']) {
+      expect(everyKeyShown, `${key} is still listed somewhere on the roles page`).not.toContain(key);
+    }
+
+    // The bands either side are untouched.
     expect(grouped.find((g) => g.key === 'membership')?.roles.map((r) => r.key)).toEqual([
       'grims_squad_members',
     ]);

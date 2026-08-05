@@ -126,16 +126,37 @@ export function SessionCountdown({
         {expired ? '00m 00s' : countdownText(left)}
       </p>
 
+      {/*
+        ★ IT WAS DESCRIBING AN ENDING — SQUADRON OWNER, 2026-08-05 ★
+
+        "this sounds to the user that they are just going to loose access and not be allowed back!"
+
+        And it did. "Signing in lasts 14 days and is not extended by using the site" is every true
+        fact about the mechanism and not one word about what happens next, so the only thing left
+        to infer is that something is taken away. Read on a page that also counts down in red, it
+        lands as a warning about losing the account rather than a note about a browser session.
+
+        Nothing is lost and nothing is revoked: the sign-in is a fourteen-day cookie, and renewing
+        it is the Discord button, once. That is the sentence that was missing, so it now leads.
+
+        The fourteen days and the fixed deadline are still stated — they are true, they explain the
+        number above it, and a member who wants to know why it does not reset deserves the answer.
+        They are simply no longer the whole message. The security property is unchanged: an
+        absolute lifetime that using the site does not extend is deliberate, and this is a
+        rewording, not a loosening.
+      */}
       <p className="mt-2.5 text-xs leading-relaxed text-[var(--color-text-secondary)]">
         {expired ? (
-          'Your next action will send you back to Discord to sign in again.'
+          'This sign-in has run its fourteen days. Your next click sends you to Discord to sign back in — one button, and you carry on where you left off.'
         ) : (
           <>
-            Signing in lasts 14 days and is not extended by using the site. Ends{' '}
+            You stay signed in for 14 days from signing in, and the clock does not reset as you use
+            the site &mdash; so this one ends{' '}
             <span className="text-[var(--color-text-primary)]">
               {formatLocal(expiresAt, timezone)}
             </span>
-            .
+            . Nothing happens to your account when it does: you sign in with Discord again, which
+            takes a click, and everything is exactly where you left it.
           </>
         )}
       </p>

@@ -84,6 +84,71 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       return;
     }
 
+    /*
+     * ★ FASTIFY'S OWN ERRORS CARRY A STATUS, AND WE WERE THROWING IT AWAY ★
+     *
+     * A plugin registered on the Fastify instance rather than inside Nest throws a plain `Error`
+     * with a numeric `statusCode` — that is Fastify's convention, not Nest's, so it is neither an
+     * `AppError` nor an `HttpException` and fell through to "anything else is a bug".
+     *
+     * `@fastify/rate-limit` is exactly that. A member who connected the companion app for the
+     * first time uploaded their whole journal history, crossed the per-device budget, and got
+     * FOUR HTTP 500s — logged as "this is a defect", which they were not. The app reads any
+     * failure as a refusal and told them "the hub refused the last upload". Reported by the
+     * squadron owner on 2026-08-05.
+     *
+     * A 429 and a 500 mean opposite things to a client: one says wait and try again, the other
+     * says something is broken and there is nothing you can do. Turning the first into the second
+     * is how a working rate limit becomes an outage report.
+     *
+     * ★ retryAfterSeconds, WHICH HAS ALWAYS BEEN IN THE ENVELOPE AND NEVER SET ★
+     *
+     * The error contract carries `retryAfterSeconds` for precisely this case. Fastify has already
+     * put the same figure on the `retry-after` header by the time the filter runs, so it is read
+     * from there rather than parsed out of an English sentence that upstream may reword.
+     */
+    const fastifyStatus = (exception as { statusCode?: unknown } | null)?.statusCode;
+    if (typeof fastifyStatus === 'number' && fastifyStatus >= 400 && fastifyStatus < 500) {
+      const header = reply.getHeader('retry-after');
+      const retryAfterSeconds =
+        typeof header === 'number'
+          ? header
+          : typeof header === 'string' && /^\d+$/.test(header)
+            ? Number(header)
+            : null;
+
+      const code: ErrorCodeName =
+        fastifyStatus === 429
+          ? ErrorCode.RATE_LIMITED
+          : fastifyStatus === 404
+            ? ErrorCode.RESOURCE_NOT_VISIBLE
+            : fastifyStatus === 401
+              ? ErrorCode.UNAUTHENTICATED
+              : fastifyStatus === 403
+                ? ErrorCode.PERMISSION_DENIED
+                : ErrorCode.VALIDATION_FAILED;
+
+      logger.warn(
+        { requestId, code, status: fastifyStatus, retryAfterSeconds },
+        exception instanceof Error ? exception.message : 'Rejected before the handler.',
+      );
+
+      const envelope: ErrorEnvelope = {
+        error: {
+          code,
+          message:
+            exception instanceof Error ? exception.message : 'That request was not accepted.',
+          requestId,
+          details: null,
+          // A rate limit clears by itself; the others need the caller to change something.
+          retryable: fastifyStatus === 429,
+          retryAfterSeconds,
+        },
+      };
+      reply.status(fastifyStatus).send(envelope);
+      return;
+    }
+
     // Anything else is a bug. Log everything; tell the client nothing.
     logger.error(
       { requestId, err: exception },

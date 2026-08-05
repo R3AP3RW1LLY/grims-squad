@@ -1,3 +1,4 @@
+import { countForumPost } from './activity-count.js';
 import { AppError, ErrorCode, Permission } from '@grims/shared';
 import { withYouTubeThumbnails, type ThumbnailStore } from './youtube-thumbnail.js';
 import type { ScreeningService } from '../ai/screening.service.js';
@@ -267,7 +268,7 @@ export class PostService {
      * Fire-and-forget, like the view counter. An activity statistic is not worth failing a post
      * over, and the member has already written the thing.
      */
-    void this.#countForumPost(db, authorId).catch(() => undefined);
+    void countForumPost(db, authorId).catch(() => undefined);
 
     /*
      * Returned rather than fanned out HERE. The service does not know the thread's slug or the site
@@ -363,51 +364,6 @@ export class PostService {
    * the server's local day would put a host in a negative offset one day out at every month
    * boundary, and the figure a member reads would disagree with the one the promotion job used.
    */
-  async #countForumPost(db: AclBoundClient, authorId: string): Promise<void> {
-    const identity = await db.discordIdentity.findFirst({
-      where: { userId: authorId },
-      // `userId` too: the month row carries it, and one created here would otherwise have none —
-      // which is the column that joins an activity row back to a member.
-      select: { discordId: true, userId: true },
-    });
-    if (identity === null) return;
-
-    const now = new Date();
-    const day = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-
-    await db.memberActivityDay.upsert({
-      where: { discordId_day: { discordId: identity.discordId, day } },
-      create: { discordId: identity.discordId, day, forumPostCount: 1 },
-      update: { forumPostCount: { increment: 1 } },
-    });
-
-    /*
-     * ★ AND THE MONTH, WHICH WAS NEVER WRITTEN ★
-     *
-     * Only the DAY row was incremented. Every read of forum activity — the admin dashboard, the
-     * activity table, and the promotion eligibility check — goes to `member_activity_months`, and
-     * nothing had ever put a forum count there: 0 of 52 monthly rows carried one.
-     *
-     * So posting on the forum counted towards nothing at all, including promotions, and the column
-     * that was supposed to record it read zero for everybody. Nothing failed and nothing was
-     * logged; the number was simply always zero, which is indistinguishable from nobody posting.
-     *
-     * `userId` is set here as well because the month row carries it and a row created by this path
-     * would otherwise have none — which is what joins it back to a member.
-     */
-    const month = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-    await db.memberActivityMonth.upsert({
-      where: { discordId_month: { discordId: identity.discordId, month } },
-      create: {
-        discordId: identity.discordId,
-        month,
-        userId: authorId,
-        forumPostCount: 1,
-      },
-      update: { forumPostCount: { increment: 1 } },
-    });
-  }
-
   async edit(
     db: AclBoundClient,
     postId: string,
