@@ -1,15 +1,16 @@
 import { describe, it, expect } from 'vitest';
 import { auditCommanders, type AuditableCommander } from './daily-commander-audit.js';
 import { composeNickname, sameSquadron } from '@grims/shared';
+import { isRename } from '@grims/db';
 
 /**
  * The nightly sweep.
  *
  * ★ WHAT IT IS FOR ★
  *
- * Two facts go stale between logins and a member has no reason to notice
- * either: they leave the squadron on Inara, or their Discord nickname stops
- * matching their rank. Nothing else looks at everybody.
+ * Three facts go stale between logins and a member has no reason to notice any of them: they
+ * rename their commander on Inara, they leave the squadron on Inara, or their Discord nickname
+ * stops matching their name. Nothing else looks at everybody.
  *
  * ★ WHAT IT MUST NEVER DO ★
  *
@@ -34,14 +35,35 @@ const cmdr = (over: Partial<AuditableCommander> = {}): AuditableCommander => ({
   ...over,
 });
 
-function harness(commanders: AuditableCommander[], answers: Record<string, string | null>) {
+/**
+ * What Inara says when asked.
+ *
+ * A bare string is the squadron, and the commander name comes back unchanged — which is the
+ * overwhelmingly common answer and keeps the existing fixtures reading as they did. The object form
+ * is for the case this file exists to cover: Inara reporting a DIFFERENT name from the one we hold.
+ */
+type Answer = string | null | { cmdrName?: string; squadronName?: string | null };
+
+function harness(commanders: AuditableCommander[], answers: Record<string, Answer>) {
   const squadrons: Array<{ userId: string; reported: string | null; matched: boolean }> = [];
   const nicks: Array<{ discordId: string; nickname: string }> = [];
+  const names: Array<{ userId: string; cmdrName: string; at: Date }> = [];
   const audit: Array<Record<string, unknown>> = [];
   let refuse = false;
+  /** Set to make every rename refuse, as the unique index does when the name is taken. */
+  let nameConflict: string | null = null;
+
+  /** The squadron half of an answer, whichever shape it was written in. */
+  const squadronOf = (a: Answer): string | null =>
+    a === null || typeof a === 'string' ? a : (a.squadronName ?? null);
 
   const store = {
     listCommanders: async () => commanders,
+    recordName: async (userId: string, cmdrName: string, at: Date) => {
+      if (nameConflict !== null) return { applied: false, reason: nameConflict };
+      names.push({ userId, cmdrName, at });
+      return { applied: true, reason: null };
+    },
     recordSquadron: async (userId: string, reported: string | null, matched: boolean) => {
       squadrons.push({ userId, reported, matched });
     },
@@ -54,15 +76,25 @@ function harness(commanders: AuditableCommander[], answers: Record<string, strin
   };
 
   const source = {
-    ownSquadron: async (apiKey: string) => {
+    ownIdentity: async (apiKey: string) => {
       if (!(apiKey in answers)) throw new Error('unreachable');
-      return { squadronName: answers[apiKey] ?? null };
+      const answer = answers[apiKey] as Answer;
+      const owner = commanders.find((c) => c.apiKey === apiKey);
+      return {
+        // Inara answers with whatever they are called NOW. Unless a test says otherwise, that is
+        // the name we already hold.
+        cmdrName:
+          answer !== null && typeof answer === 'object' && answer.cmdrName !== undefined
+            ? answer.cmdrName
+            : (owner?.cmdrName ?? ''),
+        squadronName: squadronOf(answer),
+      };
     },
     publicSquadrons: async (names: readonly string[]) =>
       new Map(
         names.flatMap((n) =>
           n.toLowerCase() in answers
-            ? [[n.toLowerCase(), { squadronName: answers[n.toLowerCase()] ?? null }] as const]
+            ? [[n.toLowerCase(), { squadronName: squadronOf(answers[n.toLowerCase()] as Answer) }] as const]
             : [],
         ),
       ),
@@ -75,11 +107,15 @@ function harness(commanders: AuditableCommander[], answers: Record<string, strin
   return {
     squadrons,
     nicks,
+    names,
     audit,
     setRefuse: (v: boolean) => {
       refuse = v;
     },
-    run: () => auditCommanders(store, source, nicknames, matches, composeNickname, AT),
+    setNameConflict: (reason: string | null) => {
+      nameConflict = reason;
+    },
+    run: () => auditCommanders(store, source, nicknames, matches, composeNickname, isRename, AT),
   };
 }
 
@@ -139,6 +175,250 @@ describe('squadron membership', () => {
 
     expect(report.unreachable).toBe(1);
     expect(h.squadrons).toHaveLength(0);
+  });
+});
+
+/**
+ * Commander renames.
+ *
+ * ★ SQUADRON OWNER, 2026-08-05 ★
+ *
+ * "we have users that have updated their inara usernames, we clicked the check inara button on the
+ * /app/members page of the website if they have been changed they need to be updated in the
+ * website, and in discord, check to make sure this is happening! this is very important!"
+ *
+ * It was not happening. The sweep read each member's STORED name, asked Inara only about their
+ * squadron, and composed their nickname from the stored name again — three steps, none of which
+ * could see a rename. These tests are the ones that would have failed.
+ */
+describe('commander renames', () => {
+  it('MANDATORY: stores the name Inara reports NOW, not the one we held', async () => {
+    const h = harness([cmdr({ cmdrName: 'PEBBLE' })], {
+      'key-1': { cmdrName: 'Pebblemerchant', squadronName: OURS },
+    });
+
+    const out = await h.run();
+
+    expect(out.renamed).toBe(1);
+    expect(h.names).toEqual([{ userId: 'u1', cmdrName: 'Pebblemerchant', at: AT }]);
+  });
+
+  it('MANDATORY: a rename reaches DISCORD, in the same pass that found it', async () => {
+    /*
+     * The half of the owner's report that a database-only fix would leave broken. There is no
+     * second job and no second Inara call: the request that discovered the rename is the one that
+     * renames them in the guild.
+     */
+    const h = harness([cmdr({ cmdrName: 'PEBBLE', currentNick: 'Pebble' })], {
+      'key-1': { cmdrName: 'Pebblemerchant', squadronName: OURS },
+    });
+
+    const out = await h.run();
+
+    expect(h.nicks, 'the new name never reached Discord').toEqual([
+      { discordId: 'd1', nickname: 'Pebblemerchant' },
+    ]);
+    expect(out.nicknamesFixed).toBe(1);
+  });
+
+  it('MANDATORY: writes an audit row naming both the old and the new', async () => {
+    const h = harness([cmdr({ cmdrName: 'PEBBLE' })], {
+      'key-1': { cmdrName: 'Pebblemerchant', squadronName: OURS },
+    });
+
+    await h.run();
+
+    const row = h.audit.find((a) => a['action'] === 'cmdr.name.changed');
+    expect(row).toMatchObject({
+      targetId: 'u1',
+      before: { cmdrName: 'PEBBLE' },
+      after: { cmdrName: 'Pebblemerchant', source: 'daily_audit' },
+    });
+  });
+
+  it('MANDATORY: an unchanged name writes NOTHING', async () => {
+    /*
+     * This runs nightly against everybody. A sweep that rewrote every member's name every night
+     * would revoke and recreate a verification row per member per day, and bury the real renames in
+     * an audit log nobody could read.
+     */
+    const h = harness([cmdr({ cmdrName: 'PEBBLE', currentNick: 'Pebble' })], { 'key-1': OURS });
+
+    const out = await h.run();
+
+    expect(out.renamed).toBe(0);
+    expect(h.names).toEqual([]);
+    expect(h.nicks).toEqual([]);
+    expect(h.audit.some((a) => a['action'] === 'cmdr.name.changed')).toBe(false);
+  });
+
+  it('MANDATORY: a case-only difference is not a rename', async () => {
+    // Elite is case-insensitive, the citext column is, and composeNickname humanizes anyway — so
+    // 'PEBBLE' and 'Pebble' are one commander wearing one nickname. Treating them as a rename would
+    // rewrite the whole squadron nightly and change nothing anybody could see.
+    const h = harness([cmdr({ cmdrName: 'PEBBLE', currentNick: 'Pebble' })], {
+      'key-1': { cmdrName: 'pebble', squadronName: OURS },
+    });
+
+    const out = await h.run();
+
+    expect(out.renamed).toBe(0);
+    expect(h.names).toEqual([]);
+  });
+
+  it('MANDATORY: leaves the stored name ALONE when Inara cannot be reached', async () => {
+    /*
+     * The rule that already governs the squadron half, extended to the name: a failed call is not
+     * evidence about anybody. Never revoke, never rewrite, on somebody else's outage.
+     */
+    const h = harness([cmdr({ cmdrName: 'PEBBLE', currentNick: 'Pebble' })], {});
+
+    const out = await h.run();
+
+    expect(out.unreachable).toBe(1);
+    expect(out.renamed).toBe(0);
+    expect(h.names).toEqual([]);
+    expect(h.squadrons).toEqual([]);
+    expect(h.nicks).toEqual([]);
+  });
+
+  it('MANDATORY: refuses a rename onto a name another member already holds', async () => {
+    /*
+     * Two members cannot both be one commander (INV-005). The sweep is not the place to decide
+     * which of them is wrong, and half a rename — a new name on the roster and the old one in
+     * Discord — is worse than the stale name it started with.
+     */
+    const h = harness([cmdr({ cmdrName: 'PEBBLE', currentNick: 'Pebble' })], {
+      'key-1': { cmdrName: 'Grimreaper', squadronName: OURS },
+    });
+    h.setNameConflict('Another member is already verified as CMDR Grimreaper.');
+
+    const out = await h.run();
+
+    expect(out.renameConflicts).toBe(1);
+    expect(out.renamed).toBe(0);
+    expect(h.nicks, 'renamed them in Discord after refusing the name').toEqual([]);
+    expect(h.audit.find((a) => a['action'] === 'cmdr.name.conflict')).toMatchObject({
+      after: { applied: false, reason: 'Another member is already verified as CMDR Grimreaper.' },
+    });
+  });
+
+  it('reports a member Discord will not rename, rather than losing it', async () => {
+    /*
+     * The guild owner cannot be renamed by a bot. That is ordinarily an unremarkable fact, counted
+     * and no more — but when we have JUST changed their commander name it is the moment the site
+     * and the guild started disagreeing about who somebody is, which is the whole complaint. It
+     * gets a row an officer can search, once.
+     */
+    const h = harness([cmdr({ cmdrName: 'PEBBLE', currentNick: 'Pebble' })], {
+      'key-1': { cmdrName: 'Pebblemerchant', squadronName: OURS },
+    });
+    h.setRefuse(true);
+
+    const out = await h.run();
+
+    expect(out.renamed).toBe(1);
+    expect(out.nicknamesRefused).toBe(1);
+    expect(h.audit.find((a) => a['action'] === 'discord.nickname.refused')).toMatchObject({
+      targetId: 'u1',
+      after: { nickname: 'Pebblemerchant', applied: false, reason: 'Guild owner.' },
+    });
+  });
+
+  it('leaves an overridden member wearing their own nickname, and still stores the name', async () => {
+    /*
+     * "if an officer overrides their name, then this is the name that stays as their discord
+     * nickname" — squadron owner, 2026-08-02. The override is about the NICKNAME. Their commander
+     * name is a fact about Inara and still moves, so the roster is right even where the guild is
+     * deliberately not.
+     */
+    const h = harness(
+      [cmdr({ cmdrName: 'PEBBLE', currentNick: 'Pebblemerchant', nicknameOverride: 'Pebblemerchant' })],
+      { 'key-1': { cmdrName: 'Grimreaper', squadronName: OURS } },
+    );
+
+    const out = await h.run();
+
+    expect(out.renamed).toBe(1);
+    expect(h.names[0]).toMatchObject({ cmdrName: 'Grimreaper' });
+    expect(h.nicks, 'the sweep renamed somebody who had opted out').toEqual([]);
+    expect(out.nicknamesOverridden).toBe(1);
+  });
+
+  it('one member failing to rename does not stop the sweep', async () => {
+    const h = harness(
+      [
+        cmdr({ userId: 'u1', discordId: 'd1', apiKey: 'key-1' }),
+        cmdr({ userId: 'u2', discordId: 'd2', apiKey: 'key-2', currentNick: 'Pebble' }),
+      ],
+      { 'key-2': { cmdrName: 'Pebblemerchant', squadronName: OURS } },
+    );
+
+    const out = await h.run();
+
+    expect(out).toMatchObject({ checked: 2, unreachable: 1, renamed: 1 });
+    expect(h.names).toEqual([{ userId: 'u2', cmdrName: 'Pebblemerchant', at: AT }]);
+  });
+});
+
+/**
+ * Members with no Inara key of their own.
+ *
+ * ★ THE HONEST ANSWER IS THAT WE CANNOT CHECK THEM ★
+ *
+ * The public lookup is BY the stored name, which is precisely the thing a rename invalidates.
+ * Searching Inara for a name that no longer exists returns "no such commander" — it does not return
+ * whatever they are called now, and Inara has no lookup that goes the other way. So the sweep says
+ * so, in a number, rather than reporting "0 renames" and letting that read as "nobody renamed".
+ */
+describe('members without a key', () => {
+  it('MANDATORY: counts them as uncheckable rather than passing over them silently', async () => {
+    const h = harness([cmdr({ apiKey: null, currentNick: 'Pebble' })], { pebble: OURS });
+
+    const out = await h.run();
+
+    expect(out.namesUncheckable).toBe(1);
+    expect(out.renamed).toBe(0);
+    expect(h.names).toEqual([]);
+  });
+
+  it('MANDATORY: still checks their squadron', async () => {
+    // Not being able to check somebody's name is no reason to stop checking the thing we CAN check.
+    const h = harness([cmdr({ apiKey: null, currentNick: 'Pebble' })], { pebble: OURS });
+
+    const out = await h.run();
+
+    expect(out.confirmed).toBe(1);
+    expect(h.squadrons[0]).toMatchObject({ userId: 'u1', matched: true });
+  });
+
+  it('counts them even when their batch lookup failed entirely', async () => {
+    /*
+     * "Cannot be checked without a key" is a fact about the MEMBER, not about how their chunk went.
+     * Counting it only on a successful lookup would make the number shrink whenever Inara had a bad
+     * night, which is the opposite of what it is for.
+     */
+    const h = harness([cmdr({ apiKey: null })], {});
+
+    const out = await h.run();
+
+    expect(out.namesUncheckable).toBe(1);
+    expect(out.unreachable).toBe(1);
+  });
+
+  it('separates the two populations in one report', async () => {
+    // An officer reading the summary can tell how much of the squadron was actually name-checked.
+    const h = harness(
+      [
+        cmdr({ userId: 'u1', discordId: 'd1', apiKey: 'key-1', currentNick: 'Pebble' }),
+        cmdr({ userId: 'u2', discordId: 'd2', apiKey: null, cmdrName: 'GRIM', currentNick: 'Grim' }),
+      ],
+      { 'key-1': { cmdrName: 'Pebblemerchant', squadronName: OURS }, grim: OURS },
+    );
+
+    const out = await h.run();
+
+    expect(out).toMatchObject({ checked: 2, renamed: 1, namesUncheckable: 1, confirmed: 2 });
   });
 });
 
