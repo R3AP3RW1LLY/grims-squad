@@ -3476,6 +3476,36 @@ model TelemetryEvent {
   @@map("telemetry_events")
 }
 
+/// One month of telemetry, banked before the purge can reach it.
+///
+/// ★ WHY THIS TABLE EXISTS ★
+///
+/// Raw `telemetry_events` live THIRTY DAYS (see above), so "how much telemetry did we get in
+/// March" stops being answerable in May — the admin dashboard's Journal Telemetry panel could
+/// only ever describe the current window, and the owner asked for it "split into the YTD and
+/// per month" (2026-08-01). The worker's telemetry rollup sweeps the current and previous
+/// month's counts in here on the daemon cadence; months older than the retention window are
+/// left exactly as banked, because the rows that would recompute them no longer exist.
+///
+/// Aggregates only — a count per event type and a reporter count, never a payload — so keeping
+/// these for ever is compatible with the raw events' 30-day promise.
+model TelemetryMonthStat {
+  /// First day of the month, UTC. The month key — the same convention as MemberActivityMonth.
+  month     DateTime @map("month") @db.Date
+  /// Journal event name, matching TelemetryEvent.eventType. e.g. "FSDJump", "LoadGame".
+  eventType String   @map("event_type")
+  eventCount Int     @default(0) @map("event_count")
+  /// Distinct commanders who sent ANY telemetry this month. Repeated on every row of the
+  /// month — the commodity_snapshots idiom — because distinct reporters cannot be summed from
+  /// per-type counts, and recovering one number through a second table would put a join on
+  /// every dashboard read.
+  reportingMembers Int @default(0) @map("reporting_members")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@id([month, eventType])
+  @@map("telemetry_month_stats")
+}
+
 // ============================================================================
 // AI
 // ============================================================================
@@ -3633,6 +3663,17 @@ model MemberActivityMonth {
   forumPostCount Int @default(0) @map("forum_post_count")
   /// Times they joined a voice channel that is open to members.
   voiceJoinCount Int @default(0) @map("voice_join_count")
+  /// Minutes spent in voice channels that count toward activity, banked by the bot when a
+  /// session ends (squadron owner, 2026-08-04: "for voice joins can we track how long they are
+  /// in voice chat per month?"). A session crossing the 1st is SPLIT at the UTC month boundary,
+  /// so each month is credited its own minutes. Sits BESIDE `voiceJoinCount`, replacing nothing.
+  ///
+  /// ★ ADMIN CONSOLE ONLY ★ Never serialised to a member-facing payload — the profile
+  /// serializer once carried an invented `voiceMinutes` and it was removed as fiction; this
+  /// column is the real figure, and it stays behind the officer gate.
+  ///
+  /// The promotion check does NOT read it. Qualification is unchanged.
+  voiceMinutes   Int @default(0) @map("voice_minutes")
 
   firstActivityAt DateTime? @map("first_activity_at") @db.Timestamptz(6)
   lastActivityAt  DateTime? @map("last_activity_at") @db.Timestamptz(6)
@@ -4427,10 +4468,27 @@ enum SupportAuthorKind {
   system
 }
 
+/// Who is answering a conversation right now — the owner's approved design: AI ANSWERS FIRST,
+/// HUMAN ON DEMAND.
+///
+/// `ai` is the starting state: GMSD AI answers each requester message from the help corpus. The
+/// flip to `officer` is ONE-WAY and happens on either of two acts — the requester pressing
+/// "Talk to an officer", or any officer replying (a human took over; the AI does not talk over
+/// them). There is deliberately no edge back: a conversation a person has joined must never be
+/// handed back to a model mid-thread.
+enum SupportHandledBy {
+  ai
+  officer
+}
+
 /// One help conversation: a member's or a guest's, worked by the officers.
 model SupportConversation {
   id     String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   status SupportConversationStatus @default(open)
+  /// Who answers the next requester message. Drives the AI's silence after a hand-off AND the
+  /// console badge: only `officer` conversations with unseen words are "waiting" — an AI-handled
+  /// conversation nobody asked a human into is not.
+  handledBy SupportHandledBy @default(ai) @map("handled_by")
   /// What it is about, if the opener said. Null renders as the opening message's first words.
   subject String?
 

@@ -355,6 +355,12 @@ export interface AdminActivityRow {
   messageCount: number;
   forumPostCount: number;
   voiceJoinCount: number;
+  /**
+   * Minutes in voice for the period, beside the join count. Banked by the bot when a session
+   * ends, split at UTC month boundaries — so a year is the sum of its months. Zero for months
+   * before the banking shipped, which the table renders as a dash rather than a figure.
+   */
+  voiceMinutes: number;
   gameActivity: string;
   qualifies: boolean;
   lastActivityAt: string | null;
@@ -412,6 +418,8 @@ export interface AdminDashboard {
     messages: number;
     forumPosts: number;
     voiceJoins: number;
+    /** Minutes in voice across the period, beside the joins — never instead of them. */
+    voiceMinutes: number;
     activeMembers: number;
     trackedMembers: number;
     /** Messages per day of the month, index 0 = the 1st. */
@@ -425,9 +433,22 @@ export interface AdminDashboard {
     top: Array<{ name: string; messages: number; voice: number; cmdrName: string | null }>;
   };
   game: {
+    /** Journal events in the SELECTED PERIOD — banked months plus the live window. */
     events: number;
+    /**
+     * Distinct commanders reporting in the period. Exact for a month; for a year it is the
+     * busiest month's figure, because distinct cannot be summed across purged months.
+     */
     reporting: number;
+    /** Game sessions (`LoadGame`) in the period. Banked + live, like `events`. */
     sessionsThisMonth: number;
+    /** Events per month of the year view, index 0 = January. Empty in the month view. */
+    monthlyEvents: number[];
+    /**
+     * The first month the bank holds, `YYYY-MM`, or null before the rollup has ever run.
+     * Months before it render a "recorded from" note rather than fake zeros.
+     */
+    telemetryRecordedFrom: string | null;
     /**
      * Elite sign-ins per day of the month, index 0 = the 1st.
      *
@@ -598,6 +619,12 @@ export const getAiHealth = (): Promise<{
 export interface SupportConsoleRow {
   id: string;
   status: 'open' | 'closed';
+  /**
+   * Who answers the next requester message. 'ai' means GMSD AI is on it and nobody has asked
+   * for a person — the console labels these apart, and the waiting count excludes them. Any
+   * officer reply flips it to 'officer' for good.
+   */
+  handledBy: 'ai' | 'officer';
   subject: string | null;
   /** Who is asking — a member with an account, or a guest with only a name. */
   requester:

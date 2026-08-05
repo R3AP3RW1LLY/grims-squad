@@ -60,6 +60,17 @@ export interface ActivityRow {
   readonly messageCount: number;
   readonly forumPostCount: number;
   readonly voiceJoinCount: number;
+  /**
+   * Minutes in voice for the period, beside the join count — never instead of it.
+   *
+   * Banked by the bot when a session ends, split at UTC month boundaries, so a year is the sum
+   * of its months. Zero for every month before the banking shipped, which the table renders as
+   * a dash rather than as a claim that nobody spoke.
+   *
+   * ADMIN CONSOLE ONLY. The public profile once carried an invented `voiceMinutes` and lost
+   * it; this real figure stays behind the officer gate.
+   */
+  readonly voiceMinutes: number;
   readonly gameActivity: string;
   /** Derived, not stored — see the note on the query. */
   readonly qualifies: boolean;
@@ -295,6 +306,11 @@ export interface ModerationAudit {
 }
 
 export interface AdminStore {
+  /**
+   * Activity for a period: `YYYY-MM` for one calendar month, or a bare `YYYY` for the whole
+   * year — the two shapes the period control sends. A year returns one row per member with the
+   * counters summed across its months.
+   */
   activityForMonth(monthKey: string): Promise<ActivityRow[]>;
   members(): Promise<MemberRow[]>;
   /** Every member of the Discord server, for the moderation roster. */
@@ -333,6 +349,18 @@ export interface AdminStore {
   }): Promise<void>;
 }
 
+/**
+ * Best evidence first, for folding a member's months into a year. A value the list does not
+ * know ranks WORST — `indexOf`'s -1 would rank it best, which is the wrong way to be wrong
+ * about evidence.
+ */
+const GAME_EVIDENCE = ['observed', 'assumed', 'absent', 'unlinked', 'unknown'] as const;
+
+function gameEvidenceRank(value: string): number {
+  const i = GAME_EVIDENCE.indexOf(value as (typeof GAME_EVIDENCE)[number]);
+  return i === -1 ? GAME_EVIDENCE.length : i;
+}
+
 export class PrismaAdminStore implements AdminStore {
   readonly #db: PrismaClient;
 
@@ -341,24 +369,30 @@ export class PrismaAdminStore implements AdminStore {
   }
 
   async activityForMonth(monthKey: string): Promise<ActivityRow[]> {
-    const month = new Date(`${monthKey}-01T00:00:00Z`);
-
     /*
-     * ★ THE MONTH IS AN EXACT MATCH, NOT A RANGE ★
+     * ★ A MONTH IS AN EXACT MATCH; A YEAR IS ITS TWELVE ★
      *
-     * `member_activity_months` stores one row per member per calendar month,
-     * with `month` pinned to the first at midnight UTC. So equality here IS the
-     * calendar-month scope — a message from June cannot appear in July's row
-     * because it was never added to it.
+     * `member_activity_months` stores one row per member per calendar month, with `month`
+     * pinned to the first at midnight UTC — so equality IS the calendar-month scope, and a
+     * bare year (the YTD and Year chips) is the range of its months, folded to one row per
+     * member below. This endpoint used to silently show the CURRENT month for both year
+     * shapes, under a period control that looked like it had answered.
      */
-    const [rows, guildMembers, discordRoles, lastSeen, mappings] = await Promise.all([
+    const yearView = /^\d{4}$/.test(monthKey);
+    const month = yearView
+      ? new Date(Date.UTC(Number(monthKey), 0, 1))
+      : new Date(`${monthKey}-01T00:00:00Z`);
+    const rangeEnd = yearView ? new Date(Date.UTC(Number(monthKey) + 1, 0, 1)) : null;
+
+    const [monthRows, guildMembers, discordRoles, lastSeen, mappings] = await Promise.all([
       this.#db.memberActivityMonth.findMany({
-        where: { month },
+        where: rangeEnd === null ? { month } : { month: { gte: month, lt: rangeEnd } },
       select: {
         discordId: true,
         messageCount: true,
         forumPostCount: true,
         voiceJoinCount: true,
+        voiceMinutes: true,
         gameActivity: true,
         lastActivityAt: true,
           user: {
@@ -457,6 +491,46 @@ export class PrismaAdminStore implements AdminStore {
         select: { discordRoleId: true, role: { select: { name: true, rankOrder: true } } },
       }),
     ]);
+
+    /*
+     * ★ ONE ROW PER MEMBER, WHATEVER THE SPAN ★
+     *
+     * A year of the monthly table holds a member up to twelve times, and this table is a
+     * roster. Counters sum; `lastActivityAt` keeps the newest; `gameActivity` keeps the best
+     * evidence any month produced. `qualifies` downstream therefore reads, for a year, as
+     * "took part and was seen flying at some point in it" — the year-sized version of the
+     * monthly test, which is a summary for reading and never an input to promotion. The
+     * promotion engine evaluates months, always, and is untouched.
+     */
+    const rows = yearView
+      ? [...monthRows
+          .reduce((held, row) => {
+            const seen = held.get(row.discordId);
+            if (seen === undefined) {
+              held.set(row.discordId, { ...row });
+              return held;
+            }
+            seen.messageCount += row.messageCount;
+            seen.forumPostCount += row.forumPostCount;
+            seen.voiceJoinCount += row.voiceJoinCount;
+            seen.voiceMinutes += row.voiceMinutes;
+            if (
+              row.lastActivityAt !== null &&
+              (seen.lastActivityAt === null || row.lastActivityAt > seen.lastActivityAt)
+            ) {
+              seen.lastActivityAt = row.lastActivityAt;
+            }
+            if (gameEvidenceRank(row.gameActivity) < gameEvidenceRank(seen.gameActivity)) {
+              seen.gameActivity = row.gameActivity;
+            }
+            // The user link is the same account whichever month carried it.
+            if (seen.user === null) seen.user = row.user;
+            return held;
+          }, new Map<string, (typeof monthRows)[number]>())
+          .values()]
+          // The order the query promised, restored — merging destroyed it.
+          .sort((a, b) => b.messageCount - a.messageCount || b.voiceJoinCount - a.voiceJoinCount)
+      : monthRows;
 
     const byDiscordId = new Map(guildMembers.map((m) => [m.discordId, m]));
     const rankByRoleId = new Map(mappings.map((m) => [m.discordRoleId, m.role]));
@@ -566,6 +640,7 @@ export class PrismaAdminStore implements AdminStore {
       messageCount: r.messageCount,
       forumPostCount: r.forumPostCount,
       voiceJoinCount: r.voiceJoinCount,
+      voiceMinutes: r.voiceMinutes,
       gameActivity: r.gameActivity,
       /*
        * Computed here, exactly as the promotion engine computes it: a MESSAGE,

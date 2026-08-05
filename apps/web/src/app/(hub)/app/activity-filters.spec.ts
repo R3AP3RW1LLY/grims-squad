@@ -31,6 +31,7 @@ function row(over: Partial<AdminActivityRow> = {}): AdminActivityRow {
     messageCount: 10,
     forumPostCount: 0,
     voiceJoinCount: 0,
+    voiceMinutes: 0,
     gameActivity: 'observed',
     qualifies: true,
     lastActivityAt: null,

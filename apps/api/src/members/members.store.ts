@@ -47,10 +47,14 @@ export interface MembersStore {
  *
  * ★ JOINS, NOT MINUTES ★
  *
- * Discord tells us when somebody ENTERS a voice channel and never how long they
- * stayed, so nothing anywhere records a minute of voice. The field this replaces
- * was called `voiceMinutes` and the profile page divided it by sixty to render
- * "hours in voice" — invented the moment anyone populated it.
+ * The field this replaces was called `voiceMinutes` and the profile page divided
+ * it by sixty to render "hours in voice" — invented the moment anyone populated
+ * it, because nothing recorded a minute of voice at the time.
+ *
+ * The bot DOES bank real minutes now (`member_activity_months.voice_minutes`,
+ * settled when a session ends), and they are ADMIN CONSOLE ONLY by the owner's
+ * decision. This member-facing shape deliberately does not carry them — do not
+ * add the field back here.
  */
 export interface SquadronActivity {
   readonly messages: number;

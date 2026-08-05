@@ -13,6 +13,8 @@ import { takeJobLock } from './lib/job-lock.js';
 import { resolveStations } from './jobs/resolve-stations.js';
 import { rebuildBountyBoard } from './jobs/bounty-board.js';
 import { scoreLeaderboards } from './jobs/leaderboard-scores.js';
+import { rollUpTelemetry } from './jobs/telemetry-rollup.js';
+import { PrismaTelemetryRollupStore } from './jobs/telemetry-rollup.wiring.js';
 import { EdsmStationSource, PrismaStationStore } from './jobs/resolve-stations.wiring.js';
 import { notificationNudge } from './lib/live-notify.js';
 
@@ -331,6 +333,7 @@ function startScheduler(db: PrismaClient): void {
   startStationResolver(db);
   startBountyBoard(db);
   startLeaderboardScoring(db);
+  startTelemetryRollup(db);
 }
 
 /**
@@ -634,6 +637,43 @@ function startLeaderboardScoring(db: PrismaClient): void {
 
   void run();
   setInterval(() => void run(), LEADERBOARD_SCORE_MS);
+}
+
+/**
+ * The telemetry month bank, hourly — the same cadence as the commodity rollup, and for a related
+ * reason: raw telemetry is purged at 30 days, so a month nobody banked is a month no chart will
+ * ever have. An hour of lag costs nothing — the dashboard blends the LIVE window in for the
+ * month still running and reads the bank only for closed months — but a month that reaches the
+ * purge unbanked is gone for good, and hourly leaves ~720 chances before that can happen.
+ */
+const TELEMETRY_ROLLUP_MS = 60 * 60_000;
+
+function startTelemetryRollup(db: PrismaClient): void {
+  const run = async (): Promise<void> => {
+    // The lock spans processes, same as every job here: a rerun is harmless — replace and
+    // lift are both idempotent — but two copies interleaving their transactions is noise the
+    // dashboard would briefly read.
+    const lock = await takeJobLock('telemetry-rollup');
+    if (lock === null) return;
+    try {
+      const report = await rollUpTelemetry(new PrismaTelemetryRollupStore(db), new Date());
+      console.log(
+        `daemon: telemetry rollup — ${report.currentEvents} events this month, ` +
+          `${report.previousEvents} banked for last`,
+      );
+    } catch (e) {
+      // Logged and swallowed. A missed hour is caught by the next one; a throw here would take
+      // the interval down and cost every hour after it — the failure this job exists to prevent.
+      console.error(`daemon: telemetry rollup failed (${e instanceof Error ? e.message : String(e)})`);
+    } finally {
+      await lock.release();
+    }
+  };
+
+  // At startup as well as on the hour, matching the commodity rollup: a worker restarted after
+  // being down should bank the months immediately rather than wait out the first interval.
+  void run();
+  setInterval(() => void run(), TELEMETRY_ROLLUP_MS);
 }
 
 async function main(): Promise<void> {

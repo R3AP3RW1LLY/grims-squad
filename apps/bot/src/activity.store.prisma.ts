@@ -96,6 +96,29 @@ export class PrismaActivityStore implements IActivityStore {
   }
 
   /**
+   * Adds a session's minutes to a member's month.
+   *
+   * The same SQL-side arithmetic as `record`, for the same reason: two sessions ending in the
+   * same instant must both land, and read-modify-write would lose one invisibly. The caller
+   * (`ActivityRecorder.onVoiceLeave`) has already split the session at UTC month boundaries,
+   * so `month` is always the month the minutes were actually spent in.
+   *
+   * Deliberately does NOT touch the other counters or first/last activity: joining voice is
+   * the activity event and is already counted on the way in — the leave only settles how long
+   * it lasted. No daily row either; `member_activity_days` counts joins, and the dashboard's
+   * per-day voice series is honest about being joins.
+   */
+  async bankVoiceMinutes(discordId: string, month: Date, minutes: number): Promise<void> {
+    await this.prisma.$executeRaw`
+      INSERT INTO member_activity_months (discord_id, month, voice_minutes)
+      VALUES (${discordId}, ${month}::date, ${minutes})
+      ON CONFLICT (discord_id, month) DO UPDATE SET
+        voice_minutes = member_activity_months.voice_minutes + ${minutes},
+        updated_at    = now()
+    `;
+  }
+
+  /**
    * Writes ONLY the daily row, never the monthly one.
    *
    * ★ THIS EXISTS SO HISTORY CAN BE REBUILT WITHOUT CORRUPTING THE TOTALS ★

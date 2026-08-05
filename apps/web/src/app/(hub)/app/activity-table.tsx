@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import type { AdminActivityRow } from '../../../lib/api';
 import { lastSeen } from './activity-freshness';
 import { squadronTenure } from './member-tenure';
+import { voiceTime } from './voice-time';
 import {
   EMPTY_FILTER,
   isFiltering,
@@ -147,6 +148,32 @@ function Min({
         }}
       />
     </Field>
+  );
+}
+
+/**
+ * Voice TIME in the activity cell: how long, beside the join count's how often.
+ *
+ * ★ A DASH, NOT A ZERO — squadron owner, 2026-08-04 ★
+ *
+ * Minutes are banked only since the feature shipped, so zero is both "never spoke" and "before
+ * we counted" — and this cell cannot tell them apart, so it must not print a figure that
+ * claims to. The joins column keeps its zero because joins have been counted all along.
+ */
+function VoiceTime({ minutes }: { minutes: number }) {
+  return (
+    <div className="text-center">
+      <div
+        className={`font-mono text-sm tabular-nums ${
+          minutes === 0 ? 'text-[var(--color-text-dim)]' : 'text-[var(--color-text-secondary)]'
+        }`}
+      >
+        {voiceTime(minutes)}
+      </div>
+      <div className="font-mono text-[9px] uppercase tracking-[0.14em] text-[var(--color-text-dim)]">
+        voice time
+      </div>
+    </div>
   );
 }
 
@@ -329,13 +356,18 @@ export function ActivityTable({
         is comparing rows far apart.
       */}
       <div className="overflow-x-auto rounded-lg border border-[var(--color-border-hairline)]">
-        <table className="w-full min-w-[1040px] border-collapse text-sm">
+        <table className="w-full min-w-[1120px] border-collapse text-sm">
           <thead>
             <tr className="border-b border-[var(--color-border-subtle)]">
               <th scope="col" className={`${TH} pl-4`}>Member</th>
               <th scope="col" className={TH}>In Discord</th>
               <th scope="col" className={TH}>Rank</th>
-              <th scope="col" className={`${TH} text-center`}>This month</th>
+              {/*
+                "Activity", no longer "This month": the period control above the table can hand
+                it a whole year now, and a year of counters under a heading that says "This
+                month" is a heading that lies. The section title carries the period.
+              */}
+              <th scope="col" className={`${TH} text-center`}>Activity</th>
               <th scope="col" className={TH}>Elite</th>
               <th scope="col" className={TH}>Last seen</th>
               <th scope="col" className={`${TH} pr-4`}>Qualifies</th>
@@ -542,6 +574,13 @@ export function ActivityTable({
                       <Count n={r.messageCount} unit="msg" strong />
                       <Count n={r.forumPostCount} unit="forum" />
                       <Count n={r.voiceJoinCount} unit="voice" />
+                      {/*
+                        Beside the join count, never instead of it — the owner asked for "how
+                        long" ALONGSIDE the joins. Officer-only by construction: this table is
+                        already behind the admin gate, and no member-facing payload carries the
+                        figure.
+                      */}
+                      <VoiceTime minutes={r.voiceMinutes} />
                     </div>
                   </td>
 
@@ -628,8 +667,9 @@ export function ActivityTable({
       </div>
 
       {rows.length === 0 && (
+        // "Period", not "month" — the control above can hand this table a whole year now.
         <p className="mt-6 text-sm text-[var(--color-text-secondary)]">
-          No activity recorded for this month yet.
+          No activity recorded for this period yet.
         </p>
       )}
 

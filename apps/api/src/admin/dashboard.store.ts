@@ -42,6 +42,17 @@ export interface DashboardData {
     readonly messages: number;
     readonly forumPosts: number;
     readonly voiceJoins: number;
+    /**
+     * Minutes members spent in voice in the period, summed from the monthly bank.
+     *
+     * ★ BESIDE THE JOIN COUNT, NEVER INSTEAD OF IT — squadron owner, 2026-08-04 ★
+     *
+     * "for voice joins can we track how long they are in voice chat per month? keep an
+     * aggregate total etc and include that in YTD aswell." Joins say how often; this says how
+     * long. Admin console only — the member profile once carried an invented `voiceMinutes`
+     * and this figure, now real, stays behind the officer gate.
+     */
+    readonly voiceMinutes: number;
     /** Members with at least one act of participation this month. */
     readonly activeMembers: number;
     /** Members the bot has ever seen, this month or not. */
@@ -64,12 +75,40 @@ export interface DashboardData {
   };
 
   readonly game: {
-    /** Journal events ingested, all time. */
+    /**
+     * Journal events in the SELECTED PERIOD — no longer all time.
+     *
+     * ★ BANKED MONTHS PLUS THE LIVE WINDOW ★
+     *
+     * Raw telemetry is purged at thirty days, so closed months are read from
+     * `telemetry_month_stats` (the worker banks them hourly) and the month still running is
+     * counted from the live rows — the bank may lag the last few minutes, and honest-but-live
+     * beats banked-but-stale for the month somebody is standing in.
+     */
     readonly events: number;
-    /** Commanders whose companion app has ever sent anything. */
+    /**
+     * Distinct commanders reporting in the period.
+     *
+     * For a single month this is exact. For a year it is the BUSIEST month's figure: distinct
+     * reporters cannot be summed across months whose raw rows are purged, and a sum would
+     * count one commander twelve times.
+     */
     readonly reporting: number;
-    /** Game sessions started this month. */
+    /** Game sessions (`LoadGame`) started in the period. Banked + live, like `events`. */
     readonly sessionsThisMonth: number;
+    /**
+     * Events per month of the year view, index 0 = January. Empty in the month view — a
+     * month's own days cannot be recovered from a monthly bank, so the panel shows the donut
+     * and total there instead.
+     */
+    readonly monthlyEvents: readonly number[];
+    /**
+     * The first month the bank holds, as `YYYY-MM`. Null before the rollup has ever run.
+     *
+     * Months before this render as "recorded from …" rather than as zeros — a zero for a
+     * month that simply predates the bank would be a claim nobody can stand behind.
+     */
+    readonly telemetryRecordedFrom: string | null;
     /**
      * Elite sign-ins per day of the month, index 0 = the 1st.
      *
@@ -81,7 +120,11 @@ export interface DashboardData {
      * first step to somebody summing it into a Discord total.
      */
     readonly dailySignIns: readonly number[];
-    /** Distinct commanders seen flying this month. */
+    /**
+     * Distinct commanders seen flying, from the LIVE window only. Not currently rendered;
+     * within the 30-day retention it is exact, beyond it it understates — see `reporting`
+     * for the figure the panel actually shows.
+     */
     readonly flyingThisMonth: number;
     /** Playing right now, by the journal heartbeat. */
     readonly playingNow: number;
@@ -94,7 +137,7 @@ export interface DashboardData {
      * EMPTY when too few people have opted in to be anonymous — see `MIN_CREDIT_COHORT`.
      */
     readonly creditBands: ReadonlyArray<{ band: string; pilots: number }>;
-    /** Events per category, so it is visible WHAT is being collected. */
+    /** Events per type WITHIN THE PERIOD, so it is visible what is being collected and when. */
     readonly byType: ReadonlyArray<{ type: string; count: number }>;
   };
 
@@ -115,7 +158,9 @@ export interface DashboardData {
 
 export interface DashboardStore {
   /**
-   * `selectedMonth` is `YYYY-MM`, or absent for the current month.
+   * `selectedMonth` is the PERIOD: `YYYY-MM` for a month, a bare `YYYY` for that whole
+   * calendar year, `ytd` for the current one, or absent for the current month. The same three
+   * shapes the period control's links send.
    *
    * Optional so every existing caller and test keeps working unchanged — the history tabs are an
    * addition, not a new requirement on anybody who just wants today's numbers.
@@ -145,6 +190,26 @@ function parseMonth(value: string | undefined): Date | null {
   // Refuse anything absurd: a typo in a URL should not scan a table for the year 9999.
   if (year < 2020 || year > 2100) return null;
   return new Date(Date.UTC(year, month - 1, 1));
+}
+
+/**
+ * `ytd` or a bare `2026` as a calendar year. Null for anything else.
+ *
+ * ★ THE YEAR CHIPS SENT A VALUE NOBODY PARSED ★
+ *
+ * The period control has offered a Year row since the owner asked for it ("Year: shows
+ * aggregate years"), and its links send `month=2026`. That failed `parseMonth` and fell back to
+ * the CURRENT MONTH — so picking a year showed one month's data under an active-looking year
+ * chip. A bare year now means that whole calendar year; `ytd` is the current one, which is the
+ * same range because months that have not happened hold nothing.
+ */
+function parseYear(value: string | undefined, now: Date): number | null {
+  if (value === YTD) return now.getUTCFullYear();
+  if (value === undefined || !/^\d{4}$/.test(value)) return null;
+  const year = Number(value);
+  // Same guard as parseMonth, same reason.
+  if (year < 2020 || year > 2100) return null;
+  return year;
 }
 
 export class PrismaDashboardStore implements DashboardStore {
@@ -177,13 +242,13 @@ export class PrismaDashboardStore implements DashboardStore {
      * 355 rows sat in July. The fix is not to widen the window until the emptiness is hidden; it is
      * to make July reachable, and to say plainly why a fresh month looks quiet.
      */
-    const picked = parseMonth(selectedMonth);
-
     /*
-     * ★ YEAR TO DATE — squadron owner, 2026-08-01 ★
+     * ★ YEAR TO DATE, AND ANY WHOLE YEAR — squadron owner, 2026-08-01 ★
      *
      * "a new tab that is YTD that shows everything the monthly tabs show but an aggregate of the
-     * year total."
+     * year total" — and "Year: (shows aggregate years)". `ytd` is the current year; a bare year
+     * from the Year chips is that whole calendar year, which for the current one is the same
+     * range because months that have not happened hold nothing.
      *
      * ★ TWELVE BARS, NOT THREE HUNDRED AND SIXTY-FIVE ★
      *
@@ -191,42 +256,58 @@ export class PrismaDashboardStore implements DashboardStore {
      * already thins 31 labels to avoid a smear — it would be a solid block of ink answering
      * nothing.
      *
-     * So YTD buckets by MONTH. The question changes with the span: across a month you want to know
-     * which days were busy, across a year you want to know which months were. Same chart, same
-     * arrays, different grain — and `granularity` tells the page which it is looking at so it can
-     * label the axis honestly.
+     * So a year buckets by MONTH. The question changes with the span: across a month you want to
+     * know which days were busy, across a year you want to know which months were. Same chart,
+     * same arrays, different grain — and `granularity` tells the page which it is looking at so
+     * it can label the axis honestly.
      */
-    const ytd = selectedMonth === YTD;
+    const pickedYear = parseYear(selectedMonth, now);
+    const yearView = pickedYear !== null;
+    const picked = yearView ? null : parseMonth(selectedMonth);
+
     const month = picked ?? new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-    const yearStart = new Date(Date.UTC(now.getUTCFullYear(), 0, 1));
-    const nextMonth = ytd
-      ? new Date(Date.UTC(now.getUTCFullYear() + 1, 0, 1))
+    const nextMonth = yearView
+      ? new Date(Date.UTC(pickedYear + 1, 0, 1))
       : new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth() + 1, 1));
-    const rangeStart = ytd ? yearStart : month;
-    const monthKey = ytd ? String(now.getUTCFullYear()) : month.toISOString().slice(0, 7);
+    const rangeStart = yearView ? new Date(Date.UTC(pickedYear, 0, 1)) : month;
+    const monthKey = yearView ? String(pickedYear) : month.toISOString().slice(0, 7);
+
+    /*
+     * The month the clock is standing in, and where the LIVE telemetry window overlaps the
+     * period. Closed months are read from the bank (`telemetry_month_stats`); only the month
+     * still running is counted from raw `telemetry_events` — the rollup may lag it by minutes,
+     * and the raw rows for everything older are already being purged.
+     */
+    const currentMonthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const currentMonthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+    const liveStart = rangeStart > currentMonthStart ? rangeStart : currentMonthStart;
+    const liveEnd = nextMonth < currentMonthEnd ? nextMonth : currentMonthEnd;
+    const liveWindow = liveStart < liveEnd;
+    const currentKey = currentMonthStart.toISOString().slice(0, 7);
 
     /*
      * Bucket count: twelve for a year, or this month's own length. Day 0 of the next month is the
      * last day of this one — 28, 29, 30 or 31 without a lookup table.
      */
-    const daysInMonth = ytd
+    const daysInMonth = yearView
       ? 12
       : new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth() + 1, 0)).getUTCDate();
 
     const [
-      activity,
+      activityRows,
       trackedMembers,
       guildMembers,
       monthsWithData,
       daily,
       dailySignIns,
-      events,
-      reporting,
+      bankedMonths,
+      liveByType,
+      liveReporters,
+      firstBanked,
       sessions,
       playingNow,
       ships,
       creditBands,
-      byType,
       members,
       verified,
       ranks,
@@ -240,11 +321,12 @@ export class PrismaDashboardStore implements DashboardStore {
          * the year's eighth month, while July alone held 10,233 messages. The chart aggregated
          * correctly and the numbers above it did not, which is worse than neither working.
          */
-        where: ytd ? { month: { gte: yearStart, lt: nextMonth } } : { month },
+        where: yearView ? { month: { gte: rangeStart, lt: nextMonth } } : { month },
         select: {
           messageCount: true,
           forumPostCount: true,
           voiceJoinCount: true,
+          voiceMinutes: true,
           gameActivity: true,
           discordId: true,
           user: {
@@ -354,7 +436,7 @@ export class PrismaDashboardStore implements DashboardStore {
       >`
         SELECT
           -- Day of the month, or month of the year when the span is a year. One query, one shape.
-          ${ytd ? Prisma.sql`EXTRACT(MONTH FROM day)::int` : Prisma.sql`EXTRACT(DAY FROM day)::int`} AS day,
+          ${yearView ? Prisma.sql`EXTRACT(MONTH FROM day)::int` : Prisma.sql`EXTRACT(DAY FROM day)::int`} AS day,
           SUM(message_count)::bigint          AS msgs,
           SUM(voice_join_count)::bigint       AS voice,
           SUM(forum_post_count)::bigint       AS forum,
@@ -397,7 +479,7 @@ export class PrismaDashboardStore implements DashboardStore {
            * actually in". Exactly that, and entirely self-inflicted: two queries feeding one array
            * have to agree about what an index means, and nothing in the types enforced it.
            */
-          ${ytd
+          ${yearView
             ? Prisma.sql`EXTRACT(MONTH FROM occurred_at AT TIME ZONE 'UTC')::int`
             : Prisma.sql`EXTRACT(DAY FROM occurred_at AT TIME ZONE 'UTC')::int`} AS day,
           COUNT(*)::bigint                                      AS signins
@@ -408,8 +490,63 @@ export class PrismaDashboardStore implements DashboardStore {
         GROUP BY 1 ORDER BY 1
       `,
 
-      this.#db.telemetryEvent.count(),
-      this.#db.telemetryEvent.findMany({ distinct: ['userId'], select: { userId: true } }),
+      /*
+       * ★ THE BANK, FOR EVERY CLOSED MONTH IN THE PERIOD ★
+       *
+       * Raw telemetry is purged at thirty days, so these figures used to be "all time" in name
+       * and thirty days in truth — and the owner's per-month view (2026-08-01) was impossible
+       * from them. `telemetry_month_stats` is written hourly by the worker's rollup and is the
+       * only copy of every closed month. The month still running is deliberately EXCLUDED here
+       * and read live below: the bank may lag it by minutes, and the raw rows still exist.
+       *
+       * One small read for everything the panel needs — per-type sums, per-month totals and
+       * each month's reporter count come out of the same rows in application code.
+       */
+      this.#db.$queryRaw<
+        Array<{ m: string; event_type: string; event_count: number; reporting_members: number }>
+      >`
+        SELECT to_char(month, 'YYYY-MM') AS m, event_type, event_count, reporting_members
+          FROM telemetry_month_stats
+         WHERE month >= ${rangeStart}::date AND month < ${nextMonth}::date
+           AND month < ${currentMonthStart}::date
+      `,
+
+      /*
+       * The live half of the blend: the current month's slice of the period, from the raw
+       * rows. Skipped entirely when the period is a closed month or a past year — there is no
+       * live window inside it to read.
+       */
+      liveWindow
+        ? this.#db.telemetryEvent.groupBy({
+            by: ['eventType'],
+            where: { occurredAt: { gte: liveStart, lt: liveEnd } },
+            _count: { _all: true },
+            orderBy: { _count: { eventType: 'desc' } },
+          })
+        : Promise.resolve([] as Array<{ eventType: string; _count: { _all: number } }>),
+
+      // Distinct reporters in the live slice. The closed months carry theirs in the bank.
+      liveWindow
+        ? this.#db.telemetryEvent.findMany({
+            where: { occurredAt: { gte: liveStart, lt: liveEnd } },
+            distinct: ['userId'],
+            select: { userId: true },
+          })
+        : Promise.resolve([] as Array<{ userId: string }>),
+
+      /*
+       * Where recorded history STARTS, so the page can say "recorded from July 2026" for
+       * anything earlier instead of drawing zeros for months the bank simply predates.
+       */
+      this.#db.$queryRaw<Array<{ m: string | null }>>`
+        SELECT to_char(min(month), 'YYYY-MM') AS m FROM telemetry_month_stats
+      `,
+
+      /*
+       * Live LoadGame rows in the whole period, kept for `flyingThisMonth` (distinct pilots,
+       * a live-window figure). The period's session COUNT comes from the blend instead — this
+       * query cannot see past the purge.
+       */
       this.#db.telemetryEvent.findMany({
         where: { eventType: 'LoadGame', occurredAt: { gte: rangeStart, lt: nextMonth } },
         select: { userId: true },
@@ -489,12 +626,6 @@ export class PrismaDashboardStore implements DashboardStore {
         GROUP BY band
       `,
 
-      this.#db.telemetryEvent.groupBy({
-        by: ['eventType'],
-        _count: { _all: true },
-        orderBy: { _count: { eventType: 'desc' } },
-      }),
-
       this.#db.user.count({ where: { status: 'active' } }),
       this.#db.cmdrVerification.count({ where: { isVerified: true, revokedAt: null } }),
       /*
@@ -506,6 +637,59 @@ export class PrismaDashboardStore implements DashboardStore {
         select: { discordRoleId: true, role: { select: { name: true, rankOrder: true } } },
       }),
     ]);
+
+    /*
+     * ★ ONE ROW PER MEMBER, WHATEVER THE SPAN ★
+     *
+     * In the year view the monthly table returns one row per member PER MONTH, and everything
+     * below — the top-ten list, "active members", the qualifying count — is written against
+     * members. Left unmerged, a commander active in seven months appeared seven times in the
+     * top ten and counted seven times in every headcount, which inflated exactly the numbers a
+     * year view exists to total honestly.
+     */
+    const activity = yearView ? mergeMemberMonths(activityRows) : activityRows;
+
+    /*
+     * ★ THE TELEMETRY BLEND: BANKED MONTHS PLUS THE LIVE SLICE ★
+     *
+     * Every closed month in the period comes from the bank; the month still running comes from
+     * the raw rows. The same rows answer four questions — per-type totals, per-month totals,
+     * each month's reporters, and each month's sessions — so they are folded once, here.
+     */
+    const typeTotals = new Map<string, number>();
+    const monthEventTotals = new Map<string, number>();
+    const monthReporters = new Map<string, number>();
+    const monthSessions = new Map<string, number>();
+
+    for (const row of bankedMonths) {
+      typeTotals.set(row.event_type, (typeTotals.get(row.event_type) ?? 0) + row.event_count);
+      monthEventTotals.set(row.m, (monthEventTotals.get(row.m) ?? 0) + row.event_count);
+      // Repeated on every row of its month by design, so any row carries the month's figure.
+      monthReporters.set(row.m, row.reporting_members);
+      if (row.event_type === 'LoadGame') monthSessions.set(row.m, row.event_count);
+    }
+
+    let liveTotal = 0;
+    for (const t of liveByType) {
+      typeTotals.set(t.eventType, (typeTotals.get(t.eventType) ?? 0) + t._count._all);
+      liveTotal += t._count._all;
+    }
+
+    const periodEvents = [...typeTotals.values()].reduce((a, b) => a + b, 0);
+    const byTypeRows = [...typeTotals.entries()]
+      .map(([type, count]) => ({ type, count }))
+      .sort((a, b) => b.count - a.count || a.type.localeCompare(b.type));
+
+    /*
+     * Distinct reporters. Exact for a month; for a year it is the BUSIEST month's figure,
+     * because a distinct cannot be summed across months whose raw rows are gone — a sum would
+     * count one commander twelve times and look all the more plausible for it.
+     */
+    const periodReporting = yearView
+      ? Math.max(0, ...monthReporters.values(), liveWindow ? liveReporters.length : 0)
+      : monthKey === currentKey
+        ? liveReporters.length
+        : (monthReporters.get(monthKey) ?? 0);
 
     /*
      * ★ ONE MEMBER COUNTS ONCE, AT THEIR HIGHEST RANK ★
@@ -594,6 +778,33 @@ export class PrismaDashboardStore implements DashboardStore {
       if (slot < 0 || slot >= dailySignInsArray.length) continue;
       dailySignInsArray[slot] = Number(row.signins);
     }
+    if (yearView) {
+      /*
+       * ★ THE YEAR'S SIGN-INS COME FROM THE BANK, NOT THE PURGED WINDOW ★
+       *
+       * The live query above can only see thirty days, so in the year view every older month
+       * drew ZERO sign-ins — fake quiet, not real quiet. Each month takes the GREATER of the
+       * live bucket and its banked LoadGame count: the bank wins for closed months the purge
+       * has thinned, the live figure wins for the running month the rollup may lag.
+       */
+      for (let i = 0; i < dailySignInsArray.length; i += 1) {
+        const key = `${monthKey}-${String(i + 1).padStart(2, '0')}`;
+        dailySignInsArray[i] = Math.max(dailySignInsArray[i] ?? 0, monthSessions.get(key) ?? 0);
+      }
+    }
+
+    /*
+     * Telemetry per month of the year, for the panel's bars. Only the year view can draw it —
+     * a closed month's own days are not recoverable from a monthly bank, so the month view
+     * shows the donut and total instead and this stays empty.
+     */
+    const monthlyEvents = yearView
+      ? Array.from({ length: 12 }, (_, i) => {
+          const key = `${monthKey}-${String(i + 1).padStart(2, '0')}`;
+          if (key === currentKey && liveWindow) return liveTotal;
+          return monthEventTotals.get(key) ?? 0;
+        })
+      : [];
     for (const row of daily) {
       // 1-indexed day to 0-indexed slot. Guarded because a clock-skewed row
       // would otherwise write past the end of the array.
@@ -618,11 +829,14 @@ export class PrismaDashboardStore implements DashboardStore {
        * What one bar means. The chart cannot tell 31 days from 12 months by looking at the array,
        * and labelling a month bucket "day 7" is the kind of wrong that goes unnoticed for months.
        */
-      granularity: ytd ? ('month' as const) : ('day' as const),
+      granularity: yearView ? ('month' as const) : ('day' as const),
       discord: {
         messages: sum((r) => r.messageCount),
         forumPosts: sum((r) => r.forumPostCount),
         voiceJoins: sum((r) => r.voiceJoinCount),
+        // Banked by the bot as sessions end, split at UTC month boundaries — so a year is the
+        // sum of its months and nothing is counted twice.
+        voiceMinutes: sum((r) => r.voiceMinutes),
         activeMembers: activity.filter(
           (r) => r.messageCount > 0 || r.forumPostCount > 0 || r.voiceJoinCount > 0,
         ).length,
@@ -656,10 +870,16 @@ export class PrismaDashboardStore implements DashboardStore {
         }),
       },
       game: {
-        events,
-        reporting: reporting.length,
-        sessionsThisMonth: sessions.length,
+        events: periodEvents,
+        reporting: periodReporting,
+        /*
+         * From the blend, not the live rows: `LoadGame` is banked like every other type, so a
+         * closed month's sessions survive the purge. The live slice covers the running month.
+         */
+        sessionsThisMonth: typeTotals.get('LoadGame') ?? 0,
         dailySignIns: dailySignInsArray,
+        monthlyEvents,
+        telemetryRecordedFrom: firstBanked[0]?.m ?? null,
         flyingThisMonth: new Set(sessions.map((s) => s.userId)).size,
         playingNow,
         /*
@@ -678,7 +898,7 @@ export class PrismaDashboardStore implements DashboardStore {
           isSuit(raw) ? shipDisplayName(raw, null, { allowSuits: true }) : null,
         ).map((r) => ({ suit: r.name, pilots: r.pilots })),
         creditBands: bandedCredits(creditBands),
-        byType: byType.map((t) => ({ type: t.eventType, count: t._count._all })),
+        byType: byTypeRows,
       },
       squadron: {
         /*
@@ -742,6 +962,67 @@ function rollUp(
     .map(([name, pilots]) => ({ name, pilots }))
     .sort((a, b) => b.pilots - a.pilots || a.name.localeCompare(b.name))
     .slice(0, 10);
+}
+
+/**
+ * Best evidence first. Used when a member's months are folded into a year: the strongest claim
+ * any month can make is the one the year makes.
+ */
+const GAME_EVIDENCE = ['observed', 'assumed', 'absent', 'unlinked', 'unknown'] as const;
+
+/** A value the list does not know ranks WORST, never best — indexOf's -1 would invert that. */
+function evidenceRank(value: string): number {
+  const i = GAME_EVIDENCE.indexOf(value as (typeof GAME_EVIDENCE)[number]);
+  return i === -1 ? GAME_EVIDENCE.length : i;
+}
+
+/**
+ * Folds one row per member per month into one row per member, for the year view.
+ *
+ * ★ WHY THIS EXISTS ★
+ *
+ * The monthly table is the source, so a year of it holds a member up to twelve times — and the
+ * top-ten list, the active-member count and the qualifying count are all statements about
+ * MEMBERS. Unmerged, a commander active in seven months appeared in the top ten seven times and
+ * counted seven times in every headcount.
+ *
+ * Counters sum; `gameActivity` keeps the best evidence any month produced, so "qualifying" in
+ * the year view reads as "took part, and was seen (or fairly assumed) flying, at some point in
+ * the year" — which is the honest year-sized version of the monthly test, and is NOT what the
+ * promotion engine runs on. Promotion evaluates months, always.
+ */
+function mergeMemberMonths<
+  T extends {
+    discordId: string;
+    messageCount: number;
+    forumPostCount: number;
+    voiceJoinCount: number;
+    voiceMinutes: number;
+    gameActivity: string;
+  },
+>(rows: T[]): T[] {
+  const byMember = new Map<string, T>();
+
+  for (const row of rows) {
+    const held = byMember.get(row.discordId);
+    if (held === undefined) {
+      // A copy, so folding a later month never mutates a row Prisma handed back.
+      byMember.set(row.discordId, { ...row });
+      continue;
+    }
+    held.messageCount += row.messageCount;
+    held.forumPostCount += row.forumPostCount;
+    held.voiceJoinCount += row.voiceJoinCount;
+    held.voiceMinutes += row.voiceMinutes;
+
+    if (evidenceRank(row.gameActivity) < evidenceRank(held.gameActivity)) {
+      held.gameActivity = row.gameActivity;
+    }
+  }
+
+  // The order the query promised — busiest first — restored, because merging destroyed it and
+  // the top-ten list is nothing but this order.
+  return [...byMember.values()].sort((a, b) => b.messageCount - a.messageCount);
 }
 
 /**

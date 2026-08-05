@@ -192,7 +192,12 @@ describe('P0.2 database schema', () => {
     // 117 as of the Help & Support chat: support_conversations + support_messages. The live chat
     // every visitor can open — guests addressed by a hashed one-time token, members by their
     // account — and the officers' console that answers it.
-    expect(Number(r[0]?.n)).toBe(117);
+    //
+    // 118 as of the period-aware telemetry panel: telemetry_month_stats. Raw telemetry_events are
+    // purged at 30 days, so "how much telemetry did we get in March" stops being answerable in
+    // May — the worker banks each month's per-type counts here while the raw rows still exist,
+    // and the dashboard reads the bank for every closed month.
+    expect(Number(r[0]?.n)).toBe(118);
   });
 
   describe('hand-written DDL that Prisma cannot express', () => {

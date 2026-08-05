@@ -55,6 +55,28 @@ export function PromotionRun({ month }: { readonly month: string }) {
 
   const incomplete = month === currentMonth();
 
+  /*
+   * ★ A RUN ACTS ON ONE MONTH, AND THE PERIOD CONTROL CAN NOW SAY "2026" ★
+   *
+   * The YTD and Year chips hand this component a bare year, and the engine is right to refuse
+   * it — qualification is a statement about a calendar month, and "run 2026's promotions" has
+   * no meaning the ladder could honour. Offering the button anyway would put a guaranteed
+   * error behind it, so the panel says what a run acts on and where to pick one instead.
+   */
+  if (!/^\d{4}-\d{2}$/.test(month)) {
+    return (
+      <div className="mb-4 rounded-lg border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel-sunken)] p-4">
+        <h3 className="m-0 font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--color-brand-orange)]">
+          Promotions
+        </h3>
+        <p className="m-0 mt-1 text-[11px] leading-relaxed text-[var(--color-text-secondary)]">
+          A promotion run acts on one calendar month — qualification is a statement about a
+          month, not a year. Pick a month above to preview and run it.
+        </p>
+      </div>
+    );
+  }
+
   const call = async (path: string): Promise<PromotionReport> =>
     apiCall<PromotionReport>('POST', `${path}?month=${encodeURIComponent(month)}`);
 

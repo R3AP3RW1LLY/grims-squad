@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { ActivityRecorder, monthKey } from './activity.recorder.js';
+import { ActivityRecorder, endsVoiceSession, monthKey, splitVoiceMinutes } from './activity.recorder.js';
 import { InMemoryActivityStore } from './activity.store.fake.js';
 
 /**
@@ -165,6 +165,8 @@ describe('what is NOT stored', () => {
       'messageCount',
       'month',
       'voiceJoinCount',
+      // Minutes, not words: a duration is a count like the others, and no less private.
+      'voiceMinutes',
     ]);
   });
 });
@@ -251,5 +253,136 @@ describe('forum and voice activity', () => {
     await rec.record({ discordId: 'b', kind: 'forum', at: AT, isBot: true, channelId: 'f' });
     await rec.record({ discordId: 'b', kind: 'voice', at: AT, isBot: true, channelId: 'v' });
     expect(store.rows).toHaveLength(0);
+  });
+});
+
+describe('voice time — how long, beside how often', () => {
+  /*
+   * Squadron owner, 2026-08-04: "for voice joins can we track how long they are in voice chat
+   * per month? keep an aggregate total etc and include that in YTD aswell."
+   *
+   * The month boundary is the whole game here too: YTD is defined as the sum of the months, so
+   * a session credited whole to the wrong side of the 1st makes the year lie as well.
+   */
+
+  it('banks a session into the month it happened in', async () => {
+    await rec.onVoiceLeave({
+      discordId: '111',
+      isBot: false,
+      since: new Date('2026-07-14T19:00:00.000Z'),
+      at: new Date('2026-07-14T21:05:00.000Z'),
+    });
+    expect(store.find('111', '2026-07-01')?.voiceMinutes).toBe(125);
+  });
+
+  it('accumulates across sessions rather than replacing', async () => {
+    const base = { discordId: '111', isBot: false };
+    await rec.onVoiceLeave({
+      ...base,
+      since: new Date('2026-07-03T19:00:00.000Z'),
+      at: new Date('2026-07-03T20:00:00.000Z'),
+    });
+    await rec.onVoiceLeave({
+      ...base,
+      since: new Date('2026-07-11T19:00:00.000Z'),
+      at: new Date('2026-07-11T19:30:00.000Z'),
+    });
+    expect(store.find('111', '2026-07-01')?.voiceMinutes).toBe(90);
+  });
+
+  it('MANDATORY: splits a session crossing the 1st, each month credited its own minutes', async () => {
+    /*
+     * 23:00 on 31 July to 01:30 on 1 August: an hour of July, ninety minutes of August.
+     * Credited whole to either side, the monthly figures stop summing to the truth — and YTD,
+     * which the owner asked to include, is nothing but that sum.
+     */
+    await rec.onVoiceLeave({
+      discordId: '111',
+      isBot: false,
+      since: new Date('2026-07-31T23:00:00.000Z'),
+      at: new Date('2026-08-01T01:30:00.000Z'),
+    });
+    expect(store.find('111', '2026-07-01')?.voiceMinutes).toBe(60);
+    expect(store.find('111', '2026-08-01')?.voiceMinutes).toBe(90);
+  });
+
+  it('spans several months when a session somehow does', () => {
+    // A crashed client that never sent a leave can look like a very long session. The split is
+    // pure arithmetic and stays correct however long the range is.
+    const parts = splitVoiceMinutes(
+      new Date('2026-06-30T23:00:00.000Z'),
+      new Date('2026-08-01T01:00:00.000Z'),
+    );
+    expect(parts.map((p) => p.month.toISOString().slice(0, 10))).toEqual([
+      '2026-06-01',
+      '2026-07-01',
+      '2026-08-01',
+    ]);
+    expect(parts.map((p) => p.minutes)).toEqual([60, 31 * 24 * 60, 60]);
+  });
+
+  it('MANDATORY: banks NOTHING when the join was never seen', async () => {
+    /*
+     * `since` is null after a restart: presence is wiped and re-seeded, so a session that
+     * spanned the restart has no honest start time. Guessing one would put invented minutes on
+     * the table promotions are read beside — the exact fiction the old profile `voiceMinutes`
+     * was removed for.
+     */
+    await rec.onVoiceLeave({
+      discordId: '111',
+      isBot: false,
+      since: null,
+      at: new Date('2026-07-14T21:00:00.000Z'),
+    });
+    expect(store.rows).toHaveLength(0);
+  });
+
+  it('banks nothing for a zero-length or backwards session', async () => {
+    // A clock-skewed `since` after the leave must not bank negative minutes.
+    await rec.onVoiceLeave({
+      discordId: '111',
+      isBot: false,
+      since: new Date('2026-07-14T21:00:00.000Z'),
+      at: new Date('2026-07-14T21:00:00.000Z'),
+    });
+    expect(store.rows).toHaveLength(0);
+  });
+
+  it('ignores bots, like every other counter', async () => {
+    await rec.onVoiceLeave({
+      discordId: 'b',
+      isBot: true,
+      since: new Date('2026-07-14T19:00:00.000Z'),
+      at: new Date('2026-07-14T21:00:00.000Z'),
+    });
+    expect(store.rows).toHaveLength(0);
+  });
+});
+
+describe('what ends a voice session', () => {
+  it('MANDATORY: a move between channels is NOT a leave — the session continues', () => {
+    /*
+     * Both ids non-null means the member walked from one counted room to another. Treating
+     * that as a leave would bank a fragment and restart the clock on every channel hop — an
+     * evening of ops across three rooms would record as three short visits.
+     */
+    expect(endsVoiceSession('111111', '222222')).toBe(false);
+  });
+
+  it('leaving voice ends it', () => {
+    expect(endsVoiceSession('111111', null)).toBe(true);
+  });
+
+  it('moving somewhere that does not count ends it', () => {
+    // The caller passes the destination only when it counts toward activity, so an admin-only
+    // room arrives here as null — the counted session is over, exactly like a leave.
+    expect(endsVoiceSession('111111', null)).toBe(true);
+  });
+
+  it('arriving from nowhere ends nothing', () => {
+    // No session was running; there is nothing to settle, and a stale presence row must not
+    // be banked as though a join had been seen.
+    expect(endsVoiceSession(null, null)).toBe(false);
+    expect(endsVoiceSession(null, '222222')).toBe(false);
   });
 });

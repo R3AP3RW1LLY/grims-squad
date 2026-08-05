@@ -31,7 +31,7 @@ import {
   MAPPING_ADMIN,
   DISCORD_MODERATION,
 } from './admin.tokens.js';
-import type { DashboardStore, DashboardData } from './dashboard.store.js';
+import { YTD, type DashboardStore, type DashboardData } from './dashboard.store.js';
 import type {
   AdminStore,
   ActivityRow,
@@ -367,16 +367,17 @@ export class AdminController {
   @Get('dashboard')
   async dashboard(@Query('month') month?: string): Promise<DashboardData> {
     /*
-     * `month` is validated in the store (parseMonth) rather than here, and anything unparseable
-     * falls back to the current month rather than erroring — a stale tab in somebody's URL should
-     * show them today, not a stack trace.
+     * `month` is the PERIOD — `YYYY-MM`, a bare `YYYY`, or `ytd` — validated in the store
+     * (parseMonth/parseYear) rather than here, and anything unparseable falls back to the
+     * current month rather than erroring — a stale tab in somebody's URL should show them
+     * today, not a stack trace.
      */
     return this.dash.dashboard(new Date(), month);
   }
 
   @Get('activity')
   async activity(@Query('month') month?: string): Promise<{ month: string; rows: ActivityRow[] }> {
-    const key = normaliseMonth(month);
+    const key = normalisePeriod(month);
     return { month: key, rows: await this.store.activityForMonth(key) };
   }
 
@@ -601,13 +602,24 @@ export class AdminController {
 }
 
 /**
- * Coerces a month parameter to the first of a month, UTC.
+ * Coerces a period parameter to `YYYY-MM` for a month, or a bare `YYYY` for a year.
+ *
+ * The period control sends three shapes — `YYYY-MM`, `YYYY`, and `ytd` (the current year).
+ * The first two pass through; `ytd` becomes the current year, so the store has exactly two
+ * cases to serve. This used to accept only months, so the YTD and Year chips silently showed
+ * the CURRENT MONTH under a control that looked like it had answered.
  *
  * Anything unparseable becomes the CURRENT month rather than an error. A
  * dashboard that 400s because of a stray query string is more annoying than
  * useful, and there is no security consequence to the fallback.
  */
-function normaliseMonth(raw: string | undefined): string {
+function normalisePeriod(raw: string | undefined): string {
+  if (raw === YTD) return String(new Date().getUTCFullYear());
+  if (raw !== undefined && /^\d{4}$/.test(raw)) {
+    const year = Number(raw);
+    // The same absurdity guard as the dashboard's parser: a typo must not scan for year 9999.
+    if (year >= 2020 && year <= 2100) return raw;
+  }
   const d = raw === undefined ? new Date() : new Date(`${raw}-01T00:00:00Z`);
   const use = Number.isNaN(d.getTime()) ? new Date() : d;
   return `${use.getUTCFullYear()}-${String(use.getUTCMonth() + 1).padStart(2, '0')}`;

@@ -161,16 +161,18 @@ export interface ProfileSource {
   /**
    * What this member has done in the squadron THIS CALENDAR MONTH.
    *
-   * ★ `voiceMinutes` WAS FICTION, AND IS GONE ★
+   * ★ `voiceMinutes` WAS FICTION, AND IS GONE — AND MUST NOT COME BACK ★
    *
    * This read `{ messages, voiceMinutes }` and the profile page divided that by
-   * sixty to render "hours in voice". Nothing anywhere records a minute of
-   * voice: `member_activity_months` counts JOINS, because Discord tells us when
-   * somebody enters a channel and never how long they stayed.
-   *
+   * sixty to render "hours in voice", when nothing recorded a minute of voice.
    * It shipped harmless only because the field was never populated — the first
    * person to wire it up would have published invented hours. So the shape now
    * says what is actually counted.
+   *
+   * The bot DOES bank real minutes now (`member_activity_months.voice_minutes`),
+   * and they are ADMIN CONSOLE ONLY by the owner's decision. A real figure is
+   * not a licence to widen the audience: this serializer must not regain the
+   * field for any public shape.
    *
    * `gameObserved` is the one that matters: it is the single input the monthly
    * promotion check reads.

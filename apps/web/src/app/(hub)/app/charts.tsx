@@ -387,6 +387,86 @@ export function RankedBars({
   );
 }
 
+/* -------------------------------------------------------------- monthly bars */
+
+/**
+ * Twelve vertical bars: one figure per month of a year.
+ *
+ * ★ SQUADRON OWNER, 2026-08-01 ★
+ *
+ * "the Journal Telemetry needs to be split into the YTD and per month so we can see it per month
+ * how much telemetry were getting etc." This is the per-month half of that sentence — the donut
+ * beside it answers WHAT was collected; this answers WHEN.
+ *
+ * Vertical, unlike RankedBars, because the x-axis is TIME: months read left to right the way a
+ * year does, and three-letter month labels fit under a bar where a commander name never would.
+ * One series, so no legend — the panel title names it, and a one-entry legend box is furniture.
+ */
+export function MonthlyBars({
+  values,
+  yearLabel,
+  unit,
+  colour = BRAND.cyan,
+}: {
+  /** Twelve values, index 0 = January — the same convention as EXTRACT(MONTH) minus one. */
+  values: number[];
+  /** The year, for the tooltip: "July 2026", never "7 2026". */
+  yearLabel: string;
+  unit: string;
+  colour?: string;
+}) {
+  const total = values.reduce((a, b) => a + b, 0);
+
+  const canvas = useChart<'bar'>(
+    () => ({
+      type: 'bar',
+      data: {
+        labels: MONTH_ABBR.slice(0, values.length),
+        datasets: [
+          {
+            label: unit,
+            data: values,
+            backgroundColor: colour,
+            // Rounded on the growing end only, matching RankedBars: a bar rounded at its origin
+            // looks detached from the baseline it is measured from.
+            borderRadius: { topLeft: 3, topRight: 3, bottomLeft: 0, bottomRight: 0 },
+            maxBarThickness: 26,
+          },
+        ],
+      },
+      options: {
+        ...RESPONSIVE,
+        interaction: { mode: 'index', intersect: false },
+        scales: {
+          x: { grid: { display: false }, border: { display: false }, ticks: { ...TICKS, autoSkip: false } },
+          y: { beginAtZero: true, grid: GRID, border: { display: false }, ticks: TICKS },
+        },
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            ...TOOLTIP_DARK,
+            callbacks: {
+              // The month spelled out, per the owner's standing instruction on the year view:
+              // "replace the month number with the actual spelling of the month please!"
+              title: (items) => `${MONTH_NAME[items[0]?.dataIndex ?? 0]} ${yearLabel}`,
+              label: (item) => ` ${Number(item.parsed.y).toLocaleString('en-GB')} ${unit}`,
+            },
+          },
+        },
+      },
+    }),
+    [values, yearLabel, unit, colour],
+  );
+
+  return (
+    <ChartBox
+      height={160}
+      label={`${total.toLocaleString('en-GB')} ${unit} across ${yearLabel}, by month`}
+      canvasRef={canvas}
+    />
+  );
+}
+
 /* --------------------------------------------------------------------- donut */
 
 export function Donut({ data, unit }: { data: Datum[]; unit: string }) {

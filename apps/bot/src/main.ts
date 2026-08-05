@@ -11,7 +11,7 @@ import {
 import { PrismaClient } from '@grims/db';
 import { composeNickname, overrideActionFor, LEADERSHIP_CEILING } from '@grims/shared';
 import pino from 'pino';
-import { ActivityRecorder, monthKey } from './activity.recorder.js';
+import { ActivityRecorder, endsVoiceSession, monthKey } from './activity.recorder.js';
 import {
   countsTowardActivity,
   isForumChannel,
@@ -701,8 +701,20 @@ async function markInVoice(discordId: string, isBot: boolean): Promise<void> {
   });
 }
 
-/** Records that somebody has left voice. */
-async function markLeftVoice(discordId: string): Promise<void> {
+/**
+ * Records that somebody has left voice, and returns WHEN they had joined.
+ *
+ * The read comes first because the update erases it, and the caller needs it: `inVoiceSince`
+ * is the start of the session whose minutes are about to be banked. Null when the bot never
+ * saw the join — a restart wipes presence — in which case the recorder banks nothing rather
+ * than guessing.
+ */
+async function markLeftVoice(discordId: string): Promise<Date | null> {
+  const existing = await prisma.discordGuildMember.findUnique({
+    where: { discordId },
+    select: { inVoiceSince: true },
+  });
+
   /*
    * `updateMany`, not `update`. Prisma's `update` throws when the row is
    * missing, and a member who left voice but was never cached is an ordinary
@@ -712,6 +724,8 @@ async function markLeftVoice(discordId: string): Promise<void> {
     where: { discordId },
     data: { inVoiceSince: null },
   });
+
+  return existing?.inVoiceSince ?? null;
 }
 
 async function seedVoiceOccupancy(): Promise<void> {
@@ -832,27 +846,50 @@ client.on(Events.VoiceStateUpdate, (before, after) => {
    * than not showing one.
    */
   if (before.channelId !== after.channelId) {
-    if (after.channelId === null) {
-      void markLeftVoice(after.id).catch((err: unknown) =>
-        logger.error({ err }, 'failed to clear voice presence'),
-      );
-    } else if (
+    /*
+     * The destination, ONLY when it counts toward activity. The scope decision is made once,
+     * here, so presence, the session clock and the ends-the-session rule all agree about what
+     * "in voice" means — a member sitting in an admin-only channel is not somewhere the roster
+     * reports on, and leaking "in voice channel" from a private room would disclose that a
+     * closed meeting is happening.
+     */
+    const countedTo =
+      after.channelId !== null &&
       after.channel !== null &&
       countsTowardActivity(describe(after.channel), roleScope)
-    ) {
+        ? after.channelId
+        : null;
+
+    if (countedTo !== null) {
       /*
-       * Scoped the same way as the count. A member sitting in an admin-only
-       * channel is not somewhere the roster should be reporting on, and leaking
-       * "in voice channel" from a private room would disclose that a closed
-       * meeting is happening.
+       * A join, or a MOVE between counted rooms. `markInVoice` keeps the original timestamp on
+       * a move, so the session continues — walking from comms to ops is not leaving, and the
+       * minutes keep counting against the one session.
        */
       void markInVoice(after.id, after.member?.user.bot ?? false).catch((err: unknown) =>
         logger.error({ err }, 'failed to record voice presence'),
       );
     } else {
-      // Moved INTO a channel that does not count. They are no longer visibly in
-      // voice, so the old presence must not linger.
-      void markLeftVoice(after.id).catch(() => undefined);
+      /*
+       * They are no longer somewhere the roster reports on — left voice, or moved into a room
+       * that does not count. Either way the old presence must not linger, and when a counted
+       * session was actually running (`endsVoiceSession`: they CAME from a channel, not from
+       * nowhere), its minutes are settled into the month bank first. The read-then-clear order
+       * lives in `markLeftVoice`, which hands back the session start the clear erases.
+       */
+      const ends = endsVoiceSession(before.channelId, countedTo);
+      void markLeftVoice(after.id)
+        .then((since) =>
+          ends
+            ? recorder.onVoiceLeave({
+                discordId: after.id,
+                isBot: after.member?.user.bot ?? false,
+                since,
+                at: new Date(),
+              })
+            : undefined,
+        )
+        .catch((err: unknown) => logger.error({ err }, 'failed to settle a voice session'));
     }
   }
 
