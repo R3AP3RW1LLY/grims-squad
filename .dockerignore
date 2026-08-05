@@ -68,6 +68,19 @@ docs
 infra/scripts
 README.md
 
+# ★ EXCEPT docs/help, WHICH THE ASSISTANT ANSWERS OUT OF ★
+#
+# The same trap the note below describes, sprung. `docs/` reads as documentation, and 57 of the
+# files under it are not: `ingest-reference.ts` walks `docs/help` on every reference ingest and
+# writes each article as a `kind: 'help'` row, and the support assistant's retrieval is
+# help-tagged ONLY. No articles in the image means no help rows in the database means an
+# assistant that answers every "how do I…" question with nothing at all.
+#
+# It failed exactly as quietly as the ssot case would have: the ingest found the directory
+# missing, wrote the guides and documents it did find, reported success, and production carried
+# ten reference passages where it should have carried hundreds.
+!docs/help
+
 # ★ `ssot/` IS NOT IN THIS LIST, AND MUST NOT BE ★
 #
 # It looks like documentation and it is not: the promotion run READS

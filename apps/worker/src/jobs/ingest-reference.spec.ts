@@ -1,6 +1,7 @@
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import { chunk, readHelpFrontmatter, readReferenceKnowledge } from './ingest-reference.js';
 import type { PrismaClient } from '@grims/db';
@@ -18,6 +19,8 @@ const emptyBoard = {
 } as unknown as PrismaClient;
 
 const noDir = join(tmpdir(), 'grims-does-not-exist');
+
+const HERE = dirname(fileURLToPath(import.meta.url));
 
 describe('readHelpFrontmatter', () => {
   it('parses title and route and returns the body without the fence', () => {
@@ -84,5 +87,62 @@ describe('chunk', () => {
     const pieces = chunk(`${paragraph}\n\n${paragraph}\n\n${paragraph}`, 600);
     expect(pieces.length).toBeGreaterThan(1);
     for (const p of pieces) expect(p.startsWith('word')).toBe(true);
+  });
+});
+
+/**
+ * Does the corpus actually REACH production?
+ *
+ * ★ THE BUG THIS EXISTS TO STOP, WHICH HAD ALREADY HAPPENED ★
+ *
+ * Every test above passed while production held ten reference passages and zero help articles.
+ * They test the READER, and the reader was never wrong — `docs/` was in `.dockerignore`, so
+ * `docs/help` was not in the build context, so the directory did not exist in the image at all.
+ * The ingest found nothing, wrote the guides it did find, and reported success.
+ *
+ * `.dockerignore` already carries a note warning that `ssot/` looks like documentation and is
+ * read at runtime. `docs/help` is the same trap, and it was not caught the same way.
+ *
+ * Last matching pattern wins, which is Docker's own rule — so a bare `docs` followed by
+ * `!docs/help` includes the corpus, and reordering them silently breaks it again.
+ */
+describe('the help corpus survives the Docker build context', () => {
+  const IGNORE = readFileSync(join(HERE, '../../../../.dockerignore'), 'utf8')
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l !== '' && !l.startsWith('#'));
+
+  /** Docker's rule: the LAST pattern that matches decides. Returns true when the path ships. */
+  function included(path: string): boolean {
+    let excluded = false;
+    for (const raw of IGNORE) {
+      const negated = raw.startsWith('!');
+      const pattern = negated ? raw.slice(1) : raw;
+      // Enough for the plain directory prefixes this file cares about.
+      if (path === pattern || path.startsWith(`${pattern}/`) || pattern.startsWith(`${path}/`)) {
+        excluded = !negated;
+      }
+    }
+    return !excluded;
+  }
+
+  it('MANDATORY: docs/help is in the build context', () => {
+    expect(
+      included('docs/help'),
+      'The support assistant answers ONLY from help-tagged rows, and those rows come from these ' +
+        'files. Excluded from the build context, the ingest reports success and writes none of them.',
+    ).toBe(true);
+  });
+
+  it('MANDATORY: ssot is in the build context', () => {
+    // Read at runtime by the promotion run. The note in .dockerignore says so; this enforces it.
+    expect(included('ssot')).toBe(true);
+  });
+
+  it('the rest of docs is still excluded — only the corpus is needed at runtime', () => {
+    // A named file rather than the directory: `docs` itself is now PARTLY included, so asking
+    // about the directory has no true answer. These describe the build; nothing reads them.
+    expect(included('docs/ai-tunnel.md')).toBe(false);
+    expect(included('docs/scheduled-jobs.md')).toBe(false);
   });
 });
