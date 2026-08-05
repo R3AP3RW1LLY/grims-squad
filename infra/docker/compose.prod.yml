@@ -234,6 +234,23 @@ services:
     env_file: [/srv/grims/.env]
     environment:
       NODE_ENV: production
+    # ★ THE SITE GETS THE CPU FIRST — MEASURED 2026-08-05 ★
+    #
+    # Members reported "The hub did not answer in time" from the companion app. The hub was
+    # answering; it was taking EIGHTY-EIGHT SECONDS to do it. The galaxy ingest was decompressing
+    # its 4 GB dump — four `unpigz` processes — on the same eight cores serving the site, load
+    # average 23.
+    #
+    # `cpu_shares` is a WEIGHT, not a cap: at 256 against the default 1024 these containers still
+    # use the whole box when nothing else wants it, and yield when the API does. So an ingest is
+    # not slower on a quiet night and cannot starve a member on a busy one.
+    #
+    # Which is the right trade, and the same one the deploy build now makes: nobody is waiting on
+    # an ingest, and everybody is waiting on the site.
+    #
+    # It covers everything the container spawns — unpigz, Prisma, the lot — which nicing individual
+    # commands would not.
+    cpu_shares: 256
     restart: unless-stopped
     # ★ SOMEWHERE FOR THE GALAXY DUMP TO LIVE ★
     #
@@ -290,6 +307,9 @@ services:
     env_file: [/srv/grims/.env]
     environment:
       NODE_ENV: production
+    # Same weight as the daemon, and for the same reason — this is the container cron runs the
+    # galaxy import in, which is the specific job that took the site down to 88-second responses.
+    cpu_shares: 256
     # The same knowledge volume the resident daemon mounts: cron downloads the galaxy dump in one
     # of these containers and ingests it in another, so the file has to outlive both.
     volumes:

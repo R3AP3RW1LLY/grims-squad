@@ -126,6 +126,11 @@ REQUIRED=(
   # the two above: unset means the rows queue silently, so the first anybody would know is a
   # project nobody was told about.
   DISCORD_COLONY_CHANNEL_ID
+  # ★ AND THE RELEASE CHANNEL ★
+  #
+  # Where "what changed on the website and in the app" goes. Required for the same reason as the
+  # rest: unset means the row queues silently and nobody hears about a release that shipped.
+  DISCORD_RELEASE_CHANNEL_ID
 )
 
 missing=()

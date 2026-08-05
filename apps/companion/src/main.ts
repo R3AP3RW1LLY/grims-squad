@@ -2276,6 +2276,48 @@ if (!app.requestSingleInstanceLock()) {
         push();
         refreshTray();
       },
+      /*
+       * ★ THE ONE CASE WHERE THIS APP INTERRUPTS SOMEBODY ★
+       *
+       * Squadron owner, 2026-08-05: updates now install even mid-session, because the releases that
+       * matter are the ones that fix how data is RECORDED — and a member in a twelve-hour session is
+       * both the one whose data is wrong and the one a wait-for-the-game-to-close rule never
+       * reaches.
+       *
+       * So they are told, in three places at once, and then it happens. The activity feed is the
+       * durable record, the tray balloon is what reaches somebody with the window closed and the
+       * game full-screen, and `push()` updates the panel if it is open. A restart nobody saw coming
+       * is the thing that makes people uninstall a background app.
+       */
+      onForced: (version, graceMs) => {
+        const seconds = Math.round(graceMs / 1000);
+        activity = appendActivity(activity, [
+          {
+            at: Date.now(),
+            level: 'warn',
+            text:
+              `Updating to ${version} in about ${seconds} seconds. This release changes how your ` +
+              `data is recorded, so it cannot wait for you to finish. Your journal position is ` +
+              `saved — nothing you have flown will be lost.`,
+          },
+        ]);
+        pendingUpdate = version;
+        push();
+        refreshTray();
+
+        /*
+         * Best effort, and never allowed to throw: a balloon that fails on a stripped-down desktop
+         * must not stop the update it was announcing.
+         */
+        try {
+          tray?.displayBalloon?.({
+            title: `Grim's Squad Companion — updating`,
+            content: `Restarting in about ${seconds} seconds to finish updating to ${version}.`,
+          });
+        } catch {
+          // No balloon on this platform. The feed and the panel still carry it.
+        }
+      },
       install: () => {
         /*
          * `isQuitting` first, or the window-close handler hides to tray instead of letting the
