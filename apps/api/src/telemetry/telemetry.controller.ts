@@ -467,10 +467,26 @@ export class TelemetryController {
  *
  * Read from OUR configuration, never from the request. The app is told where to send its member,
  * and a caller-supplied base here would be an open redirect with a credential at the end of it.
- * Relative when unset, which is correct on localhost where the app and the site share an origin.
+ *
+ * ★ IT FALLS BACK TO PUBLIC_URL, AND THAT IS THE WHOLE FIX ★
+ *
+ * Squadron owner, 2026-08-05: "when we go to add the app to our production website it redirects us
+ * to the localhost site!"
+ *
+ * This read WEB_BASE_URL alone and returned an empty string when it was unset, making the answer a
+ * RELATIVE path — correct on a laptop, where the app and the site share an origin, and useless
+ * from a desktop app talking to a server, which resolved it against its own default and opened
+ * localhost. Nobody set WEB_BASE_URL in production because nothing said it was load-bearing.
+ *
+ * PUBLIC_URL is already REQUIRED in production (the deploy refuses without it) and is already the
+ * address the deployment serves, so the environment answers this question by itself: production
+ * gets the production site, a laptop with neither variable set keeps the relative path it wants.
+ * WEB_BASE_URL still wins when present, for a split origin.
  */
 function webBase(): string {
-  return (process.env['WEB_BASE_URL'] ?? '').replace(/\/+$/, '');
+  const explicit = (process.env['WEB_BASE_URL'] ?? '').trim();
+  const fallback = (process.env['PUBLIC_URL'] ?? '').trim();
+  return (explicit === '' ? fallback : explicit).replace(/\/+$/, '');
 }
 
 function appVersionOf(req: FastifyRequest): string | undefined {

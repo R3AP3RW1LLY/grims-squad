@@ -468,7 +468,43 @@ const COLLECTOR_STALL_MS = 30 * 60_000;
 /** Spansh rebuilds nightly; thirty hours means a whole rebuild came and went without us. */
 const GALAXY_STALL_MS = 30 * 60 * 60_000;
 
+/**
+ * Which deployment is speaking.
+ *
+ * ★ SQUADRON OWNER, 2026-08-05 ★
+ *
+ * "i think we need to state what environment this is happening in in the message it sends us" —
+ * said on receiving a production alert that could equally have come from a developer's laptop. Both
+ * write to the same table shape and the bot delivers whatever it finds, so the reader had no way to
+ * tell whether the site was actually down.
+ *
+ * Derived from PUBLIC_URL's host rather than a NODE_ENV string, because that is the address the
+ * deployment actually serves and it is already required in production.
+ */
+function environmentLabel(env: NodeJS.ProcessEnv = process.env): string {
+  const raw = env['PUBLIC_URL'] ?? '';
+  try {
+    return new URL(raw).host;
+  } catch {
+    return raw === '' ? 'development' : raw;
+  }
+}
+
+/**
+ * How long ago, said in words a person can act on.
+ *
+ * `Math.round(Infinity / 60_000)` prints "Infinity minutes ago", which is what the first production
+ * alert said. Infinity is not a duration — it is this watch's way of saying the thing has NEVER
+ * reported, which is a different and more serious fact than a long gap, so it gets its own sentence.
+ */
+export function describeAge(ms: number, unit: 'minutes' | 'hours'): string {
+  if (!Number.isFinite(ms)) return 'has never reported at all';
+  const value = unit === 'minutes' ? Math.round(ms / 60_000) : Math.round(ms / 3_600_000);
+  return `last did work ${value} ${unit} ago`;
+}
+
 function startIngestionWatch(db: PrismaClient): void {
+  const where = environmentLabel();
   const alert = async (kind: string, message: string): Promise<void> => {
     const [recent] = await db.$queryRawUnsafe<Array<{ n: number }>>(
       `SELECT count(*)::int AS n FROM ops_alerts
@@ -477,12 +513,14 @@ function startIngestionWatch(db: PrismaClient): void {
     );
     if ((recent?.n ?? 0) > 0) return;
 
+    // The environment leads the sentence, so a reader knows whether to get out of bed.
+    const stamped = `[${where}] ${message}`;
     await db.$executeRawUnsafe(
       `INSERT INTO ops_alerts (kind, message) VALUES ($1, $2)`,
       kind,
-      message,
+      stamped,
     );
-    console.error(`daemon: ALERT ${kind} — ${message}`);
+    console.error(`daemon: ALERT ${kind} — ${stamped}`);
   };
 
   /* Whether each thing was healthy at the LAST check, so recovery is a transition too. */
@@ -501,8 +539,8 @@ function startIngestionWatch(db: PrismaClient): void {
       if (!collectorHealthy && wasHealthy['collector']) {
         await alert(
           'collector-stalled',
-          `Market ingestion has stopped. The EDDN collector last did work ` +
-            `${Math.round(collectorAge / 60_000)} minutes ago (threshold 30). ` +
+          `Market ingestion has stopped. The EDDN collector ` +
+            `${describeAge(collectorAge, 'minutes')} (threshold 30 minutes). ` +
             `Every price on the site is ageing from this moment.`,
         );
       } else if (collectorHealthy && !wasHealthy['collector']) {
@@ -522,8 +560,8 @@ function startIngestionWatch(db: PrismaClient): void {
       if (!galaxyHealthy && wasHealthy['galaxy']) {
         await alert(
           'galaxy-stale',
-          `The Spansh galaxy baseline has not refreshed in ` +
-            `${Math.round(galaxyAge / 3_600_000)} hours (threshold 30). ` +
+          `The Spansh galaxy baseline ${describeAge(galaxyAge, 'hours')} ` +
+            `(threshold 30 hours). ` +
             `Stations nobody visits live are ageing without a floor under them.`,
         );
       } else if (galaxyHealthy && !wasHealthy['galaxy']) {

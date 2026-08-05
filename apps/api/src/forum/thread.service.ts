@@ -767,7 +767,20 @@ export class ThreadService {
 
     const postPerm =
       category.postPerm === null ? null : BigInt(category.postPerm.toFixed(0));
-    if (!satisfiesMask(callerMask, postPerm)) {
+    /*
+     * ★ THE PUBLISH DOOR CARRIES ITS OWN AUTHORITY ★
+     *
+     * A system carbon-copy is not the author asking to post — it is the platform recording
+     * something that already happened, under a name members will recognise. The announcements
+     * board demands FORUM_POST_OFFICER, and the webmaster preset deliberately excludes every
+     * squadron-standing permission, so the configured author could never satisfy it: the deploy
+     * announcement reached Discord and its forum copy retried for ever against a wall.
+     *
+     * `viaPublish` is already the single audited exception for boards whose threads arrive through
+     * a flow rather than a composer (the suggestion box). Announcements are the second, and both
+     * still pass the sanitiser, the screener and the category's own locked check above.
+     */
+    if (!viaPublish && !satisfiesMask(callerMask, postPerm)) {
       throw new AppError(ErrorCode.PERMISSION_DENIED, 'You cannot post in this category.');
     }
 
