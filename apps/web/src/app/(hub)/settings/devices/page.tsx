@@ -110,12 +110,22 @@ export default async function DevicesPage() {
                   href="/settings/commander"
                   className="mt-2 block text-sm text-[var(--color-brand-cyan-bright)]"
                 >
+                  Who can see this data
+                </a>
+              </Panel>
+            </>
+          }
+        >
           {/*
             ★ THE DOWNLOAD COMES FIRST ★
 
             The order is: get it, pair it, choose what it sends. Somebody who
             has not installed the app cannot act on anything below, so putting
             the pairing panel above the download asks them to do step two first.
+
+            (It was briefly nested INSIDE the rail's "Who can see this data"
+            anchor — download cards rendering inside a link — which is why this
+            comment now sits where the section actually is.)
           */}
           <Section
             title="Download"
@@ -124,12 +134,6 @@ export default async function DevicesPage() {
             <CompanionDownload assets={releases?.assets ?? []} />
           </Section>
 
-                  Who can see this data
-                </a>
-              </Panel>
-            </>
-          }
-        >
           <DevicesPanel initialDevices={devices.devices} timezone={me.user?.timezone ?? 'UTC'} />
 
           {/*

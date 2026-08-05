@@ -92,8 +92,46 @@ function tryRefresh(): Promise<boolean> {
 export interface ApiCallOptions {
   /** Sent as JSON. Omit entirely when the endpoint takes no body. */
   readonly body?: unknown;
+  /**
+   * Sent AS IS, with `contentType`.
+   *
+   * ★ WHY IMAGE UPLOADS COME THROUGH HERE RATHER THAN CALLING fetch ★
+   *
+   * The upload route posts the file as the request body with an image content type — no multipart,
+   * no form fields (see the note in main.ts). That used to mean a bare `fetch` at each call site,
+   * which quietly skipped the two things this function exists for: the CSRF header, and the
+   * refresh-and-retry that a 401 needs. An upload that failed because the access token had aged out
+   * simply failed, and the member saw "that did not go through" on a perfectly good file.
+   */
+  readonly rawBody?: Blob;
+  readonly contentType?: string;
+  /**
+   * A bearer credential, for the doors that are not cookie-authenticated — the guest support
+   * chat presents its one-time token here. Cookie routes never set it; going through this
+   * function anyway is what keeps the content-type rule in ONE place, which is the entire
+   * reason this file exists.
+   */
+  readonly authorization?: string;
   /** Shown if the server does not supply a better one. */
   readonly fallbackMessage?: string;
+}
+
+/**
+ * What apiCall throws.
+ *
+ * Still an Error carrying the server's own sentence — every existing `catch (e) { e.message }`
+ * reads it exactly as before. The STATUS rides along for the callers that must tell "gone"
+ * from "broken": the guest chat treats a 404 as "start fresh" and anything else as "try again",
+ * and matching the refusal SENTENCE instead would couple the client to copy that is allowed
+ * to be reworded.
+ */
+export class ApiCallError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
 }
 
 /**
@@ -114,7 +152,13 @@ export async function apiCall<T>(
   const headers: Record<string, string> = {};
 
   if (options.body !== undefined) headers['content-type'] = 'application/json';
+  // A raw body declares its own type. The server still decides the real format by DECODING the
+  // bytes — this only selects the parser (see RAW_IMAGE_TYPES in main.ts).
+  if (options.rawBody !== undefined && options.contentType !== undefined) {
+    headers['content-type'] = options.contentType;
+  }
   if (MUTATING.has(upper)) headers['x-csrf-token'] = readCsrf();
+  if (options.authorization !== undefined) headers['authorization'] = options.authorization;
 
   const init: RequestInit = {
     method: upper,
@@ -123,6 +167,7 @@ export async function apiCall<T>(
     headers,
   };
   if (options.body !== undefined) init.body = JSON.stringify(options.body);
+  if (options.rawBody !== undefined) init.body = options.rawBody;
 
   let res = await fetch(path, init);
 
@@ -166,13 +211,23 @@ export async function apiCall<T>(
     // The API answers with an ENVELOPE — { error: { message } }. Reading
     // `json.message` off the top level always yields undefined and throws away
     // the real reason, which is a mistake this codebase has already made once.
-    throw new Error((await errorFromResponse(res, options.fallbackMessage)).message);
+    throw new ApiCallError((await errorFromResponse(res, options.fallbackMessage)).message, res.status);
   }
 
   // 204, or a body that is not JSON. Callers expecting nothing get an empty
   // object rather than a parse error.
   return (await res.json().catch(() => ({}))) as T;
 }
+
+/**
+ * A browser-side GET.
+ *
+ * Server components read through `lib/api.ts` instead; this is for the cases where a page fetches
+ * AFTER it has rendered — expanding one conversation out of a hundred, rather than sending all of
+ * them down with the page.
+ */
+export const apiGet = <T>(path: string, fallbackMessage?: string): Promise<T> =>
+  apiCall<T>('GET', path, { ...(fallbackMessage !== undefined && { fallbackMessage }) });
 
 export const apiPost = <T>(path: string, body?: unknown, fallbackMessage?: string): Promise<T> =>
   apiCall<T>('POST', path, { ...(body !== undefined && { body }), ...(fallbackMessage !== undefined && { fallbackMessage }) });

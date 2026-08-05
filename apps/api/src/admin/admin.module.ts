@@ -1,15 +1,28 @@
 import { Module } from '@nestjs/common';
 import { Redis } from 'ioredis';
 import { PrismaClient } from '@grims/db';
+import { PromotionsService } from './promotions.service.js';
 import { DatabaseModule } from '../database.module.js';
 import { AuthModule } from '../auth/auth.module.js';
 import { AdminController } from './admin.controller.js';
+import { ViewAsController } from './view-as.controller.js';
 import { PrismaAdminStore } from './admin.store.js';
 import { RoleAdminService } from './role-admin.service.js';
 import { MappingAdminService } from './mapping-admin.service.js';
 import { PrismaRoleAdminStore, PrismaMappingAdminStore } from './role-admin.store.prisma.js';
-import { ADMIN_STORE, DASHBOARD_STORE, ROLE_ADMIN, MAPPING_ADMIN } from './admin.tokens.js';
+import { RestDiscordModeration } from './discord-moderation.port.js';
+import {
+  ADMIN_STORE,
+  DASHBOARD_STORE,
+  ROLE_ADMIN,
+  MAPPING_ADMIN,
+  DISCORD_MODERATION,
+  PROMOTIONS_SERVICE,
+} from './admin.tokens.js';
 import { PrismaDashboardStore } from './dashboard.store.js';
+import { LIVE_SERVICE } from '../live/live.tokens.js';
+import { liveNudgeOf } from '../live/live-nudge.js';
+import type { LiveService } from '../live/live.service.js';
 
 /**
  * Imports AuthModule for TotpService: the AdminGateGuard resolves it, and a
@@ -20,8 +33,18 @@ const cache = (): Redis => new Redis(process.env['REDIS_URL'] ?? 'redis://localh
 
 @Module({
   imports: [DatabaseModule, AuthModule],
-  controllers: [AdminController],
+  controllers: [AdminController, ViewAsController],
   providers: [
+    {
+      // Promotions, for the month button and the per-member override. Reads the ladder from the
+      // SSOT file and applies rank changes to Discord as well as to our rows.
+      provide: PROMOTIONS_SERVICE,
+      // LIVE_SERVICE optional: the promotion notice is decoration, and a wiring without the live
+      // module must still promote. `liveNudgeOf` tolerates null.
+      inject: [PrismaClient, { token: LIVE_SERVICE, optional: true }],
+      useFactory: (db: PrismaClient, live?: LiveService) =>
+        new PromotionsService(db, liveNudgeOf(live)),
+    },
     {
       provide: DASHBOARD_STORE,
       inject: [PrismaClient],
@@ -36,6 +59,22 @@ const cache = (): Redis => new Redis(process.env['REDIS_URL'] ?? 'redis://localh
       provide: ROLE_ADMIN,
       inject: [PrismaClient],
       useFactory: (db: PrismaClient) => new RoleAdminService(new PrismaRoleAdminStore(db, cache())),
+    },
+    {
+      /*
+       * ★ THE ONE PROVIDER HERE THAT REACHES OUTSIDE ★
+       *
+       * Kick, ban and timeout are HTTP calls to Discord, so this is the only thing in the admin
+       * module that can have an effect nobody here can undo. Behind a port so the controller can be
+       * tested without a network, and so a missing token is a refusal with a sentence rather than a
+       * crash on the first ban.
+       */
+      provide: DISCORD_MODERATION,
+      useFactory: () =>
+        new RestDiscordModeration(
+          process.env['DISCORD_BOT_TOKEN'] ?? '',
+          process.env['DISCORD_GUILD_ID'] ?? '',
+        ),
     },
     {
       provide: MAPPING_ADMIN,

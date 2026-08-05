@@ -1,4 +1,6 @@
 import { cookies } from 'next/headers';
+import type { LeaderboardKey, SignatureView } from '@grims/shared';
+import type { BannerIdentity } from '../components/forum/banner-render';
 
 /**
  * Server-side calls into our own API.
@@ -86,6 +88,17 @@ export interface PrivacySettings {
   showActivity: boolean;
   showOnPublicRoster: boolean;
   showOnLeaderboard: boolean;
+  /** Render every post and signature in the site face, whatever their author chose. */
+  plainFonts: boolean;
+  /*
+   * One switch per leaderboard, all defaulting ON — squadron owner, 2026-08-04: "default all
+   * leaderboard participation on for all commanders." Per-board rather than one master switch,
+   * because hiding from the trade standings while staying on the colony board is a choice a
+   * member can reasonably make. The names come from the shared LEADERBOARDS catalogue.
+   */
+  showLbBounties: boolean;
+  showLbColony: boolean;
+  showLbTrade: boolean;
 }
 
 /**
@@ -229,6 +242,16 @@ export const getRoster = (): Promise<{ members: RosterMember[]; total: number } 
  */
 export type MemberProfile = RosterMember & MemberProfileExtras;
 
+/**
+ * The handle behind a member id, for resolving a @mention link.
+ *
+ * Null covers every failure — no such id, a banned account, the API unreachable — because the
+ * caller turns all of them into the same 404. A mention that points at a removed member is a dead
+ * link, not a page that confirms they existed.
+ */
+export const getHandleForId = (userId: string): Promise<{ handle: string } | null> =>
+  get<{ handle: string }>(`/v1/members/id/${encodeURIComponent(userId)}`, { authed: true });
+
 export const getProfile = (handle: string): Promise<MemberProfile | null> =>
   get<MemberProfile>(`/v1/members/${encodeURIComponent(handle)}`, { authed: true });
 
@@ -332,9 +355,28 @@ export interface AdminActivityRow {
   messageCount: number;
   forumPostCount: number;
   voiceJoinCount: number;
+  /**
+   * Minutes in voice for the period, beside the join count. Banked by the bot when a session
+   * ends, split at UTC month boundaries — so a year is the sum of its months. Zero for months
+   * before the banking shipped, which the table renders as a dash rather than a figure.
+   */
+  voiceMinutes: number;
   gameActivity: string;
   qualifies: boolean;
   lastActivityAt: string | null;
+  /**
+   * When Discord says they joined the server — how long they have been in the squadron.
+   *
+   * Not from Inara: its commander endpoint returns a squadron name and rank and no dates, and there
+   * is no roster endpoint. The game does not record it either. Discord is the only source that has
+   * it, and for a squadron that recruits through Discord it is the right one.
+   *
+   * Null for everybody who has left — Discord discards the date on departure — in which case the
+   * column falls back to `activeSince` and says so.
+   */
+  joinedAt: string | null;
+  /** Earliest recorded activity. A weaker claim than `joinedAt`, and labelled differently. */
+  activeSince: string | null;
 }
 
 export interface AdminAuditRow {
@@ -345,6 +387,16 @@ export interface AdminAuditRow {
   actorName: string | null;
   targetType: string | null;
   targetId: string | null;
+  /**
+   * The target's Discord nickname, when the target is a member.
+   *
+   * The id stays alongside it: a display name is chosen by the member and can be changed to match
+   * somebody else's, so the stable identifier remains what actually identifies the row.
+   */
+  targetName: string | null;
+  /** What changed (INV-009). Stored since the beginning; only now sent to the page. */
+  before: unknown;
+  after: unknown;
   createdAt: string;
 }
 
@@ -356,22 +408,47 @@ export interface AdminAuditRow {
 /** Squadron-wide figures for the admin dashboard. Aggregates only, never one member's data. */
 export interface AdminDashboard {
   month: string;
+  /** 28, 29, 30 or 31 — the axis length, sent so the client is not a second leap-year implementation. */
+  daysInMonth: number;
+  /** Months that actually have activity, newest first. Drives the history tabs. */
+  availableMonths: string[];
+  /** What one bar of the activity chart covers. `month` in the year view. */
+  granularity: 'day' | 'month';
   discord: {
     messages: number;
     forumPosts: number;
     voiceJoins: number;
+    /** Minutes in voice across the period, beside the joins — never instead of them. */
+    voiceMinutes: number;
     activeMembers: number;
     trackedMembers: number;
     /** Messages per day of the month, index 0 = the 1st. */
     daily: number[];
     /** Distinct members active on each day, index 0 = the 1st. */
+    /** Voice joins per day, split out of the old combined "actions" figure. */
+    dailyVoice: number[];
+    /** Forum posts per day. */
+    dailyForum: number[];
     dailyMembers: number[];
     top: Array<{ name: string; messages: number; voice: number; cmdrName: string | null }>;
   };
   game: {
+    /** Journal events in the SELECTED PERIOD — banked months plus the live window. */
     events: number;
+    /**
+     * Distinct commanders reporting in the period. Exact for a month; for a year it is the
+     * busiest month's figure, because distinct cannot be summed across purged months.
+     */
     reporting: number;
+    /** Game sessions (`LoadGame`) in the period. Banked + live, like `events`. */
     sessionsThisMonth: number;
+    /** Events per month of the year view, index 0 = January. Empty in the month view. */
+    monthlyEvents: number[];
+    /**
+     * The first month the bank holds, `YYYY-MM`, or null before the rollup has ever run.
+     * Months before it render a "recorded from" note rather than fake zeros.
+     */
+    telemetryRecordedFrom: string | null;
     /**
      * Elite sign-ins per day of the month, index 0 = the 1st.
      *
@@ -383,6 +460,10 @@ export interface AdminDashboard {
     flyingThisMonth: number;
     playingNow: number;
     ships: Array<{ ship: string; pilots: number }>;
+    /** What the squadron is wearing on foot. Same journal source as `ships`, filtered the other way. */
+    suits: Array<{ suit: string; pilots: number }>;
+    /** Wealth distribution among members who opted in. Empty when too few to be anonymous. */
+    creditBands: Array<{ band: string; pilots: number }>;
     byType: Array<{ type: string; count: number }>;
   };
   squadron: {
@@ -399,8 +480,10 @@ export interface AdminDashboard {
   };
 }
 
-export const getAdminDashboard = (): Promise<AdminDashboard | null> =>
-  get('/v1/admin/dashboard', { authed: true });
+export const getAdminDashboard = (month?: string): Promise<AdminDashboard | null> =>
+  get(`/v1/admin/dashboard${month === undefined ? '' : `?month=${encodeURIComponent(month)}`}`, {
+    authed: true,
+  });
 
 export const getAdminActivity = (
   month?: string,
@@ -409,6 +492,82 @@ export const getAdminActivity = (
     authed: true,
   });
 
+/**
+ * One member of the Discord server, for the Squad Members roster.
+ *
+ * Not the same list as `getAdminMembers`, which returns WEBSITE accounts — one of them, against a
+ * hundred and seventeen people in Discord. An officer moderating the squadron works from this one.
+ */
+export interface PromotionStanding {
+  userId: string;
+  currentRank: string | null;
+  nextRank: string | null;
+  qualifyingMonths: number;
+  monthsRequired: number | null;
+  earned: boolean;
+}
+
+export interface PromotionReport {
+  dryRun: boolean;
+  ranAt: string;
+  considered: number;
+  wouldPromote: Array<{ userId: string; handle: string; from: string; to: string; qualifyingMonths: number }>;
+  skipped: Array<{ userId: string; handle: string; rank: string; reason: string }>;
+  promoted: number;
+  failed: Array<{ userId: string; handle: string; reason: string }>;
+}
+
+export const getPromotionStandings = (): Promise<{ standings: PromotionStanding[] } | null> =>
+  get('/v1/admin/promotions/standings', { authed: true });
+
+export interface SquadMemberRow {
+  /** Their website user id, or null for somebody in the guild with no account. */
+  userId: string | null;
+  discordId: string;
+  /** Server nickname — the in-game name, by this squadron's convention. */
+  nick: string | null;
+  username: string | null;
+  globalName: string | null;
+  isBot: boolean;
+  /** Every Discord role they wear, by name. */
+  roles: string[];
+  /** Highest TENURE rank. Separate axis from `appointment`. */
+  rank: string | null;
+  appointment: string | null;
+  joinedAt: string | null;
+  /**
+   * When a Discord timeout expires.
+   *
+   * A value IN THE PAST means not timed out — Discord expires a timeout silently, so this is
+   * compared against the clock rather than tested for null.
+   */
+  timeoutUntil: string | null;
+  inVoiceSince: string | null;
+  lastSeenAt: string | null;
+  hasAccount: boolean;
+  handle: string | null;
+  cmdrName: string | null;
+  /**
+   * Whether Discord will let the bot act on them at all.
+   *
+   * A bot cannot kick, ban or time out anybody whose highest role sits at or above its own,
+   * whatever permissions it holds. Computed server-side so the page can disable the controls and
+   * say why, rather than offering an action that always comes back 403.
+   */
+  moderatable: boolean;
+  notModeratableBecause: string | null;
+}
+
+/**
+ * The Discord roster, read through the gate.
+ *
+ * `getAdmin`, not `get`: a plain read collapses every failure into null, and the Squad Members page
+ * would then show a two-factor code box to somebody who simply lacks MEMBER_MANAGE. That exact
+ * confusion cost an officer an evening on 2026-07-30 — see the note on `getAdmin`.
+ */
+export const getSquadRosterGated = (): Promise<AdminRead<{ rows: SquadMemberRow[] }>> =>
+  getAdmin('/v1/admin/squad');
+
 export const getAdminAudit = (): Promise<{
   entries: AdminAuditRow[];
   actions: string[];
@@ -416,6 +575,73 @@ export const getAdminAudit = (): Promise<{
   page: number;
   pageSize: number;
 } | null> => get('/v1/admin/audit?limit=100&page=1', { authed: true });
+
+/**
+ * A post the screener held, waiting for a human.
+ *
+ * Mirrors `HeldPost` on the API. `reason` is the field an officer actually triages on: `flagged`
+ * means the model objected and `categories` says to what; `unavailable` means the screener could
+ * not be reached and NOBODY has judged this post — which usually means it is fine and needs a
+ * glance, not a verdict.
+ */
+export interface HeldPostRow {
+  id: string;
+  threadId: string;
+  threadTitle: string;
+  categorySlug: string;
+  bodyHtml: string;
+  authorHandle: string;
+  authorName: string;
+  createdAt: string;
+  reason: 'flagged' | 'unavailable';
+  categories: string[];
+  /** The model's own words. For the reviewer only — never shown to the author. */
+  modelReason: string | null;
+}
+
+/** The moderation queue. Null when the caller may not review, which the tab renders as no-access. */
+export const getHeldPosts = (): Promise<{ posts: HeldPostRow[]; total: number } | null> =>
+  get('/v1/forum/review/held', { authed: true });
+
+/**
+ * Whether the AI is answering, reported per runtime.
+ *
+ * Two GPUs, two services, and they fail independently — the usual state during a game session is
+ * text up and image busy. One combined "AI: ok" would be wrong most evenings.
+ */
+export const getAiHealth = (): Promise<{
+  /* No model identifier: the API deliberately does not return one. See AI_NAME. */
+  text: { configured: boolean; reachable: boolean; tookMs: number };
+  image: { configured: boolean; reachable: boolean; tookMs: number };
+} | null> => get('/v1/ai/health', { authed: true });
+
+/** One conversation as the support console lists it. Dates arrive as ISO strings. */
+export interface SupportConsoleRow {
+  id: string;
+  status: 'open' | 'closed';
+  /**
+   * Who answers the next requester message. 'ai' means GMSD AI is on it and nobody has asked
+   * for a person — the console labels these apart, and the waiting count excludes them. Any
+   * officer reply flips it to 'officer' for good.
+   */
+  handledBy: 'ai' | 'officer';
+  subject: string | null;
+  /** Who is asking — a member with an account, or a guest with only a name. */
+  requester:
+    | { kind: 'member'; id: string; displayName: string }
+    | { kind: 'guest'; name: string };
+  preview: string;
+  createdAt: string;
+  lastMessageAt: string;
+  /** Whether words landed since ANY officer last opened it — the console is one shared queue. */
+  unread: boolean;
+}
+
+/** The support console's queue. Null when the caller may not work it, rendered as no-access. */
+export const getSupportConsole = (
+  status: 'open' | 'closed',
+): Promise<{ conversations: SupportConsoleRow[] } | null> =>
+  get(`/v1/support/console/conversations?status=${status}`, { authed: true });
 
 export interface SquadronStats {
   /** People in the Discord guild, bots excluded. THIS is the squadron. */
@@ -474,6 +700,10 @@ export interface CommanderProfile {
   /** The system they were last seen in. Null until something reports one. */
   currentSystem: string | null;
   systemSeenAt: string | null;
+  /** Station, settlement or body — whatever the journal last named inside the system. */
+  currentLocation: string | null;
+  /** Its own timestamp: a docking and a jump age at different rates. */
+  locationSeenAt: string | null;
 }
 
 export const getMyCommander = (): Promise<CommanderProfile | null> =>
@@ -568,7 +798,16 @@ export const getInaraStatus = (): Promise<InaraStatus | null> =>
 export interface NavItem {
   href: string;
   label: string;
-  section: 'squadron' | 'personal' | 'admin';
+  // 'ai' added 2026-08-01 — the GMSD AI sidebar group. Mirrors NavItem in the API's nav.ts; the
+  // API decides which items a member gets, this only names the headings.
+  section: 'squadron' | 'personal' | 'ai' | 'admin';
+  /**
+   * A collapsible group WITHIN a section, closed by default. Absent for items that sit directly
+   * under the heading.
+   *
+   * Squadron owner, 2026-08-01: the Shipyard is a subcategory of Squadron holding the Outfitter.
+   */
+  subsection?: string;
   blurb: string;
 }
 
@@ -586,6 +825,14 @@ export interface MeResponse {
   nav: NavItem[];
   isAdmin: boolean;
   mustSecureAccount: boolean;
+  /**
+   * The rank being previewed, or null.
+   *
+   * Every page renders its chrome from this response, so the banner announcing a preview comes free
+   * — and it has to, because a preview with nothing on screen saying so is indistinguishable from
+   * having lost permissions.
+   */
+  viewingAs: { id: string; name: string } | null;
   /**
    * What they still owe. Decided by the SERVER (onboarding-gate.ts) so the
    * ordering lives in one place — two copies of a rule this fiddly drift, and
@@ -621,6 +868,7 @@ export const getMe = async (): Promise<MeResponse> =>
     nav: [],
     isAdmin: false,
     mustSecureAccount: false,
+    viewingAs: null,
     session: { expiresAt: null, twoFactorExpiresAt: null },
     onboarding: { step: null, path: null, promptForVerification: false, verified: false },
   };
@@ -693,6 +941,13 @@ export interface ForumCategory {
    * network tab.
    */
   canPost: boolean;
+  /**
+   * Threads with activity this member has not seen since they last opened the board.
+   *
+   * Optional because an anonymous visitor gets nothing: an unread badge for somebody with no
+   * account is noise about content they cannot follow.
+   */
+  unreadCount?: number;
 }
 
 /**
@@ -744,8 +999,19 @@ export interface GuidePost {
   author: { handle: string; displayName: string };
 }
 
-export const getPublicGuides = async (): Promise<PublicGuide[]> => {
-  const res = await get<{ threads: PublicGuide[] }>('/v1/forum/categories/guides/threads');
+/**
+ * Published threads on a PUBLIC board.
+ *
+ * ★ TAKES THE BOARD, RATHER THAN ONE PER BOARD ★
+ *
+ * There are two public boards now — Guides and Recruiting — and there will be more. A second
+ * hardcoded fetcher would have been a second place for the "empty on failure" rule to live, and
+ * the second place is the one that eventually throws instead.
+ */
+export const getPublicBoardThreads = async (slug: string): Promise<PublicGuide[]> => {
+  const res = await get<{ threads: PublicGuide[] }>(
+    `/v1/forum/categories/${encodeURIComponent(slug)}/threads`,
+  );
   /*
    * An empty list on failure, not a thrown error. This feeds the site's navigation on
    * every page: if the API is briefly unreachable the header should render without a
@@ -755,10 +1021,21 @@ export const getPublicGuides = async (): Promise<PublicGuide[]> => {
   return res?.threads ?? [];
 };
 
+/** Guides specifically — the navigation and the guides index both want exactly this. */
+export const getPublicGuides = (): Promise<PublicGuide[]> => getPublicBoardThreads('guides');
+
+export const getPublicBoardThread = (
+  board: string,
+  slug: string,
+): Promise<{ thread: PublicGuide; posts: GuidePost[] } | null> =>
+  get(
+    `/v1/forum/categories/${encodeURIComponent(board)}/threads/${encodeURIComponent(slug)}`,
+  );
+
 export const getPublicGuide = (
   slug: string,
 ): Promise<{ thread: PublicGuide; posts: GuidePost[] } | null> =>
-  get(`/v1/forum/categories/guides/threads/${encodeURIComponent(slug)}`);
+  getPublicBoardThread('guides', slug);
 
 /* ------------------------------------------------------- forum, authenticated */
 
@@ -767,7 +1044,23 @@ export interface HubCategory {
   slug: string;
   name: string;
   description: string | null;
+  /** Whether THIS member may start a thread here. False for everyone on a publish-only board. */
   canPost: boolean;
+  /**
+   * Whether THIS member may reply in existing threads here. Computed server-side from
+   * `reply_perm` (falling back to `post_perm`) — the split that lets members reply on Feature
+   * Requests while thread creation stays the webmaster's publish flow.
+   */
+  canReply: boolean;
+  /** Threads with activity this member has not seen. Absent or 0 for an anonymous visitor. */
+  unreadCount?: number;
+}
+
+export interface ForumIdentity {
+  handle: string;
+  displayName: string;
+  /** A path on our own API, or null. Never a third-party address — see the API's `avatarPath`. */
+  avatarUrl: string | null;
 }
 
 export interface HubThread {
@@ -777,18 +1070,41 @@ export interface HubThread {
   isPinned: boolean;
   isLocked: boolean;
   postCount: number;
+  viewCount: number;
   lastPostAt: string | null;
   createdAt: string;
-  author: { handle: string; displayName: string };
+  author: ForumIdentity;
+  /** Null when nobody has replied, so a quiet thread cannot be made to look busy. */
+  lastPoster: ForumIdentity | null;
+  /** Server-decided: whether this caller may mark a reply as the answer. Re-checked on write. */
+  canMarkSolution: boolean;
 }
 
 export interface HubPost {
   id: string;
+  /** Keys the signature map on the thread response. */
+  authorId: string;
   bodyHtml: string;
   createdAt: string;
   editedAt: string | null;
   editCount: number;
-  author: { handle: string; displayName: string };
+  author: ForumIdentity;
+  /** The post this answers, when it answers one in particular. Who and where, never what. */
+  replyTo: { postId: string; author: { handle: string; displayName: string } } | null;
+  isSolution: boolean;
+  /** Net votes. Denormalised on the post, so a thread render needs no aggregate. */
+  score: number;
+  /**
+   * What THIS reader voted, or null.
+   *
+   * Sent per post rather than fetched separately: the arrows have to render in their correct state
+   * on first paint, and a second request to find out would mean every post flickers from neutral
+   * to voted on every page load.
+   */
+  myVote: 1 | -1 | null;
+  reactions: { emoji: string; count: number; mine: boolean }[];
+  /** Server-decided: whether this caller may rewrite this post. Re-checked on write. */
+  canEdit: boolean;
 }
 
 export interface ThreadGrant {
@@ -815,7 +1131,31 @@ export const getHubThreads = (
 export const getHubThread = (
   slug: string,
   threadSlug: string,
-): Promise<{ thread: HubThread; posts: HubPost[] } | null> =>
+): Promise<{
+  thread: HubThread;
+  posts: HubPost[];
+  /**
+   * Keyed by author id, NOT attached per post — a thread with forty replies from twelve people
+   * has twelve signatures, and repeating each one per post makes the response grow with the
+   * conversation rather than with the number of people in it.
+   */
+  signatures: Record<string, SignatureView>;
+  /**
+   * What each author's banner text layers resolve to.
+   *
+   * Sent alongside the signatures rather than baked into them: a signature is a design, an identity
+   * is a fact about a person, and freezing the second into the first is what would make a promotion
+   * stop updating every banner its author has ever posted.
+   */
+  identities: Record<string, BannerIdentity>;
+  /**
+   * Up to three showcased badge KEYS per author, keyed by author id like the signatures — and per
+   * AUTHOR rather than per post for the same reason: a thread's badge weight grows with the number
+   * of people in it, not with how much they said. Keys only; the page resolves them against the
+   * shared catalogue, and a key the catalogue no longer knows is skipped rather than drawn wrong.
+   */
+  badges: Record<string, string[]>;
+} | null> =>
   get(
     `/v1/forum/categories/${encodeURIComponent(slug)}/threads/${encodeURIComponent(threadSlug)}`,
     { authed: true },
@@ -928,5 +1268,1318 @@ async function getAdmin<T>(path: string): Promise<AdminRead<T>> {
 export const getAdminRolesGated = (): Promise<AdminRead<{ roles: AdminRoleRow[] }>> =>
   getAdmin('/v1/admin/roles');
 
-export const getAdminDashboardGated = (): Promise<AdminRead<AdminDashboard>> =>
-  getAdmin('/v1/admin/dashboard');
+export const getAdminDashboardGated = (month?: string): Promise<AdminRead<AdminDashboard>> =>
+  /*
+   * `month` is `YYYY-MM`. Encoded even though it is validated server-side: a value that reaches a
+   * URL unencoded is a value somebody will eventually put a slash in.
+   */
+  getAdmin(month === undefined ? '/v1/admin/dashboard' : `/v1/admin/dashboard?month=${encodeURIComponent(month)}`);
+
+/*
+ * The Support tab's own probe, because its gate is SUPPORT_AGENT rather than MEMBER_MANAGE.
+ * Probing the dashboard for it would tell a future support-only role it lacks a permission it
+ * does not need, and send them asking an officer for the wrong bit.
+ */
+export const getSupportConsoleGated = (): Promise<
+  AdminRead<{ conversations: SupportConsoleRow[] }>
+> => getAdmin('/v1/support/console/conversations?status=open');
+
+// ── The suggestion box and the roadmap ───────────────────────────────────────
+
+/** One suggestion as the webmaster's inbox lists it. Dates arrive as ISO strings. */
+export interface SuggestionInboxRow {
+  id: string;
+  body: string;
+  sender: { id: string; displayName: string };
+  createdAt: string;
+}
+
+/** The inbox read, with the reason kept when it fails — its gate is SITE_CONFIG. */
+export const getSuggestionInboxGated = (): Promise<
+  AdminRead<{ suggestions: SuggestionInboxRow[] }>
+> => getAdmin('/v1/suggestions/inbox');
+
+/** One card on the roadmap, as every reader sees it. Dates arrive as ISO strings. */
+export interface RoadmapCard {
+  id: string;
+  title: string;
+  body: string | null;
+  column: 'ideas' | 'considering' | 'planned' | 'building' | 'shipped';
+  position: number;
+  /** The Feature Requests thread it was promoted from, when THIS reader may open it. */
+  threadLink: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RoadmapArchivedCard {
+  id: string;
+  title: string;
+  column: RoadmapCard['column'];
+  archivedAt: string;
+}
+
+/** The member-readable board. Null renders as the honest empty state. */
+export const getRoadmap = (): Promise<{ cards: RoadmapCard[] } | null> =>
+  get('/v1/roadmap', { authed: true });
+
+/** The webmaster's board — live cards plus the archive. Its gate is SITE_CONFIG. */
+export const getRoadmapManageGated = (): Promise<
+  AdminRead<{ cards: RoadmapCard[]; archived: RoadmapArchivedCard[] }>
+> => getAdmin('/v1/roadmap/manage');
+
+/**
+ * The promote panel's answer for ANY thread — asked unconditionally on thread pages, because
+ * the SERVER resolves whether this thread belongs to the Feature Requests board (the same
+ * slug-or-name, case-insensitive test publish uses), not the URL. Null for everybody without
+ * the webmaster's bit, which is what keeps the panel invisible to everyone else: the API
+ * refuses, `get()` collapses it, and no panel is drawn.
+ *
+ * ★ `/promotable`, NOT `/manage` — AND THE DIFFERENCE IS THE WHOLE FIX ★
+ *
+ * This asked `/v1/roadmap/manage/thread/:id`, which carries the admin gate. Because `get()`
+ * collapses every refusal to null and the panel renders only on an answer, a webmaster who had
+ * not touched the admin console in eight hours got NO panel on a Feature Requests thread —
+ * indistinguishable from an ordinary thread, with nothing saying a step-up was wanted.
+ *
+ * The read now sits on a route gated on SITE_CONFIG alone. Promote itself still posts to
+ * `/v1/roadmap/manage/promote`, which is still behind the second factor, and its refusal is
+ * shown in the panel rather than swallowed.
+ */
+export const getRoadmapThreadCard = (
+  threadId: string,
+): Promise<{
+  /** True only when the thread's category IS the Feature Requests board. */
+  promotable: boolean;
+  card: { id: string; column: RoadmapCard['column'] } | null;
+} | null> => get(`/v1/roadmap/promotable/${encodeURIComponent(threadId)}`, { authed: true });
+
+/**
+ * What GMSD AI has learned, per source.
+ *
+ * Dates arrive as ISO strings over the wire — the shared `SourceStatus` types them as `Date`
+ * because that is what the service produces, and pretending JSON preserved that would be a lie
+ * the first time anything called a method on one.
+ */
+export interface TrainingSource {
+  source: string;
+  rows: number;
+  /**
+   * Rows with text that have not been embedded yet.
+   *
+   * Not an error. An ingest that has just written five thousand rows is SUPPOSED to leave them
+   * waiting for the embedder; this going up after a run is the system working. What it answers is
+   * "has the backlog stopped moving".
+   */
+  awaitingEmbedding: number;
+  lastIngestedAt: string | null;
+  ingesting: boolean;
+  nextInHours: number | null;
+  lastError: string | null;
+  /** Started and then went quiet, as opposed to failing with a message. Never inferred from wording. */
+  stalled: boolean;
+  /** Only while something is running — what the live bar and countdown are computed from. */
+  startedAt: string | null;
+  rowsSoFar: number | null;
+  expectedRows: number | null;
+}
+
+export const getAiTrainingGated = (): Promise<AdminRead<{ sources: TrainingSource[] }>> =>
+  getAdmin('/v1/ai/training');
+
+/** One screenshot a member has offered for training. */
+export interface TrainingSubmission {
+  id: string;
+  uploadId: string;
+  category: string;
+  description: string;
+  state: string;
+  reviewNote: string | null;
+  createdAt: string;
+}
+
+/**
+ * Help Train the Bot.
+ *
+ * ★ CategoryProgress COMES FROM THE SHARED CONTRACT, NOT REDECLARED HERE ★
+ *
+ * The progress shape is a rule about training — how many images a concept needs before a LoRA
+ * learns it rather than memorises it — and a second copy in the web layer is a second place for
+ * those numbers to be wrong.
+ */
+export const getAiCorpusGated = (): Promise<
+  AdminRead<{
+    categories: import('@grims/shared').CategoryProgress[];
+    mine: TrainingSubmission[];
+    canSubmit: boolean;
+  }>
+> => getAdmin('/v1/ai/corpus');
+
+export interface ForumSearchHit {
+  postId: string;
+  threadId: string;
+  threadTitle: string;
+  threadSlug: string;
+  categorySlug: string;
+  authorHandle: string;
+  createdAt: string;
+  snippet: string;
+}
+
+/**
+ * Forum search (INV-024).
+ *
+ * `authed: true` forwards the session so the API resolves the real principal — the visible
+ * categories are derived server-side from it and applied inside the SQL. This function has no idea
+ * which boards exist and must not: a client that knew would be a second answer to the question the
+ * invariant says has exactly one.
+ */
+export const getForumSearch = (
+  query: string,
+): Promise<{
+  result: { hits: ForumSearchHit[]; total: number; query: string };
+  snippets: string[];
+} | null> =>
+  get(`/v1/forum/search?q=${encodeURIComponent(query)}`, { authed: true });
+
+/** The caller's follow state for one thread, for the Notify me button. */
+export const getThreadSubscription = (
+  threadId: string,
+): Promise<{ level: 'watching' | 'muted' | 'none' } | null> =>
+  get(`/v1/forum/threads/${encodeURIComponent(threadId)}/subscription`, { authed: true });
+
+export interface DmPreferences {
+  notifyDmDirectReply: boolean;
+  notifyDmMention: boolean;
+  notifyDmWatched: boolean;
+}
+
+/** Which Discord DMs this member has asked for. All default false — see the migration. */
+export const getDmPreferences = (): Promise<DmPreferences | null> =>
+  get('/v1/me/notifications', { authed: true });
+
+// ── Notifications: the bell ──────────────────────────────────────────────────
+//
+// Squadron owner, 2026-08-04: "create a notifications dropdown in a bell icon ... this should also
+// have a badge system with a read all option and should work like standard social media
+// notifications" — approved with the panel as a right-edge slide-in.
+//
+// Two feeds with two read models, mirroring the API's notifications.service: a PERSONAL row
+// carries its own readAt, while the SQUADRON feed is one shared row per event and "read" is the
+// member's own seen marker, advanced when the tab opens. The badge is the sum of both.
+
+/** The bell's badge, split by tab. `total` is the number on the pill. */
+export interface NotificationCounts {
+  personal: number;
+  squadron: number;
+  total: number;
+}
+
+/** One row of the Personal tab. Unread exactly while `readAt` is null. */
+export interface PersonalNotification {
+  id: string;
+  /**
+   * Namespaced by producer — 'forum.answer-accepted', 'badge.earned', and the forum fan-out's
+   * original 'forum_direct_reply' spelling. Drives the row icon; see notifications-format.ts.
+   */
+  kind: string;
+  title: string;
+  body: string | null;
+  /** A deep link into the site, or null for news with no destination. */
+  link: string | null;
+  readAt: string | null;
+  createdAt: string;
+}
+
+/** One entry of the shared squadron feed. No per-row read state — the seen marker carries it. */
+export interface SquadronNotification {
+  id: string;
+  kind: string;
+  title: string;
+  body: string | null;
+  link: string | null;
+  /** Who did the thing, or null for events the system raised on its own. */
+  actor: { handle: string; displayName: string } | null;
+  createdAt: string;
+}
+
+/**
+ * The newest page of the squadron feed, for the dashboard's SQUADRON ACTIVITY section.
+ *
+ * The bell's panel reads the same endpoint from the BROWSER (through api-client) and pages
+ * through it with the cursor; the dashboard is a server component that shows the first page
+ * only, which is why this goes through `get` and takes no cursor at all.
+ */
+/** The member's own recent happenings — the bell's Personal tab, for the dashboard feed. */
+export const getPersonalActivity = (): Promise<{
+  items: PersonalNotification[];
+  nextCursor: string | null;
+} | null> => get('/v1/notifications', { authed: true });
+
+export const getSquadronActivity = (): Promise<{
+  items: SquadronNotification[];
+  nextCursor: string | null;
+} | null> => get('/v1/notifications?tab=squadron', { authed: true });
+
+/**
+ * One conversation with GMSD AI, as the review screen lists them.
+ *
+ * ★ SQUADRON OWNER — NON-NEGOTIABLE ★
+ *
+ * "Every conversation logged for officer review ... it also need to be visible to the webmaster
+ * role! this is non-negotiable as the webmaster is the AI developer."
+ *
+ * Collapsed to one row per thread rather than one per turn: a busy evening is hundreds of turns in
+ * which consecutive lines belong to different people asking about different things, and that is not
+ * something anybody reviews twice.
+ */
+export interface AiConversation {
+  threadId: string;
+  userId: string | null;
+  displayName: string | null;
+  turns: number;
+  startedAt: string;
+  lastAt: string;
+  /** The first question asked — what the conversation is about. */
+  opener: string;
+  /** Turns that never reached the model: a rate limit, or nothing retrieved. */
+  refusals: number;
+}
+
+export interface AiConversationTurn {
+  prompt: string;
+  response: string | null;
+  refusedReason: string | null;
+  tookMs: number | null;
+  createdAt: string;
+}
+
+export const getAiConversationsGated = (): Promise<AdminRead<{ threads: AiConversation[] }>> =>
+  getAdmin('/v1/ai/conversations');
+
+export const getAiConversationGated = (
+  threadId: string,
+): Promise<AdminRead<{ turns: AiConversationTurn[] }>> =>
+  getAdmin(`/v1/ai/conversations/${encodeURIComponent(threadId)}`);
+
+/**
+ * What the companion app is asking for, before a member approves it.
+ *
+ * Null when the code is wrong, already used, or expired — the three are deliberately
+ * indistinguishable, because telling them apart only helps somebody working through codes.
+ */
+export const describeDeviceLink = (code: string): Promise<{ label: string } | null> =>
+  get<{ label: string | null }>(`/v1/telemetry/links/${encodeURIComponent(code)}`).then((r) =>
+    r === null || r.label === null ? null : { label: r.label },
+  );
+
+/**
+ * What the squadron carries on foot.
+ *
+ * Aggregate only: how many members carry each weapon, never who. A per-member view would be a
+ * different feature with a different privacy question.
+ */
+export interface WeaponsChart {
+  weapons: Array<{ name: string; members: number; loadouts: number }>;
+  suits: Array<{ name: string; members: number }>;
+  /** Members who have reported any on-foot loadout. The denominator, and zero until some do. */
+  members: number;
+}
+
+export const getSquadronWeapons = (): Promise<WeaponsChart | null> =>
+  get('/v1/squadron/weapons', { authed: true });
+
+/** A fitted ship the squadron holds. */
+export interface ShipBuildView {
+  id: string;
+  shipId: string;
+  shipName: string;
+  buildName: string | null;
+  /** `coriolis`, `edsy` or `journal` — see the note on BuildSource: not equally trusted. */
+  source: string;
+  sourceUrl: string;
+  /** The squadron's reference build rather than a member's contribution. */
+  isBaseline: boolean;
+  /** Read out of a member's own journal rather than pasted. */
+  fromJournal: boolean;
+  submittedBy: string | null;
+  submittedById: string | null;
+  stats: {
+    unladenMass?: number;
+    ladenMass?: number;
+    jumpRange?: number | null;
+    ladenJumpRange?: number | null;
+    powerDrawn?: number;
+    powerGenerated?: number;
+    powerDeficit?: boolean;
+    cargoCapacity?: number;
+    fuelCapacity?: number;
+    armour?: number;
+  } | null;
+  fitted: number;
+  slots: number;
+  createdAt: string;
+}
+
+/**
+ * The squadron's builds.
+ *
+ * Gated read, so a member without AI_TRAIN_SUBMIT gets the "no access" screen rather than a
+ * two-factor code box — the confusion that cost an officer an evening on 2026-07-30.
+ */
+/** How far the build collection is from being worth training on, per role. */
+export interface BuildRoleProgressView {
+  role: string;
+  label: string;
+  have: number;
+  need: number;
+  ready: boolean;
+}
+
+export const getShipBuildsGated = (): Promise<
+  AdminRead<{
+    builds: ShipBuildView[];
+    progress: BuildRoleProgressView[];
+    canSubmit: boolean;
+    canModerate: boolean;
+  }>
+> => getAdmin('/v1/ai/builds');
+
+/** A hull in the Shipyard's picker. */
+export interface ShipyardShipRow {
+  id: string;
+  name: string;
+  hullCost: number;
+  /** 1 small, 2 medium, 3 large. Decides where it can dock at all. */
+  pad: number;
+}
+
+/**
+ * Every hull, keeping the reason it failed.
+ *
+ * ★ GATED, NOT `get()` — AND THE REASON IS ON RECORD ★
+ *
+ * `get()` returns null for everything: 401, 403, a permission refusal and the API being down are
+ * one value. That is what put an officer in a loop typing valid authenticator codes at a page that
+ * was refusing them on a PERMISSION — see `no-access.tsx`, which exists because of it.
+ *
+ * `SHIPYARD_VIEW` is new, so this page can now refuse somebody, and it must refuse them with the
+ * screen that names the permission rather than the one that asks for six digits.
+ */
+/** What this member wears, and whether they may choose it. */
+export interface MyNicknameState {
+  nickname: string | null;
+  convention: string | null;
+  override: string | null;
+  source: string | null;
+  mayOverride: boolean;
+  unverified: boolean;
+}
+
+export const getMyNickname = (): Promise<MyNicknameState | null> =>
+  get('/v1/me/nickname', { authed: true });
+
+export const getShipyardShipsGated = (): Promise<AdminRead<{ ships: ShipyardShipRow[] }>> =>
+  getAdmin('/v1/ai/shipyard/ships');
+
+/**
+ * One hull and every module that fits it.
+ *
+ * Typed loosely on purpose: the payload is coriolis's own module records, and the outfitter hands
+ * them straight to `computeStats`, which is where their shape is actually known. Restating that
+ * shape here would be a second definition free to drift from the one doing the arithmetic.
+ */
+/** One row on a build board. */
+export interface SharedBuildRow {
+  shipName: string;
+  buildName: string | null;
+  role: string | null;
+  stats: Record<string, unknown> | null;
+  visibility: 'private' | 'squadron' | 'public';
+  shareToken: string;
+  author: string | null;
+  updatedAt: string;
+}
+
+/** A shared build, as its reader receives it. */
+export interface SharedBuild {
+  shipId: string;
+  shipName: string;
+  buildName: string | null;
+  build: import('@grims/shared/ship-build').ShipBuild;
+  stats: Record<string, unknown> | null;
+  role: string | null;
+  author: string | null;
+  visibility: 'private' | 'squadron' | 'public';
+  updatedAt: string;
+}
+
+/**
+ * The squadron's or the world's published builds.
+ *
+ * Plain `get`, not the gated reader: both boards answer without a session — the owner asked for the
+ * public page to be "visible ... to anyone not signed in" — so `null` here means the API is down
+ * rather than that somebody was refused, and the page says exactly that.
+ */
+export const getSharedBuilds = (
+  scope: 'squadron' | 'public',
+): Promise<{ builds: SharedBuildRow[] } | null> =>
+  get(`/v1/ai/shipyard/builds/shared?scope=${scope}`, { authed: true });
+
+/** One shared build by its token. Null covers "no such build" and "not shared with you" alike. */
+export const getSharedBuild = (token: string): Promise<SharedBuild | null> =>
+  get(`/v1/ai/shipyard/builds/shared/${encodeURIComponent(token)}`, { authed: true });
+
+/** The caller's own saved builds. */
+export const getMyBuilds = (): Promise<{ builds: SavedBuildRow[] } | null> =>
+  get('/v1/ai/shipyard/builds/mine', { authed: true });
+
+export interface SavedBuildRow {
+  id: string;
+  shipName: string;
+  buildName: string | null;
+  role: string | null;
+  stats: Record<string, unknown> | null;
+  visibility: 'private' | 'squadron' | 'public';
+  shareToken: string | null;
+  updatedAt: string;
+}
+
+export const getShipyardOutfitGated = (
+  shipId: string,
+): Promise<AdminRead<import('@grims/ed-clients/builds').OutfitPayload>> =>
+  getAdmin(`/v1/ai/shipyard/outfit/${encodeURIComponent(shipId)}`);
+
+// ── Logistics & Trade ────────────────────────────────────────────────────────
+//
+// Squadron owner, 2026-08-02: "a realt time commodities market ... as well as the best places to
+// buy both in general and based on the players current location and station they are at."
+//
+// Plain `get`, like the shared build boards above and for the same reason: these answer without a
+// session, because the owner made them public. So `null` here means the API is down rather than
+// that somebody was refused — and the page has to say the first thing, not the second.
+
+/** One commodity as the market lists it. */
+export interface MarketRow {
+  commodity: string;
+  category: string | null;
+  avgBuy: number | null;
+  avgSell: number | null;
+  minBuy: number | null;
+  maxSell: number | null;
+  /** Tonnes, as a string: totals run into the billions and would lose precision as a JSON number. */
+  supply: string;
+  demand: string;
+  buyMarkets: number;
+  sellMarkets: number;
+  /** Movement in the average sell price over a day, as a fraction. Null until we hold a day. */
+  sellTrend: number | null;
+}
+
+/** One station trading one commodity. */
+export interface MarketPlace {
+  stationName: string;
+  systemName: string;
+  stationType: string | null;
+  largePads: number;
+  price: number;
+  quantity: number;
+  seenAt: string | null;
+  distance: number | null;
+}
+
+export interface HistoryPoint {
+  observedAt: string;
+  avgBuy: number | null;
+  avgSell: number | null;
+  minBuy: number | null;
+  maxSell: number | null;
+  buyMarkets: number;
+  sellMarkets: number;
+}
+
+export interface CommodityDetail {
+  commodity: MarketRow | null;
+  buys: MarketPlace[];
+  sells: MarketPlace[];
+  history: HistoryPoint[];
+  /**
+   * How current the whole market mirror is.
+   *
+   * Distinct from any single row's age: when the collector stops, every row ages together, so
+   * nothing on the page looks unusual and the whole list is quietly, uniformly wrong.
+   */
+  feed?: { stale: boolean; text: string; newestAt: string | null };
+  origin: {
+    system: string;
+    station: string | null;
+    from: 'typed' | 'journal';
+    /**
+     * How long ago the journal said so, and whether that is old enough to distrust.
+     *
+     * Absent for a typed origin — that one is current by definition. Present and possibly `stale`
+     * for a journal one, because "current or last known position" are not the same thing and a
+     * three-week-old position plans a whole trading run around somewhere the member has left.
+     */
+    age?: string;
+    stale?: boolean;
+  } | null;
+  /** A system somebody typed that we cannot place — so no radius was applied. Never silent. */
+  unknownSystem: string | null;
+}
+
+/** MarketRow plus what it costs near the member, when a position was resolvable. */
+export type NearMarketRow = MarketRow & {
+  nearBuy?: number | null;
+  nearSell?: number | null;
+  nearMarkets?: number;
+};
+
+export interface CommoditiesIndex {
+  commodities: NearMarketRow[];
+  /** Same shape the Freight Office resolves: typed system, or the journal's last word with age. */
+  origin: {
+    system: string;
+    station: string | null;
+    from: 'typed' | 'journal';
+    age?: string;
+    stale?: boolean;
+  } | null;
+  unknownSystem: string | null;
+  /** The radius the near columns measured, or null when no position was resolvable. */
+  nearWithinLy: number | null;
+}
+
+export const getCommodities = (near?: string): Promise<CommoditiesIndex | null> =>
+  get(
+    `/v1/logistics/commodities${near === undefined || near === '' ? '' : `?near=${encodeURIComponent(near)}`}`,
+    { authed: true },
+  );
+
+/** One commodity, with where to trade it. `query` carries the filters verbatim. */
+export const getCommodity = (
+  name: string,
+  query: Record<string, string> = {},
+): Promise<CommodityDetail | null> => {
+  const qs = new URLSearchParams(query).toString();
+  return get(
+    `/v1/logistics/commodities/${encodeURIComponent(name)}${qs === '' ? '' : `?${qs}`}`,
+    { authed: true },
+  );
+};
+
+/** One station on the Data Bounty board. */
+export interface BountyRow {
+  stationKey: string;
+  stationName: string;
+  systemName: string;
+  stationType: string | null;
+  largePads: number | null;
+  lastSeenAt: string | null;
+  /** Null means never seen at all — the biggest bounty there is. */
+  daysStale: number | null;
+  points: number;
+  jackpot: boolean;
+  /** Light-years from the nearest active project. Null on the galaxy tail. */
+  distanceLy: number | null;
+}
+
+export interface BountyBoard {
+  computedAt: string | null;
+  /** Within 200 ly of an active colonisation project. Listed first, as asked. */
+  ops: BountyRow[];
+  galaxy: BountyRow[];
+  /** The signed-in member's own running totals; null for a guest. */
+  me: {
+    monthPoints: number;
+    monthClaims: number;
+    allTimePoints: number;
+    allTimeClaims: number;
+  } | null;
+}
+
+export interface BountyLeaderboardEntry {
+  handle: string;
+  displayName: string;
+  points: number;
+  claims: number;
+  jackpots: number;
+}
+
+export interface BountyLeaderboard {
+  month: string;
+  season: BountyLeaderboardEntry[];
+  allTime: BountyLeaderboardEntry[];
+}
+
+export const getBounties = (): Promise<BountyBoard | null> =>
+  get('/v1/bounties', { authed: true });
+
+export const getBountyLeaderboard = (month?: string): Promise<BountyLeaderboard | null> =>
+  get(`/v1/bounties/leaderboard${month === undefined ? '' : `?month=${encodeURIComponent(month)}`}`, {
+    authed: true,
+  });
+
+// ── Leaderboards ─────────────────────────────────────────────────────────────
+//
+// Squadron owner, 2026-08-04: "make a new category called leaderboards." Three boards — Data
+// Runners, Colony Builders, Trade Barons — each with a monthly season and an all-time honour roll.
+// The CATALOGUE (names, what the points measure, tier thresholds) lives in @grims/shared; this
+// endpoint returns only the STANDINGS, so the two cannot disagree about what a board is called.
+
+/** One row of a standings table. `claims` counts scoring events — docks, deliveries, sales. */
+export interface LeaderboardEntry {
+  handle: string;
+  displayName: string;
+  points: number;
+  claims: number;
+}
+
+/** One board's standings: the running season, the all-time roll, and the caller's own line. */
+export interface LeaderboardStandings {
+  key: LeaderboardKey;
+  name: string;
+  /** What the points measure, in the catalogue's own sentence. Printed as the page lead. */
+  measures: string;
+  season: LeaderboardEntry[];
+  allTime: LeaderboardEntry[];
+  /**
+   * The signed-in caller's own numbers, whether or not they made the table. Null for a caller
+   * with nothing scored on this board.
+   *
+   * `seasonRank` is typed nullable defensively: the contract lists the field without saying what
+   * a member with lifetime points but no season activity ranks AS, and rendering "#null" would be
+   * worse than rendering nothing.
+   */
+  me: { seasonPoints: number; lifetimePoints: number; seasonRank: number | null } | null;
+}
+
+export interface LeaderboardsResponse {
+  /** The season the tables describe, `YYYY-MM`. Echoed so "?month=" typos cannot mislabel a table. */
+  month: string;
+  boards: LeaderboardStandings[];
+}
+
+/** Every board's standings in one read. The board pages each pick their own out of it. */
+export const getLeaderboards = (month?: string): Promise<LeaderboardsResponse | null> =>
+  get(`/v1/leaderboards${month === undefined ? '' : `?month=${encodeURIComponent(month)}`}`, {
+    authed: true,
+  });
+
+/**
+ * One badge the caller has earned, arriving ready to draw.
+ *
+ * The display fields are resolved SERVER-side from the shared catalogue rather than looked up
+ * here, so a retired key still renders whatever it meant when it was awarded.
+ */
+export interface EarnedBadge {
+  key: string;
+  name: string;
+  description: string;
+  /** One emoji — renders identically in the app, the site and Discord. */
+  icon: string;
+  earnedAt: string;
+}
+
+export const getMyBadges = (): Promise<{ badges: EarnedBadge[] } | null> =>
+  get('/v1/leaderboards/badges/me', { authed: true });
+
+/** One leg of a planned run. */
+export interface RouteLeg {
+  stationName: string;
+  systemName: string;
+  stationType: string | null;
+  largePads: number;
+  price: number;
+  quantity: number;
+  seenAt: string | null;
+  distance: number | null;
+  /** Light seconds from the arrival star — the in-system leg the jump count cannot see. */
+  arrivalLs: number | null;
+}
+
+export interface Route {
+  commodity: string;
+  buy: RouteLeg;
+  sell: RouteLeg;
+  profitPerTonne: number;
+  tonnes: number;
+  totalProfit: number;
+  outlay: number;
+  distanceLy: number;
+  /** What capped the load — shown, because a bare tonnage never explains itself. */
+  limitedBy: 'hold' | 'supply' | 'demand' | 'budget';
+  /** The time model's estimate for the whole run; its assumptions arrive in `RoutePlan.timeModel`. */
+  tripMinutes: number;
+  profitPerHour: number;
+}
+
+export interface RoutePlan {
+  routes: Route[];
+  considered: string[];
+  /** What the per-hour figures assume. Printed, never implied. */
+  timeModel?: { jumpLy: number; minutesPerJump: number; minutesPerStop: number };
+  /**
+   * How current the whole market mirror is.
+   *
+   * Distinct from any single row's age: when the collector stops, every row ages together, so
+   * nothing on the page looks unusual and the whole list is quietly, uniformly wrong.
+   */
+  feed?: { stale: boolean; text: string; newestAt: string | null };
+  origin: {
+    system: string;
+    station: string | null;
+    from: 'typed' | 'journal';
+    /**
+     * How long ago the journal said so, and whether that is old enough to distrust.
+     *
+     * Absent for a typed origin — that one is current by definition. Present and possibly `stale`
+     * for a journal one, because "current or last known position" are not the same thing and a
+     * three-week-old position plans a whole trading run around somewhere the member has left.
+     */
+    age?: string;
+    stale?: boolean;
+  } | null;
+  unknownSystem: string | null;
+}
+
+/** The Freight Office. `query` carries the member's filters verbatim. */
+export const getRoutes = (query: Record<string, string> = {}): Promise<RoutePlan | null> => {
+  const qs = new URLSearchParams(query).toString();
+  return get(`/v1/logistics/routes${qs === '' ? '' : `?${qs}`}`, { authed: true });
+};
+
+// ── Colonisation ─────────────────────────────────────────────────────────────
+//
+// Squadron owner, 2026-08-02: "allow our members to post their colonization project to the squadron
+// for assistance etc ... keep our own full records too."
+//
+// `getAdmin` rather than plain `get`: these are members-only, so a refusal has to be distinguishable
+// from the API being down. A signed-out visitor reaching /logistics/colonisation should be told to
+// sign in, not shown "could not load".
+
+export interface ColonyProject {
+  id: string;
+  owner: 'squadron' | 'personal';
+  title: string;
+  systemName: string;
+  stationName: string | null;
+  buildType: string | null;
+  notes: string | null;
+  visibility: 'private' | 'squadron' | 'public';
+  shareToken: string | null;
+  isPriority: boolean;
+  /**
+   * What the site actually is, worked out from what it asks for.
+   *
+   * Not the free-text `buildType` somebody typed — this is the catalogue row the requirement
+   * fingerprints to. Null until somebody has docked there.
+   */
+  identified: {
+    id: string;
+    displayName: string;
+    tier: number;
+    padSize: string;
+    location: string;
+    totalTonnes: number;
+  } | null;
+  completedAt: string | null;
+  postedBy: string | null;
+  postedById: string;
+  updatedAt: string;
+  remaining: number;
+  required: number;
+  needCount: number;
+}
+
+export interface ColonyNeed {
+  commodity: string;
+  remaining: number;
+  required: number | null;
+  /** When the game last reported this. Null before anybody has docked at the site. */
+  observedAt: string | null;
+}
+
+/** One delivery, straight off the append-only ledger. */
+export interface ColonyDelivery {
+  at: string;
+  commander: string;
+  commodity: string;
+  amount: number;
+}
+
+export interface ColonyHauler {
+  name: string;
+  tonnes: number;
+}
+
+/** Where to buy what a project still needs — the Freight Office answering for each line. */
+export interface ColonyShoppingRow {
+  commodity: string;
+  remaining: number;
+  /** The site's total ask, when the journal has given it. What the three-segment bar divides by. */
+  required: number | null;
+  /**
+   * Effective tonnes already aboard the build's attached carriers, capped at `remaining`.
+   * Manual beats journal beats mirror — the merge lives on the server, and the buy maths below
+   * has already subtracted it.
+   */
+  onCarriers: number;
+  /** What actually needs buying: max(0, remaining − onCarriers). The quantity every quote uses. */
+  toBuy: number;
+  stationName: string | null;
+  systemName: string | null;
+  price: number | null;
+  supply: number | null;
+  distance: number | null;
+  /**
+   * When somebody last saw this price.
+   *
+   * Shown rather than filtered on. Half our market mirror is older than three months, and hiding
+   * the stale rows would tell a member "nobody sells this" about commodities on a shelf right now.
+   */
+  seenAt: string | null;
+  cost: number | null;
+  /**
+   * The nearest place selling this AT ALL, when nothing inside the radius does.
+   *
+   * "Nobody in range sells this" is true and useless on its own — it says the search failed and
+   * nothing about what to do next.
+   */
+  nearestOutOfRange: {
+    stationName: string;
+    systemName: string;
+    price: number;
+    supply: number;
+    distance: number | null;
+    seenAt: string | null;
+  } | null;
+}
+
+/**
+ * One bar of the delivery chart.
+ *
+ * `bySeries` rather than `byCommodity`: the same bar is stacked by commodity in one view and by
+ * commander in the other, and a field named for one of them while holding the other is a lie.
+ *
+ * ★ `at` IS AN OPAQUE KEY, AND `label` IS WHAT THE AXIS DRAWS — 2026-08-04 ★
+ *
+ * The buckets are cut in the VIEWER's stored timezone on the server, and `at` is the bucket's
+ * wall time in that zone with no offset attached. Running it through `new Date()` reinterprets
+ * it in the browser's zone — which is precisely the reparse that used to stack today's
+ * deliveries onto yesterday's bar for anybody west of UTC. Render `label`; never parse `at`.
+ */
+export interface ColonyDeliveryBucket {
+  at: string;
+  /** Server-authored axis text: `23:00` for an hour bucket, `4 Aug` for a day bucket. */
+  label: string;
+  bySeries: Record<string, number>;
+  total: number;
+}
+
+/** One commander's column: everything they have hauled, split by commodity. */
+export interface ColonyHaulerStack {
+  commander: string;
+  byCommodity: Record<string, number>;
+  total: number;
+}
+
+/** Both charts on a project page, in one read. Switching between them costs no round trip. */
+export interface ColonyCharts {
+  bucket: 'hour' | 'day';
+  /** The IANA zone the buckets were cut in, so the footer can say whose day a bar means. */
+  tz: string;
+  byCommodity: ColonyDeliveryBucket[];
+  byCommander: ColonyDeliveryBucket[];
+  haulers: ColonyHaulerStack[];
+}
+
+/** What one carrier is holding of the things a build still wants. */
+export interface CarrierHold {
+  commodity: string;
+  tonnes: number;
+  seenAt: string | null;
+}
+
+/**
+ * What a carrier's hold DECLARES, per commodity — from the owner's journal or a crew member's
+ * hand. The market mirror sees only sell orders; these rows are the cargo staged for the build.
+ */
+export interface DeclaredCargo {
+  commodity: string;
+  tonnes: number;
+  /** `journal` rows are the owner's app reporting what it watched; `manual` rows are typed. */
+  source: 'journal' | 'manual';
+  /** Who typed a manual row. Null for journal rows. */
+  updatedBy: string | null;
+  updatedAt: string;
+}
+
+export interface AttachedCarrier {
+  marketId: string;
+  name: string;
+  callsign: string | null;
+  isSquadron: boolean;
+  addedBy: string | null;
+  /** Where it was when somebody last looked. Null when the mirror has never seen it. */
+  systemName: string | null;
+  seenAt: string | null;
+  holds: CarrierHold[];
+  totalTonnes: number;
+  /** Journal-watched and hand-declared cargo, alongside the mirror's sell orders in `holds`. */
+  declared: DeclaredCargo[];
+}
+
+/** A carrier somebody could attach, ranked by how much of THIS build's list it is carrying. */
+export interface CarrierMatch {
+  marketId: string;
+  name: string;
+  systemName: string;
+  seenAt: string | null;
+  matchingCommodities: number;
+  matchingTonnes: number;
+}
+
+export interface ColonyDetail {
+  project: ColonyProject;
+  needs: ColonyNeed[];
+  haulers: ColonyHauler[];
+  shopping: ColonyShoppingRow[];
+  /*
+   * ★ THE API HAS ALWAYS RETURNED THESE AND THIS TYPE DROPPED THEM ★
+   *
+   * Both controllers send `deliveries` — the literal ledger, newest first — and the website's own
+   * type omitted the field, so "who delivered what and when" was visible in the companion app and
+   * nowhere on the site. Nothing failed; the data simply arrived and was discarded.
+   */
+  deliveries: ColonyDelivery[];
+  chart: ColonyCharts;
+  /**
+   * Fleet carriers helping with this build, and what each is holding of what it still wants.
+   *
+   * Read from the market mirror rather than from anybody's journal — a carrier's market is public,
+   * so this sees every squadron carrier rather than only the one whose owner has the app open.
+   */
+  carriers: AttachedCarrier[];
+  /**
+   * Effective tonnes aboard the attached carriers per commodity — manual beats journal beats
+   * mirror, summed on the server so every surface stages the same yellow tonnage.
+   */
+  carrierCover: Record<string, number>;
+  /** What this reader may do to the project. A rendering hint — every write re-checks. */
+  can: { manage: boolean; isPoster: boolean; isCrew: boolean };
+  origin: { system: string } | null;
+  unknownSystem: string | null;
+}
+
+/** What the caller may do here. A rendering hint only — every write re-checks. */
+export interface ColonyRights {
+  post: boolean;
+  manage: boolean;
+  publish: boolean;
+}
+
+/** What a completed build of this kind does to its system — the seven Raven-style scalars. */
+export interface ColonyBuildTypeEffects {
+  population: number;
+  maxPopulation: number;
+  security: number;
+  technology: number;
+  wealth: number;
+  standardOfLiving: number;
+  development: number;
+}
+
+/** One kind of construction site, and what it costs to build. */
+export interface ColonyBuildType {
+  id: string;
+  displayName: string;
+  category: string;
+  tier: number;
+  location: 'orbital' | 'surface';
+  padSize: 'none' | 'small' | 'medium' | 'large';
+  totalTonnes: number;
+  commodities: number;
+  /**
+   * Where the numbers came from.
+   *
+   * Frontier publishes none of this, so every figure is either community-gathered or a measurement
+   * from one of our own builds — and somebody deciding whether to commit a fortnight of hauling to
+   * a plan deserves to know which.
+   */
+  source: 'community' | 'observed';
+  confirmations: number;
+  /** What finishing one does to the system. Community-measured, like everything here. */
+  effects: ColonyBuildTypeEffects;
+  /** What it feeds the port that receives it. `none` for the many that feed nothing. */
+  economyInfluence: string;
+  /** Set when the build's OWN economy is locked regardless of surroundings. */
+  economyFixed: string | null;
+}
+
+export interface ColonyBuildCostLine {
+  commodity: string;
+  tonnes: number;
+  price: number | null;
+  stationName: string | null;
+  systemName: string | null;
+  distance: number | null;
+  cost: number | null;
+}
+
+export interface ColonyBuildTypeDetail extends ColonyBuildType {
+  layouts: string[];
+  costs: ColonyBuildCostLine[];
+  total: number;
+  unsourced: number;
+}
+
+/** One body in a system, with the slot counts somebody read off the in-game architect view. */
+export interface PlanBody {
+  bodyId: number;
+  name: string;
+  kind: string;
+  subType: string | null;
+  isLandable: boolean;
+  gravity: number | null;
+  temperature: number | null;
+  distanceLs: number | null;
+  hasRings: boolean;
+  terraformable: boolean;
+  hasVolcanism: boolean;
+  hasAtmosphere: boolean;
+  /** What this orbits, so a moon draws under its planet. Null for the primary star. */
+  parentBodyId: number | null;
+  orbitalSlots: number | null;
+  surfaceSlots: number | null;
+  slotsBy: string | null;
+}
+
+/** One intended build, in one slot, on one body. */
+export interface PlanSite {
+  id: string;
+  bodyId: number | null;
+  location: 'orbital' | 'surface';
+  buildTypeId: string | null;
+  buildTypeName: string | null;
+  tier: number | null;
+  totalTonnes: number | null;
+  /** What this feeds into the port that receives it. `none` when it feeds nothing. */
+  economyInfluence: string | null;
+  position: number;
+  /** The system's first station. The game charges nothing for it. */
+  isPrimary: boolean;
+  projectId: string | null;
+}
+
+/**
+ * What the construction-point rules say about the plan.
+ *
+ * Computed on the SERVER, by the same module the companion's answer comes from. Two
+ * implementations of a rule this fiddly would drift, and the half that drifted would be the one
+ * deciding whether a fortnight of hauling is legal.
+ */
+export interface PlanSimStep {
+  siteId: string;
+  buildTypeId: string | null;
+  spend: { tier: number; points: number } | null;
+  /** How much of the spend is the surcharge on extra starports. Zero when untaxed. */
+  surcharge: number;
+  earn: { tier: number; points: number } | null;
+  /** The balance AFTER this step. Negative means the plan cannot reach here. */
+  tier2: number;
+  tier3: number;
+  isPrimary: boolean;
+  problems: PlanProblem[];
+}
+
+export interface PlanProblem {
+  kind: 'points' | 'prerequisite' | 'unchosen';
+  message: string;
+}
+
+export interface PlanEffects {
+  population: number;
+  maxPopulation: number;
+  security: number;
+  technology: number;
+  wealth: number;
+  standardOfLiving: number;
+  development: number;
+}
+
+/** One adjustment the economy model made, and why. */
+export interface EconAudit {
+  economy: string;
+  delta: number;
+  reason: string;
+}
+
+export interface SiteEconomy {
+  siteId: string;
+  buildTypeId: string | null;
+  /** Only starports and outposts trade. Everything else FEEDS one. */
+  receivesLinks: boolean;
+  isReceiver: boolean;
+  scores: Record<string, number>;
+  leading: string | null;
+  audit: EconAudit[];
+  strongLinks: string[];
+  weakLinks: string[];
+}
+
+export interface PlanEconomies {
+  sites: SiteEconomy[];
+  /** Inputs the game uses that we do not hold. Printed, never hidden. */
+  blindSpots: string[];
+}
+
+export interface PlanSimulation {
+  steps: PlanSimStep[];
+  tier2: number;
+  tier3: number;
+  problems: PlanProblem[];
+  effects: PlanEffects;
+  surchargedPorts: number;
+}
+
+/** One line of a predicted market: what the station would trade, and which economy put it there. */
+export interface PredictedCommodityLine {
+  commodity: string;
+  side: 'exports' | 'imports';
+  /** Rendered bold: the driving economy is at least half the leading score. */
+  strength: 'major' | 'minor';
+  fromEconomy: string;
+}
+
+/**
+ * What a planned station's market would buy and sell — the step past the economy adjective.
+ * Computed on the SERVER by the shared predictMarket, exactly like the simulation, so the website
+ * and the companion cannot show two different shops for one plan.
+ */
+export interface PredictedSiteMarket {
+  exports: PredictedCommodityLine[];
+  imports: PredictedCommodityLine[];
+  /** The honest epistemics, in one sentence, rendered once per page. */
+  note: string;
+}
+
+export interface PlanSiteMarket {
+  siteId: string;
+  market: PredictedSiteMarket;
+}
+
+export interface ColonyPlan {
+  id: string;
+  owner: 'squadron' | 'personal';
+  title: string;
+  systemName: string;
+  systemId64: string | null;
+  notes: string | null;
+  /** Optimistic concurrency. Every write carries the version it started from. */
+  version: number;
+  postedBy: string | null;
+  postedById: string;
+  updatedAt: string;
+  bodies: PlanBody[];
+  bodiesFetchedAt: string | null;
+  sites: PlanSite[];
+  simulation: PlanSimulation;
+  economies: PlanEconomies;
+  /** Per chosen site, what its market would trade. Empty on the board — bodies are not loaded there. */
+  markets: PlanSiteMarket[];
+}
+
+export const getColonyPlans = (
+  owner: 'squadron' | 'personal' | 'all' = 'all',
+): Promise<AdminRead<{ plans: ColonyPlan[] }>> =>
+  getAdmin(`/v1/logistics/colony/plans?owner=${owner}`);
+
+export const getColonyPlan = (
+  id: string,
+): Promise<AdminRead<{ plan: ColonyPlan; can: { edit: boolean } }>> =>
+  getAdmin(`/v1/logistics/colony/plans/${encodeURIComponent(id)}`);
+
+export const getBuildTypes = (): Promise<AdminRead<{ buildTypes: ColonyBuildType[] }>> =>
+  getAdmin('/v1/logistics/colony/build-types');
+
+export const getBuildType = (
+  id: string,
+  query: Record<string, string> = {},
+): Promise<
+  AdminRead<{
+    buildType: ColonyBuildTypeDetail;
+    origin: { system: string } | null;
+    unknownSystem: string | null;
+  }>
+> => {
+  const qs = new URLSearchParams(query).toString();
+  return getAdmin(
+    `/v1/logistics/colony/build-types/${encodeURIComponent(id)}${qs === '' ? '' : `?${qs}`}`,
+  );
+};
+
+export const getColonyProjects = (
+  owner: 'squadron' | 'personal' | 'all' = 'all',
+): Promise<AdminRead<{ projects: ColonyProject[]; can: ColonyRights }>> =>
+  getAdmin(`/v1/logistics/colony/projects?owner=${owner}`);
+
+export const getColonyProject = (
+  id: string,
+  query: Record<string, string> = {},
+): Promise<AdminRead<ColonyDetail>> => {
+  const qs = new URLSearchParams(query).toString();
+  return getAdmin(
+    `/v1/logistics/colony/projects/${encodeURIComponent(id)}${qs === '' ? '' : `?${qs}`}`,
+  );
+};
+
+/** A published project, by its token. No session: the token is the capability. */
+export const getSharedColonyProject = (
+  token: string,
+): Promise<{ project: ColonyProject; needs: ColonyNeed[] } | null> =>
+  get(`/v1/logistics/colony/shared/${encodeURIComponent(token)}`, { authed: true });
+
+/* ─────────────────────────────────────────────────────────── the changelog */
+
+/**
+ * One deployed release: the span of commits it shipped and that span rendered
+ * per audience, in the commit messages' own prose. The markdown grammar is
+ * narrow by construction — `### Subject` headings with plain paragraphs —
+ * because `tools/changelog.mjs` is the only writer.
+ */
+export interface ChangelogRelease {
+  id: string;
+  fromSha: string;
+  toSha: string;
+  /** The platform version this deploy shipped as. Null on rows recorded before stamping. */
+  version: string | null;
+  deployedAt: string;
+  websiteMd: string;
+  companionMd: string;
+  platformMd: string;
+}
+
+/** The same shape before it has deployed, straight from the generator. */
+export interface PendingChangelog {
+  fromSha: string;
+  toSha: string;
+  version: string | null;
+  generatedAt: string;
+  commitCount: number;
+  websiteMd: string;
+  companionMd: string;
+  platformMd: string;
+}
+
+/** Every recorded release, newest first. Any signed-in member may read this. */
+export const getChangelog = (): Promise<{ releases: ChangelogRelease[] } | null> =>
+  get('/v1/changelog', { authed: true });
+
+/**
+ * The not-yet-deployed preview. Gated (SITE_CONFIG) because it describes work
+ * the site has not shipped yet — the page renders it only for whoever the API
+ * says may see it, and the gated read is what carries that answer.
+ */
+export const getChangelogPendingGated = (): Promise<AdminRead<{ pending: PendingChangelog | null }>> =>
+  getAdmin('/v1/changelog/pending');

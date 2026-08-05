@@ -13,13 +13,18 @@ import { RequiresPermissionGuard } from './requires-permission.guard.js';
  * NOT the default everywhere: for a route a member legitimately knows about, a
  * 404 is a lie that sends them hunting a bug instead of asking for access.
  */
+/*
+ * The guard asks `ViewAsService.allows`, not `PermissionService.has`, since 2026-08-01 — so that a
+ * rank preview narrows the mask in exactly one place rather than in every caller. These fakes stand
+ * in for that service; what is under test here is the SHAPE of the refusal, not who computed it.
+ */
 class DenyAll {
-  async has(): Promise<boolean> {
+  async allows(): Promise<boolean> {
     return false;
   }
 }
 class AllowAll {
-  async has(): Promise<boolean> {
+  async allows(): Promise<boolean> {
     return true;
   }
 }

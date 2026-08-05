@@ -52,6 +52,12 @@ const PRIVATE: PrivacySettings = {
   showActivity: false,
   showOnPublicRoster: false,
   showOnLeaderboard: false,
+  // Off EXPLICITLY: this row models a member who switched everything off, which for the
+  // participation trio means overriding a default that is on.
+  showLbBounties: false,
+  showLbColony: false,
+  showLbTrade: false,
+      plainFonts: false,
 };
 const ROSTER_ONLY: PrivacySettings = { ...PRIVATE, showOnPublicRoster: true };
 
@@ -75,6 +81,14 @@ class FakeStore implements MembersStore {
   }
   async handleOf(): Promise<string | null> {
     return 'grim';
+  }
+  /*
+   * Added when @mentions started resolving an id back to a handle. Returns the real handle from
+   * `rows` rather than a constant, so a test that mentions an unknown member gets null — the case
+   * that decides whether a mention renders as a link or as plain text.
+   */
+  async handleForId(userId: string): Promise<string | null> {
+    return this.rows.find((r) => r.source.id === userId)?.source.handle ?? null;
   }
 
   /** Journal events the roster reads. Empty unless a test sets them. */
@@ -165,7 +179,13 @@ let ctl: MembersController;
 
 beforeEach(() => {
   store = new FakeStore();
-  ctl = new MembersController(store);
+  ctl = // The weapons store answers one aggregate question and is not exercised here; the badge
+      // resolver answers another (the dashboard's own list) and is likewise stubbed empty.
+      new MembersController(
+        store,
+        { chart: async () => ({ weapons: [], suits: [], members: 0 }) } as never,
+        { badgesOf: async () => [] } as never,
+      );
 });
 
 describe('GET /v1/members/:handle @INV-027', () => {
@@ -271,9 +291,22 @@ describe('GET /v1/members', () => {
 });
 
 describe('privacy settings', () => {
-  it('returns conservative defaults when no row exists', async () => {
+  it('returns the defaults when no row exists — fields private, board participation on', async () => {
     store.stored = null;
-    expect(await ctl.myPrivacy({ userId: 'u-1' })).toEqual(PRIVATE);
+    /*
+     * Not simply PRIVATE any more: every leaderboard participation switch — the master included —
+     * defaults ON (owner's instruction, 2026-08-04 — "default all leaderboard participation on
+     * for all commanders"), so a member who has never opened settings participates in the
+     * standings while every FIELD stays hidden. The master was briefly pinned false here, which
+     * made the settings page contradict the standings SQL's COALESCE(col, true).
+     */
+    expect(await ctl.myPrivacy({ userId: 'u-1' })).toEqual({
+      ...PRIVATE,
+      showOnLeaderboard: true,
+      showLbBounties: true,
+      showLbColony: true,
+      showLbTrade: true,
+    });
   });
 
   it('MANDATORY: writes against the SESSION user, never a body-supplied id', async () => {

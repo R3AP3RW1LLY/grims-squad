@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import type { RoleRow } from './role-editor';
 import { apiPost, apiDelete } from '../../../../lib/api-client';
 
@@ -31,7 +32,18 @@ export interface MappingRow {
 const SNOWFLAKE = /^[0-9]{17,20}$/;
 
 export function MappingEditor({ roles, mappings }: { roles: RoleRow[]; mappings: MappingRow[] }) {
+  const router = useRouter();
   const [rows, setRows] = useState(mappings);
+
+  /*
+   * A refresh replaces the prop, so the server's copy wins over the optimistic one.
+   *
+   * Without this the local row added below would survive a `router.refresh()` unchanged — including
+   * its `discordName: undefined`, which is the whole reason the refresh is worth doing.
+   */
+  useEffect(() => {
+    setRows(mappings);
+  }, [mappings]);
   const [roleId, setRoleId] = useState(roles[0]?.id ?? '');
   const [snowflake, setSnowflake] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -61,6 +73,15 @@ export function MappingEditor({ roles, mappings }: { roles: RoleRow[]; mappings:
         { roleId, roleName: role?.name ?? '', discordRoleId: snowflake.trim() },
       ]);
       setSnowflake('');
+      /*
+       * ★ THE ROW APPEARS NOW, THE NAME ARRIVES A MOMENT LATER ★
+       *
+       * Squadron owner, 2026-08-01: changes should be visible as they happen. The optimistic row
+       * above does that. But it carries no Discord role NAME — nothing has resolved the snowflake
+       * against our catalogue yet — so it would sit there unnamed until somebody reloaded the page
+       * by hand, looking like the mapping had half-failed.
+       */
+      router.refresh();
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -83,6 +104,8 @@ export function MappingEditor({ roles, mappings }: { roles: RoleRow[]; mappings:
       // reconciliation revoke the role from everyone holding it, and that
       // should not arrive as a surprise the following morning.
       if (j.warning !== undefined) setNotice(j.warning);
+      // Removing a mapping changes who holds what, which the rest of the page reports.
+      router.refresh();
     } catch (e) {
       setError((e as Error).message);
     } finally {

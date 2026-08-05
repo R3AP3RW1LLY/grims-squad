@@ -41,6 +41,10 @@ function boundClient(
     name: string;
     viewPerm: bigint | null;
     postPerm: bigint | null;
+    /** NULL means "same as postPerm" — the reply gate's fallback, pinned below. */
+    replyPerm?: bigint | null;
+    /** Threads arrive only via the suggestion-box publish flow. Defaults false, pinned below. */
+    threadsViaPublish?: boolean;
     parentId?: string | null;
     isLocked?: boolean;
   }>,
@@ -68,16 +72,38 @@ function boundClient(
           position: 0,
           isLocked: r.isLocked ?? false,
           postPerm: dec(r.postPerm),
+          replyPerm: dec(r.replyPerm ?? null),
+          threadsViaPublish: r.threadsViaPublish ?? false,
           viewPerm: dec(r.viewPerm),
         })),
-      findUnique: async ({ where }: { where: { id: string } }) => {
-        const r = visible.find((x) => x.id === where.id);
+      /*
+       * ★ findFirst, MATCHING THE REAL CLIENT ★
+       *
+       * This fake used to offer `findUnique`, and the services used it. That combination hid a
+       * production defect for weeks: the real ACL extension merges its predicate as
+       * `{ AND: [ {id}, {id: {in: [...]}} ] }`, which is a legal filter and an ILLEGAL unique
+       * input — so every call Prisma saw threw a validation error while this fake happily
+       * answered. A fake that accepts what the real thing rejects is worse than no fake.
+       *
+       * The `where` is read loosely for the same reason: the real one arrives wrapped in `AND`,
+       * so a fake that only understood `{ id }` would go on lying about a different shape.
+       */
+      findFirst: async ({ where }: { where: Record<string, unknown> }) => {
+        const id =
+          typeof where['id'] === 'string'
+            ? where['id']
+            : ((where['AND'] as Array<Record<string, unknown>> | undefined)?.find(
+                (w) => typeof w['id'] === 'string',
+              )?.['id'] as string | undefined);
+        const r = visible.find((x) => x.id === id);
         return r === undefined
           ? null
           : {
               id: r.id,
               isLocked: r.isLocked ?? false,
               postPerm: dec(r.postPerm),
+              replyPerm: dec(r.replyPerm ?? null),
+              threadsViaPublish: r.threadsViaPublish ?? false,
               viewPerm: dec(r.viewPerm),
             };
       },
@@ -88,9 +114,15 @@ function boundClient(
     },
     forumThread: {
       findMany: async () => [],
-      findFirst: async () => null,
-      findUnique: async ({ where }: { where: { id: string } }) =>
-        threads.find((t) => t['id'] === where.id) ?? null,
+      findFirst: async ({ where }: { where?: Record<string, unknown> } = {}) => {
+        const id =
+          typeof where?.['id'] === 'string'
+            ? (where['id'] as string)
+            : ((where?.['AND'] as Array<Record<string, unknown>> | undefined)?.find(
+                (w) => typeof w['id'] === 'string',
+              )?.['id'] as string | undefined);
+        return id === undefined ? null : (threads.find((t) => t['id'] === id) ?? null);
+      },
       create: async ({ data }: { data: Record<string, unknown> }) => {
         threads.push({ ...data, id: 'new-thread' });
         return { id: 'new-thread', slug: data['slug'] };
@@ -197,6 +229,81 @@ describe('CategoryService', () => {
     expect(list[0]?.canPost).toBe(false);
   });
 
+  describe('canReply — the reply gate, split from thread creation', () => {
+    /*
+     * The Feature Requests shape: members reply (reply_perm = FORUM_POST_MEMBER) while thread
+     * creation belongs to the publish flow (threads_via_publish), whose fallback publisher
+     * check is post_perm = SITE_CONFIG.
+     */
+    const FEATURE = {
+      id: 'fr',
+      slug: 'feature-requests',
+      name: 'Feature Requests',
+      viewPerm: null,
+      postPerm: Permission.SITE_CONFIG,
+      replyPerm: POST_MEMBER,
+      threadsViaPublish: true,
+    };
+
+    it('MANDATORY: a member may REPLY on the publish-only board but may not START a thread', async () => {
+      const db = boundClient([FEATURE], POST_MEMBER);
+      const list = await svc.list(db as never, POST_MEMBER);
+      expect(list[0]?.canReply).toBe(true);
+      expect(list[0]?.canPost).toBe(false);
+    });
+
+    it('MANDATORY: canPost is false on a publish-only board even for SITE_CONFIG — the webmaster included', async () => {
+      /*
+       * Squadron owner, 2026-08-04: "they must be published via the webmaster approval only!"
+       * A webmaster typing a thread onto the board would be a suggestion nobody sent, so the
+       * "New thread" button (which this boolean drives) exists for no one.
+       */
+      const db = boundClient([FEATURE], Permission.SITE_CONFIG);
+      const list = await svc.list(db as never, Permission.SITE_CONFIG);
+      expect(list[0]?.canPost).toBe(false);
+    });
+
+    it('MANDATORY: a NULL reply_perm means "same as post_perm" — Announcements stays read-only', async () => {
+      /*
+       * The pin the migration depends on: every board that never sets reply_perm behaves
+       * EXACTLY as before the column existed. Announcements (view: members, post: officers,
+       * reply_perm never set) still refuses a member's reply.
+       */
+      const ANNOUNCEMENTS = {
+        id: 'ann',
+        slug: 'announcements',
+        name: 'Announcements',
+        viewPerm: null,
+        postPerm: Permission.FORUM_POST_OFFICER,
+        replyPerm: null,
+      };
+      const db = boundClient([ANNOUNCEMENTS, ...TREE], POST_MEMBER);
+      const list = await svc.list(db as never, POST_MEMBER);
+      const announcements = list.find((c) => c.slug === 'announcements');
+      expect(announcements?.canReply).toBe(false);
+      expect(announcements?.canPost).toBe(false);
+      // And where the one mask allows posting, it allows replying — identical to before.
+      expect(list.find((c) => c.slug === 'general')?.canReply).toBe(true);
+    });
+
+    it('a board that never heard of the new columns behaves as it always has', async () => {
+      // Absent replyPerm/threadsViaPublish (older fakes, pre-migration rows mid-deploy) read
+      // as NULL/false: one mask, both acts.
+      const db = boundClient(TREE, POST_MEMBER);
+      const list = await svc.list(db as never, POST_MEMBER);
+      const general = list.find((c) => c.slug === 'general');
+      expect(general?.canPost).toBe(true);
+      expect(general?.canReply).toBe(true);
+    });
+
+    it('the raw reply mask never leaves the server either', async () => {
+      const db = boundClient([FEATURE], POST_MEMBER);
+      const list = await svc.list(db as never, POST_MEMBER);
+      expect(JSON.stringify(list)).not.toContain('replyPerm');
+      expect(JSON.stringify(list)).not.toContain('threadsViaPublish');
+    });
+  });
+
   it('MANDATORY: an invisible category is NOT FOUND, never forbidden', async () => {
     // A 403 confirms the category is real, and which private categories exist is
     // itself information (INV-024).
@@ -265,10 +372,27 @@ describe('CategoryService', () => {
 describe('ThreadService', () => {
   let reindex: PendingReindexQueue;
   let svc: ThreadService;
+  let pruned: Array<{ threadId: string; toCategoryId: string }>;
 
   beforeEach(() => {
     reindex = new PendingReindexQueue();
-    svc = new ThreadService(new CategoryService(), reindex);
+    pruned = [];
+    /*
+     * A recording NotifyService. `move` now prunes subscriptions the destination board excludes
+     * (INV-039, second half), and it must do so in the SAME operation as the move — so the
+     * dependency is real rather than optional, and this stub asserts the call happens.
+     *
+     * Deliberately not the real service: its own behaviour is covered exhaustively in
+     * `notify.spec.ts`, and duplicating that here would mean two places to update when the rule
+     * changes.
+     */
+    const notify = {
+      pruneOnMove: async (_db: unknown, threadId: string, toCategoryId: string) => {
+        pruned.push({ threadId, toCategoryId });
+        return 0;
+      },
+    };
+    svc = new ThreadService(new CategoryService(), reindex, notify as never);
   });
 
   it('MANDATORY: threads in an invisible category are NOT FOUND', async () => {
@@ -281,22 +405,40 @@ describe('ThreadService', () => {
   it('MANDATORY: refuses to post without the category post permission', async () => {
     const db = boundClient(TREE, 0n);
     await expect(
-      svc.create(db as never, { categoryId: 'pub', title: 'Hello there' }, 'author-1', 0n),
+      svc.create(db as never, { categoryId: 'pub', title: 'Hello there', body: 'The opening post.' }, 'author-1', 0n),
     ).rejects.toMatchObject({ code: ErrorCode.PERMISSION_DENIED });
   });
 
   it('refuses to post in a locked category', async () => {
     const db = boundClient([{ ...TREE[0]!, isLocked: true }], POST_MEMBER);
     await expect(
-      svc.create(db as never, { categoryId: 'pub', title: 'Hello there' }, 'a', POST_MEMBER),
+      svc.create(db as never, { categoryId: 'pub', title: 'Hello there', body: 'The opening post.' }, 'a', POST_MEMBER),
     ).rejects.toMatchObject({ code: ErrorCode.PERMISSION_DENIED });
+  });
+
+  it('MANDATORY: a thread is created WITH its opening post', async () => {
+    /*
+     * ★ THE GAP THIS TEST EXISTS FOR ★
+     *
+     * `create` originally took a title alone and produced a thread with NO posts — a row that
+     * renders as an empty page. It survived review because nothing called it: there was no "new
+     * thread" screen at all, so an empty thread was never seen.
+     *
+     * The owner found it by trying to write a post and discovering there was nowhere to do it.
+     */
+    const db = boundClient(TREE, POST_MEMBER);
+    await svc.create(db as never, { categoryId: 'pub', title: 'Hello there', body: 'Opening words.' }, 'author-1', POST_MEMBER);
+
+    const row = db.threads.find((t) => t['id'] === 'new-thread');
+    expect(row?.['postCount'], 'a new thread has one post').toBe(1);
+    expect(row?.['posts'], 'the opening post is created with it').toBeDefined();
   });
 
   it('MANDATORY: the author is the session user, never a request field', async () => {
     const db = boundClient(TREE, POST_MEMBER);
     await svc.create(
       db as never,
-      { categoryId: 'pub', title: 'Wing ops tonight' },
+      { categoryId: 'pub', title: 'Wing ops tonight', body: 'The opening post.' },
       'session-user',
       POST_MEMBER,
     );
@@ -307,7 +449,7 @@ describe('ThreadService', () => {
     const db = boundClient(TREE, POST_MEMBER);
     for (const title of ['ab', 'x'.repeat(201)]) {
       await expect(
-        svc.create(db as never, { categoryId: 'pub', title }, 'a', POST_MEMBER),
+        svc.create(db as never, { categoryId: 'pub', title, body: 'Opening words.' }, 'a', POST_MEMBER),
       ).rejects.toMatchObject({ code: ErrorCode.VALIDATION_FAILED });
     }
   });
@@ -315,8 +457,78 @@ describe('ThreadService', () => {
   it('cannot post into a category it cannot see', async () => {
     const db = boundClient(TREE, POST_MEMBER);
     await expect(
-      svc.create(db as never, { categoryId: 'off', title: 'Sneaking in' }, 'a', POST_MEMBER),
+      svc.create(db as never, { categoryId: 'off', title: 'Sneaking in', body: 'The opening post.' }, 'a', POST_MEMBER),
     ).rejects.toMatchObject({ code: ErrorCode.RESOURCE_NOT_VISIBLE });
+  });
+
+  describe('a publish-only board — threads arrive via the suggestion box, never the composer', () => {
+    /*
+     * Squadron owner, 2026-08-04: "dont allow anyone to start a new thread in the Feature
+     * requests category! they must be published via the webmaster approval only!"
+     */
+    const PUBLISH_ONLY = [
+      {
+        id: 'fr',
+        slug: 'feature-requests',
+        name: 'Feature Requests',
+        viewPerm: null,
+        postPerm: Permission.SITE_CONFIG,
+        replyPerm: POST_MEMBER,
+        threadsViaPublish: true,
+      },
+    ];
+    const INPUT = { categoryId: 'fr', title: 'Typed straight in', body: 'The opening post.' };
+
+    it('MANDATORY: the normal door refuses even a SITE_CONFIG holder — the webmaster included', async () => {
+      const db = boundClient(PUBLISH_ONLY, Permission.SITE_CONFIG);
+      await expect(
+        svc.create(db as never, INPUT, 'webmaster-1', Permission.SITE_CONFIG),
+      ).rejects.toMatchObject({ code: ErrorCode.PERMISSION_DENIED });
+      expect(db.threads).toHaveLength(0);
+    });
+
+    it('and refuses a member, with the sentence that says where threads come from', async () => {
+      const db = boundClient(PUBLISH_ONLY, POST_MEMBER);
+      const problem = await svc
+        .create(db as never, INPUT, 'member-1', POST_MEMBER)
+        .catch((e: Error) => e.message);
+      expect(problem).toContain('suggestion box');
+    });
+
+    it('MANDATORY: createViaPublish — the publish flow\'s door — succeeds where create refuses', async () => {
+      /*
+       * The single sanctioned exception, used only by SuggestionsService.publish. Everything
+       * else about the thread is identical — same mask check against post_perm included, so
+       * the webmaster still needs the publisher's bit.
+       */
+      const db = boundClient(PUBLISH_ONLY, Permission.SITE_CONFIG);
+      await expect(
+        svc.createViaPublish(db as never, INPUT, 'webmaster-1', Permission.SITE_CONFIG),
+      ).resolves.toMatchObject({ id: 'new-thread' });
+      expect(db.threads).toHaveLength(1);
+    });
+
+    it('createViaPublish still refuses a caller without the board\'s post permission', async () => {
+      // "The webmaster cannot post there" must surface as the same refusal a browser gets —
+      // the exception opens the composer door, never the permission one.
+      const db = boundClient(PUBLISH_ONLY, POST_MEMBER);
+      await expect(
+        svc.createViaPublish(db as never, INPUT, 'member-1', POST_MEMBER),
+      ).rejects.toMatchObject({ code: ErrorCode.PERMISSION_DENIED });
+    });
+
+    it('MANDATORY: a board without the flag takes composer threads exactly as before', async () => {
+      // The default-false pin: nothing changes anywhere the migration did not touch.
+      const db = boundClient(TREE, POST_MEMBER);
+      await expect(
+        svc.create(
+          db as never,
+          { categoryId: 'pub', title: 'Ordinary thread', body: 'The opening post.' },
+          'member-1',
+          POST_MEMBER,
+        ),
+      ).resolves.toMatchObject({ id: 'new-thread' });
+    });
   });
 
   describe('move', () => {
@@ -344,6 +556,16 @@ describe('ThreadService', () => {
 
       expect(db.updated[0]).toMatchObject({ id: 't1', categoryId: 'off' });
       expect(reindex.requests).toEqual([{ kind: 'thread', id: 't1', reason: 'moved' }]);
+
+      /*
+       * ★ AND IT PRUNES SUBSCRIPTIONS (INV-039, SECOND HALF) ★
+       *
+       * Asserted in the same test as the reindex because they are two halves of one operation. A
+       * move that did one without the other leaves either stale search results or subscribers who
+       * can no longer open the thread they are following — and the second is a disclosure, since a
+       * notification carries the thread title.
+       */
+      expect(pruned).toEqual([{ threadId: 't1', toCategoryId: 'off' }]);
     });
 
     it('does NOT enqueue when the thread is already in that category', async () => {
@@ -369,7 +591,7 @@ describe('ThreadService', () => {
 
   it('creating a thread enqueues a reindex too', async () => {
     const db = boundClient(TREE, POST_MEMBER);
-    await svc.create(db as never, { categoryId: 'pub', title: 'New thread' }, 'a', POST_MEMBER);
+    await svc.create(db as never, { categoryId: 'pub', title: 'New thread', body: 'The opening post.' }, 'a', POST_MEMBER);
     expect(reindex.requests).toEqual([
       { kind: 'thread', id: 'new-thread', reason: 'created' },
     ]);

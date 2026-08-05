@@ -20,6 +20,29 @@
 export interface PageTab {
   readonly key: string;
   readonly label: string;
+  /**
+   * Rendered after the label, inside the link — a live counter pill, typically.
+   *
+   * A NODE rather than a number, so a tab whose count must stay current (the admin console's
+   * Support tab rides the SSE stream) can bring its own client component while these tabs stay
+   * server-rendered links. Absent for the tabs that are just names, which is nearly all of them.
+   */
+  readonly badge?: React.ReactNode;
+}
+
+/**
+ * Appends `tab=` with the right separator.
+ *
+ * ★ A basePath MAY ALREADY CARRY A QUERY ★
+ *
+ * This used to be a bare `${basePath}?tab=${key}`, which was fine while every caller passed a plain
+ * path. The colonisation project page passes its filters along so a member who set a 200 ly radius
+ * and then opened Carriers does not come back to a silently reset shopping list — and that produced
+ * `...?withinLy=200&sort=cheapest?tab=buy`, a second question mark that makes the whole tail one
+ * malformed parameter value. The tab still rendered; it simply never selected.
+ */
+function withTab(basePath: string, key: string): string {
+  return `${basePath}${basePath.includes('?') ? '&' : '?'}tab=${key}`;
 }
 
 export function PageTabs({
@@ -44,7 +67,7 @@ export function PageTabs({
              * makes two URLs for one page — and the tidier one is what people
              * copy out of the address bar.
              */
-            href={index === 0 ? basePath : `${basePath}?tab=${tab.key}`}
+            href={index === 0 ? basePath : withTab(basePath, tab.key)}
             aria-current={active ? 'page' : undefined}
             className={
               active
@@ -53,6 +76,7 @@ export function PageTabs({
             }
           >
             {tab.label}
+            {tab.badge}
           </a>
         );
       })}

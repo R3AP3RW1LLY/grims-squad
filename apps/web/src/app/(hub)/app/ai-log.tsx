@@ -1,0 +1,202 @@
+'use client';
+
+import { useEffect, useRef, useState } from 'react';
+
+/**
+ * The live AI log.
+ *
+ * ★ SQUADRON OWNER, 2026-07-30 ★
+ *
+ * "we also want realtime streaming logs for ai in the admin area for the AI, just dont show PC file
+ * paths into this streaming logs servic please."
+ *
+ * Paths are stripped server-side inside `AiStreamService.emit`, which every line passes through —
+ * one funnel, so the guarantee is structural rather than something each call site remembers. This
+ * component deliberately does no filtering of its own: a second, weaker redactor here would invite
+ * somebody to rely on it.
+ *
+ * ★ WHAT IT IS FOR, WHICH IS NOT AUDITING ★
+ *
+ * `ai_calls` answers "what did it say to that member last Tuesday". This answers "is it working
+ * RIGHT NOW" — the question somebody actually has while a queue is filling up, a tunnel is being
+ * set up, or posts are being held for no obvious reason.
+ *
+ * ★ ALWAYS ON, AND THAT IS A REVERSAL ★
+ *
+ * Squadron owner, 2026-07-31: "The LIVE AI Log must always be on, show pings that keep it alive!
+ * this is non-negotiable!"
+ *
+ * It was opt-in, on the reasoning that a stream nobody is reading is a held connection. That
+ * reasoning was wrong for the job this panel actually does. The owner reported a post that "was not
+ * screened" — and with the panel disconnected there is NO WAY to tell the difference between
+ * screening running fine, screening failing, and screening not running at all. A monitor you have
+ * to switch on tells you nothing about the minutes before you switched it on.
+ *
+ * ★ AND IT SHOWS THE HEARTBEAT ★
+ *
+ * A quiet log is ambiguous: it means either "nothing is happening" or "this panel is dead". The
+ * server emits a heartbeat every few minutes as it keeps the model warm, so an idle log still
+ * proves the connection and the model are alive. Silence now means something is genuinely wrong.
+ */
+
+interface LogLine {
+  readonly at: string;
+  readonly level: 'info' | 'warn' | 'error';
+  readonly kind: string;
+  readonly message: string;
+  readonly tookMs?: number;
+}
+
+/**
+ * How many lines a tab left open all evening keeps.
+ *
+ * ★ SQUADRON OWNER, 2026-08-01 ★
+ *
+ * "only keep a max of 1000 logs visible here please. but record all logs so we have a record of
+ * them."
+ *
+ * A thousand in the browser, and every line persisted server-side — see `ai_log_lines`. The two
+ * numbers answer different questions: this one is how much a reader can scroll back through before
+ * the tab starts costing memory, and the table is the record.
+ */
+const MAX_LINES = 1_000;
+
+const LEVEL_COLOUR: Record<LogLine['level'], string> = {
+  info: 'text-[var(--color-text-secondary)]',
+  warn: 'text-[var(--color-brand-orange)]',
+  error: 'text-[var(--color-brand-orange)]',
+};
+
+export function AiLogPanel() {
+  /*
+   * A constant, not state. The panel is always connected and there is no control to change that —
+   * a setter nothing calls is an invitation to add a disconnect button back.
+   */
+  const open = true;
+  const [lines, setLines] = useState<LogLine[]>([]);
+  const [state, setState] = useState<'idle' | 'connecting' | 'live' | 'lost'>('idle');
+  const boxRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+
+    setState('connecting');
+    const source = new EventSource('/v1/ai/stream');
+
+    source.addEventListener('open', () => setState('live'));
+
+    source.addEventListener('ai', (event) => {
+      setState('live');
+      try {
+        const line = JSON.parse((event as MessageEvent<string>).data) as LogLine;
+        /*
+         * Bounded here as well as on the server. The server's ring buffer decides what a NEW
+         * subscriber receives; this decides what a tab left open all evening accumulates, which is
+         * otherwise unbounded browser memory.
+         */
+        /*
+         * ★ NEWEST FIRST ★
+         *
+         * "newest logs need to be at the top and older logs need to be at the bottom."
+         *
+         * Prepended rather than appended, so the thing that just happened is the thing you are
+         * already looking at. `slice(0, MAX)` therefore drops the OLDEST — the tail — which is the
+         * correct end to lose.
+         */
+        setLines((prev) => [line, ...prev].slice(0, MAX_LINES));
+      } catch {
+        // A malformed line is not worth breaking the panel over.
+      }
+    });
+
+    source.addEventListener('error', () => {
+      /*
+       * EventSource reconnects by itself, so this is "lost" rather than "failed" — saying "error"
+       * would have somebody investigating a stream that is already coming back.
+       */
+      setState('lost');
+    });
+
+    return () => source.close();
+  }, [open]);
+
+  /*
+   * ★ NO AUTO-SCROLL ANY MORE ★
+   *
+   * This used to jump to the bottom on every line, because the newest was there. With the newest at
+   * the TOP the newest line is already in view without moving anything — and scrolling somebody
+   * back to the top while they are reading history would be worse than the problem it solved.
+   *
+   * `boxRef` is kept: it is what makes the panel a scroll container rather than the page.
+   */
+
+  return (
+    <section className="rounded border border-[var(--color-border-hairline)] p-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="font-mono text-[11px] uppercase tracking-[0.24em] text-[var(--color-text-secondary)]">
+            Live AI log
+          </h3>
+          <p className="mt-1 text-sm text-[var(--color-text-secondary)]">
+            What the AI is doing right now. Machine paths are stripped before it leaves the server.
+          </p>
+        </div>
+        {/*
+          A status light, not a switch. The panel is always connected, so the only question worth
+          answering here is whether the stream is actually alive right now.
+        */}
+        <span className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.24em]">
+          <span
+            aria-hidden="true"
+            className={`inline-block h-2 w-2 rounded-full ${
+              state === 'live'
+                ? 'bg-[var(--color-brand-cyan-bright)]'
+                : state === 'lost'
+                  ? 'bg-[var(--color-brand-orange)]'
+                  : 'bg-[var(--color-text-secondary)]'
+            }`}
+          />
+          <span className="text-[var(--color-text-secondary)]">
+            {state === 'live' ? 'live' : state === 'lost' ? 'reconnecting' : 'connecting'}
+          </span>
+        </span>
+      </div>
+
+      {open && (
+        <>
+          <div
+            ref={boxRef}
+            className="mt-3 max-h-80 overflow-y-auto rounded bg-[var(--color-surface-panel-sunken)] p-4 font-mono text-xs"
+            // A log is a live region, but an assertive one would read every line aloud to a screen
+            // reader as it arrives. Polite lets somebody hear it when they pause.
+            aria-live="polite"
+          >
+            {lines.length === 0 ? (
+              <p className="text-[var(--color-text-secondary)]">
+                Connected. Nothing has happened yet — screen a post or generate artwork to see it
+                here.
+              </p>
+            ) : (
+              <ul className="space-y-1">
+                {lines.map((line, i) => (
+                  <li key={`${line.at}-${i}`} className={LEVEL_COLOUR[line.level]}>
+                    <span className="text-[var(--color-text-secondary)]">
+                      {new Date(line.at).toLocaleTimeString('en-GB')}
+                    </span>{' '}
+                    <span className="uppercase">[{line.kind}]</span> {line.message}
+                    {line.tookMs !== undefined && (
+                      <span className="text-[var(--color-text-secondary)]">
+                        {' '}
+                        ({line.tookMs}ms)
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}

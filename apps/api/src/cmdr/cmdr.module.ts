@@ -16,8 +16,12 @@ import { InaraLinkService } from './inara-link.service.js';
 import { PrismaInaraLinkStore } from './inara-link.store.prisma.js';
 import { NicknameSyncService } from './nickname-sync.service.js';
 import { LEADERSHIP_CEILING } from '../members/members.store.js';
-import { CMDR_SERVICE, NONCE_SERVICE, INARA_LINK } from './cmdr.tokens.js';
+import { CMDR_SERVICE, NONCE_SERVICE, INARA_LINK, NICKNAME_SERVICE } from './cmdr.tokens.js';
+import { NicknameService } from './nickname.service.js';
 import { logger } from '../logging.js';
+import { LIVE_SERVICE } from '../live/live.tokens.js';
+import { liveNudgeOf } from '../live/live-nudge.js';
+import type { LiveService } from '../live/live.service.js';
 
 /**
  * Builds the nickname reconciler, or nothing.
@@ -63,6 +67,20 @@ function nicknameReconciler(prisma: PrismaClient): NicknameSyncService | undefin
         select: { guildNick: true },
       });
       return i?.guildNick ?? null;
+    },
+    /**
+     * A nickname they chose instead of the convention.
+     *
+     * Read fresh on every check rather than cached: the whole point is that setting one takes
+     * effect immediately, and a member who set it on the settings page thirty seconds ago must not
+     * be renamed back by the next Inara call.
+     */
+    async overrideFor(userId) {
+      const u = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { nicknameOverride: true },
+      });
+      return u?.nicknameOverride ?? null;
     },
     setNickname: (g, d, nick) => discord.setMemberNickname(g, d, nick),
     /**
@@ -138,6 +156,37 @@ function nicknameReconciler(prisma: PrismaClient): NicknameSyncService | undefin
   controllers: [CmdrController],
   providers: [
     {
+      provide: NICKNAME_SERVICE,
+      inject: [PrismaClient],
+      useFactory: (db: PrismaClient) => {
+        /*
+         * The SAME Discord adapter the nickname sync uses, built the same way — including the empty
+         * `grantableRoleIds`, which makes "this adapter renames people and never grants a role"
+         * structural rather than a promise about how it happens to be called.
+         *
+         * Null when the guild or token is unset, which is the ordinary state in a development
+         * environment. Choosing a nickname still works; it simply is not pushed anywhere.
+         */
+        const guildId = process.env['DISCORD_GUILD_ID'] ?? '';
+        const botToken = process.env['DISCORD_BOT_TOKEN'] ?? '';
+
+        if (guildId === '' || botToken === '') return new NicknameService(db, null);
+
+        const discord = new DiscordAdapter({
+          clientId: process.env['DISCORD_CLIENT_ID'] ?? '',
+          clientSecret: process.env['DISCORD_CLIENT_SECRET'] ?? '',
+          botToken,
+          // EMPTY, deliberately — same reasoning as the sync adapter above. This exists to rename
+          // people and must never grant a role.
+          grantableRoleIds: [],
+        });
+        return new NicknameService(db, {
+          guildId,
+          set: (g, d, nick) => discord.setMemberNickname(g, d, nick),
+        });
+      },
+    },
+    {
       provide: CMDR_SERVICE,
       inject: [PrismaClient],
       useFactory: (db: PrismaClient) => new CmdrService(new PrismaCmdrStore(db)),
@@ -149,8 +198,10 @@ function nicknameReconciler(prisma: PrismaClient): NicknameSyncService | undefin
     },
     {
       provide: INARA_LINK,
-      inject: [PrismaClient],
-      useFactory: (db: PrismaClient): InaraLinkService => {
+      // LIVE_SERVICE optional: the confirmation notices are decoration on a verification that
+      // already happened, and a wiring without the live module must still verify people.
+      inject: [PrismaClient, { token: LIVE_SERVICE, optional: true }],
+      useFactory: (db: PrismaClient, live?: LiveService): InaraLinkService => {
         const keyring = process.env['TOKEN_ENCRYPTION_KEYRING'] ?? '';
         if (keyring === '') {
           // INV-012 has no degraded mode. Refusing to construct is better than
@@ -163,7 +214,7 @@ function nicknameReconciler(prisma: PrismaClient): NicknameSyncService | undefin
         }
 
         return new InaraLinkService(
-          new PrismaInaraLinkStore(db, new TokenCipher(createKeyring(keyring))),
+          new PrismaInaraLinkStore(db, new TokenCipher(createKeyring(keyring)), liveNudgeOf(live)),
           // The adapter's OWN key is irrelevant to verification: every check
           // runs with the MEMBER's key, which is exactly what makes the
           // returned name proof rather than a claim.

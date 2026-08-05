@@ -3,6 +3,21 @@
 	email {$ACME_EMAIL}
 }
 
+# ★ OPERATOR-ENABLED SITES, FROM A MOUNT THIS REPO DOES NOT WRITE ★
+#
+# /etc/caddy-sites is /srv/grims/caddy on the host (see compose.prod.yml) —
+# NOT part of this repo's mount. Site blocks that depend on material a deploy
+# cannot provide (the grims-squad.com block needs its Cloudflare Origin CA
+# certificate pair on disk first) are STAGED in infra/caddy/sites/ and copied
+# into /srv/grims/caddy by the operator once their prerequisites exist.
+#
+# A glob, deliberately: a glob that matches nothing is a warning, not an error,
+# so this line is inert until the operator enables a site — whereas importing
+# infra/caddy/sites/ directly would load the grims-squad.com block on the next
+# deploy and fail the whole config for want of certificates that are not
+# installed yet. The cutover order lives in infra/cutover-grims-squad.md.
+import /etc/caddy-sites/*.caddy
+
 # Both hostnames are listed so the move to the real domain needs no config
 # change and no downtime — Caddy obtains a certificate for grims-squad.com the
 # moment its DNS points here, and until then that name simply never resolves.

@@ -1,0 +1,675 @@
+import type { PrismaClient } from '@grims/db';
+import { CARRIER_STATION_TYPES } from '@grims/shared';
+
+/**
+ * Reading the commodities market.
+ *
+ * ★ SQUADRON OWNER, 2026-08-02 ★
+ *
+ * "a realt time commodities market that operates similar to uexcorp.space/commodities that shows
+ * all the comoditiy details, average pricing, price over time lots of data, as well as the best
+ * places to buy both in general and based on the players current location and station they are at."
+ *
+ * ★ EVERY QUERY HERE RIDES AN INDEX, AND THAT IS NOT A STYLE PREFERENCE ★
+ *
+ * `market_entries` holds 18.78 million rows and has NO plain index on `commodity`. It has two
+ * partial indexes covering exactly the rows that can be traded:
+ *
+ *   market_entries_buy_idx   (commodity, buy_price ASC)   WHERE supply > 0 AND buy_price > 0
+ *   market_entries_sell_idx  (commodity, sell_price DESC) WHERE demand > 0 AND sell_price > 0
+ *
+ * Measured on our own data: a `count(*)` for one commodity that cannot use them took 72,570ms. The
+ * same aggregate that can takes ~250ms, and the "best places to buy" query takes 8ms. A member-
+ * facing page cannot be on the wrong side of that, so every WHERE clause below carries the full
+ * partial predicate even where it looks redundant — dropping `supply > 0` because `buy_price > 0`
+ * seems sufficient is what silently turns an 8ms page into a seventy-second one.
+ */
+
+/** One commodity as the market index lists it. Straight off the newest hourly snapshot. */
+export interface MarketRow {
+  readonly commodity: string;
+  readonly category: string | null;
+  readonly avgBuy: number | null;
+  readonly avgSell: number | null;
+  readonly minBuy: number | null;
+  readonly maxSell: number | null;
+  readonly supply: string;
+  readonly demand: string;
+  readonly buyMarkets: number;
+  readonly sellMarkets: number;
+  /** Change in average sell price against the comparison hour, as a fraction. Null when unknown. */
+  readonly sellTrend: number | null;
+}
+
+/** One station trading one commodity. */
+export interface MarketPlace {
+  readonly stationName: string;
+  readonly systemName: string;
+  readonly stationType: string | null;
+  readonly largePads: number;
+  readonly price: number;
+  /** Tonnes available (buying) or wanted (selling). */
+  readonly quantity: number;
+  readonly seenAt: Date | null;
+  /** Light years from the system asked about. Null when no origin was given. */
+  readonly distance: number | null;
+  /**
+   * Light SECONDS from the arrival star to the pad — the supercruise leg the jump count cannot
+   * see. Null when the station's knowledge row does not carry it. Read from knowledge_items at
+   * query time rather than copied onto 18.6M market rows: the join is two index probes per
+   * RETURNED row, and a copy would need a backfill and then be one more thing the rebuild could
+   * lose.
+   */
+  readonly arrivalLs: number | null;
+  /**
+   * Where this station is, so it can become the origin of the NEXT leg.
+   *
+   * The Freight Office plans a run as buy-here then sell-there, and the second query has to be
+   * anchored on the first station rather than on where the member started. Null for a station whose
+   * coordinates we never learned — which drops it out of leg two rather than measuring from nowhere.
+   */
+  readonly coords: Coords | null;
+}
+
+export interface HistoryPoint {
+  readonly observedAt: Date;
+  readonly avgBuy: number | null;
+  readonly avgSell: number | null;
+  readonly minBuy: number | null;
+  readonly maxSell: number | null;
+  readonly buyMarkets: number;
+  readonly sellMarkets: number;
+}
+
+/** One commodity's market as seen from somewhere specific. */
+export interface NearRow {
+  /** Cheapest believable buy within the radius. Null: nobody near sells it. */
+  readonly nearBuy: number | null;
+  /** Best believable sale within the radius. Null: nobody near buys it. */
+  readonly nearSell: number | null;
+  readonly nearMarkets: number;
+}
+
+export interface MarketStore {
+  list(): Promise<readonly MarketRow[]>;
+  /**
+   * Per-commodity best prices within `withinLy` of an origin, keyed by commodity name.
+   * Believable rows only (the 90-day band): a "best near you" from 2021 is not near anybody.
+   */
+  listNear(origin: Coords, withinLy: number): Promise<ReadonlyMap<string, NearRow>>;
+  /** Commodities worth carrying, widest average margin first. Narrows the route search. */
+  topMargins(limit: number): Promise<readonly string[]>;
+  one(commodity: string): Promise<MarketRow | null>;
+  history(commodity: string, hours: number): Promise<readonly HistoryPoint[]>;
+  bestBuys(commodity: string, opts: PlaceQuery): Promise<readonly MarketPlace[]>;
+  bestSells(commodity: string, opts: PlaceQuery): Promise<readonly MarketPlace[]>;
+  /** Coordinates of a system by name, for "near me". Null when we do not hold it. */
+  systemCoords(name: string): Promise<Coords | null>;
+  /** Systems whose names begin with the fragment, for the origin picker. */
+  systemsLike(fragment: string, limit: number): Promise<readonly string[]>;
+  /** How current the whole mirror is. See `FeedHealth`. */
+  feedHealth(): Promise<FeedHealth>;
+}
+
+/**
+ * How fresh the market mirror is, as a whole.
+ *
+ * ★ THE FEED CAN STOP, AND NOTHING SAID SO — FOUND 2026-08-04 ★
+ *
+ * Every price on this platform comes from EDDN, relayed by a collector that runs as its own
+ * service. It stopped, and every page went on presenting its prices exactly as before:
+ *
+ *     newest reading anywhere: 33.2 hours ago
+ *     rows in the last 6 hours: 0
+ *     2026-07-30  425,265 rows      2026-08-02  123,230 rows
+ *     2026-07-31  nothing           2026-08-03  nothing
+ *
+ * A shopping list, a trade route and a commodity chart are all claims about what is on a shelf
+ * right now. When the feed dies they quietly become claims about what was on a shelf on Sunday,
+ * and a member acts on them identically. The per-row age already shown on some pages does not
+ * cover this: EVERY row ages together, so nothing looks unusual — the list just gets quietly and
+ * uniformly wrong.
+ *
+ * So the platform now reads its own pulse and says it out loud.
+ */
+export interface FeedHealth {
+  /** The newest reading we hold, from anywhere. Null on an empty mirror. */
+  readonly newestAt: Date | null;
+  /** Hours since then. Infinity when we hold nothing at all. */
+  readonly hoursBehind: number;
+  /**
+   * Whether prices should be presented with a warning.
+   *
+   * Six hours, because EDDN carries a busy region's markets continuously — a healthy collector
+   * produces rows every few minutes, so six quiet hours is already far outside normal and well
+   * inside the window where somebody is still deciding what to fly.
+   */
+  readonly stale: boolean;
+}
+
+export const FEED_STALE_HOURS = 6;
+
+export interface Coords {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
+}
+
+export interface PlaceQuery {
+  readonly limit: number;
+  /**
+   * What to rank by.
+   *
+   * ★ WHY THIS HAD TO BECOME A CHOICE — SQUADRON OWNER, 2026-08-02 ★
+   *
+   * "the Where to buy page is sending to to really odd places, we know we can get everything except
+   * CMM Composite from a station pretty close to the construction site, this is telling us to leave
+   * the system!"
+   *
+   * The query only ever ordered by price. A caller wanting the NEAREST station could fetch a
+   * handful and re-rank them, but that cannot work: the handful is the CHEAPEST handful, so a
+   * station in the member's own system charging 3,456 for steel is never in it when a dozen distant
+   * ones charge less. Re-ranking a price-sorted list can only reorder answers it was already given.
+   *
+   * So the ordering has to happen in the query. Both indexes support it — price by the partial
+   * index, distance by the cube GiST.
+   */
+  readonly order?: 'price' | 'distance';
+  /** Exclude fleet carriers. Default true — see the note on CARRIER_TYPE. */
+  readonly excludeCarriers: boolean;
+  /** Only stations with a large pad. */
+  readonly largePadOnly: boolean;
+  /** Ignore prices nobody has reported since this. Null for no limit. */
+  readonly seenSince: Date | null;
+  /** Rank by distance from here rather than by price alone. */
+  readonly near: Coords | null;
+  /** Light-year radius, when `near` is set. */
+  readonly withinLy: number;
+  /** Minimum tonnes on offer or wanted. */
+  readonly minQuantity: number;
+}
+
+/**
+ * Fleet carriers, excluded from the market by default.
+ *
+ * ★ NOT SNOBBERY — THE NUMBERS ★
+ *
+ * Carrier owners set prices by hand. In our own data the cheapest Gold in the galaxy is a set of
+ * carriers at 2,356 against a station average of 44,758, and the dearest a carrier at 4,760,900.
+ * All real, all entered by somebody, and all attached to a station that can be somewhere else
+ * tomorrow. Sending a member across the bubble to a carrier that has jumped is the single most
+ * expensive mistake this page can make, so they are off by default and one toggle away.
+ *
+ * ★ AND THERE ARE TWO SPELLINGS OF THE TYPE ★
+ *
+ * `market_entries.station_type` is denormalised from the catalogue, which holds the galaxy dump's
+ * `"Drake-Class Carrier"` and the journal's `"FleetCarrier"` in the same column. Measured on the
+ * dev mirror: 131,512 carrier market rows under the first spelling and 3,267 under the second.
+ * Excluding only the first meant those 3,267 hand-priced rows were being counted as ordinary
+ * stations — which is how a 2,356 cr Gold that a carrier owner typed reaches a page whose whole
+ * purpose is to keep it out. See `@grims/shared/carrier`.
+ */
+const CARRIER_TYPES = CARRIER_STATION_TYPES;
+
+/** The two partial-index predicates, written once so no query can drift off the index. */
+const BUYABLE = 'supply > 0 AND buy_price > 0';
+const SELLABLE = 'demand > 0 AND sell_price > 0';
+
+function int(v: unknown): number | null {
+  if (v === null || v === undefined) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.round(n) : null;
+}
+
+export class PrismaMarketStore implements MarketStore {
+  constructor(private readonly db: PrismaClient) {}
+
+  /**
+   * Every commodity, at the newest hour we recorded, with its movement against a day earlier.
+   *
+   * One read of `commodity_snapshots`, no join, no touch of `market_entries` at all — which is why
+   * it returns in single-digit milliseconds for all 391. The category is denormalised onto the
+   * snapshot precisely so this page needs nothing else.
+   */
+  async list(): Promise<readonly MarketRow[]> {
+    const rows = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
+      `WITH newest AS (SELECT max(observed_at) AS at FROM commodity_snapshots),
+            -- The most recent hour at least a day old. Not "exactly 24 hours ago": the job may have
+            -- missed an hour, and an exact match would silently show no trend at all for everything
+            -- rather than comparing against the nearest hour we actually hold.
+            prior AS (SELECT max(observed_at) AS at FROM commodity_snapshots
+                       WHERE observed_at <= (SELECT at FROM newest) - interval '24 hours')
+       SELECT c.commodity, c.category, c.avg_buy, c.avg_sell, c.min_buy, c.max_sell,
+              c.supply::text AS supply, c.demand::text AS demand,
+              c.buy_markets, c.sell_markets,
+              p.avg_sell AS prior_sell
+         FROM commodity_snapshots c
+         LEFT JOIN commodity_snapshots p
+           ON p.commodity = c.commodity AND p.observed_at = (SELECT at FROM prior)
+        WHERE c.observed_at = (SELECT at FROM newest)
+        ORDER BY c.commodity`,
+    );
+
+    return rows.map((r) => this.#row(r));
+  }
+
+  /*
+   * ★ CACHED, BECAUSE THE AGGREGATE COSTS A SECOND ★
+   *
+   * A 50 ly ball around anywhere in the bubble intersects a serious fraction of 18.6M rows, and
+   * the aggregate measured 1.1s. That is fine once and absurd per page view — so results are held
+   * for five minutes, keyed on the origin rounded to a 10 ly grid: two members in neighbouring
+   * systems share an entry, and prices simply do not move enough in five minutes to matter (the
+   * believability band is ninety DAYS).
+   */
+  #nearCache = new Map<string, { at: number; rows: Map<string, NearRow> }>();
+
+  async listNear(origin: Coords, withinLy: number): Promise<ReadonlyMap<string, NearRow>> {
+    const key = [
+      Math.round(origin.x / 10),
+      Math.round(origin.y / 10),
+      Math.round(origin.z / 10),
+      withinLy,
+    ].join('|');
+
+    const hit = this.#nearCache.get(key);
+    if (hit !== undefined && Date.now() - hit.at < 5 * 60_000) return hit.rows;
+
+    const rows = await this.db.$queryRawUnsafe<
+      Array<{ commodity: string; near_buy: number | null; near_sell: number | null; near_markets: number }>
+    >(
+      `SELECT commodity,
+              min(buy_price) FILTER (WHERE ${BUYABLE}) AS near_buy,
+              max(sell_price) FILTER (WHERE ${SELLABLE}) AS near_sell,
+              count(DISTINCT station_key)::int AS near_markets
+         FROM market_entries
+        WHERE coords IS NOT NULL
+          AND coords <@ cube_enlarge(cube(ARRAY[$1::float8, $2::float8, $3::float8]), $4, 3)
+          AND (coords <-> cube(ARRAY[$1::float8, $2::float8, $3::float8])) <= $4
+          AND market_seen_at >= now() - interval '90 days'
+        GROUP BY commodity`,
+      origin.x,
+      origin.y,
+      origin.z,
+      withinLy,
+    );
+
+    const map = new Map<string, NearRow>();
+    for (const r of rows) {
+      map.set(r.commodity, {
+        nearBuy: r.near_buy === null ? null : int(r.near_buy),
+        nearSell: r.near_sell === null ? null : int(r.near_sell),
+        nearMarkets: int(r.near_markets) ?? 0,
+      });
+    }
+
+    // Bounded: fifty grid cells is plenty for one process, and eviction is "oldest goes".
+    if (this.#nearCache.size >= 50) {
+      const oldest = [...this.#nearCache.entries()].sort((a, b) => a[1].at - b[1].at)[0];
+      if (oldest !== undefined) this.#nearCache.delete(oldest[0]);
+    }
+    this.#nearCache.set(key, { at: Date.now(), rows: map });
+    return map;
+  }
+
+  async one(commodity: string): Promise<MarketRow | null> {
+    const rows = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
+      `WITH newest AS (SELECT max(observed_at) AS at FROM commodity_snapshots
+                        WHERE commodity = $1),
+            prior AS (SELECT max(observed_at) AS at FROM commodity_snapshots
+                       WHERE commodity = $1
+                         AND observed_at <= (SELECT at FROM newest) - interval '24 hours')
+       SELECT c.commodity, c.category, c.avg_buy, c.avg_sell, c.min_buy, c.max_sell,
+              c.supply::text AS supply, c.demand::text AS demand,
+              c.buy_markets, c.sell_markets,
+              (SELECT avg_sell FROM commodity_snapshots
+                WHERE commodity = $1 AND observed_at = (SELECT at FROM prior)) AS prior_sell
+         FROM commodity_snapshots c
+        WHERE c.commodity = $1 AND c.observed_at = (SELECT at FROM newest)`,
+      commodity,
+    );
+
+    const r = rows[0];
+    return r === undefined ? null : this.#row(r);
+  }
+
+  #row(r: Record<string, unknown>): MarketRow {
+    const sell = int(r['avg_sell']);
+    const prior = int(r['prior_sell']);
+
+    return {
+      commodity: String(r['commodity']),
+      category: r['category'] === null ? null : String(r['category']),
+      avgBuy: int(r['avg_buy']),
+      avgSell: sell,
+      minBuy: int(r['min_buy']),
+      maxSell: int(r['max_sell']),
+      supply: String(r['supply'] ?? '0'),
+      demand: String(r['demand'] ?? '0'),
+      buyMarkets: int(r['buy_markets']) ?? 0,
+      sellMarkets: int(r['sell_markets']) ?? 0,
+      /*
+       * Guarded on `prior > 0`, not just on null. A prior hour where nothing traded records a null
+       * average, and a zero would divide to Infinity and render as an infinite gain — the shape of
+       * bug that looks like a market event rather than a missing row.
+       */
+      sellTrend: sell !== null && prior !== null && prior > 0 ? (sell - prior) / prior : null,
+    };
+  }
+
+  async history(commodity: string, hours: number): Promise<readonly HistoryPoint[]> {
+    const rows = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
+      `SELECT observed_at, avg_buy, avg_sell, min_buy, max_sell, buy_markets, sell_markets
+         FROM commodity_snapshots
+        WHERE commodity = $1
+          AND observed_at >= now() - make_interval(hours => $2::int)
+        ORDER BY observed_at`,
+      commodity,
+      hours,
+    );
+
+    return rows.map((r) => ({
+      observedAt: r['observed_at'] as Date,
+      avgBuy: int(r['avg_buy']),
+      avgSell: int(r['avg_sell']),
+      minBuy: int(r['min_buy']),
+      maxSell: int(r['max_sell']),
+      buyMarkets: int(r['buy_markets']) ?? 0,
+      sellMarkets: int(r['sell_markets']) ?? 0,
+    }));
+  }
+
+  bestBuys(commodity: string, opts: PlaceQuery): Promise<readonly MarketPlace[]> {
+    return this.#places(commodity, opts, 'buy');
+  }
+
+  bestSells(commodity: string, opts: PlaceQuery): Promise<readonly MarketPlace[]> {
+    return this.#places(commodity, opts, 'sell');
+  }
+
+  /**
+   * Where to buy or sell one commodity.
+   *
+   * ★ THE 8ms QUERY, AND WHAT KEEPS IT THAT WAY ★
+   *
+   * Built as one statement against one partial index. The filters below are all applied AFTER the
+   * index narrows to a single commodity's tradeable rows — which is a few tens of thousands, small
+   * enough that filtering and sorting them costs nothing.
+   *
+   * The one thing that must never move is the leading `commodity = $1 AND <partial predicate>`. Put
+   * anything ahead of it, or drop half the predicate, and the planner falls back to a sequential
+   * scan of 18.78 million rows.
+   */
+  async #places(
+    commodity: string,
+    opts: PlaceQuery,
+    side: 'buy' | 'sell',
+  ): Promise<readonly MarketPlace[]> {
+    const buying = side === 'buy';
+    const priceCol = buying ? 'buy_price' : 'sell_price';
+    const qtyCol = buying ? 'supply' : 'demand';
+    const predicate = buying ? BUYABLE : SELLABLE;
+
+    const params: unknown[] = [commodity];
+    const where: string[] = [`commodity = $1`, predicate];
+
+    if (opts.excludeCarriers) {
+      params.push(CARRIER_TYPES);
+      // The NULL arm is not decoration: a station whose type we never learned is NULL, and
+      // `<> ALL` answers NULL for it — dropping every unknown-type station out of the results
+      // silently. Spelled out rather than relying on `IS DISTINCT FROM`, which takes one value and
+      // this now takes a list.
+      where.push(
+        `(station_type IS NULL OR station_type <> ALL($${params.length}::text[]))`,
+      );
+    }
+    if (opts.largePadOnly) where.push(`large_pads > 0`);
+    if (opts.minQuantity > 0) {
+      params.push(opts.minQuantity);
+      where.push(`${qtyCol} >= $${params.length}`);
+    }
+    if (opts.seenSince !== null) {
+      params.push(opts.seenSince);
+      where.push(`market_seen_at >= $${params.length}`);
+    }
+
+    /*
+     * ★ A DEAD ROW'S PRICE NEVER MOVES, SO DEAD ROWS SYSTEMATICALLY WIN — MEASURED 2026-08-04 ★
+     *
+     * The ranking was pure price. Live prices drift with the game's economy; a row nobody has
+     * re-observed keeps its price for ever — so the top slot selects FOR staleness. The top answer
+     * for "where to buy Titanium near Diaguandri" was a station last seen 1,883 days ago with 19
+     * tonnes on a shelf nobody has looked at in five years. Eight of the ten most-stocked
+     * commodities' cheapest rows were over three months old.
+     *
+     * Same rule the colonisation shopping list already adopted, for the same measured reason: one
+     * question with a yes-or-no answer — can this reading be believed at all? Inside ninety days
+     * price decides and the age is printed; outside it the row sorts below every believable one,
+     * however cheap it looks, because a five-year-old supply figure is not a bargain, it is
+     * fiction. Still shown, never filtered: hiding it would say "nobody sells this" about
+     * commodities sitting on a shelf right now.
+     *
+     * As a leading ORDER BY expression this costs the index-supplied ordering: the planner filters
+     * on the (commodity, price) index and top-N sorts the matches. Measured on Gold — the worst
+     * case, 71k tradeable rows — at 84 ms against 9 ms before, on a page that spends hundreds of
+     * milliseconds rendering. The colonisation path pays nothing: it re-ranks in rankPlaces.
+     */
+    const stale = `(market_seen_at IS NULL OR market_seen_at < now() - interval '90 days')`;
+
+    /*
+     * Distance is computed with the cube operator against the GiST index. `<->` is the operator
+     * that index supports; computing it by hand in SQL would work and would scan.
+     */
+    let distanceSelect = 'NULL::float8 AS distance';
+    let order = `${stale} ASC, ` + (buying ? `buy_price ASC` : `sell_price DESC`);
+
+    if (opts.near !== null) {
+      params.push(opts.near.x, opts.near.y, opts.near.z);
+      const origin = `cube(ARRAY[$${params.length - 2}::float8,$${params.length - 1}::float8,$${params.length}::float8])`;
+      distanceSelect = `(coords <-> ${origin}) AS distance`;
+      params.push(opts.withinLy);
+      where.push(`coords IS NOT NULL AND (coords <-> ${origin}) <= $${params.length}`);
+      /*
+       * Price leads by default inside the radius: a member asking where to buy within 50 light
+       * years usually wants the best price in that circle, and every result is close enough by
+       * construction.
+       *
+       * `order: 'distance'` inverts it, and exists because "close enough by construction" stops
+       * being true the moment the radius is wide. Within 100 ly the cheapest row can be ninety
+       * jumps from a station in the member's own system that has what they need on the shelf.
+       *
+       * ★ THE SECOND KEY IS LOAD-BEARING FOR SPEED, NOT ONLY FOR TIES — MEASURED 2026-08-04 ★
+       *
+       * It looks like a tiebreak. Delete it and this query goes from 202 ms to 36 SECONDS, measured
+       * on the real 18.6-million-row table:
+       *
+       *     ORDER BY distance ASC, buy_price ASC  LIMIT 8  ->     202 ms, 39,500 buffers
+       *     ORDER BY distance ASC                 LIMIT 8  ->  35,936 ms, 11,426,201 buffers
+       *
+       * The reason is the GiST cube index. `(coords <-> origin) <= r` is a `float8 <= float8`
+       * comparison, which is not in `gist_cube_ops` — so it can only ever be a Filter, never an
+       * Index Cond. With `distance` as the sole sort key the planner can serve the ordering from a
+       * KNN index walk, and a KNN walk stops only when the LIMIT fills or the index is exhausted.
+       * In a sparse region the LIMIT never fills, so it crawls outward past the far side of the
+       * galaxy through all 18.6 million entries, discarding every one, to return seven rows.
+       *
+       * A SECOND sort key makes that impossible: a KNN scan can supply ordering on distance alone,
+       * so any second key forces a Sort node, the planner must cost the whole filtered set either
+       * way, and it therefore picks the cheap `market_entries_buy_idx` path bounded by
+       * `commodity = $1`. That is what keeps this fast, and nothing said so until a measurement
+       * script using the one-key shape had to be killed after ten minutes.
+       *
+       * If you ever find yourself removing a key here because it "does nothing", it does.
+       */
+      /*
+       * The believability band leads inside the radius too — EXCEPT on the distance ordering,
+       * where it must come second: `distance` staying the FIRST key is what lets the planner
+       * choose between the KNN walk and the price index (see the 202ms/36s note above), and
+       * "nearest first" with stale rows demoted WITHIN each band answers the question a
+       * distance sort is asking.
+       */
+      order =
+        opts.order === 'distance'
+          ? `distance ASC, ${stale} ASC, ${buying ? 'buy_price ASC' : 'sell_price DESC'}`
+          : buying
+            ? `${stale} ASC, buy_price ASC, distance ASC`
+            : `${stale} ASC, sell_price DESC, distance ASC`;
+    }
+
+    params.push(opts.limit);
+
+    const rows = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
+      `SELECT station_name, system_name, station_type, large_pads,
+              ${priceCol} AS price, ${qtyCol} AS quantity, market_seen_at, ${distanceSelect},
+              -- Projected AFTER the sort and limit (it is not a sort key), so it costs two index
+              -- probes for each row RETURNED, not for each row considered.
+              (SELECT NULLIF(ki.data->>'distanceToArrival', '')::float
+                 FROM knowledge_items ki
+                WHERE ki.kind = 'station' AND ki.source IN ('galaxy', 'eddn')
+                  AND ki.ext_key = market_entries.station_key
+                LIMIT 1) AS arrival_ls,
+              cube_ll_coord(coords, 1) AS cx,
+              cube_ll_coord(coords, 2) AS cy,
+              cube_ll_coord(coords, 3) AS cz
+         FROM market_entries
+        WHERE ${where.join(' AND ')}
+        -- ★ station_key LAST, SO THE SAME QUESTION GETS THE SAME ANSWER TWICE ★
+        --
+        -- None of the orderings above is a total order: two stations at the same price and the same
+        -- distance were resolved however the rows happened to arrive, so the shopping list could
+        -- name a different station on two consecutive page loads with nothing in the data changed.
+        -- Caught while measuring the ranking — one pair flipped between runs seconds apart.
+        --
+        -- Somebody plots a route, reloads, and is told to go somewhere else. station_key is
+        -- arbitrary as a preference and perfect as a tiebreak: unique, always present, indexed.
+        ORDER BY ${order}, station_key
+        LIMIT $${params.length}`,
+      ...params,
+    );
+
+    return rows.map((r) => ({
+      stationName: String(r['station_name']),
+      systemName: String(r['system_name']),
+      stationType: r['station_type'] === null ? null : String(r['station_type']),
+      largePads: int(r['large_pads']) ?? 0,
+      price: int(r['price']) ?? 0,
+      quantity: int(r['quantity']) ?? 0,
+      seenAt: (r['market_seen_at'] as Date | null) ?? null,
+      distance: r['distance'] === null ? null : Number(r['distance']),
+      arrivalLs: r['arrival_ls'] === null ? null : Math.round(Number(r['arrival_ls'])),
+      coords:
+        r['cx'] === null || r['cy'] === null || r['cz'] === null
+          ? null
+          : { x: Number(r['cx']), y: Number(r['cy']), z: Number(r['cz']) },
+    }));
+  }
+
+  /**
+   * The commodities worth carrying at all, widest margin first.
+   *
+   * ★ THIS IS WHAT MAKES ROUTE PLANNING AFFORDABLE ★
+   *
+   * The obvious way to plan a route is to join buy-side against sell-side across every commodity at
+   * once. That was tried on 2026-07-31 and a four-way self-join over this data spilled to temp until
+   * it exhausted the disk and took the whole Docker engine down — the reason `market_entries` exists
+   * as a flat table in the first place.
+   *
+   * So the search is narrowed BEFORE any station work happens, using the hourly rollup: 391 rows,
+   * already aggregated, read in two milliseconds. Carrying something with a two-credit margin is
+   * never the answer, so the planner only ever does expensive per-station work for commodities that
+   * could plausibly pay for the trip.
+   */
+  async topMargins(limit: number): Promise<readonly string[]> {
+    const rows = await this.db.$queryRawUnsafe<Array<{ commodity: string }>>(
+      `SELECT commodity
+         FROM commodity_snapshots
+        WHERE observed_at = (SELECT max(observed_at) FROM commodity_snapshots)
+          AND avg_buy IS NOT NULL AND avg_sell IS NOT NULL
+          -- Both sides have to be genuinely tradeable. A commodity stocked at four markets in the
+          -- galaxy has a wonderful margin and no route.
+          AND buy_markets >= 20 AND sell_markets >= 20
+        ORDER BY (avg_sell - avg_buy) DESC
+        LIMIT $1`,
+      limit,
+    );
+    return rows.map((r) => r.commodity);
+  }
+
+  /**
+   * The pulse — read from the COLLECTOR'S OWN BOOKKEEPING, not from the market table.
+   *
+   * ★ THE FIRST VERSION OF THIS TOOK THE WHOLE MODULE DOWN ★
+   *
+   * It was `SELECT max(market_seen_at) FROM market_entries`, and its comment called that "one
+   * indexed max". There is no index on `market_seen_at` — the two indexes on this table are
+   * `(commodity, buy_price)` and `(commodity, sell_price)`, both partial. So it was a sequential
+   * scan of eighteen and a half million rows, on a table the EDDN collector is writing to
+   * continuously, on EVERY request that showed a price.
+   *
+   * The scans piled up, held their connections, and starved the pool: within minutes every route in
+   * this module answered 500, including ones that touch none of this. Reported as "an unexpected
+   * error occurred ... the project wont open anymore".
+   *
+   * `knowledge_ingests` already carries the answer and is a few hundred rows. The collector opens a
+   * window, updates `progress_at` on a timer, and closes it — so the newest eddn row is exactly
+   * "when the collector last did work", which is a BETTER answer than the old one anyway: it
+   * distinguishes a stopped collector from a quiet galaxy, where a max over prices cannot.
+   */
+  async feedHealth(): Promise<FeedHealth> {
+    const [row] = await this.db.$queryRawUnsafe<Array<{ newest: Date | null }>>(
+      `SELECT max(progress_at) AS newest FROM knowledge_ingests WHERE source = 'eddn'`,
+    );
+
+    const newestAt = row?.newest ?? null;
+    const hoursBehind =
+      newestAt === null ? Number.POSITIVE_INFINITY : (Date.now() - newestAt.getTime()) / 3_600_000;
+
+    return { newestAt, hoursBehind, stale: hoursBehind > FEED_STALE_HOURS };
+  }
+
+  async systemCoords(name: string): Promise<Coords | null> {
+    /*
+     * From our own galaxy data rather than from `market_entries`, so a system with no market still
+     * works as an origin — which is most of them, and exactly where a member asking "what is near
+     * me" is likely to be sitting.
+     *
+     * ★ THE COORDINATES ARE A `cube` COLUMN, NOT JSON — COST A SILENT BUG ★
+     *
+     * The first version read `data->'coords'->>'x'`, which is a perfectly reasonable guess and is
+     * NULL for every system in the table: the ingest writes coordinates to the `coords` column so
+     * the GiST index can use them, and `data` never carries them.
+     *
+     * It failed silently and in the worst possible direction. `systemCoords` returned null, the
+     * caller read that as "no origin given", and a member asking for the best price WITHIN 50 LIGHT
+     * YEARS was quietly handed the best price in the galaxy — a correct-looking answer, a station
+     * they could not reach, and nothing anywhere saying so. Whoever changes this next: keep the
+     * caller's "unknown system" and "no system asked for" cases distinct.
+     */
+    const rows = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
+      `SELECT cube_ll_coord(coords, 1) AS x,
+              cube_ll_coord(coords, 2) AS y,
+              cube_ll_coord(coords, 3) AS z
+         FROM knowledge_items
+        WHERE source = 'galaxy' AND kind = 'system' AND lower(name) = lower($1)
+          AND coords IS NOT NULL
+        LIMIT 1`,
+      name,
+    );
+
+    const r = rows[0];
+    if (r === undefined || r['x'] === null || r['y'] === null || r['z'] === null) return null;
+    return { x: Number(r['x']), y: Number(r['y']), z: Number(r['z']) };
+  }
+
+  async systemsLike(fragment: string, limit: number): Promise<readonly string[]> {
+    const rows = await this.db.$queryRawUnsafe<Array<{ name: string }>>(
+      `SELECT name FROM knowledge_items
+        WHERE source = 'galaxy' AND kind = 'system' AND name ILIKE $1
+        ORDER BY length(name), name
+        LIMIT $2`,
+      `${fragment}%`,
+      limit,
+    );
+    return rows.map((r) => r.name);
+  }
+}

@@ -137,6 +137,27 @@ export class AclDbService {
    * until P8 gives it Postgres row-level security. A chunk table that returns
    * nothing is a P8 problem; one that returns everything is a breach.
    */
+  /**
+   * The category ids a caller may see, for the ONE place that cannot use the bound client.
+   *
+   * ★ WHY THIS IS EXPOSED AT ALL ★
+   *
+   * Full-text search needs `ts_rank` and the generated `search_tsv` column, which Prisma cannot
+   * express — so it is `$queryRaw`, and a raw query BYPASSES the extension that silently protects
+   * every other read in the forum.
+   *
+   * Rather than let the search service resolve visibility for itself — a second answer to "what can
+   * this caller see", which is how two answers drift apart — it asks here, and the SAME resolver
+   * that feeds the extension's predicate feeds the SQL.
+   *
+   * Named awkwardly on purpose. `visibleCategoryIdsFor` is not a thing to reach for casually, and a
+   * reader who finds it in a new file should ask why that file cannot use the bound client instead.
+   */
+  async visibleCategoryIdsFor(userId: string | undefined): Promise<string[]> {
+    const mask = userId === undefined ? 0n : await this.permissions.effectiveMask(userId);
+    return [...(await resolveVisibleCategoryIds(this.prisma, mask))];
+  }
+
   async #bind(base: AclPrincipal): Promise<AclBoundClient> {
     const visibleIds = {
       ForumCategory: await resolveVisibleCategoryIds(this.prisma, base.mask),

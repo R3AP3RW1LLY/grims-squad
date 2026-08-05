@@ -1,0 +1,57 @@
+# syntax=docker/dockerfile:1
+#
+# EDDN collector image: the market firehose. Resident, and exactly one of it.
+#
+# ★ WHY IT IS NOT PART OF THE WORKER IMAGE ★
+#
+# The worker is started by cron, runs one job and exits. This is the opposite — it connects to a
+# public relay and stays connected for months. Sharing an image would mean the worker carried a
+# native ZeroMQ binding it never calls, and it would blur the one property that matters here: there
+# must be exactly ONE collector. A separate service is something compose can hold to `replicas: 1`;
+# a script inside a batch image is not.
+#
+# Built from the REPO ROOT as context, like the others: pnpm workspaces need the lockfile and every
+# workspace manifest to resolve the same graph CI tested.
+FROM node:24-slim AS base
+RUN apt-get update && apt-get install -y --no-install-recommends openssl ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+ENV PNPM_HOME=/pnpm PATH=/pnpm:$PATH
+RUN corepack enable
+
+FROM base AS build
+WORKDIR /app
+COPY . .
+# ★ NOT --frozen-lockfile ALONE: the zeromq build script must be allowed to run ★
+#
+# pnpm 11 refuses to run dependency build scripts unless they are approved, and prints
+# ERR_PNPM_IGNORED_BUILDS rather than failing. zeromq ships prebuilds for linux-x64 so the package
+# still loads — but the failure mode if it ever did need to compile would be a container that builds
+# clean and then throws at `import` on first start, in production, with no build log to look at.
+RUN pnpm install --frozen-lockfile
+RUN pnpm --filter @grims/db exec prisma generate
+RUN pnpm --filter @grims/shared build \
+ && pnpm --filter @grims/db build \
+ && pnpm --filter @grims/eddn-collector exec tsc -b
+
+# Fails the BUILD rather than the deploy if the native binding is unusable on this platform.
+RUN node -e "import('zeromq').then(z => { if (typeof z.Subscriber !== 'function') process.exit(1) })" \
+    --input-type=module || (echo 'zeromq did not load — the collector cannot run' && exit 1)
+
+FROM base AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=build /app /app
+# Non-root, as everywhere else: a container escape from a root process is a far shorter path to the
+# host than one from an unprivileged process.
+RUN useradd -r -u 10001 -m grims && chown -R grims:grims /app
+USER grims
+
+# ★ IT IS THE ONLY THING THIS IMAGE DOES ★
+#
+# Unlike the worker, a default command here is correct: there is one process, it takes no arguments,
+# and `docker compose up` starting it is exactly what should happen.
+#
+# Stopped with SIGTERM, which the collector handles — it closes its reporting window before exiting
+# so an ordinary restart does not leave a row the training page reports as a stall.
+STOPSIGNAL SIGTERM
+CMD ["node", "apps/eddn-collector/dist/index.js"]

@@ -11,9 +11,53 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./version": {
+      "types": "./dist/version.d.ts",
+      "default": "./dist/version.js"
+    },
+    "./leaderboards": {
+      "types": "./dist/leaderboards.d.ts",
+      "default": "./dist/leaderboards.js"
+    },
+    "./forum-signature": {
+      "types": "./dist/forum-signature.d.ts",
+      "default": "./dist/forum-signature.js"
+    },
+    "./fonts": {
+      "types": "./dist/fonts.d.ts",
+      "default": "./dist/fonts.js"
+    },
     "./server": {
       "types": "./dist/server/index.d.ts",
       "default": "./dist/server/index.js"
+    },
+    "./ai": {
+      "types": "./dist/ai.d.ts",
+      "default": "./dist/ai.js"
+    },
+    "./ai-knowledge": {
+      "types": "./dist/ai-knowledge.d.ts",
+      "default": "./dist/ai-knowledge.js"
+    },
+    "./ai-corpus": {
+      "types": "./dist/ai-corpus.d.ts",
+      "default": "./dist/ai-corpus.js"
+    },
+    "./permissions": {
+      "types": "./dist/permissions.d.ts",
+      "default": "./dist/permissions.js"
+    },
+    "./carrier": {
+      "types": "./dist/carrier.d.ts",
+      "default": "./dist/carrier.js"
+    },
+    "./ship-build": {
+      "types": "./dist/ship-build.d.ts",
+      "default": "./dist/ship-build.js"
+    },
+    "./tenure": {
+      "types": "./dist/tenure.d.ts",
+      "default": "./dist/tenure.js"
     }
   },
   "scripts": {

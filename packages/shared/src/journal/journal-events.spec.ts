@@ -97,13 +97,40 @@ describe('the event allowlist', () => {
 
     expect(optional).toEqual([
       'Bounty',
+      /*
+       * Added 2026-08-04 for the colonisation carrier holds. Under `carrier` with the other
+       * own-carrier events: cargo moved between a member's ship and their own carrier is the only
+       * record that staged build cargo exists — the public mirror sees only sell orders. The
+       * retained field is the `Transfers` array alone (Type, Count, Direction); it carries no
+       * prices and names nobody else.
+       */
+      'CargoTransfer',
       'CarrierJump',
       'CarrierStats',
+      /*
+       * Added 2026-08-02, for colonisation. In their OWN category so they can be declined without
+       * giving up the trade leaderboard: a delivery says a member was at a specific construction
+       * site at a specific moment, which is more than a tonnage.
+       *
+       * ★ THE WIDENING THIS LIST EXISTS TO SURFACE — SAY IT PLAINLY ★
+       *
+       * `ColonisationConstructionDepot` keeps its `ResourcesRequired` ARRAY, which no other event
+       * here is allowed to do (`Market.Items` is dropped for exactly that reason). The difference
+       * is that a market's item list is public data filed under a person, and a construction site's
+       * outstanding needs exist nowhere else in the world — no API publishes them. Without the
+       * array we would store that somebody docked at a building site and nothing about the
+       * building. Squadron owner, 2026-08-02, chose this collected on by default.
+       */
+      'ColonisationConstructionDepot',
+      'ColonisationContribution',
       'Died',
       'Docked',
       'FSDJump',
       'FactionKillBond',
       'Location',
+      // Added 2026-08-01 for live market prices. Optional, under `trade`: a
+      // member who declines trade telemetry does not feed the price table.
+      'Market',
       'MarketBuy',
       'MarketSell',
       'MiningRefined',
@@ -113,6 +140,13 @@ describe('the event allowlist', () => {
       'SAAScanComplete',
       'SellExplorationData',
       'SellMicroResources',
+      /*
+       * Added 2026-08-01 for the squadron weapons chart. Optional, and in its OWN category
+       * (`onfoot`) rather than folded into fleet or combat — an on-foot loadout says more about how
+       * somebody plays than a hull does, and a member happy to share their Python should not have
+       * to accept sharing their suit to keep it.
+       */
+      'SuitLoadout',
     ]);
   });
 

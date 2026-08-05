@@ -49,8 +49,34 @@ export interface ActivityRow {
   messageCount: number;
   forumPostCount: number;
   voiceJoinCount: number;
+  /** Minutes in voice, banked when sessions END. Beside the join count, never instead of it. */
+  voiceMinutes: number;
   firstActivityAt: Date | null;
   lastActivityAt: Date | null;
+}
+
+/**
+ * A voice session ending — the member left, or moved somewhere the roster does not report on.
+ *
+ * ★ SQUADRON OWNER, 2026-08-04 ★
+ *
+ * "for voice joins can we track how long they are in voice chat per month? keep an aggregate
+ * total etc and include that in YTD aswell."
+ */
+export interface VoiceSessionEnd {
+  readonly discordId: string;
+  readonly isBot: boolean;
+  /**
+   * When the session began — `inVoiceSince`, as read BEFORE presence was cleared.
+   *
+   * Null when the bot never saw the join: a restart wipes presence and re-seeds from the live
+   * voice states, so a session that spanned the restart has no honest start time. Null banks
+   * NOTHING — a guessed duration would be invented minutes on the table promotions are read
+   * beside, which is precisely the fiction the old profile `voiceMinutes` was removed for.
+   */
+  readonly since: Date | null;
+  /** When it ended. */
+  readonly at: Date;
 }
 
 export interface IActivityStore {
@@ -72,6 +98,12 @@ export interface IActivityStore {
     kind: ActivityKind,
     eventId?: string,
   ): Promise<boolean>;
+  /**
+   * Adds minutes to a member's month. Additive, so two sessions in one month accumulate; the
+   * caller has already split a session at month boundaries, so `month` is always the month the
+   * minutes were actually spent in.
+   */
+  bankVoiceMinutes(discordId: string, month: Date, minutes: number): Promise<void>;
 }
 
 /*
@@ -95,6 +127,59 @@ export interface IActivityStore {
  */
 export function monthKey(at: Date): Date {
   return new Date(Date.UTC(at.getUTCFullYear(), at.getUTCMonth(), 1, 0, 0, 0, 0));
+}
+
+/**
+ * Whether a voice-state transition ENDS the member's counted session.
+ *
+ * `to` is the destination channel id IF IT COUNTS toward activity, else null — the caller has
+ * already applied the channel-scope rule, the same split as `record`: the recorder is
+ * arithmetic, and "is this a members' channel" is a question about a guild.
+ *
+ * ★ A MOVE IS NOT A LEAVE ★
+ *
+ * Both ids non-null means the member walked from one counted room to another: the session
+ * CONTINUES, and `inVoiceSince` keeps its original timestamp — the same rule that stops the
+ * roster's "in voice since" resetting when somebody changes channel. Only leaving voice, or
+ * moving somewhere the roster does not report on, ends the clock.
+ */
+export function endsVoiceSession(from: string | null, to: string | null): boolean {
+  return from !== null && to === null;
+}
+
+/**
+ * A session's minutes, split at UTC month boundaries.
+ *
+ * ★ WHY THE SPLIT EXISTS ★
+ *
+ * A session from 23:00 on 31 July to 01:00 on 1 August is an hour of July and an hour of
+ * August. Credited whole to either month, the monthly figures stop summing to the truth — and
+ * YTD is defined as the sum of the months, so it would inherit the error.
+ *
+ * Each part rounds to the nearest whole minute independently; a part that rounds to zero is
+ * dropped rather than written as a zero-minute row.
+ */
+export function splitVoiceMinutes(
+  since: Date,
+  at: Date,
+): Array<{ month: Date; minutes: number }> {
+  if (at <= since) return [];
+
+  const parts: Array<{ month: Date; minutes: number }> = [];
+  let cursor = since;
+
+  while (cursor < at) {
+    const month = monthKey(cursor);
+    const nextMonth = new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth() + 1, 1));
+    const end = at < nextMonth ? at : nextMonth;
+
+    const minutes = Math.round((end.getTime() - cursor.getTime()) / 60_000);
+    if (minutes > 0) parts.push({ month, minutes });
+
+    cursor = end;
+  }
+
+  return parts;
 }
 
 export class ActivityRecorder {
@@ -131,5 +216,25 @@ export class ActivityRecorder {
     if (e.discordId === '') return;
 
     await this.store.record(e.discordId, monthKey(e.at), e.at, e.kind, e.eventId);
+  }
+
+  /**
+   * A voice session ended: bank its minutes, each month credited its own.
+   *
+   * The caller decides WHEN a session ends (`endsVoiceSession` — a move between counted rooms
+   * is not an end); this decides how much it was worth and where it lands. `since: null` banks
+   * nothing: the bot restarted mid-session and the true start time is gone, and no minutes is
+   * a smaller lie than invented ones.
+   */
+  async onVoiceLeave(e: VoiceSessionEnd): Promise<void> {
+    // Bots hold presence — the roster shows them in channels — but bank no activity, the same
+    // rule as record().
+    if (e.isBot) return;
+    if (e.discordId === '') return;
+    if (e.since === null) return;
+
+    for (const part of splitVoiceMinutes(e.since, e.at)) {
+      await this.store.bankVoiceMinutes(e.discordId, part.month, part.minutes);
+    }
   }
 }

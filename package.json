@@ -19,8 +19,11 @@
     "test": "turbo run test",
     "test:unit": "turbo run test:unit",
     "test:invariants": "vitest run --project invariants",
+    "db:ritual": "node tools/db-ritual.mjs",
     "ssot:check": "tsx tools/ssot-drift-check.ts",
     "ssot:sync": "tsx tools/ssot-sync.ts",
+    "ai:image:smoke": "tsx tools/ai-image-smoke.ts",
+    "ai:studio:smoke": "tsx tools/ai-studio-smoke.ts",
     "contrast:check": "tsx tools/contrast-check.ts",
     "invariants:check": "tsx tools/ssot-drift-check.ts",
     "ci:local": "pnpm lint && pnpm typecheck && pnpm ssot:check && pnpm contrast:check && pnpm invariants:check && pnpm test",
@@ -29,7 +32,8 @@
     "db:studio": "pnpm --filter @grims/db studio",
     "db:reset": "pnpm --filter @grims/db reset",
     "lint:fix": "eslint . --fix",
-    "grant-role": "pnpm --filter @grims/db grant-role"
+    "grant-role": "pnpm --filter @grims/db grant-role",
+    "fonts:fetch": "tsx tools/fetch-fonts.ts"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

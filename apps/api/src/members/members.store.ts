@@ -14,6 +14,8 @@ export interface MemberRow {
 
 export interface MembersStore {
   byHandle(handle: string): Promise<MemberRow | null>;
+  /** A member's handle from their id, or null. Used to make @mention links resolvable. */
+  handleForId(userId: string): Promise<string | null>;
   roster(): Promise<MemberRow[]>;
   privacyOf(userId: string): Promise<Partial<PrivacySettings> | null>;
   savePrivacy(userId: string, patch: Partial<PrivacySettings>): Promise<PrivacySettings>;
@@ -45,10 +47,14 @@ export interface MembersStore {
  *
  * ★ JOINS, NOT MINUTES ★
  *
- * Discord tells us when somebody ENTERS a voice channel and never how long they
- * stayed, so nothing anywhere records a minute of voice. The field this replaces
- * was called `voiceMinutes` and the profile page divided it by sixty to render
- * "hours in voice" — invented the moment anyone populated it.
+ * The field this replaces was called `voiceMinutes` and the profile page divided
+ * it by sixty to render "hours in voice" — invented the moment anyone populated
+ * it, because nothing recorded a minute of voice at the time.
+ *
+ * The bot DOES bank real minutes now (`member_activity_months.voice_minutes`,
+ * settled when a session ends), and they are ADMIN CONSOLE ONLY by the owner's
+ * decision. This member-facing shape deliberately does not carry them — do not
+ * add the field back here.
  */
 export interface SquadronActivity {
   readonly messages: number;
@@ -259,6 +265,24 @@ export class PrismaMembersStore implements MembersStore {
   }
 
   /**
+   * The handle behind a user id.
+   *
+   * Deliberately narrow — one column, no profile assembly. The only caller is the mention
+   * redirect, which needs a handle to build a URL and nothing else; returning a full profile row
+   * would make an internal redirect cost the same as rendering a profile.
+   *
+   * Banned accounts are excluded, matching `byHandle`: a mention of somebody since removed is a
+   * dead link rather than a route into their page.
+   */
+  async handleForId(userId: string): Promise<string | null> {
+    const u = await this.#db.user.findFirst({
+      where: { id: userId, status: { not: 'banned' } },
+      select: { handle: true },
+    });
+    return u?.handle ?? null;
+  }
+
+  /**
    * This calendar month's activity for one member.
    *
    * ★ THE CURRENT MONTH ONLY, AND IN UTC ★
@@ -307,6 +331,22 @@ export class PrismaMembersStore implements MembersStore {
      * `joined_at` to `discord_guild_members` before finding it — which would
      * have been the same fact in two tables, free to disagree, with nothing
      * saying which one won.
+     *
+     * ★ AND ON 2026-08-01 IT WAS ADDED ANYWAY, ON PURPOSE ★
+     *
+     * The warning above is right in general and wrong about this case. This
+     * table is keyed on a WEBSITE ACCOUNT, so it only has a row once somebody
+     * has signed in: 117 guild members, one identity row. The admin activity
+     * roster needs a tenure for all 117.
+     *
+     * They are not the same fact in two tables. They are the same fact about two
+     * different sets of people, and `discord_guild_members.joined_at` is the
+     * larger set — refreshed on every bot start rather than snapshotted once at
+     * sign-in, and therefore the one that wins where both exist.
+     *
+     * This read is left alone deliberately. Rank must keep working with no bot
+     * running, and for anybody who has not left and rejoined since signing in
+     * the two values are identical.
      */
     const identity = await this.#db.discordIdentity.findUnique({
       where: { userId },
@@ -461,6 +501,10 @@ export class PrismaMembersStore implements MembersStore {
         showActivity: true,
         showOnPublicRoster: true,
         showOnLeaderboard: true,
+        showLbBounties: true,
+        showLbColony: true,
+        showLbTrade: true,
+        plainFonts: true,
       },
     })) as Partial<PrivacySettings> | null;
   }
@@ -479,6 +523,10 @@ export class PrismaMembersStore implements MembersStore {
         showActivity: true,
         showOnPublicRoster: true,
         showOnLeaderboard: true,
+        showLbBounties: true,
+        showLbColony: true,
+        showLbTrade: true,
+        plainFonts: true,
       },
     });
     return saved as PrivacySettings;

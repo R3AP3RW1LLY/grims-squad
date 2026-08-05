@@ -38,6 +38,22 @@ directories:
 files:
   - dist/**/*
   - package.json
+  # koffi is `external` in build.mjs — it resolves a platform-specific .node at runtime and esbuild
+  # cannot bundle one — so the module itself has to be shipped rather than compiled in.
+  - node_modules/koffi/**/*
+  - node_modules/@koromix/**/*
+
+# ★ THE NATIVE BINARY CANNOT LIVE INSIDE THE ASAR ★
+#
+# An asar is a single archive file. `dlopen` needs a real path on disk, so a .node packed into one
+# fails at load with an error that names the archive rather than the cause. asarUnpack leaves these
+# on the filesystem beside it.
+#
+# What this buys: the companion can ask Windows which window is in front, which is what lets the
+# overlays hide when the game is minimised.
+asarUnpack:
+  - node_modules/koffi/**/*
+  - node_modules/@koromix/**/*
 
 # ---------------------------------------------------------------- Windows
 # Where almost every member is. NSIS gives a normal installer that a
@@ -77,6 +93,11 @@ mac:
   target:
     - target: dmg
       arch: [arm64, x64]
+    # The zip exists for electron-updater, which cannot apply a dmg — latest-mac.yml points at it.
+    # The download page never lists it: a zip beside a dmg is dropped from the listing so members
+    # are offered the installer a Mac user recognises.
+    - target: zip
+      arch: [arm64, x64]
   category: public.app-category.utilities
   # Both architectures: a Mac running Elite through CrossOver is as likely to
   # be Apple Silicon as Intel, and Rosetta is not something to make somebody
@@ -110,7 +131,25 @@ linux:
   # manager argument, and Linux players of a Windows game are already used to
   # the format.
 
-# Auto-update is deliberately NOT configured yet. Shipping an updater before
-# there is a signed release and somewhere to publish it produces an app that
-# fails a silent check on every launch, and members would never know why.
-publish: null
+# Auto-update, through our own API.
+#
+# * A GENERIC PROVIDER, NOT GITHUB *
+#
+# electron-updater fetches `latest.yml` from this base and then the installer beside it. Our
+# release endpoint already serves assets by basename, so both requests land on infrastructure we
+# already run — no GitHub releases, no second place for builds to live, and nothing about the
+# update path that a member's network is more likely to block than the app itself.
+#
+# `latest.yml` is produced by electron-builder at pack time and must be uploaded to the release
+# bucket alongside the installer. Without it the updater finds nothing and silently reports no
+# update, which is the failure mode the old comment here was rightly worried about.
+publish:
+  provider: generic
+  # The squadron's own domain. Baked into each build's app-update.yml at pack time, so installers
+  # must be built AFTER grims-squad.com is live (the cutover precedes the release tag) — an app
+  # checking a domain that does not resolve just retries in an hour, but there is no reason to
+  # ship one. The old sslip.io site stays up in Caddy, so builds that predate the domain still
+  # reach their feed.
+  url: https://grims-squad.com/v1/companion/download
+  # Not a channel we publish to; it just has to match what the client asks for.
+  channel: latest

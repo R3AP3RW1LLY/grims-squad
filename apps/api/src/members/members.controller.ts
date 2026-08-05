@@ -3,8 +3,10 @@ import type { FastifyRequest } from 'fastify';
 import { AppError, ErrorCode } from '@grims/shared';
 import { User, type CurrentUser } from '../auth/current-user.js';
 import { verifyCsrf, readCsrfCookie } from '../common/csrf.js';
+import { LeaderboardsService, type BadgeView } from '../leaderboards/leaderboards.service.js';
 import { MEMBERS_STORE, type MembersStore } from './members.tokens.js';
 import { LEADERSHIP_CEILING } from './members.store.js';
+import { WeaponsStore, type WeaponsChart } from './weapons.store.js';
 import {
   buildSnapshots,
   withInaraRanks,
@@ -30,10 +32,12 @@ const TOGGLES = Object.keys(DEFAULT_PRIVACY) as Array<keyof PrivacySettings>;
 /**
  * Reads a privacy patch out of an untrusted body.
  *
- * Only the six known toggles are read, and only when the value is a real
- * boolean. A string "false" is rejected rather than coerced: it arrives from a
- * form that forgot to parse its own checkbox, and coercing it would silently
- * turn a member's OFF into an ON — the exact direction INV-027 cares about.
+ * Only the known toggles are read — TOGGLES derives from DEFAULT_PRIVACY, so a
+ * toggle added there is accepted here without a second list to update — and
+ * only when the value is a real boolean. A string "false" is rejected rather
+ * than coerced: it arrives from a form that forgot to parse its own checkbox,
+ * and coercing it would silently turn a member's OFF into an ON — the exact
+ * direction INV-027 cares about.
  */
 function readPatch(body: unknown): Partial<PrivacySettings> {
   if (typeof body !== 'object' || body === null) {
@@ -57,7 +61,13 @@ function readPatch(body: unknown): Partial<PrivacySettings> {
 
 @Controller('v1')
 export class MembersController {
-  constructor(@Inject(MEMBERS_STORE) private readonly store: MembersStore) {}
+  constructor(
+    @Inject(MEMBERS_STORE) private readonly store: MembersStore,
+    @Inject(WeaponsStore) private readonly weapons: WeaponsStore,
+    // The one badge resolver in the API — the dashboard's list and the forum's chips read
+    // through the same service, so the two surfaces cannot disagree about what somebody earned.
+    @Inject(LeaderboardsService) private readonly leaderboards: LeaderboardsService,
+  ) {}
 
   /**
    * The squadron roster.
@@ -95,15 +105,24 @@ export class MembersController {
    * endpoint that reads anybody's.
    */
   @Get('me/commander')
-  async myCommander(@User() caller: CurrentUser | undefined): Promise<CommanderProfile> {
+  async myCommander(
+    @User() caller: CurrentUser | undefined,
+  ): Promise<CommanderProfile & { badges: BadgeView[] }> {
     if (caller === undefined) {
       throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in to see your commander.');
     }
 
-    const [events, inara, handle] = await Promise.all([
+    const [events, inara, handle, badges] = await Promise.all([
       this.store.profileEvents(caller.userId),
       this.store.inaraRanks([caller.userId]),
       this.store.handleOf(caller.userId),
+      /*
+       * The FULL list, name and icon resolved, newest first — this is the member's own trophy
+       * shelf, not the space-constrained showcase the forum chips use. Their own data, so no
+       * privacy filter applies here either: opting out of a board hides them from the standings,
+       * never their badges from themselves.
+       */
+      this.leaderboards.badgesOf(caller.userId),
     ]);
 
     // The verified name comes from the member row. Two reads rather than one
@@ -112,11 +131,14 @@ export class MembersController {
     const row = handle === null ? null : await this.store.byHandle(handle);
 
     const cached = inara.get(caller.userId);
-    return buildCommanderProfile(
-      events,
-      row?.source.cmdrName ?? null,
-      cached === undefined ? null : { ranks: [...cached.ranks], fetchedAt: cached.fetchedAt },
-    );
+    return {
+      ...buildCommanderProfile(
+        events,
+        row?.source.cmdrName ?? null,
+        cached === undefined ? null : { ranks: [...cached.ranks], fetchedAt: cached.fetchedAt },
+      ),
+      badges,
+    };
   }
 
   @Get('members')
@@ -249,6 +271,38 @@ export class MembersController {
    * branch and there must not be one: INV-027 is a promise to the member, not a
    * permission level — and being signed in is not the same as being them.
    */
+  /**
+   * Resolves a member id to their handle.
+   *
+   * ★ WHY THIS EXISTS ★
+   *
+   * A @mention stores a user ID, deliberately: resolving the name once, when the author picks
+   * somebody, is what makes a mention survive a rename. But the profile route keys on HANDLE, so
+   * a mention has to be turned back into one somewhere. Doing it at RENDER time would mean a
+   * roster lookup per mention per page view, which is the cost the id was meant to avoid.
+   *
+   * Doing it here means it costs a request only when somebody actually clicks a mention.
+   *
+   * ★ AUTHENTICATED, AND 404 WHEN ABSENT ★
+   *
+   * Same reasoning as the profile route below: answering this anonymously would make the id space
+   * enumerable. A missing or inactive account is a 404 rather than a distinct answer.
+   */
+  @Get('members/id/:userId')
+  async handleFor(
+    @Param('userId') userId: string,
+    @User() caller: CurrentUser | undefined,
+  ): Promise<{ handle: string }> {
+    if (caller === undefined) {
+      throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
+    }
+    const handle = await this.store.handleForId(userId);
+    if (handle === null) {
+      throw new AppError(ErrorCode.RESOURCE_NOT_VISIBLE, 'Member not found.');
+    }
+    return { handle };
+  }
+
   @Get('members/:handle')
   async profile(
     @Param('handle') handle: string,
@@ -349,11 +403,20 @@ export class MembersController {
           location:
             fromJournal.currentSystem === null
               ? null
-              : // The journal's Location/FSDJump gives a system; the station is
-                // a separate fact we do not carry here, and inventing one from
-                // the ship's docking state would be a guess presented as a
-                // record.
-                { system: fromJournal.currentSystem, station: null },
+              : /*
+                 * ★ THE STATION IS REAL NOW ★
+                 *
+                 * This read `station: null` with a note that it was "a separate fact we do not
+                 * carry here" — true when it was written, and no longer. The profile derives the
+                 * sublocation from the newest of Docked / Location / SupercruiseExit /
+                 * ApproachSettlement, with Undocked clearing it.
+                 *
+                 * Still inside `source`, so `showLocation` governs it exactly as it governs the
+                 * system (INV-027). Attaching it after serialisation would publish every member's
+                 * docking to everybody and leave the setting silently doing nothing — which is the
+                 * whole reason this object exists rather than being spread onto the response.
+                 */
+                { system: fromJournal.currentSystem, station: fromJournal.currentLocation },
           fleet: fromJournal.fleet.map((s) => ({ shipType: s.shipType, name: s.name })),
           /*
            * BigInt, because the profile type is `bigint | null` and serialises
@@ -395,6 +458,21 @@ export class MembersController {
       guildJoinedAt: guildJoinedAt?.toISOString() ?? null,
       siteRoles: row.source.siteRoles ?? [],
     };
+  }
+
+  /**
+   * What the squadron carries on foot.
+   *
+   * ★ SIGNED IN, AND AGGREGATE ONLY ★
+   *
+   * No member is named and no loadout belongs to anybody in the response — it is a count of how
+   * many people carry each weapon. A per-member view would be a different feature with a different
+   * privacy question; this one answers "what does the squadron use", which is nobody's secret.
+   */
+  @Get('squadron/weapons')
+  async squadronWeapons(@User() caller: CurrentUser | undefined): Promise<WeaponsChart> {
+    requireUser(caller);
+    return this.weapons.chart();
   }
 
   /** The caller's own toggles, for the settings page. */

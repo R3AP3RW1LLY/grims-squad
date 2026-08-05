@@ -1,3 +1,4 @@
+import { JOB_REQUEST_CHANNEL } from '@grims/shared';
 import type { PrismaClient } from '@grims/db';
 import { LEADERSHIP_CEILING } from '../members/members.store.js';
 
@@ -59,6 +60,17 @@ export interface ActivityRow {
   readonly messageCount: number;
   readonly forumPostCount: number;
   readonly voiceJoinCount: number;
+  /**
+   * Minutes in voice for the period, beside the join count — never instead of it.
+   *
+   * Banked by the bot when a session ends, split at UTC month boundaries, so a year is the sum
+   * of its months. Zero for every month before the banking shipped, which the table renders as
+   * a dash rather than as a claim that nobody spoke.
+   *
+   * ADMIN CONSOLE ONLY. The public profile once carried an invented `voiceMinutes` and lost
+   * it; this real figure stays behind the officer gate.
+   */
+  readonly voiceMinutes: number;
   readonly gameActivity: string;
   /** Derived, not stored — see the note on the query. */
   readonly qualifies: boolean;
@@ -91,6 +103,102 @@ export interface ActivityRow {
    * Squadron owner, 2026-07-29.
    */
   readonly inVoiceSince: string | null;
+  /**
+   * When Discord says they joined the server — the squadron tenure.
+   *
+   * ★ ASKED FOR FROM INARA, AND INARA CANNOT ANSWER IT ★
+   *
+   * Squadron owner, 2026-08-01: "unless we can pull this from the Inara Squadron roster and show
+   * when they joined the squadron on Inara?"
+   *
+   * No. `getcommanderprofile` is the only commander endpoint and returns a squadron NAME and RANK,
+   * no dates; there is no roster endpoint at all. The game does not record it either — the
+   * journal's `SquadronStartup` carries a name and a rank. "When did this commander join this
+   * squadron" is not a readable fact anywhere in the Elite ecosystem.
+   *
+   * Discord records it exactly, and this squadron recruits through Discord, so the server join date
+   * is both the best available answer and, in practice, the true one.
+   *
+   * Null for everybody who has left: Discord discards a join date on departure and there is no way
+   * to recover it. `activeSince` covers those rows.
+   */
+  readonly joinedAt: string | null;
+  /**
+   * The earliest month we recorded any activity for them. The FALLBACK tenure.
+   *
+   * Separate from `joinedAt` because it is a weaker claim — "we first saw them in March", not "they
+   * joined in March". They may well have been here for a year before the bot was. The column labels
+   * which of the two it is showing rather than presenting a floor as a fact.
+   */
+  readonly activeSince: string | null;
+}
+
+/**
+ * One member of the Discord server, for the Squad Members roster.
+ *
+ * ★ SQUADRON OWNER, 2026-08-01 ★
+ *
+ * "we need to create a full on member roster that shows every member in our discord with full
+ * administrative tools for them, kick, ban, timeout"
+ *
+ * ★ EVERY MEMBER, NOT EVERY ACCOUNT ★
+ *
+ * `members()` above lists WEBSITE accounts, of which there is currently one. This lists the Discord
+ * server, of which there are a hundred and seventeen. An officer moderating the squadron is working
+ * from the second list, and asking them to reconcile it against the first by hand is how the
+ * activity roster ended up unreadable.
+ */
+export interface SquadMemberRow {
+  readonly discordId: string;
+  /** Server nickname — the in-game name, by this squadron's convention. */
+  readonly nick: string | null;
+  readonly username: string | null;
+  readonly globalName: string | null;
+  readonly isBot: boolean;
+  /** Discord role names they wear, resolved through our own role table. */
+  readonly roles: string[];
+  /** The highest TENURE rank they hold, for sorting and filtering. */
+  readonly rank: string | null;
+  /** A leadership appointment, a separate axis from rank. */
+  readonly appointment: string | null;
+  /** When Discord says they joined the server. Null for anyone who has left. */
+  readonly joinedAt: string | null;
+  /**
+   * When a Discord timeout expires. A value IN THE PAST means not timed out.
+   *
+   * Discord expires a timeout silently, so this is compared against the clock rather than tested
+   * for null — testing for null would show an expired timeout as active for ever.
+   */
+  readonly timeoutUntil: string | null;
+  readonly inVoiceSince: string | null;
+  /** Last activity in Discord, across every month. Null when never seen. */
+  readonly lastSeenAt: string | null;
+  /** They have an account on this site, not merely a presence in Discord. */
+  readonly hasAccount: boolean;
+  /**
+   * Their website user id, or null for somebody in the guild with no account.
+   *
+   * ★ ADDED FOR THE PROMOTE CONTROL, 2026-08-02 ★
+   *
+   * The ladder is keyed on website users, not Discord ids — ranks are `UserRole` grants. Without
+   * this the page would have to match members to standings by HANDLE, which is a display name and
+   * therefore the wrong key to promote somebody by.
+   */
+  readonly userId: string | null;
+  readonly handle: string | null;
+  readonly cmdrName: string | null;
+  /**
+   * Whether the bot can action them at all.
+   *
+   * ★ A DISCORD RULE, NOT A PERMISSION OF OURS ★
+   *
+   * A bot cannot kick, ban or time out anybody whose highest role sits at or above its own,
+   * whatever permissions it holds. Computed here so the page can DISABLE the buttons and say why,
+   * rather than offering an action that will always come back 403.
+   */
+  readonly moderatable: boolean;
+  /** Why not, when `moderatable` is false. */
+  readonly notModeratableBecause: string | null;
 }
 
 export interface MemberRow {
@@ -121,6 +229,36 @@ export interface AuditRow {
   readonly actorName: string | null;
   readonly targetType: string | null;
   readonly targetId: string | null;
+  /**
+   * The target's Discord nickname, when the target is a member.
+   *
+   * ★ RESOLVED, BECAUSE A UUID IS NOT AN AUDIT TRAIL ★
+   *
+   * Squadron owner, 2026-07-30: "in the target field show the actual squadron members discord
+   * nickname". Quite right — a log whose target column reads
+   * `f096ede9-d3c8-4916-96b7-fd37d00a0bf6` is a log nobody can read, which makes it a log nobody
+   * checks, which defeats the point of keeping one.
+   *
+   * The id STAYS alongside it, for the same reason the actor keeps its handle: a display name is
+   * chosen by the member and can be changed to match somebody else's, so the stable identifier
+   * remains the thing that actually identifies the row.
+   *
+   * Null when the target is not a member — a role, a category, a post — or when the account has
+   * since been deleted.
+   */
+  readonly targetName: string | null;
+  /**
+   * What changed, as stored (INV-009).
+   *
+   * ★ SELECTED ALL ALONG, AND SILENTLY THROWN AWAY ★
+   *
+   * These columns were already being read from the database and then dropped in the mapping, so
+   * every audit entry reached the screen as "somebody did something to something" with the actual
+   * change discarded. The invariant requires before/after to be RECORDED; recording it and never
+   * showing it satisfies the letter and none of the purpose.
+   */
+  readonly before: unknown;
+  readonly after: unknown;
   readonly createdAt: string;
 }
 
@@ -152,15 +290,75 @@ export interface AuditPage {
   readonly total: number;
 }
 
+/** What a moderation action needs recorded, whether or not Discord accepted it. */
+export interface ModerationAudit {
+  readonly actorId: string;
+  readonly discordId: string;
+  /** The name at the time, so the log stays readable after they leave. */
+  readonly targetName: string | null;
+  readonly action: string;
+  readonly reason: string;
+  readonly minutes?: number | undefined;
+  readonly deleteMessageDays?: number | undefined;
+  /** False when Discord refused. A refused action is still recorded — somebody tried. */
+  readonly applied: boolean;
+  readonly problem?: string | undefined;
+}
+
 export interface AdminStore {
+  /**
+   * Activity for a period: `YYYY-MM` for one calendar month, or a bare `YYYY` for the whole
+   * year — the two shapes the period control sends. A year returns one row per member with the
+   * counters summed across its months.
+   */
   activityForMonth(monthKey: string): Promise<ActivityRow[]>;
   members(): Promise<MemberRow[]>;
+  /** Every member of the Discord server, for the moderation roster. */
+  squadRoster(): Promise<SquadMemberRow[]>;
+  /** Writes the audit row for a moderation action. The Discord call is made by the controller. */
+  recordModeration(entry: ModerationAudit): Promise<void>;
+  /** The Discord id behind a website account, for the "not on yourself" check. Null if unlinked. */
+  discordIdFor(userId: string): Promise<string | null>;
   auditTail(limit: number): Promise<AuditRow[]>;
   auditSearch(filter: AuditFilter): Promise<AuditPage>;
   /** Clears a member's second factor. Audited; never silent. */
   resetTwoFactor(userId: string, actorId: string, reason: string): Promise<void>;
   /** Distinct action names present in the log, so the UI can offer them. */
   auditActions(): Promise<string[]>;
+  /**
+   * Asks the resident worker to run a job now.
+   *
+   * ★ SQUADRON OWNER, 2026-08-02: a button to trigger the Inara check ★
+   *
+   * NOTIFY rather than a queue row, matching the ingest buttons. A request only means anything
+   * while somebody is listening; a row would run at some unknowable later moment when nobody was
+   * expecting it, which is not what a button press means.
+   *
+   * Whether it ACTUALLY runs is the job's decision — the nightly commander audit holds an advisory
+   * lock, so a request arriving mid-run is declined rather than starting a second one.
+   */
+  requestJob(job: string): Promise<void>;
+  /** Writes one audit row. For actions that are not moderation of a member. */
+  writeAudit(entry: {
+    actorId: string | null;
+    action: string;
+    targetType: string;
+    targetId: string;
+    before: unknown;
+    after: unknown;
+  }): Promise<void>;
+}
+
+/**
+ * Best evidence first, for folding a member's months into a year. A value the list does not
+ * know ranks WORST — `indexOf`'s -1 would rank it best, which is the wrong way to be wrong
+ * about evidence.
+ */
+const GAME_EVIDENCE = ['observed', 'assumed', 'absent', 'unlinked', 'unknown'] as const;
+
+function gameEvidenceRank(value: string): number {
+  const i = GAME_EVIDENCE.indexOf(value as (typeof GAME_EVIDENCE)[number]);
+  return i === -1 ? GAME_EVIDENCE.length : i;
 }
 
 export class PrismaAdminStore implements AdminStore {
@@ -171,28 +369,36 @@ export class PrismaAdminStore implements AdminStore {
   }
 
   async activityForMonth(monthKey: string): Promise<ActivityRow[]> {
-    const month = new Date(`${monthKey}-01T00:00:00Z`);
-
     /*
-     * ★ THE MONTH IS AN EXACT MATCH, NOT A RANGE ★
+     * ★ A MONTH IS AN EXACT MATCH; A YEAR IS ITS TWELVE ★
      *
-     * `member_activity_months` stores one row per member per calendar month,
-     * with `month` pinned to the first at midnight UTC. So equality here IS the
-     * calendar-month scope — a message from June cannot appear in July's row
-     * because it was never added to it.
+     * `member_activity_months` stores one row per member per calendar month, with `month`
+     * pinned to the first at midnight UTC — so equality IS the calendar-month scope, and a
+     * bare year (the YTD and Year chips) is the range of its months, folded to one row per
+     * member below. This endpoint used to silently show the CURRENT month for both year
+     * shapes, under a period control that looked like it had answered.
      */
-    const [rows, guildMembers, discordRoles, lastSeen, mappings] = await Promise.all([
+    const yearView = /^\d{4}$/.test(monthKey);
+    const month = yearView
+      ? new Date(Date.UTC(Number(monthKey), 0, 1))
+      : new Date(`${monthKey}-01T00:00:00Z`);
+    const rangeEnd = yearView ? new Date(Date.UTC(Number(monthKey) + 1, 0, 1)) : null;
+
+    const [monthRows, guildMembers, discordRoles, lastSeen, mappings] = await Promise.all([
       this.#db.memberActivityMonth.findMany({
-        where: { month },
+        where: rangeEnd === null ? { month } : { month: { gte: month, lt: rangeEnd } },
       select: {
         discordId: true,
         messageCount: true,
         forumPostCount: true,
         voiceJoinCount: true,
+        voiceMinutes: true,
         gameActivity: true,
         lastActivityAt: true,
           user: {
             select: {
+              // The ladder is keyed on website users, so the promote control needs this.
+              id: true,
               handle: true,
               displayName: true,
               cmdrVerifications: {
@@ -216,6 +422,13 @@ export class PrismaAdminStore implements AdminStore {
        * one person and a raw snowflake for the rest.
        */
       this.#db.discordGuildMember.findMany({
+        /*
+         * No bots here either, though nothing today can reach it: `ActivityRecorder.record` drops
+         * bot events before they are stored, so no bot has an activity row to be named. Filtered
+         * anyway, because this map is what turns an id into a name — and the failure mode if a bot
+         * row ever DID appear is the one already reported once, a raw snowflake in the members list.
+         */
+        where: { isBot: false },
         select: {
           discordId: true,
           nick: true,
@@ -234,6 +447,8 @@ export class PrismaAdminStore implements AdminStore {
            * Squadron owner, 2026-07-29.
            */
           inVoiceSince: true,
+          /* The squadron tenure. See the note on the row's `joinedAt`. */
+          joinedAt: true,
         },
       }),
       // Names and categories, for the membership fallback.
@@ -246,9 +461,18 @@ export class PrismaAdminStore implements AdminStore {
        * scoped to the month on screen, and the whole point of this figure is to
        * see past it. One aggregate query for the page, not one per member.
        */
+      /*
+       * `_min: firstActivityAt` rides along on the same aggregate, at no extra cost.
+       *
+       * It is the FALLBACK tenure for anybody Discord will not tell us about — everyone who has
+       * left, whose `joinedAt` Discord discards. "Active since March" is not the same claim as
+       * "joined in March", so the column labels which one it is showing rather than quietly mixing
+       * two different facts under one heading.
+       */
       this.#db.memberActivityMonth.groupBy({
         by: ['discordId'],
         _max: { lastActivityAt: true },
+        _min: { firstActivityAt: true },
       }),
 
       /*
@@ -268,12 +492,55 @@ export class PrismaAdminStore implements AdminStore {
       }),
     ]);
 
+    /*
+     * ★ ONE ROW PER MEMBER, WHATEVER THE SPAN ★
+     *
+     * A year of the monthly table holds a member up to twelve times, and this table is a
+     * roster. Counters sum; `lastActivityAt` keeps the newest; `gameActivity` keeps the best
+     * evidence any month produced. `qualifies` downstream therefore reads, for a year, as
+     * "took part and was seen flying at some point in it" — the year-sized version of the
+     * monthly test, which is a summary for reading and never an input to promotion. The
+     * promotion engine evaluates months, always, and is untouched.
+     */
+    const rows = yearView
+      ? [...monthRows
+          .reduce((held, row) => {
+            const seen = held.get(row.discordId);
+            if (seen === undefined) {
+              held.set(row.discordId, { ...row });
+              return held;
+            }
+            seen.messageCount += row.messageCount;
+            seen.forumPostCount += row.forumPostCount;
+            seen.voiceJoinCount += row.voiceJoinCount;
+            seen.voiceMinutes += row.voiceMinutes;
+            if (
+              row.lastActivityAt !== null &&
+              (seen.lastActivityAt === null || row.lastActivityAt > seen.lastActivityAt)
+            ) {
+              seen.lastActivityAt = row.lastActivityAt;
+            }
+            if (gameEvidenceRank(row.gameActivity) < gameEvidenceRank(seen.gameActivity)) {
+              seen.gameActivity = row.gameActivity;
+            }
+            // The user link is the same account whichever month carried it.
+            if (seen.user === null) seen.user = row.user;
+            return held;
+          }, new Map<string, (typeof monthRows)[number]>())
+          .values()]
+          // The order the query promised, restored — merging destroyed it.
+          .sort((a, b) => b.messageCount - a.messageCount || b.voiceJoinCount - a.voiceJoinCount)
+      : monthRows;
+
     const byDiscordId = new Map(guildMembers.map((m) => [m.discordId, m]));
     const rankByRoleId = new Map(mappings.map((m) => [m.discordRoleId, m.role]));
     const roleById = new Map(discordRoles.map((r) => [r.discordRoleId, r]));
 
     const lastSeenByDiscordId = new Map(
       lastSeen.map((g) => [g.discordId, g._max.lastActivityAt]),
+    );
+    const firstSeenByDiscordId = new Map(
+      lastSeen.map((g) => [g.discordId, g._min.firstActivityAt]),
     );
 
     return rows.map((r) => {
@@ -373,6 +640,7 @@ export class PrismaAdminStore implements AdminStore {
       messageCount: r.messageCount,
       forumPostCount: r.forumPostCount,
       voiceJoinCount: r.voiceJoinCount,
+      voiceMinutes: r.voiceMinutes,
       gameActivity: r.gameActivity,
       /*
        * Computed here, exactly as the promotion engine computes it: a MESSAGE,
@@ -417,6 +685,22 @@ export class PrismaAdminStore implements AdminStore {
         (r.gameActivity === 'observed' || r.gameActivity === 'assumed'),
       lastActivityAt: r.lastActivityAt?.toISOString() ?? null,
       lastSeenAt: lastSeenByDiscordId.get(r.discordId)?.toISOString() ?? null,
+      /*
+       * ★ HOW LONG THEY HAVE BEEN IN THE SQUADRON ★
+       *
+       * Squadron owner, 2026-08-01, asked for it from the Inara squadron roster if that were
+       * possible. It is not — Inara's commander endpoint returns a squadron name and rank and no
+       * dates, there is no roster endpoint, and the game's `SquadronStartup` has no date either.
+       * Discord has it exactly, and this squadron recruits through Discord.
+       *
+       * Two fields rather than one string, because they are two different claims. `joinedAt` is
+       * when Discord says they arrived. `activeSince` is the earliest month we recorded anything
+       * for them, used only when the first is missing — which means everybody who has left, since
+       * Discord discards a join date on departure. Collapsing them would let the column say
+       * "joined" about a date that is merely the oldest thing we happen to have seen.
+       */
+      joinedAt: guild?.joinedAt?.toISOString() ?? null,
+      activeSince: firstSeenByDiscordId.get(r.discordId)?.toISOString() ?? null,
       inVoiceSince: byDiscordId.get(r.discordId)?.inVoiceSince?.toISOString() ?? null,
       };
     });
@@ -527,17 +811,72 @@ export class PrismaAdminStore implements AdminStore {
     ]);
 
     return {
-      rows: rows.map((r) => ({
-        id: r.id.toString(),
-        action: r.action,
-        actorHandle: r.actor?.handle ?? null,
-        actorName: r.actor?.displayName ?? null,
-        targetType: r.targetType,
-        targetId: r.targetId,
-        createdAt: r.createdAt.toISOString(),
-      })),
+      rows: await this.#withTargetNames(rows),
       total,
     };
+  }
+
+  /**
+   * Attaches a Discord nickname to every row whose target is a member.
+   *
+   * ★ ONE QUERY FOR THE PAGE ★
+   *
+   * Resolving per row would be a hundred lookups to render a hundred lines, and an audit page is
+   * exactly where somebody scrolls fast. The ids are deduplicated first, because the same officer
+   * being the target of twenty role changes is the normal case rather than an unusual one.
+   *
+   * Only `user` targets are looked up. A role id or a category id is not a member and asking the
+   * users table about one would be a hundred guaranteed misses per page.
+   */
+  async #withTargetNames(
+    rows: ReadonlyArray<{
+      id: bigint;
+      action: string;
+      targetType: string | null;
+      targetId: string | null;
+      before: unknown;
+      after: unknown;
+      createdAt: Date;
+      actor: { handle: string; displayName: string | null } | null;
+    }>,
+  ): Promise<AuditRow[]> {
+    const userIds = [
+      ...new Set(
+        rows
+          .filter((r) => r.targetType === 'user' && r.targetId !== null)
+          .map((r) => r.targetId as string),
+      ),
+    ];
+
+    const names =
+      userIds.length === 0
+        ? new Map<string, string>()
+        : new Map(
+            (
+              await this.#db.user.findMany({
+                where: { id: { in: userIds } },
+                select: { id: true, handle: true, displayName: true },
+              })
+              /*
+               * `displayName` is the Discord server nickname, which this squadron keeps matching
+               * the in-game commander name. Falls back to the handle rather than to nothing: a
+               * member with no nickname set should still read as a person.
+               */
+            ).map((u) => [u.id, u.displayName ?? u.handle]),
+          );
+
+    return rows.map((r) => ({
+      id: r.id.toString(),
+      action: r.action,
+      actorHandle: r.actor?.handle ?? null,
+      actorName: r.actor?.displayName ?? null,
+      targetType: r.targetType,
+      targetId: r.targetId,
+      targetName: r.targetId === null ? null : (names.get(r.targetId) ?? null),
+      before: r.before,
+      after: r.after,
+      createdAt: r.createdAt.toISOString(),
+    }));
   }
 
   /**
@@ -570,6 +909,217 @@ export class PrismaAdminStore implements AdminStore {
     ]);
   }
 
+  /**
+   * Where the bot sits in the Discord role hierarchy, published by the bot on every role load.
+   *
+   * Zero when it has never run. Zero is the safe answer: nobody comes out moderatable, the page
+   * says the bot has not reported in, and no officer is offered a button that would 403.
+   */
+  static readonly #BOT_ROLE_POSITION_KEY = 'discord.bot_role_position';
+
+  async squadRoster(): Promise<SquadMemberRow[]> {
+    const [members, discordRoles, mappings, lastSeen, identities, botPosition] = await Promise.all([
+      this.#db.discordGuildMember.findMany({
+        /*
+         * ★ NO BOTS, NO APPS — SQUADRON OWNER, 2026-08-02 ★
+         *
+         * "do not include bots or apps in the discord in our website please! they have no need to be
+         * listed here as this is for players only!"
+         *
+         * Filtered in the QUERY rather than after it. A `.filter()` downstream is one refactor away
+         * from being dropped, and every count, every page and every export built on this read would
+         * silently start including them again. Discord marks both bots and applications with the
+         * same flag, so one condition covers what the owner asked about.
+         */
+        where: { isBot: false },
+        select: {
+          discordId: true,
+          nick: true,
+          username: true,
+          globalName: true,
+          isBot: true,
+          roles: true,
+          joinedAt: true,
+          timeoutUntil: true,
+          inVoiceSince: true,
+        },
+      }),
+      this.#db.discordRole.findMany({
+        select: { discordRoleId: true, name: true, position: true, category: true },
+      }),
+      this.#db.roleMapping.findMany({
+        where: { role: { isHierarchical: true } },
+        select: { discordRoleId: true, role: { select: { name: true, rankOrder: true } } },
+      }),
+      this.#db.memberActivityMonth.groupBy({
+        by: ['discordId'],
+        _max: { lastActivityAt: true },
+      }),
+      /*
+       * The website account behind a Discord id, when there is one.
+       *
+       * Through `discord_identities` rather than through `users`, because the join key IS the
+       * Discord id — a website account has no other way to be matched to a server member.
+       */
+      this.#db.discordIdentity.findMany({
+        select: {
+          discordId: true,
+          user: {
+            select: {
+              // The ladder is keyed on website users, so the promote control needs this.
+              id: true,
+              handle: true,
+              cmdrVerifications: {
+                where: { revokedAt: null, isVerified: true },
+                select: { cmdrName: true },
+                take: 1,
+              },
+            },
+          },
+        },
+      }),
+      this.#db.siteConfig.findUnique({
+        where: { key: PrismaAdminStore.#BOT_ROLE_POSITION_KEY },
+        select: { value: true },
+      }),
+    ]);
+
+    const roleById = new Map(discordRoles.map((r) => [r.discordRoleId, r]));
+    const rankByRoleId = new Map(mappings.map((m) => [m.discordRoleId, m.role]));
+    const lastSeenById = new Map(lastSeen.map((g) => [g.discordId, g._max.lastActivityAt]));
+    const identityById = new Map(identities.map((i) => [i.discordId, i]));
+
+    const botPos = typeof botPosition?.value === 'number' ? botPosition.value : 0;
+
+    return members
+      .map((m): SquadMemberRow => {
+        const held = m.roles.map((id) => roleById.get(id)).filter((r) => r !== undefined);
+
+        /*
+         * ★ TWO LADDERS, NOT ONE ★
+         *
+         * The same split the activity roster makes. Roles below LEADERSHIP_CEILING are
+         * APPOINTMENTS; from it upward they are TENURE ranks. Showing only the higher number made
+         * a Squadron Leader look like they were at the top of a ladder they are not on.
+         */
+        const ranks = m.roles
+          .map((id) => rankByRoleId.get(id))
+          .filter((r) => r !== undefined)
+          .sort((a, b) => (b.rankOrder ?? 0) - (a.rankOrder ?? 0));
+
+        const rank = ranks.find((r) => (r.rankOrder ?? 0) >= LEADERSHIP_CEILING) ?? null;
+        const appointment = ranks.find((r) => (r.rankOrder ?? 0) < LEADERSHIP_CEILING) ?? null;
+
+        const highest = held.reduce((top, r) => Math.max(top, r.position), 0);
+        const identity = identityById.get(m.discordId);
+
+        /*
+         * ★ WHY THE BOT MIGHT NOT BE ABLE TO TOUCH THEM ★
+         *
+         * Two different reasons, and they need different sentences. "The bot has not reported in"
+         * is our problem and is fixed by starting it. "They outrank the bot" is a Discord
+         * hierarchy rule and is fixed by dragging a role in Server Settings. Collapsing both into
+         * "cannot moderate" would send an officer to the wrong place.
+         */
+        const reason =
+          botPos === 0
+            ? 'The bot has not reported its role position yet. Start the bot and refresh.'
+            : highest >= botPos
+              ? `Their highest Discord role sits at or above the bot's own, so Discord will refuse. ` +
+                `Move the bot's role above theirs in Server Settings → Roles.`
+              : null;
+
+        return {
+          discordId: m.discordId,
+          nick: m.nick,
+          username: m.username,
+          globalName: m.globalName,
+          isBot: m.isBot,
+          roles: held.map((r) => r.name).sort((a, b) => a.localeCompare(b)),
+          rank: rank?.name ?? null,
+          appointment: appointment?.name ?? null,
+          joinedAt: m.joinedAt?.toISOString() ?? null,
+          timeoutUntil: m.timeoutUntil?.toISOString() ?? null,
+          inVoiceSince: m.inVoiceSince?.toISOString() ?? null,
+          lastSeenAt: lastSeenById.get(m.discordId)?.toISOString() ?? null,
+          hasAccount: identity !== undefined,
+          userId: identity?.user?.id ?? null,
+          handle: identity?.user?.handle ?? null,
+          cmdrName: identity?.user?.cmdrVerifications[0]?.cmdrName ?? null,
+          moderatable: reason === null,
+          notModeratableBecause: reason,
+        };
+      })
+      /*
+       * Newest first. An officer opening this page is almost always looking at somebody who has
+       * just arrived — a recruit to place, or a name they do not recognise. Members with no join
+       * date (everybody who has left) sort last rather than first, which is where an unknown date
+       * would otherwise put them.
+       */
+      .sort((a, b) => (b.joinedAt ?? '').localeCompare(a.joinedAt ?? ''));
+  }
+
+  async discordIdFor(userId: string): Promise<string | null> {
+    const identity = await this.#db.discordIdentity.findUnique({
+      where: { userId },
+      select: { discordId: true },
+    });
+    return identity?.discordId ?? null;
+  }
+
+  async recordModeration(entry: ModerationAudit): Promise<void> {
+    await this.#db.auditLog.create({
+      data: {
+        actorId: entry.actorId,
+        actorType: 'user',
+        /*
+         * ★ REFUSED ACTIONS ARE RECORDED TOO ★
+         *
+         * `applied: false` still gets a row. Somebody tried to ban a member and Discord said no —
+         * that is exactly the sort of thing an audit log exists to hold, and dropping it would mean
+         * the log only ever shows successful moderation, which is a flattering fiction.
+         */
+        action: `discord.member.${entry.action}`,
+        targetType: 'discord_member',
+        targetId: entry.discordId,
+        before: { name: entry.targetName },
+        after: {
+          reason: entry.reason,
+          applied: entry.applied,
+          ...(entry.minutes === undefined ? {} : { minutes: entry.minutes }),
+          ...(entry.deleteMessageDays === undefined
+            ? {}
+            : { deleteMessageDays: entry.deleteMessageDays }),
+          ...(entry.problem === undefined ? {} : { problem: entry.problem }),
+        },
+      },
+    });
+  }
+
+  async requestJob(job: string): Promise<void> {
+    await this.#db.$executeRawUnsafe(`SELECT pg_notify($1, $2)`, JOB_REQUEST_CHANNEL, job);
+  }
+
+  async writeAudit(entry: {
+    actorId: string | null;
+    action: string;
+    targetType: string;
+    targetId: string;
+    before: unknown;
+    after: unknown;
+  }): Promise<void> {
+    await this.#db.auditLog.create({
+      data: {
+        actorId: entry.actorId,
+        action: entry.action,
+        targetType: entry.targetType,
+        targetId: entry.targetId,
+        before: (entry.before ?? null) as never,
+        after: (entry.after ?? null) as never,
+      },
+    });
+  }
+
   async auditActions(): Promise<string[]> {
     const rows = await this.#db.auditLog.findMany({
       distinct: ['action'],
@@ -588,21 +1138,20 @@ export class PrismaAdminStore implements AdminStore {
         action: true,
         targetType: true,
         targetId: true,
+        // Selected AND used now. These were read and then discarded in the mapping, so every
+        // entry reached the screen with the actual change thrown away.
+        before: true,
+        after: true,
         createdAt: true,
         actor: { select: { handle: true, displayName: true } },
       },
     });
 
-    return rows.map((r) => ({
-      // BigInt id — stringified rather than passed through, because JSON has no
-      // bigint and Fastify's serialiser would throw on the raw value.
-      id: r.id.toString(),
-      action: r.action,
-      actorHandle: r.actor?.handle ?? null,
-      actorName: r.actor?.displayName ?? null,
-      targetType: r.targetType,
-      targetId: r.targetId,
-      createdAt: r.createdAt.toISOString(),
-    }));
+    /*
+     * The same resolution the search path uses. Two mappings that were nearly identical is how
+     * `before`/`after` came to be dropped in one of them and not noticed — there is now one.
+     */
+    return this.#withTargetNames(rows);
   }
+
 }

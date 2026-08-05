@@ -2,6 +2,7 @@ import { SecureAccountBanner } from '../../components/secure-account-banner';
 import { VerifyPromptBanner } from '../../components/verify-prompt-banner';
 import { SiteNav, SiteFooter } from '../../components/site-chrome';
 import { AuthedNav } from '../../components/authed-nav';
+import { SupportWidget } from '../../components/support-widget';
 import { getMe } from '../../lib/api';
 
 /**
@@ -33,6 +34,14 @@ export default async function SiteLayout({ children }: { children: React.ReactNo
 
       {/* Rendered here so INV-029's attribution cannot be omitted by a page. */}
       <SiteFooter />
+
+      {/*
+        The help door, on every public page — the chat is usable by EVERYONE,
+        guests included, which is the whole point of a help door. In the LAYOUT
+        for the same reason the banners are: it follows the visitor everywhere
+        rather than being remembered per page.
+      */}
+      <SupportWidget signedIn={me.user !== null} />
     </>
   );
 }

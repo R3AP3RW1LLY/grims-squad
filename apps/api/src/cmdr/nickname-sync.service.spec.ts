@@ -34,6 +34,8 @@ function deps(over: Partial<NicknameSyncDeps> = {}): NicknameSyncDeps {
     guildId: 'g1',
     verifiedNameFor: async () => 'GRIM',
     currentNickFor: async () => null,
+    // Nobody overrides by default — the convention is what almost everybody wears.
+    overrideFor: async () => null,
     setNickname: async () => OK,
     rememberNickname: async () => undefined,
     // The rank prefix. Null by default so the existing assertions, which are
@@ -77,13 +79,20 @@ describe('when a member has a verified name', () => {
     const r = await svc.sync('u1', 'd1');
 
     expect(r.changed).toBe(true);
-    expect(calls).toEqual([{ userId: 'd1', nick: 'GRIM' }]);
+    /*
+     * ★ 'GRIM' → 'Grim', SINCE 2026-08-02 ★
+     *
+     * The fixture still returns the SHOUTED name Inara holds, because that is what Inara holds.
+     * What changed is the convention applied to it — the owner asked for names "humanized (first
+     * letter capitalized)" and called it non-negotiable. See `nickname-humanize.spec.ts`.
+     */
+    expect(calls).toEqual([{ userId: 'd1', nick: 'Grim' }]);
   });
 
   it('MANDATORY: does nothing when the nickname already matches', async () => {
     // Every Inara call would otherwise be a Discord write and an audit row —
     // and a guild audit log full of no-op renames is one nobody reads.
-    const svc = new NicknameSyncService(recording({ currentNickFor: async () => 'GRIM' }));
+    const svc = new NicknameSyncService(recording({ currentNickFor: async () => 'Grim' }));
     const r = await svc.sync('u1', 'd1');
 
     expect(r.changed).toBe(false);
@@ -105,7 +114,7 @@ describe('when a member has a verified name', () => {
 
     expect(audit).toHaveLength(1);
     expect(JSON.stringify(audit[0])).toContain('OldName');
-    expect(JSON.stringify(audit[0])).toContain('GRIM');
+    expect(JSON.stringify(audit[0])).toContain('Grim');
   });
 });
 
@@ -187,7 +196,7 @@ describe('@DESIGN-ADV it does not rename the same person forever', () => {
     );
 
     await svc.sync('u1', 'd1');
-    expect(remembered).toEqual([{ discordId: 'd1', nick: 'GRIM' }]);
+    expect(remembered).toEqual([{ discordId: 'd1', nick: 'Grim' }]);
   });
 
   it('does not record anything when Discord refused the rename', async () => {
@@ -240,14 +249,29 @@ describe('the rank prefix', () => {
    * name, which is what people are called in game and in voice. A truncated
    * name is a different person's name.
    */
-  it('MANDATORY: puts the rank in front of the commander name', () => {
-    expect(composeNickname('Sector Overseer', 'Tychicus')).toBe('Sector Overseer - Tychicus');
+  it('MANDATORY: the rank is NOT in the nickname', () => {
+    /*
+     * ★ REVERSED 2026-07-31, ON THE OWNER'S INSTRUCTION ★
+     *
+     * "right now when we verify members, we are adding the rank prefix to their discord username,
+     * we need to stop this and only show their Inara Commander name please."
+     *
+     * The rank is already visible in Discord — it is the role, in colour, in the member list — so
+     * the prefix said the same thing twice and spent most of the 32-character budget doing it.
+     *
+     * Asserted as an ABSENCE rather than deleted, because "put the rank back" is a reasonable-
+     * sounding change for somebody who never saw this instruction.
+     */
+    expect(composeNickname('Sector Overseer', 'Tychicus')).toBe('Tychicus');
+    expect(composeNickname('Prime Legate', 'GRIM')).not.toContain('Prime Legate');
+    expect(composeNickname('Prime Legate', 'GRIM')).not.toContain(' - ');
   });
 
   it('uses the name alone when there is no rank', () => {
     // A member with no mapped role at all. A leading " - " would look broken.
-    expect(composeNickname(null, 'GRIM')).toBe('GRIM');
-    expect(composeNickname('  ', 'GRIM')).toBe('GRIM');
+    // Humanized now, and the rank is still ignored — which is what this test is really about.
+    expect(composeNickname(null, 'GRIM')).toBe('Grim');
+    expect(composeNickname('  ', 'GRIM')).toBe('Grim');
   });
 
   it('MANDATORY: drops the RANK when the pair will not fit, never the name', () => {
@@ -257,16 +281,17 @@ describe('the rank prefix', () => {
      * another commander's name, which is worse than wearing no rank.
      */
     const out = composeNickname('Chief Fleet Commander', 'PEBBLEMERCAHNT');
-    expect(out).toBe('PEBBLEMERCAHNT');
+    expect(out).toBe('Pebblemercahnt');
     expect(out.length).toBeLessThanOrEqual(32);
   });
 
-  it('keeps the rank when it fits exactly', () => {
-    // 32 characters on the nose. An off-by-one here would silently drop the
-    // rank for a whole band of name lengths and look like a rule nobody wrote.
-    const out = composeNickname('Prime Legate', 'Aurelian Voss Xyz');
-    expect(out).toBe('Prime Legate - Aurelian Voss Xyz');
-    expect(out).toHaveLength(32);
+  it('a long rank no longer eats the budget', () => {
+    /*
+     * This used to assert that "Prime Legate - Aurelian Voss Xyz" fitted in exactly 32 characters.
+     * With the rank gone the whole budget belongs to the commander name, which is the point: the
+     * name is the identity, and it is what people are called in game and in voice.
+     */
+    expect(composeNickname('Prime Legate', 'Aurelian Voss Xyz')).toBe('Aurelian Voss Xyz');
   });
 
   it('still truncates a commander name that is too long on its own', () => {
@@ -280,6 +305,88 @@ describe('the rank prefix', () => {
     // The rank is a decoration; the name is the point. Wired as an async IIFE
     // rather than `.catch()`, because a dependency that throws SYNCHRONOUSLY
     // never produces a promise for `.catch()` to attach to.
-    expect(composeNickname(null, 'GRIM')).toBe('GRIM');
+    expect(composeNickname(null, 'GRIM')).toBe('Grim');
+  });
+});
+
+/**
+ * Nickname overrides.
+ *
+ * ★ SQUADRON OWNER, 2026-08-02 ★
+ *
+ * "if an officer overrides their name, then this is the name that stays as their discord nickname
+ * it should not change from that unless they change it."
+ *
+ * This path fires on every Inara call, so it is the one that would undo an override within seconds
+ * of it being set — the most confusing possible version of the bug.
+ */
+describe('an override', () => {
+  it('MANDATORY: stops the rename entirely', async () => {
+    const svc = new NicknameSyncService(
+      recording({
+        verifiedNameFor: async () => 'grim reaper',
+        currentNickFor: async () => 'Pebblemerchant',
+        overrideFor: async () => 'Pebblemerchant',
+      }),
+    );
+
+    const result = await svc.sync('u1', 'd1');
+
+    expect(result.changed).toBe(false);
+    expect(calls, 'renamed somebody who had opted out').toEqual([]);
+  });
+
+  it('does not re-assert the override on every call', async () => {
+    /*
+     * Setting the override is what wrote it to the guild. Re-asserting it here would be a Discord
+     * write and an audit row on every Inara call, for a value nothing but the member can change.
+     */
+    const svc = new NicknameSyncService(
+      recording({ currentNickFor: async () => 'anything at all', overrideFor: async () => 'Chosen Name' }),
+    );
+
+    await svc.sync('u1', 'd1');
+
+    expect(calls).toEqual([]);
+  });
+
+  it('previews the override, not the name it replaced', async () => {
+    // Showing the computed name to somebody who has overridden it promises a rename that will
+    // never happen.
+    const svc = new NicknameSyncService(
+      deps({ verifiedNameFor: async () => 'grim reaper', overrideFor: async () => 'Pebblemerchant' }),
+    );
+
+    expect(await svc.preview('u1', 'd1')).toBe('Pebblemerchant');
+  });
+
+  it('falls back to the convention when the override is blank', async () => {
+    // A blank column is not a name, and honouring it would freeze whatever they happened to wear.
+    const svc = new NicknameSyncService(
+      recording({ verifiedNameFor: async () => 'grim reaper', overrideFor: async () => '  ' }),
+    );
+
+    const result = await svc.sync('u1', 'd1');
+
+    expect(result.changed).toBe(true);
+    expect(calls[0]?.nick).toBe('Grim Reaper');
+  });
+
+  it('does not let a failing override lookup block the rename', async () => {
+    // The convention is the default for a reason. A database hiccup reading one optional column
+    // must not leave the whole squadron un-renamed.
+    const svc = new NicknameSyncService(
+      recording({
+        verifiedNameFor: async () => 'grim reaper',
+        overrideFor: async () => {
+          throw new Error('db down');
+        },
+      }),
+    );
+
+    const result = await svc.sync('u1', 'd1');
+
+    expect(result.changed).toBe(true);
+    expect(calls[0]?.nick).toBe('Grim Reaper');
   });
 });

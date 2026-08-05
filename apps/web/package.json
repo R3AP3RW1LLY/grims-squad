@@ -13,7 +13,8 @@
     "test:unit": "vitest run --passWithNoTests",
     "clean": "rm -rf .next dist",
     "predev": "node -e \"const fs=require('fs');if(fs.existsSync('.next/BUILD_ID')){fs.rmSync('.next',{recursive:true,force:true});console.log('Cleared a production .next before starting dev.')}\"",
-    "build:check": "cross-env NEXT_DIST_DIR=.next-check next build"
+    "build:check": "cross-env NEXT_DIST_DIR=.next-check next build",
+    "prebuild": "node prebuild.mjs"
   },
   "devDependencies": {
     "@grims/config": "workspace:*",
@@ -28,12 +29,21 @@
   },
   "dependencies": {
     "@grims/ed-clients": "workspace:*",
+    "@grims/shared": "workspace:*",
     "@headlessui/react": "^2.2.10",
     "@heroicons/react": "^2.2.0",
+    "@tiptap/core": "^3.29.2",
+    "@tiptap/extension-link": "^3.29.2",
+    "@tiptap/extension-placeholder": "^3.29.2",
+    "@tiptap/extension-text-align": "^3.29.2",
+    "@tiptap/extension-underline": "^3.29.2",
+    "@tiptap/pm": "^3.29.2",
+    "@tiptap/react": "^3.29.2",
+    "@tiptap/starter-kit": "^3.29.2",
+    "chart.js": "^4.5.1",
     "next": "^15.5.21",
     "qrcode.react": "^4.2.0",
     "react": "^19.2.8",
-    "react-dom": "^19.2.8",
-    "recharts": "^3.10.1"
+    "react-dom": "^19.2.8"
   }
 }

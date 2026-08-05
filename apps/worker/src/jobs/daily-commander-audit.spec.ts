@@ -26,8 +26,11 @@ const cmdr = (over: Partial<AuditableCommander> = {}): AuditableCommander => ({
   cmdrName: 'PEBBLE',
   discordId: 'd1',
   apiKey: 'key-1',
-  currentNick: 'Cadet - PEBBLE',
+  // The commander name alone. The rank prefix was dropped 2026-07-31 — see composeNickname.
+  currentNick: 'PEBBLE',
   rank: 'Cadet',
+  // Nobody overrides by default — the convention is what almost everyone wears.
+  nicknameOverride: null,
   ...over,
 });
 
@@ -145,7 +148,9 @@ describe('nicknames', () => {
     const report = await h.run();
 
     expect(report.nicknamesFixed).toBe(1);
-    expect(h.nicks[0]).toMatchObject({ discordId: 'd1', nickname: 'Cadet - PEBBLE' });
+    // The commander name alone — the rank prefix was dropped 2026-07-31 — and humanized since
+    // 2026-08-02, so the Inara name 'PEBBLE' is worn as 'Pebble'.
+    expect(h.nicks[0]).toMatchObject({ discordId: 'd1', nickname: 'Pebble' });
   });
 
   it('MANDATORY: leaves a correct nickname alone', async () => {
@@ -162,7 +167,7 @@ describe('nicknames', () => {
   });
 
   it('ignores case, because Elite does', async () => {
-    const h = harness([cmdr({ currentNick: 'cadet - pebble' })], { 'key-1': OURS });
+    const h = harness([cmdr({ currentNick: 'pebble' })], { 'key-1': OURS });
     expect((await h.run()).nicknamesFixed).toBe(0);
   });
 
@@ -192,7 +197,11 @@ describe('nicknames', () => {
       { 'key-1': OURS },
     );
     await h.run();
-    expect(h.nicks[0]?.nickname).toBe('PEBBLEMERCAHNT');
+    /*
+     * Humanized since 2026-08-02. The fixture still carries the SHOUTED Inara name because that is
+     * what Inara holds; what changed is the convention applied to it. See nickname-humanize.spec.ts.
+     */
+    expect(h.nicks[0]?.nickname).toBe('Pebblemercahnt');
   });
 });
 
@@ -205,5 +214,79 @@ describe('one member failing does not stop the sweep', () => {
     const report = await h.run();
 
     expect(report).toMatchObject({ checked: 2, unreachable: 1, confirmed: 1 });
+  });
+});
+
+/**
+ * Nickname overrides.
+ *
+ * ★ SQUADRON OWNER, 2026-08-02 ★
+ *
+ * "if an officer overrides their name, then this is the name that stays as their discord nickname
+ * it should not change from that unless they change it."
+ *
+ * The sweep is the thing that would undo it, so this is where the rule has to hold.
+ */
+describe('nickname overrides', () => {
+  it('MANDATORY: leaves an overridden member entirely alone', async () => {
+    // A name that does NOT match the convention, which is the whole point of an override. Without
+    // the guard the sweep would rename them back every single night.
+    const h = harness(
+      [cmdr({ cmdrName: 'pebble', currentNick: 'Pebblemerchant', nicknameOverride: 'Pebblemerchant' })],
+      { 'key-1': OURS },
+    );
+
+    const out = await h.run();
+
+    expect(h.nicks, 'the sweep renamed somebody who had opted out').toEqual([]);
+    expect(out.nicknamesFixed).toBe(0);
+    expect(out.nicknamesOverridden).toBe(1);
+  });
+
+  it('counts them rather than skipping silently', async () => {
+    /*
+     * "0 fixed" reads identically whether nobody drifted or everybody opted out, and the second is
+     * something an officer would want to know before wondering why the convention looks patchy.
+     */
+    const h = harness(
+      [
+        cmdr({ userId: 'u1', discordId: 'd1', nicknameOverride: 'Something Else' }),
+        cmdr({ userId: 'u2', discordId: 'd2', currentNick: 'stale', nicknameOverride: null }),
+      ],
+      { 'key-1': OURS },
+    );
+
+    const out = await h.run();
+
+    expect(out.nicknamesOverridden).toBe(1);
+    expect(out.nicknamesFixed).toBe(1);
+  });
+
+  it('still checks their SQUADRON membership', async () => {
+    /*
+     * An override is about the nickname and nothing else. Somebody who left Grim's Squad on Inara
+     * must still be recorded as departed — letting an override suppress that would make the
+     * override a way to keep a verified badge after leaving.
+     */
+    const h = harness(
+      [cmdr({ nicknameOverride: 'Kept Name' })],
+      { 'key-1': 'Some Other Squadron' },
+    );
+
+    const out = await h.run();
+
+    expect(out.departed).toBe(1);
+    expect(h.squadrons[0]?.matched).toBe(false);
+  });
+
+  it('treats an empty or whitespace override as no override', async () => {
+    // A blank string is not a name. Honouring it would leave the member wearing whatever they had,
+    // permanently, on the strength of an empty column.
+    const h = harness([cmdr({ currentNick: 'stale', nicknameOverride: '   ' })], { 'key-1': OURS });
+
+    const out = await h.run();
+
+    expect(out.nicknamesFixed).toBe(1);
+    expect(out.nicknamesOverridden).toBe(0);
   });
 });

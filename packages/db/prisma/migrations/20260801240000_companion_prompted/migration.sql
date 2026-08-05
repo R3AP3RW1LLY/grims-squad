@@ -1,0 +1,12 @@
+-- The companion app step in onboarding.
+--
+-- ★ SQUADRON OWNER, 2026-08-01: "onboarding download step" ★
+--
+-- Records that a member was SHOWN the step, not that they installed anything. Requiring a paired
+-- device would wall out anybody whose machine cannot run it, and the squadron would rather have
+-- them in the forum than nowhere. What the column prevents is asking again on every sign-in, which
+-- is how a prompt becomes something people learn to click past without reading.
+--
+-- Not inferred from device_tokens: a member who paired and later removed their only device has
+-- still been through this, and asking again would read as the site having forgotten them.
+ALTER TABLE "users" ADD COLUMN "companion_prompted_at" TIMESTAMPTZ(6);

@@ -58,6 +58,8 @@ export interface GranteeCandidate {
   readonly displayName: string | null;
   /** True when this user can already see the thread without a grant. */
   readonly alreadyHasAccess: boolean;
+  /** A path on our own API, or null. Used by the mention autocomplete; absent for grants. */
+  readonly avatarUrl?: string | null;
 }
 
 export class GrantService {
@@ -277,6 +279,85 @@ export class GrantService {
     if (!satisfiesMask(mask, Permission.FORUM_MODERATE)) {
       throw new AppError(ErrorCode.PERMISSION_DENIED, 'Only a moderator can grant access to a thread.');
     }
+  }
+
+  /**
+   * Who this member can usefully @mention in a thread.
+   *
+   * ★ FILTERED TO PEOPLE WHO CAN ACTUALLY READ IT ★
+   *
+   * An autocomplete over the whole roster is the obvious build and is quietly broken. Mentioning
+   * somebody who cannot see the thread does NOTHING — the notification fan-out re-checks the mask
+   * at send time (INV-039), so the mention is dropped and the author never learns it was. On the
+   * officers' board that is the normal case, and "I tagged them and they never replied" is how it
+   * would be discovered.
+   *
+   * So the same `inherited || granted` test the grant autocomplete uses decides the list. Somebody
+   * who cannot read the thread is not offered, because offering them is offering a no-op.
+   *
+   * ★ NO FORUM_MODERATE HERE, DELIBERATELY ★
+   *
+   * `search` above requires it because granting access is an admin act. Mentioning is not — every
+   * member does it. The check that DOES apply is rule 2: the thread is read through the caller's
+   * own bound client, so somebody who cannot see a thread cannot enumerate who can.
+   *
+   * The result is not a disclosure beyond what the roster page already shows a signed-in member,
+   * with one exception worth stating: on a restricted board, this reveals which members hold the
+   * permission to read it. That is the same fact the thread's own reply list reveals, and the
+   * alternative — an autocomplete that silently drops most of what it offers — is worse.
+   */
+  async mentionCandidates(
+    db: AclBoundClient,
+    threadId: string,
+    query: string,
+  ): Promise<GranteeCandidate[]> {
+    const thread = await this.#visibleThread(db, threadId);
+
+    const q = query.trim();
+    // Two characters minimum, matching `search`: a one-character prefix is most of the roster.
+    if (q.length < 2) return [];
+
+    const rows = await db.user.findMany({
+      where: {
+        status: 'active',
+        OR: [
+          { handle: { contains: q, mode: 'insensitive' } },
+          { displayName: { contains: q, mode: 'insensitive' } },
+        ],
+      },
+      select: {
+        id: true,
+        handle: true,
+        displayName: true,
+        avatarStoredHash: true,
+        userRoles: { select: { role: { select: { permMask: true } } } },
+        threadGrantsReceived: { where: { threadId }, select: { threadId: true } },
+      },
+      // A dropdown cannot usefully show more, and an uncapped LIKE over the roster is both a
+      // leak and a slow query.
+      take: 10,
+      orderBy: { handle: 'asc' },
+    });
+
+    return rows
+      .map((u) => {
+        /*
+         * `toFixed(0)`, never `toString()`: permMask is NUMERIC(40,0) and Prisma maps it to a
+         * Decimal whose toString() switches to exponential notation at 1e21 — ALL_PERMISSIONS is
+         * 1.19e21, so every all-permission role is over that line and `BigInt(...)` would throw.
+         */
+        const mask = u.userRoles.reduce((acc, ur) => acc | BigInt(ur.role.permMask.toFixed(0)), 0n);
+        const canRead =
+          satisfiesMask(mask, thread.categoryViewPerm) || u.threadGrantsReceived.length > 0;
+        return {
+          userId: u.id,
+          handle: u.handle,
+          displayName: u.displayName,
+          alreadyHasAccess: canRead,
+          avatarUrl: u.avatarStoredHash === null ? null : `/v1/media/avatars/${u.id}`,
+        };
+      })
+      .filter((c) => c.alreadyHasAccess);
   }
 
   /**

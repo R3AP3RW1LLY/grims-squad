@@ -1,41 +1,147 @@
 /**
- * The Discord nickname a verified member wears: `RANK - COMMANDER`.
+ * The Discord nickname a verified member wears: their COMMANDER NAME, and nothing else.
+ *
+ * ★ THE RANK PREFIX WAS REMOVED, 2026-07-31 ★
+ *
+ * Squadron owner: "right now when we verify members, we are adding the rank prefix to their discord
+ * username, we need to stop this and only show their Inara Commander name please."
+ *
+ * It used to build `RANK - COMMANDER`. The rank is already visible in Discord — it is the role, in
+ * colour, in the member list — so putting it in the nickname said the same thing twice and spent
+ * most of Discord's 32 characters doing it. What people actually want to see is who somebody is in
+ * game.
+ *
+ * ★ WHY THIS FUNCTION STILL TAKES A RANK ★
+ *
+ * So that every caller does not have to change, and so the reason is recorded in one place rather
+ * than deleted from all of them. The argument is accepted and deliberately ignored — see the note
+ * on the parameter.
  *
  * ★ WHY THIS LIVES IN SHARED ★
  *
- * Three things need the same answer: the website when it verifies somebody, the
- * settings page when it shows them what their nickname will be, and the daily
- * worker sweep when it puts back a nickname somebody changed by hand. Three
- * copies of a truncation rule would drift, and the drift would be a member
- * whose name the site displays one way and the guild another.
+ * Three things need the same answer: the website when it verifies somebody, the settings page when
+ * it previews their nickname, and the daily worker sweep that puts back a nickname somebody changed
+ * by hand. Three copies of this rule would drift, and the drift would be a member whose name the
+ * site displays one way and the guild another.
  */
 
 /** Discord's hard ceiling on a nickname. */
 export const MAX_NICK = 32;
 
-/**
- * Builds the nickname: `RANK - COMMANDER`.
+/*
+ * ─────────────────────────────────────────────────────────────────────────────
+ * HUMANIZING A COMMANDER NAME
  *
- * ★ WHEN IT DOES NOT FIT, THE RANK GOES — NEVER THE NAME ★
+ * ★ SQUADRON OWNER, 2026-08-02 ★
  *
- * Discord allows 32 characters and "Chief Fleet Commander - PEBBLEMERCAHNT" is
- * thirty-eight. Something has to give, and it must not be the commander name:
- * the name is the identity, it is what people are called in game and in voice,
- * and a truncated one is a different person's name.
+ * "these need to match their verified inara name please. this is non-negotiable! ... their name
+ * must match what is on inara exactly, but humanized (first letter capitalized) ... if they have
+ * two words seperated by a space, then each first letter of each word must be capitalized. if they
+ * have "" in their name, then everything between the quotes must be capitalized letters please like
+ * a call sign."
  *
- * Truncating the RANK instead was considered and rejected — "Chief Fleet Comma"
- * is not a rank, and a nickname that looks corrupted invites somebody to fix it
- * by hand, which the next sync would then overwrite.
- *
- * So the rank is dropped whole, and a long-named Chief Fleet Commander simply
- * appears under their commander name.
+ * The same rule for everybody — allies, Grim's Squad members, the tenure ladder from Cadet to Grand
+ * Master General, and officers. Rank changes nothing about the SHAPE of the name; officers differ
+ * only in being allowed to override it entirely (see `nicknameOverride`).
+ * ─────────────────────────────────────────────────────────────────────────────
  */
-export function composeNickname(rank: string | null, cmdrName: string): string {
-  const name = cmdrName.trim();
-  if (rank === null || rank.trim() === '') return name.slice(0, MAX_NICK);
 
-  const full = `${rank.trim()} - ${name}`;
-  return full.length <= MAX_NICK ? full : name.slice(0, MAX_NICK);
+/**
+ * Characters that open or close a callsign.
+ *
+ * Straight and both smart doubles, because a name typed on a phone arrives with `“ ”` and a member
+ * would have no idea why their callsign was not shouting.
+ *
+ * The APOSTROPHE is deliberately not here. It is a word break (`o'brien` → `O'Brien`), and treating
+ * it as a quote would turn the rest of that name into a callsign.
+ */
+const CALLSIGN_QUOTES = new Set(['"', '\u201C', '\u201D']);
+
+/**
+ * Characters after which the next letter starts a new word.
+ *
+ * Owner's answer when asked, with worked examples: `jean-luc picard` → `Jean-Luc Picard`, and
+ * `o'brien` → `O'Brien`. So hyphens and apostrophes break words exactly as spaces do.
+ */
+const WORD_BREAKS = new Set([' ', '-', "'", '\u2019']);
+
+/**
+ * A commander name, as the squadron wears it.
+ *
+ * ★ LOWERCASED FIRST, AND THAT IS A DELIBERATE TRADE ★
+ *
+ * Everything outside a callsign is lowercased before the word starts are raised. That is what makes
+ * `GRIMREAPER` come back as `Grimreaper` rather than staying at a shout, which is the whole point
+ * of "humanized".
+ *
+ * It costs deliberate inner capitals: `McDonald` becomes `Mcdonald`. The owner was shown that
+ * exact trade and chose this. A member who needs the other spelling is what the override is for.
+ *
+ * ★ UNBALANCED QUOTES ARE IGNORED, NOT GUESSED AT ★
+ *
+ * `sean "grim` has one quote. Treating it as an opening one would uppercase everything after it —
+ * a typo turning into A SHOUTING HALF NAME. With an odd number of quotes the callsign rule is
+ * dropped entirely and the name is simply title-cased, which is wrong in the small way rather than
+ * the loud way.
+ */
+export function humanizeCommanderName(raw: string): string {
+  // Collapse runs of whitespace first, so `grim   reaper` does not produce empty words.
+  const name = raw.trim().replace(/\s+/g, ' ');
+  if (name === '') return '';
+
+  const quotes = [...name].filter((c) => CALLSIGN_QUOTES.has(c)).length;
+  const callsignsBalanced = quotes > 0 && quotes % 2 === 0;
+
+  let out = '';
+  let inCallsign = false;
+  let startOfWord = true;
+
+  for (const ch of name) {
+    if (callsignsBalanced && CALLSIGN_QUOTES.has(ch)) {
+      inCallsign = !inCallsign;
+      // Normalised to a straight quote. A name that renders with `“` here and `"` on the site
+      // would look like two different names to the member reading both.
+      out += '"';
+      startOfWord = true;
+      continue;
+    }
+
+    if (inCallsign) {
+      // The callsign itself: every letter, not just the first.
+      out += ch.toUpperCase();
+      continue;
+    }
+
+    out += startOfWord ? ch.toUpperCase() : ch.toLowerCase();
+    startOfWord = WORD_BREAKS.has(ch);
+  }
+
+  return out;
+}
+
+/**
+ * Builds the nickname: just the commander name.
+ *
+ * `rank` is accepted and ignored. Kept in the signature because the rank is still resolved for the
+ * settings preview and the roster, and because a parameter that is visibly unused — with this note
+ * attached — is a clearer record of a deliberate decision than a silently deleted one.
+ *
+ * Still truncated to Discord's limit. A commander name longer than 32 characters is not something
+ * this function can solve, and a rejected API call would leave the member with no nickname at all.
+ */
+export function composeNickname(_rank: string | null, cmdrName: string): string {
+  /*
+   * ★ HUMANIZED HERE, SO EVERY CALLER GETS IT ★
+   *
+   * Three things need the same answer — the website when it verifies somebody, the settings page
+   * when it previews their nickname, and the nightly worker sweep. Putting the rule anywhere else
+   * would mean a member whose name the site shows one way and the guild another, which is the
+   * exact failure this function was moved to `shared` to prevent.
+   *
+   * Truncation comes AFTER humanizing. Doing it first would title-case a name that had already
+   * lost its last word, and the result would differ from what the preview promised.
+   */
+  return humanizeCommanderName(cmdrName).slice(0, MAX_NICK);
 }
 
 /**
@@ -134,4 +240,65 @@ export function resolveMemberRank(held: readonly HeldRole[], leadershipCeiling: 
    */
   const membership = held.filter((r) => r.category === 'membership');
   return membership[0]?.name ?? null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CAPTURING A NICKNAME SOMEBODY CHANGED IN DISCORD
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** What to do about a nickname that just changed in the guild. */
+export type OverrideAction = 'set' | 'clear' | 'ignore';
+
+/**
+ * Whether a Discord nickname change is somebody choosing their own name.
+ *
+ * ★ SQUADRON OWNER, 2026-08-02 ★
+ *
+ * "if they update it in discord, it should also update here and not change back!" — for officers,
+ * and for anyone an officer has granted the right to.
+ *
+ * ★ THE TRAP THIS EXISTS TO AVOID ★
+ *
+ * OUR OWN renames fire `GuildMemberUpdate` too. Recording every change as an override would mean
+ * the first time the nightly sweep corrected somebody, they would acquire an override and never be
+ * corrected again — the feature would disable itself, quietly, one member at a time, and the
+ * symptom would be "the convention stopped working" weeks later.
+ *
+ * So the new nickname is compared against what the convention WOULD produce. Matching it is either
+ * our own write or a member typing the same thing by hand, and neither is a decision to opt out.
+ *
+ * Case-insensitively, because Elite is: somebody re-typing their own name with different capitals
+ * has not chosen a different name, and treating it as one would opt them out by accident.
+ *
+ * ★ CLEARING IT IS ALSO A CHOICE ★
+ *
+ * Removing your nickname in Discord — leaving just your username — reads as "put me back to
+ * normal", so it clears the override rather than freezing an empty name.
+ */
+export function overrideActionFor(input: {
+  /** The nickname now set in the guild. Null means they removed it. */
+  readonly newNick: string | null;
+  /** What the convention would give them, or null when there is no verified name to build one from. */
+  readonly conventionNick: string | null;
+  /** Whether this member is permitted to hold an override at all. */
+  readonly mayOverride: boolean;
+}): OverrideAction {
+  // Not permitted: the sweep will put them back tonight, and recording anything would imply
+  // otherwise to whoever reads the audit.
+  if (!input.mayOverride) return 'ignore';
+
+  const next = input.newNick?.trim() ?? '';
+  if (next === '') return 'clear';
+
+  const convention = input.conventionNick?.trim() ?? '';
+  if (convention !== '' && next.toLowerCase() === convention.toLowerCase()) {
+    /*
+     * Indistinguishable from our own write, and harmless either way: a member wearing exactly the
+     * convention has not opted out of anything, so leaving them un-overridden keeps them following
+     * their Inara name if it later changes.
+     */
+    return 'ignore';
+  }
+
+  return 'set';
 }

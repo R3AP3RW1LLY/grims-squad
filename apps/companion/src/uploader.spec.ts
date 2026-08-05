@@ -99,20 +99,106 @@ describe('sending', () => {
     expect(called).toBe(false);
   });
 
-  it('caps the batch size', async () => {
-    // One long session must not post a ten-megabyte body.
-    let count = 0;
+  it('caps each request, and sends the remainder rather than dropping it', async () => {
+    /*
+     * ★ THE LOSS THIS TEST EXISTS FOR ★
+     *
+     * This used to assert that a 250-event chunk produced ONE request of 200 —
+     * and it passed, because that is exactly what the code did. The other fifty
+     * were discarded, and the watcher advanced its file offset anyway, so they
+     * were never read again. The test documented the bug as the specification.
+     */
+    const sizes: number[] = [];
     const up = new Uploader({
       apiBaseUrl: 'https://hub.example',
       deviceToken: 'gsq_test',
       fetchImpl: fakeFetch((init) => {
-        count = (JSON.parse(init.body as string) as { events: unknown[] }).events.length;
+        sizes.push((JSON.parse(init.body as string) as { events: unknown[] }).events.length);
         return {};
       }),
     });
 
     await up.send(Array.from({ length: MAX_BATCH + 50 }, (_, i) => event(i)));
-    expect(count).toBe(MAX_BATCH);
+
+    expect(sizes).toEqual([MAX_BATCH, 50]);
+    expect(sizes.reduce((a, b) => a + b, 0)).toBe(MAX_BATCH + 50);
+  });
+
+  it('splits on BYTES before it reaches the event count', async () => {
+    /*
+     * A `Market` event carries a station's whole commodity list. Two hundred of
+     * them is megabytes against a hub that accepts one — a 413 that would fail
+     * the ordinary events riding along with them.
+     */
+    // Shaped like the real thing: around a hundred commodities, each with the
+    // full set of fields Frontier writes. That is ~25KB an event.
+    const item = (n: number) => ({
+      id: 128049204 + n,
+      Name: '$platinum_name;',
+      Name_Localised: 'Platinum',
+      Category: '$MARKET_category_metals;',
+      Category_Localised: 'Metals',
+      BuyPrice: 0,
+      SellPrice: 58_432,
+      MeanPrice: 57_962,
+      StockBracket: 0,
+      DemandBracket: 3,
+      Stock: 0,
+      Demand: 12_450,
+      Consumer: true,
+      Producer: false,
+      Rare: false,
+    });
+    const heavy = Array.from({ length: 60 }, (_, i) => ({
+      name: 'Market',
+      occurredAt: `2026-08-01T11:00:${String(i % 60).padStart(2, '0')}Z`,
+      data: {
+        MarketID: 3223343616 + i,
+        StationName: 'Jameson Memorial',
+        StarSystem: 'Shinrarta Dezhra',
+        Items: Array.from({ length: 110 }, (_, n) => item(n)),
+      },
+    }));
+
+    const bodies: number[] = [];
+    const up = new Uploader({
+      apiBaseUrl: 'https://hub.example',
+      deviceToken: 'gsq_test',
+      fetchImpl: fakeFetch((init) => {
+        bodies.push(Buffer.byteLength(init.body as string, 'utf8'));
+        return {};
+      }),
+    });
+
+    await up.send(heavy);
+
+    // More than one request despite being well under the event cap...
+    expect(bodies.length).toBeGreaterThan(1);
+    // ...and every one of them inside the hub's limit.
+    for (const b of bodies) expect(b).toBeLessThan(1024 * 1024);
+  });
+
+  it('reports a mid-way failure as failure, so the offset does not advance', async () => {
+    /*
+     * The batches that landed are re-sent next pass and deduped on the event
+     * key. Reporting ok:true because SOME of it worked would advance the offset
+     * past events that never arrived.
+     */
+    let n = 0;
+    const up = new Uploader({
+      apiBaseUrl: 'https://hub.example',
+      deviceToken: 'gsq_test',
+      fetchImpl: fakeFetch(() => {
+        n += 1;
+        if (n === 2) throw new Error('network gone');
+        return {};
+      }),
+    });
+
+    const r = await up.send(Array.from({ length: MAX_BATCH + 50 }, (_, i) => event(i)));
+
+    expect(r.ok).toBe(false);
+    expect(n).toBe(2);
   });
 });
 

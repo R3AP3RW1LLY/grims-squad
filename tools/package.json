@@ -11,9 +11,11 @@
   },
   "devDependencies": {
     "@grims/config": "workspace:*",
+    "@grims/shared": "workspace:*",
     "@types/node": "^24.0.0",
+    "sharp": "^0.35.3",
     "typescript": "^5.7.0",
-    "yaml": "^2.6.0",
-    "vitest": "^3.0.0"
+    "vitest": "^3.0.0",
+    "yaml": "^2.6.0"
   }
 }

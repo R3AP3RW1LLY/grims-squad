@@ -1,6 +1,7 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
+import { PLATFORM_VERSION } from '@grims/shared/version';
 import {
   Dialog,
   DialogBackdrop,
@@ -13,6 +14,7 @@ import {
 } from '@headlessui/react';
 import {
   Bars3Icon,
+  BellIcon,
   XMarkIcon,
   HomeIcon,
   UsersIcon,
@@ -25,10 +27,35 @@ import {
   LockClosedIcon,
   Cog6ToothIcon,
   KeyIcon,
+  AcademicCapIcon,
+  SparklesIcon,
+  WrenchScrewdriverIcon,
+  TruckIcon,
+  BuildingOffice2Icon,
+  TrophyIcon,
+  MegaphoneIcon,
+  NewspaperIcon,
+  MapIcon,
 } from '@heroicons/react/24/outline';
 import { ChevronDownIcon } from '@heroicons/react/20/solid';
+import { ViewAsBanner } from './view-as-banner';
+import {
+  NAV_STORAGE_KEY,
+  SUBSECTION_STORAGE_KEY,
+  openSections,
+  openSubsections,
+  orderedEntries,
+  parseStored,
+  parseStoredSubsections,
+  sectionOf,
+  subsectionOf,
+  toggleSection,
+  toggleSubsection,
+  type Section,
+} from './nav-sections';
 import type { MeResponse, NavItem } from '../lib/api';
 import { Avatar } from './account-menu';
+import { NotificationsPanel, useNotificationCounts } from './notifications-panel';
 
 /**
  * The members' area shell — sidebar, mobile drawer, top bar.
@@ -44,14 +71,14 @@ import { Avatar } from './account-menu';
  * than from Tailwind's grey scale — so a change in ssot/07-design/tokens.json
  * still moves this the way it moves everything else.
  *
- * ★ WHAT WAS DELIBERATELY LEFT OUT ★
+ * ★ WHAT WAS DELIBERATELY LEFT OUT — AND WHAT HAS SINCE GONE IN ★
  *
- * The reference carries a search box and a notification bell. We have neither:
- * Meilisearch is wired for a health check and nothing else, and there is no
- * notification model yet. Shipping the controls anyway would have put two dead
- * affordances in the most prominent strip of the page — an interface that
- * offers things it cannot do teaches people to stop trusting the rest of it.
- * They go in when the features behind them do.
+ * The reference carries a search box and a notification bell. The search box is
+ * still out: Meilisearch is wired for a health check and nothing else, and a
+ * dead affordance in the most prominent strip of the page teaches people to
+ * stop trusting the rest of it. The bell went in on 2026-08-04, when the
+ * notifications system behind it landed — which is the bargain the original
+ * note struck: they go in when the features behind them do.
  */
 
 /**
@@ -74,15 +101,65 @@ const ICONS: Record<string, typeof HomeIcon> = {
   '/settings/account': Cog6ToothIcon,
   '/app': ShieldCheckIcon,
   '/app/roles': KeyIcon,
+  '/app/training': AcademicCapIcon,
+  '/gmsd-ai/ask': ChatBubbleLeftRightIcon,
+  '/gmsd-ai/train': SparklesIcon,
+  // Stations gone dark on the map, which is what a runner is fixing. This entry was missing and
+  // the board fell back to HomeIcon — two "home" entries in one section, neither of them home.
+  '/bounties': MapIcon,
+  // Release notes read like news, and a newspaper is what news looks like.
+  '/changelog': NewspaperIcon,
+};
+
+/**
+ * An icon per subcategory.
+ *
+ * ★ SQUADRON OWNER, 2026-08-03 ★
+ *
+ * "find better icons for the Shipyard, Logistics & Trade and Colonization categories."
+ *
+ * They were all a wrench — the subcategory heading rendered `WrenchScrewdriverIcon` hardcoded,
+ * whatever the subcategory was. Three groups with the same icon is three groups with no icon: the
+ * only thing distinguishing them was the text, which is what the icon is there to save you reading.
+ *
+ * Keyed on the label rather than carried in the nav payload, for the same reason the route icons
+ * are: the API has no business knowing what a Heroicon is. An unlisted subcategory falls back to
+ * the wrench, so adding one is never a crash.
+ */
+const SUBSECTION_ICONS: Record<string, typeof HomeIcon> = {
+  // Outfitting and building ships. The wrench genuinely belongs to this one.
+  Shipyard: WrenchScrewdriverIcon,
+  // Commodities and the Freight Office — both about moving cargo for profit.
+  'Logistics & Trade': TruckIcon,
+  // Construction sites, which is what the whole category is about building.
+  Colonisation: BuildingOffice2Icon,
+  // Standings and the badges they pay out. A trophy is the one thing all three boards award.
+  Leaderboards: TrophyIcon,
+  // The call going out — the category is a summons, and a megaphone is what a summons looks like.
+  'Answer the Call': MegaphoneIcon,
 };
 
 const SECTION_LABELS: Record<NavItem['section'], string> = {
   squadron: 'Squadron',
   personal: 'Your account',
+  ai: 'GMSD AI',
   admin: 'Administration',
 };
 
-const ORDER: NavItem['section'][] = ['squadron', 'personal', 'admin'];
+/*
+ * ★ ORDER SET BY THE SQUADRON OWNER, 2026-08-01 ★
+ *
+ * "move the GMSD AI Category above the Your Account Category, and move Your Account category under
+ * Administraion Category."
+ *
+ * Squadron, then GMSD AI, then Administration, then Your account.
+ *
+ * It puts the member's OWN settings last, which reads as odd until you look at how the sidebar is
+ * actually used: squadron pages are daily, GMSD AI is something the owner wants people to see and
+ * use, administration is a job, and your own account is a place you visit twice a year. Frequency
+ * of use, descending — with the thing being promoted second, where it cannot be missed.
+ */
+const ORDER: NavItem['section'][] = ['squadron', 'ai', 'admin', 'personal'];
 
 function cx(...classes: (string | false | undefined)[]): string {
   return classes.filter(Boolean).join(' ');
@@ -93,6 +170,77 @@ function SidebarContents({ me, current }: { me: MeResponse; current: string }) {
     section,
     items: me.nav.filter((i) => i.section === section),
   })).filter((s) => s.items.length > 0);
+
+  /*
+   * ★ COLLAPSIBLE CATEGORIES ★
+   *
+   * Squadron owner, 2026-08-01: "make all sidebar categories collapsable, by default the only
+   * categories that should be expanded is Squadron and Administration".
+   *
+   * ★ THE DEFAULTS RENDER FIRST, THE STORED CHOICE ARRIVES AFTER ★
+   *
+   * Local storage does not exist on the server. Reading it during render would put one set of open
+   * sections in the HTML and another at hydration — React replaces the markup and logs a mismatch.
+   * So the first paint is always the defaults and the effect applies what was saved, which is one
+   * frame later and only differs for somebody who has changed it.
+   *
+   * The section holding the current page is forced open either way. See `openSections`.
+   */
+  /*
+   * ★ THE MOBILE DRAWER AND THE DESKTOP SIDEBAR ARE BOTH IN THE DOM ★
+   *
+   * One is hidden by a media query, not unmounted, so this component renders twice on every page. A
+   * literal `nav-section-admin` would therefore appear twice — invalid HTML, and `aria-controls`
+   * resolves to whichever came first, so a screen reader operating the drawer would be told about
+   * the desktop sidebar's list.
+   */
+  const uid = useId();
+  const here = sectionOf(me.nav, current);
+  const hereSub = subsectionOf(me.nav, current);
+
+  const [open, setOpen] = useState<Set<Section>>(() => openSections(null, here));
+  /*
+   * ★ SUBCATEGORIES START CLOSED — SQUADRON OWNER, 2026-08-01 ★
+   *
+   * "make this collapsable and make it closed by default please!"
+   *
+   * Separate state and a separate key from the sections. They are the same control with opposite
+   * defaults, and one stored set could not express both: an absent entry means "use the open list"
+   * for a section and "closed" for a subcategory.
+   */
+  const [openSubs, setOpenSubs] = useState<Set<string>>(() => openSubsections(null, hereSub));
+
+  useEffect(() => {
+    setOpen(openSections(parseStored(window.localStorage.getItem(NAV_STORAGE_KEY)), here));
+    setOpenSubs(
+      openSubsections(
+        parseStoredSubsections(window.localStorage.getItem(SUBSECTION_STORAGE_KEY)),
+        hereSub,
+      ),
+    );
+  }, [here, hereSub]);
+
+  const toggleSub = (name: string) => {
+    const next = toggleSubsection(openSubs, name);
+    setOpenSubs(openSubsections([...next], hereSub));
+    try {
+      window.localStorage.setItem(SUBSECTION_STORAGE_KEY, JSON.stringify([...next]));
+    } catch {
+      /* the preference is not worth an error */
+    }
+  };
+
+  const toggle = (section: Section) => {
+    const next = toggleSection(open, section);
+    setOpen(openSections([...next], here));
+    // Best effort. Private browsing and a full quota both throw here, and neither is a reason to
+    // stop the sidebar from opening.
+    try {
+      window.localStorage.setItem(NAV_STORAGE_KEY, JSON.stringify([...next]));
+    } catch {
+      /* the preference is not worth an error */
+    }
+  };
 
   return (
     <div className="flex grow flex-col gap-y-5 overflow-y-auto border-r border-[var(--color-border-hairline)] bg-[color-mix(in_srgb,var(--color-surface-panel)_92%,transparent)] px-5 pb-4 backdrop-blur-md">
@@ -109,36 +257,158 @@ function SidebarContents({ me, current }: { me: MeResponse; current: string }) {
 
       <nav className="flex flex-1 flex-col">
         <ul role="list" className="flex flex-1 list-none flex-col gap-y-7 p-0">
-          {sections.map(({ section, items }) => (
+          {sections.map(({ section, items }) => {
+            const expanded = open.has(section);
+            const panelId = `${uid}-${section}`;
+
+            return (
             <li key={section}>
-              <div className="font-mono text-[10px] uppercase tracking-[0.28em] text-[var(--color-text-secondary)]">
-                {SECTION_LABELS[section]}
-              </div>
-              <ul role="list" className="mt-2 -mx-2 list-none space-y-1 p-0">
-                {items.map((item) => {
-                  const Icon = ICONS[item.href] ?? HomeIcon;
-                  const active = current === item.href;
+              {/*
+                A button, not a heading with a click handler. It is operated by keyboard and
+                announced as expandable for free, and `aria-expanded` is the only thing telling a
+                screen reader that the links below appeared because of this control.
+              */}
+              <button
+                type="button"
+                onClick={() => toggle(section)}
+                aria-expanded={expanded}
+                aria-controls={panelId}
+                className="flex w-full items-center justify-between gap-2 rounded py-1 font-mono text-[10px] uppercase tracking-[0.28em] text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)]"
+              >
+                <span>{SECTION_LABELS[section]}</span>
+                {/*
+                  The chevron points down when open and right when closed — the direction the
+                  content is, not an abstract state. Rotated rather than swapped so it turns.
+                */}
+                <ChevronDownIcon
+                  aria-hidden="true"
+                  className={cx(
+                    'size-3.5 shrink-0 transition-transform duration-150',
+                    expanded ? 'rotate-0' : '-rotate-90',
+                  )}
+                />
+              </button>
+              <ul
+                id={panelId}
+                role="list"
+                hidden={!expanded}
+                className="mt-2 -mx-2 list-none space-y-1 p-0"
+              >
+                {/*
+                  ★ RENDERED IN DEFINITION ORDER ★
+
+                  Squadron owner, 2026-08-01: "move the shipyard category so its below the roster
+                  please in the sidenav."
+
+                  This used to render every loose link first and push subcategories to the bottom,
+                  which made a subcategory's position in `nav.ts` meaningless — it could only ever
+                  land last. Now a group appears where its FIRST member appears, so ordering the
+                  sidebar is done by ordering the definitions, which is where somebody looking to
+                  reorder it would go first.
+
+                  The original worry stands: a group heading between two plain links can read as
+                  though the links below belong to it. Indentation and the smaller type carry that
+                  now, which is the honest fix — the old one solved a legibility problem by taking
+                  away control over the order.
+                */}
+                {orderedEntries(items).map((entry) => {
+                  if (entry.kind === 'item') {
+                    const item = entry.item;
+                    const Icon = ICONS[item.href] ?? HomeIcon;
+                    const active = current === item.href;
+                    return (
+                      <li key={item.href}>
+                        <a
+                          href={item.href}
+                          aria-current={active ? 'page' : undefined}
+                          className={cx(
+                            'group flex gap-x-3 rounded px-2 py-1.5 text-xs/5 transition-colors',
+                            active
+                              ? 'bg-[color-mix(in_srgb,var(--color-brand-orange)_14%,transparent)] text-[var(--color-brand-orange-bright)]'
+                              : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-panel-hover)] hover:text-[var(--color-text-primary)]',
+                          )}
+                        >
+                          <Icon aria-hidden="true" className="size-4 shrink-0" />
+                          {item.label}
+                        </a>
+                      </li>
+                    );
+                  }
+
+                  const sub = entry.name;
+                  const subOpen = openSubs.has(sub);
+                  const subId = `${uid}-${section}-${sub.replace(/\s+/g, '-')}`;
+
                   return (
-                    <li key={item.href}>
-                      <a
-                        href={item.href}
-                        aria-current={active ? 'page' : undefined}
-                        className={cx(
-                          'group flex gap-x-3 rounded p-2 text-sm/6 transition-colors',
-                          active
-                            ? 'bg-[color-mix(in_srgb,var(--color-brand-orange)_14%,transparent)] text-[var(--color-brand-orange-bright)]'
-                            : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-panel-hover)] hover:text-[var(--color-text-primary)]',
-                        )}
+                    /*
+                      One size everywhere, and it is the SMALL one. The owner asked for uniformity
+                      on 2026-08-04 and the first attempt enlarged the sub-rows to match the links
+                      — "this looks really bad" — so the links came down instead: every row in the
+                      sidebar now sits at the category-heading size, and only the inset and the
+                      border say "a level down".
+                    */
+                    <li key={sub} className="mt-1 ml-2">
+                      <button
+                        type="button"
+                        onClick={() => toggleSub(sub)}
+                        aria-expanded={subOpen}
+                        aria-controls={subId}
+                        className="flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-xs/5 font-medium tracking-wide text-[var(--color-text-secondary)] transition-colors hover:bg-[var(--color-surface-panel-hover)] hover:text-[var(--color-text-primary)]"
                       >
-                        <Icon aria-hidden="true" className="size-5 shrink-0" />
-                        {item.label}
-                      </a>
+                        <span className="flex items-center gap-x-2.5">
+                          {(() => {
+                            const SubIcon = SUBSECTION_ICONS[sub] ?? WrenchScrewdriverIcon;
+                            return <SubIcon aria-hidden="true" className="size-4 shrink-0" />;
+                          })()}
+                          {sub}
+                        </span>
+                        <ChevronDownIcon
+                          aria-hidden="true"
+                          className={cx(
+                            'size-3 shrink-0 transition-transform duration-150',
+                            subOpen ? 'rotate-0' : '-rotate-90',
+                          )}
+                        />
+                      </button>
+
+                      {/*
+                        Indented by a border rather than by padding alone: a vertical line makes the
+                        nesting readable at a glance, where indentation alone reads as an accident
+                        on a narrow sidebar.
+                      */}
+                      <ul
+                        id={subId}
+                        role="list"
+                        hidden={!subOpen}
+                        className="ml-3.5 mt-0.5 list-none space-y-0.5 border-l border-[var(--color-border-hairline)] p-0 pl-2.5"
+                      >
+                        {entry.items.map((item) => {
+                          const active = current === item.href;
+                          return (
+                            <li key={item.href}>
+                              <a
+                                href={item.href}
+                                aria-current={active ? 'page' : undefined}
+                                className={cx(
+                                  'group flex gap-x-3 rounded px-2 py-1.5 text-xs/5 transition-colors',
+                                  active
+                                    ? 'bg-[color-mix(in_srgb,var(--color-brand-orange)_14%,transparent)] text-[var(--color-brand-orange-bright)]'
+                                    : 'text-[var(--color-text-secondary)] hover:bg-[var(--color-surface-panel-hover)] hover:text-[var(--color-text-primary)]',
+                                )}
+                              >
+                                {item.label}
+                              </a>
+                            </li>
+                          );
+                        })}
+                      </ul>
                     </li>
                   );
                 })}
               </ul>
             </li>
-          ))}
+            );
+          })}
 
           {/*
             Back to the public site, pinned to the bottom.
@@ -178,6 +448,18 @@ function SidebarContents({ me, current }: { me: MeResponse; current: string }) {
               <a href="/terms" className="hover:text-[var(--color-text-primary)]">
                 Terms
               </a>
+              {/*
+                ★ ONE VERSION, BOTH SURFACES — SQUADRON OWNER, 2026-08-04 ★
+                The same PLATFORM_VERSION the companion app prints; the version-sync spec keeps
+                the two equal, the changelog stamps it on every release, and it links there
+                because "what is this version" is exactly what the changelog answers.
+              */}
+              <a
+                href="/changelog"
+                className="ml-auto font-mono text-[10px] tracking-[0.18em] text-[var(--color-text-dim)] hover:text-[var(--color-text-primary)]"
+              >
+                v{PLATFORM_VERSION}
+              </a>
             </p>
           </li>
         </ul>
@@ -198,6 +480,64 @@ export function HubShell({
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const user = me.user;
   const personal = me.nav.filter((i) => i.section === 'personal');
+
+  /*
+   * ★ THE BELL'S STATE LIVES HERE, NOT IN THE PANEL ★
+   *
+   * The badge renders whether or not the panel is open, and the tab pills inside the panel are
+   * the same three numbers. One hook instance in the shell means both surfaces read one state —
+   * a badge saying 3 over a panel saying 1 reads as a bug even in the moment both are true.
+   *
+   * The shell is also the one component on every hub page, which makes it the right owner of the
+   * badge's live stream: pages that refresh themselves keep their own LiveRefresh subscription,
+   * and the two do not fight over what an event means.
+   */
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const bellRef = useRef<HTMLButtonElement>(null);
+  const notificationsRef = useRef<HTMLElement>(null);
+  const { counts, refetch, apply } = useNotificationCounts();
+
+  /*
+   * Escape closes the panel and puts focus back on the bell that opened it — the mobile-nav
+   * idiom. Without the return, a keyboard user is dumped at the top of the document and has to
+   * tab all the way back to where they were.
+   */
+  useEffect(() => {
+    if (!notificationsOpen) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') {
+        setNotificationsOpen(false);
+        bellRef.current?.focus();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [notificationsOpen]);
+
+  /*
+   * A click anywhere else dismisses it. The bell is excluded because its own click already
+   * toggles — without the exclusion, clicking the bell while open would close-then-reopen.
+   */
+  useEffect(() => {
+    if (!notificationsOpen) return;
+    const onDown = (e: PointerEvent): void => {
+      const t = e.target as Node;
+      if (!notificationsRef.current?.contains(t) && !bellRef.current?.contains(t)) {
+        setNotificationsOpen(false);
+      }
+    };
+    document.addEventListener('pointerdown', onDown);
+    return () => document.removeEventListener('pointerdown', onDown);
+  }, [notificationsOpen]);
+
+  /*
+   * Focus moves INTO the panel as it opens, so the next Tab press lands on the first tab button
+   * rather than wherever the pointer happened to leave it. The panel is `inert` while closed, so
+   * this cannot run early — the effect fires after the attribute is gone.
+   */
+  useEffect(() => {
+    if (notificationsOpen) notificationsRef.current?.focus();
+  }, [notificationsOpen]);
 
   async function signOut() {
     try {
@@ -252,6 +592,25 @@ export function HubShell({
       </div>
 
       <div className="lg:pl-64">
+        {/*
+          ★ THE PREVIEW BANNER SITS ABOVE EVERYTHING ★
+
+          A rank preview makes the site behave as that rank's does — the admin section leaves the
+          sidebar, pages refuse, buttons vanish. All correct, and all exactly what somebody would
+          report as "I have lost my permissions" if nothing accounted for it.
+
+          Above the top bar rather than inside it: a preview is a state the whole page is in, not a
+          control that lives in the chrome.
+        */}
+        {/*
+          `!= null`, catching undefined as well as null.
+          
+          `!== null` alone crashes the entire shell on a response that omits the field — an older
+          cached client, or any error path that builds a partial `me`. The banner is chrome; it must
+          never be the reason a page fails to render.
+        */}
+        {me.viewingAs != null && <ViewAsBanner roleName={me.viewingAs.name} />}
+
         {/* ------------------------------------------------------- top bar */}
         <div className="sticky top-0 z-40 flex h-[var(--nav-h)] shrink-0 items-center gap-x-4 border-b border-[var(--color-border-hairline)] bg-[color-mix(in_srgb,var(--color-surface-void)_78%,transparent)] px-4 backdrop-blur-md sm:gap-x-6 sm:px-6 lg:px-8">
           <button
@@ -286,6 +645,49 @@ export function HubShell({
               >
                 Admin
               </a>
+            )}
+
+            {/*
+              ★ THE BELL — SQUADRON OWNER, 2026-08-04 ★
+
+              "create a notifications dropdown in a bell icon at the top right of the site ...
+              this should also have a badge system with a read all option". Immediately left of
+              the account menu, because that corner is where every site keeps it and a bell
+              anywhere else is a bell people search for.
+
+              The badge is the TOTAL across both feeds, capped at 99+ — three digits on a pill
+              this size stop being a number and start being noise — and hidden entirely at zero,
+              because a grey "0" is a control begging to be clicked with nothing behind it. It
+              updates live: the counts hook refetches on every `notification` SSE event, and
+              again each time the panel opens.
+
+              Signed-in only, same condition as the account menu beside it: the endpoints need a
+              session, and a bell for nobody would 401 on arrival.
+            */}
+            {user !== null && (
+              <button
+                ref={bellRef}
+                type="button"
+                onClick={() => setNotificationsOpen((v) => !v)}
+                aria-expanded={notificationsOpen}
+                aria-controls="notifications-panel"
+                className="relative -m-1.5 p-1.5 text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)]"
+              >
+                <span className="sr-only">
+                  {counts !== null && counts.total > 0
+                    ? `Notifications, ${counts.total} unread`
+                    : 'Notifications'}
+                </span>
+                <BellIcon aria-hidden="true" className="size-6" />
+                {counts !== null && counts.total > 0 && (
+                  <span
+                    aria-hidden="true"
+                    className="absolute -top-0.5 -right-0.5 min-w-4 rounded-full bg-[var(--color-brand-orange)] px-1 text-center font-mono text-[9px] leading-4 text-[var(--color-text-on-accent)]"
+                  >
+                    {counts.total > 99 ? '99+' : counts.total}
+                  </span>
+                )}
+              </button>
             )}
 
             {user !== null && (
@@ -345,6 +747,51 @@ export function HubShell({
             )}
           </div>
         </div>
+
+        {/*
+          ★ THE NOTIFICATIONS PANEL — THE OWNER'S EXACT SHAPE ★
+
+          It slides in from the RIGHT EDGE and runs exactly from the base of the navbar to the
+          bottom of the viewport. `top-[var(--nav-h)]` with `bottom-0` IS that spec: the top bar
+          above is `sticky top-0` with `h-[var(--nav-h)]`, so its base sits exactly --nav-h from
+          the viewport top at BOTH values the token takes (4rem, and 4.5rem from `sm` up — see
+          globals.css). A hard-coded h-16 twin would have drifted on the first screen wider than
+          640px.
+
+          ★ A SIBLING OF THE TOP BAR, NEVER A CHILD ★
+
+          The top bar carries backdrop-blur, and a backdrop-filter establishes a containing block
+          — `fixed` inside it would measure from the BAR rather than the viewport, and the panel
+          would pin itself inside a 4rem strip.
+
+          z-30 on the shell's ladder: under the top bar (z-40) and the sidebars (z-50) so the
+          chrome stays in charge, over everything the page renders. Width is 400px against the
+          right edge, full-width below `sm` where 400px IS the viewport.
+
+          The transition is transform-only — right-to-left translate, 200ms — so it composites on
+          the GPU, and the global prefers-reduced-motion rule in globals.css collapses it to an
+          instant show/hide. The panel must still APPEAR; disabling motion cannot disable
+          notifications. `inert` while closed keeps its buttons out of the tab order the same way
+          the mobile nav's links are kept out.
+        */}
+        <aside
+          id="notifications-panel"
+          ref={notificationsRef}
+          role="dialog"
+          aria-label="Notifications"
+          tabIndex={-1}
+          inert={!notificationsOpen}
+          className={`fixed top-[var(--nav-h)] right-0 bottom-0 z-30 w-full border-l border-[var(--color-border-hairline)] bg-[color-mix(in_srgb,var(--color-surface-panel)_92%,transparent)] shadow-xl backdrop-blur-md outline-hidden transition-transform duration-200 ease-out sm:w-[400px] ${
+            notificationsOpen ? 'translate-x-0' : 'translate-x-full'
+          }`}
+        >
+          <NotificationsPanel
+            open={notificationsOpen}
+            counts={counts}
+            refetchCounts={refetch}
+            applyCounts={apply}
+          />
+        </aside>
 
         <main id="main" className="py-10">
           <div className="px-4 sm:px-6 lg:px-8">{children}</div>

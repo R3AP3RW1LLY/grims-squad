@@ -3,6 +3,7 @@ import { DiscordAdapter, InaraAdapter, INARA_APP_NAME, INARA_APP_VERSION } from 
 import { composeNickname, expectedSquadronName, sameSquadron } from '@grims/shared';
 import { TokenCipher, createKeyring } from '@grims/shared/server';
 import { auditCommanders } from './jobs/daily-commander-audit.js';
+import { takeJobLock, COMMANDER_AUDIT_JOB } from './lib/job-lock.js';
 import {
   AdapterAuditSource,
   AdapterNicknameSetter,
@@ -31,6 +32,35 @@ import {
  * cron job gets to make.
  */
 async function main(): Promise<number> {
+  /*
+   * ★ ONE AUDIT AT A TIME, WHOEVER STARTED IT — SQUADRON OWNER, 2026-08-02 ★
+   *
+   * "pressing this should not interupt the daily job."
+   *
+   * This entrypoint now has two callers: cron at 00:15, and an officer pressing the button on the
+   * Squad members page. Without a shared lock the second would start a whole second audit on top of
+   * the first — two processes asking Inara about the same members, renaming them, and writing the
+   * same audit rows, while spending a request budget that allows two a minute.
+   *
+   * Declined rather than queued. Exiting 0 is deliberate: nothing failed, and a cron job that
+   * emails an operator because somebody pressed a button is a worse outcome than a duplicate run.
+   */
+  const lock = await takeJobLock(COMMANDER_AUDIT_JOB);
+  if (lock === null) {
+    console.error(
+      JSON.stringify({ msg: 'daily commander audit already running; this request was declined' }),
+    );
+    return 0;
+  }
+
+  try {
+    return await audit();
+  } finally {
+    await lock.release();
+  }
+}
+
+async function audit(): Promise<number> {
   const guildId = process.env['DISCORD_GUILD_ID'] ?? '';
   const botToken = process.env['DISCORD_BOT_TOKEN'] ?? '';
   const keyring = process.env['TOKEN_ENCRYPTION_KEYRING'] ?? '';

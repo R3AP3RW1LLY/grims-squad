@@ -17,6 +17,7 @@
   },
   "devDependencies": {
     "@grims/config": "workspace:*",
+    "@types/pg": "^8.20.0",
     "@types/markdown-it": "^14.1.2",
     "@types/node": "^24.13.3",
     "@types/sanitize-html": "^2.16.1",
@@ -29,6 +30,7 @@
     "@fastify/cookie": "^11.1.2",
     "@fastify/rate-limit": "^10.2.2",
     "@grims/db": "workspace:*",
+    "pg": "^8.22.0",
     "@grims/ed-clients": "workspace:*",
     "@grims/shared": "workspace:*",
     "@nestjs/common": "^11.1.28",

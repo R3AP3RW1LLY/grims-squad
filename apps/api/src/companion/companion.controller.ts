@@ -1,7 +1,8 @@
-import { Controller, Get, Inject, Param, Res } from '@nestjs/common';
+import { Controller, Get, Headers, Inject, Param, Res } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
 import { basename } from 'node:path';
 import { AppError, ErrorCode } from '@grims/shared';
+import { Public } from '../auth/auth.guard.js';
 import { User, type CurrentUser } from '../auth/current-user.js';
 import type { ReleaseAsset, ReleaseStore } from './release.service.js';
 import { newestRelease } from './release.service.js';
@@ -22,6 +23,8 @@ import { RELEASE_STORE, DEVICE_VERSIONS } from './companion.tokens.js';
 export interface DeviceVersionReader {
   /** Active devices only. Null entries have not reported a version yet. */
   versionsFor(userId: string): Promise<Array<string | null>>;
+  /** True when this raw device token belongs to an unrevoked pairing. */
+  tokenActive(token: string): Promise<boolean>;
 }
 
 /**
@@ -120,16 +123,38 @@ export class CompanionController {
   }
 
   /**
-   * Streams one installer.
+   * Streams one installer — or the auto-updater's manifest and blockmap.
    *
    * ★ STREAMED, NOT READ INTO MEMORY ★
    *
    * The Windows build is ~100 MB. `readFile` would hold all of it in the
    * process per concurrent download, and a squadron announcement is precisely
    * the moment forty people click at once.
+   *
+   * ★ @Public, BUT STILL MEMBERS ONLY ★
+   *
+   * The members-only rule stands — the decorator exists because electron-updater cannot present a
+   * session cookie. It CAN present the device token the app already holds, so the door opens to
+   * either proof: a signed-in browser, or a paired device's bearer token. An unpaired copy of the
+   * app gets nothing, which is fine — its first job is signing in, and its updates start mattering
+   * the moment it has done so.
    */
+  @Public()
   @Get('download/:file')
-  async download(@Param('file') file: string, @Res() reply: FastifyReply): Promise<void> {
+  async download(
+    @User() caller: CurrentUser | undefined,
+    @Headers('authorization') authorization: string | undefined,
+    @Param('file') file: string,
+    @Res() reply: FastifyReply,
+  ): Promise<void> {
+    if (caller === undefined) {
+      const bearer = authorization?.startsWith('Bearer ') === true ? authorization.slice(7) : '';
+      const paired = bearer === '' ? false : await this.devices.tokenActive(bearer).catch(() => false);
+      if (!paired) {
+        throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
+      }
+    }
+
     const opened = await this.releases.open(file);
 
     if (opened === null) {

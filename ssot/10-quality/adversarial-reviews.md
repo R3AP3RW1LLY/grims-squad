@@ -26,6 +26,7 @@ None of these look wrong at a glance. All of them are found by someone trying to
 | **DATA-INTEGRITY-ADV** | any phase touching EDDN, market, BGS or telemetry ingestion | *"Here is the input that corrupts your data silently."* |
 | **UX-ADV** | any member-facing surface | *"Here is where a member is misled, blocked, or excluded."* |
 | **OPS-ADV** | phase exit | *"It is 02:00 and this is broken. The runbook does not help me because…"* |
+| **CONTROL-ADV** | whenever a change adds or tightens a control — CSP, rate limit, permission, quota, validation, conservative default | *"Here is the legitimate thing this control refuses."* |
 
 Which gates apply is set by **risk tier** (ADR-021). Trivial changes do not go through six panels — the ceremony must be proportionate or it will be abandoned, and abandoned exactly when it matters.
 
@@ -48,6 +49,25 @@ Each reviewer receives the change, the relevant SSOT files, and its brief. **Not
 ### UX-ADV
 > Find where a member is misled, blocked, or excluded. Consider: a price without its age; an empty state with no explanation of *why*; an error with no next step; a colour-only signal; keyboard-unreachable functionality; a touch target under 44px; a time shown in only one zone; a hover-only affordance on mobile; an action that cannot be undone with no confirmation; jargon a new recruit will not know.
 
+### CONTROL-ADV
+> Assume the control added here is correct, and find what it breaks. A control that works perfectly and disables the feature is not a security win, it is an outage with better paperwork.
+>
+> For each control introduced or tightened, answer three questions with evidence:
+>
+> 1. **What legitimate action does it refuse?** Walk the happy path THROUGH the control, not around it. A CSP that permits `'self'` refuses a `data:` URI; a quota of five refuses a feature that needs five; a permission nobody holds refuses everybody.
+> 2. **Can the safe branch be entered by accident?** A conservative default is right on bad data and catastrophic when the data is merely missing — an empty list, a failed fetch, an unloaded config. Ask what the control does when its INPUT is absent rather than hostile.
+> 3. **Is the refusal audible?** A control that refuses silently is indistinguishable from a broken feature, and the member reports it as one. Every refusal needs a reason the user can read and an operator can find.
+>
+> These are not hypotheticals. Every one has happened here:
+>
+> - `connect-src 'self'` refused `fetch('data:…')`, so choosing a generated signature failed with a generic exception and nothing naming the policy.
+> - `img-src` without `blob:` refused every image preview. It was reported as ".jpg uploads are broken" and cost a deep dive into file formats.
+> - An artwork quota of five an hour met a feature that requests five per press. One press consumed the hour; every press after was refused before reaching the GPU. The owner reported the generator as dead.
+> - The same quota counted its own REFUSALS, so each retry extended the lockout. An hour's cooldown became an hour after the member stopped trying.
+> - The Discord bot treats "no viewer roles" as "do not count", which is correct for a locked channel and catastrophic when the role list simply failed to load. It failed to load once, and three days of squadron activity went unrecorded with nothing in any log after the first line.
+>
+> Not one of those was a bad control. Every one was a good control that nobody walked the happy path through.
+
 ### OPS-ADV
 > It is 02:00, this is broken, and you have only the runbooks. Find where you get stuck. Consider: an alert that does not say what to do; a failure mode with no runbook; a runbook step that assumes knowledge you do not have; a metric that would not have caught this; a restart that loses data; a rollback that does not work; a secret you cannot reach; a silent failure with no alert at all.
 
@@ -69,6 +89,16 @@ Each reviewer receives the change, the relevant SSOT files, and its brief. **Not
 **Verification exists because adversarial reviewers over-report by design.** Without a refutation pass, the team spends its time on non-problems and learns to ignore findings — which destroys the gate more thoroughly than not having it.
 
 **No self-approval.** The agent that wrote the code does not clear its own gate.
+
+### A finding that proposes a control must exercise it
+
+> **Any finding whose fix is a new or tighter control is incomplete until the reviewer has stated what the control does to the legitimate path.**
+
+Not "this should be tightened" — what breaks when it is. A reviewer who cannot say which legitimate request the control now refuses has not finished the finding, and it is downgraded to MINOR until they can.
+
+This is the single cheapest defence against the failure mode above, because the person proposing the control is the person best placed to know what it touches, and the least likely to be asked.
+
+**"Secure yes, crippled no."** A platform that cannot perform its function is not a secure platform; it is an unavailable one, and availability is a security property. The gates exist to protect members, and a member who cannot use the site has not been protected from anything.
 
 ## Finding format
 
@@ -94,7 +124,7 @@ Each reviewer receives the change, the relevant SSOT files, and its brief. **Not
 
 | Severity | Meaning | Blocks merge |
 |---|---|---|
-| **BLOCKER** | Security defect, data corruption, invariant violation, or a member is actively misled | **yes** |
+| **BLOCKER** | Security defect, data corruption, invariant violation, a member is actively misled, **or a control silently disables a working feature** | **yes** |
 | **MAJOR** | Will fail under realistic conditions; a runbook gap for a likely incident | **yes** |
 | **MINOR** | Real but low-impact; degrades under unusual conditions | no — logged as debt |
 | **NIT** | Style, naming, preference | no |

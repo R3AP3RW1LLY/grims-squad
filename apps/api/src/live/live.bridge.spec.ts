@@ -24,6 +24,14 @@ describe('parseLiveMessage', () => {
     });
   });
 
+  it('accepts the suggestion-box badge poke, squadron-wide like support', () => {
+    // The webmaster tab pill's event — a worker-side producer must be able to ring it too.
+    expect(parseLiveMessage('{"type":"suggestions","userId":null}')).toEqual({
+      type: 'suggestions',
+      userId: null,
+    });
+  });
+
   /*
    * ★ THE ONE THAT MATTERS ★
    *

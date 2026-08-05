@@ -72,7 +72,14 @@ describe('the production policy', () => {
      */
     const img = directive(prod(), 'img-src');
 
-    expect(img).toBe("img-src 'self' data:");
+    /*
+     * blob: added 2026-08-01 for client-side image previews. It is not a remote host — the URL is
+     * minted by our own script from bytes already in the page and is opaque to everybody else — so
+     * the property this asserts, that rendering a page tells no third party what is being looked
+     * at, is unchanged. Named explicitly rather than matched loosely, so a future widening to a
+     * real host still fails here.
+     */
+    expect(img).toBe("img-src 'self' data: blob:");
     expect(img).not.toContain('http');
     expect(img).not.toContain('*');
   });
@@ -81,8 +88,39 @@ describe('the production policy', () => {
     // An injected <base href> silently repoints every relative URL on the page, including
     // form actions and script sources.
     expect(directive(prod(), 'object-src')).toBe("object-src 'none'");
-    expect(directive(prod(), 'frame-src')).toBe("frame-src 'none'");
     expect(directive(prod(), 'base-uri')).toBe("base-uri 'self'");
+  });
+
+  it('MANDATORY: frame-src names ONE host and it is the nocookie one', () => {
+    /*
+     * ★ THIS DIRECTIVE CHANGED FROM 'none' AND THE NARROWNESS IS THE POINT ★
+     *
+     * P2.3 added YouTube embeds. `frame-src` was `'none'`; it now names exactly one host.
+     *
+     * The stored HTML still contains no iframe — a video is a placeholder until a reader clicks —
+     * so for anybody who does not click this directive is never exercised and Google is told
+     * nothing. That is why click-to-play was chosen: this squadron includes minors (D15).
+     *
+     * `youtube-nocookie.com` rather than `youtube.com`: the same player without tracking cookies
+     * on first load. Pinned as an EXACT string so widening it to a wildcard, or adding a second
+     * host, is a visible edit to this test rather than a quiet one.
+     */
+    expect(directive(prod(), 'frame-src')).toBe('frame-src https://www.youtube-nocookie.com');
+    expect(prod()).not.toContain('frame-src *');
+    // And the clickjacking protection is untouched by the change.
+    expect(directive(prod(), 'frame-ancestors')).toBe("frame-ancestors 'none'");
+  });
+
+  it('MANDATORY: no OTHER third-party host is permitted anywhere', () => {
+    /*
+     * The check on the check. One allowance is defensible; a second added by habit is how a
+     * policy stops meaning anything. Every directive except frame-src must still be self-only.
+     */
+    const policy = prod();
+    for (const d of policy.split(';').map((x) => x.trim())) {
+      if (d.startsWith('frame-src')) continue;
+      expect(d, d).not.toMatch(/https?:\/\//);
+    }
   });
 
   it('MANDATORY: forms may only submit to us', () => {

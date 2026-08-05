@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { defaultLayout, normaliseLayout, type OverlayLayout } from './overlay-config.js';
 
 /**
  * The companion's own settings, on disk.
@@ -52,6 +53,20 @@ export interface CompanionConfig {
   /** True once the search has run and found nothing, so it is not repeated every launch. */
   searchedAndFoundNothing: boolean;
   /**
+   * Start with Windows, minimised to the tray.
+   *
+   * ★ WHY THIS DEFAULTS ON, WHEN `enabled` DEFAULTS OFF ★
+   *
+   * They are different questions. `enabled` asks "may we send anything at all", and being
+   * installed is not consent — so it stays off until asked. This asks "when you have said yes,
+   * should you have to remember to launch it", and the honest answer is no: the whole point is an
+   * app you install once and never think about again.
+   *
+   * It is still only ACTED ON once the member has paired and enabled sending, so an app that has
+   * never been given permission does not quietly add itself to startup.
+   */
+  autoStart: boolean;
+  /**
    * What this machine has done, for as long as it has been paired.
    *
    * ★ WHY THE APP KEEPS ITS OWN TALLY AT ALL ★
@@ -71,6 +86,35 @@ export interface CompanionConfig {
    * from the hub, and both are shown because they answer different questions.
    */
   totals: CompanionTotals;
+  /**
+   * How the member has arranged their overlays.
+   *
+   * ★ SQUADRON OWNER, 2026-08-02 ★
+   *
+   * "make nice professional editable and lockable overlays for our modules etc."
+   *
+   * Kept in the same file as everything else so an arrangement survives a restart, an update and a
+   * machine that was switched off mid-game. The shape, the clamping and the rescue from an
+   * unplugged monitor all live in `overlay-config.ts`, which is pure and tested — this file only
+   * has to store it.
+   */
+  overlays: OverlayLayout;
+  /**
+   * Set ONLY when the settings file could not be read and the app started on defaults.
+   *
+   * Absent in the normal case, which is almost always — so the UI can treat its presence as "tell
+   * the member what happened" without asking any further questions.
+   *
+   * ★ NEVER PERSISTED ★
+   *
+   * `saveConfig` strips it. It describes one startup, not a setting, and writing it back would mean
+   * an app that reported a corruption it had already recovered from, for ever.
+   */
+  restoredFrom?: {
+    readonly reason: string;
+    /** True when the unreadable file was successfully moved aside and can still be recovered. */
+    readonly quarantined: boolean;
+  };
 }
 
 export interface CompanionTotals {
@@ -112,7 +156,10 @@ export const DEFAULT_CONFIG: CompanionConfig = {
   enabled: false,
   discoveredJournalPath: null,
   searchedAndFoundNothing: false,
+  autoStart: true,
   totals: EMPTY_TOTALS,
+  // Every overlay off and locked. See `defaultLayout` for why both of those are the safe start.
+  overlays: defaultLayout(),
 };
 
 export function configPath(userDataDir: string): string {
@@ -120,18 +167,54 @@ export function configPath(userDataDir: string): string {
 }
 
 /**
+ * Strips a UTF-8 byte order mark.
+ *
+ * ★ THIS COST A REAL PAIRING, AND IT WOULD HAVE COST MEMBERS THEIRS ★
+ *
+ * `JSON.parse` throws on a leading BOM: U+FEFF is not whitespace and is not legal JSON. Node
+ * does not remove it for you when you read as `utf8`; you get the character.
+ *
+ * That matters because of who writes one. PowerShell's `Set-Content -Encoding utf8` adds a BOM by
+ * default, as do Notepad and a good number of editors on Windows. So a member who opens this file
+ * to check their token, or a support answer that says "edit this line", corrupts it just by saving
+ * — and on 2026-08-02 that is exactly what happened here, by accident, while testing overlays.
+ *
+ * Stripping it costs one line and makes the file readable by anything a member is likely to use.
+ */
+function stripBom(text: string): string {
+  return text.charCodeAt(0) === 0xfe_ff ? text.slice(1) : text;
+}
+
+/** Where an unreadable config is put aside, rather than lost. */
+export function quarantinePath(userDataDir: string): string {
+  return join(userDataDir, 'companion-config.unreadable.json');
+}
+
+/**
  * Reads the config, falling back to defaults on anything unreadable.
  *
- * A corrupt file must not stop the app starting — the member would have no way
- * to fix it except deleting a file they cannot find. Defaults mean it comes up
- * unpaired and disabled, which is safe and obvious.
+ * A corrupt file must not stop the app starting — the member would have no way to fix it except
+ * deleting a file they cannot find. Defaults mean it comes up unpaired and disabled, which is safe
+ * and obvious.
+ *
+ * ★ BUT THE OLD FILE IS KEPT, BECAUSE "SAFE AND OBVIOUS" WAS NEITHER ★
+ *
+ * Falling back was only half the behaviour. The app writes its config constantly — every poll
+ * updates the journal offsets — so within seconds of starting on defaults it SAVED those defaults
+ * over the file it could not read. The member's device token, their offsets and their overlay
+ * arrangement were gone, permanently, and nothing anywhere said so. The visible symptom is an app
+ * that has quietly forgotten it was ever paired.
+ *
+ * So an unreadable file is moved aside first. The app still starts on defaults, the original is
+ * still on disk next to it, and `restoredFrom` tells the UI to say what happened instead of
+ * presenting a fresh install as though nothing had.
  */
 export function loadConfig(userDataDir: string): CompanionConfig {
   const path = configPath(userDataDir);
   if (!existsSync(path)) return { ...DEFAULT_CONFIG };
 
   try {
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<CompanionConfig>;
+    const parsed = JSON.parse(stripBom(readFileSync(path, 'utf8'))) as Partial<CompanionConfig>;
     return {
       apiBaseUrl: typeof parsed.apiBaseUrl === 'string' ? parsed.apiBaseUrl : DEFAULT_CONFIG.apiBaseUrl,
       deviceToken: typeof parsed.deviceToken === 'string' ? parsed.deviceToken : '',
@@ -148,10 +231,54 @@ export function loadConfig(userDataDir: string): CompanionConfig {
       discoveredJournalPath:
         typeof parsed.discoveredJournalPath === 'string' ? parsed.discoveredJournalPath : null,
       searchedAndFoundNothing: parsed.searchedAndFoundNothing === true,
+      /*
+       * `!== false`, not `=== true`. This one defaults ON, so an older config written before the
+       * field existed must read as on rather than silently opting everybody out of the behaviour
+       * they were promised.
+       */
+      autoStart: parsed.autoStart !== false,
       totals: readTotals(parsed.totals),
+      /*
+       * Normalised rather than trusted. This is a JSON file in the member's own profile — hand
+       * edited, half-written by a crash, or produced by a version with different fields — and an
+       * out-of-range opacity or a placement on a monitor that no longer exists is a panel they can
+       * neither see nor reach.
+       */
+      overlays: normaliseLayout(parsed.overlays),
     };
-  } catch {
-    return { ...DEFAULT_CONFIG };
+  } catch (error) {
+    /*
+     * ★ PUT ASIDE, NOT OVERWRITTEN ★
+     *
+     * The next `saveConfig` — which happens within seconds, because journal offsets are written on
+     * every poll — would otherwise destroy the only copy of the member's pairing. Renaming costs
+     * nothing and turns "your app forgot everything" into "your app could not read your settings,
+     * they are in this file".
+     *
+     * Best effort. If the rename fails the app must still start: refusing to launch because a
+     * backup could not be taken is a worse outcome than the one being guarded against, and the
+     * member would have no way to act on it either.
+     */
+    let quarantined = false;
+    try {
+      renameSync(path, quarantinePath(userDataDir));
+      quarantined = true;
+    } catch {
+      quarantined = false;
+    }
+
+    return {
+      ...DEFAULT_CONFIG,
+      /*
+       * Carried so the app can SAY so. Silence here is what made the original failure invisible:
+       * every symptom pointed at a fresh install, and nothing pointed at a file that could not be
+       * parsed.
+       */
+      restoredFrom: {
+        reason: error instanceof Error ? error.message : 'The settings file could not be read.',
+        quarantined,
+      },
+    };
   }
 }
 
@@ -195,12 +322,54 @@ export function apiBaseUrlFor(config: CompanionConfig, env: NodeJS.ProcessEnv): 
   return typeof override === 'string' && override !== '' ? override : config.apiBaseUrl;
 }
 
+/**
+ * Where the WEBSITE lives, as opposed to the API.
+ *
+ * ★ THE SAME ORIGIN IN PRODUCTION, TWO PORTS IN DEVELOPMENT ★
+ *
+ * On the server one origin serves both — Caddy routes `/v1` to the API and everything else to the
+ * site — so the api base is the right answer there and no second setting is needed.
+ *
+ * On a development machine they are different ports, and building a website link from the API base
+ * opened a JSON 404. `GRIMS_WEB_URL` exists for that, set by `dev.mjs`, exactly as `GRIMS_API_URL`
+ * already is. There is deliberately no UI for either — see the note above.
+ */
+export function webBaseUrlFor(config: CompanionConfig, env: NodeJS.ProcessEnv): string {
+  const override = env['GRIMS_WEB_URL'];
+  if (typeof override === 'string' && override !== '') return override.replace(/\/+$/, '');
+  return apiBaseUrlFor(config, env).replace(/\/+$/, '');
+}
+
 export function saveConfig(userDataDir: string, config: CompanionConfig): void {
   const path = configPath(userDataDir);
   mkdirSync(dirname(path), { recursive: true });
-  // 0600 where the platform honours it. Windows ignores the mode, which is why
-  // it is a mitigation rather than the protection.
-  writeFileSync(path, JSON.stringify(config, null, 2), { encoding: 'utf8', mode: 0o600 });
+
+  /*
+   * `restoredFrom` describes ONE STARTUP, not a setting. Writing it back would leave an app
+   * reporting a corruption it had already recovered from, at every launch, for ever.
+   */
+  const { restoredFrom: _transient, ...persisted } = config;
+
+  /*
+   * ★ WRITTEN TO A TEMPORARY FILE AND RENAMED ★
+   *
+   * `writeFileSync` truncates first and then writes. Lose power, run out of disk, or get killed
+   * between those two and the file on disk is a valid, empty, ZERO-BYTE settings file — which
+   * parses as nothing and reads as an app that has forgotten it was paired.
+   *
+   * That is not hypothetical here: this file is rewritten every polling pass, so it is being
+   * truncated and rewritten hundreds of times an hour on a machine somebody is also gaming on.
+   * Rename is atomic on every platform we ship to, so a reader sees either the old file or the new
+   * one and never a half-written one.
+   *
+   * The temporary file sits beside the real one so the rename stays on the same filesystem —
+   * across devices it degrades to a copy, which is exactly the non-atomic write being avoided.
+   */
+  const temporary = `${path}.tmp`;
+  // 0600 where the platform honours it. Windows ignores the mode, which is why it is a mitigation
+  // rather than the protection.
+  writeFileSync(temporary, JSON.stringify(persisted, null, 2), { encoding: 'utf8', mode: 0o600 });
+  renameSync(temporary, path);
 }
 
 /**

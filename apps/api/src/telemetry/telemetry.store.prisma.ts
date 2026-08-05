@@ -10,6 +10,23 @@ export class PrismaPairingStore implements PairingStore {
     this.#db = db;
   }
 
+  /**
+   * Whether this member lets their fleet be shown.
+   *
+   * Reads the same `showFleet` the profile serializer reads (INV-027), so a member who hid their
+   * ships from their profile has hidden them from the assistant too — one setting, one meaning.
+   *
+   * True when there is no row: privacy settings are created on first edit, and an unedited account
+   * is at the defaults, which show the fleet.
+   */
+  async showsFleet(userId: string): Promise<boolean> {
+    const row = await this.#db.privacySetting.findUnique({
+      where: { userId },
+      select: { showFleet: true },
+    });
+    return row?.showFleet ?? true;
+  }
+
   async create(userId: string, label: string, tokenHash: string): Promise<DeviceTokenRecord> {
     return (await this.#db.deviceToken.create({
       data: { userId, label, tokenHash, scopes: ['telemetry:write'] },
@@ -79,6 +96,29 @@ export class PrismaIngestStore implements IngestStore {
   }
 
   /**
+   * Whether this member lets their fleet be shown.
+   *
+   * ★ AN EXISTING PROMISE, HONOURED BY A NEW FEATURE ★
+   *
+   * Reads the same `showFleet` the profile serializer reads (INV-027), so a member who hid their
+   * ships from their profile has hidden them from the assistant too — one setting, one meaning.
+   *
+   * The squadron owner chose automatic build import for everyone, and everyone who has not turned
+   * this off is exactly that. Somebody who DID turn it off was told their ships would not be shown,
+   * and publishing their loadout squadron-wide anyway would make that setting a lie.
+   *
+   * True when there is no row: privacy settings are written on first edit, so an unedited account
+   * is at the defaults — which show the fleet.
+   */
+  async showsFleet(userId: string): Promise<boolean> {
+    const row = await this.#db.privacySetting.findUnique({
+      where: { userId },
+      select: { showFleet: true },
+    });
+    return row?.showFleet ?? true;
+  }
+
+  /**
    * Inserts, skipping anything already present.
    *
    * `skipDuplicates` leans on the unique index over `eventKey`, so dedupe
@@ -96,8 +136,21 @@ export class PrismaIngestStore implements IngestStore {
       payload: Record<string, unknown>;
       eventKey: string;
     }>,
-  ): Promise<number> {
-    const result = await this.#db.telemetryEvent.createMany({
+  ): Promise<readonly string[]> {
+    /*
+     * `createManyAndReturn` rather than `createMany`.
+     *
+     * The count alone was enough while this only fed the upload response. It is
+     * not enough for live market updates: a retried batch resends events that
+     * are already stored, and a `MarketBuy` applied per ARRIVAL would subtract
+     * the same cargo from a station twice. The keys say which rows were
+     * genuinely new; a count cannot.
+     *
+     * `skipDuplicates` still does the work in the DATABASE, so two devices
+     * racing the same journal still costs a harmless duplicate rather than a
+     * lost event.
+     */
+    const created = await this.#db.telemetryEvent.createManyAndReturn({
       data: rows.map((r) => ({
         userId: r.userId,
         deviceTokenId: r.deviceTokenId,
@@ -108,8 +161,11 @@ export class PrismaIngestStore implements IngestStore {
         eventKey: r.eventKey,
       })),
       skipDuplicates: true,
+      // Only the key is read back. Selecting the rows would return every stored
+      // payload to a caller that discards them.
+      select: { eventKey: true },
     });
-    return result.count;
+    return created.map((c) => c.eventKey);
   }
 
   /**

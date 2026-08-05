@@ -149,6 +149,18 @@ export const TELEMETRY_CATALOGUE: readonly CatalogueGroup[] = [
     purpose: 'Cargo moved and ore refined, for the trade leaderboard.',
     required: false,
     entries: [
+      {
+        event: 'Market',
+        label: 'Market screens you open',
+        /*
+         * Written plainly, and it says what the squadron gets as well as what
+         * we keep. A member reading this is deciding whether to leave it on;
+         * "the station's prices" without "shared with everyone" would be true
+         * and still misleading.
+         */
+        reveals:
+          'Which station you opened the commodity market at. The prices on that screen are shared with the squadron so route-finding works from what someone actually saw rather than from last night — your name is not attached to them.',
+      },
       { event: 'MarketBuy', label: 'Cargo bought', reveals: 'The commodity, the quantity and the station.' },
       { event: 'MarketSell', label: 'Cargo sold', reveals: 'The commodity, the quantity, the station and the price.' },
       { event: 'MiningRefined', label: 'Ore refined', reveals: 'What you refined while mining.' },
@@ -183,6 +195,68 @@ export const TELEMETRY_CATALOGUE: readonly CatalogueGroup[] = [
     entries: [
       { event: 'CarrierJump', label: 'Carrier jumps', reveals: 'Where your carrier jumped to.' },
       { event: 'CarrierStats', label: 'Carrier status', reveals: 'Its name, services and balance.' },
+      {
+        event: 'CargoTransfer',
+        label: 'Carrier cargo moves',
+        reveals:
+          'Cargo you move between your ship and your own carrier. When that carrier is attached to a colonisation build, this is what keeps its declared hold current.',
+      },
+    ],
+  },
+  {
+    /*
+     * ★ ITS OWN GROUP, SO IT IS SEPARATELY REFUSABLE ★
+     *
+     * Folding this into `fleet` or `combat` would mean a member who is happy sharing their Python
+     * has to accept sharing their suit to keep it. An on-foot loadout says rather more about how
+     * somebody plays than a hull does, and the whole point of this catalogue is that each thing can
+     * be declined on its own terms.
+     */
+    category: 'onfoot',
+    label: 'On foot',
+    purpose: 'What you carry when you leave the ship, for the squadron weapons chart.',
+    required: false,
+    entries: [
+      {
+        event: 'SuitLoadout',
+        label: 'Suit and weapons',
+        reveals: 'Which suit you wear and the weapons in it, with their engineering.',
+      },
+    ],
+  },
+  {
+    /*
+     * ★ SQUADRON OWNER, 2026-08-02 ★
+     *
+     * "colonization ... will allow our members to post their colonization project to the squadron
+     * for assistance etc", and, on how it should reach people: "On by default for anyone in the
+     * colonization system".
+     *
+     * Consent here is opt-out, so being in the catalogue at all IS on by default. What it buys is
+     * the thing that matters: a member can see exactly what this collects and switch it off,
+     * knowing what they lose. Nothing about colonisation is collected silently.
+     *
+     * Its own group rather than part of `trade`, because a delivery says a member was at a specific
+     * construction site at a specific moment — rather more than a tonnage on a leaderboard — and
+     * declining one should not cost the other.
+     */
+    category: 'colonisation',
+    label: 'Colonisation',
+    purpose:
+      'Progress on construction sites, so a project you post keeps itself up to date and the squadron can see what it still needs.',
+    required: false,
+    entries: [
+      {
+        event: 'ColonisationConstructionDepot',
+        label: 'What a site still needs',
+        reveals:
+          'The commodities a construction site you dock at is still short of, and how far along it is.',
+      },
+      {
+        event: 'ColonisationContribution',
+        label: 'What you delivered',
+        reveals: 'The cargo you hand over to a construction site, and which site it was.',
+      },
     ],
   },
 ];

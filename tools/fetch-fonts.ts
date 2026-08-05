@@ -1,0 +1,165 @@
+/**
+ * Downloads the font catalogue from Google, once, so we can serve it ourselves.
+ *
+ * ★ WHY THIS SCRIPT EXISTS RATHER THAN A `<link>` TAG ★
+ *
+ * A stylesheet link to fonts.googleapis.com sends every visitor's IP and referrer to Google on
+ * every page load — including anonymous visitors reading the public recruiting pages, who have not
+ * signed anything. The CSP says `font-src 'self'` for exactly that reason, and relaxing a rule to
+ * fit a feature means it was never a rule.
+ *
+ * So the files are fetched once, here, and committed. Roughly a megabyte for thirty families at
+ * latin/woff2, which is a reasonable thing to keep in a repository and a very unreasonable thing
+ * to make a hundred people fetch from a third party.
+ *
+ * Run with:  pnpm fonts:fetch
+ *
+ * ★ SAFE TO RE-RUN ★
+ *
+ * Existing files are skipped, so a re-run after adding one family downloads one family. Delete
+ * `apps/web/public/fonts` to force a full refresh.
+ */
+
+import { mkdir, writeFile, access } from 'node:fs/promises';
+import { join } from 'node:path';
+import { FONT_FAMILIES, type FontFamily } from '../ssot/04-contracts/fonts.js';
+
+/*
+ * A modern browser UA. Google serves woff2 only to clients it believes support it, and returns
+ * ttf — several times the size — to anything it does not recognise. Without this the download
+ * silently succeeds and produces a much heavier site.
+ */
+const UA =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+
+const OUT_DIR = join(process.cwd(), 'apps', 'web', 'public', 'fonts');
+const CSS_OUT = join(process.cwd(), 'apps', 'web', 'src', 'app', 'fonts.generated.css');
+
+interface Face {
+  readonly family: string;
+  readonly weight: number;
+  readonly file: string;
+}
+
+async function exists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Asks Google for a family's CSS, falling back to weight 400 alone when the request is refused. */
+async function familyCss(family: FontFamily): Promise<string | null> {
+  const attempts = [family.weights, [400]];
+
+  for (const weights of attempts) {
+    const axis = weights.length > 0 ? `:wght@${weights.join(';')}` : '';
+    const url = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(family.name).replace(/%20/g, '+')}${axis}&display=swap`;
+    const res = await fetch(url, { headers: { 'user-agent': UA } });
+    if (res.ok) return res.text();
+
+    /*
+     * A family with no bold returns 400 for the WHOLE request, so one wrong weight in the
+     * catalogue would drop the font entirely. Saying which family and which weights failed turns
+     * that from a mystery into a one-line fix.
+     */
+    console.warn(`  ${family.name}: [${weights.join(', ')}] refused (${res.status}), retrying`);
+  }
+  return null;
+}
+
+async function main(): Promise<void> {
+  await mkdir(OUT_DIR, { recursive: true });
+
+  const faces: Face[] = [];
+  let downloaded = 0;
+  let skipped = 0;
+  const failed: string[] = [];
+
+  for (const family of FONT_FAMILIES) {
+    const css = await familyCss(family);
+    if (css === null) {
+      failed.push(family.name);
+      continue;
+    }
+
+    /*
+     * Only the `latin` slices. Google emits a comment naming each subset before its @font-face
+     * block, so the blocks are split on that comment and the latin ones taken — matching on the
+     * unicode-range instead would break the first time Google reorders the ranges.
+     *
+     * The comment is `/* latin *\/` WITH SPACES. A first version tested `startsWith('latin*\/')`
+     * and matched nothing at all, which produced a cheerful "0 faces" and an empty stylesheet —
+     * the kind of failure that looks like success. `latin-ext` is excluded by the anchored `\s*`.
+     */
+    const blocks = css.split('/*').filter((b) => /^\s*latin\s*\*\//.test(b));
+
+    for (const block of blocks) {
+      const weight = Number(/font-weight:\s*(\d+)/.exec(block)?.[1] ?? '400');
+      const src = /url\((https:\/\/fonts\.gstatic\.com\/[^)]+\.woff2)\)/.exec(block)?.[1];
+      if (src === undefined) continue;
+
+      const file = `${family.id}-${weight}.woff2`;
+      const path = join(OUT_DIR, file);
+
+      if (await exists(path)) {
+        skipped += 1;
+      } else {
+        const bytes = await fetch(src, { headers: { 'user-agent': UA } });
+        if (!bytes.ok) {
+          failed.push(`${family.name} ${weight}`);
+          continue;
+        }
+        await writeFile(path, Buffer.from(await bytes.arrayBuffer()));
+        downloaded += 1;
+      }
+
+      faces.push({ family: family.name, weight, file });
+    }
+  }
+
+  /*
+   * The generated stylesheet. `font-display: swap` so text is readable in the site face while a
+   * family loads rather than invisible — a signature that flashes blank is worse than one that
+   * flashes in the wrong font.
+   */
+  const header = [
+    '/*',
+    ' * GENERATED BY tools/fetch-fonts.ts — do not edit by hand.',
+    ' * Regenerate with `pnpm fonts:fetch`.',
+    ' *',
+    ' * Served from our own origin so no request reaches Google. See ssot/04-contracts/fonts.ts',
+    ' * for why that is not negotiable.',
+    ' */',
+    '',
+  ].join('\n');
+
+  const rules = faces
+    .map((f) =>
+      [
+        '@font-face {',
+        `  font-family: '${f.family}';`,
+        '  font-style: normal;',
+        `  font-weight: ${f.weight};`,
+        '  font-display: swap;',
+        `  src: url('/fonts/${f.file}') format('woff2');`,
+        '}',
+      ].join('\n'),
+    )
+    .join('\n\n');
+
+  await writeFile(CSS_OUT, `${header}${rules}\n`, 'utf8');
+
+  console.log(
+    `\nfonts: ${faces.length} faces (${downloaded} downloaded, ${skipped} already present)`,
+  );
+  if (failed.length > 0) {
+    // Listed rather than thrown: one missing family should not stop the other twenty-nine, and the
+    // picker resolves an unknown id to the site font anyway.
+    console.warn(`could not fetch: ${failed.join(', ')}`);
+  }
+}
+
+await main();

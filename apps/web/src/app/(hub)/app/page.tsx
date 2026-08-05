@@ -3,9 +3,17 @@ import { redirect } from 'next/navigation';
 import {
   getAdminActivity,
   getAdminAudit,
+  getAiHealth,
+  getHeldPosts,
   getAdminDashboard,
   getAdminDashboardGated,
+  getMe,
+  getSupportConsole,
+  getSupportConsoleGated,
+  getSuggestionInboxGated,
+  getRoadmapManageGated,
   type AdminActivityRow,
+  type AdminRead,
 } from '../../../lib/api';
 import { StepUp } from './step-up';
 import { NoAccess, AdminUnavailable } from './no-access';
@@ -13,7 +21,15 @@ import { AuditFilters } from './audit-filters';
 import { Dashboard } from './dashboard';
 import { PageHeader, Section, StatGrid, StatTile } from '../../../components/hub-page';
 import { PageTabs, resolveTab, type PageTab } from '../../../components/page-tabs';
-import { lastSeen } from './activity-freshness';
+import { MonthTabs } from './month-tabs';
+import { PromotionRun } from './promotion-run';
+import { Moderation } from './moderation';
+import { Support } from './support';
+import { SupportTabBadge } from './support-tab-badge';
+import { SuggestionsTabBadge } from './suggestions-tab-badge';
+import { Suggestions } from './suggestions';
+import { RoadmapBoard } from './roadmap-board';
+import { ActivityTable } from './activity-table';
 import { LiveRefresh } from '../../../components/live-refresh';
 
 /**
@@ -52,36 +68,36 @@ const TABS: readonly PageTab[] = [
   { key: 'dashboard', label: 'Dashboard' },
   { key: 'activity', label: 'Member activity & promotions' },
   { key: 'audit', label: 'Audit log' },
+  /*
+   * ★ ADDED WHEN SCREENING SHIPPED, AND IT HAD TO ★
+   *
+   * The screener already holds posts it objects to. Without a screen to release or refuse them
+   * they accumulate where nobody can see, while their authors are told an officer will look and
+   * no officer can — which is worse than having no screening at all.
+   */
+  { key: 'moderation', label: 'Moderation' },
+  /*
+   * ★ THE HELP DESK'S ANSWERING SIDE ★
+   *
+   * The chat widget promises every visitor — guests included — that the officers answer.
+   * This tab is where that promise is kept. Gated on SUPPORT_AGENT rather than the console's
+   * MEMBER_MANAGE, because answering questions and managing members are different jobs.
+   */
+  { key: 'support', label: 'Support' },
+  /*
+   * ★ THE SUGGESTION BOX'S REVIEWING SIDE, AND THE ROADMAP IT FEEDS ★
+   *
+   * Both webmaster-only (SITE_CONFIG — the owner routed suggestions to the webmaster, and made
+   * the kanban webmaster-managed), and both tabs of THIS console for the same reason Support
+   * is: the pipeline is inbox → publish → vote → promote → board, and scattering its stations
+   * across pages would make one job feel like four. Everybody else reads the finished board at
+   * /roadmap.
+   */
+  { key: 'suggestions', label: 'Suggestions' },
+  { key: 'roadmap', label: 'Roadmap' },
   { key: 'roles', label: 'Roles & permissions' },
 ];
 
-function Num({ n, dim = false }: { n: number; dim?: boolean }) {
-  return (
-    <span
-      className={`font-mono ${n === 0 || dim ? 'text-[var(--color-text-secondary)]' : 'text-[var(--color-text-primary)]'}`}
-    >
-      {n.toLocaleString('en-GB')}
-    </span>
-  );
-}
-
-/** How a commander name was proven. The tier is the point, not the tick. */
-const VERIFY_LABEL: Record<string, string> = {
-  inara_nonce: 'Inara',
-  fdev_capi: 'Frontier',
-  officer_manual: 'By officer',
-};
-
-const GAME_LABEL: Record<string, string> = {
-  observed: 'Seen',
-  // Shown distinctly from "Seen" on purpose. `assumed` means the upstream check
-  // FAILED and we counted the month anyway (D26, fail open). An assumption must
-  // never be presented to an officer as an observation.
-  assumed: 'Assumed',
-  absent: 'None',
-  unlinked: 'No CMDR',
-  unknown: 'Not checked',
-};
 
 export default async function AdminPage({
   searchParams,
@@ -90,6 +106,11 @@ export default async function AdminPage({
 }) {
   const params = await searchParams;
   const tab = resolveTab(TABS, params['tab']);
+  /*
+   * `YYYY-MM`, or absent for the current month. Validated server-side (parseMonth) — anything
+   * unparseable falls back to today rather than erroring, so a stale link shows a page.
+   */
+  const monthParam = typeof params['month'] === 'string' ? params['month'] : undefined;
 
   /*
    * Roles lives at its own route. Handled as a redirect rather than rendered
@@ -103,11 +124,59 @@ export default async function AdminPage({
    * though — every tab needs to know whether the second factor is fresh, and
    * a null from any admin read is that answer.
    */
-  const [dashboard, activity, audit] = await Promise.all([
-    tab === 'dashboard' ? getAdminDashboard() : Promise.resolve(null),
-    tab === 'activity' ? getAdminActivity() : Promise.resolve(null),
+  const [dashboard, activity, audit, held, aiHealth, support, me, suggestions, roadmap] = await Promise.all([
+    /*
+     * Fetched for the ACTIVITY tab too, and only for its `availableMonths`.
+     *
+     * The month list lives in the dashboard response because that is where the activity table is
+     * summarised. Duplicating the query onto the activity endpoint would be a second place for the
+     * same list to be computed differently.
+     */
+    tab === 'dashboard' || tab === 'activity'
+      ? getAdminDashboard(monthParam)
+      : Promise.resolve(null),
+    tab === 'activity' ? getAdminActivity(monthParam) : Promise.resolve(null),
     tab === 'audit' ? getAdminAudit() : Promise.resolve(null),
+    tab === 'moderation' ? getHeldPosts() : Promise.resolve(null),
+    /*
+     * Health is fetched alongside the queue rather than gating on it. A null here is not a locked
+     * tab — it means the caller lacks AI_REVIEW for the health route specifically, or the API did
+     * not answer — and neither is a reason to hide a queue that loaded fine.
+     */
+    tab === 'moderation' ? getAiHealth() : Promise.resolve(null),
+    tab === 'support' ? getSupportConsole('open') : Promise.resolve(null),
+    /*
+     * For the support and suggestions tabs' clocks. INV-025 wants each queue's absolute times
+     * in the VIEWER's stored timezone, and that zone lives on /v1/me.
+     */
+    tab === 'support' || tab === 'suggestions' ? getMe() : Promise.resolve(null),
+    /*
+     * The two webmaster tabs fetch through the REASON-KEEPING reader directly, rather than the
+     * null-collapsing one plus a probe: AdminRead existed by the time they were built, so the
+     * two-step dance the older tabs do is history they do not need to repeat.
+     */
+    tab === 'suggestions' ? getSuggestionInboxGated() : Promise.resolve(null),
+    tab === 'roadmap' ? getRoadmapManageGated() : Promise.resolve(null),
   ]);
+
+  /*
+   * The webmaster tabs' own gate handling — SITE_CONFIG, named so a refusal sends whoever hit
+   * it asking for the right bit rather than MEMBER_MANAGE.
+   */
+  const gatedTab: AdminRead<unknown> | null =
+    tab === 'suggestions' ? suggestions : tab === 'roadmap' ? roadmap : null;
+  if (gatedTab !== null && gatedTab.state !== 'ok') {
+    if (gatedTab.state === 'forbidden') {
+      return tab === 'suggestions' ? (
+        <NoAccess what="the suggestion inbox" permission="SITE_CONFIG" />
+      ) : (
+        <NoAccess what="the roadmap board" permission="SITE_CONFIG" />
+      );
+    }
+    if (gatedTab.state === 'unavailable') return <AdminUnavailable />;
+    // 'needs-step-up' or 'signed-out' — a code is the reasonable thing to ask for.
+    return <StepUp />;
+  }
 
   /*
    * ★ WHY THE REASON IS PROBED SEPARATELY ★
@@ -126,12 +195,24 @@ export default async function AdminPage({
   const locked =
     (tab === 'dashboard' && dashboard === null) ||
     (tab === 'activity' && activity === null) ||
-    (tab === 'audit' && audit === null);
+    (tab === 'audit' && audit === null) ||
+    (tab === 'moderation' && held === null) ||
+    (tab === 'support' && support === null);
 
   if (locked) {
-    const why = await getAdminDashboardGated();
+    /*
+     * The support tab probes ITS OWN gate. Its bit is SUPPORT_AGENT, not MEMBER_MANAGE, and a
+     * probe against the dashboard would tell a future support-only role to ask for the wrong
+     * permission.
+     */
+    const why =
+      tab === 'support' ? await getSupportConsoleGated() : await getAdminDashboardGated(monthParam);
     if (why.state === 'forbidden') {
-      return <NoAccess what="the admin console" permission="MEMBER_MANAGE" />;
+      return tab === 'support' ? (
+        <NoAccess what="the support console" permission="SUPPORT_AGENT" />
+      ) : (
+        <NoAccess what="the admin console" permission="MEMBER_MANAGE" />
+      );
     }
     if (why.state === 'unavailable') return <AdminUnavailable />;
     // 'needs-step-up', 'signed-out', or the probe succeeding while the tab's own read did
@@ -158,12 +239,70 @@ export default async function AdminPage({
       <PageHeader
         eyebrow="Squadron leadership"
         title="ADMIN CONSOLE"
-        action={<PageTabs tabs={TABS} current={tab} basePath="/app" />}
+        tabs={
+          <PageTabs
+            /*
+             * The Support and Suggestions tabs wear their waiting counts ON THE LABEL —
+             * neither queue rings per-item notifications, so these pills are the whole bell,
+             * and a bell has to be audible from every tab of the console. Attached at render
+             * rather than stored in TABS, which stays a plain serialisable list. Each pill
+             * asks its own gated endpoint and renders nothing on refusal, so an officer
+             * without SITE_CONFIG sees a Support pill and no Suggestions one.
+             */
+            tabs={TABS.map((t) =>
+              t.key === 'support'
+                ? { ...t, badge: <SupportTabBadge /> }
+                : t.key === 'suggestions'
+                  ? { ...t, badge: <SuggestionsTabBadge /> }
+                  : t,
+            )}
+            current={tab}
+            basePath="/app"
+          />
+        }
       />
 
-      {tab === 'dashboard' && dashboard !== null && <Dashboard data={dashboard} />}
+      {tab === 'dashboard' && dashboard !== null && (
+        <>
+          <MonthTabs
+            months={dashboard.availableMonths}
+            current={dashboard.month}
+            basePath="/app"
+            tab="dashboard"
+          />
+          {/*
+            ★ NO SECOND REFRESHER HERE ★
+            The page already carries `<LiveRefresh types={['roster','verification','activity',
+            'presence']} />` above — an SSE-driven refresh that fires when activity is actually
+            recorded, which is strictly better than a timer. Adding a thirty-second poll beside it
+            would mean two mechanisms racing to re-render the same page.
+          */}
+          <Dashboard data={dashboard} />
+        </>
+      )}
 
-      {tab === 'activity' && activity !== null && <ActivityTab activity={activity} />}
+      {tab === 'activity' && activity !== null && (
+        <>
+          {/*
+            Member activity and promotion standing are BOTH monthly by nature — qualification is a
+            statement about a calendar month — so history matters here more than anywhere. The month
+            list is read from the dashboard's response when we have it, and falls back to the
+            activity response's own month so the tabs still render on a direct link.
+          */}
+          <MonthTabs
+            months={dashboard?.availableMonths ?? [activity.month]}
+            current={activity.month}
+            basePath="/app"
+            tab="activity"
+          />
+          {/*
+            Directly under the month tabs, because it acts on the month they name. Above the table
+            rather than below it: the table is what you read, this is what you do about it.
+          */}
+          <PromotionRun month={activity.month} />
+          <ActivityTab activity={activity} />
+        </>
+      )}
 
       {tab === 'audit' && audit !== null && (
         <Section
@@ -175,6 +314,48 @@ export default async function AdminPage({
             actions={audit.actions}
             initialTotal={audit.total}
           />
+        </Section>
+      )}
+
+      {tab === 'moderation' && held !== null && (
+        <Section
+          title="Moderation"
+          description="Posts the screener held before anybody could read them. Nothing here is public — releasing a post is what publishes it."
+        >
+          <Moderation initial={held.posts} total={held.total} health={aiHealth} />
+        </Section>
+      )}
+
+      {tab === 'support' && support !== null && (
+        <Section
+          title="Support"
+          description="Every help conversation, member or guest, lands here. Replies go out under your own name and avatar — the person asking sees exactly who answered."
+        >
+          <Support
+            initial={support.conversations}
+            viewerTz={me?.user?.timezone ?? 'UTC'}
+          />
+        </Section>
+      )}
+
+      {tab === 'suggestions' && suggestions !== null && suggestions.state === 'ok' && (
+        <Section
+          title="Suggestions"
+          description="Members' ideas, oldest first. Publish turns one into a Feature Requests thread the squadron votes on — credited to its sender. Decline records the review. Either way, the sender is told personally."
+        >
+          <Suggestions
+            initial={suggestions.data.suggestions}
+            viewerTz={me?.user?.timezone ?? 'UTC'}
+          />
+        </Section>
+      )}
+
+      {tab === 'roadmap' && roadmap !== null && roadmap.state === 'ok' && (
+        <Section
+          title="Roadmap"
+          description="What is being built for the platform, in five columns. Every member reads this board at /roadmap; this is where it is drawn."
+        >
+          <RoadmapBoard initial={roadmap.data} />
         </Section>
       )}
     </>
@@ -229,272 +410,34 @@ function ActivityTab({
 
       <Section
         title={`Activity — ${activity.month}`}
-        description="Counts are for this calendar month only, reset at 00:00 UTC on the 1st. A month counts when there is any Discord activity AND an Elite session; qualifying rows are tinted green. Nothing is promoted before 1 August 2026, and the first live run will follow a dry run you have read."
+        /*
+          ★ SQUADRON OWNER, 2026-08-01 ★
+
+          "make this read alot better, right now it reads like a developer note ... nothing should
+          be there about a dry run or the first promotion etc."
+
+          Quite right. It opened with a reset time and a boolean, then spent its last sentence on
+          our release plan — three facts about how the system works and none about the squadron.
+
+          What an officer needs from a subtitle is what earns a month and what the colours mean.
+          Both are said plainly, in the order they will be read. The green and red are described
+          because they are the fastest thing on the page and are otherwise unexplained.
+        */
+        description="A member earns the month by talking in Discord and flying in Elite — both, not either. Green rows have earned it. Red rows have gone quiet for three months or more and are worth a message. Everything resets at midnight UTC on the 1st."
       >
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[1180px] border-collapse text-sm">
-            <thead>
-              <tr className="border-b border-[var(--color-border-hairline)] text-left font-mono text-[11px] uppercase tracking-[0.2em] text-[var(--color-text-secondary)]">
-                <th scope="col" className="py-3 pr-4">Member</th>
-                <th scope="col" className="py-3 pr-4">Hub</th>
-                <th scope="col" className="py-3 pr-4">CMDR verified</th>
-                <th scope="col" className="py-3 pr-4">Rank</th>
-                <th scope="col" className="py-3 pr-4">Working toward</th>
-                <th scope="col" className="py-3 pr-4">Messages</th>
-                <th scope="col" className="py-3 pr-4">Forum</th>
-                <th scope="col" className="py-3 pr-4">Voice</th>
-                <th scope="col" className="py-3 pr-4">Elite</th>
-                <th scope="col" className="py-3 pr-4">Last seen</th>
-                <th scope="col" className="py-3">Qualifies</th>
-              </tr>
-            </thead>
-            <tbody>
-              {activity.rows.map((r) => (
-                <tr
-                  key={r.discordId}
-                  /*
-                    ★ QUALIFYING ROWS ARE TINTED, NOT JUST TICKED ★
+        {/*
+          ★ THE TABLE IS A CLIENT COMPONENT NOW ★
 
-                    The question this table answers is "who is due a promotion
-                    on the 1st". Scanning a Qualifies column down fifty rows to
-                    answer it is work; a tinted row answers it at a glance.
+          Squadron owner, 2026-08-01: "we need to make these pages columns filterable". Filtering a
+          hundred and seventeen rows already on the page is instant in the browser and a round trip
+          on the server — and a navigation per keystroke on the name box would be visibly worse for
+          the filter most likely to be typed into.
 
-                    A tint, not a fill: the row still has to be readable, and
-                    fifty solid green rows in a good month would be worse than
-                    none. The YES in the last column stays, because colour alone
-                    is not information anybody can rely on.
-                  */
-                  /*
-                    ★ TWO TINTS, AND GONE-QUIET WINS ★
-
-                    A member can be BOTH stale and qualifying: three months
-                    silent, then one message and a session this month. Green
-                    alone would hide the thing an officer most needs to see, so
-                    red takes precedence — the row still reads YES in the last
-                    column, so nothing is lost by colouring it red.
-                  */
-                  className={`border-b border-[var(--color-border-hairline)] ${
-                    /*
-                      `lastSeen(...).tone`, not `goneQuiet` directly. Somebody
-                      sitting in a voice channel must never be highlighted red
-                      for having gone quiet, however old their last message is —
-                      that is the most obviously wrong thing this table could
-                      show, and it would be showing it to an officer deciding
-                      who has left the squadron.
-                    */
-                    lastSeen(r).tone === 'quiet'
-                      ? 'bg-[color-mix(in_srgb,var(--color-semantic-hostile)_14%,transparent)]'
-                      : r.qualifies
-                        ? 'bg-[color-mix(in_srgb,var(--color-semantic-success)_10%,transparent)]'
-                        : ''
-                  }`}
-                >
-                  <td className="py-3 pr-4 text-[var(--color-text-primary)]">
-                    {/*
-                      ★ THE SERVER NICKNAME, WHICH IS THE IN-GAME NAME ★
-
-                      By this squadron's convention the Discord nickname is the
-                      commander name, and it is what officers recognise each
-                      other by. It used to fall back to a raw snowflake for
-                      everyone without a website account — fifty of fifty-one
-                      members — which made the table unreadable.
-                    */}
-                    {r.nick ?? r.displayName ?? r.handle ?? (
-                      <span className="font-mono text-xs text-[var(--color-text-secondary)]">
-                        {r.discordId}
-                      </span>
-                    )}
-                  </td>
-
-                  {/*
-                    Has an account here, versus present in Discord only. An
-                    officer needs to know which, because someone who has never
-                    signed in cannot have linked a commander and cannot be
-                    chased through the site.
-                  */}
-                  <td className="py-3 pr-4 font-mono text-xs">
-                    {r.joinedWebsite ? (
-                      <span className="text-[var(--color-brand-cyan-bright)]">
-                        <span aria-hidden="true">✓ </span>Joined
-                      </span>
-                    ) : (
-                      <span className="text-[var(--color-text-secondary)]">Discord only</span>
-                    )}
-                  </td>
-
-                  {/*
-                    The commander name and HOW it was proven. Tier matters: an
-                    officer's manual say-so and a name Inara returned for the
-                    member's own API key are not the same claim, and collapsing
-                    them to a tick would present the weaker one as the stronger.
-                  */}
-                  <td className="py-3 pr-4 font-mono text-xs">
-                    {r.cmdrName !== null ? (
-                      <span className="text-[var(--color-semantic-success)]">
-                        <span aria-hidden="true">✓ </span>
-                        {r.cmdrName}
-                        <span className="ml-2 text-[10px] text-[var(--color-text-secondary)]">
-                          {VERIFY_LABEL[r.verifiedVia ?? ''] ?? r.verifiedVia}
-                        </span>
-                      </span>
-                    ) : (
-                      <span className="text-[var(--color-text-secondary)]">Not verified</span>
-                    )}
-                  </td>
-                  {/*
-                    The rank they hold, then the rung above it. Both on the
-                    member line because "is this person due a promotion" is the
-                    question this table exists to answer, and it cannot be
-                    answered by activity counts alone.
-                  */}
-                  <td className="py-3 pr-4 font-mono text-xs text-[var(--color-brand-cyan-bright)]">
-                    {/*
-                      Rank, then the membership fallback, then Unranked. A full
-                      member of the squadron shown as "Unranked" is both wrong
-                      and unwelcoming — they are a member, they simply hold no
-                      rung yet.
-                    */}
-                    {r.currentRank ?? (
-                      <span className="text-[var(--color-text-secondary)]">
-                        {r.membershipRole ?? 'Unranked'}
-                      </span>
-                    )}
-                    {/*
-                      The APPOINTMENT, beneath the tenure rank rather than
-                      instead of it. They are different axes: somebody can be a
-                      Cadet by tenure and a Squadron Leader by appointment, and
-                      showing only the higher number made a Squadron Leader
-                      appear to be at the top of a ladder they are not on.
-                    */}
-                    {r.appointment !== null && (
-                      <span className="mt-0.5 block text-[10px] text-[var(--color-brand-orange)]">
-                        {r.appointment}
-                      </span>
-                    )}
-                  </td>
-                  <td className="py-3 pr-4 font-mono text-xs">
-                    {r.nextRank !== null ? (
-                      <span
-                        className={
-                          r.qualifies
-                            ? 'text-[var(--color-semantic-success)]'
-                            : 'text-[var(--color-text-secondary)]'
-                        }
-                      >
-                        <span aria-hidden="true">↑ </span>
-                        {r.nextRank}
-                      </span>
-                    ) : r.currentRank !== null ? (
-                      /*
-                        Genuinely the top of the TENURE ladder — Grand Master
-                        General, twelve qualifying months. An achievement, not
-                        missing data.
-
-                        Reached only when a tenure rank exists, which is what
-                        stops a leadership appointment being labelled this way.
-                      */
-                      <span className="text-[var(--color-brand-orange)]">Top of ladder</span>
-                    ) : (
-                      /*
-                        No mapped rank in Discord. Says so rather than showing a
-                        dash: "—" reads as a rendering failure, and the real
-                        answer — nobody has given them a rank role — is
-                        something an officer can act on.
-                      */
-                      <span className="text-[var(--color-text-secondary)]">No rank role</span>
-                    )}
-                  </td>
-                  <td className="py-3 pr-4"><Num n={r.messageCount} /></td>
-                  <td className="py-3 pr-4"><Num n={r.forumPostCount} /></td>
-                  <td className="py-3 pr-4"><Num n={r.voiceJoinCount} /></td>
-                  <td className="py-3 pr-4 font-mono text-xs text-[var(--color-text-secondary)]">
-                    {GAME_LABEL[r.gameActivity] ?? r.gameActivity}
-                  </td>
-                  {/*
-                    ★ LAST SEEN IN DISCORD, NOT ON THE WEBSITE ★
-
-                    Squadron owner, 2026-07-29. Somebody can read the site every
-                    day without saying a word to anyone, and a roster of silent
-                    accounts is exactly what this column exists to surface.
-                  */}
-                  {/*
-                    ★ IN VOICE IS ITS OWN ANSWER, NOT A FRESHER TIMESTAMP ★
-
-                    Somebody in comms is HERE. This column showed them as "3
-                    days" — true of their last message, and the wrong answer to
-                    the question the column exists for. Squadron owner,
-                    2026-07-29.
-
-                    A dot as well as a colour, because "live" and "quiet" are
-                    both rendered in colour and one of them must not depend on
-                    being able to tell red from cyan.
-                  */}
-                  <td className="py-3 pr-4 font-mono text-xs">
-                    {(() => {
-                      const seen = lastSeen(r);
-                      return (
-                        <span
-                          className={
-                            seen.tone === 'live'
-                              ? 'text-[var(--color-brand-cyan-bright)]'
-                              : seen.tone === 'quiet'
-                                ? 'text-[var(--color-semantic-hostile-bright)]'
-                                : 'text-[var(--color-text-secondary)]'
-                          }
-                          title={
-                            seen.tone === 'live'
-                              ? `In a voice channel since ${new Date(r.inVoiceSince ?? '').toLocaleString('en-GB')}`
-                              : r.lastSeenAt === null
-                                ? 'Nothing recorded in Discord at all'
-                                : new Date(r.lastSeenAt).toLocaleString('en-GB')
-                          }
-                        >
-                          {seen.tone === 'live' && <span aria-hidden="true">● </span>}
-                          {seen.label}
-                        </span>
-                      );
-                    })()}
-                  </td>
-
-                  <td className="py-3 font-mono text-xs">
-                    {/*
-                      ★ THREE ANSWERS, BECAUSE THERE ARE THREE ★
-
-                      Somebody at the top of the ladder cannot qualify for a
-                      promotion — there is none above them. Rendering that as
-                      "no" alongside everybody who simply has not been active
-                      would read as a failure, and it is the opposite: they have
-                      finished the ladder.
-
-                      `qualifies` is false for them by design (see admin.store),
-                      which is what stops the row going green. This cell says
-                      WHY, so the two read as one consistent answer rather than
-                      as a member who has somehow stopped meeting the rules.
-                    */}
-                    {r.qualifies ? (
-                      <span className="text-[var(--color-brand-cyan-bright)]">YES</span>
-                    ) : r.nextRank === null && r.currentRank !== null ? (
-                      <span
-                        className="text-[var(--color-brand-orange)]"
-                        title="At the top of the tenure ladder. There is no further rank to be promoted to."
-                      >
-                        n/a
-                      </span>
-                    ) : (
-                      <span className="text-[var(--color-text-secondary)]">no</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        {activity.rows.length === 0 && (
-          <p className="mt-6 text-sm text-[var(--color-text-secondary)]">
-            No activity recorded for this month yet.
-          </p>
-        )}
+          `now` is passed rather than read inside it. Two of its columns are relative to the present,
+          and a client component is still rendered on the server first, so `Date.now()` in there
+          would produce one answer in the HTML and another at hydration.
+        */}
+        <ActivityTable rows={activity.rows} now={Date.now()} />
       </Section>
 
     </>

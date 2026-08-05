@@ -1,6 +1,23 @@
-import { Controller, Get, Post, Patch, Delete, Body, Param, Query, Req, Inject } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Delete, Body, Param, Query, Req, Inject, Optional } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
-import { AppError, ErrorCode } from '@grims/shared';
+import { AppError, ErrorCode, ROLE_PRESETS } from '@grims/shared';
+import type { SignatureInput, SignatureView } from '@grims/shared';
+import { notifyMembers, notifySquadron, PrismaClient } from '@grims/db';
+import type { BannerIdentity } from './banner-identity.js';
+import { satisfiesMask } from './category.service.js';
+import { LIVE_SERVICE } from '../live/live.tokens.js';
+import { liveNudgeOf } from '../live/live-nudge.js';
+import type { LiveService } from '../live/live.service.js';
+
+/*
+ * Facts about THIS squadron, in one place.
+ *
+ * Hardcoded rather than configured because they are not settings — a second squadron running this
+ * code would fork it, and a config key nobody ever changes is a config key that goes stale while
+ * looking authoritative.
+ */
+const SQUADRON_NAME = 'GRIM’S SQUAD';
+const SQUADRON_ALLEGIANCE = 'Blood Brothers from Alrai';
 import { User, type CurrentUser } from '../auth/current-user.js';
 import { Public } from '../auth/auth.guard.js';
 import { verifyCsrf, readCsrfCookie } from '../common/csrf.js';
@@ -10,6 +27,17 @@ import { CategoryService, type CategoryView } from './category.service.js';
 import { ThreadService, type ThreadView, type PostView } from './thread.service.js';
 import { GrantService, type GrantView, type GranteeCandidate } from './grant.service.js';
 import { PostService, type RevisionView } from './post.service.js';
+import { EngageService, type ReactionCount, type SubscriptionLevel } from './engage.service.js';
+import { NotifyService } from './notify.service.js';
+import { GatedDiscordDm, replyDmText } from './discord-dm.port.js';
+import { SearchService, renderSnippet, type SearchResult } from './search.service.js';
+import { ModerationService } from './moderation.service.js';
+import { SignatureDesignService } from './signature-design.service.js';
+import { SignatureService } from './signature.service.js';
+import { VoteService } from './vote.service.js';
+import { ReviewQueueService, type HeldPost } from '../ai/review-queue.service.js';
+import { ReportService, REPORTED_MESSAGE } from '../ai/report.service.js';
+import { LeaderboardsService } from '../leaderboards/leaderboards.service.js';
 
 /**
  * The forum's HTTP surface.
@@ -41,7 +69,109 @@ export class ForumController {
     @Inject(ThreadService) private readonly threads: ThreadService,
     @Inject(GrantService) private readonly grants: GrantService,
     @Inject(PostService) private readonly posts: PostService,
+    @Inject(EngageService) private readonly engage: EngageService,
+    @Inject(SearchService) private readonly search: SearchService,
+    @Inject(VoteService) private readonly votes: VoteService,
+    @Inject(ModerationService) private readonly moderation: ModerationService,
+    @Inject(NotifyService) private readonly notify: NotifyService,
+    @Inject(SignatureService) private readonly signatures: SignatureService,
+    @Inject(SignatureDesignService) private readonly signatureDesign: SignatureDesignService,
+    @Inject(ReviewQueueService) private readonly review: ReviewQueueService,
+    @Inject(ReportService) private readonly reports: ReportService,
+    @Inject(LeaderboardsService) private readonly leaderboards: LeaderboardsService,
+    /*
+     * ★ THE PLAIN CLIENT, FOR NOTIFICATION ROWS ONLY ★
+     *
+     * This module's rule is that every FORUM read goes through a bound client, and that stands:
+     * `notifications` and `squadron_activity` carry no ACL column and are written through the
+     * shared notify module, whose door takes the plain PrismaClient. The static guard
+     * (acl-usage.spec.ts) still scans this file — an ACL-bearing model reached through this
+     * client would fail the build, which is the enforcement the module header relies on.
+     */
+    @Inject(PrismaClient) private readonly prisma: PrismaClient,
+    /*
+     * OPTIONAL, like every other consumer of the live service: a missing nudge costs a badge
+     * refresh, never a request — and the controller's own tests construct it without one.
+     */
+    @Optional() @Inject(LIVE_SERVICE) private readonly live: LiveService | null = null,
   ) {}
+
+  /**
+   * Tells a post's author their words are waiting for review.
+   *
+   * ★ ONE VOICE FOR THREE DOORS ★
+   *
+   * A reply, an edited post and a new thread's opening post can each land held, and the author
+   * should read the same sentence from all three. The copy explains what happens next and names
+   * nobody — being screened is the board's process, not an accusation. Failures are swallowed:
+   * the post is stored and the queue has it, whatever the bell manages.
+   */
+  async #tellAuthorHeld(authorId: string, link: string | null): Promise<void> {
+    await notifyMembers(
+      this.prisma,
+      [authorId],
+      {
+        kind: 'forum.moderation',
+        title: 'Your post is waiting for review',
+        body: 'It is not on the board yet. A reviewer will look at it and publish it, and you will hear the outcome here.',
+        ...(link === null ? {} : { link }),
+      },
+      liveNudgeOf(this.live),
+    );
+  }
+
+  /**
+   * The DM sender, built per request from the environment.
+   *
+   * ★ STILL GATED, AND THE GATE IS THE DEFAULT ★
+   *
+   * `DISCORD_DM_ALLOWLIST` unset means NOBODY is messaged and every attempt is recorded. A sender
+   * that defaulted to "everyone" and was narrowed by config would be one missing variable away from
+   * DMing 107 people.
+   */
+  #dmSender(): GatedDiscordDm {
+    return new GatedDiscordDm(
+      process.env['DISCORD_BOT_TOKEN'],
+      process.env['DISCORD_DM_ALLOWLIST'],
+    );
+  }
+
+  /**
+   * Notifies everybody who should hear about a new reply.
+   *
+   * ★ FAILURES HERE NEVER FAIL THE REPLY ★
+   *
+   * The member has already posted. Taking their request down because Discord was slow, or because a
+   * notification row could not be written, would lose their words to punish somebody else's outage.
+   * So this is wrapped and swallowed — deliberately, and it is the only place in the forum that
+   * swallows anything.
+   */
+  async #fanOut(
+    db: Awaited<ReturnType<AclDbService['forCaller']>>,
+    target: Parameters<NotifyService['recipientsFor']>[1],
+    threadTitle: string,
+  ): Promise<void> {
+    try {
+      const recipients = await this.notify.recipientsFor(db, target);
+      if (recipients.length === 0) return;
+
+      await this.notify.writeInApp(db, recipients, target);
+
+      const sender = this.#dmSender();
+      const base = process.env['PUBLIC_URL'] ?? 'https://45-63-35-93.sslip.io';
+      const link = `/forum/${target.categorySlug}/${target.threadSlug}`;
+
+      await Promise.all(
+        recipients
+          .filter((r) => r.wantsDiscordDm && r.discordId !== null)
+          .map((r) =>
+            sender.send(r.discordId as string, replyDmText(r.reason, threadTitle, link, base)),
+          ),
+      );
+    } catch {
+      // See the note above. The reply is already stored; nothing here is worth losing it over.
+    }
+  }
 
   /**
    * The caller's mask, for the decisions the data layer cannot make.
@@ -61,7 +191,7 @@ export class ForumController {
     @User() caller: CurrentUser | undefined,
   ): Promise<{ categories: CategoryView[] }> {
     const db = await this.acl.forCaller(caller?.userId);
-    return { categories: await this.categories.list(db, await this.#mask(caller)) };
+    return { categories: await this.categories.list(db, await this.#mask(caller), caller?.userId) };
   }
 
   @Public()
@@ -78,7 +208,21 @@ export class ForumController {
      * threads" would confirm it exists.
      */
     const category = await this.categories.bySlug(db, slug, mask);
-    return { category, threads: await this.threads.listByCategory(db, slug, mask) };
+    const threads = await this.threads.listByCategory(db, slug, mask);
+
+    /*
+     * Opening a board marks it seen, so the "new posts" dot clears.
+     *
+     * AFTER the threads are read, deliberately: marking first would clear the indicator for content
+     * the caller had not been shown yet if the second read failed. Awaited rather than fired and
+     * forgotten — an unawaited write here would race the member's next page load and sometimes
+     * leave the dot up, which reads as the feature not working.
+     */
+    if (caller !== undefined) {
+      await this.categories.markSeen(db, caller.userId, category.id);
+    }
+
+    return { category, threads };
   }
 
   @Public()
@@ -87,7 +231,13 @@ export class ForumController {
     @User() caller: CurrentUser | undefined,
     @Param('slug') slug: string,
     @Param('threadSlug') threadSlug: string,
-  ): Promise<{ thread: ThreadView; posts: PostView[] }> {
+  ): Promise<{
+    thread: ThreadView;
+    posts: PostView[];
+    signatures: Record<string, SignatureView>;
+    identities: Record<string, BannerIdentity>;
+    badges: Record<string, string[]>;
+  }> {
     const db = await this.acl.forCaller(caller?.userId);
     const mask = await this.#mask(caller);
     /*
@@ -101,10 +251,145 @@ export class ForumController {
      * the posts read being independently safe if it is ever called from anywhere else.
      */
     const [thread, posts] = await Promise.all([
-      this.threads.bySlug(db, slug, threadSlug, mask),
-      this.threads.postsFor(db, slug, threadSlug, mask),
+      this.threads.bySlug(db, slug, threadSlug, mask, caller?.userId ?? null),
+      this.threads.postsFor(db, slug, threadSlug, mask, caller?.userId ?? null),
     ]);
-    return { thread, posts };
+    /*
+     * Counted ONCE, here, after both reads succeeded — not inside `bySlug`, which runs three times
+     * across this request and its internals. Deliberately not awaited: the reader gets their thread
+     * without waiting on a counter, and a failure loses a number rather than a page.
+     */
+    void this.threads.recordView(db, thread.id);
+
+    /*
+     * ★ SIGNATURES KEYED BY AUTHOR, NOT ATTACHED PER POST ★
+     *
+     * A thread with forty replies from twelve people has twelve signatures. Attaching one to each
+     * post would send the same block twelve times over and make the response grow with the
+     * conversation rather than with the number of people in it.
+     *
+     * Deduplicated before the query, so this is ONE read however long the thread is.
+     */
+    const authorIds = [...new Set(posts.map((p) => p.authorId))];
+    const [signatures, identities, badges] = await Promise.all([
+      this.signatures.forUsers(db, authorIds),
+      /*
+       * ★ WITHOUT THIS, EVERY SOURCED LAYER RENDERS AS NOTHING ★
+       *
+       * A banner text layer stores a SOURCE — "my Combat rank" — resolved when it is drawn. The
+       * generator passed the renderer a real identity, so everything appeared there; this endpoint
+       * passed none, so the same banner drew correctly against an empty person and looked like a
+       * feature that did not work.
+       */
+      this.signatures.identitiesFor(db, authorIds, SQUADRON_NAME, SQUADRON_ALLEGIANCE),
+      /*
+       * ★ BADGE CHIPS, KEYED BY AUTHOR LIKE THE SIGNATURES ABOVE ★
+       *
+       * The same dedup serves all three maps: one read for the whole thread however long it is.
+       * `showcaseFor` applies the shared showcase ranking SERVER-SIDE and caps at three keys per
+       * author, so the wire never carries a member's full trophy cabinet forty posts over — and
+       * every surface truncates identically, because none of them truncates.
+       *
+       * Keys only, resolved to names and icons by the shared catalogue on the client — sending
+       * the display fields per post would repeat the catalogue once per author per thread.
+       */
+      this.leaderboards.showcaseFor(authorIds, 3),
+    ]);
+
+    return {
+      thread,
+      posts,
+      signatures: Object.fromEntries(signatures),
+      identities: Object.fromEntries(identities),
+      badges: Object.fromEntries(badges),
+    };
+  }
+
+  /**
+   * Marks a reply as the answer, or clears the mark.
+   *
+   * PUT rather than POST: setting the answer twice must leave one answer, and an idempotent verb
+   * says so at the protocol level rather than in a comment. The body carries the desired STATE,
+   * which is also what makes un-marking the same call rather than a second endpoint.
+   */
+  @Put('categories/:slug/threads/:threadSlug/posts/:postId/solution')
+  async solution(
+    @User() caller: CurrentUser | undefined,
+    @Param('slug') slug: string,
+    @Param('threadSlug') threadSlug: string,
+    @Param('postId') postId: string,
+    @Body() body: unknown,
+  ): Promise<{ ok: true }> {
+    if (caller === undefined) {
+      throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
+    }
+    const db = await this.acl.forCaller(caller.userId);
+    const mask = await this.#mask(caller);
+    const solution = (body as { solution?: unknown } | null)?.solution !== false;
+
+    const marked = await this.threads.markSolution(db, slug, threadSlug, postId, { userId: caller.userId, mask }, solution);
+
+    /*
+     * ★ forum.answer-accepted — TO THE ANSWER'S AUTHOR, ON THE TRANSITION ONLY ★
+     *
+     * `accepted` is true only when this call newly set the mark, so re-pressing the idempotent
+     * PUT stays silent. Self-accepting your own answer is skipped for the same reason the XP
+     * award skips it: it is not news to yourself. The asker is deliberately not named in the
+     * copy — the fact that matters to the author is that their answer worked.
+     */
+    if (marked.accepted && marked.answerAuthorId !== caller.userId) {
+      await notifyMembers(
+        this.prisma,
+        [marked.answerAuthorId],
+        {
+          kind: 'forum.answer-accepted',
+          title: 'Your answer was accepted',
+          body: `Your reply in “${marked.threadTitle}” was marked as the answer.`,
+          link: `/forum/${slug}/${threadSlug}`,
+        },
+        liveNudgeOf(this.live),
+      );
+    }
+
+    return { ok: true };
+  }
+
+  /**
+   * Up or down on a post.
+   *
+   * ★ THE BODY IS THE BUTTON, NOT THE DESIRED STATE ★
+   *
+   * Unlike `solution` above, this is POST and it is deliberately NOT idempotent. The member's
+   * gesture is "I pressed up", and what that means depends on what they voted last — pressing the
+   * arrow they already chose withdraws it. Sending the desired state instead would put that
+   * decision in the browser, which does not reliably know: a second tab, a stale page, a back
+   * button. The server reads what is stored and decides.
+   *
+   * ★ NO PERMISSION CHECK — SQUADRON OWNER, 2026-07-31 ★
+   *
+   * "everyone can do everything." Asked directly whether voting should require standing, the
+   * answer was that every member votes. The risk of a small forum being swung by a few votes was
+   * raised and the decision was made: this is a hundred-and-seven-person squadron where everybody
+   * knows everybody, and a reputation gate on a group that size mostly stops new members joining
+   * in. The ACL-bound client still applies — a post they cannot READ, they cannot vote on.
+   */
+  @Post('posts/:postId/vote')
+  async vote(
+    @User() caller: CurrentUser | undefined,
+    @Param('postId') postId: string,
+    @Body() body: unknown,
+  ): Promise<{ score: number; myVote: number | null }> {
+    if (caller === undefined) {
+      throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
+    }
+
+    const raw = (body as { value?: unknown } | null)?.value;
+    if (raw !== 1 && raw !== -1) {
+      throw new AppError(ErrorCode.VALIDATION_FAILED, 'A vote is either 1 or -1.');
+    }
+
+    const db = await this.acl.forCaller(caller.userId);
+    return this.votes.press(db, postId, caller.userId, raw);
   }
 
   /**
@@ -131,16 +416,72 @@ export class ForumController {
       throw new AppError(ErrorCode.VALIDATION_FAILED, 'A title is required.');
     }
 
+    /*
+     * The opening post, read by the same helper a reply uses — so a thread is started with the
+     * editor exactly as a reply is written, and there is one place that decides what a body may be.
+     *
+     * This used to be absent entirely: a thread was created with a title and no posts. Nothing
+     * called it, because there was no "new thread" screen, so an empty thread was never seen.
+     */
+    const openingPost = readBody(body);
+
     const db = await this.acl.forCaller(caller.userId);
     const mask = await this.#mask(caller);
     const category = await this.categories.bySlug(db, slug, mask);
 
-    return this.threads.create(
+    /*
+     * A muted member cannot start a thread either. Checked here as well as on replies, because
+     * `create` is a different write path — and a sanction that stops one and not the other is a
+     * sanction with a hole in it.
+     */
+    await this.moderation.assertMayPost(db, caller.userId);
+
+    const created = await this.threads.create(
       db,
-      { categoryId: category.id, title },
+      { categoryId: category.id, title, body: openingPost },
       caller.userId,
       mask,
     );
+
+    if (created.held) {
+      // The opening post was held: the author sees a thread whose body is missing, and this row
+      // is what says why. The squadron entry below is skipped — announcing a thread whose only
+      // post is invisible would send members to an empty page.
+      await this.#tellAuthorHeld(caller.userId, `/forum/${slug}/${created.slug}`);
+    } else {
+      /*
+       * ★ forum.thread — ONLY FOR BOARDS THE MEMBER BASE MAY READ (INV-039'S RULE, APPLIED HERE) ★
+       *
+       * The squadron feed is one shared list every signed-in member reads, so it may only carry
+       * titles from categories the ORDINARY member mask satisfies. A thread on the officers'
+       * board would otherwise put its title — which is the disclosure, exactly as the fan-out
+       * header explains — in front of people who cannot open the board. Checked against the
+       * member PRESET rather than the author's own mask: the author can read what they posted,
+       * and that says nothing about who else can.
+       */
+      const board = await db.forumCategory.findFirst({
+        where: { id: category.id },
+        select: { viewPerm: true },
+      });
+      const required =
+        board === null || board.viewPerm === null ? null : BigInt(board.viewPerm.toFixed(0));
+
+      if (board !== null && satisfiesMask(ROLE_PRESETS.member, required)) {
+        await notifySquadron(
+          this.prisma,
+          {
+            kind: 'forum.thread',
+            title: title.trim(),
+            body: `A new thread in ${category.name}.`,
+            link: `/forum/${slug}/${created.slug}`,
+            actorUserId: caller.userId,
+          },
+          liveNudgeOf(this.live),
+        );
+      }
+    }
+
+    return { id: created.id, slug: created.slug };
   }
 
   /*
@@ -195,6 +536,266 @@ export class ForumController {
     return {
       candidates: await this.grants.search(db, threadId, q ?? '', await this.#mask(caller)),
     };
+  }
+
+  /**
+   * Report a published post.
+   *
+   * ★ ANY MEMBER, AND IT DOES NOT HIDE ANYTHING ★
+   *
+   * A report is a claim, not a verdict — see ReportService for why holding the post on report would
+   * hand every member a button that silences any other. It is also the ONLY source of "the screener
+   * should have flagged this", which the review queue structurally cannot produce.
+   */
+  @Post('posts/:postId/report')
+  async reportPost(
+    @User() caller: CurrentUser | undefined,
+    @Param('postId') postId: string,
+    @Req() req: FastifyRequest,
+  ): Promise<{ ok: true; message: string }> {
+    const c = requireSession(caller, 'Sign in to report a post.');
+    csrf(req);
+
+    const db = await this.acl.forCaller(c.userId);
+    await this.reports.report(db, postId, { userId: c.userId });
+    return { ok: true, message: REPORTED_MESSAGE };
+  }
+
+  /**
+   * Posts waiting for a human, oldest first.
+   *
+   * Requires AI_REVIEW — narrower than AI_TOOLS_ADMIN, and held by officers and by the webmaster.
+   */
+  @Get('review/held')
+  async heldPosts(
+    @User() caller: CurrentUser | undefined,
+  ): Promise<{ posts: HeldPost[]; total: number }> {
+    const c = requireSession(caller, 'Sign in first.');
+    const db = await this.acl.forCaller(c.userId);
+    const mask = await this.#mask(caller);
+
+    const [posts, total] = await Promise.all([
+      this.review.held(db, mask),
+      this.review.heldCount(db, mask),
+    ]);
+    return { posts, total };
+  }
+
+  /**
+   * Releases a held post, or refuses it.
+   *
+   * PUT with the decision in the body rather than two routes: deciding the same post twice must
+   * settle on one state, and an idempotent verb says so at the protocol level.
+   */
+  @Put('review/held/:postId')
+  async decideHeld(
+    @User() caller: CurrentUser | undefined,
+    @Param('postId') postId: string,
+    @Body() body: unknown,
+    @Req() req: FastifyRequest,
+  ): Promise<{ ok: true }> {
+    const c = requireSession(caller, 'Sign in first.');
+    csrf(req);
+
+    const decision = (body as { decision?: unknown } | null)?.decision;
+    if (decision !== 'release' && decision !== 'refuse') {
+      throw new AppError(ErrorCode.VALIDATION_FAILED, 'Say whether to release or refuse it.');
+    }
+
+    const db = await this.acl.forCaller(c.userId);
+    const decided = await this.review.decide(db, postId, decision, {
+      userId: c.userId,
+      mask: await this.#mask(caller),
+    });
+
+    /*
+     * ★ forum.moderation — THE OUTCOME, TO THE AUTHOR, FROM THE ONE DECISION POINT ★
+     *
+     * The hold told them a reviewer would look; this is the reviewer having looked. The copy
+     * names no reviewer — the decision is the board's, and hanging a person on a refusal
+     * invites an argument with that person instead of with the rule. A refusal carries no link:
+     * there is nothing to open. Swallowed by notifyMembers on failure; the decision stands.
+     */
+    await notifyMembers(
+      this.prisma,
+      [decided.authorId],
+      decision === 'release'
+        ? {
+            kind: 'forum.moderation',
+            title: 'Your post is now on the board',
+            body: `A reviewer published your post in “${decided.threadTitle}”.`,
+            link: `/forum/${decided.categorySlug}/${decided.threadSlug}`,
+          }
+        : {
+            kind: 'forum.moderation',
+            title: 'Your post was not published',
+            body: `A reviewer looked at your post in “${decided.threadTitle}” and it will stay off the board. Speak to an officer if you would like to understand the decision.`,
+          },
+      liveNudgeOf(this.live),
+    );
+
+    /*
+     * ★ A RELEASE IS A LATE BIRTH — THE ANNOUNCEMENTS THE HOLD SUPPRESSED RUN NOW ★
+     *
+     * Squadron owner, 2026-08-04: everything in the catalogue wired, no scoping gaps. A post that
+     * was held was invisible when it was written, so its birth announcements were deliberately
+     * skipped. Releasing it is the moment it actually appears to readers, so this is when the
+     * squadron hears about an opening post (same member-mask gate as the create path — a
+     * restricted board's title still never reaches the shared feed) and when a reply's watchers
+     * finally get their fan-out. Mentions are the one thing not replayed: they were parsed from
+     * the document at write time and re-deriving them here would be a second parser to drift —
+     * the replied-to author and every watcher are the audience that matters.
+     */
+    if (decision === 'release') {
+      if (decided.isOpeningPost) {
+        const board = await db.forumCategory.findFirst({
+          where: { id: decided.categoryId },
+          select: { viewPerm: true },
+        });
+        const required =
+          board === null || board.viewPerm === null ? null : BigInt(board.viewPerm.toFixed(0));
+        if (board !== null && satisfiesMask(ROLE_PRESETS.member, required)) {
+          await notifySquadron(
+            this.prisma,
+            {
+              kind: 'forum.thread',
+              title: decided.threadTitle,
+              body: `A new thread in ${decided.categoryName}.`,
+              link: `/forum/${decided.categorySlug}/${decided.threadSlug}`,
+              actorUserId: decided.authorId,
+            },
+            liveNudgeOf(this.live),
+          );
+        }
+      } else {
+        await this.#fanOut(
+          db,
+          {
+            threadId: decided.threadId,
+            threadTitle: decided.threadTitle,
+            categorySlug: decided.categorySlug,
+            threadSlug: decided.threadSlug,
+            actorId: decided.authorId,
+            replyToAuthorId: decided.replyToAuthorId,
+            mentionedUserIds: [],
+          },
+          decided.threadTitle,
+        );
+      }
+    }
+
+    return { ok: true };
+  }
+
+  /**
+   * The caller's own forum signature.
+   *
+   * ★ ALWAYS THE CALLER'S — THERE IS NO `:userId` HERE ★
+   *
+   * Somebody else's signature arrives with their posts, already rendered. An endpoint that took a
+   * user id would be a second, unnecessary way to read one, and the first thing anybody would try
+   * is passing an id that is not theirs.
+   */
+  @Get('signature')
+  async mySignature(@User() caller: CurrentUser | undefined): Promise<{ signature: SignatureView }> {
+    const c = requireSession(caller, 'Sign in first.');
+    const db = await this.acl.forCaller(c.userId);
+    return { signature: await this.signatures.mine(db, c.userId, publicOrigin()) };
+  }
+
+  /** Saves part of the caller's signature. PUT, because saving the same thing twice is one result. */
+  @Put('signature')
+  async saveSignature(
+    @User() caller: CurrentUser | undefined,
+    @Body() body: unknown,
+    @Req() req: FastifyRequest,
+  ): Promise<{ signature: SignatureView }> {
+    const c = requireSession(caller, 'Sign in first.');
+    csrf(req);
+    const db = await this.acl.forCaller(c.userId);
+    return {
+      signature: await this.signatures.save(
+        db,
+        c.userId,
+        (body ?? {}) as SignatureInput,
+        publicOrigin(),
+      ),
+    };
+  }
+
+  /**
+   * Five signature designs, from what the member told the generator.
+   *
+   * ★ SQUADRON OWNER, 2026-08-01 ★
+   *
+   * "generate signature with GMSD AI which should be a prompt based and Q&A based signature
+   * generator ... 5 options to choose from"
+   *
+   * Returns complete, renderable designs in the few seconds the text model takes. Artwork for the
+   * backplate is a SEPARATE request per option — see `signatureBackplate` and the note in the
+   * service for why five images in one call would be four minutes of blank screen.
+   */
+  @Post('signature/design')
+  async designSignature(
+    @User() caller: CurrentUser | undefined,
+    @Body() body: unknown,
+    @Req() req: FastifyRequest,
+  ): Promise<{ options: unknown[] }> {
+    const c = requireSession(caller, 'Sign in first.');
+    csrf(req);
+    const b = (body ?? {}) as Record<string, unknown>;
+    const str = (k: string): string => (typeof b[k] === 'string' ? (b[k] as string).slice(0, 400) : '');
+
+    const options = await this.signatureDesign.design(c.userId, {
+      activity: str('activity'),
+      ship: str('ship'),
+      vibe: str('vibe'),
+      prompt: str('prompt'),
+    });
+
+    if (options.length === 0) {
+      /*
+       * AI_OFFLINE rather than a generic failure: the page hides the generator and offers the
+       * manual builder on this code, which is the right thing to do when the model is unreachable.
+       */
+      throw new AppError(
+        ErrorCode.AI_OFFLINE,
+        'GMSD AI could not design anything just now. Try again in a moment, or build one yourself.',
+      );
+    }
+    return { options };
+  }
+
+  /*
+   * ★ THERE IS NO BACKPLATE ENDPOINT HERE, DELIBERATELY ★
+   *
+   * The first draft added `POST signature/backplate`, which would have been a second way to reach
+   * the same generator — with its own rate limit reading, its own error mapping, and its own drift.
+   *
+   * `POST /v1/ai/artwork` already takes a prompt and returns banner-sized images, and the manual
+   * builder already uses it. The generator hands each design an `imageryPrompt`; the page sends that
+   * to the endpoint that exists. One artwork path, one place the quota and the messages live.
+   */
+
+  /**
+   * Who the caller can usefully @mention in this thread.
+   *
+   * Separate from the grant autocomplete because the two answer different questions and carry
+   * different permissions: granting is an admin act, mentioning is what every member does. Sharing
+   * one endpoint would mean either requiring FORUM_MODERATE to mention somebody, or dropping the
+   * check that makes granting safe.
+   */
+  @Get('threads/:threadId/mention-candidates')
+  async mentionCandidates(
+    @User() caller: CurrentUser | undefined,
+    @Param('threadId') threadId: string,
+    @Query('q') q: string | undefined,
+  ): Promise<{ candidates: GranteeCandidate[] }> {
+    if (caller === undefined) {
+      throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
+    }
+    const db = await this.acl.forCaller(caller.userId);
+    return { candidates: await this.grants.mentionCandidates(db, threadId, q ?? '') };
   }
 
   /** Grants the named users read access. One request for the whole multi-select. */
@@ -282,7 +883,66 @@ export class ForumController {
     const bodyMd = readBody(body);
 
     const db = await this.acl.forCaller(c.userId);
-    return this.posts.create(db, threadId, bodyMd, c.userId, await this.#mask(caller));
+    const replyToId = (body as { replyToId?: unknown } | null)?.replyToId;
+
+    const post = await this.posts.create(
+      db,
+      threadId,
+      bodyMd,
+      c.userId,
+      await this.#mask(caller),
+      typeof replyToId === 'string' ? replyToId : undefined,
+    );
+
+    /*
+     * The thread is re-read for its title and slug, THROUGH THE SERVICE. `create` deliberately does
+     * not return them — that would make a write path carry presentation data for a notification's
+     * benefit — and the controller does not query models itself, which is what the static ACL guard
+     * exists to keep true.
+     */
+    const thread = await this.threads.notificationTarget(db, threadId);
+
+    if (post.held) {
+      // A held reply reaches nobody, so the reply fan-out below would announce words no reader
+      // can open. The author alone is told what happened; the fan-out runs when a reviewer
+      // releases it into a visible state — or not at all.
+      await this.#tellAuthorHeld(
+        c.userId,
+        thread === null ? null : `/forum/${thread.categorySlug}/${thread.slug}`,
+      );
+    } else if (thread !== null) {
+      await this.#fanOut(
+        db,
+        {
+          threadId,
+          threadTitle: thread.title,
+          categorySlug: thread.categorySlug,
+          threadSlug: thread.slug,
+          actorId: c.userId,
+          replyToAuthorId: post.replyToAuthorId,
+          mentionedUserIds: post.mentions,
+        },
+        thread.title,
+      );
+    }
+
+    return { id: post.id, bodyHtml: post.bodyHtml, editCount: post.editCount };
+  }
+
+  /**
+   * The original source of a post, for the editor to start from.
+   *
+   * Fetched only when somebody presses Edit — see `PostService.source` for why it is not a field
+   * on the thread response.
+   */
+  @Get('posts/:postId/source')
+  async postSource(
+    @User() caller: CurrentUser | undefined,
+    @Param('postId') postId: string,
+  ): Promise<{ bodyDoc: unknown | null; bodyMd: string | null }> {
+    const c = requireSession(caller, 'Sign in to edit.');
+    const db = await this.acl.forCaller(c.userId);
+    return this.posts.source(db, postId, c.userId, await this.#mask(caller));
   }
 
   /**
@@ -300,7 +960,23 @@ export class ForumController {
     const bodyMd = readBody(body);
 
     const db = await this.acl.forCaller(c.userId);
-    return this.posts.edit(db, postId, bodyMd, c.userId, await this.#mask(caller));
+    const edited = await this.posts.edit(db, postId, bodyMd, c.userId, await this.#mask(caller));
+
+    if (edited.held) {
+      /*
+       * An edit is re-screened, and a hold takes the post OFF the board mid-conversation — more
+       * surprising than a held reply, because it was visible a moment ago. The link is resolved
+       * through the service (the controller does not query threads itself); a link that cannot
+       * be resolved still leaves the author told, which is the part that matters.
+       */
+      const target = await this.threads.notificationTarget(db, edited.threadId);
+      await this.#tellAuthorHeld(
+        c.userId,
+        target === null ? null : `/forum/${target.categorySlug}/${target.slug}`,
+      );
+    }
+
+    return { id: edited.id, bodyHtml: edited.bodyHtml, editCount: edited.editCount };
   }
 
   /**
@@ -352,7 +1028,238 @@ export class ForumController {
     const db = await this.acl.forCaller(c.userId);
     return { revisions: await this.posts.history(db, postId, await this.#mask(caller)) };
   }
+
+  /*
+   * ★ REACTIONS AND SUBSCRIPTIONS (P2.4) ★
+   *
+   * Neither needs a permission of its own: if you can SEE a thread you can react and follow, and if
+   * you cannot the service's own read returns 404 and there is nothing to act on. Deliberately
+   * weaker than posting, which needs the category's post_perm — reading and following are the same
+   * capability, speaking is a different one.
+   */
+
+  @Post('posts/:postId/reactions')
+  async react(
+    @User() caller: CurrentUser | undefined,
+    @Param('postId') postId: string,
+    @Body() body: unknown,
+    @Req() req: FastifyRequest,
+  ): Promise<{ reactions: ReactionCount[] }> {
+    const c = requireSession(caller, 'Sign in to react.');
+    csrf(req);
+
+    const emoji = (body as { emoji?: unknown } | null)?.emoji;
+    if (typeof emoji !== 'string') {
+      throw new AppError(ErrorCode.VALIDATION_FAILED, 'Which reaction?');
+    }
+
+    const db = await this.acl.forCaller(c.userId);
+    return { reactions: await this.engage.toggleReaction(db, postId, emoji, c.userId) };
+  }
+
+  /**
+   * Follows or unfollows a thread.
+   *
+   * PUT rather than POST: the caller states the desired STATE — watching, muted or none — rather
+   * than an action, so sending it twice is not a second event. That matters for a button somebody
+   * can double-click.
+   */
+  @Put('threads/:threadId/subscription')
+  async subscribe(
+    @User() caller: CurrentUser | undefined,
+    @Param('threadId') threadId: string,
+    @Body() body: unknown,
+    @Req() req: FastifyRequest,
+  ): Promise<{ level: SubscriptionLevel | 'none' }> {
+    const c = requireSession(caller, 'Sign in to follow a thread.');
+    csrf(req);
+
+    const level = (body as { level?: unknown } | null)?.level;
+    if (level !== 'watching' && level !== 'muted' && level !== 'none') {
+      throw new AppError(ErrorCode.VALIDATION_FAILED, 'Follow, mute, or neither.');
+    }
+
+    const db = await this.acl.forCaller(c.userId);
+    return this.engage.setThreadSubscription(db, threadId, c.userId, level);
+  }
+
+  @Get('threads/:threadId/subscription')
+  async mySubscription(
+    @User() caller: CurrentUser | undefined,
+    @Param('threadId') threadId: string,
+  ): Promise<{ level: SubscriptionLevel | 'none' }> {
+    const c = requireSession(caller, 'Sign in to see whether you follow this.');
+    const db = await this.acl.forCaller(c.userId);
+    return this.engage.subscriptionFor(db, threadId, c.userId);
+  }
+
+  /**
+   * Searches posts the caller can see (P2.5, INV-024).
+   *
+   * ★ @Public, AND THE FILTER IS STILL EXACT ★
+   *
+   * An anonymous visitor may search the public boards — the joining guides are the most useful thing
+   * on the site to somebody who has not joined, and making them unsearchable would be perverse.
+   *
+   * The caller's visible categories are resolved SERVER-SIDE from their session, never from the
+   * request, and passed into the query's WHERE clause. There is no post-filter step: an anonymous
+   * search for a term that appears only in the officers' board returns zero hits AND zero total,
+   * because the count is computed over the same filtered set.
+   */
+  @Public()
+  @Get('search')
+  async searchPosts(
+    @User() caller: CurrentUser | undefined,
+    @Query('q') q: string | undefined,
+    @Query('offset') offset: string | undefined,
+  ): Promise<{ result: SearchResult; snippets: string[] }> {
+    const db = await this.acl.forCaller(caller?.userId);
+    const visible = await this.acl.visibleCategoryIdsFor(caller?.userId);
+
+    const result = await this.search.search(
+      db,
+      q ?? '',
+      visible,
+      caller?.userId ?? null,
+      Number.parseInt(offset ?? '0', 10) || 0,
+    );
+
+    return {
+      result,
+      /*
+       * Snippets rendered HERE rather than in the client. `renderSnippet` escapes the member text
+       * and only then converts the markers to <mark> — an ordering that has to happen exactly once,
+       * so it happens on the server where there is one implementation of it.
+       */
+      snippets: result.hits.map((h) => renderSnippet(h.snippet)),
+    };
+  }
+
+  /*
+   * ★ MODERATION (P2.6, INV-009) ★
+   *
+   * Every route below funnels into ModerationService, which writes the member-facing record and the
+   * audit row in ONE transaction. Nothing here writes either directly — a second writer would be a
+   * second chance to write one without the other.
+   *
+   * A reason is required on all of them and is validated in the service, not here: the member is
+   * shown it, so "is this good enough to show somebody" is one decision in one place.
+   */
+
+  @Post('threads/:threadId/moderate/lock')
+  async lockThread(
+    @User() caller: CurrentUser | undefined,
+    @Param('threadId') threadId: string,
+    @Body() body: unknown,
+    @Req() req: FastifyRequest,
+  ): Promise<{ ok: true }> {
+    const c = requireSession(caller, 'Sign in to moderate.');
+    csrf(req);
+    const raw = body as { locked?: unknown; reason?: unknown } | null;
+    const db = await this.acl.forCaller(c.userId);
+    await this.moderation.setLocked(
+      db,
+      threadId,
+      raw?.locked !== false,
+      c.userId,
+      await this.#mask(caller),
+      raw?.reason,
+    );
+    return { ok: true };
+  }
+
+  @Post('threads/:threadId/moderate/pin')
+  async pinThread(
+    @User() caller: CurrentUser | undefined,
+    @Param('threadId') threadId: string,
+    @Body() body: unknown,
+    @Req() req: FastifyRequest,
+  ): Promise<{ ok: true }> {
+    const c = requireSession(caller, 'Sign in to moderate.');
+    csrf(req);
+    const raw = body as { pinned?: unknown; reason?: unknown } | null;
+    const db = await this.acl.forCaller(c.userId);
+    await this.moderation.setPinned(
+      db,
+      threadId,
+      raw?.pinned !== false,
+      c.userId,
+      await this.#mask(caller),
+      raw?.reason,
+    );
+    return { ok: true };
+  }
+
+  /**
+   * Warns, mutes, bans or unbans a member.
+   *
+   * One route with an `action` rather than four, because the shape is identical and the difference
+   * is a word the moderator chooses. Four near-identical handlers would drift on the reason
+   * handling, which is the part that must not.
+   */
+  @Post('members/:userId/moderate')
+  async moderateMember(
+    @User() caller: CurrentUser | undefined,
+    @Param('userId') userId: string,
+    @Body() body: unknown,
+    @Req() req: FastifyRequest,
+  ): Promise<{ ok: true; expiresAt?: string }> {
+    const c = requireSession(caller, 'Sign in to moderate.');
+    csrf(req);
+
+    const raw = body as
+      | { action?: unknown; reason?: unknown; hours?: unknown; appealThreadId?: unknown }
+      | null;
+    const mask = await this.#mask(caller);
+    const db = await this.acl.forCaller(c.userId);
+
+    switch (raw?.action) {
+      case 'warn':
+        await this.moderation.warn(db, userId, c.userId, mask, raw.reason);
+        return { ok: true };
+      case 'mute': {
+        const { expiresAt } = await this.moderation.mute(
+          db,
+          userId,
+          typeof raw.hours === 'number' ? raw.hours : Number.NaN,
+          c.userId,
+          mask,
+          raw.reason,
+        );
+        return { ok: true, expiresAt };
+      }
+      case 'ban':
+        await this.moderation.ban(
+          db,
+          userId,
+          c.userId,
+          mask,
+          raw.reason,
+          typeof raw.appealThreadId === 'string' ? raw.appealThreadId : null,
+        );
+        return { ok: true };
+      case 'unban':
+        await this.moderation.unban(db, userId, c.userId, mask, raw.reason);
+        return { ok: true };
+      default:
+        throw new AppError(ErrorCode.VALIDATION_FAILED, 'Warn, mute, ban or unban.');
+    }
+  }
+
+  /** A member's moderation history. Moderators only. */
+  @Get('members/:userId/moderation')
+  async memberModeration(
+    @User() caller: CurrentUser | undefined,
+    @Param('userId') userId: string,
+  ): Promise<{ history: Array<{ action: string; reason: string; createdAt: string; actorHandle: string }> }> {
+    const c = requireSession(caller, 'Sign in to read moderation history.');
+    const db = await this.acl.forCaller(c.userId);
+    return { history: await this.moderation.historyFor(db, userId, await this.#mask(caller)) };
+  }
 }
+
+
+
 
 /**
  * Refuses an anonymous caller before any work happens.
@@ -367,16 +1274,40 @@ function requireSession(caller: CurrentUser | undefined, why: string): CurrentUs
   return caller;
 }
 
-/** Reads and validates a post body from a request. */
-function readBody(body: unknown): string {
-  const raw = (body as { bodyMd?: unknown } | null)?.bodyMd;
-  if (typeof raw !== 'string') {
-    throw new AppError(ErrorCode.VALIDATION_FAILED, 'Write something first.');
+/**
+ * Reads a post body — either Markdown or a rich document.
+ *
+ * ★ THE CLIENT CHOOSES THE FORM, NOT THE SAFETY ★
+ *
+ * `bodyDoc` takes precedence when both arrive, because a client that sent both is the rich
+ * editor also supplying a plain-text fallback, and the document is the higher-fidelity one.
+ *
+ * Nothing is validated here beyond the shape of the envelope: the document is checked by
+ * `validateDocument` inside the service, which is the single place that decides what a document
+ * may contain. A second, looser check here would be a second answer to that question.
+ */
+function readBody(body: unknown): string | { doc: unknown } {
+  const raw = body as { bodyMd?: unknown; bodyDoc?: unknown } | null;
+
+  if (raw?.bodyDoc !== undefined && raw.bodyDoc !== null) {
+    return { doc: raw.bodyDoc };
   }
-  return raw;
+  if (typeof raw?.bodyMd === 'string') return raw.bodyMd;
+
+  throw new AppError(ErrorCode.VALIDATION_FAILED, 'Write something first.');
 }
 
 function csrf(req: FastifyRequest): void {
   const cookies = (req as unknown as { cookies?: Record<string, string | undefined> }).cookies ?? {};
   verifyCsrf(req.method, readCsrfCookie(cookies), req.headers['x-csrf-token'] as string | undefined);
+}
+
+/**
+ * The origin members share links from.
+ *
+ * Same source and same fallback as the notification links, deliberately: two places deriving the
+ * public address separately is how a DM and a signature end up pointing at different hosts.
+ */
+function publicOrigin(): string {
+  return process.env['PUBLIC_URL'] ?? 'https://45-63-35-93.sslip.io';
 }

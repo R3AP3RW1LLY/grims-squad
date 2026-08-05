@@ -26,3 +26,31 @@ if (process.env['NODE_ENV'] !== 'production') {
 export * from '@prisma/client';
 export * from './acl-extension.js';
 export * from './nonce.store.prisma.js';
+export { PrismaPromotionStore } from './promotion.store.prisma.js';
+/*
+ * Colonisation.
+ *
+ * ★ IT LIVES HERE SO THERE IS ONE IMPLEMENTATION, NOT TWO ★
+ *
+ * The worker runs this on a schedule to reconcile every live project. The API runs the SAME job,
+ * narrowed to one site, the moment a member's companion uploads a delivery — because the API is the
+ * one process guaranteed to be running when telemetry arrives, and a member who has just handed over
+ * cargo should not have to wait for a background daemon that may not be up. Two write paths into the
+ * same tables would be two chances to disagree; this is one job with two callers.
+ */
+export * from './colony-sync.js';
+export { PrismaColonyStore } from './colony.store.prisma.js';
+export * from './colony-catalogue.js';
+/*
+ * Stations learned live, shared by BOTH market writers — the EDDN collector and the API's journal
+ * path — so an unknown station is added the same way whichever feed sees it first.
+ */
+export * from './live-stations.js';
+export * from './notify.js';
+/*
+ * Announcements — Discord channel posts and forum carbon-copies, produced in three processes
+ * (API, worker, deploy script) and delivered by two pollers. Shared here for the same reason
+ * notify.ts is: one wording, one write path, whatever process happens to be announcing.
+ */
+export * from './announce.js';
+export { DiscordRankApplier, ladderRoleIds } from './rank-applier.discord.js';

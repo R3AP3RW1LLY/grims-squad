@@ -1,0 +1,214 @@
+# Scheduled jobs. These were WRITTEN, TESTED AND NEVER SCHEDULED — no cron entry, no systemd timer,
+# and no worker container had ever existed on this host. Discovered 2026-07-31.
+#
+# Every one is a ONE-SHOT: the container runs, does its job, exits, and is removed. The compose
+# service carries profiles:[jobs] so `up -d` can never start it as a service.
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+CRON_TZ=UTC
+
+# Inara rank + profile sync. ONCE A DAY, BATCHED — the adapter sends 30 commanders per request, and
+# Inara ask for infrequent bundled calls rather than one per commander. 05:12 is off-peak against
+# measured activity (peaks 01:00 and 20:00-21:00) and clear of the 04:17 janitor.
+12 5 * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/inara-sync.js >> /var/log/grims-worker.log 2>&1
+
+# Nickname + commander reconciliation. After the Inara sync, so it acts on fresh names.
+40 5 * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/daily-audit.js >> /var/log/grims-worker.log 2>&1
+
+# Stations EDDN reported that we do not hold, looked up and written properly.
+#
+# Squadron owner, 2026-08-02: "add the stations we do not hold" — about 111 every fifteen minutes,
+# previously counted and discarded.
+#
+# HOURLY, AT :20. EDSM is a community service on donated hardware and asks for courtesy; one call
+# per SYSTEM rather than per station collapses most of the work, and the batch is capped so a
+# backlog is worked through over hours rather than in one burst that gets us rate limited.
+#
+# :20 keeps it clear of the ingest daemon's own hourly work at the top of the hour.
+20 * * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/resolve-stations.js >> /var/log/grims-worker.log 2>&1
+
+# One hour of the galaxy's trade, per commodity — the series behind "price over time".
+#
+# Squadron owner, 2026-08-02: "average pricing, price over time lots of data". Told the history
+# table had never been written to, they chose "start recording now, show charts as they fill".
+#
+# ★ EVERY MISSED HOUR IS A PERMANENT HOLE ★
+#
+# `market_entries` holds only the CURRENT price. The past cannot be reconstructed from it, so an
+# hour this does not run is an hour no chart will ever have. That is the reason it sits at :05
+# rather than sharing the top of the hour with the ingest daemon, and the reason it takes a lock
+# instead of trusting cron not to overlap.
+#
+# The run itself is deliberately dull: ~800 aggregates that ride partial indexes only, a few
+# minutes, competing with nothing.
+5 * * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/commodity-rollup.js >> /var/log/grims-worker.log 2>&1
+
+# Colonisation projects, kept current from members' journals.
+#
+# Squadron owner, 2026-08-02: "keep our own full records too" — built self-contained once
+# Ravencolonial turned out to learn everything from the same journal events we already read.
+#
+# ★ EVERY FIFTEEN MINUTES, AND THAT IS AFFORDABLE ★
+#
+# There is no cursor to advance. Needs are REPLACED from the newest depot reading and contributions
+# carry the journal's own idempotency key into a UNIQUE column, so a run is safe at any moment and a
+# missed one costs nothing. The work is one small query per live project.
+#
+# Frequent on purpose: a member who has just hauled to a site should see their delivery on the board
+# while they are still docked, not an hour later.
+*/15 * * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/colony-sync.js >> /var/log/grims-worker.log 2>&1
+
+# ── The resident worker ──────────────────────────────────────────────────────
+#
+# NOT a cron entry — it belongs in compose.prod.yml as a long-running service. Recorded here so the
+# schedule and the thing that answers on-demand requests are described in one place.
+#
+#   node apps/worker/dist/daemon.js
+#
+# It LISTENs on `gmsd_job_request` and runs an ingest when the training page's "Run now" button asks
+# for one. The API cannot start these itself: they are containers, and a web-facing process with a
+# Docker socket is a much larger decision than a refresh button warrants.
+#
+# If it is down, the button reports "requested" and nothing runs — which is honest, and the page
+# says so within one thirty-second refresh.
+
+# ── Embedding ────────────────────────────────────────────────────────────────
+#
+# The ONLY jobs here that use the GPU. Everything else in the pipeline is a database write, which is
+# why the card is idle during a galaxy import.
+#
+# EVERY source is embedded now. The earlier design embedded prose only, because the galaxy was
+# believed to take "roughly three weeks" — measured on the actual card it is 104 rows/second at
+# concurrency 8, so just over an hour, once, then only what changed. Embedding is ADDED, never
+# substituted: "which stations in Deciat have a large pad" is still an exact lookup, because a
+# similarity search answers that with Deciak.
+#
+# Cadences set by the squadron owner, 2026-08-01, and they follow how fast each source produces text
+# somebody might immediately ask about — not how expensive it is. A sweep with nothing to do is one
+# indexed query returning no rows.
+
+# Forum answers — every 5 minutes. Somebody answers a question and walks away; the next member to
+# ask should get that answer rather than being told nobody has covered it.
+*/5 * * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/embed.js forum >> /var/log/grims-worker.log 2>&1
+
+# Squadron flight logs — every 3 minutes. "Has anyone been to X" while a wing is actually there
+# should answer yes.
+*/3 * * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/embed.js journal >> /var/log/grims-worker.log 2>&1
+
+# The roster — daily, at 06:05, just after its own ingest. It changes when somebody joins or is
+# promoted, and neither happens by the minute.
+5 6 * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/embed.js inara >> /var/log/grims-worker.log 2>&1
+
+# Everything else — 06:20, after the 03:20 galaxy import and the 06:05 roster sweep. This is the one
+# that carries the galaxy and Coriolis, and the only one that is ever long. Resumable by
+# construction: the work remaining IS "rows with no vector", so a run that dies leaves the rest for
+# tomorrow and re-running is never redundant.
+20 6 * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/embed.js >> /var/log/grims-worker.log 2>&1
+
+# ── Monthly promotions ───────────────────────────────────────────────────────
+#
+# ★ THIS WAS NEVER SCHEDULED — found 2026-08-01 ★
+#
+# The engine was written, tested, and had a `promote.js` in the deployed image. Nothing ever ran it.
+# Asked "did the auto promotions work on production", the answer was no, and the reason was that
+# there was no cron entry for it anywhere — the word "promote" appeared in this file exactly once,
+# inside a comment about something else.
+#
+# ★ WHY THE 1st, AND WHY 07:00 ★
+#
+# Qualification is a statement about a COMPLETED calendar month, so the earliest it can be answered
+# for July is the 1st of August. 07:00 UTC puts it after the nightly ingests and the role sync, so
+# it acts on a reconciled roster rather than on yesterday's.
+#
+# ★ --live AND --post ★
+#
+# Without --live it is a dry run that writes nothing, which is the safe default everywhere else and
+# would be a silent no-op here. --post sends the result to the admin channel, because a promotion
+# nobody is told about is a promotion nobody acts on.
+#
+# The squadron owner's instruction was "DO NOT START ASSIGNING PROMOTIONS UNTIL AUGUST 1ST 2026".
+# That date has passed; this is the automation it was gating.
+0 7 1 * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/promote.js --live --post >> /var/log/grims-worker.log 2>&1
+
+# Nightly reputation: experience for days flown, and badges for the totals that adds to.
+#
+# Votes and accepted answers award experience at the moment they happen — they are events. These
+# two are not: "played today" is a fact about a DAY, and a badge is a threshold crossed by a total
+# several different actions can move. Both are questions about accumulated state, and asking them
+# once a night is cheaper and more correct than detecting the crossing inside every write.
+#
+# 06:40, after the role sync and well clear of everything else. Nothing depends on it and it
+# depends on nothing, so it goes where the box is quietest.
+40 6 * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/reputation.js >> /var/log/grims-worker.log 2>&1
+
+# Discord role reconciliation.
+10 6 * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/role-sync.js >> /var/log/grims-worker.log 2>&1
+
+# Elite Dangerous knowledge ingest. Coriolis changes only with a game update; Spansh rebuilds
+# nightly. 03:20 UTC — off-peak, and BEFORE the 04:17 janitor so a long import is never competing
+# with a prune for disk. The galaxy import also rebuilds market_entries when it finishes, so the
+# route table can never disagree with the stations it was derived from.
+
+# Coriolis, EVERY THREE HOURS — not daily with the galaxy.
+#
+# ★ IT WAS SCHEDULED AT AN EIGHTH OF ITS OWN CADENCE ★
+#
+# `REFRESH_HOURS.coriolis` is 3, on the owner's instruction ("can we not do this on like a 2-3 hour
+# schedule?"), and this ran once a day bundled with the galaxy import. So the training page computed
+# "overdue" against 3 hours and was right for 21 hours out of every 24 — reported as "we have a lot
+# of ingestions that are overdue".
+#
+# Affordable at this cadence because the job asks GitHub for one commit id and stops when it
+# matches: a few hundred bytes, eight times a day, downloading only when upstream actually moved.
+#
+# Offset by 20 minutes from the hour so it never starts alongside the galaxy import or the janitor.
+
+# Journal, forum and reference knowledge.
+#
+# ★ THESE HAD NO INGEST LINE AT ALL ★
+#
+# All three had EMBED sweeps — `embed.js forum` every five minutes, `embed.js journal` every three —
+# embedding rows that nothing ever created. The ingests that produce those rows were never
+# scheduled, so the sweeps ran thousands of times a day over an empty result set and the sources sat
+# permanently overdue.
+#
+# `reference` is the worst of the three: it is the guides corpus, the only source whose entire value
+# is being embedded, and it had never run on a schedule in its life.
+#
+# Journal hourly (REFRESH_HOURS 1): it reads members' already-uploaded telemetry, so it is a
+# database pass rather than a network one. Forum and reference daily, matching their own cadences —
+# an accepted answer is not time-critical and a guide changes when somebody writes one.
+
+# Roster knowledge, from the Inara profile cache. ON ITS OWN — squadron owner, 2026-07-31: "the
+# ingestion for ML from inara, that one must be batched and run on its own."
+#
+# 05:50, AFTER the 05:12 rank sweep that fills the cache it reads. Ordered rather than coincidental:
+# running it first would ingest yesterday's roster every single day, and nothing would look wrong.
+# Also clear of the 05:40 nickname audit — two `compose run` containers starting together on a
+# one-vCPU box is how a job that normally takes seconds starts timing out.
+#
+# It makes no Inara requests of its own — see the job's own note on why that is the batching, not a
+# shortcut around it.
+
+# Orphaned media: uploads nothing points at any more — a member who picked a second AI signature
+# design, replaced a banner, or abandoned an upload. Idempotent and biased towards keeping, so a
+# nightly run is a tidy-up rather than a risk. See sweep-orphan-media.ts.
+40 4 * * * root cd /srv/grims/repo && docker compose -f infra/docker/compose.prod.yml --env-file /srv/grims/.env --profile jobs run --rm worker node apps/worker/dist/sweep-orphan-media.js >> /var/log/grims-worker.log 2>&1
+
+# ★ THE INGESTS ARE NOT SCHEDULED HERE ANY MORE — 2026-08-01 ★
+#
+# They used to be, and they never ran. This file has to be installed on the host by hand, it was not
+# installed in production, and it does not exist at all on a developer's machine — so every source
+# sat at whatever a human had last triggered, and the training page correctly showed all of them
+# overdue. Reported by the squadron owner as "these are clearly not triggering".
+#
+# The worker daemon now schedules them itself from REFRESH_HOURS, which is the same constant the
+# training page reads. That works identically in both places, needs nothing installed, and cannot
+# drift from the page that reports it.
+#
+# They are NOT listed here as well. Two schedulers against one advisory lock means half the runs are
+# started only to be declined, which is noise in the log and a permanent question about which one is
+# actually driving the cadence.
+#
+# Everything below is a job with no equivalent in the daemon: embeds, the promotion run, role sync,
+# the audit, and the media sweep.

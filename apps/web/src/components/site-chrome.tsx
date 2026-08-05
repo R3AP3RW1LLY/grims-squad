@@ -1,5 +1,6 @@
 import Image from 'next/image';
 import { MobileNav } from './mobile-nav';
+import { NavDropdown, type NavChild } from './nav-dropdown';
 /**
  * Persistent site chrome: background, navigation and footer.
  *
@@ -72,28 +73,86 @@ export function DeepField() {
 
 /* --------------------------------------------------------------------- nav */
 
-export const NAV_LINKS = [
-  { href: '/situation', label: 'Situation' },
-  { href: '/market', label: 'Market' },
-  { href: '/shipyard', label: 'Shipyard' },
+/**
+ * The PUBLIC navbar.
+ *
+ * ★ SQUADRON OWNER, 2026-08-01 ★
+ *
+ * "the Public navbar should only have a Forum link that takes people to the forum page and only
+ * shows them publically viewable forum categories please. then we need a nav group dropdown for
+ * Shipyard that has outfitter as the first link and public builds as the second link remove
+ * everything else please. we will add to this as we grow the site."
+ *
+ * ★ WHAT WAS REMOVED, AND WHY THAT IS THE POINT ★
+ *
+ * Situation, Market, Recruiting and Guides all came out. Every one of them was a real page, and
+ * that was the problem: a visitor arriving from Discord met six choices before they had any reason
+ * to care about the difference between them. Two destinations they can actually use — read what the
+ * squadron says, and build a ship — is a front door rather than a directory.
+ *
+ * The pages still exist and are still linked from where they belong. This is a nav, not an index.
+ *
+ * ★ DASHBOARD IS NOT HERE, AND CANNOT BE ★
+ *
+ * "Dashboard should be the first link ... but only visible if a user is logged in." This component
+ * only renders for a visitor with NO session — `(site)/layout.tsx` swaps in `AuthedNav` the moment
+ * there is one, and that bar already leads with Dashboard. So the condition is satisfied by which
+ * component renders rather than by a check inside one, which is why there is no `signedIn` prop
+ * here to get wrong.
+ */
+export const NAV_LINKS: ReadonlyArray<
+  { href: string; label: string } | { label: string; children: readonly NavChild[] }
+> = [
   /*
-   * ★ GUIDES IS PUBLIC; COMMS IS NOT ★
+   * ★ /forum IS PUBLIC NOW ★
    *
-   * Squadron owner, 2026-07-29: "when a post is public in guides it should be publically
-   * visible on the website homepage navbar".
+   * It sat in `(hub)` and redirected anybody without a session to sign in. A "Forum" link that
+   * bounces a visitor to Discord OAuth is not a forum link, it is a sign-in button wearing one.
    *
-   * `/guides` lives in this `(site)` group and reads the API with no credentials, so an
-   * anonymous visitor sees exactly the public guides and nothing else. `/forum` is in
-   * `(hub)` and redirects anybody without a session to sign in — which is right for the
-   * boards, and was wrong for the guides: the one board deliberately readable by the
-   * public sat behind a login, and it is the board whose whole purpose is being read by
-   * people who have not joined yet.
-   *
-   * Placed before Comms so the reading order is "here is how to join" and then "here is
-   * where members talk", which is the order a prospective member needs them in.
+   * What they see is decided by the ACL, not by this nav: category visibility is a `viewPerm`
+   * bitmask, and the guest mask holds FORUM_VIEW_PUBLIC and nothing else. So an anonymous reader
+   * gets exactly the public categories — the same filter a member's own reads go through, one mask
+   * lower.
    */
-  { href: '/guides', label: 'Guides' },
-  { href: '/forum', label: 'Comms' },
+  { href: '/forum', label: 'Forum' },
+  {
+    label: 'Shipyard',
+    children: [
+      { href: '/shipyard', label: 'Outfitter', hint: 'Fit any ship in the game, no account needed' },
+      {
+        href: '/shipyard/public',
+        label: 'Public builds',
+        hint: 'Ships our commanders have published',
+      },
+    ],
+  },
+  /*
+   * ★ GROWING THE PUBLIC BAR, AS INVITED — SQUADRON OWNER, 2026-08-02 ★
+   *
+   * "we will add to this as we grow the site please", said while cutting this bar back to Forum and
+   * Shipyard. This is the first addition, and it is here because the owner made the pages public:
+   * "this will also be available to the public for use".
+   *
+   * Squadron builds is deliberately still absent — "Squadron builds should not be publically
+   * accessible at all!" Nothing here is a shortcut past a permission: every one of these pages
+   * checks TRADE_QUERY or SHIPYARD_VIEW against the caller's own mask, and the guest mask holds
+   * both. The bar shows what a visitor may open, and the pages decide.
+   */
+  {
+    label: 'Logistics',
+    children: [
+      {
+        href: '/logistics/commodities',
+        label: 'Commodities',
+        hint: 'Live prices across the bubble, no account needed',
+      },
+      {
+        href: '/logistics/freight-office',
+        label: 'Freight Office',
+        hint: 'Plan a hauling run and get the route',
+      },
+    ],
+  },
 ] as const;
 
 export function SiteNav() {
@@ -136,16 +195,22 @@ export function SiteNav() {
         </a>
 
         <ul className="ml-auto hidden list-none items-center gap-1 p-0 lg:flex">
-          {NAV_LINKS.map((l) => (
-            <li key={l.href}>
-              <a
-                href={l.href}
-                className="px-3 py-2 text-sm tracking-wide text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)]"
-              >
-                {l.label}
-              </a>
-            </li>
-          ))}
+          {NAV_LINKS.map((l) =>
+            'children' in l ? (
+              <li key={l.label}>
+                <NavDropdown label={l.label} children={l.children} />
+              </li>
+            ) : (
+              <li key={l.href}>
+                <a
+                  href={l.href}
+                  className="px-3 py-2 text-sm tracking-wide text-[var(--color-text-secondary)] transition-colors hover:text-[var(--color-text-primary)]"
+                >
+                  {l.label}
+                </a>
+              </li>
+            ),
+          )}
         </ul>
 
         <div className="ml-auto flex items-center gap-2 lg:ml-0">
@@ -189,7 +254,16 @@ export function SiteNav() {
             </span>
           </a>
 
-          <MobileNav links={NAV_LINKS} />
+          {/*
+            FLATTENED for the phone. A dropdown inside a slide-out panel is a menu inside a menu:
+            two taps to reach a link that has room to simply be listed. The panel is already
+            vertical, so grouping costs nothing there.
+          */}
+          <MobileNav
+            links={NAV_LINKS.flatMap((l) =>
+              'children' in l ? l.children.map((c) => ({ href: c.href, label: c.label })) : [l],
+            )}
+          />
         </div>
       </nav>
     </header>
@@ -249,9 +323,14 @@ export function SiteFooter() {
             </h2>
             <ul className="mt-4 list-none space-y-2 p-0 text-sm">
               {[
-                { href: '/situation', label: 'Situation board' },
-                { href: '/market', label: 'Commodities' },
-                { href: '/shipyard', label: 'Shipyard' },
+                /*
+                 * Kept in step with the navbar above. The footer used to list a Situation board and
+                 * a Commodities page that the nav no longer offers — a footer quietly advertising
+                 * what the nav dropped is how a site ends up with two answers to "what is here".
+                 */
+                { href: '/shipyard', label: 'Ship outfitter' },
+                { href: '/shipyard/public', label: 'Public builds' },
+                { href: '/forum', label: 'Forum' },
               ].map((l) => (
                 <li key={l.href}>
                   <a

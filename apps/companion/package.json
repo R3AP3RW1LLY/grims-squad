@@ -1,6 +1,6 @@
 {
   "name": "@grims/companion",
-  "version": "0.3.0",
+  "version": "0.5.0",
   "private": true,
   "description": "Electron companion. Reads Elite Dangerous journals and keeps the hub current.",
   "main": "dist/main.cjs",
@@ -17,13 +17,18 @@
   },
   "devDependencies": {
     "@grims/config": "workspace:*",
+    "@grims/ed-clients": "workspace:*",
     "electron": "^43.2.0",
     "electron-builder": "^26.15.3",
+    "esbuild": "^0.28.1",
     "typescript": "^5.7.0",
-    "vitest": "^3.0.0",
-    "esbuild": "^0.28.1"
+    "vitest": "^3.0.0"
   },
   "dependencies": {
-    "@grims/shared": "workspace:*"
+    "@grims/shared": "workspace:*",
+    "chart.js": "^4.5.1",
+    "electron-updater": "^6.8.9",
+    "koffi": "^3.1.4",
+    "preact": "^10.29.8"
   }
 }

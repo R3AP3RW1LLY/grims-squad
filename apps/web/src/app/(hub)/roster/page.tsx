@@ -113,6 +113,21 @@ export default async function RosterPage({
               <RailStat label="Listed" value={String(listed)} tone={listed === 0 ? 'warn' : 'default'} />
               <RailStat label="Officers" value={String(officers.length)} />
               <RailStat label="Verified CMDRs" value={String(withCmdr)} />
+              {/*
+                ★ THE NUDGE, NOT A RENAME — SQUADRON OWNER, 2026-08-02 ★
+                
+                Asked what should happen to a member with no verified Inara profile, the owner chose
+                "Nudge them, then leave it". Their Discord nickname is untouched, because there is
+                nothing authoritative to set it to — but an officer should be able to see, at a
+                glance, how many of the squadron are wearing a name we did not put there.
+                
+                Warn-toned only when there ARE any. A permanent amber zero reads as a fault.
+              */}
+              <RailStat
+                label="Awaiting a name"
+                value={String(Math.max(0, listed - withCmdr))}
+                tone={listed - withCmdr > 0 ? 'warn' : 'good'}
+              />
               <RailStat
                 label="Flew this week"
                 value={String(

@@ -31,6 +31,22 @@ services:
       #
       # Mounting the directory means a replaced file is visible immediately.
       - ../caddy:/etc/caddy:ro
+      # ★ OPERATOR-ENABLED SITES — OUTSIDE THE REPO MOUNT, DELIBERATELY ★
+      #
+      # The Caddyfile imports /etc/caddy-sites/*.caddy. Site blocks with
+      # prerequisites a deploy cannot satisfy (grims-squad.com needs its Origin
+      # CA certificate pair installed first) are staged in infra/caddy/sites/
+      # and copied here by the operator when they are ready to load. If this
+      # directory imported from the repo mount instead, the next `git pull`
+      # would load a block whose certificates do not exist and fail the whole
+      # config. Docker creates the host directory empty on first up, and an
+      # empty import glob is a no-op.
+      - /srv/grims/caddy:/etc/caddy-sites:ro
+      # The Cloudflare Origin CA pair for grims-squad.com. Empty until the
+      # cutover (infra/cutover-grims-squad.md) — mounting an empty directory
+      # costs nothing, and having the mount in place BEFORE the certificates
+      # arrive means installing them needs no compose change, only a reload.
+      - /etc/ssl/grims-squad.com:/etc/ssl/grims-squad.com:ro
       - caddy_data:/data # certificates and ACME account — MUST persist
       - caddy_config:/config
     environment:
@@ -88,6 +104,26 @@ services:
       dockerfile: infra/docker/Dockerfile.api
     restart: unless-stopped
     env_file: [/srv/grims/.env]
+    # ── Reaching GMSD AI, which lives on the owner's PC ──────────────────────
+    #
+    # A reverse SSH tunnel binds the model endpoints to the SERVER's loopback
+    # (see tools/gmsd-tunnel.cmd). A container has its own network namespace, so
+    # `127.0.0.1` inside here is the container itself — the tunnel is invisible
+    # from in here without this line.
+    #
+    # `host-gateway` resolves to the docker host, so AI_BASE_URL in production is
+    # `http://host.docker.internal:11434/v1`.
+    #
+    # WORTH CORRECTING A CLAIM MADE EARLIER: the AI contract said this value was
+    # identical on a laptop and on the server, "one value, one code path". That
+    # was true only while nothing had to cross a container boundary. It differs by
+    # HOST and by nothing else — same scheme, same ports, same paths — and the
+    # code still has no environment branching in it.
+    #
+    # The tunnel deliberately does NOT bind 0.0.0.0. Publishing an unauthenticated
+    # model endpoint to the internet is the one mistake that would matter here.
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
     environment:
       NODE_ENV: production
       API_PORT: 5001
@@ -169,6 +205,66 @@ services:
   #
   # There is deliberately no `restart:` for the same reason. A job that fails
   # should be visible in cron's mail, not retried in a loop against Inara.
+  # ── The resident worker ────────────────────────────────────────────────────
+  #
+  # Long-running, unlike `worker` below. It LISTENs on a Postgres channel and runs an ingest when
+  # the training page's "Run now" button asks for one.
+  #
+  # ★ WHY THIS EXISTS RATHER THAN THE API DOING IT ★
+  #
+  # The ingests are containers. The API has no Docker socket, and giving a web-facing service the
+  # ability to start containers is a far larger decision than a refresh button warrants. This has no
+  # ports and no ingress — it only listens to the database.
+  #
+  # `restart: unless-stopped` because a button that silently does nothing is worse than no button:
+  # if this is down, requests are discarded and the page will say "requested" for ever.
+  worker-daemon:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.worker
+    command: ['node', 'apps/worker/dist/daemon.js']
+    env_file: [/srv/grims/.env]
+    environment:
+      NODE_ENV: production
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  # ── The EDDN collector ─────────────────────────────────────────────────────
+  #
+  # Subscribes to the public EDDN relay and keeps `market_entries` current between nightly Spansh
+  # rebuilds. Roughly one market snapshot a second, from every player running an uploader.
+  #
+  # ★ EXACTLY ONE, AND THE SCALE FIELD IS NOT THE THING ENFORCING IT ★
+  #
+  # Two collectors would both write every station, interleaving two delete-and-insert transactions
+  # over the same rows. `deploy.replicas: 1` states the intent; the guarantee is a Postgres advisory
+  # lock inside the process, because a second one started by hand during a deploy would not consult
+  # this file.
+  #
+  # ★ NO PORTS, NO INGRESS, OUTBOUND ONLY ★
+  #
+  # It connects out to tcp://eddn.edcd.io:9500 and to Postgres. Nothing reaches it.
+  #
+  # `restart: unless-stopped` because a dead subscriber is invisible: prices simply stop being
+  # current, with no error anywhere. The training page's one-hour deadline is the alarm for that,
+  # and this is what makes the alarm rare enough to be worth reading.
+  eddn-collector:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.eddn-collector
+    env_file: [/srv/grims/.env]
+    environment:
+      NODE_ENV: production
+    restart: unless-stopped
+    # SIGTERM closes the current reporting window before exiting, so an ordinary redeploy does not
+    # leave a row the training page would report as a stall. Given room to finish that write.
+    stop_grace_period: 20s
+    deploy:
+      replicas: 1
+    depends_on:
+      postgres: { condition: service_healthy }
+
   worker:
     profiles: ['jobs']
     build:

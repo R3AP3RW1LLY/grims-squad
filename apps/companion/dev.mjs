@@ -24,6 +24,9 @@ delete env['ELECTRON_RUN_AS_NODE'];
 // Point at a local API unless told otherwise. The packaged app has no UI for
 // this on purpose — see apiBaseUrlFor.
 env['GRIMS_API_URL'] ??= 'http://localhost:5001';
+// The SITE, which in development is a different port from the API. In production one origin serves
+// both and this is not needed — see webBaseUrlFor.
+env['GRIMS_WEB_URL'] ??= 'http://localhost:5000';
 
 const electron = createRequire(import.meta.url)('electron');
 

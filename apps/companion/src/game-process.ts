@@ -82,6 +82,46 @@ export function commandFor(
  * message, the launcher, a truncated name — is testable without a machine that
  * happens to be playing Elite.
  */
+/**
+ * Is the process with this id Elite Dangerous?
+ *
+ * ★ ASKED ONLY WHEN THE FOREGROUND WINDOW CHANGES OWNER ★
+ *
+ * The overlays need to know whether the window in front belongs to the game, twice a second.
+ * Spawning `tasklist` twice a second is not possible — it measures at 190ms. But the ANSWER only
+ * changes when a human alt-tabs, so the caller samples the cheap thing (the foreground process id,
+ * about 1.6 microseconds) constantly and asks this only when that id is one it has not seen.
+ *
+ * Filtered by PID rather than by image name, so this answers "is that particular process the game"
+ * and not "is the game running somewhere" — which is a different question, and the one that was
+ * already being asked elsewhere.
+ */
+export function commandForPid(
+  platform: NodeJS.Platform,
+  pid: number,
+): { command: string; args: readonly string[] } | null {
+  if (platform !== 'win32') return null;
+  return { command: 'tasklist', args: ['/FI', `PID eq ${pid}`, '/NH', '/FO', 'CSV'] };
+}
+
+export async function isPidGame(
+  pid: number,
+  platform: NodeJS.Platform,
+  run: ProcessLister,
+): Promise<boolean> {
+  const cmd = commandForPid(platform, pid);
+  if (cmd === null) return false;
+
+  try {
+    const { stdout } = await run(cmd.command, cmd.args);
+    // The same parser, so the launcher exclusion holds here too: EDLaunch.exe owning the foreground
+    // window is emphatically not the game, and drawing panels over the launcher would be wrong.
+    return listingHasGame(stdout);
+  } catch {
+    return false;
+  }
+}
+
 export function listingHasGame(stdout: string): boolean {
   return stdout
     .split(/\r?\n/)
@@ -154,17 +194,68 @@ export function journalIsFresh(newestWriteAt: number | null, now: number = Date.
 }
 
 /**
- * Both halves. Neither alone is enough.
+ * ★ Status.json — THE SIGNAL THE JOURNAL CANNOT GIVE ★
  *
- * Process without a fresh journal is the game sitting at a menu. A fresh
- * journal without the process is a session that has just ended — the last write
- * is still recent, and reporting that as live is exactly the lag members notice
- * when they quit.
+ * Reported live, 2026-08-04: a member IN THE GAME, hauling a full hold, shown "Elite is not
+ * running" — because outfitting, the galaxy map and a long supercruise write no journal lines,
+ * and the fifteen-minute freshness window ran out. Frontier writes `Status.json` beside the
+ * journals EVERY FEW SECONDS while a commander is actually in a session, with a nonzero Flags
+ * word (Flags2 for on-foot). At the main menu the file goes stale and its flags read zero — so
+ * this is exactly the in-game-not-merely-open distinction the 2026-07-29 decision demanded,
+ * without the false-offline the journal window causes.
+ */
+export const STATUS_FRESH_MS = 2 * 60_000;
+
+export function statusSaysInGame(
+  mtime: number | null,
+  flags: number,
+  flags2: number,
+  now: number = Date.now(),
+): boolean {
+  if (mtime === null) return false;
+  const age = now - mtime;
+  if (age < 0 || age >= STATUS_FRESH_MS) return false;
+  // Flags 0 AND Flags2 0 is the main menu (or commander select) — open, not in.
+  return flags !== 0 || flags2 !== 0;
+}
+
+/**
+ * The process, plus EITHER recent journal writes OR a live Status.json. Neither half alone is
+ * enough: process without any in-session evidence is the game sitting at a menu; in-session
+ * evidence without the process is a session that has just ended.
  */
 export function isActivelyPlaying(
   processRunning: boolean,
   newestWriteAt: number | null,
   now: number = Date.now(),
+  statusInGame = false,
 ): boolean {
-  return processRunning && journalIsFresh(newestWriteAt, now);
+  return processRunning && (journalIsFresh(newestWriteAt, now) || statusInGame);
+}
+
+/**
+ * Reads Status.json's half of the answer. Never throws — a missing or garbled sidecar (the game
+ * rewrites it constantly, so torn reads happen) is simply "no evidence", and the journal window
+ * still gets its say.
+ */
+export async function readStatusInGame(
+  journalDir: string,
+  now: number = Date.now(),
+): Promise<boolean> {
+  try {
+    const { stat, readFile } = await import('node:fs/promises');
+    const { join } = await import('node:path');
+    const path = join(journalDir, 'Status.json');
+    const st = await stat(path);
+    const raw = (await readFile(path, 'utf8')).replace(/^\uFEFF/, '');
+    const parsed = JSON.parse(raw) as { Flags?: unknown; Flags2?: unknown };
+    return statusSaysInGame(
+      st.mtimeMs,
+      typeof parsed.Flags === 'number' ? parsed.Flags : 0,
+      typeof parsed.Flags2 === 'number' ? parsed.Flags2 : 0,
+      now,
+    );
+  } catch {
+    return false;
+  }
 }

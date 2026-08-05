@@ -8,7 +8,7 @@ import {
 import { Reflector } from '@nestjs/core';
 import type { FastifyRequest } from 'fastify';
 import { AppError, ErrorCode, type PermissionMask } from '@grims/shared';
-import { PermissionService } from './permission.service.js';
+import { ViewAsService } from './view-as.service.js';
 
 const KEY = 'authz:required';
 const CLOAK_KEY = 'authz:cloak-404';
@@ -44,7 +44,7 @@ export class RequiresPermissionGuard implements CanActivate {
   // Explicit tokens: see the note in AuthGuard. Type-based injection needs
   // emitDecoratorMetadata, which esbuild does not produce.
   constructor(
-    @Inject(PermissionService) private readonly permissions: PermissionService,
+    @Inject(ViewAsService) private readonly viewAs: ViewAsService,
     @Inject(Reflector) private readonly reflector: Reflector,
   ) {}
 
@@ -58,7 +58,16 @@ export class RequiresPermissionGuard implements CanActivate {
       throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in to continue.');
     }
 
-    if (!(await this.permissions.has(userId, BigInt(raw)))) {
+    /*
+     * ★ THROUGH THE PREVIEW, NOT AROUND IT ★
+     *
+     * `viewAs.allows` is `permissions.has` when nothing is being previewed, and the INTERSECTION of
+     * the caller's real mask with the previewed role's when something is. Checking
+     * `permissions.has` directly here would leave the guard answering yes while the nav that built
+     * the link answered no — a preview showing a sidebar without the admin section, and the admin
+     * pages still opening.
+     */
+    if (!(await this.viewAs.allows(userId, req, BigInt(raw)))) {
       // Deliberately does NOT say which permission was missing. Telling an
       // attacker exactly which bit to acquire is a map of the way in.
       const cloak = this.reflector.getAllAndOverride<boolean>(CLOAK_KEY, [

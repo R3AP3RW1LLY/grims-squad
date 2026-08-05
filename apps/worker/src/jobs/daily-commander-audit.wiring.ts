@@ -1,4 +1,6 @@
 import type { PrismaClient } from '@grims/db';
+import { announceMemberVerified, notifyMembers, notifySquadron } from '@grims/db';
+import { notificationNudge } from '../lib/live-notify.js';
 import type { DiscordAdapter, InaraAdapter } from '@grims/ed-clients';
 import type { TokenCipher } from '@grims/shared/server';
 import { rankForDisplay, LEADERSHIP_CEILING } from '@grims/shared';
@@ -64,6 +66,22 @@ export class PrismaAuditStore implements AuditStore {
     });
     const memberByDiscordId = new Map(members.map((m) => [m.discordId, m]));
 
+    /*
+     * Who has chosen their own nickname.
+     *
+     * Read for everybody in one query rather than per member: the sweep already makes one Inara
+     * request per commander and is the slowest job on the platform — adding a round trip per person
+     * to read one nullable column would be the cheapest possible way to make it slower.
+     */
+    const overrides = new Map(
+      (
+        await this.db.user.findMany({
+          where: { id: { in: userIds }, nicknameOverride: { not: null } },
+          select: { id: true, nicknameOverride: true },
+        })
+      ).map((u) => [u.id, u.nicknameOverride]),
+    );
+
     const keyByUser = new Map(
       links.flatMap((l) => {
         try {
@@ -103,6 +121,8 @@ export class PrismaAuditStore implements AuditStore {
         // on every GuildMemberUpdate — so it wins where both have a value.
         currentNick: member?.nick ?? identity?.guildNick ?? null,
         rank: rankForDisplay(held, LEADERSHIP_CEILING),
+        // Null for almost everybody. Set means the sweep leaves their nickname entirely alone.
+        nicknameOverride: overrides.get(v.userId) ?? null,
       };
     });
   }
@@ -113,6 +133,22 @@ export class PrismaAuditStore implements AuditStore {
     matched: boolean,
     at: Date,
   ): Promise<void> {
+    /*
+     * ★ THE NIGHTLY AUDIT'S HALF OF THE CONFIRM PATH — READ BEFORE WRITE ★
+     *
+     * Squadron owner, 2026-08-04: nothing in the catalogue left unwired. The audit re-checks
+     * EVERYONE nightly, so unlike the twenty-minute sweep its input is not a transition list —
+     * the transition has to be observed here, by reading whether the squadron half was
+     * unconfirmed before this write confirms it. Without the guard, every verified member would
+     * be re-congratulated at 00:15, nightly, forever.
+     */
+    const wasUnconfirmed = matched
+      ? (await this.db.cmdrVerification.findFirst({
+          where: { userId, isVerified: true, revokedAt: null, squadronVerifiedAt: null },
+          select: { userId: true },
+        })) !== null
+      : false;
+
     await this.db.cmdrVerification.updateMany({
       where: { userId, isVerified: true, revokedAt: null },
       data: {
@@ -123,6 +159,52 @@ export class PrismaAuditStore implements AuditStore {
         squadronCheckedAt: at,
       },
     });
+
+    if (wasUnconfirmed && matched) {
+      /*
+       * ★ MIRRORED IN apps/api/src/cmdr/inara-link.store.prisma.ts AND inara-sync.ts —
+       * KEEP THE COPY IDENTICAL ★ Failure swallowed: the member IS verified either way.
+       */
+      try {
+        await notifyMembers(
+          this.db,
+          [userId],
+          {
+            kind: 'verification.confirmed',
+            title: 'Your commander is fully verified',
+            body: 'Inara confirms your commander and your squadron membership. Every member area is open to you.',
+            link: '/settings/commander',
+          },
+          notificationNudge,
+        );
+
+        const member = await this.db.user.findUnique({
+          where: { id: userId },
+          select: { displayName: true, handle: true },
+        });
+        const name = member?.displayName ?? member?.handle ?? 'A new member';
+
+        await notifySquadron(
+          this.db,
+          {
+            kind: 'member.verified',
+            title: `${name} is verified — welcome them aboard`,
+            body: 'Their commander and squadron membership are confirmed.',
+            actorUserId: userId,
+          },
+          notificationNudge,
+        );
+
+        /*
+         * And the Discord channel — through the shared announce door in @grims/db, so all three
+         * confirm paths post identical words without a fourth mirrored copy. Channel only, no
+         * forum carbon-copy: the squadron feed above already carries it on-site.
+         */
+        await announceMemberVerified(this.db, userId);
+      } catch {
+        // See above: the verification stands whether or not the bell rang.
+      }
+    }
   }
 
   async rememberNickname(discordId: string, nickname: string): Promise<void> {

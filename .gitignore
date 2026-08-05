@@ -29,6 +29,10 @@
 *.tsbuildinfo
 *~
 .DS_Store
+# Written by `tools/changelog.mjs --write-pending`; served to webmasters by
+# GET /v1/changelog/pending as the not-yet-deployed preview. Regenerated at
+# will, so committing one would only freeze a stale preview into the repo.
+.changelog-pending.json
 .cloudflared/
 .env
 .env.*
@@ -101,3 +105,6 @@ vault-*.enc
 # and attached as workflow artifacts.
 apps/companion/release/
 .local-storage/
+
+# Operations credentials (Cloudflare token, etc). Never in git, per the standing secrets rule.
+.secrets/

@@ -31,6 +31,13 @@ import type { AclBoundClient } from '../authz/acl-db.service.js';
 
 /** A category as the caller is allowed to see it. */
 export interface CategoryView {
+  /**
+   * Threads with activity this member has not seen. 0 for an anonymous visitor.
+   *
+   * Counted against their per-board `lastSeenAt`, so "new" means new TO THEM rather than recent —
+   * a board nobody has posted in for a month is still new to somebody who has never opened it.
+   */
+  readonly unreadCount?: number;
   readonly id: string;
   readonly parentId: string | null;
   readonly slug: string;
@@ -38,8 +45,20 @@ export interface CategoryView {
   readonly description: string | null;
   readonly position: number;
   readonly isLocked: boolean;
-  /** Whether THIS caller may start a thread here. Computed, never a raw mask. */
+  /**
+   * Whether THIS caller may start a thread here. Computed, never a raw mask.
+   *
+   * False for EVERYBODY on a `threads_via_publish` board — the webmaster included: threads
+   * there arrive through the suggestion-box publish flow, so there is no "New thread" button
+   * to show anyone (squadron owner, 2026-08-04).
+   */
   readonly canPost: boolean;
+  /**
+   * Whether THIS caller may REPLY in threads here. Computed from `reply_perm`, falling back to
+   * `post_perm` when NULL — the split that lets Feature Requests take members' replies while
+   * thread creation stays the publish flow's. Presentation only; the post service re-checks.
+   */
+  readonly canReply: boolean;
 }
 
 export interface CategoryInput {
@@ -113,6 +132,68 @@ function requireModerator(mask: bigint): void {
 
 export class CategoryService {
   /**
+   * How many threads in each board this member has not seen.
+   *
+   * ★ ONE QUERY FOR EVERY BOARD, NOT ONE PER CARD ★
+   *
+   * The forum index renders every visible board. A count per card would be a query per card, run on
+   * the most-visited page in the hub — so both sides are fetched once and joined in memory over a
+   * few dozen rows.
+   *
+   * A board with NO read marker counts everything: somebody who has never opened it has not seen
+   * any of it. That is the correct answer and also the one a new member gets, which is when the
+   * indicator is most useful.
+   */
+  async unreadCounts(
+    db: AclBoundClient,
+    userId: string | undefined,
+    categoryIds: readonly string[],
+  ): Promise<Map<string, number>> {
+    const out = new Map<string, number>();
+    // An anonymous visitor has read nothing and is told nothing — an unread badge for somebody with
+    // no account is noise about content they cannot follow.
+    if (userId === undefined || categoryIds.length === 0) return out;
+
+    const [reads, threads] = await Promise.all([
+      db.forumCategoryRead.findMany({
+        where: { userId, categoryId: { in: [...categoryIds] } },
+        select: { categoryId: true, lastSeenAt: true },
+      }),
+      db.forumThread.findMany({
+        where: { categoryId: { in: [...categoryIds] }, deletedAt: null },
+        select: { categoryId: true, lastPostAt: true, createdAt: true },
+      }),
+    ]);
+
+    const seenAt = new Map(reads.map((r) => [r.categoryId, r.lastSeenAt] as const));
+
+    for (const t of threads) {
+      const last = t.lastPostAt ?? t.createdAt;
+      const seen = seenAt.get(t.categoryId);
+      // No marker means never opened, so everything counts.
+      if (seen === undefined || last.getTime() > seen.getTime()) {
+        out.set(t.categoryId, (out.get(t.categoryId) ?? 0) + 1);
+      }
+    }
+
+    return out;
+  }
+
+  /**
+   * Records that this member has now seen a board.
+   *
+   * Called when they open it. `upsert` so the first visit creates the marker and every later one
+   * moves it — there is no separate "have they been here before" question to get wrong.
+   */
+  async markSeen(db: AclBoundClient, userId: string, categoryId: string): Promise<void> {
+    await db.forumCategoryRead.upsert({
+      where: { userId_categoryId: { userId, categoryId } },
+      create: { userId, categoryId, lastSeenAt: new Date() },
+      update: { lastSeenAt: new Date() },
+    });
+  }
+
+  /**
    * The categories this caller may see, in display order.
    *
    * Flat rather than nested: the client draws the tree from `parentId`. A nested
@@ -122,7 +203,16 @@ export class CategoryService {
    * DEPEND on that being true. For something ACL-filtered, the shape that
    * survives a mistake is the better one.
    */
-  async list(db: AclBoundClient, callerMask: bigint): Promise<CategoryView[]> {
+  async list(
+    db: AclBoundClient,
+    callerMask: bigint,
+    /**
+     * Who is asking, for unread counts. Optional so an anonymous caller works unchanged — they have
+     * read nothing and are told nothing, because an unread badge for somebody with no account is
+     * noise about content they cannot follow.
+     */
+    userId?: string,
+  ): Promise<CategoryView[]> {
     const rows = await db.forumCategory.findMany({
       orderBy: [{ position: 'asc' }, { name: 'asc' }],
       select: {
@@ -134,12 +224,17 @@ export class CategoryService {
         position: true,
         isLocked: true,
         postPerm: true,
+        replyPerm: true,
+        threadsViaPublish: true,
       },
     });
+
+    const unread = await this.unreadCounts(db, userId, rows.map((r) => r.id));
 
     return rows.map((r) => ({
       id: r.id,
       parentId: r.parentId,
+      unreadCount: unread.get(r.id) ?? 0,
       slug: r.slug,
       name: r.name,
       description: r.description,
@@ -150,8 +245,23 @@ export class CategoryService {
        * mask would tell a member exactly which bit they are missing, which is a
        * map of the permission model handed to anybody curious enough to open the
        * network tab.
+       *
+       * A `threads_via_publish` board answers false for everyone — the composer door is
+       * closed there, however strong the mask (the flag postdates older fakes, so absent
+       * reads as false).
        */
-      canPost: !r.isLocked && satisfiesMask(callerMask, maskOf(r.postPerm)),
+      canPost:
+        !r.isLocked &&
+        !(r.threadsViaPublish ?? false) &&
+        satisfiesMask(callerMask, maskOf(r.postPerm)),
+      /*
+       * Replies follow `reply_perm`, and NULL means "same as post_perm" — the exact rule the
+       * post service enforces, computed here only so the thread page knows whether to draw
+       * the composer.
+       */
+      canReply:
+        !r.isLocked &&
+        satisfiesMask(callerMask, maskOf(r.replyPerm ?? null) ?? maskOf(r.postPerm)),
     }));
   }
 
@@ -222,7 +332,7 @@ export class CategoryService {
   async #parentViewPerm(db: AclBoundClient, parentId: string | null): Promise<bigint | null> {
     if (parentId === null) return null;
 
-    const parent = await db.forumCategory.findUnique({
+    const parent = await db.forumCategory.findFirst({
       where: { id: parentId },
       select: { viewPerm: true },
     });

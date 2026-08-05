@@ -6,8 +6,13 @@ import {
   getMe,
   getMyDevices,
   getMyCommander,
+  getMyBadges,
+  getPersonalActivity,
+  getSquadronActivity,
 } from '../../../lib/api';
+import { kindIcon, notificationAge } from '../../../components/notifications-format';
 import { PilotRanks, Location, Fleet, Balance } from './commander-panels';
+import { BadgeCase } from './badge-case';
 import { Avatar } from '../../../components/account-menu';
 import {
   PageHeader,
@@ -50,13 +55,16 @@ export const dynamic = 'force-dynamic';
  */
 
 export default async function DashboardPage() {
-  const [status, inara, stats, me, devices, commander] = await Promise.all([
+  const [status, inara, stats, me, devices, commander, badges, activity, personal] = await Promise.all([
     getAccountStatus(),
     getInaraStatus(),
     getSquadronStats(),
     getMe(),
     getMyDevices(),
     getMyCommander(),
+    getMyBadges(),
+    getSquadronActivity(),
+    getPersonalActivity(),
   ]);
 
   const verified = inara?.cmdrName ?? null;
@@ -111,7 +119,13 @@ export default async function DashboardPage() {
         Squadron owner, 2026-07-29: verifications must show instantly across the
         app. This is the page they land on.
       */}
-      <LiveRefresh types={['telemetry', 'verification']} />
+      {/*
+        `notification` joined the list on 2026-08-04, when SQUADRON ACTIVITY below started
+        rendering the live feed. Not a contradiction of the "only what this page shows" rule
+        above — it is that rule: the feed is now ON the page, and each event is a row this page
+        displays, coalesced by LiveRefresh so a burst still costs one refresh.
+      */}
+      <LiveRefresh types={['telemetry', 'verification', 'notification']} />
 
       {/*
         ★ A GREETING, NOT A CONTROL PANEL ★
@@ -230,36 +244,154 @@ export default async function DashboardPage() {
           </>
         )}
 
+        {/*
+          Outside the commander branch above, on purpose: badges are earned on the leaderboards,
+          not read from the journal, and a member whose commander profile failed to load has not
+          also lost their badge case.
+        */}
+        <BadgeCase badges={badges?.badges ?? null} />
+
+        {/*
+          ★ RENAMED IN THE 2026-08-04 NOTIFICATIONS PASS — A PAIR, ON PURPOSE ★
+
+          YOUR ACTIVITY above SQUADRON ACTIVITY: the same word carried by both headings is what
+          says these two sections answer the same question about two different subjects — you,
+          then everybody. (Section renders its title uppercase, so the sentence-case strings here
+          arrive on screen exactly as the owner spelled them.)
+        */}
+        {/*
+          ★ AN ACTIVITY SECTION THAT SHOWS ACTIVITY — SQUADRON OWNER, 2026-08-04 ★
+
+          "this is kind of weird for an activity tracker!" — it was: the section held a paragraph
+          about how the rank check works and a device count, which is settings prose wearing an
+          activity heading. Now it leads with the member's own recent happenings — the same rows
+          the bell's Personal tab reads, so the two can never disagree — and the rank-check
+          machinery shrinks to the one-line footnote it always deserved to be. Reading it here
+          marks nothing read: glancing at a dashboard is not opening the bell.
+        */}
         <Section
           title="Your activity"
-          description="The monthly rank check looks for two things: taking part in Discord, and an Elite session. The first is counted for everybody automatically; the second comes from the companion app."
+          description="What has just happened to you: badges, bounties, answers, your builds."
         >
-          {activeDevices === 0 ? (
-            <p className="max-w-[68ch] text-sm leading-relaxed text-[var(--color-text-secondary)]">
-              Nothing is reporting your sessions yet, so your months read as{' '}
-              <strong>unknown</strong> rather than as inactive.{' '}
-              <a href="/settings/devices" className="text-[var(--color-brand-cyan-bright)]">
-                Install the companion app
-              </a>{' '}
-              and it keeps your ranks, ships and monthly activity current on its own.
+          {personal === null ? (
+            <p className="mb-4 max-w-[68ch] text-sm leading-relaxed text-[var(--color-text-secondary)]">
+              Your activity could not be loaded just now. It returns on its own.
+            </p>
+          ) : personal.items.length === 0 ? (
+            <p className="mb-4 max-w-[68ch] text-sm leading-relaxed text-[var(--color-text-secondary)]">
+              Nothing yet — your bounty banks, badges, accepted answers and build events land here
+              as they happen.
             </p>
           ) : (
-            <p className="max-w-[68ch] text-sm leading-relaxed text-[var(--color-text-secondary)]">
-              {activeDevices === 1 ? 'One device is' : `${activeDevices} devices are`} paired and
-              sending. Your sessions, ranks and ships update themselves whenever the app is
-              running.{' '}
-              <a href="/settings/devices" className="text-[var(--color-brand-cyan-bright)]">
-                Manage devices
-              </a>
-              .
-            </p>
+            <ul className="m-0 mb-4 list-none divide-y divide-[var(--color-border-subtle)] overflow-hidden rounded-lg border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel)] p-0">
+              {personal.items.slice(0, 8).map((item) => (
+                <li key={item.id} className="flex items-start gap-3 px-4 py-3">
+                  <span aria-hidden="true" className="shrink-0 text-base leading-5">
+                    {kindIcon(item.kind)}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    {item.link === null ? (
+                      <span className="block text-sm leading-5 text-[var(--color-text-primary)]">
+                        {item.title}
+                      </span>
+                    ) : (
+                      <a
+                        href={item.link}
+                        className="block text-sm leading-5 text-[var(--color-text-primary)] transition-colors hover:text-[var(--color-brand-orange-bright)]"
+                      >
+                        {item.title}
+                      </a>
+                    )}
+                    <p className="m-0 mt-1 font-mono text-[10px] tracking-wide text-[var(--color-text-dim)]">
+                      {notificationAge(item.createdAt)}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ul>
           )}
+
+          {/* The rank-check machinery, demoted to the footnote it is. */}
+          <p className="m-0 max-w-[68ch] font-mono text-[11px] leading-relaxed text-[var(--color-text-dim)]">
+            {activeDevices === 0 ? (
+              <>
+                The monthly rank check counts Discord automatically; game sessions need the{' '}
+                <a href="/settings/devices" className="text-[var(--color-brand-cyan-bright)]">
+                  companion app
+                </a>{' '}
+                — nothing is reporting yours yet, so your months read as unknown.
+              </>
+            ) : (
+              <>
+                Rank check: Discord counted automatically · game sessions from your{' '}
+                {activeDevices === 1 ? 'paired device' : `${activeDevices} paired devices`} ·{' '}
+                <a href="/settings/devices" className="text-[var(--color-brand-cyan-bright)]">
+                  manage devices
+                </a>
+              </>
+            )}
+          </p>
         </Section>
 
         <Section
-          title="The squadron"
-          description="How the rest of us are doing."
+          title="Squadron activity"
+          description="What has just happened across the squadron, and how the rest of us are doing."
         >
+          {/*
+            ★ THE FEED LEADS, THE FIGURES FOLLOW ★
+
+            This section was 'The squadron' and held only the four tiles. The feed goes ABOVE
+            them because it is the part that changes between two visits — the member counts move
+            weekly, the feed moves nightly — and the tiles keep their place below rather than
+            leaving: the feed says what happened, the tiles say what we are, and the section
+            needs both to earn its heading.
+
+            Ten entries, from the same endpoint the bell's Squadron tab reads, so the two can
+            never disagree about what counts as squadron news. Reading it here does NOT advance
+            the seen marker — glancing at a dashboard is not opening the feed, and a member who
+            saw three rows in passing has not read them.
+          */}
+          {activity === null ? (
+            <p className="mb-8 max-w-[68ch] text-sm leading-relaxed text-[var(--color-text-secondary)]">
+              The squadron feed could not be loaded just now. It returns on its own — this page
+              refreshes as events arrive.
+            </p>
+          ) : activity.items.length === 0 ? (
+            <p className="mb-8 max-w-[68ch] text-sm leading-relaxed text-[var(--color-text-secondary)]">
+              The squadron feed is empty for now. What members post, build and claim appears here
+              as it happens.
+            </p>
+          ) : (
+            <ul className="m-0 mb-8 list-none divide-y divide-[var(--color-border-subtle)] overflow-hidden rounded-lg border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel)] p-0">
+              {activity.items.slice(0, 10).map((item) => (
+                <li key={item.id} className="flex items-start gap-3 px-4 py-3">
+                  <span aria-hidden="true" className="shrink-0 text-base leading-5">
+                    {kindIcon(item.kind)}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    {item.link === null ? (
+                      <span className="block text-sm leading-5 text-[var(--color-text-primary)]">
+                        {item.title}
+                      </span>
+                    ) : (
+                      <a
+                        href={item.link}
+                        className="block text-sm leading-5 text-[var(--color-text-primary)] transition-colors hover:text-[var(--color-brand-orange-bright)]"
+                      >
+                        {item.title}
+                      </a>
+                    )}
+                    <p className="m-0 mt-1 font-mono text-[10px] tracking-wide text-[var(--color-text-dim)]">
+                      {item.actor === null
+                        ? notificationAge(item.createdAt)
+                        : `${item.actor.displayName} · ${notificationAge(item.createdAt)}`}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+
           <StatGrid>
             <StatTile
             label="Squadron"
@@ -304,11 +436,16 @@ export default async function DashboardPage() {
           description="Named rather than mocked up. Nothing on this page is invented — every figure above is read from live data, and a feature that does not exist says so instead of showing a plausible number."
         >
           <dl className="m-0 grid gap-x-8 gap-y-3 sm:grid-cols-2">
+            {/*
+              Leaderboards left this list on 2026-08-04 — the three boards are live under
+              /leaderboards, and a page cannot both link a feature and call it "soon".
+              Notifications followed the same day: the bell is live in the top bar and the
+              squadron feed renders above, so calling it "soon" here would be the page
+              contradicting itself.
+            */}
             {[
-              ['Notifications', 'Replies, promotions and operations you signed up for.'],
               ['Operations', 'Wings forming up, who has signed on, and what they still need.'],
               ['The faction', 'Our systems, their state, and this week’s orders.'],
-              ['Leaderboards', 'Who is flying what, and how far.'],
             ].map(([title, blurb]) => (
               <div key={title} className="flex gap-3 text-sm">
                 <dt className="shrink-0 font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--color-text-dim)]">

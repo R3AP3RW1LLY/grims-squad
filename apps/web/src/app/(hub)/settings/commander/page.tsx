@@ -14,9 +14,11 @@ import {
   CouldNotLoad,
 } from '../../../../components/hub-page';
 import { PageTabs, resolveTab, type PageTab } from '../../../../components/page-tabs';
+import { SignatureEditor } from './signature-editor';
 import { PrivacyControls, sharedFields } from '../privacy/body';
 import { appVersionSummary } from '../../../../components/update-banner-rules';
-import { getMyPrivacy, getUpdateStatus } from '../../../../lib/api';
+import { getMyPrivacy, getProfile, getUpdateStatus, getMyNickname } from '../../../../lib/api';
+import { NicknameChooser } from '../../../../components/nickname-chooser';
 import { SecurityBody } from '../security/body';
 import { AccountBody } from '../account/body';
 
@@ -63,6 +65,13 @@ const TABS: readonly PageTab[] = [
    * now holds the same controls rather than on a 404.
    */
   { key: 'security', label: 'Security' },
+  /*
+   * Squadron owner, 2026-07-30: "this should be built in a new tab on the commander profile page".
+   *
+   * Placed before Account rather than last: Account holds the things you touch once (export,
+   * delete), and a tab people will actually visit should not sit behind them.
+   */
+  { key: 'signature', label: 'Forum signature' },
   { key: 'account', label: 'Account' },
 ];
 
@@ -73,6 +82,11 @@ export default async function CommanderPage({
 }) {
   const params = await searchParams;
   const tab = resolveTab(TABS, params['tab']);
+  /*
+   * Only for the tab that shows it. This is a Discord round trip's worth of state behind it, and
+   * the signature editor has no use for it.
+   */
+  const nickname = tab === 'verification' ? await getMyNickname() : null;
 
   /*
    * Privacy is fetched HERE as well as inside `PrivacyControls`, because the
@@ -97,6 +111,13 @@ export default async function CommanderPage({
      */
     getUpdateStatus(),
   ]);
+
+  /*
+   * Their own profile, for the banner's rank layers. Fetched separately because the signature tab
+   * is the only thing that needs it, and Next dedupes within a render — so a member who never opens
+   * that tab pays nothing for it.
+   */
+  const profile = me.user === null ? null : await getProfile(me.user.handle);
 
   /*
    * Null covers a signed-out read, an unreachable release bucket, and an API
@@ -125,7 +146,45 @@ export default async function CommanderPage({
         only the first two tabs need — cannot blank a privacy screen that never
         depended on it.
       */}
-      {tab === 'security' ? (
+      {tab === 'signature' ? (
+        <PageBody
+          wide
+          lead="How you appear on the forums. None of this changes your Discord photo."
+        >
+          <SignatureEditor
+            discordAvatarUrl={me.user?.avatarUrl ?? null}
+            /*
+             * Real values, so the banner preview shows THEIR name and rank on first paint. A
+             * generator that shows placeholders until a request lands is one people design
+             * against the placeholder and then find looks wrong with their own details in it.
+             */
+            who={{
+              commander: verified,
+              squadronRank: me.user?.rank ?? null,
+              squadron: 'GRIM’S SQUAD',
+              allegiance: 'Blood Brothers from Alrai',
+              /*
+               * The six Elite ladders, from the commander snapshot. Absent ones render as nothing
+               * rather than as an empty slot, so an unverified member still gets a working banner.
+               */
+              /*
+               * The six Elite ladders, keyed lowercase to match the banner's source names. An
+               * absent ladder renders as NOTHING rather than as an empty slot, so an unverified
+               * member still gets a working banner rather than a row of blanks.
+               */
+              ranks: Object.fromEntries(
+                (profile?.commander.ranks ?? []).map((r: { key: string; name: string | null }) => [
+                  r.key.toLowerCase(),
+                  r.name,
+                ]),
+              ),
+              ship: profile?.commander.currentShip ?? null,
+              memberSince: null,
+              lastPlayed: profile?.commander.lastPlayedAt ?? null,
+            }}
+          />
+        </PageBody>
+      ) : tab === 'security' ? (
         <SecurityBody />
       ) : tab === 'account' ? (
         <AccountBody />
@@ -343,6 +402,27 @@ export default async function CommanderPage({
             <SquadronStatus />
             <InaraForm />
           </VerificationProvider>
+
+          {/*
+            ★ YOUR NAME IN DISCORD, ON THE "NAME & VERIFICATION" TAB ★
+
+            Squadron owner, 2026-08-02: an officer's chosen nickname "should not change from that
+            unless they change it" — so there has to be a place to change it, and this is the tab
+            about what the member is called.
+
+            Shown to everybody, not only to officers. `NicknameChooser` explains the convention to
+            somebody who cannot alter it, which is worth more than hiding the section: a member who
+            has heard that officers can choose should be told why they cannot, rather than
+            concluding the page is broken.
+          */}
+          {nickname !== null && (
+            <Section
+              title="Your name in Discord"
+              description="What the squadron sees in the member list, and where it comes from."
+            >
+              <NicknameChooser initial={nickname} />
+            </Section>
+          )}
         </PageBody>
       )}
     </>

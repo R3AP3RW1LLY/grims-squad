@@ -1,0 +1,17 @@
+-- The consent category colonisation data arrives under.
+--
+-- ★ SQUADRON OWNER, 2026-08-02 ★
+--
+-- Asked how the new journal events should reach people: "On by default for anyone in the
+-- colonization system." Consent here is OPT-OUT — `privacy_settings.telemetry_opt_out_categories`
+-- lists what a member has switched off, and is empty by default — so adding the value IS on by
+-- default, and adding it to the catalogue is what lets somebody switch it off knowingly.
+--
+-- Separate from `trade` deliberately. Both are cargo, but a delivery says a member was at a
+-- specific construction site at a specific moment, and somebody happy to appear on a trade
+-- leaderboard should be able to decline that without giving up the leaderboard. The same reasoning
+-- that gave `onfoot` its own value rather than folding it into `fleet`.
+--
+-- ADDED, never reordered. Postgres enum values are stored by position, so inserting one in the
+-- middle would silently change what every existing row means.
+ALTER TYPE "TelemetryCategory" ADD VALUE IF NOT EXISTS 'colonisation';

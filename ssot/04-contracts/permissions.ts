@@ -21,8 +21,15 @@
  *   Bits are grouped by domain with reserved gaps, so a new permission never renumbers an
  *   existing one. Renumbering would silently change what every stored role mask means.
  *     0-9   forum        10-19 ops         20-29 fleet & carriers
- *     30-39 BGS          40-49 trade       50-59 AI
- *     60-69 admin        70-79 telemetry   80+   reserved
+ *     30-39 BGS          40-42 trade       43-49 shipyard
+ *     50-59 AI           60-69 admin       70-79 telemetry
+ *     80+   reserved
+ *
+ *   The 40s were "trade" alone until 2026-08-01. Trade had used three of ten for a year and the
+ *   shipyard needed four; a fresh decade for four bits would have cost the last unreserved block
+ *   for a domain that is unlikely to grow past this. The ranges are a convention for keeping
+ *   related bits together, not a promise — what must never change is a bit's NUMBER, because every
+ *   stored role mask is interpreted by position.
  */
 
 /** A permission bitmask. Always `bigint`, never `number` (INV-006). */
@@ -123,6 +130,39 @@ export const Permission = {
   /** Ring 1. Create and manage personal price alerts. */
   TRADE_MANAGE_ALERTS: 1n << 42n,
 
+  /*
+   * ── Shipyard ──────────────────────────────────────────────────────────────
+   *
+   * ★ SQUADRON OWNER, 2026-08-01 ★
+   *
+   * "create the permissions for the Shipyard category and add them to the roles page make them work
+   * the same as all other categories."
+   *
+   * ★ WHY FOUR AND NOT ONE ★
+   *
+   * Because the four things a member does here carry different consequences. Planning a ship is
+   * private and costs nothing. Saving one keeps a row. Sharing one puts a member's name in front of
+   * the squadron. Publishing one puts it in front of the internet, where it cannot be recalled.
+   *
+   * One bit for all four would mean the only way to stop somebody publishing to the public web is
+   * to stop them planning a ship at all — which is the shape of gate that gets left wide open
+   * because closing it costs too much.
+   */
+  /** Ring 1. Open the outfitter and the assisted builder. Reads Frontier's own data. */
+  SHIPYARD_VIEW: 1n << 43n,
+  /** Ring 1. Keep builds against their own account. */
+  SHIPYARD_SAVE: 1n << 44n,
+  /** Ring 1. Publish a build to the squadron — every signed-in member can then open it. */
+  SHIPYARD_SHARE: 1n << 45n,
+  /**
+   * Ring 2. Publish a build on a link that works WITHOUT signing in.
+   *
+   * Separate from SHIPYARD_SHARE because a public link is the only action on this page that cannot
+   * be taken back once somebody has copied it — so it must be revocable on its own. Every member
+   * holds it; the point of the separate bit is being able to take it away from one of them.
+   */
+  SHIPYARD_SHARE_PUBLIC: 1n << 46n,
+
   // ── AI ───────────────────────────────────────────────────────────────────
   /** Ring 1. Converse with GSAI at all. Without it, the panel is not offered. */
   AI_CHAT: 1n << 50n,
@@ -136,6 +176,66 @@ export const Permission = {
   AI_TOOLS_WRITE: 1n << 52n,
   /** Ring 2+. AI administration: kill switches, quota overrides, cross-member conversation review. */
   AI_TOOLS_ADMIN: 1n << 53n,
+  /**
+   * Ring 2. Read the AI call log, and work the screening queue.
+   *
+   * ★ NARROWER THAN AI_TOOLS_ADMIN, ON PURPOSE ★
+   *
+   * Squadron owner, 2026-07-30: every AI conversation is "logged for officer review ... it also
+   * need to be visible to the webmaster role! this is non-negotiable as the webmaster is the AI
+   * developer."
+   *
+   * `AI_TOOLS_ADMIN` would satisfy that and also hand every officer the kill switches and quota
+   * overrides, which is a great deal more than reading a log. Reviewing what the model said and
+   * being able to turn it off are different jobs, and only one of them was asked for.
+   *
+   * ★ THE WEBMASTER GETS THIS AUTOMATICALLY ★
+   *
+   * Deliberately NOT in SQUADRON_STANDING_PERMISSIONS, so `ALL_PERMISSIONS & ~SQUADRON_STANDING`
+   * includes it. That is the whole mechanism: the webmaster holds everything except the two bits
+   * that mean "speaks for the squadron", and debugging a model whose output you cannot see is not
+   * speaking for anybody.
+   */
+  AI_REVIEW: 1n << 54n,
+  /**
+   * Ring 2. Watch what GMSD AI is learning, and approve what goes into it.
+   *
+   * ★ WHY THIS IS NOT AI_TOOLS_ADMIN EITHER ★
+   *
+   * Squadron owner, 2026-07-30: any member may submit screenshots for the image models, and
+   * "webmaster + AI_TRAINING holders approve". That is a curation job — looking at a picture and
+   * deciding whether it belongs — and it wants to be handed to the members who know Elite, not to
+   * whoever also happens to hold the kill switches.
+   *
+   * It also gates the training page itself: ingestion sources, what has been trained, what is
+   * training now, and when the next cycle runs. Reading that is not administering anything.
+   *
+   * ★ THE WEBMASTER GETS THIS AUTOMATICALLY ★
+   *
+   * Same mechanism as `AI_REVIEW`: kept out of `SQUADRON_STANDING_PERMISSIONS`, so the webmaster's
+   * `ALL_PERMISSIONS & ~SQUADRON_STANDING` includes it. Approving a training image is not speaking
+   * for the squadron.
+   */
+  AI_TRAINING: 1n << 55n,
+  /**
+   * Ring 1. Offer screenshots for GMSD AI to train on — "Help Train the Bot".
+   *
+   * ★ SEPARATE FROM AI_TRAINING, ON THE OWNER'S INSTRUCTION ★
+   *
+   * Squadron owner, 2026-08-01: "Ai Training also needs permissions that we can add to each role
+   * please ... so we can enable / disable it as we need to."
+   *
+   * Submitting and approving are different jobs held by different people. One bit covering both
+   * would mean the only way to stop somebody submitting is to take away their ability to review,
+   * and the only way to let somebody review is to let everybody submit.
+   *
+   * ★ AND WHY A BIT AT ALL, WHEN EVERY MEMBER GETS IT ★
+   *
+   * Because a member who floods the pool with junk is a real problem with no other remedy. Removing
+   * this from one role — or from one person, via their role — stops it without touching anything
+   * else they can do. It is the sanction that exists so the feature can stay open by default.
+   */
+  AI_TRAIN_SUBMIT: 1n << 56n,
 
   // ── Admin ────────────────────────────────────────────────────────────────
   /** Ring 2. Member management: search, filter, notes, probation, activity flags, deactivation. */
@@ -156,6 +256,61 @@ export const Permission = {
    * consent in PrivacySetting is a separate, server-enforced control (INV-013).
    */
   TELEMETRY_WRITE: 1n << 70n,
+
+  // ── Colonisation ─────────────────────────────────────────────────────────
+  /*
+   * ★ SQUADRON OWNER, 2026-08-02 ★
+   *
+   * "colonization ... will allow our members to post their colonization project to the squadron for
+   * assistance etc. officers will be able to add Squadron specific and personal project and ladder
+   * ranked members will be able to list personal projects."
+   *
+   * Four bits, split the same way the Shipyard is and for the same reason: the things a member does
+   * here carry different consequences. Reading the board is nothing. Posting a project puts their
+   * name and their build in front of the squadron. Publishing one puts a system, a station and a
+   * shopping list on the open web, which cannot be recalled. And declaring what the WHOLE squadron
+   * is working on steers everybody's evening.
+   */
+  /** Ring 1. See the colonisation boards. Members only — a project board is operational. */
+  COLONY_VIEW: 1n << 71n,
+  /** Ring 1. Post a personal project and ask the squadron for help with it. */
+  COLONY_POST: 1n << 72n,
+  /**
+   * Ring 2. Publish a personal project on a link that works WITHOUT signing in.
+   *
+   * Its own bit because it is the only action here that cannot be taken back once somebody has
+   * copied the link — the same reasoning as SHIPYARD_SHARE_PUBLIC, which is deliberately NOT in
+   * PRIVILEGED_PERMISSIONS. Neither is this: see the note below that list.
+   */
+  COLONY_SHARE_PUBLIC: 1n << 73n,
+  /**
+   * Ring 2. Create and prioritise SQUADRON projects — the ones the whole squadron hauls for.
+   *
+   * Officer-level, and grouped with BGS_SET_ORDERS in spirit: marking a project as the current
+   * effort is a claim on everybody's playing time.
+   */
+  COLONY_MANAGE: 1n << 74n,
+
+  // ── Support ──────────────────────────────────────────────────────────────
+  /**
+   * Ring 2. Work the Help & Support console: read every conversation, reply as yourself,
+   * close and reopen.
+   *
+   * ★ ONE BIT, BECAUSE THE CONSOLE IS ONE JOB ★
+   *
+   * Asking for help needs no permission at all — the chat is open to everyone, guests included,
+   * which is the entire point of a help door. The bit gates the OTHER side of the desk: the
+   * console reads members' and guests' private conversations, and answering one puts the
+   * officer's own name and face on the reply. Reading and answering are the same job here;
+   * splitting them would create a role that can watch people ask for help and never respond.
+   *
+   * Opens bit 80 — the first of a fresh decade, because support is its own domain and borrowing
+   * a gap in somebody else's would put the next support bit forty positions away.
+   *
+   * Held by the officer ranks; the webmaster holds it automatically, being outside
+   * SQUADRON_STANDING_PERMISSIONS — whoever runs the website answers questions about it.
+   */
+  SUPPORT_AGENT: 1n << 80n,
 } as const;
 
 export type PermissionName = keyof typeof Permission;
@@ -190,7 +345,30 @@ export const PRIVILEGED_PERMISSIONS: PermissionMask =
   Permission.FORUM_MODERATE |
   Permission.OPS_MANAGE |
   Permission.BGS_SET_ORDERS |
-  Permission.FLEET_APPROVE_DOCTRINE;
+  Permission.FLEET_APPROVE_DOCTRINE |
+  /*
+   * The support console reads members' and guests' private help conversations — other people's
+   * words, by the test above. Every holder today is an officer already obliged by MEMBER_MANAGE,
+   * so this changes nobody's enrolment; it exists for the support role somebody creates later,
+   * which must not be a way to read private conversations on one factor.
+   */
+  Permission.SUPPORT_AGENT;
+
+/*
+ * ★ SHIPYARD_SHARE_PUBLIC IS DELIBERATELY *NOT* PRIVILEGED — READ BEFORE ADDING IT ★
+ *
+ * It was in the list above for about an hour, on the reasoning that a link working with no session
+ * is the one thing a compromised account could put in front of the internet under the squadron's
+ * name.
+ *
+ * That reasoning ignores what this constant DOES. `requiresTwoFactor` reads it, so putting a bit
+ * here obliges every member holding it to enrol an authenticator. The owner's instruction is that
+ * members share publicly "if they choose to" — so the bit is in the member preset, so that change
+ * would have marched all hundred-odd members into a 2FA enrolment for the sake of a ship build.
+ *
+ * The separate bit still earns its place: it is how an officer stops ONE member publishing without
+ * taking away everything else they can do here.
+ */
 
 /**
  * Does this member have to enrol a second factor?
@@ -280,8 +458,35 @@ export const WEBMASTER_PERMISSIONS: PermissionMask = ALL_PERMISSIONS & ~SQUADRON
 
 const P = Permission;
 
-/** Unauthenticated. Never persisted as a role row — this is the default mask for no session. */
-const GUEST: PermissionMask = P.FORUM_VIEW_PUBLIC;
+/**
+ * Unauthenticated. Never persisted as a role row — this is the default mask for no session.
+ *
+ * ★ THE SHIPYARD IS OPEN — SQUADRON OWNER, 2026-08-01 ★
+ *
+ * "also make the builder public please and accessible to signed out users."
+ *
+ * Granted as a PERMISSION rather than by removing the gate. Deleting the check would have been
+ * fewer lines and would have thrown away the thing the owner asked for three messages earlier:
+ * Shipyard permissions that "work the same as all other categories", so a rank can have the page
+ * taken away. Putting the bit in the guest mask keeps that intact and makes "public" a decision
+ * recorded in the permission model rather than an absence of one.
+ *
+ * SHIPYARD_VIEW only. A visitor may plan a ship and read what the squadron has published; saving
+ * and sharing need an account, because both write a row that belongs to somebody.
+ *
+ * ★ AND SO IS LOGISTICS & TRADE — SQUADRON OWNER, 2026-08-02 ★
+ *
+ * "this will also be available to the public for use", of the route planner. TRADE_QUERY is the bit
+ * that opens both the commodities market and the Freight Office, and they are one system: the
+ * planner is built on the market's prices and shows the same numbers on the way to a route. Opening
+ * the planner while gating the market would hide a page while publishing everything on it.
+ *
+ * The same shape as the Shipyard decision above, for the same reason — granted as a PERMISSION, so
+ * a rank can still have it taken away, and "public" stays a decision recorded in the model rather
+ * than a missing check. TRADE_SAVE_ROUTE and TRADE_MANAGE_ALERTS are NOT here: both write a row
+ * that belongs to somebody, which needs an account.
+ */
+const GUEST: PermissionMask = P.FORUM_VIEW_PUBLIC | P.SHIPYARD_VIEW | P.TRADE_QUERY;
 
 /** Application in flight. Public forum plus their own application thread (by ownership predicate). */
 const APPLICANT: PermissionMask = GUEST | P.FORUM_POST_PUBLIC;
@@ -301,9 +506,39 @@ const MEMBER: PermissionMask =
   P.TRADE_QUERY |
   P.TRADE_SAVE_ROUTE |
   P.TRADE_MANAGE_ALERTS |
+  /*
+   * Planning, saving and sharing a ship — to the squadron, and to the open web if they choose to.
+   *
+   * Squadron owner, 2026-08-01: "the ability for our users to share their builds and make them
+   * visible to the squadron and public if they choose to."
+   *
+   * Public sharing keeps its own bit even though every member holds it, so an officer can stop one
+   * person publishing without taking away everything else they can do here. A permission every
+   * member happens to hold still earns its place when the interesting case is removing it.
+   */
+  P.SHIPYARD_VIEW |
+  P.SHIPYARD_SAVE |
+  P.SHIPYARD_SHARE |
+  P.SHIPYARD_SHARE_PUBLIC |
   P.AI_CHAT |
   P.AI_TOOLS_READ |
   P.AI_TOOLS_WRITE |
+  /*
+   * Every member may contribute screenshots. The whole point of "Help Train the Bot" is that the
+   * pool fills from people playing the game, and a collection drive nobody is allowed to join
+   * collects nothing. Removable per role when somebody abuses it — see AI_TRAIN_SUBMIT.
+   */
+  P.AI_TRAIN_SUBMIT |
+  /*
+   * Reading the colonisation boards, posting a personal project, and publishing one if they choose
+   * to — "ladder ranked members will be able to list personal projects".
+   *
+   * COLONY_MANAGE is NOT here. Squadron projects are what the whole squadron hauls for, and
+   * declaring one is an officer's call; it is granted in OFFICER below.
+   */
+  P.COLONY_VIEW |
+  P.COLONY_POST |
+  P.COLONY_SHARE_PUBLIC |
   P.TELEMETRY_WRITE;
 
 /** Member plus the ability to create and run operations. */
@@ -312,6 +547,15 @@ const WING_LEAD: PermissionMask = MEMBER | P.OPS_CREATE;
 /** Moderation, member management, BGS direction, audit visibility. */
 const OFFICER: PermissionMask =
   WING_LEAD |
+  /*
+   * Squadron colonisation projects — "officers will be able to add Squadron specific and personal
+   * project", squadron owner, 2026-08-02.
+   *
+   * The personal half comes up from MEMBER. This bit is only the squadron half, because marking a
+   * project as the effort everybody hauls for is a claim on the whole squadron's playing time —
+   * the same kind of decision as BGS_SET_ORDERS, and held by the same people.
+   */
+  P.COLONY_MANAGE |
   P.FORUM_VIEW_OFFICER |
   P.FORUM_POST_OFFICER |
   /*
@@ -324,12 +568,29 @@ const OFFICER: PermissionMask =
    */
   P.FORUM_POST_GUIDE |
   P.FORUM_MODERATE |
+  /*
+   * Reading the AI log and working the screening queue. Officers are who the owner named as the
+   * reviewers, and a queue nobody can open is a queue that fills up.
+   */
+  P.AI_REVIEW |
+  /*
+   * Watching what the AI is learning, and approving the screenshots members submit for it.
+   * Officers get it for the same reason they get AI_REVIEW: a queue nobody can open fills up,
+   * and judging whether a picture of a Krait belongs in a training set is a job for people who
+   * fly them.
+   */
+  P.AI_TRAINING |
   P.OPS_MANAGE |
   P.CARRIER_MANAGE |
   P.FLEET_APPROVE_DOCTRINE |
   P.BGS_SET_ORDERS |
   P.MEMBER_MANAGE |
-  P.AUDIT_VIEW;
+  P.AUDIT_VIEW |
+  /*
+   * The Help & Support console. Officers are who the owner named to answer the chat — "a human
+   * on demand" is a human with squadron standing, and the console queue is theirs to work.
+   */
+  P.SUPPORT_AGENT;
 
 /** Officer plus role management — the ability to grant any other permission. */
 const COMMANDER: PermissionMask = OFFICER | P.ROLE_MANAGE;

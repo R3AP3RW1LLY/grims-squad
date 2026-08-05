@@ -76,6 +76,20 @@ export const JOURNAL_EVENTS = {
   /** Cargo bought and sold, with the commodity and the station. */
   MarketBuy: 'trade',
   MarketSell: 'trade',
+  /**
+   * Opening a station's commodity screen.
+   *
+   * ★ THE MOST VALUABLE EVENT IN THE JOURNAL, AND WE WERE NOT READING IT ★
+   *
+   * It carries the station's ENTIRE commodity list — every price, stock and
+   * demand figure — as the game showed it seconds ago. The nightly galaxy dump
+   * gives the same thing up to twenty-four hours late, and the routes worth
+   * flying are the ones that go stale fastest.
+   *
+   * What is stored from it is only which station was opened; the prices go to
+   * `market_entries` where route-finding reads them. See EVENT_FIELDS.
+   */
+  Market: 'trade',
   /** Mined and refined, which the trade board counts separately. */
   MiningRefined: 'trade',
 
@@ -93,6 +107,72 @@ export const JOURNAL_EVENTS = {
   /** Fleet carrier jumps and finances, for the squadron's own carrier. */
   CarrierJump: 'carrier',
   CarrierStats: 'carrier',
+  /**
+   * Cargo moved between the member's ship and their own carrier.
+   *
+   * ★ JOINED 2026-08-04, FOR THE COLONISATION CARRIER HOLDS ★
+   *
+   * A carrier staged for a build holds exactly the cargo its owner has NOT put up for sale, which
+   * is the part the public market mirror cannot see — so the shopping list kept telling members to
+   * buy steel the squadron already owned. This event is the only record of that cargo existing.
+   *
+   * Same category as the other carrier events because it is the same disclosure: what the member's
+   * own carrier is doing. Only the OWNER can transfer to a carrier, so nothing here is ever about
+   * somebody else's ship.
+   */
+  CargoTransfer: 'carrier',
+
+  /**
+   * The suit and weapons a commander takes on foot.
+   *
+   * ★ A NEW THING COLLECTED, DECLARED THE ORDINARY WAY ★
+   *
+   * The squadron wanted a chart of what people carry on foot, and nothing was collecting it —
+   * `SuitLoadout` was not in this registry, so the ingest had no category for it and every one
+   * ever sent was discarded.
+   *
+   * It joins as its OWN category rather than being folded into `ship` or `combat`, because that is
+   * what makes it separately refusable. On-foot loadouts say more about how somebody plays than a
+   * ship does, and a member who is happy sharing their Python should not have to accept sharing
+   * their suit to keep it — which is exactly what would happen if this rode in on an existing
+   * switch.
+   *
+   * Optional, like everything below the baseline: it appears in the app's "What the squadron keeps"
+   * panel and can be switched off there, on its own.
+   */
+  SuitLoadout: 'onfoot',
+
+  /**
+   * Colonisation: what a construction site still needs, and what somebody delivered to it.
+   *
+   * ★ SQUADRON OWNER, 2026-08-02 ★
+   *
+   * "colonization ... will allow our members to post their colonization project to the squadron for
+   * assistance etc ... keep our own full records too."
+   *
+   * ★ THIS IS THE ONLY WAY THE DATA EXISTS ★
+   *
+   * There is no API anywhere that knows what a construction site needs. Ravencolonial does not; it
+   * learns from exactly these two events, sent by exactly this kind of plugin. Shown that, the owner
+   * chose to build ours self-contained — which makes this registry entry the whole foundation. An
+   * event missing from here is discarded by the ingest with no error, which is how `SuitLoadout`
+   * silently collected nothing for weeks.
+   *
+   * ★ ITS OWN CATEGORY, ON BY DEFAULT ★
+   *
+   * Consent here is OPT-OUT: a category defaults to on and a member declines it on the website. The
+   * owner chose that for this — "On by default for anyone in the colonization system" — on the
+   * reasoning that posting a project implies sending its progress, since a project with no progress
+   * data is an empty page.
+   *
+   * Separate from `trade` even though both are cargo, because they answer different questions and
+   * one is far more revealing: a delivery says a member was at a specific construction site at a
+   * specific moment. Somebody happy to appear on a trade leaderboard should be able to decline that
+   * without giving up the leaderboard, which is the same reasoning that gave `onfoot` its own
+   * switch.
+   */
+  ColonisationConstructionDepot: 'colonisation',
+  ColonisationContribution: 'colonisation',
 } as const;
 
 export type JournalEventName = keyof typeof JOURNAL_EVENTS;
@@ -165,8 +245,30 @@ export const EVENT_FIELDS: Record<JournalEventName, readonly string[]> = {
   FactionKillBond: ['AwardingFaction', 'VictimFaction', 'Reward'],
   PVPKill: ['CombatRank'],
 
-  MarketBuy: ['Type', 'Type_Localised', 'Count', 'TotalCost', 'MarketID'],
-  MarketSell: ['Type', 'Type_Localised', 'Count', 'TotalSale', 'MarketID'],
+  /*
+   * BuyPrice / SellPrice / AvgPricePaid joined on 2026-08-04 for the Trade Barons leaderboard:
+   * realized profit is TotalSale minus AvgPricePaid×Count, and AvgPricePaid is Frontier's OWN
+   * average across every buy the member ever made — including ones this app never saw. The same
+   * sensitivity class as the totals already kept: the member's own money, nobody else's.
+   */
+  MarketBuy: ['Type', 'Type_Localised', 'Count', 'BuyPrice', 'TotalCost', 'MarketID'],
+  MarketSell: ['Type', 'Type_Localised', 'Count', 'SellPrice', 'TotalSale', 'AvgPricePaid', 'MarketID'],
+  /*
+   * ★ DELIBERATELY NOT `Items` ★
+   *
+   * The event's item list is the whole point of reading it, and it is still not
+   * stored HERE. A commodity market is around a hundred entries; keeping the
+   * array would write a copy of one station's price list into a member's own
+   * telemetry every time they opened a market screen, for a hundred and seven
+   * members, forever — and it would be about a STATION rather than about them,
+   * which is not what this table is for.
+   *
+   * The prices are applied to `market_entries` instead, where one row per
+   * station-commodity is shared by everybody and route-finding can index it.
+   * What survives here is the fact that they docked and looked, which is the
+   * part that is genuinely about the member.
+   */
+  Market: ['MarketID', 'StationName', 'StarSystem'],
   MiningRefined: ['Type', 'Type_Localised'],
 
   MultiSellExplorationData: ['TotalEarnings', 'BaseValue', 'Bonus', 'Discovered'],
@@ -178,6 +280,58 @@ export const EVENT_FIELDS: Record<JournalEventName, readonly string[]> = {
 
   CarrierJump: ['StarSystem', 'SystemAddress', 'StationName', 'CarrierID'],
   CarrierStats: ['CarrierID', 'Callsign', 'Name', 'DockingAccess', 'JumpRangeCurr'],
+  /*
+   * `Transfers` joined on 2026-08-04 for the colonisation carrier holds. It is a handful of
+   * entries — {Type, Type_Localised, Count, Direction} for the contents of one lift, not a market
+   * — and it is the ONLY record that cargo staged on a carrier exists at all: the public mirror
+   * sees sell orders, and staged cargo is exactly what is not on sale. The same sensitivity class
+   * as the trade events already kept: the member's own cargo, nobody else's — and carriers carry
+   * no prices in this event, so there is nothing here for `stripMoney` to miss.
+   */
+  CargoTransfer: ['Transfers'],
+
+  /*
+   * ★ THE SUIT AND WHAT IS IN IT, AND NOTHING ELSE ★
+   *
+   * A raw SuitLoadout carries SuitID and LoadoutID — Frontier's internal handles, which identify
+   * nothing to us and are the sort of value that gets stored because it was in the payload. The
+   * chart needs what the suit IS and what weapons are in it; the ids answer no question anybody is
+   * asking.
+   *
+   * `Modules` is the weapon list. It is kept whole because a weapon without its slot is not a
+   * loadout — the same gun in a primary and a secondary slot is a different build, which is the
+   * distinction the chart exists to show.
+   */
+  SuitLoadout: ['SuitName', 'SuitName_Localised', 'SuitMods', 'LoadoutName', 'Modules'],
+
+  /*
+   * ★ THE ARRAY IS KEPT HERE, UNLIKE EVERYWHERE ELSE ★
+   *
+   * `Market.Items` is deliberately dropped a few entries above, because storing a hundred-entry
+   * price list in a member's own telemetry every time they open a market screen is a copy of public
+   * data filed under a person.
+   *
+   * `ResourcesRequired` is the opposite case on every axis. It is about thirty commodities, not a
+   * hundred; it is written once when a depot's needs CHANGE rather than on every screen; it exists
+   * nowhere else in the world, because no API publishes what a construction site still needs; and
+   * it is the entire reason the event is being read. Dropping it would leave us storing that
+   * somebody docked at a building site and nothing about the building.
+   *
+   * `ConstructionProgress` is the fraction complete, and `ConstructionComplete` / `ConstructionFailed`
+   * are how a project stops being current without anybody having to remember to close it.
+   */
+  ColonisationConstructionDepot: [
+    'MarketID',
+    'ConstructionProgress',
+    'ConstructionComplete',
+    'ConstructionFailed',
+    'ResourcesRequired',
+  ],
+  /*
+   * What one commander handed over. `Contributions` is a handful of entries — the contents of a
+   * hold, not a market — and it is the ledger the squadron leaderboard is summed from.
+   */
+  ColonisationContribution: ['MarketID', 'Contributions'],
 };
 
 /**
@@ -292,7 +446,11 @@ export type TelemetryCategoryName =
   | 'trade'
   | 'exploration'
   | 'bgs'
-  | 'carrier';
+  | 'carrier'
+  /** On-foot: the suit and weapons a commander takes out of the ship. */
+  | 'onfoot'
+  /** Colonisation: construction-site needs, and deliveries to them. */
+  | 'colonisation';
 
 const CATEGORY_BY_LABEL: Record<JournalCategory, TelemetryCategoryName> = {
   // ---- baseline -----------------------------------------------------------
@@ -312,6 +470,8 @@ const CATEGORY_BY_LABEL: Record<JournalCategory, TelemetryCategoryName> = {
   exploration: 'exploration',
   bgs: 'bgs',
   carrier: 'carrier',
+  onfoot: 'onfoot',
+  colonisation: 'colonisation',
 };
 
 /**

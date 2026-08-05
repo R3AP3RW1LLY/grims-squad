@@ -1,0 +1,554 @@
+/*
+ * THE WEBSITE'S LOOK, IN THE COMPANION APP.
+ *
+ * ★ SQUADRON OWNER, 2026-08-02 ★
+ *
+ * "brand/theme the companion app so it matches the website background and glass look. because this
+ * looks really basic."
+ *
+ * It did, and this file is most of why. The renderer had no stylesheet at all — every style was an
+ * inline object, and an inline style cannot express a hover state, a focus ring, a pseudo-element
+ * or a media query. So the app had none of those. It was not styled conservatively; it was styled
+ * with a tool that could not do the job.
+ *
+ * ★ WHAT IS COPIED, AND FROM WHERE ★
+ *
+ * The layers below are ported from apps/web/src/app/globals.css. Where the site writes
+ * `color-mix(in srgb, X 82%, transparent)` or `var(--color-…)`, the resolved value appears here
+ * instead — see the note on the token object in ui.tsx for why those two forms cannot be used.
+ *
+ * The background is FOUR PURE-CSS LAYERS AND NO IMAGE. The site has no background asset at all;
+ * the starfield is two repeating radial-gradient pseudo-elements and the nebulae are four soft
+ * washes. That is why nothing new had to be copied into the bundle for it.
+ */
+
+/* ========================================================================== */
+/*  FONTS — the same files the website serves                                */
+/* ========================================================================== */
+
+/*
+ * ★ THE APP HAS NEVER ONCE RENDERED A BRAND TYPEFACE ★
+ *
+ * The only @font-face in either shell pointed at `fonts/Orbitron-Bold.woff2`, which has never
+ * existed in this repository. Seven `fontFamily: 'Orbitron, sans-serif'` sites therefore rendered
+ * in whatever generic sans-serif the platform picked, and the five real brand faces that the build
+ * has been faithfully copying into `dist` were loaded by nothing.
+ *
+ * That is the failure mode of a missing font: no console error, no network error under
+ * `font-display: swap`, just a fallback that looks like somebody's deliberate choice. Every face
+ * below is verified present on disk.
+ */
+@font-face {
+  font-family: 'Chakra Petch';
+  src: url('fonts/chakra-petch-400.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Chakra Petch';
+  src: url('fonts/chakra-petch-700.woff2') format('woff2');
+  /*
+   * A RANGE, not a single weight. The site asks next/font for 600 as well as 700, and only 400 and
+   * 700 exist as files. Declaring the bold face as `600 700` maps a 600 request onto the real 700
+   * outline; without it the browser synthesises a fake semibold by smearing the 400, which looks
+   * like a rendering fault on a display face.
+   */
+  font-weight: 600 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Inter';
+  src: url('fonts/inter-400.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Inter';
+  src: url('fonts/inter-700.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('fonts/jetbrains-mono-400.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('fonts/jetbrains-mono-700.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  color-scheme: dark;
+
+  /* The site's three roles: display for headings, body for prose, mono for anything instrumental. */
+  --font-display: 'Chakra Petch', system-ui, sans-serif;
+  --font-body: 'Inter', 'IBM Plex Sans', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+/* ========================================================================== */
+/*  BACKGROUND — deepfield, nebulae, scanlines                               */
+/* ========================================================================== */
+
+/*
+ * ★ WHY THESE SIT AT NEGATIVE z-index AND WHAT BREAKS THAT ★
+ *
+ * Both layers are `position: fixed` with a negative z-index, so they paint behind the root's
+ * content without being inside it. Three things silently defeat that, and all three are easy to
+ * reintroduce by accident:
+ *
+ *   1. A painted background on <body>. It covers a z-index:-2 child completely. The base colour
+ *      therefore lives on <html> and <body> is transparent.
+ *   2. A stacking context between them and the content — any opacity, transform, filter or
+ *      isolation on html, body or #root.
+ *   3. An opaque content pane. <main> must stay backgroundless and the sidebar is translucent.
+ *
+ * The symptom of all three is identical and silent: a flat dark app that looks like the change
+ * never landed.
+ */
+.deepfield {
+  position: fixed;
+  inset: 0;
+  z-index: -2;
+  pointer-events: none;
+  background-color: #05070a;
+  /*
+   * ★ CLIPPED, AND THAT IS A PERFORMANCE FIX NOT A TIDINESS ONE ★
+   *
+   * Without it the two pseudo-elements below paint outside the viewport and Chromium rasterises
+   * every pixel of them.
+   */
+  overflow: hidden;
+}
+
+.deepfield::before,
+.deepfield::after {
+  content: '';
+  position: absolute;
+  /*
+   * `inset: 0`, not the site's `inset: -50%`.
+   *
+   * The website oversizes these because it animates them — a layer that drifts has to be bigger
+   * than the screen or its edge would swing into view. Nothing moves here, so -50% bought a layer
+   * FOUR TIMES the viewport area, twice over: on a 3440×1440 ultrawide that is roughly forty
+   * million pixels of tiled radial-gradient rasterised for no visible difference whatsoever.
+   */
+  inset: 0;
+  background-repeat: repeat;
+}
+
+/* Distant stars: dense, dim. */
+.deepfield::before {
+  background-image:
+    radial-gradient(1px 1px at 20% 30%, rgba(232, 238, 245, 0.65) 50%, transparent 50%),
+    radial-gradient(1px 1px at 70% 65%, rgba(232, 238, 245, 0.5) 50%, transparent 50%),
+    radial-gradient(1px 1px at 45% 85%, rgba(232, 238, 245, 0.45) 50%, transparent 50%),
+    radial-gradient(1px 1px at 85% 15%, rgba(180, 210, 255, 0.5) 50%, transparent 50%),
+    radial-gradient(1px 1px at 10% 70%, rgba(232, 238, 245, 0.4) 50%, transparent 50%);
+  background-size: 220px 220px;
+}
+
+/* Near stars: sparse, brighter — the parallax cue. */
+.deepfield::after {
+  background-image:
+    radial-gradient(2px 2px at 15% 45%, rgba(255, 255, 255, 0.9) 45%, transparent 50%),
+    radial-gradient(2px 2px at 80% 25%, rgba(255, 220, 180, 0.8) 45%, transparent 50%),
+    radial-gradient(1.5px 1.5px at 55% 75%, rgba(180, 220, 255, 0.85) 45%, transparent 50%);
+  background-size: 480px 480px;
+}
+
+/* Nebulae: four enormous, very soft washes — the only warm light in the scene. */
+.nebula {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(62rem 42rem at 10% -12%, rgba(255, 113, 0, 0.16), transparent 60%),
+    radial-gradient(52rem 40rem at 96% 6%, rgba(0, 200, 255, 0.12), transparent 62%),
+    radial-gradient(74rem 52rem at 50% 118%, rgba(120, 60, 200, 0.13), transparent 60%),
+    radial-gradient(40rem 34rem at 78% 62%, rgba(255, 60, 90, 0.07), transparent 66%);
+}
+
+/*
+ * Scanline at ~1.2%. At this level it is texture, not pattern; above ~3% it is a migraine trigger.
+ *
+ * ★ BEHIND THE CONTENT, NOT OVER IT ★
+ *
+ * The website puts this at z-index 9999 over everything. Here it sits with the background layers,
+ * because a full-screen FIXED element stacked above a scrolling pane defeats Chromium's scroll-blit
+ * fast path — every scroll of the project list repainted the whole window instead of shifting it.
+ * Over a 1.2% white gradient. It is texture on the starfield either way.
+ */
+body.scanlines::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background: repeating-linear-gradient(0deg, transparent 0 2px, rgba(255, 255, 255, 0.012) 2px 3px);
+  z-index: -1;
+}
+
+/* ========================================================================== */
+/*  PANELS — angular, cut-cornered, cockpit-instrument framing                */
+/* ========================================================================== */
+
+/*
+ * ★ CHAMFERED, NOT ROUNDED ★
+ *
+ * The site has two panel systems: this one, and the hub's plain rounded boxes. This is the one the
+ * owner means by "the glass look", and it is also the only one that works over a starfield — an
+ * opaque #0b0f14 box would sit on top of the background we just built and make the entire change
+ * invisible.
+ *
+ * `clip-path` rather than `border-radius`, so the corner is a cut rather than a curve. The border
+ * follows the clip because the element is clipped after it is painted.
+ */
+.panel {
+  position: relative;
+  background-color: rgba(11, 15, 20, 0.82);
+  border: 1px solid rgba(255, 113, 0, 0.18);
+  /*
+   * ★ NO backdrop-filter HERE, DELIBERATELY — SQUADRON OWNER, 2026-08-02 ★
+   *
+   * "the app seems to be freezing up quite a bit."
+   *
+   * It had one, copied from the site. On the website six panels sit on a page that scrolls the
+   * document. Here, `<main>` is its own scroll container over a FIXED background, so every scroll
+   * frame invalidates the backdrop snapshot of every panel — and Chromium does not batch that: it
+   * is one readback, one blur and one clip-path mask pass PER PANEL PER FRAME. The project board
+   * draws one panel per project with no upper bound, so a squadron with thirty builds was asking
+   * for thirty blurred readbacks every frame it scrolled.
+   *
+   * What actually reads as glass is the translucency, the chamfered corner and the warm hairline —
+   * all three are still here and all three are free. The blur was the expensive tenth of the effect.
+   * It survives on the sidebar alone, which is one element and never scrolls.
+   */
+  clip-path: polygon(
+    0 10px,
+    10px 0,
+    100% 0,
+    100% calc(100% - 10px),
+    calc(100% - 10px) 100%,
+    0 100%
+  );
+  transition:
+    border-color 200ms ease,
+    background-color 200ms ease;
+}
+
+/*
+ * HUD corner brackets, drawn with borders on two pseudo-elements so they scale with the box and
+ * never distort the way a background image would. Used sparingly — brackets on all forty rows of a
+ * needs list is noise, not instrumentation.
+ */
+.hud::before,
+.hud::after {
+  content: '';
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border-color: #ff7100;
+  opacity: 0.7;
+  pointer-events: none;
+}
+.hud::before {
+  top: -1px;
+  left: -1px;
+  border-top: 2px solid;
+  border-left: 2px solid;
+}
+.hud::after {
+  right: -1px;
+  bottom: -1px;
+  border-right: 2px solid;
+  border-bottom: 2px solid;
+}
+
+/* The divider under a page header. Orange into cyan into nothing. */
+.rule-glow {
+  height: 1px;
+  background: linear-gradient(to right, #ff7100, rgba(0, 200, 255, 0.6), transparent);
+}
+
+/* ========================================================================== */
+/*  CONTROLS — base AND hover, in the same place, on purpose                  */
+/* ========================================================================== */
+
+/*
+ * ★ THE BASE VALUES LIVE HERE, NOT IN AN INLINE STYLE OBJECT ★
+ *
+ * This is not a formatting preference — it is the whole reason the rules work.
+ *
+ * A declaration in a `style` attribute outranks EVERY non-`!important` rule in an author
+ * stylesheet, whatever the selector's specificity. So a button that sets `color` inline and hopes
+ * a `.btn:hover { color: … }` rule will change it on hover gets nothing: the rule matches, loses
+ * the cascade, and the control sits inert under the mouse. Nothing errors. Nothing warns. Lint,
+ * typecheck and every unit test pass.
+ *
+ * This file shipped in exactly that state for one commit, and the review that caught it is the
+ * only reason it is written down here. The fix is not `!important` — it is that a property whose
+ * value must change on hover, focus or selection cannot have an inline base value at all.
+ */
+
+.btn {
+  border-radius: 4px;
+  padding: 7px 14px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  cursor: pointer;
+  border: 1px solid transparent;
+  background-color: transparent;
+  transition:
+    color 150ms ease,
+    background-color 150ms ease,
+    border-color 150ms ease,
+    opacity 150ms ease;
+}
+.btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.btn-default {
+  border-color: rgba(255, 113, 0, 0.18);
+  color: #93a4b8;
+}
+.btn-default:hover:not(:disabled) {
+  border-color: rgba(255, 113, 0, 0.55);
+  color: #e8eef5;
+}
+
+.btn-primary {
+  border-color: #5cd9ff;
+  background-color: rgba(92, 217, 255, 0.12);
+  color: #5cd9ff;
+}
+.btn-primary:hover:not(:disabled) {
+  opacity: 0.8;
+}
+
+.btn-danger {
+  border-color: #ff7a7a;
+  color: #ff7a7a;
+}
+.btn-danger:hover:not(:disabled) {
+  background-color: rgba(255, 122, 122, 0.12);
+}
+
+.tab {
+  border-radius: 4px;
+  padding: 8px 16px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  cursor: pointer;
+  border: 1px solid rgba(255, 113, 0, 0.18);
+  background-color: transparent;
+  color: #93a4b8;
+  transition:
+    color 150ms ease,
+    background-color 150ms ease,
+    border-color 150ms ease;
+}
+.tab:not([aria-selected='true']):hover {
+  border-color: rgba(255, 113, 0, 0.55);
+  color: #e8eef5;
+}
+.tab[aria-selected='true'] {
+  border-color: #ff7100;
+  background-color: rgba(255, 113, 0, 0.12);
+  color: #ff9d3f;
+}
+
+.nav-item {
+  width: 100%;
+  text-align: left;
+  border: none;
+  border-radius: 4px;
+  padding: 9px 12px;
+  font-family: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background-color: transparent;
+  color: #93a4b8;
+  transition:
+    color 150ms ease,
+    background-color 150ms ease;
+}
+/* A child destination inside a collapsible group. Indented and a shade quieter. */
+.nav-item-sub {
+  /* One size everywhere, the SMALL one — the owner's 2026-08-04 clarification after the first
+     uniformity attempt enlarged rows instead ("this looks really bad"). Only the left inset
+     says "a level down", matching the website's sidebar. */
+  padding: 7px 12px 7px 26px;
+  font-size: 12.5px;
+}
+.nav-item:not([aria-current='page']):hover {
+  background-color: #18202a;
+  color: #e8eef5;
+}
+.nav-item[aria-current='page'] {
+  background-color: rgba(255, 113, 0, 0.12);
+  color: #ff9d3f;
+}
+
+/*
+ * A title that opens something, as a real button.
+ *
+ * ★ WHY NOT A DIV WITH AN onClick ★
+ *
+ * Because a div is not reachable by keyboard, does not announce itself as a control, and does not
+ * fire on Enter. Everything visual lives here rather than inline for the reason at the top of this
+ * file: an inline colour outranks the hover rule and freezes the control.
+ */
+.linkish {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  font-family: inherit;
+  color: #e8eef5;
+  cursor: pointer;
+  transition: color 150ms ease;
+}
+.linkish:hover {
+  color: #ff9d3f;
+  text-decoration: underline;
+}
+
+/* A copy button sized to sit inside a line of text rather than next to it. */
+.copy {
+  border-radius: 3px;
+  border: 1px solid rgba(255, 113, 0, 0.18);
+  background-color: transparent;
+  color: #93a4b8;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  cursor: pointer;
+  transition:
+    color 150ms ease,
+    border-color 150ms ease;
+}
+.copy:hover {
+  border-color: rgba(255, 113, 0, 0.55);
+  color: #e8eef5;
+}
+
+/*
+ * A panel that opens something.
+ *
+ * ★ IT HAD NO HOVER AND NO FOCUS RING AT ALL ★
+ *
+ * The board row was a div with an inline `cursor: pointer` and nothing else — so there was no
+ * feedback on hover, and once it became keyboard-reachable there was nothing to show WHERE the
+ * keyboard was. accessibility.md treats a missing focus indicator as review-blocking, and it is
+ * right to: a member tabbing through a list of projects could not tell which one Enter would open.
+ *
+ * Not inline, for the reason at the top of this file: an inline value outranks these rules and
+ * freezes the control.
+ */
+.row-open {
+  transition: border-color 150ms ease;
+}
+.row-open:hover {
+  border-color: rgba(255, 113, 0, 0.55);
+}
+
+/* A chip somebody can claim. Same idea as .tab, on a control that is not selectable. */
+.chip {
+  border-radius: 4px;
+  padding: 5px 10px;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  border: 1px solid rgba(255, 113, 0, 0.18);
+  background-color: transparent;
+  color: #e8eef5;
+  transition:
+    color 150ms ease,
+    background-color 150ms ease,
+    border-color 150ms ease;
+}
+.chip:hover:not(:disabled) {
+  border-color: rgba(255, 113, 0, 0.55);
+  background-color: rgba(255, 113, 0, 0.12);
+}
+.chip:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/*
+ * ★ THE FOCUS RING IS NOT OPTIONAL ★
+ *
+ * ssot/07-design/accessibility.md treats removing this as a review-blocking defect. The `:where()`
+ * form gives it zero specificity, so a component that genuinely needs its own treatment can
+ * override it with a single class rather than by fighting an !important.
+ */
+:where(a, button, [role='button'], input, select, textarea, summary):focus-visible {
+  outline: 2px solid #ff9d3f;
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/* ========================================================================== */
+/*  ACCESSIBILITY — the same two escapes the website honours                  */
+/* ========================================================================== */
+
+/*
+ * Honoured automatically, never behind a setting. Somebody who has told their operating system that
+ * motion makes them ill should not have to find a checkbox in a squadron app to be believed.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  body.scanlines::after {
+    display: none;
+  }
+}
+
+/*
+ * At `prefers-contrast: more` the decoration goes and the structure hardens: no wash behind the
+ * panels, no scanline, an opaque fill and a border at more than three times the alpha. The corner
+ * brackets go to full opacity because at this setting they are the panel's edge, not a flourish.
+ */
+@media (prefers-contrast: more) {
+  .nebula,
+  body.scanlines::after {
+    display: none;
+  }
+  .panel {
+    background-color: #0b0f14;
+    border-color: rgba(255, 113, 0, 0.55);
+    border-width: 2px;
+  }
+  .hud::before,
+  .hud::after {
+    opacity: 1;
+  }
+}

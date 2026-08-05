@@ -19,6 +19,27 @@ const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const COPIES: ReadonlyArray<{ source: string; copy: string }> = [
   { source: 'ssot/03-data/schema.prisma', copy: 'packages/db/prisma/schema.prisma' },
   { source: 'ssot/04-contracts/permissions.ts', copy: 'packages/shared/src/permissions.ts' },
+  { source: 'ssot/04-contracts/rich-document.ts', copy: 'packages/shared/src/rich-document.ts' },
+  {
+    source: 'ssot/04-contracts/forum-signature.ts',
+    copy: 'packages/shared/src/forum-signature.ts',
+  },
+  { source: 'ssot/04-contracts/fonts.ts', copy: 'packages/shared/src/fonts.ts' },
+  { source: 'ssot/04-contracts/ship-names.ts', copy: 'packages/shared/src/ship-names.ts' },
+  { source: 'ssot/04-contracts/ai.ts', copy: 'packages/shared/src/ai.ts' },
+  { source: 'ssot/04-contracts/ai-image.ts', copy: 'packages/shared/src/ai-image.ts' },
+  { source: 'ssot/04-contracts/ai-studio.ts', copy: 'packages/shared/src/ai-studio.ts' },
+  { source: 'ssot/04-contracts/ai-corpus.ts', copy: 'packages/shared/src/ai-corpus.ts' },
+  { source: 'ssot/04-contracts/ai-learning.ts', copy: 'packages/shared/src/ai-learning.ts' },
+  { source: 'ssot/04-contracts/ai-knowledge.ts', copy: 'packages/shared/src/ai-knowledge.ts' },
+  { source: 'ssot/04-contracts/reputation.ts', copy: 'packages/shared/src/reputation.ts' },
+  { source: 'ssot/04-contracts/job-channels.ts', copy: 'packages/shared/src/job-channels.ts' },
+  { source: 'ssot/04-contracts/view-as.ts', copy: 'packages/shared/src/view-as.ts' },
+  { source: 'ssot/04-contracts/ship-build.ts', copy: 'packages/shared/src/ship-build.ts' },
+  {
+    source: 'ssot/04-contracts/signature-design.ts',
+    copy: 'packages/shared/src/signature-design.ts',
+  },
 ];
 
 const green = (s: string) => `\x1b[32m${s}\x1b[0m`;

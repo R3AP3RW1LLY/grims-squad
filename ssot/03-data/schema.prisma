@@ -266,6 +266,18 @@ enum TelemetryCategory {
   session
   /// Ranks, progress and squadron standing. What a commander IS, rather than what they did.
   profile
+  /// The suit and weapons a commander takes out of the ship.
+  ///
+  /// Its OWN category rather than part of `fleet` or `combat`, so it can be declined on its own:
+  /// an on-foot loadout says more about how somebody plays than a hull does, and a member happy to
+  /// share their Python should not have to accept sharing their suit to keep it.
+  onfoot
+  /// Construction-site needs and deliveries to them.
+  ///
+  /// Separate from `trade` for the same reason `onfoot` is separate from `fleet`: a delivery says a
+  /// member was at a specific construction site at a specific moment, which is rather more than a
+  /// tonnage on a leaderboard, and declining one should not cost the other.
+  colonisation
 }
 
 /// Delivery channel for a notification fan-out.
@@ -326,6 +338,10 @@ model User {
   bio         String?
   /// IANA zone. Every user-facing time renders in this AND UTC (INV-025).
   timezone    String     @default("UTC")
+  /// The newest squadron_activity row this member has SEEN (opened the bell's squadron tab).
+  /// The unread badge counts rows beyond it; null means everything is new, which is true.
+  squadronSeenAt DateTime? @map("squadron_seen_at") @db.Timestamptz(6)
+
   /// Last moment the companion app saw the member's journal still being WRITTEN.
   ///
   /// Not "last event received" — Elite's journal clusters at session start and then goes quiet for
@@ -338,12 +354,86 @@ model User {
   /// A SEPARATE COLUMN rather than inferring from `timezone`, because the default is "UTC" and
   /// somebody who genuinely lives in UTC would otherwise be asked forever. Null means never asked.
   commanderOnboardedAt DateTime? @map("commander_onboarded_at") @db.Timestamptz(6)
+  /// When the member was shown the companion app step during onboarding.
+  ///
+  /// ★ SEEN, NOT INSTALLED ★
+  ///
+  /// The step is satisfied by having been through it, not by having a paired device. Requiring the
+  /// device would wall out anybody on a machine that cannot run it - and the squadron would rather
+  /// have them in the forum than nowhere. What it must NOT do is ask again every login, which is
+  /// how a prompt becomes something people learn to click past without reading.
+  ///
+  /// A separate column rather than inferring from device_tokens: a member who paired and later
+  /// removed their only device has still SEEN this, and showing it again would read as the site
+  /// having forgotten them.
+  companionPromptedAt DateTime? @map("companion_prompted_at") @db.Timestamptz(6)
+
+  /// When they were shown the "choose your own nickname" onboarding step.
+  ///
+  /// SEEN, not acted on — the same shape as `companionPromptedAt`, and for the same reason. The
+  /// step is an offer rather than an obligation, so passing through it is what completes it; an
+  /// officer who is happy with the convention should not be asked again every time they sign in.
+  nicknamePromptedAt DateTime? @map("nickname_prompted_at") @db.Timestamptz(6)
+
+  /// The nickname this member wears INSTEAD of their humanized Inara name, or null.
+  ///
+  /// ★ SQUADRON OWNER, 2026-08-02 ★
+  ///
+  /// "if an officer overrides their name, then this is the name that stays as their discord
+  /// nickname it should not change from that unless they change it. if they update it in discord,
+  /// it should also update here and not change back!"
+  ///
+  /// Set means the nightly sweep leaves them alone entirely. Null means they follow the convention
+  /// like everybody else — which is why this is nullable rather than defaulting to the computed
+  /// name: a stored copy of the computed name would freeze it, and a member who later corrects
+  /// their Inara profile would never pick the correction up.
+  nicknameOverride String? @map("nickname_override")
+  /// When it was set, so an officer reviewing the roster can see how old a frozen name is.
+  nicknameOverrideAt DateTime? @map("nickname_override_at") @db.Timestamptz(6)
+  /// How it arrived: `web` from the site, `discord` from renaming themselves in the guild.
+  ///
+  /// Recorded because the two mean different things to whoever is reading the audit later. A
+  /// `discord` source is somebody who may not realise they have opted out of the convention.
+  nicknameOverrideSource String? @map("nickname_override_source")
+
+  /// Whether this member may hold an override at all, when their rank does not already allow it.
+  ///
+  /// Officers get the right from their rank and never need this. It exists for the owner's answer
+  /// to "who can hold a nickname override": "Officers, and anyone an officer grants it to" — a
+  /// well-known callsign, or a name Inara simply cannot represent, without promoting somebody to
+  /// officer to achieve it.
+  nicknameOverrideAllowed Boolean @default(false) @map("nickname_override_allowed")
+
   status      UserStatus @default(active)
   joinedAt    DateTime   @default(now()) @map("joined_at") @db.Timestamptz(6)
   lastSeenAt  DateTime?  @map("last_seen_at") @db.Timestamptz(6)
   /// Explicit per-user permission revocations, subtracted LAST. Deny always beats grant (INV-007).
   /// NUMERIC(40,0) because the mask exceeds 64 bits — SITE_CONFIG is 1n<<63n (ADR-005).
   denyMask    Decimal    @default(0) @map("deny_mask") @db.Decimal(40, 0)
+  /// Discord DM notifications, one switch per REASON. (P2.4, extended P2.10)
+  ///
+  /// * ALL DEFAULT FALSE, AND SEPARATELY *
+  ///
+  /// A DM lands in somebody's private inbox. Inferring consent from "they linked Discord to sign
+  /// in" would be putting words in their mouth: they linked it to authenticate, not to be messaged.
+  /// It also matches the protective defaults D15 set when the squadron confirmed it includes minors.
+  ///
+  /// * WHY THREE COLUMNS RATHER THAN ONE *
+  ///
+  /// The three reasons have very different volumes, and a member who wants one rarely wants all
+  /// three. Being answered directly is rare and almost always wanted; a busy watched thread can
+  /// produce twenty messages in an evening. A single switch would force somebody to choose between
+  /// missing a direct reply and being flooded - and the choice they actually make is to turn
+  /// everything off, which is how notification systems die.
+  ///
+  /// In-app notifications need no preference at all: they appear somewhere the member chose to visit.
+  ///
+  /// Someone replied directly to a post this member wrote.
+  notifyDmDirectReply Boolean @default(false) @map("notify_dm_direct_reply")
+  /// Someone @mentioned this member in a post.
+  notifyDmMention     Boolean @default(false) @map("notify_dm_mention")
+  /// A new reply landed in a thread this member pressed "notify me" on.
+  notifyDmWatched     Boolean @default(false) @map("notify_dm_watched")
   createdAt   DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime   @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -353,15 +443,24 @@ model User {
   inaraLink           InaraLink?
   inaraProfile        InaraCommanderProfile?
   cmdrVerifications   CmdrVerification[]
+  bountyClaims        BountyClaim[]
+  leaderboardEvents   LeaderboardEvent[]
+  currentBuild        CurrentBuild?
+  squadronActivityActed SquadronActivity[] @relation("SquadronActivityActor")
   userRoles           UserRole[]            @relation("UserRoleHolder")
   rolesGranted        UserRole[]            @relation("UserRoleGrantor")
   refreshFamilies     RefreshTokenFamily[]
   deviceTokens        DeviceToken[]
+  deviceLinks         DeviceLink[]
   threads             ForumThread[]         @relation("ThreadAuthor")
   lastPostedThreads   ForumThread[]         @relation("ThreadLastPoster")
   posts               ForumPost[]
+  postsReviewed       ForumPost[]           @relation("PostReviewer")
+  aiCalls             AiCall[]
+  shipBuilds          ShipBuild[]
   reactions           ForumReaction[]
   subscriptions       ForumSubscription[]
+  forumSignature      ForumSignature?
   reportsFiled        ContentReport[]       @relation("ReportReporter")
   reportsResolved     ContentReport[]       @relation("ReportResolver")
   moderationActions   ModerationAction[]    @relation("ModerationActor")
@@ -402,7 +501,47 @@ model User {
 
   postRevisions        PostRevision[]     @relation("PostRevisionEditor")
 
+  forumReads           ForumCategoryRead[]
+
+  /// Reputation (P2). Votes cast, experience earned, badges held.
+  forumVotes           ForumVote[]
+  xpEvents             XpEvent[]
+  badges               MemberBadge[]
+
+  /// Screenshots offered for training, and screenshots reviewed. Two relations because the
+  /// submitter and the reviewer are different people and both need to be findable.
+  trainingSubmissions  TrainingImage[] @relation("TrainingSubmitter")
+  trainingReviews      TrainingImage[] @relation("TrainingReviewer")
+
+  /// Colonisation. Projects they posted, and cargo they hauled to anybody's — two relations
+  /// because helping with somebody else's build is the common case, not the exception.
+  colonyProjects       ColonyProject[]      @relation("ColonyProjectPoster")
+  /// Plans this member drew up. See ColonyPlan — a plan is a system's shape before it is built.
+  colonyPlans          ColonyPlan[]
+  colonyContributions  ColonyContribution[] @relation("ColonyContributor")
+  /// Projects they have joined, what they have taken on, what they have handed out, and carriers
+  /// they have offered. Four relations because they are four different acts.
+  colonyMemberships    ColonyMember[]       @relation("ColonyMemberOf")
+  colonyAssignments    ColonyAssignment[]   @relation("ColonyAssignee")
+  colonyAssignedOut    ColonyAssignment[]   @relation("ColonyAssigner")
+  colonyCarriersAdded  ColonyCarrier[]      @relation("ColonyCarrierAdder")
+
   @@map("users")
+
+  /// Screening decisions this member made as a moderator.
+  screenDecisions ScreenDecision[]
+
+  /// Help & Support. Conversations they opened, conversations they closed as an officer, and
+  /// messages they wrote on either side of the desk — three relations because they are three
+  /// different acts.
+  supportConversations SupportConversation[] @relation("SupportRequester")
+  supportClosed        SupportConversation[] @relation("SupportCloser")
+  supportMessages      SupportMessage[]      @relation("SupportAuthor")
+
+  /// The suggestion box. Ideas they sent, and ideas they reviewed as the webmaster — two
+  /// relations because sending and judging are different acts done by different people.
+  suggestions          Suggestion[]          @relation("SuggestionAuthor")
+  suggestionsReviewed  Suggestion[]          @relation("SuggestionReviewer")
 }
 
 /// 1:1 link to a Discord account. `guildRoles` is the input to the entire authorization model.
@@ -686,6 +825,63 @@ model DeviceToken {
   @@map("device_tokens")
 }
 
+/// One companion app waiting to be linked to an account.
+///
+/// ★ SQUADRON OWNER, 2026-08-01 ★
+///
+/// "COMPANION Discord login; remove key generator"
+///
+/// ★ WHY THE APP CANNOT JUST DO OAUTH ITSELF ★
+///
+/// A desktop app has nowhere safe to keep a client secret and no trustworthy redirect target - a
+/// local listener can be raced by anything else on the machine. The standard answer is the device
+/// authorisation flow, and this table is its state:
+///
+///   1. The app asks for a link. It gets a short CODE to show, and a secret only it holds.
+///   2. The member opens the website in their own browser and signs in with Discord as usual -
+///      the same session, the same cookie, no second identity system.
+///   3. They approve the code. That binds this row to their user.
+///   4. The app polls with its secret and collects the device token exactly once.
+///
+/// The member never copies a credential, and no secret is ever displayed. The CODE is safe to show
+/// because holding it does nothing without a signed-in browser session to approve it, and the
+/// SECRET never leaves the app.
+model DeviceLink {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Shown by the app and typed or clicked by the member. Short, unambiguous, single use.
+  code String @unique
+  /// SHA-256 of the polling secret. The secret is generated by the API, returned once to the app
+  /// and never stored - the same rule as the device token itself.
+  pollSecretHash String @map("poll_secret_hash")
+  /// What the app calls this machine, so the approval screen can say WHICH device is asking.
+  label String
+  /// Set when a member approves. Null while pending.
+  userId String? @map("user_id") @db.Uuid
+  approvedAt DateTime? @map("approved_at") @db.Timestamptz(6)
+  /// The device this became. Set at approval; the app collects the token by polling.
+  deviceTokenId String? @map("device_token_id") @db.Uuid
+  /// The token, encrypted at rest, held only until the app collects it. Cleared on collection.
+  ///
+  /// ★ WHY IT IS STORED AT ALL, BRIEFLY ★
+  ///
+  /// The token is minted when the MEMBER approves, in their browser, and collected later by the
+  /// APP in a different request. Something has to bridge those two, and the alternative - minting
+  /// at poll time - would mean an approval that never gets collected leaves no device at all while
+  /// the member has been told it worked.
+  tokenOnce String? @map("token_once")
+  collectedAt DateTime? @map("collected_at") @db.Timestamptz(6)
+  /// Links are short-lived. An abandoned one must not stay approvable overnight.
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(6)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// The poll, which is the hottest read: every app checks every few seconds while waiting.
+  @@index([code])
+  @@index([expiresAt])
+  @@map("device_links")
+}
+
 /// A member's own Inara API key, supplied voluntarily from the website or the companion app.
 ///
 /// ★ THIS IS WHAT MAKES CMDR VERIFICATION PROOF RATHER THAN A CLAIM ★
@@ -765,6 +961,66 @@ model DiscordGuildMember {
   roles      String[] @default([])
   isBot      Boolean  @default(false) @map("is_bot")
   syncedAt   DateTime @default(now()) @map("synced_at") @db.Timestamptz(6)
+
+  /// When they joined the Discord server. Null until the name sweep has seen them.
+  ///
+  /// ★ THIS IS HOW LONG SOMEBODY HAS BEEN IN THE SQUADRON ★
+  ///
+  /// Squadron owner, 2026-08-01, asked for it from Inara if possible. It is not: Inara's only
+  /// commander endpoint returns `squadronName` and `squadronMemberRank` and no dates at all, and
+  /// there is no squadron-roster endpoint. The game does not record it either — the journal's
+  /// `SquadronStartup` carries a name and a rank, never a date. Nowhere in the Elite ecosystem is
+  /// "when did this commander join this squadron" a fact you can read.
+  ///
+  /// Discord does record it, exactly, and this squadron recruits through Discord — so the server
+  /// join date IS the membership start for all practical purposes. It also costs nothing: it comes
+  /// on the member objects the name sweep already fetches.
+  ///
+  /// ★ IT IS THE CURRENT SPELL, NOT THE FIRST ★
+  ///
+  /// Discord discards `joinedAt` when somebody leaves. Rejoin and it is the new date, and there is
+  /// no way to recover the old one. So a returning member reads as new, which is wrong but
+  /// unknowable — and the alternative, silently keeping a stale date, would claim a continuous
+  /// membership that did not happen.
+  ///
+  /// Null for anyone the sweep cannot see, which is everybody who has left. Their earliest recorded
+  /// activity is used instead, and the column says which it is showing.
+  ///
+  /// ★ YES, `discord_identities.guildJoinedAt` ALSO EXISTS. HERE IS WHICH WINS ★
+  ///
+  /// `PrismaMembersStore.guildJoinedAt` carries a comment warning against adding exactly this
+  /// column — "the same fact in two tables, free to disagree, with nothing saying which one won."
+  /// That warning is right in general and does not apply here, because the two cover different
+  /// populations: `discord_identities` is keyed on a WEBSITE account and only exists once somebody
+  /// has signed in. Measured on 2026-08-01: 117 guild members, ONE identity row. It can put a
+  /// tenure against one person out of a hundred and seventeen.
+  ///
+  /// So they are not the same fact in two tables. They are the same fact about two different sets
+  /// of people, and this is the larger set.
+  ///
+  /// Precedence, stated once so it is never a guess: THIS COLUMN WINS. It is refreshed on every bot
+  /// start, so it survives a member leaving and rejoining. `guildJoinedAt` is a snapshot taken at
+  /// sign-in and never revisited, so it can only go stale. The rank ladder still reads
+  /// `guildJoinedAt` — deliberately unchanged, because rank must keep working with no bot running,
+  /// and the two agree for anybody who has not left and rejoined since signing in.
+  joinedAt   DateTime? @map("joined_at") @db.Timestamptz(6)
+
+  /// When a Discord timeout on this member expires. Null when they are not timed out.
+  ///
+  /// ★ MIRRORED FROM DISCORD, NEVER DECIDED HERE ★
+  ///
+  /// Discord owns this: it is `communication_disabled_until` on the guild member, and it expires on
+  /// its own with no event to tell us. So a row in the past means NOT timed out, and every reader
+  /// must compare against the clock rather than testing for null.
+  ///
+  /// Kept here so the Squad Members roster is one database read. The alternative — asking Discord
+  /// for the member list on every page load — puts a rate-limited network call in front of a page
+  /// an officer refreshes while working through a queue.
+  ///
+  /// Written on the startup sweep and on every member update, which is what Discord sends when a
+  /// timeout is applied or lifted. It can therefore be a few seconds stale after somebody is timed
+  /// out from Discord's own UI, and that is the correct trade for a roster.
+  timeoutUntil DateTime? @map("timeout_until") @db.Timestamptz(6)
 
   /// When this member joined the voice channel they are sitting in. Null when they are not in one.
   ///
@@ -889,12 +1145,59 @@ model PrivacySetting {
   /// Superseded by the two columns above. Retained so the migration can read it, and so anybody
   /// looking at an old backup can see what it meant. Nothing writes it.
   telemetryConsent   TelemetryCategory[] @default([]) @map("telemetry_consent")
-  showLocation       Boolean             @default(false) @map("show_location")
+  /// ★ ON BY DEFAULT, EXCEPT THE BALANCE (owner's instruction, 2026-07-31) ★
+  ///
+  /// "default all privacy options to on except balance, they can opt into that! this is
+  /// non-negotiable!"
+  ///
+  /// These control VISIBILITY, not collection — telemetry is already opt-out above. A squadron
+  /// roster where everybody is hidden by default is a roster nobody uses, and the members who most
+  /// need to appear are the new ones least likely to find a settings page.
+  ///
+  /// Every one of these remains a switch a member can turn off. Defaulting on is a decision about
+  /// what a squadron site is FOR; it is not a decision to stop asking.
+  showLocation       Boolean             @default(true) @map("show_location")
+  /// ★ THE EXCEPTION, AND THE ONLY ONE ★
+  ///
+  /// Credit balance stays OFF until a member chooses otherwise. It is the one field that is nobody
+  /// else's business by default — wealth invites comparison and, in a squadron that includes
+  /// minors, attention nobody asked for. Opt IN, deliberately, against every other field's opt-out.
   showCredits        Boolean             @default(false) @map("show_credits")
-  showFleet          Boolean             @default(false) @map("show_fleet")
-  showActivity       Boolean             @default(false) @map("show_activity")
-  showOnPublicRoster Boolean             @default(false) @map("show_on_public_roster")
-  showOnLeaderboard  Boolean             @default(false) @map("show_on_leaderboard")
+  showFleet          Boolean             @default(true) @map("show_fleet")
+  showActivity       Boolean             @default(true) @map("show_activity")
+  showOnPublicRoster Boolean             @default(true) @map("show_on_public_roster")
+  showOnLeaderboard  Boolean             @default(true) @map("show_on_leaderboard")
+  /// ★ PER-BOARD, UNDER THE MASTER — squadron owner, 2026-08-04 ★
+  ///
+  /// "show each leaderboard there and add all future leaderboards here too, default all
+  /// leaderboard participation on for all commanders please!" The master switch above still
+  /// gates everything at once; these narrow it board by board. A new leaderboard gets a new
+  /// column here, defaulting on, and appears in the settings list by being in the shared
+  /// LEADERBOARDS catalogue.
+  showLbBounties     Boolean             @default(true) @map("show_lb_bounties")
+  showLbColony       Boolean             @default(true) @map("show_lb_colony")
+  showLbTrade        Boolean             @default(true) @map("show_lb_trade")
+
+  /// The font this member's own new posts start in. Null means the site face.
+  ///
+  /// An id from the font catalogue, never a family name - the same rule as the document marks, so
+  /// nothing a member picked can reach a `font-family` value directly.
+  defaultFontId      String?             @map("default_font_id")
+
+  /// ★ THE READER'S OVERRIDE, WHICH IS NOT THE SAME QUESTION ★
+  ///
+  /// `defaultFontId` is what THEY write in. This is what they READ in: when true, every post and
+  /// signature renders in the site face regardless of what its author chose.
+  ///
+  /// Members can pick from thirty display faces, and a forum where each post is a different one is
+  /// genuinely harder to read - worse for anybody with dyslexia or low vision, who currently have
+  /// no way out but to stop reading. An author choosing a font is expression; a reader turning
+  /// them off is accessibility, and neither should be able to overrule the other.
+  ///
+  /// Costs nothing to honour: fonts render as `doc-font-<id>` CLASSES, so this is one stylesheet
+  /// rule rather than a second render path.
+  plainFonts         Boolean             @default(false) @map("plain_fonts")
+
   updatedAt          DateTime            @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -920,6 +1223,17 @@ model ForumCategory {
   viewPerm         Decimal? @map("view_perm") @db.Decimal(40, 0)
   /// Permission mask required to POST.
   postPerm         Decimal? @map("post_perm") @db.Decimal(40, 0)
+  /// Permission mask required to REPLY in an existing thread. NULL means "same as post_perm" —
+  /// one mask gating both, which is what every board did before this column existed and what
+  /// every board keeps doing until somebody sets it. Exists for Feature Requests, where thread
+  /// CREATION is the webmaster's publish flow and REPLIES are the squadron's.
+  replyPerm        Decimal? @map("reply_perm") @db.Decimal(40, 0)
+  /// Threads on this board arrive ONLY through the suggestion-box publish flow — the normal
+  /// composer refuses every caller, the webmaster included (squadron owner, 2026-08-04: "they
+  /// must be published via the webmaster approval only"). A category property, not a slug check
+  /// in code, so renaming the board cannot silently reopen the door. Default false: every other
+  /// board is untouched.
+  threadsViaPublish Boolean @default(false) @map("threads_via_publish")
   isLocked         Boolean  @default(false) @map("is_locked")
   /// Optional thread-level Discord bridge target. Message-level mirroring is rejected (ADR-006).
   discordChannelId String?  @map("discord_channel_id")
@@ -930,6 +1244,8 @@ model ForumCategory {
   subscribers ForumSubscription[]
 
   @@index([parentId, position])
+  reads       ForumCategoryRead[]
+
   @@map("forum_categories")
 }
 
@@ -1077,9 +1393,117 @@ model MediaUpload {
 
   uploader User @relation("MediaUploader", fields: [uploaderId], references: [id], onDelete: Cascade)
 
+  /// Back-relations for signature images. `SetNull` on both, so deleting an upload leaves the
+  /// signature intact and merely picture-less rather than taking the member's whole block with it.
+  signatureAvatars ForumSignature[] @relation("SignatureAvatar")
+  signatureBanners ForumSignature[] @relation("SignatureBanner")
+  signaturePublished ForumSignature[] @relation("SignaturePublished")
+
+  /// Training submissions built on this upload.
+  trainingImages TrainingImage[]
+
+  /// Support messages carrying this image. SetNull: deleting the upload leaves the message,
+  /// merely picture-less — the same rule as the signature images above.
+  supportAttachments SupportMessage[] @relation("SupportAttachment")
+
   /// "What has this member uploaded, newest first" - the quota and moderation query.
   @@index([uploaderId, createdAt])
   @@map("media_uploads")
+}
+
+/// A screenshot a member has offered for training GMSD AI's image models (P2).
+///
+/// * SQUADRON OWNER, 2026-08-01: "Help Train the Bot" *
+///
+/// * WHY THIS IS A SEPARATE ROW AND NOT A FLAG ON media_uploads *
+///
+/// An upload is a FILE. This is an OFFER, and it carries things a file does not: which concept it
+/// is meant to teach, what the member says is in it, whether an officer has accepted it, and
+/// whether the member has since changed their mind. The same image can be uploaded for a forum post
+/// and never offered here; offering it is a decision, and decisions want their own row with their
+/// own timestamps.
+///
+/// It also means withdrawing consent deletes THIS row and leaves the member's image where it was.
+model TrainingImage {
+  id       String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  uploadId String @map("upload_id") @db.Uuid
+  userId   String @map("user_id") @db.Uuid
+
+  /// A key of TRAINING_CATEGORIES. Not free text: a LoRA is trained per concept, and a category
+  /// somebody invented is an image that will never be part of any training run.
+  category String
+
+  /// What the member says is in it.
+  ///
+  /// * THE ENTIRE VALUE OF THE UPLOAD *
+  ///
+  /// A thousand unlabelled screenshots teach a model nothing; a hundred labelled
+  /// "Krait Mk II, exterior, docked at an orbis starport, night side" teach it to draw a Krait.
+  /// An image captioned "cool shot" is worse than no image, because it dilutes the ones that are
+  /// labelled properly. Minimum length is enforced in the contract, not here - see
+  /// MIN_DESCRIPTION_CHARS.
+  description String
+
+  /// The ship in frame, when it is known. Usually DERIVED from the member's journal around the
+  /// upload time rather than asked - see SHIP_INFERENCE_WINDOW_MS. Null is honest; a guess is not.
+  shipType String? @map("ship_type")
+
+  /// Anything else worth recording: the system, the station, the time of day, what was happening.
+  /// Free text, optional, and appended to the caption at training time.
+  notes String?
+
+  /// pending | approved | rejected | withdrawn. See CORPUS_STATES.
+  state String @default("pending")
+
+  /// Why an officer refused it. Shown to the member, because a rejection with no reason teaches
+  /// them nothing and they will submit the same thing again.
+  reviewNote String?   @map("review_note")
+  reviewedBy String?   @map("reviewed_by") @db.Uuid
+  reviewedAt DateTime? @map("reviewed_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  upload   MediaUpload @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+  user     User        @relation("TrainingSubmitter", fields: [userId], references: [id], onDelete: Cascade)
+  reviewer User?       @relation("TrainingReviewer", fields: [reviewedBy], references: [id], onDelete: SetNull)
+
+  /// The progress query: how many approved and pending per category.
+  @@index([category, state])
+  /// "What have I submitted", newest first.
+  @@index([userId, createdAt])
+  /// The review queue: everything waiting, oldest first.
+  @@index([state, createdAt])
+  /// One offer per image. Submitting the same upload twice is a mistake, not two contributions.
+  @@unique([uploadId])
+  @@map("training_images")
+}
+
+/// When a member last looked at a board, for "new posts" indicators.
+///
+/// * ONE ROW PER MEMBER PER BOARD, NOT PER THREAD *
+///
+/// Squadron owner, 2026-07-30: "add the ability to show new post indicators on the category cards".
+///
+/// Per-THREAD read state is what a big forum does, and it costs a row per member per thread - at
+/// 107 members and a growing board that is the largest table in the schema within a year, written
+/// on every page view, to drive a dot on a card.
+///
+/// Per-BOARD is bounded by members x boards, which is a few hundred rows forever, and answers the
+/// question actually being asked: does this board have anything I have not seen. A thread-level
+/// unread mark can be added later without moving this - it is a different question with a different
+/// cost, and conflating them now would commit to the expensive one before anybody has asked for it.
+model ForumCategoryRead {
+  userId     String   @map("user_id") @db.Uuid
+  categoryId String   @map("category_id") @db.Uuid
+  /// The moment the member opened the board. Compared against threads' last_post_at.
+  lastSeenAt DateTime @default(now()) @map("last_seen_at") @db.Timestamptz(6)
+
+  user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  category ForumCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([userId, categoryId])
+  @@index([userId])
+  @@map("forum_category_reads")
 }
 
 model ForumPost {
@@ -1088,11 +1512,57 @@ model ForumPost {
   authorId   String                   @map("author_id") @db.Uuid
   replyToId  String?                  @map("reply_to_id") @db.Uuid
   bodyMd     String                   @map("body_md")
-  /// Sanitized SERVER-SIDE with DOMPurify before storage, served under a strict CSP (INV-035).
+  /// Sanitized SERVER-SIDE before storage, served under a strict CSP (INV-035).
+  ///
+  /// For a RICH post this is GENERATED from body_doc and is never accepted from a client.
   bodyHtml   String                   @map("body_html")
+  /// The rich document (P2.3), when the post was written in the rich editor.
+  ///
+  /// * WHY BOTH THIS AND body_html EXIST *
+  ///
+  /// This is the SOURCE OF TRUTH; body_html is derived from it on the server. Keeping both means
+  /// reading a post is one column with no render step, while EDITING starts from the exact tree
+  /// the author built - so a round trip through the editor cannot degrade their layout.
+  ///
+  /// * WHY NOT REPLACE body_md *
+  ///
+  /// Markdown posts still exist and are still valid: replies, the seeded guides, anything written
+  /// before P2.3. A migration that rewrote them all into documents would be a lossy transform of
+  /// every post on the site, run once, with no way back. Null here means "written as Markdown",
+  /// which is a fact worth keeping rather than erasing.
+  ///
+  /// Validated against a closed set of eleven node types before storage. There is no node type
+  /// that can carry raw HTML, and images carry OUR upload id rather than a URL - so a document
+  /// cannot reference a third-party host at all.
+  bodyDoc    Json?                    @map("body_doc")
   editedAt   DateTime?                @map("edited_at") @db.Timestamptz(6)
   editCount  Int                      @default(0) @map("edit_count")
   isSolution Boolean                  @default(false) @map("is_solution")
+
+  /// Whether the AI screener has cleared this post for anybody to read.
+  ///
+  /// * SQUADRON OWNER, 2026-07-30: "the ai must ingest and moderate all posts before they are
+  /// visible / posted to the forum" *
+  ///
+  /// So a post is HELD by default in the sense that it is written with whatever the screener said,
+  /// and the read path filters on this column. Nothing unscreened is ever visible, including to the
+  /// author - a member who could see their own held post would assume it had published.
+  ///
+  /// `held` covers two different situations on purpose: the screener flagged it, or the screener
+  /// could not be reached. Both mean the same thing to a reader - a human has not looked yet - and
+  /// distinguishing them in the READ path would be a second rule to keep in step. The moderation
+  /// queue tells them apart from `screenVerdict` below.
+  screenState ScreenState @default(held) @map("screen_state")
+
+  /// What the screener concluded, for the officer reviewing it. NEVER shown to the author.
+  ///
+  /// Telling somebody which category fired teaches anybody determined exactly which wording gets
+  /// through, and they can retry freely. Owner's decision, 2026-07-30.
+  screenVerdict Json? @map("screen_verdict")
+
+  /// When a human released or removed it, and who.
+  reviewedAt DateTime? @map("reviewed_at") @db.Timestamptz(6)
+  reviewedBy String?   @map("reviewed_by") @db.Uuid
   createdAt  DateTime                 @default(now()) @map("created_at") @db.Timestamptz(6)
   /// Soft delete only (INV-022).
   deletedAt  DateTime?                @map("deleted_at") @db.Timestamptz(6)
@@ -1102,15 +1572,116 @@ model ForumPost {
 
   thread    ForumThread     @relation(fields: [threadId], references: [id], onDelete: Cascade)
   author    User            @relation(fields: [authorId], references: [id])
+  reviewer  User?           @relation("PostReviewer", fields: [reviewedBy], references: [id], onDelete: SetNull)
   replyTo   ForumPost?      @relation("PostReplies", fields: [replyToId], references: [id], onDelete: SetNull)
   replies   ForumPost[]     @relation("PostReplies")
   reactions ForumReaction[]
   revisions PostRevision[]
+  votes     ForumVote[]
+
+  /// The running total of votes on this post.
+  ///
+  /// * DENORMALISED, AND IT HAS TO BE *
+  ///
+  /// Every post in every thread listing shows its score. Computing it from `forum_votes` means a
+  /// correlated aggregate per post per page load, and the ONE query that must stay fast on this
+  /// site is reading a thread. This column is written in the same transaction as the vote, so it
+  /// cannot drift without a bug that also lost the vote itself.
+  ///
+  /// Nullable would be wrong: zero is a real score and "no votes yet" is the same thing to every
+  /// reader.
+  score      Int                      @default(0)
 
   @@index([threadId, createdAt])
+  /// Highest-scoring posts, for the knowledge ingest and for "top answers". Partial in the
+  /// migration - the vast majority of posts sit at zero and indexing them helps nothing.
+  @@index([score])
   @@index([authorId, createdAt])
   @@index([replyToId])
+  /// The moderation queue's only query: everything waiting, oldest first.
+  @@index([screenState, createdAt])
   @@map("forum_posts")
+
+  /// Decisions taught by this post. Kept if the post is deleted — see ScreenDecision.
+  screenDecisions ScreenDecision[]
+}
+
+/// One member's vote on one post (P2, squadron owner 2026-07-31).
+///
+/// * WHY A ROW PER VOTE RATHER THAN A COUNTER *
+///
+/// A counter cannot answer "have I already voted on this", which every reader needs on every post
+/// to render the buttons correctly. It also cannot be undone: a member changing their mind would
+/// decrement something they might never have incremented.
+///
+/// The unique key is the whole enforcement. One member, one post, one vote — in the DATABASE, so
+/// two browser tabs racing produce a constraint violation rather than two votes.
+model ForumVote {
+  postId    String   @map("post_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  /// +1 or -1. Never 0 — withdrawing a vote deletes the row, so "no opinion" has one
+  /// representation rather than two that queries would have to remember to treat alike.
+  value     Int
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  post ForumPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+  user User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([postId, userId])
+  /// "What have I voted on in this thread" — asked once per thread render, for the whole page.
+  @@index([userId, postId])
+  @@map("forum_votes")
+}
+
+/// Every experience award, as it happened.
+///
+/// * A LEDGER, NOT A BALANCE *
+///
+/// The obvious design is an `xp` column on `users` that goes up. It cannot answer "why do I have
+/// 340", it cannot be corrected when an award turns out to be wrong, and if a bug ever
+/// double-awards there is no way to find out — the number is just bigger than it should be, for
+/// ever.
+///
+/// Rows are cheap. A hundred and seven members earning a dozen awards a week is a table that stays
+/// small enough to sum on demand for years, and the sum can always be checked against the reasons.
+model XpEvent {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  /// Matches a key of XP_AWARDS in the reputation contract.
+  reason    String
+  amount    Int
+  /// What it was for — a post id, a thread id, or a date for a played day. Free-form because the
+  /// subject differs per reason, and a typed column per reason would be six mostly-null columns.
+  subject   String?
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// Summing a member's total, which is the only read this table gets.
+  @@index([userId, createdAt])
+  /// * IDEMPOTENCE, ENFORCED IN THE DATABASE *
+  ///
+  /// A unique partial index on (user_id, reason, subject) lives in the migration, because Prisma
+  /// cannot express a partial index. It is what stops the daily job awarding `playedToday` twice
+  /// for the same date if it is ever run twice — which is exactly what a retry does.
+  @@map("xp_events")
+}
+
+/// A badge a member has earned, and when.
+///
+/// Stored rather than computed on read, so the DATE is real. A badge whose earned-at is recomputed
+/// every page load says a member earned it today, every day, and "since March" is most of what a
+/// badge is worth.
+model MemberBadge {
+  userId   String   @map("user_id") @db.Uuid
+  /// Matches a `key` in BADGES.
+  badgeKey String   @map("badge_key")
+  earnedAt DateTime @default(now()) @map("earned_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, badgeKey])
+  @@map("member_badges")
 }
 
 /// Edit history. Retained so moderation can see what a post said before it was changed.
@@ -1142,6 +1713,338 @@ model PostRevision {
 }
 
 /// Per-post emoji reaction.
+/// A member's forum signature - the block under their posts.
+///
+/// * WHY THE AVATAR HERE IS NOT THE AVATAR ON `User` *
+///
+/// Squadron owner, 2026-07-30: "allow users to upload a signature avatar if they want to customize
+/// it ... the avatar upload should only be displayed on the forums and not replace their global
+/// avatar that discord imports".
+///
+/// So this is a SEPARATE column, and `User.avatarStoredHash` is never written by anything in this
+/// file. The obvious implementation - "let them upload an avatar" - would have overwritten the
+/// Discord import, and the next Discord sync would have silently overwritten it back. A member
+/// would watch their picture change on its own and have no way to describe the bug.
+///
+/// * ONE ROW PER MEMBER, CREATED ON FIRST SAVE *
+///
+/// `userId` is the primary key rather than a `signatureId` with a unique index: a member has one
+/// signature or none, and a table that can physically hold two is a table that eventually does.
+/// Absent means "has not made one", which renders as the default built from their Discord avatar.
+model ForumSignature {
+  userId String @id @map("user_id") @db.Uuid
+
+  /// Forum-only avatar. Null means "use the Discord one", which is the default and stays true
+  /// forever if they never touch this.
+  avatarMediaId String? @map("avatar_media_id") @db.Uuid
+
+  /// One line under the name. Length-capped in the contract, not here, so the limit is stated in
+  /// one place that both the API and the editor read.
+  tagline String?
+
+  /// The banner image, and where it points.
+  ///
+  /// Set when they UPLOADED a finished banner. Mutually exclusive with `bannerSpec` in practice:
+  /// a banner is either something they made here or something they brought.
+  bannerMediaId String? @map("banner_media_id") @db.Uuid
+
+  /// The banner they BUILT, as a layer spec rather than a rendered image.
+  ///
+  /// * WHY A SPEC AND NOT A PNG *
+  ///
+  /// Storing the output would freeze it. Text layers name a SOURCE - commander, rank, squadron -
+  /// which is resolved when the banner is drawn, so a promotion or a rename updates every banner
+  /// automatically. A stored image would leave a member advertising a rank they no longer hold
+  /// until they remembered to come back and rebuild it.
+  ///
+  /// It is also what makes the editor honest: the preview renders this spec with the same code the
+  /// forum uses, so there is one renderer and nothing to disagree with.
+  bannerSpec Json? @map("banner_spec")
+
+  /// A flat PNG of the built banner, for pasting into OTHER forums as BBCode.
+  ///
+  /// * WHY A SNAPSHOT EXISTS AT ALL *
+  ///
+  /// BBCode cannot describe a banner - `[img]` takes a URL and nothing else. So sharing off-site
+  /// means publishing a picture, and a picture cannot resolve "my rank" the way the live banner
+  /// does. Get promoted and the on-site banner updates itself while the published copy does not,
+  /// until it is published again. That is inherent to the format, not a shortcut.
+  ///
+  /// Separate from `bannerMediaId`, which is a banner they UPLOADED. Conflating them would mean
+  /// publishing silently replaced an uploaded banner.
+  bannerPublishedMediaId String? @map("banner_published_media_id") @db.Uuid
+
+  /// * A HOST ALLOWLIST, NOT A FREE URL *
+  ///
+  /// Owner asked for a banner "that links to inara commander profile or something of that nature
+  /// or a stream channel if they are a streamer". That is a small, nameable set of destinations.
+  ///
+  /// An arbitrary URL under every post a member writes is advertising space with a hundred
+  /// impressions a day, and the first time somebody links somewhere unpleasant it is a moderation
+  /// problem on every page they have ever posted on. The allowlist lives in the contract; this
+  /// column holds what passed it.
+  bannerUrl   String? @map("banner_url")
+  /// What the link says, for readers who cannot see the image.
+  bannerLabel String? @map("banner_label")
+
+  /// Which brand accent to use. A closed set in the contract - free-form colour would let a
+  /// member render unreadable text on our own background.
+  accent String @default("orange")
+
+  showRank      Boolean @default(true) @map("show_rank")
+  showCommander Boolean @default(true) @map("show_commander")
+  /// Turned off without deleting, so switching it back does not mean rebuilding it.
+  enabled       Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user   User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  avatar MediaUpload? @relation("SignatureAvatar", fields: [avatarMediaId], references: [id], onDelete: SetNull)
+  banner MediaUpload? @relation("SignatureBanner", fields: [bannerMediaId], references: [id], onDelete: SetNull)
+  published MediaUpload? @relation("SignaturePublished", fields: [bannerPublishedMediaId], references: [id], onDelete: SetNull)
+
+  @@map("forum_signatures")
+}
+
+/// Whether a post has been cleared to be read.
+enum ScreenState {
+  /// Waiting for a human. Either the screener flagged it, or the screener could not be reached.
+  held
+  /// Cleared - by the screener, or by an officer releasing it.
+  clear
+  /// An officer decided it stays down. Distinct from a soft delete, which is the author removing it.
+  refused
+}
+
+/// Every call made to the AI, kept for review.
+///
+/// * SQUADRON OWNER, 2026-07-30 *
+///
+/// "Every conversation logged for officer review ... with option 4 it also need to be visible to
+/// the webmaster role! this is non-negotiable as the webmaster is the AI developer."
+///
+/// * WHY LOG AT ALL *
+///
+/// A model that starts answering badly is invisible otherwise: the member who got a wrong answer
+/// rarely reports it, they just act on it. This is how somebody notices it telling people the wrong
+/// joining steps - and how abuse of an unauthenticated endpoint pointed at a home GPU is spotted.
+///
+/// Members are told this is not private. A log people do not know about is a different thing from
+/// a log they do.
+model AiCall {
+  id     String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Null for an anonymous caller on the public recruiting or guides pages.
+  userId String?   @map("user_id") @db.Uuid
+  /// `screen`, `assistant` or `signature`.
+  kind   String
+  /// Where it came from: `web`, `discord`, `public`.
+  surface String
+
+  /// What was asked. Truncated at the service, because a whole forum post is not a useful log line.
+  prompt String
+  /// What came back. Null when the AI was unreachable, which is itself worth recording.
+  response String?
+
+  /// Whether this call was refused before it reached the model, and why - rate limit, or scope.
+  refusedReason String? @map("refused_reason")
+
+  /// Milliseconds. A tunnel degrading shows up here long before it fails outright.
+  tookMs Int? @map("took_ms")
+
+  /// Groups the turns of one assistant conversation. Null for screening and signature calls,
+  /// which are single exchanges with nothing to belong to.
+  ///
+  /// ★ WITHOUT IT THE REVIEW SCREEN CAN ONLY GUESS ★
+  ///
+  /// Grouping by member and a time gap gets it wrong in exactly the cases somebody is reviewing:
+  /// two unrelated questions ten minutes apart read as one incoherent conversation, and a member
+  /// returning an hour later to finish a thought reads as two.
+  threadId String? @map("thread_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  /// The review screen: newest first, optionally by kind.
+  @@index([createdAt])
+  @@index([kind, createdAt])
+  @@index([userId, createdAt])
+  /// One conversation, in order. Partial in the migration - most rows never carry a thread.
+  @@index([threadId, createdAt])
+  @@map("ai_calls")
+}
+
+/// A post a human judged, kept so the screener can learn from precedent.
+///
+/// ★ THE LABEL IS THE HUMAN'S, NEVER THE MODEL'S ★
+///
+/// `should_flag` is what a person concluded. `model_flagged` is what the screener said at the time,
+/// and is used ONLY to measure drift - never as a label, or the model would be learning from itself
+/// and any early mistake would compound forever.
+///
+/// ★ BOTH DIRECTIONS, DELIBERATELY ★
+///
+/// A moderator only ever sees posts the model FLAGGED, so a review can only ever say "you
+/// over-flagged". Reports are the only source of "you under-flagged" - the direction that matters,
+/// and the one the review queue structurally cannot see. Without reports this table would teach the
+/// screener to flag less and less while appearing to improve.
+model ScreenDecision {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  /// The post this came from, kept nullable so a deleted post does not erase the lesson it taught.
+  postId String? @map("post_id") @db.Uuid
+
+  /// The text that was judged. Stored rather than joined: the post may be edited or removed, and an
+  /// example that changes under you is not an example.
+  text String
+
+  /// What the HUMAN decided. This is the label.
+  shouldFlag Boolean @map("should_flag")
+  /// What the screener said at the time. For drift only.
+  modelFlagged Boolean @map("model_flagged")
+
+  /// `review` (a moderator decided) or `report` (a member reported a published post).
+  source String
+
+  /// Who decided. Null for a report that no officer has upheld yet.
+  decidedBy String?   @map("decided_by") @db.Uuid
+  decidedAt DateTime? @map("decided_at") @db.Timestamptz(6)
+
+  /// nomic-embed-text, 768 dimensions. Added by the migration as a `vector(768)` column with an
+  /// HNSW index - Prisma has no native type for it.
+  /// embedding vector(768)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  post    ForumPost? @relation(fields: [postId], references: [id], onDelete: SetNull)
+  decider User?      @relation(fields: [decidedBy], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([source, createdAt])
+  @@map("screen_decisions")
+}
+
+/// One ingested fact, from any source.
+///
+/// ★ ONE TABLE, NOT SEVEN ★
+///
+/// Ships, systems, stations and blueprints have wildly different shapes, and a table each would mean
+/// a migration every time a source is added — plus seven places for the assistant's lookup to know
+/// about. The shared columns are the ones every source has (what it is, what it is called, where it
+/// came from, when we learned it) and `data` carries the rest.
+///
+/// The cost is honest: `data` is not type-checked by the database. The ingest for each source is
+/// where its shape is enforced, and the retrieval layer treats anything in here as untrusted.
+model KnowledgeItem {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  /// `journal`, `coriolis`, `galaxy`, `eddn`, `inara`, `reference`, `forum`.
+  source String
+  /// `ship`, `module`, `blueprint`, `system`, `station`, `commander`, `article`.
+  kind   String
+
+  /// The natural key WITHIN a source — a system name, a ship id, a wiki slug. With `source` and
+  /// `kind` this is what makes re-ingesting an update rather than a duplicate.
+  extKey String @map("ext_key")
+
+  /// What a human calls it. Indexed for the exact and fuzzy name lookups that answer most questions.
+  name String
+
+  /// Everything else, shaped by the source.
+  data Json
+
+  /// Prose, for sources stored as vectors. Null for structured rows, which are looked up instead.
+  /// Kept separate from `data` so the embedder never has to guess which field to read.
+  text String?
+
+  /// nomic-embed-text, 768 dims. Added by the migration as `vector(768)` with an HNSW index —
+  /// Prisma has no native type, and a generated diff would drop it.
+  /// embedding vector(768)
+
+  /// 3D position, for `cube`-based nearest-neighbour on systems. Also migration-only.
+  /// coords cube
+
+  ingestedAt DateTime @default(now()) @map("ingested_at") @db.Timestamptz(6)
+
+  @@unique([source, kind, extKey])
+  @@index([source, kind])
+  @@index([name])
+  @@map("knowledge_items")
+}
+
+/// One ingestion run, so the training page can say what happened and when.
+///
+/// Records FAILURES as well as successes. A source that is quietly broken looks identical to one
+/// that has never been ingested, and both look like "nothing to see" on a status page.
+/// Every line that has appeared on the live AI log (P2).
+///
+/// * SQUADRON OWNER, 2026-08-01: "record all logs so we have a record of them" *
+///
+/// * WHY A TABLE WHEN THERE IS ALREADY A STREAM *
+///
+/// `AiStreamService` is a ring buffer in memory: a hundred lines, gone on restart, and invisible to
+/// anybody who was not watching. That is the right shape for a LIVE panel and no shape at all for a
+/// record. "What did the screener say at 3am on Tuesday" had no answer.
+///
+/// * WHY NOT ai_calls *
+///
+/// That table records CALLS TO THE MODEL - prompt, verdict, duration. Half of what crosses the
+/// stream is not a call: heartbeats, ingest progress, embedding sweeps, the listener connecting.
+/// Widening ai_calls to hold them would make every row's meaning conditional on its kind.
+///
+/// Volume is small - a heartbeat every four minutes is 360 rows a day, and everything else is
+/// event-driven. A retention sweep can trim it if it ever stops being small.
+model AiLogLine {
+  id      BigInt   @id @default(autoincrement())
+  /// info | warn | error.
+  level   String
+  /// Which subsystem spoke: screen, embed, ingest, health, assistant, signature.
+  kind    String
+  message String
+  /// Milliseconds, when the line describes something that finished.
+  tookMs  Int?     @map("took_ms")
+  at      DateTime @default(now()) @db.Timestamptz(6)
+
+  /// The panel's only query: newest first, optionally filtered by kind.
+  @@index([at])
+  @@index([kind, at])
+  @@map("ai_log_lines")
+}
+
+model KnowledgeIngest {
+  id     String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  source String
+
+  startedAt  DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
+  finishedAt DateTime? @map("finished_at") @db.Timestamptz(6)
+
+  /// Rows written so far. Zero while running and nothing written yet - NOT null.
+  ///
+  /// * NULL IS WHY THE COUNTDOWN SAID "estimating..." FOR EVER *
+  ///
+  /// It used to be null until the run finished, and null cannot be told apart from "no progress
+  /// reported yet". The training page had nothing to divide by and nothing to draw, so a live
+  /// import rendered exactly like a dead one. Zero is a real answer with a short shelf life.
+  rows Int? @default(0)
+  /// Null on success. The message an officer reads on the training page.
+  error String?
+
+  /// When this run last reported progress.
+  ///
+  /// * THE DIFFERENCE BETWEEN SLOW AND DEAD *
+  ///
+  /// Judged on `started_at` alone, those two are the same reading - so the stall threshold had to
+  /// clear the slowest job imaginable, and a crashed import claimed to be training for six hours.
+  ///
+  /// A living job touches this every batch. A run that has written nothing for fifteen minutes is
+  /// dead whether it started ten minutes or ten hours ago, which is precise rather than cautious.
+  progressAt DateTime? @map("progress_at") @db.Timestamptz(6)
+
+  @@index([source, startedAt])
+  @@map("knowledge_ingests")
+}
+
 model ForumReaction {
   postId String @map("post_id") @db.Uuid
   userId String @map("user_id") @db.Uuid
@@ -1385,6 +2288,681 @@ model MarketHistory {
   @@index([marketId, commodity, observedAt])
   @@index([observedAt])
   @@map("market_history")
+}
+
+/// Who a colonisation project belongs to.
+enum ColonyOwner {
+  /// The whole squadron hauls for it. Created by officers (COLONY_MANAGE).
+  squadron
+  /// One member's own build, posted so the squadron can help.
+  personal
+}
+
+/// Who may open a colonisation project.
+enum ColonyVisibility {
+  /// Only its owner.
+  private
+  /// Every signed-in member. The default, because the point of posting is asking for help.
+  squadron
+  /// Anyone, on a link. Personal projects only — see the note on ColonyProject.
+  public
+}
+
+/// A colonisation build the squadron is working on, or one member is.
+///
+/// ★ SQUADRON OWNER, 2026-08-02 ★
+///
+/// "colonization ... will allow our members to post their colonization project to the squadron for
+/// assistance etc. officers will be able to add Squadron specific and personal project and ladder
+/// ranked members will be able to list personal projects. ... keep our own full records too."
+///
+/// ★ FULLY OURS, BY THE OWNER'S DECISION ★
+///
+/// The original instruction was to integrate with Ravencolonial's API. Shown that their API holds
+/// no data we cannot capture ourselves — it learns everything from the same journal events our
+/// companion app already reads — the owner chose to build this self-contained. So this table IS the
+/// record, not a cache of somebody else's, and nothing here degrades when a third party is down.
+///
+/// ★ POSTED, THEN TRACKED ★
+///
+/// Asked whether a project should appear automatically when a member docks at a construction site,
+/// the owner chose: "Member posts it; journal then tracks it". So a row here exists because
+/// somebody decided it should, and `marketId` is what lets their journal keep it current from then
+/// on. A board of things people asked for help with, rather than everywhere anyone has flown.
+model ColonyProject {
+  id    String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  owner ColonyOwner
+
+  /// Who posted it. Kept for a squadron project too — somebody made that call, and the audit
+  /// trail for "who declared this the effort" is worth more than the null.
+  postedById String @map("posted_by_id") @db.Uuid
+
+  /// The construction site's market id, from the journal. THE JOIN TO REALITY: it is how a
+  /// `ColonisationConstructionDepot` event is matched to the project a member posted, and it is
+  /// stable in a way the station name is not.
+  marketId BigInt @map("market_id")
+
+  systemName  String  @map("system_name")
+  systemId64  BigInt? @map("system_id64")
+  stationName String? @map("station_name")
+  /// Frontier's build type, e.g. `apollo`. Null until the journal tells us.
+  buildType String? @map("build_type")
+
+  title String
+  notes String?
+
+  visibility ColonyVisibility @default(squadron)
+  /// Set only when visibility is `public`. The capability for a signed-out reader.
+  shareToken String? @unique @map("share_token")
+
+  /// The squadron's current effort. Officers set it; more than one may be true at a time, because
+  /// a squadron can be pushing two builds and pretending otherwise helps nobody.
+  isPriority Boolean @default(false) @map("is_priority")
+
+  completedAt DateTime? @map("completed_at") @db.Timestamptz(6)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  postedBy      User                 @relation("ColonyProjectPoster", fields: [postedById], references: [id], onDelete: Cascade)
+  /// Which build type this site is, once its requirement has been fingerprinted against the
+  /// catalogue.
+  ///
+  /// ★ THE JOURNAL NEVER SAYS WHAT IS BEING BUILT ★
+  ///
+  /// `ColonisationConstructionDepot` reports what a site still wants and nothing about its kind,
+  /// and the station name is whatever the architect typed. But a build type's requirement is a
+  /// vector of twenty-odd commodities at exact tonnages and no two share one — so the requirement
+  /// identifies the build. Nobody picks from a dropdown, and the catalogue is checked against
+  /// reality on the same read.
+  buildTypeId String?          @map("build_type_id")
+  /// Named `identifiedType`, not `buildType`: the free-text `buildType` above is what somebody
+  /// TYPED when they posted, and this is what the site's requirement actually fingerprints to. Two
+  /// fields with one name is how they get confused for each other, and Prisma refuses it outright.
+  identifiedType ColonyBuildType? @relation(fields: [buildTypeId], references: [id], onDelete: SetNull)
+  /// Plan entries that became this project. A planned site links to the real build once it exists,
+  /// so a plan can show its own progress rather than only its intention.
+  plannedAs      ColonyPlanSite[]
+
+  needs         ColonyNeed[]
+  currentBuilds CurrentBuild[]
+  contributions ColonyContribution[]
+  members       ColonyMember[]
+  assignments   ColonyAssignment[]
+  carriers      ColonyCarrier[]
+
+  /// One project per construction site. A second post of the same site is the same build, and two
+  /// rows would split its deliveries in half with neither showing the truth.
+  @@unique([marketId])
+  @@index([owner, isPriority])
+  @@index([postedById])
+  @@map("colony_projects")
+}
+
+/// What one project still needs, per commodity.
+///
+/// ★ A SNAPSHOT, REPLACED WHOLE ★
+///
+/// `ColonisationConstructionDepot` reports the REMAINING need for every commodity at once, so these
+/// rows are replaced from each event rather than decremented. Decrementing would drift the moment a
+/// single event was missed — and events are missed, because a member can haul with the companion
+/// app closed.
+model ColonyNeed {
+  projectId String @map("project_id") @db.Uuid
+  commodity String
+
+  /// Tonnes still wanted, as the depot last reported it.
+  remaining Int
+  /// Tonnes the site wants in total, when the journal gives it. Lets a bar show progress.
+  required Int?
+
+  observedAt DateTime @map("observed_at") @db.Timestamptz(6)
+
+  project ColonyProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@id([projectId, commodity])
+  @@index([commodity])
+  @@map("colony_needs")
+}
+
+/// A star system's bodies, cached from EDSM.
+///
+/// ★ SQUADRON OWNER, 2026-08-03 ★
+///
+/// "ideally what we would like is the same interface that raven gives us, a layout of the system,
+/// with spots on each planet that we can settle etc."
+///
+/// ★ WE HELD NO BODY DATA AT ALL ★
+///
+/// Not one table, anywhere. The EDDN collector consumes `commodity/3` and discards the `Scan`
+/// events that carry bodies — which are 34.7% of the firehose — so a planner had nothing to lay out.
+///
+/// EDSM answers this on demand: one request per system, no paging (173 bodies came back in a single
+/// response), every field a planner needs, and a measured 720-per-hour token bucket. So bodies are
+/// fetched when somebody first plans a system and cached here rather than bulk-imported. A squadron
+/// plans a handful of systems, not the galaxy.
+model ColonySystem {
+  /// Frontier's own 64-bit address. The join key EDSM, Spansh and the journal all agree on.
+  id64 BigInt @id
+
+  name String @unique
+
+  /// What EDSM believes the system holds, so a partial scan can say so.
+  bodyCount Int?
+
+  /// When we last asked. Shown on the page — a body list nobody can date is one nobody can trust.
+  fetchedAt DateTime @map("fetched_at") @db.Timestamptz(6)
+
+  bodies ColonyBody[]
+  plans  ColonyPlan[]
+
+  @@map("colony_systems")
+}
+
+/// One body in a system, with the slot counts a member read off the in-game map.
+///
+/// ★ SLOT COUNTS ARE ENTERED, NOT PREDICTED — SQUADRON OWNER, 2026-08-03 ★
+///
+/// A community formula exists for SURFACE slots and none exists for orbital: RavenColonial predicts
+/// the first and asks the member for the second. The owner chose to ask for both, which is the
+/// stricter and more honest answer — every number on the planner is then something somebody read
+/// off their own screen rather than something we inferred.
+///
+/// They live on the BODY rather than on a plan, because how many slots a body has is a fact about
+/// the system. One member reads it once and every plan of that system has it.
+model ColonyBody {
+  systemId64 BigInt @map("system_id64")
+  /// EDSM's `bodyId`, stable within a system.
+  bodyId     Int    @map("body_id")
+
+  name    String
+  /// `Star`, `Planet` or `Belt`.
+  kind    String
+  /// EDSM's `subType` — "High metal content world", "Class I gas giant", and so on.
+  subType String? @map("sub_type")
+
+  isLandable    Boolean @default(false) @map("is_landable")
+  /// In g. Above 2.7 nothing can be built on the surface.
+  gravity       Float?
+  /// In K. Above 700 nothing can be built on the surface.
+  temperature   Float?
+  /// Light seconds from the arrival point — how far somebody has to fly after they drop in.
+  distanceLs    Float?  @map("distance_ls")
+  radiusKm      Float?  @map("radius_km")
+  hasRings      Boolean @default(false) @map("has_rings")
+  terraformable Boolean @default(false)
+  hasAtmosphere Boolean @default(false) @map("has_atmosphere")
+  hasVolcanism  Boolean @default(false) @map("has_volcanism")
+
+  /// The body this orbits, so a moon can be drawn under its planet. Null for the primary star.
+  parentBodyId Int? @map("parent_body_id")
+
+  /// Read off the in-game architect view. Null until somebody has looked.
+  orbitalSlots Int? @map("orbital_slots")
+  surfaceSlots Int? @map("surface_slots")
+  /// Who entered them and when, so a wrong number has an author rather than being anonymous.
+  slotsById    String?   @map("slots_by_id") @db.Uuid
+  slotsAt      DateTime? @map("slots_at") @db.Timestamptz(6)
+
+  system ColonySystem     @relation(fields: [systemId64], references: [id64], onDelete: Cascade)
+  sites  ColonyPlanSite[]
+
+  @@id([systemId64, bodyId])
+  @@index([systemId64, parentBodyId])
+  @@map("colony_bodies")
+}
+
+/// A plan for colonising a whole system, before any of it is built.
+///
+/// ★ THE THING A PROJECT CANNOT BE ★
+///
+/// A project tracks ONE construction site that already exists in the game. A plan is the shape of a
+/// system somebody intends to build — thirty sites across a dozen bodies, ordered, costed, and
+/// argued over on Discord long before the first beacon is dropped.
+model ColonyPlan {
+  id String @id @default(uuid()) @db.Uuid
+
+  /// Squadron or personal, and it governs who may edit — the same rule projects use.
+  owner ColonyOwner
+
+  title      String
+  systemName String  @map("system_name")
+  systemId64 BigInt? @map("system_id64")
+  notes      String?
+
+  /// Optimistic concurrency. Two officers editing one plan must not silently overwrite each other.
+  version Int @default(1)
+
+  postedById String   @map("posted_by_id") @db.Uuid
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt  DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  postedBy User          @relation(fields: [postedById], references: [id], onDelete: Cascade)
+  system   ColonySystem? @relation(fields: [systemId64], references: [id64], onDelete: SetNull)
+  sites    ColonyPlanSite[]
+
+  @@index([owner])
+  @@index([systemId64])
+  @@map("colony_plans")
+}
+
+/// One intended build, in one slot, on one body.
+model ColonyPlanSite {
+  id     String @id @default(uuid()) @db.Uuid
+  planId String @map("plan_id") @db.Uuid
+
+  /// Which body it goes on. Null while somebody is still deciding where to put it.
+  systemId64 BigInt? @map("system_id64")
+  bodyId     Int?    @map("body_id")
+
+  /// `orbital` or `surface`. Decides which pool of slots it consumes.
+  location String
+
+  /// The catalogue row. Null for a slot somebody has reserved without choosing what goes in it.
+  buildTypeId String? @map("build_type_id")
+
+  /// Where it sits in the build order. Tier points are earned and spent in this sequence.
+  position Int
+
+  /// True for the system's FIRST station, which the game treats specially and charges nothing for.
+  isPrimary Boolean @default(false) @map("is_primary")
+
+  /// Set once this intention became a real construction site, so a plan can show its own progress.
+  projectId String? @map("project_id") @db.Uuid
+
+  plan      ColonyPlan       @relation(fields: [planId], references: [id], onDelete: Cascade)
+  body      ColonyBody?      @relation(fields: [systemId64, bodyId], references: [systemId64, bodyId], onDelete: SetNull)
+  buildType ColonyBuildType? @relation(fields: [buildTypeId], references: [id], onDelete: SetNull)
+  project   ColonyProject?   @relation(fields: [projectId], references: [id], onDelete: SetNull)
+
+  @@index([planId, position])
+  @@index([buildTypeId])
+  @@map("colony_plan_sites")
+}
+
+/// What a construction site of a given kind costs to build.
+///
+/// ★ SQUADRON OWNER, 2026-08-02 ★
+///
+/// "ensure our baseline colonization setup we have now meets and exceeds the current feature and
+/// system of raven colonial."
+///
+/// Nothing could be planned or pre-costed without this. A project had no needs at all until
+/// somebody physically flew to the site and docked, so "what will this cost me" was unanswerable
+/// before committing to it — which is exactly when it is worth asking.
+///
+/// ★ WHERE THE NUMBERS COME FROM, AND WHY EVERY ROW SAYS SO ★
+///
+/// Frontier publishes none of this. Every figure in circulation is community-gathered, originally
+/// out of their own forum threads, and the lists disagree with each other at the edges. So the
+/// source is recorded per row rather than assumed, and our OWN depot readings are treated as the
+/// better authority: when a member docks at a site whose requirement matches one of these, the row
+/// is confirmed against reality, and where it disagrees, reality wins.
+///
+/// That makes this the one table that gets more accurate the more the squadron builds — which a
+/// hand-curated list cannot do.
+model ColonyBuildType {
+  /// Frontier's own symbol where we know it (`no_truss`), otherwise a slug of the name.
+  id String @id
+
+  /// What a member calls it. "Coriolis Starport".
+  displayName String @map("display_name")
+  /// The family it belongs to, for grouping a long list. "Coriolis", "Outpost", "Settlement".
+  category String
+  /// 1, 2 or 3. What the game charges in construction points.
+  tier Int
+  /// `orbital` or `surface`. Decides which bodies it can go on and how it is hauled to.
+  location String
+  /// `none`, `small`, `medium` or `large`. The pad you can actually land on when it is finished.
+  padSize String @map("pad_size")
+
+  /// Every name this has been seen under, so a station name can be matched back to a type.
+  layouts String[]
+
+  /// Total tonnage across every commodity. Denormalised because every list and sort wants it.
+  totalTonnes Int @map("total_tonnes")
+
+  /// `community` or `observed`. See the note above — `observed` outranks `community`.
+  source String
+
+  /// ★ THE SIMULATION — WHAT THE GAME CHARGES AND WHAT IT GRANTS ★
+  ///
+  /// Colonisation is not "haul enough and it appears". The game runs an economy of CONSTRUCTION
+  /// POINTS: tier-1 builds EARN tier-2 points, tier-2 builds spend them and earn tier-3 points,
+  /// and tier-3 builds spend those. A plan that ignores this stalls halfway through with a port
+  /// nobody can start, which is the single most expensive mistake a squadron can make — a fortnight
+  /// of hauling against a build that was never legal.
+  ///
+  /// These five columns are what make a plan checkable before anybody undocks.
+  ///
+  /// `starport`, `outpost`, `installation`, `settlement` or `hub`. Decides which rules apply.
+  buildClass String @map("build_class")
+  /// Which tier of points this SPENDS, and how many. Tier 0 means it costs nothing.
+  needsTier   Int @default(0) @map("needs_tier")
+  needsPoints Int @default(0) @map("needs_points")
+  /// Which tier of points this EARNS, and how many. Tier 0 means it grants nothing.
+  givesTier   Int @default(0) @map("gives_tier")
+  givesPoints Int @default(0) @map("gives_points")
+
+  /// A prerequisite key this build needs somewhere in the system first, or null.
+  ///
+  /// A KEY rather than a list of build ids, because the ids that satisfy it live on the other side
+  /// of the relationship — see `satisfies`. Storing "requires a military settlement" once and
+  /// letting each settlement declare that it IS one means adding a build type later is a data
+  /// change and never a code change.
+  requires String?
+  /// The prerequisite keys this build satisfies. Usually empty.
+  satisfies String[]
+
+  /// ★ WHAT A COMPLETED BUILD DOES TO THE SYSTEM ★
+  ///
+  /// Seven scalars the game applies when a site finishes. Frontier publishes none of them: every
+  /// figure is a community measurement, which is why the planner labels them as such on screen
+  /// rather than presenting them as facts. Security is routinely NEGATIVE for a large starport.
+  effPopulation       Int @default(0) @map("eff_population")
+  effMaxPopulation    Int @default(0) @map("eff_max_population")
+  effSecurity         Int @default(0) @map("eff_security")
+  effTechnology       Int @default(0) @map("eff_technology")
+  effWealth           Int @default(0) @map("eff_wealth")
+  effStandardOfLiving Int @default(0) @map("eff_standard_of_living")
+  effDevelopment      Int @default(0) @map("eff_development")
+
+  /// ★ WHAT ECONOMY A FINISHED SITE PUSHES THE SYSTEM TOWARDS ★
+  ///
+  /// A station's economy decides what its market carries, which is the question a squadron is
+  /// really asking when they choose where to put a port. `economyInfluence` is what this build
+  /// contributes to whatever it links to; `economyFixed` is set only on builds whose OWN economy is
+  /// locked regardless of surroundings — a Pirate Outpost is a service economy wherever it stands.
+  ///
+  /// `none` is a real answer, not a missing one: plenty of installations influence nothing.
+  economyInfluence String  @map("economy_influence")
+  economyFixed     String? @map("economy_fixed")
+
+  /// When one of OUR OWN depot readings last agreed with this row, exactly. Null until it has.
+  confirmedAt DateTime? @map("confirmed_at") @db.Timestamptz(6)
+  /// How many distinct sites of ours have matched it. A row confirmed six times is not a guess.
+  confirmations Int @default(0)
+
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  costs     ColonyBuildCost[]
+  projects  ColonyProject[]
+  planSites ColonyPlanSite[]
+
+  @@index([category])
+  @@index([tier])
+  @@map("colony_build_types")
+}
+
+/// One commodity in one build type's bill of materials.
+///
+/// Commodity names are DISPLAY names ("CMM Composite"), matching `colony_needs` and
+/// `market_entries` — so a build type joins straight against the market mirror to be priced, and
+/// against a live project's needs to be recognised. A symbol here would join against nothing.
+model ColonyBuildCost {
+  buildTypeId String @map("build_type_id")
+  commodity   String
+  tonnes      Int
+
+  buildType ColonyBuildType @relation(fields: [buildTypeId], references: [id], onDelete: Cascade)
+
+  @@id([buildTypeId, commodity])
+  @@index([commodity])
+  @@map("colony_build_costs")
+}
+
+/// Who delivered what.
+///
+/// ★ THE LEDGER, AND WHY IT IS APPEND-ONLY ★
+///
+/// One row per `ColonisationContribution` event. Never updated, so the tally is always the sum of
+/// what actually happened rather than a running total that can drift away from it — and so a
+/// squadron leaderboard can be recomputed from scratch if it is ever doubted.
+model ColonyContribution {
+  id        BigInt @id @default(autoincrement())
+  projectId String @map("project_id") @db.Uuid
+  /// The member who hauled it. Null for a delivery we can attribute to no account — somebody
+  /// helping who is not on the site.
+  userId    String? @map("user_id") @db.Uuid
+
+  commodity String
+  amount    Int
+
+  deliveredAt DateTime @map("delivered_at") @db.Timestamptz(6)
+  /// The idempotency key, same discipline as TelemetryEvent (INV-017). Elite's journal timestamps
+  /// have whole-second resolution, so two deliveries in the same second would collide without the
+  /// commodity and amount in the hash.
+  eventKey String @unique @map("event_key")
+
+  project ColonyProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User?         @relation("ColonyContributor", fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([projectId, deliveredAt])
+  @@index([userId])
+  @@map("colony_contributions")
+}
+
+/// Somebody who has put their name to a colonisation project.
+///
+/// ★ SQUADRON OWNER, 2026-08-02 ★
+///
+/// "we also need a way for people to join the project ahead of time."
+///
+/// Joining is a ROSTER, not a commitment. It says "I intend to help", which is what makes a build
+/// plannable before anybody has flown anywhere — and it is the list an officer assigns from.
+///
+/// Deliberately separate from having delivered something. A member who hauls without joining still
+/// appears in the ledger and on every chart; joining is about what is going to happen, and
+/// contributions are about what did.
+model ColonyMember {
+  projectId String   @map("project_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  joinedAt  DateTime @default(now()) @map("joined_at") @db.Timestamptz(6)
+
+  project ColonyProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User          @relation("ColonyMemberOf", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([projectId, userId])
+  @@index([userId])
+  @@map("colony_members")
+}
+
+/// Who is bringing what.
+///
+/// ★ CLAIMED OR ASSIGNED, AND THE DIFFERENCE IS RECORDED ★
+///
+/// Squadron owner, 2026-08-02: "Officers can assign on Squadron Projects, Project Owners can assign
+/// on Members Projects" — and members may also claim freely.
+///
+/// `assignedById` is what tells the two apart: null means the member took it themselves, a value
+/// means somebody put it on them. That matters on screen — "you claimed this" and "an officer asked
+/// you to do this" are different messages — and it matters for who may remove it.
+model ColonyAssignment {
+  id        String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  projectId String @map("project_id") @db.Uuid
+  userId    String @map("user_id") @db.Uuid
+  commodity String
+
+  /// Tonnes this member is taking on. Null means "this one is mine" without a number attached,
+  /// which is how most claims actually happen.
+  tonnes Int?
+
+  /// Who assigned it. Null when the member claimed it themselves.
+  assignedById String?  @map("assigned_by_id") @db.Uuid
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  project    ColonyProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user       User          @relation("ColonyAssignee", fields: [userId], references: [id], onDelete: Cascade)
+  assignedBy User?         @relation("ColonyAssigner", fields: [assignedById], references: [id], onDelete: SetNull)
+
+  /// One claim per member per commodity on a project. A second is the same intention restated, and
+  /// two rows would double-count what the build believes is covered.
+  @@unique([projectId, userId, commodity])
+  @@index([projectId, commodity])
+  @@map("colony_assignments")
+}
+
+/// A fleet carrier helping with a build.
+///
+/// ★ SQUADRON OWNER, 2026-08-02 ★
+///
+/// "we also need a way to add fleet carriers to the project like raven colonial does", and
+/// "squadron carriers too".
+///
+/// A carrier is attached by ANYBODY on the project who owns it — the owner's choice — because a big
+/// build is exactly where somebody offers their carrier to a project that is not theirs.
+model ColonyCarrier {
+  projectId String @map("project_id") @db.Uuid
+  /// The carrier's own market id, which is how its cargo is recognised in the journal.
+  marketId  BigInt @map("market_id")
+
+  name     String
+  /// The callsign, e.g. `K7Q-B4L`. What everybody actually calls it.
+  callsign String?
+
+  /// True for a squadron carrier rather than a member's own. Kept because they are answerable to
+  /// different people, and a board that cannot tell them apart cannot say whose cargo is whose.
+  isSquadron Boolean @default(false) @map("is_squadron")
+
+  addedById String   @map("added_by_id") @db.Uuid
+  addedAt   DateTime @default(now()) @map("added_at") @db.Timestamptz(6)
+
+  project ColonyProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  addedBy User          @relation("ColonyCarrierAdder", fields: [addedById], references: [id], onDelete: Cascade)
+
+  @@id([projectId, marketId])
+  @@index([marketId])
+  @@map("colony_carriers")
+}
+
+/// What is actually sitting in a carrier's hold.
+///
+/// ★ KEYED ON THE CARRIER, NOT ON A PROJECT ★
+///
+/// A carrier has one hold. Attaching it to two builds must not mean two sets of cargo — so this is
+/// a property of the carrier, and a project sums whatever its attached carriers are holding.
+///
+/// ★ AND IT IS A SNAPSHOT, NOT A LEDGER ★
+///
+/// The same reasoning as `ColonyNeed`. The journal reports transfers as DELTAS, but a member can
+/// haul with the app closed, so accumulating deltas drifts permanently from the first one missed.
+/// Each reading replaces the commodity's row outright, and a stale figure carries its own timestamp
+/// so a page can say how old it is rather than implying it is current.
+model CarrierCargo {
+  marketId  BigInt @map("market_id")
+  commodity String
+  tonnes    Int
+
+  observedAt DateTime @map("observed_at") @db.Timestamptz(6)
+
+  @@id([marketId, commodity])
+  @@index([commodity])
+  @@map("carrier_cargo")
+}
+
+/// What an attached carrier's hold DECLARES it is carrying for a build — from the journal, or
+/// from a crew member's own hand.
+///
+/// ★ WHY THE MARKET MIRROR ALONE WAS NOT ENOUGH ★
+///
+/// The mirror sees a carrier's SELL ORDERS, which is only the part of the hold the owner has put
+/// up for sale. Cargo staged for a build is exactly the cargo that is usually NOT on sale — so the
+/// board told members to go and buy steel the squadron already owned. Two more sources close that:
+/// the owner's own journal (`CargoTransfer`, and buys/sells at the carrier's market), and a crew
+/// member typing in what they know is aboard.
+///
+/// ★ KEYED ON THE CARRIER, LIKE `CarrierCargo` ★
+///
+/// A carrier has one hold; attaching it to two builds must not mean two sets of cargo. A project
+/// sums whatever its attached carriers declare.
+///
+/// ★ ONE ROW PER (CARRIER, COMMODITY, SOURCE), AND THE MERGE RULE IS WRITTEN DOWN ★
+///
+/// `journal` rows are replaced by the owner's companion app from what it actually watched;
+/// `manual` rows are typed by crew. They deliberately do not overwrite each other: a journal
+/// update landing two minutes after a member corrected a figure by hand must not undo the
+/// correction. The EFFECTIVE value — what the shopping maths reads — is:
+///
+///     manual if declared, else max(journal, market-mirror supply)
+///
+/// Manual wins outright because it is the only source that can say "this figure is wrong"; the
+/// other two are both floors (the journal misses whatever moved while the app was closed, the
+/// mirror sees only sell orders), and the larger of two floors is the better floor.
+model ColonyCarrierCargo {
+  marketId  BigInt @map("market_id")
+  commodity String
+  /// `journal` or `manual`. See the merge rule above.
+  source String
+
+  /// Tonnes aboard, as this source last declared it. Zero is a real statement — "none of this is
+  /// aboard" — and not the same as the row being absent, which says nothing.
+  tonnes Int
+
+  /// Who typed it. Null for `journal` rows, which the owner's app writes without a person acting.
+  /// No FK, same reasoning as `ColonyBody.slotsById`: an author worth naming, not a relation
+  /// anything traverses.
+  updatedById String? @map("updated_by_id") @db.Uuid
+
+  /// When this source last spoke. A declared figure with no date is one nobody can weigh.
+  updatedAt DateTime @map("updated_at") @db.Timestamptz(6)
+
+  @@id([marketId, commodity, source])
+  @@index([commodity])
+  @@map("colony_carrier_cargo")
+}
+
+/// One hour of the galaxy's trade in one commodity — the series behind "price over time".
+///
+/// ★ WHY THIS EXISTS RATHER THAN `MarketHistory` — SQUADRON OWNER, 2026-08-02 ★
+///
+/// The owner asked for "average pricing, price over time, lots of data" and chose to start
+/// recording immediately, accepting thin charts for a fortnight. `MarketHistory` is the obvious
+/// home and it cannot be: the feed carries ~140,000 prices every fifteen minutes, so a row per
+/// price is 13.4 MILLION A DAY — about 1.2 BILLION inside the ninety-day retention. That is not a
+/// chart, it is an outage with a graph on top.
+///
+/// Rolling up per commodity per hour is 398 rows an hour. Nine and a half thousand a day, under
+/// four million a year, and it answers the question actually being asked — what is this commodity
+/// worth across the bubble, and which way is it moving. `MarketHistory` stays empty and stays
+/// defined; per-station series are a different feature with a different cost.
+///
+/// ★ FLEET CARRIERS ARE COUNTED SEPARATELY, NOT SILENTLY ★
+///
+/// Carrier owners set prices by hand. Gold's cheapest sellers in our own data are carriers at
+/// 2,356 against a station average of 48,098 — genuine, and gone the moment the carrier jumps.
+/// Folding those into one mean produces a number that describes nowhere. The station figures are
+/// the honest average; the carrier figures are kept beside them so neither has to be a guess.
+model CommoditySnapshot {
+  commodity  String
+  observedAt DateTime @map("observed_at") @db.Timestamptz(6)
+
+  /// Repeated on every row so the market index is ONE indexed read with no join. A commodity's
+  /// category never changes, and 398 short strings an hour is nothing against a join to an
+  /// 18.8-million-row table that has no index supporting it.
+  category String?
+
+  /// Stations only — carriers excluded. Null when nowhere stocked it this hour.
+  avgBuy    Int? @map("avg_buy")
+  minBuy    Int? @map("min_buy")
+  /// Stations only — carriers excluded. Null when nowhere wanted it this hour.
+  avgSell   Int? @map("avg_sell")
+  maxSell   Int? @map("max_sell")
+  /// Tonnes on offer and tonnes wanted, across every station counted above.
+  supply    BigInt @default(0)
+  demand    BigInt @default(0)
+  /// How many stations stocked it, and how many wanted it. A price averaged over three markets
+  /// means something very different from one averaged over three thousand, and a chart that will
+  /// not say which is a chart that misleads.
+  buyMarkets  Int @default(0) @map("buy_markets")
+  sellMarkets Int @default(0) @map("sell_markets")
+
+  /// Carriers, kept apart for the reason in the note above.
+  carrierMinBuy  Int? @map("carrier_min_buy")
+  carrierMaxSell Int? @map("carrier_max_sell")
+  carrierMarkets Int  @default(0) @map("carrier_markets")
+
+  @@id([commodity, observedAt])
+  @@index([observedAt])
+  @@map("commodity_snapshots")
 }
 
 /// FDevIDs internal→display mapping for commodities, modules and ships.
@@ -1914,6 +3492,36 @@ model TelemetryEvent {
   @@map("telemetry_events")
 }
 
+/// One month of telemetry, banked before the purge can reach it.
+///
+/// ★ WHY THIS TABLE EXISTS ★
+///
+/// Raw `telemetry_events` live THIRTY DAYS (see above), so "how much telemetry did we get in
+/// March" stops being answerable in May — the admin dashboard's Journal Telemetry panel could
+/// only ever describe the current window, and the owner asked for it "split into the YTD and
+/// per month" (2026-08-01). The worker's telemetry rollup sweeps the current and previous
+/// month's counts in here on the daemon cadence; months older than the retention window are
+/// left exactly as banked, because the rows that would recompute them no longer exist.
+///
+/// Aggregates only — a count per event type and a reporter count, never a payload — so keeping
+/// these for ever is compatible with the raw events' 30-day promise.
+model TelemetryMonthStat {
+  /// First day of the month, UTC. The month key — the same convention as MemberActivityMonth.
+  month     DateTime @map("month") @db.Date
+  /// Journal event name, matching TelemetryEvent.eventType. e.g. "FSDJump", "LoadGame".
+  eventType String   @map("event_type")
+  eventCount Int     @default(0) @map("event_count")
+  /// Distinct commanders who sent ANY telemetry this month. Repeated on every row of the
+  /// month — the commodity_snapshots idiom — because distinct reporters cannot be summed from
+  /// per-type counts, and recovering one number through a second table would put a join on
+  /// every dashboard read.
+  reportingMembers Int @default(0) @map("reporting_members")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@id([month, eventType])
+  @@map("telemetry_month_stats")
+}
+
 // ============================================================================
 // AI
 // ============================================================================
@@ -2071,6 +3679,17 @@ model MemberActivityMonth {
   forumPostCount Int @default(0) @map("forum_post_count")
   /// Times they joined a voice channel that is open to members.
   voiceJoinCount Int @default(0) @map("voice_join_count")
+  /// Minutes spent in voice channels that count toward activity, banked by the bot when a
+  /// session ends (squadron owner, 2026-08-04: "for voice joins can we track how long they are
+  /// in voice chat per month?"). A session crossing the 1st is SPLIT at the UTC month boundary,
+  /// so each month is credited its own minutes. Sits BESIDE `voiceJoinCount`, replacing nothing.
+  ///
+  /// ★ ADMIN CONSOLE ONLY ★ Never serialised to a member-facing payload — the profile
+  /// serializer once carried an invented `voiceMinutes` and it was removed as fiction; this
+  /// column is the real figure, and it stays behind the officer gate.
+  ///
+  /// The promotion check does NOT read it. Qualification is unchanged.
+  voiceMinutes   Int @default(0) @map("voice_minutes")
 
   firstActivityAt DateTime? @map("first_activity_at") @db.Timestamptz(6)
   lastActivityAt  DateTime? @map("last_activity_at") @db.Timestamptz(6)
@@ -2169,6 +3788,36 @@ model Notification {
   @@index([userId, readAt, createdAt])
   @@index([state, createdAt])
   @@map("notifications")
+}
+
+/// ═══════════════ SQUADRON ACTIVITY — THE SHARED FEED ═══════════════
+///
+/// Squadron owner, 2026-08-04: "we need to add the Personal and Squadron Activity notifications
+/// and the notifications system that notifies users of various activities." Personal rows live in
+/// `notifications` above (per-member, with read state); squadron-wide events live HERE, once each
+/// — a project starting is one fact, not a hundred and seven copies of it. Each member's unread
+/// badge counts rows newer than their own `users.squadronSeenAt` marker.
+model SquadronActivity {
+  id    BigInt  @id @default(autoincrement())
+  /// 'colony.project-started' | 'colony.project-completed' | 'colony.priority' |
+  /// 'shipyard.build-published' | 'bounties.jackpot' | 'leaderboards.season-champion' |
+  /// 'leaderboards.platinum' | 'member.verified' | 'forum.thread' | ...
+  kind  String
+  title String
+  body  String?
+  /// Deep link into the site.
+  link  String?
+  /// Who did it, when the deed has a face. Null for system events; SetNull keeps history when an
+  /// account goes.
+  actorUserId String? @map("actor_user_id") @db.Uuid
+  meta        Json?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  actor User? @relation("SquadronActivityActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt])
+  @@index([kind, createdAt])
+  @@map("squadron_activity")
 }
 
 /// Idempotency records for mutating endpoints (INV-010). Replay of a key returns the stored
@@ -2292,4 +3941,732 @@ model AchievementAward {
   @@id([achievementId, userId])
   @@index([userId, awardedAt])
   @@map("achievement_awards")
+}
+
+/// A fitted ship, imported from a build link or read out of a member's own journal.
+///
+/// ★ SQUADRON OWNER, 2026-08-01 ★
+///
+/// "users should be able to submit links to existing coriolis and other elite dangerous ship builds
+/// and it should take that link and learn everything about that ship and build" — with a webmaster
+/// import of baseline builds so "we have a strong baseline to build ships from when players start
+/// asking for this information".
+///
+/// ★ THE CANONICAL FORM IS STORED, NOT THE LINK ★
+///
+/// `build` holds the decoded `ShipBuild`: every slot, what is in it, and the engineering on it.
+/// Storing only the URL and re-decoding on read would tie every answer to a website staying up and
+/// keeping its format — and would make a build that decoded correctly last month fail silently
+/// after somebody else's deploy.
+///
+/// The URL is kept beside it so a member can always get back to where it came from.
+model ShipBuild {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  /// Coriolis ship key — `mandalay`, `type_11_prospector`. Joins to everything about the hull.
+  shipId   String @map("ship_id")
+  shipName String @map("ship_name")
+  /// What its owner called it. Null when the source carried no name.
+  buildName String? @map("build_name")
+
+  /// `coriolis`, `edsy` or `journal`. See the note on BuildSource: they are not equally trusted.
+  source    String
+  sourceUrl String @map("source_url")
+
+  /// The decoded build. The whole point of the row.
+  build Json
+  /// Mass, jump range, power and armour, computed at import.
+  ///
+  /// Stored rather than derived on read because the answer must not change when coriolis-data
+  /// refreshes underneath it — a member asking twice and getting two jump ranges for one ship would
+  /// have no way to tell which was true.
+  stats Json?
+
+  /// Who submitted it. Null for the webmaster's baseline builds, which belong to the squadron.
+  submittedById String? @map("submitted_by_id") @db.Uuid
+  submittedBy   User?   @relation(fields: [submittedById], references: [id], onDelete: SetNull)
+
+  /// What the build is FOR — `mining`, `combat`, `exploration`, `trading`, `multipurpose`.
+  ///
+  /// Inferred from the modules at import by `classifyBuild`, not asked for: somebody pasting a link
+  /// they found on a forum has no idea how we categorise it, and a dropdown they guess at is worse
+  /// data than a rule. Null on rows imported before the classifier existed.
+  role String?
+
+  /// True for the reference builds imported in the admin console.
+  ///
+  /// The AI weights them differently: a baseline is "this is how the squadron does it", a member's
+  /// is "this is what somebody flies". Collapsing the two would let one person's experiment answer
+  /// as doctrine.
+  isBaseline Boolean @default(false) @map("is_baseline")
+
+  /// Set when the build came from a member's own journal rather than a link they pasted.
+  ///
+  /// Kept current on every refit, so it is the only kind of row that is UPDATED rather than added.
+  fromJournal Boolean @default(false) @map("from_journal")
+
+  /// Who may open it: `private`, `squadron` or `public`. See BuildVisibility.
+  ///
+  /// Defaults to private because a build is a PLAN — somebody working out whether they can afford a
+  /// Cutter has not decided to tell the squadron they are saving for one.
+  visibility String @default("private")
+
+  /// The token in a share link, or null when it has never been shared.
+  ///
+  /// Kept when visibility goes back to private rather than cleared, so re-sharing restores the link
+  /// somebody already pasted into Discord instead of silently minting a different one.
+  shareToken String? @unique @map("share_token")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  /// One journal build per member per ship: a refit replaces it rather than adding a second.
+  ///
+  /// ★ THE CONSTRAINT IS HAND-WRITTEN, AND THE COMPOUND UNIQUE THAT WAS HERE WAS WRONG ★
+  ///
+  /// It read `@@unique([submittedById, shipId, fromJournal])`, whose own comment said pasted links
+  /// are "deliberately NOT unique — one member may keep several plans for one hull". The constraint
+  /// did not say that. Including `fromJournal` as a COLUMN makes the tuple unique for every value
+  /// of it, so a member saving a second plan for the same hull hit a unique violation — which is
+  /// exactly what the Shipyard's save button did the first time it ran against a real database.
+  ///
+  /// What is meant is a PARTIAL unique index: unique on (member, ship) only where the row came from
+  /// a journal. Prisma cannot express a partial unique index, so it is hand-written DDL —
+  /// `ship_builds_one_journal_per_ship_idx`, in ssot/03-data/indexes.md. Declaring it here as well
+  /// would make Prisma create a second, total one.
+  @@index([submittedById, shipId])
+  @@index([shipId])
+  @@index([isBaseline])
+  @@index([submittedById])
+  /// The squadron's shared builds, newest first — the only query the share boards run.
+  @@index([visibility, updatedAt])
+  @@map("ship_builds")
+}
+
+/// A station EDDN reported that we do not hold, waiting to be looked up.
+///
+/// ★ SQUADRON OWNER, 2026-08-02 ★
+///
+/// "add the stations we do not hold" — and, asked what a station should become given EDDN carries
+/// only a name, a system and a market id: "Look each one up before creating it", so it lands
+/// complete with pad size and type rather than as a stub.
+///
+/// ★ WHY A QUEUE AND NOT A LOOKUP IN THE COLLECTOR ★
+///
+/// The collector has to keep up with roughly one message a second off the live relay. An HTTP
+/// lookup per unknown station inside that loop would stall the feed behind a rate-limited third
+/// party — and unknown stations arrive in bursts, about 111 in a fifteen-minute window.
+///
+/// So the sighting is recorded here, which is one cheap upsert, and a worker job resolves them at
+/// a pace the upstream will tolerate. Nothing is written to `knowledge_items` until it is complete,
+/// which is what "no stubs" means.
+/// ═══════════════ THE REST OF THE EDDN RELAY, RECORDED ═══════════════
+///
+/// Squadron owner, 2026-08-04: "Capture and leverage all information that we can use on our system
+/// from EDDN! ... non-negotiable!" — all four schema families chosen. The collector consumed one
+/// schema (commodity/3, 2.6% of messages); these eight tables take the rest. Written by the
+/// collector in raw SQL; modelled here because the schema is law (ADR-019).
+
+/// What a station SELLS beyond commodities — outfitting/2. Replaced wholesale per message.
+model StationOutfitting {
+  marketId BigInt   @id @map("market_id")
+  modules  String[]
+  seenAt   DateTime @default(now()) @map("seen_at") @db.Timestamptz(6)
+
+  @@map("station_outfitting")
+}
+
+/// Ships on a station's shipyard list — shipyard/2.
+model StationShipyard {
+  marketId BigInt   @id @map("market_id")
+  ships    String[]
+  seenAt   DateTime @default(now()) @map("seen_at") @db.Timestamptz(6)
+
+  @@map("station_shipyard")
+}
+
+/// Bio/geo signal counts per body — two of the colonisation economy model's three blind spots.
+model BodySignals {
+  systemAddress BigInt   @map("system_address")
+  bodyId        Int      @map("body_id")
+  bodyName      String?  @map("body_name")
+  biological    Int      @default(0)
+  geological    Int      @default(0)
+  seenAt        DateTime @default(now()) @map("seen_at") @db.Timestamptz(6)
+
+  @@id([systemAddress, bodyId])
+  @@map("body_signals")
+}
+
+/// Ground settlements with surface coordinates — approachsettlement/1, the only public source.
+model Settlement {
+  systemAddress BigInt   @map("system_address")
+  name          String
+  bodyName      String?  @map("body_name")
+  marketId      BigInt?  @map("market_id")
+  latitude      Float?
+  longitude     Float?
+  seenAt        DateTime @default(now()) @map("seen_at") @db.Timestamptz(6)
+
+  @@id([systemAddress, name])
+  @@map("settlements")
+}
+
+/// Where a fleet carrier actually is, live. The only stations that MOVE, and our stalest data —
+/// this is what lets a page say "that carrier left two hours ago; its listing is void".
+model CarrierPosition {
+  marketId      BigInt   @id @map("market_id")
+  callsign      String
+  systemName    String   @map("system_name")
+  systemAddress BigInt?  @map("system_address")
+  event         String
+  seenAt        DateTime @default(now()) @map("seen_at") @db.Timestamptz(6)
+
+  @@index([systemName])
+  @@map("carrier_positions")
+}
+
+/// The carrier bartender's materials market — fcmaterials_journal/1.
+model FcBartender {
+  marketId BigInt   @map("market_id")
+  item     String
+  price    Int      @default(0)
+  stock    Int      @default(0)
+  demand   Int      @default(0)
+  seenAt   DateTime @default(now()) @map("seen_at") @db.Timestamptz(6)
+
+  @@id([marketId, item])
+  @@map("fc_bartender")
+}
+
+/// Jumps flown and routes plotted per system per hour. Predicts how fresh data STAYS, and feeds
+/// Data Bounty scoring — a bounty nobody's traffic will refresh is worth more.
+model SystemTraffic {
+  systemAddress BigInt   @map("system_address")
+  hour          DateTime @db.Timestamptz(6)
+  jumps         Int      @default(0)
+  routed        Int      @default(0)
+
+  @@id([systemAddress, hour])
+  @@map("system_traffic")
+}
+
+/// Arrival counts for EVERY schema, so "record everything" is literally true even for schemas with
+/// no feature yet — and their real volume is known before one earns a table.
+model EddnSchemaStat {
+  schema   String
+  hour     DateTime @db.Timestamptz(6)
+  messages Int      @default(0)
+
+  @@id([schema, hour])
+  @@map("eddn_schema_stats")
+}
+
+/// ═══════════════ DATA BOUNTIES — THE DATA RUNNER LEADERBOARD ═══════════════
+///
+/// Squadron owner, 2026-08-04: "create a new page under squadrons called Data bounty's and create a
+/// list of all stations and systems we need to dock at to shore up market data ... any time
+/// something goes stale it should automatically be added to the list, turn this into our first
+/// offical Data Runner Leaderboard please! gamify this too" — scoring staleness-weighted with
+/// jackpots, credit automatic on companion upload, monthly seasons plus all-time, squadron space
+/// ranked above the galaxy tail.
+
+/// The bounty board: one row per station whose market data is missing or past the believability
+/// band. REBUILT by the worker every half hour — going stale IS how a station gets listed, and a
+/// fresh observation from anyone (member or relay) is how it leaves. Claiming deletes the row
+/// mid-cycle so a bounty pays exactly once.
+model DataBounty {
+  stationKey  String    @id @map("station_key")
+  stationName String    @map("station_name")
+  systemName  String    @map("system_name")
+  stationType String?   @map("station_type")
+  largePads   Int?      @map("large_pads")
+  /// Newest market observation we hold. Null is the biggest bounty of all: never seen.
+  lastSeenAt  DateTime? @map("last_seen_at") @db.Timestamptz(6)
+  daysStale   Int?      @map("days_stale")
+  points      Int
+  /// Doubled points, worn as a badge: in squadron space and either a year stale or never seen.
+  jackpot     Boolean   @default(false)
+  /// Within 200 ly of an active colonisation project — the space the squadron actually flies.
+  inOps       Boolean   @map("in_ops")
+  /// Light-years from the nearest ops anchor. Null on the galaxy tail.
+  distanceLy  Float?    @map("distance_ly")
+  computedAt  DateTime  @map("computed_at") @db.Timestamptz(6)
+
+  @@index([inOps, points])
+  @@map("data_bounties")
+}
+
+/// A bounty paid. Permanent — the board is rebuilt on a timer, this is the ledger the leaderboard
+/// sums. Credit is automatic: the companion upload that refreshed a bountied station names its
+/// member, and nobody files anything.
+model BountyClaim {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  stationKey  String   @map("station_key")
+  stationName String   @map("station_name")
+  systemName  String   @map("system_name")
+  points      Int
+  jackpot     Boolean  @default(false)
+  /// How stale the data was when this member refreshed it. Null: never seen before them.
+  daysStale   Int?     @map("days_stale")
+  claimedAt   DateTime @default(now()) @map("claimed_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, claimedAt])
+  @@index([claimedAt])
+  @@map("bounty_claims")
+}
+
+/// ═══════════════ LEADERBOARDS, XP AND BADGES ═══════════════
+///
+/// Squadron owner, 2026-08-04: "make a new category called leaderboards ... gamify the
+/// colonization leaderboard, make badges ect the same way were doing it for databounties ...
+/// then we also need to make a leaderboard and gamify it for Trade routes ... default all
+/// leaderboard participation on for all commanders". Badge RULES live in code
+/// (@grims/shared/leaderboards — a badge is a rule, and rules ship with the code that applies
+/// them); these tables hold only what is genuinely data: points earned and badges awarded.
+
+/// One point-earning deed on a gamified board. Colony and trade write here (bounties keeps its
+/// own richer ledger in bounty_claims); sourceKey makes every scorer idempotent — a contribution
+/// or a sale scores exactly once however many times the job replays it.
+model LeaderboardEvent {
+  id     BigInt @id @default(autoincrement())
+  userId String @map("user_id") @db.Uuid
+  /// 'colony' | 'trade'. Never 'bounties' — see above.
+  board  String
+  points Int
+  /// The row this scored: a colony_contributions id, a telemetry event key. Unique per board.
+  sourceKey String @map("source_key")
+  /// What earned it, for the member's own history: commodity, tonnes, project, profit.
+  meta Json?
+  /// When the deed happened in the GAME (journal time) — seasons cut on this, not on when the
+  /// scorer got around to it.
+  occurredAt DateTime @map("occurred_at") @db.Timestamptz(6)
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([board, sourceKey])
+  @@index([board, occurredAt])
+  @@index([userId, board, occurredAt])
+  @@map("leaderboard_events")
+}
+
+/// The build a member has declared they are currently on — at most one per member, which is the
+/// whole meaning of "current". Drives the companion's pinned project overlay.
+model CurrentBuild {
+  userId    String   @id @map("user_id") @db.Uuid
+  projectId String   @map("project_id") @db.Uuid
+  setAt     DateTime @default(now()) @map("set_at") @db.Timestamptz(6)
+
+  user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project ColonyProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@map("current_builds")
+}
+
+/// A scorer's high-water mark. Generic on purpose: every incremental job that walks an
+/// append-only source needs exactly one string of state, and a table per job is how a schema
+/// fills with near-duplicates.
+model WorkerCursor {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("worker_cursors")
+}
+
+/// An operational alert on its way to a human.
+///
+/// ★ WHY A TABLE AND NOT A NOTIFY — 2026-08-04 ★
+///
+/// The collector stopped for two days and the galaxy ingest could never finish, and nothing said a
+/// word either time. The owner's instruction: a dead collector or a failed dump "must announce
+/// itself", by Discord DM. A pg_notify would be lost the moment the bot was down — and an alert
+/// about infrastructure being down must survive infrastructure being down. A row persists until
+/// the bot has actually delivered it, however long that takes.
+model OpsAlert {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+
+  /// `collector-stalled`, `galaxy-stale`, `collector-recovered`... — the dedupe key, so a broken
+  /// thing alerts once per incident rather than once per check.
+  kind    String
+  message String
+
+  /// Who should hear about it. Only `webmaster` today; a column so the next audience is data.
+  audience String @default("webmaster")
+
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  /// Set once the bot has sent the DMs. Undelivered rows are retried on every poll.
+  deliveredAt DateTime? @map("delivered_at") @db.Timestamptz(6)
+
+  @@index([kind, createdAt])
+  @@map("ops_alerts")
+}
+
+model PendingStation {
+  /// Frontier's market id. The key EDDN and our station records both use.
+  marketId  BigInt @id @map("market_id")
+
+  /// What EDDN called it. Kept so a resolver can match by name when the market id is not indexed
+  /// upstream yet, which is common for a station built this week.
+  stationName String @map("station_name")
+  systemName  String @map("system_name")
+
+  firstSeenAt DateTime @default(now()) @map("first_seen_at") @db.Timestamptz(6)
+  lastSeenAt  DateTime @default(now()) @map("last_seen_at") @db.Timestamptz(6)
+  /// How many times we have tried to resolve it, so a station nobody upstream knows about stops
+  /// being retried for ever.
+  attempts    Int      @default(0)
+  lastTriedAt DateTime? @map("last_tried_at") @db.Timestamptz(6)
+  /// Why the last attempt failed, for an officer wondering why a station never appeared.
+  lastError   String?  @map("last_error")
+
+  /// Set when a real station row was written. Kept rather than deleted so a station that vanishes
+  /// upstream is not re-queued on its next sighting.
+  resolvedAt  DateTime? @map("resolved_at") @db.Timestamptz(6)
+
+  /// The queue the resolver reads: unresolved, least recently tried first.
+  @@index([resolvedAt, lastTriedAt])
+  @@map("pending_stations")
+}
+
+/// EDSY's own module and ship numbering, mapped to the game's symbols.
+///
+/// An EDSY build link encodes each module as a three-character base-64 id in EDSY's own numbering —
+/// `FBG` is 62160 is `Hpt_PulseLaser_Fixed_Small`. Nothing in Frontier's data or Coriolis's carries
+/// that numbering, so without this table an EDSY link cannot be read at all.
+///
+/// `fdname` is the game's own symbol, which is the key the journal importer already joins on. So
+/// this is the single hop EDSY needs, and everything downstream is unchanged.
+///
+/// Extracted from `eddb.js` in taleden/EDSY and refreshed on a schedule, the same way coriolis-data
+/// is. Only the id-to-symbol mapping is taken — none of EDSY's code and none of its statistics,
+/// which we already hold from Coriolis. taleden's work is CC BY-NC 4.0; this hub is non-commercial
+/// and attributes it on the import page.
+model EdsyId {
+  /// `ship` or `module` — EDSY numbers them separately and a link uses both.
+  kind     String
+  edsyId   Int      @map("edsy_id")
+  /// The game's symbol, e.g. `Int_Hyperdrive_Size5_Class1`.
+  fdname   String
+  /// Frontier's own id, which Coriolis records as `edID`.
+  ///
+  /// The join for SHIPS. EDSY calls the Alliance Challenger `TypeX_3` and Coriolis calls it
+  /// `alliance_challenger`; no string normalisation reconciles those. Both files carry Frontier's
+  /// number and they agree exactly, so the hull match is a lookup rather than an alias table
+  /// somebody has to extend every time Frontier ships a ship.
+  fdid     BigInt?
+  syncedAt DateTime @default(now()) @map("synced_at") @db.Timestamptz(6)
+
+  @@id([kind, edsyId])
+  @@map("edsy_ids")
+}
+
+/// ═══════════════ THE CHANGELOG ═══════════════
+///
+/// One row per production deploy, written by the deploy script's final step
+/// (infra/scripts/deploy.sh step 8) from `tools/changelog.mjs --sql`. The
+/// generator classifies every commit between the previously deployed revision
+/// and the new one by the files it touched, and the three markdown columns
+/// are that classification rendered per audience — the commit messages' own
+/// prose, never a summary of it.
+///
+/// Markdown as COLUMNS rather than a normalised entries table, deliberately:
+/// the unit members care about is "what did this deploy change for me", the
+/// row is written once and never edited, and the page renders each column
+/// whole. Normalising would buy joins nobody performs.
+model ChangelogRelease {
+  id          String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// The revision members were on before this deploy — the deploy script's PREVIOUS_SHA.
+  fromSha     String   @map("from_sha")
+  /// The revision this deploy shipped.
+  toSha       String   @map("to_sha")
+  /// The platform version this deploy shipped as (PLATFORM_VERSION at deploy time). Null on
+  /// rows recorded before versions were stamped — inventing them would be fiction.
+  version    String?
+  deployedAt  DateTime @default(now()) @map("deployed_at") @db.Timestamptz(6)
+  /// What changed on the website (apps/web). Empty string when the deploy touched none of it.
+  websiteMd   String   @map("website_md")
+  /// What changed in the companion app (apps/companion).
+  companionMd String   @map("companion_md")
+  /// Everything else — API, worker, bot, collector, packages, infra, tooling.
+  platformMd  String   @map("platform_md")
+
+  /// The page reads newest-first; this is that read.
+  @@index([deployedAt])
+  @@map("changelog_releases")
+}
+
+/// ═══════════════ ANNOUNCEMENTS — WHAT THE SQUADRON IS TOLD ═══════════════
+///
+/// A durable row per thing worth announcing, written by the producers (the deploy
+/// script, the promotion runs, the verification confirm paths) and DELIVERED by two
+/// independent pollers: the bot posts `content` to the Discord channel its kind maps
+/// to, and the API carbon-copies rows that carry a forum half into the forum's
+/// Announcements category, then rings every member's bell.
+///
+/// The same doctrine as `ops_alerts`, for the same reason: an announcement written
+/// while the bot is down must survive the outage and post when it returns. Neither
+/// poller ever composes copy — `content` arrives final, mentions already interpolated
+/// as `<@id>` tokens by the producer, because only the producer knows who it is about.
+///
+/// No channel ids live here or anywhere in code (INV-008): the bot resolves the
+/// destination from DISCORD_ANNOUNCE_CHANNEL_ID / DISCORD_PROMOTIONS_CHANNEL_ID at
+/// delivery time, and an unset variable means that kind simply waits — default silent,
+/// the same shape as the DM allowlist.
+model Announcement {
+  id   BigInt @id @default(autoincrement())
+  /// 'deploy' | 'promotion' | 'member-verified' — decides which channel env the bot posts to.
+  kind String
+
+  /// The final Discord markdown. The bot sends this verbatim (truncated to Discord's
+  /// 2000-char limit with a pointer to the site when a changelog runs long).
+  content String
+
+  /// The forum half. Both set = a carbon-copy thread is wanted; both null = channel only.
+  /// Verifications deliberately carry no forum half — the squadron feed already has them on-site.
+  forumTitle String? @map("forum_title")
+  /// The thread's opening post, as the same markdown the forum's composer accepts.
+  forumBody  String? @map("forum_body")
+
+  /// Set when the bot has posted to Discord. Null rows are retried every poll.
+  postedAt DateTime? @map("posted_at") @db.Timestamptz(6)
+
+  /// Set when the API has created the forum thread — BEFORE the bell fan-out, so a
+  /// failed bell can never cause a second thread.
+  forumPostedAt DateTime? @map("forum_posted_at") @db.Timestamptz(6)
+  /// The thread the carbon-copy became, for tracing an announcement to its discussion.
+  forumThreadId String? @map("forum_thread_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  /// The two pollers' queues are partial indexes on (created_at) WHERE the relevant
+  /// posted stamp IS NULL — hand-written in the migration, as Prisma cannot express
+  /// them. This one serves the history reads.
+  @@index([kind, createdAt])
+  @@map("announcements")
+}
+
+/// ═══════════════ HELP & SUPPORT — THE LIVE CHAT ═══════════════
+///
+/// The approved design: a help chat usable by EVERYONE, signed-out guests included, answered by
+/// the officers from a Support console on the site and in the companion app. A later wave puts
+/// the AI on the first turn; in this one every conversation goes to the officers.
+///
+/// Guests hold no account, so their door is a TOKEN: minted when the conversation starts, shown
+/// once to that browser and stored only as a SHA-256 hash — the same discipline as device tokens
+/// and recovery codes. The token IS the address of the conversation: presenting it names exactly
+/// one row, so a wrong token reads as "no such conversation" and confirms nothing about which
+/// tokens exist.
+
+/// Conversation lifecycle. Closed is an answered question, not a deleted one — the transcript
+/// stays readable by whoever it belongs to, and an officer can reopen it.
+enum SupportConversationStatus {
+  open
+  closed
+}
+
+/// Who wrote a support message.
+///
+/// `ai` is the assistant's seat at the table, reserved NOW so its first answer is an enum value
+/// rather than a migration — the thread model must not need reshaping when the AI starts taking
+/// the first turn. `system` is the room itself speaking ("This conversation was closed."), which
+/// is nobody's words and must never wear anybody's face.
+enum SupportAuthorKind {
+  member
+  officer
+  guest
+  ai
+  system
+}
+
+/// Who is answering a conversation right now — the owner's approved design: AI ANSWERS FIRST,
+/// HUMAN ON DEMAND.
+///
+/// `ai` is the starting state: GMSD AI answers each requester message from the help corpus. The
+/// flip to `officer` is ONE-WAY and happens on either of two acts — the requester pressing
+/// "Talk to an officer", or any officer replying (a human took over; the AI does not talk over
+/// them). There is deliberately no edge back: a conversation a person has joined must never be
+/// handed back to a model mid-thread.
+enum SupportHandledBy {
+  ai
+  officer
+}
+
+/// One help conversation: a member's or a guest's, worked by the officers.
+model SupportConversation {
+  id     String                    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  status SupportConversationStatus @default(open)
+  /// Who answers the next requester message. Drives the AI's silence after a hand-off AND the
+  /// console badge: only `officer` conversations with unseen words are "waiting" — an AI-handled
+  /// conversation nobody asked a human into is not.
+  handledBy SupportHandledBy @default(ai) @map("handled_by")
+  /// What it is about, if the opener said. Null renders as the opening message's first words.
+  subject String?
+
+  /// The signed-in member who opened it. Null means a guest conversation.
+  userId String? @map("user_id") @db.Uuid
+
+  /// SHA-256 of the guest's token, and the only way a guest can reach their conversation.
+  /// Unique because a lookup BY HASH must name at most one row. Null on member conversations.
+  guestTokenHash String? @unique @map("guest_token_hash")
+  /// What the guest asked to be called. Display only; it authenticates nothing.
+  guestName      String? @map("guest_name")
+
+  /// Denormalised from messages so the console can order by activity without a join per row.
+  lastMessageAt DateTime @default(now()) @map("last_message_at") @db.Timestamptz(6)
+
+  /// Read high-water marks, one per side — the repo's notification shape, kept simple.
+  ///
+  /// A single officer mark rather than one per officer: the console is a shared queue, and
+  /// "somebody has seen this" is what its unread indicator means. Per-officer read state would
+  /// be a row per officer per conversation to answer a question nobody asked.
+  officerSeenAt   DateTime? @map("officer_seen_at") @db.Timestamptz(6)
+  /// When the member or guest last opened the transcript. Drives the widget's unread dot.
+  requesterSeenAt DateTime? @map("requester_seen_at") @db.Timestamptz(6)
+
+  closedAt   DateTime? @map("closed_at") @db.Timestamptz(6)
+  /// The officer who closed it. SetNull: the closure outlives the officer's account.
+  closedById String?   @map("closed_by_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user     User?            @relation("SupportRequester", fields: [userId], references: [id], onDelete: Cascade)
+  closedBy User?            @relation("SupportCloser", fields: [closedById], references: [id], onDelete: SetNull)
+  messages SupportMessage[]
+
+  /// The console's queue: conversations by state, newest activity first.
+  @@index([status, lastMessageAt])
+  /// "My conversations", for the member widget.
+  @@index([userId, lastMessageAt])
+  @@map("support_conversations")
+}
+
+/// One turn in a support conversation.
+model SupportMessage {
+  id             String            @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  conversationId String            @map("conversation_id") @db.Uuid
+  authorKind     SupportAuthorKind @map("author_kind")
+  /// The member or officer who wrote it. Null for guest, system and (later) ai turns — a guest
+  /// has no account row to point at, and inventing one per conversation would be accounts nobody
+  /// owns. SetNull keeps the transcript when an author's account goes.
+  authorId       String?           @map("author_id") @db.Uuid
+  /// Plain text. Capped at 4000 characters in the service — long enough to describe any problem,
+  /// short enough that the cap is never met by accident.
+  body           String
+  /// One image, through the hardened media path. There is deliberately no second upload route.
+  attachmentId   String?           @map("attachment_media_id") @db.Uuid
+  createdAt      DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  conversation SupportConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  author       User?               @relation("SupportAuthor", fields: [authorId], references: [id], onDelete: SetNull)
+  attachment   MediaUpload?        @relation("SupportAttachment", fields: [attachmentId], references: [id], onDelete: SetNull)
+
+  /// The transcript read, oldest first.
+  @@index([conversationId, createdAt])
+  @@map("support_messages")
+}
+
+/// ═══════════════ THE SUGGESTION BOX ═══════════════
+///
+/// The approved design, Wave 4 of Help & Support: "a suggestion box feature that sends the
+/// webmaster user submitted ideas and suggestions." Members only — a suggestion is credited to
+/// its sender by name when it is published, and credit needs an account; the widget invites a
+/// guest to sign in rather than accepting words it could never attribute.
+///
+/// The webmaster REVIEWS, then PUBLISHES: a new suggestion sits in a private inbox until one
+/// click turns it into a thread in the Feature Requests board — where the squadron votes on it —
+/// or declines it. Either way the sender is told personally.
+
+/// The whole review lifecycle. Exactly three states, and `new` has exactly two exits — publish
+/// and decline, both one-way. There is deliberately no edge back to `new`: a published thread
+/// cannot be unpublished from here (that is forum moderation's job), and un-declining would put
+/// words back in a queue their sender was already told about.
+enum SuggestionStatus {
+  new
+  published
+  declined
+}
+
+/// One idea from a member, on its way to the webmaster.
+model Suggestion {
+  id     String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Who sent it. NOT NULL, structurally: publishing credits the sender by display name, and a
+  /// suggestion nobody can be credited for is the thing the sign-in requirement exists to prevent.
+  userId String           @map("user_id") @db.Uuid
+  /// Plain text, capped at 2000 characters in the service — an idea, not an essay.
+  body   String
+  status SuggestionStatus @default(new)
+
+  /// The review stamp: when, and by whom. SetNull keeps the verdict when the reviewer's account
+  /// goes — the suggestion was still judged, whoever judged it.
+  reviewedAt   DateTime? @map("reviewed_at") @db.Timestamptz(6)
+  reviewedById String?   @map("reviewed_by_id") @db.Uuid
+
+  /// The Feature Requests thread this became, when it was published. A bare uuid rather than a
+  /// relation, the Announcement.forumThreadId precedent: the thread is a trace target, threads
+  /// are soft-deleted rather than removed, and an FK here would be a constraint on moderation.
+  publishedThreadId String? @map("published_thread_id") @db.Uuid
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user       User  @relation("SuggestionAuthor", fields: [userId], references: [id], onDelete: Cascade)
+  reviewedBy User? @relation("SuggestionReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  /// The webmaster's inbox: new suggestions, oldest first — a queue is worked in arrival order.
+  @@index([status, createdAt])
+  /// "Your suggestions", for the widget's own list.
+  @@index([userId, createdAt])
+  @@map("suggestions")
+}
+
+/// ═══════════════ THE ROADMAP ═══════════════
+///
+/// Wave 5: the webmaster's kanban — Ideas, Considering, Planned, Building, Shipped — managed
+/// from the admin console and readable by every member at /roadmap. Cards promoted from Feature
+/// Requests threads carry `source_thread_id`, so the board links back to the vote that put them
+/// there.
+
+/// The five columns, in board order. An enum rather than free text so a typo cannot invent a
+/// sixth column that renders nowhere.
+enum RoadmapColumn {
+  ideas
+  considering
+  planned
+  building
+  shipped
+}
+
+/// One card on the roadmap board.
+model RoadmapCard {
+  id    String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// Capped at 200 in the service — the same ceiling as a thread title, because promoted cards
+  /// take their title from one.
+  title String
+  body  String?
+
+  /// Which column, and where in it. `column` is a reserved word in SQL, so the database column
+  /// wears a name that never needs quoting in hand-written migrations.
+  column   RoadmapColumn @default(ideas) @map("board_column")
+  position Int           @default(0)
+
+  /// The Feature Requests thread this was promoted from. Unique because one thread is one item
+  /// of work — promoting it twice would put the same ask on the board in two columns. A bare
+  /// uuid rather than a relation, the Announcement.forumThreadId precedent (see Suggestion).
+  sourceThreadId String? @unique @map("source_thread_id") @db.Uuid
+
+  /// Archived cards leave every board view but keep their history. A soft mark rather than a
+  /// delete, because "we are not doing this after all" is itself a fact worth keeping.
+  archivedAt DateTime? @map("archived_at") @db.Timestamptz(6)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  /// The board read: one column's live cards, in order.
+  @@index([column, position])
+  @@map("roadmap_cards")
 }

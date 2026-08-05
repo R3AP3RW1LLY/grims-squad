@@ -10,7 +10,8 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    }
+    },
+    "./colony-build-seed.json": "./src/colony-build-seed.json"
   },
   "scripts": {
     "build": "tsc -b",
@@ -28,7 +29,8 @@
   },
   "dependencies": {
     "@prisma/client": "^6.19.0",
-    "@grims/shared": "workspace:*"
+    "@grims/shared": "workspace:*",
+    "@grims/ed-clients": "workspace:*"
   },
   "devDependencies": {
     "@grims/config": "workspace:*",

@@ -63,6 +63,29 @@ export const ACL_MODELS = {
   KnowledgeChunk: 'viewPerm',
   Loadout: 'visibility',
   /*
+   * Ship builds from the Shipyard. Same column, different vocabulary: a build is
+   * `private`, `squadron` or `public`, where a Loadout is `squadron` or `officer`.
+   *
+   * Registered the moment the column was added, because `assertAclModelsRegistered`
+   * failed the build — which is the whole point of that check. The service methods
+   * that read these already filter, and this is the layer that holds for the ones
+   * that do not exist yet.
+   */
+  ShipBuild: 'visibility',
+  /*
+   * Colonisation projects. The same `private | squadron | public` vocabulary as ShipBuild, and
+   * registered here for the same reason: the column exists, so `assertAclModelsRegistered` would
+   * fail the build otherwise — which is exactly what that check is for.
+   *
+   * ★ THE PUBLIC VALUE IS NARROWER THAN IT LOOKS ★
+   *
+   * Squadron owner, 2026-08-02: "Squadron projects members-only, personal projects publishable by
+   * choice." So `public` is only ever legitimate on a `personal` project. That is a rule about
+   * WRITES and is enforced in the service, not here — this layer's job is to make sure no reader
+   * ever sees a row its visibility forbids, whatever put the value there.
+   */
+  ColonyProject: 'visibility',
+  /*
    * ForumThread carries no ACL COLUMN of its own — it inherits its category's, and
    * is listed here because two things now modify that inheritance in both
    * directions:
@@ -223,6 +246,53 @@ function predicateFor(model: AclModel, p: AclPrincipal): object {
           { grants: { some: { userId: p.userId } } },
         ],
       };
+    }
+    case 'ShipBuild': {
+      /*
+       * ★ PUBLIC MEANS PUBLIC, INCLUDING TO NOBODY ★
+       *
+       * Squadron owner, 2026-08-01: "the public page must also be visible along
+       * with the builds in them to anyone not signed in."
+       *
+       * So `public` needs no mask and no session. `squadron` needs a signed-in
+       * reader — any of them; there is no rank to it — which is what a non-null
+       * userId means here. `private` is the author's alone.
+       *
+       * Ownership is part of the ACL rather than a check bolted on top: a member
+       * always sees their own build whatever its visibility, which is what makes
+       * "my builds" work without a bypass.
+       */
+      const or: object[] = [{ visibility: 'public' }];
+      if (p.userId !== null) {
+        or.push({ visibility: 'squadron' });
+        or.push({ submittedById: p.userId });
+      }
+      return { OR: or };
+    }
+    case 'ColonyProject': {
+      /*
+       * ★ THE SAME SHAPE AS ShipBuild, AND FOR THE SAME REASONS ★
+       *
+       * Squadron owner, 2026-08-02: "Squadron projects members-only, personal
+       * projects publishable by choice."
+       *
+       * `public` needs no session — that is what publishing a personal project
+       * means. `squadron` needs a signed-in reader, any of them. `private` is the
+       * poster's alone, and ownership is IN the predicate rather than checked on
+       * top, so a member always sees their own project whatever its visibility.
+       *
+       * The rule that only a PERSONAL project may be public is about writes, and
+       * lives in the service. This layer holds whatever value is in the column —
+       * which is the correct division: if a bug ever set `public` on a squadron
+       * project, the fix belongs at the write, and having this layer quietly
+       * disagree with the stored value would hide it instead.
+       */
+      const or: object[] = [{ visibility: 'public' }];
+      if (p.userId !== null) {
+        or.push({ visibility: 'squadron' });
+        or.push({ postedById: p.userId });
+      }
+      return { OR: or };
     }
     case 'Loadout': {
       // Ownership is part of the ACL, not a separate check bolted on top: a

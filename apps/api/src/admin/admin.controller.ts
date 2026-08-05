@@ -1,3 +1,6 @@
+import { COMMANDER_AUDIT_JOB, type PromotionReport } from '@grims/shared';
+import { PROMOTIONS_SERVICE } from './admin.tokens.js';
+import type { PromotionsService, PromotionStanding } from './promotions.service.js';
 import {
   Controller,
   Get,
@@ -8,6 +11,7 @@ import {
   Query,
   Req,
   Inject,
+  Optional,
   UseGuards,
 } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
@@ -20,9 +24,26 @@ import {
 } from '../auth/admin-gate.guard.js';
 import { User, type CurrentUser } from '../auth/current-user.js';
 import { verifyCsrf, readCsrfCookie } from '../common/csrf.js';
-import { ADMIN_STORE, DASHBOARD_STORE, ROLE_ADMIN, MAPPING_ADMIN } from './admin.tokens.js';
-import type { DashboardStore, DashboardData } from './dashboard.store.js';
-import type { AdminStore, ActivityRow, AuditRow, MemberRow } from './admin.store.js';
+import {
+  ADMIN_STORE,
+  DASHBOARD_STORE,
+  ROLE_ADMIN,
+  MAPPING_ADMIN,
+  DISCORD_MODERATION,
+} from './admin.tokens.js';
+import { YTD, type DashboardStore, type DashboardData } from './dashboard.store.js';
+import type {
+  AdminStore,
+  ActivityRow,
+  AuditRow,
+  MemberRow,
+  SquadMemberRow,
+} from './admin.store.js';
+import {
+  MAX_TIMEOUT_MINUTES,
+  type DiscordModeration,
+  type ModerationAction,
+} from './discord-moderation.port.js';
 import type { RoleAdminService, MaskPreview } from './role-admin.service.js';
 import type { MappingAdminService, MappingRecord } from './mapping-admin.service.js';
 
@@ -51,7 +72,277 @@ export class AdminController {
     @Inject(DASHBOARD_STORE) private readonly dash: DashboardStore,
     @Inject(ROLE_ADMIN) private readonly roles: RoleAdminService,
     @Inject(MAPPING_ADMIN) private readonly mappings: MappingAdminService,
+    @Inject(DISCORD_MODERATION) private readonly discord: DiscordModeration,
+    /*
+     * @Optional, matching the pattern already used for LiveService on the cmdr controller: this
+     * controller's own tests construct it directly with the collaborators they exercise, and a
+     * required sixth would turn each of them into a wiring test.
+     *
+     * Its absence is not silently survivable — the promotion routes have nothing to answer with —
+     * so `#promotions()` says so rather than dereferencing undefined.
+     */
+    @Optional() @Inject(PROMOTIONS_SERVICE) private readonly promotions?: PromotionsService,
   ) {}
+
+  // ------------------------------------------------------------ squad roster
+  /**
+   * Every member of the Discord server.
+   *
+   * ★ SQUADRON OWNER, 2026-08-01 ★
+   *
+   * "we need to create a full on member roster that shows every member in our discord with full
+   * administrative tools for them, kick, ban, timeout"
+   *
+   * Distinct from `members()`, which lists WEBSITE accounts — currently one, against a hundred and
+   * seventeen people in Discord. An officer moderating the squadron works from the second list.
+   */
+  @Get('squad')
+  async squad(): Promise<{ rows: SquadMemberRow[] }> {
+    return { rows: await this.store.squadRoster() };
+  }
+
+  // ------------------------------------------------------------- promotions
+  /**
+   * Who WOULD be promoted if the run happened now. Writes nothing.
+   *
+   * ★ SQUADRON OWNER, 2026-08-02 ★
+   *
+   * "add a button to each month, that will trigger promotions beyond the job that runs once a month
+   * on the 1st day of the month" — and, asked whether to preview first: yes for a whole-month run.
+   *
+   * The evaluation is the SAME one the monthly job performs, which is what the owner chose: only
+   * complete months count, so this is "run it now" rather than "let somebody through".
+   */
+  @Post('promotions/preview')
+  async promotionsPreview(@Query('month') month?: string): Promise<PromotionReport> {
+    return this.#promotions().preview(month ?? null);
+  }
+
+  /** Runs them for real. Same evaluation as the preview, one flag apart. */
+  @Post('promotions/run')
+  async promotionsRun(
+    @User() caller: CurrentUser | undefined,
+    @Query('month') month?: string,
+  ): Promise<PromotionReport> {
+    const report = await this.#promotions().apply(month ?? null);
+
+    await this.store.writeAudit({
+      actorId: caller?.userId ?? null,
+      action: 'promotion.run.manual',
+      targetType: 'system',
+      targetId: 'promotions',
+      before: null,
+      /*
+       * The COUNT and the names. A run that promoted nobody is a real outcome worth being able to
+       * point at later — "we did press it, and nobody was due" is a different fact from silence.
+       */
+      after: {
+        // The month is recorded because it changes what the run MEANT. "We ran promotions" and "we
+        // ran July's promotions in October" are different facts.
+        month: month ?? null,
+        promoted: report.promoted,
+        considered: report.considered,
+        who: report.wouldPromote,
+      },
+    });
+
+    return report;
+  }
+
+  /** Where every member stands on the ladder, for the members page. */
+  @Get('promotions/standings')
+  async promotionStandings(): Promise<{ standings: PromotionStanding[] }> {
+    return { standings: [...(await this.#promotions().standings()).values()] };
+  }
+
+  /**
+   * Promotes one member by an officer's decision.
+   *
+   * ★ AN OVERRIDE, DELIBERATELY UNCONDITIONAL — SQUADRON OWNER, 2026-08-02 ★
+   *
+   * "we are still onboarding, and we need an override!" Asked whether this should follow the rules
+   * or override them, the owner chose the override: an officer's judgement, always available.
+   *
+   * It still refuses to skip rungs — the only rank it grants is the one directly above — so a slip
+   * cannot put a new member at Grand Master General.
+   */
+  @Post('members/:userId/promote')
+  async promoteMember(
+    @User() caller: CurrentUser | undefined,
+    @Param('userId') userId: string,
+  ): Promise<{ from: string; to: string }> {
+    if (caller === undefined) throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
+    return this.#promotions().promoteOne(userId, caller.userId);
+  }
+
+  /** The promotions service, or a clear refusal rather than a crash on undefined. */
+  #promotions(): PromotionsService {
+    if (this.promotions === undefined) {
+      throw new AppError(ErrorCode.UPSTREAM_UNAVAILABLE, 'Promotions are not configured here.');
+    }
+    return this.promotions;
+  }
+
+  /**
+   * Runs the Inara commander check now.
+   *
+   * ★ SQUADRON OWNER, 2026-08-02 ★
+   *
+   * "add a button to the admin console to trigger an inara update manually please. that way we can
+   * trigger this if we need too ... pressing this should not interupt the daily job."
+   *
+   * ★ IT REQUESTS, AND THE JOB DECIDES ★
+   *
+   * NOTIFY, not a queue row. A request is only meaningful while somebody is listening: if the
+   * daemon is down there is nothing to run it, and a row sitting in a table would execute at some
+   * unknowable later moment when it may no longer be wanted. That is exactly the semantics of a
+   * button press.
+   *
+   * Not interrupting the nightly run is NOT enforced here, and could not be. Both callers contend
+   * for one Postgres advisory lock inside `daily-audit.ts` — cron at 00:15 and this — and whichever
+   * arrives second is declined and says so. Doing it in this controller would guard only the half
+   * of the traffic that comes through the website.
+   *
+   * ★ MEMBER_MANAGE, MATCHING THE PAGE IT SITS ON ★
+   *
+   * The button is on Squad members. Anybody who can kick somebody from the guild can certainly ask
+   * Inara whether they are still in the squadron.
+   */
+  @Post('squad/refresh-inara')
+  async refreshInara(@User() caller: CurrentUser | undefined): Promise<{ requested: true }> {
+    /*
+     * `pg_notify` through the same channel the ingest buttons use. The payload is the job name the
+     * daemon's registry and the audit's lock both key on — one string, agreed in one place.
+     */
+    await this.store.requestJob(COMMANDER_AUDIT_JOB);
+
+    await this.store.writeAudit({
+      actorId: caller?.userId ?? null,
+      action: 'inara.commander-audit.requested',
+      targetType: 'system',
+      targetId: COMMANDER_AUDIT_JOB,
+      before: null,
+      after: { source: 'admin console' },
+    });
+
+    return { requested: true };
+  }
+
+  /**
+   * Times out, kicks or bans a Discord member.
+   *
+   * ★ WHY ONE ENDPOINT AND NOT FIVE ★
+   *
+   * Every action shares the same four steps in the same order — check the caller may act on this
+   * person, call Discord, record what happened whether or not it worked, report it in words. Split
+   * five ways, that is five places for one of the four to be forgotten, and the one that gets
+   * forgotten is always the audit row.
+   *
+   * ★ MEMBER_MANAGE, BY THE OWNER'S DECISION ★
+   *
+   * 2026-08-01, offered separate MEMBER_TIMEOUT / MEMBER_KICK / MEMBER_BAN bits and chose to keep
+   * all three under MEMBER_MANAGE. So anybody who can manage members can ban, and that is
+   * deliberate. It is inherited from the controller, along with the two-factor gate.
+   */
+  @Post('squad/:discordId/moderate')
+  async moderate(
+    @User() caller: CurrentUser | undefined,
+    @Param('discordId') discordId: string,
+    @Body() body: unknown,
+    @Req() req: FastifyRequest,
+  ): Promise<{ applied: boolean; problem?: string }> {
+    const actorId = requireUser(caller);
+    csrf(req);
+
+    const input = (body ?? {}) as Record<string, unknown>;
+    const action = readString(input, 'action') as ModerationAction;
+
+    const ALLOWED: readonly ModerationAction[] = ['timeout', 'untimeout', 'kick', 'ban', 'unban'];
+    if (!ALLOWED.includes(action)) {
+      throw new AppError(ErrorCode.VALIDATION_FAILED, `Unknown moderation action: ${action}`);
+    }
+
+    /*
+     * A reason is REQUIRED, and it is not bureaucracy.
+     *
+     * It goes into Discord's own server audit log as well as ours, so the next officer scrolling
+     * that log sees why somebody vanished. Without it a ban issued from this site is
+     * indistinguishable from one issued by a compromised bot.
+     */
+    const reason = readString(input, 'reason').trim();
+    if (reason.length < 3) {
+      throw new AppError(
+        ErrorCode.VALIDATION_FAILED,
+        'Give a reason. It is written to the squadron audit log and to the one in Discord.',
+      );
+    }
+
+    const roster = await this.store.squadRoster();
+    const target = roster.find((r) => r.discordId === discordId);
+
+    if (target === undefined) {
+      throw new AppError(
+        ErrorCode.RESOURCE_NOT_VISIBLE,
+        'That member is not in the Discord server.',
+      );
+    }
+
+    /*
+     * Acting on yourself is refused before Discord ever sees it. Banning your own account from the
+     * console is a mistake with no undo from inside the console, and nobody needs this to do it —
+     * the Discord client is right there if they genuinely mean to.
+     *
+     * The caller's Discord id is looked up rather than read off the session: `CurrentUser` carries
+     * a userId and nothing else, and widening it for one check here would put a Discord id on every
+     * authenticated request in the application.
+     */
+    if ((await this.store.discordIdFor(actorId)) === discordId) {
+      throw new AppError(ErrorCode.PERMISSION_DENIED, 'You cannot use this on your own account.');
+    }
+
+    /*
+     * `unban` is the exception to the hierarchy rule: the person is not in the guild, so they hold
+     * no roles to outrank anybody with. Refusing it on `moderatable` would make an accidental ban
+     * unfixable from here, which is the one thing this page must never be.
+     */
+    if (!target.moderatable && action !== 'unban') {
+      throw new AppError(
+        ErrorCode.PERMISSION_DENIED,
+        target.notModeratableBecause ?? 'Discord will not let the bot act on this member.',
+      );
+    }
+
+    const minutes = action === 'timeout' ? readTimeoutMinutes(input) : undefined;
+    const deleteMessageDays = action === 'ban' ? readDeleteDays(input) : undefined;
+
+    const outcome = await this.discord.apply({
+      action,
+      discordId,
+      reason,
+      ...(minutes === undefined ? {} : { minutes }),
+      ...(deleteMessageDays === undefined ? {} : { deleteMessageDays }),
+    });
+
+    /*
+     * Recorded even when Discord refused.
+     *
+     * An audit log that only holds SUCCESSFUL moderation is a flattering fiction: "who tried to ban
+     * this member last week" is exactly the question it should be able to answer.
+     */
+    await this.store.recordModeration({
+      actorId,
+      discordId,
+      targetName: target.nick ?? target.globalName ?? target.username,
+      action,
+      reason,
+      minutes,
+      deleteMessageDays,
+      applied: outcome.ok,
+      problem: outcome.problem,
+    });
+
+    return outcome.ok ? { applied: true } : { applied: false, problem: outcome.problem ?? '' };
+  }
 
   /**
    * Monthly activity, the input to promotion.
@@ -74,13 +365,19 @@ export class AdminController {
    * Behind the same second-factor gate as every other read on this controller.
    */
   @Get('dashboard')
-  async dashboard(): Promise<DashboardData> {
-    return this.dash.dashboard(new Date());
+  async dashboard(@Query('month') month?: string): Promise<DashboardData> {
+    /*
+     * `month` is the PERIOD — `YYYY-MM`, a bare `YYYY`, or `ytd` — validated in the store
+     * (parseMonth/parseYear) rather than here, and anything unparseable falls back to the
+     * current month rather than erroring — a stale tab in somebody's URL should show them
+     * today, not a stack trace.
+     */
+    return this.dash.dashboard(new Date(), month);
   }
 
   @Get('activity')
   async activity(@Query('month') month?: string): Promise<{ month: string; rows: ActivityRow[] }> {
-    const key = normaliseMonth(month);
+    const key = normalisePeriod(month);
     return { month: key, rows: await this.store.activityForMonth(key) };
   }
 
@@ -305,13 +602,24 @@ export class AdminController {
 }
 
 /**
- * Coerces a month parameter to the first of a month, UTC.
+ * Coerces a period parameter to `YYYY-MM` for a month, or a bare `YYYY` for a year.
+ *
+ * The period control sends three shapes — `YYYY-MM`, `YYYY`, and `ytd` (the current year).
+ * The first two pass through; `ytd` becomes the current year, so the store has exactly two
+ * cases to serve. This used to accept only months, so the YTD and Year chips silently showed
+ * the CURRENT MONTH under a control that looked like it had answered.
  *
  * Anything unparseable becomes the CURRENT month rather than an error. A
  * dashboard that 400s because of a stray query string is more annoying than
  * useful, and there is no security consequence to the fallback.
  */
-function normaliseMonth(raw: string | undefined): string {
+function normalisePeriod(raw: string | undefined): string {
+  if (raw === YTD) return String(new Date().getUTCFullYear());
+  if (raw !== undefined && /^\d{4}$/.test(raw)) {
+    const year = Number(raw);
+    // The same absurdity guard as the dashboard's parser: a typo must not scan for year 9999.
+    if (year >= 2020 && year <= 2100) return raw;
+  }
   const d = raw === undefined ? new Date() : new Date(`${raw}-01T00:00:00Z`);
   const use = Number.isNaN(d.getTime()) ? new Date() : d;
   return `${use.getUTCFullYear()}-${String(use.getUTCMonth() + 1).padStart(2, '0')}`;
@@ -371,4 +679,39 @@ function csrf(req: FastifyRequest): void {
 function requireUser(caller: CurrentUser | undefined): string {
   if (caller === undefined) throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
   return caller.userId;
+}
+
+/**
+ * How long a timeout lasts, in minutes.
+ *
+ * Clamped rather than rejected at the top: Discord's ceiling is 28 days, and an officer who types
+ * 60 days meant "as long as possible", not "fail". Below one minute IS rejected, because a
+ * zero-minute timeout reports success and does nothing.
+ */
+function readTimeoutMinutes(input: Record<string, unknown>): number {
+  const raw = input['minutes'];
+  const n = typeof raw === 'number' ? raw : Number(raw);
+
+  if (!Number.isFinite(n) || n < 1) {
+    throw new AppError(ErrorCode.VALIDATION_FAILED, 'Choose how long the timeout should last.');
+  }
+  return Math.min(Math.floor(n), MAX_TIMEOUT_MINUTES);
+}
+
+/**
+ * How much of a banned member's recent history to delete, in days.
+ *
+ * Defaults to ZERO — deleting nothing. Wiping a week of somebody's messages is a much larger act
+ * than removing them: it takes conversations other members were part of with it, and none of it
+ * comes back. It has to be asked for explicitly.
+ */
+function readDeleteDays(input: Record<string, unknown>): number {
+  const raw = input['deleteMessageDays'];
+  if (raw === undefined || raw === null) return 0;
+
+  const n = typeof raw === 'number' ? raw : Number(raw);
+  if (!Number.isFinite(n) || n < 0 || n > 7) {
+    throw new AppError(ErrorCode.VALIDATION_FAILED, 'Message deletion must be between 0 and 7 days.');
+  }
+  return Math.floor(n);
 }

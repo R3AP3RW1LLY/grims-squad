@@ -1,0 +1,36 @@
+-- The rich document (P2.3).
+--
+-- Squadron owner, 2026-07-30: a Word-class editor with image placement and video embeds, and
+-- EVERY member gets it — not just officers.
+--
+-- ★ WHY A DOCUMENT COLUMN AND NOT RICHER HTML ★
+--
+-- A rich editor emitting HTML would mean the sanitiser facing arbitrary untrusted markup from
+-- 107 people, and every new capability (alignment, width, embeds) widening an HTML allowlist —
+-- the exact surface narrowed all week.
+--
+-- A validated node tree inverts it. The server never accepts HTML for a rich post: it accepts a
+-- tree, validates it against a closed set of eleven node types, and GENERATES body_html itself.
+-- The question stops being "is this markup safe" and becomes "is this one of eleven shapes I
+-- know". Anything else is refused before storage.
+--
+-- Two consequences worth recording:
+--   - There is no field in a document that can hold a third-party URL. Images carry our upload
+--     id, so a post cannot leak a reader's IP to another host — structurally, not by a check.
+--   - Nothing in the renderer emits a script tag and no input node can ask for one.
+--
+-- ★ NULL MEANS "WRITTEN AS MARKDOWN", WHICH IS A FACT WORTH KEEPING ★
+--
+-- Markdown posts remain valid: replies, the seeded joining guides, everything written before
+-- today. Rewriting them all into documents would be a lossy transform of every post on the
+-- site, run once, with no way back. So this is nullable and body_md stays.
+--
+-- JSONB rather than TEXT: it is queried structurally later (finding every post that embeds a
+-- given video, or references an upload before deleting it), and JSONB makes that an index away
+-- instead of a scan with a parser.
+ALTER TABLE "forum_posts" ADD COLUMN "body_doc" JSONB;
+
+-- Finds posts that reference a given upload, which is what makes "is this image still in use"
+-- answerable before deleting an object. A GIN index on the whole document rather than an
+-- expression index on one path: the same index then serves the embed lookups too.
+CREATE INDEX "forum_posts_body_doc_idx" ON "forum_posts" USING gin ("body_doc" jsonb_path_ops);

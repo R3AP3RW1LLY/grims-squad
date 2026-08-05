@@ -1,4 +1,7 @@
 import { readJournalChunk, journalFilesInOrder } from './journal-reader.js';
+import { trackDocked, type DockedAt } from './docked.js';
+import { foldTrip, EMPTY_TRIP, type TripLedger } from './trip-ledger.js';
+import { foldCarrierHold, EMPTY_CARRIER_HOLD, type CarrierHoldState } from './carrier-hold.js';
 import type { CompanionConfig } from './config.js';
 import type { Uploader } from './uploader.js';
 
@@ -72,6 +75,33 @@ export interface WatchOutcome {
   /** Set when the token has been revoked — the loop should stop until re-paired. */
   readonly unauthorised: boolean;
   readonly error: string | null;
+  /**
+   * Where the commander is docked, folded over every event this pass read.
+   *
+   * ★ SQUADRON OWNER, 2026-08-02 ★
+   *
+   * "it should appear automatically in the companion app on the new project page if it is not being
+   * used please!" — of the market id a project needs.
+   *
+   * Carried out of the watcher rather than read again elsewhere, because this is the only place the
+   * journal is parsed. A second reader would be a second set of offsets to keep in step, and the
+   * one that fell behind would quietly serve a station the member left.
+   *
+   * Null means "not docked, as far as we know", which is also what a first run reports.
+   */
+  readonly dockedAt: DockedAt | null;
+  /**
+   * The trip P&L, folded over every event this pass read — the same plumbing as `dockedAt`, for
+   * the same reason: this is the only place the journal is parsed, and a second reader would be a
+   * second set of offsets that drift.
+   */
+  readonly trip: TripLedger;
+  /**
+   * The member's own carrier's hold, folded the same way. The caller pushes its snapshot to the
+   * hub when it CHANGES — the fold lives here because this is the only place the journal is
+   * parsed, and the debounce lives with the caller because sending is the caller's job.
+   */
+  readonly carrierHold: CarrierHoldState;
 }
 
 /**
@@ -100,11 +130,27 @@ export async function runWatchPass(
   journalDir: string,
   config: CompanionConfig,
   uploader: Uploader,
+  /*
+   * What we believed before this pass. Threaded through rather than held in module state so the
+   * function stays pure enough to test — the same reason every other decision in this file is a
+   * parameter rather than a global.
+   */
+  dockedBefore: DockedAt | null = null,
+  /*
+   * The running trip, threaded the same way. Defaults to the empty trip: a fresh app start begins
+   * an empty ledger on purpose — nothing is seeded from the tail, see trip-ledger.ts.
+   */
+  tripBefore: TripLedger = EMPTY_TRIP,
+  /*
+   * The member's own carrier's hold, threaded the same way and unseeded for the same reason: a
+   * ledger rebuilt from half a session shows figures whose starting point nobody can name.
+   */
+  carrierBefore: CarrierHoldState = EMPTY_CARRIER_HOLD,
 ): Promise<{ outcome: WatchOutcome; config: CompanionConfig }> {
   if (!config.enabled || config.deviceToken === '') {
     // Not an error. The app is installed and waiting, which is the state it
     // ships in — being installed is not consent to transmit.
-    return { outcome: empty(), config };
+    return { outcome: empty(null, tripBefore, carrierBefore), config };
   }
 
   const all = journalFilesInOrder(await fs.listFiles(journalDir));
@@ -123,6 +169,13 @@ export async function runWatchPass(
   let txBytes = 0;
   let rxBytes = 0;
   let gameRunning = false;
+  // Seeded from what the caller already believed, so a station docked at ten minutes ago survives
+  // the passes in between that mention nothing.
+  let docked: DockedAt | null = dockedBefore;
+  // Likewise: a buy from three passes ago is still this trip's spend until an Undocked closes it.
+  let trip: TripLedger = tripBefore;
+  // And the carrier hold: cargo staged an hour ago is still aboard until the journal says otherwise.
+  let carrierHold: CarrierHoldState = carrierBefore;
   let sent = 0;
   let duplicates = 0;
   const refused: Record<string, number> = {};
@@ -166,6 +219,27 @@ export async function runWatchPass(
 
     if (result.sessionIsLive !== null) next.sessionLive[name] = result.sessionIsLive;
 
+    /*
+     * ★ FOLDED BEFORE THE "NOTHING TO SEND" RETURN, DELIBERATELY ★
+     *
+     * `Docked` is only uploaded when the member has left the `location` category on. Where they are
+     * docked is needed by the app itself — to fill in a project form — whether or not the squadron
+     * is allowed to know it, and reading it here rather than after the consent filter keeps those
+     * two questions separate.
+     *
+     * Nothing about this leaves the machine. It is used to pre-fill a form the member is looking at.
+     */
+    docked = trackDocked(docked, result.events);
+    /*
+     * The trip P&L, folded in the same breath and before the same "nothing to send" return, for
+     * the same reason as the dock: what a member paid at a buy screen is needed by the app's own
+     * overlay whether or not any of these events is in a category the squadron receives.
+     */
+    trip = foldTrip(trip, result.events);
+    // The own-carrier hold, same breath, same reasoning. The caller decides whether its snapshot
+    // is worth a push; the fold merely watches.
+    carrierHold = foldCarrierHold(carrierHold, result.events);
+
     if (result.events.length === 0) {
       /*
        * Nothing to send, but the offset still moves: those bytes have been read
@@ -196,7 +270,7 @@ export async function runWatchPass(
       // picks up exactly where it left off.
       return {
         outcome: {
-          ...empty(),
+          ...empty(docked, trip, carrierHold),
           gameRunning,
           filesRead,
           newFilesRead,
@@ -218,7 +292,7 @@ export async function runWatchPass(
        */
       return {
         outcome: {
-          ...empty(),
+          ...empty(docked, trip, carrierHold),
           gameRunning,
           filesRead,
           newFilesRead,
@@ -260,6 +334,9 @@ export async function runWatchPass(
   next = pruneOffsets(next, all);
   return {
     outcome: {
+      dockedAt: docked,
+      trip,
+      carrierHold,
       gameRunning,
       filesRead,
       newFilesRead,
@@ -295,8 +372,15 @@ export function pruneOffsets(config: CompanionConfig, present: readonly string[]
   return { ...config, offsets, sessionLive };
 }
 
-function empty(): WatchOutcome {
+function empty(
+  dockedAt: DockedAt | null = null,
+  trip: TripLedger = EMPTY_TRIP,
+  carrierHold: CarrierHoldState = EMPTY_CARRIER_HOLD,
+): WatchOutcome {
   return {
+    dockedAt,
+    trip,
+    carrierHold,
     gameRunning: false,
     filesRead: 0,
     newFilesRead: 0,

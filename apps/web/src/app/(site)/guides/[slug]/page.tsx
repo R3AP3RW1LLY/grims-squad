@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { getPublicGuide } from '../../../../lib/api';
+import { YouTubeConsent } from '../../../../components/editor/youtube-consent';
 
 /**
  * One public guide.
@@ -69,6 +70,12 @@ export default async function GuidePage({ params }: { params: Promise<{ slug: st
 
   return (
     <article className="mx-auto max-w-[900px] px-4 py-12 sm:px-6">
+      {/*
+        Turns a stored video placeholder into a player, but only on a click. The stored HTML
+        contains no iframe at all — see `youtube-consent`. Renders nothing itself.
+      */}
+      <YouTubeConsent />
+
       <nav aria-label="Breadcrumb" className="mb-8">
         <a
           href="/guides"

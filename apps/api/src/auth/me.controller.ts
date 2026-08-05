@@ -13,6 +13,7 @@ import {
 } from './onboarding-gate.js';
 import { createHash } from 'node:crypto';
 import { PermissionService } from '../authz/permission.service.js';
+import { ViewAsService } from '../authz/view-as.service.js';
 import { STEP_UP_TTL_MS } from './admin-gate.guard.js';
 import { verifyCsrf, readCsrfCookie } from '../common/csrf.js';
 import { isValidTimezone, knownTimezones, DEFAULT_TIMEZONE } from '../common/timezone.js';
@@ -53,6 +54,19 @@ export interface MeResponse {
   /** Privileged AND unenrolled — the chrome uses this to keep admin links honest. */
   mustSecureAccount: boolean;
   /**
+   * The role being previewed, or null.
+   *
+   * ★ SQUADRON OWNER, 2026-08-01 ★
+   *
+   * "a way for the webmaster and officers to visually spoof a rank and physically see what they see
+   * in the web app".
+   *
+   * Reported so the chrome can say so on every page. A preview with nothing on screen announcing it
+   * is indistinguishable from having lost permissions — which is exactly the panic the feature
+   * would otherwise cause, in the person who pressed the button.
+   */
+  viewingAs: { id: string; name: string } | null;
+  /**
    * What they still owe, decided in ONE place (onboarding-gate.ts).
    *
    * The web layout redirects on `step`; it does not re-derive the rule. Two
@@ -91,6 +105,20 @@ export class MeController {
     @Optional()
     @Inject(PermissionService)
     private readonly permissions: PermissionService | null = null,
+    /*
+     * ★ THE RANK PREVIEW HAS TO REACH THE NAV ★
+     *
+     * Squadron owner, 2026-08-01: officers need to see the site as another rank sees it. If this
+     * endpoint kept answering with the viewer's REAL mask, the sidebar would still show the admin
+     * section while every page inside it refused — which looks like the permissions are broken
+     * rather than like a preview.
+     *
+     * Optional, like the permission service beside it, so a unit test of this controller does not
+     * need the whole authz module.
+     */
+    @Optional()
+    @Inject(ViewAsService)
+    private readonly viewAs: ViewAsService | null = null,
   ) {}
 
   @Public()
@@ -103,6 +131,8 @@ export class MeController {
         nav: [],
         isAdmin: false,
         mustSecureAccount: false,
+        // Signed out: no preview can be running, and saying null is more honest than omitting it.
+        viewingAs: null,
         session: { expiresAt: null, twoFactorExpiresAt: null },
         onboarding: { step: null, path: null, promptForVerification: false, verified: false },
       };
@@ -116,6 +146,9 @@ export class MeController {
         avatarStoredHash: true,
         timezone: true,
         commanderOnboardedAt: true,
+        companionPromptedAt: true,
+        nicknamePromptedAt: true,
+        nicknameOverrideAllowed: true,
       },
     });
     if (user === null) {
@@ -130,13 +163,25 @@ export class MeController {
         nav: [],
         isAdmin: false,
         mustSecureAccount: false,
+        // Signed out: no preview can be running, and saying null is more honest than omitting it.
+        viewingAs: null,
         session: { expiresAt: null, twoFactorExpiresAt: null },
         onboarding: { step: null, path: null, promptForVerification: false, verified: false },
       };
     }
 
+    /*
+     * `viewAs.maskFor` when it is available, which is `effectiveMask` unless a preview is running.
+     * One source of truth for "what may this request do", shared with the permission guard.
+     */
     const mask =
-      this.permissions === null ? NO_PERMISSIONS : await this.permissions.effectiveMask(userId);
+      this.viewAs !== null
+        ? await this.viewAs.maskFor(userId, req)
+        : this.permissions === null
+          ? NO_PERMISSIONS
+          : await this.permissions.effectiveMask(userId);
+
+    const viewingAs = this.viewAs === null ? null : await this.viewAs.previewedRole(req);
 
     const privileged = requiresTwoFactor(mask);
     const enrolled = await this.#enrolled(userId);
@@ -146,7 +191,21 @@ export class MeController {
       privileged,
       twoFactorEnrolled: enrolled,
       commanderOnboarded: user.commanderOnboardedAt !== null,
+      companionPrompted: user.companionPromptedAt !== null,
       verified: await this.#verified(userId),
+      /*
+       * ★ OFFICERS AND GRANTED MEMBERS ONLY — SQUADRON OWNER, 2026-08-02 ★
+       *
+       * `privileged` is the same test the admin console uses, and it is the right one here: the
+       * ranks that can open the admin area are exactly the leadership appointments the owner meant
+       * by "officer". `nicknameOverrideAllowed` covers the exception an officer can grant to
+       * somebody who is not one.
+       *
+       * Everybody else has nothing to decide — their nickname is their humanized Inara name — and a
+       * step explaining a rule they cannot change is a page they click past without reading.
+       */
+      mayChooseNickname: privileged || user.nicknameOverrideAllowed,
+      nicknamePrompted: user.nicknamePromptedAt !== null,
     };
     const step = nextOnboardingStep(state);
 
@@ -179,6 +238,14 @@ export class MeController {
       // explain why they are being asked; it just must not link them anywhere.
       isAdmin: hasAdminArea(mask),
       mustSecureAccount: mustSecure,
+      /*
+       * ★ REPORTED SO THE BANNER CAN EXIST ★
+       *
+       * A preview with nothing on screen saying so is indistinguishable from having lost
+       * permissions — which is precisely the panic this feature would otherwise cause. Every page
+       * already reads this endpoint for its chrome, so the banner comes free.
+       */
+      viewingAs,
       session: {
         expiresAt: (await this.#sessionEndsAt(req))?.toISOString() ?? null,
         twoFactorExpiresAt:
@@ -202,6 +269,92 @@ export class MeController {
    * field here a member can set, and a broad PATCH would need a per-field
    * allowlist to stop it becoming a way to write `handle` or `status`.
    */
+  /**
+   * Which Discord DMs this member has asked for (P2.10).
+   *
+   * ★ THREE SWITCHES, NOT ONE ★
+   *
+   * The reasons have very different volumes: being answered directly is rare and almost always
+   * wanted, while a busy watched thread can produce twenty messages in an evening. A single switch
+   * forces a choice between missing a reply and being flooded, and the choice people actually make
+   * is to turn everything off.
+   */
+  @Get('me/notifications')
+  async notificationPrefs(@Req() req: FastifyRequest): Promise<{
+    notifyDmDirectReply: boolean;
+    notifyDmMention: boolean;
+    notifyDmWatched: boolean;
+    discordLinked: boolean;
+  }> {
+    const userId = req.user?.userId;
+    if (userId === undefined) throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
+
+    const me = await this.db.user.findUnique({
+      where: { id: userId },
+      select: {
+        notifyDmDirectReply: true,
+        notifyDmMention: true,
+        notifyDmWatched: true,
+        discordIdentity: { select: { discordId: true } },
+      },
+    });
+    if (me === null) throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
+
+    return {
+      notifyDmDirectReply: me.notifyDmDirectReply,
+      notifyDmMention: me.notifyDmMention,
+      notifyDmWatched: me.notifyDmWatched,
+      /*
+       * Reported so the settings page can say "link Discord first" rather than offering switches
+       * that would silently do nothing. A toggle that saves and then never delivers is worse than
+       * one that explains why it is unavailable.
+       */
+      discordLinked: me.discordIdentity !== null,
+    };
+  }
+
+  /** Changes them. Each is set independently; omitted keys are left alone. */
+  @Patch('me/notifications')
+  async setNotificationPrefs(
+    @Req() req: FastifyRequest,
+    @Body() body: unknown,
+  ): Promise<{ notifyDmDirectReply: boolean; notifyDmMention: boolean; notifyDmWatched: boolean }> {
+    const userId = req.user?.userId;
+    if (userId === undefined) throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
+
+    const cookies =
+      (req as unknown as { cookies?: Record<string, string | undefined> }).cookies ?? {};
+    verifyCsrf(req.method, readCsrfCookie(cookies), req.headers['x-csrf-token'] as string | undefined);
+
+    const raw = body as Record<string, unknown> | null;
+    /*
+     * Only booleans are accepted, and only for keys actually present. A PATCH that treated a
+     * missing key as `false` would turn off preferences the caller never mentioned — which is how
+     * a settings page with one toggle silently clears the other two.
+     */
+    const data: Record<string, boolean> = {};
+    for (const key of ['notifyDmDirectReply', 'notifyDmMention', 'notifyDmWatched'] as const) {
+      const value = raw?.[key];
+      if (typeof value === 'boolean') data[key] = value;
+    }
+
+    if (Object.keys(data).length === 0) {
+      throw new AppError(ErrorCode.VALIDATION_FAILED, 'Nothing to change.');
+    }
+
+    const updated = await this.db.user.update({
+      where: { id: userId },
+      data,
+      select: {
+        notifyDmDirectReply: true,
+        notifyDmMention: true,
+        notifyDmWatched: true,
+      },
+    });
+
+    return updated;
+  }
+
   @Patch('me/timezone')
   async setTimezone(
     @Req() req: FastifyRequest,
@@ -264,6 +417,63 @@ export class MeController {
       data: { timezone, commanderOnboardedAt: new Date() },
     });
     return { timezone, done: true };
+  }
+
+  /**
+   * Marks the companion step as seen.
+   *
+   * ★ SEEN, NOT INSTALLED — squadron owner, 2026-08-01: "onboarding download step" ★
+   *
+   * Called when the member moves on from the page, whether or not they connected anything. Gating
+   * this on a paired device would wall out anybody whose machine cannot run the app, and the
+   * squadron would rather have them in the forum than nowhere.
+   *
+   * Idempotent: the timestamp is only written the first time, so passing through again does not
+   * make an old member look newly onboarded in the audit trail.
+   */
+  @Post('me/onboarding/companion')
+  async companionSeen(@Req() req: FastifyRequest): Promise<{ done: true }> {
+    const userId = req.user?.userId;
+    if (userId === undefined) throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
+
+    const cookies =
+      (req as unknown as { cookies?: Record<string, string | undefined> }).cookies ?? {};
+    verifyCsrf(req.method, readCsrfCookie(cookies), req.headers['x-csrf-token'] as string | undefined);
+
+    await this.db.user.updateMany({
+      where: { id: userId, companionPromptedAt: null },
+      data: { companionPromptedAt: new Date() },
+    });
+    return { done: true };
+  }
+
+  /**
+   * Marks the nickname step as seen.
+   *
+   * ★ SEEN, NOT DECIDED — squadron owner, 2026-08-02 ★
+   *
+   * "add a step to onboarding that allows them to overide their discord server nickname."
+   *
+   * Allows, not requires. Wanting the humanized Inara name is a valid answer and the commonest one,
+   * so passing through completes the step — exactly like the companion page above, and for the same
+   * reason: a prompt an officer cannot dismiss is one they learn to click past.
+   *
+   * Idempotent, so passing again does not make an old officer look newly onboarded in the audit.
+   */
+  @Post('me/onboarding/nickname')
+  async nicknameSeen(@Req() req: FastifyRequest): Promise<{ done: true }> {
+    const userId = req.user?.userId;
+    if (userId === undefined) throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
+
+    const cookies =
+      (req as unknown as { cookies?: Record<string, string | undefined> }).cookies ?? {};
+    verifyCsrf(req.method, readCsrfCookie(cookies), req.headers['x-csrf-token'] as string | undefined);
+
+    await this.db.user.updateMany({
+      where: { id: userId, nicknamePromptedAt: null },
+      data: { nicknamePromptedAt: new Date() },
+    });
+    return { done: true };
   }
 
   /** The zones the picker offers. Read from the runtime, never a hand-kept list. */

@@ -35,6 +35,31 @@ allowBuilds:
   # stops pnpm asking — leaving it blank re-triggers the placeholder state that
   # disables every OTHER build script too.
   electron-winstaller: false
+  # DECLINED, deliberately. zeromq ships prebuilt bindings for every platform we
+  # run on — win32-x64 for development, linux-x64 in the collector image — and
+  # `import('zeromq')` was verified to resolve `Subscriber` on both without its
+  # build script ever running.
+  #
+  # `true` would mean compiling libzmq from source, which needs a C++ toolchain
+  # that node:24-slim does not carry: the image would have to grow build-essential
+  # to produce a binary identical to the prebuild it already had.
+  #
+  # The risk `false` accepts is a platform with no prebuild failing at `import`
+  # rather than at install. Dockerfile.eddn-collector closes that: it loads the
+  # module during the build and fails there, not in production.
+  zeromq: false
+  # DECLINED, deliberately, and for the same reason as zeromq. koffi is what lets the companion ask
+  # Windows which window is in front, so the overlays can hide when the game is minimised. It ships
+  # PREBUILT binaries for win32 x86/x64/ARM64, linux glibc and musl, macOS x64 and ARM64, FreeBSD
+  # and OpenBSD — its own documentation is explicit that it installs without a C++ compiler.
+  #
+  # Verified rather than assumed: `koffi.load('user32.dll')` was called with the build script
+  # blocked and returned a working foreground reading (10,000 samples in 16ms) before this line was
+  # written.
+  #
+  # `true` would mean compiling from source and adding a toolchain requirement to every developer
+  # machine and to CI, to produce a binary identical to the prebuild already on disk.
+  koffi: false
 
 onlyBuiltDependencies:
   - esbuild
@@ -56,7 +81,8 @@ onlyBuiltDependencies:
 # Reached only through eslint -> minimatch, i.e. dev-time tooling, never runtime.
 # Overridden rather than ignored: a suppressed advisory is one nobody revisits.
 overrides:
-  brace-expansion@<5.0.8: ">=5.0.8"
+  # Raised from 5.0.8 when the advisory was re-scored against the whole 4.x/5.x line up to 5.0.9.
+  brace-expansion@<5.0.9: ">=5.0.9"
   # CRITICAL (GHSA-72c6-fx6q-fr5w): @fastify/middie <=9.3.1 allows middleware
   # authentication bypass in child plugin scopes. Reached transitively via
   # @nestjs/platform-fastify - i.e. it sits directly under the request path that
@@ -65,7 +91,20 @@ overrides:
   # All transitive, all with patches available, several in the request path.
   # Overridden rather than ignored - a suppressed advisory is one nobody revisits.
   "fastify@<5.7.2": ">=5.7.2" # Content-Type tab char bypasses body validation
-  "fast-uri@<3.1.1": ">=3.1.1" # path traversal via percent-encoded dot
+  # ★ TWO LINES, BECAUSE THE ADVISORY LANDED ON BOTH ★
+  #
+  # This was one entry pinning `<3.1.1`, written for the percent-encoded dot traversal. A newer
+  # advisory (GHSA-7p8r-x3mc-p8w7, host confusion via a backslash authority introducer) is fixed
+  # in 3.1.5 and 4.1.2 — so the old pin let 3.1.1–3.1.4 through, and said nothing at all about the
+  # 4.x line fastify now resolves. Both ranges are named rather than one loose floor, because a
+  # single `>=4.1.2` would refuse to satisfy anything still asking for 3.x.
+  #
+  # Reached through @nestjs/platform-fastify → fastify → ajv, i.e. squarely in the request path.
+  #
+  # A single unqualified floor rather than two ranged selectors: the ranged form left 4.1.1 pinned
+  # in the lockfile because nothing forced a re-resolve of that edge. Every consumer in this tree
+  # resolves to the 4.x line, so one floor is both sufficient and impossible to satisfy halfway.
+  "fast-uri": ">=4.1.2"
   "find-my-way@<9.6.1": ">=9.6.1" # HTTP/2 DoS
   "postcss@<8.5.12": ">=8.5.12" # arbitrary file read
   "sharp@<0.35.0": ">=0.35.0" # inherited libvips CVEs

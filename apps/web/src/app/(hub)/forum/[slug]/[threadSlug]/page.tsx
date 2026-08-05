@@ -1,9 +1,22 @@
 import { notFound } from 'next/navigation';
+import { badgeDisplay, type BadgeDisplay } from '@grims/shared';
 import { PageHeader, PageBody, Panel, RailStat } from '../../../../../components/hub-page';
-import { getHubThread, getThreadGrants, getMe } from '../../../../../lib/api';
+import {
+  getHubThread,
+  getHubThreads,
+  getThreadGrants,
+  getMe,
+  getRoadmapThreadCard,
+  getThreadSubscription,
+  getDmPreferences,
+} from '../../../../../lib/api';
 import { formatLocal } from '../../../../../lib/time';
 import { ThreadAccess } from './thread-access';
+import { PromoteToBoard } from './promote-to-board';
+import { Conversation } from './conversation';
+import { NotifyMe } from './notify-me';
 import { ImageUploader } from '../../../../../components/image-uploader';
+import { YouTubeConsent } from '../../../../../components/editor/youtube-consent';
 
 /**
  * One thread, with its posts.
@@ -41,8 +54,27 @@ export default async function ThreadPage({
    */
   if (data === null) notFound();
 
-  const { thread, posts } = data;
+  const { thread, posts, signatures, identities } = data;
   const access = await getThreadGrants(thread.id);
+
+  /*
+   * ★ BADGE KEYS ARE RESOLVED HERE, ON THE SERVER ★
+   *
+   * The thread response carries up to three showcased badge KEYS per author; what a key looks
+   * like lives in the shared catalogue. `Conversation` is a client component, and a client bundle
+   * may not import runtime values from the `@grims/shared` barrel — it drags in `node:crypto` and
+   * fails the build (see client-imports.spec.ts) — so the lookup happens here and the chips travel
+   * as resolved display data. A key the catalogue no longer knows resolves to null and is dropped
+   * silently: an old award is not worth an "unknown badge" chip on somebody's post.
+   */
+  const badges: Record<string, BadgeDisplay[]> = {};
+  for (const [authorId, keys] of Object.entries(data.badges ?? {})) {
+    const resolved = keys
+      .slice(0, 3)
+      .map((key) => badgeDisplay(key))
+      .filter((b): b is BadgeDisplay => b !== null);
+    if (resolved.length > 0) badges[authorId] = resolved;
+  }
 
   /*
    * ★ THE MEMBER'S STORED TIMEZONE, NEVER THE BROWSER'S ★
@@ -58,8 +90,53 @@ export default async function ThreadPage({
   const me = await getMe();
   const viewerTz = me.user?.timezone ?? 'UTC';
 
+  /*
+   * The category, for `canPost`. Fetched separately rather than added to the thread response: the
+   * thread endpoint is @Public and shared with anonymous readers, and posting permission is a
+   * question about the CALLER — mixing it in would make a cacheable public response depend on who
+   * asked. Two cheap reads on a page that already does two.
+   */
+  const board = await getHubThreads(slug);
+
+  /*
+   * The follow state and the DM preference, fetched together. Both are per-caller and neither is
+   * cacheable, so they ride alongside the thread read rather than being fetched by the button after
+   * it mounts — a button that renders "Notify me" and then flips to "Notifying you" is a button
+   * that looked wrong for a moment.
+   */
+  const [subscription, dmPrefs] = await Promise.all([
+    getThreadSubscription(thread.id),
+    getDmPreferences(),
+  ]);
+
+  /*
+   * "Promote to board", fetched-not-inferred like the access panel above: the API answers only a
+   * SITE_CONFIG holder, so `null` here means no panel and no reasoning about masks in the
+   * browser. Asked on EVERY thread page, because whether this thread belongs to the Feature
+   * Requests board is the SERVER's call — the same slug-or-name resolution publish uses — not a
+   * comparison against the URL literal, which would die the day the board was renamed. For
+   * everybody without the webmaster's bit the request is the one gated fetch this page already
+   * makes for the access panel: refused, collapsed to null, no panel.
+   *
+   * ★ THE PERMISSION ALONE, NOT THE STEP-UP ★
+   *
+   * This probe used to require a fresh second factor as well, and a collapsed refusal is
+   * indistinguishable from "not that board" — so a webmaster who had spent the afternoon reading
+   * the forum instead of the console simply had no promote panel, with nothing anywhere saying
+   * why. Whether a thread is on the Feature Requests board and whether a card points at it are
+   * facts they are already looking at; the step-up belongs on the promote, which still has it.
+   */
+  const roadmap = await getRoadmapThreadCard(thread.id);
+  const showRoadmapPanel = roadmap !== null && (roadmap.promotable || roadmap.card !== null);
+
   return (
     <>
+      {/*
+        Turns a stored video placeholder into a player, but only on a click. The stored HTML
+        contains no iframe at all — see `youtube-consent`. Renders nothing itself.
+      */}
+      <YouTubeConsent />
+
       <PageHeader
         eyebrow="FORUM"
         title={thread.title}
@@ -77,6 +154,14 @@ export default async function ThreadPage({
       <PageBody
         rail={
           <>
+            <Panel title="Follow">
+              <NotifyMe
+                threadId={thread.id}
+                initialLevel={subscription?.level ?? 'none'}
+                dmEnabled={dmPrefs?.notifyDmWatched ?? false}
+              />
+            </Panel>
+
             <Panel title="Thread">
               <RailStat label="Posts" value={String(thread.postCount)} />
               <RailStat
@@ -96,6 +181,12 @@ export default async function ThreadPage({
             {access !== null && (
               <Panel title="Who can read this">
                 <ThreadAccess threadId={thread.id} initialGrants={access.grants} />
+              </Panel>
+            )}
+
+            {showRoadmapPanel && (
+              <Panel title="Roadmap">
+                <PromoteToBoard threadId={thread.id} initialCard={roadmap.card} />
               </Panel>
             )}
 
@@ -119,36 +210,32 @@ export default async function ThreadPage({
           </div>
         )}
 
-        <div className="space-y-8">
-          {posts.map((post, i) => (
-            <article
-              key={post.id}
-              id={`post-${i + 1}`}
-              className="scroll-mt-24 rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel)] p-5"
-            >
-              <header className="mb-4 flex flex-wrap items-baseline justify-between gap-2 border-b border-[var(--color-border-hairline)] pb-3">
-                <p className="text-sm text-[var(--color-text-primary)]">
-                  {post.author.displayName}
-                </p>
-                <p className="font-mono text-[11px] text-[var(--color-text-secondary)]">
-                  {formatLocal(post.createdAt, viewerTz)}
-                  {/*
-                    Shown only when the server set `editedAt`. The grace window means a typo
-                    fixed moments after posting is not flagged — a forum that flags that
-                    teaches members to post twice instead of editing.
-                  */}
-                  {post.editedAt !== null && ' · edited'}
-                </p>
-              </header>
-
-              <div
-                /* Same scoped prose styling as the public guides, on existing tokens. */
-                className="guide-prose"
-                dangerouslySetInnerHTML={{ __html: post.bodyHtml }}
-              />
-            </article>
-          ))}
-        </div>
+        {/*
+          Posts and composer together, as one client island. "Reply to this post" and "Quote this
+          post" are messages from a post TO the composer, and splitting them would mean inventing a
+          channel for something React already models as state. The bodies are still the server's
+          pre-sanitised HTML, unchanged.
+        */}
+        <Conversation
+          posts={posts}
+          viewerTz={viewerTz}
+          threadId={thread.id}
+          locked={thread.isLocked}
+          /*
+           * `canReply`, not `canPost`: the composer on THIS page writes replies, and the two
+           * are separate gates now — on Feature Requests a member replies (reply_perm) while
+           * nobody, webmaster included, starts a thread through the composer. The server
+           * computes both; the board page's "New thread" keeps `canPost`.
+           */
+          canReply={board?.category.canReply ?? false}
+          /* Server-decided. See `ThreadView.canMarkSolution` for why it is not computed here. */
+          canMarkSolution={thread.canMarkSolution}
+          boardSlug={slug}
+          threadSlug={threadSlug}
+          signatures={signatures}
+          identities={identities}
+          badges={badges}
+        />
       </PageBody>
     </>
   );

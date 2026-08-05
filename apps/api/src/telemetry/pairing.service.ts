@@ -92,8 +92,29 @@ export interface PairingResult {
   readonly label: string;
 }
 
+/**
+ * Tells the account owner about a device transition — pairing completed, or a device revoked.
+ *
+ * ★ A CALLBACK, NOT A CLIENT ★
+ *
+ * The service is deliberately store-shaped (see the header), and both device doors — the token a
+ * member pastes themselves, and the browser-approved link flow — come through `pair` and
+ * `revoke` here. Putting the announcement behind this seam keeps that single-point property
+ * without teaching the service about databases or SSE. The caller's implementation must never
+ * throw; a device notice is decoration on a credential change that has already happened.
+ */
+export type DeviceSecurityNotice = (
+  userId: string,
+  event: 'paired' | 'revoked',
+  label: string,
+) => Promise<void>;
+
 export class PairingService {
-  constructor(private readonly store: PairingStore) {}
+  constructor(
+    private readonly store: PairingStore,
+    /** Optional so every existing test constructs the service exactly as before. */
+    private readonly security?: DeviceSecurityNotice,
+  ) {}
 
   /**
    * Issues a device token. The plaintext is returned ONCE and never again.
@@ -126,6 +147,13 @@ export class PairingService {
       // credential gets copied to and then forgotten about.
       after: { label, scopes: [TELEMETRY_SCOPE] },
     });
+
+    /*
+     * The owner is told their account grew a credential. Both pairing doors — the pasted token
+     * and the browser-approved link — pass through here, so this is one notice however the
+     * device arrived. Never allowed to fail the pairing that already succeeded.
+     */
+    await this.security?.(userId, 'paired', label).catch(() => undefined);
 
     return { token, deviceId: record.id, label };
   }
@@ -175,7 +203,18 @@ export class PairingService {
    * exactly as an unknown one does — distinguishing them would confirm that a
    * given id exists.
    */
-  async revoke(userId: string, deviceId: string, now: Date = new Date()): Promise<void> {
+  async revoke(
+    userId: string,
+    deviceId: string,
+    now: Date = new Date(),
+    /**
+     * `silent` exists for exactly one caller: the link flow's compensating revoke, where a
+     * device minted a moment ago loses a race and is unwound before its token was ever handed
+     * out. Telling the member "a device was unlinked" about a device they never knew existed
+     * would read as somebody else acting on their account — the opposite of a security notice.
+     */
+    options: { silent?: boolean } = {},
+  ): Promise<void> {
     const devices = await this.store.listFor(userId);
     const mine = devices.find((d) => d.id === deviceId);
     if (mine === undefined) {
@@ -191,5 +230,10 @@ export class PairingService {
       before: { label: mine.label, active: true },
       after: { active: false },
     });
+
+    // Gated on the row having been live: re-revoking a dead device is not a second transition.
+    if (options.silent !== true && mine.revokedAt === null) {
+      await this.security?.(userId, 'revoked', mine.label).catch(() => undefined);
+    }
   }
 }

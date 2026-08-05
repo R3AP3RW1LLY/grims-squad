@@ -17,7 +17,7 @@ import { apiPatch } from '../../../../lib/api-client';
  * is unpredictable — which is not acceptable for a privacy control.
  */
 
-interface Toggle {
+export interface Toggle {
   key: keyof PrivacySettings;
   label: string;
   help: string;
@@ -57,12 +57,55 @@ const TOGGLES: readonly Toggle[] = [
   {
     key: 'showOnLeaderboard',
     label: 'Include me on leaderboards',
-    help: 'Off by default. Leaderboards are opt-in, separately from the roster.',
+    // On for everyone — the owner's ruling, and what the standings SQL already does. The old text
+    // claimed "Off by default. Leaderboards are opt-in", which was never how the boards behaved.
+    help: 'On for every commander. Switching it off takes your name off every board at once.',
+  },
+  {
+    /*
+     * ★ NOT A PRIVACY TOGGLE, AND IT SAYS SO ★
+     *
+     * Every other switch here controls what OTHERS see of you. This one controls what YOU see of
+     * them, and it is on this page because this is where a member's own switches live and it
+     * arrives in the same request.
+     *
+     * The help text carries that distinction, because a reading setting filed among privacy
+     * settings would otherwise read as "hide my fonts from other people".
+     */
+    key: 'plainFonts',
+    label: 'Show all posts in the site font',
+    help: 'For you only, everywhere on the site. Commanders can pick from thirty fonts for their posts and signatures; this ignores all of them and renders everything in the plain site face. It changes nothing about how your own posts look to anybody else.',
   },
 ];
 
-export function PrivacyForm({ initial }: { initial: PrivacySettings }) {
-  const [settings, setSettings] = useState<PrivacySettings>(initial);
+export function PrivacyForm({
+  initial,
+  boardToggles,
+}: {
+  initial: PrivacySettings;
+  /**
+   * One switch per leaderboard, derived from the shared LEADERBOARDS catalogue by the SERVER
+   * component that renders this form. Derived there and not here because a client bundle may not
+   * import runtime values from the `@grims/shared` barrel (see client-imports.spec.ts) — and
+   * driving the list from the catalogue is what makes a future board appear here by being added
+   * to it, which is the owner's explicit requirement.
+   */
+  boardToggles: readonly Toggle[];
+}) {
+  const [settings, setSettings] = useState<PrivacySettings>(() => {
+    /*
+     * The per-board switches default ON — squadron owner: "default all leaderboard participation
+     * on for all commanders" — so a response from an API that predates them still renders every
+     * switch in its true resting state rather than as an unchecked lie.
+     */
+    const normalised = { ...initial };
+    for (const t of boardToggles) {
+      // Widened locally: the TYPE promises the key, the wire may not have sent it yet.
+      const stored: boolean | undefined = normalised[t.key];
+      normalised[t.key] = stored ?? true;
+    }
+    return normalised;
+  });
   const [busy, setBusy] = useState<keyof PrivacySettings | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -98,50 +141,89 @@ export function PrivacyForm({ initial }: { initial: PrivacySettings }) {
       )}
 
       <ul className="space-y-1">
-        {TOGGLES.map((t) => {
-          const on = settings[t.key];
-          return (
-            <li key={t.key} className="border-b border-[var(--color-border-hairline)] py-5">
-              <div className="flex items-start justify-between gap-6">
-                <div className="min-w-0">
-                  <label
-                    htmlFor={`toggle-${t.key}`}
-                    className="block text-[var(--color-text-primary)]"
-                  >
-                    {t.label}
-                  </label>
-                  <p
-                    id={`help-${t.key}`}
-                    className="mt-1 max-w-[60ch] text-sm text-[var(--color-text-secondary)]"
-                  >
-                    {t.help}
-                  </p>
-                </div>
-                {/*
-                  A real checkbox. A styled div with role="switch" loses keyboard
-                  behaviour, form semantics and the screen-reader announcement of
-                  its own state — none of which are worth trading for a nicer
-                  default appearance on a privacy control.
-                */}
-                <input
-                  id={`toggle-${t.key}`}
-                  type="checkbox"
-                  role="switch"
-                  checked={on}
-                  disabled={busy === t.key}
-                  aria-describedby={`help-${t.key}`}
-                  onChange={(e) => void set(t.key, e.currentTarget.checked)}
-                  className="mt-1 h-6 w-11 shrink-0 cursor-pointer appearance-none rounded-full border border-[var(--color-border-hairline)] bg-[var(--color-surface-void)] transition-colors before:ml-[3px] before:block before:h-4 before:w-4 before:translate-y-[3px] before:rounded-full before:bg-[var(--color-text-secondary)] before:transition-transform checked:border-[var(--color-brand-cyan-bright)] checked:bg-[color-mix(in_srgb,var(--color-brand-cyan-bright)_28%,transparent)] checked:before:translate-x-5 checked:before:bg-[var(--color-brand-cyan-bright)] disabled:opacity-50"
-                />
-              </div>
-            </li>
-          );
-        })}
+        {TOGGLES.map((t) => (
+          <ToggleRow key={t.key} toggle={t} on={settings[t.key]} busy={busy === t.key} onSet={set} />
+        ))}
+      </ul>
+
+      {/*
+        ★ THE LEADERBOARDS ARE THEIR OWN GROUP ★
+
+        A heading rather than three more rows in the list above, because these switches answer a
+        different question. The list above defaults OFF and each switch GIVES something away; the
+        boards default ON — squadron owner, 2026-08-04 — and each switch here takes a name off a
+        scoreboard. Filing them together would make "everything below is opt-in" quietly false.
+      */}
+      <h3 className="mt-10 font-mono text-[10px] uppercase tracking-[0.24em] text-[var(--color-text-secondary)]">
+        Leaderboards
+      </h3>
+      <p className="mt-2 max-w-[60ch] text-sm text-[var(--color-text-secondary)]">
+        Whether your name appears on each board — the season table and the all-time roll both. All
+        three are on for every commander; a switch turned off takes your name off that board while
+        it stays off.
+      </p>
+      <ul className="mt-3 space-y-1">
+        {boardToggles.map((t) => (
+          <ToggleRow key={t.key} toggle={t} on={settings[t.key]} busy={busy === t.key} onSet={set} />
+        ))}
       </ul>
 
       <p aria-live="polite" className="sr-only">
         {busy === null ? 'Settings saved.' : 'Saving.'}
       </p>
     </div>
+  );
+}
+
+/**
+ * One switch and its explanation. Shared by both lists so the leaderboard group cannot drift from
+ * the sharing toggles it sits under — same markup, same immediate-save machinery.
+ */
+function ToggleRow({
+  toggle,
+  on,
+  busy,
+  onSet,
+}: {
+  readonly toggle: Toggle;
+  readonly on: boolean;
+  readonly busy: boolean;
+  readonly onSet: (key: keyof PrivacySettings, value: boolean) => Promise<void>;
+}) {
+  return (
+    <li className="border-b border-[var(--color-border-hairline)] py-5">
+      <div className="flex items-start justify-between gap-6">
+        <div className="min-w-0">
+          <label
+            htmlFor={`toggle-${toggle.key}`}
+            className="block text-[var(--color-text-primary)]"
+          >
+            {toggle.label}
+          </label>
+          <p
+            id={`help-${toggle.key}`}
+            className="mt-1 max-w-[60ch] text-sm text-[var(--color-text-secondary)]"
+          >
+            {toggle.help}
+          </p>
+        </div>
+        {/*
+          A real checkbox. A styled div with role="switch" loses keyboard
+          behaviour, form semantics and the screen-reader announcement of
+          its own state — none of which are worth trading for a nicer
+          default appearance on a privacy control.
+        */}
+        <input
+          id={`toggle-${toggle.key}`}
+          type="checkbox"
+          role="switch"
+          checked={on}
+          disabled={busy}
+          aria-describedby={`help-${toggle.key}`}
+          onChange={(e) => void onSet(toggle.key, e.currentTarget.checked)}
+          className="mt-1 h-6 w-11 shrink-0 cursor-pointer appearance-none rounded-full border border-[var(--color-border-hairline)] bg-[var(--color-surface-void)] transition-colors before:ml-[3px] before:block before:h-4 before:w-4 before:translate-y-[3px] before:rounded-full before:bg-[var(--color-text-secondary)] before:transition-transform checked:border-[var(--color-brand-cyan-bright)] checked:bg-[color-mix(in_srgb,var(--color-brand-cyan-bright)_28%,transparent)] checked:before:translate-x-5 checked:before:bg-[var(--color-brand-cyan-bright)] disabled:opacity-50"
+        />
+      </div>
+    </li>
   );
 }

@@ -408,6 +408,40 @@ export default async function HomePage() {
           <p className="mt-5 font-mono text-[11px] tracking-[0.2em] text-[var(--color-text-secondary)]">
             VIA DISCORD &middot; TAKES A MINUTE
           </p>
+
+          {/*
+            ★ THE SHIPYARD, FROM THE FRONT DOOR — SQUADRON OWNER, 2026-08-01 ★
+
+            "the public page must also be visible along with the builds in them to anyone not signed
+            in from the homepage, also make the builder public please and accessible to signed out
+            users."
+
+            Under the join button rather than above it, and quieter. Somebody who has read this far
+            is being asked to join; offering them a ship builder first would answer a question they
+            have not asked yet. Placed here it is what it should be — a reason to stay on the site
+            for the visitor who is not ready to commit, and something real to look at rather than a
+            recruitment page that only talks about itself.
+
+            Plain links, not buttons: two accent buttons stacked would compete, and the join button
+            is meant to win.
+          */}
+          <p className="mt-10 text-sm text-[var(--color-text-secondary)]">
+            Not ready yet? Use our{' '}
+            <a
+              href="/shipyard"
+              className="text-[var(--color-brand-orange-bright)] underline-offset-2 hover:underline"
+            >
+              ship outfitter
+            </a>{' '}
+            or browse{' '}
+            <a
+              href="/shipyard/public"
+              className="text-[var(--color-brand-orange-bright)] underline-offset-2 hover:underline"
+            >
+              builds our commanders have published
+            </a>
+            . No account needed.
+          </p>
         </div>
       </section>
     </main>

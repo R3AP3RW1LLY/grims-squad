@@ -47,6 +47,18 @@ describe('P0.2 database schema', () => {
   // The count is hardcoded ON PURPOSE. Every schema addition has to come and
   // bump it, which is a two-second acknowledgement that a table was added —
   // versus a self-counting assertion that would let one appear unnoticed.
+  // 70 as of 2026-07-30: ai_calls — every call to the AI, kept for officer review. Visible to
+  // officers AND the webmaster, who is the AI developer and cannot debug a model whose output they
+  // cannot see. Members are told it is not private; a log people do not know about is a different
+  // thing from one they do.
+  // 69 as of 2026-07-30: forum_signatures — the block under a member's posts. Its avatar column is
+  // deliberately SEPARATE from users.avatar_stored_hash: the signature avatar shows on the forums
+  // only and must never overwrite the Discord import, which would be silently undone by the next
+  // sync while the member watched their picture change on its own.
+  // 68 as of 2026-07-30: forum_category_reads — when a member last looked at a board, for the
+  // "new posts" indicator on the category cards. Per BOARD rather than per thread: per-thread read
+  // state costs a row per member per thread and would become the largest table in the schema
+  // within a year, written on every page view, to drive a dot on a card.
   // 67 as of 2026-07-29: media_uploads — images a member uploaded, AFTER hardening. Every row
   // describes a file this application encoded rather than one that arrived: the upload is decoded
   // to pixels and re-encoded, so no EXIF, polyglot or appended payload survives. There is
@@ -77,8 +89,122 @@ describe('P0.2 database schema', () => {
        where table_schema = 'public' and table_type = 'BASE TABLE'
          and table_name not like '\\_prisma%'`,
     );
-    // 61 models in ssot/03-data/schema.prisma.
-    expect(Number(r[0]?.n)).toBe(67);
+    // 71 tables: 70 Prisma models plus screen_decisions, added 2026-07-31 for the screening
+    // feedback loop. Its vector column is hand-written in the migration because Prisma has no
+    // native pgvector type and would drop it on every generated diff.
+    //
+    // 74 as of 2026-08-01: market_entries, one row per station-commodity, flattened out of the
+    // galaxy dump's nested JSON. Route-finding across a hundred thousand markets was a four-way
+    // self-join over jsonb that exhausted the disk and took Postgres down with it; the same
+    // question against this table is an indexed lookup. Hand-written too — its `cube` column has
+    // no Prisma type either.
+    //
+    // 77 as of 2026-08-01: forum_votes, xp_events and member_badges. Reputation — the owner asked
+    // for "upvote, downvote and answer buttons like stack overflow ... an xp and badge system".
+    // xp_events is a LEDGER rather than a counter on users: a number that only goes up cannot say
+    // why somebody has 340, cannot be corrected, and cannot be audited if anything ever
+    // double-awards.
+    //
+    // 78 as of 2026-08-01: training_images. "Help Train the Bot" — members offering screenshots for
+    // the image models. A separate row from media_uploads because an upload is a FILE and this is an
+    // OFFER: which concept it teaches, what the member says is in it, and whether they still consent.
+    //
+    // 79 as of 2026-08-01: ai_log_lines. The live panel is a hundred-line ring buffer in memory,
+    // gone on restart — the owner asked for "a record of them", and "what did the screener say at
+    // 3am on Tuesday" had no answer. Deliberately NOT folded into ai_calls: half of what crosses
+    // the stream is not a call to the model.
+    //
+    // 80 as of 2026-08-01: device_links. The companion app signs in with Discord instead of the
+    // member copying a `gsq_…` token out of the website and pasting it in. A desktop app cannot
+    // hold a client secret and has no trustworthy redirect target, so it never performs the OAuth
+    // exchange — it shows a code, the member approves it in their own browser, and the app collects
+    // the result. This table is that handshake's state, and it is short-lived by construction.
+    //
+    // 81 as of 2026-08-01: ship_builds. Fitted ships, from a build link a member found in the wild
+    // or read straight out of their own journal. The DECODED build is stored rather than the link:
+    // re-decoding on read would tie every answer to somebody else's website staying up and keeping
+    // its format, and a build that decoded last month would start failing after their deploy.
+    //
+    // 82 as of 2026-08-01: edsy_ids. EDSY encodes each module in a build link as a three-character
+    // id in its OWN numbering — `FBG` is 62160 is Hpt_PulseLaser_Fixed_Small. Nothing in Frontier's
+    // data or Coriolis's carries that numbering, so without this mapping an EDSY link cannot be
+    // read at all. Refreshed from taleden/EDSY; only the id-to-symbol mapping is taken.
+    //
+    // 83 as of 2026-08-02: pending_stations. EDDN reports markets for stations our galaxy dump does
+    // not hold — about 111 in a fifteen-minute window — and they used to be counted and discarded.
+    // The sighting is queued here and a worker job looks each one up before writing a real station
+    // row, because the collector has to keep up with a message a second and cannot wait on a
+    // rate-limited third party, and because a station with a name and no pad size answers one
+    // question and lies about the next.
+    //
+    // 84 as of 2026-08-02: commodity_snapshots. One hour of the galaxy's trade per commodity — the
+    // series behind "price over time". A row per PRICE was never possible: EDDN carries ~140,000
+    // every fifteen minutes, which is 13.4 million a day and about 1.2 billion inside
+    // market_history's ninety-day retention. Rolled up per commodity per hour it is 391 rows an
+    // hour and answers the question that was actually asked.
+    //
+    // 87 as of 2026-08-02: colony_projects, colony_needs, colony_contributions. Colonisation, built
+    // self-contained after the owner was shown that Ravencolonial's API holds nothing we cannot
+    // capture from the same journal events our own companion app already reads. Three tables
+    // because the three things have different lifetimes: a project is posted once, its needs are a
+    // snapshot REPLACED whole from each depot event, and its contributions are an append-only
+    // ledger that must stay recomputable.
+    //
+    // 91 as of 2026-08-02: colony_members, colony_assignments, colony_carriers, carrier_cargo.
+    // Joining a build, taking on a commodity, and offering a carrier to it. `carrier_cargo` is
+    // keyed on the CARRIER rather than the project, because a carrier has one hold and attaching it
+    // to two builds must not produce two sets of cargo.
+    //
+    // 93 as of 2026-08-03: colony_build_types, colony_build_costs. The build catalogue — what a
+    // construction site of each kind costs. Two tables rather than one JSON column because the
+    // costs are joined against BOTH `market_entries` (to price a build before anybody flies there)
+    // and `colony_needs` (to identify what a site is from what it asks for), and neither join is
+    // possible against a blob.
+    //
+    // The costs carry DISPLAY commodity names for exactly that reason. Seeded from community
+    // figures, then corrected by our own depot readings — which caught one wrong name on the first
+    // comparison, so the mechanism is not theoretical.
+    //
+    // 97 as of 2026-08-03: colony_systems, colony_bodies, colony_plans, colony_plan_sites. The
+    // system planner — a system's bodies, and the plans drawn on them.
+    //
+    // We held no body data at all before this: the EDDN collector consumes commodity/3 and discards
+    // the Scan events that carry bodies, which are 34.7% of the whole firehose. Bodies come from
+    // EDSM on demand and are cached, because a squadron plans a handful of systems rather than the
+    // galaxy.
+    //
+    // Slot counts live on the BODY rather than on a plan, because how many slots a body has is a
+    // fact about the system — one member reads it off the in-game map once and every plan has it.
+    //
+    // 114 as of 2026-08-04, one very long day: ops_alerts (a feed that announces its own death),
+    // the eight EDDN full-capture tables (outfitting, shipyards, body signals, settlements,
+    // carrier positions, the bartender, traffic, schema stats), data_bounties + bounty_claims
+    // (the Data Runner board), leaderboard_events + current_builds + worker_cursors (the gamified
+    // boards and the pinned build), squadron_activity (the shared feed behind the bell),
+    // changelog_releases (the deploy notes), and colony_carrier_cargo (what the squadron's
+    // carriers hold, journal-witnessed and hand-corrected).
+    //
+    // 115 as of 2026-08-05: announcements — the durable rows behind the Discord channel posts and
+    // their forum carbon-copies. Landed a day before this count was next read, which is how the
+    // ledger above briefly stopped at 114 while the database had moved on: the deliberate
+    // mirroring failing in the direction it is supposed to.
+    //
+    // 117 as of the Help & Support chat: support_conversations + support_messages. The live chat
+    // every visitor can open — guests addressed by a hashed one-time token, members by their
+    // account — and the officers' console that answers it.
+    //
+    // 118 as of the period-aware telemetry panel: telemetry_month_stats. Raw telemetry_events are
+    // purged at 30 days, so "how much telemetry did we get in March" stops being answerable in
+    // May — the worker banks each month's per-type counts here while the raw rows still exist,
+    // and the dashboard reads the bank for every closed month.
+    //
+    // 120 as of the suggestion box and the roadmap: suggestions + roadmap_cards. Members send
+    // the webmaster ideas; a one-click publish turns one into a Feature Requests thread the
+    // squadron votes on (crediting the sender), and promoted asks live on the webmaster's
+    // kanban, readable by every member at /roadmap. The same migration seeds the
+    // feature-requests board — a category row, not a table, which is why the count moves by
+    // exactly two.
+    expect(Number(r[0]?.n)).toBe(120);
   });
 
   describe('hand-written DDL that Prisma cannot express', () => {
@@ -251,9 +377,51 @@ describe('seeded roles', () => {
    * wanted was the old ALL_PERMISSIONS, the dist had already been rebuilt correctly, and
    * clearing the vitest cache changed nothing. The list is local by design.
    */
+  /*
+   * ★ BITS 55 AND 56 ADDED 2026-08-01: AI_TRAINING, AI_TRAIN_SUBMIT ★
+   *
+   * The deliberate mirroring working again, and worth recording because it failed in BOTH
+   * directions within one session:
+   *
+   *   First the stored mask was SMALLER than this list — the roles had not been granted the new
+   *   bits, because adding a permission to the contract does not touch the database. That needed a
+   *   migration.
+   *
+   *   Then it was LARGER — the migration had run and this list had not been updated.
+   *
+   * Neither failure is a stale build, and both look like one. The list is local by design; see the
+   * note above.
+   */
   const ALL_PERMISSIONS = [
-    0, 1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 13, 20, 21, 22, 23, 24, 30, 31, 32, 40, 41, 42, 50, 51,
-    52, 53, 60, 61, 62, 63, 70,
+    0, 1, 2, 3, 4, 5, 6, 7, 10, 11, 12, 13, 20, 21, 22, 23, 24, 30, 31, 32, 40, 41, 42,
+    // Shipyard, 2026-08-01: view, save, share to the squadron, share publicly.
+    43, 44, 45, 46,
+    50, 51, 52, 53, 54, 55, 56, 60, 61, 62, 63, 70,
+    /*
+     * ★ BITS 71-74 ADDED 2026-08-02: COLONISATION ★
+     *
+     * View the boards, post a personal project, publish one, and create squadron projects.
+     *
+     * The deliberate mirroring working a third time, and in the same two directions the note above
+     * records: first the stored mask was SMALLER, because adding a permission to the contract does
+     * not touch the database and the webmaster is promised every non-squadron-standing bit
+     * (INV-006) — that needed `20260802170000_webmaster_colony_grant`. Then it was LARGER, because
+     * the migration had run and this list had not been updated.
+     *
+     * Both look like a stale build. Neither is. The list is local by design; see the note above.
+     */
+    71, 72, 73, 74,
+    /*
+     * ★ BIT 80 ADDED FOR HELP & SUPPORT: SUPPORT_AGENT ★
+     *
+     * Working the support console — reading members' and guests' help conversations and
+     * answering them. Granted by `20260805120000_support_chat` to the roles that already carry
+     * MEMBER_MANAGE (the officer tier, webmaster included), NOT to `perm_mask > 0` like the
+     * member-tier bits: it opens other people's private conversations.
+     *
+     * The deliberate mirroring, one more time. The list is local by design; see the note above.
+     */
+    80,
   ].reduce((acc, bit) => acc | (1n << BigInt(bit)), 0n);
 
   /**
@@ -346,6 +514,52 @@ describe('seeded roles', () => {
 
     expect(BigInt(r[0]!.post_perm ?? '0')).toBe(1n << 6n); // FORUM_POST_OFFICER
     expect(BigInt(r[0]!.view_perm ?? '0')).toBe(1n << 4n); // FORUM_VIEW_OFFICER
+  });
+
+  /**
+   * The Feature Requests board: members read, vote AND reply; threads arrive only by publish.
+   *
+   * Voting rides VISIBILITY (vote.service.ts reads the post through the voter's bound client),
+   * so view_perm = FORUM_VIEW_MEMBER is what opens the vote rail to the squadron. Squadron
+   * owner, 2026-08-04: "people can reply to the thread like a normal forum but can not start
+   * it that way" — so reply_perm = FORUM_POST_MEMBER opens replies to members, and
+   * threads_via_publish closes the composer to EVERYONE, the webmaster included: the
+   * suggestion-box publish flow is the board's only thread creator. post_perm = SITE_CONFIG
+   * still names who publishes, so the inbox and the board cannot drift to different tiers.
+   */
+  it('the Feature Requests board: post SITE_CONFIG, view MEMBER, reply MEMBER, threads via publish', async () => {
+    const r = await rows<{
+      post_perm: string | null;
+      view_perm: string | null;
+      reply_perm: string | null;
+      threads_via_publish: boolean;
+    }>(
+      `select post_perm::text, view_perm::text, reply_perm::text, threads_via_publish
+       from forum_categories where slug = 'feature-requests'`,
+    );
+    // Skipped rather than failed when the board has not been seeded in this database — the
+    // assertion is about its shape, not about it existing (the officers-board precedent above).
+    if (r.length === 0) return;
+
+    expect(BigInt(r[0]!.post_perm ?? '0')).toBe(1n << 63n); // SITE_CONFIG
+    expect(BigInt(r[0]!.view_perm ?? '0')).toBe(1n << 2n); // FORUM_VIEW_MEMBER
+    expect(BigInt(r[0]!.reply_perm ?? '0')).toBe(1n << 3n); // FORUM_POST_MEMBER
+    expect(r[0]!.threads_via_publish).toBe(true);
+  });
+
+  /**
+   * And ONLY that board changed. reply_perm was added NULLABLE (NULL = "same as post_perm")
+   * and threads_via_publish defaults false, so every board the migration did not name behaves
+   * exactly as it did before the columns existed — Announcements stays read-only for members,
+   * General takes threads as ever. This is the pin the migration's promise rests on.
+   */
+  it('MANDATORY: every other board is untouched — reply_perm NULL, threads_via_publish false', async () => {
+    const r = await rows<{ n: string }>(
+      `select count(*)::text as n from forum_categories
+       where slug <> 'feature-requests'
+         and (reply_perm is not null or threads_via_publish = true)`,
+    );
+    expect(Number(r[0]!.n)).toBe(0);
   });
 
   it('webmaster is mapped to NO Discord role', async () => {

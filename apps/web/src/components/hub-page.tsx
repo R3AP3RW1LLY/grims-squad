@@ -40,6 +40,7 @@ export function PageHeader({
   title,
   subtitle,
   action,
+  tabs,
   icon,
 }: {
   eyebrow: string;
@@ -47,6 +48,24 @@ export function PageHeader({
   /** A line under the title — a rank, a status. */
   subtitle?: string;
   action?: React.ReactNode;
+  /**
+   * Page tabs, rendered ABOVE the rule that separates the header from the body.
+   *
+   * ★ SQUADRON OWNER, 2026-08-01 ★
+   *
+   * "the tabs need to be above the horizontal line that seperates the title from the body like the
+   * tabs we have on the /app page please. this needs to be the default for these types of tabs."
+   *
+   * ★ WHY THIS IS A PROP AND NOT A CONVENTION ★
+   *
+   * `/app` got it right by passing its tabs through `action`, which happens to render inside the
+   * header. Help Train the Bot got it wrong by rendering `<PageTabs>` after `<PageHeader>`, which
+   * puts them below the rule — and nothing about either page said which was correct.
+   *
+   * A named prop makes the right placement the easy one. `action` still exists for genuine actions;
+   * tabs belong to the header and now say so.
+   */
+  tabs?: React.ReactNode;
   /** Rendered to the LEFT of the text. The dashboard puts an avatar here. */
   icon?: React.ReactNode;
 }) {
@@ -78,6 +97,7 @@ export function PageHeader({
           </div>
         </div>
         {action}
+        {tabs}
       </div>
 
       <div className="rule-glow mt-5" aria-hidden="true" />
@@ -96,6 +116,7 @@ export function PageBody({
   children,
   rail,
   lead,
+  wide,
 }: {
   children: React.ReactNode;
   rail?: React.ReactNode;
@@ -104,6 +125,20 @@ export function PageBody({
    * line is level with the top of the rail beside it.
    */
   lead?: string;
+  /**
+   * Drops the reading-width cap.
+   *
+   * ★ AN OPTION, NOT A DEFAULT, AND NOT A LOCAL OVERRIDE ★
+   *
+   * 68ch is right for prose: past that, the eye loses the start of the next line. It is wrong for
+   * a page that is a TOOL rather than a document — the signature maker is a live preview beside a
+   * column of controls, and squeezing that into a paragraph's width wastes most of the screen.
+   *
+   * Exposed here rather than letting the page wrap itself in its own container, because a page
+   * that re-centres itself is exactly what `hub-page.spec` exists to catch. Widening is a decision
+   * this component owns; the page only says which kind of page it is.
+   */
+  wide?: boolean;
 }) {
   const body = (
     <>
@@ -115,7 +150,7 @@ export function PageBody({
   );
 
   if (rail === undefined) {
-    return <div className="max-w-[68ch]">{body}</div>;
+    return <div className={wide === true ? '' : 'max-w-[68ch]'}>{body}</div>;
   }
 
   return (

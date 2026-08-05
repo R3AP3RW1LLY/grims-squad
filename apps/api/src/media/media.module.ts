@@ -7,6 +7,7 @@ import { AvatarService } from './avatar.service.js';
 import { PrismaAvatarStore } from './media.store.prisma.js';
 import { s3ConfigFrom, type ObjectStore } from './object-store.js';
 import { S3ObjectStore, FileObjectStore } from './object-store.drivers.js';
+import { MonitoredObjectStore } from './object-store.monitor.js';
 import { AVATAR_SERVICE, OBJECT_STORE } from './media.tokens.js';
 import { UploadService } from './upload.service.js';
 
@@ -24,9 +25,12 @@ import { UploadService } from './upload.service.js';
   providers: [
     {
       provide: OBJECT_STORE,
-      useFactory: (): ObjectStore => {
+      inject: [PrismaClient],
+      useFactory: (db: PrismaClient): ObjectStore => {
+        // Wrapped so a dead storage backend writes an ops_alert (→ webmaster DM) instead of
+        // becoming a site full of silently broken images. See object-store.monitor.ts.
         const config = s3ConfigFrom(process.env);
-        if (config !== null) return new S3ObjectStore(config);
+        if (config !== null) return new MonitoredObjectStore(new S3ObjectStore(config), db);
 
         // Said out loud rather than assumed. Local disk in production would be
         // a real problem — files vanish on every redeploy — and the one thing
@@ -35,7 +39,26 @@ import { UploadService } from './upload.service.js';
           'S3 is not configured; storing uploads on local disk. Fine for development, ' +
             'wrong for production — files are lost on redeploy.',
         );
-        return new FileObjectStore(join(process.cwd(), '.local-storage'));
+        /*
+         * ★ MEDIA_LOCAL_ROOT — squadron owner, 2026-08-01 ★
+         *
+         * "for localhost testing they should be saved on the F Drive please. or D drive."
+         *
+         * Overridable rather than hardcoded to a drive letter: this same code path runs on the
+         * Linux server whenever S3 is unconfigured, and `D:/` there is a directory called "D:"
+         * sitting in the repo root — which would look like it worked.
+         *
+         * The old default stays as the fallback. Changing it outright would orphan every image
+         * already under `.local-storage` on a machine that had been running for weeks, and they
+         * would come back as broken pictures rather than as an error anybody could act on.
+         */
+        const root = process.env['MEDIA_LOCAL_ROOT']?.trim();
+        return new MonitoredObjectStore(
+          new FileObjectStore(
+            root === undefined || root === '' ? join(process.cwd(), '.local-storage') : root,
+          ),
+          db,
+        );
       },
     },
     {

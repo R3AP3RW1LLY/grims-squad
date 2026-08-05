@@ -20,9 +20,34 @@
  * exported rather than counted here.
  */
 
+import { LEADERBOARDS, type LeaderboardKey } from '@grims/shared';
 import { getMyPrivacy, type PrivacySettings } from '../../../../lib/api';
-import { PrivacyForm } from './privacy-form';
+import { PrivacyForm, type Toggle } from './privacy-form';
 import { Section } from '../../../../components/hub-page';
+
+/**
+ * Which privacy field carries each board's opt-in.
+ *
+ * ★ A Record OVER THE KEY UNION, NOT A LOOKUP THAT SHRUGS ★
+ *
+ * The owner's requirement is that a board added to the shared catalogue appears here by being
+ * added there. `Record<LeaderboardKey, …>` is the mechanism: a new board key widens the union,
+ * this table stops compiling until the new field is named, and the toggle therefore cannot be
+ * silently missing. Derived in this SERVER component because the form is a client component and
+ * may not import runtime values from the `@grims/shared` barrel (client-imports.spec.ts).
+ */
+const LB_PRIVACY_KEYS: Record<LeaderboardKey, keyof PrivacySettings> = {
+  bounties: 'showLbBounties',
+  colony: 'showLbColony',
+  trade: 'showLbTrade',
+};
+
+/** One switch per board, straight off the catalogue: its name is the label, its measure the help. */
+const BOARD_TOGGLES: readonly Toggle[] = LEADERBOARDS.map((board) => ({
+  key: LB_PRIVACY_KEYS[board.key],
+  label: board.name,
+  help: board.measures,
+}));
 
 /**
  * How many of the five sharing toggles are on.
@@ -76,7 +101,7 @@ export async function PrivacyControls() {
       title="What others can see"
       description="Each item is separate — showing your position does not also show your balance. Changes save as you make them, so there is no button to forget."
     >
-      <PrivacyForm initial={settings} />
+      <PrivacyForm initial={settings} boardToggles={BOARD_TOGGLES} />
     </Section>
   );
 }

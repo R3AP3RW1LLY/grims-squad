@@ -1,8 +1,10 @@
 import type { AdminDashboard } from '../../../lib/api';
 import { Section, StatGrid, StatTile } from '../../../components/hub-page';
+import { voiceTime } from './voice-time';
 import {
   ActivityChart,
   Donut,
+  MonthlyBars,
   RankedBars,
   StackedStrip,
   BRAND,
@@ -57,7 +59,11 @@ function Empty({ children }: { children: React.ReactNode }) {
 export function Dashboard({ data }: { data: AdminDashboard }) {
   const { discord, game, squadron } = data;
 
-  const label = monthLabel(data.month);
+  /*
+   * "July 2026" for a month, "2026" for the year view — the API sends the bare year as the label
+   * when YTD was asked for, and `monthLabel` would turn that into something meaningless.
+   */
+  const label = /^\d{4}$/.test(data.month) ? data.month : monthLabel(data.month);
   const participation =
     squadron.members === 0 ? 0 : Math.round((discord.activeMembers / squadron.members) * 100);
 
@@ -73,6 +79,10 @@ export function Dashboard({ data }: { data: AdminDashboard }) {
     day: i + 1,
     messages,
     members: discord.dailyMembers[i] ?? 0,
+    // `?? 0` for the same reason as sign-ins below: a shorter array must draw a zero rather
+    // than break the line.
+    voice: discord.dailyVoice[i] ?? 0,
+    forum: discord.dailyForum[i] ?? 0,
     /*
      * From `game`, not `discord` — it is a journal fact (`LoadGame`), and the
      * two arrive as separate arrays covering the same days. `?? 0` because a
@@ -95,7 +105,12 @@ export function Dashboard({ data }: { data: AdminDashboard }) {
         <StatTile
           label="Messages"
           value={discord.messages.toLocaleString('en-GB')}
-          hint={`${discord.forumPosts} forum · ${discord.voiceJoins} voice joins`}
+          /*
+            Voice TIME beside the voice JOINS, per the owner (2026-08-04): how long, next to how
+            often, replacing nothing. A dash means no minutes are banked for the period — which
+            is every month before the banking shipped, as well as genuine silence.
+          */
+          hint={`${discord.forumPosts} forum · ${discord.voiceJoins} voice joins · ${voiceTime(discord.voiceMinutes)} in voice`}
         />
         <StatTile
           label="Playing now"
@@ -116,9 +131,22 @@ export function Dashboard({ data }: { data: AdminDashboard }) {
         description="Actions per day against the number of people behind them. Counted from per-day records rather than from a monthly total, so a member active on the 5th and the 20th appears on both."
       >
         {discord.daily.some((d) => d > 0) ? (
-          <ActivityChart days={heat} monthLabel={label} />
+          <ActivityChart days={heat} monthLabel={label} granularity={data.granularity} />
         ) : (
-          <Empty>Nothing recorded this month yet.</Empty>
+          /*
+           * ★ SAYS WHY, AND WHERE TO LOOK ★
+           *
+           * This read "Nothing recorded this month yet", which is true and reads as a fault — the
+           * squadron owner opened the console four minutes into August and reasonably concluded the
+           * page was broken. Nothing was lost; the previous month was full and unreachable.
+           *
+           * A fresh month being quiet is the expected state for a day or two every month, so the
+           * empty state names it and points at the tabs rather than leaving somebody to guess.
+           */
+          <Empty>
+            {label} has only just started, so there is nothing charted yet. Pick an earlier month —
+            or YTD — above to see history. Nothing has been lost.
+          </Empty>
         )}
       </Section>
 
@@ -160,7 +188,7 @@ export function Dashboard({ data }: { data: AdminDashboard }) {
 
         <Section
           fill
-          title="What the squadron flies"
+          title="What we fly"
           description="The ship each commander was last seen in — not every ship they own, and not counted per session, so the most frequent player does not decide this alone."
         >
           {game.ships.length > 0 ? (
@@ -174,6 +202,51 @@ export function Dashboard({ data }: { data: AdminDashboard }) {
           <div className="mt-auto pt-5">
             <div className="border-t border-[var(--color-border-hairline)]" />
           </div>
+
+        </Section>
+
+        <Section
+          fill
+          title="What we wear"
+          description="The suit each commander was last seen in, for anybody who plays on foot. Read from the same journal events as the ships above — a commander who never leaves the cockpit simply does not appear here."
+        >
+          {game.suits.length > 0 ? (
+            <Donut
+              unit={game.suits.length === 1 ? 'pilot' : 'pilots'}
+              data={game.suits.map((s) => ({ label: s.suit, value: s.pilots }))}
+            />
+          ) : (
+            <Empty>Nobody has been on foot yet.</Empty>
+          )}
+        </Section>
+
+        <Section
+          fill
+          title="How the squadron is doing"
+          description="Credit balances, in bands, for members who have chosen to share them. Nobody is named and no figure is ever shown — only how many commanders sit in each range."
+        >
+          {game.creditBands.length > 0 ? (
+            <Donut
+              unit={
+                game.creditBands.reduce((a, b) => a + b.pilots, 0) === 1 ? 'commander' : 'commanders'
+              }
+              data={game.creditBands.map((b) => ({ label: b.band, value: b.pilots }))}
+            />
+          ) : (
+            /*
+             * One message for both causes, because it has to be true of both: nobody has opted in,
+             * or too few have for a band to be anonymous. Saying which would itself leak the count.
+             */
+            <Empty>
+              {/*
+                The sidebar's wording, exactly. This sentence tells a member where to go, so it has
+                to name the thing they will actually see in the nav — a pointer to "Commander
+                management" sends them looking for an entry that says Commander Mgmt.
+              */}
+              Not enough commanders share their balance yet. Turn it on in Commander Mgmt to be
+              counted.
+            </Empty>
+          )}
         </Section>
 
         <Section
@@ -203,11 +276,33 @@ export function Dashboard({ data }: { data: AdminDashboard }) {
 
         <Section
           fill
-          title="Journal telemetry"
-          description="What the companion app has sent, by event type. Baseline categories are always collected; anything beyond them is opt-in and appears here only once somebody has turned it on."
+          /*
+            ★ PERIOD-SCOPED NOW — SQUADRON OWNER, 2026-08-01 ★
+
+            "the Journal Telemetry needs to be split into the YTD and per month so we can see it
+            per month how much telemetry were getting etc. this should be the way every chart /
+            graph works in /app". This panel used to show ALL-TIME figures whatever the period
+            control said — which, with raw telemetry purged at thirty days, meant "all time" was
+            quietly "the last thirty days". Closed months now come from the month bank; the
+            month still running is counted live.
+          */
+          title={`Journal telemetry — ${label}`}
+          description="What the companion app sent in this period, by event type. Baseline categories are always collected; anything beyond them is opt-in and appears here only once somebody has turned it on."
         >
           {game.byType.length > 0 ? (
             <>
+              {/*
+                The year view gets BOTH answers: the bars say WHEN telemetry arrived (the
+                owner's "per month how much telemetry were getting"), the donut says WHAT it
+                was across the year. A chosen month needs no bars — its donut and total ARE the
+                month — and a monthly bank cannot draw a closed month's days anyway.
+              */}
+              {data.granularity === 'month' && (
+                <div className="mb-5">
+                  <MonthlyBars values={game.monthlyEvents} yearLabel={data.month} unit="events" />
+                </div>
+              )}
+
               <Donut
                 unit="events"
                 data={game.byType.slice(0, 10).map((t) => ({ label: t.type, value: t.count }))}
@@ -218,21 +313,66 @@ export function Dashboard({ data }: { data: AdminDashboard }) {
                 underneath a rule of its own, which both put it on the wrong
                 side of the line and left that line at a different height from
                 the ladder panel's.
+
+                Two shapes on purpose. A month's reporter count is exact; a year's is the
+                busiest month's figure, because distinct commanders cannot be summed across
+                months whose raw rows are purged — and the sentence says which it is showing.
               */}
               <p className="mt-4 font-mono text-[11px] text-[var(--color-text-secondary)]">
-                {game.events.toLocaleString('en-GB')} events from {game.reporting}{' '}
-                {game.reporting === 1 ? 'commander' : 'commanders'} · {game.sessionsThisMonth}{' '}
-                sessions this month
+                {data.granularity === 'month' ? (
+                  <>
+                    {game.events.toLocaleString('en-GB')} events · {game.sessionsThisMonth}{' '}
+                    sessions in {label} · {game.reporting}{' '}
+                    {game.reporting === 1 ? 'commander' : 'commanders'} reporting in the busiest
+                    month
+                  </>
+                ) : (
+                  <>
+                    {game.events.toLocaleString('en-GB')} events from {game.reporting}{' '}
+                    {game.reporting === 1 ? 'commander' : 'commanders'} · {game.sessionsThisMonth}{' '}
+                    sessions in {label}
+                  </>
+                )}
               </p>
+
+              {/*
+                ★ WHERE THE RECORD BEGINS ★
+
+                Monthly banking started on a date, and months before it hold nothing — not
+                zero. In a year view that includes such months, the bars honestly show empty
+                slots; this line is what stops empty reading as "nobody flew in the spring".
+              */}
+              {game.telemetryRecordedFrom !== null &&
+                data.granularity === 'month' &&
+                `${data.month}-01` < game.telemetryRecordedFrom && (
+                  <p className="mt-1 font-mono text-[11px] text-[var(--color-text-dim)]">
+                    Recorded from {monthLabel(game.telemetryRecordedFrom)} — earlier months hold
+                    no telemetry record, not a zero.
+                  </p>
+                )}
 
               <div className="mt-auto pt-5">
                 <div className="border-t border-[var(--color-border-hairline)]" />
               </div>
             </>
+          ) : game.telemetryRecordedFrom !== null &&
+            (data.granularity === 'month'
+              ? data.month < game.telemetryRecordedFrom.slice(0, 4)
+              : data.month < game.telemetryRecordedFrom) ? (
+            /*
+              A period that PREDATES the record. Saying "nothing ingested yet" here would be
+              false — plenty has been ingested since — and a blank chart would read as a fault.
+              The honest sentence is that the record starts later than the period asked about.
+            */
+            <Empty>
+              Telemetry is recorded from {monthLabel(game.telemetryRecordedFrom)}. {label}{' '}
+              predates the record, so there is nothing to chart — the raw events were purged on
+              their 30-day schedule before monthly banking existed.
+            </Empty>
           ) : (
             <Empty>
-              Nothing ingested yet. Journal data arrives once a member installs the companion app
-              and pairs it.
+              Nothing ingested in {label} yet. Journal data arrives once a member installs the
+              companion app and pairs it.
             </Empty>
           )}
         </Section>

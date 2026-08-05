@@ -6,6 +6,7 @@ import { User, type CurrentUser } from '../auth/current-user.js';
 import { verifyCsrf, readCsrfCookie } from '../common/csrf.js';
 import { PAIRING_SERVICE, INGEST_SERVICE, CONSENT_SERVICE } from './telemetry.tokens.js';
 import type { PairingService } from './pairing.service.js';
+import { DeviceLinkService } from './device-link.service.js';
 import type { JournalIngestService, IncomingEvent } from './journal-ingest.service.js';
 import type { ConsentService } from './consent.service.js';
 import { LIVE_SERVICE } from '../live/live.tokens.js';
@@ -32,7 +33,87 @@ export class TelemetryController {
      * off matters far more than whether an update exists.
      */
     @Optional() @Inject(RELEASE_STORE) private readonly releases: ReleaseStore | null = null,
+    @Optional() @Inject(DeviceLinkService) private readonly links: DeviceLinkService | null = null,
   ) {}
+
+  // ------------------------------------------------------------- device links
+  /**
+   * The app asks to be linked. Nobody is signed in yet, so this is public.
+   *
+   * ★ SQUADRON OWNER, 2026-08-01: "COMPANION Discord login; remove key generator" ★
+   *
+   * Open by design and safe because the result is inert: a link grants nothing until a signed-in
+   * member approves that specific code in a browser, and the caller has no way to approve their
+   * own. See `DeviceLinkService.start`.
+   */
+  @Public()
+  @Post('telemetry/links')
+  async startLink(
+    @Body() body: unknown,
+  ): Promise<{ code: string; pollSecret: string; expiresAt: string; verifyUrl: string }> {
+    const links = this.requireLinks();
+    const label = (body as Record<string, unknown> | null)?.['label'];
+    const started = await links.start(typeof label === 'string' ? label : '');
+
+    return {
+      code: started.code,
+      pollSecret: started.pollSecret,
+      expiresAt: started.expiresAt.toISOString(),
+      /*
+       * Built here rather than in the app. The app would have to be rebuilt and redistributed to
+       * follow a domain change; the server already knows where it lives.
+       */
+      verifyUrl: `${webBase()}/link-device?code=${encodeURIComponent(started.code)}`,
+    };
+  }
+
+  /** What the approval page shows before the member commits. Public: the code IS the lookup. */
+  @Public()
+  @Get('telemetry/links/:code')
+  async describeLink(@Param('code') code: string): Promise<{ label: string } | { label: null }> {
+    const links = this.requireLinks();
+    const found = await links.describe(code);
+    // Null rather than a 404: "no such code" and "expired code" must look identical, and a status
+    // code is exactly the sort of difference somebody guessing codes would measure.
+    return found ?? { label: null };
+  }
+
+  /** A signed-in member approves. This is where the account is bound and the device minted. */
+  @Post('telemetry/links/:code/approve')
+  async approveLink(
+    @User() caller: CurrentUser | undefined,
+    @Param('code') code: string,
+    @Req() req: FastifyRequest,
+  ): Promise<{ label: string }> {
+    const userId = requireUser(caller);
+    csrf(req);
+    return this.requireLinks().approve(userId, code);
+  }
+
+  /**
+   * The app collects its token. Public, because the app has no session — the polling secret is
+   * what authenticates it, and that secret was never displayed to anybody.
+   */
+  @Public()
+  @Post('telemetry/links/:code/poll')
+  async pollLink(
+    @Param('code') code: string,
+    @Body() body: unknown,
+  ): Promise<{ status: string; token?: string }> {
+    const secret = (body as Record<string, unknown> | null)?.['pollSecret'];
+    const state = await this.requireLinks().poll(code, typeof secret === 'string' ? secret : '');
+    return state.status === 'approved'
+      ? { status: 'approved', token: state.token }
+      : { status: state.status };
+  }
+
+  /** The service is optional for the same reason the others are; say so plainly if it is absent. */
+  private requireLinks(): DeviceLinkService {
+    if (this.links === null) {
+      throw new AppError(ErrorCode.INTERNAL_ERROR, 'Device linking is not available.');
+    }
+    return this.links;
+  }
 
   // ------------------------------------------------------------------ pairing
   /**
@@ -381,6 +462,17 @@ export class TelemetryController {
  * untouched. Only the settings poll sends it, and the ingest route must not
  * wipe a known version on every batch.
  */
+/**
+ * Where the website lives, for the link-approval URL the app opens.
+ *
+ * Read from OUR configuration, never from the request. The app is told where to send its member,
+ * and a caller-supplied base here would be an open redirect with a credential at the end of it.
+ * Relative when unset, which is correct on localhost where the app and the site share an origin.
+ */
+function webBase(): string {
+  return (process.env['WEB_BASE_URL'] ?? '').replace(/\/+$/, '');
+}
+
 function appVersionOf(req: FastifyRequest): string | undefined {
   const raw = req.headers['x-app-version'];
   if (typeof raw !== 'string') return undefined;

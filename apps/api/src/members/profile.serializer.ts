@@ -39,15 +39,39 @@ export interface PrivacySettings {
   readonly showActivity: boolean;
   readonly showOnPublicRoster: boolean;
   readonly showOnLeaderboard: boolean;
+  /**
+   * Per-board participation, under the master switch above.
+   *
+   * ★ SQUADRON OWNER, 2026-08-04 ★
+   *
+   * "show each leaderboard there and add all future leaderboards here too, default all
+   * leaderboard participation on for all commanders please!" `showOnLeaderboard` still turns
+   * everything off at once; these narrow it board by board. A member appears on a board only
+   * when the master switch AND that board's switch agree.
+   */
+  readonly showLbBounties: boolean;
+  readonly showLbColony: boolean;
+  readonly showLbTrade: boolean;
+  /**
+   * Render every post and signature in the site face, whatever their author chose.
+   *
+   * ★ A READING SETTING, NOT A PRIVACY ONE ★
+   *
+   * It sits on this record because that is where a member's own switches live and it is fetched
+   * with them — not because it hides anything. Members can pick from thirty display faces, and a
+   * thread where every post is a different one is genuinely hard to read; for anybody with dyslexia
+   * or low vision the only way out today is to stop reading.
+   */
+  readonly plainFonts: boolean;
 }
 
 /**
  * What a member gets before they have ever opened the settings page.
  *
- * Every value is false, and that is the whole point: the privacy row is created
- * lazily, so in production most members have no row at all. This object is what
- * `null` resolves to, which makes "no row" mean "fully private" rather than
- * "unconfigured, so show everything".
+ * Every FIELD toggle is false, and that is the whole point: the privacy row is
+ * created lazily, so in production most members have no row at all. This object
+ * is what `null` resolves to, which makes "no row" mean "fully private" rather
+ * than "unconfigured, so show everything".
  */
 export const DEFAULT_PRIVACY: PrivacySettings = {
   showLocation: false,
@@ -55,7 +79,27 @@ export const DEFAULT_PRIVACY: PrivacySettings = {
   showFleet: false,
   showActivity: false,
   showOnPublicRoster: false,
-  showOnLeaderboard: false,
+  /*
+   * ★ ON, AGAINST EVERY OTHER DEFAULT IN THIS OBJECT — AND NOT A MISTAKE ★
+   *
+   * The field toggles above hide FACTS about a member — where they are, what
+   * they own — so their conservative default is off. These four are
+   * PARTICIPATION switches for the gamified boards, the schema columns default
+   * TRUE, and the squadron owner's instruction was explicit: "default all
+   * leaderboard participation on for all commanders". Code and schema must
+   * tell the same story, or a member with no row would participate in the
+   * standings SQL (which reads COALESCE(col, true)) while this object reported
+   * them opted out — which is exactly what the MASTER switch did until
+   * 2026-08-04: it sat here as false, so the settings page showed "off" to
+   * every member who was in fact on the boards.
+   */
+  showOnLeaderboard: true,
+  showLbBounties: true,
+  showLbColony: true,
+  showLbTrade: true,
+  // Off: an author's chosen font is shown unless a reader says otherwise. Turning them all off by
+  // default would silently discard something every member deliberately picked.
+  plainFonts: false,
 };
 
 export interface ProfileLocation {
@@ -117,16 +161,18 @@ export interface ProfileSource {
   /**
    * What this member has done in the squadron THIS CALENDAR MONTH.
    *
-   * ★ `voiceMinutes` WAS FICTION, AND IS GONE ★
+   * ★ `voiceMinutes` WAS FICTION, AND IS GONE — AND MUST NOT COME BACK ★
    *
    * This read `{ messages, voiceMinutes }` and the profile page divided that by
-   * sixty to render "hours in voice". Nothing anywhere records a minute of
-   * voice: `member_activity_months` counts JOINS, because Discord tells us when
-   * somebody enters a channel and never how long they stayed.
-   *
+   * sixty to render "hours in voice", when nothing recorded a minute of voice.
    * It shipped harmless only because the field was never populated — the first
    * person to wire it up would have published invented hours. So the shape now
    * says what is actually counted.
+   *
+   * The bot DOES bank real minutes now (`member_activity_months.voice_minutes`),
+   * and they are ADMIN CONSOLE ONLY by the owner's decision. A real figure is
+   * not a licence to widen the audience: this serializer must not regain the
+   * field for any public shape.
    *
    * `gameObserved` is the one that matters: it is the single input the monthly
    * promotion check reads.
@@ -193,7 +239,18 @@ export function resolvePrivacy(stored: Partial<PrivacySettings> | null | undefin
     showFleet: stored.showFleet === true,
     showActivity: stored.showActivity === true,
     showOnPublicRoster: stored.showOnPublicRoster === true,
-    showOnLeaderboard: stored.showOnLeaderboard === true,
+    /*
+     * `!== false` where everything above is `=== true`, because these DEFAULT ON (see
+     * DEFAULT_PRIVACY). A partial row missing one of them must resolve to participating —
+     * exactly as the database column default and the standings SQL's COALESCE(col, true)
+     * already decide — not fall to private through a check written for the field toggles.
+     * The master switch is one of them: it defaults on with the boards it governs.
+     */
+    showOnLeaderboard: stored.showOnLeaderboard !== false,
+    showLbBounties: stored.showLbBounties !== false,
+    showLbColony: stored.showLbColony !== false,
+    showLbTrade: stored.showLbTrade !== false,
+    plainFonts: stored.plainFonts === true,
   };
 }
 
