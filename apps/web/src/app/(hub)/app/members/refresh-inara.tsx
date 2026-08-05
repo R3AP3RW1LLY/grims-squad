@@ -11,6 +11,22 @@ import { apiCall } from '../../../../lib/api-client';
  * "add a button to the admin console to trigger an inara update manually please. that way we can
  * trigger this if we need too ... pressing this should not interupt the daily job."
  *
+ * ★ WHAT IT CHECKS — SQUADRON OWNER, 2026-08-05 ★
+ *
+ * "we have users that have updated their inara usernames ... if they have been changed they need to
+ * be updated in the website, and in discord".
+ *
+ * It does that now, and the line under the button says so, because until 2026-08-05 it did not and
+ * the button gave no clue either way. Inara is asked what each member is called NOW, using their
+ * own key; a changed name is written to the roster and worn in the guild.
+ *
+ * ★ AND THE LINE SAYS WHO IS LEFT OUT, WHICH IS THE HARDER HALF ★
+ *
+ * Members who have not linked an Inara key can have their SQUADRON checked and their NAME not: the
+ * lookup for them goes by the name we already hold, which is the exact thing a rename invalidates,
+ * and Inara offers nothing that goes the other way. An officer pressing this and seeing somebody's
+ * old name still there deserves to know why rather than to press it again.
+ *
  * ★ IT REQUESTS. IT DOES NOT WAIT ★
  *
  * The audit asks Inara about every verified commander one key at a time, because `getOwnIdentity`
@@ -61,6 +77,18 @@ export function RefreshInara() {
       >
         {busy ? 'Asking…' : 'Check Inara now'}
       </button>
+
+      {/*
+       * Standing text, not a result. It says what the check covers before anybody presses it, so an
+       * officer who presses it and still sees an old name knows which of the two cases they are
+       * looking at.
+       */}
+      <p className="m-0 mt-2 max-w-xs text-[11px] leading-relaxed text-[var(--color-text-secondary)]">
+        Asks Inara for each member&rsquo;s current commander name and squadron, and updates the
+        roster and their Discord nickname when either has changed. Members who have not linked an
+        Inara key have their squadron checked; their name is looked up by the name we already hold,
+        so a rename shows up only once they link a key.
+      </p>
 
       {note !== null && (
         <p
