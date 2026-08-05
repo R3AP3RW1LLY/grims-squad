@@ -127,16 +127,34 @@ export function nicknameNote(
  * data. A page that titled somebody "Webmaster" while the card that linked to it
  * said "Founder" is the kind of contradiction nobody reports and everybody
  * notices.
+ *
+ * ★ A STANDING WITHOUT A TITLE STILL HAS ROLES — REPORTED 2026-08-05 ★
+ *
+ * Founding standing covers two different things, and this collapsed them. The four founders
+ * have a POSITION at the top of the roster and a TITLE to print. The webmaster has the
+ * position — pinned immediately below them — and no title at all, because he is not a
+ * founder and said so plainly: "I am purely the webmaster."
+ *
+ * So `title` became null for that case, and this function went on substituting it anyway. The
+ * card rendered a title span with nothing in it, and the line read
+ *
+ *     PEBBLEMERCAHNT
+ *     Commander |
+ *
+ * — the divider still there, announcing something that never arrived, and both real roles
+ * silenced to make room for it. Where there is no title to show, there is nothing to step
+ * aside FOR, and the site roles are what the line was always going to carry.
  */
 export function titleRoles(member: {
   founder: FoundingStanding | null;
   siteRoles: ReadonlyArray<{ name: string; colour: string | null }>;
 }): ReadonlyArray<{ name: string; colour: string | null }> {
-  if (member.founder !== null) {
+  const title = member.founder?.title ?? null;
+  if (title !== null && title !== '') {
     // The colour is the founding title's own, and there is none: `roles.colour`
     // is a Discord mirror and nothing sets it for a role Discord does not have.
     // The line renders every title in the site orange regardless.
-    return [{ name: member.founder.title, colour: null }];
+    return [{ name: title, colour: null }];
   }
   return member.siteRoles;
 }

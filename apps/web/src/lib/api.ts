@@ -196,8 +196,21 @@ export interface CommanderSnapshot {
  * so a rename on /app -> Roles changes the title and nothing else.
  */
 export interface FoundingStanding {
-  /** `roles.name`, verbatim: "Founder", "Co-Founder", or whatever it is edited to. */
-  title: string;
+  /**
+   * `roles.name`, verbatim: "Founder", "Co-Founder", or whatever it is edited to.
+   *
+   * ★ NULL IS A REAL ANSWER, AND THIS TYPE LIED ABOUT IT ★
+   *
+   * A standing is about POSITION — where somebody sits on the roster. A title is a separate
+   * claim, and not everybody with a position has one: the webmaster is pinned directly below
+   * the founders and is not a founder, which is the squadron owner's own correction ("I am
+   * purely the webmaster, anything else would be misconstruing this").
+   *
+   * The API started returning null for exactly that case. This interface still said `string`,
+   * so nothing failed to compile — and the card rendered an empty span where the title went,
+   * printing "Commander |" with nothing after the divider.
+   */
+  title: string | null;
   /** Where they sit at the top of the roster. LOWER IS MORE SENIOR. */
   precedence: number;
   /** One of the squadron's founders, and therefore on the Founders tab. */

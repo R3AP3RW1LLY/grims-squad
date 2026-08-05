@@ -26,7 +26,12 @@ import {
   type PrivacySettings,
   type PublicProfile,
 } from './profile.serializer.js';
-import { foundingStanding, type FoundingStanding } from './founding.js';
+import {
+  FOUNDING_ROLE_KEYS,
+  TITLED_FOUNDING_ROLE_KEYS,
+  foundingStanding,
+  type FoundingStanding,
+} from './founding.js';
 
 /**
  * The non-hierarchical roles a member wears, as the browser sees them.
@@ -35,11 +40,27 @@ import { foundingStanding, type FoundingStanding } from './founding.js';
  * is how founding standing is recognised and the rank_order is where the holder
  * is pinned — and neither is anybody's business on a roster card, so they are
  * dropped here rather than spread onto the response by accident.
+ *
+ * ★ "ROSTER PIN" IS FURNITURE, NOT A TITLE ★
+ *
+ * It is a role only because that is the honest place to keep an ORDER somebody can edit
+ * without a deploy. It says nothing about the person, and printing it beside a commander
+ * name would read as a rank the squadron does not have — so the position-only founding
+ * keys are dropped here, derived from the two lists rather than named again.
+ *
+ * The titled founding roles stay: they are legitimate titles, and the card substitutes
+ * them for this list anyway.
  */
+const POSITION_ONLY_ROLE_KEYS = FOUNDING_ROLE_KEYS.filter(
+  (key) => !TITLED_FOUNDING_ROLE_KEYS.includes(key),
+);
+
 function titles(
-  roles: ReadonlyArray<{ name: string; colour: string | null }> | undefined,
+  roles: ReadonlyArray<{ key?: string; name: string; colour: string | null }> | undefined,
 ): ReadonlyArray<{ name: string; colour: string | null }> {
-  return (roles ?? []).map(({ name, colour }) => ({ name, colour }));
+  return (roles ?? [])
+    .filter((r) => r.key === undefined || !POSITION_ONLY_ROLE_KEYS.includes(r.key))
+    .map(({ name, colour }) => ({ name, colour }));
 }
 
 const TOGGLES = Object.keys(DEFAULT_PRIVACY) as Array<keyof PrivacySettings>;
