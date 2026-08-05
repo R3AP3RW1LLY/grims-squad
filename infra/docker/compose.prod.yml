@@ -111,8 +111,16 @@ services:
     # `127.0.0.1` inside here is the container itself — the tunnel is invisible
     # from in here without this line.
     #
-    # `host-gateway` resolves to the docker host, so AI_BASE_URL in production is
-    # `http://host.docker.internal:11434/v1`.
+    # `host-gateway` resolves to the docker host — but note WHICH address, because it cost the
+    # whole AI feature set on launch night: `host.docker.internal` resolves to 172.17.0.1, the
+    # DEFAULT bridge, while tools/gmsd-tunnel.cmd binds 172.18.0.1, this compose network's gateway.
+    # They are different interfaces, so a container asking host.docker.internal finds nothing
+    # listening.
+    #
+    # AI_BASE_URL in production is therefore `http://172.18.0.1:11434/v1` — the address the tunnel
+    # actually binds. This mapping stays because it costs nothing and makes the host reachable at
+    # all; if the tunnel is ever changed to bind the default bridge, host.docker.internal becomes
+    # the better value and this note should move with it.
     #
     # WORTH CORRECTING A CLAIM MADE EARLIER: the AI contract said this value was
     # identical on a laptop and on the server, "one value, one code path". That
@@ -227,6 +235,15 @@ services:
     environment:
       NODE_ENV: production
     restart: unless-stopped
+    # ★ SOMEWHERE FOR THE GALAXY DUMP TO LIVE ★
+    #
+    # The Spansh baseline is a 4 GB download that the ingest then reads. Without a volume it
+    # landed in a container layer and vanished with the container, so every night paid to fetch it
+    # and nothing ever kept it — one reason the baseline had never refreshed in production. Shared
+    # with the `worker` one-shots below, because cron runs the download in one container and the
+    # ingest in another.
+    volumes:
+      - knowledge:/srv/knowledge
     depends_on:
       postgres: { condition: service_healthy }
 
@@ -273,6 +290,10 @@ services:
     env_file: [/srv/grims/.env]
     environment:
       NODE_ENV: production
+    # The same knowledge volume the resident daemon mounts: cron downloads the galaxy dump in one
+    # of these containers and ingests it in another, so the file has to outlive both.
+    volumes:
+      - knowledge:/srv/knowledge
     depends_on:
       postgres: { condition: service_healthy }
 
@@ -282,3 +303,6 @@ volumes:
   meilidata:
   caddy_data:
   caddy_config:
+  # The Spansh galaxy baseline and the coriolis checkout. Named rather than a bind mount so it is
+  # docker's to manage, and shared by the worker one-shots and the resident daemon.
+  knowledge:
