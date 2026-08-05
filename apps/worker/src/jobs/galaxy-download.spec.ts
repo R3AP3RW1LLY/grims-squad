@@ -155,7 +155,15 @@ describe('refreshGalaxyDump', () => {
       // this a test about slow headers instead.
       res.flushHeaders();
 
-      // Four chunks, 60ms apart — always arriving, and finishing long after a 50ms total deadline.
+      /*
+       * Four chunks, 250ms apart, so the body takes about a second — comfortably longer than the
+       * headers deadline below, which is the relationship under test.
+       *
+       * These were 60ms apart against a 50ms deadline. The RATIO was right and the absolute
+       * numbers were not: fifty milliseconds is inside ordinary scheduling jitter, so on a loaded
+       * machine the headers themselves missed the deadline and the test failed reporting a network
+       * fault it had caused. It blocked two unrelated pull requests before it was worth fixing.
+       */
       let sent = 0;
       const tick = setInterval(() => {
         res.write(payload.slice(sent, sent + 100));
@@ -164,7 +172,7 @@ describe('refreshGalaxyDump', () => {
           clearInterval(tick);
           res.end();
         }
-      }, 60);
+      }, 250);
     });
 
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -172,9 +180,11 @@ describe('refreshGalaxyDump', () => {
 
     try {
       const result = await refreshGalaxyDump(file, `http://127.0.0.1:${port}/galaxy.json.gz`, {
-        // Shorter than the body takes to arrive. The whole point: this must NOT kill the transfer.
-        headersTimeoutMs: 50,
-        idleTimeoutMs: 2_000,
+        // Shorter than the body takes to arrive (~1s), and long enough that a loopback socket on a
+        // busy machine still delivers headers inside it. The whole point: this must NOT kill the
+        // transfer.
+        headersTimeoutMs: 750,
+        idleTimeoutMs: 5_000,
       });
 
       expect(result.skipped).toBeNull();

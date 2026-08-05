@@ -288,6 +288,96 @@ describe('GET /v1/members', () => {
     const out = await ctl.roster();
     expect(out.members[0]).not.toHaveProperty('credits');
   });
+
+  /**
+   * Founding standing on the wire.
+   *
+   * `founding.spec.ts` proves the derivation. These prove the ENDPOINT actually
+   * performs it — a controller that emitted `siteRoles` and nothing else would
+   * sail past that suite and leave the Founders tab permanently empty, with the
+   * roster still rendering perfectly.
+   */
+  describe('founding standing', () => {
+    const site = (key: string, name: string, rankOrder: number) => ({
+      key,
+      name,
+      colour: null,
+      rankOrder,
+    });
+
+    it('MANDATORY: resolves it from the roles the member holds', async () => {
+      store.rows = [
+        {
+          source: base({
+            handle: 'founder',
+            siteRoles: [site('founder', 'Founder', 800), site('grims_squad_members', "Grim's Squad members", 900)],
+          }),
+          privacy: null,
+        },
+      ];
+
+      const out = await ctl.roster();
+      expect(out.members[0]?.founder).toEqual({
+        title: 'Founder',
+        precedence: 800,
+        foundedSquadron: true,
+      });
+    });
+
+    it('MANDATORY: the roster pin keeps its holder titled by the roles they hold', async () => {
+      // Pebblemerchant as production holds them: webmaster, membership, and the
+      // position-only pin. Squadron owner, 2026-08-05: "i am purely the
+      // webmaster! that is it!" — so the card must not gain a founding title.
+      store.rows = [
+        {
+          source: base({
+            handle: 'hub',
+            siteRoles: [
+              site('webmaster', 'Webmaster', 1000),
+              site('roster_pin', 'Roster pin', 820),
+              site('grims_squad_members', "Grim's Squad members", 900),
+            ],
+          }),
+          privacy: null,
+        },
+      ];
+
+      const out = await ctl.roster();
+      expect(out.members[0]?.founder?.title).toBeNull();
+      expect(out.members[0]?.founder?.precedence).toBe(820);
+      expect(out.members[0]?.founder?.foundedSquadron).toBe(false);
+    });
+
+    it('MANDATORY: a member with no founding role gets null', async () => {
+      store.rows = [
+        {
+          source: base({ handle: 'ordinary', siteRoles: [site('grims_squad_members', "Grim's Squad members", 900)] }),
+          privacy: null,
+        },
+      ];
+
+      const out = await ctl.roster();
+      expect(out.members[0]?.founder).toBeNull();
+    });
+
+    it('MANDATORY: the role key and rank order never leave the API', async () => {
+      /*
+       * Both are internal: the key is how the standing is recognised and the
+       * rank order is where the holder is pinned. A browser that received them
+       * could match on them, which is exactly the coupling `founder` exists to
+       * prevent — and neither is any of a roster card's business.
+       */
+      store.rows = [
+        {
+          source: base({ handle: 'founder', siteRoles: [site('founder', 'Founder', 800)] }),
+          privacy: null,
+        },
+      ];
+
+      const out = await ctl.roster();
+      expect(out.members[0]?.siteRoles).toEqual([{ name: 'Founder', colour: null }]);
+    });
+  });
 });
 
 describe('privacy settings', () => {

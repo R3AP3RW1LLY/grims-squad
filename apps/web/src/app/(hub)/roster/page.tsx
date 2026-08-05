@@ -4,6 +4,7 @@ import { PageHeader, PageBody, Panel, RailStat } from '../../../components/hub-p
 import { RosterCard } from '../../../components/roster-card';
 import { LiveRefresh } from '../../../components/live-refresh';
 import { PageTabs, resolveTab, type PageTab } from '../../../components/page-tabs';
+import { foundersFirst, squadronFounders, FOUNDERS_TAB } from './roster-order';
 
 /**
  * The squadron roster.
@@ -30,10 +31,10 @@ export const metadata: Metadata = {
 export const dynamic = 'force-dynamic';
 
 /**
- * ★ THE SAME ROSTER, THREE WAYS IN ★
+ * ★ THE SAME ROSTER, FOUR WAYS IN ★
  *
  * "Everyone" is the default because it is the honest answer to "who is in this
- * squadron" — the other two are filters on it, not different pages.
+ * squadron" — the others are filters on it, not different pages.
  *
  * Officers and members are complements: every member is in exactly one, and the
  * two counts always add to the whole. Split any other way and somebody appears
@@ -43,9 +44,21 @@ export const dynamic = 'force-dynamic';
  * The split is a PERMISSION question — does this account hold something that
  * requires a second factor — decided on the server. Not a list of role names,
  * which would silently drop somebody the day a rank was renamed.
+ *
+ * ★ FOUNDERS CUTS ACROSS BOTH, AND THAT IS FINE ★
+ *
+ * Squadron owner, 2026-08-04. It is the one tab that is not part of the
+ * officers/members partition — a founder appears here AND in whichever of the
+ * two their rank puts them in. That does not break the completeness promise
+ * above, which is about those two adding to the whole; this is a shortcut to
+ * four people, not a third bucket.
+ *
+ * It sits second because it is a small, fixed list that people come looking for,
+ * and burying it behind the two big filters would make it hard to find.
  */
 const TABS: readonly PageTab[] = [
   { key: 'all', label: 'All members' },
+  { key: FOUNDERS_TAB, label: 'Founders' },
   { key: 'officers', label: 'Officers' },
   { key: 'members', label: 'Members' },
 ];
@@ -59,11 +72,28 @@ export default async function RosterPage({
   const tab = resolveTab(TABS, params['tab']);
 
   const [data, me] = await Promise.all([getRoster(), getMe()]);
-  const all = data?.members ?? [];
+  /*
+   * ★ ORDERED ONCE, THEN FILTERED — NOT ORDERED PER TAB ★
+   *
+   * The founders are pinned to the top here, and every tab below is a filter on
+   * the already-ordered list. That is what makes the Members tab open with
+   * Pebblemerchant without knowing anything about them: they are the only
+   * founding-standing holder who is not an officer, so filtering the officers
+   * out leaves them first. See `roster-order.ts`.
+   */
+  const all = foundersFirst(data?.members ?? []);
   const total = data?.total ?? 0;
 
   const officers = all.filter((m) => m.isOfficer);
-  const members = tab === 'officers' ? officers : tab === 'members' ? all.filter((m) => !m.isOfficer) : all;
+  const founders = squadronFounders(all);
+  const members =
+    tab === 'officers'
+      ? officers
+      : tab === 'members'
+        ? all.filter((m) => !m.isOfficer)
+        : tab === FOUNDERS_TAB
+          ? founders
+          : all;
 
   const listed = all.length;
   const withCmdr = all.filter((m) => m.cmdrName !== null).length;
@@ -111,6 +141,13 @@ export default async function RosterPage({
             <Panel title="At a glance">
               <RailStat label="Squadron" value={String(total)} />
               <RailStat label="Listed" value={String(listed)} tone={listed === 0 ? 'warn' : 'default'} />
+              {/*
+                Counted from the same list the tab renders, so the number beside
+                "Founders" and the number of cards behind it are the same fact.
+                A second count derived some other way is a second thing to be
+                wrong.
+              */}
+              <RailStat label="Founders" value={String(founders.length)} />
               <RailStat label="Officers" value={String(officers.length)} />
               <RailStat label="Verified CMDRs" value={String(withCmdr)} />
               {/*

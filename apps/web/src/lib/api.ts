@@ -185,6 +185,25 @@ export interface CommanderSnapshot {
   lastPlayedAt: string | null;
 }
 
+/**
+ * Founding standing, as the API resolves it from the roles a member holds.
+ *
+ * ★ WHY THE BROWSER IS NOT TOLD THE ROLE KEY ★
+ *
+ * It would only be able to misuse it. The three facts the pages need are here
+ * already — what to print, where to pin them, and whether they belong on the
+ * Founders tab — and every one of them is decided in the API, from the role row,
+ * so a rename on /app -> Roles changes the title and nothing else.
+ */
+export interface FoundingStanding {
+  /** `roles.name`, verbatim: "Founder", "Co-Founder", or whatever it is edited to. */
+  title: string;
+  /** Where they sit at the top of the roster. LOWER IS MORE SENIOR. */
+  precedence: number;
+  /** One of the squadron's founders, and therefore on the Founders tab. */
+  foundedSquadron: boolean;
+}
+
 /** A Discord role, with what it means to us. Channel-access roles never arrive. */
 export interface DiscordRoleBadge {
   name: string;
@@ -206,6 +225,14 @@ export type RosterMember = PublicProfile & {
   isOfficer: boolean;
   /** Platform roles such as webmaster. Shown as a title, never as a rank. */
   siteRoles: Array<{ name: string; colour: string | null }>;
+  /**
+   * Founding standing, or null for everybody who has none.
+   *
+   * Where it is present it REPLACES the site titles on the card — squadron
+   * owner, 2026-08-04: "where Pebblemerchant says webmaster it should say
+   * founder for them".
+   */
+  founder: FoundingStanding | null;
 };
 
 /**

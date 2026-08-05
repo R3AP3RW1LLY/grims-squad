@@ -167,6 +167,14 @@ export class PrismaMembersStore implements MembersStore {
       select: {
         role: {
           select: {
+            /*
+             * The KEY, as well as the name. A name is what somebody reads and
+             * an admin may retype; a key is the stable identifier, and it is
+             * the only thing founding standing may be recognised by — see
+             * `founding.ts`. Recognising "Founder" by its name would break the
+             * Founders tab the first time the owner edited the label.
+             */
+            key: true,
             name: true,
             colour: true,
             rankOrder: true,
@@ -200,6 +208,7 @@ export class PrismaMembersStore implements MembersStore {
     discordIdentity: { guildRoles: string[] } | null;
     userRoles: Array<{
       role: {
+        key: string;
         name: string;
         colour: string | null;
         rankOrder: number;
@@ -230,10 +239,23 @@ export class PrismaMembersStore implements MembersStore {
          * `webmaster` is a platform role: it grants every permission and confers
          * no standing in the squadron whatsoever. Shown as a title beside the
          * commander name, never as a rank and never as an officer.
+         *
+         * ★ THE KEY AND THE rank_order TRAVEL WITH THEM, AND STOP AT THE API ★
+         *
+         * Founding standing is one of these roles (`founder`, `co_founder`,
+         * `roster_pin`), and deriving it needs the key to recognise the role
+         * and the rank_order to know where the holder is pinned on the roster.
+         * Both are stripped in the controller before the response is built —
+         * the browser gets the name and the colour it always did.
          */
         siteRoles: u.userRoles
           .filter((r) => !r.role.isHierarchical)
-          .map((r) => ({ name: r.role.name, colour: r.role.colour })),
+          .map((r) => ({
+            key: r.role.key,
+            name: r.role.name,
+            colour: r.role.colour,
+            rankOrder: r.role.rankOrder,
+          })),
         cmdrName: u.cmdrVerifications[0]?.cmdrName ?? null,
         /*
          * ★ BOTH HALVES, OR IT IS NOT VERIFIED ★
