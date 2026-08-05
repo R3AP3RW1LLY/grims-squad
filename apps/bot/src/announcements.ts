@@ -62,8 +62,24 @@ export function truncateForDiscord(content: string): string {
  */
 export function channelEnvFor(
   kind: string,
-): 'DISCORD_ANNOUNCE_CHANNEL_ID' | 'DISCORD_PROMOTIONS_CHANNEL_ID' {
-  return kind === 'promotion' ? 'DISCORD_PROMOTIONS_CHANNEL_ID' : 'DISCORD_ANNOUNCE_CHANNEL_ID';
+):
+  | 'DISCORD_ANNOUNCE_CHANNEL_ID'
+  | 'DISCORD_PROMOTIONS_CHANNEL_ID'
+  | 'DISCORD_COLONY_CHANNEL_ID' {
+  if (kind === 'promotion') return 'DISCORD_PROMOTIONS_CHANNEL_ID';
+  /*
+   * ★ COLONISATION HAS ITS OWN CHANNEL — SQUADRON OWNER, 2026-08-05 ★
+   *
+   * "when a new squadron colonization project is created, can we send a notification to this
+   * discord channel please" — a specific channel, not the general announcements one, because a
+   * call to haul is aimed at people who want to be told about hauling.
+   *
+   * The ID stays out of source (INV-008) exactly as the other two do: unset means these rows
+   * WAIT rather than being posted somewhere guessed at, and a bot that posts to the wrong
+   * channel cannot be un-posted.
+   */
+  if (kind === 'colony-project') return 'DISCORD_COLONY_CHANNEL_ID';
+  return 'DISCORD_ANNOUNCE_CHANNEL_ID';
 }
 
 /** The one method this file needs from a channel, structurally — see main.ts on why not the union. */

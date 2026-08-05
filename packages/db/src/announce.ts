@@ -43,7 +43,7 @@ export interface AnnouncementForum {
 
 export interface AnnouncementInput {
   /** Decides which channel env the bot posts to (see apps/bot/src/announcements.ts). */
-  readonly kind: 'deploy' | 'promotion' | 'member-verified';
+  readonly kind: 'deploy' | 'promotion' | 'member-verified' | 'colony-project';
   /** Final Discord markdown. Mentions already interpolated as `<@id>` tokens. */
   readonly content: string;
   /** Present = a forum carbon-copy is wanted. Verifications deliberately omit it. */
@@ -244,6 +244,185 @@ export async function announceMemberVerified(db: PrismaClient, userId: string): 
     });
   } catch {
     // The member IS verified, whatever the announcement manages.
+    return false;
+  }
+}
+
+
+/* ─────────────────────────────────── squadron colonisation projects ── */
+
+/**
+ * What the colony announcement needs to know about a project.
+ *
+ * Deliberately not the Prisma row: the template is a pure function so the wording can be tested
+ * without a database, and the caller does the one lookup.
+ */
+export interface ColonyProjectAnnouncement {
+  readonly id: string;
+  readonly title: string;
+  readonly systemName: string;
+  /** The catalogue row the requirement fingerprints to. Null until somebody has docked there. */
+  readonly identifiedAs: string | null;
+  /** Total tonnes the build asks for. Null for the same reason. */
+  readonly totalTonnes: number | null;
+  /** Whoever posted it — they found the site, and that credit does not move when it is adopted. */
+  readonly startedBy: AnnouncementPerson;
+  /** The officer who adopted it, when this announcement is about an adoption. */
+  readonly adoptedBy?: AnnouncementPerson;
+}
+
+/**
+ * The middle line: where it is, what it is, and how big.
+ *
+ * ★ SQUADRON OWNER, 2026-08-05: POST IMMEDIATELY ★
+ *
+ * A build type and a tonnage are only known once somebody has DOCKED at the site, which usually
+ * happens after the project is posted. Holding the announcement until then would deliver it after
+ * the early hauling — and the whole point is to rally haulers before that. So an unidentified site
+ * says so plainly rather than showing a blank where a number belongs.
+ */
+function whereAndWhat(project: ColonyProjectAnnouncement): string {
+  const parts = [project.systemName];
+  if (project.identifiedAs === null) {
+    parts.push('build type not identified yet');
+  } else {
+    parts.push(project.identifiedAs);
+    if (project.totalTonnes !== null && project.totalTonnes > 0) {
+      parts.push(`${project.totalTonnes.toLocaleString('en-GB')} t`);
+    }
+  }
+  return parts.join(' · ');
+}
+
+/**
+ * The squadron colonisation announcement — the owner's approved wording.
+ *
+ * ★ SQUADRON OWNER, 2026-08-05 ★
+ *
+ * "when a new squadron colonization project is created, can we send a notification to this discord
+ * channel please ... with a link to the project on the website ... include the name of the
+ * commander who started the squadron project"
+ *
+ * ★ TWO EVENTS, ONE TEMPLATE ★
+ *
+ * Officers can adopt a member's personal project into a squadron one, which is also a new squadron
+ * project as far as this channel is concerned — the owner approved announcing both. Adoption names
+ * BOTH people, because the credit for finding the site and the decision to commit the squadron to
+ * it are different acts by different members, and collapsing them would quietly transfer the first.
+ *
+ * The link is the point of the message: `PUBLIC_URL` is passed in rather than read here, because
+ * this package is imported by three processes and only they know their own base URL.
+ */
+export function colonyProjectContent(
+  project: ColonyProjectAnnouncement,
+  siteUrl: string,
+): string {
+  /*
+   * Narrowed into a local rather than asserted. `adoptedBy` decides both the heading and the
+   * credit line, and a non-null assertion here would be the one place this file promised the
+   * compiler something it had not checked.
+   */
+  const adoptedBy = project.adoptedBy;
+  const link = `${siteUrl.replace(/\/+$/, '')}/colonisation/${project.id}`;
+
+  return [
+    adoptedBy === undefined
+      ? '🏗️ **A new squadron colonisation project**'
+      : '🏗️ **Adopted as a squadron project**',
+    '',
+    `**${project.title}**`,
+    whereAndWhat(project),
+    '',
+    adoptedBy === undefined
+      ? `Started by ${mentionOf(project.startedBy)}`
+      : `Found by ${mentionOf(project.startedBy)}, adopted by ${mentionOf(adoptedBy)}`,
+    '',
+    link,
+  ].join('\n');
+}
+
+/**
+ * Announces a squadron colonisation project.
+ *
+ * ★ SQUADRON PROJECTS ONLY ★
+ *
+ * A personal build is one member's, and posting it to a squadron channel would read as a call to
+ * arms nobody issued. The caller decides — this is reached from the create path only when the
+ * owner is `squadron`, and from the adopt path when it becomes one.
+ *
+ * ★ NO FORUM CARBON-COPY ★
+ *
+ * Same reasoning as verifications: the colonisation board already carries the project, and a
+ * thread per project would be the same fact in a third place.
+ *
+ * Never throws. The project exists whatever this manages — see the module header.
+ */
+export async function announceColonyProject(
+  db: PrismaClient,
+  projectId: string,
+  siteUrl: string,
+  adoptedByUserId?: string,
+): Promise<boolean> {
+  try {
+    const rows = await db.$queryRaw<
+      Array<{
+        id: string;
+        title: string;
+        system_name: string;
+        identified_as: string | null;
+        total_tonnes: number | null;
+        poster_name: string;
+        poster_discord: string | null;
+      }>
+    >`
+      SELECT p.id,
+             p.title,
+             p.system_name,
+             bt.display_name AS identified_as,
+             bt.total_tonnes AS total_tonnes,
+             COALESCE(u.display_name, u.handle) AS poster_name,
+             di.discord_id AS poster_discord
+        FROM colony_projects p
+        JOIN users u ON u.id = p.posted_by_id
+        LEFT JOIN discord_identities di ON di.user_id = u.id
+        LEFT JOIN colony_build_types bt ON bt.id = p.build_type_id
+       WHERE p.id = ${projectId}::uuid`;
+
+    const row = rows[0];
+    if (row === undefined) return false;
+
+    let adoptedBy: AnnouncementPerson | undefined;
+    if (adoptedByUserId !== undefined) {
+      const officers = await db.$queryRaw<
+        Array<{ name: string; discord_id: string | null }>
+      >`
+        SELECT COALESCE(u.display_name, u.handle) AS name, di.discord_id
+          FROM users u
+          LEFT JOIN discord_identities di ON di.user_id = u.id
+         WHERE u.id = ${adoptedByUserId}::uuid`;
+      const officer = officers[0];
+      if (officer !== undefined) {
+        adoptedBy = { displayName: officer.name, discordId: officer.discord_id };
+      }
+    }
+
+    return await announce(db, {
+      kind: 'colony-project',
+      content: colonyProjectContent(
+        {
+          id: row.id,
+          title: row.title,
+          systemName: row.system_name,
+          identifiedAs: row.identified_as,
+          totalTonnes: row.total_tonnes === null ? null : Number(row.total_tonnes),
+          startedBy: { displayName: row.poster_name, discordId: row.poster_discord },
+          ...(adoptedBy === undefined ? {} : { adoptedBy }),
+        },
+        siteUrl,
+      ),
+    });
+  } catch {
+    // The project exists. The announcement must not un-create it.
     return false;
   }
 }
