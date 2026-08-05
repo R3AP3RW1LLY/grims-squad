@@ -36,6 +36,12 @@ contextBridge.exposeInMainWorld('companion', {
   /** Opens the approval page again — the browser may have failed to open, or been closed. */
   reopenLink: () => ipcRenderer.invoke('reopenLink'),
   unpair: () => ipcRenderer.invoke('unpair'),
+  /*
+   * Forget this hub's reading positions so the next pass re-reads every journal from the top.
+   * For anybody whose history was consumed by a run against a different hub before offsets were
+   * tracked per destination. Safe to press twice — the hub deduplicates.
+   */
+  resendHistory: () => ipcRenderer.invoke('resendHistory'),
   setEnabled: (enabled: boolean) => ipcRenderer.invoke('setEnabled', enabled),
   setAutoStart: (autoStart: boolean) => ipcRenderer.invoke('setAutoStart', autoStart),
   openHub: () => ipcRenderer.invoke('openHub'),

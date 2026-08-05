@@ -1,7 +1,19 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { runWatchPass, pruneOffsets, FIRST_RUN_FILE_LIMIT, type JournalFs } from './watcher.js';
-import { DEFAULT_CONFIG, type CompanionConfig } from './config.js';
+import { DEFAULT_CONFIG, hubKey, type CompanionConfig } from './config.js';
 import type { Uploader, UploadResult } from './uploader.js';
+
+/**
+ * This hub's reading positions.
+ *
+ * Offsets became per-DESTINATION on 2026-08-05: an offset says how far a file has been read, and
+ * saying nothing about where those lines went is how a development run against localhost silently
+ * consumed a member's history and the production hub resumed after it.
+ */
+function offsetsOf(config: CompanionConfig): Record<string, number> {
+  return config.offsetsByHub[hubKey(config.apiBaseUrl)] ?? {};
+}
+
 
 /**
  * The watch loop.
@@ -136,7 +148,7 @@ describe('failure never loses events', () => {
 
     const failed = await run(paired());
     expect(failed.outcome.error).toBe('Could not reach the hub.');
-    expect(failed.config.offsets[NAME] ?? 0).toBe(0);
+    expect(offsetsOf(failed.config)[NAME] ?? 0).toBe(0);
 
     up.result = { ...up.result, ok: true, error: null };
     const retried = await run(failed.config);
@@ -154,7 +166,7 @@ describe('failure never loses events', () => {
 
     const { outcome, config } = await run(paired());
     expect(outcome.unauthorised).toBe(true);
-    expect(config.offsets[NAME] ?? 0).toBe(0);
+    expect(offsetsOf(config)[NAME] ?? 0).toBe(0);
   });
 
   it('stops at the first failure rather than trying every file', async () => {
@@ -211,7 +223,7 @@ describe('a file that changes shape', () => {
     const { config, outcome } = await run(paired());
 
     expect(outcome.sent).toBe(0);
-    expect(config.offsets[NAME]).toBeGreaterThan(0);
+    expect(offsetsOf(config)[NAME]).toBeGreaterThan(0);
   });
 });
 
@@ -243,7 +255,7 @@ describe('the first run', () => {
     }
 
     const first = await run(paired());
-    expect(Object.keys(first.config.offsets)).toHaveLength(FIRST_RUN_FILE_LIMIT + 5);
+    expect(Object.keys(offsetsOf(first.config))).toHaveLength(FIRST_RUN_FILE_LIMIT + 5);
 
     const second = await run(first.config);
     expect(second.outcome.filesRead).toBe(0);
@@ -267,11 +279,16 @@ describe('pruneOffsets', () => {
   it('forgets files that are gone', () => {
     // Journals accumulate for years and members delete them. Without this the
     // config grows without limit.
-    const config = paired({
+    /*
+     * `pruneOffsets` works on the FLAT working map the pass builds for one hub, not on the stored
+     * per-hub structure — so this constructs that shape directly rather than going through a
+     * config, which is also what the function is handed at the call site.
+     */
+    const working = {
+      ...paired({ sessionLive: { a: true, b: false } }),
       offsets: { a: 1, b: 2 },
-      sessionLive: { a: true, b: false },
-    });
-    const pruned = pruneOffsets(config, ['a']);
+    };
+    const pruned = pruneOffsets(working, ['a']);
 
     expect(pruned.offsets).toEqual({ a: 1 });
     expect(pruned.sessionLive).toEqual({ a: true });

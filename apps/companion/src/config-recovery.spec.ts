@@ -54,7 +54,7 @@ const PAIRED: CompanionConfig = {
   ...DEFAULT_CONFIG,
   deviceToken: 'gsq_a_real_looking_token',
   enabled: true,
-  offsets: { 'Journal.2026-08-02T090000.01.log': 4096 },
+  offsetsByHub: { 'https://grims-squad.com': { 'Journal.2026-08-02T090000.01.log': 4096 } },
 };
 
 describe('a byte order mark', () => {
@@ -71,7 +71,7 @@ describe('a byte order mark', () => {
 
     expect(loaded.deviceToken).toBe('gsq_a_real_looking_token');
     expect(loaded.enabled).toBe(true);
-    expect(loaded.offsets).toEqual(PAIRED.offsets);
+    expect(loaded.offsetsByHub).toEqual(PAIRED.offsetsByHub);
     // And it must not look like a recovery, because nothing was lost.
     expect(loaded.restoredFrom).toBeUndefined();
   });
@@ -146,7 +146,7 @@ describe('an ordinary file', () => {
 
     expect(loaded.deviceToken).toBe(PAIRED.deviceToken);
     expect(loaded.enabled).toBe(true);
-    expect(loaded.offsets).toEqual(PAIRED.offsets);
+    expect(loaded.offsetsByHub).toEqual(PAIRED.offsetsByHub);
     expect(loaded.restoredFrom).toBeUndefined();
   });
 

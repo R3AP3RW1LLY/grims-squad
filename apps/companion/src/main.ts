@@ -87,6 +87,7 @@ import {
   saveConfig,
   redactToken,
   apiBaseUrlFor,
+  hubKey,
   webBaseUrlFor,
   type CompanionConfig,
 } from './config.js';
@@ -2063,6 +2064,53 @@ if (!app.requestSingleInstanceLock()) {
 
     ipcMain.handle('cancelSignIn', () => {
       linkCancelled = true;
+      return { ok: true };
+    });
+
+    /**
+     * Re-send everything to this hub, from the beginning.
+     *
+     * ★ SQUADRON OWNER, 2026-08-05 ★
+     *
+     * "it appears that not all of my historical journal data was sent ... im wondering if my
+     * development data is not being sent journal wise, if so i need all of my data sent to the
+     * production environment so that it all gets counted"
+     *
+     * It was not, and the reason was structural: an offset recorded how far a FILE had been read
+     * and said nothing about where those lines had been sent. A development run against localhost
+     * advanced them, the events landed in the development database, and pointing the app at
+     * grims-squad.com resumed from where development stopped. The production hub never saw a line
+     * of it, and nothing reported a problem, because as far as the app was concerned the work was
+     * done.
+     *
+     * Offsets are per-hub now, so this cannot happen again. It cannot un-happen what was already
+     * skipped, which is what this door is for: forget this hub's positions and let the next pass
+     * read every journal from the top.
+     *
+     * ★ SAFE TO PRESS TWICE ★
+     *
+     * The hub deduplicates on (device token, timestamp, event, payload), so a re-read costs
+     * bandwidth and produces no duplicate rows. `sessionLive` goes with the offsets — it is a
+     * per-file verdict derived while reading, and keeping it against files about to be re-read
+     * from the top would be a stale answer to a question being asked again.
+     */
+    ipcMain.handle('resendHistory', () => {
+      const hub = hubKey(apiBaseUrlFor(config, process.env));
+      const remaining = { ...config.offsetsByHub };
+      delete remaining[hub];
+
+      config = { ...config, offsetsByHub: remaining, sessionLive: {} };
+      saveConfig(app.getPath('userData'), config);
+
+      activity = appendActivity(activity, [
+        {
+          at: Date.now(),
+          level: 'info',
+          text: 'Re-reading every journal from the start. The hub discards anything it already has.',
+        },
+      ]);
+      // The window is showing a byte count and an activity feed that both just changed.
+      push();
       return { ok: true };
     });
 
