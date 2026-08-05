@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { InaraAdapter, InaraApiError, InaraNotApprovedError } from './inara.adapter.js';
-import { resetInaraLimiterForTests } from './limiter.js';
+import { resetInaraLimiterForTests, INARA_MIN_SPACING_MS, LimiterBusyError } from './limiter.js';
 
 /**
  * P1.8b — the Inara adapter.
@@ -423,5 +423,86 @@ describe('@REGRESSION Inara’s real payload shape', () => {
     inaraResponds(live({ commanderName: 'X' }));
     const p = await adapter.getCommanderProfile('X');
     expect(p?.squadronName).toBeNull();
+  });
+});
+
+/**
+ * Who is allowed to wait, and for how long.
+ *
+ * ★ FOUND IN PRODUCTION, 2026-08-05 — THE NIGHTLY SWEEP CHECKED ONE MEMBER ★
+ *
+ * `getOwnIdentity` was unconditionally bounded at the eight-second request-path wait, with the
+ * comment "a member is waiting on this". True of the settings page; false of the worker, and the
+ * worker is the caller that LOOPS.
+ *
+ * The limiter spaces dispatches thirty seconds apart (INV-033). A sweep that awaits one member
+ * before asking about the next therefore enqueues the second call a moment after the first
+ * dispatched, waits eight seconds, and is refused twenty-two seconds before its slot would have
+ * arrived. Every member after the first. The audit swallowed each refusal as "Inara did not answer"
+ * and reported a healthy run over a squadron it had not looked at.
+ *
+ * These pin BOTH halves, because either alone is a bug: a worker that gives up checks one person,
+ * and a request path that does not hold an HTTP connection open behind a queue that is minutes
+ * deep.
+ */
+describe('waiting for a rate-limit slot', () => {
+  /**
+   * Drains the limiter's first, immediate slot.
+   *
+   * Under fake timers even a zero-delay dispatch has to be advanced into, so the opening call of
+   * each test is started and stepped rather than simply awaited — otherwise the test hangs on the
+   * limiter rather than on the thing it is about.
+   */
+  const takeFirstSlot = async (): Promise<void> => {
+    const first = adapter.getOwnIdentity('key', 'queue');
+    await vi.advanceTimersByTimeAsync(1);
+    await first;
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    inaraResponds(ok({ commanderName: 'PEBBLE' }));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('MANDATORY: a scheduled job QUEUES, so a sweep reaches every member', async () => {
+    await takeFirstSlot();
+
+    // The second member of the sweep must wait out the full thirty-second spacing rather than
+    // giving up at eight and being recorded as "Inara did not answer".
+    const second = adapter.getOwnIdentity('key', 'queue');
+    await vi.advanceTimersByTimeAsync(INARA_MIN_SPACING_MS + 1_000);
+
+    expect(await second, 'the second member of the sweep was never asked about').toMatchObject({
+      cmdrName: 'PEBBLE',
+    });
+  });
+
+  it('MANDATORY: a request-path caller GIVES UP rather than holding the connection', async () => {
+    /*
+     * The other half, and it is not optional either. A member linking a key while the worker's
+     * queue drains must be told to try again shortly, with an error distinguishable from "your key
+     * is wrong" — or they will replace a perfectly good key and conclude the site is broken.
+     */
+    await takeFirstSlot();
+
+    const settled = adapter.getOwnIdentity('key', 'request').catch((e: unknown) => e);
+    await vi.advanceTimersByTimeAsync(9_000);
+
+    expect(await settled).toBeInstanceOf(LimiterBusyError);
+  });
+
+  it('defaults to the request-path wait, which is the answer that fails safely', async () => {
+    // A caller that forgot to say degrades to a spinner and a retry. The opposite default would
+    // have a request path hold a connection open behind a queue that is minutes deep.
+    await takeFirstSlot();
+
+    const settled = adapter.getOwnIdentity('key').catch((e: unknown) => e);
+    await vi.advanceTimersByTimeAsync(9_000);
+
+    expect(await settled).toBeInstanceOf(LimiterBusyError);
   });
 });
