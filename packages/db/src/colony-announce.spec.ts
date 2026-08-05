@@ -45,6 +45,7 @@ const IDENTIFIED: ColonyProjectAnnouncement = {
   systemName: 'Hyades Sector XJ-Z c18',
   identifiedAs: 'Port Surface Outpost',
   totalTonnes: 216_030,
+  owner: 'squadron',
   startedBy: VOSS,
 };
 
@@ -55,6 +56,7 @@ const UNIDENTIFIED: ColonyProjectAnnouncement = {
   systemName: 'Hyades Sector WO-Y b1-4',
   identifiedAs: null,
   totalTonnes: null,
+  owner: 'squadron',
   startedBy: VOSS,
 };
 
@@ -195,5 +197,43 @@ describe('a companion release announcement', () => {
 
   it('a trailing slash does not double up', () => {
     expect(appReleaseContent('0.5.1', 'https://grims-squad.com/')).not.toContain('.com//');
+  });
+});
+
+
+/**
+ * A member's own build.
+ *
+ * ★ SQUADRON OWNER, 2026-08-05 ★
+ *
+ * "can we also announce player owned colonization projects in the same channel the same way we do
+ * the squadron owned colonization projects?"
+ *
+ * Same channel, different words. A member posting a build is exactly when they would like help
+ * with it — but the squadron's own efforts must not read as one entry in a list of side projects,
+ * so the heading says whose it is.
+ */
+describe('a member-owned colonisation project', () => {
+  const personal: ColonyProjectAnnouncement = { ...IDENTIFIED, owner: 'personal' };
+
+  it('MANDATORY: says a MEMBER started it, not the squadron', () => {
+    const content = colonyProjectContent(personal, SITE);
+    expect(content).toContain('A member has started a colonisation project');
+    expect(content).not.toContain('A new squadron colonisation project');
+  });
+
+  it('still names them, links the project, and reads the same otherwise', () => {
+    const content = colonyProjectContent(personal, SITE);
+    expect(content).toContain(`Started by **<@${VOSS.discordId}>**`);
+    expect(content).toContain('/colonisation/52f525c5-9578-412e-88af-809104d1b707');
+    expect(content).toContain('Port Surface Outpost · 216,030 t');
+  });
+
+  it('adoption still wins the heading — it IS a squadron project by then', () => {
+    const adopted: ColonyProjectAnnouncement = {
+      ...personal,
+      adoptedBy: { displayName: 'Mr Grimsoul', discordId: '100000000000000002' },
+    };
+    expect(colonyProjectContent(adopted, SITE)).toContain('Adopted as a squadron project');
   });
 });
