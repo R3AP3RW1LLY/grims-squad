@@ -487,6 +487,17 @@ export function appReleaseContent(version: string, siteUrl: string): string {
  * wins and every other caller updates nothing and announces nothing. A read-then-write would race
  * and post the same release a dozen times.
  *
+ * ★ to_jsonb, BECAUSE THE COLUMN IS jsonb — AND I SHIPPED IT WITHOUT ★
+ *
+ * `site_config.value` is `jsonb`, not `text`. The first version of this passed a bare string,
+ * Postgres refused the cast, and the `catch` below swallowed it — so the release announced nothing
+ * and the failure was invisible. Exactly the shape of bug this file's own header warns about, and
+ * it survived a green test run because the tests never touched a database.
+ *
+ * The Prisma delegate would convert it for us (that is how the EDSY refresh writes the same table)
+ * but the delegate cannot express the conditional claim below, which is what stops a dozen polling
+ * apps announcing one release a dozen times. So the SQL stays and the cast is explicit.
+ *
  * Never throws. The release is published whatever this manages — see the module header.
  */
 export async function announceCompanionRelease(
@@ -505,7 +516,7 @@ export async function announceCompanionRelease(
      */
     const claimed = await db.$executeRaw`
       INSERT INTO site_config (key, value)
-      VALUES (${COMPANION_ANNOUNCED_KEY}, ${version})
+      VALUES (${COMPANION_ANNOUNCED_KEY}, to_jsonb(${version}::text))
       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
        WHERE site_config.value IS DISTINCT FROM EXCLUDED.value`;
 

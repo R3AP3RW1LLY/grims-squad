@@ -110,11 +110,16 @@ export async function rebuildBountyBoard(db: PrismaClient): Promise<BountyBoardR
         `SELECT count(*)::bigint AS n FROM bounty_anchors`,
       );
       const anchors = Number(anchorRows[0]?.n ?? 0);
+      /*
+       * `to_jsonb`, because the column is jsonb and not text. Written without it first, which
+       * Postgres rejected — and the rejection went nowhere, so the key was simply never there and
+       * the page went on reporting "no active projects" while three were running.
+       */
       await tx.$executeRawUnsafe(
-        `INSERT INTO site_config (key, value) VALUES ($1, $2)
+        `INSERT INTO site_config (key, value) VALUES ($1, to_jsonb($2::int))
          ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
         BOUNTY_ANCHOR_COUNT_KEY,
-        String(anchors),
+        anchors,
       );
 
       await tx.$executeRawUnsafe(`DELETE FROM data_bounties`);
