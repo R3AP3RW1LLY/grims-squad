@@ -92,6 +92,49 @@ export function humanizeSubject(subject) {
  * opening paragraph is the part written for a reader, and the full message
  * remains one `git show` away.
  */
+/**
+ * Language that must not appear on a page every member reads.
+ *
+ * ★ ONE OF THESE SHIPPED — 2026-08-05 ★
+ *
+ * The squadron owner reported a bug in strong terms, it was quoted word for word into a commit
+ * body because that is how this repository writes, and this tool did exactly what it promises:
+ * carried the author's own words through to the public changelog. Every member read it.
+ *
+ * ★ WHY THE TOOL GUARDS RATHER THAN THE AUTHOR REMEMBERING ★
+ *
+ * The rule this file is built on — preserve the voice, never compress it — is right for the
+ * repository and blind to the difference between a commit log and a publication. The next person
+ * to write one of these is quoting somebody who was angry, which is precisely when the words are
+ * most worth recording internally and least suitable for a members' page. A discipline that must
+ * be remembered at the worst possible moment is not a discipline.
+ *
+ * ★ WORD BOUNDARIES ARE LOAD-BEARING ★
+ *
+ * Without them this is the Scunthorpe problem, and Elite's galaxy is full of procedurally
+ * generated names. A release note silently deleted by a system name would be a bug nobody could
+ * ever explain.
+ *
+ * The git history is untouched. This affects only what is PUBLISHED.
+ */
+const NOT_FOR_MEMBERS =
+  /\b(fuck\w*|shit\w*|bollocks|bastard\w*|wank\w*|cunt\w*|arsehole\w*|asshole\w*)\b/i;
+
+/**
+ * Drops any paragraph of a detail that quotes such language.
+ *
+ * A whole paragraph rather than a masked word: `f***` in a release note is still recognisably a
+ * quotation of somebody swearing, and reads worse than the engineering note standing on its own.
+ * Every commit names its change in the subject line, so this costs a sentence and never an entry.
+ */
+export function fitForMembers(detail) {
+  return detail
+    .split(/\n[ \t]*\n/)
+    .filter((paragraph) => !NOT_FOR_MEMBERS.test(paragraph))
+    .join('\n\n')
+    .trim();
+}
+
 export function firstParagraph(body) {
   const paragraphs = body.split(/\n[ \t]*\n/).map((p) => p.trim());
   const taken = [];
@@ -177,7 +220,8 @@ export function buildRelease({ fromSha, toSha, commits, generatedAt, version = n
   const entries = commits.map((commit) => ({
     sha: commit.sha,
     subject: humanizeSubject(commit.subject),
-    detail: firstParagraph(commit.body),
+    // Published, not logged — see `fitForMembers`. The commit body keeps every word.
+    detail: fitForMembers(firstParagraph(commit.body)),
     sections: sectionsFor(commit.files),
   }));
 

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
+  fitForMembers,
   sectionsFor,
   humanizeSubject,
   firstParagraph,
@@ -334,5 +335,62 @@ describe('the deploy announcement — what the whole squadron is told', () => {
   it('trims a trailing slash from the public URL rather than linking //changelog', () => {
     const { content } = buildAnnouncement(release, 'https://grims-squad.com/');
     expect(content).toContain('Full changelog: https://grims-squad.com/changelog');
+  });
+});
+
+/**
+ * What must never reach a page every member reads.
+ *
+ * ★ IT SHIPPED ONCE — 2026-08-05 ★
+ *
+ * The squadron owner reported a bug in strong terms; I quoted them word for word in a commit body
+ * because that is how this repository writes; and the changelog did exactly what it promises,
+ * carrying the author's own words through to the public page. Every member read it.
+ *
+ * Their instruction was that it must never happen again — and a discipline that has to be
+ * remembered at the moment somebody is quoting an angry bug report is not a discipline. The tool
+ * guards instead.
+ *
+ * The git history is untouched. This is about PUBLICATION, and nothing else.
+ */
+describe('fitForMembers', () => {
+  it('MANDATORY: drops a paragraph quoting language a changelog must not carry', () => {
+    const detail = 'The sign-in callback failed.\n\n*"what the fuck! fix this shit."*';
+
+    expect(fitForMembers(detail)).toBe('The sign-in callback failed.');
+  });
+
+  it('MANDATORY: keeps the engineering note that came with it', () => {
+    /*
+     * A whole paragraph rather than a masked word: `f***` in a release note is still obviously a
+     * quotation of somebody swearing and reads worse than the explanation standing alone. Every
+     * commit names its change in the subject line, so this costs a sentence and never an entry.
+     */
+    const detail =
+      '*"this is shit!"*\n\nBrowsers now get an error page; the app still gets the data it needs.';
+
+    expect(fitForMembers(detail)).toBe(
+      'Browsers now get an error page; the app still gets the data it needs.',
+    );
+  });
+
+  it('MANDATORY: Scunthorpe is a place, not a swear word', () => {
+    /*
+     * Without word boundaries this is the classic false positive, and Elite's galaxy is full of
+     * procedurally generated names. A release note silently deleted by a system name would be a
+     * bug nobody could ever explain.
+     */
+    const detail = 'Route planning now handles the run out to Scunthorpe Dock correctly.';
+    expect(fitForMembers(detail)).toBe(detail);
+  });
+
+  it('ordinary prose is untouched, including the colon-introduction shape', () => {
+    const detail = 'Two waves, both specced to the bone:\n\nThe first wave landed.';
+    expect(fitForMembers(detail)).toBe(detail);
+  });
+
+  it('an entry that was ONLY a quote becomes empty rather than half a sentence', () => {
+    // The subject line still names the change, so the entry survives without its detail.
+    expect(fitForMembers('*"what the fuck"*')).toBe('');
   });
 });
