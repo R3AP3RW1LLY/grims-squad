@@ -14,6 +14,7 @@ import { PlanningPage } from './planning.js';
 import { BuildTypesPage } from './build-types.js';
 import { LeaderboardPage } from './leaderboards.js';
 import { SupportPage } from './support.js';
+import { HelpWidget } from './help-widget.js';
 import { GroupIcon } from './icons.js';
 // The shapes come from the hub client, which is where they are defined — re-exporting them through
 // the component file would be a second name for one type.
@@ -539,6 +540,19 @@ function App(): JSX.Element {
         {page === 'support' ? <SupportPage /> : null}
         {page === 'settings' ? <SettingsPage state={state} /> : null}
       </main>
+
+      {/*
+        ★ HELP, FOR EVERYBODY — SQUADRON OWNER, 2026-08-04 ★
+
+        "we also need the chat widget included in the companion app too."
+
+        The website's floating help chat, for the member behind this device. Deliberately NOT
+        gated like the sidebar's Support entry above: that entry is the ANSWERING side and
+        exists only for SUPPORT_AGENT holders; this launcher is the ASKING side, and asking is
+        for every paired member. Fixed over the whole shell, so help is one press away on every
+        page — which is where the website puts it too.
+      */}
+      <HelpWidget />
     </div>
   );
 }

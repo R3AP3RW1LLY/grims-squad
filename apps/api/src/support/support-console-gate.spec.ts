@@ -67,18 +67,62 @@ describe('the device console gates every route in its own body', () => {
   const source = readFileSync(join(REPO, DEVICE), 'utf8');
   const routes = routeBodies(source);
 
+  /*
+   * The device controller carries TWO doors now: the console routes (SUPPORT_AGENT, via
+   * `#agent`) and the `me/` member routes — the website widget's asking side, which any paired
+   * member may use. The split below is by path prefix, so a new route lands in exactly one
+   * bucket and cannot be forgotten by both assertions.
+   */
+  const memberRoutes = routes.filter((r) => r.path.startsWith('me/'));
+  const consoleRoutes = routes.filter((r) => r.path !== 'access' && !r.path.startsWith('me/'));
+
   it('found the routes at all', () => {
-    expect(routes.length).toBeGreaterThanOrEqual(7);
+    expect(consoleRoutes.length).toBeGreaterThanOrEqual(6);
+    expect(memberRoutes.length).toBeGreaterThanOrEqual(5);
     expect(routes.map((r) => r.path)).toContain('conversations');
   });
 
   it('MANDATORY: every console route resolves the caller through #agent', () => {
-    const console_ = routes.filter((r) => r.path !== 'access');
-    const naked = console_.filter((r) => !r.body.includes('this.#agent(req)'));
+    const naked = consoleRoutes.filter((r) => !r.body.includes('this.#agent(req)'));
 
     expect(
       naked.map((r) => `${r.verb} ${r.path}`),
       'these device routes would answer without checking SUPPORT_AGENT',
+    ).toEqual([]);
+  });
+
+  it('MANDATORY: every member route authenticates the device — and never demands SUPPORT_AGENT', () => {
+    /*
+     * Both halves matter. A member route that lost `#device` would answer strangers; one that
+     * gained `#agent` would lock every ordinary member out of their own help chat, which is the
+     * inverse bug and just as silent.
+     */
+    const unauthenticated = memberRoutes.filter((r) => !r.body.includes('this.#device(req)'));
+    const overGated = memberRoutes.filter((r) => r.body.includes('this.#agent(req)'));
+
+    expect(
+      unauthenticated.map((r) => `${r.verb} ${r.path}`),
+      'these member routes would answer without a paired device',
+    ).toEqual([]);
+    expect(
+      overGated.map((r) => `${r.verb} ${r.path}`),
+      'these member routes would demand SUPPORT_AGENT from members asking for help',
+    ).toEqual([]);
+  });
+
+  it('MANDATORY: member routes reach only the member half of the service', () => {
+    /*
+     * The console methods take no "whose" — consoleRead(id) answers ANY conversation, because
+     * its callers have already proven SUPPORT_AGENT. A member route calling one would be an
+     * any-member read of the whole help desk. The member methods scope every query to the
+     * caller, so these are the only ones the `me/` door may touch.
+     */
+    const forbidden = /this\.support\.(console|replyAsOfficer|transition)/;
+    const leaking = memberRoutes.filter((r) => forbidden.test(r.body));
+
+    expect(
+      leaking.map((r) => `${r.verb} ${r.path}`),
+      'these member routes reach console methods that are scoped to no owner',
     ).toEqual([]);
   });
 

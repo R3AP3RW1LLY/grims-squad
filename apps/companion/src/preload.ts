@@ -154,6 +154,23 @@ contextBridge.exposeInMainWorld('support', {
   reopen: (id: string) => ipcRenderer.invoke('supportReopen', id),
 });
 
+/**
+ * Help & Support — the ASKING side, for every paired member.
+ *
+ * The website's floating chat widget, in the app: the member's own conversations, over the
+ * `me/` device routes the hub scopes to the caller. Deliberately a separate bridge from
+ * `support` above — that one is the officers' console and most members hold nothing that can
+ * use it; this one is for everybody the moment the device is paired.
+ */
+contextBridge.exposeInMainWorld('help', {
+  conversations: () => ipcRenderer.invoke('helpConversations'),
+  start: (subject: string, body: string) => ipcRenderer.invoke('helpStart', subject, body),
+  conversation: (id: string) => ipcRenderer.invoke('helpConversation', id),
+  send: (id: string, body: string) => ipcRenderer.invoke('helpSend', id, body),
+  /** "Talk to an officer" — flips the conversation to the officers for good. */
+  escalate: (id: string) => ipcRenderer.invoke('helpEscalate', id),
+});
+
 contextBridge.exposeInMainWorld('colony', {
   /** Both boards, plus what this member is allowed to do with them. */
   projects: () => ipcRenderer.invoke('colonyProjects'),

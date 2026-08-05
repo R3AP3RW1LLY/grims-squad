@@ -48,6 +48,11 @@ import {
 import { bountyBoard, bountyLeaderboard } from './hub-bounties.js';
 import { leaderboardBoard } from './hub-leaderboards.js';
 import {
+  helpConversation,
+  helpConversations,
+  helpEscalate,
+  helpSend,
+  helpStart,
   supportAccess,
   supportBadge,
   supportClose,
@@ -1677,6 +1682,35 @@ if (!app.requestSingleInstanceLock()) {
     ipcMain.handle('supportReopen', (_e, id: unknown) =>
       typeof id === 'string' && id !== ''
         ? supportReopen(hub(), id)
+        : { ok: false as const, error: 'No conversation asked for.' },
+    );
+    /*
+     * ★ THE HELP WIDGET — THE ASKING SIDE, FOR EVERY PAIRED MEMBER ★
+     *
+     * The website widget's member door over the device token; the hub scopes every read to the
+     * member behind it. No permission gate here or on the hub — asking for help is for
+     * everybody, which is the entire point of a help door. Renderer args are re-read, never
+     * trusted, like every handler in this block.
+     */
+    ipcMain.handle('helpConversations', () => helpConversations(hub()));
+    ipcMain.handle('helpStart', (_e, subject: unknown, body: unknown) =>
+      typeof body === 'string' && body.trim() !== ''
+        ? helpStart(hub(), typeof subject === 'string' ? subject : '', body)
+        : { ok: false as const, error: 'Write your question first.' },
+    );
+    ipcMain.handle('helpConversation', (_e, id: unknown) =>
+      typeof id === 'string' && id !== ''
+        ? helpConversation(hub(), id)
+        : { ok: false as const, error: 'No conversation asked for.' },
+    );
+    ipcMain.handle('helpSend', (_e, id: unknown, body: unknown) =>
+      typeof id === 'string' && id !== '' && typeof body === 'string' && body.trim() !== ''
+        ? helpSend(hub(), id, body)
+        : { ok: false as const, error: 'Write a message first.' },
+    );
+    ipcMain.handle('helpEscalate', (_e, id: unknown) =>
+      typeof id === 'string' && id !== ''
+        ? helpEscalate(hub(), id)
         : { ok: false as const, error: 'No conversation asked for.' },
     );
     /*

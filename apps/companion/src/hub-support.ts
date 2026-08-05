@@ -277,3 +277,98 @@ export const supportReopen = (call: HubCall, id: string): Promise<Answer<{ ok: b
   hubSupport<{ ok: boolean }>(call, `/conversations/${encodeURIComponent(id)}/reopen`, {
     method: 'PATCH',
   });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The asking side — the website widget's member door, over the same token.
+//
+// For EVERY paired member, not just SUPPORT_AGENT holders: these are the `me/` routes, which
+// the hub scopes to the caller. Same wire shapes the website widget reads, with the one
+// difference every companion surface shares — avatars arrive as data URIs, inlined here,
+// because the renderer's CSP is `img-src 'self' data:`.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** One of the member's own conversations, for the widget's list. */
+export interface HelpConversation {
+  readonly id: string;
+  readonly status: 'open' | 'closed';
+  /** Who answers next: GMSD AI, or the officers once anybody asked for a person. One-way. */
+  readonly handledBy: 'ai' | 'officer';
+  readonly subject: string | null;
+  readonly guestName: string | null;
+  readonly createdAt: string;
+  readonly lastMessageAt: string;
+  readonly unread: boolean;
+  readonly preview: string;
+}
+
+export interface HelpTranscript {
+  readonly conversation: HelpConversation;
+  readonly messages: SupportMessage[];
+}
+
+type WireHelpTranscript = {
+  readonly conversation: HelpConversation;
+  readonly messages: WireMessage[];
+};
+
+/** The transcript with every account-backed author's avatar inlined — officers' and the member's own. */
+async function dressHelpTranscript(
+  call: HubCall,
+  wire: WireHelpTranscript,
+): Promise<HelpTranscript> {
+  const avatars = await avatarsFor(
+    call,
+    wire.messages.flatMap((m) => (m.author === null ? [] : [m.author.id])),
+  );
+  return {
+    conversation: wire.conversation,
+    messages: wire.messages.map((m) => ({
+      ...m,
+      author: m.author === null ? null : { ...m.author, avatar: avatars.get(m.author.id) ?? null },
+    })),
+  };
+}
+
+export const helpConversations = (
+  call: HubCall,
+): Promise<Answer<{ conversations: HelpConversation[] }>> =>
+  hubSupport<{ conversations: HelpConversation[] }>(call, '/me/conversations');
+
+export const helpStart = (
+  call: HubCall,
+  subject: string,
+  body: string,
+): Promise<Answer<{ id: string }>> =>
+  hubSupport<{ id: string }>(call, '/me/conversations', {
+    method: 'POST',
+    body: { subject, body },
+  });
+
+export async function helpConversation(
+  call: HubCall,
+  id: string,
+): Promise<Answer<HelpTranscript>> {
+  const wire = await hubSupport<WireHelpTranscript>(
+    call,
+    `/me/conversations/${encodeURIComponent(id)}`,
+  );
+  if (!wire.ok) return wire;
+  return { ok: true, data: await dressHelpTranscript(call, wire.data) };
+}
+
+export const helpSend = (
+  call: HubCall,
+  id: string,
+  body: string,
+): Promise<Answer<{ message: SupportMessage }>> =>
+  hubSupport<{ message: SupportMessage }>(
+    call,
+    `/me/conversations/${encodeURIComponent(id)}/messages`,
+    { method: 'POST', body: { body } },
+  );
+
+/** "Talk to an officer" — the same one-way flip the website widget presses. */
+export const helpEscalate = (call: HubCall, id: string): Promise<Answer<{ ok: boolean }>> =>
+  hubSupport<{ ok: boolean }>(call, `/me/conversations/${encodeURIComponent(id)}/escalate`, {
+    method: 'POST',
+  });

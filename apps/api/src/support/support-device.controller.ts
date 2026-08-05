@@ -8,18 +8,31 @@ import type { PairingService } from '../telemetry/pairing.service.js';
 import { SupportService } from './support.service.js';
 
 /**
- * The support console, for the companion app.
+ * Help & Support, for the companion app — BOTH sides of the desk, one token door.
  *
  * ★ THE SAME SERVICE, THE SAME PERMISSION — A DIFFERENT DOOR ★
  *
- * Every route delegates to the identical `SupportService` the website's console uses, and
- * checks the identical SUPPORT_AGENT bit. The ONLY difference is how the caller is identified:
- * the site has a session cookie, the app has a paired device token — the same shape as
- * `ColonyDeviceController`, and for the same reason: a second implementation would drift, and
- * the half that drifted would be the one deciding who may read a member's private conversation.
+ * Every route delegates to the identical `SupportService` the website uses. The ONLY difference
+ * is how the caller is identified: the site has a session cookie, the app has a paired device
+ * token — the same shape as `ColonyDeviceController`, and for the same reason: a second
+ * implementation would drift, and the half that drifted would be the one deciding who may read
+ * a member's private conversation.
+ *
+ * Two groups of routes, gated differently because they are different jobs:
+ *
+ *   the CONSOLE routes  the answering side. `#agent()` in every body checks SUPPORT_AGENT on
+ *                       the member behind the token, exactly as the website's console door does.
+ *   the `me/` routes    the asking side — the website widget's member door, over the device
+ *                       token. `#device()` only: asking for help needs no permission at all,
+ *                       and every read is scoped to the caller inside the service itself
+ *                       (`listForMember`, `readForMember` — the owner-in-the-query rule).
  *
  * The permission is resolved from the USER behind the token, never from the device: an
  * officer's laptop is an officer, and the same laptop after they are demoted is not.
+ *
+ * The AI's first turn needs no wiring here: `startForMember` and `postAsMember` fire it inside
+ * the SERVICE (`void this.#aiRespond(...)`), so a conversation started from the app gets the
+ * same first answer as one started from the website — one trigger, not two copies of it.
  *
  * ★ EVERY ROUTE IS @Public(), AND THE SPEC ENFORCES IT ★
  *
@@ -126,6 +139,56 @@ export class SupportDeviceController {
   async reopen(@Req() req: FastifyRequest, @Param('id') id: string) {
     const me = await this.#agent(req);
     await this.support.transition(me.userId, id, 'reopen');
+    return { ok: true };
+  }
+
+  // ── The member door — the asking side, over the same token ─────────────────
+  //
+  // `#device()` only, deliberately: these are the website widget's member routes, and asking
+  // for help is for every paired member. The service scopes every read to the caller, so a
+  // route here can name nobody else's conversation however it is called.
+
+  @Public()
+  @Get('me/conversations')
+  async myList(@Req() req: FastifyRequest) {
+    const me = await this.#device(req);
+    return { conversations: await this.support.listForMember(me.userId) };
+  }
+
+  @Public()
+  @Post('me/conversations')
+  async myStart(@Req() req: FastifyRequest, @Body() body: { subject?: string; body?: string }) {
+    const me = await this.#device(req);
+    // The AI's first turn fires inside startForMember — the same call the website door makes.
+    return this.support.startForMember(me.userId, body.subject, body.body);
+  }
+
+  /** One conversation with its transcript. Opening it marks it seen, like the website widget. */
+  @Public()
+  @Get('me/conversations/:id')
+  async myRead(@Req() req: FastifyRequest, @Param('id') id: string) {
+    const me = await this.#device(req);
+    return this.support.readForMember(me.userId, id);
+  }
+
+  /**
+   * No attachment parameter, like the officer reply above and for the same reason: the hardened
+   * upload path is a browser session's, and the app's composer does not offer what the API
+   * would refuse. The companion widget is text-first.
+   */
+  @Public()
+  @Post('me/conversations/:id/messages')
+  async myPost(@Req() req: FastifyRequest, @Param('id') id: string, @Body() body: { body?: string }) {
+    const me = await this.#device(req);
+    return { message: await this.support.postAsMember(me.userId, id, body.body, undefined) };
+  }
+
+  /** "Talk to an officer" — the same one-way flip the website widget presses. */
+  @Public()
+  @Post('me/conversations/:id/escalate')
+  async myEscalate(@Req() req: FastifyRequest, @Param('id') id: string) {
+    const me = await this.#device(req);
+    await this.support.escalateForMember(me.userId, id);
     return { ok: true };
   }
 }
