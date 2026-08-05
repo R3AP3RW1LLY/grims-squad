@@ -372,9 +372,10 @@ async function ingestForum(db: PrismaClient): Promise<void> {
 async function ingestReference(db: PrismaClient): Promise<void> {
   const run = await beginIngest(db, 'reference');
   try {
-    const { rows, fromBoard, fromFiles } = await readReferenceKnowledge(
+    const { rows, fromBoard, fromFiles, fromHelp } = await readReferenceKnowledge(
       db,
       process.env['KNOWLEDGE_REFERENCE_DIR'] ?? 'ssot/09-reference',
+      process.env['KNOWLEDGE_HELP_DIR'] ?? 'docs/help',
     );
 
     const tally = { inserted: 0, updated: 0 };
@@ -387,7 +388,7 @@ async function ingestReference(db: PrismaClient): Promise<void> {
     const written = tally.inserted + tally.updated;
     await finishIngest(db, run, { rows: written, ...tally, source: 'reference' });
     console.log(
-      `reference: ${written} passages (${fromBoard} guides, ${fromFiles} documents)`,
+      `reference: ${written} passages (${fromBoard} guides, ${fromFiles} documents, ${fromHelp} help articles)`,
     );
   } catch (e) {
     await finishIngest(db, run, { error: e instanceof Error ? e.message : String(e) });

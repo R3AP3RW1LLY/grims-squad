@@ -37,10 +37,43 @@ export interface ReferenceKnowledge {
   readonly rows: WritableRow[];
   readonly fromBoard: number;
   readonly fromFiles: number;
+  readonly fromHelp: number;
 }
 
 /** Where reference documents live. Overridable so a second machine need not match this one. */
 const DEFAULT_DIR = 'ssot/09-reference';
+
+/**
+ * Where the help corpus lives — the 57 articles describing every surface of the platform.
+ *
+ * ★ ITS OWN kind, ON PURPOSE ★
+ *
+ * These rows carry `kind: 'help'` where ordinary reference carries 'guide'/'document', because the
+ * support assistant's retrieval is HELP-TAGGED ONLY (owner's approved design): a member asking the
+ * support chat "how do I pair the app" must be answered from the articles written for that
+ * question, not from whatever forum guide embeds nearest. The general assistant still sees them —
+ * they are reference like everything else here — but the support leg can narrow to exactly this
+ * kind and nothing else.
+ */
+const HELP_DIR = 'docs/help';
+
+/**
+ * The frontmatter the help articles carry: `title`, `surface`, `route`. Parsed rather than
+ * stripped, because the title is the retrieval anchor and the route is what lets an answer link
+ * the member to the page it is describing.
+ */
+export function readHelpFrontmatter(raw: string): { title: string | null; route: string | null; body: string } {
+  const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(raw);
+  if (match === null) return { title: null, route: null, body: raw };
+
+  const field = (name: string): string | null => {
+    const line = new RegExp(`^${name}:\\s*(.+)$`, 'm').exec(match[1] ?? '');
+    const value = line?.[1];
+    return value === undefined ? null : value.trim();
+  };
+
+  return { title: field('title'), route: field('route'), body: raw.slice(match[0].length) };
+}
 
 /**
  * How much of one document goes in a row.
@@ -80,10 +113,11 @@ export function chunk(text: string, target = CHUNK_TARGET): string[] {
   return out;
 }
 
-/** Reads the guides board and the reference directory into rows. */
+/** Reads the guides board, the reference directory and the help corpus into rows. */
 export async function readReferenceKnowledge(
   db: PrismaClient,
   dir: string = DEFAULT_DIR,
+  helpDir: string = HELP_DIR,
 ): Promise<ReferenceKnowledge> {
   const rows: WritableRow[] = [];
 
@@ -178,5 +212,47 @@ export async function readReferenceKnowledge(
     }
   }
 
-  return { rows, fromBoard, fromFiles };
+  // ── the help corpus ───────────────────────────────────────────────────────
+  let fromHelp = 0;
+  if (existsSync(helpDir) && statSync(helpDir).isDirectory()) {
+    for (const file of readdirSync(helpDir)) {
+      if (extname(file).toLowerCase() !== '.md') continue;
+      // The index is navigation for humans and the seeding script — a table of contents embedded
+      // as an answer would be retrieved for everything and answer nothing.
+      if (file.toUpperCase() === 'INDEX.MD') continue;
+
+      const raw = readFileSync(join(helpDir, file), 'utf8');
+      const { title: fmTitle, route, body: afterFrontmatter } = readHelpFrontmatter(raw);
+
+      const body = afterFrontmatter
+        .replace(/^#{1,6}\s*/gm, '')
+        .replace(/[*_`>]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (body.length < 200) continue;
+
+      const title = fmTitle ?? basename(file, '.md').replace(/[-_]+/g, ' ');
+      const pieces = chunk(body);
+      fromHelp += 1;
+
+      pieces.forEach((piece, i) => {
+        rows.push({
+          source: 'reference',
+          kind: 'help',
+          extKey: `help/${file}#${i}`,
+          name: title,
+          // `url` is the article's route, so an assistant answer can link the member straight to
+          // the page it is explaining rather than describing where to find it.
+          data: { title, file, url: route, part: i + 1, parts: pieces.length },
+          text:
+            pieces.length === 1
+              ? `${title}\n\n${piece}`
+              : `${title} (part ${i + 1} of ${pieces.length})\n\n${piece}`,
+          coords: null,
+        });
+      });
+    }
+  }
+
+  return { rows, fromBoard, fromFiles, fromHelp };
 }
