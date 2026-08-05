@@ -12,6 +12,18 @@ import { apiPost } from '../../../../../lib/api-client';
  * (`getRoadmapThreadCard`, SITE_CONFIG-gated) and got an answer instead of a refusal. Nothing
  * here reasons about the caller's permissions, and the promote route re-checks server-side
  * regardless — this is presentation, not the boundary.
+ *
+ * ★ THE PANEL IS NOT GATED ON THE STEP-UP; THE BUTTON IS ★
+ *
+ * The probe behind it used to sit on the admin-gated manage controller, so a webmaster who had
+ * been reading the forum for longer than the eight-hour step-up window saw no panel at all — the
+ * feature quietly ceased to exist for the one person it is for, and the page could not tell that
+ * refusal apart from "this is not a Feature Requests thread".
+ *
+ * The probe is now gated on the permission alone. Promote still posts to the guarded route, and
+ * when the step-up has lapsed the admin gate's own sentence — "Confirm your authenticator code to
+ * continue." — arrives through the error path below and is shown, with the route to satisfy it.
+ * A control that refuses out loud is honest; one that disappears is not.
  */
 
 const COLUMN_LABELS: Record<string, string> = {
@@ -66,9 +78,31 @@ export function PromoteToBoard({
         Put this ask on the roadmap. It lands in Ideas, linked back to this thread and its votes.
       </p>
       {problem !== null && (
-        <p role="alert" className="text-xs text-[var(--color-semantic-hostile-bright)]">
-          {problem}
-        </p>
+        <div role="alert" className="space-y-1">
+          <p className="text-xs text-[var(--color-semantic-hostile-bright)]">{problem}</p>
+          {/*
+            ★ A STEP-UP REFUSAL GETS SOMEWHERE TO GO ★
+
+            Told to confirm an authenticator code on a page with nowhere to type one, the
+            reasonable conclusion is that two-factor is broken — the same trap the roles editor
+            fixed with an in-place modal. There is no code box on a forum thread and there should
+            not be one, so this points at the console's own step-up instead. Derived from the
+            message rather than from a flag because the API is the only thing that knows which
+            refusal this was.
+          */}
+          {/authenticator|two-factor/i.test(problem) && (
+            <p className="text-xs text-[var(--color-text-secondary)]">
+              Confirm your code in the{' '}
+              <a
+                href="/app"
+                className="text-[var(--color-brand-cyan-bright)] underline-offset-2 hover:underline"
+              >
+                admin console
+              </a>
+              , then come back to this thread — nothing here is lost.
+            </p>
+          )}
+        </div>
       )}
       <button
         type="button"

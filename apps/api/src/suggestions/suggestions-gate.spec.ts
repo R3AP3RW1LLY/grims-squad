@@ -66,6 +66,29 @@ describe('the roadmap manage board is gated at the class', () => {
     );
   });
 
+  it('MANDATORY: the promote PROBE is gated on the bit alone, with no second factor', () => {
+    /*
+     * ★ A REFUSAL THAT DEGRADES TO INVISIBILITY IS NOT A GATE, IT IS A DISAPPEARANCE ★
+     *
+     * This read used to sit on the manage controller. The thread page draws the promote panel only
+     * when the API answers — a refusal collapses to null and nothing renders — so a webmaster more
+     * than eight hours from their last authenticator code saw no panel on a Feature Requests
+     * thread, indistinguishable from an ordinary one.
+     *
+     * What it discloses is which board a thread they are already reading sits on, and whether a
+     * card on the member-readable /roadmap points at it. Adjacency again: the permission decorator
+     * directly above the class, and NOTHING between it and the @Controller line.
+     */
+    expect(source).toMatch(
+      /@Controller\('v1\/roadmap\/promotable'\)\s*\n@RequiresPermission\(Permission\.SITE_CONFIG\)\s*\nexport class RoadmapPromotableController/,
+    );
+    expect(source).not.toMatch(
+      /@RequiresTwoFactor\(\)\s*\n@Controller\('v1\/roadmap\/promotable'\)/,
+    );
+    // And the probe left the manage class entirely — a route, not just a decorator, moved.
+    expect(source).not.toContain("@Get('thread/:threadId')");
+  });
+
   it('the member-facing read carries NO permission decorator — every signed-in member may look', () => {
     /*
      * The other direction matters too: /roadmap is the squadron's window onto the plan, and a

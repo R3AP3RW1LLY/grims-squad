@@ -1332,8 +1332,19 @@ export const getRoadmapManageGated = (): Promise<
  * The promote panel's answer for ANY thread — asked unconditionally on thread pages, because
  * the SERVER resolves whether this thread belongs to the Feature Requests board (the same
  * slug-or-name, case-insensitive test publish uses), not the URL. Null for everybody without
- * the webmaster's bit or a fresh step-up, which is what keeps the panel invisible to everyone
- * else: the API refuses, `get()` collapses it, and no panel is drawn.
+ * the webmaster's bit, which is what keeps the panel invisible to everyone else: the API
+ * refuses, `get()` collapses it, and no panel is drawn.
+ *
+ * ★ `/promotable`, NOT `/manage` — AND THE DIFFERENCE IS THE WHOLE FIX ★
+ *
+ * This asked `/v1/roadmap/manage/thread/:id`, which carries the admin gate. Because `get()`
+ * collapses every refusal to null and the panel renders only on an answer, a webmaster who had
+ * not touched the admin console in eight hours got NO panel on a Feature Requests thread —
+ * indistinguishable from an ordinary thread, with nothing saying a step-up was wanted.
+ *
+ * The read now sits on a route gated on SITE_CONFIG alone. Promote itself still posts to
+ * `/v1/roadmap/manage/promote`, which is still behind the second factor, and its refusal is
+ * shown in the panel rather than swallowed.
  */
 export const getRoadmapThreadCard = (
   threadId: string,
@@ -1341,7 +1352,7 @@ export const getRoadmapThreadCard = (
   /** True only when the thread's category IS the Feature Requests board. */
   promotable: boolean;
   card: { id: string; column: RoadmapCard['column'] } | null;
-} | null> => get(`/v1/roadmap/manage/thread/${encodeURIComponent(threadId)}`, { authed: true });
+} | null> => get(`/v1/roadmap/promotable/${encodeURIComponent(threadId)}`, { authed: true });
 
 /**
  * What GMSD AI has learned, per source.

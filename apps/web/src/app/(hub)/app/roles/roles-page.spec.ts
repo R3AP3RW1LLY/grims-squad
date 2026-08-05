@@ -2,8 +2,10 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ALL_PERMISSIONS, DESCRIBES } from './role-editor';
+import { HIERARCHICAL_ROLES, ROLE_PRESETS, maskToString, type RoleKey } from '@grims/shared';
+import { ALL_PERMISSIONS, DESCRIBES, countPermissions, maskDiff } from './role-editor';
 import { groupRoles, LEADERSHIP_CEILING, LADDER_CEILING } from './role-groups';
+import { rolePresets } from './role-presets';
 import type { AdminRoleRow } from '../../../../lib/api';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -159,5 +161,168 @@ describe('grouping roles', () => {
 
   it('the two ceilings do not overlap', () => {
     expect(LEADERSHIP_CEILING).toBeLessThan(LADDER_CEILING);
+  });
+});
+
+/**
+ * Applying a role preset.
+ *
+ * ★ WHY THIS IS SPECIFIED AND NOT JUST WRITTEN ★
+ *
+ * A preset is a one-click change to what a hundred members may do. Three things have to hold, and
+ * every one of them fails silently if it regresses: the list must be the permission model's own
+ * bundles rather than a hand-typed copy that drifts; the masks must cross to the browser as
+ * decimal STRINGS, because SITE_CONFIG is 1n<<63n and a JSON number would arrive rounded into a
+ * plausible-looking different set (INV-006); and the control must stage bits for Preview and Save
+ * rather than writing anything itself.
+ */
+describe('role presets', () => {
+  const presets = rolePresets();
+
+  it('MANDATORY: the list handed to the client IS ROLE_PRESETS — same keys, same order', () => {
+    /*
+     * Derived, never listed. A bundle added to ssot/04-contracts/permissions.ts and missing here
+     * would be a set of permissions the console can only reproduce by ticking it out from memory,
+     * which is the exact problem this control removes.
+     */
+    expect(presets.map((p) => p.key)).toEqual(Object.keys(ROLE_PRESETS));
+  });
+
+  it('MANDATORY: every mask is the shared constant, exactly', () => {
+    for (const p of presets) {
+      const key = p.key as RoleKey;
+      expect(p.mask, `${p.key} mask`).toBe(maskToString(ROLE_PRESETS[key]));
+      // And it round-trips as a bigint, which is how the editor parses it.
+      expect(BigInt(p.mask), `${p.key} round trip`).toBe(ROLE_PRESETS[key]);
+    }
+  });
+
+  it('MANDATORY: masks travel as decimal STRINGS, never numbers (INV-006)', () => {
+    for (const p of presets) {
+      expect(typeof p.mask, `${p.key} is a ${typeof p.mask}`).toBe('string');
+      expect(p.mask, `${p.key} is not decimal`).toMatch(/^\d+$/);
+    }
+
+    /*
+     * The reason, demonstrated rather than asserted in prose: `sysadmin` carries SITE_CONFIG at
+     * 1n<<63n, so its mask cannot survive a trip through a JavaScript number at all. If this ever
+     * became a number on the wire, the browser would receive a rounded mask, tick a plausible set
+     * of boxes, and save it.
+     */
+    const sysadmin = presets.find((p) => p.key === 'sysadmin');
+    expect(sysadmin).toBeDefined();
+    expect(Number.isSafeInteger(Number(sysadmin?.mask))).toBe(false);
+    expect(BigInt(Number(sysadmin?.mask))).not.toBe(BigInt(sysadmin?.mask ?? '0'));
+  });
+
+  it('MANDATORY: every bit in every preset has a checkbox on this page', () => {
+    /*
+     * Otherwise applying a preset would stage a permission the editor cannot render — granted on
+     * save, invisible on screen, and impossible to take off again from here.
+     */
+    const shown = ALL_PERMISSIONS.reduce((mask, [, bit]) => mask | (1n << BigInt(bit)), 0n);
+    for (const [key, mask] of Object.entries(ROLE_PRESETS)) {
+      expect(mask & ~shown, `${key} carries a bit the page does not render`).toBe(0n);
+    }
+  });
+
+  it('marks the ladder rungs as hierarchical and the rest as tags', () => {
+    for (const p of presets) {
+      expect(p.hierarchical, p.key).toBe(HIERARCHICAL_ROLES.includes(p.key as RoleKey));
+    }
+    // Both groups exist, so neither heading in the control is ever empty by construction.
+    expect(presets.some((p) => p.hierarchical)).toBe(true);
+    expect(presets.some((p) => !p.hierarchical)).toBe(true);
+  });
+
+  it('every preset carries a name and a sentence, like every checkbox does', () => {
+    for (const p of presets) {
+      expect(p.name.trim(), `${p.key} name`).not.toBe('');
+      expect(p.name, `${p.key} name is the raw key`).not.toBe(p.key);
+      expect(p.blurb.length, `${p.key} is too terse to help`).toBeGreaterThan(20);
+    }
+  });
+
+  it('MANDATORY: applying a preset stages exactly its bits — additions AND removals', () => {
+    /*
+     * A preset is the WHOLE bundle. Applying `member` to a role that holds FORUM_MODERATE takes
+     * moderation away, and the panel has to say so — a diff that showed only additions would read
+     * as "grant these as well" while quietly revoking.
+     */
+    const officer = BigInt(presets.find((p) => p.key === 'officer')?.mask ?? '0');
+    const member = BigInt(presets.find((p) => p.key === 'member')?.mask ?? '0');
+
+    const down = maskDiff(officer, member);
+    expect(down.adds).toEqual([]);
+    expect(down.removes).toContain('FORUM_MODERATE');
+    expect(down.removes).toContain('MEMBER_MANAGE');
+
+    const up = maskDiff(member, officer);
+    expect(up.removes).toEqual([]);
+    expect(up.adds).toContain('FORUM_MODERATE');
+
+    // Every name in either direction is a permission this page actually renders.
+    const shown = new Set(ALL_PERMISSIONS.map(([name]) => name));
+    for (const name of [...up.adds, ...down.removes]) expect(shown.has(name)).toBe(true);
+  });
+
+  it('MANDATORY: applying to a zero role stages the bundle and nothing else', () => {
+    /*
+     * The case the membership migration left waiting: `grims_squad_members`, `allies` and
+     * `unranked` all seeded at zero, on purpose, "because a migration that quietly granted the
+     * whole squadron a permission bundle nobody chose would be a privilege escalation dressed as
+     * a feature."
+     */
+    const member = BigInt(presets.find((p) => p.key === 'member')?.mask ?? '0');
+    const diff = maskDiff(0n, member);
+    expect(diff.removes).toEqual([]);
+    expect(diff.adds.length).toBe(countPermissions(member));
+    expect(diff.adds).toContain('FORUM_VIEW_MEMBER');
+    // Nothing from the Administration group rides along in the member bundle.
+    expect(diff.adds).not.toContain('ROLE_MANAGE');
+    expect(diff.adds).not.toContain('SITE_CONFIG');
+  });
+
+  it('a preset applied to a role that already holds it stages nothing', () => {
+    const member = BigInt(presets.find((p) => p.key === 'member')?.mask ?? '0');
+    expect(maskDiff(member, member)).toEqual({ adds: [], removes: [] });
+  });
+
+  it('MANDATORY: choosing a preset writes NOTHING — the save path is untouched', () => {
+    /*
+     * The whole safety of this control. A preset that posted straight to the API would be a
+     * one-click permission grant for a hundred members with nothing on screen between the click
+     * and the consequence — no preview naming who is affected, and no audited save.
+     *
+     * Read from the source, because the property is "there is no third network call in this file"
+     * and no amount of exercising the two that exist can prove that.
+     */
+    const editor = readFileSync(resolve(HERE, 'role-editor.tsx'), 'utf8');
+
+    const calls = editor.match(/apiPost</g) ?? [];
+    expect(calls, 'a network call was added to the role editor').toHaveLength(2);
+    expect(editor).toContain('/v1/admin/roles/${selected.id}/preview');
+    expect(editor).toContain('/v1/admin/roles/${selected.id}`');
+    // Save is still impossible before a preview — the editor's oldest rule.
+    expect(editor).toContain('disabled={busy || preview === null || preview.unchanged}');
+    // And applying a preset invalidates any preview on screen, like a hand tick does.
+    expect(editor).toMatch(/function applyPreset[\s\S]{0,600}setPreview\(null\)/);
+  });
+
+  it('MANDATORY: the editor never imports the shared barrel to get these', () => {
+    /*
+     * `@grims/shared`'s index re-exports `nonce.service`, which imports `node:crypto`. A client
+     * component that reaches it fails the webpack build with UnhandledSchemeError and takes every
+     * hub page to a 500. lib/client-imports.spec.ts guards this generally; asserted here too
+     * because the obvious way to write a preset control is the way that breaks the site.
+     */
+    const editor = readFileSync(resolve(HERE, 'role-editor.tsx'), 'utf8');
+    expect(editor).not.toMatch(/from\s+['"]@grims\/shared['"]/);
+    expect(editor).not.toMatch(/from\s+['"]\.\/role-presets['"]/);
+
+    // And the module that DOES import it is only ever pulled by the server component.
+    const page = readFileSync(resolve(HERE, 'page.tsx'), 'utf8');
+    expect(page).toContain("from './role-presets'");
+    expect(page).not.toMatch(/^\s*['"]use client['"]/m);
   });
 });

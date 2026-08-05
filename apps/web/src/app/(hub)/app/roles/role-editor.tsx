@@ -33,6 +33,23 @@ export interface MaskPreview {
 }
 
 /**
+ * One named permission bundle, resolved by the SERVER and handed down as a prop.
+ *
+ * The masks live in `@grims/shared`, whose barrel reaches `node:crypto` and must never enter a
+ * browser bundle — so `role-presets.ts` builds this list in the server component and this file
+ * only ever reads it. See the note at the top of that file.
+ */
+export interface RolePreset {
+  readonly key: string;
+  readonly name: string;
+  readonly blurb: string;
+  /** DECIMAL STRING, like every other mask on this page. `sysadmin` is past 2^63 (INV-006). */
+  readonly mask: string;
+  /** A rung on the promotion ladder, as opposed to an orthogonal tag that confers no rank. */
+  readonly hierarchical: boolean;
+}
+
+/**
  * Every permission, grouped by the part of the site it governs.
  *
  * ★ BIT ORDER IS NOT READING ORDER ★
@@ -331,6 +348,34 @@ export function countPermissions(mask: bigint): number {
 }
 
 /**
+ * What moving from one mask to another turns ON and what it turns OFF.
+ *
+ * ★ BOTH DIRECTIONS, BECAUSE A PRESET IS A WHOLE BUNDLE ★
+ *
+ * Choosing "Member" for a role that currently holds FORUM_MODERATE does not add the member
+ * permissions to it — it REPLACES the mask, and moderation goes. A control that showed only the
+ * additions would read as "grant these as well" while silently revoking, which on this page is
+ * the difference between a considered change and an accident nobody can see until somebody
+ * complains they cannot lock a thread any more.
+ *
+ * Walks `ALL_PERMISSIONS` rather than the raw bits, so a bit set in a stored mask that this page
+ * does not render cannot appear in the diff under a name it does not have — and, equally, cannot
+ * be silently dropped from the list of things that changed.
+ */
+export function maskDiff(from: bigint, to: bigint): { adds: string[]; removes: string[] } {
+  const adds: string[] = [];
+  const removes: string[] = [];
+  for (const [name, bit] of ALL_PERMISSIONS) {
+    const b = 1n << BigInt(bit);
+    const had = (from & b) !== 0n;
+    const will = (to & b) !== 0n;
+    if (!had && will) adds.push(name);
+    if (had && !will) removes.push(name);
+  }
+  return { adds, removes };
+}
+
+/**
  * The role editor.
  *
  * ★ THE PREVIEW IS NOT OPTIONAL ★
@@ -343,7 +388,13 @@ export function countPermissions(mask: bigint): number {
  * All arithmetic is BigInt. A permission mask above 2^53 loses precision as a
  * JavaScript number, and SITE_CONFIG alone is 1n<<63n.
  */
-export function RoleEditor({ groups }: { groups: readonly RoleGroup[] }) {
+export function RoleEditor({
+  groups,
+  presets,
+}: {
+  groups: readonly RoleGroup[];
+  presets: readonly RolePreset[];
+}) {
   const router = useRouter();
   /*
    * ★ THE ROLE LIST IS STATE, NOT A PROP READ STRAIGHT THROUGH ★
@@ -382,6 +433,13 @@ export function RoleEditor({ groups }: { groups: readonly RoleGroup[] }) {
    * "you do not hold ROLE_MANAGE" would repeat the exact mistake this release fixes.
    */
   const [needsCode, setNeedsCode] = useState(false);
+  /*
+   * Which preset was applied, if one was. Kept so the staged diff can NAME the bundle it came
+   * from — "these thirty permissions appeared" is a great deal less answerable than "Member was
+   * applied". Cleared when another role is picked, and deliberately NOT cleared by a hand tick:
+   * the panel says the bundle has since been adjusted instead, which is the true account.
+   */
+  const [applied, setApplied] = useState<RolePreset | null>(null);
 
   function choose(role: RoleRow) {
     setSelected(role);
@@ -389,6 +447,7 @@ export function RoleEditor({ groups }: { groups: readonly RoleGroup[] }) {
     setPreview(null);
     setSaved(null);
     setError(null);
+    setApplied(null);
   }
 
   function toggle(bit: number) {
@@ -396,6 +455,28 @@ export function RoleEditor({ groups }: { groups: readonly RoleGroup[] }) {
     setMask((m) => (m & b) === b ? m & ~b : m | b);
     // Any edit invalidates the preview. Leaving a stale one on screen next to
     // a Save button is how somebody saves a change they never previewed.
+    setPreview(null);
+    setSaved(null);
+  }
+
+  /**
+   * Applying a preset STAGES it. It does not save.
+   *
+   * ★ THE WHOLE POINT OF THE CONTROL ★
+   *
+   * The checkboxes below are rewritten to exactly this bundle, the staged diff says what that
+   * added and what it removed, and then the existing road out is the only road out: Preview,
+   * which names every member who gains or loses something, and Save, which is the audited
+   * write. A preset that wrote straight to the API would be a one-click permission grant for a
+   * hundred members with nothing on screen between the click and the consequence.
+   *
+   * `BigInt(p.mask)` — the mask arrives as a decimal string and is never parsed as a number.
+   */
+  function applyPreset(p: RolePreset) {
+    setMask(BigInt(p.mask));
+    setApplied(p);
+    // Same reasoning as `toggle`: the mask changed, so any preview on screen is about a
+    // different mask and must not sit next to an enabled Save button.
     setPreview(null);
     setSaved(null);
   }
@@ -470,6 +551,19 @@ export function RoleEditor({ groups }: { groups: readonly RoleGroup[] }) {
       setBusy(false);
     }
   }
+
+  /*
+   * ★ DIRTY IS A MASK COMPARISON, NOT A COUNT COMPARISON ★
+   *
+   * The "unsaved" flag used to compare `countPermissions(mask)` against the count of the stored
+   * mask, which is blind to every change that swaps one permission for another — turn
+   * FORUM_MODERATE off and OPS_CREATE on and the count is identical, so the page said nothing was
+   * pending. Applying a preset makes that the ordinary case rather than a corner one, so the
+   * indicator now asks the only question that answers it: is the staged mask the stored mask?
+   */
+  const savedMask = selected === null ? 0n : BigInt(selected.permMask);
+  const dirty = selected !== null && mask !== savedMask;
+  const staged = maskDiff(savedMask, mask);
 
   return (
     <>
@@ -561,7 +655,9 @@ export function RoleEditor({ groups }: { groups: readonly RoleGroup[] }) {
           <p className="rounded border border-dashed border-[var(--color-border-hairline)] px-5 py-6 text-sm leading-relaxed text-[var(--color-text-secondary)]">
             Pick a role to see and change what it may do. Every role on this page
             is editable, including the floor that applies to a member holding no
-            rank at all.
+            rank at all. The named bundles the permission model defines are
+            offered there as a starting point, and each one is previewed and
+            saved like any other change.
           </p>
         ) : (
           <>
@@ -574,9 +670,7 @@ export function RoleEditor({ groups }: { groups: readonly RoleGroup[] }) {
               </h3>
               <span className="font-mono text-[11px] text-[var(--color-text-secondary)]">
                 {countPermissions(mask)} of {ALL_PERMISSIONS.length} permissions
-                {countPermissions(mask) !== countPermissions(BigInt(selected.permMask)) && (
-                  <span className="ml-2 text-[var(--color-brand-orange)]">unsaved</span>
-                )}
+                {dirty && <span className="ml-2 text-[var(--color-brand-orange)]">unsaved</span>}
               </span>
             </div>
 
@@ -604,6 +698,198 @@ export function RoleEditor({ groups }: { groups: readonly RoleGroup[] }) {
               <p className="mt-4 rounded border border-[var(--color-brand-cyan-bright)] px-4 py-3 text-sm text-[var(--color-brand-cyan-bright)]">
                 {saved}
               </p>
+            )}
+
+            {/*
+              ★ START FROM A PRESET — THE BUNDLE, NOT TWENTY TICKS ★
+
+              The membership roles were seeded with a mask of zero on purpose: "a migration that
+              quietly granted the whole squadron a permission bundle nobody chose would be a
+              privilege escalation dressed as a feature. The page exists to set them
+              deliberately." (20260729040000_membership_roles.)
+
+              This is that page keeping its side of the bargain. Setting "member" by hand was
+              thirty correct ticks recalled from memory, and a wrong tick here is a security
+              decision made by accident — so the bundles the permission model already defines are
+              offered as bundles, and NOTHING about the write path changes: the boxes below are
+              rewritten, the diff says what moved, and Preview and Save are still the only way
+              out.
+            */}
+            <section className="mt-6 rounded-lg border border-[var(--color-border-hairline)] p-4">
+              <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-secondary)]">
+                Start from a preset
+              </p>
+              <p className="mt-2 text-[11px] leading-relaxed text-[var(--color-text-secondary)]">
+                A preset is the whole bundle rather than an addition: choosing one makes this
+                role&rsquo;s permissions exactly that set, turning some on and others off. Nothing
+                is written by the choice. The boxes below change so you can read what is about to
+                be granted, and it leaves through Preview and Save like every other edit here.
+              </p>
+              <p className="mt-1.5 text-[11px] leading-relaxed text-[var(--color-text-dim)]">
+                These are starting bundles, not a locked authority. The role stays editable
+                afterwards, and the platform reads the mask stored on this page — never the
+                preset it came from.
+              </p>
+
+              {(
+                [
+                  [
+                    'Ranks',
+                    true,
+                    'The ladder, each one carrying everything below it.',
+                  ],
+                  [
+                    'Tags',
+                    false,
+                    'Orthogonal to rank. Three of these grant nothing at all, so applying one empties the role.',
+                  ],
+                ] as ReadonlyArray<readonly [string, boolean, string]>
+              ).map(([title, rung, note]) => {
+                const items = presets.filter((p) => p.hierarchical === rung);
+                if (items.length === 0) return null;
+                return (
+                  <div key={title} className="mt-4">
+                    <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-[var(--color-brand-orange)]">
+                      {title}
+                    </p>
+                    <p className="mt-1 text-[11px] leading-relaxed text-[var(--color-text-dim)]">
+                      {note}
+                    </p>
+                    <ul className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                      {items.map((p) => {
+                        /*
+                          `BigInt`, never `Number`: sysadmin carries SITE_CONFIG at 1n<<63n, and
+                          a mask parsed as a JavaScript number arrives rounded into a different
+                          — and entirely plausible-looking — set of permissions (INV-006).
+                        */
+                        const bundle = BigInt(p.mask);
+                        const matches = mask === bundle;
+                        return (
+                          <li key={p.key}>
+                            <button
+                              type="button"
+                              onClick={() => applyPreset(p)}
+                              aria-pressed={matches}
+                              title={p.blurb}
+                              className={`w-full rounded border px-3 py-2 text-left transition-colors ${
+                                matches
+                                  ? 'border-[var(--color-brand-cyan-bright)] bg-[color-mix(in_srgb,var(--color-brand-cyan-bright)_10%,transparent)]'
+                                  : 'border-[var(--color-border-hairline)] hover:border-[var(--color-border-active)]'
+                              }`}
+                            >
+                              <span className="flex items-center justify-between gap-3">
+                                <span
+                                  className={`min-w-0 truncate text-sm ${
+                                    matches
+                                      ? 'text-[var(--color-brand-cyan-bright)]'
+                                      : 'text-[var(--color-text-primary)]'
+                                  }`}
+                                >
+                                  {p.name}
+                                </span>
+                                <span
+                                  className={`shrink-0 rounded-full border px-2 py-0.5 font-mono text-[9px] ${
+                                    countPermissions(bundle) === 0
+                                      ? 'border-[var(--color-border-hairline)] text-[var(--color-text-dim)]'
+                                      : 'border-[var(--color-brand-cyan)] text-[var(--color-brand-cyan-bright)]'
+                                  }`}
+                                  title={`${countPermissions(bundle)} of ${ALL_PERMISSIONS.length} permissions`}
+                                >
+                                  {countPermissions(bundle)}
+                                </span>
+                              </span>
+                              {/*
+                                Shown, not only tooltipped — the same rule as the checkbox
+                                descriptions below. A tooltip is invisible on a touch screen and
+                                to anybody who does not think to hover, and this sentence is what
+                                makes the bundle decidable.
+                              */}
+                              <span className="mt-1 block text-[10px] leading-snug text-[var(--color-text-dim)]">
+                                {p.blurb}
+                              </span>
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                );
+              })}
+            </section>
+
+            {/*
+              ★ WHAT IS STAGED, BEFORE ANYTHING IS WRITTEN ★
+
+              Both directions, always. A preset REPLACES the mask, so the interesting half is
+              frequently what it takes away — and a panel that listed only the additions would
+              read as "grant these as well" while quietly revoking moderation from an officer
+              rank.
+
+              It renders for hand ticks too, not only for presets: the question "what is
+              different from what is stored" has the same answer however the mask got that way.
+            */}
+            {dirty && (
+              <section
+                aria-live="polite"
+                className="mt-6 rounded-lg border border-[var(--color-brand-orange)] p-4"
+              >
+                <p className="font-mono text-[10px] uppercase tracking-[0.24em] text-[var(--color-brand-orange)]">
+                  Staged, not saved
+                </p>
+                <p className="mt-2 text-[11px] leading-relaxed text-[var(--color-text-secondary)]">
+                  {applied === null
+                    ? `Changed by hand against what is stored for ${selected.name}.`
+                    : mask === BigInt(applied.mask)
+                      ? `${applied.name} applied to ${selected.name}, as the whole bundle. Against what is stored, that is:`
+                      : `${applied.name} applied to ${selected.name} and then adjusted by hand. Against what is stored, that is:`}
+                </p>
+
+                <div className="mt-3 grid grid-cols-1 gap-5 lg:grid-cols-2">
+                  <div>
+                    <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--color-brand-cyan-bright)]">
+                      Turns on ({staged.adds.length})
+                    </p>
+                    {staged.adds.length === 0 ? (
+                      <p className="mt-1 text-[11px] text-[var(--color-text-dim)]">Nothing.</p>
+                    ) : (
+                      <ul className="mt-1 space-y-0.5">
+                        {staged.adds.map((name) => (
+                          <li
+                            key={name}
+                            className="font-mono text-[11px] text-[var(--color-brand-cyan-bright)]"
+                          >
+                            + {name}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                  <div>
+                    <p className="font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--color-brand-orange)]">
+                      Turns off ({staged.removes.length})
+                    </p>
+                    {staged.removes.length === 0 ? (
+                      <p className="mt-1 text-[11px] text-[var(--color-text-dim)]">Nothing.</p>
+                    ) : (
+                      <ul className="mt-1 space-y-0.5">
+                        {staged.removes.map((name) => (
+                          <li
+                            key={name}
+                            className="font-mono text-[11px] text-[var(--color-brand-orange)]"
+                          >
+                            &minus; {name}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </div>
+
+                <p className="mt-4 text-[11px] leading-relaxed text-[var(--color-text-dim)]">
+                  This is what changes on the role. Preview answers the other half — which
+                  members gain and lose something, by name — and Save is still the only write.
+                </p>
+              </section>
             )}
 
             <div className="mt-6 space-y-5">

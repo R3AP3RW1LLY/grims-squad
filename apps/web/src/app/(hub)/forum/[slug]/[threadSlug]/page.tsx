@@ -110,13 +110,21 @@ export default async function ThreadPage({
   ]);
 
   /*
-   * "Promote to board", fetched-not-inferred like the access panel above: the API answers only
-   * a stepped-up SITE_CONFIG holder, so `null` here means no panel and no reasoning about
-   * masks in the browser. Asked on EVERY thread page, because whether this thread belongs to
-   * the Feature Requests board is the SERVER's call — the same slug-or-name resolution publish
-   * uses — not a comparison against the URL literal, which would die the day the board was
-   * renamed. For everybody without the webmaster's bit the request is the one gated fetch this
-   * page already makes for the access panel: refused, collapsed to null, no panel.
+   * "Promote to board", fetched-not-inferred like the access panel above: the API answers only a
+   * SITE_CONFIG holder, so `null` here means no panel and no reasoning about masks in the
+   * browser. Asked on EVERY thread page, because whether this thread belongs to the Feature
+   * Requests board is the SERVER's call — the same slug-or-name resolution publish uses — not a
+   * comparison against the URL literal, which would die the day the board was renamed. For
+   * everybody without the webmaster's bit the request is the one gated fetch this page already
+   * makes for the access panel: refused, collapsed to null, no panel.
+   *
+   * ★ THE PERMISSION ALONE, NOT THE STEP-UP ★
+   *
+   * This probe used to require a fresh second factor as well, and a collapsed refusal is
+   * indistinguishable from "not that board" — so a webmaster who had spent the afternoon reading
+   * the forum instead of the console simply had no promote panel, with nothing anywhere saying
+   * why. Whether a thread is on the Feature Requests board and whether a card points at it are
+   * facts they are already looking at; the step-up belongs on the promote, which still has it.
    */
   const roadmap = await getRoadmapThreadCard(thread.id);
   const showRoadmapPanel = roadmap !== null && (roadmap.promotable || roadmap.card !== null);

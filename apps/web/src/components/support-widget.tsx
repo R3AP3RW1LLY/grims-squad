@@ -205,12 +205,28 @@ export function SupportWidget({ signedIn }: { signedIn: boolean }) {
 // The suggestion box — a letter to the webmaster, not a chat turn.
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * One of the sender's own suggestions.
+ *
+ * ★ `outcome`, NOT THE STORED STATUS ★
+ *
+ * Publishing claims the row before the thread exists, so for a moment a suggestion is `published`
+ * with no link — which is also what a moderation-removed thread looks like, and what a publish
+ * that broke halfway leaves behind. The API answers with the disambiguated outcome so this list
+ * never has to guess which of the three it is holding.
+ */
 interface MySuggestion {
   readonly id: string;
   readonly body: string;
-  readonly status: 'new' | 'published' | 'declined';
+  readonly outcome:
+    | 'new'
+    | 'publishing'
+    | 'published'
+    | 'published_thread_gone'
+    | 'publish_incomplete'
+    | 'declined';
   readonly createdAt: string;
-  /** Where it went when it was published — null until then. */
+  /** Where it went when it was published — null until then, and null if it is no longer there. */
   readonly threadLink: string | null;
 }
 
@@ -306,7 +322,7 @@ function SuggestionBox() {
               <li key={s.id} className="rounded-[var(--radius-sm)] border border-[var(--color-border-hairline)] p-3">
                 <p className="text-xs whitespace-pre-wrap text-[var(--color-text-primary)]">{s.body}</p>
                 <p className="mt-1.5 flex items-center gap-2 text-[10px] text-[var(--color-text-secondary)]">
-                  <SuggestionStatusChip status={s.status} threadLink={s.threadLink} />
+                  <SuggestionStatusChip outcome={s.outcome} threadLink={s.threadLink} />
                   <span>{notificationAge(s.createdAt)}</span>
                 </p>
               </li>
@@ -318,14 +334,27 @@ function SuggestionBox() {
   );
 }
 
+/**
+ * The one line a sender gets about what became of their idea.
+ *
+ * ★ FOUR PUBLISHED FACES, NOT ONE ★
+ *
+ * "Published" with no link used to be shown for three different situations: the thread landing
+ * this second, a thread moderation had removed, and a publish that broke between claiming the row
+ * and creating the thread. The first is a good thing happening; the second is somebody's idea
+ * being taken down; the third is a fault. One chip for all three told the sender their suggestion
+ * had been deleted while it was, in fact, going up.
+ *
+ * Every branch here is one `outcome` value, so the API's answer and this list cannot drift.
+ */
 function SuggestionStatusChip({
-  status,
+  outcome,
   threadLink,
 }: {
-  status: MySuggestion['status'];
+  outcome: MySuggestion['outcome'];
   threadLink: string | null;
 }) {
-  if (status === 'published' && threadLink !== null) {
+  if (outcome === 'published' && threadLink !== null) {
     return (
       <a
         href={threadLink}
@@ -335,14 +364,49 @@ function SuggestionStatusChip({
       </a>
     );
   }
-  if (status === 'published') {
+  if (outcome === 'publishing') {
+    /*
+     * In progress, and said as such. `role="status"` because it is a state that changes on its
+     * own — the next load of this list carries the link.
+     */
     return (
-      <span className="rounded-[var(--radius-pill)] border border-[var(--color-brand-cyan)] px-2 py-0.5 tracking-wide text-[var(--color-brand-cyan-bright)] uppercase">
-        Published
+      <span
+        role="status"
+        className="rounded-[var(--radius-pill)] border border-[var(--color-brand-cyan)] px-2 py-0.5 tracking-wide text-[var(--color-brand-cyan-bright)] uppercase"
+      >
+        Going on the board now
       </span>
     );
   }
-  if (status === 'declined') {
+  /*
+   * `published` can only reach here without a link if the API's own rule changed underneath this
+   * file. Falling through to "waiting for review" would be the worst available answer, so the two
+   * share a branch: on the board, not reachable from here.
+   */
+  if (outcome === 'published_thread_gone' || outcome === 'published') {
+    // Honest about both possibilities, and it does not accuse anybody: a thread can also be
+    // somewhere this member cannot read.
+    return (
+      <span
+        title="It was published. The thread is not there any more, or not somewhere you can read."
+        className="rounded-[var(--radius-pill)] border border-[var(--color-border-hairline)] px-2 py-0.5 tracking-wide text-[var(--color-text-secondary)] uppercase"
+      >
+        Published — thread gone
+      </span>
+    );
+  }
+  if (outcome === 'publish_incomplete') {
+    // The double failure. Naming it is the whole point: a sender looking at this can say so.
+    return (
+      <span
+        title="The webmaster published this and the thread did not land. Mention it in the chat next door and it can be published again."
+        className="rounded-[var(--radius-pill)] border border-[var(--color-semantic-hostile)] px-2 py-0.5 tracking-wide text-[var(--color-semantic-hostile-bright)] uppercase"
+      >
+        Publish did not finish
+      </span>
+    );
+  }
+  if (outcome === 'declined') {
     return (
       <span className="rounded-[var(--radius-pill)] border border-[var(--color-border-hairline)] px-2 py-0.5 tracking-wide text-[var(--color-text-secondary)] uppercase">
         Not taken up

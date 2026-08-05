@@ -12,7 +12,9 @@ import {
   featureRequestsWhere,
   openingPostFor,
   reviewProblem,
+  suggestionOutcome,
   titleFrom,
+  type SuggestionOutcome,
   type SuggestionStatus,
 } from './suggestion-box.js';
 
@@ -39,7 +41,18 @@ import {
 export interface SuggestionMineView {
   readonly id: string;
   readonly body: string;
-  readonly status: SuggestionStatus;
+  /**
+   * What this suggestion IS to its sender — the stored status disambiguated by whether a thread
+   * exists yet and whether they can reach it.
+   *
+   * ★ THE STORED `status` IS DELIBERATELY NOT EXPOSED HERE ★
+   *
+   * It cannot answer the question this list asks. `published` covers a thread landing right now,
+   * a thread the squadron is voting on, a thread moderation removed, and a publish that broke
+   * halfway — and a renderer handed both fields would have two answers to one question, which is
+   * how the ambiguous face got drawn in the first place. See `suggestionOutcome`.
+   */
+  readonly outcome: SuggestionOutcome;
   readonly createdAt: Date;
   /** Where it went when it was published, ready for an <a href>. Null until then — and null
    *  if the thread has since been removed by moderation. */
@@ -88,7 +101,19 @@ export class SuggestionsService {
       // Scoped by OWNER in the query itself — the support-desk rule.
       where: { userId },
       orderBy: { createdAt: 'desc' },
-      select: { id: true, body: true, status: true, createdAt: true, publishedThreadId: true },
+      select: {
+        id: true,
+        body: true,
+        status: true,
+        createdAt: true,
+        publishedThreadId: true,
+        /*
+         * The claim's own timestamp — what tells "the thread is landing this second" apart from
+         * "this was claimed an hour ago and nothing ever landed". Publish stamps it in the same
+         * conditional update that claims the row, so it is exactly as old as the claim.
+         */
+        reviewedAt: true,
+      },
     });
 
     /*
@@ -109,13 +134,22 @@ export class SuggestionsService {
       for (const t of threads) links.set(t.id, `/forum/${t.category.slug}/${t.slug}`);
     }
 
-    return rows.map((r) => ({
-      id: r.id,
-      body: r.body,
-      status: r.status,
-      createdAt: r.createdAt,
-      threadLink: r.publishedThreadId === null ? null : (links.get(r.publishedThreadId) ?? null),
-    }));
+    /*
+     * One `now` for the whole list, so two rows claimed in the same instant cannot land on
+     * opposite sides of the landing window and read as two different things.
+     */
+    const now = new Date();
+    return rows.map((r) => {
+      const threadLink =
+        r.publishedThreadId === null ? null : (links.get(r.publishedThreadId) ?? null);
+      return {
+        id: r.id,
+        body: r.body,
+        outcome: suggestionOutcome({ ...r, threadLink }, now),
+        createdAt: r.createdAt,
+        threadLink,
+      };
+    });
   }
 
   // ── The webmaster's inbox ──────────────────────────────────────────────────
@@ -200,12 +234,17 @@ export class SuggestionsService {
      * claimed after creating, and the losing reviewer minted a thread before discovering the
      * claim was lost.
      *
-     * The claim is `published` with a NULL thread id — a shape `listMine` already renders
-     * honestly (status without a link, the same face a moderation-removed thread wears) for
-     * the moment it takes the thread to land. If thread creation then THROWS, the catch below
-     * reverts the claim to `new`, so a failed publish leaves the suggestion back in the queue
-     * rather than stranded. Only if the revert itself also fails does a `published` row with
-     * no thread persist — a double failure the state machine tolerates by design.
+     * The claim is `published` with a NULL thread id. For the moment it takes the thread to
+     * land, that shape is what the sender's own list holds — and it used to render as "published,
+     * no link", which is the same face a moderation-removed thread wears. `suggestionOutcome`
+     * now tells the two apart from `reviewedAt`: a claim seconds old is `publishing` and says so
+     * in progress terms, an old one is `publish_incomplete`. Nothing here changed to achieve
+     * that; the reader stopped being lied to, and the claim is still the claim.
+     *
+     * If thread creation then THROWS, the catch below reverts the claim to `new`, so a failed
+     * publish leaves the suggestion back in the queue rather than stranded. Only if the revert
+     * itself also fails does a `published` row with no thread persist — a double failure the
+     * state machine tolerates by design, and the one `publish_incomplete` names.
      */
     const claimed = await this.db.suggestion.updateMany({
       where: { id: suggestion.id, status: 'new' },

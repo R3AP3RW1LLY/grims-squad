@@ -4,6 +4,7 @@ import { RoleEditor } from './role-editor';
 import { ViewAsPicker } from './view-as-picker';
 import { MappingEditor } from './mapping-editor';
 import { groupRoles } from './role-groups';
+import { rolePresets } from './role-presets';
 import { StepUp } from '../step-up';
 import { NoAccess, AdminUnavailable } from '../no-access';
 import { PageHeader, Section, StatGrid, StatTile } from '../../../../components/hub-page';
@@ -153,7 +154,20 @@ export default async function RolesPage({
             <ViewAsPicker roles={roles.roles} />
           </div>
 
-          <RoleEditor groups={groups} />
+          {/*
+            ★ THE PRESET MASKS ARE RESOLVED HERE, ON THE SERVER ★
+
+            `rolePresets()` reads `ROLE_PRESETS` from the shared permission model. That import is
+            legal in this file and illegal inside `role-editor.tsx`: the shared barrel reaches
+            `node:crypto`, and a client component that pulls it fails the webpack build and takes
+            every hub page to a 500 (lib/client-imports.spec.ts). Same reason the editor keeps its
+            own literal list of permission bits rather than importing one.
+
+            They arrive as decimal STRINGS. `sysadmin` holds SITE_CONFIG at 1n<<63n, and a mask
+            serialised as a JSON number comes back rounded — a different set of permissions that
+            still looks entirely plausible (INV-006).
+          */}
+          <RoleEditor groups={groups} presets={rolePresets()} />
         </Section>
       ) : (
         <Section

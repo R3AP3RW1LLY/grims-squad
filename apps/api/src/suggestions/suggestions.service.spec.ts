@@ -149,6 +149,83 @@ describe('the member door', () => {
   });
 });
 
+describe("the sender's list tells the transient apart from the removed", () => {
+  /*
+   * ★ THE SHAPE THE CLAIM LEAVES BEHIND ★
+   *
+   * `publish` claims the row — `published`, thread id NULL — before creating the thread, which is
+   * what resolves the two-webmasters race before either mints anything. That is unchanged and
+   * must stay unchanged. What changed is that the few milliseconds it lasts no longer wear the
+   * same face as a thread moderation removed.
+   *
+   * Driven through `listMine` rather than the pure function alone, because the property being
+   * protected is that the SERVICE feeds it the right row — `reviewedAt` has to be selected, and a
+   * missing column would silently make every publish read as a fault.
+   */
+  function listing(rows: ReadonlyArray<Record<string, unknown>>, threads: unknown[] = []) {
+    const { svc } = stub({});
+    const db = (svc as unknown as { db: { suggestion: Record<string, unknown> } }).db;
+    db.suggestion['findMany'] = async () => rows;
+    const acl = (svc as unknown as { acl: { forCaller: unknown } }).acl;
+    acl.forCaller = async () => ({ forumThread: { findMany: async () => threads } });
+    return svc.listMine('member-1');
+  }
+
+  const base = {
+    id: 's1',
+    body: 'Dark mode for the roster',
+    status: 'published',
+    createdAt: new Date(),
+  };
+
+  it('MANDATORY: a claim made this instant reads as going up, not as published', async () => {
+    const [row] = await listing([
+      { ...base, publishedThreadId: null, reviewedAt: new Date() },
+    ]);
+    expect(row?.outcome).toBe('publishing');
+    expect(row?.threadLink).toBeNull();
+  });
+
+  it('MANDATORY: a thread that landed reads as published, with the link the reader may follow', async () => {
+    const [row] = await listing(
+      [{ ...base, publishedThreadId: 'th1', reviewedAt: new Date() }],
+      [{ id: 'th1', slug: 'dark-mode-abc123', category: { slug: 'feature-requests' } }],
+    );
+    expect(row?.outcome).toBe('published');
+    expect(row?.threadLink).toBe('/forum/feature-requests/dark-mode-abc123');
+  });
+
+  it('MANDATORY: a removed thread reads as removed, NOT as still going up', async () => {
+    // A thread id exists — it was genuinely published — and the reader's own bound client returns
+    // nothing for it. The distinction the transient used to destroy.
+    const [row] = await listing([
+      { ...base, publishedThreadId: 'th1', reviewedAt: new Date() },
+    ]);
+    expect(row?.outcome).toBe('published_thread_gone');
+    expect(row?.threadLink).toBeNull();
+  });
+
+  it('MANDATORY: an old claim with no thread is a fault, not a publication', async () => {
+    // The double failure `publish` tolerates by design: creation threw and the revert threw too.
+    const [row] = await listing([
+      { ...base, publishedThreadId: null, reviewedAt: new Date(Date.now() - 3_600_000) },
+    ]);
+    expect(row?.outcome).toBe('publish_incomplete');
+  });
+
+  it('MANDATORY: the stored status is not handed to the reader at all', async () => {
+    /*
+     * Two answers to one question is how the ambiguous face was drawn in the first place: a
+     * renderer given both would reasonably branch on `status` and be wrong for three of the four
+     * published cases.
+     */
+    const [row] = await listing([
+      { ...base, publishedThreadId: null, reviewedAt: new Date() },
+    ]);
+    expect(row).not.toHaveProperty('status');
+  });
+});
+
 describe('publish — one click, one real thread, one credited sender', () => {
   it('MANDATORY: creates the thread through ThreadService AS the webmaster, crediting the sender', async () => {
     const { svc, rec } = stub({});

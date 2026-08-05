@@ -91,6 +91,99 @@ export function cleanSuggestionBody(raw: unknown): { body: string } | { problem:
 
 export type SuggestionStatus = 'new' | 'published' | 'declined';
 
+// ─────────────────────────────────────────────────────────────────────────────
+// WHAT THE SENDER IS TOLD
+//
+// ★ THE TRANSIENT SHAPE, AND WHY IT IS DERIVED RATHER THAN STORED ★
+//
+// Publish claims the row — `published`, thread id still NULL — BEFORE creating the thread, so two
+// webmasters racing the same suggestion resolve to one winner before either mints anything. That
+// claim is correct and stays exactly as it is. Its cost is a few milliseconds in which the
+// sender's own list holds a `published` row with no link.
+//
+// A `published` row with no link is ALSO what a moderation-removed thread looks like, and what a
+// double failure (creation threw, the revert threw too) leaves behind for good. Three different
+// situations wearing one face, one of which reads as "the squadron deleted your idea" while the
+// thread is still being written.
+//
+// A fourth STORED status — `publishing` — would need an enum value, a migration, and a state
+// machine edge that exists for a few milliseconds and can be orphaned by a crash between the two
+// writes. It would put a transient of the WRITE path into the schema, where it would then have to
+// be reasoned about by every reader forever.
+//
+// So the stored machine keeps its three states and the READER gets an honest answer computed from
+// what is already on the row: the claim's own timestamp says whether the thread is still landing.
+// Nothing about the race safety or the failure revert changes; only what the sender is shown.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * How long a claimed-but-threadless suggestion reads as still landing.
+ *
+ * Generous on purpose. The real gap is one thread creation — sanitising, screening and a couple of
+ * writes, so milliseconds — and this is measured against a clock the reader may be several seconds
+ * behind. Erring long means a slow publish reads as "going up now" for a moment too many; erring
+ * short means it reads as "something went wrong" while it is going perfectly well, which is the
+ * mistake worth avoiding.
+ */
+export const PUBLISH_LANDING_MS = 30_000;
+
+/**
+ * What a suggestion IS, to the person who sent it.
+ *
+ * Not the stored status: it is the stored status plus the two facts that disambiguate it — does a
+ * thread id exist, and can this reader reach the thread. `new` and `declined` pass through
+ * unchanged because nothing about them is ambiguous.
+ *
+ *   publishing           claimed seconds ago, thread still being created. In progress.
+ *   published            on the board, and here is the link.
+ *   published_thread_gone  on the board, but the thread is not there for this reader — removed by
+ *                          moderation, or in a category they cannot see.
+ *   publish_incomplete   claimed long ago and no thread ever landed. The double failure the
+ *                        publish path tolerates by design, said out loud instead of disguised.
+ */
+export type SuggestionOutcome =
+  | 'new'
+  | 'publishing'
+  | 'published'
+  | 'published_thread_gone'
+  | 'publish_incomplete'
+  | 'declined';
+
+/**
+ * Which of those a row is, right now.
+ *
+ * `threadLink` is passed in rather than looked up: it is resolved through the READER'S own bound
+ * client, so "gone" means gone as far as this person is concerned, which is the only honest
+ * meaning available here.
+ */
+export function suggestionOutcome(
+  row: {
+    readonly status: SuggestionStatus;
+    readonly publishedThreadId: string | null;
+    readonly reviewedAt: Date | null;
+    readonly threadLink: string | null;
+  },
+  now: Date = new Date(),
+): SuggestionOutcome {
+  if (row.status !== 'published') return row.status;
+
+  if (row.publishedThreadId !== null) {
+    return row.threadLink === null ? 'published_thread_gone' : 'published';
+  }
+
+  // Claimed, nothing stamped yet. Either the thread is landing this instant, or it never did.
+  if (row.reviewedAt === null) return 'publish_incomplete';
+
+  /*
+   * Bounded BOTH ways, like the step-up window and for a related reason: an unbounded lower bound
+   * would let a timestamp ahead of the reader's clock read as "landing" forever. This one is not
+   * attacker-controlled — the server stamps it — so the tolerance is symmetric rather than zero,
+   * which is what stops a second of clock drift turning a healthy publish into an alarm.
+   */
+  const age = now.getTime() - row.reviewedAt.getTime();
+  return age > -PUBLISH_LANDING_MS && age < PUBLISH_LANDING_MS ? 'publishing' : 'publish_incomplete';
+}
+
 /** Why a suggestion may not be reviewed this way, or null when it may. Shown as written. */
 export function reviewProblem(
   status: SuggestionStatus,

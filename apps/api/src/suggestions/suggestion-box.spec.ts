@@ -2,12 +2,14 @@ import { describe, expect, it } from 'vitest';
 import {
   FEATURE_REQUESTS_NAME,
   FEATURE_REQUESTS_SLUG,
+  PUBLISH_LANDING_MS,
   SUGGESTION_MAX_CHARS,
   cleanSuggestionBody,
   featureRequestsWhere,
   isFeatureRequestsBoard,
   openingPostFor,
   reviewProblem,
+  suggestionOutcome,
   titleFrom,
 } from './suggestion-box.js';
 
@@ -61,6 +63,96 @@ describe('the review state machine', () => {
         expect(problem).toContain('already');
       }
     }
+  });
+});
+
+/**
+ * What the SENDER is told, which is not the stored status.
+ *
+ * ★ THE FACE THE TRANSIENT USED TO WEAR ★
+ *
+ * Publish claims the row — `published`, thread id NULL — before creating the thread, so the race
+ * resolves to one winner before anything is minted. For the few milliseconds that takes, the
+ * sender's list holds a `published` row with no link, and so does a suggestion whose thread
+ * moderation removed, and so does a publish that broke halfway. Three situations, one chip, and
+ * the reader's most natural reading of it was "they deleted my idea".
+ *
+ * The stored machine above is untouched — three states, no migration, no transient in the schema.
+ * These are the four answers derived from what the row already carries.
+ */
+describe('what a suggestion is to its sender', () => {
+  const NOW = new Date('2026-08-04T12:00:00Z');
+  const row = (over: Partial<Parameters<typeof suggestionOutcome>[0]> = {}) =>
+    suggestionOutcome(
+      {
+        status: 'published',
+        publishedThreadId: null,
+        reviewedAt: NOW,
+        threadLink: null,
+        ...over,
+      },
+      NOW,
+    );
+
+  it('passes `new` and `declined` straight through — nothing about them is ambiguous', () => {
+    expect(row({ status: 'new', reviewedAt: null })).toBe('new');
+    expect(row({ status: 'declined' })).toBe('declined');
+  });
+
+  it('MANDATORY: a claim made this instant reads as IN PROGRESS, not as published', () => {
+    // The exact shape `publish` leaves between the conditional claim and the thread stamp.
+    expect(row({ reviewedAt: NOW })).toBe('publishing');
+    expect(row({ reviewedAt: new Date(NOW.getTime() - 1_000) })).toBe('publishing');
+  });
+
+  it('MANDATORY: a thread that landed reads as published, with its link', () => {
+    expect(
+      row({ publishedThreadId: 'th1', threadLink: '/forum/feature-requests/dark-mode' }),
+    ).toBe('published');
+  });
+
+  it('MANDATORY: published-but-removed still reads honestly, and NOT as in progress', () => {
+    /*
+     * The case the transient was being confused with. A thread id exists, so this was genuinely
+     * published; the link is null because moderation removed the thread or the reader cannot see
+     * the category. Age is irrelevant here — a removed thread reads the same a year later.
+     */
+    expect(row({ publishedThreadId: 'th1', threadLink: null })).toBe('published_thread_gone');
+    expect(
+      suggestionOutcome(
+        { status: 'published', publishedThreadId: 'th1', reviewedAt: NOW, threadLink: null },
+        NOW,
+      ),
+    ).toBe('published_thread_gone');
+  });
+
+  it('MANDATORY: a claim older than the window is a FAULT, said out loud', () => {
+    /*
+     * The double failure the publish path tolerates by design: creation threw AND the revert threw
+     * too, so a `published` row with no thread persists. It used to render as an ordinary
+     * published suggestion forever.
+     */
+    const old = new Date(NOW.getTime() - PUBLISH_LANDING_MS - 1_000);
+    expect(row({ reviewedAt: old })).toBe('publish_incomplete');
+    // And a claimed row with no review stamp at all — a shape nothing writes, and still not a lie.
+    expect(row({ reviewedAt: null })).toBe('publish_incomplete');
+  });
+
+  it('the landing window is bounded on BOTH sides', () => {
+    /*
+     * An unbounded lower bound would let a stamp ahead of the reader's clock read as "landing"
+     * forever. Not attacker-controlled — the server writes it — so the tolerance is symmetric,
+     * which is what stops a second of drift turning a healthy publish into an alarm.
+     */
+    const farFuture = new Date(NOW.getTime() + PUBLISH_LANDING_MS + 1_000);
+    expect(row({ reviewedAt: farFuture })).toBe('publish_incomplete');
+    expect(row({ reviewedAt: new Date(NOW.getTime() + 1_000) })).toBe('publishing');
+  });
+
+  it('the window is generous, because the wrong error is the costly one', () => {
+    // A slow publish reading as "going up" for a moment too long costs nothing. The reverse tells
+    // a member their idea broke while it is going perfectly well.
+    expect(PUBLISH_LANDING_MS).toBeGreaterThanOrEqual(10_000);
   });
 });
 

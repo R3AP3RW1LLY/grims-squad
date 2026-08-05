@@ -44,7 +44,16 @@ export class RoadmapController {
  * The admin controller's exact idiom — `AdminGateGuard` + `@RequiresTwoFactor()`. What this
  * board says is what the whole squadron is told is being built; rewriting it is admin-console
  * work, and enrolment without a fresh code in THIS session is what a stolen cookie has. The
- * member-facing read below carries neither decorator: reading the roadmap is every member's.
+ * member-facing read above carries neither decorator: reading the roadmap is every member's.
+ *
+ * ★ EVERY ROUTE HERE MUTATES, AND THAT IS NOW LOAD-BEARING ★
+ *
+ * The promote panel's read used to sit in this class, which meant an idle webmaster's thread page
+ * asked a step-up-gated question, was refused, and rendered no panel — a control that vanished
+ * rather than one that said why. It moved to `RoadmapPromotableController` below, gated on
+ * SITE_CONFIG alone. What is left in here is create, edit, move, archive, restore, promote and
+ * the console's own list: writes, and the screen you do them from. A read added to this class
+ * again would degrade to invisibility the same way, so it belongs below instead.
  */
 @UseGuards(AdminGateGuard)
 @RequiresTwoFactor()
@@ -138,17 +147,53 @@ export class RoadmapManageController {
     csrf(req);
     return this.roadmap.promote(webmasterId, body.threadId);
   }
+}
+
+/**
+ * The promote panel's PROBE: is this thread on the Feature Requests board, and is it already on
+ * the roadmap?
+ *
+ * ★ SITE_CONFIG, AND DELIBERATELY NOT BEHIND THE SECOND FACTOR ★
+ *
+ * This route lived on the manage controller above, and being there is what made the panel
+ * disappear. The step-up window is eight hours of admin ACTIVITY; a webmaster reading the forum
+ * all afternoon is not doing admin activity, so nine hours after their last code the thread page
+ * asked this question, was refused, and drew no panel at all. Not a locked button with a reason —
+ * nothing. The feature simply stopped existing for its only user, and the page could not tell
+ * that from "this is not a Feature Requests thread".
+ *
+ * A refusal must never degrade to invisibility. So the READ moved here, where it is gated on the
+ * webmaster's bit alone, and every MUTATION stayed above with `AdminGateGuard` and
+ * `@RequiresTwoFactor()` on it: promote, create, edit, move, archive, restore.
+ *
+ * ★ WHY LOWERING THIS GATE IS SAFE, STATED PLAINLY ★
+ *
+ * What it discloses to a SITE_CONFIG holder — the only people it answers at all — is two facts
+ * about a thread they are already reading: which board it is on, and whether a roadmap card
+ * points at it. The board is on their screen. The card is on /roadmap, which every signed-in
+ * member may read. Nothing here changes anything, and the thread is resolved through the
+ * caller's own bound client, so a thread they cannot see is `promotable: false` exactly as if it
+ * were an ordinary thread.
+ *
+ * The step-up still bites where it matters: pressing Promote hits the guarded route above and is
+ * refused with the admin gate's own sentence, which the panel shows. A visible control that says
+ * why it refused is the honest shape; an invisible one is not.
+ */
+@Controller('v1/roadmap/promotable')
+@RequiresPermission(Permission.SITE_CONFIG)
+export class RoadmapPromotableController {
+  constructor(@Inject(RoadmapService) private readonly roadmap: RoadmapService) {}
 
   /**
-   * The promote panel's answer, for ANY thread — whether this one belongs to the Feature
-   * Requests board (`promotable`, resolved server-side by the same test publish uses) and the
-   * card it already became, if any. Refused (as every route here is) for anybody without the
-   * webmaster's bit and a fresh second factor, which is exactly how the panel stays invisible
-   * to everyone else: the page treats the refusal as "no panel".
+   * `promotable` is resolved server-side by the same slug-or-name test publish uses, never by
+   * comparing the URL — which is what once killed the panel the day the board was renamed.
    */
-  @Get('thread/:threadId')
+  @Get(':threadId')
   async cardForThread(@User() caller: CurrentUser | undefined, @Param('threadId') threadId: string) {
-    return this.roadmap.cardForThread(this.#me(caller), threadId);
+    if (caller === undefined) {
+      throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in first.');
+    }
+    return this.roadmap.cardForThread(caller.userId, threadId);
   }
 }
 
