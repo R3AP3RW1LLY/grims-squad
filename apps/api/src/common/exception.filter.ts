@@ -4,6 +4,7 @@ import { Catch, HttpException, type ArgumentsHost, type ExceptionFilter } from '
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { AppError, ErrorCode, type ErrorEnvelope, type ErrorCodeName } from '@grims/shared';
 import { logger } from '../logging.js';
+import { errorPage, wantsHtml } from './error-page.js';
 
 /**
  * Where a development-time defect is written down as well as logged.
@@ -46,12 +47,51 @@ export class GlobalExceptionFilter implements ExceptionFilter {
     const request = ctx.getRequest<FastifyRequest>();
     const requestId = (request.id as string | undefined) ?? 'unknown';
 
+    /*
+     * ★ A BROWSER GETS A PAGE — SQUADRON OWNER, 2026-08-05 ★
+     *
+     * "no error screen! what the fuck! we want error screens instead of showing this shit."
+     *
+     * The website's own error boundaries could never have covered this. Next's `error.tsx` catches
+     * a failure while REACT renders; the JSON they saw came from `GET /v1/auth/discord/callback`,
+     * a URL the browser navigates to directly as the last leg of signing in. Next is not involved,
+     * so nothing of its can intervene.
+     *
+     * Decided by `Accept`, which is the header that exists to answer exactly this. The companion
+     * app, the site's server-side fetches and every script keep the envelope — `retryable` and
+     * `retryAfterSeconds` are a contract the app reads. Somebody looking at a screen gets a screen.
+     */
+    /*
+     * Optional-chained deliberately. This is the code that runs when something has ALREADY gone
+     * wrong, and a filter that throws while handling a failure turns a 500 into a hung request.
+     * A request with no headers at all is not a thing Fastify produces — it is a thing a test or a
+     * future refactor produces, and neither is worth hanging on.
+     */
+    const html = wantsHtml(request.headers?.['accept']);
+    const asPage = (status: number, message: string): void => {
+      void reply
+        .status(status)
+        .header('content-type', 'text/html; charset=utf-8')
+        .send(
+          errorPage({
+            status,
+            message,
+            requestId,
+            siteUrl: (process.env['WEB_BASE_URL'] ?? process.env['PUBLIC_URL'] ?? '').trim(),
+          }),
+        );
+    };
+
     if (exception instanceof AppError) {
       // Expected, typed, already safe to display.
       logger.warn(
         { requestId, code: exception.code, details: exception.details },
         exception.message,
       );
+      if (html) {
+        asPage(exception.status, exception.message);
+        return;
+      }
       reply.status(exception.status).send(exception.toEnvelope(requestId));
       return;
     }
@@ -80,6 +120,10 @@ export class GlobalExceptionFilter implements ExceptionFilter {
           retryAfterSeconds: null,
         },
       };
+      if (html) {
+        asPage(status, status >= 500 ? 'An unexpected error occurred.' : exception.message);
+        return;
+      }
       reply.status(status).send(envelope);
       return;
     }
@@ -145,6 +189,13 @@ export class GlobalExceptionFilter implements ExceptionFilter {
           retryAfterSeconds,
         },
       };
+      if (html) {
+        asPage(
+          fastifyStatus,
+          exception instanceof Error ? exception.message : 'That request was not accepted.',
+        );
+        return;
+      }
       reply.status(fastifyStatus).send(envelope);
       return;
     }
@@ -173,6 +224,15 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       } catch {
         // The log is best effort. The member already has their requestId and their 500.
       }
+    }
+
+    /*
+     * The branch that actually reached a member: the Discord sign-in callback threw, and a browser
+     * sitting on `/v1/auth/discord/callback` was shown the envelope. It gets the page now.
+     */
+    if (html) {
+      asPage(500, 'An unexpected error occurred.');
+      return;
     }
 
     const envelope: ErrorEnvelope = {
