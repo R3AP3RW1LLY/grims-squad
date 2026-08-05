@@ -533,10 +533,29 @@ export class InaraAdapter {
 
       // ---- the envelope -----------------------------------------------------
       const headerStatus = json.header?.eventStatus ?? 0;
-      if (headerStatus === 400 || headerStatus === 401 || headerStatus === 403) {
-        // Our key is wrong, revoked, or was never approved. Not retryable, and
-        // distinct from a transient failure so the caller can stop asking.
+      /*
+       * ★ 400 IS ABOUT US; 401 AND 403 ARE ABOUT THE KEY WE SENT ★
+       *
+       * All three used to raise `InaraNotApprovedError`, and the service turns that into "our
+       * application is still awaiting access from Inara. Your key is fine; nothing you can do will
+       * change this." For a member whose own key was wrong or expired that is precisely backwards:
+       * it tells them the one thing they CAN fix is not the problem, and to go and bother an
+       * officer instead. Reported by a member on 2026-08-05, while the squadron's own key was
+       * answering 200 from the same server — which is the proof the application is approved.
+       *
+       * 400 is the envelope-level rejection of the APPLICATION ("This application has no access
+       * allowed"); no key of any kind works until that is fixed, and it is ours to fix.
+       * 401/403 reject the CREDENTIAL in the request, which for a verification call is the
+       * member's own key — the caller already has a good message for that, and now reaches it.
+       */
+      if (headerStatus === 400) {
         throw new InaraNotApprovedError(headerStatus, json.header?.eventStatusText ?? '');
+      }
+      if (headerStatus === 401 || headerStatus === 403) {
+        // Deliberately NOT InaraNotApprovedError, and deliberately not retryable: repeating a
+        // rejected key just spends the rate budget. The text is never echoed — Inara mirrors
+        // request parameters in some payloads, and the request carries the key (INV-012).
+        throw new InaraApiError('Inara rejected the API key.', headerStatus, false);
       }
       if (headerStatus >= 500) {
         throw new InaraApiError(

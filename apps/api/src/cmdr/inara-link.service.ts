@@ -274,6 +274,20 @@ export class InaraLinkService {
         );
       }
 
+      /*
+       * Inara rejected the CREDENTIAL we sent, which on this path is the member's own key.
+       * Distinguished from the application-level 400 above since 2026-08-05: these used to share
+       * a branch, so a member with an expired key was told our application was awaiting approval
+       * and that their key was fine — the one instruction guaranteed to leave them stuck.
+       */
+      const status = (cause as { eventStatus?: number }).eventStatus;
+      if (name === 'InaraApiError' && (status === 401 || status === 403)) {
+        throw new AppError(
+          ErrorCode.VALIDATION_FAILED,
+          'Inara did not recognise that API key. Copy it again from your Inara profile settings.',
+        );
+      }
+
       if (name === 'LimiterBusyError') {
         // Our own queue, not Inara's fault and not the member's. Inara allows
         // two calls a minute globally (INV-033), so this genuinely does clear.

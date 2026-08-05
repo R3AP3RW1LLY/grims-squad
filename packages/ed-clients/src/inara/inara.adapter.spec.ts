@@ -93,7 +93,7 @@ describe('@INV-031-adjacent: HTTP 200 is not success', () => {
     await expect((adapter.getCommanderProfile('GRIM'))).rejects.toThrow(/400|invalid/i);
   });
 
-  it('MANDATORY: treats an unapproved or revoked API key as NOT retryable', async () => {
+  it('MANDATORY: treats a rejected API key as NOT retryable', async () => {
     // Retrying a rejected key forever burns the rate limit and never succeeds.
     // The caller has to be able to tell "stop asking" from "try again later".
     inaraResponds({ header: { eventStatus: 401, eventStatusText: 'Access denied' } });
@@ -102,8 +102,33 @@ describe('@INV-031-adjacent: HTTP 200 is not success', () => {
     // 30 seconds behind the global limiter — which is the limiter working, not
     // a fault, and is not what this test is about.
     const err = await adapter.getCommanderProfile('GRIM').catch((e: unknown) => e);
-    expect(err).toBeInstanceOf(InaraNotApprovedError);
+    expect(err).toBeInstanceOf(InaraApiError);
     expect(err).toMatchObject({ retryable: false });
+  });
+
+  /*
+   * ★ 401 IS THE KEY, 400 IS US — AND THEY USED TO SHARE A BRANCH ★
+   *
+   * A member whose own key had expired was told "our application is still awaiting access from
+   * Inara. Your key is fine; nothing you can do will change this" — while the squadron's key was
+   * answering 200 from the same server. The one thing they could fix was the thing they were told
+   * to leave alone. Reported 2026-08-05.
+   *
+   * Two tests, not one: each adapter call queues behind the GLOBAL limiter, and `beforeEach`
+   * resets it — so a second call inside one test would wait a real thirty seconds.
+   */
+  it('MANDATORY: a rejected KEY is not reported as an unapproved APPLICATION', async () => {
+    inaraResponds({ header: { eventStatus: 401, eventStatusText: 'Access denied' } });
+    const err = await adapter.getCommanderProfile('GRIM').catch((e: unknown) => e);
+    expect(err).not.toBeInstanceOf(InaraNotApprovedError);
+  });
+
+  it('MANDATORY: an unapproved APPLICATION still reports itself as one', async () => {
+    inaraResponds({
+      header: { eventStatus: 400, eventStatusText: 'This application has no access allowed' },
+    });
+    const err = await adapter.getCommanderProfile('GRIM').catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(InaraNotApprovedError);
   });
 
   it('treats a 5xx eventStatus as retryable', async () => {
@@ -302,7 +327,9 @@ describe('InaraAdapter.getCommanderProfiles', () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({
       ok: true,
       status: 200,
-      json: async () => ({ header: { eventStatus: 401, eventStatusText: 'no access' } }),
+      // 400: the APPLICATION is refused, so every remaining chunk fails identically. A 401 here
+      // would be one member's key and must not abandon the whole sweep.
+      json: async () => ({ header: { eventStatus: 400, eventStatusText: 'no access' } }),
     })));
 
     await expect(adapter.getCommanderProfiles(['ALPHA'])).rejects.toBeInstanceOf(
