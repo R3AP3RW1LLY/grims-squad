@@ -273,6 +273,20 @@ let trip: TripLedger = EMPTY_TRIP;
 let carrierHold: CarrierHoldState = EMPTY_CARRIER_HOLD;
 
 /**
+ * The moment this process started watching.
+ *
+ * Everything older is HISTORY: still read, still uploaded, and deliberately kept out of the trip
+ * ledger and the carrier hold. Those two answer "what am I carrying right now", and a first-run
+ * replay of thirty journal files — or a full re-read after the app is pointed at a different hub —
+ * would otherwise pile a member's entire purchase history into one lot and put a months-old sale
+ * on screen as the last transaction. Reported 2026-08-05; see the note in `runWatchPass`.
+ *
+ * Captured once at module load rather than per pass, so a long-running app keeps one honest
+ * boundary instead of a moving one that would quietly discard the session it is meant to track.
+ */
+const WATCHING_SINCE = Date.now();
+
+/**
  * The last carrier-hold snapshot the hub ACCEPTED, serialised.
  *
  * ★ THE DEBOUNCE IS "ON CHANGE", NOT "ON A TIMER" ★
@@ -720,7 +734,7 @@ async function tick(): Promise<void> {
     push();
     let pass;
     try {
-      pass = await runWatchPass(nodeFs, dir, config, uploader, dockedAt, trip, carrierHold);
+      pass = await runWatchPass(nodeFs, dir, config, uploader, dockedAt, trip, carrierHold, WATCHING_SINCE);
     } finally {
       sending = false;
     }

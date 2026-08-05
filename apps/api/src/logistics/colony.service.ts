@@ -1189,15 +1189,27 @@ export class ColonyService {
      * discord channel please ... with a link to the project on the website ... include the name of
      * the commander who started the squadron project"
      *
-     * Squadron only. A personal build belongs to the member who posted it, and putting it in a
-     * squadron channel would read as a call to arms nobody issued.
+     * ★ AND MEMBERS' OWN BUILDS TOO — SQUADRON OWNER, 2026-08-05 ★
+     *
+     * "can we also announce player owned colonization projects in the same channel the same way we
+     * do the squadron owned colonization projects?"
+     *
+     * This was squadron-only, on the reasoning that a personal build is one member's and putting it
+     * in a squadron channel would read as a call to arms nobody issued. The owner's answer is that
+     * a member posting a build is exactly when they would like some help with it — the channel is
+     * where haulers look, and a project nobody hears about gets hauled by nobody.
+     *
+     * The wording distinguishes them, so the reader still knows whose it is and the squadron's own
+     * efforts are not diluted into a list of everybody's side projects.
+     *
+     * PRIVATE builds stay silent. A member who set their project to private has said who may see
+     * it, and a channel post would hand it to everybody — announcing something the visibility
+     * setting exists to prevent.
      *
      * Fire-and-forget, like the squadron notice above it: the project is created by the time this
      * runs, and no announcement is worth failing a creation over.
      */
-    if (input.owner === 'squadron') {
-      void announceColonyProject(this.db, created.id, siteUrl()).catch(() => undefined);
-    }
+    void announceColonyProject(this.db, created.id, siteUrl()).catch(() => undefined);
 
     return created;
   }

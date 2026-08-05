@@ -260,6 +260,8 @@ export async function announceMemberVerified(db: PrismaClient, userId: string): 
 export interface ColonyProjectAnnouncement {
   readonly id: string;
   readonly title: string;
+  /** Whose build it is. A member's own is announced too, in different words. */
+  readonly owner: 'squadron' | 'personal';
   readonly systemName: string;
   /** The catalogue row the requirement fingerprints to. Null until somebody has docked there. */
   readonly identifiedAs: string | null;
@@ -326,9 +328,22 @@ export function colonyProjectContent(
   const link = `${siteUrl.replace(/\/+$/, '')}/colonisation/${project.id}`;
 
   return [
-    adoptedBy === undefined
-      ? '🏗️ **A new squadron colonisation project**'
-      : '🏗️ **Adopted as a squadron project**',
+    adoptedBy !== undefined
+      ? '🏗️ **Adopted as a squadron project**'
+      : project.owner === 'squadron'
+        ? '🏗️ **A new squadron colonisation project**'
+        : /*
+           * ★ A MEMBER'S OWN BUILD — SQUADRON OWNER, 2026-08-05 ★
+           *
+           * "can we also announce player owned colonization projects in the same channel the same
+           * way we do the squadron owned colonization projects?"
+           *
+           * Same channel, different words. A member posting a build is exactly when they would
+           * like some help with it, and the channel is where haulers look — but the squadron's own
+           * efforts must not be diluted into a list of everybody's side projects, so the heading
+           * says plainly whose this is.
+           */
+          '🏗️ **A member has started a colonisation project**',
     '',
     `**${project.title}**`,
     whereAndWhat(project),
@@ -368,6 +383,8 @@ export async function announceColonyProject(
       Array<{
         id: string;
         title: string;
+        owner: string;
+        visibility: string;
         system_name: string;
         identified_as: string | null;
         total_tonnes: number | null;
@@ -377,6 +394,8 @@ export async function announceColonyProject(
     >`
       SELECT p.id,
              p.title,
+             p.owner::text AS owner,
+             p.visibility::text AS visibility,
              p.system_name,
              bt.display_name AS identified_as,
              bt.total_tonnes AS total_tonnes,
@@ -390,6 +409,15 @@ export async function announceColonyProject(
 
     const row = rows[0];
     if (row === undefined) return false;
+
+    /*
+     * ★ PRIVATE MEANS PRIVATE ★
+     *
+     * A member who set their build to private has already said who may see it. Posting it to a
+     * channel every member reads would hand it to everybody — announcing the very thing the
+     * visibility setting exists to prevent. Squadron and public builds are both fair game.
+     */
+    if (row.visibility === 'private') return false;
 
     let adoptedBy: AnnouncementPerson | undefined;
     if (adoptedByUserId !== undefined) {
@@ -412,6 +440,7 @@ export async function announceColonyProject(
         {
           id: row.id,
           title: row.title,
+          owner: row.owner === 'squadron' ? 'squadron' : 'personal',
           systemName: row.system_name,
           identifiedAs: row.identified_as,
           totalTonnes: row.total_tonnes === null ? null : Number(row.total_tonnes),

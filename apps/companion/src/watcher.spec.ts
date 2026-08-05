@@ -294,3 +294,99 @@ describe('pruneOffsets', () => {
     expect(pruned.sessionLive).toEqual({ a: true });
   });
 });
+
+/**
+ * History is read and uploaded; it is not "what I am carrying".
+ *
+ * ★ SQUADRON OWNER, 2026-08-05 ★
+ *
+ * "it seems that it is tracking all the materials i buy and persisting them right now i have 1040
+ * tonnes of titanium and its giving me the aggregated total of all the times ive bought it ... its
+ * also showing ive sold modular terminals or something and ive never done that!"
+ *
+ * One fault, two symptoms. Every parsed event was folded into the trip ledger and the carrier
+ * hold — including the first-run replay of up to thirty old journal files, and a full re-read of
+ * every journal whenever the app is pointed at a different hub. So a whole purchase history piled
+ * into one lot, and `lastSale` was whatever that replay happened to end on: a real sale, months
+ * old, that nobody remembers making.
+ */
+describe('the trip ledger ignores replayed history', () => {
+  const OLD = '2026-01-02T03:04:05Z';
+  const NOW = '2026-07-27T10:30:00Z';
+  const WATCHING = Date.parse('2026-07-27T10:00:00Z');
+
+  const buy = (at: string, commodity: string, count: number) =>
+    line({
+      timestamp: at,
+      event: 'MarketBuy',
+      Type: commodity.toLowerCase(),
+      Type_Localised: commodity,
+      Count: count,
+      BuyPrice: 1000,
+      TotalCost: count * 1000,
+    });
+
+  const sell = (at: string, commodity: string, count: number) =>
+    line({
+      timestamp: at,
+      event: 'MarketSell',
+      Type: commodity.toLowerCase(),
+      Type_Localised: commodity,
+      Count: count,
+      SellPrice: 100,
+      TotalSale: count * 100,
+    });
+
+  const watched = (config: CompanionConfig) =>
+    runWatchPass(fs, DIR, config, up as unknown as Uploader, null, undefined, undefined, WATCHING);
+
+  it('MANDATORY: an old purchase does not join this session’s lot', async () => {
+    fs.files[NAME] = HEADER + LOAD + buy(OLD, 'Titanium', 900) + buy(NOW, 'Titanium', 40);
+
+    const { outcome } = await watched(paired());
+
+    // 40, not 940: the replayed 900 was read and uploaded, and is not aboard.
+    expect(outcome.trip.lots['titanium']?.units).toBe(40);
+  });
+
+  it('MANDATORY: an old sale is not shown as the last transaction', async () => {
+    /*
+     * The "modular terminals" complaint exactly: a real sale, months old, surfacing as the receipt
+     * on screen because a replay happened to end on it.
+     */
+    fs.files[NAME] = HEADER + LOAD + sell(OLD, 'Modular Terminals', 12);
+
+    const { outcome } = await watched(paired());
+
+    expect(outcome.trip.lastSale).toBeNull();
+  });
+
+  it('a sale made THIS session still shows', async () => {
+    fs.files[NAME] = HEADER + LOAD + buy(NOW, 'Titanium', 40) + sell(NOW, 'Titanium', 40);
+
+    const { outcome } = await watched(paired());
+
+    expect(outcome.trip.lastSale?.commodity).toBe('titanium');
+    expect(outcome.trip.lastSale?.units).toBe(40);
+  });
+
+  it('history is still READ and still uploaded — only the ledger ignores it', async () => {
+    /*
+     * The point of the replay is the hub. Excluding it from the ledger must not quietly stop it
+     * reaching the squadron, which is the failure this would be worth trading for and is not.
+     */
+    fs.files[NAME] = HEADER + LOAD + buy(OLD, 'Titanium', 900);
+
+    const { outcome } = await watched(paired());
+
+    expect(outcome.sent).toBeGreaterThan(0);
+  });
+
+  it('with no boundary given, everything folds — the default the other tests rely on', async () => {
+    fs.files[NAME] = HEADER + LOAD + buy(OLD, 'Titanium', 900);
+
+    const { outcome } = await run(paired());
+
+    expect(outcome.trip.lots['titanium']?.units).toBe(900);
+  });
+});

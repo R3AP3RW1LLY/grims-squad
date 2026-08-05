@@ -328,9 +328,12 @@ export class MarketController {
       /*
        * Clamped, not trusted — but at the CARRIER's capacity now, not a ship's.
        *
-       * This was 794, the biggest hold a ship can carry, which meant a member planning a fleet
-       * carrier run was quietly planned for 794 tonnes and quoted the profit of a run nobody was
-       * doing. Squadron owner, 2026-08-05: "max out the cargo T text entry so there is no max".
+       * This was 794 — described in this comment as "the biggest hold a ship can carry", which the
+       * squadron owner corrected on 2026-08-05: "this statement is not true at all". It is not. A
+       * Panther Clipper Mk II carries well past it, and members routinely haul more. So the old
+       * number was not merely too small for carriers, it was too small for SHIPS, and a member
+       * planning either was quietly planned for 794 tonnes and quoted the profit of a run nobody
+       * was doing.
        *
        * The bound survives because it was never about ships. Route profit is a per-tonne figure
        * multiplied by this, so 99999999 is quoted a total that is pure fiction — and it is the one

@@ -146,6 +146,28 @@ export async function runWatchPass(
    * ledger rebuilt from half a session shows figures whose starting point nobody can name.
    */
   carrierBefore: CarrierHoldState = EMPTY_CARRIER_HOLD,
+  /*
+   * ★ WHERE "WHAT I AM CARRYING" STOPS BEING HISTORY — REPORTED 2026-08-05 ★
+   *
+   * "it seems that it is tracking all the materials i buy and persisting them ... its giving me
+   * the aggregated total of all the times ive bought it ... its also showing ive sold modular
+   * terminals and ive never done that!"
+   *
+   * Both are the same fault. Every parsed event was folded into the trip ledger and the carrier
+   * hold — including a FIRST-RUN REPLAY of up to thirty old journal files, and, since offsets
+   * became per-hub, a full re-read of every journal whenever the app is pointed somewhere new. So
+   * a member's entire purchase history piled into one lot, and `lastSale` was whatever the oldest
+   * replay happened to end on: a real sale, from months ago, that nobody remembers making.
+   *
+   * `trip-ledger.ts` already states the principle — "a ledger rebuilt from half a session would
+   * show costs whose starting point nobody can name" — it simply had nothing enforcing it against
+   * replayed files. This is that boundary: only events at or after the moment this app started
+   * WATCHING count as watched.
+   *
+   * The events themselves are still read and still uploaded. The hub wants the history; the
+   * overlay's "what is in my hold right now" does not.
+   */
+  watchingSince: number = 0,
 ): Promise<{ outcome: WatchOutcome; config: CompanionConfig }> {
   if (!config.enabled || config.deviceToken === '') {
     // Not an error. The app is installed and waiting, which is the state it
@@ -267,10 +289,25 @@ export async function runWatchPass(
      * the same reason as the dock: what a member paid at a buy screen is needed by the app's own
      * overlay whether or not any of these events is in a category the squadron receives.
      */
-    trip = foldTrip(trip, result.events);
+    /*
+     * Only what this app actually WATCHED, never a replay of somebody's back catalogue. Filtered
+     * once and shared: the two folds answer the same question about the present, and letting them
+     * disagree about which events are current would be a bug nobody could reproduce.
+     */
+    const watched =
+      watchingSince <= 0
+        ? result.events
+        : result.events.filter((e) => {
+            const at = Date.parse(e.occurredAt);
+            // An unparseable timestamp is not evidence of the present. Excluded rather than
+            // guessed at — the cost is one missed line, and the alternative is the bug above.
+            return Number.isFinite(at) && at >= watchingSince;
+          });
+
+    trip = foldTrip(trip, watched);
     // The own-carrier hold, same breath, same reasoning. The caller decides whether its snapshot
     // is worth a push; the fold merely watches.
-    carrierHold = foldCarrierHold(carrierHold, result.events);
+    carrierHold = foldCarrierHold(carrierHold, watched);
 
     if (result.events.length === 0) {
       /*
