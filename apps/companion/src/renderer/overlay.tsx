@@ -70,6 +70,18 @@ export interface OverlayData {
     readonly capacity: number | null;
     /** Total watched spend aboard. Zero when nothing was bought under the app's eye. */
     readonly totalPaid: number;
+    /** What the hold is worth at the best price in range. Null until the hub has priced it. */
+    readonly value: number | null;
+    /** Where to take the whole hold, and what that one landing pays. */
+    readonly bestSale: {
+      readonly station: string;
+      readonly system: string;
+      readonly distanceLy: number | null;
+      readonly total: number;
+      readonly perTonne: number;
+    } | null;
+    /** Worth now less what was paid. Null for mined or mission cargo, which has no basis. */
+    readonly profit: number | null;
     /** The till receipt — persists across undocks until the next sale replaces it. */
     readonly lastSale: {
       readonly commodity: string;
@@ -412,7 +424,7 @@ function CargoPanel({
     return (
       <div>
         <Waiting what="Hold empty." />
-        <LastSaleLine sale={data.lastSale} />
+        {show('lastSale') ? <LastSaleLine sale={data.lastSale} /> : null}
       </div>
     );
   }
@@ -456,12 +468,52 @@ function CargoPanel({
         </p>
       ) : null}
 
-      {data.totalPaid > 0 ? (
-        <p style={{ margin: '4px 0 0', fontSize: '0.8em', color: C.dim }}>
-          Paid {data.totalPaid.toLocaleString()} cr for what is aboard
+      {/*
+        ★ SQUADRON OWNER, 2026-08-06 ★
+
+        "we want valiue information but its showing irrellevant sell information in it!"
+
+        What the hold is WORTH, and where to take it. The two lines below are the reason this panel
+        is worth having over the game's own cargo screen, and neither is available to any other
+        tool — they need eighteen million price rows to answer.
+      */}
+      {show('value') && data.value !== null ? (
+        <p style={{ margin: '4px 0 0', fontSize: '0.8em' }}>
+          <span style={{ color: C.dim }}>Worth </span>
+          <span style={{ color: accent, fontVariantNumeric: 'tabular-nums' }}>
+            {data.value.toLocaleString()} cr
+          </span>
+          {/* The unrealised gain, and only when there is an honest basis to subtract. */}
+          {show('profit') && data.profit !== null ? (
+            <span
+              style={{
+                fontVariantNumeric: 'tabular-nums',
+                color: data.profit > 0 ? C.good : data.profit < 0 ? C.bad : C.dim,
+              }}
+            >
+              {' '}
+              ({data.profit < 0 ? '−' : '+'}
+              {Math.abs(data.profit).toLocaleString()})
+            </span>
+          ) : null}
         </p>
       ) : null}
-      <LastSaleLine sale={data.lastSale} />
+
+      {show('bestSale') && data.bestSale !== null ? (
+        <p style={{ margin: '3px 0 0', fontSize: '0.8em', color: C.dim }}>
+          Best {data.bestSale.station}
+          {data.bestSale.distanceLy === null ? '' : ` · ${data.bestSale.distanceLy.toFixed(0)} ly`}
+          {' · '}
+          {data.bestSale.perTonne.toLocaleString()}/t
+        </p>
+      ) : null}
+
+      {/*
+        The receipt for the last trip. Rendered unconditionally until 2026-08-06, when the owner
+        called it out as the irrelevant part — it is now a field, and off by default for anybody who
+        already had a config. Kept rather than deleted because they asked for it in the first place.
+      */}
+      {show('lastSale') ? <LastSaleLine sale={data.lastSale} /> : null}
     </div>
   );
 }

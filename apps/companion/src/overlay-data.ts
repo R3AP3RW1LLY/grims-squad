@@ -1,5 +1,6 @@
 import type { DockedAt } from './docked.js';
 import { isFresh, projectTitleFrom } from './docked.js';
+import { unrealised } from './cargo-value.js';
 import { markWanted, type Hold } from './cargo.js';
 import type { CurrentBuild } from './hub-colony.js';
 import type { TripLedger } from './trip-ledger.js';
@@ -46,6 +47,25 @@ export interface OverlayInput {
   readonly hold: Hold | null;
   /** Tonnes the ship can carry, from Loadout. Null until a Loadout has been seen. */
   readonly capacity: number | null;
+  /**
+   * What the hold is worth and where to take it, priced by the hub against the squadron's own
+   * market table. Null until a valuation has come back — see `cargo-value.ts` for when one is
+   * asked for, which is deliberately not "every time the cargo changes".
+   */
+  readonly holdValue?:
+    | {
+        readonly value: number;
+        readonly bestSale: {
+          readonly station: string;
+          readonly system: string;
+          readonly distanceLy: number | null;
+          readonly total: number;
+          readonly perTonne: number;
+        } | null;
+        readonly unpriced: readonly string[];
+      }
+    | null
+    | undefined;
   /**
    * The member's current build, from the hub — whole-project needs with everyone's deliveries
    * folded in. Null when no current build is set, which is what makes the journal fallback below
@@ -178,6 +198,19 @@ function cargoPanel(input: OverlayInput): OverlayData['cargo'] {
      * one replaces it — the exact behaviour the owner asked for.
      */
     lastSale: input.trip?.lastSale ?? null,
+    /*
+     * ★ SQUADRON OWNER, 2026-08-06 ★
+     *
+     * "we want valiue information but its showing irrellevant sell information in it!"
+     *
+     * What it is worth NOW and where to take it, rather than what was paid for it and what was
+     * last sold. Null until the hub has priced this hold; the panel omits the lines rather than
+     * drawing a zero, because a hold worth nothing and a hold not yet priced are different states
+     * and only one of them is bad news.
+     */
+    value: input.holdValue?.value ?? null,
+    bestSale: input.holdValue?.bestSale ?? null,
+    profit: unrealised(input.holdValue?.value ?? null, totalPaid),
   };
 }
 

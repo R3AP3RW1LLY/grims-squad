@@ -48,7 +48,8 @@ import {
 } from './hub-colony.js';
 import { bountyBoard, bountyLeaderboard } from './hub-bounties.js';
 import { leaderboardBoard } from './hub-leaderboards.js';
-import { miningRings, miningSessions, miningValuation } from './hub-mining.js';
+import { miningRings, miningSessions, miningValuation, type HoldValue } from './hub-mining.js';
+import { holdOf, worthAsking } from './cargo-value.js';
 import {
   helpConversation,
   helpConversations,
@@ -258,6 +259,50 @@ let departedDock = false;
  * a disk write to record something worthless the moment the app closes.
  */
 let hold: Hold | null = null;
+
+/*
+ * ★ WHAT THE HOLD IS WORTH — SQUADRON OWNER, 2026-08-06 ★
+ *
+ * "we want valiue information but its showing irrellevant sell information in it!"
+ *
+ * Priced by the hub against the squadron's market table, because nothing on this machine can
+ * answer it. Held here rather than fetched by the panel so that one answer serves the overlay and
+ * the window, and so the ASKING can be rate-limited — see `worthAsking`. A laser miner's cargo
+ * changes every few seconds for an hour, and pricing it each time would be several hundred
+ * fan-outs against eighteen million rows to watch one number creep upward.
+ */
+let holdValue: HoldValue | null = null;
+let valuedAt: number | null = null;
+let valuedFor: Record<string, number> | null = null;
+
+/** Asks the hub what the hold is worth, when it is worth asking. Never throws into the caller. */
+async function refreshHoldValue(): Promise<void> {
+  if (hold === null) return;
+
+  const want = holdOf(hold.items.map((i) => ({ ...i, wanted: false, paid: null })));
+  const now = Date.now();
+  if (!worthAsking({ hold: want, askedAt: valuedAt, askedFor: valuedFor, now })) return;
+
+  // Stamped BEFORE the request, not after: an in-flight call must not be started again by the
+  // next push, which on a busy journal pass is milliseconds away.
+  valuedAt = now;
+  valuedFor = want;
+
+  const where = mergedDock()?.systemName ?? null;
+  const answer = await miningValuation(
+    { apiBaseUrl: apiBaseUrlFor(config, process.env), deviceToken: config.deviceToken },
+    want,
+    where,
+  );
+  if (!answer.ok) {
+    // A hub that cannot price the hold is not an error worth showing: the lines simply do not
+    // render, exactly as they do before the first valuation.
+    return;
+  }
+
+  holdValue = answer.data;
+  push();
+}
 let cargoCapacity: number | null = null;
 
 /**
@@ -1098,6 +1143,7 @@ function push(): void {
       gameRunning: wasPlaying,
       hold,
       capacity: cargoCapacity,
+      holdValue,
       // The two mining folds ride the same push as everything else, so the prospector panel updates
       // in the same breath as the rest rather than on a timer of its own.
       prospecting,
@@ -1109,6 +1155,13 @@ function push(): void {
       now: Date.now(),
     }),
   );
+
+  /*
+   * Fired and not awaited: `push()` is called from every mutation path including synchronous ones,
+   * and a network round trip must never be on that path. The valuation lands on a later push, which
+   * `refreshHoldValue` triggers itself.
+   */
+  void refreshHoldValue();
 }
 
 /** The version waiting to be installed, once one has downloaded. Null the rest of the time. */

@@ -47,7 +47,24 @@ export const OVERLAY_FIELDS: Record<OverlayId, readonly string[]> = {
   // Saved configs that still carry it are cleaned on load by exactly the validation named above.
   build: ['title', 'needs', 'progress', 'haulers'],
   route: ['commodity', 'buy', 'sell', 'profit', 'cargo'],
-  cargo: ['items', 'capacity', 'matched'],
+  /*
+   * ★ SQUADRON OWNER, 2026-08-06 ★
+   *
+   * "the cargo overlay, rework this so it provides ritch information, but doesnt offer useless
+   * information ... we want valiue information but its showing irrellevant sell information in it!"
+   *
+   * The panel used to answer "what did I pay" and "what did I last sell". The first is a sunk cost
+   * and the second is a receipt for a trip already over — neither tells a member holding 700 tonnes
+   * the thing they actually want, which is what it is worth and where to take it.
+   *
+   * `value`, `bestSale` and `profit` come from the squadron's own market table. No other tool can
+   * show them, for the same reason the refinery overlay can: none of them own eighteen million
+   * price rows.
+   *
+   * `lastSale` was rendered unconditionally and is now a field, so it can be switched off — see
+   * LEGACY_OFFERED, which is what turns it off for everybody who already has a config.
+   */
+  cargo: ['items', 'capacity', 'matched', 'value', 'bestSale', 'profit', 'lastSale'],
   status: ['sending', 'queued', 'lastUpload', 'gameState'],
   /*
    * `materials` is the list with its percentage bars — the reason the panel exists, and the only
@@ -63,6 +80,34 @@ export const OVERLAY_FIELDS: Record<OverlayId, readonly string[]> = {
   refinery: ['materials', 'session', 'rate', 'points', 'value', 'bestSale'],
 };
 
+/**
+ * The field lists as they stood before `offered` was recorded (release 0.5.2).
+ *
+ * ★ FROZEN, AND NEVER UPDATED AGAIN ★
+ *
+ * This is not a copy of `OVERLAY_FIELDS` to be kept in step — it is a snapshot of history, used
+ * only for configs written before the app recorded what it offered. Updating it would tell those
+ * members that fields added since were on offer at the time, which is precisely the lie that would
+ * hide the new lines from them.
+ *
+ * Every config saved from now on carries its own `offered`, so nothing new should ever need adding
+ * here.
+ */
+const LEGACY_OFFERED: Record<OverlayId, readonly string[]> = {
+  build: ['title', 'needs', 'progress', 'haulers'],
+  route: ['commodity', 'buy', 'sell', 'profit', 'cargo'],
+  /*
+   * `lastSale` is listed here even though it was never a checkbox: it was DRAWN unconditionally, so
+   * it was on offer in every sense that matters to a member looking at the panel. Recording it as
+   * legacy is what makes it default OFF now that it is switchable — which is the point of the
+   * change, since it is the line the owner called irrelevant.
+   */
+  cargo: ['items', 'capacity', 'matched', 'lastSale'],
+  status: ['sending', 'queued', 'lastUpload', 'gameState'],
+  prospector: ['materials', 'motherlode', 'content', 'hitRate', 'best'],
+  refinery: ['materials', 'session', 'rate', 'points', 'value', 'bestSale'],
+};
+
 export interface OverlayStyle {
   /** 0.2–1. Below 0.2 the panel is invisible and the member cannot find it to fix it. */
   opacity: number;
@@ -72,6 +117,16 @@ export interface OverlayStyle {
   accent: string;
   /** Which of `OVERLAY_FIELDS[id]` to draw, in order. */
   fields: string[];
+  /**
+   * Every field this overlay OFFERED when the config was written.
+   *
+   * ★ WHAT MAKES A NEW FIELD REACH AN EXISTING MEMBER ★
+   *
+   * `fields` alone cannot tell "I turned that off" from "that did not exist yet", and the
+   * intersection below treats both as off. Without this record, every field added in a later
+   * release ships invisible to everybody who has ever opened the overlay settings.
+   */
+  offered: string[];
 }
 
 export interface OverlayPlacement {
@@ -120,6 +175,7 @@ function defaultState(id: OverlayId, index: number): OverlayState {
       scale: 1,
       accent: ACCENT,
       fields: [...OVERLAY_FIELDS[id]],
+      offered: [...OVERLAY_FIELDS[id]],
     },
   };
 }
@@ -168,9 +224,29 @@ export function normaliseLayout(raw: unknown): OverlayLayout {
      * to draw something that no longer exists. Order is the member's; membership is ours.
      */
     const known = new Set(OVERLAY_FIELDS[id]);
-    const fields = Array.isArray(style.fields)
+    const chosen = Array.isArray(style.fields)
       ? style.fields.filter((f): f is string => typeof f === 'string' && known.has(f))
       : base.style.fields;
+
+    /*
+     * ★ THE MEMBER'S CHOICES, PLUS ANYTHING THEY COULD NOT HAVE CHOSEN ★
+     *
+     * "Absent from the saved list" means "switched off" only for fields that were on offer at the
+     * time. A field added since cannot have been declined, so it arrives on — otherwise a new line
+     * ships invisible to every member who has ever opened these settings, which is the failure this
+     * whole mechanism exists to prevent.
+     *
+     * A config written before `offered` existed falls back to LEGACY_OFFERED: the field lists as
+     * they stood at that point. Without it, everybody using the app today would be exactly the
+     * group the next feature stays hidden from.
+     */
+    const offered = new Set(
+      Array.isArray(style.offered)
+        ? style.offered.filter((f): f is string => typeof f === 'string')
+        : LEGACY_OFFERED[id],
+    );
+    const added = OVERLAY_FIELDS[id].filter((f) => !offered.has(f));
+    const fields = [...chosen, ...added.filter((f) => !chosen.includes(f))];
 
     out[id] = {
       enabled: given.enabled === true,
@@ -193,6 +269,8 @@ export function normaliseLayout(raw: unknown): OverlayLayout {
         accent: accentOf(style.accent),
         // An empty list is a panel showing nothing, which reads as broken. Fall back to everything.
         fields: fields.length > 0 ? fields : base.style.fields,
+        // Recorded so the NEXT release can tell a declined field from one that did not exist.
+        offered: [...OVERLAY_FIELDS[id]],
       },
     };
   }
