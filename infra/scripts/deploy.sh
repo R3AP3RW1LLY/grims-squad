@@ -304,7 +304,7 @@ ok "old build cache and superseded images pruned"
 # already exists rather than a rebuild of a tree that has moved on.
 say "Fetching images"
 export GRIMS_IMAGE_TAG="$TARGET_SHA"
-if ! $COMPOSE --profile jobs pull --quiet api web bot worker worker-daemon eddn-collector; then
+if ! $COMPOSE --profile jobs pull --quiet api web bot worker; then
   # Deliberately fatal, unlike most steps here. A missing image means CI has not finished — or has
   # failed — for this revision, and the honest response is to stop before the swap rather than
   # quietly serve whatever was pulled last time.
@@ -409,8 +409,8 @@ rollback() {
   # already in trouble, taking minutes to restore a service that was down. The previous revision's
   # images are in the registry and usually still in the local cache, so this is now seconds.
   export GRIMS_IMAGE_TAG="$PREVIOUS_SHA"
-  $COMPOSE --profile jobs pull --quiet api web bot worker worker-daemon eddn-collector >/dev/null 2>&1 || true
-  $COMPOSE up -d api web bot worker-daemon eddn-collector >/dev/null 2>&1 || true
+  $COMPOSE --profile jobs pull --quiet api web bot worker >/dev/null 2>&1 || true
+  $COMPOSE up -d api web bot >/dev/null 2>&1 || true
   printf '\033[31m  rolled back. The database was NOT reverted — %s holds the pre-deploy state.\033[0m\n' "$DUMP" >&2
 }
 trap 'rollback' ERR
@@ -425,18 +425,22 @@ $COMPOSE up -d web bot
 wait_healthy web
 wait_healthy bot
 
-# ★ THE BACKGROUND PAIR, LAST AND DELIBERATELY ★
+# ★ THE BACKGROUND PAIR NO LONGER LIVES HERE — 2026-08-06 ★
 #
-# Neither serves a request, so neither belongs in the health-gated window above — but both were
-# missing from the rollout entirely, which meant a freshly built image sat on disk while the old
-# container kept running. Replaced after the member-facing three so that if a new image cannot
-# start, the site is already up and the failure is isolated to ingestion.
+# `worker-daemon` and `eddn-collector` used to be started at this point. They now run on the
+# ingestion box (149.248.39.225) and reach this database over a WireGuard tunnel, because the
+# nightly galaxy import took this machine to load 23 and made the companion app wait EIGHTY-EIGHT
+# SECONDS while four unpigz processes decompressed a 4 GB dump on the cores serving members.
 #
-# The collector is `replicas: 1` by design and takes a moment to close its reporting window on
-# SIGTERM; `up -d` honours that. Restarting it costs one reconnect to the relay, nothing more.
-$COMPOSE up -d worker-daemon eddn-collector
-wait_healthy worker-daemon
-wait_healthy eddn-collector
+# Starting them here again would not merely waste the second machine: two EDDN collectors both
+# write every station, interleaving delete-and-insert over the same rows. The advisory lock keeps
+# that from becoming corruption — one of them simply loses the race and idles — so the symptom
+# would be a box you pay for doing nothing while this one quietly went back to ingesting.
+#
+# tools/deploy-script.spec.ts asserts they are absent from both this file and compose.prod.yml, so
+# putting either back is a test failure rather than a discovery weeks later.
+#
+# Deploying THEM is a separate step; see infra/runbooks/workers-second-box.md.
 
 trap - ERR
 

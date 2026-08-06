@@ -186,14 +186,23 @@ rm /etc/cron.d/grims-worker
 > why it was written as an advisory lock — but one of the two will sit idle having lost the race,
 > and you will have paid for a machine doing nothing while believing ingestion is twice as fast.
 >
-> Check, do not assume:
+> Check, do not assume — but check the right thing. **"Exactly one advisory lock" is wrong**, which
+> the real cutover on 2026-08-06 demonstrated by reporting two and looking like a failure. The
+> daemon and the collector each take their own lock, with different object ids. Two is correct.
+>
+> What actually matters is that every advisory lock comes from the SAME host, and that no two
+> sessions hold the same one:
 >
 > ```bash
-> docker exec grims-postgres-1 psql -U grims -d grims -tAc \
->   "select count(*) from pg_locks where locktype='advisory'"
+> docker exec grims-postgres-1 psql -U grims -d grims -tAc "
+>   select coalesce(host(a.client_addr),'local')||'  '||l.classid||'/'||l.objid||'  granted='||l.granted
+>     from pg_locks l left join pg_stat_activity a on a.pid = l.pid
+>    where l.locktype='advisory' order by 1"
 > ```
 >
-> Exactly one.
+> Every row should name the ingestion box, every `objid` should be distinct, and every `granted`
+> should be true. A duplicate objid means two of the same process are racing; a row from `local` or
+> from a docker-network address means the primary is still running one.
 
 Then remove those three services from `compose.prod.yml` so the next deploy does not start them
 again. Until that lands, **a deploy will undo step 8** — `docker compose up -d` starts everything
