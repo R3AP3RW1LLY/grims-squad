@@ -40,3 +40,12 @@ export declare function evaluate(
 ): { state: ProbeState; events: ProbeEvent[] };
 
 export declare function alertContent(event: ProbeEvent): string;
+
+export interface ProbeDestination {
+  kind: 'dm' | 'channel';
+  id: string;
+}
+
+export declare function destinations(
+  env: Record<string, string | undefined>,
+): ProbeDestination[];

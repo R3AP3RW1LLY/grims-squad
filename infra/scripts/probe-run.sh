@@ -20,9 +20,21 @@ envval() { sed -n "s/^$1=//p" "$ENV_FILE" | head -n1; }
 
 # INV-012: exported into the child's environment, never echoed, never written to the log this
 # script's stdout is redirected into.
+#
+# ★ A DM AND/OR A CHANNEL — SQUADRON OWNER, 2026-08-06 ★
+#
+# DISCORD_OPS_USER_ID is a Discord USER id, and the probe opens a DM to it. A channel alert at 3am
+# is read at 9am, and the whole reason this exists is that the site was slow for twenty minutes and
+# the only monitoring system was somebody noticing.
+#
+# Both are read because they are not alternatives: one person on call, plus a record the squadron
+# can see, is a normal arrangement. Set either, or both, or neither — with neither the probe still
+# measures and says in its log that it told nobody.
 export DISCORD_BOT_TOKEN
+export DISCORD_OPS_USER_ID
 export DISCORD_OPS_CHANNEL_ID
 DISCORD_BOT_TOKEN="$(envval DISCORD_BOT_TOKEN)"
+DISCORD_OPS_USER_ID="$(envval DISCORD_OPS_USER_ID)"
 DISCORD_OPS_CHANNEL_ID="$(envval DISCORD_OPS_CHANNEL_ID)"
 
 # ★ PROBED BY THE NAME MEMBERS ACTUALLY USE ★
