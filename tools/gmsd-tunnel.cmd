@@ -16,10 +16,15 @@ REM  runs in a container, and 127.0.0.1 inside a container is the CONTAINER. A
 REM  tunnel on the host's loopback is invisible from in there. The bridge gateway
 REM  is reachable by containers on that host and by nothing else.
 REM
-REM  So the API's AI_BASE_URL is `http://127.0.0.1:11434/v1` in BOTH places. On a
-REM  development machine that is the model server running locally; on the server
-REM  it is the near end of this tunnel. One value, one code path, no environment
-REM  branching -- which is what makes "it worked locally" mean something.
+REM  So the API's AI_BASE_URL DIFFERS by environment, and this comment used to claim
+REM  it did not -- which is exactly what sends somebody debugging a dead tunnel to
+REM  the wrong socket:
+REM
+REM    development  http://127.0.0.1:11434/v1    the model server on that machine
+REM    production   http://172.18.0.1:11434/v1   the bridge gateway, near end of this tunnel
+REM
+REM  One code path and no environment branching; one VALUE that has to differ,
+REM  because loopback inside a container is the container.
 REM
 REM  * WHY OUT AND NOT IN *
 REM

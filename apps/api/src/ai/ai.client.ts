@@ -59,6 +59,18 @@ export function aiConfigFrom(env: NodeJS.ProcessEnv): AiConfig | null {
   };
 }
 
+/**
+ * How long to wait before the heartbeat's second attempt.
+ *
+ * Three seconds: comfortably longer than the tunnel takes to re-establish in the common case, and
+ * a rounding error against the four-minute beat — so a genuine outage is still reported in the
+ * same cycle rather than deferred to the next one.
+ *
+ * NOT a shorter warm timeout. A healthy `warm()` has been measured at up to 16.5 seconds on a cold
+ * model load, so tightening the budget would manufacture the very false alarm this removes.
+ */
+const WARM_RETRY_MS = 3_000;
+
 export class AiClient {
   constructor(
     private readonly config: AiConfig | null,
@@ -185,7 +197,28 @@ export class AiClient {
 
     // One token. Enough to force the load, small enough to cost nothing every four minutes.
     const answer = await this.#complete([{ role: 'user', content: 'ok' }], SCREEN_TIMEOUT_MS, 0);
-    return answer !== null;
+    if (answer !== null) return true;
+
+    /*
+     * ★ ONE RETRY, AND ONLY FOR THE FAST FAILURE — SQUADRON OWNER, 2026-08-06 ★
+     *
+     * "we need to ensure this does not happen any more!"
+     *
+     * The AI runs on the owner's own machine and production reaches it down a reverse SSH tunnel
+     * that drops several times a day. A healthy round trip through it is 35-47ms, so the reported
+     * 4ms failures never reached the far end: they are a local connection refused, in the seconds
+     * between sshd reaping the dead session and the tunnel coming back.
+     *
+     * That is a reconnect in progress, not an outage, and it was being logged as "posts will be
+     * held". One retry after a short pause turns almost all of them into nothing at all.
+     *
+     * The pause is deliberately longer than a refusal takes and far shorter than the four-minute
+     * beat, so a genuine outage is still reported inside the same cycle rather than hidden.
+     */
+    await new Promise((resolve) => setTimeout(resolve, WARM_RETRY_MS));
+
+    const second = await this.#complete([{ role: 'user', content: 'ok' }], SCREEN_TIMEOUT_MS, 0);
+    return second !== null;
   }
 
   /**
@@ -358,13 +391,20 @@ export function parseScreenJson(
  *
  * Squadron owner, 2026-07-30: "the AI must work on both Localhost and our actual server / website".
  *
- * It does, and the reason is worth stating: `AI_BASE_URL` is `http://127.0.0.1:11434/v1` in BOTH
- * places. On a development machine that is Ollama running locally. On the Vultr box it is the
- * near end of the SSH reverse tunnel, which forwards that port to the same Ollama on the owner's
- * PC.
+ * It does, and the shape is worth stating precisely — an earlier version of this comment said the
+ * URL was `127.0.0.1:11434` in BOTH places, which is wrong and sends anybody debugging it to the
+ * wrong socket.
  *
- * So there is one configuration value, one code path, and no environment branching anywhere in
- * this file — which is what makes "it worked locally" mean something.
+ *   development   AI_BASE_URL=http://127.0.0.1:11434/v1    Ollama on this machine.
+ *   production    AI_BASE_URL=http://172.18.0.1:11434/v1   the Docker BRIDGE GATEWAY.
+ *
+ * The server value cannot be loopback: the API runs in a container, and 127.0.0.1 inside a
+ * container is the container. The tunnel's near end is published on the bridge gateway, which is
+ * reachable by containers on that host and by nothing else.
+ *
+ * What IS identical is the code path — one variable, no environment branching anywhere in this
+ * file — which is what makes "it worked locally" mean something. The value differs; the logic does
+ * not.
  */
 export async function aiHealth(
   client: AiClient,
