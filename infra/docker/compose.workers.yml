@@ -1,0 +1,105 @@
+# The ingestion box.
+#
+# ★ WHY A SECOND MACHINE — SQUADRON OWNER, 2026-08-05 ★
+#
+# Members reported "The hub did not answer in time" from the companion app. The hub was answering;
+# it was taking EIGHTY-EIGHT SECONDS to do it, because the galaxy ingest was decompressing its 4 GB
+# dump — four `unpigz` processes — on the same eight cores serving the site. Load average 23.
+#
+# `cpu_shares: 256` was the first answer and it is a real one: the ingest yields when the API wants
+# the CPU, so it costs nothing on a quiet night and cannot starve anybody on a busy one. What a
+# weight cannot do is give back the memory or the disk bandwidth, and the ingest wants both at
+# exactly the moment Postgres does.
+#
+# So the resident daemon, the EDDN subscriber and the cron one-shots move to their own machine, and
+# the box members actually talk to keeps its cores for them.
+#
+# ★ WHAT STAYS BEHIND ★
+#
+# Postgres, Redis, Meilisearch, Caddy, the API, the web app and the bot. This file holds only the
+# things nobody is waiting on. If a job here dies at 3am, a price is stale; if the API dies, the
+# site is down. They do not belong on the same machine and they especially do not belong competing
+# for the same page cache.
+#
+# ★ HOW IT REACHES THE DATABASE ★
+#
+# Over the Vultr VPC, never the public internet — see infra/runbooks/workers-second-box.md, which
+# is the half of this that is not a compose file. Postgres binds to the private interface only.
+# `DATABASE_URL` and `REDIS_URL` in this box's /srv/grims/.env point at the private address; every
+# other value is identical to the primary's.
+#
+# Usage on the ingestion box:
+#   docker compose -f compose.workers.yml --env-file /srv/grims/.env up -d
+#   docker compose -f compose.workers.yml --env-file /srv/grims/.env --profile jobs run --rm worker ...
+name: grims-workers
+
+services:
+  # The resident scheduler. Watches the database for requested refreshes and runs them.
+  #
+  # No ports, no ingress — it only listens to the database, which is as true across a VPC as it was
+  # across a docker network.
+  worker-daemon:
+    image: ghcr.io/r3ap3rw1lly/grims-squad/worker:${GRIMS_IMAGE_TAG:-latest}
+    command: ['node', 'apps/worker/dist/daemon.js']
+    env_file: [/srv/grims/.env]
+    environment:
+      NODE_ENV: production
+    restart: unless-stopped
+    # ★ NO cpu_shares HERE, DELIBERATELY ★
+    #
+    # On the primary these run at weight 256 so the site wins every contest for a core. On this box
+    # there is no site to lose to — the whole machine exists to do this work, and throttling it
+    # against nothing would just make ingests slower for no one's benefit.
+    #
+    # If anything web-facing is ever added to this file, put the weights back.
+    volumes:
+      - knowledge:/srv/knowledge
+    # ★ NO depends_on ★
+    #
+    # Postgres is on the other machine, so compose cannot wait for it and must not pretend to. The
+    # daemon retries its connection; `restart: unless-stopped` covers the case where it gives up.
+    # The primary being rebooted must not leave this box needing a hand.
+
+  # Subscribes to the public EDDN relay and keeps market_entries current between nightly rebuilds.
+  # Roughly one market snapshot a second, from every player running an uploader.
+  #
+  # ★ STILL EXACTLY ONE, AND NOW IT MATTERS MORE ★
+  #
+  # Two collectors would interleave two delete-and-insert transactions over the same rows. On one
+  # machine the mistake was at least visible in `docker ps`. Across two it is not: the failure mode
+  # of this migration is the collector left running on the PRIMARY while a second starts here.
+  #
+  # The guarantee is the Postgres advisory lock inside the process, which does not care which host
+  # it is called from — that is why it was written as an advisory lock rather than a file lock.
+  # Step 8 of the runbook is stopping the old one; the lock is what makes forgetting survivable
+  # rather than corrupting.
+  eddn-collector:
+    image: ghcr.io/r3ap3rw1lly/grims-squad/eddn-collector:${GRIMS_IMAGE_TAG:-latest}
+    env_file: [/srv/grims/.env]
+    environment:
+      NODE_ENV: production
+    restart: unless-stopped
+    # SIGTERM closes the current reporting window before exiting, so an ordinary redeploy does not
+    # leave a row the training page would report as a stall.
+    stop_grace_period: 20s
+
+  # The one-shot container cron runs the nightly reconcile and the galaxy import in.
+  # Same image as the daemon: one is a resident scheduler, the other the cron runs, and they are the
+  # same code started differently.
+  worker:
+    profiles: ['jobs']
+    image: ghcr.io/r3ap3rw1lly/grims-squad/worker:${GRIMS_IMAGE_TAG:-latest}
+    env_file: [/srv/grims/.env]
+    environment:
+      NODE_ENV: production
+    volumes:
+      - knowledge:/srv/knowledge
+
+volumes:
+  # The Spansh baseline is a 4 GB download the ingest then reads. Without a volume it lands in a
+  # container layer and vanishes with the container, so every night pays to fetch it again and
+  # nothing ever keeps it — which is one reason the baseline had never refreshed in production.
+  #
+  # Shared between the daemon and the cron one-shots because the download happens in one container
+  # and the ingest in another.
+  knowledge:
