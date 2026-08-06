@@ -99,6 +99,13 @@ services:
       retries: 6
 
   api:
+    # ★ PULLED, NOT BUILT — SQUADRON OWNER, 2026-08-05 ★
+    #
+    # The image is built in CI and pulled here. `build:` stays for a developer running this file
+    # locally, and compose only uses it when the image is absent — so production pulls and a laptop
+    # can still build. `GRIMS_IMAGE_TAG` is set by deploy.sh to the exact revision being shipped;
+    # `latest` is the fallback for a hand-run `docker compose up`.
+    image: ghcr.io/r3ap3rw1lly/grims-squad/api:${GRIMS_IMAGE_TAG:-latest}
     build:
       context: ../..
       dockerfile: infra/docker/Dockerfile.api
@@ -156,6 +163,13 @@ services:
       start_period: 30s
 
   web:
+    # ★ PULLED, NOT BUILT — SQUADRON OWNER, 2026-08-05 ★
+    #
+    # The image is built in CI and pulled here. `build:` stays for a developer running this file
+    # locally, and compose only uses it when the image is absent — so production pulls and a laptop
+    # can still build. `GRIMS_IMAGE_TAG` is set by deploy.sh to the exact revision being shipped;
+    # `latest` is the fallback for a hand-run `docker compose up`.
+    image: ghcr.io/r3ap3rw1lly/grims-squad/web:${GRIMS_IMAGE_TAG:-latest}
     build:
       context: ../..
       dockerfile: infra/docker/Dockerfile.web
@@ -187,6 +201,13 @@ services:
     depends_on: [api]
 
   bot:
+    # ★ PULLED, NOT BUILT — SQUADRON OWNER, 2026-08-05 ★
+    #
+    # The image is built in CI and pulled here. `build:` stays for a developer running this file
+    # locally, and compose only uses it when the image is absent — so production pulls and a laptop
+    # can still build. `GRIMS_IMAGE_TAG` is set by deploy.sh to the exact revision being shipped;
+    # `latest` is the fallback for a hand-run `docker compose up`.
+    image: ghcr.io/r3ap3rw1lly/grims-squad/bot:${GRIMS_IMAGE_TAG:-latest}
     build:
       context: ../..
       dockerfile: infra/docker/Dockerfile.bot
@@ -227,6 +248,13 @@ services:
   # `restart: unless-stopped` because a button that silently does nothing is worse than no button:
   # if this is down, requests are discarded and the page will say "requested" for ever.
   worker-daemon:
+    # ★ PULLED, NOT BUILT — SQUADRON OWNER, 2026-08-05 ★
+    #
+    # The image is built in CI and pulled here. `build:` stays for a developer running this file
+    # locally, and compose only uses it when the image is absent — so production pulls and a laptop
+    # can still build. `GRIMS_IMAGE_TAG` is set by deploy.sh to the exact revision being shipped;
+    # `latest` is the fallback for a hand-run `docker compose up`.
+    image: ghcr.io/r3ap3rw1lly/grims-squad/worker:${GRIMS_IMAGE_TAG:-latest}
     build:
       context: ../..
       dockerfile: infra/docker/Dockerfile.worker
@@ -284,6 +312,13 @@ services:
   # current, with no error anywhere. The training page's one-hour deadline is the alarm for that,
   # and this is what makes the alarm rare enough to be worth reading.
   eddn-collector:
+    # ★ PULLED, NOT BUILT — SQUADRON OWNER, 2026-08-05 ★
+    #
+    # The image is built in CI and pulled here. `build:` stays for a developer running this file
+    # locally, and compose only uses it when the image is absent — so production pulls and a laptop
+    # can still build. `GRIMS_IMAGE_TAG` is set by deploy.sh to the exact revision being shipped;
+    # `latest` is the fallback for a hand-run `docker compose up`.
+    image: ghcr.io/r3ap3rw1lly/grims-squad/eddn-collector:${GRIMS_IMAGE_TAG:-latest}
     build:
       context: ../..
       dockerfile: infra/docker/Dockerfile.eddn-collector
@@ -301,6 +336,16 @@ services:
 
   worker:
     profiles: ['jobs']
+    # ★ PULLED, NOT BUILT — SQUADRON OWNER, 2026-08-05 ★
+    #
+    # The image is built in CI and pulled here. `build:` stays for a developer running this file
+    # locally, and compose only uses it when the image is absent — so production pulls and a laptop
+    # can still build. `GRIMS_IMAGE_TAG` is set by deploy.sh to the exact revision being shipped;
+    # `latest` is the fallback for a hand-run `docker compose up`.
+    # The SAME image as worker-daemon: one is a resident scheduler, the other the one-shot cron
+    # runs, and they are the same code started differently. Two tags would be two things to keep
+    # in step for no benefit.
+    image: ghcr.io/r3ap3rw1lly/grims-squad/worker:${GRIMS_IMAGE_TAG:-latest}
     build:
       context: ../..
       dockerfile: infra/docker/Dockerfile.worker

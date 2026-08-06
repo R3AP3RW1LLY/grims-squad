@@ -1,0 +1,115 @@
+# Building the production images, off the production box.
+#
+# ★ SQUADRON OWNER, 2026-08-05 ★
+#
+# Members watched the site crawl through deploy after deploy, and every time the cause was the same:
+# the box that serves them was also compiling six Docker images. Measured during one build, with
+# parallelism already limited to two — sixteen minutes of healthy 0.24s pages, then the Next.js
+# image started and `/` took 19.95 seconds.
+#
+# Reducing the number of compilers helped and could never be enough, because the problem is that
+# compiling happens there at all. A build is not something anybody is waiting for; a page is.
+#
+# So the images are built here, on hardware nobody is browsing, and the deploy PULLS them. The box
+# stops being a build machine and goes back to being a server.
+#
+# ★ ON EVERY PUSH TO MAIN, NOT ON EVERY PR ★
+#
+# A PR proves the code compiles — `pnpm build` in pr.yml already does that, and doing it twice would
+# double CI time to learn the same fact. This runs when something lands, so an image exists for
+# every revision that could be deployed and the deploy never waits on a build it triggered.
+#
+# ★ TAGGED BY SHA, AND THAT IS THE POINT ★
+#
+# `latest` is a moving target that makes "what is production running" unanswerable — the exact
+# question deployed.sha exists to answer. Every image carries its commit, so a deploy names the
+# revision it wants and gets precisely that, and a rollback is a pull rather than a rebuild.
+name: images
+
+on:
+  push:
+    branches: [main]
+  # Buildable on demand, so image breakage can be found without waiting for a merge.
+  workflow_dispatch:
+
+# The registry is GitHub's own, so the job's token is the only credential CI needs.
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  # One build per revision. A rapid second merge supersedes an in-flight build rather than racing
+  # it — the older images would be deployed by nobody.
+  group: images-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.image }}
+    runs-on: ubuntu-latest
+    strategy:
+      # One job per image, so six images cost one image's wall-clock rather than six. This is the
+      # parallelism that had to be TAKEN AWAY from the production box; here it is free.
+      fail-fast: false
+      matrix:
+        include:
+          - image: api
+            dockerfile: infra/docker/Dockerfile.api
+          - image: web
+            dockerfile: infra/docker/Dockerfile.web
+          - image: bot
+            dockerfile: infra/docker/Dockerfile.bot
+          - image: worker
+            dockerfile: infra/docker/Dockerfile.worker
+          - image: eddn-collector
+            dockerfile: infra/docker/Dockerfile.eddn-collector
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: sign in to the registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # ★ THE REPOSITORY OWNER, LOWER-CASED ★
+      #
+      # GHCR requires a lowercase path and this repository's owner is not. Computed rather than
+      # hard-coded so a rename does not silently push to a namespace nobody reads.
+      - name: work out the image path
+        id: path
+        run: echo "repo=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      # ★ THE ONE THING A CI BUILD CAN GET WRONG THAT A BOX BUILD COULD NOT ★
+      #
+      # Next inlines NEXT_PUBLIC_* at BUILD time. On the box, compose read PUBLIC_SITE_URL from
+      # /srv/grims/.env and the built image could not disagree with production. Here there is no
+      # .env, so without this the web image would bake Dockerfile.web's fallback —
+      # https://45-63-35-93.sslip.io — into every canonical URL, OpenGraph tag and absolute link.
+      #
+      # It would start cleanly, serve every page, and quietly tell search engines and every shared
+      # link that the squadron lives at an IP address. Passed here, and asserted by
+      # tools/deploy-script.spec.ts so the two files cannot drift apart in silence.
+      #
+      # A repository variable overrides it — for a staging host — but the default is the real
+      # domain rather than empty, because the failure mode of "unset" is silent and the failure
+      # mode of "wrong domain in the repo" is somebody noticing immediately.
+      - name: build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: true
+          build-args: |
+            NEXT_PUBLIC_SITE_URL=${{ vars.PUBLIC_SITE_URL || 'https://grims-squad.com' }}
+          tags: |
+            ghcr.io/${{ steps.path.outputs.repo }}/${{ matrix.image }}:${{ github.sha }}
+            ghcr.io/${{ steps.path.outputs.repo }}/${{ matrix.image }}:latest
+          # GitHub's own layer cache. Keyed per image so one Dockerfile's churn cannot evict
+          # another's layers — which is what made the box's shared cache reach 188 GB.
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
