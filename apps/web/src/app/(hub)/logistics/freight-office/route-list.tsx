@@ -1,3 +1,4 @@
+import { depthOf } from '@grims/shared';
 import type { Route, RoutePlan } from '../../../../lib/api';
 
 /**
@@ -41,6 +42,43 @@ const STALE_DAYS = 30;
 function isStale(iso: string | null): boolean {
   if (iso === null) return true;
   return (Date.now() - new Date(iso).getTime()) / 86_400_000 > STALE_DAYS;
+}
+
+
+/**
+ * Supply at the pickup, demand at the destination.
+ *
+ * ★ SQUADRON OWNER, 2026-08-06 ★
+ *
+ * "show total supply at the pickup station and total demand at the destination station please,
+ * green for in demand, red for not in demand, and yellow for inbetween"
+ *
+ * The colour is judged against the tonnes this route would actually move, not against an absolute —
+ * see `depthOf`. Four thousand tonnes of demand is generous for a Python and thin for a Cutter, and
+ * one pill must not tell both of them the same thing.
+ *
+ * The NUMBER rides alongside the colour deliberately. A bare pill says "fine" without saying how
+ * fine, and the member deciding whether to bring a second load needs the figure.
+ */
+function Depth({ quantity, tonnes, noun }: { quantity: number; tonnes: number; noun: string }) {
+  const depth = depthOf(quantity, tonnes);
+
+  const tone =
+    depth === 'good'
+      ? 'text-[var(--color-semantic-success)]'
+      : depth === 'partial'
+        ? 'text-[var(--color-semantic-warning)]'
+        : depth === 'none'
+          ? // `hostile-bright`, not `hostile`: the flat red is 3.1:1 on the panel and this is a
+            // small mono figure, where the brighter tone clears AA at the size it is actually read.
+            'text-[var(--color-semantic-hostile-bright)]'
+          : 'text-[var(--color-text-secondary)]';
+
+  return (
+    <span className={`font-mono tabular-nums ${tone}`}>
+      {depth === 'unknown' ? '—' : quantity.toLocaleString()} {noun}
+    </span>
+  );
 }
 
 export function RouteList({ plan }: { plan: RoutePlan }) {
@@ -103,7 +141,8 @@ export function RouteList({ plan }: { plan: RoutePlan }) {
                 <dd className="m-0 text-[11px] text-[var(--color-text-secondary)]">
                   {r.buy.systemName} ·{' '}
                   {r.buy.distance === null ? '—' : `${r.buy.distance.toFixed(1)} ly`}
-                  {ls(r.buy.arrivalLs)} · {r.buy.price.toLocaleString()} cr/t
+                  {ls(r.buy.arrivalLs)} · {r.buy.price.toLocaleString()} cr/t ·{' '}
+                  <Depth quantity={r.buy.quantity} tonnes={r.tonnes} noun="in stock" />
                 </dd>
               </div>
 
@@ -117,7 +156,8 @@ export function RouteList({ plan }: { plan: RoutePlan }) {
                 <dd className="m-0 text-[11px] text-[var(--color-text-secondary)]">
                   {r.sell.systemName} ·{' '}
                   {r.sell.distance === null ? '—' : `${r.sell.distance.toFixed(1)} ly`}
-                  {ls(r.sell.arrivalLs)} · {r.sell.price.toLocaleString()} cr/t
+                  {ls(r.sell.arrivalLs)} · {r.sell.price.toLocaleString()} cr/t ·{' '}
+                  <Depth quantity={r.sell.quantity} tonnes={r.tonnes} noun="wanted" />
                 </dd>
               </div>
 

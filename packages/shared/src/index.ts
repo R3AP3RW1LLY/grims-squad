@@ -230,3 +230,6 @@ export {
   BGS_STANCES,
 } from './bgs.js';
 export type { BgsStance, BgsOrder, FactionEffect } from './bgs.js';
+
+export { depthOf, DEPTH_COMFORTABLE } from './market-depth.js';
+export type { MarketDepth } from './market-depth.js';

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
+import { depthOf } from '@grims/shared';
 import type { TradePlan, TradeRoute } from '../hub-trade.js';
 import { Button, C, Card, Empty, Problem, Section, inputStyle } from './ui.js';
 import { useLive } from './use-live.js';
@@ -78,14 +79,16 @@ function RouteCard({ r }: { r: TradeRoute }): JSX.Element {
           <span style={{ color: C.text }}>{r.buy.stationName}</span>
           <br />
           {r.buy.systemName} · {r.buy.distance === null ? '—' : `${r.buy.distance.toFixed(1)} ly`}
-          {ls(r.buy.arrivalLs)} · {r.buy.price.toLocaleString()} cr/t
+          {ls(r.buy.arrivalLs)} · {r.buy.price.toLocaleString()} cr/t ·{' '}
+          <Depth quantity={r.buy.quantity} tonnes={r.tonnes} noun="in stock" />
         </div>
         <div>
           <span style={LABEL}>Sell at</span>
           <span style={{ color: C.text }}>{r.sell.stationName}</span>
           <br />
           {r.sell.systemName} · {r.sell.distance === null ? '—' : `${r.sell.distance.toFixed(1)} ly`}
-          {ls(r.sell.arrivalLs)} · {r.sell.price.toLocaleString()} cr/t
+          {ls(r.sell.arrivalLs)} · {r.sell.price.toLocaleString()} cr/t ·{' '}
+          <Depth quantity={r.sell.quantity} tonnes={r.tonnes} noun="wanted" />
         </div>
         <div>
           <span style={LABEL}>Carrying</span>
@@ -103,6 +106,31 @@ function RouteCard({ r }: { r: TradeRoute }): JSX.Element {
         </div>
       </div>
     </Card>
+  );
+}
+
+
+/**
+ * Supply at the pickup, demand at the destination — the same rule the website uses.
+ *
+ * ★ SQUADRON OWNER, 2026-08-06 ★
+ *
+ * "show total supply at the pickup station and total demand at the destination station please,
+ * green for in demand, red for not in demand, and yellow for inbetween"
+ *
+ * `depthOf` lives in @grims/shared so the app and the website cannot call the same stop good and
+ * thin. Judged against the tonnes THIS route moves, because four thousand tonnes of demand is
+ * generous for a Python and thin for a Cutter.
+ */
+function Depth({ quantity, tonnes, noun }: { quantity: number; tonnes: number; noun: string }): JSX.Element {
+  const depth = depthOf(quantity, tonnes);
+  const tone =
+    depth === 'good' ? C.good : depth === 'partial' ? C.warn : depth === 'none' ? C.bad : C.dim;
+
+  return (
+    <span style={{ color: tone, fontVariantNumeric: 'tabular-nums' }}>
+      {depth === 'unknown' ? '—' : quantity.toLocaleString()} {noun}
+    </span>
   );
 }
 
