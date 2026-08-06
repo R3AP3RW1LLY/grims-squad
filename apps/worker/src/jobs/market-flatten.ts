@@ -51,6 +51,23 @@ const INDEXES = [
   'market_entries_coords_idx',
   'market_entries_station_idx',
   'market_entries_commodity_trgm_idx',
+  // ★ ADDED AFTER THE OUTAGE OF 2026-08-06 ★
+  //
+  // Without this in the drop-and-rebuild list the bulk insert below would maintain a GiST index
+  // over five and a half million rows one row at a time, which is precisely the cost this whole
+  // shape exists to avoid. Its absence would not fail — it would just make the nightly rebuild
+  // take hours longer, silently.
+  'market_entries_buy_coords_idx',
+  // ★ AND THIS ONE HAD BEEN MISSING ALL ALONG ★
+  //
+  // Found on 2026-08-06 by widening the drift test to read EVERY migration rather than only the
+  // one that first created the table. It has existed in a migration since the live-rows fix and
+  // was never in this list, so every rebuild since has maintained it a row at a time through the
+  // bulk insert below — exactly the cost this shape exists to avoid.
+  //
+  // Safe to drop here: the `live_keep` snapshot is taken further down but BEFORE the drops, and
+  // that snapshot is the one query this index serves.
+  'market_entries_live_source_idx',
 ] as const;
 
 const INDEX_DDL = [
@@ -67,10 +84,32 @@ const INDEX_DDL = [
   `CREATE INDEX "market_entries_station_idx" ON "market_entries" ("station_key")`,
   // Fuzzy commodity names, so "platinium" still finds Platinum.
   `CREATE INDEX "market_entries_commodity_trgm_idx" ON "market_entries" USING gin ("commodity" gin_trgm_ops)`,
+  /*
+   * ★ "WHERE CAN I BUY THIS, NEAREST FIRST" — THE QUERY THAT TOOK SEVENTY SECONDS ★
+   *
+   * `WHERE commodity = $1 ... ORDER BY coords <-> origin LIMIT 1`. With only the plain coords GiST
+   * index, Postgres walks outward from the origin nearest-first and applies `commodity` as a
+   * filter — so when nothing within range sells it, the scan crawls the galaxy to prove a negative.
+   * Measured at a real origin: 88.8s, and the answer was an empty set.
+   *
+   * btree_gist lets the scalar equality share the GiST index with the cube, scoping the walk to one
+   * commodity before it starts. Same six commodities afterwards: 0.27s, 0.43s, 0.02s, 0.26s, 0.15s,
+   * 0.19s.
+   *
+   * Partial on the buy predicate: 5.5M of the 18.9M rows can actually be bought, which is the
+   * difference between 708 MB and several gigabytes, and every query using it already carries those
+   * predicates.
+   */
+  `CREATE INDEX "market_entries_buy_coords_idx" ON "market_entries" USING gist ("commodity", "coords")
+     WHERE "supply" > 0 AND "buy_price" > 0 AND "coords" IS NOT NULL`,
+  // "which stations have live rows" — the preservation pass's own lookup, once per rebuild.
+  // Partial because 'dump' rows are the overwhelming majority and are never looked up by source.
+  `CREATE INDEX "market_entries_live_source_idx" ON "market_entries" ("station_key")
+     WHERE "source" <> 'dump'`,
 ] as const;
 
 export async function rebuildMarketEntries(db: PrismaClient): Promise<number> {
-  return db.$transaction(
+  const written = await db.$transaction(
     async (tx) => {
       /*
        * TRUNCATE, not DELETE. DELETE on tens of millions of rows writes a dead tuple for each and
@@ -247,13 +286,6 @@ export async function rebuildMarketEntries(db: PrismaClient): Promise<number> {
         await tx.$executeRawUnsafe(ddl);
       }
 
-      /*
-       * ANALYZE, explicitly. Autovacuum will get to it eventually, and until it does the planner
-       * has statistics from an empty table — which is how a perfectly good index gets ignored in
-       * favour of a sequential scan for the first several minutes after every rebuild.
-       */
-      await tx.$executeRawUnsafe(`ANALYZE market_entries`);
-
       return written;
     },
     /*
@@ -275,4 +307,37 @@ export async function rebuildMarketEntries(db: PrismaClient): Promise<number> {
      */
     { timeout: 4 * 60 * 60_000, maxWait: 60_000 },
   );
+
+  /*
+   * ★ ANALYZE, AFTER THE COMMIT — AND THE REASON THAT MATTERS ★
+   *
+   * This used to be the last statement INSIDE the transaction above, and it was not enough.
+   *
+   * Measured in production on 2026-08-06: Postgres believed this table held 30,281 rows. It held
+   * 18,847,651. `pg_stat_user_tables` reported `last_analyze = never` and `last_autoanalyze =
+   * never`, and every plan touching the largest table in the database was costed from a number six
+   * hundred times too small.
+   *
+   * What that cost: at a real commander's position, "cheapest source of this commodity within
+   * 100 ly" took SEVENTY TO ONE HUNDRED AND FIFTEEN SECONDS and returned nothing. Believing the
+   * table tiny, the planner chose a KNN walk over the coords index with `commodity` as a
+   * post-filter, so it crawled outward through the galaxy discarding rows. The colonisation page
+   * fires one of those per commodity; the companion app retried; the API's entire connection pool
+   * went to a single endpoint and the site fell over.
+   *
+   * The planner statistics themselves are transactional and did land. The CUMULATIVE COUNTERS are
+   * not — they are reported to the stats collector separately, and a TRUNCATE inside a transaction
+   * that later rolls back or times out (this rebuild has done both) leaves them describing a table
+   * that no longer exists. Autovacuum then reads those counters, concludes a 30,000-row table is
+   * not worth visiting, and never corrects them. It had never once run on this table.
+   *
+   * Running it here, on the pooled client after the commit, means the statistics are taken from
+   * the committed table and the counters are reported where every planner afterwards can see them.
+   *
+   * It is deliberately NOT inside the transaction and deliberately NOT on `tx`: that client is
+   * invalid the moment the callback returns.
+   */
+  await db.$executeRawUnsafe(`ANALYZE market_entries`);
+
+  return written;
 }

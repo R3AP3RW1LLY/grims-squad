@@ -10,6 +10,21 @@ import { AppError, ErrorCode, Permission } from '@grims/shared';
 import { DEFAULT_TIMEZONE, isValidTimezone } from '../common/timezone.js';
 import type { AclDbService } from '../authz/acl-db.service.js';
 import type { MarketStore, PlaceQuery } from './market.store.js';
+import { SingleFlight } from '../common/single-flight.js';
+import { Bulkhead } from '../common/bulkhead.js';
+
+/**
+ * How long a computed shopping list stays fresh.
+ *
+ * Sixty seconds is chosen against the two failures on either side of it. Too short and a retrying
+ * companion still stampedes, which is the outage this exists to prevent. Too long and the list
+ * quotes a station that sold out — a different bug report, and one that erodes trust in the whole
+ * feature rather than merely making it slow.
+ *
+ * A minute is far longer than a burst of retries and far shorter than the interval at which market
+ * data actually changes: EDDN refreshes a given station every few minutes at best.
+ */
+const SHOPPING_LIST_TTL_MS = 60_000;
 
 /**
  * Where the site lives, for a link in a Discord message.
@@ -423,6 +438,35 @@ export function rankPlaces<
 }
 
 export class ColonyService {
+  /**
+   * Shared across every instance, deliberately.
+   *
+   * Nest constructs this service per module, and a coalescer scoped to one instance would let the
+   * same project be computed once per instance — which is the stampede again, just with a smaller
+   * number. There is one database and one answer, so there is one flight.
+   */
+  private static readonly shoppingFlight = new SingleFlight({ maxEntries: 200 });
+
+  /**
+   * ★ THE CEILING THIS ROUTE MAY NOT EXCEED ★
+   *
+   * On 2026-08-06 this one computation held all twenty-five database connections, so sign-in, the
+   * roster and the health check the deploy gates on were queued behind a page of market lookups.
+   *
+   * Six of twenty-five, and a short queue. That is generous for a computation that is now
+   * coalesced — six DISTINCT shopping lists at once is far beyond anything a 107-member squadron
+   * produces — while leaving nineteen connections that this route can never touch, whatever
+   * happens to it next.
+   *
+   * Static for the same reason the coalescer is: per-instance limits would multiply by the number
+   * of instances, which is not a limit.
+   */
+  private static readonly shoppingBulkhead = new Bulkhead({
+    limit: 6,
+    queue: 12,
+    name: 'colonisation shopping list',
+  });
+
   constructor(
     private readonly db: PrismaClient,
     private readonly market: MarketStore,
@@ -896,7 +940,56 @@ export class ColonyService {
    * A construction site wants around thirty commodities, and each lookup rides the partial buy
    * index at roughly 8ms. Thirty small queries beat one enormous one, decisively.
    */
+  /**
+   * ★ COALESCED — THE FIX FOR THE OUTAGE OF 2026-08-06 ★
+   *
+   * The API log showed NINE requests for the same project inside three hundred milliseconds,
+   * sustained, each running the whole list below: sixty to ninety market queries apiece. The
+   * companion app retried because the endpoint was slow, and the retries were what kept it slow.
+   * Response times went 667ms → 14,646ms and the entire connection pool went to this one route.
+   *
+   * A plain cache would not have stopped it — nine simultaneous misses are nine computations, and
+   * in a stampede everybody arrives during the first one. Coalescing is the property that matters:
+   * the first caller computes and the other eight wait on the same promise.
+   *
+   * The key names everything that changes the answer. Sharing a key between two different
+   * questions would return one project's shopping list for another, which is far worse than being
+   * slow — see the test that pins it.
+   */
   async shoppingList(
+    projectId: string,
+    opts: {
+      near: { x: number; y: number; z: number } | null;
+      withinLy: number;
+      largePadOnly: boolean;
+      sort?: 'local' | 'cheapest' | 'closest';
+      carrierCover?: Readonly<Record<string, number>>;
+    },
+  ): Promise<readonly ShoppingRow[]> {
+    const key = JSON.stringify([
+      projectId,
+      opts.near === null ? null : [opts.near.x, opts.near.y, opts.near.z],
+      opts.withinLy,
+      opts.largePadOnly,
+      opts.sort ?? 'local',
+      // Sorted, so two equal covers that were built in a different order share one entry rather
+      // than computing the same answer twice under two spellings of the same key.
+      Object.entries(opts.carrierCover ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+    ]);
+
+    /*
+     * Coalescer OUTSIDE the bulkhead, deliberately.
+     *
+     * The nine callers of one stampede should join a single flight and then occupy ONE permit
+     * between them — not nine. Reversed, the bulkhead would refuse eight callers who were about to
+     * share an answer that was already being computed, which is a refusal that buys nothing.
+     */
+    return ColonyService.shoppingFlight.run(key, SHOPPING_LIST_TTL_MS, () =>
+      ColonyService.shoppingBulkhead.run(() => this.#computeShoppingList(projectId, opts)),
+    );
+  }
+
+  async #computeShoppingList(
     projectId: string,
     opts: {
       near: { x: number; y: number; z: number } | null;
