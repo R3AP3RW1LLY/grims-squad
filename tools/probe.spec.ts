@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { evaluate, freshState, DEFAULTS } from './probe.mjs';
+
+const HERE = dirname(fileURLToPath(import.meta.url));
 
 /**
  * The decision an uptime probe actually has to make.
@@ -176,6 +181,63 @@ describe('each thing watched is watched separately', () => {
     }
 
     expect(seen).toEqual(['https://grims-squad.com/forum']);
+  });
+});
+
+describe('the probe watches things that exist', () => {
+  /*
+   * ★ CAUGHT ON THE FIRST RUN ON THE REAL BOX, 2026-08-06 ★
+   *
+   * The default targets included http://127.0.0.1:5001/v1/health, and the very first invocation
+   * announced "🔴 127.0.0.1:5001 is not responding". It never had been: the API publishes no host
+   * ports at all — it is reachable only from the docker network, which is why deploy.sh's verify
+   * step curls `http://api:5001` from INSIDE a container.
+   *
+   * An alert that fires forever about something that was never up is worse than no alert. It is
+   * the thing that teaches everybody the channel is noise, and it would have started the moment
+   * this went into cron.
+   *
+   * https://grims-squad.com/v1/health answers in 0.059s and is the path a member's request
+   * actually travels — through Caddy, to the API — so it is both reachable and more truthful about
+   * what is being measured.
+   */
+  const wrapper = readFileSync(join(HERE, '..', 'infra', 'scripts', 'probe-run.sh'), 'utf8');
+  const compose = readFileSync(
+    join(HERE, '..', 'infra', 'docker', 'compose.prod.yml'),
+    'utf8',
+  );
+
+  it('MANDATORY: no default target is a host port nothing publishes', () => {
+    /*
+     * Comments stripped first. The fix for this bug explains itself by quoting the URL it removed,
+     * and the first version of this test read that prose as a live target — failing on the very
+     * change that fixed it. A source scan that cannot tell code from commentary will eventually
+     * be silenced rather than believed.
+     */
+    const code = wrapper
+      .split('\n')
+      .filter((line) => !/^\s*#/.test(line))
+      .join('\n');
+    const loopbackPorts = [...code.matchAll(/127\.0\.0\.1:(\d+)/g)].map((m) => m[1]);
+
+    for (const port of loopbackPorts) {
+      /*
+       * Read from compose rather than listed here, so publishing a port later automatically makes
+       * it a legitimate target instead of requiring this test to be remembered.
+       */
+      const published = new RegExp(`['"\\s]\\d*:?${port}:\\d+|:${port}:`).test(compose);
+      expect(
+        published,
+        `probe-run.sh probes 127.0.0.1:${port}, which compose.prod.yml never publishes to the host — it will alert forever`,
+      ).toBe(true);
+    }
+  });
+
+  it('MANDATORY: the API is checked by the route a member would take', () => {
+    expect(
+      /PUBLIC_URL\}\/v1\/health/.test(wrapper),
+      'the API health check no longer goes through the public URL, so it stops measuring what members experience',
+    ).toBe(true);
   });
 });
 

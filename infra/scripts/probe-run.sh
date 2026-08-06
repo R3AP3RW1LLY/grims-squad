@@ -36,6 +36,18 @@ PUBLIC_URL="${PUBLIC_URL:-https://grims-squad.com}"
 # The home page, the heaviest page members actually load, and the API underneath both. `/forum`
 # earns its place: during the six-image build it measured 14.9s, within a rounding error of `/`,
 # which is how we know the saturation was the box and not one slow route.
-export PROBE_URLS="${PROBE_URLS:-${PUBLIC_URL}/,${PUBLIC_URL}/forum,http://127.0.0.1:5001/v1/health}"
+#
+# ★ THE API IS CHECKED THROUGH CADDY, NOT ON LOOPBACK — FIXED 2026-08-06 ★
+#
+# This said http://127.0.0.1:5001/v1/health, and the very first run on the real box announced
+# "🔴 127.0.0.1:5001 is not responding". It never had been. The API publishes NO host ports; it is
+# reachable only from the docker network, which is why deploy.sh's verify step curls
+# `http://api:5001` from inside a container rather than from the host.
+#
+# An alert that fires forever about something that was never up is how a channel gets muted, and it
+# would have started the minute this reached cron. The public path answers in 0.059s and is the
+# route a member's request actually travels, so it is both reachable and more honest about what is
+# being measured.
+export PROBE_URLS="${PROBE_URLS:-${PUBLIC_URL}/,${PUBLIC_URL}/forum,${PUBLIC_URL}/v1/health}"
 
 exec node "$REPO/tools/probe.mjs"

@@ -7,6 +7,13 @@
 # Ninety days of history is kept, which is enough to answer "was this deploy slower than the ones
 # before it" — the question that was unanswerable every previous time it was asked.
 /var/log/grims-probe.ndjson {
+    # ★ REQUIRED ON THIS BOX, AND SILENT WITHOUT IT ★
+    #
+    # /var/log is root:syslog drwxrwxr-x — group-writable by a group that is not root — so logrotate
+    # refuses to rotate anything in it without being told whose privileges to use. It does not warn:
+    # it SKIPS the file, and the first anybody would know is a log that has been growing for a year.
+    # Found with `logrotate -d`; the same line appears in ubuntu-pro-client's config on this box.
+    su root root
     daily
     rotate 90
     compress
@@ -21,6 +28,7 @@
 # Cron's own output — the alert lines, and any complaint from the probe about not being able to
 # persist its state. Short retention: it is a breadcrumb trail, not a record.
 /var/log/grims-probe.log {
+    su root root
     weekly
     rotate 4
     compress
