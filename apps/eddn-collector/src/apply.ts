@@ -39,9 +39,17 @@ export interface ApplyResult {
   readonly unknownStation: boolean;
   /** Commodity symbols in this message we could not place. */
   readonly unresolved: number;
+  /** The symbols behind `unresolved`, so the count is answerable rather than merely alarming. */
+  readonly unknownSymbols: readonly string[];
 }
 
-const NOTHING: ApplyResult = { rows: 0, removed: 0, unknownStation: false, unresolved: 0 };
+const NOTHING: ApplyResult = {
+  rows: 0,
+  removed: 0,
+  unknownStation: false,
+  unresolved: 0,
+  unknownSymbols: [],
+};
 
 export async function applyMarket(
   db: PrismaClient,
@@ -108,6 +116,8 @@ export async function applyMarket(
   }
 
   let unresolved = 0;
+  // Recorded so the window log can NAME the offenders. The count alone told nobody anything.
+  const unknownSymbols: string[] = [];
   const rows: Array<{
     name: string;
     category: string | null;
@@ -121,6 +131,7 @@ export async function applyMarket(
     const known = names.resolve(c.symbol);
     if (known === null) {
       unresolved += 1;
+      unknownSymbols.push(c.symbol);
       continue;
     }
     rows.push({
@@ -138,7 +149,7 @@ export async function applyMarket(
    * message whose commodities we cannot name tells us nothing about what the station trades, and
    * emptying its rows on that basis would replace good data with none.
    */
-  if (rows.length === 0) return { ...NOTHING, unresolved };
+  if (rows.length === 0) return { ...NOTHING, unresolved, unknownSymbols };
 
   const deleted = await db.$transaction(async (tx) => {
     /*
@@ -229,5 +240,6 @@ export async function applyMarket(
     // Still reported, but it now means "written under a provisional station" rather than "lost".
     unknownStation,
     unresolved,
+    unknownSymbols,
   };
 }

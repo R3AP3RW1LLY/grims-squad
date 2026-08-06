@@ -123,6 +123,44 @@ export interface Commodity {
   readonly category: string | null;
 }
 
+/**
+ * The EDDN symbol, reduced to a comparison key.
+ *
+ * ★ THE LOCALISED KEY FORM — 2026-08-06 ★
+ *
+ * Most uploaders send the bare symbol (`platinum`). A minority send the raw journal localisation
+ * key instead (`$platinum_name;`), which `squash` turns into `platinumname` — matching nothing.
+ *
+ * The cost is not one lost line. When EVERY commodity in a message fails, `applyMarket` writes no
+ * rows at all, so the whole station is dropped rather than merely incomplete: a sampled message
+ * carried 351 commodities and lost all of them.
+ */
+export function symbolKey(symbol: string): string {
+  return squash(symbol.replace(/^\$/, '').replace(/_name;?$/i, ''));
+}
+
+/**
+ * Words a commodity's DISPLAY name may carry that its symbol does not.
+ *
+ * ★ DELIBERATELY TINY, AND IT HAS TO STAY THAT WAY ★
+ *
+ * Frontier's symbol for "Curated Commodity Package" is `curatedcommodity` — the name with a
+ * generic trailing noun the symbol omits. EDCD's FDevIDs has no entry for it at all, so the alias
+ * table cannot help and waiting for it never will.
+ *
+ * The temptation is a general "symbol is a prefix of the name" rule. That would be a corruption
+ * engine: `water` would reach "Water Purifiers" and `opal` would reach "Opalescent Gemstones",
+ * filing one commodity's prices under another in the table every route query reads. So the bridge
+ * crosses ONLY these packaging words, and `bridges` is tested against exactly those near misses.
+ */
+const GENERIC_SUFFIXES: readonly string[] = ['package', 'packages'];
+
+/** Whether a symbol key reaches a display-name key across nothing but a packaging word. */
+export function bridges(symbol: string, name: string): boolean {
+  if (symbol === name) return true;
+  return GENERIC_SUFFIXES.some((suffix) => name === `${symbol}${suffix}`);
+}
+
 export class CommodityNames {
   #bySquash = new Map<string, Commodity>();
   /** EDDN symbol (squashed) -> the commodity it means. Built from the EDCD files. */
@@ -283,11 +321,21 @@ export class CommodityNames {
    * contain.
    */
   #find(key: string): Commodity | undefined {
-    return (
+    const direct =
       this.#bySquash.get(key) ??
       this.#bySquash.get(`${key}s`) ??
-      (key.endsWith('s') ? this.#bySquash.get(key.slice(0, -1)) : undefined)
-    );
+      (key.endsWith('s') ? this.#bySquash.get(key.slice(0, -1)) : undefined);
+    if (direct !== undefined) return direct;
+
+    /*
+     * Last resort: a display name that is this symbol plus a packaging word. Linear over ~400
+     * names and reached only for symbols that already failed every cheap lookup, which in the
+     * current feed is one symbol.
+     */
+    for (const [nameKey, commodity] of this.#bySquash) {
+      if (bridges(key, nameKey)) return commodity;
+    }
+    return undefined;
   }
 
   async refreshIfStale(db: PrismaClient, now = Date.now()): Promise<void> {
@@ -307,7 +355,8 @@ export class CommodityNames {
    * when Frontier adds a commodity, and the nightly galaxy ingest introduces it within a day.
    */
   resolve(symbol: string): Commodity | null {
-    const key = squash(symbol);
+    // `symbolKey`, not `squash`: it also unwraps the `$..._name;` form some uploaders send.
+    const key = symbolKey(symbol);
     // Ours first: it is the authority on what a commodity is called. The alias table only answers
     // the question our own names cannot — which symbol means which commodity.
     const hit = this.#find(key) ?? this.#aliases.get(key);
