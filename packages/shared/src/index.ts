@@ -220,3 +220,12 @@ export type { ProspectThresholds, Rock, RockMaterial } from './mining.js';
 
 export { openProjectCounts } from './colony-badge.js';
 export type { CountableProject, OpenProjectCounts } from './colony-badge.js';
+
+export {
+  pipsOf,
+  readFactionEffects,
+  scoreContribution,
+  BGS_POINTS_PER_PIP,
+  HOLD_MULTIPLIER,
+} from './bgs.js';
+export type { BgsStance, BgsOrder, FactionEffect } from './bgs.js';
