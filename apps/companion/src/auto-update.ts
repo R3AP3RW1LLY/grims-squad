@@ -79,6 +79,17 @@ export const FORCED_INSTALL_TICK_MS = 10_000;
  * member in a twelve-hour session is exactly the member whose data is wrong and exactly the one the
  * old rule would never update — it waited for a game close that might be a week away.
  *
+ * ★ AND v0.5.2 MADE THE CASE AGAIN, FROM THE OTHER DIRECTION ★
+ *
+ * That release fixed an app that was harming the HUB rather than its own data: it asked for the
+ * same colonisation project nine times inside three hundred milliseconds, sustained, and the
+ * retries were what made the responses slow enough to trigger more retries. Every copy still
+ * running the old build is a copy still doing that to everybody else.
+ *
+ * A version whose bug is felt by other members is the strongest possible argument for a floor tied
+ * to the published version: waiting for that member to close the game means the whole squadron
+ * waits with them.
+ *
  * ★ WHAT THIS COSTS, STATED HONESTLY ★
  *
  * Every update now interrupts play, not just important ones. Sixty seconds is the mitigation: long
