@@ -124,6 +124,31 @@ export const TELEMETRY_CATALOGUE: readonly CatalogueGroup[] = [
       { event: 'FSDJump', label: 'Hyperspace jumps', reveals: 'Each system you jump to, how far it was, and the fuel it cost.' },
       { event: 'Location', label: 'Current system', reveals: 'The system you are in, and whether you are docked.' },
       { event: 'Docked', label: 'Docking', reveals: 'The station you docked at and the faction that runs it.' },
+      /*
+       * ★ ADDED 2026-08-06, SO THE DASHBOARD CAN SAY WHERE YOU ARE ★
+       *
+       * The three events that make "where in the system" answerable. Without them the dashboard
+       * could only say a system name, and a station name for as long as you stayed docked — so a
+       * member flying around a planet showed as still docked at wherever they last were.
+       *
+       * Written the same way as the rest: what the event REVEALS, in the member's terms, because
+       * this catalogue is the page where they decide whether to send it.
+       */
+      {
+        event: 'SupercruiseExit',
+        label: 'Arriving at a body',
+        reveals: 'The planet, moon or star you drop out of supercruise at.',
+      },
+      {
+        event: 'ApproachSettlement',
+        label: 'Approaching a settlement',
+        reveals: 'The name of a surface settlement you fly up to, and the body it sits on.',
+      },
+      {
+        event: 'Undocked',
+        label: 'Leaving a station',
+        reveals: 'That you have left a station — which is how your location stops showing you docked there.',
+      },
     ],
   },
   {

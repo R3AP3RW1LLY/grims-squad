@@ -96,6 +96,22 @@ describe('the event allowlist', () => {
       .sort();
 
     expect(optional).toEqual([
+      /*
+       * ★ ADDED 2026-08-06, DELIBERATELY AND FOR ONE REASON ★
+       *
+       * The dashboard answers "where in the system are they" from the newest of five events. Three
+       * of the five — this, SupercruiseExit and Undocked — were never collectable: absent from the
+       * events map, so the companion never sent them and the server would have discarded them.
+       * Production had ZERO rows of all three, ever.
+       *
+       * They were added to the profile QUERY on 2026-08-05, which changed nothing anybody could
+       * see, and the squadron owner reported the same stale location again the next day.
+       *
+       * All three are in the EXISTING `location` category, so a member who has switched location
+       * off is still sending none of them. This widens what a consenting member reports, not who
+       * is asked — which is exactly the distinction this pinned list exists to surface.
+       */
+      'ApproachSettlement',
       'Bounty',
       /*
        * Added 2026-08-04 for the colonisation carrier holds. Under `carrier` with the other
@@ -147,6 +163,12 @@ describe('the event allowlist', () => {
        * to accept sharing their suit to keep it.
        */
       'SuitLoadout',
+      // Both added 2026-08-06 alongside ApproachSettlement — see the note at the head of this
+      // list. SupercruiseExit says where they dropped out; Undocked is the only event that says
+      // "no longer anywhere in particular", without which somebody who leaves a station shows as
+      // docked there for ever.
+      'SupercruiseExit',
+      'Undocked',
     ]);
   });
 

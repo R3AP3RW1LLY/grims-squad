@@ -24,7 +24,6 @@ import {
   RailStat,
   CouldNotLoad,
 } from '../../../components/hub-page';
-import { SessionCountdown } from '../../../components/session-countdown';
 import { LiveRefresh } from '../../../components/live-refresh';
 
 export const metadata: Metadata = {
@@ -180,15 +179,22 @@ export default async function DashboardPage() {
             </Panel>
 
             {/*
-              The countdown is about the BROWSER somebody is sitting at, which
-              is neither an account fact nor a squadron one — so it gets its own
-              box rather than being filed under either.
+              ★ THE SIGN-OUT COUNTDOWN IS GONE — SQUADRON OWNER, 2026-08-06 ★
+
+              "please remove this from the right rail, it is confusing members —
+              remove the entire box."
+
+              It was written to be reassuring: a clock, and a paragraph saying
+              nothing happens to your account when it runs out. But a countdown
+              is a countdown. Members read fourteen days of ticking seconds on
+              their own dashboard as a warning about something, and the
+              paragraph explaining that it is not only confirms there is
+              something to explain.
+
+              Nothing is lost by removing it. Sessions still expire after
+              fourteen days and signing back in is one click through Discord —
+              which is exactly why the box never needed to exist.
             */}
-            <SessionCountdown
-              expiresAt={me.session.expiresAt}
-              twoFactorExpiresAt={me.session.twoFactorExpiresAt}
-              timezone={me.user?.timezone ?? 'UTC'}
-            />
 
             {/*
               Only when there IS something. A panel of ticks is a chore list;

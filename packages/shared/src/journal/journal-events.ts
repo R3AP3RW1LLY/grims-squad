@@ -50,6 +50,27 @@ export const JOURNAL_EVENTS = {
   /** Where they are on a normal-space arrival, and where they docked. */
   Location: 'location',
   Docked: 'location',
+  /*
+   * ★ THE THREE THAT MAKE "WHERE ARE THEY" ANSWERABLE — ADDED 2026-08-06 ★
+   *
+   * The dashboard picks the newest of Docked / Location / SupercruiseExit / ApproachSettlement /
+   * Undocked to say where in a system somebody is. Three of those five were never collectable
+   * journal events: absent from this map, so the companion never sent them and the server would
+   * have discarded them anyway. Production had ZERO rows of all three, ever.
+   *
+   * They were added to the profile QUERY on 2026-08-05 and that changed nothing a member could
+   * see, because an allowlist naming an event nobody collects is a comment that compiles. The
+   * squadron owner reported the same symptom again the next day.
+   *
+   * `Undocked` earns its place by being the only event that says "no longer anywhere in
+   * particular" — without it somebody who leaves a station shows as docked there indefinitely.
+   *
+   * Same `location` category as the two above, so this adds no new consent surface: a member who
+   * has switched location off is still not sending any of them.
+   */
+  SupercruiseExit: 'location',
+  ApproachSettlement: 'location',
+  Undocked: 'location',
 
   /** A bounty claimed, and what it was worth. */
   Bounty: 'combat',
@@ -229,8 +250,28 @@ export const EVENT_FIELDS: Record<JournalEventName, readonly string[]> = {
   // cannot say what a bounty was worth is a list of names. The member opted in
   // to exactly this — see BASELINE_CATEGORIES for what they did not.
   FSDJump: ['StarSystem', 'SystemAddress', 'StarPos', 'JumpDist', 'FuelUsed'],
-  Location: ['StarSystem', 'SystemAddress', 'StationName', 'Docked'],
+  /*
+   * ★ `Body` ADDED 2026-08-06 ★
+   *
+   * The dashboard reads the sublocation as `StationName ?? Name ?? Body`, and `Body` was being
+   * discarded here on ingest — so the third branch could never fire. A docked member had a station
+   * name; everybody else had nothing at all, permanently, and no amount of fixing the builder
+   * would have shown them the planet they were orbiting.
+   *
+   * `BodyType` comes with it because "Hyades Sector WO-Y b1-4 A 2" reads very differently
+   * depending on whether it is a star, a planet or a ring, and the column is one line wide.
+   */
+  Location: ['StarSystem', 'SystemAddress', 'StationName', 'Docked', 'Body', 'BodyType'],
   Docked: ['StarSystem', 'StationName', 'StationType', 'StationFaction'],
+  /*
+   * The three that were never collectable. Each contributes exactly one thing: where the member
+   * dropped out of supercruise, which settlement they flew up to, and the fact that they have left
+   * a station. Nothing else from these events is wanted, and the station name on `Undocked` is
+   * read as a CLEAR rather than as a place — see the builder.
+   */
+  SupercruiseExit: ['StarSystem', 'SystemAddress', 'Body', 'BodyType'],
+  ApproachSettlement: ['Name', 'StarSystem', 'SystemAddress', 'BodyName'],
+  Undocked: ['StationName', 'StationType'],
 
   Bounty: ['Target', 'Target_Localised', 'TotalReward', 'VictimFaction'],
   /*

@@ -241,12 +241,41 @@ export function buildCommanderProfile(
 
   const fleet = readFleet(stored?.payload, str(asRecord(stored?.payload)['StarSystem']));
 
-  // The ship they are flying is marked rather than listed twice — it is already
-  // in the hangar list, and a duplicate row reads as owning two of them.
+  /*
+   * ★ THE SHIP THEY ARE FLYING IS ADDED, NOT JUST MARKED — FIXED 2026-08-06 ★
+   *
+   * This used to only mark it, on the reasoning that it "is already in the hangar list". It is
+   * not. `StoredShips` lists ships in STORAGE — `ShipsHere` is what is parked where you are
+   * standing, `ShipsRemote` is everything else — and the hull you are sitting in is in neither,
+   * because it is not stored. You are flying it.
+   *
+   * Worse, `StoredShips` only fires at a shipyard, so it can be many hours behind. The squadron
+   * owner's own rows at the moment they reported this:
+   *
+   *   StoredShips  2026-08-05 18:39   Caspian Explorer, Lynx Highliner,
+   *                                   Type-11 Prospector, Python Mk II
+   *   Loadout      2026-08-06 15:29   panthermkii "sovereign of the hoard"
+   *
+   * Twenty-one hours apart. Their dashboard listed four ships, highlighted none of them, and the
+   * one they were actually in was invisible: "not all of my ships are being shown, infact the one
+   * im currently flying is not even visible or hilighting like it was before."
+   *
+   * `Loadout` fires on every ship change and every login, so it is always current and is the only
+   * honest answer to what they are in right now.
+   *
+   * ★ STILL NEVER TWICE ★
+   *
+   * The original note was right about that much — a duplicate row reads as owning two of them —
+   * and `ShipsHere` genuinely does contain the current hull for the window between docking and
+   * swapping. So it is matched first and only appended when absent.
+   */
+  const alreadyListed = fleet.some((s) => currentShip !== null && s.shipType === currentShip);
+
   const withCurrent = fleet.map((s) => ({
     ...s,
     current: currentShip !== null && s.shipType === currentShip,
   }));
+
 
   const rank = squadron['CurrentRank'];
 
@@ -267,6 +296,22 @@ export function buildCommanderProfile(
           : location;
 
   const currentSystem = newest === undefined ? null : str(asRecord(newest.payload)['StarSystem']);
+
+  if (currentShip !== null && !alreadyListed) {
+    /*
+     * First, because it is the one they are in — a fleet list that opens with a ship parked forty
+     * jumps away buries the answer to "what am I flying".
+     *
+     * `ShipName` is the name the MEMBER gave it and lives nowhere else; the stored entries carry
+     * their own `Name`. Location is where they are now, which is by definition where the ship is.
+     */
+    withCurrent.unshift({
+      shipType: currentShip,
+      name: str(loadout['ShipName']),
+      current: true,
+      location: currentSystem,
+    });
+  }
 
   /*
    * ★ WHERE IN THE SYSTEM — squadron owner, 2026-07-30 ★
