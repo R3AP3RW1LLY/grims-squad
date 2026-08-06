@@ -49,6 +49,14 @@ export declare const GIT_LOG_FORMAT: string;
 export declare function sectionsFor(files: readonly string[]): string[];
 export declare function humanizeSubject(subject: string): string;
 export declare function firstParagraph(body: string): string;
+/**
+ * Drops any paragraph of a detail quoting language a members' page must not carry.
+ *
+ * Publication hygiene, not censorship of the repository: the commit body keeps every word, and
+ * only what is PUBLISHED is filtered. See the note on `NOT_FOR_MEMBERS` in changelog.mjs for why
+ * the tool guards rather than trusting whoever writes the next commit to remember.
+ */
+export declare function fitForMembers(detail: string): string;
 export declare function parseGitLog(raw: string): ChangelogCommit[];
 export declare function buildRelease(input: {
   fromSha: string;

@@ -229,15 +229,29 @@ ok "old build cache pruned"
 # INTERNAL_ERROR. Reported by the squadron owner on 2026-08-05: "this is supposed to be zero
 # downtime updates etc! what the fuck!"
 #
-# `nice -n 19` is the lowest priority the scheduler offers, and `ionice -c3` is idle-class disk.
-# Together they mean the build gets whatever is left after the site has taken what it needs — on an
-# idle box it is no slower, and on a busy one it yields instead of competing. Which is exactly the
-# trade a deploy should make: nobody is waiting on the build, and everybody is waiting on the site.
+# ★ nice DOES NOT REACH THE BUILDER, AND I SHIPPED IT CLAIMING IT DID — MEASURED 2026-08-05 ★
 #
-# The image count is the reason this became necessary. It was four; the ingest daemon and the
-# collector were added when they turned out to be running stale code for a whole day.
+# `nice -n 19 ionice -c3 docker compose build` lowers the priority of the CLI CLIENT, which does
+# almost no work. The compiling happens inside the Docker daemon, and `ps -o ni` shows dockerd and
+# every build process sitting at nice 0 throughout — the niceness never crosses the socket.
+#
+# It is kept because it costs nothing and is correct for the client, but it was never the fix. The
+# squadron owner's companion app timed out through two consecutive deploys while this was in place:
+# "Could not reach the squadron: The hub took too long to answer", four times, exactly during the
+# build window.
+#
+# ★ WHAT ACTUALLY BOUNDS IT: BUILD FEWER AT ONCE ★
+#
+# Compose builds every named service in parallel — six images, each running tsc and Next, on eight
+# cores that are also serving members. `COMPOSE_PARALLEL_LIMIT` is the one knob that genuinely
+# reduces peak load, because it reduces the number of compilers running at all rather than asking
+# the scheduler to referee them.
+#
+# Two, not one: the deploy still finishes in a reasonable time, and two compilers leave six cores
+# for Postgres and the API. One would be gentler and turn a four-minute build into twelve, which is
+# a longer window in which a stale container is serving.
 say "Building images"
-nice -n 19 ionice -c3 $COMPOSE --profile jobs build api web bot worker worker-daemon eddn-collector
+COMPOSE_PARALLEL_LIMIT=2 nice -n 19 ionice -c3   $COMPOSE --profile jobs build api web bot worker worker-daemon eddn-collector
 ok "api, web, bot, worker, worker-daemon, eddn-collector built"
 
 # ─────────────────────────────────────────────────────────── 5. migrate
