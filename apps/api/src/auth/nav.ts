@@ -65,7 +65,7 @@ interface NavDefinition extends NavItem {
  * were rebuilt.
  */
 const NAV: readonly NavDefinition[] = [
-  // ---- squadron ------------------------------------------------------------
+// ---- squadron ------------------------------------------------------------
   {
     href: '/dashboard',
     label: 'Dashboard',
@@ -74,101 +74,53 @@ const NAV: readonly NavDefinition[] = [
     requires: null,
   },
   {
-    href: '/forum',
-    label: 'Forum',
+    href: '/fleet',
+    label: 'Fleet',
     section: 'squadron',
-    blurb: 'The boards. Where the squadron talks when it is not in Discord.',
+    blurb: 'Ships, builds, and what the doctrine asks for.',
+    requires: Permission.FLEET_VIEW,
+  },
+  {
     /*
-     * FORUM_VIEW_MEMBER, not null.
+     * ★ SQUADRON OWNER, 2026-08-04 ★
      *
-     * Squadron owner, 2026-07-29: "all forum users must be in our discord." The
-     * nav entry follows the same rule as the content — somebody who cannot see a
-     * single category should not be shown a door that opens onto nothing.
+     * "create a new page under squadrons called Data bounty's and create a list of all stations
+     * and systems we need to dock at to shore up market data ... turn this into our first offical
+     * Data Runner Leaderboard please!"
      *
-     * Per-category `viewPerm` still governs what is behind it, so a future
-     * public-readable category is a data change rather than a code one.
+     * Gated on TRADE_QUERY like the market pages it feeds: the board is market metadata, and one
+     * mask governing both means taking the market away takes the bounty hunt with it.
      */
-    requires: Permission.FORUM_VIEW_MEMBER,
-  },
-  {
-    href: '/roster',
-    label: 'Roster',
+    /*
+     * ★ ANSWER THE CALL — SQUADRON OWNER, 2026-08-04 ★
+     *
+     * "Put the data bounties nav link under a new category called Answer the Call please ...
+     * it should be placed under the Colonization category." A group appears where its first
+     * member appears, so this entry sitting after the Colonisation block IS the placement.
+     * One entry today; the category exists because more calls to answer are coming.
+     */
+    href: '/bounties',
+    label: 'Data Bounties',
     section: 'squadron',
-    blurb: 'Who flies with the squadron.',
-    requires: null,
-  },
-  /*
-   * ★ THE SHIPYARD — SQUADRON OWNER, 2026-08-01 ★
-   *
-   * "a page under squadron called Shipyard that operates like the signature builder, 2 options
-   * build my own or AI Assisted build" — and, refined: a subcategory called Shipyard with the page
-   * named Outfitter.
-   *
-   * ★ GATED ON SHIPYARD_VIEW SINCE 2026-08-01 ★
-   *
-   * This shipped ungated, on the reasoning that working out what to save for is not a privileged
-   * act and the data behind it is Frontier's own.
-   *
-   * That is an argument about the DATA, and the owner's instruction — "create the permissions for
-   * the Shipyard category ... make them work the same as all other categories" — is about the
-   * FEATURE. Being able to hold a page back from a rank while it is being tuned, or take it away
-   * from one that is abusing it, is an operational control rather than a privacy one. Every member
-   * holds SHIPYARD_VIEW in the preset, so nothing changes for anybody today.
-   */
-  {
-    href: '/shipyard',
-    label: 'Outfitter',
-    section: 'squadron',
-    subsection: 'Shipyard',
-    blurb: 'Outfit any hull in the game, or let the assistant fit one to a budget.',
-    requires: Permission.SHIPYARD_VIEW,
-  },
-  {
-    href: '/shipyard/squadron',
-    label: 'Squadron builds',
-    section: 'squadron',
-    subsection: 'Shipyard',
-    blurb: 'What people here are flying, and how they fitted it.',
-    requires: Permission.SHIPYARD_VIEW,
-  },
-  {
-    href: '/shipyard/public',
-    label: 'Public builds',
-    section: 'squadron',
-    subsection: 'Shipyard',
-    blurb: 'Ships the squadron has published for anyone to use.',
-    requires: Permission.SHIPYARD_VIEW,
-  },
-  /*
-   * ★ LOGISTICS & TRADE — SQUADRON OWNER, 2026-08-02 ★
-   *
-   * "create another subcategory under Squadron called Logistics & Trade please. the first thing i
-   * want to build is a realt time commodities market ... this market will also be the basis for our
-   * version of a trade route planner ... put that under the new subcategory too."
-   *
-   * The planner's name is the owner's pick from a shortlist: the Freight Office. It reads as a
-   * PLACE you go to get hauling work, which is the same shape as Shipyard → Outfitter above.
-   *
-   * Both are gated on TRADE_QUERY, which guests now hold — "this will also be available to the
-   * public for use". Sitting under `squadron` is not a contradiction: the section is where the
-   * pages LIVE in the sidebar, and the permission is what decides who may open them. The Outfitter
-   * has been exactly this since 2026-08-01.
-   */
-  {
-    href: '/logistics/commodities',
-    label: 'Commodities',
-    section: 'squadron',
-    subsection: 'Logistics & Trade',
-    blurb: 'What every commodity is worth, where to buy it, and which way the price is moving.',
+    subsection: 'Answer the Call',
+    blurb: 'Stations whose market data has gone dark. Dock, open the market, collect the points.',
     requires: Permission.TRADE_QUERY,
   },
   {
-    href: '/logistics/freight-office',
-    label: 'Freight Office',
+    /*
+     * Mining sits under "Answer the Call" beside Data Bounties because it asks the same thing of a
+     * member: go somewhere and come back with something the squadron did not have. The rings page
+     * is built entirely from members' own prospector limpets — it is worth nothing until people fly
+     * it, and worth more than any single-player tool once they do.
+     */
+    href: '/mining',
+    label: 'Mining',
     section: 'squadron',
-    subsection: 'Logistics & Trade',
-    blurb: 'Plan a run: pick the cargo, the hull and the range, and get the route.',
-    requires: Permission.TRADE_QUERY,
+    subsection: 'Answer the Call',
+    blurb: 'Which rings the squadron has actually been finding worth mining, this fortnight.',
+    // Its own bit since 2026-08-06. It rode on TRADE_QUERY for a day, which meant taking the
+    // market away from somebody took mining with it.
+    requires: Permission.MINING_VIEW,
   },
   /*
    * Colonisation, under the same subcategory. Gated on COLONY_VIEW, which guests do NOT hold —
@@ -252,47 +204,94 @@ const NAV: readonly NavDefinition[] = [
     blurb: 'Builds members have asked the squadron for help with.',
     requires: Permission.COLONY_VIEW,
   },
+  /*
+   * ★ LOGISTICS & TRADE — SQUADRON OWNER, 2026-08-02 ★
+   *
+   * "create another subcategory under Squadron called Logistics & Trade please. the first thing i
+   * want to build is a realt time commodities market ... this market will also be the basis for our
+   * version of a trade route planner ... put that under the new subcategory too."
+   *
+   * The planner's name is the owner's pick from a shortlist: the Freight Office. It reads as a
+   * PLACE you go to get hauling work, which is the same shape as Shipyard → Outfitter above.
+   *
+   * Both are gated on TRADE_QUERY, which guests now hold — "this will also be available to the
+   * public for use". Sitting under `squadron` is not a contradiction: the section is where the
+   * pages LIVE in the sidebar, and the permission is what decides who may open them. The Outfitter
+   * has been exactly this since 2026-08-01.
+   */
   {
-    /*
-     * ★ SQUADRON OWNER, 2026-08-04 ★
-     *
-     * "create a new page under squadrons called Data bounty's and create a list of all stations
-     * and systems we need to dock at to shore up market data ... turn this into our first offical
-     * Data Runner Leaderboard please!"
-     *
-     * Gated on TRADE_QUERY like the market pages it feeds: the board is market metadata, and one
-     * mask governing both means taking the market away takes the bounty hunt with it.
-     */
-    /*
-     * ★ ANSWER THE CALL — SQUADRON OWNER, 2026-08-04 ★
-     *
-     * "Put the data bounties nav link under a new category called Answer the Call please ...
-     * it should be placed under the Colonization category." A group appears where its first
-     * member appears, so this entry sitting after the Colonisation block IS the placement.
-     * One entry today; the category exists because more calls to answer are coming.
-     */
-    href: '/bounties',
-    label: 'Data Bounties',
+    href: '/logistics/commodities',
+    label: 'Commodities',
     section: 'squadron',
-    subsection: 'Answer the Call',
-    blurb: 'Stations whose market data has gone dark. Dock, open the market, collect the points.',
+    subsection: 'Logistics & Trade',
+    blurb: 'What every commodity is worth, where to buy it, and which way the price is moving.',
     requires: Permission.TRADE_QUERY,
   },
   {
-    /*
-     * Mining sits under "Answer the Call" beside Data Bounties because it asks the same thing of a
-     * member: go somewhere and come back with something the squadron did not have. The rings page
-     * is built entirely from members' own prospector limpets — it is worth nothing until people fly
-     * it, and worth more than any single-player tool once they do.
-     */
-    href: '/mining',
-    label: 'Mining',
+    href: '/logistics/freight-office',
+    label: 'Freight Office',
     section: 'squadron',
-    subsection: 'Answer the Call',
-    blurb: 'Which rings the squadron has actually been finding worth mining, this fortnight.',
-    // Its own bit since 2026-08-06. It rode on TRADE_QUERY for a day, which meant taking the
-    // market away from somebody took mining with it.
-    requires: Permission.MINING_VIEW,
+    subsection: 'Logistics & Trade',
+    blurb: 'Plan a run: pick the cargo, the hull and the range, and get the route.',
+    requires: Permission.TRADE_QUERY,
+  },
+  {
+    href: '/ops',
+    label: 'Operations',
+    section: 'squadron',
+    subsection: 'Command',
+    blurb: 'Wings forming up, and what they need.',
+    requires: Permission.OPS_VIEW,
+  },
+  {
+    href: '/bgs',
+    label: 'BGS',
+    section: 'squadron',
+    subsection: 'Command',
+    blurb: 'The faction, its systems, and this week’s orders.',
+    requires: Permission.BGS_VIEW,
+  },
+  /*
+   * ★ THE SHIPYARD — SQUADRON OWNER, 2026-08-01 ★
+   *
+   * "a page under squadron called Shipyard that operates like the signature builder, 2 options
+   * build my own or AI Assisted build" — and, refined: a subcategory called Shipyard with the page
+   * named Outfitter.
+   *
+   * ★ GATED ON SHIPYARD_VIEW SINCE 2026-08-01 ★
+   *
+   * This shipped ungated, on the reasoning that working out what to save for is not a privileged
+   * act and the data behind it is Frontier's own.
+   *
+   * That is an argument about the DATA, and the owner's instruction — "create the permissions for
+   * the Shipyard category ... make them work the same as all other categories" — is about the
+   * FEATURE. Being able to hold a page back from a rank while it is being tuned, or take it away
+   * from one that is abusing it, is an operational control rather than a privacy one. Every member
+   * holds SHIPYARD_VIEW in the preset, so nothing changes for anybody today.
+   */
+  {
+    href: '/shipyard',
+    label: 'Outfitter',
+    section: 'squadron',
+    subsection: 'Shipyard',
+    blurb: 'Outfit any hull in the game, or let the assistant fit one to a budget.',
+    requires: Permission.SHIPYARD_VIEW,
+  },
+  {
+    href: '/shipyard/squadron',
+    label: 'Squadron builds',
+    section: 'squadron',
+    subsection: 'Shipyard',
+    blurb: 'What people here are flying, and how they fitted it.',
+    requires: Permission.SHIPYARD_VIEW,
+  },
+  {
+    href: '/shipyard/public',
+    label: 'Public builds',
+    section: 'squadron',
+    subsection: 'Shipyard',
+    blurb: 'Ships the squadron has published for anyone to use.',
+    requires: Permission.SHIPYARD_VIEW,
   },
   /*
    * ★ LEADERBOARDS — SQUADRON OWNER, 2026-08-04 ★
@@ -353,25 +352,28 @@ const NAV: readonly NavDefinition[] = [
     requires: Permission.BGS_VIEW,
   },
   {
-    href: '/ops',
-    label: 'Operations',
+    href: '/forum',
+    label: 'Forum',
     section: 'squadron',
-    blurb: 'Wings forming up, and what they need.',
-    requires: Permission.OPS_VIEW,
+    blurb: 'The boards. Where the squadron talks when it is not in Discord.',
+    /*
+     * FORUM_VIEW_MEMBER, not null.
+     *
+     * Squadron owner, 2026-07-29: "all forum users must be in our discord." The
+     * nav entry follows the same rule as the content — somebody who cannot see a
+     * single category should not be shown a door that opens onto nothing.
+     *
+     * Per-category `viewPerm` still governs what is behind it, so a future
+     * public-readable category is a data change rather than a code one.
+     */
+    requires: Permission.FORUM_VIEW_MEMBER,
   },
   {
-    href: '/bgs',
-    label: 'BGS',
+    href: '/roster',
+    label: 'Roster',
     section: 'squadron',
-    blurb: 'The faction, its systems, and this week’s orders.',
-    requires: Permission.BGS_VIEW,
-  },
-  {
-    href: '/fleet',
-    label: 'Fleet',
-    section: 'squadron',
-    blurb: 'Ships, builds, and what the doctrine asks for.',
-    requires: Permission.FLEET_VIEW,
+    blurb: 'Who flies with the squadron.',
+    requires: null,
   },
   /*
    * ★ THE CHANGELOG — EVERY MEMBER, NO GATE ★
@@ -406,6 +408,7 @@ const NAV: readonly NavDefinition[] = [
     href: '/roadmap',
     label: 'Roadmap',
     section: 'squadron',
+    subsection: 'About',
     blurb: 'What is being built for the platform — from members’ ideas, through your votes, to shipped.',
     requires: null,
   },
@@ -413,6 +416,7 @@ const NAV: readonly NavDefinition[] = [
     href: '/changelog',
     label: 'Changelog',
     section: 'squadron',
+    subsection: 'About',
     blurb: 'What each deploy changed — on the website, in the companion app, and behind the scenes.',
     requires: null,
   },

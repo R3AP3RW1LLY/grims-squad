@@ -40,6 +40,9 @@ const pick = (
   ...opts,
 });
 
+/** A system at a point in space, for the pairwise-distance tests. */
+const at = (x: number, y: number, z: number) => ({ x, y, z });
+
 describe('filling one hold from several routes', () => {
   it('MANDATORY: the richest commodity gets the hold first', () => {
     /*
@@ -194,5 +197,89 @@ describe('the order to fly it in', () => {
     expect(out.lines).toEqual([]);
     expect(out.order).toEqual([]);
     expect(out.profit).toBe(0);
+  });
+});
+
+/**
+ * The shortest way round the pickups.
+ *
+ * ★ SQUADRON OWNER, 2026-08-06 ★
+ *
+ * "If you want true routing between pickups, that needs pairwise distances — say the word" — the
+ * word was given, computed and on by default.
+ *
+ * ★ WHY THIS WAS NOT THERE TO BEGIN WITH ★
+ *
+ * Every distance the market gives us is measured from the MEMBER, not between the stops. Ordering
+ * by those would look authoritative and be arbitrary. But we hold coordinates for every system, so
+ * the real pairwise distances are a small calculation on a handful of stops rather than new data —
+ * and with them the order can be a genuine shortest path.
+ */
+describe('routing the pickups', () => {
+  it('MANDATORY: visits stops in the shortest order, not the richest', () => {
+    /*
+     * The near stop is worth least, so a profit-first order would fly past it, out to the far one,
+     * and back. Laid out on a line: origin at 0, stops at 10 and 60, destination at 70.
+     */
+    const out = planManifest(
+      [
+        pick('Painite', 'Far', 4_000, { supply: 50, buyCoords: at(60, 0, 0) }),
+        pick('Gold', 'Near', 1_000, { supply: 50, buyCoords: at(10, 0, 0) }),
+      ],
+      {
+        capacity: 200,
+        budget: null,
+        origin: at(0, 0, 0),
+        destination: at(70, 0, 0),
+      },
+    );
+
+    expect(out.order.map((s) => s.system)).toEqual(['Near', 'Far']);
+    // 0 -> 10 -> 60 -> 70. The profit-first order would be 0 -> 60 -> 10 -> 70 = 170.
+    expect(out.routeLy).toBe(70);
+  });
+
+  it('MANDATORY: two stops in one system cost nothing extra to visit together', () => {
+    const out = planManifest(
+      [
+        pick('Painite', 'Deciat', 4_000, { supply: 50, buyStation: 'A', buyCoords: at(10, 0, 0) }),
+        pick('Silver', 'Deciat', 2_000, { supply: 50, buyStation: 'B', buyCoords: at(10, 0, 0) }),
+        pick('Gold', 'Sol', 3_000, { supply: 50, buyCoords: at(40, 0, 0) }),
+      ],
+      { capacity: 300, budget: null, origin: at(0, 0, 0), destination: at(50, 0, 0) },
+    );
+
+    const systems = out.order.map((s) => s.system);
+    expect(systems.lastIndexOf('Deciat') - systems.indexOf('Deciat')).toBe(1);
+    expect(out.routeLy).toBe(50);
+  });
+
+  it('MANDATORY: falls back to grouping when a system cannot be placed', () => {
+    /*
+     * A provisional station whose system we have not resolved has no coordinates. Treating a
+     * missing one as the origin would compute a confident, wrong path — so the whole route reverts
+     * to grouping by system, and says it did.
+     */
+    const out = planManifest(
+      [
+        pick('Painite', 'Far', 4_000, { supply: 50, buyCoords: at(60, 0, 0) }),
+        pick('Gold', 'Unplaced', 1_000, { supply: 50, buyCoords: null }),
+      ],
+      { capacity: 200, budget: null, origin: at(0, 0, 0), destination: at(70, 0, 0) },
+    );
+
+    expect(out.routeLy, 'a route was measured through a system we cannot place').toBeNull();
+    expect(out.order).toHaveLength(2);
+  });
+
+  it('MANDATORY: with no origin given it still produces an order', () => {
+    // The commodity page plans without a "from". Grouping is the honest answer there.
+    const out = planManifest([pick('Painite', 'Deciat', 4_000, { supply: 50 })], {
+      capacity: 200,
+      budget: null,
+    });
+
+    expect(out.order).toHaveLength(1);
+    expect(out.routeLy).toBeNull();
   });
 });

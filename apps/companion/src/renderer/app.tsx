@@ -468,6 +468,18 @@ function App(): JSX.Element {
                       key={child.id}
                       label={child.label}
                       hint={child.hint}
+                      /*
+                       * ★ SQUADRON OWNER, 2026-08-06 ★
+                       *
+                       * "ensure every category and nav link in the website and companion app have
+                       * appropriate icons please!"
+                       *
+                       * The children had none — only the group headings and the two top-level
+                       * pages did — so an opened category was a wall of indented text. Same glyphs
+                       * the website uses for the matching page, because the two surfaces are meant
+                       * to be one picture and a member should not learn two vocabularies.
+                       */
+                      icon={<PageIcon page={child.id} />}
                       active={page === child.id}
                       indent
                       count={counts[child.id]}

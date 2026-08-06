@@ -36,8 +36,25 @@ export interface Pick {
   readonly supply: number;
   /** Tonnes wanted at the destination. A different station, and a different hard cap. */
   readonly demand: number;
-  /** Light years to the pickup, for ordering the stops. */
+  /** Light years to the pickup, as the market measured it FROM THE MEMBER. */
   readonly buyDistanceLy: number;
+  /**
+   * Where the pickup's system actually is.
+   *
+   * ★ THE REASON THE ORDER CAN BE A REAL SHORTEST PATH ★
+   *
+   * `buyDistanceLy` is measured from the member, not between stops, so it cannot order them. These
+   * coordinates can. Null for a system we have not resolved — a provisional station, usually — and
+   * one null is enough to abandon the path entirely rather than compute a confident wrong one.
+   */
+  readonly buyCoords?: Coords | null | undefined;
+}
+
+/** A point in the galaxy. The same shape the market store returns. */
+export interface Coords {
+  readonly x: number;
+  readonly y: number;
+  readonly z: number;
 }
 
 /** How much of one commodity the manifest carries, and what it costs and earns. */
@@ -68,12 +85,23 @@ export interface Manifest {
   readonly profit: number;
   /** Hold left empty. Shown, because "you could carry 700 and are carrying 44" explains itself. */
   readonly spare: number;
+  /**
+   * Light years for the whole circuit, when every stop could be placed.
+   *
+   * Null means the order is grouped by system rather than routed — either no origin was given, or
+   * a system could not be placed. Null rather than a guess, so the page can say which it is.
+   */
+  readonly routeLy: number | null;
 }
 
 export interface ManifestOptions {
   readonly capacity: number;
   /** Credits available. Null for "do not consider it". */
   readonly budget: number | null;
+  /** Where the member is starting. Without it there is no path to optimise, only a grouping. */
+  readonly origin?: Coords | null | undefined;
+  /** Where everything is being sold. The fixed far end of the path. */
+  readonly destination?: Coords | null | undefined;
 }
 
 export function planManifest(picks: readonly Pick[], opts: ManifestOptions): Manifest {
@@ -128,9 +156,12 @@ export function planManifest(picks: readonly Pick[], opts: ManifestOptions): Man
     if (creditsLeft !== null) creditsLeft -= outlay;
   }
 
+  const routed = routeStops(lines, picks, opts);
+
   return {
     lines,
-    order: orderStops(lines),
+    order: routed.stops,
+    routeLy: routed.lengthLy,
     tonnes: lines.reduce((n, l) => n + l.tonnes, 0),
     outlay: lines.reduce((n, l) => n + l.outlay, 0),
     /*
@@ -145,48 +176,144 @@ export function planManifest(picks: readonly Pick[], opts: ManifestOptions): Man
 /**
  * The order to collect them in.
  *
- * ★ SYSTEMS TOGETHER, WHICH IS THE WHOLE POINT ★
+ * ★ A REAL SHORTEST PATH WHEN WE CAN, GROUPING WHEN WE CANNOT ★
  *
- * Two pickups in Deciat and one in Sol must never be ordered Deciat, Sol, Deciat — a jump out and
- * back for nothing, and precisely what ranking by profit alone produces. Grouping by system first
- * is the streamlining the owner asked for and it costs one pass.
+ * Every distance the market reports is measured from the MEMBER, not between the stops, so it
+ * cannot order them. Coordinates can — and we hold them for every system — so with an origin and a
+ * destination the stops become a small travelling-salesman problem with both ends pinned.
  *
- * Within that, systems are visited nearest first and stations within a system richest first: the
- * only case where the order inside a system matters is a member who runs out of credits partway,
- * and they should run out having bought the good things.
+ * Small is doing real work there. A hold fills from a handful of routes, so exhaustive search over
+ * the permutations is exact and instant; past `EXACT_LIMIT` it falls back to nearest-neighbour,
+ * which is a good order rather than a proven one.
+ *
+ * ★ ONE MISSING COORDINATE ABANDONS THE WHOLE PATH ★
+ *
+ * A provisional station's system may not be placed yet. Treating that as the origin — or as
+ * anywhere — produces a confident, wrong route, which is worse than an honest grouping. So the
+ * whole thing reverts and `routeLy` is null, which is what lets the page say which it did.
  */
-function orderStops(lines: readonly ManifestLine[]): Stop[] {
-  const bySystem = new Map<string, ManifestLine[]>();
-  for (const line of lines) {
-    const group = bySystem.get(line.buySystem) ?? [];
-    group.push(line);
-    bySystem.set(line.buySystem, group);
+
+/** Above this many stops, exhaustive search stops being instant. 6! = 720; 8! = 40,320. */
+const EXACT_LIMIT = 7;
+
+function distance(a: Coords, b: Coords): number {
+  return Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+}
+
+function routeStops(
+  lines: readonly ManifestLine[],
+  picks: readonly Pick[],
+  opts: ManifestOptions,
+): { stops: Stop[]; lengthLy: number | null } {
+  const stops = lines.map((line) => {
+    const source = picks.find(
+      (p) => p.commodity === line.commodity && p.buyStation === line.buyStation,
+    );
+    return {
+      commodity: line.commodity,
+      station: line.buyStation,
+      system: line.buySystem,
+      tonnes: line.tonnes,
+      coords: source?.buyCoords ?? null,
+      profit: line.profit,
+    };
+  });
+
+  const origin = opts.origin ?? null;
+  const destination = opts.destination ?? null;
+  const placed = stops.every((s) => s.coords !== null);
+
+  // No ends to pin, or a stop we cannot place: group by system and say nothing about distance.
+  if (origin === null || destination === null || !placed || stops.length > EXACT_LIMIT) {
+    return { stops: groupBySystem(stops), lengthLy: null };
   }
 
-  /*
-   * Systems ranked by their best line. Not by distance: the distances we hold are all measured from
-   * the member's origin rather than from each other, so "nearest next" cannot be computed honestly
-   * from them — and inventing a travelling-salesman order out of the wrong distances would look
-   * authoritative while being arbitrary.
-   */
+  const best = shortestOrder(
+    stops.map((s) => ({ ...s, coords: s.coords as Coords })),
+    origin,
+    destination,
+  );
+
+  return {
+    stops: best.order.map(({ commodity, station, system, tonnes }) => ({
+      commodity,
+      station,
+      system,
+      tonnes,
+    })),
+    lengthLy: Math.round(best.lengthLy),
+  };
+}
+
+/** Exhaustive, with both ends pinned. Exact for the handful of stops one hold can carry. */
+function shortestOrder<T extends { coords: Coords }>(
+  stops: readonly T[],
+  origin: Coords,
+  destination: Coords,
+): { order: T[]; lengthLy: number } {
+  let bestOrder: T[] = [...stops];
+  let bestLength = Number.POSITIVE_INFINITY;
+
+  const walk = (chosen: T[], rest: readonly T[]): void => {
+    if (rest.length === 0) {
+      let length = 0;
+      let at = origin;
+      for (const stop of chosen) {
+        length += distance(at, stop.coords);
+        at = stop.coords;
+      }
+      length += distance(at, destination);
+
+      if (length < bestLength) {
+        bestLength = length;
+        bestOrder = [...chosen];
+      }
+      return;
+    }
+
+    for (let i = 0; i < rest.length; i += 1) {
+      const next = rest[i] as T;
+      walk([...chosen, next], [...rest.slice(0, i), ...rest.slice(i + 1)]);
+    }
+  };
+
+  walk([], stops);
+  return { order: bestOrder, lengthLy: bestLength };
+}
+
+/**
+ * The fallback: systems together, best-first.
+ *
+ * Two pickups in Deciat and one in Sol must never be ordered Deciat, Sol, Deciat — a jump out and
+ * back for nothing, and exactly what ranking by profit alone produces.
+ */
+function groupBySystem<T extends { system: string; profit: number }>(stops: readonly T[]): Stop[] {
+  const bySystem = new Map<string, T[]>();
+  for (const stop of stops) {
+    const group = bySystem.get(stop.system) ?? [];
+    group.push(stop);
+    bySystem.set(stop.system, group);
+  }
+
   const systems = [...bySystem.entries()].sort(
     (a, b) => bestProfit(b[1]) - bestProfit(a[1]),
   );
 
-  const stops: Stop[] = [];
-  for (const [system, group] of systems) {
-    for (const line of [...group].sort((a, b) => b.profit - a.profit)) {
-      stops.push({
-        commodity: line.commodity,
-        station: line.buyStation,
-        system,
-        tonnes: line.tonnes,
+  const out: Stop[] = [];
+  for (const [, group] of systems) {
+    for (const stop of [...group].sort((a, b) => b.profit - a.profit)) {
+      const s = stop as unknown as Stop;
+      out.push({
+        commodity: s.commodity,
+        station: s.station,
+        system: s.system,
+        tonnes: s.tonnes,
       });
     }
   }
-  return stops;
+  return out;
 }
 
-function bestProfit(lines: readonly ManifestLine[]): number {
-  return lines.reduce((best, l) => Math.max(best, l.profit), 0);
+function bestProfit(stops: readonly { profit: number }[]): number {
+  return stops.reduce((best, s) => Math.max(best, s.profit), 0);
 }

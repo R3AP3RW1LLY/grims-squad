@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_OPEN,
@@ -97,5 +100,58 @@ describe('toggleSection', () => {
     const start = new Set<Section>(['squadron']);
     toggleSection(start, 'ai');
     expect([...start]).toEqual(['squadron']);
+  });
+});
+
+/**
+ * Every link and every category carries its own icon.
+ *
+ * ★ SQUADRON OWNER, 2026-08-06 ★
+ *
+ * "ensure every category and nav link in the website and companion app have appropriate icons
+ * please! make this all look really good!"
+ *
+ * ★ WHY A TEST AND NOT JUST A CAREFUL AFTERNOON ★
+ *
+ * Nineteen of thirty-four links had no icon and fell through to the default, so unrelated pages sat
+ * under the same glyph. That is worse than a blank: an icon that does not distinguish teaches the
+ * eye to stop using icons at all, and the subsection headings had already been through exactly this
+ * once — every one of them rendered a wrench, whatever the category was.
+ *
+ * It rotted because adding a nav item and adding its icon are two edits in two files, and only one
+ * of them is required to make the link work. This makes the second one required too.
+ */
+describe('nav iconography', () => {
+  const shell = readFileSync(
+    resolve(dirname(fileURLToPath(import.meta.url)), 'hub-shell.tsx'),
+    'utf8',
+  );
+  const nav = readFileSync(
+    resolve(dirname(fileURLToPath(import.meta.url)), '../../../api/src/auth/nav.ts'),
+    'utf8',
+  );
+
+  it('MANDATORY: every nav link has an icon of its own', () => {
+    const iconed = new Set([...shell.matchAll(/'(\/[^']*)':\s*\w+Icon/g)].map((m) => m[1] ?? ''));
+    const links = [...new Set([...nav.matchAll(/href:\s*'([^']+)'/g)].map((m) => m[1] ?? ''))];
+
+    const missing = links.filter((href) => !iconed.has(href));
+
+    expect(missing, `these nav links would fall back to the default icon:\n  ${missing.join('\n  ')}`).toEqual([]);
+  });
+
+  it('MANDATORY: every category has an icon of its own', () => {
+    /*
+     * The failure that already happened once: three groups rendering the same hardcoded wrench.
+     * Three groups with one icon is three groups with no icon.
+     */
+    const subsections = [...new Set([...nav.matchAll(/subsection:\s*'([^']+)'/g)].map((m) => m[1] ?? ''))];
+    const iconed = new Set(
+      [...shell.matchAll(/^\s*'?([A-Za-z &]+)'?:\s*\w+Icon,/gm)].map((m) => (m[1] ?? '').trim()),
+    );
+
+    const missing = subsections.filter((name) => !iconed.has(name));
+
+    expect(missing, `these categories have no icon: ${missing.join(', ')}`).toEqual([]);
   });
 });

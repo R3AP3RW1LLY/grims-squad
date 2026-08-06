@@ -129,9 +129,95 @@ const COG: readonly string[] = [
  * Keyed on the id rather than the label so renaming "Status" in the sidebar cannot silently drop
  * its icon — the same reasoning as `GroupIcon`, one level up. An unlisted page gets none.
  */
+
+/*
+ * ★ EVERY PAGE, NOT JUST THE TWO — SQUADRON OWNER, 2026-08-06 ★
+ *
+ * "ensure every category and nav link in the website and companion app have appropriate icons
+ * please! make this all look really good!"
+ *
+ * The same Heroicons the website uses for the matching page, because the two surfaces are meant to
+ * be the same picture and a member should not have to learn two vocabularies. Where the website
+ * shows a truck for the Freight Office, so does this.
+ */
+
+/** Heroicons 24/outline `CubeIcon` — mining: what comes out of a rock. */
+const CUBE =
+  'm21 7.5-9-5.25L3 7.5m18 0-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9';
+
+/** Heroicons 24/outline `ScaleIcon` — commodities: prices weighed against each other. */
+const SCALE =
+  'M12 3v17.25m0 0c-1.472 0-2.882.265-4.185.75M12 20.25c1.472 0 2.882.265 4.185.75M18.75 4.97A48.416 48.416 0 0 0 12 4.5c-2.291 0-4.545.16-6.75.47m13.5 0c1.01.143 2.01.317 3 .52m-3-.52 2.62 10.726c.122.499-.106 1.028-.589 1.202a5.988 5.988 0 0 1-2.031.352 5.988 5.988 0 0 1-2.031-.352c-.483-.174-.711-.703-.59-1.202L18.75 4.971Zm-16.5.52c.99-.203 1.99-.377 3-.52m0 0 2.62 10.726c.122.499-.106 1.028-.589 1.202a5.989 5.989 0 0 1-2.031.352 5.989 5.989 0 0 1-2.031-.352c-.483-.174-.711-.703-.59-1.202L5.25 4.971Z';
+
+/** Heroicons 24/outline `ClipboardDocumentListIcon` — planning: the list before the work. */
+const CLIPBOARD =
+  'M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 0 0 2.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 0 0-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75 2.25 2.25 0 0 0-.1-.664m-5.8 0A2.251 2.251 0 0 1 13.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25ZM6.75 12h.008v.008H6.75V12Zm0 3h.008v.008H6.75V15Zm0 3h.008v.008H6.75V18Z';
+
+/** Heroicons 24/outline `QueueListIcon` — build types: a catalogue. */
+const QUEUE =
+  'M3.75 12h16.5m-16.5 3.75h16.5M3.75 19.5h16.5M5.625 4.5h12.75a1.875 1.875 0 0 1 0 3.75H5.625a1.875 1.875 0 0 1 0-3.75Z';
+
+/** Heroicons 24/outline `PlusCircleIcon` — starting something new. */
+const PLUS =
+  'M12 9v6m3-3H9m12 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z';
+
+/** Heroicons 24/outline `GlobeAltIcon` — public: visible to the whole web. */
+const GLOBE =
+  'M12 21a9.004 9.004 0 0 0 8.716-6.747M12 21a9.004 9.004 0 0 1-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 0 1 7.843 4.582M12 3a8.997 8.997 0 0 0-7.843 4.582m15.686 0A11.953 11.953 0 0 1 12 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0 1 21 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0 1 12 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 0 1 3 12c0-1.605.42-3.113 1.157-4.418';
+
+/** Heroicons 24/outline `ShieldCheckIcon` — the squadron's own, approved. */
+const SHIELD =
+  'M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z';
+
+/** Heroicons 24/outline `SignalIcon` — data runners: lighting up dark stations. */
+const SIGNAL =
+  'M9.348 14.652a3.75 3.75 0 0 1 0-5.304m5.304 0a3.75 3.75 0 0 1 0 5.304m-7.425 2.121a6.75 6.75 0 0 1 0-9.546m9.546 0a6.75 6.75 0 0 1 0 9.546M5.106 18.894c-3.808-3.807-3.808-9.98 0-13.788m13.788 0c3.808 3.807 3.808 9.98 0 13.788M12 12h.008v.008H12V12Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z';
+
+/** Heroicons 24/outline `BanknotesIcon` — trade barons: realised profit. */
+const BANKNOTES =
+  'M2.25 18.75a60.07 60.07 0 0 1 15.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 0 1 3 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 0 0-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 0 1-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 0 0 3 15h-.75M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z';
+
+/** Heroicons 24/outline `FlagIcon` — faction hands: whose flag flies. */
+const FLAG =
+  'M3 3v1.5M3 21v-6m0 0 2.77-.693a9 9 0 0 1 6.208.682l.108.054a9 9 0 0 0 6.086.71l3.114-.732a48.524 48.524 0 0 1-.005-10.499l-3.11.732a9 9 0 0 1-6.085-.711l-.108-.054a9 9 0 0 0-6.208-.682L3 4.5M3 15V4.5';
+
+/** Heroicons 24/outline `UserGroupIcon` — other members' projects. */
+const GROUP =
+  'M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z';
+
 const PAGES: Record<string, string | readonly string[]> = {
   status: HOME,
   settings: COG,
+
+  // Shipyard
+  outfitter: WRENCH,
+  'builds-squadron': SHIELD,
+  'builds-public': GLOBE,
+
+  // Logistics & Trade
+  commodities: SCALE,
+  trade: TRUCK,
+
+  // Colonisation
+  'colony-new': PLUS,
+  'colony-planning': CLIPBOARD,
+  'colony-build-types': QUEUE,
+  'colony-squadron': BUILDINGS,
+  'colony-members': GROUP,
+
+  // Answer the Call
+  bounties: SIGNAL,
+  mining: CUBE,
+
+  /*
+   * The boards share a family because they ARE one thing five times, but each keeps its own glyph
+   * so a member scanning the group finds theirs without reading.
+   */
+  'lb-bounties': SIGNAL,
+  'lb-colony': BUILDINGS,
+  'lb-trade': BANKNOTES,
+  'lb-mining': CUBE,
+  'lb-bgs': FLAG,
 };
 
 export function PageIcon({
