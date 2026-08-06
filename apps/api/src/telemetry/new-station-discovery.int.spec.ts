@@ -135,15 +135,6 @@ describe('docking at a station nothing has ever catalogued', () => {
         ).toBe(true);
 
         // ---- and it is findable the way a member would actually look ----
-        const sellable = await db.$queryRawUnsafe<Array<{ commodity: string; sell_price: number }>>(
-          `SELECT commodity, sell_price
-             FROM market_entries
-            WHERE data_source_check IS NULL AND station_name = $1
-            ORDER BY commodity`,
-          STATION,
-        );
-        void sellable;
-
         const rows = await db.$queryRawUnsafe<
           Array<{ commodity: string; source: string; has_coords: boolean }>
         >(

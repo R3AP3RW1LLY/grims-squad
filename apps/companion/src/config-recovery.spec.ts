@@ -232,7 +232,7 @@ describe('a saved setting', () => {
     const loaded = loadConfig(dir);
 
     const dropped = Object.keys(full).filter(
-      (key) => JSON.stringify((loaded as Record<string, unknown>)[key]) === undefined,
+      (key) => JSON.stringify((loaded as unknown as Record<string, unknown>)[key]) === undefined,
     );
 
     expect(dropped, `loadConfig dropped: ${dropped.join(', ')}`).toEqual([]);
