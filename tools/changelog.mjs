@@ -158,6 +158,22 @@ const LOOKS_LIKE_AN_ADDRESS = /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/g;
  *
  * The trailer runs to the next blank line or the end of the body, so it may be a sentence or a
  * short paragraph.
+ *
+ * ★ A SQUASH MERGE WILL EAT IT, AND DID — 2026-08-06 ★
+ *
+ * `gh pr merge --squash` writes the PULL REQUEST TITLE as the commit message and discards every
+ * commit body in the branch. The first release to use this mechanism was merged that way and the
+ * changelog came out completely empty: three carefully written trailers, none of them in git any
+ * more.
+ *
+ * So the trailer has to survive the merge, which means one of:
+ *
+ *   `gh pr merge --squash --body "$(...)"`, passing the trailers explicitly, or
+ *   a merge commit rather than a squash, which keeps every body.
+ *
+ * Nothing here can detect the difference — by the time this code runs, the words are already gone.
+ * The check that would catch it is looking at the changelog preview before deploying, which is why
+ * `--sql` is not the only mode this tool has.
  */
 export function memberSummary(body) {
   /*
