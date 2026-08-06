@@ -427,6 +427,61 @@ describe('the datastores are never published to the world', () => {
   }
 });
 
+describe('the primary does not run the workers any more', () => {
+  /*
+   * ★ THE STEP THAT UNDOES ITSELF IF FORGOTTEN — 2026-08-06 ★
+   *
+   * The resident daemon and the EDDN subscriber moved to their own machine, because the nightly
+   * galaxy import took the primary to load 23 and made the companion app wait EIGHTY-EIGHT SECONDS
+   * while four unpigz processes decompressed a 4 GB dump on the cores serving members.
+   *
+   * Stopping them on the primary is not enough on its own. `docker compose up -d` starts whatever
+   * the file declares, so the very next deploy would start them again — and then TWO EDDN
+   * collectors would be writing every station, interleaving delete-and-insert over the same rows.
+   * The advisory lock stops that becoming corruption; it does not stop it becoming a machine you
+   * pay for that does nothing, while the primary goes back to being the thing that ingests.
+   *
+   * So they are gone from compose.prod.yml, and this is what keeps them gone.
+   *
+   * `worker` STAYS. It is the one-shot container the deploy runs migrations and the catalogue seed
+   * in, it exits when it is done, and it is behind the `jobs` profile so nothing starts it by
+   * accident. Removing it would break every deploy.
+   */
+  const compose = readFileSync(join(REPO, 'infra', 'docker', 'compose.prod.yml'), 'utf8');
+
+  for (const service of ['worker-daemon', 'eddn-collector']) {
+    it(`MANDATORY: compose.prod.yml no longer declares ${service}`, () => {
+      const declared = compose.split('\n').some((l) => l.trimEnd() === `  ${service}:`);
+      expect(
+        declared,
+        `compose.prod.yml declares ${service} again — the next deploy will start it on the primary alongside the one on the ingestion box`,
+      ).toBe(false);
+    });
+
+    it(`MANDATORY: the deploy never starts ${service} on this box`, () => {
+      const starts = new RegExp(`\\$COMPOSE[^\\n]*up -d[^\\n]*\\b${service}\\b`).test(current);
+      expect(
+        starts,
+        `deploy.sh runs "up -d ${service}" — that is the primary taking the work back`,
+      ).toBe(false);
+    });
+  }
+
+  it('MANDATORY: the one-shot worker survives, or every deploy breaks', () => {
+    /*
+     * The opposite mistake, and an easy one to make while deleting the other two: this is what
+     * `prisma migrate deploy` and the catalogue seed run inside.
+     */
+    expect(
+      compose.split('\n').some((l) => l.trimEnd() === '  worker:'),
+      'compose.prod.yml no longer declares the one-shot worker — migrations and seeding have nothing to run in',
+    ).toBe(true);
+    expect(current, 'the deploy no longer runs migrations in the worker container').toMatch(
+      /--profile jobs run --rm[^\n]*worker/,
+    );
+  });
+});
+
 describe('the deploy still refuses to start without its configuration', () => {
   it('every announcement channel is required in the preflight', () => {
     /*
