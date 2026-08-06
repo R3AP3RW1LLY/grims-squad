@@ -177,6 +177,11 @@ contextBridge.exposeInMainWorld('help', {
   escalate: (id: string) => ipcRenderer.invoke('helpEscalate', id),
 });
 
+contextBridge.exposeInMainWorld('commander', {
+  /** Where the hub says this commander is. Its answer, not ours — see hub-commander.ts. */
+  location: () => ipcRenderer.invoke('commanderLocation'),
+});
+
 contextBridge.exposeInMainWorld('colony', {
   /** Both boards, plus what this member is allowed to do with them. */
   projects: () => ipcRenderer.invoke('colonyProjects'),

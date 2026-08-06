@@ -21,8 +21,13 @@ import type { JSX } from 'preact';
  * above each says which Heroicon it is so the lookup is one search rather than a guess.
  */
 
-/** One outline, at whatever size the caller asks for. Stroke, not fill — Heroicons' 24/outline set. */
-function Outline({ d, size = 16 }: { d: string; size?: number }): JSX.Element {
+/**
+ * One outline, at whatever size the caller asks for. Stroke, not fill — Heroicons' 24/outline set.
+ *
+ * `d` takes an array as well as a string because some Heroicons are two paths — Cog6Tooth is the
+ * toothed ring AND the hole in the middle, and drawing only the first is a cog with no centre.
+ */
+function Outline({ d, size = 16 }: { d: string | readonly string[]; size?: number }): JSX.Element {
   return (
     <svg
       width={size}
@@ -38,7 +43,9 @@ function Outline({ d, size = 16 }: { d: string; size?: number }): JSX.Element {
       aria-hidden="true"
       style={{ flexShrink: 0 }}
     >
-      <path d={d} />
+      {(typeof d === 'string' ? [d] : d).map((path) => (
+        <path key={path} d={path} />
+      ))}
     </svg>
   );
 }
@@ -94,4 +101,49 @@ const GROUPS: Record<string, string> = {
   Operations: ROCKET,
 };
 
-export { Outline, WRENCH, TRUCK, BUILDINGS, ROCKET, TROPHY, USERS };
+/**
+ * ★ THE TWO TOP-LEVEL DESTINATIONS — SQUADRON OWNER, 2026-08-06 ★
+ *
+ * "lets add an icon to the companion app status nav link, same with the settings link use
+ * appropriate icons please!"
+ *
+ * Appropriate means the website's, by the same rule as the groups above: the two surfaces are meant
+ * to be the same picture. `hub-shell.tsx` maps `/dashboard` to HomeIcon and `/settings/account` to
+ * Cog6ToothIcon, and Status is this app's dashboard — the page you land on that says what is going
+ * on — so it takes the same icon rather than a cleverer one.
+ */
+
+/** Heroicons 24/outline `HomeIcon` — the website's own icon for /dashboard. */
+const HOME =
+  'm2.25 12 8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25';
+
+/** Heroicons 24/outline `Cog6ToothIcon` — two paths: the toothed ring, and the hole. */
+const COG: readonly string[] = [
+  'M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.247a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z',
+  'M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z',
+];
+
+/**
+ * The icon for a top-level destination, by page id.
+ *
+ * Keyed on the id rather than the label so renaming "Status" in the sidebar cannot silently drop
+ * its icon — the same reasoning as `GroupIcon`, one level up. An unlisted page gets none.
+ */
+const PAGES: Record<string, string | readonly string[]> = {
+  status: HOME,
+  settings: COG,
+};
+
+export function PageIcon({
+  page,
+  size = 16,
+}: {
+  page: string;
+  size?: number;
+}): JSX.Element | null {
+  const d = PAGES[page];
+  if (d === undefined) return null;
+  return <Outline d={d} size={size} />;
+}
+
+export { Outline, WRENCH, TRUCK, BUILDINGS, ROCKET, TROPHY, USERS, HOME, COG };

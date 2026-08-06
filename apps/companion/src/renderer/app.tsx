@@ -15,7 +15,7 @@ import { BuildTypesPage } from './build-types.js';
 import { LeaderboardPage } from './leaderboards.js';
 import { SupportPage } from './support.js';
 import { HelpWidget } from './help-widget.js';
-import { GroupIcon } from './icons.js';
+import { GroupIcon, PageIcon } from './icons.js';
 // The shapes come from the hub client, which is where they are defined — re-exporting them through
 // the component file would be a second name for one type.
 import type { ColonyProject, ColonyRights } from '../hub-colony.js';
@@ -37,8 +37,23 @@ import { OverlaysPanel } from './overlays-panel.js';
  * The website's own navigation is a sidebar for the same reason.
  */
 
+interface CommanderLocation {
+  readonly currentSystem: string | null;
+  readonly systemSeenAt: string | null;
+  readonly currentLocation: string | null;
+  readonly locationSeenAt: string | null;
+}
+
+type LocationAnswer =
+  | { ok: true; data: CommanderLocation }
+  | { ok: false; error: string };
+
 declare global {
   interface Window {
+    readonly commander: {
+      /** Where the hub says this commander is. Its answer, not ours — see hub-commander.ts. */
+      location(): Promise<LocationAnswer>;
+    };
     readonly companion: {
       getState(): Promise<AppState>;
       onState(handler: (state: AppState) => void): void;
@@ -371,6 +386,7 @@ function App(): JSX.Element {
                 hint={entry.hint}
                 active={page === entry.id}
                 onClick={() => setPage(entry.id)}
+                icon={<PageIcon page={entry.id} />}
               />
             );
           }
@@ -469,6 +485,7 @@ function App(): JSX.Element {
             hint="This device, overlays, and every future setting"
             active={page === 'settings'}
             onClick={() => setPage('settings')}
+            icon={<PageIcon page="settings" />}
           />
         </div>
 
@@ -601,12 +618,19 @@ function NavButton({
   onClick,
   indent,
   count,
+  icon,
 }: {
   label: string;
   hint: string;
   active: boolean;
   onClick: () => void;
   indent?: boolean | undefined;
+  /*
+   * The two top-level destinations carry one; the grouped children do not, because their group
+   * header already shows the picture and repeating it down a column is noise rather than
+   * navigation.
+   */
+  icon?: JSX.Element | null | undefined;
   // `| undefined` explicitly: `exactOptionalPropertyTypes` treats an optional property and one
   // that may be undefined as different types, and the caller reads it out of a lookup table.
   count?: number | undefined;
@@ -629,7 +653,14 @@ function NavButton({
        */
       aria-current={active ? 'page' : undefined}
     >
-      <span>{label}</span>
+      {/*
+        Wrapped so the icon and the label travel together, leaving the count free to sit at the far
+        end of the row exactly as it did before.
+      */}
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+        {icon ?? null}
+        <span>{label}</span>
+      </span>
       {/*
         Zero is deliberately NOT drawn. A badge reading 0 is a thing to read and dismiss on every
         glance; its absence says the same and costs nothing.
@@ -700,6 +731,75 @@ function SignIn({ state }: { state: AppState }): JSX.Element {
   );
 }
 
+/**
+ * Where you are, exactly as the website says it.
+ *
+ * ★ SQUADRON OWNER, 2026-08-06 ★
+ *
+ * "can we also add the location to the companion app status page, and show it like it is shown in
+ * the web app please."
+ *
+ * So this is the website's panel, in this app's chrome: the same title, the same two facts side by
+ * side, the same "In open space" for a commander who is not anywhere in particular. The hub works
+ * it out — one implementation, two surfaces, no way for them to disagree.
+ *
+ * ★ TWO TIMESTAMPS, NOT ONE ★
+ *
+ * The system and the sublocation age at different rates: somebody can sit docked for an hour after
+ * a jump. The website carries a timestamp on each for that reason and so does this — sharing one
+ * would date the docking from the jump.
+ */
+function WhereYouAre(): JSX.Element {
+  const [answer, setAnswer] = useState<LocationAnswer | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    const read = () => {
+      void window.commander.location().then((a) => {
+        if (live) setAnswer(a);
+      });
+    };
+
+    read();
+    /*
+     * Every thirty seconds. Frequent enough that a jump shows up while somebody is looking at the
+     * page, rare enough to be nothing next to what the app already sends — and it stops entirely
+     * when the page is unmounted, which is what the cleanup is for.
+     */
+    const timer = setInterval(read, 30_000);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, []);
+
+  return (
+    <Section title="Where you are">
+      {answer === null ? (
+        <Empty>Asking the hub.</Empty>
+      ) : !answer.ok ? (
+        <Empty>{answer.error}</Empty>
+      ) : answer.data.currentSystem === null ? (
+        <Empty>
+          No position reported yet. This arrives the next time you jump or load in.
+        </Empty>
+      ) : (
+        <Card>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+            <Stat label="System" value={answer.data.currentSystem} />
+            {/*
+              "In open space" rather than "Unknown", the website's own wording. The journal names a
+              station or a body when there is one to name; its absence is not missing DATA, it is a
+              commander in supercruise or between stars, and "unknown" would read as a fault.
+            */}
+            <Stat label="Location" value={answer.data.currentLocation ?? 'In open space'} />
+          </div>
+        </Card>
+      )}
+    </Section>
+  );
+}
+
 function Status({ state }: { state: AppState }): JSX.Element {
   const totals = state.totals ?? { sent: 0, duplicates: 0, journalsRead: 0, since: null };
 
@@ -731,6 +831,8 @@ function Status({ state }: { state: AppState }): JSX.Element {
           </p>
         </Card>
       </Section>
+
+      <WhereYouAre />
 
       <Section title="Recent activity">
         {(state.activity ?? []).length === 0 ? (

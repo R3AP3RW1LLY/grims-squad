@@ -10,6 +10,7 @@ import {
 } from './overlay-runtime.js';
 import { buildOverlayData } from './overlay-data.js';
 import { explain } from './display-mode.js';
+import { commanderLocation } from './hub-commander.js';
 import {
   colonyAssign,
   colonyAtMarket,
@@ -1598,6 +1599,9 @@ if (!app.requestSingleInstanceLock()) {
     });
 
     ipcMain.handle('colonyProjects', () => colonyProjects(hub()));
+    // Where the commander is, for the Status page. The hub decides it so the app and the website
+    // cannot disagree — see hub-commander.ts.
+    ipcMain.handle('commanderLocation', () => commanderLocation(hub()));
     ipcMain.handle('bountyBoard', () => bountyBoard(hub()));
     ipcMain.handle('tradeCommodity', (_e, name: unknown, query: unknown) => {
       if (typeof name !== 'string' || name === '') {
