@@ -23,10 +23,19 @@
 #
 # ★ HOW IT REACHES THE DATABASE ★
 #
-# Over the Vultr VPC, never the public internet — see infra/runbooks/workers-second-box.md, which
-# is the half of this that is not a compose file. Postgres binds to the private interface only.
-# `DATABASE_URL` and `REDIS_URL` in this box's /srv/grims/.env point at the private address; every
+# Over a WireGuard tunnel, never the public internet. The primary is 10.66.0.1, this box is
+# 10.66.0.2, and `DATABASE_URL`/`REDIS_URL` in this box's /srv/grims/.env point at 10.66.0.1. Every
 # other value is identical to the primary's.
+#
+# ★ WHY NOT VULTR'S OWN VPC, WHICH IS THE OBVIOUS ANSWER ★
+#
+# It was the first design and it destroyed two freshly-provisioned instances. Attaching a VPC to a
+# running Ubuntu 24.04 host left it answering ping with no sshd and no other open port; a reboot
+# did not recover it, and neither did detaching the VPC again. The existing primary, attached while
+# long-running, was unaffected — so it is specific to new instances, and it is not a risk worth
+# taking twice.
+#
+# WireGuard also encrypts, which a VPC does not, and depends on nothing the provider might change.
 #
 # Usage on the ingestion box:
 #   docker compose -f compose.workers.yml --env-file /srv/grims/.env up -d

@@ -344,6 +344,89 @@ describe('CI builds exactly what the deploy pulls', () => {
   });
 });
 
+describe('the datastores are never published to the world', () => {
+  /*
+   * ★ THE ONE MISTAKE THAT WOULD MATTER MOST — 2026-08-06 ★
+   *
+   * Moving the workers to a second box means Postgres and Redis must become reachable from another
+   * machine, and the obvious way to do that is the catastrophic one. `ports: ['5432:5432']` binds
+   * EVERY interface including the public IP, and Docker writes its own iptables rules that sit in
+   * FRONT of ufw — so a ufw deny does not save you. 107 members' data on a public IP behind
+   * nothing but a password, found by scanners within hours.
+   *
+   * compose.prod.yml's own header already says this. This is what makes it true rather than
+   * merely written down.
+   *
+   * The link is a WireGuard tunnel, so the bind address is the tunnel's own and traffic can only
+   * arrive from a peer holding the key.
+   */
+  const compose = readFileSync(join(REPO, 'infra', 'docker', 'compose.prod.yml'), 'utf8');
+
+  /** Every `ports:` entry belonging to one service, read by indentation. */
+  function publishedPorts(service: string): string[] {
+    const lines = compose.split('\n');
+    const start = lines.findIndex((l) => l.trimEnd() === `  ${service}:`);
+    if (start === -1) return [];
+
+    const out: string[] = [];
+    let inPorts = false;
+    for (let i = start + 1; i < lines.length; i += 1) {
+      const line = lines[i] ?? '';
+      if (/^ {2}\S/.test(line)) break; // the next service began
+      if (/^ {4}ports:\s*$/.test(line)) {
+        inPorts = true;
+        continue;
+      }
+      if (!inPorts) continue;
+      const entry = /^ {6}-\s*['"]?([^'"#\s]+)/.exec(line);
+      if (entry?.[1]) out.push(entry[1]);
+      else if (/^ {4}\S/.test(line)) inPorts = false; // a sibling key ended the list
+    }
+    return out;
+  }
+
+  for (const service of ['postgres', 'redis']) {
+    it(`MANDATORY: ${service} is bound to an address, never every interface`, () => {
+      for (const entry of publishedPorts(service)) {
+        /*
+         * A published port must carry a bind address — "ADDR:host:container", three parts. Two
+         * parts means every interface. That is the whole assertion.
+         */
+        expect(
+          entry.split(':').length,
+          `${service} publishes "${entry}" with no bind address — that is every interface, including the public IP`,
+        ).toBeGreaterThanOrEqual(3);
+
+        expect(entry, `${service} publishes "${entry}" on the wildcard address`).not.toMatch(
+          /^0\.0\.0\.0:/,
+        );
+      }
+    });
+
+    it(`MANDATORY: ${service} fails closed when the bind address is unset`, () => {
+      /*
+       * A bare ${VAR} expands to EMPTY when unset, and compose reads ":5432:5432" as every
+       * interface — the same disaster, produced by forgetting one line in .env. The fallback must
+       * be loopback, so a missing variable makes the workers unable to connect (loud, harmless)
+       * rather than making the database public (silent, fatal).
+       */
+      for (const entry of publishedPorts(service)) {
+        const variable = /^\$\{([A-Z_]+)(?::-([^}]*))?\}/.exec(entry);
+        if (!variable) continue; // a hard-coded address cannot be unset
+
+        expect(
+          variable[2],
+          `${service} binds to \${${variable[1]}} with no fallback — unset means every interface`,
+        ).toBeDefined();
+        expect(
+          variable[2],
+          `${service}'s bind fallback is "${variable[2]}", which is not loopback`,
+        ).toBe('127.0.0.1');
+      }
+    });
+  }
+});
+
 describe('the deploy still refuses to start without its configuration', () => {
   it('every announcement channel is required in the preflight', () => {
     /*
