@@ -4,6 +4,7 @@ import {
   COMPANION_ANNOUNCED_KEY,
   announceCompanionRelease,
 } from './announce.js';
+import { BOUNTY_ANCHOR_COUNT_KEY } from '@grims/shared';
 
 /**
  * Writing to `site_config`, against a real database.
@@ -89,5 +90,58 @@ describe('announcing a companion release', () => {
 
     const stored = await db.siteConfig.findUnique({ where: { key: COMPANION_ANNOUNCED_KEY } });
     expect(stored).toBeNull();
+  });
+});
+
+
+/**
+ * The other write that failed the same way, on the same day.
+ *
+ * ★ TWO OF THESE SHIPPED, AND BOTH WERE SILENT ★
+ *
+ * The bounty board writes how many project anchors it built from — a plain integer, into the same
+ * `jsonb` column, through the same kind of raw INSERT, with the same catch-and-carry-on around it
+ * because a board rebuild must not die over a statistic.
+ *
+ * It failed identically and nobody could tell: the key was simply never there, so `/bounties` went
+ * on telling members "there are no active projects" while three were running. The companion
+ * release announcement above is its twin; this is the half that had no test even after the first
+ * one got one.
+ *
+ * The WORKER owns that INSERT, so this asserts the property the worker depends on rather than
+ * importing it: that this column accepts an integer written the way `bounty-board.ts` writes it,
+ * and refuses it written the way it used to.
+ */
+describe('the bounty anchor count survives its column', () => {
+  afterAll(async () => {
+    await db.siteConfig.deleteMany({ where: { key: BOUNTY_ANCHOR_COUNT_KEY } });
+  });
+
+  it('MANDATORY: an integer written with to_jsonb lands and reads back as a number', async () => {
+    await db.$executeRawUnsafe(
+      `INSERT INTO site_config (key, value) VALUES ($1, to_jsonb($2::int))
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+      BOUNTY_ANCHOR_COUNT_KEY,
+      3,
+    );
+
+    const row = await db.siteConfig.findUnique({ where: { key: BOUNTY_ANCHOR_COUNT_KEY } });
+    expect(Number(row?.value)).toBe(3);
+  });
+
+  it('MANDATORY: the shape that shipped broken is still rejected by the database', async () => {
+    /*
+     * The regression, stated as the thing that actually happened: a bare string into a jsonb
+     * column. Postgres refuses it, the caller's catch swallowed the refusal, and the feature was
+     * quietly dead. If this ever stops throwing, the guard above has stopped meaning anything.
+     */
+    await expect(
+      db.$executeRawUnsafe(
+        `INSERT INTO site_config (key, value) VALUES ($1, $2)
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+        BOUNTY_ANCHOR_COUNT_KEY,
+        '3',
+      ),
+    ).rejects.toThrow();
   });
 });
