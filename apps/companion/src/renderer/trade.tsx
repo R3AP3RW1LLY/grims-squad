@@ -143,7 +143,7 @@ export function TradePage(): JSX.Element {
   const [sort, setSort] = useState('trip');
   // The four the website has had all along and the app did not send. See TradeQuery.
   const [budget, setBudget] = useState('');
-  const [largePad, setLargePad] = useState(false);
+  const [padSize, setPadSize] = useState('');
   const [carriers, setCarriers] = useState(false);
   const [freshDays, setFreshDays] = useState('7');
   const [plan, setPlan] = useState<TradePlan | null>(null);
@@ -162,7 +162,7 @@ export function TradePage(): JSX.Element {
         sort,
         budget,
         // The hub reads these as '1'/absent, the same way the website's form posts them.
-        largePad: largePad ? '1' : '',
+        padSize,
         carriers: carriers ? '1' : '',
         freshDays,
       })
@@ -274,16 +274,24 @@ export function TradePage(): JSX.Element {
               </select>
             </label>
             {/*
-              Landing pads. The single most consequential filter in the app: a run to a station your
+              Landing pads — the single most consequential filter here: a run to a station your
               hull cannot land at is not a worse run, it is not a run at all.
+
+              A selector rather than a "large only" tick, because 54% of stations have no large pad
+              and 1.2% are small-only, so a medium hull ticking the old box threw away half the
+              galaxy to avoid one per cent of it.
             */}
-            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', alignSelf: 'end', paddingBottom: '6px' }}>
-              <input
-                type="checkbox"
-                checked={largePad}
-                onChange={(e) => setLargePad((e.target as HTMLInputElement).checked)}
-              />
-              <span style={{ fontSize: '12px', color: C.dim }}>Large pad only</span>
+            <label>
+              <span style={LABEL}>My ship needs</span>
+              <select
+                style={{ ...inputStyle, width: '150px' }}
+                value={padSize}
+                onChange={(e) => setPadSize((e.target as HTMLSelectElement).value)}
+              >
+                <option value="">Any pad</option>
+                <option value="medium">Medium or better</option>
+                <option value="large">Large pad</option>
+              </select>
             </label>
             <label style={{ display: 'flex', alignItems: 'center', gap: '6px', alignSelf: 'end', paddingBottom: '6px' }}>
               <input

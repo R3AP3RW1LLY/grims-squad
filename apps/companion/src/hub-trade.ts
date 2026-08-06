@@ -73,6 +73,8 @@ export interface TradeQuery {
    * the split between the two surfaces the owner has objected to before.
    */
   readonly largePad?: string;
+  /** 'small' | 'medium' | 'large'. Absent means no pad filter. */
+  readonly padSize?: string;
   readonly carriers?: string;
   readonly freshDays?: string;
 }

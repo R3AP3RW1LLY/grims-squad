@@ -56,6 +56,16 @@ function feedBanner(health: { newestAt: Date | null; hoursBehind: number; stale:
   return { stale: health.stale, text, newestAt: health.newestAt };
 }
 
+/**
+ * The smallest pad a member's ship can use, off the wire.
+ *
+ * Re-read rather than trusted, and anything unrecognised is NO filter rather than a guess: a
+ * mistyped value quietly excluding half the galaxy would look like the market having no routes.
+ */
+function readPad(raw: string | undefined): 'small' | 'medium' | 'large' | undefined {
+  return raw === 'small' || raw === 'medium' || raw === 'large' ? raw : undefined;
+}
+
 @Controller('v1/logistics')
 export class MarketController {
   constructor(
@@ -200,6 +210,7 @@ export class MarketController {
     @Query('withinLy') withinLy?: string,
     @Query('carriers') carriers?: string,
     @Query('largePad') largePad?: string,
+    @Query('padSize') padSize?: string,
     @Query('minQty') minQty?: string,
     @Query('freshDays') freshDays?: string,
     @Query('hours') hours?: string,
@@ -231,6 +242,7 @@ export class MarketController {
       // and the dearest prices in the galaxy and can be somewhere else tomorrow.
       excludeCarriers: carriers !== '1',
       largePadOnly: largePad === '1',
+      ...(readPad(padSize) === undefined ? {} : { minPad: readPad(padSize) }),
       minQuantity: numberOr(minQty, 0),
       seenSince: daysAgo(numberOr(freshDays, 0)),
       near: origin?.coords ?? null,
@@ -300,6 +312,7 @@ export class MarketController {
     @Query('sellWithinLy') sellWithinLy?: string,
     @Query('budget') budget?: string,
     @Query('largePad') largePad?: string,
+    @Query('padSize') padSize?: string,
     @Query('carriers') carriers?: string,
     @Query('freshDays') freshDays?: string,
     @Query('commodity') commodity?: string,
@@ -344,6 +357,7 @@ export class MarketController {
       sellWithinLy: clamp(numberOr(sellWithinLy, 100), 1, 500),
       budget: budget === undefined || budget.trim() === '' ? null : Math.max(0, numberOr(budget, 0)),
       largePadOnly: largePad === '1',
+      ...(readPad(padSize) === undefined ? {} : { minPad: readPad(padSize) }),
       includeCarriers: carriers === '1',
       /*
        * ★ SEVEN DAYS, NOT "ANY AGE" — MEASURED 2026-08-04 ★

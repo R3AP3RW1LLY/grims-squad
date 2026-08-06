@@ -41,7 +41,10 @@ const KEYS = [
   'buyWithinLy',
   'sellWithinLy',
   'budget',
+  // `largePad` is kept alongside `padSize` so a bookmarked or shared link from before 2026-08-06
+  // still filters the way its author meant. The API accepts both; 'large' and the old flag agree.
   'largePad',
+  'padSize',
   'carriers',
   'freshDays',
   'commodity',

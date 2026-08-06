@@ -181,7 +181,7 @@ export async function rebuildMarketEntries(db: PrismaClient): Promise<number> {
        */
       const written = await tx.$executeRawUnsafe(`
         INSERT INTO market_entries (
-          station_key, station_name, system_name, station_type, coords, large_pads,
+          station_key, station_name, system_name, station_type, coords, large_pads, medium_pads,
           commodity, category, buy_price, sell_price, supply, demand, source, market_seen_at)
         SELECT
           k.ext_key,
@@ -190,6 +190,9 @@ export async function rebuildMarketEntries(db: PrismaClient): Promise<number> {
           k.data->>'type',
           k.coords,
           COALESCE((k.data->'landingPads'->>'large')::int, 0),
+          -- Medium joined 2026-08-06: 54% of stations have no large pad, so "large only" was the
+          -- only pad question this table could answer and it is the wrong one for a medium hull.
+          COALESCE((k.data->'landingPads'->>'medium')::int, 0),
           c->>'name',
           c->>'category',
           COALESCE((c->>'buyPrice')::int, 0),

@@ -193,14 +193,24 @@ export function RunForm({
           </select>
         </label>
 
-        <label className="flex items-center gap-2 pb-2 text-sm text-[var(--color-text-secondary)]">
-          <input
-            type="checkbox"
-            name="largePad"
-            value="1"
-            defaultChecked={query['largePad'] === '1'}
-          />
-          Large pad only
+        <label className="flex flex-col gap-1">
+          {/*
+            ★ SQUADRON OWNER, 2026-08-06: "add one that filters for pad size" ★
+
+            This was a "Large pad only" checkbox, which can ask exactly one question: does a LARGE
+            ship fit. Across the stations we hold, 43% have a large pad, 54% have a medium one and
+            no large, and 1.2% are small-only.
+
+            So a Python pilot had to choose between ticking it — discarding fifty-four per cent of
+            the galaxy for no reason — and leaving it off, which offers them outposts they cannot
+            land at. Neither answers the question they actually have.
+          */}
+          <span className={LABEL}>My ship needs</span>
+          <select name="padSize" defaultValue={val('padSize', '')} className={FIELD}>
+            <option value="">Any pad</option>
+            <option value="medium">Medium pad or better</option>
+            <option value="large">Large pad</option>
+          </select>
         </label>
 
         <label className="flex items-center gap-2 pb-2 text-sm text-[var(--color-text-secondary)]">

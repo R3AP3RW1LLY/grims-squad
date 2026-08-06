@@ -39,6 +39,13 @@ export interface RouteRequest {
   /** Credits available. A route they cannot afford to fill is not a route. */
   readonly budget: number | null;
   readonly largePadOnly: boolean;
+  /**
+   * The smallest pad the member's ship can use, when they have said.
+   *
+   * Sits beside `largePadOnly` rather than replacing it so every existing caller keeps working:
+   * 'large' and the boolean mean the same thing, and absent means no pad filter.
+   */
+  readonly minPad?: 'small' | 'medium' | 'large' | undefined;
   readonly includeCarriers: boolean;
   /** Ignore prices nobody has reported since this. */
   readonly seenSince: Date | null;
@@ -219,6 +226,7 @@ export async function planRoutes(
   const base = {
     excludeCarriers: !req.includeCarriers,
     largePadOnly: req.largePadOnly,
+    ...(req.minPad === undefined ? {} : { minPad: req.minPad }),
     seenSince: req.seenSince,
     minQuantity: 1,
   };

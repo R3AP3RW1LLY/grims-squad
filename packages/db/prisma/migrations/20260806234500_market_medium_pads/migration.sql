@@ -1,0 +1,27 @@
+-- Medium landing pads on the market table.
+--
+-- ★ SQUADRON OWNER, 2026-08-06 ★
+--
+-- "Add more filters include we add one that filters for pad size please!"
+--
+-- ★ WHY THE EXISTING BOOLEAN WAS NOT ENOUGH ★
+--
+-- `large_pads` supports exactly one question: does a large ship fit. Measured across the 313,294
+-- stations we hold:
+--
+--   134,678 (43%)  have a large pad
+--   168,124 (54%)  have NO large pad but do have a medium one
+--     3,720 (1.2%) are small-only
+--
+-- So a Python pilot — a MEDIUM ship — had to choose between "large pad only", which throws away
+-- fifty-four per cent of the galaxy for no reason, and leaving it off, which offers them stations
+-- they cannot land at. Neither answers their actual question, and the shape of the data is why:
+-- the interesting cut for a medium hull is against the 1.2%, and nothing on this table could see it.
+--
+-- ★ A CONSTANT DEFAULT, SO THIS DOES NOT REWRITE 18.9 MILLION ROWS ★
+--
+-- Postgres 11 and later record a non-volatile default in the catalogue rather than rewriting the
+-- heap, so this is effectively instant on a table this size. The real values arrive with the next
+-- market flatten, which TRUNCATEs and rebuilds from the galaxy dump anyway; until then every row
+-- reads 0, which the query treats as "unknown", never as "no medium pad".
+ALTER TABLE "market_entries" ADD COLUMN IF NOT EXISTS "medium_pads" INTEGER NOT NULL DEFAULT 0;
