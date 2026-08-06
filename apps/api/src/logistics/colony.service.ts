@@ -1031,11 +1031,31 @@ export class ColonyService {
       minQuantity: 1,
     };
 
-    const out: ShoppingRow[] = [];
+    /*
+     * ★ SEVERAL COMMODITIES AT ONCE, BUT NOT ALL OF THEM — MEASURED 2026-08-06 ★
+     *
+     * This loop used to await each commodity's pair of queries before starting the next. Thirty
+     * lookups at a real origin measured 5.8 SECONDS of database time on production, almost all of
+     * it spent waiting out network hops in single file. A 25-commodity build is fifty round trips
+     * one after another.
+     *
+     * The obvious fix — Promise.all over every need — would have been the next outage. The
+     * connection pool is twenty-five and `shoppingBulkhead` already permits SIX concurrent shopping
+     * lists, so unbounded fan-out is six lists times fifty queries against a pool of twenty-five.
+     * The list that caused the incident would have caused the next one.
+     *
+     * Four at a time, each still issuing its own pair, so at most eight queries are in flight per
+     * list and six lists stay under the pool with room for everything else the API is doing.
+     *
+     * Nothing else changes: not one query, not the ranking, not the fallbacks. The shopping list
+     * has correctness history — "always prioritize local markets before sending out of system" was
+     * a real bug — and only the waiting is being removed.
+     */
+    const SHOPPING_CONCURRENCY = 4;
 
-    for (const need of needs) {
+    const priceOne = async (need: (typeof needs)[number]): Promise<ShoppingRow | null> => {
       // Settled lines are dropped rather than shown at zero: a shopping list is what to go and buy.
-      if (need.remaining <= 0) continue;
+      if (need.remaining <= 0) return null;
 
       /*
        * ★ WHAT THE CARRIERS ALREADY HOLD IS NOT SOMETHING TO BUY ★
@@ -1053,7 +1073,12 @@ export class ColonyService {
       const toBuy = need.remaining - onCarriers;
 
       if (toBuy <= 0) {
-        out.push({
+        /*
+         * Returned BEFORE any market call, exactly as before. Concurrency makes it tempting to
+         * hoist the lookups above this check for tidiness; that would quote stations for cargo the
+         * squadron already owns, which is the trip the carrier cover exists to prevent.
+         */
+        return {
           commodity: need.commodity,
           remaining: need.remaining,
           required: need.required,
@@ -1068,8 +1093,7 @@ export class ColonyService {
           nearestOutOfRange: null,
           // Zero, not null: null means "nowhere sells it", and this line needs nothing bought.
           cost: 0,
-        });
-        continue;
+        };
       }
 
       /*
@@ -1139,7 +1163,7 @@ export class ColonyService {
                 .catch(() => [])
             )[0] ?? null);
 
-      out.push({
+      return {
         commodity: need.commodity,
         remaining: need.remaining,
         required: need.required,
@@ -1168,7 +1192,19 @@ export class ColonyService {
          * see the supply column and work out how many trips.
          */
         cost: place === undefined ? null : place.price * toBuy,
-      });
+      };
+    };
+
+    /*
+     * Windowed rather than Promise.all, and the ORDER of the output is preserved because each
+     * window writes into the array it was sliced from. A shopping list whose rows do not line up
+     * with its needs would quote the wrong station for the wrong commodity, and nothing on the page
+     * would look wrong.
+     */
+    const out: ShoppingRow[] = [];
+    for (let i = 0; i < needs.length; i += SHOPPING_CONCURRENCY) {
+      const window = await Promise.all(needs.slice(i, i + SHOPPING_CONCURRENCY).map(priceOne));
+      for (const row of window) if (row !== null) out.push(row);
     }
 
     return out;
