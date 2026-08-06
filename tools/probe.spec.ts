@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { evaluate, freshState, DEFAULTS } from './probe.mjs';
+import { evaluate, freshState, destinations, DEFAULTS } from './probe.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -181,6 +181,87 @@ describe('each thing watched is watched separately', () => {
     }
 
     expect(seen).toEqual(['https://grims-squad.com/forum']);
+  });
+});
+
+describe('the alert reaches a person, not a channel nobody has open', () => {
+  /*
+   * ★ SQUADRON OWNER, 2026-08-06: "send these in DM" ★
+   *
+   * Which is the right call for this particular signal. A channel alert at 3am is read at 9am; the
+   * whole point of this probe is that the site was slow for twenty minutes and the only monitoring
+   * system was a person noticing. A DM reaches the phone that is already in the room.
+   *
+   * A channel is still supported, because the two are not alternatives — one person on call and a
+   * record somewhere the rest of the squadron can see is a normal arrangement, and configuring
+   * both should not mean choosing.
+   */
+
+  it('MANDATORY: nothing configured means no destinations, not a crash', () => {
+    /*
+     * The state the box is in right now. The probe must still measure and still write history —
+     * the alerting is the part that is unconfigured, and losing the measurement with it would
+     * throw away the baseline this is collecting for the upsize.
+     */
+    expect(destinations({})).toEqual([]);
+  });
+
+  /*
+   * ★ THE FIXTURES ARE DELIBERATELY NOT SNOWFLAKE-SHAPED ★
+   *
+   * The first version used realistic 18-digit ids and gitleaks failed the build with five hits:
+   * its `discord-client-id` rule matches any 17-20 digit number near the word "discord", and it
+   * cannot tell a made-up one from a leaked one. That is the rule working correctly.
+   *
+   * The tempting fix is adding them to .gitleaks.toml's allowlist. That file's own reasoning
+   * argues against it — every entry there is a real value that is provably not a secret, and
+   * padding it with invented ones makes the list harder to audit for the entries that matter.
+   *
+   * `destinations()` does no format validation; it routes. So the fixtures say what they are.
+   */
+  it('MANDATORY: a user id becomes a DM destination', () => {
+    expect(destinations({ DISCORD_OPS_USER_ID: 'ops-user-fixture' })).toEqual([
+      { kind: 'dm', id: 'ops-user-fixture' },
+    ]);
+  });
+
+  it('MANDATORY: a channel id still works, so this is additive', () => {
+    expect(destinations({ DISCORD_OPS_CHANNEL_ID: 'ops-channel-fixture' })).toEqual([
+      { kind: 'channel', id: 'ops-channel-fixture' },
+    ]);
+  });
+
+  it('MANDATORY: configuring both sends to both, DM first', () => {
+    /*
+     * DM first because if Discord rate-limits or the second call fails, the one that got through
+     * should be the one that wakes somebody up.
+     */
+    const both = destinations({
+      DISCORD_OPS_CHANNEL_ID: 'ops-channel-fixture',
+      DISCORD_OPS_USER_ID: 'ops-user-fixture',
+    });
+
+    expect(both.map((d) => d.kind)).toEqual(['dm', 'channel']);
+  });
+
+  it('MANDATORY: a placeholder is treated as unset, exactly as the deploy preflight does', () => {
+    /*
+     * deploy.sh rejects `CHANGE_ME` values as missing rather than present. If this disagreed, a
+     * half-filled .env would give a probe that posts to a channel named CHANGE_ME, fails every
+     * time, and logs a 404 nobody reads — configured-looking and silent, which is the worst of
+     * both.
+     */
+    expect(
+      destinations({ DISCORD_OPS_USER_ID: 'CHANGE_ME', DISCORD_OPS_CHANNEL_ID: '  ' }),
+    ).toEqual([]);
+  });
+
+  it('surrounding whitespace does not become part of the id', () => {
+    // `echo 'X=123' >> .env` is how these get set, and a stray space produces a 404 that reads
+    // like a permissions problem.
+    expect(destinations({ DISCORD_OPS_USER_ID: '  ops-user-fixture  ' })).toEqual([
+      { kind: 'dm', id: 'ops-user-fixture' },
+    ]);
   });
 });
 

@@ -138,6 +138,42 @@ export function alertContent(event) {
   return `🟠 **${where}** has been slow for several minutes — ${(event.ms / 1000).toFixed(1)}s to respond.`;
 }
 
+/**
+ * Where an alert should go, read from the environment.
+ *
+ * ★ SQUADRON OWNER, 2026-08-06: "send these in DM" ★
+ *
+ * The right call for this signal. A channel alert at 3am is read at 9am, and the entire reason this
+ * probe exists is that the site was slow for twenty minutes and the only monitoring system was a
+ * person noticing. A DM reaches the phone that is already in the room.
+ *
+ * A channel stays supported because the two are not alternatives — one person on call plus a record
+ * the rest of the squadron can see is a normal arrangement, and configuring both should not mean
+ * choosing between them.
+ *
+ * @param {Record<string, string | undefined>} env
+ */
+export function destinations(env) {
+  /*
+   * `CHANGE_ME` counts as unset, matching deploy.sh's preflight exactly. If these disagreed, a
+   * half-filled .env would produce a probe that posts to a channel called CHANGE_ME, fails every
+   * time, and logs a 404 nobody reads — configured-looking and silent, which is worse than either.
+   */
+  const value = (key) => {
+    const raw = (env[key] ?? '').trim();
+    return raw && !raw.includes('CHANGE_ME') ? raw : null;
+  };
+
+  const out = [];
+  // DM first: if Discord rate-limits or the second call fails, the one that got through should be
+  // the one that wakes somebody up.
+  const user = value('DISCORD_OPS_USER_ID');
+  if (user) out.push({ kind: 'dm', id: user });
+  const channel = value('DISCORD_OPS_CHANNEL_ID');
+  if (channel) out.push({ kind: 'channel', id: channel });
+  return out;
+}
+
 /* ────────────────────────────────────────────────────────── the shell around it */
 
 /** One timed request. Never throws: a probe that dies on a network error stops being a probe. */
@@ -162,9 +198,38 @@ async function measure(url, timeoutMs = 30_000) {
   }
 }
 
-async function announce(content, { token, channelId }) {
-  if (!token || !channelId) return false;
+/**
+ * A bot cannot post to a person; it posts to a channel, and a DM is a channel you have to ask for.
+ *
+ * `POST /users/@me/channels` is idempotent — Discord returns the existing DM channel if there is
+ * one — so this is safe to call per alert rather than caching an id that could go stale. Alerts are
+ * rare by construction, so the extra round trip costs nothing worth engineering around.
+ */
+async function openDm(token, userId) {
+  const response = await fetch('https://discord.com/api/v10/users/@me/channels', {
+    method: 'POST',
+    headers: { Authorization: `Bot ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ recipient_id: userId }),
+  });
 
+  if (!response.ok) {
+    /*
+     * The two ways this fails, both worth naming because neither is a bug in this code:
+     *   403 — the recipient does not share a guild with the bot, or has "allow direct messages
+     *         from server members" switched off. Nothing here can fix that.
+     *   404 — the id is not a user. Almost always a channel id pasted into the user variable.
+     */
+    console.error(
+      `probe: could not open a DM (${response.status}) — check DISCORD_OPS_USER_ID is a USER id and that you allow DMs from server members`,
+    );
+    return null;
+  }
+
+  const dm = await response.json();
+  return dm?.id ?? null;
+}
+
+async function post(token, channelId, content) {
   const response = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
     method: 'POST',
     headers: { Authorization: `Bot ${token}`, 'Content-Type': 'application/json' },
@@ -177,6 +242,23 @@ async function announce(content, { token, channelId }) {
    */
   if (!response.ok) console.error(`probe: discord refused the alert (${response.status})`);
   return response.ok;
+}
+
+/** Deliver one alert to every configured destination. Returns how many actually landed. */
+async function announce(content, token, targets) {
+  if (!token || targets.length === 0) return 0;
+
+  let delivered = 0;
+  for (const target of targets) {
+    /*
+     * Sequential, not Promise.all. Two destinations is the realistic maximum and Discord rate-limits
+     * per route; racing them to save forty milliseconds on an event that happens twice a month is
+     * not a trade worth making.
+     */
+    const channelId = target.kind === 'dm' ? await openDm(token, target.id) : target.id;
+    if (channelId && (await post(token, channelId, content))) delivered += 1;
+  }
+  return delivered;
 }
 
 function readState(path) {
@@ -234,17 +316,23 @@ async function main() {
     console.error(`probe: COULD NOT PERSIST STATE — alerts will never fire — ${error.message}`);
   }
 
-  const discord = {
-    token: process.env.DISCORD_BOT_TOKEN,
-    channelId: process.env.DISCORD_OPS_CHANNEL_ID,
-  };
+  const token = process.env.DISCORD_BOT_TOKEN;
+  // `alertTargets`, not `targets` — that name is already the list of URLs being probed, and the
+  // two are very easy to confuse when reading this function quickly.
+  const alertTargets = destinations(process.env);
 
   for (const event of events) {
     const content = alertContent(event);
+    // Always to the log first. If Discord is the thing that is down, this is the only record.
     console.log(content);
-    if (!(await announce(content, discord)) && !discord.channelId) {
-      console.error('probe: DISCORD_OPS_CHANNEL_ID is unset — measured, but told nobody');
+
+    if (alertTargets.length === 0) {
+      console.error(
+        'probe: no DISCORD_OPS_USER_ID or DISCORD_OPS_CHANNEL_ID — measured, but told nobody',
+      );
+      continue;
     }
+    await announce(content, token, alertTargets);
   }
 }
 
