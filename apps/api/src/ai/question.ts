@@ -31,6 +31,18 @@ export interface Plan {
   /** Set when the question is about proximity to a named system. */
   readonly near: { readonly system: string; readonly radiusLy: number } | null;
   /**
+   * Set when the question is "WHERE should I mine", as distinct from "what should I fly for
+   * mining" (the fitter) and "where do I sell what I mined" (the market).
+   *
+   * ★ SQUADRON OWNER, 2026-08-06: "if we can add our AI into this some way that would be epic!" ★
+   *
+   * Its own leg because the answer comes from a source no other leg touches: `prospected_rocks`,
+   * every member's limpets pooled. A model asked this without it would answer from whatever mining
+   * prose the semantic leg found, which is a wiki page about Painite hotspots from two years ago
+   * presented with the same confidence as a measurement taken last Tuesday.
+   */
+  readonly rings: { readonly material: string | null } | null;
+  /**
    * Set when the question is "what should I fly for X".
    *
    * ★ SQUADRON OWNER ★
@@ -93,6 +105,16 @@ export function planFor(
   const market = marketIn(q, commodities);
   const near = nearIn(q);
   const fit = fitIn(q, ships);
+  /*
+   * ★ THE FITTER WINS A BUILD QUESTION OUTRIGHT ★
+   *
+   * "What should I fly for mining on a 200 million budget" says "what" and says "mining", so the
+   * ring grammar matches it — and answering it with a list of rings would be the same class of
+   * failure as answering a sell question with buy prices. `fitIn` already demanded build-intent
+   * phrasing, a budget or a named hull before it claimed the question, so its yes is the stronger
+   * evidence and it consumes the sentence.
+   */
+  const rings = fit === null ? ringsIn(q, commodities) : null;
 
   /*
    * ★ A TERM IS CONSUMED BY THE LEG THAT UNDERSTOOD IT ★
@@ -108,6 +130,9 @@ export function planFor(
   const consumed = new Set<string>();
   if (market !== null) consumed.add(market.commodity.toLowerCase());
   if (near !== null) consumed.add(near.system.toLowerCase());
+  // The ring leg knows what Painite is and is measuring real rocks for it. Looking the same word
+  // up by name a second way can only add stations that merely share letters with it.
+  if (rings?.material != null) consumed.add(rings.material.toLowerCase());
 
   return {
     // Always. See the note above about routing being a bet.
@@ -116,6 +141,7 @@ export function planFor(
     market,
     near,
     fit,
+    rings,
   };
 }
 
@@ -217,6 +243,45 @@ function fitIn(
   if (!BUILD_INTENT.test(q) && budget === null && hull === null) return null;
 
   return { role, budget, shipId: hull?.id ?? null };
+}
+
+/**
+ * Phrasings that mean "tell me WHERE to dig".
+ *
+ * ★ THE WORD "MINING" IS NOT ENOUGH, AND NEITHER IS "WHERE" ★
+ *
+ * Three different questions contain a mining word:
+ *
+ *   "What should I fly for mining"  → the fitter
+ *   "Where do I sell mined Painite" → the market
+ *   "Where should I mine Painite"   → here
+ *
+ * So this needs BOTH a mining word and a place-seeking phrase, and it steps aside for a selling
+ * question outright — a member with a full hold has already done the mining, and a list of rings is
+ * the one answer that cannot help them.
+ */
+const RING_INTENT =
+  /\b(where|which|what|best|good|top|richest)\b[^?.!]{0,40}\b(mine|mining|ring|rings|hotspot|hotspots|prospect)\b|\b(rings?|hotspots?)\b[^?.!]{0,40}\b(mine|mining|worth|best|good)\b/i;
+
+/** Words that mean the member is holding the cargo already, not looking for it in a rock. */
+const ALREADY_MINED = /\b(sell|selling|sold|unload|offload|dump)\b/i;
+
+function ringsIn(q: string, commodities: readonly string[]): Plan['rings'] {
+  if (!RING_INTENT.test(q)) return null;
+  // A selling question is the market's, whatever else it says. See ALREADY_MINED.
+  if (ALREADY_MINED.test(q)) return null;
+
+  /*
+   * Longest commodity name first, for the same reason the market matcher does it: "Low Temperature
+   * Diamonds" contains "Diamonds", and matching the shorter one would survey rings for a different
+   * mineral from the one asked about.
+   */
+  const material =
+    [...commodities]
+      .sort((a, b) => b.length - a.length)
+      .find((c) => q.toLowerCase().includes(c.toLowerCase())) ?? null;
+
+  return { material };
 }
 
 /**

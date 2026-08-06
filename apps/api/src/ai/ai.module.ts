@@ -21,6 +21,8 @@ import { AssistantService } from './assistant.service.js';
 import { SupportAnswerService } from './support-answer.service.js';
 import { ShipBuildService, ShipBuildQueries, ShipyardService } from './ship-build.service.js';
 import { CorpusService } from './corpus.service.js';
+import { MiningModule } from '../mining/mining.module.js';
+import { MiningService } from '../mining/mining.service.js';
 import { JobLogListener } from './job-log.listener.js';
 import { ArtworkController } from './artwork.controller.js';
 import { LIVE_SERVICE } from '../live/live.tokens.js';
@@ -134,6 +136,19 @@ export class ModelWarmer implements OnModuleInit, OnModuleDestroy {
 
 @Global()
 @Module({
+  /*
+   * MiningModule for the ring survey leg.
+   *
+   * ★ AN OPTIONAL INJECTION IS ONLY OPTIONAL IF SOMETHING PROVIDES IT ★
+   *
+   * `{ token: MiningService, optional: true }` resolves to undefined when the token is not in this
+   * module's context — no error, no warning, and the leg simply never runs. The assistant would go
+   * on answering ring questions from stale wiki prose, which is the exact failure the leg was
+   * written to prevent, with nothing anywhere to say so.
+   *
+   * MiningModule does not import AiModule, so there is no cycle.
+   */
+  imports: [MiningModule],
   providers: [
     {
       provide: AiStreamService,
@@ -250,14 +265,25 @@ export class ModelWarmer implements OnModuleInit, OnModuleDestroy {
       provide: AssistantService,
       // ShipBuildService too: "what should I fly for mining with 50 million" is answered by the
       // fitting engine, as a retrieval leg beside the market and spatial ones.
-      inject: [PrismaClient, AiClient, KnowledgeService, AiLog, ShipBuildService],
+      // MiningService too, and OPTIONALLY: "where should I mine Painite" is answered from the
+      // squadron's own prospector limpets, as a retrieval leg beside the market, spatial and
+      // fitting ones. Optional so the assistant still answers everything else if it is absent.
+      inject: [
+        PrismaClient,
+        AiClient,
+        KnowledgeService,
+        AiLog,
+        ShipBuildService,
+        { token: MiningService, optional: true },
+      ],
       useFactory: (
         db: PrismaClient,
         ai: AiClient,
         knowledge: KnowledgeService,
         log: AiLog,
         builds: ShipBuildService,
-      ) => new AssistantService(db, ai, knowledge, log, builds),
+        mining?: MiningService,
+      ) => new AssistantService(db, ai, knowledge, log, builds, mining),
     },
     /*
      * The help chat's answer leg — GMSD AI reading the help corpus and nothing else. Constructed

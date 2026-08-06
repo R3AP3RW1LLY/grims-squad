@@ -5,6 +5,7 @@ import { AiLog } from './ai-log.port.js';
 import { KnowledgeService, type Fact } from './knowledge.service.js';
 import { planFor } from './question.js';
 import { ShipBuildService } from './ship-build.service.js';
+import type { MiningService } from '../mining/mining.service.js';
 
 /**
  * The assistant — the surface everything else has been building towards.
@@ -82,6 +83,10 @@ const SYSTEM_PROMPT = [
   '   real modules and real figures. Give the ship name and the total cost first, then the figures',
   '   that matter for the job. Never substitute a different ship, never adjust the numbers, and',
   '   never add modules it does not mention — if it names compromises, repeat them.',
+  '8. A FACT of kind "ring" is a MEASUREMENT from squadron members\' own prospector limpets, not',
+  '   lore. Give the ring, what share of rocks were worth shooting, and how recently anybody was',
+  '   there. Never name a ring or a hotspot that is not in the FACTS, however well known it is —',
+  '   Frontier has reshuffled hotspots more than once and what you remember is likely wrong.',
 ].join('\n');
 
 @Injectable()
@@ -109,6 +114,20 @@ export class AssistantService {
      * different answers, and the member would have no way to tell which was right.
      */
     private readonly builds: ShipBuildService,
+    /**
+     * The ring survey.
+     *
+     * ★ SQUADRON OWNER, 2026-08-06: "if we can add our AI into this some way that would be epic!" ★
+     *
+     * The SAME service the /mining page reads, for the same reason the fitter is shared: two
+     * answers to "where should I mine Painite" — one from a page and one from the assistant — would
+     * eventually be two different answers, and the member would have no way to tell which was
+     * right.
+     *
+     * Optional so the assistant keeps working wherever it is absent, which is every existing test
+     * that constructs this class with five arguments.
+     */
+    private readonly mining?: MiningService,
   ) {}
 
   async ask(
@@ -273,6 +292,10 @@ export class AssistantService {
       legs.push(this.knowledge.market(commodity, side));
     }
 
+    if (plan.rings !== null && this.mining !== undefined) {
+      legs.push(this.#ringLeg(plan.rings.material));
+    }
+
     const settled = await Promise.allSettled(legs);
 
     const seen = new Set<string>();
@@ -291,6 +314,58 @@ export class AssistantService {
 
     // Bounded. Past a dozen the context stops helping and starts burying the relevant rows.
     return facts.slice(0, 12);
+  }
+
+  /**
+   * Rings the squadron has actually been working, rendered as facts.
+   *
+   * ★ MEASURED, NOT REMEMBERED ★
+   *
+   * Without this leg, "where should I mine Painite" falls to the semantic search, which finds
+   * whatever mining prose the corpus holds — a wiki page about hotspots from two years ago, handed
+   * to the model with exactly the same confidence as a measurement taken last Tuesday. Frontier has
+   * reshuffled hotspots more than once since; the prose is not merely stale, it is wrong.
+   *
+   * What goes in the prompt is the squadron's own limpets: how many rocks, what share of them were
+   * worth shooting, and when anybody was last there.
+   */
+  async #ringLeg(material: string | null): Promise<Fact[]> {
+    // Undefined only in tests that construct this class without the mining service; the caller
+    // has already checked, and this keeps the narrowing local rather than at the call site.
+    if (this.mining === undefined) return [];
+
+    const rings = await this.mining.rings(material, 21, 5);
+
+    /*
+     * Nothing measured is a real answer and must not become silence. Returning no fact would drop
+     * the question back to the semantic leg — the exact stale-prose failure this leg exists to
+     * prevent — so the absence is stated instead, and the model has something true to say.
+     */
+    if (rings.length === 0) {
+      return [
+        {
+          source: 'mining',
+          kind: 'rings',
+          name: material === null ? 'ring survey' : `${material} rings`,
+          text:
+            material === null
+              ? 'No squadron member has prospected enough rocks in the last three weeks to measure any ring. The survey is built entirely from members’ own prospector limpets, so it fills as people fly with mining telemetry switched on in the companion app.'
+              : `No squadron member has prospected a ring running ${material} in the last three weeks. The survey is built from members’ own prospector limpets and holds nothing about this mineral yet.`,
+          url: '/mining',
+        },
+      ];
+    }
+
+    return rings.map((r) => ({
+      source: 'mining',
+      kind: 'ring',
+      name: `${r.body}, ${r.system}`,
+      text:
+        `${r.body} in ${r.system}: ${r.rocks} rocks prospected by squadron members in the last three weeks, ` +
+        `${r.hitRate.toFixed(0)}% of them worth shooting. Mostly running ${r.topMaterial}; ` +
+        `richest rock seen was ${r.bestPercent.toFixed(1)}%. Last prospected ${r.lastSeen.toISOString().slice(0, 10)}.`,
+      url: '/mining',
+    }));
   }
 
   /**
