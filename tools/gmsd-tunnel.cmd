@@ -65,6 +65,19 @@ set DELAY=5
 :loop
 echo [%date% %time%] connecting...
 
+REM  Three forwards, and the third is not like the other two.
+REM
+REM  11434 and 8188 are published on the DOCKER BRIDGE (172.18.0.1) because their consumer is the
+REM  API container on that same box.
+REM
+REM  11435 is the EMBEDDING model on the 3060 (see tools/gmsd-embed.cmd), and its consumer is the
+REM  worker daemon on the INGESTION box. That machine reaches this one over WireGuard, and cannot
+REM  see the primary's docker bridge at all -- so this one is published on the wg0 address, which
+REM  10.66.0.2 can route to.
+REM
+REM  Each address must also be listed in the tunnel key's `permitlisten` options, or sshd refuses
+REM  the bind and ssh exits with "remote port forwarding failed".
+
 ssh -N -T ^
   -i "%KEY%" ^
   -o IdentitiesOnly=yes ^
@@ -75,6 +88,7 @@ ssh -N -T ^
   -o ConnectTimeout=15 ^
   -R 172.18.0.1:11434:127.0.0.1:11434 ^
   -R 172.18.0.1:8188:127.0.0.1:8188 ^
+  -R 10.66.0.1:11435:127.0.0.1:11435 ^
   %REMOTE%
 
 REM  A connection that LASTED is a healthy one, so the next failure starts from
