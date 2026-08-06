@@ -183,8 +183,20 @@ export const TELEMETRY_CATALOGUE: readonly CatalogueGroup[] = [
          * "the station's prices" without "shared with everyone" would be true
          * and still misleading.
          */
+        /*
+         * ★ THE FILE IS NAMED, AS OF 2026-08-06 ★
+         *
+         * This already promised the prices were shared, and for the whole life of the feature they
+         * were not: Frontier's journal event carries no prices at all, and the app was reading only
+         * the journal. Production had 1,092 of these events, zero market rows and zero data
+         * bounties paid.
+         *
+         * The app now reads `Market.json` — the file the game writes the price list into — when one
+         * of these events fires. Saying so is the point: a member deciding whether to leave this on
+         * should be told which file it reads, not only what the result is used for.
+         */
         reveals:
-          'Which station you opened the commodity market at. The prices on that screen are shared with the squadron so route-finding works from what someone actually saw rather than from last night — your name is not attached to them.',
+          'Which station you opened the commodity market at, and the prices on that screen — read from the game’s own Market.json the moment you open it. They are shared with the squadron so route-finding works from what someone actually saw rather than from last night; your name is not attached to them.',
       },
       { event: 'MarketBuy', label: 'Cargo bought', reveals: 'The commodity, the quantity and the station.' },
       { event: 'MarketSell', label: 'Cargo sold', reveals: 'The commodity, the quantity, the station and the price.' },

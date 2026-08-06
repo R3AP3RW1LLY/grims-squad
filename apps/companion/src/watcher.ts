@@ -1,4 +1,5 @@
 import { readJournalChunk, journalFilesInOrder } from './journal-reader.js';
+import { withMarketPrices } from './market-prices.js';
 import { trackDocked, type DockedAt } from './docked.js';
 import { foldTrip, EMPTY_TRIP, type TripLedger } from './trip-ledger.js';
 import { foldCarrierHold, EMPTY_CARRIER_HOLD, type CarrierHoldState } from './carrier-hold.js';
@@ -274,6 +275,35 @@ export async function runWatchPass(
     if (result.sessionIsLive !== null) next.sessionLive[name] = result.sessionIsLive;
 
     /*
+     * ★ THE PRICES, WHICH THE JOURNAL DOES NOT CARRY — 2026-08-06 ★
+     *
+     * Frontier's `Market` event is a five-field announcement: MarketID, StationName, StarSystem.
+     * The commodity list goes into a SEPARATE file, `Market.json`, rewritten each time a market
+     * screen is opened.
+     *
+     * Without it the hub's snapshot path returns immediately, no market row is ever written from a
+     * member's upload, and the data bounty that pays on a written row is never reached. Production
+     * had 1,092 Market events, zero rows and zero claims — the feature had never worked once.
+     *
+     * Read only when this chunk actually contains a Market event, so the ordinary pass — which is
+     * most of them — touches nothing it did not before. `withMarketPrices` refuses the file unless
+     * its MarketID matches the event's, because it holds only the LAST market opened and catching
+     * up on an old journal would otherwise publish one station's prices under another's name.
+     */
+    let events = result.events;
+    if (events.some((e) => e.name === 'Market')) {
+      const marketJson = await fs.readFrom(`${journalDir}/Market.json`, 0).catch(() => null);
+      if (marketJson !== null) {
+        events = events.map((e) => {
+          if (e.name !== 'Market') return e;
+          const merged = withMarketPrices({ ...e.data, event: e.name }, marketJson);
+          const items = merged['Items'];
+          return items === undefined ? e : { ...e, data: { ...e.data, Items: items } };
+        });
+      }
+    }
+
+    /*
      * ★ FOLDED BEFORE THE "NOTHING TO SEND" RETURN, DELIBERATELY ★
      *
      * `Docked` is only uploaded when the member has left the `location` category on. Where they are
@@ -283,7 +313,7 @@ export async function runWatchPass(
      *
      * Nothing about this leaves the machine. It is used to pre-fill a form the member is looking at.
      */
-    docked = trackDocked(docked, result.events);
+    docked = trackDocked(docked, events);
     /*
      * The trip P&L, folded in the same breath and before the same "nothing to send" return, for
      * the same reason as the dock: what a member paid at a buy screen is needed by the app's own
@@ -296,8 +326,8 @@ export async function runWatchPass(
      */
     const watched =
       watchingSince <= 0
-        ? result.events
-        : result.events.filter((e) => {
+        ? events
+        : events.filter((e) => {
             const at = Date.parse(e.occurredAt);
             // An unparseable timestamp is not evidence of the present. Excluded rather than
             // guessed at — the cost is one missed line, and the alternative is the bug above.
@@ -309,7 +339,7 @@ export async function runWatchPass(
     // is worth a push; the fold merely watches.
     carrierHold = foldCarrierHold(carrierHold, watched);
 
-    if (result.events.length === 0) {
+    if (events.length === 0) {
       /*
        * Nothing to send, but the offset still moves: those bytes have been read
        * and re-reading them next pass would be work with no possible outcome.
@@ -328,7 +358,7 @@ export async function runWatchPass(
       continue;
     }
 
-    const upload = await uploader.send(result.events, { gameRunning });
+    const upload = await uploader.send(events, { gameRunning });
     // Added BEFORE the early returns below, so a pass that failed partway still
     // reports what it moved.
     txBytes += upload.txBytes;

@@ -132,9 +132,26 @@ describe('journal file matching', () => {
 
   it('MANDATORY: ignores every other file in the folder', () => {
     /*
-     * The same folder holds Status.json, Market.json, Cargo.json, ModulesInfo
-     * and more. Reading those is outside what the member agreed to — the app
-     * says it reads the journal, so it reads the journal.
+     * The same folder holds Status.json, Market.json, Cargo.json, ModulesInfo and more. None of
+     * them is a JOURNAL file, which is all this predicate decides — it drives the "which files do
+     * we walk and track offsets for" loop, and walking a file the game overwrites in place would
+     * be meaningless.
+     *
+     * ★ Market.json IS NOW READ, AND DELIBERATELY NOT HERE — 2026-08-06 ★
+     *
+     * This note used to say reading those files "is outside what the member agreed to — the app
+     * says it reads the journal, so it reads the journal". That promise was kept, and the Data
+     * Bounty feature built on top of it could not work: Frontier's `Market` journal event carries
+     * no prices, they go into Market.json, and production had 1,092 of those events, zero market
+     * rows and zero bounties paid, ever.
+     *
+     * The squadron owner chose to read the file and change the promise where members read it — the
+     * telemetry catalogue now names Market.json in what the Market event reveals — rather than keep
+     * a leaderboard that credits nobody.
+     *
+     * It is read by name, once, only when a Market event is in the chunk, and only under the same
+     * `trade` consent as the event itself. It is still not a journal file, so it still belongs on
+     * this list.
      */
     for (const other of [
       'Status.json',
