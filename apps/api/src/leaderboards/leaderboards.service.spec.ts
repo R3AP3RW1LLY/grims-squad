@@ -44,11 +44,12 @@ describe('the month key', () => {
 });
 
 describe('the standings shape', () => {
-  it('carries all three boards, named from the shared catalogue', async () => {
-    const svc = new LeaderboardsService(scripted([[], [], [], [], [], []]));
+  it('carries all four boards, named from the shared catalogue', async () => {
+    // Eight reads for a guest: (season, allTime) x four boards. Deep Core joined 2026-08-06.
+    const svc = new LeaderboardsService(scripted([[], [], [], [], [], [], [], []]));
     const out = await svc.standings('2026-08', null);
 
-    expect(out?.boards.map((b) => b.key)).toEqual(['bounties', 'colony', 'trade']);
+    expect(out?.boards.map((b) => b.key)).toEqual(['bounties', 'colony', 'trade', 'mining']);
     // Name and measures ride with each board so the page never keeps its own copy of either.
     for (const board of out?.boards ?? []) {
       expect(board.name).not.toBe('');
@@ -58,7 +59,7 @@ describe('the standings shape', () => {
 
   it('shapes snake_case rows into wire entries', async () => {
     const row = { handle: 'grim', display_name: 'Grim', points: 1200, claims: 4 };
-    // Six reads for a guest: (season, allTime) x three boards.
+    // Eight reads for a guest: (season, allTime) x four boards.
     const svc = new LeaderboardsService(scripted([[row], [], [], [], [], []]));
 
     const out = await svc.standings('2026-08', null);

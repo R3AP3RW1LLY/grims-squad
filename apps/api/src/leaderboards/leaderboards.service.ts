@@ -105,6 +105,17 @@ const SOURCES: Record<
     boardFilter: `AND s.board = 'trade'`,
     optColumn: 'show_lb_trade',
   },
+  /*
+   * Deep Core, 2026-08-06. `leaderboard_events` like colony and trade rather than its own ledger
+   * the way Data Runners has one: there is nothing richer to record than "this member refined this
+   * much of this", and a fourth table shape would be a fourth thing for this file to read.
+   */
+  mining: {
+    table: 'leaderboard_events',
+    timeColumn: 'occurred_at',
+    boardFilter: `AND s.board = 'mining'`,
+    optColumn: 'show_lb_mining',
+  },
 };
 
 /**

@@ -444,6 +444,8 @@ model User {
   inaraProfile        InaraCommanderProfile?
   cmdrVerifications   CmdrVerification[]
   bountyClaims        BountyClaim[]
+  miningSessions      MiningSession[]
+  prospectedRocks     ProspectedRock[]
   leaderboardEvents   LeaderboardEvent[]
   currentBuild        CurrentBuild?
   squadronActivityActed SquadronActivity[] @relation("SquadronActivityActor")
@@ -1177,6 +1179,9 @@ model PrivacySetting {
   showLbBounties     Boolean             @default(true) @map("show_lb_bounties")
   showLbColony       Boolean             @default(true) @map("show_lb_colony")
   showLbTrade        Boolean             @default(true) @map("show_lb_trade")
+  /// Deep Core, added 2026-08-06 with the mining module. Defaulting on like the other three —
+  /// the owner's rule is that leaderboard participation is on for everybody and opted OUT of.
+  showLbMining       Boolean             @default(true) @map("show_lb_mining")
 
   /// The font this member's own new posts start in. Null means the site face.
   ///
@@ -4258,6 +4263,73 @@ model BountyClaim {
   @@index([userId, claimedAt])
   @@index([claimedAt])
   @@map("bounty_claims")
+}
+
+/// ═══════════════ MINING ═══════════════
+///
+/// Squadron owner, 2026-08-06: "our own version of EDminer ... gamified leaderboard ... on refined
+/// materials". Deep Core scores through `leaderboard_events` like colony and trade; these two
+/// tables are the mining tool's own record.
+
+/// A continuous stretch of mining: opens on the first prospected rock, closes after a gap.
+///
+/// It exists so a member's history reads as evenings rather than as thousands of separate rocks,
+/// and so "yield per hour" has something to divide by.
+model MiningSession {
+  id              String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId          String    @map("user_id") @db.Uuid
+  startedAt       DateTime  @map("started_at") @db.Timestamptz(6)
+  endedAt         DateTime? @map("ended_at") @db.Timestamptz(6)
+  /// Where. Null until a rock or a location event names it; the ring is the interesting unit.
+  systemName      String?   @map("system_name")
+  bodyName        String?   @map("body_name")
+  ringName        String?   @map("ring_name")
+  /// Refined tonnage is the scoring quantity; rocks and hits are the skill measures.
+  tonnesRefined   Int       @default(0) @map("tonnes_refined")
+  rocksProspected Int       @default(0) @map("rocks_prospected")
+  rocksHit        Int       @default(0) @map("rocks_hit")
+  points          Int       @default(0)
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user  User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  rocks ProspectedRock[]
+
+  @@index([userId, startedAt])
+  @@map("mining_sessions")
+}
+
+/// Every rock a prospector limpet reported.
+///
+/// ★ THE HIGHEST-VOLUME TABLE HERE, DELIBERATELY ★
+///
+/// `ProspectedAsteroid` fires on every limpet hit — several hundred an hour while somebody mines,
+/// against roughly twenty `MiningRefined`. Collecting it in full was chosen knowingly, because it
+/// is the only way to answer "is this ring still paying" from more than one commander's memory.
+///
+/// Kept narrow for that reason: the percentages that matter and nothing else. No raw payload, no
+/// limpet ids, nothing that would make a row wide enough for the volume to hurt.
+model ProspectedRock {
+  id          BigInt   @id @default(autoincrement())
+  sessionId   String?  @map("session_id") @db.Uuid
+  userId      String   @map("user_id") @db.Uuid
+  at          DateTime @db.Timestamptz(6)
+  systemName  String?  @map("system_name")
+  bodyName    String?  @map("body_name")
+  /// The best material on the rock and its share. One row per rock rather than per material: the
+  /// decision a miner makes is about the best thing on it, and the rest is noise at this volume.
+  topMaterial String   @map("top_material")
+  topPercent  Float    @map("top_percent")
+  /// Frontier's own word for overall richness: Low, Medium, High.
+  content     String?
+  /// The rock a core miner is looking for — rare enough to flag rather than infer later.
+  motherlode  String?
+
+  session MiningSession? @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user    User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([systemName, bodyName, at])
+  @@index([userId, at])
+  @@map("prospected_rocks")
 }
 
 /// ═══════════════ LEADERBOARDS, XP AND BADGES ═══════════════

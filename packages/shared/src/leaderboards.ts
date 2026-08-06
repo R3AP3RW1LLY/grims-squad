@@ -34,7 +34,7 @@
 
 import { BADGES as FORUM_BADGES } from './reputation.js';
 
-export type LeaderboardKey = 'bounties' | 'colony' | 'trade';
+export type LeaderboardKey = 'bounties' | 'colony' | 'trade' | 'mining';
 
 export interface LeaderboardDef {
   readonly key: LeaderboardKey;
@@ -64,6 +64,13 @@ export const LEADERBOARDS: readonly LeaderboardDef[] = [
     name: 'Trade Barons',
     measures:
       'Points from realized trading profit your journal reports: a point per ten thousand credits actually earned, sale matched against what you paid.',
+    pointsNoun: 'pts',
+  },
+  {
+    key: 'mining',
+    name: 'Deep Core',
+    measures:
+      'Points from ore your refinery finishes: a point per tonne, multiplied by how hard that tonne was to get — eight for core-only rocks like Void Opals, four for Painite and Platinum, one for gravel.',
     pointsNoun: 'pts',
   },
 ] as const;
@@ -125,6 +132,20 @@ export const TIER_LADDERS: Record<LeaderboardKey, readonly TierStep[]> = {
     { tier: 'gold', name: 'Magnate', at: 250_000 },
     { tier: 'platinum', name: 'Trade Baron', at: 1_000_000 },
   ],
+  /*
+   * ★ TUNED TO WHAT A POINT COSTS HERE — 2026-08-06 ★
+   *
+   * A point is a tonne, weighted ×1 to ×8. A solid core session is roughly 40 t of opals ≈ 320
+   * pts; a committed week of it is a few thousand. Rock Hopper is a first proper night out; Deep
+   * Core — the board's own name, worn by whoever earns it — is years of the stuff, matching how
+   * Trade Baron and Void Cartographer sit at the top of theirs.
+   */
+  mining: [
+    { tier: 'bronze', name: 'Rock Hopper', at: 2_000 },
+    { tier: 'silver', name: 'Seam Runner', at: 20_000 },
+    { tier: 'gold', name: 'Core Breaker', at: 100_000 },
+    { tier: 'platinum', name: 'Deep Core', at: 400_000 },
+  ],
 } as const;
 
 export interface BadgeDef {
@@ -175,6 +196,7 @@ export const LEADERBOARD_BADGES: readonly BadgeDef[] = [
   ...tierBadges('bounties', 'Data Runners'),
   ...tierBadges('colony', 'Colony Builders'),
   ...tierBadges('trade', 'Trade Barons'),
+  ...tierBadges('mining', 'Deep Core'),
 
   // ---- Data Runners achievements ----
   {
@@ -267,6 +289,48 @@ export const LEADERBOARD_BADGES: readonly BadgeDef[] = [
     kind: 'achievement',
     name: 'Trade Baron Champion',
     description: 'Topped the Trade Barons board for a whole season.',
+    icon: '👑',
+  },
+
+  // ---- Deep Core achievements ----
+  {
+    key: 'mining-first-light',
+    board: 'mining',
+    kind: 'achievement',
+    name: 'First Light',
+    description: 'Refined a first tonne of a core-only mineral — the kind no laser will ever reach.',
+    icon: '💎',
+  },
+  {
+    key: 'mining-motherlode',
+    board: 'mining',
+    kind: 'achievement',
+    name: 'Motherlode',
+    description: 'Prospected a rock running over half of one mineral. Most miners never see one.',
+    icon: '🥚',
+  },
+  {
+    key: 'mining-grindstone',
+    board: 'mining',
+    kind: 'achievement',
+    name: 'Grindstone',
+    description: 'Refined a thousand tonnes inside one calendar month.',
+    icon: '⛏️',
+  },
+  {
+    key: 'mining-void-prospector',
+    board: 'mining',
+    kind: 'achievement',
+    name: 'Void Prospector',
+    description: 'Refined every core-only mineral at least once — the full set, cracked by hand.',
+    icon: '🌌',
+  },
+  {
+    key: 'mining-season-champion',
+    board: 'mining',
+    kind: 'achievement',
+    name: 'Deep Core Champion',
+    description: 'Topped the Deep Core board for a whole season.',
     icon: '👑',
   },
 ] as const;

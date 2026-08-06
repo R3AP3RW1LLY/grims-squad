@@ -99,6 +99,7 @@ export interface PrivacySettings {
   showLbBounties: boolean;
   showLbColony: boolean;
   showLbTrade: boolean;
+  showLbMining: boolean;
 }
 
 /**

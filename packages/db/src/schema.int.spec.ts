@@ -211,7 +211,18 @@ describe('P0.2 database schema', () => {
     // game's own total tonnage aboard, so a page can state the gap instead of implying there is
     // none. Its own table because it is one fact about a CARRIER: per-commodity would invite two
     // rows to disagree, and (project, market) would repeat it once per build it is helping.
-    expect(Number(r[0]?.n)).toBe(121);
+    //
+    // 123 as of 2026-08-06: mining_sessions and prospected_rocks, for the mining module. A session
+    // is a continuous stretch of mining so a member's history reads as evenings rather than as
+    // thousands of separate rocks, and so "yield per hour" has something to divide by.
+    //
+    // prospected_rocks is the highest-volume table here and was asked for knowingly:
+    // `ProspectedAsteroid` fires on EVERY limpet hit — several hundred an hour while somebody is
+    // mining, against roughly twenty `MiningRefined`. The squadron owner chose full collection
+    // because it is the only way to answer "is this ring still paying" from more than one
+    // commander's memory, which is the one thing no single-player mining tool can ever do. Kept
+    // deliberately narrow for that reason: the best material and its share, and nothing else.
+    expect(Number(r[0]?.n)).toBe(123);
   });
 
   describe('hand-written DDL that Prisma cannot express', () => {

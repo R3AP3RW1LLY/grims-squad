@@ -203,3 +203,14 @@ export {
   type LeaderboardDef,
   type LeaderboardKey,
 } from './leaderboards.js';
+
+export {
+  MINING_WEIGHTS,
+  DEFAULT_MINING_WEIGHT,
+  CORE_ONLY_MATERIALS,
+  DEFAULT_PROSPECT_THRESHOLD,
+  materialWeight,
+  miningPoints,
+  worthShooting,
+} from './mining.js';
+export type { ProspectThresholds } from './mining.js';
