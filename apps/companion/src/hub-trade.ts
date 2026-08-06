@@ -62,6 +62,19 @@ export interface TradeQuery {
   readonly budget?: string;
   readonly commodity?: string;
   readonly sort?: string;
+  /*
+   * ★ SQUADRON OWNER, 2026-08-06 ★
+   *
+   * "it may have that on the web portal but it is not there on the companion app!"
+   *
+   * The hub's device route has accepted all four of these since the Freight Office shipped; the app
+   * simply never sent them, so a member planning in the app got runs to stations their ship cannot
+   * land at, priced off data a fortnight old. The website has had them all along, which is exactly
+   * the split between the two surfaces the owner has objected to before.
+   */
+  readonly largePad?: string;
+  readonly carriers?: string;
+  readonly freshDays?: string;
 }
 
 /** One commodity as the index lists it — the website's row shape, near columns included. */

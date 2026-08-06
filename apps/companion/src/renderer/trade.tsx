@@ -113,6 +113,11 @@ export function TradePage(): JSX.Element {
   const [sellLy, setSellLy] = useState('100');
   const [commodity, setCommodity] = useState('');
   const [sort, setSort] = useState('trip');
+  // The four the website has had all along and the app did not send. See TradeQuery.
+  const [budget, setBudget] = useState('');
+  const [largePad, setLargePad] = useState(false);
+  const [carriers, setCarriers] = useState(false);
+  const [freshDays, setFreshDays] = useState('7');
   const [plan, setPlan] = useState<TradePlan | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -120,7 +125,19 @@ export function TradePage(): JSX.Element {
   const run = (): void => {
     setBusy(true);
     void window.trade
-      .routes({ near, cargo, buyWithinLy: buyLy, sellWithinLy: sellLy, commodity, sort })
+      .routes({
+        near,
+        cargo,
+        buyWithinLy: buyLy,
+        sellWithinLy: sellLy,
+        commodity,
+        sort,
+        budget,
+        // The hub reads these as '1'/absent, the same way the website's form posts them.
+        largePad: largePad ? '1' : '',
+        carriers: carriers ? '1' : '',
+        freshDays,
+      })
       .then((a) => {
         setBusy(false);
         if (a.ok) {
@@ -203,6 +220,54 @@ export function TradePage(): JSX.Element {
                 <option value="tonne">Best per tonne</option>
                 <option value="hour">Best per hour</option>
               </select>
+            </label>
+            <label>
+              <span style={LABEL}>Credits</span>
+              <input
+                style={{ ...inputStyle, width: '110px' }}
+                value={budget}
+                onInput={(e) => setBudget((e.target as HTMLInputElement).value)}
+                placeholder="all of them"
+                inputMode="numeric"
+              />
+            </label>
+            <label>
+              <span style={LABEL}>Prices seen</span>
+              <select
+                style={{ ...inputStyle, width: '130px' }}
+                value={freshDays}
+                onChange={(e) => setFreshDays((e.target as HTMLSelectElement).value)}
+              >
+                <option value="1">Today</option>
+                <option value="3">Last 3 days</option>
+                <option value="7">Last week</option>
+                <option value="30">Last month</option>
+                <option value="0">Any age</option>
+              </select>
+            </label>
+            {/*
+              Landing pads. The single most consequential filter in the app: a run to a station your
+              hull cannot land at is not a worse run, it is not a run at all.
+            */}
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', alignSelf: 'end', paddingBottom: '6px' }}>
+              <input
+                type="checkbox"
+                checked={largePad}
+                onChange={(e) => setLargePad((e.target as HTMLInputElement).checked)}
+              />
+              <span style={{ fontSize: '12px', color: C.dim }}>Large pad only</span>
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '6px', alignSelf: 'end', paddingBottom: '6px' }}>
+              <input
+                type="checkbox"
+                checked={carriers}
+                onChange={(e) => setCarriers((e.target as HTMLInputElement).checked)}
+              />
+              {/*
+                Off by default, matching the website and for the reason set out on CARRIER_TYPE: a
+                carrier's prices are set by hand and it can be somewhere else tomorrow.
+              */}
+              <span style={{ fontSize: '12px', color: C.dim }}>Include carriers</span>
             </label>
             <Button onClick={run} disabled={busy}>
               {busy ? 'Planning…' : 'Plan a run'}
