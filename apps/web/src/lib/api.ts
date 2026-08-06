@@ -1993,6 +1993,47 @@ export const getBountyLeaderboard = (month?: string): Promise<BountyLeaderboard 
     authed: true,
   });
 
+// ── Mining ───────────────────────────────────────────────────────────────────
+//
+// Squadron owner, 2026-08-06: "our own version of EDminer ... the leaderboard should be on refined
+// materials etc." The BOARD is the ordinary leaderboards endpoint (Deep Core is just a fourth
+// board key). These two are the things a mining tool has that a leaderboard does not: which rings
+// the squadron has found worth mining, and a member's own evenings.
+
+/** One ring, measured across everybody who has prospected in it. */
+export interface MiningRing {
+  system: string;
+  body: string;
+  rocks: number;
+  /** Share of rocks whose best material cleared the squadron-wide bar, as a percentage. */
+  hitRate: number;
+  bestPercent: number;
+  topMaterial: string;
+  lastSeen: string;
+}
+
+/** One mining evening. */
+export interface MiningSession {
+  id: string;
+  startedAt: string;
+  endedAt: string | null;
+  system: string | null;
+  ring: string | null;
+  rocks: number;
+  hits: number;
+  tonnes: number;
+  points: number;
+}
+
+export const getMiningRings = (material?: string, days = 14): Promise<{ rings: MiningRing[] } | null> =>
+  get(
+    `/v1/mining/rings?days=${days}${material === undefined ? '' : `&material=${encodeURIComponent(material)}`}`,
+    { authed: true },
+  );
+
+export const getMiningSessions = (): Promise<{ sessions: MiningSession[] } | null> =>
+  get('/v1/mining/sessions', { authed: true });
+
 // ── Leaderboards ─────────────────────────────────────────────────────────────
 //
 // Squadron owner, 2026-08-04: "make a new category called leaderboards." Three boards — Data

@@ -13,6 +13,7 @@ import { BuildBoardsPage } from './shipyard-boards.js';
 import { PlanningPage } from './planning.js';
 import { BuildTypesPage } from './build-types.js';
 import { LeaderboardPage } from './leaderboards.js';
+import { MiningPage } from './mining.js';
 import { SupportPage } from './support.js';
 import { HelpWidget } from './help-widget.js';
 import { GroupIcon, PageIcon } from './icons.js';
@@ -107,6 +108,8 @@ type Page =
   | 'lb-bounties'
   | 'lb-colony'
   | 'lb-trade'
+  | 'lb-mining'
+  | 'mining'
   | 'commodities'
   | 'trade'
   | 'outfitter'
@@ -237,6 +240,12 @@ const NAV: ReadonlyArray<NavItem | NavGroup> = [
     label: 'Answer the Call',
     children: [
       { id: 'bounties', label: 'Data Bounties', hint: 'Dark stations, and who lights them up' },
+      /*
+       * The second call, and the reason the category was written to expect one. Mining asks the
+       * same thing of a member as Data Bounties does — go somewhere and come back with something
+       * the squadron did not have — and the rings page is built entirely from members' own limpets.
+       */
+      { id: 'mining', label: 'Mining', hint: 'Which rings are actually paying' },
     ],
   },
   {
@@ -254,6 +263,7 @@ const NAV: ReadonlyArray<NavItem | NavGroup> = [
       { id: 'lb-bounties', label: 'Data Runners', hint: 'Who is lighting up dark stations' },
       { id: 'lb-colony', label: 'Colony Builders', hint: 'Who is hauling the squadron’s builds' },
       { id: 'lb-trade', label: 'Trade Barons', hint: 'Who is banking real trading profit' },
+      { id: 'lb-mining', label: 'Deep Core', hint: 'Who is refining the most out of the rings' },
     ],
   },
 ];
@@ -554,6 +564,13 @@ function App(): JSX.Element {
         {page === 'lb-bounties' ? <LeaderboardPage board="bounties" /> : null}
         {page === 'lb-colony' ? <LeaderboardPage board="colony" /> : null}
         {page === 'lb-trade' ? <LeaderboardPage board="trade" /> : null}
+        {/*
+          Nothing in `LeaderboardPage` needed changing for a fourth board — it reads the ladder and
+          the badges off the shared catalogue, so Deep Core arrives looking exactly like the three
+          boards members already know.
+        */}
+        {page === 'lb-mining' ? <LeaderboardPage board="mining" /> : null}
+        {page === 'mining' ? <MiningPage /> : null}
         {page === 'commodities' ? <CommoditiesPage /> : null}
         {page === 'outfitter' ? <OutfitterPage /> : null}
         {page === 'builds-squadron' ? <BuildBoardsPage scope="squadron" /> : null}

@@ -48,6 +48,7 @@ import {
 } from './hub-colony.js';
 import { bountyBoard, bountyLeaderboard } from './hub-bounties.js';
 import { leaderboardBoard } from './hub-leaderboards.js';
+import { miningRings, miningSessions, miningValuation } from './hub-mining.js';
 import {
   helpConversation,
   helpConversations,
@@ -1782,10 +1783,46 @@ if (!app.requestSingleInstanceLock()) {
      * being forwarded to the hub as a guess.
      */
     ipcMain.handle('leaderboardBoard', (_e, board: unknown, month: unknown) =>
-      board === 'bounties' || board === 'colony' || board === 'trade'
+      // 'mining' joined the list when Deep Core shipped. A key missing HERE is the failure mode
+      // this guard is prone to: the page renders, the nav works, and the board refuses in a
+      // sentence that reads like the hub is out of date.
+      board === 'bounties' || board === 'colony' || board === 'trade' || board === 'mining'
         ? leaderboardBoard(hub(), board, typeof month === 'string' && month !== '' ? month : undefined)
         : { ok: false as const, error: 'No board asked for.' },
     );
+
+    /*
+     * Mining. Rings and sessions are plain reads; the valuation carries the hold, which is folded
+     * from the journal on THIS machine and so is known here before it is known anywhere else.
+     */
+    ipcMain.handle('miningRings', (_e, material: unknown, days: unknown) =>
+      miningRings(
+        hub(),
+        typeof material === 'string' && material !== '' ? material : undefined,
+        typeof days === 'number' && Number.isFinite(days) ? days : 14,
+      ),
+    );
+    ipcMain.handle('miningSessions', () => miningSessions(hub()));
+    ipcMain.handle('miningValuation', (_e, hold: unknown, system: unknown, withinLy: unknown) => {
+      /*
+       * Re-read rather than trusted, like every renderer-supplied value. A tonnage arriving as a
+       * string would reach the hub as a hold it cannot price, and the member would be told their
+       * cargo is worth nothing — an answer they would believe.
+       */
+      const raw = (hold ?? {}) as Record<string, unknown>;
+      const clean: Record<string, number> = {};
+      for (const [name, tonnes] of Object.entries(raw)) {
+        if (typeof tonnes === 'number' && Number.isFinite(tonnes) && tonnes > 0) {
+          clean[name] = tonnes;
+        }
+      }
+      return miningValuation(
+        hub(),
+        clean,
+        typeof system === 'string' && system !== '' ? system : null,
+        typeof withinLy === 'number' && Number.isFinite(withinLy) ? withinLy : 100,
+      );
+    });
     ipcMain.handle('colonyProject', (_e, id: unknown, filters: unknown) => {
       if (typeof id !== 'string' || id === '') {
         return { ok: false as const, error: 'No project asked for.' };

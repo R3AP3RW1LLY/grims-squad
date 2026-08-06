@@ -276,6 +276,20 @@ const NAV: readonly NavDefinition[] = [
     blurb: 'Stations whose market data has gone dark. Dock, open the market, collect the points.',
     requires: Permission.TRADE_QUERY,
   },
+  {
+    /*
+     * Mining sits under "Answer the Call" beside Data Bounties because it asks the same thing of a
+     * member: go somewhere and come back with something the squadron did not have. The rings page
+     * is built entirely from members' own prospector limpets — it is worth nothing until people fly
+     * it, and worth more than any single-player tool once they do.
+     */
+    href: '/mining',
+    label: 'Mining',
+    section: 'squadron',
+    subsection: 'Answer the Call',
+    blurb: 'Which rings the squadron has actually been finding worth mining, this fortnight.',
+    requires: Permission.TRADE_QUERY,
+  },
   /*
    * ★ LEADERBOARDS — SQUADRON OWNER, 2026-08-04 ★
    *
@@ -316,6 +330,14 @@ const NAV: readonly NavDefinition[] = [
     section: 'squadron',
     subsection: 'Leaderboards',
     blurb: 'Who has banked the most realized trading profit — earned credits, not moved cargo.',
+    requires: Permission.TRADE_QUERY,
+  },
+  {
+    href: '/leaderboards/mining',
+    label: 'Deep Core',
+    section: 'squadron',
+    subsection: 'Leaderboards',
+    blurb: 'Who has refined the most — scored on what came out of the refinery, not what it sold for.',
     requires: Permission.TRADE_QUERY,
   },
   {

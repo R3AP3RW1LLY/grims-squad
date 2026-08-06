@@ -146,6 +146,20 @@ contextBridge.exposeInMainWorld('leaderboards', {
 });
 
 /**
+ * Mining, from the hub.
+ *
+ * The overlays need none of this — they read the journal on this machine. These are the two
+ * questions that need something bigger than one commander: what a hold is worth, and which rings
+ * the squadron has been finding worth the limpets.
+ */
+contextBridge.exposeInMainWorld('mining', {
+  rings: (material?: string, days?: number) => ipcRenderer.invoke('miningRings', material, days),
+  sessions: () => ipcRenderer.invoke('miningSessions'),
+  valuation: (hold: Record<string, number>, system: string | null, withinLy?: number) =>
+    ipcRenderer.invoke('miningValuation', hold, system, withinLy),
+});
+
+/**
  * The Help & Support console, for members holding SUPPORT_AGENT.
  *
  * The hub decides who that is — `access` is the sidebar's question, and every other call
