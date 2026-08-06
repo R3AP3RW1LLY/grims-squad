@@ -482,6 +482,45 @@ describe('the primary does not run the workers any more', () => {
   });
 });
 
+describe('a flaky registry does not abort a deploy', () => {
+  /*
+   * ★ MEASURED TWICE ON 2026-08-06 ★
+   *
+   * The registry returned "error reading from server: EOF" mid-layer, twice in one evening — once
+   * pulling onto the ingestion box, once during the deploy of #119. Both succeeded on an immediate
+   * retry; neither was a real failure.
+   *
+   * The second one cost more than a retry would have. The deploy aborted at the fetch step, so the
+   * rollback ran, and production was left running `:latest` images with `deployed.sha` naming a
+   * revision that was no longer what the repository held. "What is production running" became
+   * unanswerable, which is the exact question tagging by SHA exists to answer.
+   *
+   * A network read is allowed to fail. Making the whole deploy fatal on the first attempt turns
+   * ordinary internet weather into an outage in the release process.
+   */
+  it('MANDATORY: the image fetch retries before giving up', () => {
+    const fetchStep = current.slice(current.indexOf('say "Fetching images"'));
+    const step = fetchStep.slice(0, fetchStep.indexOf('# ────'));
+
+    expect(
+      /for\s+\w+\s+in|while\s+|until\s+/.test(step),
+      'the image fetch has no retry loop — one transient EOF from the registry aborts the deploy',
+    ).toBe(true);
+    expect(step, 'the retry does not back off between attempts').toMatch(/sleep\s+/);
+  });
+
+  it('MANDATORY: it still fails loudly once the retries are exhausted', () => {
+    /*
+     * Retrying forever is the opposite mistake: a deploy that hangs is worse than one that stops,
+     * because nobody is watching a script that has not said anything.
+     */
+    const fetchStep = current.slice(current.indexOf('say "Fetching images"'));
+    const step = fetchStep.slice(0, fetchStep.indexOf('# ────'));
+
+    expect(step, 'the fetch no longer dies when the images genuinely are not there').toMatch(/die /);
+  });
+});
+
 describe('the deploy still refuses to start without its configuration', () => {
   it('every announcement channel is required in the preflight', () => {
     /*

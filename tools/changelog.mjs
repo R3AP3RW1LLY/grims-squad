@@ -127,6 +127,63 @@ const NOT_FOR_MEMBERS =
  * quotation of somebody swearing, and reads worse than the engineering note standing on its own.
  * Every commit names its change in the subject line, so this costs a sentence and never an entry.
  */
+/**
+ * Anything shaped like an IPv4 address. Redacted from everything published, without exception.
+ *
+ * On 2026-08-06 the changelog was about to publish the production ingestion box's public address to
+ * 107 members, because it appeared in a commit body where it belonged. A commit body is written for
+ * whoever maintains this in a year and is supposed to name hosts; a release note is read by
+ * everybody. The two have different audiences, and this is where they part.
+ */
+const LOOKS_LIKE_AN_ADDRESS = /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/g;
+
+/**
+ * What a commit wants members told — if it says.
+ *
+ * ★ THE RULE: SAY IT DELIBERATELY, OR SAY NOTHING ★
+ *
+ * Publishing the first paragraph of a commit body was the old behaviour and it was never going to
+ * work. Those paragraphs are full of table names, row counts and hostnames because that is what a
+ * useful commit message contains. Filtering them hard enough to be member-safe means filtering them
+ * until they say nothing.
+ *
+ * The squadron owner has now been let down by this twice: once by a body quoting them swearing, and
+ * once — caught before it shipped — by "the planner believed market_entries held 30,281 rows" and a
+ * production IP address heading for the release notes.
+ *
+ * So a change members should hear about carries a `Members:` trailer written for them, and a change
+ * that is genuinely not member news — a tunnel, an index, a CI retry — carries none and is omitted.
+ * A changelog that leaves out the plumbing is more honest than one that describes it to people who
+ * fly ships.
+ *
+ * The trailer runs to the next blank line or the end of the body, so it may be a sentence or a
+ * short paragraph.
+ */
+export function memberSummary(body) {
+  /*
+   * Scanned by line rather than matched by one regular expression.
+   *
+   * The first version used /^[ \t]*Members:([\s\S]*?)(?:\n\n|$)/im and silently truncated every
+   * trailer to its first line: under the `m` flag `$` means end of LINE, so the alternation
+   * matched immediately. The preview showed "The companion app connects reliably again. It had
+   * been asking the hub" and stopped mid-sentence — which would have been published exactly like
+   * that.
+   */
+  const lines = (body ?? '').split('\n');
+  const start = lines.findIndex((line) => /^[ \t]*Members:/i.test(line));
+  if (start === -1) return '';
+
+  const collected = [(lines[start] ?? '').replace(/^[ \t]*Members:[ \t]*/i, '')];
+  for (let i = start + 1; i < lines.length; i += 1) {
+    const line = lines[i] ?? '';
+    if (line.trim() === '') break; // the trailer is one paragraph
+    collected.push(line.trim());
+  }
+
+  const text = collected.join(' ').replace(/\s+/g, ' ').trim();
+  return fitForMembers(text).replace(LOOKS_LIKE_AN_ADDRESS, '[redacted]').trim();
+}
+
 export function fitForMembers(detail) {
   return detail
     .split(/\n[ \t]*\n/)
@@ -220,17 +277,25 @@ export function buildRelease({ fromSha, toSha, commits, generatedAt, version = n
   const entries = commits.map((commit) => ({
     sha: commit.sha,
     subject: humanizeSubject(commit.subject),
-    // Published, not logged — see `fitForMembers`. The commit body keeps every word.
-    detail: fitForMembers(firstParagraph(commit.body)),
+    // Published, not logged. Empty unless the commit says what members should be told — see
+    // `memberSummary`. The commit body itself keeps every word.
+    detail: memberSummary(commit.body),
     sections: sectionsFor(commit.files),
   }));
 
+  /*
+   * Only entries that said something to members, and ONLY what they said.
+   *
+   * The subject is not published either. It is written for the same engineer the body is — the
+   * preview of this release had members reading "### The planner believed market_entries held
+   * 30,281 rows" above a paragraph about colonisation pages being fast. A heading that has to be
+   * translated is worse than no heading, and the member-facing sentence already names its own
+   * subject.
+   */
   const sectionMd = (key) =>
     entries
-      .filter((entry) => entry.sections.includes(key))
-      .map((entry) =>
-        entry.detail === '' ? `### ${entry.subject}` : `### ${entry.subject}\n\n${entry.detail}`,
-      )
+      .filter((entry) => entry.sections.includes(key) && entry.detail !== '')
+      .map((entry) => entry.detail)
       .join('\n\n');
 
   return {

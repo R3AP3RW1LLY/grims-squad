@@ -322,6 +322,40 @@ describe('the probe watches things that exist', () => {
   });
 });
 
+describe('the probe watches what actually broke', () => {
+  /*
+   * ★ WIDENED AFTER THE OUTAGE OF 2026-08-06 ★
+   *
+   * The probe watched three URLs and reported all three healthy throughout. It was right: the home
+   * page, the forum and the health check were all fast. What had collapsed was the COMPANION's
+   * colonisation route, which nothing was measuring — response times there went from 667ms to
+   * 14,646ms and the first anybody knew was the squadron owner saying the app would not connect.
+   *
+   * A monitoring system that watches only the pages that were slow last time is a monitoring
+   * system for last time.
+   */
+  const wrapper = readFileSync(join(HERE, '..', 'infra', 'scripts', 'probe-run.sh'), 'utf8');
+
+  it('MANDATORY: it probes a companion route, not only the website', () => {
+    expect(
+      /companion/i.test(wrapper),
+      'no companion endpoint is probed — the surface that actually failed on 2026-08-06 is unwatched',
+    ).toBe(true);
+  });
+
+  it('MANDATORY: it probes the colonisation surface specifically', () => {
+    /*
+     * Named rather than left to a generic sweep: this is the expensive one, the one with a
+     * bulkhead in front of it, and the one whose slowness is the leading indicator of everything
+     * else queueing behind it.
+     */
+    expect(
+      /colon/i.test(wrapper),
+      'the colonisation route is unwatched, and it is the one that took the site down',
+    ).toBe(true);
+  });
+});
+
 describe('the state survives the gap between runs', () => {
   it('MANDATORY: it round-trips through JSON without losing the count', () => {
     /*

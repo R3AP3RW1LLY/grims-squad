@@ -304,11 +304,39 @@ ok "old build cache and superseded images pruned"
 # already exists rather than a rebuild of a tree that has moved on.
 say "Fetching images"
 export GRIMS_IMAGE_TAG="$TARGET_SHA"
-if ! $COMPOSE --profile jobs pull --quiet api web bot worker; then
-  # Deliberately fatal, unlike most steps here. A missing image means CI has not finished — or has
+
+# ★ RETRIED, BECAUSE THE REGISTRY IS A NETWORK — MEASURED 2026-08-06 ★
+#
+# GHCR returned "error reading from server: EOF" mid-layer twice in one evening: once pulling onto
+# the ingestion box, once during the deploy of #119. Both succeeded immediately on a second
+# attempt. Neither was a real failure.
+#
+# The second one was expensive anyway. With no retry the deploy aborted here, the rollback ran, and
+# production was left running `:latest` while `deployed.sha` named a revision the repository no
+# longer held — so "what is production running" became unanswerable, which is the exact question
+# tagging by commit exists to answer.
+#
+# Three attempts with a widening pause. A network read is allowed to fail; making the release
+# process fatal on the first one turns ordinary internet weather into an outage.
+fetched=false
+for attempt in 1 2 3; do
+  if $COMPOSE --profile jobs pull --quiet api web bot worker; then
+    fetched=true
+    break
+  fi
+  # No sleep after the last attempt — it would only delay the failure message.
+  if [[ $attempt -lt 3 ]]; then
+    warn "image fetch attempt ${attempt} failed — retrying in $((attempt * 10))s"
+    sleep $((attempt * 10))
+  fi
+done
+
+if [[ $fetched != true ]]; then
+  # Still fatal once the retries are spent. A missing image means CI has not finished — or has
   # failed — for this revision, and the honest response is to stop before the swap rather than
-  # quietly serve whatever was pulled last time.
-  die "could not fetch images for ${TARGET_SHA:0:8} — is the images workflow finished? (gh run list --workflow=images.yml)"
+  # quietly serve whatever was pulled last time. Retrying forever would be worse than stopping:
+  # nobody watches a script that has gone quiet.
+  die "could not fetch images for ${TARGET_SHA:0:8} after 3 attempts — is the images workflow finished? (gh run list --workflow=images.yml)"
 fi
 ok "images for ${TARGET_SHA:0:8} fetched"
 

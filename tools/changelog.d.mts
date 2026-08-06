@@ -72,3 +72,5 @@ export declare function buildAnnouncement(
   publicUrl: string,
 ): DeployAnnouncement;
 export declare function renderAnnounceSql(release: ChangelogRelease, publicUrl: string): string;
+
+export declare function memberSummary(body: string): string;
