@@ -102,7 +102,16 @@ export default async function FreightOfficePage({
                 : `Best runs from ${plan.origin?.system ?? 'here'}`
             }
           >
-            <RouteList plan={plan} />
+            {/*
+              The hold and the credits come from the form the member just submitted, so the
+              manifest agrees with the tonnages the rows quote rather than assuming a ship of its
+              own. The default matches the form's.
+            */}
+            <RouteList
+              plan={plan}
+              cargo={Number(query['cargo'] ?? '') || 64}
+              budget={Number(query['budget'] ?? '') || null}
+            />
           </Section>
         )}
       </PageBody>

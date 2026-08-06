@@ -39,6 +39,8 @@ function route(
     seenAt: new Date('2026-08-05T00:00:00Z'),
     distance: 10,
     arrivalLs: 500,
+    // Not exercised by pairing — that works on station and system names — but part of the leg.
+    coords: null,
   });
 
   return {

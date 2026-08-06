@@ -268,7 +268,17 @@ export class MarketController {
       origin:
         origin === null
           ? null
-          : { system: origin.system, station: origin.station, from: origin.from },
+          : {
+              system: origin.system,
+              station: origin.station,
+              from: origin.from,
+              /*
+               * The coordinates too, so the page can route a basket of picked runs in the browser.
+               * The manifest planner is pure and the client already holds every leg — a round trip
+               * to reorder three stops would be latency buying nothing.
+               */
+              coords: origin.coords,
+            },
       /*
        * ★ SAID OUT LOUD, BECAUSE THE SILENT VERSION WAS DANGEROUS ★
        *

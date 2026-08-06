@@ -62,6 +62,14 @@
     "./tenure": {
       "types": "./dist/tenure.d.ts",
       "default": "./dist/tenure.js"
+    },
+    "./manifest": {
+      "types": "./dist/manifest.d.ts",
+      "default": "./dist/manifest.js"
+    },
+    "./market-depth": {
+      "types": "./dist/market-depth.d.ts",
+      "default": "./dist/market-depth.js"
     }
   },
   "scripts": {

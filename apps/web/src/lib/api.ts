@@ -2116,6 +2116,13 @@ export interface RouteLeg {
   distance: number | null;
   /** Light seconds from the arrival star — the in-system leg the jump count cannot see. */
   arrivalLs: number | null;
+  /**
+   * Where this station's system is, so a basket of picks can be routed in the browser.
+   *
+   * Every other distance here is from the MEMBER and cannot order stops against each other.
+   * Null for a system we have not placed.
+   */
+  coords: { x: number; y: number; z: number } | null;
 }
 
 export interface Route {
@@ -2159,6 +2166,8 @@ export interface RoutePlan {
      */
     age?: string;
     stale?: boolean;
+    /** Where that system is, so a basket of picked runs can be routed in the browser. */
+    coords?: { x: number; y: number; z: number } | null;
   } | null;
   unknownSystem: string | null;
 }

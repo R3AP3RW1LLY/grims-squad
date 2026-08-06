@@ -73,6 +73,20 @@ export interface RouteLeg {
   readonly distance: number | null;
   /** Light seconds from the arrival star — the in-system leg. Null when unknown. */
   readonly arrivalLs: number | null;
+  /**
+   * Where this station's system is.
+   *
+   * ★ SO THE CLIENT CAN ROUTE A BASKET OF PICKS ★
+   *
+   * Every other distance here is measured from the MEMBER, which cannot order stops against each
+   * other. These can, and the multi-route manifest is planned in the browser and the app rather
+   * than on the server — it is a pure function over data the client already has, so a round trip to
+   * recompute it would be latency for nothing.
+   *
+   * Null for a system we have not placed, which is what makes the manifest fall back to grouping
+   * instead of drawing a confident wrong path.
+   */
+  readonly coords: { readonly x: number; readonly y: number; readonly z: number } | null;
 }
 
 export interface Route {
@@ -204,6 +218,7 @@ function leg(p: MarketPlace): RouteLeg {
     seenAt: p.seenAt,
     distance: p.distance,
     arrivalLs: p.arrivalLs,
+    coords: p.coords,
   };
 }
 

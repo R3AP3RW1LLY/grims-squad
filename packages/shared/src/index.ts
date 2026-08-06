@@ -233,3 +233,13 @@ export type { BgsStance, BgsOrder, FactionEffect } from './bgs.js';
 
 export { depthOf, DEPTH_COMFORTABLE } from './market-depth.js';
 export type { MarketDepth } from './market-depth.js';
+
+export { planManifest } from './manifest.js';
+export type {
+  Pick as ManifestPick,
+  ManifestLine,
+  ManifestOptions,
+  Manifest,
+  Stop as ManifestStop,
+  Coords as ManifestCoords,
+} from './manifest.js';
