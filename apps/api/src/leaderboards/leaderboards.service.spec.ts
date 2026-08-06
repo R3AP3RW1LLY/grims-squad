@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PrismaClient } from '@grims/db';
+import { LEADERBOARDS } from '@grims/shared';
 import { LeaderboardsService } from './leaderboards.service.js';
 
 /**
@@ -44,12 +45,22 @@ describe('the month key', () => {
 });
 
 describe('the standings shape', () => {
-  it('carries all four boards, named from the shared catalogue', async () => {
-    // Eight reads for a guest: (season, allTime) x four boards. Deep Core joined 2026-08-06.
-    const svc = new LeaderboardsService(scripted([[], [], [], [], [], [], [], []]));
+  it('carries every board in the shared catalogue, named from it', async () => {
+    /*
+     * ★ DERIVED FROM THE CATALOGUE, NOT LISTED HERE ★
+     *
+     * This named the four boards it expected and had to be edited every time one was added — which
+     * is a test that fails for a reason that is not a defect, and teaches people to edit tests
+     * until they pass. The catalogue is the source of truth for which boards exist; asserting
+     * against it means adding a board to @grims/shared is the whole change.
+     *
+     * Two reads per board for a guest: season and all-time.
+     */
+    const reads = LEADERBOARDS.flatMap(() => [[], []]);
+    const svc = new LeaderboardsService(scripted(reads));
     const out = await svc.standings('2026-08', null);
 
-    expect(out?.boards.map((b) => b.key)).toEqual(['bounties', 'colony', 'trade', 'mining']);
+    expect(out?.boards.map((b) => b.key)).toEqual(LEADERBOARDS.map((b) => b.key));
     // Name and measures ride with each board so the page never keeps its own copy of either.
     for (const board of out?.boards ?? []) {
       expect(board.name).not.toBe('');

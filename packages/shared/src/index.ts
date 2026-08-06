@@ -227,5 +227,6 @@ export {
   scoreContribution,
   BGS_POINTS_PER_PIP,
   HOLD_MULTIPLIER,
+  BGS_STANCES,
 } from './bgs.js';
 export type { BgsStance, BgsOrder, FactionEffect } from './bgs.js';

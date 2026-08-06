@@ -1189,6 +1189,7 @@ model PrivacySetting {
   showLbTrade        Boolean             @default(true) @map("show_lb_trade")
   /// Deep Core, added 2026-08-06 with the mining module. Defaulting on like the other three —
   /// the owner's rule is that leaderboard participation is on for everybody and opted OUT of.
+  showLbBgs        Boolean  @default(true) @map("show_lb_bgs")
   showLbMining       Boolean             @default(true) @map("show_lb_mining")
 
   /// The font this member's own new posts start in. Null means the site face.

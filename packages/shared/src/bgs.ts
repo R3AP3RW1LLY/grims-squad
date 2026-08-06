@@ -21,24 +21,19 @@
  * twice in Discord and hoping.
  */
 
-/** What the officers want doing about a faction in a system. */
-export type BgsStance =
-  /** Run missions for them here. The ordinary case. */
-  | 'push'
-  /**
-   * Keep it where it is.
-   *
-   * Influence pushed too high triggers an expansion into systems the squadron may not want, so
-   * "more" is not always better and a board that only rewarded more would damage the faction.
-   */
-  | 'hold'
-  /**
-   * Leave this alone.
-   *
-   * The order members will never guess, and the one worth writing down: usually the officers are
-   * managing a delicate state that well-meant effort would undo.
-   */
-  | 'avoid';
+/**
+ * What the officers want doing about a faction.
+ *
+ * ★ THE SCHEMA'S OWN VOCABULARY, NOT A NEW ONE ★
+ *
+ * These are exactly the `BgsDirective` enum values the database has carried since the BGS tables
+ * were designed. Inventing a parallel set here would mean an officer choosing `suppress` in the
+ * admin area and the scorer silently reading it as something else — a mismatch where both halves
+ * look correct in isolation.
+ */
+export const BGS_STANCES = ['push', 'hold', 'suppress', 'ignore'] as const;
+
+export type BgsStance = (typeof BGS_STANCES)[number];
 
 /** A standing order, as the scorer needs it. */
 export interface BgsOrder {
@@ -165,19 +160,33 @@ export function scoreContribution({
 }): number {
   if (order === null || pips === 0) return 0;
 
-  /*
-   * AVOID pays nothing in EITHER direction. Paying for pushing a disfavoured faction down is
-   * tempting — it sounds helpful — but the order usually exists because the officers are managing a
-   * delicate state, and rewarding interference invites exactly the meddling it forbids.
-   */
-  if (order.stance === 'avoid') return 0;
+  // Not a target. Nothing done to them is worth anything to the squadron either way.
+  if (order.stance === 'ignore') return 0;
 
   const base = pips * BGS_POINTS_PER_PIP;
 
   /*
-   * Negative influence toward a faction the squadron is backing is a member working against the
-   * plan, and it costs them. Scoring it zero would make undoing the squadron's work free.
+   * ★ SUPPRESS INVERTS THE SIGN ★
+   *
+   * `suppress` means the squadron wants this faction WEAKENED — a rival taking systems we want. The
+   * work being asked for is negative influence, so negative pips are the achievement and score
+   * positively, and helping them costs.
+   *
+   * Treating every stance's pips alike is the obvious mistake, and it would pay members for
+   * strengthening the exact faction they were sent to hold back.
+   */
+  if (order.stance === 'suppress') return -base;
+
+  /*
+   * Holding pays less than pushing. Not zero — keeping a system steady is the work that was asked
+   * for. Not full — or HOLD and PUSH would be indistinguishable, and the distinction is the whole
+   * reason a HOLD exists: influence pushed too high triggers an expansion nobody wants.
    */
   if (order.stance === 'hold') return Math.floor(base * HOLD_MULTIPLIER);
+
+  /*
+   * PUSH. Negative influence toward a faction we are backing is a member working against the plan
+   * and costs them, which is why this is not `Math.max(0, base)`.
+   */
   return base;
 }

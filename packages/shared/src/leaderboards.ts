@@ -34,7 +34,7 @@
 
 import { BADGES as FORUM_BADGES } from './reputation.js';
 
-export type LeaderboardKey = 'bounties' | 'colony' | 'trade' | 'mining';
+export type LeaderboardKey = 'bounties' | 'colony' | 'trade' | 'mining' | 'bgs';
 
 export interface LeaderboardDef {
   readonly key: LeaderboardKey;
@@ -71,6 +71,26 @@ export const LEADERBOARDS: readonly LeaderboardDef[] = [
     name: 'Deep Core',
     measures:
       'Points from ore your refinery finishes: a point per tonne, multiplied by how hard that tonne was to get — eight for core-only rocks like Void Opals, four for Painite and Platinum, one for gravel.',
+    pointsNoun: 'pts',
+  },
+  {
+    /*
+     * ★ SQUADRON OWNER, 2026-08-06 ★
+     *
+     * "create a BGS leaderboard, and allow the officers to choose what factions we want to be
+     * running missions for etc, give instructions to the squad members etc."
+     *
+     * ★ THE ONLY BOARD WHERE THE SCORE DEPENDS ON AN ORDER ★
+     *
+     * Every other board pays for a deed: a tonne delivered, a credit earned, an ore refined. This
+     * one pays for a deed done WHERE THE OFFICERS ASKED. That is deliberate and it is the whole
+     * point — it makes the standings a statement of what the squadron is trying to achieve, and it
+     * lets officers change what everybody does by editing a list rather than asking twice.
+     */
+    key: 'bgs',
+    name: 'Faction Hands',
+    measures:
+      'Points from influence you actually moved for a faction the squadron is backing: ten a pip, half that for holding a system steady where the orders say hold, and nothing at all for factions nobody asked you to help.',
     pointsNoun: 'pts',
   },
 ] as const;
@@ -146,6 +166,17 @@ export const TIER_LADDERS: Record<LeaderboardKey, readonly TierStep[]> = {
     { tier: 'gold', name: 'Core Breaker', at: 100_000 },
     { tier: 'platinum', name: 'Deep Core', at: 400_000 },
   ],
+  /*
+   * A pip is worth ten points, and a good evening's missions is a few dozen pips. So the ladder is
+   * pitched lower than the hauling boards: influence is slow, deliberate work and a member who
+   * turns out every week for a month should reach silver.
+   */
+  bgs: [
+    { tier: 'bronze', name: 'Canvasser', at: 500 },
+    { tier: 'silver', name: 'Ward Heeler', at: 4_000 },
+    { tier: 'gold', name: 'Kingmaker', at: 20_000 },
+    { tier: 'platinum', name: 'Grey Eminence', at: 75_000 },
+  ],
 } as const;
 
 export interface BadgeDef {
@@ -197,6 +228,7 @@ export const LEADERBOARD_BADGES: readonly BadgeDef[] = [
   ...tierBadges('colony', 'Colony Builders'),
   ...tierBadges('trade', 'Trade Barons'),
   ...tierBadges('mining', 'Deep Core'),
+  ...tierBadges('bgs', 'Faction Hands'),
 
   // ---- Data Runners achievements ----
   {
@@ -324,6 +356,39 @@ export const LEADERBOARD_BADGES: readonly BadgeDef[] = [
     name: 'Void Prospector',
     description: 'Refined every core-only mineral at least once — the full set, cracked by hand.',
     icon: '🌌',
+  },
+  // ---- Faction Hands achievements ----
+  {
+    key: 'bgs-first-blood',
+    board: 'bgs',
+    kind: 'achievement',
+    name: 'First Blood',
+    description: 'Moved influence for a faction the squadron is backing, the first of many.',
+    icon: '🗳️',
+  },
+  {
+    key: 'bgs-steady-hand',
+    board: 'bgs',
+    kind: 'achievement',
+    name: 'Steady Hand',
+    description: 'Held a system where the orders said hold — the discipline nobody sees.',
+    icon: '⚖️',
+  },
+  {
+    key: 'bgs-landslide',
+    board: 'bgs',
+    kind: 'achievement',
+    name: 'Landslide',
+    description: 'Twenty pips of influence for one faction inside a single tick.',
+    icon: '📈',
+  },
+  {
+    key: 'bgs-season-champion',
+    board: 'bgs',
+    kind: 'achievement',
+    name: 'Faction Hands Champion',
+    description: 'Topped the Faction Hands board for a whole season.',
+    icon: '👑',
   },
   {
     key: 'mining-season-champion',

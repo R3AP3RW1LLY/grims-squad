@@ -5,6 +5,7 @@ import {
   scoreContribution,
   BGS_POINTS_PER_PIP,
   HOLD_MULTIPLIER,
+  BGS_STANCES,
   type BgsStance,
 } from './bgs.js';
 
@@ -154,10 +155,10 @@ describe('reading influence off a mission', () => {
 });
 
 describe('deciding what a contribution scores', () => {
-  const watched = (stance: BgsStance) => ({ faction: 'Lords of Kamil', stance });
+  const order = (stance: BgsStance) => ({ faction: 'Lords of Kamil', stance });
 
-  it('MANDATORY: pushing a watched faction scores', () => {
-    expect(scoreContribution({ pips: 3, order: watched('push') })).toBe(3 * BGS_POINTS_PER_PIP);
+  it('MANDATORY: pushing a faction we back scores', () => {
+    expect(scoreContribution({ pips: 3, order: order('push') })).toBe(3 * BGS_POINTS_PER_PIP);
   });
 
   it('MANDATORY: a faction nobody asked for scores nothing', () => {
@@ -166,49 +167,65 @@ describe('deciding what a contribution scores', () => {
      *
      * Missions run for a faction the squadron is not backing do not count, however many. That is
      * what makes the leaderboard an instrument of direction rather than a record of who played
-     * most — and it is the reason officers can change squadron behaviour by editing a list.
+     * most — officers change squadron behaviour by editing a list.
      */
     expect(scoreContribution({ pips: 5, order: null })).toBe(0);
+    expect(scoreContribution({ pips: 5, order: order('ignore') })).toBe(0);
   });
 
-  it('MANDATORY: pushing where the order says AVOID scores nothing', () => {
-    // Acting against a standing order must not pay. Otherwise the board rewards undoing the plan.
-    expect(scoreContribution({ pips: 4, order: watched('avoid') })).toBe(0);
+  it('MANDATORY: SUPPRESS pays for pushing a rival DOWN', () => {
+    /*
+     * ★ THE STANCE THAT INVERTS THE SIGN ★
+     *
+     * `suppress` means the squadron wants this faction weakened — a rival taking systems we want.
+     * The work is NEGATIVE influence, so negative pips are the achievement and must score
+     * positively. A scorer that treated all pips alike would pay members for helping the very
+     * faction they were sent to hold back.
+     */
+    expect(scoreContribution({ pips: -3, order: order('suppress') })).toBe(3 * BGS_POINTS_PER_PIP);
+  });
+
+  it('MANDATORY: helping a faction we are suppressing costs points', () => {
+    // The mirror of the above, and the reason the sign cannot simply be taken as absolute.
+    expect(scoreContribution({ pips: 2, order: order('suppress') })).toBe(-2 * BGS_POINTS_PER_PIP);
   });
 
   it('MANDATORY: holding steady pays, but less than pushing', () => {
     /*
      * A HOLD exists because influence pushed too high triggers an expansion the squadron does not
-     * want. Paying nothing for it would leave the members keeping a system stable unrewarded;
-     * paying full would make HOLD indistinguishable from PUSH and defeat the point.
+     * want. Paying nothing would leave the members keeping a system stable unrewarded; paying full
+     * would make HOLD and PUSH indistinguishable, which defeats the point of having both.
      */
-    const held = scoreContribution({ pips: 4, order: watched('hold') });
+    const held = scoreContribution({ pips: 4, order: order('hold') });
 
     expect(held).toBeGreaterThan(0);
-    expect(held).toBeLessThan(scoreContribution({ pips: 4, order: watched('push') }));
+    expect(held).toBeLessThan(scoreContribution({ pips: 4, order: order('push') }));
     expect(held).toBe(Math.floor(4 * BGS_POINTS_PER_PIP * HOLD_MULTIPLIER));
   });
 
   it('MANDATORY: harming a faction we are backing costs points', () => {
     /*
-     * Negative influence toward a PUSH order is the member actively working against the squadron's
-     * plan. Scoring it as zero would make it free; scoring it negative makes the board honest.
+     * Negative influence toward a PUSH order is a member working against the plan. Scoring it zero
+     * would make undoing the squadron's own work free.
      */
-    expect(scoreContribution({ pips: -2, order: watched('push') })).toBe(-2 * BGS_POINTS_PER_PIP);
-  });
-
-  it('MANDATORY: harming a faction we asked people to AVOID is not rewarded either', () => {
-    /*
-     * Tempting to pay for it — pushing a rival down helps. But AVOID means "leave this alone",
-     * usually because the officers are managing a delicate state, and paying for interference in
-     * either direction invites exactly the meddling the order forbids.
-     */
-    expect(scoreContribution({ pips: -3, order: watched('avoid') })).toBe(0);
+    expect(scoreContribution({ pips: -2, order: order('push') })).toBe(-2 * BGS_POINTS_PER_PIP);
   });
 
   it('MANDATORY: zero pips scores zero whatever the order', () => {
-    for (const stance of ['push', 'hold', 'avoid'] as const) {
-      expect(scoreContribution({ pips: 0, order: watched(stance) })).toBe(0);
+    for (const stance of ['push', 'hold', 'suppress', 'ignore'] as const) {
+      expect(scoreContribution({ pips: 0, order: order(stance) })).toBe(0);
     }
+  });
+
+  it('MANDATORY: the stances are exactly the four the schema already defines', () => {
+    /*
+     * ★ NOT A VOCABULARY OF MY OWN ★
+     *
+     * The database has carried a `BgsDirective` enum of push/hold/suppress/ignore since it was
+     * designed. A parallel set of stances in the scorer would mean an officer picking `suppress` in
+     * the admin area and the board silently scoring it as something else — the worst kind of
+     * mismatch, because both halves look right on their own.
+     */
+    expect([...BGS_STANCES].sort()).toEqual(['hold', 'ignore', 'push', 'suppress']);
   });
 });

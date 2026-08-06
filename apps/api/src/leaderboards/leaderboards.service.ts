@@ -116,6 +116,18 @@ const SOURCES: Record<
     boardFilter: `AND s.board = 'mining'`,
     optColumn: 'show_lb_mining',
   },
+  /*
+   * Faction Hands, 2026-08-06. `leaderboard_events` again — the influence itself is recorded in
+   * `bgs_activity_reports`, which is far richer than a score and is what the charts and the tick
+   * digest read. The board only needs the points, so it banks them beside every other board rather
+   * than teaching the standings query a fifth shape.
+   */
+  bgs: {
+    table: 'leaderboard_events',
+    timeColumn: 'occurred_at',
+    boardFilter: `AND s.board = 'bgs'`,
+    optColumn: 'show_lb_bgs',
+  },
 };
 
 /**

@@ -41,6 +41,7 @@ const LB_PRIVACY_KEYS: Record<LeaderboardKey, keyof PrivacySettings> = {
   colony: 'showLbColony',
   trade: 'showLbTrade',
   mining: 'showLbMining',
+  bgs: 'showLbBgs',
 };
 
 /** One switch per board, straight off the catalogue: its name is the label, its measure the help. */

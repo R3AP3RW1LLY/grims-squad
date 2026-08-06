@@ -345,6 +345,14 @@ const NAV: readonly NavDefinition[] = [
     requires: Permission.MINING_VIEW,
   },
   {
+    href: '/leaderboards/bgs',
+    label: 'Faction Hands',
+    section: 'squadron',
+    subsection: 'Leaderboards',
+    blurb: 'Who has moved influence where the orders asked — and only where the orders asked.',
+    requires: Permission.BGS_VIEW,
+  },
+  {
     href: '/ops',
     label: 'Operations',
     section: 'squadron',

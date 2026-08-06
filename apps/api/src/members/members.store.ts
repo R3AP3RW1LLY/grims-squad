@@ -527,6 +527,7 @@ export class PrismaMembersStore implements MembersStore {
         showLbColony: true,
         showLbTrade: true,
         showLbMining: true,
+        showLbBgs: true,
         plainFonts: true,
       },
     })) as Partial<PrivacySettings> | null;
@@ -550,6 +551,7 @@ export class PrismaMembersStore implements MembersStore {
         showLbColony: true,
         showLbTrade: true,
         showLbMining: true,
+        showLbBgs: true,
         plainFonts: true,
       },
     });
