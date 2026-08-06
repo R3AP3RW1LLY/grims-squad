@@ -1,5 +1,5 @@
 import { render } from 'preact';
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import type { OverlayId, OverlayState } from '../overlay-config.js';
 import { C } from './ui.js';
 import { ProspectorPanel, RefineryPanel } from './mining-panels.js';
@@ -25,6 +25,8 @@ declare global {
       onData(fn: (payload: OverlayData) => void): void;
       /** Asks the main process for the current state, for a window that loaded late. */
       ready(id: string): void;
+      /** Reports this panel's content height so the window can grow to fit it. */
+      measured(id: string, height: number): void;
     };
   }
 }
@@ -139,6 +141,9 @@ const EMPTY: OverlayData = {
 
 const ID = (new URLSearchParams(location.search).get('id') ?? 'status') as OverlayId;
 
+/** The panel's own border and padding, which sit outside the measured content box. */
+const PANEL_CHROME_PX = 22;
+
 function App(): preact.JSX.Element | null {
   const [message, setMessage] = useState<OverlayMessage | null>(null);
   const [data, setData] = useState<OverlayData>(EMPTY);
@@ -150,6 +155,36 @@ function App(): preact.JSX.Element | null {
     // mount closes that race rather than leaving a panel permanently blank.
     window.overlayBridge.ready(ID);
   }, []);
+
+  /*
+   * ★ MEASURING THE PANEL SO THE WINDOW CAN FIT IT — SQUADRON OWNER, 2026-08-06 ★
+   *
+   * "update the build tracker overlay to expand and collapse automatically so we can show the full
+   * list"
+   *
+   * The renderer is the only thing that CAN know this height: it depends on how many commodities a
+   * build wants and how the text wrapped, neither of which the main process can see.
+   *
+   * A ResizeObserver rather than a measurement per render, because the height changes for reasons
+   * a render does not — a font settling, a scrollbar arriving. The main process applies a dead band
+   * (`nextOverlayHeight`), which is what stops resize→repaint→measure→resize running away.
+   */
+  const body = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const node = body.current;
+    if (node === null) return;
+
+    const report = (): void => {
+      // scrollHeight, not clientHeight: clientHeight is what the window already allows, which would
+      // measure the panel as exactly the size it is and never grow.
+      window.overlayBridge.measured(ID, node.scrollHeight + PANEL_CHROME_PX);
+    };
+
+    report();
+    const observer = new ResizeObserver(report);
+    observer.observe(node);
+    return () => observer.disconnect();
+  });
 
   if (message === null) return null;
 
@@ -178,7 +213,12 @@ function App(): preact.JSX.Element | null {
       }}
     >
       <Header id={ID} state={state} arranging={arranging} />
-      <div style={{ padding: '8px 10px 10px', overflow: 'hidden', flex: 1 }}>
+      {/*
+        `overflow: auto` rather than hidden: the window grows to fit its content up to a cap, and
+        past that cap the list has to remain reachable rather than being silently clipped — which is
+        the fault this change exists to fix.
+      */}
+      <div ref={body} style={{ padding: '8px 10px 10px', overflow: 'auto', flex: 1 }}>
         <Panel id={ID} state={state} data={data} />
       </div>
     </div>
@@ -311,7 +351,20 @@ function BuildPanel({
   const pct = data.required > 0 ? Math.round((data.delivered / data.required) * 100) : null;
   // The four biggest shortfalls. A construction site wants around thirty commodities and an overlay
   // is 140px tall — showing all of them makes every line unreadable.
-  const needs = [...data.needs].sort((a, b) => b.remaining - a.remaining).slice(0, 4);
+  /*
+   * ★ THE WHOLE LIST — SQUADRON OWNER, 2026-08-06 ★
+   *
+   * "update the build tracker overlay to expand and collapse automatically so we can show the full
+   * list"
+   *
+   * This was `slice(0, 4)`, because four rows is what fits a fixed 140px window. For a hauler
+   * deciding what to load, four of eleven with nothing to say the other seven exist is the wrong
+   * four about as often as not.
+   *
+   * The window now measures itself and grows (see `overlay-autosize.ts`), so the cap can go. Past
+   * the height cap the panel scrolls rather than clipping.
+   */
+  const needs = [...data.needs].sort((a, b) => b.remaining - a.remaining);
 
   return (
     <div>

@@ -8,6 +8,7 @@ import {
   type OverlayState,
 } from './overlay-config.js';
 import { destinationFor, type DisplayMode, type OverlayDestination } from './display-mode.js';
+import { autoSizes, nextOverlayHeight } from './overlay-autosize.js';
 
 /**
  * The overlay windows themselves.
@@ -142,7 +143,8 @@ export class OverlayWindows {
       }
 
       const window = this.#windows.get(id) ?? this.#open(id, state, destination);
-      this.#position(window, state);
+      this.#lastSaved.set(id, state.placement.height);
+      this.#position(id, window, state);
       this.#applyLock(window, state, destination);
       this.#send(window, id, state, destination);
     }
@@ -220,7 +222,18 @@ export class OverlayWindows {
       // `getBounds()` rather than getPosition/getSize: one call, one consistent snapshot, and a
       // typed object instead of two arrays that have to be destructured and null-checked.
       const { x, y, width, height } = window.getBounds();
-      this.host.onMoved(id, { x, y, width, height });
+      /*
+       * A self-sizing panel reports its own height, and that height must not be written back as the
+       * member's setting — it is a consequence of how many rows are showing, not a choice. Their
+       * configured height is preserved so that switching auto-sizing off returns them to it.
+       */
+      const auto = this.#autoHeights.get(id);
+      this.host.onMoved(id, {
+        x,
+        y,
+        width,
+        height: auto !== undefined && auto === height ? this.#lastSaved.get(id) ?? height : height,
+      });
     };
     window.on('moved', remember);
     window.on('resized', remember);
@@ -235,8 +248,52 @@ export class OverlayWindows {
     return window;
   }
 
-  #position(window: BrowserWindow, state: OverlayState): void {
-    const placement = ontoScreen(state.placement, this.#screens());
+  /**
+   * Heights the panels have measured for themselves, for the overlays that size to their content.
+   *
+   * Kept in memory and NEVER written to the config. A member's chosen height is theirs; this is a
+   * transient consequence of how many rows happen to be showing, and persisting it would overwrite
+   * their setting with whatever a build's requirement looked like at the time.
+   */
+  readonly #autoHeights = new Map<OverlayId, number>();
+
+  /** The height the member actually configured, kept so a self-measured one never overwrites it. */
+  readonly #lastSaved = new Map<OverlayId, number>();
+
+  /**
+   * A panel has measured itself.
+   *
+   * Resizes only when it is worth it — see `nextOverlayHeight` for the dead band that stops
+   * repaint-measure-resize becoming an endless loop over the top of the game.
+   */
+  measured(id: OverlayId, height: number): void {
+    if (!autoSizes(id)) return;
+
+    const window = this.#windows.get(id);
+    if (window === undefined || window.isDestroyed()) return;
+
+    const next = nextOverlayHeight(window.getBounds().height, height);
+    if (next === null) return;
+
+    this.#autoHeights.set(id, next);
+    window.setBounds({ ...window.getBounds(), height: next });
+  }
+
+  /** The placement to actually use: the member's, with a self-measured height when there is one. */
+  #effective(id: OverlayId, state: OverlayState): OverlayPlacement {
+    const auto = this.#autoHeights.get(id);
+    return auto === undefined ? state.placement : { ...state.placement, height: auto };
+  }
+
+  #position(id: OverlayId, window: BrowserWindow, state: OverlayState): void {
+    /*
+     * The member's placement, with a self-measured height when the panel has reported one.
+     *
+     * Without this the two fight: the panel measures and grows, `apply()` runs on the next state
+     * push, sees a height differing from the saved one, and snaps it straight back — so the list
+     * would expand and instantly collapse on every settings change or journal pass.
+     */
+    const placement = ontoScreen(this.#effective(id, state), this.#screens());
     const now = window.getBounds();
 
     // Only when it actually differs. Setting bounds to their current value still emits `moved` on

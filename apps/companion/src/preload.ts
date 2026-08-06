@@ -95,6 +95,19 @@ contextBridge.exposeInMainWorld('overlayBridge', {
    * its state, and without this it would sit blank until the member next changed a setting.
    */
   ready: (id: string) => ipcRenderer.send('overlay:ready', id),
+  /*
+   * ★ THE ONE THING AN OVERLAY MAY ASK FOR ★
+   *
+   * This bridge is deliberately read-only — an overlay window is a display surface, and giving it
+   * the ability to act would widen what a rendering bug can reach. Reporting its own content height
+   * is the exception, and a narrow one: it carries a single number, the main process clamps it
+   * (`nextOverlayHeight`), and the worst a bad value can do is make one panel the wrong height.
+   *
+   * It earns the exception because the renderer is the only thing that CAN know: the height depends
+   * on how many commodities a build wants and how the text wrapped, neither of which the main
+   * process can see.
+   */
+  measured: (id: string, height: number) => ipcRenderer.send('overlay:measured', id, height),
 });
 
 /*
