@@ -1,0 +1,14 @@
+# Response-time probe. See tools/probe.mjs for why this exists:
+# the site served pages at 19.95 seconds during a deploy and the way anybody found out
+# was the squadron owner reporting it. Members are not a monitoring system.
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+
+# ★ EVERY MINUTE, AND THE THRESHOLDS ASSUME IT ★
+#
+# probe.mjs alerts after three consecutive breaches, which is three minutes at this interval. A
+# slower schedule does not make it quieter — it makes the alert LATER, because the count is in
+# ticks and not in wall-clock time.
+#
+# One request to three URLs, once a minute, is nothing next to what it is watching for.
+* * * * * root /srv/grims/probe-run.sh >> /var/log/grims-probe.log 2>&1
