@@ -131,6 +131,17 @@ REQUIRED=(
   # Where "what changed on the website and in the app" goes. Required for the same reason as the
   # rest: unset means the row queues silently and nobody hears about a release that shipped.
   DISCORD_RELEASE_CHANNEL_ID
+
+  # ★ THE ADDRESS POSTGRES AND REDIS ARE REACHABLE ON — ADDED 2026-08-06 ★
+  #
+  # The WireGuard address of this box (10.66.0.1), used by compose.prod.yml to publish those two
+  # ports. Required for the same reason the announcement channels are: unset is not an error, it is
+  # a SILENCE. compose would fall back to loopback, the ingestion box would quietly fail to
+  # connect, and prices would simply stop being current with no error anywhere.
+  #
+  # The loopback fallback stays in compose regardless — it is what makes forgetting this harmless
+  # instead of publishing the database to the internet. This makes forgetting it loud as well.
+  GRIMS_BIND_IP
 )
 
 missing=()

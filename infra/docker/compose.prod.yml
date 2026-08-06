@@ -58,6 +58,27 @@ services:
     # Bundles BOTH TimescaleDB and pgvector. Using plain postgres here would
     # break market_history (a hypertable) and the RAG embeddings at once.
     image: timescale/timescaledb-ha:pg16
+    # ★ REACHABLE FROM THE INGESTION BOX, AND FROM NOWHERE ELSE ★
+    #
+    # The workers moved to their own machine on 2026-08-06, so this has to be reachable across a
+    # network for the first time. The obvious spelling — '5432:5432' — binds EVERY interface
+    # including the public IP, and Docker's iptables rules sit in FRONT of ufw, so a ufw deny would
+    # not save it. That is 107 members' data behind nothing but a password, found by scanners in
+    # hours.
+    #
+    # GRIMS_BIND_IP is the WireGuard address of this box (10.66.0.1). Packets can only arrive
+    # through the tunnel, from a peer holding the key — there is no path from the public internet
+    # to this port at all.
+    #
+    # Vultr's own VPC was tried first and is not what this uses: attaching one to a running Ubuntu
+    # 24.04 host broke two freshly-provisioned instances outright, and neither reboot nor detach
+    # recovered them.
+    #
+    # The fallback is LOOPBACK, not blank. An unset variable would make compose read ':5432:5432'
+    # as every interface — the same disaster produced by forgetting a line in .env. Failing closed
+    # means the workers cannot connect, which is loud and harmless.
+    ports:
+      - '${GRIMS_BIND_IP:-127.0.0.1}:5432:5432'
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
@@ -76,6 +97,11 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     command: ['redis-server', '--appendonly', 'yes', '--requirepass', '${REDIS_PASSWORD}']
+    # Same reasoning as postgres above: the tunnel address only, loopback if unset. Redis holds
+    # less than Postgres does, but an open Redis is a remote code execution in most configurations,
+    # so it gets exactly the same treatment rather than a relaxed version of it.
+    ports:
+      - '${GRIMS_BIND_IP:-127.0.0.1}:6379:6379'
     volumes:
       - redisdata:/data
     healthcheck:
