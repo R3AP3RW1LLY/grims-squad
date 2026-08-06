@@ -145,6 +145,22 @@ ok "${#REQUIRED[@]} required settings present"
   || die "S3_BUCKET and BACKUP_S3_BUCKET are the same bucket — database dumps would land in media"
 ok "media and backup buckets are separate"
 
+# ★ THE REGISTRY LOGIN, CHECKED HERE RATHER THAN DISCOVERED AT THE PULL ★
+#
+# Since the images are built in CI, a deploy cannot proceed without being able to read them. The
+# repository is private, so its packages are private, so an unauthenticated pull gets a 403 — and
+# `docker` reports that as "denied", which reads like a permissions bug rather than a missing login.
+#
+# Found in the preflight it costs a sentence. Found at the pull it costs the deploy, and the
+# operator spends ten minutes reading GHCR error codes to learn something knowable up front.
+if ! grep -q 'ghcr\.io' /root/.docker/config.json 2>/dev/null; then
+  die "not signed in to ghcr.io — the images cannot be pulled.
+     Create a token at https://github.com/settings/tokens with the read:packages scope, then:
+       echo <TOKEN> | docker login ghcr.io -u r3ap3rw1lly --password-stdin
+     The login persists; this is a one-time step per box."
+fi
+ok "registry credentials present"
+
 # ─────────────────────────────────────────────────────────── 2. fetch
 say "Fetching $REF"
 git -C "$REPO" fetch --quiet origin
@@ -201,12 +217,34 @@ docker builder prune --force --filter 'until=168h' >/dev/null 2>&1 || true
 # never data.
 docker builder prune --force >/dev/null 2>&1 || true
 
+# ★ AND NOW THE IMAGES THEMSELVES, WHICH IS NEW ★
+#
+# Building on the box grew the build CACHE. Pulling from a registry grows the IMAGE store instead,
+# and it grows faster: six images per deploy, each tagged with its commit, and a tagged image is
+# never dangling — so the ordinary `docker image prune` will not touch one of them. Twenty deploys
+# would be twenty complete sets sitting there forever.
+#
+# This is the same failure that took the disk to 79%, in a new costume, and it is being written
+# down before it costs anything rather than after a member reports a slow site.
+#
+# 168h keeps a week of revisions, so every rollback target a deploy could plausibly want is still
+# local and instant. `--filter until=` only ever considers images no container is using, so the
+# running set is safe regardless of age.
+docker image prune --force --filter 'until=168h' >/dev/null 2>&1 || true
+
 used_pct="$(df --output=pcent / | tail -1 | tr -dc '0-9')"
 if [[ -n $used_pct && $used_pct -ge 70 ]]; then
-  warn "disk at ${used_pct}% — clearing the whole build cache, the next build will be slower"
+  warn "disk at ${used_pct}% — clearing the whole build cache and every unused image"
   docker builder prune --all --force >/dev/null 2>&1 || true
+  # ★ ONLY UNDER PRESSURE, BECAUSE THIS IS THE ROLLBACK PATH BEING SPENT ★
+  #
+  # `--all` removes every image no RUNNING container needs, which includes the previous revision —
+  # the thing a rollback would otherwise pull from local disk in seconds. That is an acceptable
+  # price at 70% and a bad trade at any less, so it lives here and not above. A rollback still
+  # works; it just fetches from the registry like any other pull.
+  docker image prune --all --force >/dev/null 2>&1 || true
 fi
-ok "old build cache pruned"
+ok "old build cache and superseded images pruned"
 
 # ★ EVERY SERVICE, NOT THE FOUR THAT FACE A MEMBER ★
 #
@@ -229,30 +267,39 @@ ok "old build cache pruned"
 # INTERNAL_ERROR. Reported by the squadron owner on 2026-08-05: "this is supposed to be zero
 # downtime updates etc! what the fuck!"
 #
-# ★ nice DOES NOT REACH THE BUILDER, AND I SHIPPED IT CLAIMING IT DID — MEASURED 2026-08-05 ★
+# ★ PULLED, NOT BUILT — AND THE HISTORY OF WHY ★
 #
-# `nice -n 19 ionice -c3 docker compose build` lowers the priority of the CLI CLIENT, which does
-# almost no work. The compiling happens inside the Docker daemon, and `ps -o ni` shows dockerd and
-# every build process sitting at nice 0 throughout — the niceness never crosses the socket.
+# This box used to compile six Docker images on every deploy, while serving members. Two attempts
+# were made to civilise that and both failed in instructive ways:
 #
-# It is kept because it costs nothing and is correct for the client, but it was never the fix. The
-# squadron owner's companion app timed out through two consecutive deploys while this was in place:
-# "Could not reach the squadron: The hub took too long to answer", four times, exactly during the
-# build window.
+#   `nice -n 19 docker compose build` lowers the priority of the CLI CLIENT. The compiling happens
+#   inside the Docker daemon, and `ps -o ni` showed dockerd and every build process at nice 0
+#   throughout. It changed nothing, and was declared a fix on one fast page load.
 #
-# ★ WHAT ACTUALLY BOUNDS IT: BUILD FEWER AT ONCE ★
+#   `COMPOSE_PARALLEL_LIMIT=2` genuinely helped — sixteen minutes of a build passed with pages at
+#   0.24s — and still could not cover the peak: when the Next.js image began, `/` took 19.95
+#   seconds. Fewer compilers is better than more, and no number of them is none.
 #
-# Compose builds every named service in parallel — six images, each running tsc and Next, on eight
-# cores that are also serving members. `COMPOSE_PARALLEL_LIMIT` is the one knob that genuinely
-# reduces peak load, because it reduces the number of compilers running at all rather than asking
-# the scheduler to referee them.
+# The squadron owner's verdict, 2026-08-05: build in CI, and let production pull.
 #
-# Two, not one: the deploy still finishes in a reasonable time, and two compilers leave six cores
-# for Postgres and the API. One would be gentler and turn a four-minute build into twelve, which is
-# a longer window in which a stale container is serving.
-say "Building images"
-COMPOSE_PARALLEL_LIMIT=2 nice -n 19 ionice -c3   $COMPOSE --profile jobs build api web bot worker worker-daemon eddn-collector
-ok "api, web, bot, worker, worker-daemon, eddn-collector built"
+# So `.github/workflows/images.yml` builds every image on merge and pushes it to GHCR tagged with
+# its commit, and this step fetches the exact revision being deployed. The box does no compiling at
+# all — a pull is network and disk, which is what a server has spare.
+#
+# ★ TAGGED BY SHA, WHICH IS WHAT MAKES A ROLLBACK CHEAP ★
+#
+# `latest` would make "what is production running" unanswerable, which is the question
+# deployed.sha exists to answer. Naming the revision means a rollback is a pull of an image that
+# already exists rather than a rebuild of a tree that has moved on.
+say "Fetching images"
+export GRIMS_IMAGE_TAG="$TARGET_SHA"
+if ! $COMPOSE --profile jobs pull --quiet api web bot worker worker-daemon eddn-collector; then
+  # Deliberately fatal, unlike most steps here. A missing image means CI has not finished — or has
+  # failed — for this revision, and the honest response is to stop before the swap rather than
+  # quietly serve whatever was pulled last time.
+  die "could not fetch images for ${TARGET_SHA:0:8} — is the images workflow finished? (gh run list --workflow=images.yml)"
+fi
+ok "images for ${TARGET_SHA:0:8} fetched"
 
 # ─────────────────────────────────────────────────────────── 5. migrate
 #
@@ -345,7 +392,13 @@ wait_healthy() {
 rollback() {
   printf '\n\033[31m✖ rolling back to %s\033[0m\n' "${PREVIOUS_SHA:0:8}" >&2
   git -C "$REPO" reset --quiet --hard "$PREVIOUS_SHA"
-  $COMPOSE --profile jobs build api web bot worker worker-daemon eddn-collector >/dev/null 2>&1 || true
+  # ★ A ROLLBACK IS NOW A PULL, WHICH IS THE WHOLE POINT OF TAGGING BY SHA ★
+  #
+  # This used to REBUILD six images at the worst possible moment — during a failed deploy, on a box
+  # already in trouble, taking minutes to restore a service that was down. The previous revision's
+  # images are in the registry and usually still in the local cache, so this is now seconds.
+  export GRIMS_IMAGE_TAG="$PREVIOUS_SHA"
+  $COMPOSE --profile jobs pull --quiet api web bot worker worker-daemon eddn-collector >/dev/null 2>&1 || true
   $COMPOSE up -d api web bot worker-daemon eddn-collector >/dev/null 2>&1 || true
   printf '\033[31m  rolled back. The database was NOT reverted — %s holds the pre-deploy state.\033[0m\n' "$DUMP" >&2
 }

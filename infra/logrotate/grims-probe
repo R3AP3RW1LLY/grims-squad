@@ -1,0 +1,38 @@
+# ★ A MONITORING SYSTEM THAT FILLS THE DISK IS AN OUTAGE, NOT A SAFEGUARD ★
+#
+# Three samples a minute is roughly 4,300 lines and half a megabyte a day. Left alone that is
+# 150MB a year of a file nobody would ever think to look at — small, but this box has already been
+# to 79% once, and the whole reason the probe exists is that slow discovery is expensive.
+#
+# Ninety days of history is kept, which is enough to answer "was this deploy slower than the ones
+# before it" — the question that was unanswerable every previous time it was asked.
+/var/log/grims-probe.ndjson {
+    # ★ REQUIRED ON THIS BOX, AND SILENT WITHOUT IT ★
+    #
+    # /var/log is root:syslog drwxrwxr-x — group-writable by a group that is not root — so logrotate
+    # refuses to rotate anything in it without being told whose privileges to use. It does not warn:
+    # it SKIPS the file, and the first anybody would know is a log that has been growing for a year.
+    # Found with `logrotate -d`; the same line appears in ubuntu-pro-client's config on this box.
+    su root root
+    daily
+    rotate 90
+    compress
+    delaycompress
+    missingok
+    notifempty
+    # No `create` and no restart: probe.mjs opens the file per append, so it picks up the new inode
+    # on its next run without anything needing to be told.
+    copytruncate
+}
+
+# Cron's own output — the alert lines, and any complaint from the probe about not being able to
+# persist its state. Short retention: it is a breadcrumb trail, not a record.
+/var/log/grims-probe.log {
+    su root root
+    weekly
+    rotate 4
+    compress
+    missingok
+    notifempty
+    copytruncate
+}

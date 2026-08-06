@@ -144,6 +144,206 @@ describe('the build cache cannot fill the disk', () => {
   });
 });
 
+describe('the production box does no compiling', () => {
+  /*
+   * ★ THE THIRD AND FINAL ATTEMPT AT THE SAME BUG ★
+   *
+   * `nice` did not reach the daemon. `COMPOSE_PARALLEL_LIMIT=2` reached it and helped enormously —
+   * sixteen minutes of 0.24s pages — and still could not cover the peak: when the Next.js image
+   * began compiling, `/` took 19.95 seconds. Fewer compilers is better than more, and no number of
+   * them is none.
+   *
+   * The squadron owner's decision, 2026-08-05: build in CI, and let production pull. This test is
+   * what stops the build step from creeping back in the next time somebody wants a quick local fix
+   * on the box, which is exactly how it got there the first time.
+   */
+
+  /** True when the deploy fetches prebuilt images rather than compiling them. */
+  function fetchesRatherThanCompiles(script: string): boolean {
+    // Any `compose build` of the service images means the box is compiling again, whatever else it
+    // also does. The pull must be present too — a script that neither builds nor pulls deploys
+    // whatever happens to be lying in the local cache.
+    const compiles = /\$COMPOSE[^\n]*\bbuild\b[^\n]*\bapi\b/.test(script);
+    const fetches = /\$COMPOSE[^\n]*\bpull\b[^\n]*\bapi\b/.test(script);
+    return fetches && !compiles;
+  }
+
+  it('MANDATORY: the deploy pulls its images instead of building them', () => {
+    expect(
+      fetchesRatherThanCompiles(current),
+      'deploy.sh compiles images on the production box again — that is what took / to 19.95s',
+    ).toBe(true);
+  });
+
+  it('MANDATORY: it would have failed on every revision that built on the box', () => {
+    // ffddd23 is the last revision that compiled during a deploy.
+    const before = scriptBefore('ffddd23');
+    if (before === null) return; // shallow clone; see the note on the helper
+
+    expect(
+      fetchesRatherThanCompiles(before),
+      'the "before" revision already pulls, so this test proves nothing',
+    ).toBe(false);
+  });
+
+  it('MANDATORY: the images it fetches are named by the revision being deployed', () => {
+    /*
+     * `latest` would make "what is production running" unanswerable — the exact question
+     * deployed.sha exists to answer — and would turn a rollback back into a rebuild, since the
+     * previous revision's image would no longer be reachable by name.
+     */
+    expect(
+      /GRIMS_IMAGE_TAG="\$TARGET_SHA"/.test(current),
+      'the deploy no longer pins images to the commit it is deploying',
+    ).toBe(true);
+  });
+
+  it('MANDATORY: a rollback pulls the old images rather than rebuilding them', () => {
+    /*
+     * The rollback used to run `compose build` — six images compiled during a failed deploy, on a
+     * box already in trouble, to restore a service that was down. Tagging by SHA is what makes the
+     * cheap path available; this is what keeps it taken.
+     */
+    const rollback = current.slice(current.indexOf('rollback() {'));
+    const body = rollback.slice(0, rollback.indexOf('\n}'));
+
+    expect(body, 'the rollback still compiles images at the worst possible moment').not.toMatch(
+      /\bbuild\b/,
+    );
+    expect(body, 'the rollback does not fetch the previous revision by name').toMatch(
+      /GRIMS_IMAGE_TAG="\$PREVIOUS_SHA"/,
+    );
+  });
+});
+
+describe('pulling images cannot fill the disk the way building them did', () => {
+  /*
+   * ★ THE RISK THIS MIGRATION CREATED, WRITTEN DOWN BEFORE IT COST ANYTHING ★
+   *
+   * Moving the build to CI removes the build cache from this box — and replaces it with something
+   * that grows the same way. Every deploy pulls six images tagged with its commit, and a tagged
+   * image is never dangling, so `docker image prune` in its default form will not touch a single
+   * one of them. Twenty deploys is twenty full sets, sitting there indefinitely.
+   *
+   * The build cache reaching 188 GB was found by a member reporting a slow site. This is the same
+   * shape of failure, foreseeable this time, so it gets its test before it gets its incident
+   * rather than after — which is the whole of AGENTS.md §8.5 read forwards instead of backwards.
+   */
+  it('MANDATORY: superseded images are removed, not merely dangling ones', () => {
+    /*
+     * A bare `docker image prune --force` removes only untagged layers and would reclaim nothing
+     * here, exactly as `--keep-storage 40GB` reclaimed nothing from the build cache. Removing
+     * SHA-tagged images requires either an age filter or --all.
+     */
+    expect(
+      /docker image prune[^\n]*(--filter|--all)/.test(current),
+      'deploy.sh does not remove superseded images — every deploy leaves six tagged images behind forever',
+    ).toBe(true);
+  });
+
+  it('MANDATORY: the routine prune still leaves something to roll back to', () => {
+    /*
+     * `--all` on every deploy would delete the previous revision's images the moment the new ones
+     * start, turning the cheap rollback this migration was designed around back into a slow pull
+     * at the worst possible moment. The unconditional prune must be age-filtered; --all belongs
+     * only behind the disk-pressure branch.
+     */
+    const pruneLines = current.split('\n').filter((l) => /docker image prune/.test(l));
+    expect(pruneLines.length, 'no image prune at all').toBeGreaterThan(0);
+
+    const unconditional = pruneLines.filter((l) => !/--filter/.test(l));
+    for (const line of unconditional) {
+      expect(
+        line.trim().startsWith('#') || /^\s{2,}/.test(line),
+        `an unfiltered image prune runs on every deploy: ${line.trim()} — the previous revision would be gone before it could be rolled back to`,
+      ).toBe(true);
+    }
+  });
+});
+
+describe('CI builds exactly what the deploy pulls', () => {
+  /*
+   * ★ MOVING THE BUILD MOVED THE WAYS IT CAN BE WRONG ★
+   *
+   * A build on the box read the box's own .env, so it could not disagree with production about
+   * anything. A build in CI can — and it fails SILENTLY, because a wrong image starts perfectly
+   * well and only misbehaves once a member is looking at it.
+   *
+   * Two ways for the two files to drift apart, both caught here:
+   *
+   *   A service gains an image the workflow does not build. The deploy pulls, gets nothing, and
+   *   either fails or serves a stale revision that nobody chose.
+   *
+   *   A build ARG is added to compose and not to the workflow. Next inlines NEXT_PUBLIC_* at build
+   *   time, so the image bakes the Dockerfile's fallback — https://45-63-35-93.sslip.io — into
+   *   every canonical URL, OpenGraph tag and absolute link on the site. Production would look
+   *   fine, be fine, and tell Google it lives at an IP address.
+   */
+  const compose = readFileSync(join(REPO, 'infra', 'docker', 'compose.prod.yml'), 'utf8');
+  const workflow = readFileSync(join(REPO, '.github', 'workflows', 'images.yml'), 'utf8');
+
+  it('MANDATORY: every image production pulls is one CI builds', () => {
+    const pulled = new Set(
+      [...compose.matchAll(/image:\s*ghcr\.io\/[^/]+\/[^/]+\/([\w-]+):/g)].map((m) => m[1]),
+    );
+    const built = new Set([...workflow.matchAll(/- image:\s*([\w-]+)/g)].map((m) => m[1]));
+
+    expect(pulled.size, 'no ghcr images found in compose.prod.yml — has the path changed?').toBeGreaterThan(0);
+
+    for (const name of pulled) {
+      expect(built, `compose pulls "${name}" but images.yml never builds it`).toContain(name);
+    }
+  });
+
+  it('MANDATORY: every build arg production supplies is one CI supplies', () => {
+    /*
+     * Read from compose rather than listed here, so adding an arg cannot pass this test by being
+     * forgotten in two places at once.
+     */
+    /*
+     * Scanned by indentation rather than by regex. The first version used `\s+` to gather the
+     * block, which happily ran past `args:` into `environment:` and demanded CI pass NODE_ENV —
+     * a test failing for a reason that has nothing to do with what it claims to check.
+     */
+    const lines = compose.split('\n');
+    const argNames: string[] = [];
+    for (let i = 0; i < lines.length; i += 1) {
+      const opener = /^(\s*)args:\s*$/.exec(lines[i] ?? '');
+      if (!opener) continue;
+
+      const depth = (opener[1] ?? '').length;
+      for (let j = i + 1; j < lines.length; j += 1) {
+        const line = lines[j] ?? '';
+        const indent = /^(\s*)\S/.exec(line);
+        if (!indent || (indent[1] ?? '').length <= depth) break; // dedented out of the block
+        const key = /^\s*([A-Z_][\w]*):/.exec(line);
+        if (key?.[1]) argNames.push(key[1]);
+      }
+    }
+
+    expect(argNames.length, 'no build args found in compose.prod.yml — has the format changed?').toBeGreaterThan(0);
+
+    for (const arg of argNames) {
+      expect(
+        workflow,
+        `compose builds with ${arg} but images.yml does not pass it — the image will bake the Dockerfile's fallback`,
+      ).toContain(arg);
+    }
+  });
+
+  it('MANDATORY: the site URL CI bakes in is the one members actually visit', () => {
+    /*
+     * The Dockerfile's fallback is the box's raw IP via sslip.io. Correct as a last resort for a
+     * developer with no .env; catastrophic as the value shipped to 107 members, and invisible
+     * until somebody notices a share preview pointing at 45-63-35-93.
+     */
+    expect(
+      workflow,
+      'images.yml no longer names grims-squad.com, so the built site would advertise an IP address',
+    ).toContain('https://grims-squad.com');
+  });
+});
+
 describe('the deploy still refuses to start without its configuration', () => {
   it('every announcement channel is required in the preflight', () => {
     /*

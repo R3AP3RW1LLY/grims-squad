@@ -119,14 +119,22 @@ export default tseslint.config(
       // and a dead EDDN subscriber is invisible. Fourth entry, failing on the same two globals as
       // every one before it — the list is explicit by design, and this is the design working.
       '**/keep-alive.mjs',
-      // The changelog generator runs as `node tools/changelog.mjs` on the
-      // production box during a deploy — plain Node, no build step — so it
-      // reads process.argv and prints like every launcher above it.
-      '**/changelog.mjs',
-      // The Prisma dev ritual (`pnpm db:ritual`): kills the tsx children that
-      // hold the engine DLL, migrates, regenerates, rebuilds. Fifth entry to
-      // fail on the same two globals as every one before it.
-      '**/db-ritual.mjs',
+      // ★ tools/ BY DIRECTORY, NOT BY NAME — AND WHY THIS ONE IS DIFFERENT ★
+      //
+      // Every entry above was added the same way: somebody wrote a Node script, lint failed on
+      // `process` and `console`, and a line was added here. The comments record it happening a
+      // third, fourth and fifth time while calling the list explicit by design. `tools/probe.mjs`
+      // was the sixth, and a design that is right six times in a row about the same two globals is
+      // not a design, it is a queue.
+      //
+      // The launchers above stay listed by name because they live among application code, where a
+      // stray `process.env` in a component genuinely should fail. tools/ is not that: it is a
+      // directory whose entire contents are Node programs run directly by cron, by a deploy, or by
+      // a developer. There is nothing in it for this rule to protect.
+      //
+      // Anchored to the repo root (lint runs as `eslint .` there), so it cannot quietly widen to
+      // an apps/*/tools/ directory that does hold browser code.
+      'tools/*.mjs',
     ],
     languageOptions: {
       globals: {
@@ -140,6 +148,12 @@ export default tseslint.config(
         console: 'readonly',
         // A supervisor's whole job is to wait before trying again. Absent until one needed it.
         setTimeout: 'readonly',
+        // The uptime probe times requests and gives up on the ones that hang. Node has had all
+        // three since 18; they were absent here only because nothing had needed to make a network
+        // call from a script yet.
+        clearTimeout: 'readonly',
+        fetch: 'readonly',
+        AbortController: 'readonly',
       },
     },
   },
