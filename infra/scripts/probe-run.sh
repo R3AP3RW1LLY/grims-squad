@@ -60,6 +60,24 @@ PUBLIC_URL="${PUBLIC_URL:-https://grims-squad.com}"
 # would have started the minute this reached cron. The public path answers in 0.059s and is the
 # route a member's request actually travels, so it is both reachable and more honest about what is
 # being measured.
-export PROBE_URLS="${PROBE_URLS:-${PUBLIC_URL}/,${PUBLIC_URL}/forum,${PUBLIC_URL}/v1/health}"
+# ★ WIDENED AFTER THE OUTAGE OF 2026-08-06 ★
+#
+# The probe watched three URLs and reported all three healthy throughout that outage. It was
+# right — the home page, the forum and the health check were all fast. What had collapsed was the
+# COMPANION's colonisation route, which nothing was measuring: responses there went from 667ms to
+# 14,646 ms, and the first anybody knew was the squadron owner saying the app would not connect.
+#
+# A monitoring system that watches only what was slow last time is a monitoring system for last
+# time. The companion colonisation surface is added because it is the expensive one, the one with a
+# bulkhead in front of it, and the one whose slowness is the leading indicator of everything else
+# queueing behind it.
+#
+# ★ IT IS PROBED UNAUTHENTICATED, ON PURPOSE ★
+#
+# Without a device token this answers 401, which is a fine thing to measure: it proves the route is
+# reachable and how long the API takes to reject, and it costs the database nothing. Embedding a
+# real token in a cron script to measure it "properly" would put a credential on disk to watch a
+# latency number — INV-012, and not a trade worth making.
+export PROBE_URLS="${PROBE_URLS:-${PUBLIC_URL}/,${PUBLIC_URL}/forum,${PUBLIC_URL}/v1/health,${PUBLIC_URL}/v1/companion/colony/projects}"
 
 exec node "$REPO/tools/probe.mjs"

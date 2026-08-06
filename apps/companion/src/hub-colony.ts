@@ -174,6 +174,28 @@ export interface HubCall {
 type Answer<T> = { ok: true; data: T } | { ok: false; error: string };
 
 /**
+ * GETs currently in flight, keyed by their full URL.
+ *
+ * ★ THE APP'S OWN SHARE OF THE OUTAGE OF 2026-08-06 ★
+ *
+ * The hub's log showed NINE GETs for the same colonisation project inside three hundred
+ * milliseconds, sustained, from this app. Each made the hub price every commodity in the build.
+ * Response times went 667ms → 14,646ms, the hub's whole database connection pool went to that one
+ * route, and the squadron owner reported the companion would not connect at all.
+ *
+ * It would not connect because it was the thing preventing it. Every timeout produced another
+ * attempt and every attempt made the next timeout likelier — the app was its own denial of
+ * service.
+ *
+ * The hub now coalesces and sheds load, so this can no longer hurt anybody else. This is the other
+ * half: not asking nine times to begin with.
+ *
+ * Module scope rather than per-call: the whole point is that callers who do not know about each
+ * other still share one request.
+ */
+const inFlight = new Map<string, Promise<Answer<unknown>>>();
+
+/**
  * One request to the companion's colonisation surface.
  *
  * ★ EVERY FAILURE BECOMES A SENTENCE, NOT AN EXCEPTION ★
@@ -194,6 +216,22 @@ export async function hubColony<T>(
 ): Promise<Answer<T>> {
   if (call.deviceToken === '') return { ok: false, error: 'Pair this device first.' };
 
+  const url = `${call.apiBaseUrl.replace(/\/+$/, '')}/v1/companion/colony${path}`;
+
+  /*
+   * ★ READS ARE SHARED; WRITES NEVER ARE ★
+   *
+   * Two members joining a project, or one member pressing a button twice, are two events. Sharing
+   * a POST would silently drop one — and unlike a slow read, a dropped write is invisible until
+   * somebody notices the delivery they logged is missing.
+   */
+  const method = init?.method ?? 'GET';
+  if (method === 'GET') {
+    const joined = inFlight.get(url);
+    if (joined !== undefined) return joined as Promise<Answer<T>>;
+  }
+
+  const run = async (): Promise<Answer<T>> => {
   const doFetch = call.fetchImpl ?? fetch;
   const ac = new AbortController();
   const timer = setTimeout(() => ac.abort(), call.timeoutMs ?? 15_000);
@@ -249,6 +287,20 @@ export async function hubColony<T>(
   } finally {
     clearTimeout(timer);
   }
+  };
+
+  if (method !== 'GET') return run();
+
+  /*
+   * Cleared as soon as it settles, so this is DEDUPE and not a cache. Holding the entry after the
+   * answer arrived would mean a member pressing refresh sees the same numbers for ever, which
+   * trades one bug report for a worse one.
+   */
+  const flight = run().finally(() => {
+    inFlight.delete(url);
+  }) as Promise<Answer<unknown>>;
+  inFlight.set(url, flight);
+  return flight as Promise<Answer<T>>;
 }
 
 

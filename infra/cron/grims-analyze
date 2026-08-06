@@ -1,0 +1,31 @@
+# Keep the query planner's statistics honest.
+#
+# ★ WHY THIS EXISTS — 2026-08-06 ★
+#
+# Postgres believed `market_entries` held 30,281 rows. It held 18,847,651. It believed
+# `telemetry_events` held 1,723; it held 53,846. It believed `colony_build_costs`, `edsy_ids` and
+# `forum_posts` were EMPTY. Every plan in the database was costed from those numbers.
+#
+# What it cost: "cheapest source of this commodity within 100 ly" took seventy to a hundred and
+# fifteen seconds and returned nothing, the colonisation page fired one of those per commodity, the
+# companion app retried, and the API's entire connection pool went to one route until the site
+# stopped answering.
+#
+# ★ AUTOVACUUM COULD NOT FIX IT, BECAUSE OF WHAT IT READS ★
+#
+# Autoanalyze triggers on a PERCENTAGE OF THE ROW COUNT IT ALREADY BELIEVES. Believing the market
+# table held thirty thousand rows, it concluded the table was far too small to be worth visiting —
+# so the wrong number kept itself wrong, for as long as nobody looked. `last_autoanalyze` was
+# `never` on the largest table in the database.
+#
+# The per-table thresholds in 20260806060000_market_plan_health break that loop for the two tables
+# that matter most. This is the belt to that pair of braces: an unconditional pass over everything,
+# which cannot be talked out of running by the very statistic it exists to correct.
+#
+# It costs 2.3 seconds. There is no version of this that is not worth running.
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+
+# 04:20, after the nightly reconcile at 03:00 has finished rewriting the market, and well clear of
+# the 04:17 docker janitor.
+20 4 * * * root docker exec grims-postgres-1 psql -U grims -d grims -c 'ANALYZE' >> /var/log/grims-analyze.log 2>&1

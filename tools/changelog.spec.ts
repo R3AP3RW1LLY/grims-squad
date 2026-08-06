@@ -164,10 +164,8 @@ describe('the assembled release', () => {
      * reached 107 members. A commit body is written for whoever maintains this in a year; the
      * `Members:` trailer is written for the squadron.
      */
-    expect(release.websiteMd).toBe('### A website change\n\nWhat members see on the website.');
-    expect(release.platformMd).toBe(
-      '### A platform change\n\nWhat members see across the platform.',
-    );
+    expect(release.websiteMd).toBe('What members see on the website.');
+    expect(release.platformMd).toBe('What members see across the platform.');
     expect(release.companionMd).toBe('');
   });
 

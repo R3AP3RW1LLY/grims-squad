@@ -160,15 +160,27 @@ const LOOKS_LIKE_AN_ADDRESS = /\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b/g;
  * short paragraph.
  */
 export function memberSummary(body) {
-  const match = /^[ \t]*Members:[ \t]*([\s\S]*?)(?:\n[ \t]*\n|$)/im.exec(body ?? '');
-  if (match === null) return '';
+  /*
+   * Scanned by line rather than matched by one regular expression.
+   *
+   * The first version used /^[ \t]*Members:([\s\S]*?)(?:\n\n|$)/im and silently truncated every
+   * trailer to its first line: under the `m` flag `$` means end of LINE, so the alternation
+   * matched immediately. The preview showed "The companion app connects reliably again. It had
+   * been asking the hub" and stopped mid-sentence — which would have been published exactly like
+   * that.
+   */
+  const lines = (body ?? '').split('\n');
+  const start = lines.findIndex((line) => /^[ \t]*Members:/i.test(line));
+  if (start === -1) return '';
 
-  const text = (match[1] ?? '')
-    .split('\n')
-    .map((line) => line.trim())
-    .join(' ')
-    .trim();
+  const collected = [(lines[start] ?? '').replace(/^[ \t]*Members:[ \t]*/i, '')];
+  for (let i = start + 1; i < lines.length; i += 1) {
+    const line = lines[i] ?? '';
+    if (line.trim() === '') break; // the trailer is one paragraph
+    collected.push(line.trim());
+  }
 
+  const text = collected.join(' ').replace(/\s+/g, ' ').trim();
   return fitForMembers(text).replace(LOOKS_LIKE_AN_ADDRESS, '[redacted]').trim();
 }
 
@@ -272,13 +284,18 @@ export function buildRelease({ fromSha, toSha, commits, generatedAt, version = n
   }));
 
   /*
-   * Only entries that said something to members. A commit with no `Members:` trailer is not
-   * published at all — not even its subject, which is written for the same engineer the body is.
+   * Only entries that said something to members, and ONLY what they said.
+   *
+   * The subject is not published either. It is written for the same engineer the body is — the
+   * preview of this release had members reading "### The planner believed market_entries held
+   * 30,281 rows" above a paragraph about colonisation pages being fast. A heading that has to be
+   * translated is worse than no heading, and the member-facing sentence already names its own
+   * subject.
    */
   const sectionMd = (key) =>
     entries
       .filter((entry) => entry.sections.includes(key) && entry.detail !== '')
-      .map((entry) => `### ${entry.subject}\n\n${entry.detail}`)
+      .map((entry) => entry.detail)
       .join('\n\n');
 
   return {
