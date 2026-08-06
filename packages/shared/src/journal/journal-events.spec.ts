@@ -8,6 +8,7 @@ import {
   canonicalJson,
   telemetryCategoryFor,
   isBaselineCategory,
+  OPTIONAL_CATEGORIES,
   type JournalEventName,
 } from './journal-events.js';
 
@@ -112,6 +113,18 @@ describe('the event allowlist', () => {
        * is asked — which is exactly the distinction this pinned list exists to surface.
        */
       'ApproachSettlement',
+      /*
+       * ★ THE MINING MODULE, 2026-08-06 ★
+       *
+       * ProspectedAsteroid, AsteroidCracked and LaunchDrone, in their OWN `mining` category rather
+       * than folded into `trade` where MiningRefined lives. The reason is volume: ProspectedAsteroid
+       * fires on every limpet hit, several hundred an hour, against roughly twenty MiningRefined.
+       *
+       * A member happy for us to see what they hauled has not thereby agreed to send a row for
+       * every rock they shoot at. This is a genuinely new thing collected, from a new switch, and
+       * that is exactly what this pinned list exists to put in front of a reviewer.
+       */
+      'AsteroidCracked',
       'Bounty',
       /*
        * Added 2026-08-04 for the colonisation carrier holds. Under `carrier` with the other
@@ -143,6 +156,7 @@ describe('the event allowlist', () => {
       'Docked',
       'FSDJump',
       'FactionKillBond',
+      'LaunchDrone',
       'Location',
       // Added 2026-08-01 for live market prices. Optional, under `trade`: a
       // member who declines trade telemetry does not feed the price table.
@@ -153,6 +167,7 @@ describe('the event allowlist', () => {
       'MissionCompleted',
       'MultiSellExplorationData',
       'PVPKill',
+      'ProspectedAsteroid',
       'SAAScanComplete',
       'SellExplorationData',
       'SellMicroResources',
@@ -364,5 +379,79 @@ describe('canonicalJson', () => {
   it('distinguishes values that differ', () => {
     expect(canonicalJson({ a: 1 })).not.toBe(canonicalJson({ a: 2 }));
     expect(canonicalJson({ a: '1' })).not.toBe(canonicalJson({ a: 1 }));
+  });
+});
+
+describe('mining is its own category, and its own decision', () => {
+  /*
+   * ★ SQUADRON OWNER, 2026-08-06 ★
+   *
+   * "our own version of EDminer" — with FULL rock collection chosen deliberately over a summary,
+   * because it is the only way to answer "is this ring still paying" from more than one
+   * commander's memory. That is the one thing no single-player mining tool can ever do.
+   *
+   * ★ WHY IT IS NOT FILED UNDER `trade` ★
+   *
+   * `MiningRefined` already sits under trade, and the tempting thing is to put the rest there too.
+   * It would be wrong. `ProspectedAsteroid` fires on EVERY limpet hit — several hundred an hour
+   * while somebody is mining, against roughly twenty MiningRefined — and it is by a wide margin the
+   * highest-volume thing this platform would ever collect.
+   *
+   * A member who is happy for us to see what they hauled has not thereby agreed to send a row for
+   * every rock they shoot at. Volume that different deserves its own switch, and hiding it inside
+   * an existing one would make that switch mean something other than what it says.
+   */
+  it('MANDATORY: the mining events are collectable', () => {
+    for (const name of ['ProspectedAsteroid', 'AsteroidCracked', 'LaunchDrone']) {
+      expect(isAllowedEvent(name), `${name} is not collectable, so the mining tool has no data`).toBe(true);
+    }
+  });
+
+  it('MANDATORY: they are all under `mining`, not folded into trade', () => {
+    for (const name of ['ProspectedAsteroid', 'AsteroidCracked', 'LaunchDrone'] as const) {
+      expect(
+        telemetryCategoryFor(name),
+        `${name} is under another category — its volume would arrive on a switch that does not describe it`,
+      ).toBe('mining');
+    }
+  });
+
+  it('MANDATORY: mining is OPTIONAL, never baseline', () => {
+    /*
+     * The baseline three are what the platform exists to hold — who played, what rank, what they
+     * fly. A per-rock stream is emphatically not that, and making it unrefusable would be the
+     * exact thing INV-013 was amended to prevent.
+     */
+    expect(isBaselineCategory('mining')).toBe(false);
+    expect(OPTIONAL_CATEGORIES as readonly string[]).toContain('mining');
+  });
+
+  it('MANDATORY: a prospected rock keeps its materials, or the tool is blind', () => {
+    const kept = pickAllowedFields('ProspectedAsteroid', {
+      Materials: [{ Name: 'Painite', Proportion: 38.4 }],
+      Content: '$AsteroidMaterialContent_High;',
+      Content_Localised: 'High',
+      MotherlodeMaterial: 'Platinum',
+      Remaining: 100,
+      // Not wanted, and named here so the assertion below is about a real field rather than a
+      // hypothetical one.
+      SurveyorScannerID: 12345,
+    });
+
+    expect(kept['Materials'], 'the material list is dropped, so no percentage can ever be shown').toBeDefined();
+    expect(kept['Content_Localised']).toBe('High');
+    expect(kept['MotherlodeMaterial']).toBe('Platinum');
+    expect(kept['SurveyorScannerID'], 'an unnamed field survived the allowlist').toBeUndefined();
+  });
+
+  it('MANDATORY: MiningRefined keeps enough to score a tonne', () => {
+    // The leaderboard is tonnes × rarity, and rarity is looked up from the name. Losing the name
+    // would make every tonne score the floor, silently.
+    const kept = pickAllowedFields('MiningRefined', {
+      Type: '$painite_name;',
+      Type_Localised: 'Painite',
+    });
+
+    expect(kept['Type_Localised'] ?? kept['Type']).toBeDefined();
   });
 });

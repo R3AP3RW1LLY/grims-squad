@@ -114,6 +114,26 @@ export const JOURNAL_EVENTS = {
   /** Mined and refined, which the trade board counts separately. */
   MiningRefined: 'trade',
 
+  /*
+   * ★ MINING, IN ITS OWN CATEGORY — SQUADRON OWNER, 2026-08-06 ★
+   *
+   * "our own version of EDminer", with FULL rock collection chosen deliberately over a summary,
+   * because it is the only way to answer "is this ring still paying" from more than one
+   * commander's memory — the one thing no single-player mining tool can ever do.
+   *
+   * NOT folded in with `trade`, where MiningRefined sits, and the reason is volume.
+   * `ProspectedAsteroid` fires on EVERY limpet hit: several hundred an hour while somebody is
+   * mining, against roughly twenty MiningRefined. It is by a wide margin the largest stream this
+   * platform would ever collect.
+   *
+   * A member happy for us to see what they hauled has not thereby agreed to send a row for every
+   * rock they shoot at. Volume that different deserves its own switch, and hiding it inside an
+   * existing one would make that switch mean something other than what it says.
+   */
+  ProspectedAsteroid: 'mining',
+  AsteroidCracked: 'mining',
+  LaunchDrone: 'mining',
+
   /** Scan data sold, which is how exploration is actually scored. */
   MultiSellExplorationData: 'exploration',
   SellExplorationData: 'exploration',
@@ -311,6 +331,28 @@ export const EVENT_FIELDS: Record<JournalEventName, readonly string[]> = {
    */
   Market: ['MarketID', 'StationName', 'StarSystem'],
   MiningRefined: ['Type', 'Type_Localised'],
+  /*
+   * The material list is the whole point — a prospected rock with no percentages is an announcement
+   * that a rock exists. `Content_Localised` is Frontier's own word for overall richness (Low,
+   * Medium, High) and `MotherlodeMaterial` is the rock a core miner is hunting, rare enough to be
+   * worth naming rather than inferring from a percentage later.
+   *
+   * `Remaining` is kept because a rock already half-mined by somebody else reads very differently.
+   * Nothing else: no scanner ids, no positions.
+   */
+  ProspectedAsteroid: [
+    'Materials',
+    'Content',
+    'Content_Localised',
+    'MotherlodeMaterial',
+    'MotherlodeMaterial_Localised',
+    'Remaining',
+  ],
+  // Just the fact and the ring. A cracked core is the deed the badge counts.
+  AsteroidCracked: ['Body'],
+  // Which limpet, so the tool can say how many prospectors are left in the hold — running out
+  // mid-ring is the classic mining failure and nothing else warns about it.
+  LaunchDrone: ['Type'],
 
   MultiSellExplorationData: ['TotalEarnings', 'BaseValue', 'Bonus', 'Discovered'],
   SellExplorationData: ['TotalEarnings', 'BaseValue', 'Bonus', 'Systems'],
@@ -491,7 +533,9 @@ export type TelemetryCategoryName =
   /** On-foot: the suit and weapons a commander takes out of the ship. */
   | 'onfoot'
   /** Colonisation: construction-site needs, and deliveries to them. */
-  | 'colonisation';
+  | 'colonisation'
+  /** Mining: every rock prospected, and the cores cracked. The largest stream here. */
+  | 'mining';
 
 const CATEGORY_BY_LABEL: Record<JournalCategory, TelemetryCategoryName> = {
   // ---- baseline -----------------------------------------------------------
@@ -513,6 +557,7 @@ const CATEGORY_BY_LABEL: Record<JournalCategory, TelemetryCategoryName> = {
   carrier: 'carrier',
   onfoot: 'onfoot',
   colonisation: 'colonisation',
+  mining: 'mining',
 };
 
 /**
@@ -546,6 +591,7 @@ export const OPTIONAL_CATEGORIES: readonly TelemetryCategoryName[] = [
   'exploration',
   'bgs',
   'carrier',
+  'mining',
 ];
 
 /** Is this category collected regardless of consent? */

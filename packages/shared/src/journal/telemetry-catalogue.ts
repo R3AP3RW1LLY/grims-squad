@@ -296,6 +296,48 @@ export const TELEMETRY_CATALOGUE: readonly CatalogueGroup[] = [
       },
     ],
   },
+  {
+    /*
+     * ★ MINING — SQUADRON OWNER, 2026-08-06 ★
+     *
+     * "our own version of EDminer ... must meet / exceed ED tools as it works currently!"
+     *
+     * ★ ITS OWN GROUP, AND THE HONEST REASON IS VOLUME ★
+     *
+     * MiningRefined already sits under Trading, and the tempting thing was to put the rest there
+     * too. It would have been wrong. A prospected rock is reported for EVERY limpet — several
+     * hundred an hour while somebody is mining, against roughly twenty refined tonnes.
+     *
+     * A member happy for us to see what they hauled has not thereby agreed to send a row for every
+     * rock they shoot at, and burying that inside an existing switch would make the switch mean
+     * something other than what it says. So it is its own, and the purpose line below says plainly
+     * what it buys them: the ring intelligence is the whole reason to leave it on.
+     */
+    category: 'mining',
+    label: 'Mining',
+    purpose:
+      'Every rock you prospect, so the app can show what is in it before you shoot — and so the squadron can tell which rings are actually paying this week, which no single-player tool can do.',
+    required: false,
+    entries: [
+      {
+        event: 'ProspectedAsteroid',
+        label: 'Rocks you prospect',
+        reveals:
+          'What each asteroid contains and in what proportions, whether it holds a motherlode, and the ring it was in. This is the busiest thing the app sends — one report per limpet.',
+      },
+      {
+        event: 'AsteroidCracked',
+        label: 'Cores you crack',
+        reveals: 'That you cracked a core, and where. Counts toward the Deep Core board’s achievements.',
+      },
+      {
+        event: 'LaunchDrone',
+        label: 'Limpets you launch',
+        reveals:
+          'Which kind of limpet you launched — so the app can tell you how many prospectors you have left before you run out mid-ring.',
+      },
+    ],
+  },
 ];
 
 /**
