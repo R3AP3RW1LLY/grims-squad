@@ -13,6 +13,8 @@ import {
   maskFromString,
   missingPermissions,
   rolesGranting,
+  PERMISSION_NAMES,
+  PRIVILEGED_PERMISSIONS,
 } from './permissions.js';
 
 describe('permission bitmask', () => {
@@ -166,5 +168,85 @@ describe('introspection helpers', () => {
       'FORUM_VIEW_OFFICER',
     ]);
     expect(missingPermissions(ROLE_PRESETS.officer, need)).toEqual([]);
+  });
+});
+
+/**
+ * The mining bits.
+ *
+ * ★ SQUADRON OWNER, 2026-08-06 ★
+ *
+ * "also add roles and permissions to the Mining system, BGS already has roles included in the
+ * admin area."
+ *
+ * ★ WHY MINING COULD NOT KEEP RIDING ON TRADE_QUERY ★
+ *
+ * The mining module shipped gated on TRADE_QUERY, because it was the nearest existing bit. That
+ * conflates two unrelated things: taking the market away from somebody would take mining with it,
+ * and there was no way to appoint a mining lead at all. BGS has had exactly this shape since it was
+ * designed — view, report, set orders — and mining now matches it.
+ */
+describe('the mining permissions', () => {
+  it('MANDATORY: the mining bits are fresh, not borrowed from another domain', () => {
+    /*
+     * ★ THE ONE MISTAKE THAT CANNOT BE UNDONE ★
+     *
+     * Every stored role mask is interpreted BY POSITION. Reusing a bit another permission already
+     * owns would silently change what every role in the database grants — an officer role would
+     * quietly gain or lose something nobody edited. So each mining bit must be its own.
+     */
+    const bits = [P.MINING_VIEW, P.MINING_MANAGE, P.MINING_SET_ORDERS];
+
+    for (const bit of bits) {
+      const collisions = PERMISSION_NAMES.filter(
+        (name) => !name.startsWith('MINING_') && (P[name] & bit) !== 0n,
+      );
+      expect(collisions, `a mining bit collides with ${collisions.join(', ')}`).toHaveLength(0);
+    }
+
+    // And distinct from each other.
+    expect(P.MINING_VIEW & P.MINING_MANAGE).toBe(0n);
+    expect(P.MINING_VIEW & P.MINING_SET_ORDERS).toBe(0n);
+    expect(P.MINING_MANAGE & P.MINING_SET_ORDERS).toBe(0n);
+  });
+
+  it('MANDATORY: every member may look at mining; only officers direct it', () => {
+    /*
+     * Viewing is the floor — the ring survey is built from members' own limpets and it would be
+     * absurd for a contributor not to be able to read it. Curating it and issuing orders steer the
+     * whole squadron's evening, which is the same standing BGS_SET_ORDERS has.
+     */
+    expect(ROLE_PRESETS.member & P.MINING_VIEW).toBe(P.MINING_VIEW);
+    expect(ROLE_PRESETS.member & P.MINING_MANAGE).toBe(0n);
+    expect(ROLE_PRESETS.member & P.MINING_SET_ORDERS).toBe(0n);
+
+    expect(ROLE_PRESETS.officer & P.MINING_MANAGE).toBe(P.MINING_MANAGE);
+    expect(ROLE_PRESETS.officer & P.MINING_SET_ORDERS).toBe(P.MINING_SET_ORDERS);
+  });
+
+  it('MANDATORY: setting mining orders is privileged, like setting BGS orders', () => {
+    /*
+     * PRIVILEGED_PERMISSIONS is the set that demands a second factor. Directing where the squadron
+     * spends an evening belongs there for the same reason BGS_SET_ORDERS does — and being the only
+     * one of the pair NOT in the list would be an inconsistency somebody would eventually exploit.
+     */
+    expect(PRIVILEGED_PERMISSIONS & P.MINING_SET_ORDERS).toBe(
+      P.MINING_SET_ORDERS,
+    );
+  });
+
+  it('MANDATORY: the existing `miner` tag is the routing hook, and stays one', () => {
+    /*
+     * ★ NO SECOND MINING TAG ★
+     *
+     * A `mining_team` tag was drafted here and then deleted: `miner` already exists, and it is the
+     * same shape as `bgs_team` — a tag for matchmaking and notification routing rather than a
+     * grant. Two tags meaning "does the mining" would be two lists for an officer to keep in step,
+     * and the one that drifted would be whichever the admin page does not show first.
+     *
+     * Direction comes from the OFFICER preset, exactly as it does for BGS.
+     */
+    expect(ROLE_PRESETS.miner).toBe(NO_PERMISSIONS);
+    expect(ROLE_PRESETS.miner & P.MINING_SET_ORDERS).toBe(0n);
   });
 });

@@ -288,7 +288,9 @@ const NAV: readonly NavDefinition[] = [
     section: 'squadron',
     subsection: 'Answer the Call',
     blurb: 'Which rings the squadron has actually been finding worth mining, this fortnight.',
-    requires: Permission.TRADE_QUERY,
+    // Its own bit since 2026-08-06. It rode on TRADE_QUERY for a day, which meant taking the
+    // market away from somebody took mining with it.
+    requires: Permission.MINING_VIEW,
   },
   /*
    * ★ LEADERBOARDS — SQUADRON OWNER, 2026-08-04 ★
@@ -338,7 +340,7 @@ const NAV: readonly NavDefinition[] = [
     section: 'squadron',
     subsection: 'Leaderboards',
     blurb: 'Who has refined the most — scored on what came out of the refinery, not what it sold for.',
-    requires: Permission.TRADE_QUERY,
+    requires: Permission.MINING_VIEW,
   },
   {
     href: '/ops',

@@ -23,7 +23,7 @@
  *     0-9   forum        10-19 ops         20-29 fleet & carriers
  *     30-39 BGS          40-42 trade       43-49 shipyard
  *     50-59 AI           60-69 admin       70-79 telemetry
- *     80+   reserved
+ *     80    support      81-83 mining      84+   reserved
  *
  *   The 40s were "trade" alone until 2026-08-01. Trade had used three of ten for a year and the
  *   shipyard needed four; a fresh decade for four bits would have cost the last unreserved block
@@ -311,6 +311,41 @@ export const Permission = {
    * SQUADRON_STANDING_PERMISSIONS — whoever runs the website answers questions about it.
    */
   SUPPORT_AGENT: 1n << 80n,
+
+  // ── Mining ───────────────────────────────────────────────────────────────
+  /*
+   * ★ SQUADRON OWNER, 2026-08-06 ★
+   *
+   * "also add roles and permissions to the Mining system, BGS already has roles included in the
+   * admin area."
+   *
+   * ★ WHY MINING COULD NOT KEEP RIDING ON TRADE_QUERY ★
+   *
+   * The module shipped gated on TRADE_QUERY because it was the nearest existing bit. That conflates
+   * two unrelated things: taking the market away from somebody would take mining with it, and there
+   * was no way to appoint a mining lead at all. BGS has had the right shape since it was designed —
+   * view, report, set orders — and mining now matches it.
+   *
+   * Bits 81-83, a fresh block above SUPPORT_AGENT. Borrowing a gap in somebody else's decade would
+   * put the next mining bit forty positions away, and RENUMBERING an existing bit is the one
+   * mistake that cannot be undone: every stored role mask is interpreted by position, so an officer
+   * role would silently gain or lose something nobody edited.
+   */
+  /** Ring 1. The mining page, the squadron ring survey, and a member's own sessions. */
+  MINING_VIEW: 1n << 81n,
+  /**
+   * Ring 2. Curate the ring survey — hide a ring, pin one worth flying, set the squadron's
+   * "worth shooting" bar.
+   */
+  MINING_MANAGE: 1n << 82n,
+  /**
+   * Ring 2. Issue mining orders: "this week, Platinum in Hyades for the colony build."
+   *
+   * Steers the whole squadron's evening, which is precisely the standing BGS_SET_ORDERS has — so it
+   * joins BGS_SET_ORDERS in PRIVILEGED_PERMISSIONS rather than being the one of the pair that does
+   * not need a second factor.
+   */
+  MINING_SET_ORDERS: 1n << 83n,
 } as const;
 
 export type PermissionName = keyof typeof Permission;
@@ -345,6 +380,8 @@ export const PRIVILEGED_PERMISSIONS: PermissionMask =
   Permission.FORUM_MODERATE |
   Permission.OPS_MANAGE |
   Permission.BGS_SET_ORDERS |
+  // Directing where the squadron spends an evening — the same standing as BGS_SET_ORDERS above.
+  Permission.MINING_SET_ORDERS |
   Permission.FLEET_APPROVE_DOCTRINE |
   /*
    * The support console reads members' and guests' private help conversations — other people's
@@ -539,6 +576,14 @@ const MEMBER: PermissionMask =
   P.COLONY_VIEW |
   P.COLONY_POST |
   P.COLONY_SHARE_PUBLIC |
+  /*
+   * Reading the ring survey and their own mining history.
+   *
+   * The floor, not a privilege: the survey is built from members' own prospector limpets, and a
+   * contributor who could not read what their rocks add up to would be a strange thing to ship.
+   * Curating it and issuing orders are officers' — granted in OFFICER below.
+   */
+  P.MINING_VIEW |
   P.TELEMETRY_WRITE;
 
 /** Member plus the ability to create and run operations. */
@@ -556,6 +601,17 @@ const OFFICER: PermissionMask =
    * the same kind of decision as BGS_SET_ORDERS, and held by the same people.
    */
   P.COLONY_MANAGE |
+  /*
+   * Directing the squadron's mining — curating the ring survey, and issuing the orders that decide
+   * where an evening's limpets go.
+   *
+   * Granted here rather than through the `miner` tag, deliberately. `miner` is a matchmaking and
+   * notification tag that grants nothing, the same as `combat_wing` and `explorer`; making it the
+   * route to MINING_SET_ORDERS would turn "tell me about mining ops" into "direct the squadron",
+   * which is not what anybody ticking that box is agreeing to.
+   */
+  P.MINING_MANAGE |
+  P.MINING_SET_ORDERS |
   P.FORUM_VIEW_OFFICER |
   P.FORUM_POST_OFFICER |
   /*

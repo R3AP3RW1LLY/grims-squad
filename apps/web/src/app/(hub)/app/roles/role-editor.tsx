@@ -170,6 +170,12 @@ export const DESCRIBES: Readonly<Record<string, string>> = {
     'Pair a device and send journal data. Gates the CAPABILITY only — what is actually stored is decided by the member’s own settings.',
   SUPPORT_AGENT:
     'Work the Help & Support console: read every help conversation — members’ and guests’ — and answer under their own name. Asking for help needs no permission at all; this is the other side of the desk.',
+  MINING_VIEW:
+    'Read the ring survey and their own mining history. On for every member — the survey is built from members’ own prospector limpets, so a contributor who could not read it would be a strange thing to ship.',
+  MINING_MANAGE:
+    'Curate the ring survey: hide a ring that is not what it looks like, pin one worth flying, and set the squadron’s “worth shooting” bar.',
+  MINING_SET_ORDERS:
+    'Issue mining orders — “this week, Platinum in Hyades for the colony build”. Steers where the squadron spends an evening, so it asks for a second factor, exactly as setting BGS orders does.',
 };
 
 interface PermissionGroup {
@@ -336,6 +342,23 @@ const PERMISSION_GROUPS: readonly PermissionGroup[] = [
     title: 'Support',
     note: 'Who answers the help chat. The chat itself is open to everyone, guests included — this gates the console that reads and answers it.',
     items: [['SUPPORT_AGENT', 80]],
+  },
+  {
+    /*
+     * Mining got its own bits on 2026-08-06. It had shipped gated on TRADE_QUERY, which meant
+     * taking the market away from somebody took mining with it, and there was no way to appoint a
+     * mining lead at all.
+     *
+     * This page's own test is what caught the omission: the bits existed, the nav used them, and
+     * no officer could have granted them.
+     */
+    title: 'Mining',
+    note: 'Reading the ring survey is every member’s. Curating it and issuing orders steer the whole squadron’s evening, the same way BGS orders do.',
+    items: [
+      ['MINING_VIEW', 81],
+      ['MINING_MANAGE', 82],
+      ['MINING_SET_ORDERS', 83],
+    ],
   },
 ];
 
