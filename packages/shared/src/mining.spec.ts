@@ -6,6 +6,8 @@ import {
   CORE_ONLY_MATERIALS,
   worthShooting,
   DEFAULT_PROSPECT_THRESHOLD,
+  continuesSession,
+  MINING_SESSION_GAP_MINUTES,
 } from './mining.js';
 import { LEADERBOARDS, TIER_LADDERS, LEADERBOARD_BADGES as BADGES } from './leaderboards.js';
 
@@ -180,5 +182,73 @@ describe('the core-only list is the one the weights use', () => {
     for (const material of CORE_ONLY_MATERIALS) {
       expect(materialWeight(material), `${material} is listed core-only but is not weighted so`).toBe(8);
     }
+  });
+});
+
+/**
+ * ★ WHERE ONE EVENING ENDS AND THE NEXT BEGINS ★
+ *
+ * A mining session is a continuous stretch of rocks. It has to be decided INCREMENTALLY, because
+ * the scorer reads telemetry in batches behind a cursor and never holds a member's whole history in
+ * memory — so the question is always the narrow one: does this rock join the session that is
+ * already open, or start a new one?
+ *
+ * The answer is what "tonnes per hour" divides by. Get it wrong in one direction and an evening
+ * splits into forty sessions of one rock each; wrong in the other and a fortnight of mining is a
+ * single session with a rate near zero.
+ */
+describe('deciding when a mining session continues', () => {
+  const T0 = Date.parse('2026-08-06T20:00:00Z');
+
+  it('MANDATORY: nothing open means nothing to continue', () => {
+    // The first rock a member ever prospects has no predecessor. It opens a session.
+    expect(continuesSession(null, T0)).toBe(false);
+  });
+
+  it('MANDATORY: rocks minutes apart are the same session', () => {
+    expect(continuesSession(T0, T0 + 60_000)).toBe(true);
+    expect(continuesSession(T0, T0 + 20 * 60_000)).toBe(true);
+  });
+
+  it('MANDATORY: a long gap starts a new session', () => {
+    // Next evening. Joining these would divide one night's tonnage by twenty-four hours.
+    expect(continuesSession(T0, T0 + 24 * 3_600_000)).toBe(false);
+  });
+
+  it('MANDATORY: the boundary itself still continues', () => {
+    /*
+     * A member who flies to the station, sells, and comes back inside the window is still on the
+     * same trip. Exactly-at-the-gap is the common case of that, not an edge case — it is what a
+     * round trip to a nearby station actually costs.
+     */
+    expect(continuesSession(T0, T0 + MINING_SESSION_GAP_MINUTES * 60_000)).toBe(true);
+    expect(continuesSession(T0, T0 + MINING_SESSION_GAP_MINUTES * 60_000 + 1)).toBe(false);
+  });
+
+  it('MANDATORY: an out-of-order event joins rather than opening a phantom session', () => {
+    /*
+     * Journals upload in chunks and clocks are not perfectly monotonic. A rock timestamped a second
+     * BEFORE the previous one must not open a second session — that would leave two overlapping
+     * sessions for the same evening, and every rate computed from either would be wrong.
+     */
+    expect(continuesSession(T0, T0 - 1_000)).toBe(true);
+  });
+
+  it('MANDATORY: a rock from last week does not join tonight', () => {
+    /*
+     * The mutation that proved this test was missing: without the absolute difference, ANY
+     * backwards step counts as "no gap", so a member re-uploading an old journal would have every
+     * rock in it swallowed by whatever session is currently open. One session would then span a
+     * fortnight and its tonnes-per-hour would round to zero.
+     *
+     * Small backwards steps join (clocks wobble); large ones are a different evening.
+     */
+    expect(continuesSession(T0, T0 - 7 * 24 * 3_600_000)).toBe(false);
+  });
+
+  it('MANDATORY: Date objects and epoch milliseconds decide alike', () => {
+    // The worker reads `Date` off Postgres; the companion holds numbers. One rule for both.
+    expect(continuesSession(new Date(T0), new Date(T0 + 60_000))).toBe(true);
+    expect(continuesSession(new Date(T0), new Date(T0 + 24 * 3_600_000))).toBe(false);
   });
 });

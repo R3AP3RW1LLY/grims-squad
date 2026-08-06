@@ -278,6 +278,14 @@ enum TelemetryCategory {
   /// member was at a specific construction site at a specific moment, which is rather more than a
   /// tonnage on a leaderboard, and declining one should not cost the other.
   colonisation
+  /// Every rock prospected and every tonne refined.
+  ///
+  /// Its own category because of VOLUME, not sensitivity. `ProspectedAsteroid` fires on every
+  /// limpet hit — several hundred an hour while somebody is mining, against roughly twenty
+  /// `MiningRefined`. A member happy for us to see what they hauled has not thereby agreed to send
+  /// a row for every rock they shoot at, and hiding that inside an existing switch would make that
+  /// switch mean something other than what it says.
+  mining
 }
 
 /// Delivery channel for a notification fan-out.

@@ -16,87 +16,15 @@
  * by launching Electron and flying to a ring is a fold nobody will ever test again.
  */
 
-import { worthShooting, type ProspectThresholds } from '@grims/shared';
+import { worthShooting, type ProspectThresholds, type Rock } from '@grims/shared';
 
-export interface RockMaterial {
-  readonly name: string;
-  /** Percentage of the rock, as the game reports it. */
-  readonly percent: number;
-}
-
-export interface Rock {
-  /** Every material, richest first — see `readRock`. */
-  readonly materials: readonly RockMaterial[];
-  /** The richest one. Never null: a rock with no materials is not a Rock at all. */
-  readonly top: RockMaterial;
-  /** The rock a core miner is hunting, when there is one. */
-  readonly motherlode: string | null;
-  /** Frontier's own word for overall richness: Low, Medium, High. */
-  readonly content: string | null;
-  /** How much is left, for a rock somebody else has already been at. */
-  readonly remaining: number | null;
-}
-
-function str(v: unknown): string | null {
-  return typeof v === 'string' && v.trim() !== '' ? v.trim() : null;
-}
-
-/** Frontier's display name where it exists, the internal symbol cleaned up otherwise. */
-function materialName(raw: Record<string, unknown>): string | null {
-  return str(raw['Name_Localised']) ?? str(raw['Name']);
-}
-
-/**
- * One `ProspectedAsteroid` payload, read into something a panel can draw.
- *
- * Returns null for a rock with nothing usable on it. That is not an error — a prospector limpet on
- * a barren rock has genuinely told the member something — but an overlay drawing an empty list
- * looks broken, so the caller keeps showing the last real rock and only moves the counters.
+/*
+ * `readRock` and its types moved to @grims/shared once the worker needed to read the same payload
+ * on ingest. Re-exported here so every existing importer — and the fifteen tests below it — keep
+ * working against the same names.
  */
-export function readRock(payload: unknown): Rock | null {
-  if (typeof payload !== 'object' || payload === null) return null;
-  const p = payload as Record<string, unknown>;
-
-  const raw = p['Materials'];
-  if (!Array.isArray(raw)) return null;
-
-  const materials: RockMaterial[] = [];
-  for (const entry of raw as unknown[]) {
-    if (typeof entry !== 'object' || entry === null) continue;
-    const item = entry as Record<string, unknown>;
-
-    const name = materialName(item);
-    const percent = item['Proportion'];
-    /*
-     * A non-numeric proportion is dropped rather than coerced. `Number('lots')` is NaN, which
-     * renders as "NaN%" on a panel somebody is reading at a glance and sorts unpredictably against
-     * real numbers — one bad field would scramble the whole list.
-     */
-    if (name === null || typeof percent !== 'number' || !Number.isFinite(percent)) continue;
-
-    materials.push({ name, percent });
-  }
-
-  if (materials.length === 0) return null;
-
-  /*
-   * ★ SORTED, BECAUSE FRONTIER DOES NOT ★
-   *
-   * The journal lists materials in its own order. A panel showing that order would put 4%
-   * Bertrandite above 38% Painite — the exact opposite of the decision being made in the two
-   * seconds the rock is on screen.
-   */
-  materials.sort((a, b) => b.percent - a.percent);
-
-  return {
-    materials,
-    // Safe: the length check above guarantees one.
-    top: materials[0] as RockMaterial,
-    motherlode: str(p['MotherlodeMaterial_Localised']) ?? str(p['MotherlodeMaterial']),
-    content: str(p['Content_Localised']) ?? str(p['Content']),
-    remaining: typeof p['Remaining'] === 'number' ? p['Remaining'] : null,
-  };
-}
+export { readRock } from '@grims/shared';
+export type { Rock, RockMaterial } from '@grims/shared';
 
 export interface ProspectingState {
   /** The rock on screen. Survives a barren one — see the fold. */

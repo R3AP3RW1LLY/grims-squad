@@ -91,3 +91,17 @@ CREATE INDEX IF NOT EXISTS "prospected_rocks_user_idx"
 --
 -- No DDL needed: `leaderboard_events` already carries an arbitrary board key. Recorded here so the
 -- next reader does not go looking for a mining_claims table that was deliberately never created.
+
+-- ────────────────────────────────────────────────────── 5. the consent category itself
+--
+-- ★ CAUGHT BY mining-ingest.int.spec.ts, NOT BY THE COMPILER ★
+--
+-- `telemetry_events.category` is a Postgres ENUM. MINING 2 added 'mining' to the TypeScript union
+-- and to every allowlist, and all of that typechecked green — but without this line the database
+-- rejects the value outright, so EVERY rock and every refined tonne the companion sent would have
+-- been thrown out at insert with a 22P02. The whole module would have shipped, looked complete,
+-- and collected nothing.
+--
+-- IF NOT EXISTS because ALTER TYPE .. ADD VALUE is not transactional on older servers and this
+-- migration must be safe to re-run.
+ALTER TYPE "TelemetryCategory" ADD VALUE IF NOT EXISTS 'mining';

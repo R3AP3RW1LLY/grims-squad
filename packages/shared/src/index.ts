@@ -212,5 +212,8 @@ export {
   materialWeight,
   miningPoints,
   worthShooting,
+  MINING_SESSION_GAP_MINUTES,
+  continuesSession,
+  readRock,
 } from './mining.js';
-export type { ProspectThresholds } from './mining.js';
+export type { ProspectThresholds, Rock, RockMaterial } from './mining.js';

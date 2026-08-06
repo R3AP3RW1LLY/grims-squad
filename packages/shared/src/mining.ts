@@ -160,3 +160,136 @@ export function worthShooting(
 
   return percent >= bar;
 }
+
+/**
+ * How long a miner can be away before the evening counts as over.
+ *
+ * Thirty minutes because that is a round trip: fly to the station, sell, come back. Shorter and a
+ * single sale run splits the night into two sessions with half the tonnage each; much longer and
+ * "after dinner" merges into "before dinner" and the rate is computed across an hour of nothing.
+ */
+export const MINING_SESSION_GAP_MINUTES = 30;
+
+/**
+ * Does this rock belong to the session already open, or start a new one?
+ *
+ * ★ INCREMENTAL BY NECESSITY ★
+ *
+ * The scorer reads telemetry in batches behind a cursor and never holds a member's whole history in
+ * memory, so sessionisation cannot be a fold over everything. It has to answer the narrow question
+ * one row at a time — which is also the only shape that survives a replayed batch.
+ *
+ * ★ OUT-OF-ORDER EVENTS JOIN ★
+ *
+ * Journals upload in chunks and clocks are not perfectly monotonic, so a rock can arrive stamped
+ * slightly BEFORE the one before it. Treating that as a gap would open a second session overlapping
+ * the first, and every rate computed from either would be wrong. Taking the absolute difference
+ * makes a backwards step join, which is what it always is in practice.
+ */
+export function continuesSession(
+  lastAt: Date | number | null,
+  nextAt: Date | number,
+  gapMinutes: number = MINING_SESSION_GAP_MINUTES,
+): boolean {
+  // No session open. The caller opens one; there is nothing to continue.
+  if (lastAt === null) return false;
+
+  const last = lastAt instanceof Date ? lastAt.getTime() : lastAt;
+  const next = nextAt instanceof Date ? nextAt.getTime() : nextAt;
+
+  return Math.abs(next - last) <= gapMinutes * 60_000;
+}
+
+
+/* ───────────────────────────────────────────────── reading one prospected rock
+
+ * ★ SHARED BECAUSE TWO READERS MUST NOT DISAGREE ★
+ *
+ * The companion draws the rock on an overlay; the worker files it in `prospected_rocks` and rolls
+ * it into the ring intelligence the whole squadron reads. If those two ever disagreed about which
+ * material is the top one, a member would be shown a highlight the squadron's own history does not
+ * support — and there would be no way to tell which of the two was lying.
+ *
+ * So it lives here and both import it. Moved out of the companion once the worker needed it, with
+ * the companion's fifteen prospector tests left untouched as the proof the move was faithful.
+ */
+
+export interface RockMaterial {
+  readonly name: string;
+  /** Percentage of the rock, as the game reports it. */
+  readonly percent: number;
+}
+
+export interface Rock {
+  /** Every material, richest first — see `readRock`. */
+  readonly materials: readonly RockMaterial[];
+  /** The richest one. Never null: a rock with no materials is not a Rock at all. */
+  readonly top: RockMaterial;
+  /** The rock a core miner is hunting, when there is one. */
+  readonly motherlode: string | null;
+  /** Frontier's own word for overall richness: Low, Medium, High. */
+  readonly content: string | null;
+  /** How much is left, for a rock somebody else has already been at. */
+  readonly remaining: number | null;
+}
+
+function str(v: unknown): string | null {
+  return typeof v === 'string' && v.trim() !== '' ? v.trim() : null;
+}
+
+/** Frontier's display name where it exists, the internal symbol cleaned up otherwise. */
+function materialName(raw: Record<string, unknown>): string | null {
+  return str(raw['Name_Localised']) ?? str(raw['Name']);
+}
+
+/**
+ * One `ProspectedAsteroid` payload, read into something a panel can draw.
+ *
+ * Returns null for a rock with nothing usable on it. That is not an error — a prospector limpet on
+ * a barren rock has genuinely told the member something — but an overlay drawing an empty list
+ * looks broken, so the caller keeps showing the last real rock and only moves the counters.
+ */
+export function readRock(payload: unknown): Rock | null {
+  if (typeof payload !== 'object' || payload === null) return null;
+  const p = payload as Record<string, unknown>;
+
+  const raw = p['Materials'];
+  if (!Array.isArray(raw)) return null;
+
+  const materials: RockMaterial[] = [];
+  for (const entry of raw as unknown[]) {
+    if (typeof entry !== 'object' || entry === null) continue;
+    const item = entry as Record<string, unknown>;
+
+    const name = materialName(item);
+    const percent = item['Proportion'];
+    /*
+     * A non-numeric proportion is dropped rather than coerced. `Number('lots')` is NaN, which
+     * renders as "NaN%" on a panel somebody is reading at a glance and sorts unpredictably against
+     * real numbers — one bad field would scramble the whole list.
+     */
+    if (name === null || typeof percent !== 'number' || !Number.isFinite(percent)) continue;
+
+    materials.push({ name, percent });
+  }
+
+  if (materials.length === 0) return null;
+
+  /*
+   * ★ SORTED, BECAUSE FRONTIER DOES NOT ★
+   *
+   * The journal lists materials in its own order. A panel showing that order would put 4%
+   * Bertrandite above 38% Painite — the exact opposite of the decision being made in the two
+   * seconds the rock is on screen.
+   */
+  materials.sort((a, b) => b.percent - a.percent);
+
+  return {
+    materials,
+    // Safe: the length check above guarantees one.
+    top: materials[0] as RockMaterial,
+    motherlode: str(p['MotherlodeMaterial_Localised']) ?? str(p['MotherlodeMaterial']),
+    content: str(p['Content_Localised']) ?? str(p['Content']),
+    remaining: typeof p['Remaining'] === 'number' ? p['Remaining'] : null,
+  };
+}
