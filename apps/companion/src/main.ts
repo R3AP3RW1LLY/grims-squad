@@ -103,6 +103,9 @@ import {
 } from './docked.js';
 import { capacityFrom, parseCargo, type Hold } from './cargo.js';
 import { EMPTY_TRIP, type TripLedger } from './trip-ledger.js';
+import { EMPTY_PROSPECTING, type ProspectingState } from './prospector.js';
+import { EMPTY_REFINING, type RefiningState } from './refinery.js';
+import { readMiningSettings } from './mining-settings.js';
 import { EMPTY_CARRIER_HOLD, carrierSnapshot, type CarrierHoldState } from './carrier-hold.js';
 import { accumulate } from './totals.js';
 import { isGameRunning, isActivelyPlaying,
@@ -264,6 +267,15 @@ let cargoCapacity: number | null = null;
  * of trip-ledger.ts.
  */
 let trip: TripLedger = EMPTY_TRIP;
+
+/**
+ * The mining session, carried between passes the same way `trip` is.
+ *
+ * Unseeded on start for the same reason: a hit rate rebuilt from half a session is a number whose
+ * denominator nobody can name.
+ */
+let prospecting: ProspectingState = EMPTY_PROSPECTING;
+let refining: RefiningState = EMPTY_REFINING;
 
 /**
  * The member's own carrier's hold, carried between passes the same way `trip` is.
@@ -694,6 +706,8 @@ async function tick(): Promise<void> {
       dockedAt,
       trip,
       carrierHold,
+      prospecting,
+      refining,
     };
     push();
     refreshTray();
@@ -716,6 +730,8 @@ async function tick(): Promise<void> {
       dockedAt,
       trip,
       carrierHold,
+      prospecting,
+      refining,
     };
     push();
     return;
@@ -735,7 +751,19 @@ async function tick(): Promise<void> {
     push();
     let pass;
     try {
-      pass = await runWatchPass(nodeFs, dir, config, uploader, dockedAt, trip, carrierHold, WATCHING_SINCE);
+      pass = await runWatchPass(
+        nodeFs,
+        dir,
+        config,
+        uploader,
+        dockedAt,
+        trip,
+        carrierHold,
+        WATCHING_SINCE,
+        prospecting,
+        refining,
+        readMiningSettings(config.miningSettings ?? null),
+      );
     } finally {
       sending = false;
     }
@@ -756,6 +784,15 @@ async function tick(): Promise<void> {
     // about a member's journal upload waits on it.
     carrierHold = pass.outcome.carrierHold;
     void pushCarrierHold();
+
+    /*
+     * The mining session, carried the same way. Omitting these two lines was a real bug and the
+     * LINTER found it: prefer-const fired because nothing ever reassigned them, which is precisely
+     * what "the fold never accumulates" looks like from the outside. The overlays would have sat
+     * on their opening state for ever while every pass computed the right answer and discarded it.
+     */
+    prospecting = pass.outcome.prospecting;
+    refining = pass.outcome.refining;
 
     /*
      * ★ THE HOLD, READ FROM FRONTIER'S OWN SIDECAR ★
@@ -965,6 +1002,8 @@ async function tick(): Promise<void> {
       dockedAt,
       trip,
       carrierHold,
+      prospecting,
+      refining,
     };
   }
 
@@ -1058,6 +1097,10 @@ function push(): void {
       gameRunning: wasPlaying,
       hold,
       capacity: cargoCapacity,
+      // The two mining folds ride the same push as everything else, so the prospector panel updates
+      // in the same breath as the rest rather than on a timer of its own.
+      prospecting,
+      refining,
       // The hub's whole-project answer rides every push, so the build tracker updates the moment
       // ANYTHING changes — a journal pass, a settings refresh, or the sixty-second hub refetch.
       currentProject,

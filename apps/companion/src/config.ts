@@ -25,6 +25,15 @@ import { defaultLayout, normaliseLayout, type OverlayLayout } from './overlay-co
  */
 
 export interface CompanionConfig {
+  /**
+   * The member's prospector thresholds, stored as JSON.
+   *
+   * A STRING rather than a nested object, deliberately: `readMiningSettings` repairs whatever is on
+   * disk on every read, so a hand-edited or older-version file cannot put a NaN into the comparison
+   * that decides whether a rock is worth shooting. Parsing it here would mean two places that
+   * validate, and one of them would drift.
+   */
+  miningSettings?: string;
   /** Base URL of the hub. Configurable so a member can point at a test server. */
   apiBaseUrl: string;
   /** The pairing token. Empty until the member pairs. */

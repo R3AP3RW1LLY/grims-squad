@@ -1,5 +1,9 @@
 import { readJournalChunk, journalFilesInOrder } from './journal-reader.js';
 import { withMarketPrices } from './market-prices.js';
+import { readRock, foldProspecting, EMPTY_PROSPECTING, type ProspectingState } from './prospector.js';
+import { foldRefining, EMPTY_REFINING, type RefiningState } from './refinery.js';
+import { DEFAULT_MINING_SETTINGS } from './mining-settings.js';
+import type { ProspectThresholds } from '@grims/shared';
 import { trackDocked, type DockedAt } from './docked.js';
 import { foldTrip, EMPTY_TRIP, type TripLedger } from './trip-ledger.js';
 import { foldCarrierHold, EMPTY_CARRIER_HOLD, type CarrierHoldState } from './carrier-hold.js';
@@ -103,6 +107,17 @@ export interface WatchOutcome {
    * parsed, and the debounce lives with the caller because sending is the caller's job.
    */
   readonly carrierHold: CarrierHoldState;
+  /**
+   * The rock in front of the member, and the session it belongs to.
+   *
+   * Folded here for the same reason as `trip` and `carrierHold`: this is the only place the
+   * journal is parsed, and a second reader would be a second set of offsets that drift out of step.
+   *
+   * Both are subject to `watchingSince`, so a first-run replay of thirty old journals cannot report
+   * a hit rate from last March as though it were this evening.
+   */
+  readonly prospecting: ProspectingState;
+  readonly refining: RefiningState;
 }
 
 /**
@@ -169,11 +184,30 @@ export async function runWatchPass(
    * overlay's "what is in my hold right now" does not.
    */
   watchingSince: number = 0,
+  /*
+   * ★ APPENDED, NEVER INSERTED — 2026-08-06 ★
+   *
+   * The mining session, threaded the same way as `trip` and unseeded for the same reason: a hit
+   * rate rebuilt from half a session is a number whose denominator nobody can name.
+   *
+   * These sit AFTER `watchingSince` because the first draft put them before it, which silently
+   * shifted every existing caller's eighth argument — `watchingSince` arrived as
+   * `prospectingBefore` and two replay-guard tests failed with no clue as to why. A positional
+   * parameter list is only safe to append to.
+   */
+  prospectingBefore: ProspectingState = EMPTY_PROSPECTING,
+  refiningBefore: RefiningState = EMPTY_REFINING,
+  /*
+   * The member's own thresholds, so a hit means what THEY said it means. Defaulted rather than
+   * required: a caller that has not loaded settings yet still gets a working fold.
+   */
+  miningThresholds: ProspectThresholds = DEFAULT_MINING_SETTINGS,
+
 ): Promise<{ outcome: WatchOutcome; config: CompanionConfig }> {
   if (!config.enabled || config.deviceToken === '') {
     // Not an error. The app is installed and waiting, which is the state it
     // ships in — being installed is not consent to transmit.
-    return { outcome: empty(null, tripBefore, carrierBefore), config };
+    return { outcome: empty(null, tripBefore, carrierBefore, prospectingBefore, refiningBefore), config };
   }
 
   const all = journalFilesInOrder(await fs.listFiles(journalDir));
@@ -231,6 +265,8 @@ export async function runWatchPass(
   let trip: TripLedger = tripBefore;
   // And the carrier hold: cargo staged an hour ago is still aboard until the journal says otherwise.
   let carrierHold: CarrierHoldState = carrierBefore;
+  let prospecting: ProspectingState = prospectingBefore;
+  let refining: RefiningState = refiningBefore;
   let sent = 0;
   let duplicates = 0;
   const refused: Record<string, number> = {};
@@ -335,6 +371,22 @@ export async function runWatchPass(
           });
 
     trip = foldTrip(trip, watched);
+
+    /*
+     * ★ MINING, FOLDED OVER THE SAME `watched` LIST ★
+     *
+     * Subject to `watchingSince` like everything else here: a first-run replay of thirty old
+     * journals must not report last March's hit rate as though it were this evening's, which is the
+     * exact fault that was reported against the trip ledger and the carrier hold.
+     */
+    for (const e of watched) {
+      if (e.name === 'ProspectedAsteroid') {
+        prospecting = foldProspecting(prospecting, readRock(e.data), miningThresholds);
+      } else if (e.name === 'MiningRefined') {
+        const at = Date.parse(e.occurredAt);
+        refining = foldRefining(refining, e.data, Number.isFinite(at) ? at : Date.now());
+      }
+    }
     // The own-carrier hold, same breath, same reasoning. The caller decides whether its snapshot
     // is worth a push; the fold merely watches.
     carrierHold = foldCarrierHold(carrierHold, watched);
@@ -436,6 +488,8 @@ export async function runWatchPass(
       dockedAt: docked,
       trip,
       carrierHold,
+      prospecting,
+      refining,
       gameRunning,
       filesRead,
       newFilesRead,
@@ -478,11 +532,15 @@ function empty(
   dockedAt: DockedAt | null = null,
   trip: TripLedger = EMPTY_TRIP,
   carrierHold: CarrierHoldState = EMPTY_CARRIER_HOLD,
+  prospecting: ProspectingState = EMPTY_PROSPECTING,
+  refining: RefiningState = EMPTY_REFINING,
 ): WatchOutcome {
   return {
     dockedAt,
     trip,
     carrierHold,
+    prospecting,
+    refining,
     gameRunning: false,
     filesRead: 0,
     newFilesRead: 0,

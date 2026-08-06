@@ -13,8 +13,17 @@
  * launching the app and looking.
  */
 
-/** The four panels the owner asked for. */
-export const OVERLAY_IDS = ['build', 'route', 'cargo', 'status'] as const;
+/**
+ * The panels. Four from the original brief, two added with the mining module.
+ *
+ * ★ MINING, 2026-08-06 ★
+ *
+ * The prospector panel is the one that makes this a mining tool rather than a scoreboard: a rock
+ * drifts past in a couple of seconds and the whole skill is deciding, inside that window, whether
+ * it is worth shooting. The refinery panel is the session — what came out, how fast, and what it is
+ * worth on the board.
+ */
+export const OVERLAY_IDS = ['build', 'route', 'cargo', 'status', 'prospector', 'refinery'] as const;
 export type OverlayId = (typeof OVERLAY_IDS)[number];
 
 export const OVERLAY_LABELS: Record<OverlayId, string> = {
@@ -22,6 +31,8 @@ export const OVERLAY_LABELS: Record<OverlayId, string> = {
   route: 'Trade run',
   cargo: 'Cargo hold',
   status: 'Upload status',
+  prospector: 'Prospector',
+  refinery: 'Refinery',
 };
 
 /**
@@ -38,6 +49,18 @@ export const OVERLAY_FIELDS: Record<OverlayId, readonly string[]> = {
   route: ['commodity', 'buy', 'sell', 'profit', 'cargo'],
   cargo: ['items', 'capacity', 'matched'],
   status: ['sending', 'queued', 'lastUpload', 'gameState'],
+  /*
+   * `materials` is the list with its percentage bars — the reason the panel exists, and the only
+   * field here somebody would be mad to switch off. The rest are genuinely optional: a core miner
+   * cares about `motherlode` and may not want `hitRate`; a laser miner is the other way round.
+   */
+  prospector: ['materials', 'motherlode', 'content', 'hitRate', 'best'],
+  /*
+   * `value` and `bestSale` are what no other mining tool can show, because none of them own a
+   * market database. They are fields rather than fixtures because they need a position to be
+   * useful, and a member mining somewhere unmapped would otherwise stare at two empty rows.
+   */
+  refinery: ['materials', 'session', 'rate', 'points', 'value', 'bestSale'],
 };
 
 export interface OverlayStyle {

@@ -4,6 +4,8 @@ import { markWanted, type Hold } from './cargo.js';
 import type { CurrentBuild } from './hub-colony.js';
 import type { TripLedger } from './trip-ledger.js';
 import type { OverlayData } from './renderer/overlay.js';
+import { hitRate, type ProspectingState } from './prospector.js';
+import { refinedRate, sessionMinutes, type RefiningState } from './refinery.js';
 
 /**
  * What the overlays actually draw.
@@ -54,11 +56,25 @@ export interface OverlayInput {
   readonly trip: TripLedger | null;
   /** Now, injected so the freshness rule is testable. */
   readonly now: number;
+  /**
+   * The rock in front of the member, and the session it belongs to.
+   *
+   * Both null until the member has actually prospected or refined something, which keeps the two
+   * panels honestly empty rather than showing a session of zeroes to somebody who is not mining.
+   */
+  /*
+   * `| undefined` spelled out: `exactOptionalPropertyTypes` treats an optional property and one
+   * that may be undefined as different types, and callers built before mining existed pass neither.
+   */
+  readonly prospecting?: ProspectingState | null | undefined;
+  readonly refining?: RefiningState | null | undefined;
 }
 
 export function buildOverlayData(input: OverlayInput): OverlayData {
   return {
     build: buildPanel(input),
+    prospector: prospectorPanel(input),
+    refinery: refineryPanel(input),
     /*
      * ★ ROUTE: NOTHING TO SEND, AND NOTHING FETCHABLE ★
      *
@@ -264,5 +280,63 @@ function fromDepot(
      * people have hauled to a POSTED build, and both hub-aware paths above supply it.
      */
     haulers: 0,
+  };
+}
+
+
+/**
+ * The prospector panel: the rock in front of the member.
+ *
+ * Null until one has been prospected — an empty panel says "waiting for a limpet", which is true,
+ * where a panel of zeroes would say they are mining badly.
+ */
+function prospectorPanel(input: OverlayInput): OverlayData['prospector'] {
+  /*
+   * Nullish rather than `=== null`: this arrives from a long-lived main process and from callers
+   * built before these fields existed, so undefined is a real state and not a type violation worth
+   * throwing over.
+   */
+  const p = input.prospecting ?? null;
+  if (p === null || p.current === null) return null;
+
+  return {
+    materials: p.current.materials.map((m) => ({ name: m.name, percent: m.percent })),
+    isHit: p.currentIsHit,
+    motherlode: p.current.motherlode,
+    content: p.current.content,
+    prospected: p.prospected,
+    hitRate: hitRate(p),
+    bestPercent: p.bestPercent,
+    bestMaterial: p.bestMaterial,
+  };
+}
+
+/**
+ * The refinery panel: the session.
+ *
+ * ★ `value` AND `bestSale` ARE NOT COMPUTED HERE, DELIBERATELY ★
+ *
+ * They need the market table, which lives on the hub — eighteen million rows the app has no copy
+ * of and should not. They arrive with the current-project data the panel already receives, and are
+ * null until they do. Null renders as an absent row rather than a wrong number, which is the right
+ * behaviour for a member mining somewhere the squadron has no prices for.
+ */
+function refineryPanel(input: OverlayInput): OverlayData['refinery'] {
+  const r = input.refining ?? null;
+  if (r === null || r.tonnes === 0) return null;
+
+  // Biggest first: mid-session the useful question is "what am I actually getting".
+  const materials = Object.entries(r.byMaterial)
+    .map(([name, tonnes]) => ({ name, tonnes }))
+    .sort((a, b) => b.tonnes - a.tonnes);
+
+  return {
+    materials,
+    tonnes: r.tonnes,
+    minutes: sessionMinutes(r, input.now),
+    rate: refinedRate(r, input.now),
+    points: r.points,
+    value: null,
+    bestSale: null,
   };
 }

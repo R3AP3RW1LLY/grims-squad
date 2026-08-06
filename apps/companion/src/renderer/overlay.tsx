@@ -2,6 +2,7 @@ import { render } from 'preact';
 import { useEffect, useState } from 'preact/hooks';
 import type { OverlayId, OverlayState } from '../overlay-config.js';
 import { C } from './ui.js';
+import { ProspectorPanel, RefineryPanel } from './mining-panels.js';
 
 /**
  * What a single overlay panel draws.
@@ -83,9 +84,46 @@ export interface OverlayData {
     readonly lastUploadAt: string | null;
     readonly gameRunning: boolean;
   } | null;
+  /**
+   * The rock in front of the member, right now.
+   *
+   * The panel that makes this a mining tool rather than a scoreboard: a prospected rock drifts past
+   * in a couple of seconds and the whole skill is deciding, inside that window, whether it is worth
+   * shooting.
+   */
+  readonly prospector: {
+    readonly materials: ReadonlyArray<{ name: string; percent: number }>;
+    /** True when the best material beat the member's own bar for THAT material. */
+    readonly isHit: boolean;
+    readonly motherlode: string | null;
+    readonly content: string | null;
+    readonly prospected: number;
+    /** Percent, or null before the first rock — a rate over zero rocks is not zero. */
+    readonly hitRate: number | null;
+    readonly bestPercent: number;
+    readonly bestMaterial: string | null;
+  } | null;
+  /** The session: what came out, how fast, what it scores, and what it is worth. */
+  readonly refinery: {
+    readonly materials: ReadonlyArray<{ name: string; tonnes: number }>;
+    readonly tonnes: number;
+    readonly minutes: number | null;
+    readonly rate: number | null;
+    readonly points: number;
+    /** What the hold is worth at the best price we know within range. Null when unknown. */
+    readonly value: number | null;
+    readonly bestSale: { readonly station: string; readonly distanceLy: number | null; readonly perTonne: number } | null;
+  } | null;
 }
 
-const EMPTY: OverlayData = { build: null, route: null, cargo: null, status: null };
+const EMPTY: OverlayData = {
+  build: null,
+  route: null,
+  cargo: null,
+  status: null,
+  prospector: null,
+  refinery: null,
+};
 
 const ID = (new URLSearchParams(location.search).get('id') ?? 'status') as OverlayId;
 
@@ -196,6 +234,8 @@ const TITLES: Record<OverlayId, string> = {
   route: 'Trade run',
   cargo: 'Cargo',
   status: 'Uplink',
+  prospector: 'Prospector',
+  refinery: 'Refinery',
 };
 
 function Panel({
@@ -218,6 +258,10 @@ function Panel({
       return <CargoPanel data={data.cargo} accent={state.style.accent} show={show} />;
     case 'status':
       return <StatusPanel data={data.status} accent={state.style.accent} show={show} />;
+    case 'prospector':
+      return <ProspectorPanel data={data.prospector} accent={state.style.accent} show={show} />;
+    case 'refinery':
+      return <RefineryPanel data={data.refinery} accent={state.style.accent} show={show} />;
   }
 }
 
