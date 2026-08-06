@@ -16,6 +16,8 @@ import { LeaderboardPage } from './leaderboards.js';
 import { SupportPage } from './support.js';
 import { HelpWidget } from './help-widget.js';
 import { GroupIcon, PageIcon } from './icons.js';
+import { MiningSettingsPanel } from './mining-settings-panel.js';
+import { readMiningSettings } from '../mining-settings.js';
 // The shapes come from the hub client, which is where they are defined — re-exporting them through
 // the component file would be a second name for one type.
 import type { ColonyProject, ColonyRights } from '../hub-colony.js';
@@ -63,6 +65,7 @@ declare global {
       unpair(): Promise<unknown>;
       setEnabled(enabled: boolean): Promise<unknown>;
       setAutoStart(on: boolean): Promise<unknown>;
+      setMiningSettings(json: string): Promise<unknown>;
       openHub(): Promise<unknown>;
       rescan(): Promise<unknown>;
     };
@@ -86,6 +89,8 @@ interface AppState {
   /** Where the commander is docked, when it is recent enough to trust. Null otherwise. */
   dockedAt: import('./colonisation.js').DockedAt | null;
   overlays: OverlayLayout;
+  /** The prospector thresholds as stored JSON. Repaired on read — see mining-settings.ts. */
+  miningSettings: string | null;
   overlayEditing: boolean;
   displayMode: string;
   displayNote: string | null;
@@ -582,7 +587,7 @@ function App(): JSX.Element {
  * whole reason this page exists.
  */
 function SettingsPage({ state }: { state: AppState }): JSX.Element {
-  const [tab, setTab] = useState<'device' | 'overlays'>('device');
+  const [tab, setTab] = useState<'device' | 'overlays' | 'mining'>('device');
 
   return (
     <div>
@@ -593,10 +598,22 @@ function SettingsPage({ state }: { state: AppState }): JSX.Element {
         tabs={[
           { key: 'device', label: 'This device' },
           { key: 'overlays', label: 'Overlays' },
+          { key: 'mining', label: 'Mining' },
         ]}
       />
       <div style={{ marginTop: '16px' }}>
         {tab === 'device' ? <Device state={state} /> : null}
+        {tab === 'mining' ? (
+          <MiningSettingsPanel
+            settings={readMiningSettings(state.miningSettings)}
+            /*
+             * Written straight through on every change. The model returns a NEW object each time,
+             * so a save cannot race a re-render into disagreeing about what is set — and the file
+             * is repaired on read regardless of what lands.
+             */
+            onChange={(next) => void window.companion.setMiningSettings(JSON.stringify(next))}
+          />
+        ) : null}
         {tab === 'overlays' ? (
           <OverlaysPanel
             layout={state.overlays}

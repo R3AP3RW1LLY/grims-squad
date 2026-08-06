@@ -1182,6 +1182,7 @@ function state(): Record<string, unknown> {
       return isFresh(merged, Date.now()) ? merged : null;
     })(),
     overlays: config.overlays,
+    miningSettings: config.miningSettings ?? null,
     overlayEditing: isEditing(),
     displayMode: currentMode(),
     displayNote: explain(currentMode()),
@@ -1995,6 +1996,19 @@ if (!app.requestSingleInstanceLock()) {
     });
 
     ipcMain.handle('colonyPlanRemove', (_e, id: unknown) => removeColonyPlan(hub(), asText(id)));
+
+    /*
+     * The prospector thresholds. Stored as the JSON STRING the renderer sends, because
+     * `readMiningSettings` repairs whatever is on disk on every read — validating here as well
+     * would be two validators, and one of them would drift from the rules the overlay obeys.
+     */
+    ipcMain.handle('setMiningSettings', (_e, json: unknown) => {
+      if (typeof json !== 'string') return config.miningSettings ?? null;
+      config = { ...config, miningSettings: json };
+      void saveConfig(app.getPath('userData'), config);
+      push();
+      return config.miningSettings;
+    });
 
     ipcMain.handle('setOverlays', (_e, layout: unknown) => {
       const applied = setLayout(layout);
