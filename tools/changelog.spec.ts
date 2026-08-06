@@ -139,13 +139,13 @@ describe('the assembled release', () => {
     {
       sha: 'a'.repeat(40),
       subject: 'feat(web): a website change',
-      body: 'Why the website changed.',
+      body: 'Why the website changed.\n\nMembers: What members see on the website.',
       files: ['apps/web/src/x.tsx'],
     },
     {
       sha: 'b'.repeat(40),
       subject: 'feat(api): a platform change',
-      body: 'Why the API changed.',
+      body: 'Why the API changed.\n\nMembers: What members see across the platform.',
       files: ['apps/api/src/y.ts'],
     },
   ];
@@ -157,9 +157,17 @@ describe('the assembled release', () => {
     generatedAt: '2026-08-04T00:00:00.000Z',
   });
 
-  it('MANDATORY: per-section markdown carries the commit prose, not a summary of it', () => {
-    expect(release.websiteMd).toBe('### A website change\n\nWhy the website changed.');
-    expect(release.platformMd).toBe('### A platform change\n\nWhy the API changed.');
+  it('MANDATORY: per-section markdown carries the MEMBER-FACING prose, not the commit body', () => {
+    /*
+     * Changed 2026-08-06. This used to assert the commit body was published verbatim, which is how
+     * "the planner believed market_entries held 30,281 rows" and a production IP address nearly
+     * reached 107 members. A commit body is written for whoever maintains this in a year; the
+     * `Members:` trailer is written for the squadron.
+     */
+    expect(release.websiteMd).toBe('### A website change\n\nWhat members see on the website.');
+    expect(release.platformMd).toBe(
+      '### A platform change\n\nWhat members see across the platform.',
+    );
     expect(release.companionMd).toBe('');
   });
 
@@ -177,7 +185,7 @@ describe('the assembled release', () => {
         {
           sha: 'a'.repeat(40),
           subject: "feat: quoting torture",
-          body: "It's got 'quotes', \"doubles\", $grimslog$ itself, and a ; semicolon.",
+          body: "Members: It's got 'quotes', \"doubles\", $grimslog$ itself, and a ; semicolon.",
           files: ['apps/api/src/z.ts'],
         },
       ],
@@ -392,5 +400,117 @@ describe('fitForMembers', () => {
   it('an entry that was ONLY a quote becomes empty rather than half a sentence', () => {
     // The subject line still names the change, so the entry survives without its detail.
     expect(fitForMembers('*"what the fuck"*')).toBe('');
+  });
+});
+
+describe('members are told what changed for them, not how it was built', () => {
+  /*
+   * ★ SQUADRON OWNER, TWICE ★
+   *
+   * 2026-08-05: "do not ever show anything like this in the changelog again", after a commit body
+   * quoting them swearing was published verbatim. `fitForMembers` was the answer to that one.
+   *
+   * 2026-08-06: the same mechanism was about to publish "The planner believed market_entries held
+   * 30,281 rows... pg_stat_user_tables reported last_analyze = never", and the production worker
+   * box's PUBLIC IP ADDRESS, to 107 members.
+   *
+   * The first fix treated a symptom. The cause is that commit bodies are written for whoever
+   * maintains this in a year — they are supposed to be full of table names and measurements — and
+   * publishing them to members was never going to work by filtering hard enough.
+   *
+   * So a commit now SAYS what members should be told, in a `Members:` trailer, or it says nothing
+   * to them at all. An infrastructure change genuinely is not member news, and a changelog that
+   * omits it is more honest than one that describes a WireGuard tunnel to people who fly ships.
+   */
+
+  it('MANDATORY: a commit with no Members: trailer is not published to members', () => {
+    const release = buildRelease({
+      fromSha: 'a',
+      toSha: 'b',
+      generatedAt: '2026-08-06T07:00:00.000Z',
+      commits: [
+        {
+          sha: 'deadbeef',
+          subject: 'feat(infra): the primary stops running the workers',
+          body: 'They now run on their own machine (149.248.39.225) over a WireGuard tunnel.',
+          files: ['apps/web/src/page.tsx'],
+        },
+      ],
+    });
+
+    expect(
+      release.websiteMd,
+      'an untagged engineering commit reached the member-facing changelog',
+    ).toBe('');
+  });
+
+  it('MANDATORY: a Members: trailer is what gets published', () => {
+    const release = buildRelease({
+      fromSha: 'a',
+      toSha: 'b',
+      generatedAt: '2026-08-06T07:00:00.000Z',
+      commits: [
+        {
+          sha: 'deadbeef',
+          subject: 'fix(perf): the planner believed market_entries held 30,281 rows',
+          body: [
+            'It held 18,847,651, and pg_stat_user_tables reported last_analyze = never.',
+            '',
+            'Members: Colonisation pages are fast again — the "where to buy" list was taking over',
+            'a minute and often came back empty. It now answers in under a second.',
+          ].join('\n'),
+          files: ['apps/web/src/page.tsx'],
+        },
+      ],
+    });
+
+    expect(release.websiteMd).toContain('Colonisation pages are fast again');
+    expect(release.websiteMd, 'engineering detail leaked past the trailer').not.toContain(
+      'pg_stat_user_tables',
+    );
+    expect(release.websiteMd, 'the raw row count leaked').not.toContain('18,847,651');
+  });
+
+  it('MANDATORY: an address never reaches members even inside a Members: trailer', () => {
+    /*
+     * Belt and braces. The trailer is written by hand and a hand can paste an IP into it; the
+     * consequence of that mistake is publishing infrastructure to the internet, so it is worth
+     * catching in two places rather than one.
+     */
+    const release = buildRelease({
+      fromSha: 'a',
+      toSha: 'b',
+      generatedAt: '2026-08-06T07:00:00.000Z',
+      commits: [
+        {
+          sha: 'deadbeef',
+          subject: 'fix: something',
+          body: 'Members: Ingestion moved to 149.248.39.225 and is faster now.',
+          files: ['apps/web/src/page.tsx'],
+        },
+      ],
+    });
+
+    expect(release.websiteMd, 'a server address was published to members').not.toMatch(
+      /\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/,
+    );
+  });
+
+  it('the trailer still loses a paragraph that quotes swearing', () => {
+    const release = buildRelease({
+      fromSha: 'a',
+      toSha: 'b',
+      generatedAt: '2026-08-06T07:00:00.000Z',
+      commits: [
+        {
+          sha: 'deadbeef',
+          subject: 'fix: something',
+          body: 'Members: We fixed the shit out of this.',
+          files: ['apps/web/src/page.tsx'],
+        },
+      ],
+    });
+
+    expect(release.websiteMd).not.toContain('shit');
   });
 });
