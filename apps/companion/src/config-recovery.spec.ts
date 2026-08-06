@@ -181,3 +181,60 @@ describe('an ordinary file', () => {
     expect(loadConfig(dir).deviceToken).toBe(PAIRED.deviceToken);
   });
 });
+
+/**
+ * Settings that must survive closing the app.
+ *
+ * ★ THE BUG THIS EXISTS BECAUSE OF — 2026-08-06 ★
+ *
+ * `loadConfig` does not spread the parsed file. It rebuilds its result FIELD BY FIELD, so that a
+ * hand-edited or half-written config is validated rather than trusted — which is right, and which
+ * means every new setting has to be added to that list by hand.
+ *
+ * `miningSettings` was added to the `CompanionConfig` interface and to the save path, and left out
+ * of the load list. It typechecked, it saved correctly, and it was silently dropped on every
+ * restart: a member set their per-material percentages, closed the app, and came back to the
+ * defaults with nothing to explain why.
+ *
+ * ★ WRITTEN OVER THE WHOLE ROUND TRIP, NOT OVER ONE FIELD ★
+ *
+ * Asserting only on `miningSettings` would pass again the day somebody adds the next setting and
+ * forgets the same line. This walks every own key of a saved config, so the next omission fails
+ * here rather than in somebody's hands.
+ */
+describe('a saved setting', () => {
+  it('MANDATORY: mining percentages survive a restart', () => {
+    const settings = JSON.stringify({ default: 22, perMaterial: { Painite: 8, 'Void Opal': 0 } });
+
+    saveConfig(dir, { ...PAIRED, miningSettings: settings });
+    const loaded = loadConfig(dir);
+
+    expect(
+      loaded.miningSettings,
+      'the member set their thresholds and the app forgot them on restart',
+    ).toBe(settings);
+  });
+
+  it('MANDATORY: every field written is a field read back', () => {
+    /*
+     * The general form of the bug. `loadConfig` rebuilding field by field is deliberate, so this
+     * cannot be enforced by the type system — but it can be enforced here, and it catches the next
+     * setting somebody adds to the interface and forgets in the load list.
+     */
+    const full: CompanionConfig = {
+      ...PAIRED,
+      miningSettings: JSON.stringify({ default: 30, perMaterial: {} }),
+      journalPathOverride: null,
+      autoStart: true,
+    };
+
+    saveConfig(dir, full);
+    const loaded = loadConfig(dir);
+
+    const dropped = Object.keys(full).filter(
+      (key) => JSON.stringify((loaded as Record<string, unknown>)[key]) === undefined,
+    );
+
+    expect(dropped, `loadConfig dropped: ${dropped.join(', ')}`).toEqual([]);
+  });
+});

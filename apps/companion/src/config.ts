@@ -344,6 +344,22 @@ export function loadConfig(userDataDir: string): CompanionConfig {
        * neither see nor reach.
        */
       overlays: normaliseLayout(parsed.overlays),
+      /*
+       * ★ THE FIELD THAT WAS LEFT OUT — 2026-08-06 ★
+       *
+       * Kept as the raw string and repaired by `readMiningSettings` at the point of use, which is
+       * where the clamping and the NaN rules already live. Validating it twice would be two
+       * validators and a bug.
+       *
+       * It was missing from this list for a day: added to the interface, saved correctly, and
+       * silently dropped on every load. A member set their per-material percentages, closed the
+       * app, and came back to the defaults with nothing to explain why. Nothing typechecks this —
+       * `loadConfig` rebuilds field by field on purpose — so the guard is a test over the whole
+       * round trip in `config-recovery.spec.ts`.
+       */
+      ...(typeof parsed.miningSettings === 'string'
+        ? { miningSettings: parsed.miningSettings }
+        : {}),
     };
   } catch (error) {
     /*
