@@ -839,6 +839,11 @@ export const getInaraStatus = (): Promise<InaraStatus | null> =>
 export interface NavItem {
   href: string;
   label: string;
+  /**
+   * A count worth showing beside the entry, decided by the API. Absent when there is nothing to
+   * say — deliberately, so the sidebar is not a row of grey noughts.
+   */
+  badge?: number;
   // 'ai' added 2026-08-01 — the GMSD AI sidebar group. Mirrors NavItem in the API's nav.ts; the
   // API decides which items a member gets, this only names the headings.
   section: 'squadron' | 'personal' | 'ai' | 'admin';

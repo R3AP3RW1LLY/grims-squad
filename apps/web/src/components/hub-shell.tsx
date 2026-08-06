@@ -397,6 +397,26 @@ function SidebarContents({ me, current }: { me: MeResponse; current: string }) {
                                 )}
                               >
                                 {item.label}
+                                {/*
+                                  ★ SQUADRON OWNER, 2026-08-06 ★
+
+                                  "we also need to add this notification/badge to the web site
+                                  too" — the companion has shown these counts since colonisation
+                                  shipped and the website never has, so a member saw a number in
+                                  one place and a bare link in the other.
+
+                                  The API decides the number and omits it entirely at zero, so
+                                  there is no grey nought beside every link teaching people to
+                                  stop reading them.
+                                */}
+                                {item.badge === undefined ? null : (
+                                  <span
+                                    className="ml-auto rounded-full bg-[color-mix(in_srgb,var(--color-brand-cyan)_18%,transparent)] px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-[var(--color-brand-cyan-bright)]"
+                                    aria-label={`${item.badge} still needing hauling`}
+                                  >
+                                    {item.badge}
+                                  </span>
+                                )}
                               </a>
                             </li>
                           );

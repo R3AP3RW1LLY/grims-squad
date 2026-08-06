@@ -1,7 +1,8 @@
 import { Controller, Get, Post, Patch, Body, Req, Inject, Optional } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
 import { PrismaClient } from '@grims/db';
-import { resolveMemberRank, LEADERSHIP_CEILING } from '@grims/shared';
+import { resolveMemberRank, LEADERSHIP_CEILING, hasPermission, Permission
+} from '@grims/shared';
 import { NO_PERMISSIONS, requiresTwoFactor } from '@grims/shared';
 import { Public } from './auth.guard.js';
 import { navFor, hasAdminArea, type NavItem } from './nav.js';
@@ -122,6 +123,7 @@ export class MeController {
   ) {}
 
   @Public()
+
   @Get('me')
   async me(@Req() req: FastifyRequest): Promise<MeResponse> {
     const userId = req.user?.userId;
@@ -233,7 +235,7 @@ export class MeController {
        * anyway, and offering doors that are locked teaches people the interface
        * lies.
        */
-      nav: mustSecure ? [] : navFor(mask),
+      nav: mustSecure ? [] : navFor(mask, await this.#colonyBadges(mask)),
       // Still reported truthfully. The UI needs to know they ARE an admin to
       // explain why they are being asked; it just must not link them anywhere.
       isAdmin: hasAdminArea(mask),
@@ -581,4 +583,47 @@ export class MeController {
     const count = await this.db.twoFactorCredential.count({ where: { userId } });
     return count > 0;
   }
+
+  /**
+   * Counts for the sidebar.
+   *
+   * ★ SQUADRON OWNER, 2026-08-06 ★
+   *
+   * "we also need to add this notification/badge to the web site too showing completed projects is
+   * confusing!" — the companion has shown these since colonisation shipped and the website never
+   * has, so a member saw a number in one place and a bare link in the other.
+   *
+   * ★ SKIPPED ENTIRELY FOR ANYBODY WHO CANNOT SEE THE PAGES ★
+   *
+   * `/v1/me` is on the path of every page load, so this must not be a query the whole world pays
+   * for. A member without COLONY_VIEW gets no badge rendered anyway — `navFor` filters before it
+   * decorates — so for them the query is pure waste and is not run.
+   */
+  async #colonyBadges(mask: bigint): Promise<Record<string, number>> {
+    if (!hasPermission(mask, Permission.COLONY_VIEW)) return {};
+
+    /*
+     * Counted in the database rather than by loading the projects: this runs on every page load,
+     * and the rows are only ever needed as two numbers.
+     *
+     * `completed_at IS NULL` is the same rule `openProjectCounts` applies in the app — stated twice
+     * because one side is SQL and the other TypeScript, and asserted identical by the shared spec
+     * that owns the definition of "still wants hauling".
+     */
+    const rows = await this.db.$queryRawUnsafe<Array<{ owner: string; n: number }>>(
+      `SELECT owner, count(*)::int AS n
+         FROM colony_projects
+        WHERE completed_at IS NULL
+        GROUP BY owner`,
+    );
+
+    const badges: Record<string, number> = {};
+    for (const row of rows) {
+      const href =
+        row.owner === 'squadron' ? '/colonisation/squadron' : '/colonisation/members';
+      badges[href] = row.n;
+    }
+    return badges;
+  }
+
 }

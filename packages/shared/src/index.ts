@@ -217,3 +217,6 @@ export {
   readRock,
 } from './mining.js';
 export type { ProspectThresholds, Rock, RockMaterial } from './mining.js';
+
+export { openProjectCounts } from './colony-badge.js';
+export type { CountableProject, OpenProjectCounts } from './colony-badge.js';

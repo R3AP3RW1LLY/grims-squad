@@ -19,6 +19,7 @@ import { HelpWidget } from './help-widget.js';
 import { GroupIcon, PageIcon } from './icons.js';
 import { MiningSettingsPanel } from './mining-settings-panel.js';
 import { readMiningSettings } from '../mining-settings.js';
+import { openProjectCounts } from '@grims/shared';
 // The shapes come from the hub client, which is where they are defined — re-exporting them through
 // the component file would be a second name for one type.
 import type { ColonyProject, ColonyRights } from '../hub-colony.js';
@@ -407,8 +408,19 @@ function App(): JSX.Element {
           }
 
           const counts: Record<string, number> = {
-            'colony-squadron': (colony?.projects ?? []).filter((p) => p.owner === 'squadron').length,
-            'colony-members': (colony?.projects ?? []).filter((p) => p.owner === 'personal').length,
+            /*
+             * ★ FINISHED BUILDS DO NOT COUNT — SQUADRON OWNER, 2026-08-06 ★
+             *
+             * "when a colonization project is complete, we need to remove it from the badge ...
+             * showing completed projects is confusing!"
+             *
+             * This counted every project regardless of state, so a build the squadron had already
+             * finished went on advertising itself in the sidebar for ever. The rule lives in
+             * @grims/shared because the website now shows the same badge, and two counts written
+             * separately would drift.
+             */
+            'colony-squadron': openProjectCounts(colony?.projects ?? []).squadron,
+            'colony-members': openProjectCounts(colony?.projects ?? []).personal,
           };
           const insideOpen = entry.children.some((c) => c.id === page);
           // The current page's group is always open, whatever the stored choice says.

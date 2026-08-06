@@ -20,6 +20,8 @@ import { Permission, hasAnyPermission, type PermissionMask } from '@grims/shared
 export interface NavItem {
   readonly href: string;
   readonly label: string;
+  /** A count worth showing beside the entry. Absent when there is nothing to say. */
+  readonly badge?: number;
   /** Groups items under a heading in the sidebar. */
   /*
    * ★ 'ai' ADDED 2026-08-01, ON THE OWNER'S INSTRUCTION ★
@@ -589,13 +591,33 @@ const NAV: readonly NavDefinition[] = [
  * copied it, so no member would ever have seen the subcategory. `nav-shape.spec.ts` now fails if
  * any displayable field goes missing here.
  */
-export function navFor(mask: PermissionMask): NavItem[] {
+/**
+ * Counts to show beside sidebar entries, keyed by href.
+ *
+ * ★ SQUADRON OWNER, 2026-08-06 ★
+ *
+ * "we also need to add this notification/badge to the web site too" — the companion has carried
+ * these since colonisation shipped and the website never has.
+ *
+ * Passed in rather than computed here, because this function is pure and has no database. It is
+ * also what keeps the badge from becoming a side channel: the filter below runs FIRST, so a count
+ * for a page a member cannot reach is simply never rendered (INV-002).
+ */
+export type NavBadges = Readonly<Record<string, number>>;
+
+export function navFor(mask: PermissionMask, badges: NavBadges = {}): NavItem[] {
   return NAV.filter((item) => item.requires === null || hasAnyPermission(mask, item.requires)).map(
     ({ href, label, section, subsection, blurb }) => ({
       href,
       label,
       section,
       blurb,
+      /*
+       * Zero is deliberately NO badge rather than a "0". A grey nought beside every link is clutter
+       * that teaches members to stop reading the numbers at all, and "nothing to say" is what the
+       * sidebar should look like most of the time.
+       */
+      ...(typeof badges[href] === 'number' && badges[href] > 0 ? { badge: badges[href] } : {}),
       // Conditional, not `subsection: subsection` — `exactOptionalPropertyTypes` forbids assigning
       // undefined to an optional field, and an explicit `"subsection": undefined` in the JSON is a
       // different shape from its absence.
