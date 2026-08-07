@@ -78,6 +78,16 @@ export interface Plan {
    * with total confidence, which is worse than listing everything and letting them find their own.
    */
   readonly orders: { readonly system: string | null } | null;
+  /**
+   * Set when the question is "what is the squadron doing".
+   *
+   * ★ THE MOST ASKED QUESTION IN ANY SQUADRON, AND IT HAD NO ANSWER ★
+   *
+   * `operations` is read by no other leg. Without this, "what's on tonight" is answered from
+   * whatever forum prose the semantic search turned up — an op that ran in March, delivered with
+   * exactly the confidence of tonight's actual roster.
+   */
+  readonly ops: Record<string, never> | null;
 }
 
 /**
@@ -162,6 +172,7 @@ export function planFor(
      * confident non-answer. `ordersIn` steps aside for the build verbs itself.
      */
     orders: ordersIn(q),
+    ops: opsIn(q),
   };
 }
 
@@ -322,6 +333,33 @@ const ORDERS_IMPLIED =
  * Requires a capital letter, which is what separates a system name from "in the bgs".
  */
 const ORDERS_SYSTEM = /\b(?:in|at|for)\s+([A-Z][A-Za-z0-9'’-]*(?:\s+[A-Z0-9][A-Za-z0-9'’-]*)*)/;
+
+/**
+ * "What is the squadron doing", in the forms members actually type.
+ *
+ * ★ THE SUBJECT MUST BE THE SQUADRON, NOT THE CLOCK ★
+ *
+ * "tonight", "next" and "coming up" appear constantly in trade and mining questions, so a time word
+ * alone can never be enough — "where should I mine tonight" answered with an operations roster is a
+ * confident non-answer. Either the question names ops directly, or it asks what *we* are doing.
+ */
+const OPS_INTENT =
+  /\b(?:ops|op)\b|\boperations?\b(?!\s+(?:of|manual))|\bops\s+board\b|\b(?:what|anything|something|who)\b[^?.!]{0,30}\b(?:we|us|our|squadron|everyone)\b[^?.!]{0,30}\b(?:doing|running|flying|planning|up\s+to|on)\b|\b(?:anything|something)\b[^?.!]{0,20}\bon\b[^?.!]{0,20}\b(?:tonight|tomorrow|weekend|later|this\s+week)\b/i;
+
+/**
+ * Questions that merely contain an operations word but are about something else.
+ *
+ * "How do I operate the fuel scoop" is the obvious false positive; the trade and mining verbs catch
+ * the rest, because a member asking where to sell has not asked what the squadron is doing.
+ */
+const OPS_NOT =
+  /\b(?:operate|operating)\b|\b(?:sell|selling|buy|buying|mine|mining|haul|hauling|fly|fit|build|loadout|route)\b/i;
+
+function opsIn(q: string): Record<string, never> | null {
+  if (!OPS_INTENT.test(q)) return null;
+  if (OPS_NOT.test(q)) return null;
+  return {};
+}
 
 function ordersIn(q: string): { system: string | null } | null {
   if (!ORDERS_INTENT.test(q) && !ORDERS_IMPLIED.test(q)) return null;

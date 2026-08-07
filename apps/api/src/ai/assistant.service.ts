@@ -7,6 +7,7 @@ import { planFor } from './question.js';
 import { ShipBuildService } from './ship-build.service.js';
 import type { MiningService } from '../mining/mining.service.js';
 import type { BgsService } from '../bgs/bgs.service.js';
+import type { OpsService } from '../ops/ops.service.js';
 
 /**
  * The assistant — the surface everything else has been building towards.
@@ -143,6 +144,15 @@ export class AssistantService {
      * without it.
      */
     private readonly bgs?: BgsService,
+    /**
+     * The operations board.
+     *
+     * The SAME service the /ops page and the officer console read. "What is on tonight" is the most
+     * asked question in any squadron and it has never had an answer here — `operations` is touched
+     * by no other leg, so without this the assistant answers from forum prose about an op that ran
+     * in March.
+     */
+    private readonly ops?: OpsService,
   ) {}
 
   async ask(
@@ -169,7 +179,7 @@ export class AssistantService {
       };
     }
 
-    const facts = await this.#gather(q);
+    const facts = await this.#gather(q, userId);
 
     /*
      * ★ NOTHING RETRIEVED MEANS NO CALL AT ALL ★
@@ -289,7 +299,15 @@ export class AssistantService {
    * They also overlap — a question about Deciat matches by name AND spatially — and the same fact
    * twice in the context is a fact the model weights twice.
    */
-  async #gather(question: string): Promise<Fact[]> {
+  async #gather(
+    question: string,
+    /*
+     * The caller, threaded through only because the operations leg needs it: a member asking what
+     * is on tonight who is ALREADY signed up should be told so. Null for a signed-out visitor,
+     * which the board handles.
+     */
+    userId: string | null,
+  ): Promise<Fact[]> {
     const plan = planFor(question, await this.#commodityNames(), await this.#shipNames());
 
     const legs: Array<Promise<Fact[]>> = [this.knowledge.semantic(question)];
@@ -313,6 +331,10 @@ export class AssistantService {
 
     if (plan.orders !== null && this.bgs !== undefined) {
       legs.push(this.#ordersLeg(plan.orders.system));
+    }
+
+    if (plan.ops !== null && this.ops !== undefined) {
+      legs.push(this.#opsLeg(userId));
     }
 
     const settled = await Promise.allSettled(legs);
@@ -385,6 +407,60 @@ export class AssistantService {
         `richest rock seen was ${r.bestPercent.toFixed(1)}%. Last prospected ${r.lastSeen.toISOString().slice(0, 10)}.`,
       url: '/mining',
     }));
+  }
+
+  /**
+   * What is actually on the board, rendered as facts.
+   *
+   * ★ THE MEMBER'S OWN COMMITMENT RIDES WITH IT ★
+   *
+   * `board` takes the caller's id and returns whether THEY are signed up. A member asking "what is
+   * on tonight" who is already committed should be told so — answering as though they had not
+   * replied is the fastest way to make an assistant feel like it does not know them.
+   */
+  async #opsLeg(userId: string | null): Promise<Fact[]> {
+    if (this.ops === undefined) return [];
+
+    const board = await this.ops.board(userId);
+    const live = board.filter((o) => o.status !== 'cancelled' && o.status !== 'complete');
+
+    /*
+     * An empty board is a real answer and must not become silence — falling back to the semantic
+     * leg is what produces a confident description of an operation that finished months ago.
+     */
+    if (live.length === 0) {
+      return [
+        {
+          source: 'ops',
+          kind: 'operations',
+          name: 'operations board',
+          text: 'Nothing is on the operations board right now. Wing leads post ops from the admin area and they appear for everybody the moment they do.',
+          url: '/ops',
+        },
+      ];
+    }
+
+    return live.map((o) => {
+      const full = o.capacity !== null && o.going >= o.capacity;
+      const seats =
+        o.capacity === null
+          ? `${o.going} going, no limit on numbers`
+          : `${o.going} of ${o.capacity} seats taken${o.standby > 0 ? `, ${o.standby} on standby` : ''}${full ? ' — committing now joins the standby queue' : ''}`;
+
+      return {
+        source: 'ops',
+        kind: 'operation',
+        name: o.title,
+        text:
+          `${o.title} — a ${o.opType} op starting ${o.startsAt.toISOString()}, posted by ${o.createdBy}. ${seats}. ` +
+          (o.mine === null
+            ? 'You have not said whether you are coming.'
+            : o.mine === 'standby'
+              ? 'You are on the standby queue for this one.'
+              : `You have said "${o.mine}" to this one.`),
+        url: '/ops',
+      };
+    });
   }
 
   /**

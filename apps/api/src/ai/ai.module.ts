@@ -25,6 +25,8 @@ import { MiningModule } from '../mining/mining.module.js';
 import { MiningService } from '../mining/mining.service.js';
 import { BgsModule } from '../bgs/bgs.module.js';
 import { BgsService } from '../bgs/bgs.service.js';
+import { OpsModule } from '../ops/ops.module.js';
+import { OpsService } from '../ops/ops.service.js';
 import { JobLogListener } from './job-log.listener.js';
 import { ArtworkController } from './artwork.controller.js';
 import { LIVE_SERVICE } from '../live/live.tokens.js';
@@ -153,7 +155,7 @@ export class ModelWarmer implements OnModuleInit, OnModuleDestroy {
    * most, because "who are we pushing" answered from wiki prose sends a member to work against
    * their own squadron.
    */
-  imports: [MiningModule, BgsModule],
+  imports: [MiningModule, BgsModule, OpsModule],
   providers: [
     {
       provide: AiStreamService,
@@ -281,6 +283,7 @@ export class ModelWarmer implements OnModuleInit, OnModuleDestroy {
         ShipBuildService,
         { token: MiningService, optional: true },
         { token: BgsService, optional: true },
+        { token: OpsService, optional: true },
       ],
       useFactory: (
         db: PrismaClient,
@@ -290,7 +293,8 @@ export class ModelWarmer implements OnModuleInit, OnModuleDestroy {
         builds: ShipBuildService,
         mining?: MiningService,
         bgs?: BgsService,
-      ) => new AssistantService(db, ai, knowledge, log, builds, mining, bgs),
+        ops?: OpsService,
+      ) => new AssistantService(db, ai, knowledge, log, builds, mining, bgs, ops),
     },
     /*
      * The help chat's answer leg — GMSD AI reading the help corpus and nothing else. Constructed

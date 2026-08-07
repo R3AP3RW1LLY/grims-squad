@@ -5,6 +5,8 @@ import { MiningService } from '../mining/mining.service.js';
 import { BgsService } from '../bgs/bgs.service.js';
 import { MiningModule } from '../mining/mining.module.js';
 import { BgsModule } from '../bgs/bgs.module.js';
+import { OpsService } from '../ops/ops.service.js';
+import { OpsModule } from '../ops/ops.module.js';
 
 /**
  * The assistant's optional retrieval legs are actually wired.
@@ -68,6 +70,19 @@ describe('the assistant’s optional legs', () => {
 
     const imports = (Reflect.getMetadata('imports', AiModule) ?? []) as unknown[];
     expect(imports, 'BgsService is injected but nothing provides it').toContain(BgsModule);
+  });
+
+  it('MANDATORY: the operations board is injected AND its module is imported', () => {
+    /*
+     * "What is on tonight" is the most asked question in a squadron. Answered without this leg it
+     * describes an op that ran months ago, in the present tense.
+     */
+    expect(tokensOf(assistantProvider()), 'the operations leg would silently never run').toContain(
+      OpsService,
+    );
+
+    const imports = (Reflect.getMetadata('imports', AiModule) ?? []) as unknown[];
+    expect(imports, 'OpsService is injected but nothing provides it').toContain(OpsModule);
   });
 
   it('passes every injected token to the constructor in order', () => {

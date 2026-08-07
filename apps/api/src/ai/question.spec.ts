@@ -210,3 +210,40 @@ describe('asking what the squadron wants done in the background sim', () => {
     expect(planFor('where can I buy gold near Sol', COMMODITIES).orders).toBeNull();
   });
 });
+
+describe('asking what the squadron is doing tonight', () => {
+  /**
+   * ★ THE MOST ASKED QUESTION IN ANY SQUADRON ★
+   *
+   * "what's on tonight" has never had an answer here. The operations board knows, and no other leg
+   * reads `operations` — so without this the assistant answers from forum prose about an op that
+   * happened in March, with the same confidence as tonight's actual roster.
+   */
+  it('routes the plain forms members use', () => {
+    for (const q of [
+      'what ops are on',
+      'is there anything on tonight',
+      'when is the next operation',
+      'what is the squadron doing this weekend',
+      'any ops coming up',
+      'whats on the ops board',
+    ]) {
+      expect(planFor(q, COMMODITIES).ops, `"${q}" did not reach the ops leg`).not.toBeNull();
+    }
+  });
+
+  it('MANDATORY: does not hijack questions that merely contain a time word', () => {
+    /*
+     * "tonight" and "next" turn up constantly in trade and mining questions. Answering "where
+     * should I mine tonight" with an operations roster would be a confident non-answer.
+     */
+    expect(planFor('where should I mine tonight', COMMODITIES).ops).toBeNull();
+    expect(planFor('where can I sell Painite', COMMODITIES).ops).toBeNull();
+    expect(planFor('what should I fly for combat', COMMODITIES).ops).toBeNull();
+  });
+
+  it('does not fire on an unrelated question about operating a ship', () => {
+    // "operation" is not always an op. This is the obvious false positive.
+    expect(planFor('how do I operate the fuel scoop', COMMODITIES).ops).toBeNull();
+  });
+});
