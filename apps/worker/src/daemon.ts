@@ -15,6 +15,7 @@ import { rebuildBountyBoard } from './jobs/bounty-board.js';
 import { refreshEdsyIds } from './jobs/edsy-refresh.js';
 import { scoreLeaderboards } from './jobs/leaderboard-scores.js';
 import { ingestMining } from './jobs/mining-ingest.js';
+import { ingestBgs } from './jobs/bgs-ingest.js';
 import { awardRecruitMilestones } from './jobs/recruit-milestones.js';
 import { rollUpTelemetry } from './jobs/telemetry-rollup.js';
 import { PrismaTelemetryRollupStore } from './jobs/telemetry-rollup.wiring.js';
@@ -720,6 +721,18 @@ function startLeaderboardScoring(db: PrismaClient): void {
       if (mining.rocks > 0 || mining.tonnes > 0) {
         console.log(
           `daemon: mining — ${mining.rocks} rocks, ${mining.tonnes} t refined, ${mining.points} points, ${mining.sessions} sessions opened`,
+        );
+      }
+
+      /*
+       * BGS folds here too, for the same reason: influence moved in the last five minutes reaches
+       * the Faction Hands board in the tick it was earned. Its own points are written directly to
+       * the ledger, so `scoreLeaderboards` picks them up in the same pass.
+       */
+      const bgs = await ingestBgs(db);
+      if (bgs.effects > 0) {
+        console.log(
+          `daemon: bgs — ${bgs.effects} influence effect(s), ${bgs.scored} scored, ${bgs.points} points`,
         );
       }
 

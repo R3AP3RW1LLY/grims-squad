@@ -116,6 +116,31 @@ export class BgsService {
       clean,
       isOurs,
     );
+
+    await this.#replayHistory();
+  }
+
+  /**
+   * Send the ingest back through everything it has already read.
+   *
+   * ★ WITHOUT THIS THE FEATURE CANNOT START ★
+   *
+   * The ingest skips effects for factions nobody watches, and its cursor moves on regardless. So on
+   * a box with history and an empty watchlist — which is exactly how this ships — the cursor runs
+   * past all of it in the first five minutes, and the influence those missions moved becomes
+   * permanently unreachable. The officer who then adds the first faction sees an empty board and no
+   * reason why.
+   *
+   * Rewinding is safe because the ingest is idempotent: the ledger write is `ON CONFLICT DO
+   * NOTHING` against a unique key, and `bgs-ingest.int.spec.ts` runs the whole job twice over the
+   * same events and asserts the board does not move. That property is what makes this two lines
+   * instead of a backfill script somebody has to remember to run.
+   */
+  async #replayHistory(): Promise<void> {
+    await this.db.$executeRawUnsafe(
+      `INSERT INTO worker_cursors (key, value, updated_at) VALUES ('bgs-mission-influence', '0', now())
+       ON CONFLICT (key) DO UPDATE SET value = '0', updated_at = now()`,
+    );
   }
 
   /** Stop backing a faction. Its orders go with it; its recorded influence history does not. */
@@ -191,6 +216,14 @@ export class BgsService {
       guidance === '' ? null : guidance,
       input.setById,
     );
+
+    /*
+     * A new order changes what past work was worth — influence already recorded for this faction in
+     * this system now scores where before it did not. Replaying credits the members who were
+     * already doing it, which is the right way round: an officer naming a target is recognising
+     * work in progress at least as often as they are starting something new.
+     */
+    await this.#replayHistory();
   }
 
   /**

@@ -116,6 +116,9 @@ enum DataSource {
   eddn
   bgstally
   system
+  /// Our own companion app reading the journal. Deliberately NOT `edmc`: those are third-party
+  /// tools whose exports we may yet import, and provenance we cannot separate is provenance lost.
+  companion
 }
 
 /// Visibility ladder shared by loadouts and knowledge chunks. MUST stay aligned with the forum ACL model.
