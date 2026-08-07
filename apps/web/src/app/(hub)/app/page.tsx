@@ -12,6 +12,7 @@ import {
   getSupportConsoleGated,
   getRecruitManage,
   getBgsWatchlist,
+  getOps,
   getSuggestionInboxGated,
   getRoadmapManageGated,
   getTrainingQueueGated,
@@ -30,6 +31,7 @@ import { Moderation } from './moderation';
 import { Support } from './support';
 import { RecruitingConsole } from './recruiting';
 import { BgsConsole } from './bgs-console';
+import { OpsConsole } from './ops-console';
 import { SupportTabBadge } from './support-tab-badge';
 import { SuggestionsTabBadge } from './suggestions-tab-badge';
 import { TrainingImagesTabBadge } from './training-images-tab-badge';
@@ -135,6 +137,11 @@ const TABS: readonly PageTab[] = [
    * not necessarily the ones who do the other — the same reasoning Support and Recruiting use.
    */
   { key: 'bgs', label: 'BGS orders' },
+  /*
+   * Gated on OPS_CREATE rather than the console's MEMBER_MANAGE — a wing lead is exactly somebody
+   * who posts ops and does NOT manage the roster, and that is what the bit was created to express.
+   */
+  { key: 'ops', label: 'Operations' },
   { key: 'roles', label: 'Roles & permissions' },
 ];
 
@@ -164,7 +171,7 @@ export default async function AdminPage({
    * though — every tab needs to know whether the second factor is fresh, and
    * a null from any admin read is that answer.
    */
-  const [dashboard, activity, audit, held, aiHealth, support, recruiting, bgs, me, suggestions, roadmap, trainingQueue] =
+  const [dashboard, activity, audit, held, aiHealth, support, recruiting, bgs, opsBoard, me, suggestions, roadmap, trainingQueue] =
     await Promise.all([
     /*
      * Fetched for the ACTIVITY tab too, and only for its `availableMonths`.
@@ -188,6 +195,7 @@ export default async function AdminPage({
     tab === 'support' ? getSupportConsole('open') : Promise.resolve(null),
     tab === 'recruiting' ? getRecruitManage() : Promise.resolve(null),
     tab === 'bgs' ? getBgsWatchlist() : Promise.resolve(null),
+    tab === 'ops' ? getOps() : Promise.resolve(null),
     /*
      * For the support and suggestions tabs' clocks. INV-025 wants each queue's absolute times
      * in the VIEWER's stored timezone, and that zone lives on /v1/me.
@@ -402,6 +410,15 @@ export default async function AdminPage({
           description="The factions the squadron backs, and what to do about each of them. Nothing scores for a faction that is not on this list."
         >
           <BgsConsole factions={bgs.factions} />
+        </Section>
+      )}
+
+      {tab === 'ops' && opsBoard !== null && (
+        <Section
+          title="Operations"
+          description="Post an op and the board shows it to everybody. A full op queues members on standby rather than turning them away, and a drop-out promotes the next in line."
+        >
+          <OpsConsole ops={opsBoard.ops} />
         </Section>
       )}
 

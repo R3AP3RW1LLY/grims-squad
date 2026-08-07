@@ -2086,6 +2086,29 @@ export interface RecruitManage {
 export const getRecruitManage = (): Promise<RecruitManage | null> =>
   get('/v1/recruit/manage', { authed: true });
 
+// ── Operations ───────────────────────────────────────────────────────────────
+//
+// Squadron owner, 2026-08-06: "the ops/and bgs need admin pages in the administration category".
+// Built on tables that carried capacity and standby overflow from the day they were designed.
+
+export interface OpRow {
+  id: string;
+  title: string;
+  /** bgs | combat | mining | trade | exploration | rescue | social | training. */
+  opType: string;
+  startsAt: string;
+  status: string;
+  /** Null means uncapped — a real choice, not a missing value. */
+  capacity: number | null;
+  going: number;
+  standby: number;
+  createdBy: string;
+  /** The caller's own commitment: yes, maybe, no, standby — or null if they have not said. */
+  mine: string | null;
+}
+
+export const getOps = (): Promise<{ ops: OpRow[] } | null> => get('/v1/ops', { authed: true });
+
 // ── BGS ──────────────────────────────────────────────────────────────────────
 //
 // Squadron owner, 2026-08-06: "allow the officers to choose what factions we want to be running
