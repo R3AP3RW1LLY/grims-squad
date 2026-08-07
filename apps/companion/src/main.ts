@@ -11,6 +11,7 @@ import {
 import { buildOverlayData } from './overlay-data.js';
 import { EMPTY_BGS, type BgsSessionState } from './bgs-session.js';
 import { fetchStandingOrders, type CompanionStanding } from './hub-bgs.js';
+import { readTradePlan, readPlanOrigin } from './trade-plan.js';
 import { explain } from './display-mode.js';
 import { commanderLocation } from './hub-commander.js';
 import {
@@ -1202,6 +1203,10 @@ function push(): void {
       refining,
       standingOrders,
       bgsSession: bgs,
+      // Re-read on every push rather than cached: the config is the single record of what was
+      // picked, and a cached copy is one more thing that can disagree with it.
+      tradePicks: readTradePlan(config.tradePlan ?? null),
+      tradeOrigin: readPlanOrigin(config.tradePlan ?? null),
       // The hub's whole-project answer rides every push, so the build tracker updates the moment
       // ANYTHING changes — a journal pass, a settings refresh, or the sixty-second hub refetch.
       currentProject,
@@ -2154,6 +2159,23 @@ if (!app.requestSingleInstanceLock()) {
      * `readMiningSettings` repairs whatever is on disk on every read — validating here as well
      * would be two validators, and one of them would drift from the rules the overlay obeys.
      */
+    /*
+     * ★ THE PICKED RUN, FROM THE WINDOW TO THE OVERLAY — SQUADRON OWNER, 2026-08-06 ★
+     *
+     * "add an option to choose the trade route and display them in the overlay please"
+     *
+     * Stored as the string the config holds rather than a parsed object, exactly like the mining
+     * settings: `readTradePlan` repairs whatever is there on every read, so there is one place that
+     * validates instead of two that can drift.
+     */
+    ipcMain.handle('setTradePlan', (_e, json: unknown) => {
+      if (typeof json !== 'string') return config.tradePlan ?? null;
+      config = { ...config, tradePlan: json };
+      void saveConfig(app.getPath('userData'), config);
+      push();
+      return config.tradePlan;
+    });
+
     ipcMain.handle('setMiningSettings', (_e, json: unknown) => {
       if (typeof json !== 'string') return config.miningSettings ?? null;
       config = { ...config, miningSettings: json };

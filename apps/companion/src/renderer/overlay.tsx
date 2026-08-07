@@ -52,14 +52,35 @@ export interface OverlayData {
      */
     readonly fromHub: boolean;
   } | null;
+  /**
+   * The run the member picked in the Freight Office.
+   *
+   * ★ WHAT TO DO AT THIS STATION COMES FIRST ★
+   *
+   * A member reads this while docked, deciding what to buy or sell before undocking. So `loadHere`
+   * and `sellHere` lead — they are an instruction — and the rest of the manifest is context behind
+   * them.
+   */
   readonly route: {
-    readonly commodity: string;
-    readonly buyAt: string;
-    readonly buyPrice: number;
-    readonly sellAt: string;
-    readonly sellPrice: number;
-    readonly profitPerTonne: number;
+    /** The whole manifest, in the order to fly it. */
+    readonly stops: ReadonlyArray<{
+      readonly commodity: string;
+      readonly station: string;
+      readonly system: string;
+      readonly tonnes: number;
+    }>;
+    /** What to load at the station the member is docked at right now. */
+    readonly loadHere: ReadonlyArray<{ readonly commodity: string; readonly tonnes: number }>;
+    /** What to sell here. Both can be non-empty: a chain sells and reloads at one station. */
+    readonly sellHere: ReadonlyArray<{ readonly commodity: string; readonly tonnes: number }>;
     readonly tonnes: number;
+    readonly capacity: number | null;
+    readonly outlay: number;
+    readonly profit: number;
+    /** Hold left empty — "you could carry 700 and are carrying 44" explains itself. */
+    readonly spare: number;
+    /** Light years for the whole run. Null when a stop could not be placed, so it is grouped. */
+    readonly routeLy: number | null;
   } | null;
   readonly cargo: {
     readonly items: ReadonlyArray<{
@@ -447,33 +468,87 @@ function RoutePanel({
   if (data === null) return <Waiting what="Pick a run in the Freight Office." />;
 
   return (
-    <div>
-      {show('commodity') ? (
-        <p style={{ margin: '0 0 4px', fontWeight: 600 }}>{data.commodity}</p>
-      ) : null}
-      {show('buy') ? (
-        <div style={ROW}>
-          <span>Buy · {data.buyAt}</span>
-          <span style={{ fontVariantNumeric: 'tabular-nums' }}>{data.buyPrice.toLocaleString()}</span>
-        </div>
-      ) : null}
-      {show('sell') ? (
-        <div style={ROW}>
-          <span>Sell · {data.sellAt}</span>
-          <span style={{ fontVariantNumeric: 'tabular-nums' }}>{data.sellPrice.toLocaleString()}</span>
-        </div>
-      ) : null}
-      {show('profit') ? (
-        <div style={{ ...ROW, marginTop: '4px', color: accent }}>
-          <span>Per tonne</span>
+    <div style={{ display: 'grid', gap: '2px' }}>
+      {/*
+        ★ WHAT TO DO HERE COMES FIRST — SQUADRON OWNER, 2026-08-06 ★
+
+        "add an option to choose the trade route and display them in the overlay"
+
+        This panel is read while docked, in the seconds before opening the commodity market. An
+        instruction for the station the member is standing at is worth more than the whole manifest,
+        so it sits at the top and the plan is context behind it.
+
+        Both lists can be non-empty at once: a chain sells here and loads the next leg here, and a
+        panel that showed only one would have somebody undock having done half the job.
+      */}
+      {show('here') && data.sellHere.length > 0 ? (
+        <div style={{ ...ROW, color: C.good, fontWeight: 600 }}>
+          <span>SELL HERE</span>
           <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-            +{data.profitPerTonne.toLocaleString()}
+            {data.sellHere.map((l) => `${l.commodity} ${l.tonnes}t`).join(' · ')}
           </span>
         </div>
       ) : null}
+
+      {show('here') && data.loadHere.length > 0 ? (
+        <div style={{ ...ROW, color: accent, fontWeight: 600 }}>
+          <span>LOAD HERE</span>
+          <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+            {data.loadHere.map((l) => `${l.commodity} ${l.tonnes}t`).join(' · ')}
+          </span>
+        </div>
+      ) : null}
+
+      {/*
+        The stops in the order to fly them. Numbered because the ORDER is the thing the planner
+        worked out — an unnumbered list reads as a set of options rather than a sequence.
+      */}
+      {show('stops')
+        ? data.stops.map((stop, i) => (
+            <div key={`${stop.station}:${stop.commodity}`} style={ROW}>
+              <span
+                style={{
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                <span style={{ color: C.faint }}>{i + 1}. </span>
+                {stop.commodity}
+                <span style={{ color: C.dim }}> · {stop.station}</span>
+              </span>
+              <span style={{ fontVariantNumeric: 'tabular-nums', color: C.dim }}>
+                {stop.tonnes.toLocaleString()} t
+              </span>
+            </div>
+          ))
+        : null}
+
+      {show('profit') ? (
+        <div style={{ ...ROW, marginTop: '4px', color: accent }}>
+          <span>Profit</span>
+          <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+            +{data.profit.toLocaleString()} cr
+          </span>
+        </div>
+      ) : null}
+
       {show('cargo') ? (
         <p style={{ margin: '3px 0 0', fontSize: '0.8em', color: C.dim }}>
-          {data.tonnes.toLocaleString()} t · {(data.profitPerTonne * data.tonnes).toLocaleString()} cr
+          {data.tonnes.toLocaleString()} t
+          {/*
+            The hold is stated only when a Loadout has been seen. Without one the manifest was
+            planned against what the stations can supply, and quoting a capacity we are guessing at
+            would be the one number on this panel nobody would think to doubt.
+          */}
+          {data.capacity === null
+            ? ' loaded · hold unknown until a Loadout is seen'
+            : ` of ${data.capacity.toLocaleString()} t${data.spare > 0 ? ` · ${data.spare.toLocaleString()} t spare` : ''}`}
+          {data.routeLy === null
+            ? // Said plainly: the stops are grouped by system, not routed. A member comparing this
+              // against their own galaxy map should know which of the two they are looking at.
+              ' · grouped, not routed'
+            : ` · ${Math.round(data.routeLy)} ly`}
         </p>
       ) : null}
     </div>

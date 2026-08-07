@@ -8,6 +8,8 @@ import type { OverlayData } from './renderer/overlay.js';
 import { hitRate, type ProspectingState } from './prospector.js';
 import { refinedRate, sessionMinutes, type RefiningState } from './refinery.js';
 import { standingFor, EMPTY_BGS, type BgsSessionState } from './bgs-session.js';
+import { whereInPlan, type PickedRun } from './trade-plan.js';
+import { planManifest } from '@grims/shared/manifest';
 import type { CompanionStanding } from './hub-bgs.js';
 
 /**
@@ -97,6 +99,87 @@ export interface OverlayInput {
   readonly standingOrders?: readonly CompanionStanding[] | null | undefined;
   /** What this member has moved for the squadron since the app started. */
   readonly bgsSession?: BgsSessionState | null | undefined;
+  /**
+   * The runs the member picked in the Freight Office.
+   *
+   * The PICKS, not a finished manifest: capacity changes when somebody swaps ship, so the manifest
+   * is planned here against the hold the app can currently see rather than baked at pick time.
+   */
+  readonly tradePicks?: readonly PickedRun[] | undefined;
+  /**
+   * Where the Freight Office measured that plan from.
+   *
+   * The journal names the station a member is docked at but never says where it is in space, so
+   * the planner's own origin travels with the plan — without it the manifest can only GROUP the
+   * stops by system rather than order them.
+   */
+  readonly tradeOrigin?: { readonly x: number; readonly y: number; readonly z: number } | null | undefined;
+}
+
+/**
+ * The picked run, planned against the hold the member is actually flying.
+ *
+ * ★ SQUADRON OWNER, 2026-08-06 ★
+ *
+ * "add an option to choose the trade route and display them in the overlay please so we can group
+ * multiple routes together if there are several that are going to the same destination, and show
+ * the optimized order"
+ *
+ * ★ THE SAME `planManifest` THE WEBSITE USES ★
+ *
+ * Grouping the shared stops and ordering them is a solved problem living in `@grims/shared`, and
+ * the two surfaces have to agree: a member who plans on the site and flies with the app must not be
+ * given a different order by each. Re-deriving it here would be a second implementation to keep in
+ * step, and the one that drifted would be the one nobody was looking at.
+ */
+function routePanel(input: OverlayInput): OverlayData['route'] {
+  const picks = input.tradePicks ?? [];
+  if (picks.length === 0) return null;
+
+  /*
+   * Without a Loadout we do not know the hold. Planning against a guess would quote tonnages and
+   * profits for a ship the member is not flying, so the manifest assumes the hold is whatever the
+   * picks can supply and says `capacity: null` — the panel prints the caveat.
+   */
+  const capacity = input.capacity;
+  const manifest = planManifest(picks, {
+    capacity: capacity ?? picks.reduce((sum, p) => sum + p.supply, 0),
+    budget: null,
+    ...(input.tradeOrigin == null ? {} : { origin: input.tradeOrigin }),
+  });
+
+  const here = whereInPlan(picks, input.dock ?? null);
+
+  /*
+   * Tonnes come from the MANIFEST, not from the pick. A pick says what the station has; the
+   * manifest says what actually fits once the hold, the supply and the demand have all had their
+   * say — and that is the number a member loads.
+   */
+  const tonnesOf = (commodity: string): number =>
+    manifest.lines.find((l) => l.commodity === commodity)?.tonnes ?? 0;
+
+  return {
+    stops: manifest.order.map((s) => ({
+      commodity: s.commodity,
+      station: s.station,
+      system: s.system,
+      tonnes: s.tonnes,
+    })),
+    loadHere: here.loadHere.map((p) => ({
+      commodity: p.commodity,
+      tonnes: tonnesOf(p.commodity),
+    })),
+    sellHere: here.sellHere.map((p) => ({
+      commodity: p.commodity,
+      tonnes: tonnesOf(p.commodity),
+    })),
+    tonnes: manifest.tonnes,
+    capacity,
+    outlay: manifest.outlay,
+    profit: manifest.profit,
+    spare: manifest.spare,
+    routeLy: manifest.routeLy,
+  };
 }
 
 export function buildOverlayData(input: OverlayInput): OverlayData {
@@ -104,18 +187,7 @@ export function buildOverlayData(input: OverlayInput): OverlayData {
     build: buildPanel(input),
     prospector: prospectorPanel(input),
     refinery: refineryPanel(input),
-    /*
-     * ★ ROUTE: NOTHING TO SEND, AND NOTHING FETCHABLE ★
-     *
-     * There is no record anywhere of the run a member picked. The Freight Office is a PLANNER — it
-     * computes candidates from an origin and some parameters — and `TRADE_SAVE_ROUTE` exists as a
-     * permission with nothing that writes it. Unblocking this is an API feature (save a chosen run,
-     * read it back on the companion), not overlay wiring.
-     *
-     * So the panel keeps saying "Pick a run in the Freight Office", which is exactly right and is
-     * what the app's own Trade runs page already says.
-     */
-    route: null,
+    route: routePanel(input),
     cargo: cargoPanel(input),
     status: {
       sending: input.sending,

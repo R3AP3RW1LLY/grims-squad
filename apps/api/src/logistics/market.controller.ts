@@ -413,6 +413,18 @@ export class MarketController {
         system: origin.system,
         station: origin.station,
         from: origin.from,
+        /*
+         * ★ THE COORDINATES, WITHOUT WHICH THE BASKET CANNOT ROUTE — FOUND 2026-08-06 ★
+         *
+         * `RoutePlan.origin.coords` was declared on the client and never sent by this endpoint. The
+         * multi-route manifest plans a shortest path FROM the member, so with no origin it silently
+         * fell back to grouping stops by system — and the page dutifully printed "grouped, not
+         * routed" for everybody, for every basket, with nothing to explain why.
+         *
+         * The owner asked for "the optimised order" and then for "true routing between pickups".
+         * This one field is what makes both real rather than a label.
+         */
+        coords: origin.coords,
         // Undefined for a typed origin. The page prints the age only when there is one to print.
         ...(origin.age === undefined ? {} : { age: origin.age, stale: origin.stale === true }),
       },
@@ -554,6 +566,7 @@ export class MarketController {
         system: origin.system,
         station: origin.station,
         from: origin.from,
+        coords: origin.coords,
         ...(origin.age === undefined ? {} : { age: origin.age, stale: origin.stale === true }),
       },
       unknownSystem: null,

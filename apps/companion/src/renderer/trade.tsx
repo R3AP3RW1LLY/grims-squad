@@ -2,7 +2,8 @@ import { useEffect, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 import { depthOf } from '@grims/shared';
 import type { TradePlan, TradeRoute } from '../hub-trade.js';
-import { Button, C, Card, Empty, Problem, Section, inputStyle } from './ui.js';
+import { Button, C, Card, Empty, Problem, R, Section, inputStyle } from './ui.js';
+import { writeTradePlan, type PickedRun } from '../trade-plan.js';
 import { useLive } from './use-live.js';
 
 /**
@@ -64,10 +65,134 @@ const CAP: Record<TradeRoute['limitedBy'], string> = {
   budget: 'your credits',
 };
 
-function RouteCard({ r }: { r: TradeRoute }): JSX.Element {
+/** A stable identity for a route, so a pick survives a re-render. */
+function keyOf(r: TradeRoute): string {
+  return `${r.commodity}/${r.buy.stationName}/${r.sell.stationName}`;
+}
+
+/**
+ * The picked runs, and the one button that puts them on the overlay.
+ *
+ * ★ SQUADRON OWNER, 2026-08-06 ★
+ *
+ * "add an option to choose the trade route and display them in the overlay please so we can group
+ * multiple routes together if there are several that are going to the same destination, and show
+ * the optimized order"
+ *
+ * ★ THE ORDER IS WORKED OUT WHERE THE HOLD IS KNOWN ★
+ *
+ * This sends the PICKS, not a manifest. The overlay plans against the hold the app can currently
+ * see, so swapping ship re-plans the run instead of quoting tonnages for a ship the member sold.
+ */
+function Basket({
+  plan,
+  picked,
+  sent,
+  onSent,
+  onClear,
+}: {
+  plan: TradePlan;
+  picked: ReadonlySet<string>;
+  sent: boolean;
+  onSent: () => void;
+  onClear: () => void;
+}): JSX.Element | null {
+  const chosen = plan.routes.filter((r) => picked.has(keyOf(r)));
+  if (chosen.length === 0) return null;
+
+  const send = (): void => {
+    const picks: PickedRun[] = chosen.map((r) => ({
+      commodity: r.commodity,
+      buyStation: r.buy.stationName,
+      buySystem: r.buy.systemName,
+      sellStation: r.sell.stationName,
+      sellSystem: r.sell.systemName,
+      buyPrice: r.buy.price,
+      profitPerTonne: r.profitPerTonne,
+      supply: r.buy.quantity,
+      demand: r.sell.quantity,
+      buyDistanceLy: r.buy.distance ?? 0,
+      buyCoords: r.buy.coords ?? null,
+    }));
+
+    void window.companion
+      .setTradePlan(writeTradePlan(picks, plan.origin?.coords ?? null))
+      .then(onSent);
+  };
+
+  return (
+    <Card>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px',
+          flexWrap: 'wrap',
+          fontSize: '13px',
+          color: C.text,
+        }}
+      >
+        <strong>
+          {chosen.length} run{chosen.length === 1 ? '' : 's'} picked
+        </strong>
+        <span style={{ color: C.dim, fontSize: '12px' }}>
+          {chosen.map((r) => r.commodity).join(' · ')}
+        </span>
+        <span style={{ marginLeft: 'auto', display: 'flex', gap: '8px', alignItems: 'center' }}>
+          {/*
+            Confirmed in words after the fact. The overlay may not even be enabled, so a silent
+            success would leave a member pressing a button that appears to do nothing.
+          */}
+          {sent ? (
+            <span style={{ color: C.good, fontSize: '12px' }}>
+              On the Trade run overlay
+            </span>
+          ) : null}
+          <Button onClick={send}>{sent ? 'Send again' : 'Send to overlay'}</Button>
+          <Button onClick={onClear}>Clear</Button>
+        </span>
+      </div>
+    </Card>
+  );
+}
+
+function RouteCard({
+  r,
+  picked,
+  onToggle,
+}: {
+  r: TradeRoute;
+  picked: boolean;
+  onToggle: () => void;
+}): JSX.Element {
   return (
     <Card>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '10px', flexWrap: 'wrap' }}>
+        {/*
+          ★ SQUADRON OWNER, 2026-08-06 ★
+
+          "add a clickable picker icon to each traderoute and use those to plan with etc"
+
+          A button, not a checkbox: it is an action with a consequence somewhere else on screen, and
+          it says which state it is in with a word as well as a mark — a lone tick against a dark
+          card is the kind of thing a member misses and then wonders why their overlay is empty.
+        */}
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-pressed={picked}
+          style={{
+            background: picked ? C.orangeTint : 'transparent',
+            border: `1px solid ${picked ? C.orange : C.subtle}`,
+            color: picked ? C.orangeBright : C.dim,
+            borderRadius: R.control,
+            cursor: 'pointer',
+            fontSize: '11px',
+            padding: '2px 8px',
+          }}
+        >
+          {picked ? '✓ Picked' : '+ Pick'}
+        </button>
         <strong style={{ color: C.text, fontSize: '14px' }}>{r.commodity}</strong>
         <span style={{ color: C.good, fontVariantNumeric: 'tabular-nums', fontSize: '15px' }}>
           {r.totalProfit.toLocaleString()} cr
@@ -147,6 +272,12 @@ export function TradePage(): JSX.Element {
   const [carriers, setCarriers] = useState(false);
   const [freshDays, setFreshDays] = useState('7');
   const [plan, setPlan] = useState<TradePlan | null>(null);
+  /*
+   * Which runs the member has picked, by a key that survives a re-render. Kept here rather than in
+   * the config so that picking is instant — the config write happens once, when they send it.
+   */
+  const [picked, setPicked] = useState<ReadonlySet<string>>(new Set());
+  const [sent, setSent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -345,9 +476,35 @@ export function TradePage(): JSX.Element {
                 {plan.timeModel.minutesPerStop} minutes per stop, and add supercruise time from
                 each station's arrival distance when we hold it.
               </p>
-              {plan.routes.map((r) => (
-                <RouteCard key={`${r.commodity}/${r.buy.stationName}/${r.sell.stationName}`} r={r} />
-              ))}
+              <Basket
+                plan={plan}
+                picked={picked}
+                sent={sent}
+                onSent={() => setSent(true)}
+                onClear={() => {
+                  setPicked(new Set());
+                  setSent(false);
+                }}
+              />
+              {plan.routes.map((r) => {
+                const key = keyOf(r);
+                return (
+                  <RouteCard
+                    key={key}
+                    r={r}
+                    picked={picked.has(key)}
+                    onToggle={() => {
+                      const next = new Set(picked);
+                      if (next.has(key)) next.delete(key);
+                      else next.add(key);
+                      setPicked(next);
+                      // Any change invalidates "sent" — otherwise the bar keeps claiming the
+                      // overlay holds a plan the member has since edited.
+                      setSent(false);
+                    }}
+                  />
+                );
+              })}
             </div>
           )}
         </Section>

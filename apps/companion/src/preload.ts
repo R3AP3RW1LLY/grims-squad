@@ -46,6 +46,7 @@ contextBridge.exposeInMainWorld('companion', {
   setAutoStart: (autoStart: boolean) => ipcRenderer.invoke('setAutoStart', autoStart),
   /** The prospector thresholds, as JSON. Repaired on read by mining-settings.ts. */
   setMiningSettings: (json: string) => ipcRenderer.invoke('setMiningSettings', json),
+  setTradePlan: (json: string) => ipcRenderer.invoke('setTradePlan', json),
   openHub: () => ipcRenderer.invoke('openHub'),
   chooseJournalFolder: () => ipcRenderer.invoke('chooseJournalFolder'),
   /** Searches the disk again — the game may have been installed since. */

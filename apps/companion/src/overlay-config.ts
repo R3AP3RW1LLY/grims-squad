@@ -55,7 +55,16 @@ export const OVERLAY_FIELDS: Record<OverlayId, readonly string[]> = {
   // No 'eta': nothing computes one, so the checkbox was a promise the panel could never keep.
   // Saved configs that still carry it are cleaned on load by exactly the validation named above.
   build: ['title', 'needs', 'progress', 'haulers'],
-  route: ['commodity', 'buy', 'sell', 'profit', 'cargo'],
+  /*
+   * ★ RENAMED WHEN THE PANEL STOPPED BEING ONE ROUTE — 2026-08-06 ★
+   *
+   * It drew a single buy/sell pair because that was all there was. It now draws the member's whole
+   * picked manifest, so 'commodity' and 'buy' would be names for lines that no longer exist.
+   *
+   * Old configs simply drop the retired keys on load and pick up the new ones as additions — see
+   * LEGACY_OFFERED, which still records the old list and must never be edited to match this one.
+   */
+  route: ['here', 'stops', 'profit', 'cargo'],
   /*
    * ★ SQUADRON OWNER, 2026-08-06 ★
    *
@@ -119,11 +128,10 @@ export const FIELD_LABELS: Record<string, string> = {
   progress: 'Progress bar',
   haulers: 'Haulers on it',
   // route
-  commodity: 'Commodity',
-  buy: 'Buy price',
-  sell: 'Sell price',
+  here: 'What to do at this station',
+  stops: 'The stops, in order',
   profit: 'Profit',
-  cargo: 'Tonnes',
+  cargo: 'Tonnes and distance',
   // cargo
   items: 'What you are carrying',
   capacity: 'Hold used',

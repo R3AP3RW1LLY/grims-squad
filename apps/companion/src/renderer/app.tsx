@@ -68,6 +68,7 @@ declare global {
       setEnabled(enabled: boolean): Promise<unknown>;
       setAutoStart(on: boolean): Promise<unknown>;
       setMiningSettings(json: string): Promise<unknown>;
+      setTradePlan(json: string): Promise<unknown>;
       openHub(): Promise<unknown>;
       rescan(): Promise<unknown>;
     };

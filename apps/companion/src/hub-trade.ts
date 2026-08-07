@@ -11,6 +11,14 @@ import type { HubCall } from './hub-colony.js';
  */
 
 export interface TradeLeg {
+  /**
+   * Where this station's system is.
+   *
+   * Every other distance on a leg is measured from the MEMBER, which cannot order stops against
+   * each other. These can — it is what lets the picked manifest be a real shortest path rather
+   * than a grouping. Null for a system we have not placed.
+   */
+  readonly coords?: { readonly x: number; readonly y: number; readonly z: number } | null;
   readonly stationName: string;
   readonly systemName: string;
   readonly stationType: string | null;
@@ -45,6 +53,14 @@ export interface TradePlan {
     readonly from: 'typed' | 'journal';
     readonly age?: string;
     readonly stale?: boolean;
+    /**
+     * Where that system is.
+     *
+     * The anchor the picked manifest is ordered from — the journal names the station a member is
+     * docked at but never says where it is in space, so without this the stops can only be grouped
+     * by system rather than routed.
+     */
+    readonly coords?: { readonly x: number; readonly y: number; readonly z: number } | null;
   } | null;
   readonly unknownSystem: string | null;
   readonly timeModel: {

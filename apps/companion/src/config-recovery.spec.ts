@@ -224,6 +224,9 @@ describe('a saved setting', () => {
     const full: CompanionConfig = {
       ...PAIRED,
       miningSettings: JSON.stringify({ default: 30, perMaterial: {} }),
+      // The picked trade run. Listed here so the general guard covers it — the whole point of this
+      // test is that the NEXT setting somebody adds is caught, and that only works if it is here.
+      tradePlan: JSON.stringify({ picks: [], origin: null }),
       journalPathOverride: null,
       autoStart: true,
     };

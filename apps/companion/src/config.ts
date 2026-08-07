@@ -34,6 +34,14 @@ export interface CompanionConfig {
    * validate, and one of them would drift.
    */
   miningSettings?: string;
+  /**
+   * The runs the member picked in the Freight Office, and where they planned from.
+   *
+   * A STRING for the same reason as `miningSettings`: `readTradePlan` repairs whatever is on disk on
+   * every read, so a hand-edited or older-version file cannot put a half-written pick into a
+   * manifest. Parsing it here would mean two places that validate, and one of them would drift.
+   */
+  tradePlan?: string;
   /** Base URL of the hub. Configurable so a member can point at a test server. */
   apiBaseUrl: string;
   /** The pairing token. Empty until the member pairs. */
@@ -360,6 +368,9 @@ export function loadConfig(userDataDir: string): CompanionConfig {
       ...(typeof parsed.miningSettings === 'string'
         ? { miningSettings: parsed.miningSettings }
         : {}),
+      // Same guard, same reason. Omitting this line is how the mining settings were lost on every
+      // restart with 386 green tests, none of which read a config back.
+      ...(typeof parsed.tradePlan === 'string' ? { tradePlan: parsed.tradePlan } : {}),
     };
   } catch (error) {
     /*
