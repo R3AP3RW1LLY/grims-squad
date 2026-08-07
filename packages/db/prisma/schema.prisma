@@ -453,6 +453,11 @@ model User {
   cmdrVerifications   CmdrVerification[]
   bountyClaims        BountyClaim[]
   miningSessions      MiningSession[]
+  recruitInvite       RecruitInvite?  @relation("RecruitInviteOwner")
+  recruitInvitesRevoked RecruitInvite[] @relation("RecruitInviteRevoker")
+  recruited           RecruitJoin[]   @relation("RecruitJoinRecruiter")
+  recruitedAs         RecruitJoin[]   @relation("RecruitJoinRecruit")
+  recruitJoinsVoided  RecruitJoin[]   @relation("RecruitJoinVoider")
   prospectedRocks     ProspectedRock[]
   leaderboardEvents   LeaderboardEvent[]
   currentBuild        CurrentBuild?
@@ -4792,4 +4797,84 @@ model RoadmapCard {
   /// The board read: one column's live cards, in order.
   @@index([column, position])
   @@map("roadmap_cards")
+}
+
+/// A member's personal Discord invite.
+///
+/// ★ SQUADRON OWNER, 2026-08-06 ★
+///
+/// "a unique discord invite link for all members that are inara veriefied in our platform!"
+///
+/// One per member, ever. Re-minting returns the same code rather than littering the guild with
+/// abandoned invites — Discord keeps every one until it is deleted, and a member who clicks the
+/// button twice should not create a second door into the squadron.
+model RecruitInvite {
+  userId       String    @id @map("user_id") @db.Uuid
+  /// Discord's own invite code. Unique because it IS the identity of the link.
+  code         String    @unique
+  /// The last use count we saw. Attribution diffs against this, so it is state rather than a stat.
+  usesSeen     Int       @default(0) @map("uses_seen")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  /// Revoked rather than deleted: joins already credited through it keep their provenance.
+  revokedAt    DateTime? @map("revoked_at") @db.Timestamptz(6)
+  revokedBy    String?   @map("revoked_by") @db.Uuid
+  revokeReason String?   @map("revoke_reason")
+
+  user      User  @relation("RecruitInviteOwner", fields: [userId], references: [id], onDelete: Cascade)
+  revokedByUser User? @relation("RecruitInviteRevoker", fields: [revokedBy], references: [id], onDelete: SetNull)
+
+  @@map("recruit_invites")
+}
+
+/// Somebody who came through a member's link.
+///
+/// ★ ONE DISCORD ACCOUNT IS ATTRIBUTABLE ONCE, EVER ★
+///
+/// The id is the joiner's Discord id rather than a serial, so leaving and rejoining cannot credit
+/// anybody a second time — the database refuses it rather than trusting a worker to remember.
+model RecruitJoin {
+  discordId   String    @id @map("discord_id")
+  /// Null when we could not tell who to credit. A normal state, not a failure: see `attribution`.
+  recruiterId String?   @map("recruiter_id") @db.Uuid
+  inviteCode  String?   @map("invite_code")
+  /// auto | manual | ambiguous | unknown. "We could not tell" and "an officer decided" are
+  /// different facts about the same row and only one of them should be trusted later.
+  attribution String    @default("unknown")
+  joinedAt    DateTime  @default(now()) @map("joined_at") @db.Timestamptz(6)
+  /// Set when the joiner links a hub account, which is what makes the later milestones knowable.
+  userId      String?   @map("user_id") @db.Uuid
+  /// Voided rather than deleted, so a fraudulent credit leaves a trail and no further milestone pays.
+  voidedAt    DateTime? @map("voided_at") @db.Timestamptz(6)
+  voidedBy    String?   @map("voided_by") @db.Uuid
+  voidReason  String?   @map("void_reason")
+
+  recruiter  User? @relation("RecruitJoinRecruiter", fields: [recruiterId], references: [id], onDelete: SetNull)
+  recruit    User? @relation("RecruitJoinRecruit", fields: [userId], references: [id], onDelete: SetNull)
+  voidedByUser User? @relation("RecruitJoinVoider", fields: [voidedBy], references: [id], onDelete: SetNull)
+  milestones RecruitMilestone[]
+
+  @@index([recruiterId, joinedAt])
+  @@map("recruit_joins")
+}
+
+/// How far a recruit got.
+///
+/// Separate from the join so the tracker shows a ladder rather than a boolean, and so a milestone
+/// reached is a dated fact rather than something derived and re-derived.
+model RecruitMilestone {
+  id         BigInt   @id @default(autoincrement())
+  discordId  String   @map("discord_id")
+  /// joined | stayed | verified | flying | cadet. Text, not an enum: the ladder is a product
+  /// decision that may grow, and an enum migration to add a rung locks a table everyone reads.
+  milestone  String
+  reachedAt  DateTime @default(now()) @map("reached_at") @db.Timestamptz(6)
+  /// What it paid AT THE TIME, so tuning the ladder later cannot rewrite what somebody earned.
+  points     Int      @default(0)
+
+  join RecruitJoin @relation(fields: [discordId], references: [discordId], onDelete: Cascade)
+
+  /// Each rung once per recruit. This is what makes the milestone worker replayable.
+  @@unique([discordId, milestone], map: "recruit_milestones_once")
+  @@index([discordId, reachedAt])
+  @@map("recruit_milestones")
 }

@@ -222,7 +222,15 @@ describe('P0.2 database schema', () => {
     // because it is the only way to answer "is this ring still paying" from more than one
     // commander's memory, which is the one thing no single-player mining tool can ever do. Kept
     // deliberately narrow for that reason: the best material and its share, and nothing else.
-    expect(Number(r[0]?.n)).toBe(123);
+    /*
+     * 126 since 2026-08-06: the three recruitment tables joined mining's two.
+     *
+     * This number is deliberately hard to change by accident. The first instinct on seeing it fail
+     * is to bump it — which is right ONLY when the SSOT genuinely declares the new tables, and
+     * wrong when a migration created something the schema never mentioned. That is exactly how the
+     * mining tables were caught: the migration was ahead of the models.
+     */
+    expect(Number(r[0]?.n)).toBe(126);
   });
 
   describe('hand-written DDL that Prisma cannot express', () => {

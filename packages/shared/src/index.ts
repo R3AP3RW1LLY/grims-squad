@@ -243,3 +243,6 @@ export type {
   Stop as ManifestStop,
   Coords as ManifestCoords,
 } from './manifest.js';
+
+export { canMintInvite, milestonePoints, RECRUIT_MILESTONES } from './recruit.js';
+export type { RecruitMilestone, MintCheck, MintVerdict, MintRefusal } from './recruit.js';
