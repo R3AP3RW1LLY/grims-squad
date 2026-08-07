@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'preact/hooks';
+import { compareBodyNames } from '@grims/shared/body-order';
 import type { JSX } from 'preact';
 import type {
   BuildTypeRow,
@@ -65,6 +66,23 @@ function tree(bodies: readonly PlanBody[]): Array<{ body: PlanBody; depth: numbe
     // the body is promoted to a root rather than vanishing off the diagram.
     const key = b.parentBodyId !== null && known.has(b.parentBodyId) ? b.parentBodyId : null;
     byParent.set(key, [...(byParent.get(key) ?? []), b]);
+  }
+
+  /*
+   * ★ SQUADRON OWNER, 2026-08-07 ★
+   *
+   * "all the sub planets are not appearing alphabetically, and it looks really bad!"
+   *
+   * The same fault the website's planner had, from the same cause: siblings kept whatever order the
+   * query returned, and a gas giant's moons all sit within a few light seconds of each other, so
+   * that order was effectively arbitrary. Sorted by name, and NATURALLY — a plain string sort puts
+   * `B 10` above `B 2`.
+   *
+   * Shared with the website deliberately. Two surfaces drawing the same system map in two different
+   * orders is worse than either order being wrong.
+   */
+  for (const [key, kids] of byParent) {
+    byParent.set(key, [...kids].sort((x, y) => compareBodyNames(x.name, y.name)));
   }
 
   const out: Array<{ body: PlanBody; depth: number }> = [];

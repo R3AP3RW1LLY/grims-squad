@@ -1,6 +1,11 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
+/*
+ * The SUBPATH, not the barrel: this is a client component and the barrel reaches node:crypto,
+ * which fails the browser build and 500s every hub page. `client-imports.spec.ts` guards it.
+ */
+import { compareBodyNames } from '@grims/shared/body-order';
 import { useState } from 'react';
 import type {
   ColonyBuildType,
@@ -165,6 +170,22 @@ function tree(bodies: readonly PlanBody[]): Array<{ body: PlanBody; depth: numbe
     // the body is promoted to a root rather than vanishing off the diagram.
     const key = b.parentBodyId !== null && known.has(b.parentBodyId) ? b.parentBodyId : null;
     byParent.set(key, [...(byParent.get(key) ?? []), b]);
+  }
+
+  /*
+   * ★ SQUADRON OWNER, 2026-08-07 ★
+   *
+   * "all the sub planets are not appearing alphabetically, and it looks really bad!"
+   *
+   * Siblings arrived in the query's order — `distance_ls, body_id` — and a gas giant's moons all
+   * sit within four light seconds of each other, so that was effectively arbitrary: `A 1 c` could
+   * render above `A 1 a` purely because it was scanned first.
+   *
+   * Sorted by NAME, and naturally: a plain string sort puts `B 10` above `B 2`, which is the other
+   * half of why the list looked wrong.
+   */
+  for (const [key, kids] of byParent) {
+    byParent.set(key, [...kids].sort((x, y) => compareBodyNames(x.name, y.name)));
   }
 
   const out: Array<{ body: PlanBody; depth: number }> = [];

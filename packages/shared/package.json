@@ -70,6 +70,10 @@
     "./market-depth": {
       "types": "./dist/market-depth.d.ts",
       "default": "./dist/market-depth.js"
+    },
+    "./body-order": {
+      "types": "./dist/body-order.d.ts",
+      "default": "./dist/body-order.js"
     }
   },
   "scripts": {
