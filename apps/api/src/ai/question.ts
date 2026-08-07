@@ -88,6 +88,19 @@ export interface Plan {
    * exactly the confidence of tonight's actual roster.
    */
   readonly ops: Record<string, never> | null;
+  /**
+   * Set when the question is "where should we colonise next".
+   *
+   * ★ ANSWERED FROM THE SCOUT, NOT FROM PROSE ★
+   *
+   * The candidate set is live: claimable systems in range of an anchor, each with the station that
+   * sells its permit and the power that purchase extends. Asked without this leg, the assistant
+   * answers from forum posts about a system somebody claimed months ago.
+   *
+   * `anchor` is null when the member named no system, in which case the leg says what it needs
+   * rather than guessing at one.
+   */
+  readonly colonise: { readonly anchor: string | null } | null;
 }
 
 /**
@@ -173,6 +186,7 @@ export function planFor(
      */
     orders: ordersIn(q),
     ops: opsIn(q),
+    colonise: coloniseIn(q),
   };
 }
 
@@ -354,6 +368,31 @@ const OPS_INTENT =
  */
 const OPS_NOT =
   /\b(?:operate|operating)\b|\b(?:sell|selling|buy|buying|mine|mining|haul|hauling|fly|fit|build|loadout|route)\b/i;
+
+/**
+ * "Where should we colonise", in the forms members type.
+ *
+ * ★ IT MUST BE ABOUT CLAIMING, NOT ABOUT AN EXISTING COLONY ★
+ *
+ * "Colony" turns up constantly in hauling questions — what the colony needs, where to deliver to
+ * it. Answering those with a list of systems to claim would be a confident non-answer, so the
+ * grammar demands a claiming verb alongside the subject.
+ */
+const COLONISE_INTENT =
+  /\b(?:colonis|coloniz)\w*\b|\b(?:claim|settle|expand)\w*\b[^?.!]{0,30}\b(?:system|systems|next|somewhere)\b|\b(?:where|what|which|find)\b[^?.!]{0,30}\b(?:system|systems)\b[^?.!]{0,30}\b(?:claim|settle|colonis|coloniz|take|put)\w*|\b(?:put|start|found|place|build)\b[^?.!]{0,25}\b(?:next\s+|new\s+|another\s+)?colony\b/i;
+
+/** Questions about a colony that already exists — hauling, deliveries, what it still needs. */
+const COLONISE_NOT =
+  /\b(?:deliver|delivery|deliveries|haul|hauling|need|needs|needed|still|buy|buying|sell|selling|commodit|cargo|progress|remaining)\w*/i;
+
+/** The system to search around, when the member names one. Same grammar the spatial leg uses. */
+const COLONISE_NEAR = /\b(?:near|around|close to|by|from|next to)\s+([A-Z][A-Za-z0-9'’-]*(?:\s+[A-Z0-9][A-Za-z0-9'’-]*)*)/;
+
+function coloniseIn(q: string): { anchor: string | null } | null {
+  if (!COLONISE_INTENT.test(q)) return null;
+  if (COLONISE_NOT.test(q)) return null;
+  return { anchor: COLONISE_NEAR.exec(q)?.[1]?.trim() ?? null };
+}
 
 function opsIn(q: string): Record<string, never> | null {
   if (!OPS_INTENT.test(q)) return null;

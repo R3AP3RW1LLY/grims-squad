@@ -13,6 +13,7 @@ import { EMPTY_BGS, type BgsSessionState } from './bgs-session.js';
 import { fetchStandingOrders, type CompanionStanding } from './hub-bgs.js';
 import { readTradePlan, readPlanOrigin } from './trade-plan.js';
 import { recruitStatus, mintInvite } from './hub-recruit.js';
+import { scoutSystems, surveySystem } from './hub-scout.js';
 import { explain } from './display-mode.js';
 import { commanderLocation } from './hub-commander.js';
 import {
@@ -1781,6 +1782,24 @@ if (!app.requestSingleInstanceLock()) {
       }
       return tradeCommodity(hub(), name, clean);
     });
+    /*
+     * Scouting. Renderer args re-read rather than trusted, like every handler in this block: only
+     * strings pass, and the hub clamps the range regardless.
+     */
+    ipcMain.handle('scoutSearch', (_e, anchor: unknown, range: unknown, prefer: unknown) =>
+      typeof anchor === 'string' && anchor.trim() !== ''
+        ? scoutSystems(hub(), anchor.trim(), {
+            ...(typeof range === 'string' ? { range } : {}),
+            ...(typeof prefer === 'string' ? { prefer } : {}),
+          })
+        : Promise.resolve({ ok: false as const, error: 'Name a system to search around.' }),
+    );
+    ipcMain.handle('scoutSurvey', (_e, system: unknown) =>
+      typeof system === 'string' && system.trim() !== ''
+        ? surveySystem(hub(), system.trim())
+        : Promise.resolve({ ok: false as const, error: 'Name a system to survey.' }),
+    );
+
     ipcMain.handle('shipyardShips', () => shipyardShips(hub()));
     ipcMain.handle('shipyardOutfit', (_e, shipId: unknown) =>
       typeof shipId === 'string' && shipId !== ''

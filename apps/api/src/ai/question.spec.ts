@@ -247,3 +247,38 @@ describe('asking what the squadron is doing tonight', () => {
     expect(planFor('how do I operate the fuel scoop', COMMODITIES).ops).toBeNull();
   });
 });
+
+describe('asking where the squadron should colonise next', () => {
+  /**
+   * ★ SQUADRON OWNER, 2026-08-07 ★
+   *
+   * The scout answers this from live galaxy data and our own station table. Asked without it, the
+   * assistant answers from forum prose about a system somebody claimed months ago.
+   */
+  it('routes the plain forms', () => {
+    for (const q of [
+      'where should we colonise next',
+      'what system should we claim',
+      'any good systems to colonize nearby',
+      'where can we put our next colony',
+      'find us a system to colonise',
+    ]) {
+      expect(planFor(q, COMMODITIES).colonise, `"${q}" did not reach the scout leg`).not.toBeNull();
+    }
+  });
+
+  it('picks up the system to search around when one is named', () => {
+    const plan = planFor('where should we colonise near Shinrarta Dezhra', COMMODITIES);
+    expect(plan.colonise?.anchor).toBe('Shinrarta Dezhra');
+  });
+
+  it('MANDATORY: does not hijack questions about an existing colony', () => {
+    /*
+     * "colony" appears constantly in hauling questions. Answering "what does our colony still need"
+     * with a list of systems to claim would be a confident non-answer.
+     */
+    expect(planFor('what does the colony still need', COMMODITIES).colonise).toBeNull();
+    expect(planFor('where do I deliver to the colony', COMMODITIES).colonise).toBeNull();
+    expect(planFor('where can I buy steel for the build', COMMODITIES).colonise).toBeNull();
+  });
+});

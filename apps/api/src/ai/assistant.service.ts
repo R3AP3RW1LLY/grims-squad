@@ -8,6 +8,7 @@ import { ShipBuildService } from './ship-build.service.js';
 import type { MiningService } from '../mining/mining.service.js';
 import type { BgsService } from '../bgs/bgs.service.js';
 import type { OpsService } from '../ops/ops.service.js';
+import type { ScoutService } from '../colonisation/scout.service.js';
 
 /**
  * The assistant — the surface everything else has been building towards.
@@ -153,6 +154,14 @@ export class AssistantService {
      * in March.
      */
     private readonly ops?: OpsService,
+    /**
+     * The colonisation scout.
+     *
+     * "Where should we colonise next" is answered from live galaxy data and our own station table —
+     * which systems can be claimed, from which station, extending whose power. Without it the
+     * assistant answers from forum posts about a system somebody claimed months ago.
+     */
+    private readonly scout?: ScoutService,
   ) {}
 
   async ask(
@@ -337,6 +346,10 @@ export class AssistantService {
       legs.push(this.#opsLeg(userId));
     }
 
+    if (plan.colonise !== null && this.scout !== undefined) {
+      legs.push(this.#coloniseLeg(plan.colonise.anchor));
+    }
+
     const settled = await Promise.allSettled(legs);
 
     const seen = new Set<string>();
@@ -406,6 +419,78 @@ export class AssistantService {
         `${r.hitRate.toFixed(0)}% of them worth shooting. Mostly running ${r.topMaterial}; ` +
         `richest rock seen was ${r.bestPercent.toFixed(1)}%. Last prospected ${r.lastSeen.toISOString().slice(0, 10)}.`,
       url: '/mining',
+    }));
+  }
+
+  /**
+   * Where the squadron could colonise, rendered as facts.
+   *
+   * ★ IT REFUSES TO GUESS AN ANCHOR ★
+   *
+   * A claim reaches fifteen light years from the station selling it, so "where should we colonise"
+   * is unanswerable without knowing where FROM. Picking a system on the member's behalf would
+   * produce a confident list about the wrong part of the galaxy, so the leg says what it needs
+   * instead — which is a useful answer, and an honest one.
+   */
+  async #coloniseLeg(anchor: string | null): Promise<Fact[]> {
+    if (this.scout === undefined) return [];
+
+    if (anchor === null) {
+      return [
+        {
+          source: 'colonisation',
+          kind: 'scout',
+          name: 'colonisation scout',
+          text: 'A colonisation claim only reaches about 15 light years from the station that sells it, so the answer depends entirely on where you are claiming FROM. Name a system — usually a station you already buy colonisation ships at, or a colony the squadron already holds — and the scout lists what can be claimed near it, where each permit is bought, and which power that purchase extends.',
+          url: '/colonisation/scout',
+        },
+      ];
+    }
+
+    const out = await this.scout.scout({ anchor });
+
+    if (out.unknownAnchor !== null) {
+      return [
+        {
+          source: 'colonisation',
+          kind: 'scout',
+          name: 'unknown system',
+          text: `We hold no coordinates for “${out.unknownAnchor}”, so nothing can be measured from it. The name has to match the game exactly.`,
+          url: '/colonisation/scout',
+        },
+      ];
+    }
+
+    if (out.candidates.length === 0) {
+      return [
+        {
+          source: 'colonisation',
+          kind: 'scout',
+          name: `nothing claimable near ${out.anchor?.system ?? anchor}`,
+          text: `Nothing inside claim range of ${out.anchor?.system ?? anchor} can be claimed — everything nearby is already colonised, inhabited or permit-locked.`,
+          url: '/colonisation/scout',
+        },
+      ];
+    }
+
+    /*
+     * The top few only. A model handed thirty candidates writes about thirty candidates; the
+     * ranking already put the best first, and the page is there for the full list.
+     */
+    return out.candidates.slice(0, 5).map((c) => ({
+      source: 'colonisation',
+      kind: 'candidate',
+      name: c.system,
+      text:
+        `${c.system} — claimable, ${c.bodyCount > 0 ? `${c.bodyCount} bodies` : 'body count unknown'}. ` +
+        (c.permit === null
+          ? 'No station within claim range, so it cannot actually be claimed from anywhere nearby.'
+          : `Buy the claim at ${c.permit.system}, ${c.permitLy?.toFixed(1) ?? '?'} ly away` +
+            `${c.permit.allegiance === null ? '' : ` — ${c.permit.allegiance}, so claiming it extends that power`}.`) +
+        (c.surveyed
+          ? ` Nearest landable body ${c.nearestLandableLs === null ? 'none' : `${Math.round(c.nearestLandableLs).toLocaleString()} Ls`} from the arrival star.`
+          : ' Not surveyed yet — nothing is known about its bodies.'),
+      url: '/colonisation/scout',
     }));
   }
 

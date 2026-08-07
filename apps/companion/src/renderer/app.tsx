@@ -14,6 +14,7 @@ import { PlanningPage } from './planning.js';
 import { BuildTypesPage } from './build-types.js';
 import { LeaderboardPage } from './leaderboards.js';
 import { RecruitPage } from './recruit.js';
+import { ScoutPage } from './scout.js';
 import { MiningPage } from './mining.js';
 import { SupportPage } from './support.js';
 import { HelpWidget } from './help-widget.js';
@@ -118,6 +119,7 @@ type Page =
   | 'outfitter'
   | 'builds-squadron'
   | 'builds-public'
+  | 'scout'
   | 'recruit'
   | 'support'
   | 'settings'
@@ -223,6 +225,13 @@ const NAV: ReadonlyArray<NavItem | NavGroup> = [
        * work happens in: you plan a system, look up what the pieces cost, then post the one you
        * have started building.
        */
+      /*
+       * ★ SCOUT ABOVE PLANNING, MIRRORING THE WEBSITE — SQUADRON OWNER, 2026-08-07 ★
+       *
+       * Scouting is the step BEFORE planning: planning lays out a system already chosen, scouting
+       * is the choosing. The website puts it here and the app mirrors the website exactly.
+       */
+      { id: 'scout', label: 'Scout', hint: 'Find the next system worth claiming' },
       { id: 'colony-planning', label: 'Planning', hint: 'Lay out a whole system before you build' },
       { id: 'colony-build-types', label: 'Build types', hint: 'What each kind of site costs' },
       // "Start New Project" here too, so the app and the website do not call the same destination
@@ -608,6 +617,7 @@ function App(): JSX.Element {
         */}
         {page === 'lb-mining' ? <LeaderboardPage board="mining" /> : null}
         {page === 'mining' ? <MiningPage /> : null}
+        {page === 'scout' ? <ScoutPage /> : null}
         {page === 'recruit' ? <RecruitPage /> : null}
         {page === 'commodities' ? <CommoditiesPage /> : null}
         {page === 'outfitter' ? <OutfitterPage /> : null}

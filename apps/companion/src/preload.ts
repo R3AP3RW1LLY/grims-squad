@@ -217,6 +217,12 @@ contextBridge.exposeInMainWorld('commander', {
   location: () => ipcRenderer.invoke('commanderLocation'),
 });
 
+contextBridge.exposeInMainWorld('scout', {
+  search: (anchor: string, range?: string, prefer?: string) =>
+    ipcRenderer.invoke('scoutSearch', anchor, range, prefer),
+  survey: (system: string) => ipcRenderer.invoke('scoutSurvey', system),
+});
+
 contextBridge.exposeInMainWorld('colony', {
   /** Both boards, plus what this member is allowed to do with them. */
   projects: () => ipcRenderer.invoke('colonyProjects'),
