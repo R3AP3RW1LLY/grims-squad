@@ -78,6 +78,10 @@
     "./colony-plan-check": {
       "types": "./dist/colony-plan-check.d.ts",
       "default": "./dist/colony-plan-check.js"
+    },
+    "./colony-scout": {
+      "types": "./dist/colony-scout.d.ts",
+      "default": "./dist/colony-scout.js"
     }
   },
   "scripts": {
