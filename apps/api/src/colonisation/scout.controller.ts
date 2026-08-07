@@ -7,6 +7,7 @@ import { User, type CurrentUser } from '../auth/current-user.js';
 import { PAIRING_SERVICE } from '../telemetry/telemetry.tokens.js';
 import type { PairingService } from '../telemetry/pairing.service.js';
 import { ScoutService } from './scout.service.js';
+import { SurveyService } from './survey.service.js';
 
 /**
  * The colonisation scout.
@@ -26,6 +27,7 @@ import { ScoutService } from './scout.service.js';
 export class ScoutController {
   constructor(
     @Inject(ScoutService) private readonly scout: ScoutService,
+    @Inject(SurveyService) private readonly survey: SurveyService,
     @Inject(PermissionService) private readonly permissions: PermissionService,
   ) {}
 
@@ -50,6 +52,26 @@ export class ScoutController {
   ) {
     await this.#assert(caller);
     return this.scout.scout(readQuery(anchor, range, prefer));
+  }
+
+  /**
+   * Take a proper look at one candidate.
+   *
+   * Separate from the search on purpose: a member comparing a dozen systems should see the list
+   * immediately, not wait for a dozen body surveys before anything appears.
+   */
+  @Get('survey')
+  async look(@User() caller: CurrentUser | undefined, @Query('system') system?: string) {
+    await this.#assert(caller);
+
+    const name = system?.trim() ?? '';
+    if (name === '') {
+      throw new AppError(ErrorCode.VALIDATION_FAILED, 'Name a system to survey.');
+    }
+
+    const out = await this.survey.survey(name);
+    // Named back, so the page can say WHICH system was not found rather than showing an empty one.
+    return out ?? { notFound: name };
   }
 }
 
@@ -92,6 +114,7 @@ function readQuery(anchor?: string, range?: string, prefer?: string) {
 export class ScoutDeviceController {
   constructor(
     @Inject(ScoutService) private readonly scout: ScoutService,
+    @Inject(SurveyService) private readonly survey: SurveyService,
     @Inject(PAIRING_SERVICE) private readonly pairing: PairingService,
   ) {}
 
@@ -116,5 +139,15 @@ export class ScoutDeviceController {
   ) {
     await this.#paired(req);
     return this.scout.scout(readQuery(anchor, range, prefer));
+  }
+
+  @Public()
+  @Get('survey')
+  async look(@Req() req: FastifyRequest, @Query('system') system?: string) {
+    await this.#paired(req);
+    const name = system?.trim() ?? '';
+    if (name === '') throw new AppError(ErrorCode.VALIDATION_FAILED, 'Name a system to survey.');
+    const out = await this.survey.survey(name);
+    return out ?? { notFound: name };
   }
 }
