@@ -43,25 +43,35 @@ async function seedMember(): Promise<{ userId: string; deviceId: string }> {
 }
 
 /**
- * A real system out of the galaxy table, so `ensureSystem` runs its lazy-create for real.
+ * A galaxy row for a system this spec owns, so `ensureSystem` runs its lazy-create for real.
  *
- * Inventing an address would skip the interesting half of that function — the `cube_ll_coord`
- * extraction and the `ext_key` match, which are exactly the two things that would fail at runtime
- * and nowhere else.
+ * ★ SEEDED, NOT BORROWED — CAUGHT BY CI ★
+ *
+ * This used to pick any real system out of `knowledge_items` and fail loudly when it found none.
+ * That reads as rigorous and is wrong: a fresh CI database has no galaxy dump and never will, so
+ * the spec could not pass there by construction. It went red on the first run against a clean box.
+ *
+ * Seeding its own row keeps the interesting half of `ensureSystem` under test — the
+ * `cube_ll_coord` extraction and the `ext_key` match, which are exactly the two things that fail
+ * at runtime and nowhere else — while depending on nothing but the schema.
  */
-async function realSystem(): Promise<{ address: string; preexisting: boolean } | null> {
-  const [k] = await db.$queryRawUnsafe<Array<{ ext_key: string }>>(
-    `SELECT ext_key FROM knowledge_items
-      WHERE kind = 'system' AND coords IS NOT NULL AND ext_key ~ '^[0-9]+$'
-      LIMIT 1`,
-  );
-  if (k === undefined) return null;
+const TEST_ADDRESS = '900000000000001';
 
+async function seedGalaxySystem(): Promise<{ address: string; preexisting: boolean }> {
   const [have] = await db.$queryRawUnsafe<Array<{ address: bigint }>>(
     `SELECT address FROM systems WHERE address = $1::bigint`,
-    k.ext_key,
+    TEST_ADDRESS,
   );
-  return { address: k.ext_key, preexisting: have !== undefined };
+
+  await db.$executeRawUnsafe(
+    `INSERT INTO knowledge_items (source, kind, ext_key, name, data, coords, text)
+     VALUES ('galaxy', 'system', $1, $2, '{}'::jsonb, cube(array[1.0, 2.0, 3.0]), $2)
+     ON CONFLICT (source, kind, ext_key) DO UPDATE SET coords = EXCLUDED.coords`,
+    TEST_ADDRESS,
+    `${TAG} System`,
+  );
+
+  return { address: TEST_ADDRESS, preexisting: have !== undefined };
 }
 
 /**
@@ -138,17 +148,18 @@ async function cleanUp(userId: string, systemDrop: string | null): Promise<void>
   if (systemDrop !== null) {
     await db.$executeRawUnsafe(`DELETE FROM systems WHERE address = $1::bigint`, systemDrop);
   }
+  // The seeded galaxy row too — this spec created it, so this spec removes it.
+  await db.$executeRawUnsafe(
+    `DELETE FROM knowledge_items WHERE kind = 'system' AND ext_key = $1`,
+    TEST_ADDRESS,
+  );
 }
 
 describe('the BGS ingest, against Postgres', () => {
   it(
     'scores what the officers ordered, records what they did not, and never pays twice',
     async () => {
-      const place = await realSystem();
-      if (place === null) {
-        // A box with no galaxy loaded cannot exercise this. Say so rather than pass quietly.
-        expect.fail('no system in knowledge_items — load the galaxy before running this spec');
-      }
+      const place = await seedGalaxySystem();
 
       const { userId, deviceId } = await seedMember();
       const ourId = await seedFaction(OURS, true);
@@ -242,7 +253,7 @@ describe('the BGS ingest, against Postgres', () => {
         expect((after[0] as { n: number }).n).toBe(2);
         expect((after[0] as { total: number }).total).toBe(30);
       } finally {
-        await cleanUp(userId, place !== null && !place.preexisting ? place.address : null);
+        await cleanUp(userId, place.preexisting ? null : place.address);
       }
     },
     120_000,
@@ -251,8 +262,7 @@ describe('the BGS ingest, against Postgres', () => {
   it(
     'records a watched faction with no standing order, and pays nothing for it',
     async () => {
-      const place = await realSystem();
-      if (place === null) expect.fail('no system in knowledge_items');
+      const place = await seedGalaxySystem();
 
       const { userId, deviceId } = await seedMember();
       const ourId = await seedFaction(OURS, true);
@@ -291,7 +301,7 @@ describe('the BGS ingest, against Postgres', () => {
         );
         expect((points[0] as { n: number }).n).toBe(0);
       } finally {
-        await cleanUp(userId, place !== null && !place.preexisting ? place.address : null);
+        await cleanUp(userId, place.preexisting ? null : place.address);
         await db.$disconnect();
       }
     },
