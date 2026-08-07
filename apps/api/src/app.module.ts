@@ -12,6 +12,7 @@ import { LogisticsModule } from './logistics/logistics.module.js';
 import { BountiesModule } from './bounties/bounties.module.js';
 import { LeaderboardsModule } from './leaderboards/leaderboards.module.js';
 import { MiningModule } from './mining/mining.module.js';
+import { RecruitModule } from './recruit/recruit.module.js';
 import { ShipyardDeviceModule } from './ai/shipyard-device.module.js';
 import { NotificationsModule } from './notifications/notifications.module.js';
 import { TelemetryModule } from './telemetry/telemetry.module.js';
@@ -30,7 +31,7 @@ import { RequiresPermissionGuard } from './authz/requires-permission.guard.js';
 import { ViewAsGuard } from './authz/view-as.guard.js';
 
 @Module({
-  imports: [DatabaseModule, AuthzModule, AuthModule, MembersModule, CmdrModule, AdminModule, PublicModule, LogisticsModule, BountiesModule, LeaderboardsModule, MiningModule, ShipyardDeviceModule, NotificationsModule, TelemetryModule, MediaModule, CompanionModule, LiveModule, AiModule, ForumModule, ChangelogModule, AnnouncementsModule, SupportModule, SuggestionsModule, RoadmapModule],
+  imports: [DatabaseModule, AuthzModule, AuthModule, MembersModule, CmdrModule, AdminModule, PublicModule, LogisticsModule, BountiesModule, LeaderboardsModule, MiningModule, RecruitModule, ShipyardDeviceModule, NotificationsModule, TelemetryModule, MediaModule, CompanionModule, LiveModule, AiModule, ForumModule, ChangelogModule, AnnouncementsModule, SupportModule, SuggestionsModule, RoadmapModule],
   controllers: [HealthController],
   providers: [
     /*

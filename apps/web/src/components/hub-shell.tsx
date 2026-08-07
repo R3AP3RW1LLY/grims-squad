@@ -136,6 +136,7 @@ const ICONS: Record<string, typeof HomeIcon> = {
    * unrelated pages — and an icon that does not distinguish is worse than no icon, because the eye
    * learns to stop using it.
    */
+  '/recruit': TicketIcon,
   '/mining': CubeIcon,
   '/colonisation/new': PlusCircleIcon,
   '/colonisation/planning': ClipboardDocumentListIcon,

@@ -2041,6 +2041,33 @@ export const getMiningRings = (material?: string, days = 14): Promise<{ rings: M
 export const getMiningSessions = (): Promise<{ sessions: MiningSession[] } | null> =>
   get('/v1/mining/sessions', { authed: true });
 
+// ── Recruiting ───────────────────────────────────────────────────────────────
+//
+// Squadron owner, 2026-08-06: "a unique discord invite link for all members that are inara
+// veriefied in our platform!" One link per member, and credit for the recruits who stay.
+
+export interface RecruitRow {
+  name: string;
+  joinedAt: string;
+  /** In ladder order: joined, stayed, verified, flying, cadet. */
+  milestones: string[];
+  points: number;
+}
+
+export interface RecruitStatus {
+  /** Null when they have not minted one, or cannot. */
+  link: string | null;
+  canMint: boolean;
+  /** Why not, in words a member can act on. Null when they can. */
+  blockedBecause: string | null;
+  recruits: RecruitRow[];
+  totalPoints: number;
+  ladder: { milestone: string; points: number }[];
+}
+
+export const getRecruitStatus = (): Promise<RecruitStatus | null> =>
+  get('/v1/recruit', { authed: true });
+
 // ── Leaderboards ─────────────────────────────────────────────────────────────
 //
 // Squadron owner, 2026-08-04: "make a new category called leaderboards." Three boards — Data
