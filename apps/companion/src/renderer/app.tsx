@@ -13,6 +13,7 @@ import { BuildBoardsPage } from './shipyard-boards.js';
 import { PlanningPage } from './planning.js';
 import { BuildTypesPage } from './build-types.js';
 import { LeaderboardPage } from './leaderboards.js';
+import { RecruitPage } from './recruit.js';
 import { MiningPage } from './mining.js';
 import { SupportPage } from './support.js';
 import { HelpWidget } from './help-widget.js';
@@ -117,6 +118,7 @@ type Page =
   | 'outfitter'
   | 'builds-squadron'
   | 'builds-public'
+  | 'recruit'
   | 'support'
   | 'settings'
   | 'overlays'
@@ -248,6 +250,16 @@ const NAV: ReadonlyArray<NavItem | NavGroup> = [
        * the squadron did not have — and the rings page is built entirely from members' own limpets.
        */
       { id: 'mining', label: 'Mining', hint: 'Which rings are actually paying' },
+      /*
+       * ★ SQUADRON OWNER, 2026-08-06 ★
+       *
+       * "build me a cool recruit tracking system"
+       *
+       * It belongs in this category rather than under Leaderboards because it asks the same thing
+       * of a member as the other two calls do — go and bring something back the squadron did not
+       * have. The board is where the score is read; this is where the work is done.
+       */
+      { id: 'recruit', label: 'Recruiting', hint: 'Your invite link, and who came through it' },
     ],
   },
   {
@@ -596,6 +608,7 @@ function App(): JSX.Element {
         */}
         {page === 'lb-mining' ? <LeaderboardPage board="mining" /> : null}
         {page === 'mining' ? <MiningPage /> : null}
+        {page === 'recruit' ? <RecruitPage /> : null}
         {page === 'commodities' ? <CommoditiesPage /> : null}
         {page === 'outfitter' ? <OutfitterPage /> : null}
         {page === 'builds-squadron' ? <BuildBoardsPage scope="squadron" /> : null}

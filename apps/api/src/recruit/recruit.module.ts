@@ -2,7 +2,8 @@ import { Module } from '@nestjs/common';
 import { PrismaClient } from '@grims/db';
 import { DatabaseModule } from '../database.module.js';
 import { AuthzModule } from '../authz/authz.module.js';
-import { RecruitController } from './recruit.controller.js';
+import { TelemetryModule } from '../telemetry/telemetry.module.js';
+import { RecruitController, RecruitDeviceController } from './recruit.controller.js';
 import { RecruitService } from './recruit.service.js';
 
 /**
@@ -13,8 +14,8 @@ import { RecruitService } from './recruit.service.js';
  * one place rather than a `process.env` buried in a method.
  */
 @Module({
-  imports: [DatabaseModule, AuthzModule],
-  controllers: [RecruitController],
+  imports: [DatabaseModule, AuthzModule, TelemetryModule],
+  controllers: [RecruitController, RecruitDeviceController],
   providers: [
     { provide: 'DISCORD_BOT_TOKEN', useValue: process.env['DISCORD_BOT_TOKEN'] ?? '' },
     { provide: 'DISCORD_GUILD_ID', useValue: process.env['DISCORD_GUILD_ID'] ?? '' },

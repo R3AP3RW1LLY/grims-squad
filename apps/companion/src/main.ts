@@ -12,6 +12,7 @@ import { buildOverlayData } from './overlay-data.js';
 import { EMPTY_BGS, type BgsSessionState } from './bgs-session.js';
 import { fetchStandingOrders, type CompanionStanding } from './hub-bgs.js';
 import { readTradePlan, readPlanOrigin } from './trade-plan.js';
+import { recruitStatus, mintInvite } from './hub-recruit.js';
 import { explain } from './display-mode.js';
 import { commanderLocation } from './hub-commander.js';
 import {
@@ -1818,6 +1819,15 @@ if (!app.requestSingleInstanceLock()) {
     ipcMain.handle('tradeCommodities', (_e, near: unknown) =>
       tradeCommodities(hub(), typeof near === 'string' ? near : undefined),
     );
+    /*
+     * Recruiting. No arguments and nothing to sanitise — the hub identifies the member from the
+     * device token, so there is nothing the renderer could pass that would change whose link this
+     * is. That is the point of routing it through the main process rather than letting a page hold
+     * the token.
+     */
+    ipcMain.handle('recruitStatus', () => recruitStatus(hub()));
+    ipcMain.handle('recruitMint', () => mintInvite(hub()));
+
     ipcMain.handle('tradeRoutes', (_e, query: unknown) => {
       /*
        * Re-read rather than trusted, like every renderer-supplied value: only known keys pass,

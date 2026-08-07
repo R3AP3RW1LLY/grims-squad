@@ -140,6 +140,11 @@ contextBridge.exposeInMainWorld('trade', {
   commodity: (name: string, query?: unknown) => ipcRenderer.invoke('tradeCommodity', name, query),
 });
 
+contextBridge.exposeInMainWorld('recruit', {
+  status: () => ipcRenderer.invoke('recruitStatus'),
+  mint: () => ipcRenderer.invoke('recruitMint'),
+});
+
 contextBridge.exposeInMainWorld('shipyard', {
   ships: () => ipcRenderer.invoke('shipyardShips'),
   outfit: (shipId: string) => ipcRenderer.invoke('shipyardOutfit', shipId),
