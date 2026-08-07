@@ -2276,6 +2276,42 @@ export const getRoutes = (query: Record<string, string> = {}): Promise<RoutePlan
   return get(`/v1/logistics/routes${qs === '' ? '' : `?${qs}`}`, { authed: true });
 };
 
+/** An outbound run paired with its best way home. */
+export interface Circuit {
+  out: Route;
+  /** Null when nothing pays to come back. Stated, not hidden — an empty leg is real information. */
+  back: Route | null;
+  deadLeg: boolean;
+  totalProfit: number;
+  tripMinutes: number;
+  profitPerHour: number;
+  /** The LARGER single outlay, not the sum — a circuit funds itself as it goes. */
+  capitalNeeded: number;
+}
+
+export interface CircuitPlan {
+  circuits: Circuit[];
+  considered: string[];
+  /**
+   * How many destinations were explored for a way home.
+   *
+   * Printed on the page. The search is bounded — every destination costs a full route search — and
+   * a silently truncated list reads as "there is nothing better", which is a claim it has not
+   * earned.
+   */
+  destinationsSearched: number;
+  timeModel?: { jumpLy: number; minutesPerJump: number; minutesPerStop: number };
+  feed?: { stale: boolean; text: string; newestAt: string | null };
+  origin: RoutePlan['origin'];
+  unknownSystem: string | null;
+}
+
+/** Round trips: out and back, scored as one circuit. */
+export const getCircuits = (query: Record<string, string> = {}): Promise<CircuitPlan | null> => {
+  const qs = new URLSearchParams(query).toString();
+  return get(`/v1/logistics/circuits${qs === '' ? '' : `?${qs}`}`, { authed: true });
+};
+
 // ── Colonisation ─────────────────────────────────────────────────────────────
 //
 // Squadron owner, 2026-08-02: "allow our members to post their colonization project to the squadron

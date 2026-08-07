@@ -34,6 +34,14 @@ export interface CircuitOptions {
    * home for every practical purpose, and the member is heading out again anyway.
    */
   readonly homeWithinLy: number;
+  /**
+   * Where home actually is, when we can place it.
+   *
+   * Turns "did this return finish near home" from a guess into a measurement — see
+   * `finishesNearHome`. Optional because the galaxy table does not hold every system, and refusing
+   * to pair the ones it misses would quietly drop circuits for the newest parts of the bubble.
+   */
+  readonly homeCoords?: { readonly x: number; readonly y: number; readonly z: number } | undefined;
 }
 
 export interface Circuit {
@@ -70,6 +78,23 @@ function sameSystem(a: string, b: string): boolean {
 function finishesNearHome(back: Route, opts: CircuitOptions): boolean {
   if (sameSystem(back.sell.systemName, opts.home)) return true;
   if (opts.homeWithinLy <= 0) return false;
+
+  /*
+   * ★ MEASURED WHEN WE CAN, INFERRED ONLY WHEN WE CANNOT ★
+   *
+   * With both positions this is the real question — how far from home does the member end up. The
+   * leg-length fallback below cannot tell a return that flew 40 ly HOME from one that flew 40 ly
+   * further out, so on its own it will happily sell somebody a "round trip" that strands them on
+   * the far side of the bubble.
+   */
+  const there = back.sell.coords;
+  if (opts.homeCoords !== undefined && there !== null) {
+    const dx = there.x - opts.homeCoords.x;
+    const dy = there.y - opts.homeCoords.y;
+    const dz = there.z - opts.homeCoords.z;
+    return Math.sqrt(dx * dx + dy * dy + dz * dz) <= opts.homeWithinLy;
+  }
+
   return back.distanceLy <= opts.homeWithinLy;
 }
 

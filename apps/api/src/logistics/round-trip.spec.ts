@@ -208,3 +208,83 @@ describe('pairing an outbound run with a way home', () => {
     expect(circuits[0]?.back, 'a leg was paired with itself').toBeNull();
   });
 });
+
+/**
+ * A route whose legs carry real positions, so "does this finish near home" can be measured rather
+ * than inferred from how far the leg travelled.
+ */
+function placedRoute(
+  from: string,
+  to: string,
+  fromAt: { x: number; y: number; z: number },
+  toAt: { x: number; y: number; z: number },
+  distanceLy: number,
+): Route {
+  const base = route('Gold', from, to, 1_000_000, 60);
+  return {
+    ...base,
+    buy: { ...base.buy, coords: fromAt },
+    sell: { ...base.sell, coords: toAt },
+    distanceLy,
+  };
+}
+
+describe('finishing near home, when we know where home is', () => {
+  const AT_HOME = { x: 0, y: 0, z: 0 };
+  const AWAY = { x: 30, y: 0, z: 0 };
+
+  it('MANDATORY: refuses a return that travels far but lands nowhere near home', () => {
+    /*
+     * ★ THE FAILURE THIS EXISTS TO STOP ★
+     *
+     * Without positions the only available test is how FAR the return leg travelled, which is a
+     * proxy and a poor one: a return that flies 40 ly directly away from home passes it just as
+     * easily as one that flies 40 ly back. A member is then sold a "round trip" that strands them
+     * on the far side of the bubble, which is the exact opposite of what they asked for.
+     */
+    const out = placedRoute(HOME, 'Deciat', AT_HOME, AWAY, 30);
+    // Leaves Deciat, travels a short way, and ends further out still.
+    const back = placedRoute('Deciat', 'Maia', AWAY, { x: 60, y: 0, z: 0 }, 30);
+
+    const [circuit] = pairCircuits([out], [back], {
+      home: HOME,
+      homeWithinLy: 50,
+      homeCoords: AT_HOME,
+    });
+
+    expect(circuit?.back, 'a return heading away from home was accepted').toBeNull();
+    expect(circuit?.deadLeg).toBe(true);
+  });
+
+  it('accepts a return that lands inside the tolerance, even at a different station', () => {
+    const out = placedRoute(HOME, 'Deciat', AT_HOME, AWAY, 30);
+    const back = placedRoute('Deciat', 'Sol', AWAY, { x: 8, y: 0, z: 0 }, 30);
+
+    const [circuit] = pairCircuits([out], [back], {
+      home: HOME,
+      homeWithinLy: 50,
+      homeCoords: AT_HOME,
+    });
+
+    expect(circuit?.back?.sell.systemName, 'a genuine way home was refused').toBe('Sol');
+    expect(circuit?.deadLeg).toBe(false);
+  });
+
+  it('falls back to the leg-length proxy when we cannot place the system', () => {
+    /*
+     * Unplaced systems are real — the galaxy table does not hold every one. Refusing to pair them
+     * would silently drop circuits for the newest and most interesting parts of the bubble, so the
+     * old test still applies where it is all we have.
+     */
+    const out = route('Gold', HOME, 'Deciat', 1_000_000, 60);
+    const back = route('Gold', 'Deciat', 'Somewhere', 1_000_000, 60);
+
+    const [circuit] = pairCircuits([out], [back], {
+      home: HOME,
+      homeWithinLy: 50,
+      homeCoords: { x: 0, y: 0, z: 0 },
+    });
+
+    expect(circuit?.back?.sell.systemName).toBe('Somewhere');
+  });
+});
