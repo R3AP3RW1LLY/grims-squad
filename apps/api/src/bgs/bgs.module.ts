@@ -2,7 +2,8 @@ import { Module } from '@nestjs/common';
 import { PrismaClient } from '@grims/db';
 import { DatabaseModule } from '../database.module.js';
 import { AuthzModule } from '../authz/authz.module.js';
-import { BgsController } from './bgs.controller.js';
+import { TelemetryModule } from '../telemetry/telemetry.module.js';
+import { BgsController, BgsDeviceController } from './bgs.controller.js';
 import { BgsService } from './bgs.service.js';
 
 /**
@@ -12,8 +13,8 @@ import { BgsService } from './bgs.service.js';
  * was designed and have been sitting empty in production ever since.
  */
 @Module({
-  imports: [DatabaseModule, AuthzModule],
-  controllers: [BgsController],
+  imports: [DatabaseModule, AuthzModule, TelemetryModule],
+  controllers: [BgsController, BgsDeviceController],
   providers: [
     {
       provide: BgsService,

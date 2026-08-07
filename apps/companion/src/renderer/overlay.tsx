@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'preact/hooks';
 import type { OverlayId, OverlayState } from '../overlay-config.js';
 import { C } from './ui.js';
 import { ProspectorPanel, RefineryPanel } from './mining-panels.js';
+import { BgsPanel } from './bgs-panel.js';
 
 /**
  * What a single overlay panel draws.
@@ -128,6 +129,33 @@ export interface OverlayData {
     readonly value: number | null;
     readonly bestSale: { readonly station: string; readonly distanceLy: number | null; readonly perTonne: number } | null;
   } | null;
+  /**
+   * The standing orders where the member is, and what they have moved this session.
+   *
+   * ★ THE ONE THING THE GAME WILL NOT TELL THEM ★
+   *
+   * A mission board shows every faction equally. Only the squadron knows which of them the officers
+   * asked for — so this panel puts that in front of the member at the moment they are choosing what
+   * to take, rather than in a Discord message they read yesterday.
+   */
+  readonly bgs: {
+    /** Orders that apply in this system, most important first. */
+    readonly here: ReadonlyArray<{
+      readonly faction: string;
+      readonly stance: string;
+      readonly priority: number;
+      readonly guidance: string | null;
+      /** The squadron's own faction, as opposed to an ally worth supporting. */
+      readonly isOurs: boolean;
+    }>;
+    /** How many orders apply somewhere else — what stops an empty panel reading as "no work". */
+    readonly elsewhere: number;
+    /** Where the member is, so the panel can name the system it is talking about. */
+    readonly system: string | null;
+    readonly missions: number;
+    readonly pips: number;
+    readonly points: number;
+  } | null;
 }
 
 const EMPTY: OverlayData = {
@@ -137,6 +165,7 @@ const EMPTY: OverlayData = {
   status: null,
   prospector: null,
   refinery: null,
+  bgs: null,
 };
 
 const ID = (new URLSearchParams(location.search).get('id') ?? 'status') as OverlayId;
@@ -288,6 +317,7 @@ const TITLES: Record<OverlayId, string> = {
   status: 'Uplink',
   prospector: 'Prospector',
   refinery: 'Refinery',
+  bgs: 'Faction orders',
 };
 
 function Panel({
@@ -314,6 +344,8 @@ function Panel({
       return <ProspectorPanel data={data.prospector} accent={state.style.accent} show={show} />;
     case 'refinery':
       return <RefineryPanel data={data.refinery} accent={state.style.accent} show={show} />;
+    case 'bgs':
+      return <BgsPanel data={data.bgs} accent={state.style.accent} show={show} />;
   }
 }
 

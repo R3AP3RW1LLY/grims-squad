@@ -1,6 +1,7 @@
 import { useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 import {
+  FIELD_LABELS,
   OVERLAY_FIELDS,
   OVERLAY_IDS,
   OVERLAY_LABELS,
@@ -224,7 +225,7 @@ export function OverlaysPanel({
                                   style(id, { fields: [...next] });
                                 }}
                               />
-                              {f}
+                              {FIELD_LABELS[f] ?? f}
                             </label>
                           );
                         })}

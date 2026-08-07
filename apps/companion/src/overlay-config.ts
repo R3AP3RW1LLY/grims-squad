@@ -23,7 +23,15 @@
  * it is worth shooting. The refinery panel is the session — what came out, how fast, and what it is
  * worth on the board.
  */
-export const OVERLAY_IDS = ['build', 'route', 'cargo', 'status', 'prospector', 'refinery'] as const;
+export const OVERLAY_IDS = [
+  'build',
+  'route',
+  'cargo',
+  'status',
+  'prospector',
+  'refinery',
+  'bgs',
+] as const;
 export type OverlayId = (typeof OVERLAY_IDS)[number];
 
 export const OVERLAY_LABELS: Record<OverlayId, string> = {
@@ -33,6 +41,7 @@ export const OVERLAY_LABELS: Record<OverlayId, string> = {
   status: 'Upload status',
   prospector: 'Prospector',
   refinery: 'Refinery',
+  bgs: 'Faction orders',
 };
 
 /**
@@ -78,6 +87,69 @@ export const OVERLAY_FIELDS: Record<OverlayId, readonly string[]> = {
    * useful, and a member mining somewhere unmapped would otherwise stare at two empty rows.
    */
   refinery: ['materials', 'session', 'rate', 'points', 'value', 'bestSale'],
+  /*
+   * ★ SQUADRON OWNER, 2026-08-06 ★
+   *
+   * "for the BGS system, create an overlay in the companion app with settings etc like the mining
+   * overlay please!"
+   *
+   * `orders` is the reason the panel exists: which factions the officers asked for, in the system
+   * the member is actually standing in, at the moment they are choosing what to take off a mission
+   * board. Everything else is optional — `guidance` is the officer's own words, `session` and
+   * `points` are the evening's tally, and `elsewhere` is what stops an empty panel reading as "the
+   * squadron has no BGS work".
+   */
+  bgs: ['orders', 'guidance', 'elsewhere', 'session', 'points'],
+};
+
+/**
+ * What each field is called in the settings.
+ *
+ * The checkboxes drew the raw key — `bestSale`, `lastUpload`, `hitRate` — which is the name a
+ * programmer gave it, not a description of the line it controls. A member deciding what to show on
+ * their screen should not have to switch a thing on to find out what it is.
+ *
+ * Keyed by field name across every overlay, since the same word means the same thing wherever it
+ * appears; anything unlisted falls back to the key, so a new field is untidy rather than broken.
+ */
+export const FIELD_LABELS: Record<string, string> = {
+  // build
+  title: 'Project name',
+  needs: 'What is still needed',
+  progress: 'Progress bar',
+  haulers: 'Haulers on it',
+  // route
+  commodity: 'Commodity',
+  buy: 'Buy price',
+  sell: 'Sell price',
+  profit: 'Profit',
+  cargo: 'Tonnes',
+  // cargo
+  items: 'What you are carrying',
+  capacity: 'Hold used',
+  matched: 'Wanted by the build',
+  value: 'What it is worth',
+  bestSale: 'Best place to sell',
+  lastSale: 'Last sale',
+  // status
+  sending: 'Sending light',
+  queued: 'Queued events',
+  lastUpload: 'Last upload',
+  gameState: 'Whether Elite is running',
+  // prospector
+  materials: 'Materials',
+  motherlode: 'Motherlode',
+  content: 'Content level',
+  hitRate: 'Hit rate',
+  best: 'Best so far',
+  // refinery
+  session: 'This session',
+  rate: 'Tonnes per hour',
+  points: 'Points',
+  // bgs
+  orders: 'Orders for this system',
+  guidance: "The officer's instructions",
+  elsewhere: 'Orders elsewhere',
 };
 
 /**
@@ -106,6 +178,12 @@ const LEGACY_OFFERED: Record<OverlayId, readonly string[]> = {
   status: ['sending', 'queued', 'lastUpload', 'gameState'],
   prospector: ['materials', 'motherlode', 'content', 'hitRate', 'best'],
   refinery: ['materials', 'session', 'rate', 'points', 'value', 'bestSale'],
+  /*
+   * Empty, and correct: this overlay did not exist when any legacy config was written, so it
+   * offered nothing. Every field therefore reads as newly added and switches itself on — which is
+   * exactly right for a panel a member has never seen a settings row for.
+   */
+  bgs: [],
 };
 
 export interface OverlayStyle {

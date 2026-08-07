@@ -7,6 +7,8 @@ import type { TripLedger } from './trip-ledger.js';
 import type { OverlayData } from './renderer/overlay.js';
 import { hitRate, type ProspectingState } from './prospector.js';
 import { refinedRate, sessionMinutes, type RefiningState } from './refinery.js';
+import { standingFor, EMPTY_BGS, type BgsSessionState } from './bgs-session.js';
+import type { CompanionStanding } from './hub-bgs.js';
 
 /**
  * What the overlays actually draw.
@@ -88,6 +90,13 @@ export interface OverlayInput {
    */
   readonly prospecting?: ProspectingState | null | undefined;
   readonly refining?: RefiningState | null | undefined;
+  /**
+   * The squadron's standing orders. Null until the hub has answered once — see `bgsPanel`, where
+   * that is deliberately different from an empty list.
+   */
+  readonly standingOrders?: readonly CompanionStanding[] | null | undefined;
+  /** What this member has moved for the squadron since the app started. */
+  readonly bgsSession?: BgsSessionState | null | undefined;
 }
 
 export function buildOverlayData(input: OverlayInput): OverlayData {
@@ -121,6 +130,41 @@ export function buildOverlayData(input: OverlayInput): OverlayData {
         input.lastTransferAt === 0 ? null : new Date(input.lastTransferAt).toISOString(),
       gameRunning: input.gameRunning,
     },
+    bgs: bgsPanel(input),
+  };
+}
+
+/**
+ * The standing orders where the member is, and what they have moved this session.
+ *
+ * ★ null UNTIL THE ORDERS HAVE ARRIVED, NOT UNTIL THERE ARE SOME ★
+ *
+ * An empty array is a real answer — "the officers have not ordered anything" — and the panel says
+ * so. `null` means we have not managed to ask the hub yet, and the panel says THAT instead. Merging
+ * the two would have a member on a broken connection reading "no standing orders" and believing it.
+ */
+function bgsPanel(input: OverlayInput): OverlayData['bgs'] {
+  const orders = input.standingOrders ?? null;
+  if (orders === null) return null;
+
+  const split = standingFor(orders, input.dock?.systemName ?? null);
+  const session = input.bgsSession ?? EMPTY_BGS;
+
+  return {
+    here: split.here.map((o) => ({
+      faction: o.faction,
+      stance: o.stance,
+      priority: o.priority,
+      guidance: o.guidance,
+      // `standingFor` works on the shared shape, which has no `isOurs`; the companion's rows carry
+      // it, so it is read back off the original rather than threaded through the split.
+      isOurs: orders.find((x) => x.faction === o.faction)?.isOurs === true,
+    })),
+    elsewhere: split.elsewhere,
+    system: input.dock?.systemName ?? null,
+    missions: session.missions,
+    pips: session.pips,
+    points: session.points,
   };
 }
 

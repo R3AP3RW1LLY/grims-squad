@@ -2,6 +2,7 @@ import { readJournalChunk, journalFilesInOrder } from './journal-reader.js';
 import { withMarketPrices } from './market-prices.js';
 import { readRock, foldProspecting, EMPTY_PROSPECTING, type ProspectingState } from './prospector.js';
 import { foldRefining, EMPTY_REFINING, type RefiningState } from './refinery.js';
+import { foldMission, EMPTY_BGS, type BgsSessionState, type BgsStanding } from './bgs-session.js';
 import { DEFAULT_MINING_SETTINGS } from './mining-settings.js';
 import type { ProspectThresholds } from '@grims/shared';
 import { trackDocked, type DockedAt } from './docked.js';
@@ -118,6 +119,8 @@ export interface WatchOutcome {
    */
   readonly prospecting: ProspectingState;
   readonly refining: RefiningState;
+  /** What the member has moved for the squadron this session, scored against the standing orders. */
+  readonly bgs: BgsSessionState;
 }
 
 /**
@@ -202,12 +205,24 @@ export async function runWatchPass(
    * required: a caller that has not loaded settings yet still gets a working fold.
    */
   miningThresholds: ProspectThresholds = DEFAULT_MINING_SETTINGS,
-
+  /*
+   * The BGS session and the orders it is scored against. Appended, for exactly the reason spelled
+   * out above — this is the second time that warning has earned its place.
+   *
+   * The orders are an INPUT rather than something the fold looks up: the watcher is pure and
+   * testable precisely because it never reaches the network, and the orders are the caller's to
+   * refresh on its own timer.
+   */
+  bgsBefore: BgsSessionState = EMPTY_BGS,
+  standingOrders: readonly BgsStanding[] = [],
 ): Promise<{ outcome: WatchOutcome; config: CompanionConfig }> {
   if (!config.enabled || config.deviceToken === '') {
     // Not an error. The app is installed and waiting, which is the state it
     // ships in — being installed is not consent to transmit.
-    return { outcome: empty(null, tripBefore, carrierBefore, prospectingBefore, refiningBefore), config };
+    return {
+      outcome: empty(null, tripBefore, carrierBefore, prospectingBefore, refiningBefore, bgsBefore),
+      config,
+    };
   }
 
   const all = journalFilesInOrder(await fs.listFiles(journalDir));
@@ -267,6 +282,7 @@ export async function runWatchPass(
   let carrierHold: CarrierHoldState = carrierBefore;
   let prospecting: ProspectingState = prospectingBefore;
   let refining: RefiningState = refiningBefore;
+  let bgs: BgsSessionState = bgsBefore;
   let sent = 0;
   let duplicates = 0;
   const refused: Record<string, number> = {};
@@ -385,6 +401,11 @@ export async function runWatchPass(
       } else if (e.name === 'MiningRefined') {
         const at = Date.parse(e.occurredAt);
         refining = foldRefining(refining, e.data, Number.isFinite(at) ? at : Date.now());
+      } else if (e.name === 'MissionCompleted') {
+        // Same `watched` list, same `watchingSince` guard: a first-run replay must not report last
+        // March's influence as tonight's work.
+        const at = Date.parse(e.occurredAt);
+        bgs = foldMission(bgs, e.data, standingOrders, Number.isFinite(at) ? at : Date.now());
       }
     }
     // The own-carrier hold, same breath, same reasoning. The caller decides whether its snapshot
@@ -490,6 +511,7 @@ export async function runWatchPass(
       carrierHold,
       prospecting,
       refining,
+      bgs,
       gameRunning,
       filesRead,
       newFilesRead,
@@ -534,6 +556,7 @@ function empty(
   carrierHold: CarrierHoldState = EMPTY_CARRIER_HOLD,
   prospecting: ProspectingState = EMPTY_PROSPECTING,
   refining: RefiningState = EMPTY_REFINING,
+  bgs: BgsSessionState = EMPTY_BGS,
 ): WatchOutcome {
   return {
     dockedAt,
@@ -541,6 +564,7 @@ function empty(
     carrierHold,
     prospecting,
     refining,
+    bgs,
     gameRunning: false,
     filesRead: 0,
     newFilesRead: 0,

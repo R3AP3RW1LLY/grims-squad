@@ -9,6 +9,8 @@ import {
   stopOverlays,
 } from './overlay-runtime.js';
 import { buildOverlayData } from './overlay-data.js';
+import { EMPTY_BGS, type BgsSessionState } from './bgs-session.js';
+import { fetchStandingOrders, type CompanionStanding } from './hub-bgs.js';
 import { explain } from './display-mode.js';
 import { commanderLocation } from './hub-commander.js';
 import {
@@ -324,6 +326,16 @@ let prospecting: ProspectingState = EMPTY_PROSPECTING;
 let refining: RefiningState = EMPTY_REFINING;
 
 /**
+ * The BGS session, and the squadron's standing orders.
+ *
+ * `standingOrders` starts NULL rather than empty: the panel tells "we have not asked the hub yet"
+ * apart from "the officers have ordered nothing", and merging them would have a member on a broken
+ * connection reading "no standing orders" and believing it.
+ */
+let bgs: BgsSessionState = EMPTY_BGS;
+let standingOrders: CompanionStanding[] | null = null;
+
+/**
  * The member's own carrier's hold, carried between passes the same way `trip` is.
  *
  * Starts empty on purpose — a witness statement, not an inventory; see carrier-hold.ts. The hub
@@ -415,6 +427,40 @@ async function refreshCurrentProject(): Promise<void> {
   // lands, and a minute of "nothing moved" costs no broadcast at all.
   const changed = JSON.stringify(answer.data.current) !== JSON.stringify(currentProject);
   currentProject = answer.data.current;
+  if (changed) push();
+}
+
+/**
+ * How often to ask the hub what the officers have ordered.
+ *
+ * The same cadence as the build tracker, and for the same reason: these numbers move on somebody
+ * ELSE'S action — an officer changing the target faction — so this machine's journal will never
+ * tell us. A member acting on an order that was countermanded ten minutes ago is the failure this
+ * interval exists to bound.
+ */
+const STANDING_ORDERS_MS = 60_000;
+
+async function refreshStandingOrders(): Promise<void> {
+  if (config.deviceToken === '') {
+    if (standingOrders !== null) {
+      standingOrders = null;
+      push();
+    }
+    return;
+  }
+
+  const next = await fetchStandingOrders({
+    apiBaseUrl: apiBaseUrlFor(config, process.env),
+    deviceToken: config.deviceToken,
+  });
+
+  /*
+   * Pushed only on a real change. `fetchStandingOrders` returns an empty list on failure, so this
+   * would otherwise flap between "no orders" and the real list every minute on a bad connection —
+   * and a member watching the panel would see the squadron's instructions blink out and back.
+   */
+  const changed = JSON.stringify(next) !== JSON.stringify(standingOrders);
+  standingOrders = next;
   if (changed) push();
 }
 
@@ -754,6 +800,7 @@ async function tick(): Promise<void> {
       carrierHold,
       prospecting,
       refining,
+      bgs,
     };
     push();
     refreshTray();
@@ -778,6 +825,7 @@ async function tick(): Promise<void> {
       carrierHold,
       prospecting,
       refining,
+      bgs,
     };
     push();
     return;
@@ -809,6 +857,8 @@ async function tick(): Promise<void> {
         prospecting,
         refining,
         readMiningSettings(config.miningSettings ?? null),
+        bgs,
+        standingOrders ?? [],
       );
     } finally {
       sending = false;
@@ -839,6 +889,7 @@ async function tick(): Promise<void> {
      */
     prospecting = pass.outcome.prospecting;
     refining = pass.outcome.refining;
+    bgs = pass.outcome.bgs;
 
     /*
      * ★ THE HOLD, READ FROM FRONTIER'S OWN SIDECAR ★
@@ -1050,6 +1101,7 @@ async function tick(): Promise<void> {
       carrierHold,
       prospecting,
       refining,
+      bgs,
     };
   }
 
@@ -1148,6 +1200,8 @@ function push(): void {
       // in the same breath as the rest rather than on a timer of its own.
       prospecting,
       refining,
+      standingOrders,
+      bgsSession: bgs,
       // The hub's whole-project answer rides every push, so the build tracker updates the moment
       // ANYTHING changes — a journal pass, a settings refresh, or the sixty-second hub refetch.
       currentProject,
@@ -1636,6 +1690,14 @@ if (!app.requestSingleInstanceLock()) {
      */
     setInterval(() => void refreshCurrentProject(), CURRENT_BUILD_MS);
     void refreshCurrentProject();
+
+    /*
+     * The standing orders, on the same footing and for the same reason: they change when an officer
+     * changes them, never because of anything this machine did, and the faction orders panel is
+     * worthless if it is showing last week's target.
+     */
+    setInterval(() => void refreshStandingOrders(), STANDING_ORDERS_MS);
+    void refreshStandingOrders();
 
     startOverlays({
       layout: () => config.overlays,

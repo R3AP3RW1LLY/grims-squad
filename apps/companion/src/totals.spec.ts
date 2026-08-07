@@ -1,5 +1,6 @@
 import { EMPTY_PROSPECTING } from './prospector.js';
 import { EMPTY_REFINING } from './refinery.js';
+import { EMPTY_BGS } from './bgs-session.js';
 import { describe, it, expect } from 'vitest';
 import { accumulate } from './totals.js';
 import { EMPTY_TOTALS, loadConfig, DEFAULT_CONFIG } from './config.js';
@@ -28,6 +29,7 @@ function pass(over: Partial<WatchOutcome> = {}): WatchOutcome {
     carrierHold: { carrier: null, hold: {}, dockedCarrierId: null, totalTonnes: null, totalAt: null },
     prospecting: EMPTY_PROSPECTING,
     refining: EMPTY_REFINING,
+    bgs: EMPTY_BGS,
     gameRunning: false,
     filesRead: 0,
     newFilesRead: 0,
