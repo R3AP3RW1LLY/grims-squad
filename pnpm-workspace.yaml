@@ -120,3 +120,14 @@ overrides:
   # but pinned so a future electron-builder cannot quietly drag an old copy back.
   "builder-util-runtime@<9.7.0": ">=9.7.0"
   "app-builder-lib@<26.15.0": ">=26.15.0"
+  # HIGH (GHSA-5p4m-2wfm-xmqj, CVE-2026-59870): js-yaml quadratic CPU consumption
+  # resolving `!!omap`, i.e. a parse-time DoS on crafted YAML.
+  #
+  # Reached two ways, and only one of them ever runs outside this repo: eslint
+  # (dev tooling), and electron-updater — which parses the `latest.yml` release
+  # manifest on a MEMBER'S machine. That manifest is ours, so exploiting it means
+  # already controlling our release channel. Pinned regardless: "the input is
+  # ours" is exactly the reasoning that ages badly, and the fix is a patch bump.
+  #
+  # Not reached by the api, web or worker at all, so no server surface is exposed.
+  "js-yaml@>=4.0.0 <4.3.1": ">=4.3.1"
