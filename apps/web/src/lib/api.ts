@@ -101,6 +101,7 @@ export interface PrivacySettings {
   showLbTrade: boolean;
   showLbMining: boolean;
   showLbBgs: boolean;
+  showLbRecruit: boolean;
 }
 
 /**

@@ -174,6 +174,12 @@ export const DESCRIBES: Readonly<Record<string, string>> = {
     'Read the ring survey and their own mining history. On for every member — the survey is built from members’ own prospector limpets, so a contributor who could not read it would be a strange thing to ship.',
   MINING_MANAGE:
     'Curate the ring survey: hide a ring that is not what it looks like, pin one worth flying, and set the squadron’s “worth shooting” bar.',
+  RECRUIT_INVITE:
+    'Hold a personal Discord invite link. Minting one also requires an Inara-verified commander and the rank of Cadet — this bit is what lets an officer stop one person recruiting without touching their rank.',
+  RECRUIT_VIEW:
+    'See the recruit tracker: who brought whom in, and how far along each recruit is.',
+  RECRUIT_MANAGE:
+    'The recruiting manager: reassign a join nobody could be credited for, void a claim, revoke a link. Rewrites who appears on a leaderboard, so it asks for a second factor.',
   MINING_SET_ORDERS:
     'Issue mining orders — “this week, Platinum in Hyades for the colony build”. Steers where the squadron spends an evening, so it asks for a second factor, exactly as setting BGS orders does.',
 };
@@ -358,6 +364,19 @@ const PERMISSION_GROUPS: readonly PermissionGroup[] = [
       ['MINING_VIEW', 81],
       ['MINING_MANAGE', 82],
       ['MINING_SET_ORDERS', 83],
+    ],
+  },
+  {
+    /*
+     * Recruitment, 2026-08-06. Inviting is every member's; managing claims is an officer's, because
+     * voiding one takes points off somebody's name.
+     */
+    title: 'Recruitment',
+    note: 'Holding an invite link is a member’s. Minting one also needs Inara verification and Cadet, which are earned rather than granted — this is the part an officer can take away.',
+    items: [
+      ['RECRUIT_INVITE', 84],
+      ['RECRUIT_VIEW', 85],
+      ['RECRUIT_MANAGE', 86],
     ],
   },
 ];

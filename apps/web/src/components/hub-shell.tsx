@@ -52,6 +52,7 @@ import {
   BookOpenIcon,
   InboxStackIcon,
   IdentificationIcon,
+  TicketIcon,
 } from '@heroicons/react/24/outline';
 import { ChevronDownIcon } from '@heroicons/react/20/solid';
 import { ViewAsBanner } from './view-as-banner';
@@ -153,6 +154,8 @@ const ICONS: Record<string, typeof HomeIcon> = {
   '/leaderboards/trade': BanknotesIcon,
   '/leaderboards/mining': CubeIcon,
   '/leaderboards/bgs': FlagIcon,
+  // The Welcome — a recruiter hands out the ticket that gets somebody through the door.
+  '/leaderboards/recruit': TicketIcon,
   '/roadmap': MapIcon,
   '/app/members': IdentificationIcon,
   '/app/conversations': InboxStackIcon,

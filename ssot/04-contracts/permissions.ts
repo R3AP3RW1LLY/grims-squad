@@ -23,7 +23,8 @@
  *     0-9   forum        10-19 ops         20-29 fleet & carriers
  *     30-39 BGS          40-42 trade       43-49 shipyard
  *     50-59 AI           60-69 admin       70-79 telemetry
- *     80    support      81-83 mining      84+   reserved
+ *     80    support      81-83 mining      84-86 recruitment
+ *     87+   reserved
  *
  *   The 40s were "trade" alone until 2026-08-01. Trade had used three of ten for a year and the
  *   shipyard needed four; a fresh decade for four bits would have cost the last unreserved block
@@ -346,6 +347,38 @@ export const Permission = {
    * not need a second factor.
    */
   MINING_SET_ORDERS: 1n << 83n,
+
+  // ── Recruitment ──────────────────────────────────────────────────────────
+  /*
+   * ★ SQUADRON OWNER, 2026-08-06 ★
+   *
+   * "a unique discord invite link for all members that are inara veriefied in our platform ... the
+   * minimum rant to do this is Cadet please ... we also need permissions added too for the
+   * recruiting system!"
+   *
+   * ★ THREE GATES, DELIBERATELY OF DIFFERENT KINDS ★
+   *
+   * Inara verification and Cadet are EARNED, and are checked at the moment a link is minted. This
+   * permission is GRANTED — and, more usefully, revocable from one person who abuses it without
+   * touching anybody else.
+   *
+   * Folding them together would mean the only way to stop somebody handing out invites is to take
+   * their rank away: a month of service undone to solve an afternoon's problem.
+   *
+   * Bits 84-86, above mining's. Renumbering an existing bit is the one mistake here that cannot be
+   * undone — every stored role mask is interpreted by position.
+   */
+  /** Ring 1. Hold a personal Discord invite. Still requires Inara verification and Cadet in use. */
+  RECRUIT_INVITE: 1n << 84n,
+  /** Ring 1. See the recruit tracker and who brought whom in. */
+  RECRUIT_VIEW: 1n << 85n,
+  /**
+   * Ring 2. The recruiting manager: reassign an unattributed join, void a credit, revoke a link.
+   *
+   * Privileged. It rewrites who is credited on a leaderboard and can take points off somebody's
+   * name — the squadron speaking about a member's record, not one officer's opinion.
+   */
+  RECRUIT_MANAGE: 1n << 86n,
 } as const;
 
 export type PermissionName = keyof typeof Permission;
@@ -382,6 +415,8 @@ export const PRIVILEGED_PERMISSIONS: PermissionMask =
   Permission.BGS_SET_ORDERS |
   // Directing where the squadron spends an evening — the same standing as BGS_SET_ORDERS above.
   Permission.MINING_SET_ORDERS |
+  // Voiding a recruit claim takes points off a member's name. Same standing as the two above.
+  Permission.RECRUIT_MANAGE |
   Permission.FLEET_APPROVE_DOCTRINE |
   /*
    * The support console reads members' and guests' private help conversations — other people's
@@ -584,6 +619,13 @@ const MEMBER: PermissionMask =
    * Curating it and issuing orders are officers' — granted in OFFICER below.
    */
   P.MINING_VIEW |
+  /*
+   * Recruiting is a member's to do — the whole point is to get the playerbase bringing people in.
+   * The two harder gates (Inara verified, Cadet) are checked when a link is actually minted, so a
+   * member who holds this and has neither simply has nothing to mint yet.
+   */
+  P.RECRUIT_INVITE |
+  P.RECRUIT_VIEW |
   P.TELEMETRY_WRITE;
 
 /** Member plus the ability to create and run operations. */
@@ -612,6 +654,8 @@ const OFFICER: PermissionMask =
    */
   P.MINING_MANAGE |
   P.MINING_SET_ORDERS |
+  // Reassigning credit and voiding a claim decide who appears on a board.
+  P.RECRUIT_MANAGE |
   P.FORUM_VIEW_OFFICER |
   P.FORUM_POST_OFFICER |
   /*

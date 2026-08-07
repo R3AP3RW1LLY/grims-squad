@@ -128,6 +128,17 @@ const SOURCES: Record<
     boardFilter: `AND s.board = 'bgs'`,
     optColumn: 'show_lb_bgs',
   },
+  /*
+   * The Welcome, 2026-08-06. `leaderboard_events` like the rest — the recruit ledger itself is far
+   * richer (who, when, which milestone) and lives in its own table for the tracker to read; the
+   * board only needs the points.
+   */
+  recruit: {
+    table: 'leaderboard_events',
+    timeColumn: 'occurred_at',
+    boardFilter: `AND s.board = 'recruit'`,
+    optColumn: 'show_lb_recruit',
+  },
 };
 
 /**

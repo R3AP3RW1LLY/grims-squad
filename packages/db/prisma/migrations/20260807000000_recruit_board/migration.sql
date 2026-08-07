@@ -1,0 +1,11 @@
+-- The Welcome: the recruitment board's opt-out.
+--
+-- ★ SQUADRON OWNER, 2026-08-06 ★
+--
+-- "we want this to be a leaderboard item and gamified too please!"
+--
+-- Demanded by the TYPE SYSTEM the moment 'recruit' joined LeaderboardKey — the privacy page maps
+-- Record<LeaderboardKey, keyof PrivacySettings> and stops compiling until the column exists. That
+-- is the schema's own comment doing its job for the third time; mining and BGS were both found the
+-- same way.
+ALTER TABLE "privacy_settings" ADD COLUMN IF NOT EXISTS "show_lb_recruit" BOOLEAN NOT NULL DEFAULT true;

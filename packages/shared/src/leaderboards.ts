@@ -34,7 +34,7 @@
 
 import { BADGES as FORUM_BADGES } from './reputation.js';
 
-export type LeaderboardKey = 'bounties' | 'colony' | 'trade' | 'mining' | 'bgs';
+export type LeaderboardKey = 'bounties' | 'colony' | 'trade' | 'mining' | 'bgs' | 'recruit';
 
 export interface LeaderboardDef {
   readonly key: LeaderboardKey;
@@ -91,6 +91,25 @@ export const LEADERBOARDS: readonly LeaderboardDef[] = [
     name: 'Faction Hands',
     measures:
       'Points from influence you actually moved for a faction the squadron is backing: ten a pip, half that for holding a system steady where the orders say hold, and nothing at all for factions nobody asked you to help.',
+    pointsNoun: 'pts',
+  },
+  {
+    /*
+     * ★ SQUADRON OWNER, 2026-08-06 ★
+     *
+     * "we want this to be a leaderboard item and gamified too please! we want to encourage our
+     * playerbase to beable to invite people into the squadron!"
+     *
+     * ★ NOTHING IS PAID FOR SOMEBODY ARRIVING ★
+     *
+     * Pay per join and this is an alt-account farm: ten throwaway accounts in an evening tops the
+     * board, and the squadron gets ten empty seats. Every point here comes from a milestone a real
+     * recruit passes and a throwaway will not — the largest of them takes a month.
+     */
+    key: 'recruit',
+    name: 'The Welcome',
+    measures:
+      'Points from the people you brought in and who stayed: nothing for the join itself, then for a week survived, a commander verified, a Cadet made, and a recruit who starts scoring on a board of their own.',
     pointsNoun: 'pts',
   },
 ] as const;
@@ -171,6 +190,19 @@ export const TIER_LADDERS: Record<LeaderboardKey, readonly TierStep[]> = {
    * pitched lower than the hauling boards: influence is slow, deliberate work and a member who
    * turns out every week for a month should reach silver.
    */
+  /*
+   * Pitched against the milestone table: one recruit who reaches Cadet is 600 points on their own,
+   * so bronze is roughly "you brought in somebody who stayed" and platinum is a recruiter who has
+   * genuinely built a wing.
+   */
+  recruit: [
+    { tier: 'bronze', name: 'Greeter', at: 500 },
+    { tier: 'silver', name: 'Wing Whip', at: 3_000 },
+    { tier: 'gold', name: 'Crimp', at: 12_000 },
+    // NOT "Kingmaker" — that is BGS's gold rung, and the catalogue test refuses a repeated rank
+    // name anywhere: a member wearing one has to be identifiable without asking which board.
+    { tier: 'platinum', name: 'Fleetbuilder', at: 40_000 },
+  ],
   bgs: [
     { tier: 'bronze', name: 'Canvasser', at: 500 },
     { tier: 'silver', name: 'Ward Heeler', at: 4_000 },
@@ -229,6 +261,7 @@ export const LEADERBOARD_BADGES: readonly BadgeDef[] = [
   ...tierBadges('trade', 'Trade Barons'),
   ...tierBadges('mining', 'Deep Core'),
   ...tierBadges('bgs', 'Faction Hands'),
+  ...tierBadges('recruit', 'The Welcome'),
 
   // ---- Data Runners achievements ----
   {
@@ -357,6 +390,48 @@ export const LEADERBOARD_BADGES: readonly BadgeDef[] = [
     description: 'Refined every core-only mineral at least once — the full set, cracked by hand.',
     icon: '🌌',
   },
+  // ---- The Welcome achievements ----
+  {
+    key: 'recruit-first-contact',
+    board: 'recruit',
+    kind: 'achievement',
+    name: 'First Contact',
+    description: 'Somebody you invited stayed a week. The first one is the hardest.',
+    icon: '🎟️',
+  },
+  {
+    key: 'recruit-made-a-cadet',
+    board: 'recruit',
+    kind: 'achievement',
+    name: 'Made a Cadet',
+    description: 'A recruit of yours earned Cadet — a month of flying, because you asked them in.',
+    icon: '🎖️',
+  },
+  {
+    key: 'recruit-wingmaker',
+    board: 'recruit',
+    kind: 'achievement',
+    name: 'Wingmaker',
+    description: 'Five recruits reached Cadet. That is a wing you built out of strangers.',
+    icon: '🪶',
+  },
+  {
+    key: 'recruit-outflown',
+    board: 'recruit',
+    kind: 'achievement',
+    name: 'Outflown',
+    description: 'A commander you recruited out-scored you on a board. Exactly as intended.',
+    icon: '🏅',
+  },
+  {
+    key: 'recruit-season-champion',
+    board: 'recruit',
+    kind: 'achievement',
+    name: 'The Welcome Champion',
+    description: 'Brought in more than anyone else for a whole season.',
+    icon: '👑',
+  },
+
   // ---- Faction Hands achievements ----
   {
     key: 'bgs-first-blood',

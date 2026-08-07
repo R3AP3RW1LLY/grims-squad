@@ -344,6 +344,14 @@ const NAV: readonly NavDefinition[] = [
     requires: Permission.MINING_VIEW,
   },
   {
+    href: '/leaderboards/recruit',
+    label: 'The Welcome',
+    section: 'squadron',
+    subsection: 'Leaderboards',
+    blurb: 'Who brought people in — and whose recruits are still flying with us.',
+    requires: Permission.RECRUIT_VIEW,
+  },
+  {
     href: '/leaderboards/bgs',
     label: 'Faction Hands',
     section: 'squadron',
