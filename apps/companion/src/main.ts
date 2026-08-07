@@ -14,6 +14,7 @@ import { fetchStandingOrders, type CompanionStanding } from './hub-bgs.js';
 import { readTradePlan, readPlanOrigin } from './trade-plan.js';
 import { recruitStatus, mintInvite } from './hub-recruit.js';
 import { scoutSystems, surveySystem } from './hub-scout.js';
+import { opsBoard, opsSignUp, opsWithdraw } from './hub-ops.js';
 import { explain } from './display-mode.js';
 import { commanderLocation } from './hub-commander.js';
 import {
@@ -1786,6 +1787,19 @@ if (!app.requestSingleInstanceLock()) {
      * Scouting. Renderer args re-read rather than trusted, like every handler in this block: only
      * strings pass, and the hub clamps the range regardless.
      */
+    ipcMain.handle('bgsOrders', () => fetchStandingOrders(hub()));
+    ipcMain.handle('opsBoard', () => opsBoard(hub()));
+    ipcMain.handle('opsSignUp', (_e, id: unknown, state: unknown) =>
+      typeof id === 'string' && (state === 'yes' || state === 'maybe' || state === 'no')
+        ? opsSignUp(hub(), id, state)
+        : Promise.resolve({ ok: false as const, error: 'Say yes, maybe or no.' }),
+    );
+    ipcMain.handle('opsWithdraw', (_e, id: unknown) =>
+      typeof id === 'string'
+        ? opsWithdraw(hub(), id)
+        : Promise.resolve({ ok: false as const, error: 'Which op?' }),
+    );
+
     ipcMain.handle('scoutSearch', (_e, anchor: unknown, range: unknown, prefer: unknown) =>
       typeof anchor === 'string' && anchor.trim() !== ''
         ? scoutSystems(hub(), anchor.trim(), {

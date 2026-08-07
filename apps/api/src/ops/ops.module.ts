@@ -2,7 +2,8 @@ import { Module } from '@nestjs/common';
 import { PrismaClient } from '@grims/db';
 import { DatabaseModule } from '../database.module.js';
 import { AuthzModule } from '../authz/authz.module.js';
-import { OpsController } from './ops.controller.js';
+import { TelemetryModule } from '../telemetry/telemetry.module.js';
+import { OpsController, OpsDeviceController } from './ops.controller.js';
 import { OpsService } from './ops.service.js';
 
 /**
@@ -11,8 +12,8 @@ import { OpsService } from './ops.service.js';
  * since the module was designed.
  */
 @Module({
-  imports: [DatabaseModule, AuthzModule],
-  controllers: [OpsController],
+  imports: [DatabaseModule, AuthzModule, TelemetryModule],
+  controllers: [OpsController, OpsDeviceController],
   providers: [
     {
       provide: OpsService,

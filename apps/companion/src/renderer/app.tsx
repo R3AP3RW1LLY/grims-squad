@@ -15,6 +15,8 @@ import { BuildTypesPage } from './build-types.js';
 import { LeaderboardPage } from './leaderboards.js';
 import { RecruitPage } from './recruit.js';
 import { ScoutPage } from './scout.js';
+import { BgsPage } from './bgs.js';
+import { OpsPage } from './ops.js';
 import { MiningPage } from './mining.js';
 import { SupportPage } from './support.js';
 import { HelpWidget } from './help-widget.js';
@@ -119,6 +121,8 @@ type Page =
   | 'outfitter'
   | 'builds-squadron'
   | 'builds-public'
+  | 'bgs'
+  | 'ops'
   | 'scout'
   | 'recruit'
   | 'support'
@@ -146,7 +150,7 @@ interface NavItem {
 }
 
 interface NavGroup {
-  readonly group: 'colonisation' | 'logistics' | 'shipyard' | 'answer-the-call' | 'leaderboards';
+  readonly group: 'colonisation' | 'logistics' | 'shipyard' | 'answer-the-call' | 'command' | 'leaderboards';
   readonly label: string;
   readonly children: readonly NavItem[];
 }
@@ -617,6 +621,8 @@ function App(): JSX.Element {
         */}
         {page === 'lb-mining' ? <LeaderboardPage board="mining" /> : null}
         {page === 'mining' ? <MiningPage /> : null}
+        {page === 'bgs' ? <BgsPage /> : null}
+        {page === 'ops' ? <OpsPage /> : null}
         {page === 'scout' ? <ScoutPage /> : null}
         {page === 'recruit' ? <RecruitPage /> : null}
         {page === 'commodities' ? <CommoditiesPage /> : null}

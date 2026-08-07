@@ -217,6 +217,16 @@ contextBridge.exposeInMainWorld('commander', {
   location: () => ipcRenderer.invoke('commanderLocation'),
 });
 
+contextBridge.exposeInMainWorld('bgs', {
+  orders: () => ipcRenderer.invoke('bgsOrders'),
+});
+
+contextBridge.exposeInMainWorld('ops', {
+  board: () => ipcRenderer.invoke('opsBoard'),
+  signUp: (id: string, state: string) => ipcRenderer.invoke('opsSignUp', id, state),
+  withdraw: (id: string) => ipcRenderer.invoke('opsWithdraw', id),
+});
+
 contextBridge.exposeInMainWorld('scout', {
   search: (anchor: string, range?: string, prefer?: string) =>
     ipcRenderer.invoke('scoutSearch', anchor, range, prefer),
