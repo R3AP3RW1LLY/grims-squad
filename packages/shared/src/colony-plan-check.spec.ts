@@ -147,18 +147,57 @@ describe('the plan validator', () => {
     expect(out.leadingEconomy).toBe('refinery');
   });
 
-  it('MANDATORY: refuses more surface builds than a body can hold', () => {
+  it('MANDATORY: refuses more builds than a body has slots for, when the count is KNOWN', () => {
     /*
-     * The A-cluster failure: a plan needing thirteen surface slots where eleven moons exist. One
-     * body takes one surface build, so two settlements on one moon is the same error in miniature.
+     * ★ THE RULE THAT WAS ONCE AN INVENTION ★
+     *
+     * This originally refused a SECOND surface build on any body, as a hard error. That was a guess
+     * dressed as a mechanic: the real slot data, where we hold it, shows bodies with four and five
+     * surface slots. A validator refusing legal plans on an unverified rule is the exact failure it
+     * exists to prevent.
+     */
+    const oneSlot: PlanBodyRef[] = [
+      { bodyId: 9, name: 'A 1', landable: false, distanceLs: 864 },
+      { bodyId: 18, name: 'A 1 f', landable: true, distanceLs: 859, surfaceSlots: 1 },
+    ];
+
+    const out = checkColonyPlan(
+      [build('plutus', 9), build('ourea', 18), build('bellona', 18)],
+      TYPES,
+      oneSlot,
+    );
+    expect(out.ok).toBe(false);
+    expect(out.errors.some((e) => e.code === 'slot-taken')).toBe(true);
+  });
+
+  it('allows several surface builds on a body with room for them', () => {
+    // Four slots is a real figure from our own data, not a hypothetical.
+    const roomy: PlanBodyRef[] = [
+      { bodyId: 9, name: 'A 1', landable: false, distanceLs: 864 },
+      { bodyId: 18, name: 'A 1 f', landable: true, distanceLs: 859, surfaceSlots: 4 },
+    ];
+
+    const out = checkColonyPlan(
+      [build('plutus', 9), build('ourea', 18), build('bellona', 18)],
+      TYPES,
+      roomy,
+    );
+    expect(out.errors.some((e) => e.code === 'slot-taken')).toBe(false);
+  });
+
+  it('MANDATORY: warns rather than refuses when the slot count is unknown', () => {
+    /*
+     * We hold slot counts for two bodies out of seventy-nine. Refusing every plan that stacks
+     * structures would refuse nearly every real plan — but saying nothing lets somebody haul for a
+     * layout the colonisation UI will not accept. So it is said, and not enforced.
      */
     const out = checkColonyPlan(
       [build('plutus', 9), build('ourea', 18), build('bellona', 18)],
       TYPES,
       BODIES,
     );
-    expect(out.ok).toBe(false);
-    expect(out.errors.some((e) => e.code === 'slot-taken')).toBe(true);
+    expect(out.ok, 'refused a plan on a rule we cannot show').toBe(true);
+    expect(out.warnings.some((w) => w.code === 'slots-unknown')).toBe(true);
   });
 
   it('names an unknown body or build type rather than silently ignoring it', () => {

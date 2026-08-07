@@ -52,6 +52,23 @@ export interface PlanBodyRef {
   readonly name: string;
   readonly landable: boolean;
   readonly distanceLs: number | null;
+  /**
+   * How many structures this body can actually carry.
+   *
+   * ★ NOT ONE — THAT WAS AN INVENTION ★
+   *
+   * The first version of this checker refused a second surface build on any body, as a hard error
+   * and a MANDATORY test. It was a guess. The real data, where we hold it, shows bodies with FOUR
+   * and FIVE surface slots — so that rule would have refused perfectly legal plans and, worse, it
+   * asserted a game mechanic we had never verified. Exactly the class of error this file exists to
+   * catch, made inside the file itself.
+   *
+   * Null means we do not hold the count for this body, which is the case for all but a handful.
+   * Unknown is reported as a WARNING, never an error: a validator must not refuse a plan on a rule
+   * it cannot show.
+   */
+  readonly surfaceSlots?: number | null | undefined;
+  readonly orbitalSlots?: number | null | undefined;
 }
 
 /** One planned build: a catalogue type placed on a body. Order in the array IS the build order. */
@@ -68,6 +85,7 @@ export type PlanIssueCode =
   | 'missing-prerequisite'
   | 'not-enough-points'
   | 'slot-taken'
+  | 'slots-unknown'
   | 'very-far';
 
 export interface PlanIssue {
@@ -127,10 +145,9 @@ export function checkColonyPlan(
   const influence: Record<string, number> = {};
 
   const provided = new Set<string>();
-  /* One surface build per body. Orbital structures are not capped here — see the note in the
-   * report's caller about slot counts being null in our data — but a second SURFACE settlement on
-   * one moon is unambiguously wrong. */
-  const surfaceTaken = new Set<number>();
+  // How many builds each body already carries, so a known slot count can be enforced.
+  const surfaceUsed = new Map<number, number>();
+  const orbitalUsed = new Map<number, number>();
 
   let tier2 = 0;
   let tier3 = 0;
@@ -173,16 +190,33 @@ export function checkColonyPlan(
       });
     }
 
-    if (type.location === 'surface') {
-      if (surfaceTaken.has(body.bodyId)) {
-        errors.push({
-          code: 'slot-taken',
-          step,
-          message: `Step ${step}: ${body.name} already carries a surface build. One body, one surface structure.`,
-        });
-      }
-      surfaceTaken.add(body.bodyId);
+    /*
+     * ★ ENFORCED ONLY WHERE THE COUNT IS KNOWN ★
+     *
+     * Where we hold a slot count it is a hard limit. Where we do not — almost everywhere — piling
+     * several structures onto one body is worth SAYING, because it is the assumption most likely to
+     * be wrong when the member opens the colonisation UI, but it cannot be refused on a rule we
+     * cannot show.
+     */
+    const used = type.location === 'surface' ? surfaceUsed : orbitalUsed;
+    const limit = type.location === 'surface' ? body.surfaceSlots : body.orbitalSlots;
+    const already = used.get(body.bodyId) ?? 0;
+
+    if (typeof limit === 'number' && already + 1 > limit) {
+      errors.push({
+        code: 'slot-taken',
+        step,
+        message: `Step ${step}: ${body.name} has ${limit} ${type.location} slot${limit === 1 ? '' : 's'} and this would be number ${already + 1}.`,
+      });
+    } else if ((limit === null || limit === undefined) && already >= 1) {
+      warnings.push({
+        code: 'slots-unknown',
+        step,
+        message: `Step ${step}: this is ${type.location} structure number ${already + 1} on ${body.name}, and we do not hold a slot count for it. Check the colonisation UI before committing the haul.`,
+      });
     }
+
+    used.set(body.bodyId, already + 1);
 
     if (type.requires !== null && !provided.has(type.requires)) {
       errors.push({
