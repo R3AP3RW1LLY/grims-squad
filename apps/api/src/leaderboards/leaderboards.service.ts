@@ -105,6 +105,40 @@ const SOURCES: Record<
     boardFilter: `AND s.board = 'trade'`,
     optColumn: 'show_lb_trade',
   },
+  /*
+   * Deep Core, 2026-08-06. `leaderboard_events` like colony and trade rather than its own ledger
+   * the way Data Runners has one: there is nothing richer to record than "this member refined this
+   * much of this", and a fourth table shape would be a fourth thing for this file to read.
+   */
+  mining: {
+    table: 'leaderboard_events',
+    timeColumn: 'occurred_at',
+    boardFilter: `AND s.board = 'mining'`,
+    optColumn: 'show_lb_mining',
+  },
+  /*
+   * Faction Hands, 2026-08-06. `leaderboard_events` again — the influence itself is recorded in
+   * `bgs_activity_reports`, which is far richer than a score and is what the charts and the tick
+   * digest read. The board only needs the points, so it banks them beside every other board rather
+   * than teaching the standings query a fifth shape.
+   */
+  bgs: {
+    table: 'leaderboard_events',
+    timeColumn: 'occurred_at',
+    boardFilter: `AND s.board = 'bgs'`,
+    optColumn: 'show_lb_bgs',
+  },
+  /*
+   * The Welcome, 2026-08-06. `leaderboard_events` like the rest — the recruit ledger itself is far
+   * richer (who, when, which milestone) and lives in its own table for the tracker to read; the
+   * board only needs the points.
+   */
+  recruit: {
+    table: 'leaderboard_events',
+    timeColumn: 'occurred_at',
+    boardFilter: `AND s.board = 'recruit'`,
+    optColumn: 'show_lb_recruit',
+  },
 };
 
 /**

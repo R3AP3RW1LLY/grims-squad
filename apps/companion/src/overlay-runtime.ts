@@ -15,6 +15,7 @@ import {
 import {
   normaliseLayout,
   withEditMode,
+  OVERLAY_IDS,
   type OverlayId,
   type OverlayLayout,
   type OverlayPlacement,
@@ -257,6 +258,19 @@ export function startOverlays(h: OverlayRuntimeHost): void {
     if (host !== null) windows?.apply(host.layout(), mode);
     // And its data, which it missed by not existing yet. See the note on `lastData`.
     if (lastData !== null) windows?.broadcast('overlay:data', lastData);
+  });
+
+  /*
+   * A panel reporting how tall its content is, so the window can grow to fit it.
+   *
+   * Both arguments are re-read rather than trusted, like every renderer-supplied value: an unknown
+   * id is ignored, and a non-numeric height would otherwise reach `setBounds` as NaN. `measured`
+   * itself decides whether the change is worth acting on.
+   */
+  ipcMain.on('overlay:measured', (_event, id: unknown, height: unknown) => {
+    if (typeof id !== 'string' || typeof height !== 'number') return;
+    if (!(OVERLAY_IDS as readonly string[]).includes(id)) return;
+    windows?.measured(id as OverlayId, height);
   });
 }
 

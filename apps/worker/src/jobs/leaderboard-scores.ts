@@ -1,5 +1,6 @@
 import { notifyMembers, notifySquadron, type LiveNudge, type PrismaClient } from '@grims/db';
 import {
+  CORE_ONLY_MATERIALS,
   COLONY_LINE_CLOSER_BONUS,
   COLONY_PRIORITY_MULTIPLIER,
   TRADE_CREDITS_PER_POINT,
@@ -41,6 +42,25 @@ const CURSORS = {
 } as const;
 
 const BATCH = 2_000;
+
+/**
+ * The core-only minerals, as a SQL list.
+ *
+ * ★ DERIVED, NEVER RETYPED ★
+ *
+ * Built from the shared constant rather than written out in the query, because "the full set" is
+ * what Void Prospector means — and a hand-copied list that fell one mineral behind the real one
+ * would make the badge unearnable with no error anywhere to explain why.
+ *
+ * Interpolated rather than parameterised, which is safe here and only here: these are compile-time
+ * constants from our own source, never user input. Normalised the same way `materialWeight` does
+ * it — lowercased, punctuation stripped — so "Low Temperature Diamonds" and "lowtemperaturediamonds"
+ * are one mineral on both sides of the boundary.
+ */
+const NORMALISE_MATERIAL = `lower(regexp_replace(meta->>'material', '[^a-zA-Z0-9]', '', 'g'))`;
+const CORE_ONLY_SQL = CORE_ONLY_MATERIALS.map(
+  (m) => `'${m.toLowerCase().replace(/[^a-z0-9]/g, '')}'`,
+).join(', ');
 
 export interface ScoreReport {
   readonly colonyEvents: number;
@@ -372,7 +392,25 @@ async function sweepBadges(db: PrismaClient, nudge?: LiveNudge): Promise<number>
       WHERE board = 'trade' AND points > 0
      UNION
      SELECT DISTINCT user_id, 'trade-millionaire-run' FROM leaderboard_events
-      WHERE board = 'trade' AND (meta->>'millionaire')::boolean`,
+      WHERE board = 'trade' AND (meta->>'millionaire')::boolean
+     UNION
+     SELECT DISTINCT user_id, 'mining-first-light' FROM leaderboard_events
+      WHERE board = 'mining' AND ${NORMALISE_MATERIAL} IN (${CORE_ONLY_SQL})
+     UNION
+     -- Over half the rock one mineral. Read from prospected_rocks rather than from a motherlode
+     -- flag: a laser miner can hit a 50% seam without a motherlode ever being called, and the
+     -- badge is for the rock, not for the technique.
+     SELECT DISTINCT user_id, 'mining-motherlode' FROM prospected_rocks WHERE top_percent > 50
+     UNION
+     SELECT user_id, 'mining-grindstone' FROM leaderboard_events
+      WHERE board = 'mining'
+      GROUP BY user_id, date_trunc('month', occurred_at AT TIME ZONE 'UTC')
+      HAVING sum((meta->>'tonnes')::int) >= 1000
+     UNION
+     SELECT user_id, 'mining-void-prospector' FROM leaderboard_events
+      WHERE board = 'mining' AND ${NORMALISE_MATERIAL} IN (${CORE_ONLY_SQL})
+      GROUP BY user_id
+      HAVING count(DISTINCT ${NORMALISE_MATERIAL}) >= ${CORE_ONLY_MATERIALS.length}`,
   );
   for (const f of firstAndFlags) await award(f.user_id, f.badge);
 

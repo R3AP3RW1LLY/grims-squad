@@ -14,6 +14,9 @@ import { resolveStations } from './jobs/resolve-stations.js';
 import { rebuildBountyBoard } from './jobs/bounty-board.js';
 import { refreshEdsyIds } from './jobs/edsy-refresh.js';
 import { scoreLeaderboards } from './jobs/leaderboard-scores.js';
+import { ingestMining } from './jobs/mining-ingest.js';
+import { ingestBgs } from './jobs/bgs-ingest.js';
+import { awardRecruitMilestones } from './jobs/recruit-milestones.js';
 import { rollUpTelemetry } from './jobs/telemetry-rollup.js';
 import { PrismaTelemetryRollupStore } from './jobs/telemetry-rollup.wiring.js';
 import { EdsmStationSource, PrismaStationStore } from './jobs/resolve-stations.wiring.js';
@@ -709,6 +712,42 @@ function startLeaderboardScoring(db: PrismaClient): void {
     const lock = await takeJobLock('leaderboard-scores');
     if (lock === null) return;
     try {
+      /*
+       * Mining folds BEFORE the scorers run, so a tonne refined in the last five minutes is on the
+       * board in the same tick it is banked — and so the badge sweep at the end of `scoreLeaderboards`
+       * sees it. Folding after would leave Deep Core badges a full cycle behind every other board's.
+       */
+      const mining = await ingestMining(db);
+      if (mining.rocks > 0 || mining.tonnes > 0) {
+        console.log(
+          `daemon: mining — ${mining.rocks} rocks, ${mining.tonnes} t refined, ${mining.points} points, ${mining.sessions} sessions opened`,
+        );
+      }
+
+      /*
+       * BGS folds here too, for the same reason: influence moved in the last five minutes reaches
+       * the Faction Hands board in the tick it was earned. Its own points are written directly to
+       * the ledger, so `scoreLeaderboards` picks them up in the same pass.
+       */
+      const bgs = await ingestBgs(db);
+      if (bgs.effects > 0) {
+        console.log(
+          `daemon: bgs — ${bgs.effects} influence effect(s), ${bgs.scored} scored, ${bgs.points} points`,
+        );
+      }
+
+      /*
+       * Recruit milestones fold in the same tick, and BEFORE the scorers, so a recruit reaching
+       * Cadet pays their recruiter and the badge sweep at the end of `scoreLeaderboards` sees the
+       * points in the same pass rather than a cycle later.
+       */
+      const recruits = await awardRecruitMilestones(db);
+      if (recruits.reached > 0) {
+        console.log(
+          `daemon: recruits — ${recruits.reached} milestone(s) reached, ${recruits.points} points`,
+        );
+      }
+
       // The nudge lets a badge or line-closure notice reach open tabs through the Redis bridge.
       const report = await scoreLeaderboards(db, notificationNudge);
       if (report.colonyEvents > 0 || report.tradeEvents > 0 || report.badgesAwarded > 0) {

@@ -412,6 +412,13 @@ async function ingest(
   try {
     const result = await applyMarket(db, market, names, stations);
     counts.unresolved += result.unresolved;
+    for (const symbol of result.unknownSymbols) {
+      // Bounded: EDDN is an untrusted feed, and an unbounded key set is a slow leak in a process
+      // that runs for weeks. Past the cap the count still rises; only the naming stops.
+      if (counts.unknownSymbols.size < 200 || counts.unknownSymbols.has(symbol)) {
+        counts.unknownSymbols.set(symbol, (counts.unknownSymbols.get(symbol) ?? 0) + 1);
+      }
+    }
     /*
      * `unknownStation` no longer means "dropped" — since the provisional-station work the rows are
      * WRITTEN, under a `live:` key, so they count as a market like any other. The counter survives

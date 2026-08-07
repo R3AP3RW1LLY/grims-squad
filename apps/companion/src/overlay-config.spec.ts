@@ -200,3 +200,110 @@ describe('arrange mode', () => {
     expect(after.build.placement).toEqual(before.build.placement);
   });
 });
+
+/**
+ * A field that did not exist when the member last saved.
+ *
+ * ★ THE BUG THIS PREVENTS — 2026-08-06 ★
+ *
+ * Saved fields are INTERSECTED with what this version knows, which is right for a field we have
+ * REMOVED: it stops the renderer being asked to draw something gone. But it is wrong in the other
+ * direction, and silently so.
+ *
+ * A member who has ever opened the overlay settings has a saved field list. Add a new field to an
+ * overlay and the intersection drops it — their saved list cannot contain a field that did not
+ * exist yet. The new line ships, is switched on by default for nobody, and appears for no one who
+ * has used the app before. Every test passes and the feature is invisible.
+ *
+ * So: the member's choices are kept, and any field they could never have chosen is added. "Not in
+ * my saved list" means "I turned it off" only for fields that were on offer at the time.
+ */
+describe('a field added in a later release', () => {
+  it('MANDATORY: appears for a member whose saved config predates it', () => {
+    const saved = {
+      cargo: {
+        enabled: true,
+        locked: true,
+        destination: 'auto',
+        placement: { x: 24, y: 24, width: 320, height: 140 },
+        style: {
+          opacity: 0.9,
+          scale: 1,
+          accent: '#3fd0d4',
+          // What the cargo overlay offered before the value fields existed.
+          fields: ['items', 'capacity'],
+          offered: ['items', 'capacity', 'matched'],
+        },
+      },
+    };
+
+    const out = normaliseLayout(saved);
+
+    // Deliberately switched off, and stays off.
+    expect(out.cargo.style.fields, 'a field the member turned off came back').not.toContain(
+      'matched',
+    );
+    // Could never have been switched off, so it arrives on.
+    for (const field of OVERLAY_FIELDS.cargo) {
+      if (saved.cargo.style.offered.includes(field)) continue;
+      expect(
+        out.cargo.style.fields,
+        `${field} is new and did not reach a member with an older config`,
+      ).toContain(field);
+    }
+  });
+
+  it('MANDATORY: a config with no record of what was offered still gets new fields', () => {
+    /*
+     * Every config written before this change has no `offered` list at all. Those members must not
+     * be the ones the feature stays invisible for — which would be everybody using the app today.
+     */
+    const saved = {
+      cargo: {
+        enabled: true,
+        locked: true,
+        destination: 'auto',
+        placement: { x: 24, y: 24, width: 320, height: 140 },
+        style: { opacity: 0.9, scale: 1, accent: '#3fd0d4', fields: ['items'] },
+      },
+    };
+
+    const out = normaliseLayout(saved);
+
+    expect(out.cargo.style.fields).toContain('items');
+    expect(
+      out.cargo.style.fields.length,
+      'an older config received none of the fields added since',
+    ).toBeGreaterThan(1);
+  });
+
+  it('MANDATORY: a removed field is still dropped', () => {
+    // The behaviour the intersection was written for, which must survive the change above.
+    const saved = {
+      cargo: {
+        enabled: true,
+        locked: true,
+        destination: 'auto',
+        placement: { x: 24, y: 24, width: 320, height: 140 },
+        style: {
+          opacity: 0.9,
+          scale: 1,
+          accent: '#3fd0d4',
+          fields: ['items', 'somethingWeDeleted'],
+          offered: ['items', 'somethingWeDeleted'],
+        },
+      },
+    };
+
+    expect(normaliseLayout(saved).cargo.style.fields).not.toContain('somethingWeDeleted');
+  });
+
+  it('MANDATORY: what was on offer is recorded, so the next release can tell', () => {
+    // Without this written back, every future field addition faces the same problem again.
+    const out = normaliseLayout({});
+
+    expect(out.cargo.style.offered, 'nothing recorded what this version offered').toEqual([
+      ...OVERLAY_FIELDS.cargo,
+    ]);
+  });
+});

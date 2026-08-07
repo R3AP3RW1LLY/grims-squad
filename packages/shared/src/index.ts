@@ -203,3 +203,46 @@ export {
   type LeaderboardDef,
   type LeaderboardKey,
 } from './leaderboards.js';
+
+export {
+  MINING_WEIGHTS,
+  DEFAULT_MINING_WEIGHT,
+  CORE_ONLY_MATERIALS,
+  DEFAULT_PROSPECT_THRESHOLD,
+  materialWeight,
+  miningPoints,
+  worthShooting,
+  MINING_SESSION_GAP_MINUTES,
+  continuesSession,
+  readRock,
+} from './mining.js';
+export type { ProspectThresholds, Rock, RockMaterial } from './mining.js';
+
+export { openProjectCounts } from './colony-badge.js';
+export type { CountableProject, OpenProjectCounts } from './colony-badge.js';
+
+export {
+  pipsOf,
+  readFactionEffects,
+  scoreContribution,
+  BGS_POINTS_PER_PIP,
+  HOLD_MULTIPLIER,
+  BGS_STANCES,
+} from './bgs.js';
+export type { BgsStance, BgsOrder, FactionEffect } from './bgs.js';
+
+export { depthOf, DEPTH_COMFORTABLE } from './market-depth.js';
+export type { MarketDepth } from './market-depth.js';
+
+export { planManifest } from './manifest.js';
+export type {
+  Pick as ManifestPick,
+  ManifestLine,
+  ManifestOptions,
+  Manifest,
+  Stop as ManifestStop,
+  Coords as ManifestCoords,
+} from './manifest.js';
+
+export { canMintInvite, milestonePoints, RECRUIT_MILESTONES } from './recruit.js';
+export type { RecruitMilestone, MintCheck, MintVerdict, MintRefusal } from './recruit.js';

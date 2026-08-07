@@ -36,6 +36,24 @@ import {
   MegaphoneIcon,
   NewspaperIcon,
   MapIcon,
+  ViewfinderCircleIcon,
+  // Added 2026-08-06, when every nav link got its own icon. Chosen for what the page DOES rather
+  // than what it is called: a build list is a clipboard, a hauling run is a truck, a board is a
+  // trophy — and two links sharing an icon is two links with no icon.
+  CubeIcon,
+  ScaleIcon,
+  ClipboardDocumentListIcon,
+  PlusCircleIcon,
+  QueueListIcon,
+  UserGroupIcon,
+  BanknotesIcon,
+  SignalIcon,
+  StarIcon,
+  FlagIcon,
+  BookOpenIcon,
+  InboxStackIcon,
+  IdentificationIcon,
+  TicketIcon,
 } from '@heroicons/react/24/outline';
 import { ChevronDownIcon } from '@heroicons/react/20/solid';
 import { ViewAsBanner } from './view-as-banner';
@@ -109,6 +127,42 @@ const ICONS: Record<string, typeof HomeIcon> = {
   '/bounties': MapIcon,
   // Release notes read like news, and a newspaper is what news looks like.
   '/changelog': NewspaperIcon,
+
+  /*
+   * ★ EVERY LINK, NOT MOST OF THEM — SQUADRON OWNER, 2026-08-06 ★
+   *
+   * "ensure every category and nav link in the website and companion app have appropriate icons"
+   *
+   * Nineteen links had none and fell through to the default, which put the same glyph beside
+   * unrelated pages — and an icon that does not distinguish is worse than no icon, because the eye
+   * learns to stop using it.
+   */
+  '/recruit': TicketIcon,
+  '/mining': CubeIcon,
+  '/colonisation/new': PlusCircleIcon,
+  // A reticle: scouting is picking a target before anything is built.
+  '/colonisation/scout': ViewfinderCircleIcon,
+  '/colonisation/planning': ClipboardDocumentListIcon,
+  '/colonisation/build-types': QueueListIcon,
+  '/colonisation/squadron': BuildingOffice2Icon,
+  '/colonisation/members': UserGroupIcon,
+  '/logistics/commodities': ScaleIcon,
+  '/logistics/freight-office': TruckIcon,
+  '/shipyard': WrenchScrewdriverIcon,
+  '/shipyard/squadron': ShieldCheckIcon,
+  '/shipyard/public': GlobeAltIcon,
+  // The five boards share a family deliberately — they ARE one thing five times — but each keeps
+  // its own glyph so a member scanning the group can find theirs without reading.
+  '/leaderboards/bounties': SignalIcon,
+  '/leaderboards/colony': BuildingOffice2Icon,
+  '/leaderboards/trade': BanknotesIcon,
+  '/leaderboards/mining': CubeIcon,
+  '/leaderboards/bgs': FlagIcon,
+  // The Welcome — a recruiter hands out the ticket that gets somebody through the door.
+  '/leaderboards/recruit': TicketIcon,
+  '/roadmap': MapIcon,
+  '/app/members': IdentificationIcon,
+  '/app/conversations': InboxStackIcon,
 };
 
 /**
@@ -137,6 +191,13 @@ const SUBSECTION_ICONS: Record<string, typeof HomeIcon> = {
   Leaderboards: TrophyIcon,
   // The call going out — the category is a summons, and a megaphone is what a summons looks like.
   'Answer the Call': MegaphoneIcon,
+  /*
+   * Added with the two new categories on 2026-08-06. Command holds the officer-directed work —
+   * operations and the background simulation — and About holds the things that are about the site
+   * rather than about the squadron, which is why they no longer sit loose at the bottom.
+   */
+  Command: StarIcon,
+  About: BookOpenIcon,
 };
 
 const SECTION_LABELS: Record<NavItem['section'], string> = {
@@ -397,6 +458,26 @@ function SidebarContents({ me, current }: { me: MeResponse; current: string }) {
                                 )}
                               >
                                 {item.label}
+                                {/*
+                                  ★ SQUADRON OWNER, 2026-08-06 ★
+
+                                  "we also need to add this notification/badge to the web site
+                                  too" — the companion has shown these counts since colonisation
+                                  shipped and the website never has, so a member saw a number in
+                                  one place and a bare link in the other.
+
+                                  The API decides the number and omits it entirely at zero, so
+                                  there is no grey nought beside every link teaching people to
+                                  stop reading them.
+                                */}
+                                {item.badge === undefined ? null : (
+                                  <span
+                                    className="ml-auto rounded-full bg-[color-mix(in_srgb,var(--color-brand-cyan)_18%,transparent)] px-1.5 py-0.5 font-mono text-[10px] tabular-nums text-[var(--color-brand-cyan-bright)]"
+                                    aria-label={`${item.badge} still needing hauling`}
+                                  >
+                                    {item.badge}
+                                  </span>
+                                )}
                               </a>
                             </li>
                           );

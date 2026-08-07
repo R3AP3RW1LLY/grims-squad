@@ -44,6 +44,9 @@ contextBridge.exposeInMainWorld('companion', {
   resendHistory: () => ipcRenderer.invoke('resendHistory'),
   setEnabled: (enabled: boolean) => ipcRenderer.invoke('setEnabled', enabled),
   setAutoStart: (autoStart: boolean) => ipcRenderer.invoke('setAutoStart', autoStart),
+  /** The prospector thresholds, as JSON. Repaired on read by mining-settings.ts. */
+  setMiningSettings: (json: string) => ipcRenderer.invoke('setMiningSettings', json),
+  setTradePlan: (json: string) => ipcRenderer.invoke('setTradePlan', json),
   openHub: () => ipcRenderer.invoke('openHub'),
   chooseJournalFolder: () => ipcRenderer.invoke('chooseJournalFolder'),
   /** Searches the disk again — the game may have been installed since. */
@@ -93,6 +96,19 @@ contextBridge.exposeInMainWorld('overlayBridge', {
    * its state, and without this it would sit blank until the member next changed a setting.
    */
   ready: (id: string) => ipcRenderer.send('overlay:ready', id),
+  /*
+   * ★ THE ONE THING AN OVERLAY MAY ASK FOR ★
+   *
+   * This bridge is deliberately read-only — an overlay window is a display surface, and giving it
+   * the ability to act would widen what a rendering bug can reach. Reporting its own content height
+   * is the exception, and a narrow one: it carries a single number, the main process clamps it
+   * (`nextOverlayHeight`), and the worst a bad value can do is make one panel the wrong height.
+   *
+   * It earns the exception because the renderer is the only thing that CAN know: the height depends
+   * on how many commodities a build wants and how the text wrapped, neither of which the main
+   * process can see.
+   */
+  measured: (id: string, height: number) => ipcRenderer.send('overlay:measured', id, height),
 });
 
 /*
@@ -124,6 +140,11 @@ contextBridge.exposeInMainWorld('trade', {
   commodity: (name: string, query?: unknown) => ipcRenderer.invoke('tradeCommodity', name, query),
 });
 
+contextBridge.exposeInMainWorld('recruit', {
+  status: () => ipcRenderer.invoke('recruitStatus'),
+  mint: () => ipcRenderer.invoke('recruitMint'),
+});
+
 contextBridge.exposeInMainWorld('shipyard', {
   ships: () => ipcRenderer.invoke('shipyardShips'),
   outfit: (shipId: string) => ipcRenderer.invoke('shipyardOutfit', shipId),
@@ -141,6 +162,20 @@ contextBridge.exposeInMainWorld('bounties', {
 contextBridge.exposeInMainWorld('leaderboards', {
   /** One board — season, all-time, the member's own line. No month means the current season. */
   board: (board: string, month?: string) => ipcRenderer.invoke('leaderboardBoard', board, month),
+});
+
+/**
+ * Mining, from the hub.
+ *
+ * The overlays need none of this — they read the journal on this machine. These are the two
+ * questions that need something bigger than one commander: what a hold is worth, and which rings
+ * the squadron has been finding worth the limpets.
+ */
+contextBridge.exposeInMainWorld('mining', {
+  rings: (material?: string, days?: number) => ipcRenderer.invoke('miningRings', material, days),
+  sessions: () => ipcRenderer.invoke('miningSessions'),
+  valuation: (hold: Record<string, number>, system: string | null, withinLy?: number) =>
+    ipcRenderer.invoke('miningValuation', hold, system, withinLy),
 });
 
 /**
@@ -175,6 +210,27 @@ contextBridge.exposeInMainWorld('help', {
   send: (id: string, body: string) => ipcRenderer.invoke('helpSend', id, body),
   /** "Talk to an officer" — flips the conversation to the officers for good. */
   escalate: (id: string) => ipcRenderer.invoke('helpEscalate', id),
+});
+
+contextBridge.exposeInMainWorld('commander', {
+  /** Where the hub says this commander is. Its answer, not ours — see hub-commander.ts. */
+  location: () => ipcRenderer.invoke('commanderLocation'),
+});
+
+contextBridge.exposeInMainWorld('bgs', {
+  orders: () => ipcRenderer.invoke('bgsOrders'),
+});
+
+contextBridge.exposeInMainWorld('ops', {
+  board: () => ipcRenderer.invoke('opsBoard'),
+  signUp: (id: string, state: string) => ipcRenderer.invoke('opsSignUp', id, state),
+  withdraw: (id: string) => ipcRenderer.invoke('opsWithdraw', id),
+});
+
+contextBridge.exposeInMainWorld('scout', {
+  search: (anchor: string, range?: string, prefer?: string) =>
+    ipcRenderer.invoke('scoutSearch', anchor, range, prefer),
+  survey: (system: string) => ipcRenderer.invoke('scoutSurvey', system),
 });
 
 contextBridge.exposeInMainWorld('colony', {

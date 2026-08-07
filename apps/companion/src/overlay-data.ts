@@ -1,9 +1,16 @@
 import type { DockedAt } from './docked.js';
 import { isFresh, projectTitleFrom } from './docked.js';
+import { unrealised } from './cargo-value.js';
 import { markWanted, type Hold } from './cargo.js';
 import type { CurrentBuild } from './hub-colony.js';
 import type { TripLedger } from './trip-ledger.js';
 import type { OverlayData } from './renderer/overlay.js';
+import { hitRate, type ProspectingState } from './prospector.js';
+import { refinedRate, sessionMinutes, type RefiningState } from './refinery.js';
+import { standingFor, EMPTY_BGS, type BgsSessionState } from './bgs-session.js';
+import { whereInPlan, type PickedRun } from './trade-plan.js';
+import { planManifest } from '@grims/shared/manifest';
+import type { CompanionStanding } from './hub-bgs.js';
 
 /**
  * What the overlays actually draw.
@@ -45,6 +52,25 @@ export interface OverlayInput {
   /** Tonnes the ship can carry, from Loadout. Null until a Loadout has been seen. */
   readonly capacity: number | null;
   /**
+   * What the hold is worth and where to take it, priced by the hub against the squadron's own
+   * market table. Null until a valuation has come back — see `cargo-value.ts` for when one is
+   * asked for, which is deliberately not "every time the cargo changes".
+   */
+  readonly holdValue?:
+    | {
+        readonly value: number;
+        readonly bestSale: {
+          readonly station: string;
+          readonly system: string;
+          readonly distanceLy: number | null;
+          readonly total: number;
+          readonly perTonne: number;
+        } | null;
+        readonly unpriced: readonly string[];
+      }
+    | null
+    | undefined;
+  /**
    * The member's current build, from the hub — whole-project needs with everyone's deliveries
    * folded in. Null when no current build is set, which is what makes the journal fallback below
    * reachable at all.
@@ -54,23 +80,114 @@ export interface OverlayInput {
   readonly trip: TripLedger | null;
   /** Now, injected so the freshness rule is testable. */
   readonly now: number;
+  /**
+   * The rock in front of the member, and the session it belongs to.
+   *
+   * Both null until the member has actually prospected or refined something, which keeps the two
+   * panels honestly empty rather than showing a session of zeroes to somebody who is not mining.
+   */
+  /*
+   * `| undefined` spelled out: `exactOptionalPropertyTypes` treats an optional property and one
+   * that may be undefined as different types, and callers built before mining existed pass neither.
+   */
+  readonly prospecting?: ProspectingState | null | undefined;
+  readonly refining?: RefiningState | null | undefined;
+  /**
+   * The squadron's standing orders. Null until the hub has answered once — see `bgsPanel`, where
+   * that is deliberately different from an empty list.
+   */
+  readonly standingOrders?: readonly CompanionStanding[] | null | undefined;
+  /** What this member has moved for the squadron since the app started. */
+  readonly bgsSession?: BgsSessionState | null | undefined;
+  /**
+   * The runs the member picked in the Freight Office.
+   *
+   * The PICKS, not a finished manifest: capacity changes when somebody swaps ship, so the manifest
+   * is planned here against the hold the app can currently see rather than baked at pick time.
+   */
+  readonly tradePicks?: readonly PickedRun[] | undefined;
+  /**
+   * Where the Freight Office measured that plan from.
+   *
+   * The journal names the station a member is docked at but never says where it is in space, so
+   * the planner's own origin travels with the plan — without it the manifest can only GROUP the
+   * stops by system rather than order them.
+   */
+  readonly tradeOrigin?: { readonly x: number; readonly y: number; readonly z: number } | null | undefined;
+}
+
+/**
+ * The picked run, planned against the hold the member is actually flying.
+ *
+ * ★ SQUADRON OWNER, 2026-08-06 ★
+ *
+ * "add an option to choose the trade route and display them in the overlay please so we can group
+ * multiple routes together if there are several that are going to the same destination, and show
+ * the optimized order"
+ *
+ * ★ THE SAME `planManifest` THE WEBSITE USES ★
+ *
+ * Grouping the shared stops and ordering them is a solved problem living in `@grims/shared`, and
+ * the two surfaces have to agree: a member who plans on the site and flies with the app must not be
+ * given a different order by each. Re-deriving it here would be a second implementation to keep in
+ * step, and the one that drifted would be the one nobody was looking at.
+ */
+function routePanel(input: OverlayInput): OverlayData['route'] {
+  const picks = input.tradePicks ?? [];
+  if (picks.length === 0) return null;
+
+  /*
+   * Without a Loadout we do not know the hold. Planning against a guess would quote tonnages and
+   * profits for a ship the member is not flying, so the manifest assumes the hold is whatever the
+   * picks can supply and says `capacity: null` — the panel prints the caveat.
+   */
+  const capacity = input.capacity;
+  const manifest = planManifest(picks, {
+    capacity: capacity ?? picks.reduce((sum, p) => sum + p.supply, 0),
+    budget: null,
+    ...(input.tradeOrigin == null ? {} : { origin: input.tradeOrigin }),
+  });
+
+  const here = whereInPlan(picks, input.dock ?? null);
+
+  /*
+   * Tonnes come from the MANIFEST, not from the pick. A pick says what the station has; the
+   * manifest says what actually fits once the hold, the supply and the demand have all had their
+   * say — and that is the number a member loads.
+   */
+  const tonnesOf = (commodity: string): number =>
+    manifest.lines.find((l) => l.commodity === commodity)?.tonnes ?? 0;
+
+  return {
+    stops: manifest.order.map((s) => ({
+      commodity: s.commodity,
+      station: s.station,
+      system: s.system,
+      tonnes: s.tonnes,
+    })),
+    loadHere: here.loadHere.map((p) => ({
+      commodity: p.commodity,
+      tonnes: tonnesOf(p.commodity),
+    })),
+    sellHere: here.sellHere.map((p) => ({
+      commodity: p.commodity,
+      tonnes: tonnesOf(p.commodity),
+    })),
+    tonnes: manifest.tonnes,
+    capacity,
+    outlay: manifest.outlay,
+    profit: manifest.profit,
+    spare: manifest.spare,
+    routeLy: manifest.routeLy,
+  };
 }
 
 export function buildOverlayData(input: OverlayInput): OverlayData {
   return {
     build: buildPanel(input),
-    /*
-     * ★ ROUTE: NOTHING TO SEND, AND NOTHING FETCHABLE ★
-     *
-     * There is no record anywhere of the run a member picked. The Freight Office is a PLANNER — it
-     * computes candidates from an origin and some parameters — and `TRADE_SAVE_ROUTE` exists as a
-     * permission with nothing that writes it. Unblocking this is an API feature (save a chosen run,
-     * read it back on the companion), not overlay wiring.
-     *
-     * So the panel keeps saying "Pick a run in the Freight Office", which is exactly right and is
-     * what the app's own Trade runs page already says.
-     */
-    route: null,
+    prospector: prospectorPanel(input),
+    refinery: refineryPanel(input),
+    route: routePanel(input),
     cargo: cargoPanel(input),
     status: {
       sending: input.sending,
@@ -85,6 +202,41 @@ export function buildOverlayData(input: OverlayInput): OverlayData {
         input.lastTransferAt === 0 ? null : new Date(input.lastTransferAt).toISOString(),
       gameRunning: input.gameRunning,
     },
+    bgs: bgsPanel(input),
+  };
+}
+
+/**
+ * The standing orders where the member is, and what they have moved this session.
+ *
+ * ★ null UNTIL THE ORDERS HAVE ARRIVED, NOT UNTIL THERE ARE SOME ★
+ *
+ * An empty array is a real answer — "the officers have not ordered anything" — and the panel says
+ * so. `null` means we have not managed to ask the hub yet, and the panel says THAT instead. Merging
+ * the two would have a member on a broken connection reading "no standing orders" and believing it.
+ */
+function bgsPanel(input: OverlayInput): OverlayData['bgs'] {
+  const orders = input.standingOrders ?? null;
+  if (orders === null) return null;
+
+  const split = standingFor(orders, input.dock?.systemName ?? null);
+  const session = input.bgsSession ?? EMPTY_BGS;
+
+  return {
+    here: split.here.map((o) => ({
+      faction: o.faction,
+      stance: o.stance,
+      priority: o.priority,
+      guidance: o.guidance,
+      // `standingFor` works on the shared shape, which has no `isOurs`; the companion's rows carry
+      // it, so it is read back off the original rather than threaded through the split.
+      isOurs: orders.find((x) => x.faction === o.faction)?.isOurs === true,
+    })),
+    elsewhere: split.elsewhere,
+    system: input.dock?.systemName ?? null,
+    missions: session.missions,
+    pips: session.pips,
+    points: session.points,
   };
 }
 
@@ -162,6 +314,19 @@ function cargoPanel(input: OverlayInput): OverlayData['cargo'] {
      * one replaces it — the exact behaviour the owner asked for.
      */
     lastSale: input.trip?.lastSale ?? null,
+    /*
+     * ★ SQUADRON OWNER, 2026-08-06 ★
+     *
+     * "we want valiue information but its showing irrellevant sell information in it!"
+     *
+     * What it is worth NOW and where to take it, rather than what was paid for it and what was
+     * last sold. Null until the hub has priced this hold; the panel omits the lines rather than
+     * drawing a zero, because a hold worth nothing and a hold not yet priced are different states
+     * and only one of them is bad news.
+     */
+    value: input.holdValue?.value ?? null,
+    bestSale: input.holdValue?.bestSale ?? null,
+    profit: unrealised(input.holdValue?.value ?? null, totalPaid),
   };
 }
 
@@ -264,5 +429,63 @@ function fromDepot(
      * people have hauled to a POSTED build, and both hub-aware paths above supply it.
      */
     haulers: 0,
+  };
+}
+
+
+/**
+ * The prospector panel: the rock in front of the member.
+ *
+ * Null until one has been prospected — an empty panel says "waiting for a limpet", which is true,
+ * where a panel of zeroes would say they are mining badly.
+ */
+function prospectorPanel(input: OverlayInput): OverlayData['prospector'] {
+  /*
+   * Nullish rather than `=== null`: this arrives from a long-lived main process and from callers
+   * built before these fields existed, so undefined is a real state and not a type violation worth
+   * throwing over.
+   */
+  const p = input.prospecting ?? null;
+  if (p === null || p.current === null) return null;
+
+  return {
+    materials: p.current.materials.map((m) => ({ name: m.name, percent: m.percent })),
+    isHit: p.currentIsHit,
+    motherlode: p.current.motherlode,
+    content: p.current.content,
+    prospected: p.prospected,
+    hitRate: hitRate(p),
+    bestPercent: p.bestPercent,
+    bestMaterial: p.bestMaterial,
+  };
+}
+
+/**
+ * The refinery panel: the session.
+ *
+ * ★ `value` AND `bestSale` ARE NOT COMPUTED HERE, DELIBERATELY ★
+ *
+ * They need the market table, which lives on the hub — eighteen million rows the app has no copy
+ * of and should not. They arrive with the current-project data the panel already receives, and are
+ * null until they do. Null renders as an absent row rather than a wrong number, which is the right
+ * behaviour for a member mining somewhere the squadron has no prices for.
+ */
+function refineryPanel(input: OverlayInput): OverlayData['refinery'] {
+  const r = input.refining ?? null;
+  if (r === null || r.tonnes === 0) return null;
+
+  // Biggest first: mid-session the useful question is "what am I actually getting".
+  const materials = Object.entries(r.byMaterial)
+    .map(([name, tonnes]) => ({ name, tonnes }))
+    .sort((a, b) => b.tonnes - a.tonnes);
+
+  return {
+    materials,
+    tonnes: r.tonnes,
+    minutes: sessionMinutes(r, input.now),
+    rate: refinedRate(r, input.now),
+    points: r.points,
+    value: null,
+    bestSale: null,
   };
 }

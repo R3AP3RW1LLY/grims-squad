@@ -119,5 +119,18 @@ import type { LiveService } from '../live/live.service.js';
         new ColonyService(db, market, acl, liveNudgeOf(live)),
     },
   ],
+  /*
+   * The market store is EXPORTED so the mining module can price a hold against the same eighteen
+   * million rows the colony shopping list reads. A second store built on the same table would be a
+   * second place for the carrier-exclusion and staleness rules to drift apart, and those rules are
+   * the ones that stop a member being sent across the bubble to a price nobody has seen in a month.
+   */
+  /*
+   * `ColonyPlanService` is exported so the colonisation scout can survey a candidate through the
+   * SAME instance the planner uses. That matters: its fetch-and-cache is the only path that leaves
+   * hand-entered slot counts intact on a refresh, and a second instance would mean a second cache
+   * with its own idea of how fresh a system is.
+   */
+  exports: [MARKET_STORE, ColonyPlanService],
 })
 export class LogisticsModule {}

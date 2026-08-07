@@ -99,6 +99,9 @@ export interface PrivacySettings {
   showLbBounties: boolean;
   showLbColony: boolean;
   showLbTrade: boolean;
+  showLbMining: boolean;
+  showLbBgs: boolean;
+  showLbRecruit: boolean;
 }
 
 /**
@@ -838,6 +841,11 @@ export const getInaraStatus = (): Promise<InaraStatus | null> =>
 export interface NavItem {
   href: string;
   label: string;
+  /**
+   * A count worth showing beside the entry, decided by the API. Absent when there is nothing to
+   * say — deliberately, so the sidebar is not a row of grey noughts.
+   */
+  badge?: number;
   // 'ai' added 2026-08-01 — the GMSD AI sidebar group. Mirrors NavItem in the API's nav.ts; the
   // API decides which items a member gets, this only names the headings.
   section: 'squadron' | 'personal' | 'ai' | 'admin';
@@ -1992,6 +2000,144 @@ export const getBountyLeaderboard = (month?: string): Promise<BountyLeaderboard 
     authed: true,
   });
 
+// ── Mining ───────────────────────────────────────────────────────────────────
+//
+// Squadron owner, 2026-08-06: "our own version of EDminer ... the leaderboard should be on refined
+// materials etc." The BOARD is the ordinary leaderboards endpoint (Deep Core is just a fourth
+// board key). These two are the things a mining tool has that a leaderboard does not: which rings
+// the squadron has found worth mining, and a member's own evenings.
+
+/** One ring, measured across everybody who has prospected in it. */
+export interface MiningRing {
+  system: string;
+  body: string;
+  rocks: number;
+  /** Share of rocks whose best material cleared the squadron-wide bar, as a percentage. */
+  hitRate: number;
+  bestPercent: number;
+  topMaterial: string;
+  lastSeen: string;
+}
+
+/** One mining evening. */
+export interface MiningSession {
+  id: string;
+  startedAt: string;
+  endedAt: string | null;
+  system: string | null;
+  ring: string | null;
+  rocks: number;
+  hits: number;
+  tonnes: number;
+  points: number;
+}
+
+export const getMiningRings = (material?: string, days = 14): Promise<{ rings: MiningRing[] } | null> =>
+  get(
+    `/v1/mining/rings?days=${days}${material === undefined ? '' : `&material=${encodeURIComponent(material)}`}`,
+    { authed: true },
+  );
+
+export const getMiningSessions = (): Promise<{ sessions: MiningSession[] } | null> =>
+  get('/v1/mining/sessions', { authed: true });
+
+// ── Recruiting ───────────────────────────────────────────────────────────────
+//
+// Squadron owner, 2026-08-06: "a unique discord invite link for all members that are inara
+// veriefied in our platform!" One link per member, and credit for the recruits who stay.
+
+export interface RecruitRow {
+  name: string;
+  joinedAt: string;
+  /** In ladder order: joined, stayed, verified, flying, cadet. */
+  milestones: string[];
+  points: number;
+}
+
+export interface RecruitStatus {
+  /** Null when they have not minted one, or cannot. */
+  link: string | null;
+  canMint: boolean;
+  /** Why not, in words a member can act on. Null when they can. */
+  blockedBecause: string | null;
+  recruits: RecruitRow[];
+  totalPoints: number;
+  ladder: { milestone: string; points: number }[];
+}
+
+export const getRecruitStatus = (): Promise<RecruitStatus | null> =>
+  get('/v1/recruit', { authed: true });
+
+/** The officer's view: every link, every join, and which of them nobody could be credited for. */
+export interface RecruitManage {
+  links: { owner: string; code: string; recruits: number; revokedAt: string | null }[];
+  joins: {
+    discordId: string;
+    name: string;
+    recruiter: string | null;
+    /** auto | foreign | manual | ambiguous | unknown — see the bot's attribution notes. */
+    attribution: string;
+    joinedAt: string;
+    points: number;
+    voidedAt: string | null;
+  }[];
+}
+
+export const getRecruitManage = (): Promise<RecruitManage | null> =>
+  get('/v1/recruit/manage', { authed: true });
+
+// ── Operations ───────────────────────────────────────────────────────────────
+//
+// Squadron owner, 2026-08-06: "the ops/and bgs need admin pages in the administration category".
+// Built on tables that carried capacity and standby overflow from the day they were designed.
+
+export interface OpRow {
+  id: string;
+  title: string;
+  /** bgs | combat | mining | trade | exploration | rescue | social | training. */
+  opType: string;
+  startsAt: string;
+  status: string;
+  /** Null means uncapped — a real choice, not a missing value. */
+  capacity: number | null;
+  going: number;
+  standby: number;
+  createdBy: string;
+  /** The caller's own commitment: yes, maybe, no, standby — or null if they have not said. */
+  mine: string | null;
+}
+
+export const getOps = (): Promise<{ ops: OpRow[] } | null> => get('/v1/ops', { authed: true });
+
+// ── BGS ──────────────────────────────────────────────────────────────────────
+//
+// Squadron owner, 2026-08-06: "allow the officers to choose what factions we want to be running
+// missions for etc, give instructions to the squad members etc." Nothing scores for a faction that
+// is not on this list, which is what makes the watchlist an instrument of direction.
+
+export interface BgsOrderRow {
+  id: string;
+  /** push | hold | suppress | ignore — the schema's own BgsDirective. */
+  stance: string;
+  systemName: string | null;
+  priority: number;
+  guidance: string | null;
+  activeFrom: string;
+  activeUntil: string | null;
+}
+
+export interface BgsFactionRow {
+  id: string;
+  name: string;
+  /** The squadron's own player faction, as opposed to an ally worth supporting. */
+  isOurs: boolean;
+  notes: string | null;
+  orders: BgsOrderRow[];
+}
+
+export const getBgsWatchlist = (): Promise<{ factions: BgsFactionRow[] } | null> =>
+  get('/v1/bgs/watchlist', { authed: true });
+
 // ── Leaderboards ─────────────────────────────────────────────────────────────
 //
 // Squadron owner, 2026-08-04: "make a new category called leaderboards." Three boards — Data
@@ -2068,6 +2214,13 @@ export interface RouteLeg {
   distance: number | null;
   /** Light seconds from the arrival star — the in-system leg the jump count cannot see. */
   arrivalLs: number | null;
+  /**
+   * Where this station's system is, so a basket of picks can be routed in the browser.
+   *
+   * Every other distance here is from the MEMBER and cannot order stops against each other.
+   * Null for a system we have not placed.
+   */
+  coords: { x: number; y: number; z: number } | null;
 }
 
 export interface Route {
@@ -2111,6 +2264,8 @@ export interface RoutePlan {
      */
     age?: string;
     stale?: boolean;
+    /** Where that system is, so a basket of picked runs can be routed in the browser. */
+    coords?: { x: number; y: number; z: number } | null;
   } | null;
   unknownSystem: string | null;
 }
@@ -2119,6 +2274,42 @@ export interface RoutePlan {
 export const getRoutes = (query: Record<string, string> = {}): Promise<RoutePlan | null> => {
   const qs = new URLSearchParams(query).toString();
   return get(`/v1/logistics/routes${qs === '' ? '' : `?${qs}`}`, { authed: true });
+};
+
+/** An outbound run paired with its best way home. */
+export interface Circuit {
+  out: Route;
+  /** Null when nothing pays to come back. Stated, not hidden — an empty leg is real information. */
+  back: Route | null;
+  deadLeg: boolean;
+  totalProfit: number;
+  tripMinutes: number;
+  profitPerHour: number;
+  /** The LARGER single outlay, not the sum — a circuit funds itself as it goes. */
+  capitalNeeded: number;
+}
+
+export interface CircuitPlan {
+  circuits: Circuit[];
+  considered: string[];
+  /**
+   * How many destinations were explored for a way home.
+   *
+   * Printed on the page. The search is bounded — every destination costs a full route search — and
+   * a silently truncated list reads as "there is nothing better", which is a claim it has not
+   * earned.
+   */
+  destinationsSearched: number;
+  timeModel?: { jumpLy: number; minutesPerJump: number; minutesPerStop: number };
+  feed?: { stale: boolean; text: string; newestAt: string | null };
+  origin: RoutePlan['origin'];
+  unknownSystem: string | null;
+}
+
+/** Round trips: out and back, scored as one circuit. */
+export const getCircuits = (query: Record<string, string> = {}): Promise<CircuitPlan | null> => {
+  const qs = new URLSearchParams(query).toString();
+  return get(`/v1/logistics/circuits${qs === '' ? '' : `?${qs}`}`, { authed: true });
 };
 
 // ── Colonisation ─────────────────────────────────────────────────────────────
@@ -2675,3 +2866,79 @@ export const getChangelog = (): Promise<{ releases: ChangelogRelease[] } | null>
  */
 export const getChangelogPendingGated = (): Promise<AdminRead<{ pending: PendingChangelog | null }>> =>
   getAdmin('/v1/changelog/pending');
+
+// ── Colonisation scout ───────────────────────────────────────────────────────
+//
+// Finding the next system worth claiming, and taking a proper look at one.
+
+export interface ScoutPermit {
+  system: string;
+  allegiance: string | null;
+  controllingFaction: string | null;
+  stationCount: number;
+  hasOrbital: boolean;
+}
+
+export interface ScoutCandidateRow {
+  system: string;
+  bodyCount: number;
+  landableCount: number;
+  nearestLandableLs: number | null;
+  hotspots: Record<string, number>;
+  /** False until somebody surveys it. Distinct from "surveyed and empty". */
+  surveyed: boolean;
+  pristine: boolean;
+  /** Null means this system cannot be claimed from anywhere in range. */
+  permit: ScoutPermit | null;
+  permitLy: number | null;
+  score: number;
+}
+
+export interface ScoutResult {
+  anchor: { system: string; allegiance: string | null; controllingFaction: string | null } | null;
+  candidates: ScoutCandidateRow[];
+  consideredSystems: number;
+  permitSources: number;
+  unknownAnchor: string | null;
+}
+
+/** Search for claimable systems around an anchor. `prefer` extends that power. */
+export const getScout = (
+  anchor: string,
+  opts: { range?: string; prefer?: string } = {},
+): Promise<AdminRead<ScoutResult>> => {
+  const q = new URLSearchParams({ anchor });
+  if (opts.range !== undefined && opts.range !== '') q.set('range', opts.range);
+  if (opts.prefer !== undefined && opts.prefer !== '') q.set('prefer', opts.prefer);
+  return getAdmin(`/v1/colonisation/scout?${q.toString()}`);
+};
+
+export interface SurveyedBodyRow {
+  bodyId: number;
+  name: string;
+  subType: string | null;
+  landable: boolean;
+  distanceLs: number | null;
+  gravity: number | null;
+  hasRings: boolean;
+  terraformable: boolean;
+  orbitalSlots: number | null;
+  surfaceSlots: number | null;
+}
+
+export interface SystemSurveyResult {
+  system: string;
+  bodyCount: number | null;
+  bodies: SurveyedBodyRow[];
+  landableCount: number;
+  nearestLandableLs: number | null;
+  ringedCount: number;
+  hotspots: Record<string, number>;
+  fetchedAt: string | null;
+  hasSlotData: boolean;
+  /** Present instead of the survey when the system could not be found at all. */
+  notFound?: string;
+}
+
+export const getSystemSurvey = (system: string): Promise<AdminRead<SystemSurveyResult>> =>
+  getAdmin(`/v1/colonisation/survey?system=${encodeURIComponent(system)}`);

@@ -212,7 +212,13 @@ describe('an unsecured privileged account', () => {
      */
     const source = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), 'me.controller.ts'), 'utf8');
 
-    expect(source).toMatch(/nav:\s*mustSecure\s*\?\s*\[\]\s*:\s*navFor\(mask\)/);
+    /*
+     * The ARGUMENTS are deliberately open-ended — `navFor` gained a badges argument on 2026-08-06 —
+     * but the ternary is not. What this pins is that an unsecured account gets an empty list and
+     * everybody else gets it from `navFor`, which is the property that keeps the navbar, the
+     * sidebar and the account dropdown emptying together.
+     */
+    expect(source).toMatch(/nav:\s*mustSecure\s*\?\s*\[\]\s*:\s*navFor\(\s*mask/);
   });
 
   it('MANDATORY: is still reported AS an admin, so the UI can explain why', () => {
@@ -221,5 +227,54 @@ describe('an unsecured privileged account', () => {
     const source = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), 'me.controller.ts'), 'utf8');
 
     expect(source).toContain('isAdmin: hasAdminArea(mask)');
+  });
+});
+
+/**
+ * Counts on the sidebar.
+ *
+ * ★ SQUADRON OWNER, 2026-08-06 ★
+ *
+ * "we also need to add this notification/badge to the web site too showing completed projects is
+ * confusing!"
+ *
+ * The app has carried these counts since colonisation shipped; the website has never had them, so
+ * a member saw "4 squadron projects" in one place and a bare link in the other. The rule for WHICH
+ * projects count lives in @grims/shared and is proven there — this is only about the number
+ * reaching the sidebar.
+ */
+describe('sidebar counts', () => {
+  it('MANDATORY: a count reaches the item it belongs to', () => {
+    const nav = navFor(ROLE_PRESETS.member, { '/colonisation/squadron': 3 });
+    const item = nav.find((i) => i.href === '/colonisation/squadron');
+
+    expect(item?.badge).toBe(3);
+  });
+
+  it('MANDATORY: no count is no badge, not a zero', () => {
+    /*
+     * A grey "0" beside every link is clutter that teaches members to stop reading the numbers.
+     * Absent means "nothing to say", which is what the sidebar should look like most of the time.
+     */
+    const nav = navFor(ROLE_PRESETS.member, { '/colonisation/squadron': 0 });
+    const item = nav.find((i) => i.href === '/colonisation/squadron');
+
+    expect(item?.badge).toBeUndefined();
+  });
+
+  it('MANDATORY: nothing passed at all still builds a nav', () => {
+    // Every existing caller passes nothing, and must keep working unchanged.
+    expect(navFor(ROLE_PRESETS.member).length).toBeGreaterThan(0);
+  });
+
+  it('MANDATORY: a count for an item this member cannot see is simply not rendered', () => {
+    /*
+     * The badge must never become a side channel. A guest who cannot reach the colonisation pages
+     * must not learn how many builds are running from a number on a link they do not have — which
+     * is the same cloaking rule the nav itself obeys (INV-002).
+     */
+    const nav = navFor(ROLE_PRESETS.guest, { '/colonisation/squadron': 7 });
+
+    expect(nav.some((i) => i.href === '/colonisation/squadron')).toBe(false);
   });
 });

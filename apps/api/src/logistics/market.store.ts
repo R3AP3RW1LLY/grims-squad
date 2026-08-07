@@ -177,8 +177,21 @@ export interface PlaceQuery {
   readonly order?: 'price' | 'distance';
   /** Exclude fleet carriers. Default true — see the note on CARRIER_TYPE. */
   readonly excludeCarriers: boolean;
-  /** Only stations with a large pad. */
+  /** Only stations with a large pad. Kept for callers that ask the old yes/no question. */
   readonly largePadOnly: boolean;
+  /**
+   * The smallest pad the member's ship can use.
+   *
+   * ★ SQUADRON OWNER, 2026-08-06: "add one that filters for pad size" ★
+   *
+   * `largePadOnly` could only ask "does a large ship fit". Across the stations we hold, 43% have a
+   * large pad, 54% have a medium one and no large, and 1.2% are small-only — so a MEDIUM hull had
+   * to pick between discarding half the galaxy and being offered stations it cannot land at.
+   *
+   * Absent means no pad filter at all. 'large' is equivalent to the old boolean, which is what lets
+   * both live side by side without a caller having to be updated to keep working.
+   */
+  readonly minPad?: 'small' | 'medium' | 'large' | undefined;
   /** Ignore prices nobody has reported since this. Null for no limit. */
   readonly seenSince: Date | null;
   /** Rank by distance from here rather than by price alone. */
@@ -423,7 +436,16 @@ export class PrismaMarketStore implements MarketStore {
         `(station_type IS NULL OR station_type <> ALL($${params.length}::text[]))`,
       );
     }
-    if (opts.largePadOnly) where.push(`large_pads > 0`);
+    if (opts.largePadOnly || opts.minPad === 'large') where.push(`large_pads > 0`);
+    else if (opts.minPad === 'medium') {
+      /*
+       * A large pad accepts a medium ship, so either will do. `medium_pads = 0` means "we have not
+       * rebuilt this row since the column was added" as well as "no medium pad" — which is why the
+       * large arm is an OR rather than this being a single `medium_pads > 0`: until the next
+       * flatten, a station with a large pad still correctly passes.
+       */
+      where.push(`(large_pads > 0 OR medium_pads > 0)`);
+    }
     if (opts.minQuantity > 0) {
       params.push(opts.minQuantity);
       where.push(`${qtyCol} >= $${params.length}`);

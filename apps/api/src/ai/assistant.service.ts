@@ -5,6 +5,10 @@ import { AiLog } from './ai-log.port.js';
 import { KnowledgeService, type Fact } from './knowledge.service.js';
 import { planFor } from './question.js';
 import { ShipBuildService } from './ship-build.service.js';
+import type { MiningService } from '../mining/mining.service.js';
+import type { BgsService } from '../bgs/bgs.service.js';
+import type { OpsService } from '../ops/ops.service.js';
+import type { ScoutService } from '../colonisation/scout.service.js';
 
 /**
  * The assistant — the surface everything else has been building towards.
@@ -82,6 +86,10 @@ const SYSTEM_PROMPT = [
   '   real modules and real figures. Give the ship name and the total cost first, then the figures',
   '   that matter for the job. Never substitute a different ship, never adjust the numbers, and',
   '   never add modules it does not mention — if it names compromises, repeat them.',
+  '8. A FACT of kind "ring" is a MEASUREMENT from squadron members\' own prospector limpets, not',
+  '   lore. Give the ring, what share of rocks were worth shooting, and how recently anybody was',
+  '   there. Never name a ring or a hotspot that is not in the FACTS, however well known it is —',
+  '   Frontier has reshuffled hotspots more than once and what you remember is likely wrong.',
 ].join('\n');
 
 @Injectable()
@@ -109,6 +117,51 @@ export class AssistantService {
      * different answers, and the member would have no way to tell which was right.
      */
     private readonly builds: ShipBuildService,
+    /**
+     * The ring survey.
+     *
+     * ★ SQUADRON OWNER, 2026-08-06: "if we can add our AI into this some way that would be epic!" ★
+     *
+     * The SAME service the /mining page reads, for the same reason the fitter is shared: two
+     * answers to "where should I mine Painite" — one from a page and one from the assistant — would
+     * eventually be two different answers, and the member would have no way to tell which was
+     * right.
+     *
+     * Optional so the assistant keeps working wherever it is absent, which is every existing test
+     * that constructs this class with five arguments.
+     */
+    private readonly mining?: MiningService,
+    /**
+     * The standing orders.
+     *
+     * ★ SQUADRON OWNER, 2026-08-06: "incorporate AI where we can too" ★
+     *
+     * The SAME service the admin console writes and the companion overlay reads. A member asking
+     * "who are we pushing" and an officer reading the console must not be told different things —
+     * and unlike every other leg, being wrong here means a member spends their evening working
+     * against the squadron.
+     *
+     * Optional for the same reason the ring survey is: every existing test constructs this class
+     * without it.
+     */
+    private readonly bgs?: BgsService,
+    /**
+     * The operations board.
+     *
+     * The SAME service the /ops page and the officer console read. "What is on tonight" is the most
+     * asked question in any squadron and it has never had an answer here — `operations` is touched
+     * by no other leg, so without this the assistant answers from forum prose about an op that ran
+     * in March.
+     */
+    private readonly ops?: OpsService,
+    /**
+     * The colonisation scout.
+     *
+     * "Where should we colonise next" is answered from live galaxy data and our own station table —
+     * which systems can be claimed, from which station, extending whose power. Without it the
+     * assistant answers from forum posts about a system somebody claimed months ago.
+     */
+    private readonly scout?: ScoutService,
   ) {}
 
   async ask(
@@ -135,7 +188,7 @@ export class AssistantService {
       };
     }
 
-    const facts = await this.#gather(q);
+    const facts = await this.#gather(q, userId);
 
     /*
      * ★ NOTHING RETRIEVED MEANS NO CALL AT ALL ★
@@ -255,7 +308,15 @@ export class AssistantService {
    * They also overlap — a question about Deciat matches by name AND spatially — and the same fact
    * twice in the context is a fact the model weights twice.
    */
-  async #gather(question: string): Promise<Fact[]> {
+  async #gather(
+    question: string,
+    /*
+     * The caller, threaded through only because the operations leg needs it: a member asking what
+     * is on tonight who is ALREADY signed up should be told so. Null for a signed-out visitor,
+     * which the board handles.
+     */
+    userId: string | null,
+  ): Promise<Fact[]> {
     const plan = planFor(question, await this.#commodityNames(), await this.#shipNames());
 
     const legs: Array<Promise<Fact[]>> = [this.knowledge.semantic(question)];
@@ -271,6 +332,22 @@ export class AssistantService {
     if (plan.market !== null) {
       const { commodity, side } = plan.market;
       legs.push(this.knowledge.market(commodity, side));
+    }
+
+    if (plan.rings !== null && this.mining !== undefined) {
+      legs.push(this.#ringLeg(plan.rings.material));
+    }
+
+    if (plan.orders !== null && this.bgs !== undefined) {
+      legs.push(this.#ordersLeg(plan.orders.system));
+    }
+
+    if (plan.ops !== null && this.ops !== undefined) {
+      legs.push(this.#opsLeg(userId));
+    }
+
+    if (plan.colonise !== null && this.scout !== undefined) {
+      legs.push(this.#coloniseLeg(plan.colonise.anchor));
     }
 
     const settled = await Promise.allSettled(legs);
@@ -291,6 +368,254 @@ export class AssistantService {
 
     // Bounded. Past a dozen the context stops helping and starts burying the relevant rows.
     return facts.slice(0, 12);
+  }
+
+  /**
+   * Rings the squadron has actually been working, rendered as facts.
+   *
+   * ★ MEASURED, NOT REMEMBERED ★
+   *
+   * Without this leg, "where should I mine Painite" falls to the semantic search, which finds
+   * whatever mining prose the corpus holds — a wiki page about hotspots from two years ago, handed
+   * to the model with exactly the same confidence as a measurement taken last Tuesday. Frontier has
+   * reshuffled hotspots more than once since; the prose is not merely stale, it is wrong.
+   *
+   * What goes in the prompt is the squadron's own limpets: how many rocks, what share of them were
+   * worth shooting, and when anybody was last there.
+   */
+  async #ringLeg(material: string | null): Promise<Fact[]> {
+    // Undefined only in tests that construct this class without the mining service; the caller
+    // has already checked, and this keeps the narrowing local rather than at the call site.
+    if (this.mining === undefined) return [];
+
+    const rings = await this.mining.rings(material, 21, 5);
+
+    /*
+     * Nothing measured is a real answer and must not become silence. Returning no fact would drop
+     * the question back to the semantic leg — the exact stale-prose failure this leg exists to
+     * prevent — so the absence is stated instead, and the model has something true to say.
+     */
+    if (rings.length === 0) {
+      return [
+        {
+          source: 'mining',
+          kind: 'rings',
+          name: material === null ? 'ring survey' : `${material} rings`,
+          text:
+            material === null
+              ? 'No squadron member has prospected enough rocks in the last three weeks to measure any ring. The survey is built entirely from members’ own prospector limpets, so it fills as people fly with mining telemetry switched on in the companion app.'
+              : `No squadron member has prospected a ring running ${material} in the last three weeks. The survey is built from members’ own prospector limpets and holds nothing about this mineral yet.`,
+          url: '/mining',
+        },
+      ];
+    }
+
+    return rings.map((r) => ({
+      source: 'mining',
+      kind: 'ring',
+      name: `${r.body}, ${r.system}`,
+      text:
+        `${r.body} in ${r.system}: ${r.rocks} rocks prospected by squadron members in the last three weeks, ` +
+        `${r.hitRate.toFixed(0)}% of them worth shooting. Mostly running ${r.topMaterial}; ` +
+        `richest rock seen was ${r.bestPercent.toFixed(1)}%. Last prospected ${r.lastSeen.toISOString().slice(0, 10)}.`,
+      url: '/mining',
+    }));
+  }
+
+  /**
+   * Where the squadron could colonise, rendered as facts.
+   *
+   * ★ IT REFUSES TO GUESS AN ANCHOR ★
+   *
+   * A claim reaches fifteen light years from the station selling it, so "where should we colonise"
+   * is unanswerable without knowing where FROM. Picking a system on the member's behalf would
+   * produce a confident list about the wrong part of the galaxy, so the leg says what it needs
+   * instead — which is a useful answer, and an honest one.
+   */
+  async #coloniseLeg(anchor: string | null): Promise<Fact[]> {
+    if (this.scout === undefined) return [];
+
+    if (anchor === null) {
+      return [
+        {
+          source: 'colonisation',
+          kind: 'scout',
+          name: 'colonisation scout',
+          text: 'A colonisation claim only reaches about 15 light years from the station that sells it, so the answer depends entirely on where you are claiming FROM. Name a system — usually a station you already buy colonisation ships at, or a colony the squadron already holds — and the scout lists what can be claimed near it, where each permit is bought, and which power that purchase extends.',
+          url: '/colonisation/scout',
+        },
+      ];
+    }
+
+    const out = await this.scout.scout({ anchor });
+
+    if (out.unknownAnchor !== null) {
+      return [
+        {
+          source: 'colonisation',
+          kind: 'scout',
+          name: 'unknown system',
+          text: `We hold no coordinates for “${out.unknownAnchor}”, so nothing can be measured from it. The name has to match the game exactly.`,
+          url: '/colonisation/scout',
+        },
+      ];
+    }
+
+    if (out.candidates.length === 0) {
+      return [
+        {
+          source: 'colonisation',
+          kind: 'scout',
+          name: `nothing claimable near ${out.anchor?.system ?? anchor}`,
+          text: `Nothing inside claim range of ${out.anchor?.system ?? anchor} can be claimed — everything nearby is already colonised, inhabited or permit-locked.`,
+          url: '/colonisation/scout',
+        },
+      ];
+    }
+
+    /*
+     * The top few only. A model handed thirty candidates writes about thirty candidates; the
+     * ranking already put the best first, and the page is there for the full list.
+     */
+    return out.candidates.slice(0, 5).map((c) => ({
+      source: 'colonisation',
+      kind: 'candidate',
+      name: c.system,
+      text:
+        `${c.system} — claimable, ${c.bodyCount > 0 ? `${c.bodyCount} bodies` : 'body count unknown'}. ` +
+        (c.permit === null
+          ? 'No station within claim range, so it cannot actually be claimed from anywhere nearby.'
+          : `Buy the claim at ${c.permit.system}, ${c.permitLy?.toFixed(1) ?? '?'} ly away` +
+            `${c.permit.allegiance === null ? '' : ` — ${c.permit.allegiance}, so claiming it extends that power`}.`) +
+        (c.surveyed
+          ? ` Nearest landable body ${c.nearestLandableLs === null ? 'none' : `${Math.round(c.nearestLandableLs).toLocaleString()} Ls`} from the arrival star.`
+          : ' Not surveyed yet — nothing is known about its bodies.'),
+      url: '/colonisation/scout',
+    }));
+  }
+
+  /**
+   * What is actually on the board, rendered as facts.
+   *
+   * ★ THE MEMBER'S OWN COMMITMENT RIDES WITH IT ★
+   *
+   * `board` takes the caller's id and returns whether THEY are signed up. A member asking "what is
+   * on tonight" who is already committed should be told so — answering as though they had not
+   * replied is the fastest way to make an assistant feel like it does not know them.
+   */
+  async #opsLeg(userId: string | null): Promise<Fact[]> {
+    if (this.ops === undefined) return [];
+
+    const board = await this.ops.board(userId);
+    const live = board.filter((o) => o.status !== 'cancelled' && o.status !== 'complete');
+
+    /*
+     * An empty board is a real answer and must not become silence — falling back to the semantic
+     * leg is what produces a confident description of an operation that finished months ago.
+     */
+    if (live.length === 0) {
+      return [
+        {
+          source: 'ops',
+          kind: 'operations',
+          name: 'operations board',
+          text: 'Nothing is on the operations board right now. Wing leads post ops from the admin area and they appear for everybody the moment they do.',
+          url: '/ops',
+        },
+      ];
+    }
+
+    return live.map((o) => {
+      const full = o.capacity !== null && o.going >= o.capacity;
+      const seats =
+        o.capacity === null
+          ? `${o.going} going, no limit on numbers`
+          : `${o.going} of ${o.capacity} seats taken${o.standby > 0 ? `, ${o.standby} on standby` : ''}${full ? ' — committing now joins the standby queue' : ''}`;
+
+      return {
+        source: 'ops',
+        kind: 'operation',
+        name: o.title,
+        text:
+          `${o.title} — a ${o.opType} op starting ${o.startsAt.toISOString()}, posted by ${o.createdBy}. ${seats}. ` +
+          (o.mine === null
+            ? 'You have not said whether you are coming.'
+            : o.mine === 'standby'
+              ? 'You are on the standby queue for this one.'
+              : `You have said "${o.mine}" to this one.`),
+        url: '/ops',
+      };
+    });
+  }
+
+  /**
+   * What the officers have actually ordered, rendered as facts.
+   *
+   * ★ THE ONE LEG WHERE BEING VAGUE IS WORSE THAN SILENCE ★
+   *
+   * Every other leg answers a question about the galaxy; this one answers a question about the
+   * squadron's own intent, and a member who acts on a wrong answer spends an evening pushing a
+   * faction the officers wanted held back. So it states the stance as a word, names the system, and
+   * says plainly when there is nothing rather than producing something plausible.
+   */
+  async #ordersLeg(system: string | null): Promise<Fact[]> {
+    if (this.bgs === undefined) return [];
+
+    const watchlist = await this.bgs.watchlist();
+
+    const want = system?.trim().toLowerCase() ?? null;
+    const orders = watchlist.flatMap((f) =>
+      f.orders
+        .filter((o) => o.activeUntil === null || o.activeUntil.getTime() > Date.now())
+        .filter(
+          (o) =>
+            want === null ||
+            (o.systemName !== null && o.systemName.trim().toLowerCase() === want),
+        )
+        .map((o) => ({ faction: f.name, isOurs: f.isOurs, ...o })),
+    );
+
+    /*
+     * Nothing ordered is a real answer and must not become silence — dropping back to the semantic
+     * leg is exactly the stale-prose failure this leg exists to prevent. It would find a wiki page
+     * explaining what influence is and present it as though it were tonight's instructions.
+     */
+    if (orders.length === 0) {
+      return [
+        {
+          source: 'bgs',
+          kind: 'orders',
+          name: system === null ? 'standing orders' : `standing orders in ${system}`,
+          text:
+            system === null
+              ? 'The officers have no standing BGS orders in force. Nothing is being pushed, held or suppressed right now, so no mission hand-in scores on the Faction Hands board until an order is set.'
+              : `The officers have no standing BGS orders for ${system}. Work done there counts for nothing on the Faction Hands board until one is set.`,
+          url: '/bgs',
+        },
+      ];
+    }
+
+    // Most important first, which is also the order an officer set them in.
+    orders.sort((a, b) => a.priority - b.priority);
+
+    return orders.map((o) => ({
+      source: 'bgs',
+      kind: 'order',
+      name: `${o.stance} ${o.faction}`,
+      text:
+        `Standing order: ${o.stance.toUpperCase()} ${o.faction}` +
+        `${o.isOurs ? ' (the squadron’s own faction)' : ''}` +
+        `${o.systemName === null ? '' : ` in ${o.systemName}`}, priority ${o.priority}. ` +
+        (o.stance === 'suppress'
+          ? 'Work that WEAKENS this faction scores; helping them costs points.'
+          : o.stance === 'hold'
+            ? 'Keep influence steady — pushing it higher can trigger an expansion nobody wants. Scores at half rate.'
+            : o.stance === 'ignore'
+              ? 'Not a target. Nothing done for or against them scores.'
+              : 'Missions handed in for this faction score on the Faction Hands board.') +
+        (o.guidance === null ? '' : ` Officer's note: ${o.guidance}`),
+      url: '/bgs',
+    }));
   }
 
   /**

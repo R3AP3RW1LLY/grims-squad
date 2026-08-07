@@ -34,7 +34,7 @@
 
 import { BADGES as FORUM_BADGES } from './reputation.js';
 
-export type LeaderboardKey = 'bounties' | 'colony' | 'trade';
+export type LeaderboardKey = 'bounties' | 'colony' | 'trade' | 'mining' | 'bgs' | 'recruit';
 
 export interface LeaderboardDef {
   readonly key: LeaderboardKey;
@@ -64,6 +64,52 @@ export const LEADERBOARDS: readonly LeaderboardDef[] = [
     name: 'Trade Barons',
     measures:
       'Points from realized trading profit your journal reports: a point per ten thousand credits actually earned, sale matched against what you paid.',
+    pointsNoun: 'pts',
+  },
+  {
+    key: 'mining',
+    name: 'Deep Core',
+    measures:
+      'Points from ore your refinery finishes: a point per tonne, multiplied by how hard that tonne was to get — eight for core-only rocks like Void Opals, four for Painite and Platinum, one for gravel.',
+    pointsNoun: 'pts',
+  },
+  {
+    /*
+     * ★ SQUADRON OWNER, 2026-08-06 ★
+     *
+     * "create a BGS leaderboard, and allow the officers to choose what factions we want to be
+     * running missions for etc, give instructions to the squad members etc."
+     *
+     * ★ THE ONLY BOARD WHERE THE SCORE DEPENDS ON AN ORDER ★
+     *
+     * Every other board pays for a deed: a tonne delivered, a credit earned, an ore refined. This
+     * one pays for a deed done WHERE THE OFFICERS ASKED. That is deliberate and it is the whole
+     * point — it makes the standings a statement of what the squadron is trying to achieve, and it
+     * lets officers change what everybody does by editing a list rather than asking twice.
+     */
+    key: 'bgs',
+    name: 'Faction Hands',
+    measures:
+      'Points from influence you actually moved for a faction the squadron is backing: ten a pip, half that for holding a system steady where the orders say hold, and nothing at all for factions nobody asked you to help.',
+    pointsNoun: 'pts',
+  },
+  {
+    /*
+     * ★ SQUADRON OWNER, 2026-08-06 ★
+     *
+     * "we want this to be a leaderboard item and gamified too please! we want to encourage our
+     * playerbase to beable to invite people into the squadron!"
+     *
+     * ★ NOTHING IS PAID FOR SOMEBODY ARRIVING ★
+     *
+     * Pay per join and this is an alt-account farm: ten throwaway accounts in an evening tops the
+     * board, and the squadron gets ten empty seats. Every point here comes from a milestone a real
+     * recruit passes and a throwaway will not — the largest of them takes a month.
+     */
+    key: 'recruit',
+    name: 'The Welcome',
+    measures:
+      'Points from the people you brought in and who stayed: nothing for the join itself, then for a week survived, a commander verified, a Cadet made, and a recruit who starts scoring on a board of their own.',
     pointsNoun: 'pts',
   },
 ] as const;
@@ -125,6 +171,44 @@ export const TIER_LADDERS: Record<LeaderboardKey, readonly TierStep[]> = {
     { tier: 'gold', name: 'Magnate', at: 250_000 },
     { tier: 'platinum', name: 'Trade Baron', at: 1_000_000 },
   ],
+  /*
+   * ★ TUNED TO WHAT A POINT COSTS HERE — 2026-08-06 ★
+   *
+   * A point is a tonne, weighted ×1 to ×8. A solid core session is roughly 40 t of opals ≈ 320
+   * pts; a committed week of it is a few thousand. Rock Hopper is a first proper night out; Deep
+   * Core — the board's own name, worn by whoever earns it — is years of the stuff, matching how
+   * Trade Baron and Void Cartographer sit at the top of theirs.
+   */
+  mining: [
+    { tier: 'bronze', name: 'Rock Hopper', at: 2_000 },
+    { tier: 'silver', name: 'Seam Runner', at: 20_000 },
+    { tier: 'gold', name: 'Core Breaker', at: 100_000 },
+    { tier: 'platinum', name: 'Deep Core', at: 400_000 },
+  ],
+  /*
+   * A pip is worth ten points, and a good evening's missions is a few dozen pips. So the ladder is
+   * pitched lower than the hauling boards: influence is slow, deliberate work and a member who
+   * turns out every week for a month should reach silver.
+   */
+  /*
+   * Pitched against the milestone table: one recruit who reaches Cadet is 600 points on their own,
+   * so bronze is roughly "you brought in somebody who stayed" and platinum is a recruiter who has
+   * genuinely built a wing.
+   */
+  recruit: [
+    { tier: 'bronze', name: 'Greeter', at: 500 },
+    { tier: 'silver', name: 'Wing Whip', at: 3_000 },
+    { tier: 'gold', name: 'Crimp', at: 12_000 },
+    // NOT "Kingmaker" — that is BGS's gold rung, and the catalogue test refuses a repeated rank
+    // name anywhere: a member wearing one has to be identifiable without asking which board.
+    { tier: 'platinum', name: 'Fleetbuilder', at: 40_000 },
+  ],
+  bgs: [
+    { tier: 'bronze', name: 'Canvasser', at: 500 },
+    { tier: 'silver', name: 'Ward Heeler', at: 4_000 },
+    { tier: 'gold', name: 'Kingmaker', at: 20_000 },
+    { tier: 'platinum', name: 'Grey Eminence', at: 75_000 },
+  ],
 } as const;
 
 export interface BadgeDef {
@@ -175,6 +259,9 @@ export const LEADERBOARD_BADGES: readonly BadgeDef[] = [
   ...tierBadges('bounties', 'Data Runners'),
   ...tierBadges('colony', 'Colony Builders'),
   ...tierBadges('trade', 'Trade Barons'),
+  ...tierBadges('mining', 'Deep Core'),
+  ...tierBadges('bgs', 'Faction Hands'),
+  ...tierBadges('recruit', 'The Welcome'),
 
   // ---- Data Runners achievements ----
   {
@@ -267,6 +354,123 @@ export const LEADERBOARD_BADGES: readonly BadgeDef[] = [
     kind: 'achievement',
     name: 'Trade Baron Champion',
     description: 'Topped the Trade Barons board for a whole season.',
+    icon: '👑',
+  },
+
+  // ---- Deep Core achievements ----
+  {
+    key: 'mining-first-light',
+    board: 'mining',
+    kind: 'achievement',
+    name: 'First Light',
+    description: 'Refined a first tonne of a core-only mineral — the kind no laser will ever reach.',
+    icon: '💎',
+  },
+  {
+    key: 'mining-motherlode',
+    board: 'mining',
+    kind: 'achievement',
+    name: 'Motherlode',
+    description: 'Prospected a rock running over half of one mineral. Most miners never see one.',
+    icon: '🥚',
+  },
+  {
+    key: 'mining-grindstone',
+    board: 'mining',
+    kind: 'achievement',
+    name: 'Grindstone',
+    description: 'Refined a thousand tonnes inside one calendar month.',
+    icon: '⛏️',
+  },
+  {
+    key: 'mining-void-prospector',
+    board: 'mining',
+    kind: 'achievement',
+    name: 'Void Prospector',
+    description: 'Refined every core-only mineral at least once — the full set, cracked by hand.',
+    icon: '🌌',
+  },
+  // ---- The Welcome achievements ----
+  {
+    key: 'recruit-first-contact',
+    board: 'recruit',
+    kind: 'achievement',
+    name: 'First Contact',
+    description: 'Somebody you invited stayed a week. The first one is the hardest.',
+    icon: '🎟️',
+  },
+  {
+    key: 'recruit-made-a-cadet',
+    board: 'recruit',
+    kind: 'achievement',
+    name: 'Made a Cadet',
+    description: 'A recruit of yours earned Cadet — a month of flying, because you asked them in.',
+    icon: '🎖️',
+  },
+  {
+    key: 'recruit-wingmaker',
+    board: 'recruit',
+    kind: 'achievement',
+    name: 'Wingmaker',
+    description: 'Five recruits reached Cadet. That is a wing you built out of strangers.',
+    icon: '🪶',
+  },
+  {
+    key: 'recruit-outflown',
+    board: 'recruit',
+    kind: 'achievement',
+    name: 'Outflown',
+    description: 'A commander you recruited out-scored you on a board. Exactly as intended.',
+    icon: '🏅',
+  },
+  {
+    key: 'recruit-season-champion',
+    board: 'recruit',
+    kind: 'achievement',
+    name: 'The Welcome Champion',
+    description: 'Brought in more than anyone else for a whole season.',
+    icon: '👑',
+  },
+
+  // ---- Faction Hands achievements ----
+  {
+    key: 'bgs-first-blood',
+    board: 'bgs',
+    kind: 'achievement',
+    name: 'First Blood',
+    description: 'Moved influence for a faction the squadron is backing, the first of many.',
+    icon: '🗳️',
+  },
+  {
+    key: 'bgs-steady-hand',
+    board: 'bgs',
+    kind: 'achievement',
+    name: 'Steady Hand',
+    description: 'Held a system where the orders said hold — the discipline nobody sees.',
+    icon: '⚖️',
+  },
+  {
+    key: 'bgs-landslide',
+    board: 'bgs',
+    kind: 'achievement',
+    name: 'Landslide',
+    description: 'Twenty pips of influence for one faction inside a single tick.',
+    icon: '📈',
+  },
+  {
+    key: 'bgs-season-champion',
+    board: 'bgs',
+    kind: 'achievement',
+    name: 'Faction Hands Champion',
+    description: 'Topped the Faction Hands board for a whole season.',
+    icon: '👑',
+  },
+  {
+    key: 'mining-season-champion',
+    board: 'mining',
+    kind: 'achievement',
+    name: 'Deep Core Champion',
+    description: 'Topped the Deep Core board for a whole season.',
     icon: '👑',
   },
 ] as const;

@@ -12,6 +12,7 @@ import { PrismaClient } from '@grims/db';
 import { composeNickname, overrideActionFor, LEADERSHIP_CEILING } from '@grims/shared';
 import pino from 'pino';
 import { ActivityRecorder, endsVoiceSession, monthKey } from './activity.recorder.js';
+import { whoInvited } from './invite-attribution.js';
 import {
   countsTowardActivity,
   isForumChannel,
@@ -808,6 +809,44 @@ async function seedVoiceOccupancy(): Promise<void> {
  * Everything in the chain below is idempotent, so running it again on a reconnect costs a few
  * queries and removes a class of silent failure.
  */
+/**
+ * The last known use count of every invite in the guild.
+ *
+ * ★ THE ONLY WAY DISCORD LETS YOU ANSWER "WHO INVITED THEM" ★
+ *
+ * There is no field and no event carrying it. You remember the counts, and when somebody joins you
+ * look for the one that went up — see `whoInvited`, which owns that reasoning and its awkward cases.
+ *
+ * Null until the first successful fetch. A join before then is honestly unattributed rather than
+ * guessed at, which is why the type says null rather than starting empty: an EMPTY map would claim
+ * we looked and saw nothing.
+ */
+let inviteUses: Map<string, number> | null = null;
+
+/**
+ * Re-read every invite in the guild.
+ *
+ * Requires MANAGE_GUILD. Without it Discord refuses the fetch, and the honest consequence is that
+ * attribution stops rather than silently crediting the wrong people — so a failure here leaves the
+ * snapshot alone and says so once, rather than resetting it to empty.
+ */
+async function refreshInvites(): Promise<Map<string, number> | null> {
+  try {
+    const guild = await client.guilds.fetch(GUILD_ID);
+    const invites = await guild.invites.fetch();
+
+    const next = new Map<string, number>();
+    for (const [code, invite] of invites) next.set(code, invite.uses ?? 0);
+    return next;
+  } catch (err) {
+    logger.warn(
+      { err },
+      'could not read guild invites — recruit attribution needs MANAGE_GUILD; joins will be recorded as unattributed',
+    );
+    return null;
+  }
+}
+
 client.on(Events.ClientReady, (c) => {
   logger.info({ tag: c.user.tag, guilds: c.guilds.cache.size }, 'bot connected');
 
@@ -823,6 +862,14 @@ client.on(Events.ClientReady, (c) => {
   // Roles FIRST, and until they load. The scope rule cannot classify a channel without them, and
   // classifying against an empty role list marks every channel admin-gated and records nothing at
   // all — see loadRolesUntilLoaded for the outage that caused.
+  /*
+   * Seed the invite snapshot. Deliberately independent of the sweep below: attribution must not
+   * wait behind a role load, because the join it misses is the one that happens during startup.
+   */
+  void refreshInvites().then((seen) => {
+    if (seen !== null) inviteUses = seen;
+  });
+
   void loadRolesUntilLoaded()
     .then(() => syncMemberNames())
     .then(() => nameUnknownAuthors())
@@ -1020,7 +1067,90 @@ client.on(Events.GuildMemberAdd, (member) => {
       },
     })
     .catch((err: unknown) => logger.error({ err }, 'failed to record a joining member'));
+
+  /*
+   * ★ WHO BROUGHT THEM IN — SQUADRON OWNER, 2026-08-06 ★
+   *
+   * "a unique discord invite link for all members ... please build me a cool recruit tracking
+   * system!"
+   *
+   * Fired and not awaited: the member record above is the important write and must not wait behind
+   * a network fetch. A failure here costs one attribution, never the join itself.
+   */
+  void recordRecruitJoin(member.id).catch((err: unknown) =>
+    logger.error({ err }, 'failed to attribute a joining member'),
+  );
 });
+
+/**
+ * Record an arrival against whoever's link it came through.
+ *
+ * ★ ONE ACCOUNT IS ATTRIBUTABLE ONCE, EVER ★
+ *
+ * `ON CONFLICT DO NOTHING` on the joiner's Discord id. Somebody who leaves and rejoins does not
+ * credit anybody a second time, and it is the DATABASE that refuses rather than this function
+ * remembering to.
+ */
+async function recordRecruitJoin(discordId: string): Promise<void> {
+  const after = await refreshInvites();
+
+  /*
+   * A fetch we could not do leaves the snapshot untouched. Overwriting it with null here would
+   * make the NEXT join unattributable too — one missing permission becoming a permanent outage of
+   * a feature rather than one lost row.
+   */
+  const verdict = after === null ? { outcome: 'unknown' as const } : whoInvited(inviteUses, after);
+  if (after !== null) inviteUses = after;
+
+  const code = verdict.outcome === 'attributed' ? verdict.code : null;
+
+  /*
+   * ★ A CODE WE MATCHED IS NOT NECESSARILY A CODE WE OWN ★
+   *
+   * The guild is full of invites members made by hand — 23 of them when this was written — and the
+   * use-count diff matches those exactly as well as it matches ours. Recording such a join as
+   * `auto` would claim we knew who to credit while leaving the recruiter null: a row that reads as
+   * confident and resolves to nobody.
+   *
+   * So the owner is looked up FIRST, and a code with no owner is recorded as `foreign` — which is
+   * information worth having ("they came through a link we do not track") rather than the silence
+   * of `unknown`.
+   */
+  const owner =
+    code === null
+      ? null
+      : (
+          await prisma.$queryRawUnsafe<Array<{ user_id: string }>>(
+            `SELECT user_id FROM recruit_invites WHERE code = $1 AND revoked_at IS NULL`,
+            code,
+          )
+        )[0]?.user_id ?? null;
+
+  const attribution =
+    verdict.outcome !== 'attributed' ? verdict.outcome : owner === null ? 'foreign' : 'auto';
+
+  await prisma.$executeRawUnsafe(
+    `INSERT INTO recruit_joins (discord_id, recruiter_id, invite_code, attribution)
+     VALUES ($1, $2::uuid, $3, $4)
+     ON CONFLICT (discord_id) DO NOTHING`,
+    discordId,
+    owner,
+    code,
+    attribution,
+  );
+
+  /*
+   * The arrival itself, banked as a milestone worth NOTHING. Recorded because the recruiter should
+   * see it the moment it happens, and scored at zero because anybody can walk through a door — see
+   * `milestonePoints`, where the whole anti-farming shape of this feature lives.
+   */
+  await prisma.$executeRawUnsafe(
+    `INSERT INTO recruit_milestones (discord_id, milestone, points)
+     VALUES ($1, 'joined', 0)
+     ON CONFLICT (discord_id, milestone) DO NOTHING`,
+    discordId,
+  );
+}
 
 /*
  * A nickname change is the one thing that would otherwise go stale between

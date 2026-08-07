@@ -1,7 +1,9 @@
 import { render } from 'preact';
-import { useEffect, useState } from 'preact/hooks';
+import { useEffect, useRef, useState } from 'preact/hooks';
 import type { OverlayId, OverlayState } from '../overlay-config.js';
 import { C } from './ui.js';
+import { ProspectorPanel, RefineryPanel } from './mining-panels.js';
+import { BgsPanel } from './bgs-panel.js';
 
 /**
  * What a single overlay panel draws.
@@ -24,6 +26,8 @@ declare global {
       onData(fn: (payload: OverlayData) => void): void;
       /** Asks the main process for the current state, for a window that loaded late. */
       ready(id: string): void;
+      /** Reports this panel's content height so the window can grow to fit it. */
+      measured(id: string, height: number): void;
     };
   }
 }
@@ -48,14 +52,35 @@ export interface OverlayData {
      */
     readonly fromHub: boolean;
   } | null;
+  /**
+   * The run the member picked in the Freight Office.
+   *
+   * ★ WHAT TO DO AT THIS STATION COMES FIRST ★
+   *
+   * A member reads this while docked, deciding what to buy or sell before undocking. So `loadHere`
+   * and `sellHere` lead — they are an instruction — and the rest of the manifest is context behind
+   * them.
+   */
   readonly route: {
-    readonly commodity: string;
-    readonly buyAt: string;
-    readonly buyPrice: number;
-    readonly sellAt: string;
-    readonly sellPrice: number;
-    readonly profitPerTonne: number;
+    /** The whole manifest, in the order to fly it. */
+    readonly stops: ReadonlyArray<{
+      readonly commodity: string;
+      readonly station: string;
+      readonly system: string;
+      readonly tonnes: number;
+    }>;
+    /** What to load at the station the member is docked at right now. */
+    readonly loadHere: ReadonlyArray<{ readonly commodity: string; readonly tonnes: number }>;
+    /** What to sell here. Both can be non-empty: a chain sells and reloads at one station. */
+    readonly sellHere: ReadonlyArray<{ readonly commodity: string; readonly tonnes: number }>;
     readonly tonnes: number;
+    readonly capacity: number | null;
+    readonly outlay: number;
+    readonly profit: number;
+    /** Hold left empty — "you could carry 700 and are carrying 44" explains itself. */
+    readonly spare: number;
+    /** Light years for the whole run. Null when a stop could not be placed, so it is grouped. */
+    readonly routeLy: number | null;
   } | null;
   readonly cargo: {
     readonly items: ReadonlyArray<{
@@ -69,6 +94,18 @@ export interface OverlayData {
     readonly capacity: number | null;
     /** Total watched spend aboard. Zero when nothing was bought under the app's eye. */
     readonly totalPaid: number;
+    /** What the hold is worth at the best price in range. Null until the hub has priced it. */
+    readonly value: number | null;
+    /** Where to take the whole hold, and what that one landing pays. */
+    readonly bestSale: {
+      readonly station: string;
+      readonly system: string;
+      readonly distanceLy: number | null;
+      readonly total: number;
+      readonly perTonne: number;
+    } | null;
+    /** Worth now less what was paid. Null for mined or mission cargo, which has no basis. */
+    readonly profit: number | null;
     /** The till receipt — persists across undocks until the next sale replaces it. */
     readonly lastSale: {
       readonly commodity: string;
@@ -83,11 +120,79 @@ export interface OverlayData {
     readonly lastUploadAt: string | null;
     readonly gameRunning: boolean;
   } | null;
+  /**
+   * The rock in front of the member, right now.
+   *
+   * The panel that makes this a mining tool rather than a scoreboard: a prospected rock drifts past
+   * in a couple of seconds and the whole skill is deciding, inside that window, whether it is worth
+   * shooting.
+   */
+  readonly prospector: {
+    readonly materials: ReadonlyArray<{ name: string; percent: number }>;
+    /** True when the best material beat the member's own bar for THAT material. */
+    readonly isHit: boolean;
+    readonly motherlode: string | null;
+    readonly content: string | null;
+    readonly prospected: number;
+    /** Percent, or null before the first rock — a rate over zero rocks is not zero. */
+    readonly hitRate: number | null;
+    readonly bestPercent: number;
+    readonly bestMaterial: string | null;
+  } | null;
+  /** The session: what came out, how fast, what it scores, and what it is worth. */
+  readonly refinery: {
+    readonly materials: ReadonlyArray<{ name: string; tonnes: number }>;
+    readonly tonnes: number;
+    readonly minutes: number | null;
+    readonly rate: number | null;
+    readonly points: number;
+    /** What the hold is worth at the best price we know within range. Null when unknown. */
+    readonly value: number | null;
+    readonly bestSale: { readonly station: string; readonly distanceLy: number | null; readonly perTonne: number } | null;
+  } | null;
+  /**
+   * The standing orders where the member is, and what they have moved this session.
+   *
+   * ★ THE ONE THING THE GAME WILL NOT TELL THEM ★
+   *
+   * A mission board shows every faction equally. Only the squadron knows which of them the officers
+   * asked for — so this panel puts that in front of the member at the moment they are choosing what
+   * to take, rather than in a Discord message they read yesterday.
+   */
+  readonly bgs: {
+    /** Orders that apply in this system, most important first. */
+    readonly here: ReadonlyArray<{
+      readonly faction: string;
+      readonly stance: string;
+      readonly priority: number;
+      readonly guidance: string | null;
+      /** The squadron's own faction, as opposed to an ally worth supporting. */
+      readonly isOurs: boolean;
+    }>;
+    /** How many orders apply somewhere else — what stops an empty panel reading as "no work". */
+    readonly elsewhere: number;
+    /** Where the member is, so the panel can name the system it is talking about. */
+    readonly system: string | null;
+    readonly missions: number;
+    readonly pips: number;
+    readonly points: number;
+  } | null;
 }
 
-const EMPTY: OverlayData = { build: null, route: null, cargo: null, status: null };
+const EMPTY: OverlayData = {
+  build: null,
+  route: null,
+  cargo: null,
+  status: null,
+  prospector: null,
+  refinery: null,
+  bgs: null,
+};
 
 const ID = (new URLSearchParams(location.search).get('id') ?? 'status') as OverlayId;
+
+/** The panel's own border and padding, which sit outside the measured content box. */
+const PANEL_CHROME_PX = 22;
 
 function App(): preact.JSX.Element | null {
   const [message, setMessage] = useState<OverlayMessage | null>(null);
@@ -100,6 +205,36 @@ function App(): preact.JSX.Element | null {
     // mount closes that race rather than leaving a panel permanently blank.
     window.overlayBridge.ready(ID);
   }, []);
+
+  /*
+   * ★ MEASURING THE PANEL SO THE WINDOW CAN FIT IT — SQUADRON OWNER, 2026-08-06 ★
+   *
+   * "update the build tracker overlay to expand and collapse automatically so we can show the full
+   * list"
+   *
+   * The renderer is the only thing that CAN know this height: it depends on how many commodities a
+   * build wants and how the text wrapped, neither of which the main process can see.
+   *
+   * A ResizeObserver rather than a measurement per render, because the height changes for reasons
+   * a render does not — a font settling, a scrollbar arriving. The main process applies a dead band
+   * (`nextOverlayHeight`), which is what stops resize→repaint→measure→resize running away.
+   */
+  const body = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const node = body.current;
+    if (node === null) return;
+
+    const report = (): void => {
+      // scrollHeight, not clientHeight: clientHeight is what the window already allows, which would
+      // measure the panel as exactly the size it is and never grow.
+      window.overlayBridge.measured(ID, node.scrollHeight + PANEL_CHROME_PX);
+    };
+
+    report();
+    const observer = new ResizeObserver(report);
+    observer.observe(node);
+    return () => observer.disconnect();
+  });
 
   if (message === null) return null;
 
@@ -128,7 +263,12 @@ function App(): preact.JSX.Element | null {
       }}
     >
       <Header id={ID} state={state} arranging={arranging} />
-      <div style={{ padding: '8px 10px 10px', overflow: 'hidden', flex: 1 }}>
+      {/*
+        `overflow: auto` rather than hidden: the window grows to fit its content up to a cap, and
+        past that cap the list has to remain reachable rather than being silently clipped — which is
+        the fault this change exists to fix.
+      */}
+      <div ref={body} style={{ padding: '8px 10px 10px', overflow: 'auto', flex: 1 }}>
         <Panel id={ID} state={state} data={data} />
       </div>
     </div>
@@ -196,6 +336,9 @@ const TITLES: Record<OverlayId, string> = {
   route: 'Trade run',
   cargo: 'Cargo',
   status: 'Uplink',
+  prospector: 'Prospector',
+  refinery: 'Refinery',
+  bgs: 'Faction orders',
 };
 
 function Panel({
@@ -218,6 +361,12 @@ function Panel({
       return <CargoPanel data={data.cargo} accent={state.style.accent} show={show} />;
     case 'status':
       return <StatusPanel data={data.status} accent={state.style.accent} show={show} />;
+    case 'prospector':
+      return <ProspectorPanel data={data.prospector} accent={state.style.accent} show={show} />;
+    case 'refinery':
+      return <RefineryPanel data={data.refinery} accent={state.style.accent} show={show} />;
+    case 'bgs':
+      return <BgsPanel data={data.bgs} accent={state.style.accent} show={show} />;
   }
 }
 
@@ -255,7 +404,20 @@ function BuildPanel({
   const pct = data.required > 0 ? Math.round((data.delivered / data.required) * 100) : null;
   // The four biggest shortfalls. A construction site wants around thirty commodities and an overlay
   // is 140px tall — showing all of them makes every line unreadable.
-  const needs = [...data.needs].sort((a, b) => b.remaining - a.remaining).slice(0, 4);
+  /*
+   * ★ THE WHOLE LIST — SQUADRON OWNER, 2026-08-06 ★
+   *
+   * "update the build tracker overlay to expand and collapse automatically so we can show the full
+   * list"
+   *
+   * This was `slice(0, 4)`, because four rows is what fits a fixed 140px window. For a hauler
+   * deciding what to load, four of eleven with nothing to say the other seven exist is the wrong
+   * four about as often as not.
+   *
+   * The window now measures itself and grows (see `overlay-autosize.ts`), so the cap can go. Past
+   * the height cap the panel scrolls rather than clipping.
+   */
+  const needs = [...data.needs].sort((a, b) => b.remaining - a.remaining);
 
   return (
     <div>
@@ -306,33 +468,87 @@ function RoutePanel({
   if (data === null) return <Waiting what="Pick a run in the Freight Office." />;
 
   return (
-    <div>
-      {show('commodity') ? (
-        <p style={{ margin: '0 0 4px', fontWeight: 600 }}>{data.commodity}</p>
-      ) : null}
-      {show('buy') ? (
-        <div style={ROW}>
-          <span>Buy · {data.buyAt}</span>
-          <span style={{ fontVariantNumeric: 'tabular-nums' }}>{data.buyPrice.toLocaleString()}</span>
-        </div>
-      ) : null}
-      {show('sell') ? (
-        <div style={ROW}>
-          <span>Sell · {data.sellAt}</span>
-          <span style={{ fontVariantNumeric: 'tabular-nums' }}>{data.sellPrice.toLocaleString()}</span>
-        </div>
-      ) : null}
-      {show('profit') ? (
-        <div style={{ ...ROW, marginTop: '4px', color: accent }}>
-          <span>Per tonne</span>
+    <div style={{ display: 'grid', gap: '2px' }}>
+      {/*
+        ★ WHAT TO DO HERE COMES FIRST — SQUADRON OWNER, 2026-08-06 ★
+
+        "add an option to choose the trade route and display them in the overlay"
+
+        This panel is read while docked, in the seconds before opening the commodity market. An
+        instruction for the station the member is standing at is worth more than the whole manifest,
+        so it sits at the top and the plan is context behind it.
+
+        Both lists can be non-empty at once: a chain sells here and loads the next leg here, and a
+        panel that showed only one would have somebody undock having done half the job.
+      */}
+      {show('here') && data.sellHere.length > 0 ? (
+        <div style={{ ...ROW, color: C.good, fontWeight: 600 }}>
+          <span>SELL HERE</span>
           <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-            +{data.profitPerTonne.toLocaleString()}
+            {data.sellHere.map((l) => `${l.commodity} ${l.tonnes}t`).join(' · ')}
           </span>
         </div>
       ) : null}
+
+      {show('here') && data.loadHere.length > 0 ? (
+        <div style={{ ...ROW, color: accent, fontWeight: 600 }}>
+          <span>LOAD HERE</span>
+          <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+            {data.loadHere.map((l) => `${l.commodity} ${l.tonnes}t`).join(' · ')}
+          </span>
+        </div>
+      ) : null}
+
+      {/*
+        The stops in the order to fly them. Numbered because the ORDER is the thing the planner
+        worked out — an unnumbered list reads as a set of options rather than a sequence.
+      */}
+      {show('stops')
+        ? data.stops.map((stop, i) => (
+            <div key={`${stop.station}:${stop.commodity}`} style={ROW}>
+              <span
+                style={{
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                <span style={{ color: C.faint }}>{i + 1}. </span>
+                {stop.commodity}
+                <span style={{ color: C.dim }}> · {stop.station}</span>
+              </span>
+              <span style={{ fontVariantNumeric: 'tabular-nums', color: C.dim }}>
+                {stop.tonnes.toLocaleString()} t
+              </span>
+            </div>
+          ))
+        : null}
+
+      {show('profit') ? (
+        <div style={{ ...ROW, marginTop: '4px', color: accent }}>
+          <span>Profit</span>
+          <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+            +{data.profit.toLocaleString()} cr
+          </span>
+        </div>
+      ) : null}
+
       {show('cargo') ? (
         <p style={{ margin: '3px 0 0', fontSize: '0.8em', color: C.dim }}>
-          {data.tonnes.toLocaleString()} t · {(data.profitPerTonne * data.tonnes).toLocaleString()} cr
+          {data.tonnes.toLocaleString()} t
+          {/*
+            The hold is stated only when a Loadout has been seen. Without one the manifest was
+            planned against what the stations can supply, and quoting a capacity we are guessing at
+            would be the one number on this panel nobody would think to doubt.
+          */}
+          {data.capacity === null
+            ? ' loaded · hold unknown until a Loadout is seen'
+            : ` of ${data.capacity.toLocaleString()} t${data.spare > 0 ? ` · ${data.spare.toLocaleString()} t spare` : ''}`}
+          {data.routeLy === null
+            ? // Said plainly: the stops are grouped by system, not routed. A member comparing this
+              // against their own galaxy map should know which of the two they are looking at.
+              ' · grouped, not routed'
+            : ` · ${Math.round(data.routeLy)} ly`}
         </p>
       ) : null}
     </div>
@@ -368,7 +584,7 @@ function CargoPanel({
     return (
       <div>
         <Waiting what="Hold empty." />
-        <LastSaleLine sale={data.lastSale} />
+        {show('lastSale') ? <LastSaleLine sale={data.lastSale} /> : null}
       </div>
     );
   }
@@ -412,12 +628,52 @@ function CargoPanel({
         </p>
       ) : null}
 
-      {data.totalPaid > 0 ? (
-        <p style={{ margin: '4px 0 0', fontSize: '0.8em', color: C.dim }}>
-          Paid {data.totalPaid.toLocaleString()} cr for what is aboard
+      {/*
+        ★ SQUADRON OWNER, 2026-08-06 ★
+
+        "we want valiue information but its showing irrellevant sell information in it!"
+
+        What the hold is WORTH, and where to take it. The two lines below are the reason this panel
+        is worth having over the game's own cargo screen, and neither is available to any other
+        tool — they need eighteen million price rows to answer.
+      */}
+      {show('value') && data.value !== null ? (
+        <p style={{ margin: '4px 0 0', fontSize: '0.8em' }}>
+          <span style={{ color: C.dim }}>Worth </span>
+          <span style={{ color: accent, fontVariantNumeric: 'tabular-nums' }}>
+            {data.value.toLocaleString()} cr
+          </span>
+          {/* The unrealised gain, and only when there is an honest basis to subtract. */}
+          {show('profit') && data.profit !== null ? (
+            <span
+              style={{
+                fontVariantNumeric: 'tabular-nums',
+                color: data.profit > 0 ? C.good : data.profit < 0 ? C.bad : C.dim,
+              }}
+            >
+              {' '}
+              ({data.profit < 0 ? '−' : '+'}
+              {Math.abs(data.profit).toLocaleString()})
+            </span>
+          ) : null}
         </p>
       ) : null}
-      <LastSaleLine sale={data.lastSale} />
+
+      {show('bestSale') && data.bestSale !== null ? (
+        <p style={{ margin: '3px 0 0', fontSize: '0.8em', color: C.dim }}>
+          Best {data.bestSale.station}
+          {data.bestSale.distanceLy === null ? '' : ` · ${data.bestSale.distanceLy.toFixed(0)} ly`}
+          {' · '}
+          {data.bestSale.perTonne.toLocaleString()}/t
+        </p>
+      ) : null}
+
+      {/*
+        The receipt for the last trip. Rendered unconditionally until 2026-08-06, when the owner
+        called it out as the irrelevant part — it is now a field, and off by default for anybody who
+        already had a config. Kept rather than deleted because they asked for it in the first place.
+      */}
+      {show('lastSale') ? <LastSaleLine sale={data.lastSale} /> : null}
     </div>
   );
 }

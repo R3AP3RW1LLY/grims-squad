@@ -9,7 +9,14 @@ import {
   stopOverlays,
 } from './overlay-runtime.js';
 import { buildOverlayData } from './overlay-data.js';
+import { EMPTY_BGS, type BgsSessionState } from './bgs-session.js';
+import { fetchStandingOrders, type CompanionStanding } from './hub-bgs.js';
+import { readTradePlan, readPlanOrigin } from './trade-plan.js';
+import { recruitStatus, mintInvite } from './hub-recruit.js';
+import { scoutSystems, surveySystem } from './hub-scout.js';
+import { opsBoard, opsSignUp, opsWithdraw } from './hub-ops.js';
 import { explain } from './display-mode.js';
+import { commanderLocation } from './hub-commander.js';
 import {
   colonyAssign,
   colonyAtMarket,
@@ -47,6 +54,8 @@ import {
 } from './hub-colony.js';
 import { bountyBoard, bountyLeaderboard } from './hub-bounties.js';
 import { leaderboardBoard } from './hub-leaderboards.js';
+import { miningRings, miningSessions, miningValuation, type HoldValue } from './hub-mining.js';
+import { holdOf, worthAsking } from './cargo-value.js';
 import {
   helpConversation,
   helpConversations,
@@ -102,6 +111,9 @@ import {
 } from './docked.js';
 import { capacityFrom, parseCargo, type Hold } from './cargo.js';
 import { EMPTY_TRIP, type TripLedger } from './trip-ledger.js';
+import { EMPTY_PROSPECTING, type ProspectingState } from './prospector.js';
+import { EMPTY_REFINING, type RefiningState } from './refinery.js';
+import { readMiningSettings } from './mining-settings.js';
 import { EMPTY_CARRIER_HOLD, carrierSnapshot, type CarrierHoldState } from './carrier-hold.js';
 import { accumulate } from './totals.js';
 import { isGameRunning, isActivelyPlaying,
@@ -253,6 +265,50 @@ let departedDock = false;
  * a disk write to record something worthless the moment the app closes.
  */
 let hold: Hold | null = null;
+
+/*
+ * ★ WHAT THE HOLD IS WORTH — SQUADRON OWNER, 2026-08-06 ★
+ *
+ * "we want valiue information but its showing irrellevant sell information in it!"
+ *
+ * Priced by the hub against the squadron's market table, because nothing on this machine can
+ * answer it. Held here rather than fetched by the panel so that one answer serves the overlay and
+ * the window, and so the ASKING can be rate-limited — see `worthAsking`. A laser miner's cargo
+ * changes every few seconds for an hour, and pricing it each time would be several hundred
+ * fan-outs against eighteen million rows to watch one number creep upward.
+ */
+let holdValue: HoldValue | null = null;
+let valuedAt: number | null = null;
+let valuedFor: Record<string, number> | null = null;
+
+/** Asks the hub what the hold is worth, when it is worth asking. Never throws into the caller. */
+async function refreshHoldValue(): Promise<void> {
+  if (hold === null) return;
+
+  const want = holdOf(hold.items.map((i) => ({ ...i, wanted: false, paid: null })));
+  const now = Date.now();
+  if (!worthAsking({ hold: want, askedAt: valuedAt, askedFor: valuedFor, now })) return;
+
+  // Stamped BEFORE the request, not after: an in-flight call must not be started again by the
+  // next push, which on a busy journal pass is milliseconds away.
+  valuedAt = now;
+  valuedFor = want;
+
+  const where = mergedDock()?.systemName ?? null;
+  const answer = await miningValuation(
+    { apiBaseUrl: apiBaseUrlFor(config, process.env), deviceToken: config.deviceToken },
+    want,
+    where,
+  );
+  if (!answer.ok) {
+    // A hub that cannot price the hold is not an error worth showing: the lines simply do not
+    // render, exactly as they do before the first valuation.
+    return;
+  }
+
+  holdValue = answer.data;
+  push();
+}
 let cargoCapacity: number | null = null;
 
 /**
@@ -263,6 +319,25 @@ let cargoCapacity: number | null = null;
  * of trip-ledger.ts.
  */
 let trip: TripLedger = EMPTY_TRIP;
+
+/**
+ * The mining session, carried between passes the same way `trip` is.
+ *
+ * Unseeded on start for the same reason: a hit rate rebuilt from half a session is a number whose
+ * denominator nobody can name.
+ */
+let prospecting: ProspectingState = EMPTY_PROSPECTING;
+let refining: RefiningState = EMPTY_REFINING;
+
+/**
+ * The BGS session, and the squadron's standing orders.
+ *
+ * `standingOrders` starts NULL rather than empty: the panel tells "we have not asked the hub yet"
+ * apart from "the officers have ordered nothing", and merging them would have a member on a broken
+ * connection reading "no standing orders" and believing it.
+ */
+let bgs: BgsSessionState = EMPTY_BGS;
+let standingOrders: CompanionStanding[] | null = null;
 
 /**
  * The member's own carrier's hold, carried between passes the same way `trip` is.
@@ -356,6 +431,40 @@ async function refreshCurrentProject(): Promise<void> {
   // lands, and a minute of "nothing moved" costs no broadcast at all.
   const changed = JSON.stringify(answer.data.current) !== JSON.stringify(currentProject);
   currentProject = answer.data.current;
+  if (changed) push();
+}
+
+/**
+ * How often to ask the hub what the officers have ordered.
+ *
+ * The same cadence as the build tracker, and for the same reason: these numbers move on somebody
+ * ELSE'S action — an officer changing the target faction — so this machine's journal will never
+ * tell us. A member acting on an order that was countermanded ten minutes ago is the failure this
+ * interval exists to bound.
+ */
+const STANDING_ORDERS_MS = 60_000;
+
+async function refreshStandingOrders(): Promise<void> {
+  if (config.deviceToken === '') {
+    if (standingOrders !== null) {
+      standingOrders = null;
+      push();
+    }
+    return;
+  }
+
+  const next = await fetchStandingOrders({
+    apiBaseUrl: apiBaseUrlFor(config, process.env),
+    deviceToken: config.deviceToken,
+  });
+
+  /*
+   * Pushed only on a real change. `fetchStandingOrders` returns an empty list on failure, so this
+   * would otherwise flap between "no orders" and the real list every minute on a bad connection —
+   * and a member watching the panel would see the squadron's instructions blink out and back.
+   */
+  const changed = JSON.stringify(next) !== JSON.stringify(standingOrders);
+  standingOrders = next;
   if (changed) push();
 }
 
@@ -693,6 +802,9 @@ async function tick(): Promise<void> {
       dockedAt,
       trip,
       carrierHold,
+      prospecting,
+      refining,
+      bgs,
     };
     push();
     refreshTray();
@@ -715,6 +827,9 @@ async function tick(): Promise<void> {
       dockedAt,
       trip,
       carrierHold,
+      prospecting,
+      refining,
+      bgs,
     };
     push();
     return;
@@ -734,7 +849,21 @@ async function tick(): Promise<void> {
     push();
     let pass;
     try {
-      pass = await runWatchPass(nodeFs, dir, config, uploader, dockedAt, trip, carrierHold, WATCHING_SINCE);
+      pass = await runWatchPass(
+        nodeFs,
+        dir,
+        config,
+        uploader,
+        dockedAt,
+        trip,
+        carrierHold,
+        WATCHING_SINCE,
+        prospecting,
+        refining,
+        readMiningSettings(config.miningSettings ?? null),
+        bgs,
+        standingOrders ?? [],
+      );
     } finally {
       sending = false;
     }
@@ -755,6 +884,16 @@ async function tick(): Promise<void> {
     // about a member's journal upload waits on it.
     carrierHold = pass.outcome.carrierHold;
     void pushCarrierHold();
+
+    /*
+     * The mining session, carried the same way. Omitting these two lines was a real bug and the
+     * LINTER found it: prefer-const fired because nothing ever reassigned them, which is precisely
+     * what "the fold never accumulates" looks like from the outside. The overlays would have sat
+     * on their opening state for ever while every pass computed the right answer and discarded it.
+     */
+    prospecting = pass.outcome.prospecting;
+    refining = pass.outcome.refining;
+    bgs = pass.outcome.bgs;
 
     /*
      * ★ THE HOLD, READ FROM FRONTIER'S OWN SIDECAR ★
@@ -964,6 +1103,9 @@ async function tick(): Promise<void> {
       dockedAt,
       trip,
       carrierHold,
+      prospecting,
+      refining,
+      bgs,
     };
   }
 
@@ -1057,6 +1199,17 @@ function push(): void {
       gameRunning: wasPlaying,
       hold,
       capacity: cargoCapacity,
+      holdValue,
+      // The two mining folds ride the same push as everything else, so the prospector panel updates
+      // in the same breath as the rest rather than on a timer of its own.
+      prospecting,
+      refining,
+      standingOrders,
+      bgsSession: bgs,
+      // Re-read on every push rather than cached: the config is the single record of what was
+      // picked, and a cached copy is one more thing that can disagree with it.
+      tradePicks: readTradePlan(config.tradePlan ?? null),
+      tradeOrigin: readPlanOrigin(config.tradePlan ?? null),
       // The hub's whole-project answer rides every push, so the build tracker updates the moment
       // ANYTHING changes — a journal pass, a settings refresh, or the sixty-second hub refetch.
       currentProject,
@@ -1064,6 +1217,13 @@ function push(): void {
       now: Date.now(),
     }),
   );
+
+  /*
+   * Fired and not awaited: `push()` is called from every mutation path including synchronous ones,
+   * and a network round trip must never be on that path. The valuation lands on a later push, which
+   * `refreshHoldValue` triggers itself.
+   */
+  void refreshHoldValue();
 }
 
 /** The version waiting to be installed, once one has downloaded. Null the rest of the time. */
@@ -1138,6 +1298,7 @@ function state(): Record<string, unknown> {
       return isFresh(merged, Date.now()) ? merged : null;
     })(),
     overlays: config.overlays,
+    miningSettings: config.miningSettings ?? null,
     overlayEditing: isEditing(),
     displayMode: currentMode(),
     displayNote: explain(currentMode()),
@@ -1538,6 +1699,14 @@ if (!app.requestSingleInstanceLock()) {
     setInterval(() => void refreshCurrentProject(), CURRENT_BUILD_MS);
     void refreshCurrentProject();
 
+    /*
+     * The standing orders, on the same footing and for the same reason: they change when an officer
+     * changes them, never because of anything this machine did, and the faction orders panel is
+     * worthless if it is showing last week's target.
+     */
+    setInterval(() => void refreshStandingOrders(), STANDING_ORDERS_MS);
+    void refreshStandingOrders();
+
     startOverlays({
       layout: () => config.overlays,
       save: (overlays) => {
@@ -1598,6 +1767,9 @@ if (!app.requestSingleInstanceLock()) {
     });
 
     ipcMain.handle('colonyProjects', () => colonyProjects(hub()));
+    // Where the commander is, for the Status page. The hub decides it so the app and the website
+    // cannot disagree — see hub-commander.ts.
+    ipcMain.handle('commanderLocation', () => commanderLocation(hub()));
     ipcMain.handle('bountyBoard', () => bountyBoard(hub()));
     ipcMain.handle('tradeCommodity', (_e, name: unknown, query: unknown) => {
       if (typeof name !== 'string' || name === '') {
@@ -1611,6 +1783,37 @@ if (!app.requestSingleInstanceLock()) {
       }
       return tradeCommodity(hub(), name, clean);
     });
+    /*
+     * Scouting. Renderer args re-read rather than trusted, like every handler in this block: only
+     * strings pass, and the hub clamps the range regardless.
+     */
+    ipcMain.handle('bgsOrders', () => fetchStandingOrders(hub()));
+    ipcMain.handle('opsBoard', () => opsBoard(hub()));
+    ipcMain.handle('opsSignUp', (_e, id: unknown, state: unknown) =>
+      typeof id === 'string' && (state === 'yes' || state === 'maybe' || state === 'no')
+        ? opsSignUp(hub(), id, state)
+        : Promise.resolve({ ok: false as const, error: 'Say yes, maybe or no.' }),
+    );
+    ipcMain.handle('opsWithdraw', (_e, id: unknown) =>
+      typeof id === 'string'
+        ? opsWithdraw(hub(), id)
+        : Promise.resolve({ ok: false as const, error: 'Which op?' }),
+    );
+
+    ipcMain.handle('scoutSearch', (_e, anchor: unknown, range: unknown, prefer: unknown) =>
+      typeof anchor === 'string' && anchor.trim() !== ''
+        ? scoutSystems(hub(), anchor.trim(), {
+            ...(typeof range === 'string' ? { range } : {}),
+            ...(typeof prefer === 'string' ? { prefer } : {}),
+          })
+        : Promise.resolve({ ok: false as const, error: 'Name a system to search around.' }),
+    );
+    ipcMain.handle('scoutSurvey', (_e, system: unknown) =>
+      typeof system === 'string' && system.trim() !== ''
+        ? surveySystem(hub(), system.trim())
+        : Promise.resolve({ ok: false as const, error: 'Name a system to survey.' }),
+    );
+
     ipcMain.handle('shipyardShips', () => shipyardShips(hub()));
     ipcMain.handle('shipyardOutfit', (_e, shipId: unknown) =>
       typeof shipId === 'string' && shipId !== ''
@@ -1649,6 +1852,15 @@ if (!app.requestSingleInstanceLock()) {
     ipcMain.handle('tradeCommodities', (_e, near: unknown) =>
       tradeCommodities(hub(), typeof near === 'string' ? near : undefined),
     );
+    /*
+     * Recruiting. No arguments and nothing to sanitise — the hub identifies the member from the
+     * device token, so there is nothing the renderer could pass that would change whose link this
+     * is. That is the point of routing it through the main process rather than letting a page hold
+     * the token.
+     */
+    ipcMain.handle('recruitStatus', () => recruitStatus(hub()));
+    ipcMain.handle('recruitMint', () => mintInvite(hub()));
+
     ipcMain.handle('tradeRoutes', (_e, query: unknown) => {
       /*
        * Re-read rather than trusted, like every renderer-supplied value: only known keys pass,
@@ -1734,10 +1946,46 @@ if (!app.requestSingleInstanceLock()) {
      * being forwarded to the hub as a guess.
      */
     ipcMain.handle('leaderboardBoard', (_e, board: unknown, month: unknown) =>
-      board === 'bounties' || board === 'colony' || board === 'trade'
+      // 'mining' joined the list when Deep Core shipped. A key missing HERE is the failure mode
+      // this guard is prone to: the page renders, the nav works, and the board refuses in a
+      // sentence that reads like the hub is out of date.
+      board === 'bounties' || board === 'colony' || board === 'trade' || board === 'mining'
         ? leaderboardBoard(hub(), board, typeof month === 'string' && month !== '' ? month : undefined)
         : { ok: false as const, error: 'No board asked for.' },
     );
+
+    /*
+     * Mining. Rings and sessions are plain reads; the valuation carries the hold, which is folded
+     * from the journal on THIS machine and so is known here before it is known anywhere else.
+     */
+    ipcMain.handle('miningRings', (_e, material: unknown, days: unknown) =>
+      miningRings(
+        hub(),
+        typeof material === 'string' && material !== '' ? material : undefined,
+        typeof days === 'number' && Number.isFinite(days) ? days : 14,
+      ),
+    );
+    ipcMain.handle('miningSessions', () => miningSessions(hub()));
+    ipcMain.handle('miningValuation', (_e, hold: unknown, system: unknown, withinLy: unknown) => {
+      /*
+       * Re-read rather than trusted, like every renderer-supplied value. A tonnage arriving as a
+       * string would reach the hub as a hold it cannot price, and the member would be told their
+       * cargo is worth nothing — an answer they would believe.
+       */
+      const raw = (hold ?? {}) as Record<string, unknown>;
+      const clean: Record<string, number> = {};
+      for (const [name, tonnes] of Object.entries(raw)) {
+        if (typeof tonnes === 'number' && Number.isFinite(tonnes) && tonnes > 0) {
+          clean[name] = tonnes;
+        }
+      }
+      return miningValuation(
+        hub(),
+        clean,
+        typeof system === 'string' && system !== '' ? system : null,
+        typeof withinLy === 'number' && Number.isFinite(withinLy) ? withinLy : 100,
+      );
+    });
     ipcMain.handle('colonyProject', (_e, id: unknown, filters: unknown) => {
       if (typeof id !== 'string' || id === '') {
         return { ok: false as const, error: 'No project asked for.' };
@@ -1948,6 +2196,36 @@ if (!app.requestSingleInstanceLock()) {
     });
 
     ipcMain.handle('colonyPlanRemove', (_e, id: unknown) => removeColonyPlan(hub(), asText(id)));
+
+    /*
+     * The prospector thresholds. Stored as the JSON STRING the renderer sends, because
+     * `readMiningSettings` repairs whatever is on disk on every read — validating here as well
+     * would be two validators, and one of them would drift from the rules the overlay obeys.
+     */
+    /*
+     * ★ THE PICKED RUN, FROM THE WINDOW TO THE OVERLAY — SQUADRON OWNER, 2026-08-06 ★
+     *
+     * "add an option to choose the trade route and display them in the overlay please"
+     *
+     * Stored as the string the config holds rather than a parsed object, exactly like the mining
+     * settings: `readTradePlan` repairs whatever is there on every read, so there is one place that
+     * validates instead of two that can drift.
+     */
+    ipcMain.handle('setTradePlan', (_e, json: unknown) => {
+      if (typeof json !== 'string') return config.tradePlan ?? null;
+      config = { ...config, tradePlan: json };
+      void saveConfig(app.getPath('userData'), config);
+      push();
+      return config.tradePlan;
+    });
+
+    ipcMain.handle('setMiningSettings', (_e, json: unknown) => {
+      if (typeof json !== 'string') return config.miningSettings ?? null;
+      config = { ...config, miningSettings: json };
+      void saveConfig(app.getPath('userData'), config);
+      push();
+      return config.miningSettings;
+    });
 
     ipcMain.handle('setOverlays', (_e, layout: unknown) => {
       const applied = setLayout(layout);

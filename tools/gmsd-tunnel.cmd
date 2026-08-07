@@ -16,10 +16,15 @@ REM  runs in a container, and 127.0.0.1 inside a container is the CONTAINER. A
 REM  tunnel on the host's loopback is invisible from in there. The bridge gateway
 REM  is reachable by containers on that host and by nothing else.
 REM
-REM  So the API's AI_BASE_URL is `http://127.0.0.1:11434/v1` in BOTH places. On a
-REM  development machine that is the model server running locally; on the server
-REM  it is the near end of this tunnel. One value, one code path, no environment
-REM  branching -- which is what makes "it worked locally" mean something.
+REM  So the API's AI_BASE_URL DIFFERS by environment, and this comment used to claim
+REM  it did not -- which is exactly what sends somebody debugging a dead tunnel to
+REM  the wrong socket:
+REM
+REM    development  http://127.0.0.1:11434/v1    the model server on that machine
+REM    production   http://172.18.0.1:11434/v1   the bridge gateway, near end of this tunnel
+REM
+REM  One code path and no environment branching; one VALUE that has to differ,
+REM  because loopback inside a container is the container.
 REM
 REM  * WHY OUT AND NOT IN *
 REM
@@ -60,6 +65,19 @@ set DELAY=5
 :loop
 echo [%date% %time%] connecting...
 
+REM  Three forwards, and the third is not like the other two.
+REM
+REM  11434 and 8188 are published on the DOCKER BRIDGE (172.18.0.1) because their consumer is the
+REM  API container on that same box.
+REM
+REM  11435 is the EMBEDDING model on the 3060 (see tools/gmsd-embed.cmd), and its consumer is the
+REM  worker daemon on the INGESTION box. That machine reaches this one over WireGuard, and cannot
+REM  see the primary's docker bridge at all -- so this one is published on the wg0 address, which
+REM  10.66.0.2 can route to.
+REM
+REM  Each address must also be listed in the tunnel key's `permitlisten` options, or sshd refuses
+REM  the bind and ssh exits with "remote port forwarding failed".
+
 ssh -N -T ^
   -i "%KEY%" ^
   -o IdentitiesOnly=yes ^
@@ -70,6 +88,7 @@ ssh -N -T ^
   -o ConnectTimeout=15 ^
   -R 172.18.0.1:11434:127.0.0.1:11434 ^
   -R 172.18.0.1:8188:127.0.0.1:8188 ^
+  -R 10.66.0.1:11435:127.0.0.1:11435 ^
   %REMOTE%
 
 REM  A connection that LASTED is a healthy one, so the next failure starts from

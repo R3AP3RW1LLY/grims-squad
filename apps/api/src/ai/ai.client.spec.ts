@@ -170,3 +170,60 @@ describe('configuration', () => {
     expect(config?.baseUrl).toBe('http://x/v1');
   });
 });
+
+/**
+ * The heartbeat, and why one missed beat is not an outage.
+ *
+ * ★ SQUADRON OWNER, 2026-08-06 ★
+ *
+ * "were also seeing this in the AI logs: [health] GMSD AI did not answer — posts will be held — we
+ * need to ensure this does not happen any more!"
+ *
+ * ★ WHAT THE 4ms WAS ★
+ *
+ * The AI runs on the owner's own machine and production reaches it down a reverse SSH tunnel. That
+ * tunnel drops several times a day. A healthy round trip through it measures 35–47ms, so a failure
+ * in 4ms never reached the far end at all — it is a local connection refused, in the seconds
+ * between sshd reaping the dead session and the tunnel reconnecting.
+ *
+ * The model was never the problem, and the reconnect is usually done before anybody could look. So
+ * a single refused connection is not evidence of an outage; it is evidence of a reconnect in
+ * progress, and reporting it as "posts will be held" was crying wolf.
+ *
+ * ★ WHY ONLY THE FAST FAILURE RETRIES ★
+ *
+ * A refusal is instant and the retry costs nothing. A TIMEOUT means the far end accepted the
+ * connection and then stopped answering — retrying that immediately spends another twenty seconds
+ * to learn the same thing, and delays the honest report.
+ */
+describe('the model heartbeat', () => {
+  it('MANDATORY: a single refused connection is retried, not reported', async () => {
+    let calls = 0;
+    const fetchImpl = vi.fn(async () => {
+      calls += 1;
+      // Refused once — the tunnel reconnecting — then healthy, which is the common real sequence.
+      if (calls <= 2) throw new Error('ECONNREFUSED');
+      return {
+        ok: true,
+        json: async () => ({ choices: [{ message: { content: 'ok' } }] }),
+      } as unknown as Response;
+    });
+
+    const warm = await new AiClient(CONFIG, fetchImpl as never).warm();
+
+    expect(warm, 'a reconnecting tunnel was reported as the AI being down').toBe(true);
+  });
+
+  it('MANDATORY: a persistent refusal is still reported', async () => {
+    // A tunnel that is genuinely gone must not be papered over — posts are held for a reason.
+    const fetchImpl = vi.fn(async () => {
+      throw new Error('ECONNREFUSED');
+    });
+
+    expect(await new AiClient(CONFIG, fetchImpl as never).warm()).toBe(false);
+  });
+
+  it('MANDATORY: an unconfigured AI does not pretend to be warm', async () => {
+    expect(await new AiClient(null).warm()).toBe(false);
+  });
+});

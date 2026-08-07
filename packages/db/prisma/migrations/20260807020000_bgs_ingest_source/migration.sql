@@ -1,0 +1,12 @@
+-- The companion is not EDMC.
+--
+-- ★ WHY A NEW ENUM VALUE RATHER THAN REUSING ONE ★
+--
+-- `DataSource` names where a record came from: manual, capi, edmc, eddn, bgstally, system. The BGS
+-- ingest reads OUR companion's journal telemetry, which is none of them. Filing it as `edmc` would
+-- have been one word in one INSERT and permanently unrecoverable — `bgstally` and `edmc` are real
+-- tools whose exports we may yet import, and once our own contributions are indistinguishable from
+-- a third party's there is no query that can separate them again.
+--
+-- Adding the value is reversible. Mislabelling the provenance of 2,844 rows is not.
+ALTER TYPE "DataSource" ADD VALUE IF NOT EXISTS 'companion';

@@ -4,6 +4,7 @@ import {
   PROFILE_EVENT_TYPES,
   type ProfileEvent,
 } from './commander-profile.service.js';
+import { JOURNAL_EVENTS, EVENT_FIELDS } from '@grims/shared';
 
 /**
  * Where a member is, and the list that decides whether we can tell.
@@ -132,5 +133,46 @@ describe('the query fetches everything the builder reads', () => {
     for (const name of ['FSDJump', 'Location']) {
       expect(PROFILE_EVENT_TYPES as readonly string[]).toContain(name);
     }
+  });
+});
+
+describe('the events the query fetches are events that can exist', () => {
+  /*
+   * ★ THE SAME BUG, ONE LAYER FURTHER UP — 2026-08-06 ★
+   *
+   * The test above closed the gap between the BUILDER and the QUERY. It did not close the gap
+   * between the query and REALITY: `SupercruiseExit`, `ApproachSettlement` and `Undocked` were
+   * added to `PROFILE_EVENT_TYPES` and are not journal events this platform collects at all. They
+   * are absent from the events map, so the companion never sends them and the server would discard
+   * them if it did.
+   *
+   * Production, at the moment this was found: ZERO rows of all three, ever. The builder's "newest
+   * of five events wins" was in fact "newest of two", and the fix that was written down as done on
+   * 2026-08-05 changed nothing a member could see.
+   *
+   * Squadron owner, 2026-08-06: "my location does not seem to be updating as it should be."
+   *
+   * An allowlist naming an event nobody collects is not a fix; it is a comment that compiles.
+   */
+  it('MANDATORY: every fetched event is one the platform actually collects', () => {
+    for (const name of PROFILE_EVENT_TYPES) {
+      expect(
+        JOURNAL_EVENTS[name as keyof typeof JOURNAL_EVENTS],
+        `${name} is fetched by the profile query but is not a collectable journal event — it can never have a row`,
+      ).toBeDefined();
+    }
+  });
+
+  it('MANDATORY: Location keeps the body, or a member in space has no sublocation', () => {
+    /*
+     * The builder reads `StationName ?? Name ?? Body`. The server's field allowlist kept only
+     * StarSystem, SystemAddress, StationName and Docked — so `Body` was discarded on ingest and the
+     * third branch could never fire. Docked members had a station; everybody else had nothing, for
+     * ever, and no amount of fixing the builder would have shown them a planet.
+     */
+    expect(
+      EVENT_FIELDS.Location as readonly string[],
+      'Location drops Body on ingest, so a member who is not docked can never have a sublocation',
+    ).toContain('Body');
   });
 });

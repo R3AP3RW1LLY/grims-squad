@@ -50,6 +50,27 @@ export const JOURNAL_EVENTS = {
   /** Where they are on a normal-space arrival, and where they docked. */
   Location: 'location',
   Docked: 'location',
+  /*
+   * ★ THE THREE THAT MAKE "WHERE ARE THEY" ANSWERABLE — ADDED 2026-08-06 ★
+   *
+   * The dashboard picks the newest of Docked / Location / SupercruiseExit / ApproachSettlement /
+   * Undocked to say where in a system somebody is. Three of those five were never collectable
+   * journal events: absent from this map, so the companion never sent them and the server would
+   * have discarded them anyway. Production had ZERO rows of all three, ever.
+   *
+   * They were added to the profile QUERY on 2026-08-05 and that changed nothing a member could
+   * see, because an allowlist naming an event nobody collects is a comment that compiles. The
+   * squadron owner reported the same symptom again the next day.
+   *
+   * `Undocked` earns its place by being the only event that says "no longer anywhere in
+   * particular" — without it somebody who leaves a station shows as docked there indefinitely.
+   *
+   * Same `location` category as the two above, so this adds no new consent surface: a member who
+   * has switched location off is still not sending any of them.
+   */
+  SupercruiseExit: 'location',
+  ApproachSettlement: 'location',
+  Undocked: 'location',
 
   /** A bounty claimed, and what it was worth. */
   Bounty: 'combat',
@@ -92,6 +113,26 @@ export const JOURNAL_EVENTS = {
   Market: 'trade',
   /** Mined and refined, which the trade board counts separately. */
   MiningRefined: 'trade',
+
+  /*
+   * ★ MINING, IN ITS OWN CATEGORY — SQUADRON OWNER, 2026-08-06 ★
+   *
+   * "our own version of EDminer", with FULL rock collection chosen deliberately over a summary,
+   * because it is the only way to answer "is this ring still paying" from more than one
+   * commander's memory — the one thing no single-player mining tool can ever do.
+   *
+   * NOT folded in with `trade`, where MiningRefined sits, and the reason is volume.
+   * `ProspectedAsteroid` fires on EVERY limpet hit: several hundred an hour while somebody is
+   * mining, against roughly twenty MiningRefined. It is by a wide margin the largest stream this
+   * platform would ever collect.
+   *
+   * A member happy for us to see what they hauled has not thereby agreed to send a row for every
+   * rock they shoot at. Volume that different deserves its own switch, and hiding it inside an
+   * existing one would make that switch mean something other than what it says.
+   */
+  ProspectedAsteroid: 'mining',
+  AsteroidCracked: 'mining',
+  LaunchDrone: 'mining',
 
   /** Scan data sold, which is how exploration is actually scored. */
   MultiSellExplorationData: 'exploration',
@@ -229,8 +270,28 @@ export const EVENT_FIELDS: Record<JournalEventName, readonly string[]> = {
   // cannot say what a bounty was worth is a list of names. The member opted in
   // to exactly this — see BASELINE_CATEGORIES for what they did not.
   FSDJump: ['StarSystem', 'SystemAddress', 'StarPos', 'JumpDist', 'FuelUsed'],
-  Location: ['StarSystem', 'SystemAddress', 'StationName', 'Docked'],
+  /*
+   * ★ `Body` ADDED 2026-08-06 ★
+   *
+   * The dashboard reads the sublocation as `StationName ?? Name ?? Body`, and `Body` was being
+   * discarded here on ingest — so the third branch could never fire. A docked member had a station
+   * name; everybody else had nothing at all, permanently, and no amount of fixing the builder
+   * would have shown them the planet they were orbiting.
+   *
+   * `BodyType` comes with it because "Hyades Sector WO-Y b1-4 A 2" reads very differently
+   * depending on whether it is a star, a planet or a ring, and the column is one line wide.
+   */
+  Location: ['StarSystem', 'SystemAddress', 'StationName', 'Docked', 'Body', 'BodyType'],
   Docked: ['StarSystem', 'StationName', 'StationType', 'StationFaction'],
+  /*
+   * The three that were never collectable. Each contributes exactly one thing: where the member
+   * dropped out of supercruise, which settlement they flew up to, and the fact that they have left
+   * a station. Nothing else from these events is wanted, and the station name on `Undocked` is
+   * read as a CLEAR rather than as a place — see the builder.
+   */
+  SupercruiseExit: ['StarSystem', 'SystemAddress', 'Body', 'BodyType'],
+  ApproachSettlement: ['Name', 'StarSystem', 'SystemAddress', 'BodyName'],
+  Undocked: ['StationName', 'StationType'],
 
   Bounty: ['Target', 'Target_Localised', 'TotalReward', 'VictimFaction'],
   /*
@@ -270,6 +331,28 @@ export const EVENT_FIELDS: Record<JournalEventName, readonly string[]> = {
    */
   Market: ['MarketID', 'StationName', 'StarSystem'],
   MiningRefined: ['Type', 'Type_Localised'],
+  /*
+   * The material list is the whole point — a prospected rock with no percentages is an announcement
+   * that a rock exists. `Content_Localised` is Frontier's own word for overall richness (Low,
+   * Medium, High) and `MotherlodeMaterial` is the rock a core miner is hunting, rare enough to be
+   * worth naming rather than inferring from a percentage later.
+   *
+   * `Remaining` is kept because a rock already half-mined by somebody else reads very differently.
+   * Nothing else: no scanner ids, no positions.
+   */
+  ProspectedAsteroid: [
+    'Materials',
+    'Content',
+    'Content_Localised',
+    'MotherlodeMaterial',
+    'MotherlodeMaterial_Localised',
+    'Remaining',
+  ],
+  // Just the fact and the ring. A cracked core is the deed the badge counts.
+  AsteroidCracked: ['Body'],
+  // Which limpet, so the tool can say how many prospectors are left in the hold — running out
+  // mid-ring is the classic mining failure and nothing else warns about it.
+  LaunchDrone: ['Type'],
 
   MultiSellExplorationData: ['TotalEarnings', 'BaseValue', 'Bonus', 'Discovered'],
   SellExplorationData: ['TotalEarnings', 'BaseValue', 'Bonus', 'Systems'],
@@ -450,7 +533,9 @@ export type TelemetryCategoryName =
   /** On-foot: the suit and weapons a commander takes out of the ship. */
   | 'onfoot'
   /** Colonisation: construction-site needs, and deliveries to them. */
-  | 'colonisation';
+  | 'colonisation'
+  /** Mining: every rock prospected, and the cores cracked. The largest stream here. */
+  | 'mining';
 
 const CATEGORY_BY_LABEL: Record<JournalCategory, TelemetryCategoryName> = {
   // ---- baseline -----------------------------------------------------------
@@ -472,6 +557,7 @@ const CATEGORY_BY_LABEL: Record<JournalCategory, TelemetryCategoryName> = {
   carrier: 'carrier',
   onfoot: 'onfoot',
   colonisation: 'colonisation',
+  mining: 'mining',
 };
 
 /**
@@ -505,6 +591,7 @@ export const OPTIONAL_CATEGORIES: readonly TelemetryCategoryName[] = [
   'exploration',
   'bgs',
   'carrier',
+  'mining',
 ];
 
 /** Is this category collected regardless of consent? */

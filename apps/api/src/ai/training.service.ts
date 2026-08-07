@@ -2,6 +2,7 @@ import { Injectable, Inject } from '@nestjs/common';
 import { PrismaClient } from '@grims/db';
 import {
   KNOWLEDGE_SOURCES,
+  EMBEDDED_SOURCES,
   JOB_REQUEST_CHANNEL,
   nextInHours,
   type KnowledgeSource,
@@ -221,8 +222,18 @@ export class TrainingStatusService {
          * Zero for a source that is never embedded, which is most of the reason this is a per-source
          * number rather than one total: a backlog of 4,000 means something very different against
          * the galaxy than against our forum guides.
+         *
+         * ★ THAT RULE WAS WRITTEN HERE AND NOT IMPLEMENTED — 2026-08-06 ★
+         *
+         * The count came straight off `embedding IS NULL`, which includes `eddn` — a LOOKUP source
+         * that is deliberately never embedded, holds more rows than everything else combined, and
+         * therefore reported a backlog of 79,109 that could never fall. The owner reasonably read
+         * it as the embedder failing to keep up and asked for it to be fixed; the embedder was
+         * never behind. A number that cannot reach zero is worse than no number.
          */
-        awaitingEmbedding: backlogBySource.get(source) ?? 0,
+        awaitingEmbedding: EMBEDDED_SOURCES.includes(source as KnowledgeSource)
+          ? (backlogBySource.get(source) ?? 0)
+          : 0,
         lastIngestedAt: lastAt,
         ingesting,
         nextInHours: nextInHours(source, lastAt, now),

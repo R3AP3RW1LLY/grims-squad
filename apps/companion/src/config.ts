@@ -25,6 +25,23 @@ import { defaultLayout, normaliseLayout, type OverlayLayout } from './overlay-co
  */
 
 export interface CompanionConfig {
+  /**
+   * The member's prospector thresholds, stored as JSON.
+   *
+   * A STRING rather than a nested object, deliberately: `readMiningSettings` repairs whatever is on
+   * disk on every read, so a hand-edited or older-version file cannot put a NaN into the comparison
+   * that decides whether a rock is worth shooting. Parsing it here would mean two places that
+   * validate, and one of them would drift.
+   */
+  miningSettings?: string;
+  /**
+   * The runs the member picked in the Freight Office, and where they planned from.
+   *
+   * A STRING for the same reason as `miningSettings`: `readTradePlan` repairs whatever is on disk on
+   * every read, so a hand-edited or older-version file cannot put a half-written pick into a
+   * manifest. Parsing it here would mean two places that validate, and one of them would drift.
+   */
+  tradePlan?: string;
   /** Base URL of the hub. Configurable so a member can point at a test server. */
   apiBaseUrl: string;
   /** The pairing token. Empty until the member pairs. */
@@ -335,6 +352,25 @@ export function loadConfig(userDataDir: string): CompanionConfig {
        * neither see nor reach.
        */
       overlays: normaliseLayout(parsed.overlays),
+      /*
+       * ★ THE FIELD THAT WAS LEFT OUT — 2026-08-06 ★
+       *
+       * Kept as the raw string and repaired by `readMiningSettings` at the point of use, which is
+       * where the clamping and the NaN rules already live. Validating it twice would be two
+       * validators and a bug.
+       *
+       * It was missing from this list for a day: added to the interface, saved correctly, and
+       * silently dropped on every load. A member set their per-material percentages, closed the
+       * app, and came back to the defaults with nothing to explain why. Nothing typechecks this —
+       * `loadConfig` rebuilds field by field on purpose — so the guard is a test over the whole
+       * round trip in `config-recovery.spec.ts`.
+       */
+      ...(typeof parsed.miningSettings === 'string'
+        ? { miningSettings: parsed.miningSettings }
+        : {}),
+      // Same guard, same reason. Omitting this line is how the mining settings were lost on every
+      // restart with 386 green tests, none of which read a config back.
+      ...(typeof parsed.tradePlan === 'string' ? { tradePlan: parsed.tradePlan } : {}),
     };
   } catch (error) {
     /*

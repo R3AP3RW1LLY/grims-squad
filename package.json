@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Grim's Squad Hub \u2014 Elite Dangerous squadron platform",
+  "description": "Grim's Squad Hub — Elite Dangerous squadron platform",
   "engines": {
     "node": ">=24 <25",
     "pnpm": ">=9"

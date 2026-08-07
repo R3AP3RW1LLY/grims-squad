@@ -157,3 +157,128 @@ describe('planFor — terms consumed by the leg that understood them', () => {
     expect(plan.names).toContain('Krait Mk II');
   });
 });
+
+describe('asking what the squadron wants done in the background sim', () => {
+  /**
+   * ★ SQUADRON OWNER, 2026-08-06 ★
+   *
+   * "we also want to create the BGS component too ... Make this extremely feature ritch, incorporate
+   * AI where we can too"
+   *
+   * ★ ITS OWN LEG, FOR THE SAME REASON THE RINGS ARE ★
+   *
+   * The answer comes from a source no other leg touches: `bgs_orders`, written by officers this
+   * week. A model asked this without it answers from whatever BGS prose the semantic leg found —
+   * a wiki page explaining what influence IS, presented with the same confidence as tonight's
+   * actual instructions.
+   */
+  it('routes "what factions should I run missions for" to the orders leg', () => {
+    const plan = planFor('what factions should I be running missions for?', COMMODITIES);
+    expect(plan.orders).not.toBeNull();
+  });
+
+  it('routes the plain forms an officer or member would type', () => {
+    for (const q of [
+      'what are our bgs orders',
+      'who are we pushing right now',
+      'which faction should I support',
+      'what is the squadron working on in bgs',
+      'are we suppressing anyone',
+    ]) {
+      expect(planFor(q, COMMODITIES).orders, `"${q}" did not reach the orders leg`).not.toBeNull();
+    }
+  });
+
+  it('picks up the system when the member names one', () => {
+    const plan = planFor('what are our bgs orders in Deciat?', COMMODITIES);
+    expect(plan.orders?.system).toBe('Deciat');
+  });
+
+  it('leaves the system null when none is named, rather than guessing', () => {
+    // A guess would answer about the wrong system with total confidence, which is worse than
+    // listing everything and letting the member find their own.
+    expect(planFor('what are our bgs orders', COMMODITIES).orders?.system).toBeNull();
+  });
+
+  it('MANDATORY: does not hijack a question about selling cargo', () => {
+    /*
+     * "faction" and "support" appear in questions that have nothing to do with standing orders.
+     * Answering "where do I sell this" with a list of factions would be a confident non-answer.
+     */
+    expect(planFor('where do I sell Painite', COMMODITIES).orders).toBeNull();
+    expect(planFor('what should I fly for combat', COMMODITIES).orders).toBeNull();
+    expect(planFor('where can I buy gold near Sol', COMMODITIES).orders).toBeNull();
+  });
+});
+
+describe('asking what the squadron is doing tonight', () => {
+  /**
+   * ★ THE MOST ASKED QUESTION IN ANY SQUADRON ★
+   *
+   * "what's on tonight" has never had an answer here. The operations board knows, and no other leg
+   * reads `operations` — so without this the assistant answers from forum prose about an op that
+   * happened in March, with the same confidence as tonight's actual roster.
+   */
+  it('routes the plain forms members use', () => {
+    for (const q of [
+      'what ops are on',
+      'is there anything on tonight',
+      'when is the next operation',
+      'what is the squadron doing this weekend',
+      'any ops coming up',
+      'whats on the ops board',
+    ]) {
+      expect(planFor(q, COMMODITIES).ops, `"${q}" did not reach the ops leg`).not.toBeNull();
+    }
+  });
+
+  it('MANDATORY: does not hijack questions that merely contain a time word', () => {
+    /*
+     * "tonight" and "next" turn up constantly in trade and mining questions. Answering "where
+     * should I mine tonight" with an operations roster would be a confident non-answer.
+     */
+    expect(planFor('where should I mine tonight', COMMODITIES).ops).toBeNull();
+    expect(planFor('where can I sell Painite', COMMODITIES).ops).toBeNull();
+    expect(planFor('what should I fly for combat', COMMODITIES).ops).toBeNull();
+  });
+
+  it('does not fire on an unrelated question about operating a ship', () => {
+    // "operation" is not always an op. This is the obvious false positive.
+    expect(planFor('how do I operate the fuel scoop', COMMODITIES).ops).toBeNull();
+  });
+});
+
+describe('asking where the squadron should colonise next', () => {
+  /**
+   * ★ SQUADRON OWNER, 2026-08-07 ★
+   *
+   * The scout answers this from live galaxy data and our own station table. Asked without it, the
+   * assistant answers from forum prose about a system somebody claimed months ago.
+   */
+  it('routes the plain forms', () => {
+    for (const q of [
+      'where should we colonise next',
+      'what system should we claim',
+      'any good systems to colonize nearby',
+      'where can we put our next colony',
+      'find us a system to colonise',
+    ]) {
+      expect(planFor(q, COMMODITIES).colonise, `"${q}" did not reach the scout leg`).not.toBeNull();
+    }
+  });
+
+  it('picks up the system to search around when one is named', () => {
+    const plan = planFor('where should we colonise near Shinrarta Dezhra', COMMODITIES);
+    expect(plan.colonise?.anchor).toBe('Shinrarta Dezhra');
+  });
+
+  it('MANDATORY: does not hijack questions about an existing colony', () => {
+    /*
+     * "colony" appears constantly in hauling questions. Answering "what does our colony still need"
+     * with a list of systems to claim would be a confident non-answer.
+     */
+    expect(planFor('what does the colony still need', COMMODITIES).colonise).toBeNull();
+    expect(planFor('where do I deliver to the colony', COMMODITIES).colonise).toBeNull();
+    expect(planFor('where can I buy steel for the build', COMMODITIES).colonise).toBeNull();
+  });
+});

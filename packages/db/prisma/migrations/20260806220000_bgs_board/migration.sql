@@ -1,0 +1,20 @@
+-- The fifth leaderboard's opt-out.
+--
+-- ★ SQUADRON OWNER, 2026-08-06 ★
+--
+-- "create a BGS leaderboard, and allow the officers to choose what factions we want to be running
+-- missions for etc, give instructions to the squad members etc."
+--
+-- ★ THIS IS THE WHOLE MIGRATION, AND THAT IS THE POINT ★
+--
+-- The BGS data model was designed and migrated long ago and never populated: `bgs_ticks`,
+-- `bgs_orders`, `bgs_activity_reports`, `tracked_factions` and `faction_influence_snapshots` all
+-- exist in production today, empty. A first draft of this change created a parallel set of tables
+-- with slightly different names and a poorer design — no tick model, no dedupe guarantee, three
+-- stances where the schema already had four. Prisma refused it as a duplicate model name, which is
+-- the only reason it was caught.
+--
+-- So the module is built on what is already there, and all that was actually missing is this
+-- column — demanded by the TYPE SYSTEM the moment 'bgs' joined LeaderboardKey, because the privacy
+-- page maps Record<LeaderboardKey, keyof PrivacySettings> and stopped compiling.
+ALTER TABLE "privacy_settings" ADD COLUMN IF NOT EXISTS "show_lb_bgs" BOOLEAN NOT NULL DEFAULT true;

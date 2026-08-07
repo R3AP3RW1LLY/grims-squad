@@ -11,8 +11,23 @@ import { User, type CurrentUser } from '../auth/current-user.js';
 import { PermissionService } from '../authz/permission.service.js';
 import { MARKET_STORE } from './logistics.tokens.js';
 import type { Coords, MarketStore, PlaceQuery } from './market.store.js';
-import { planRoutes, TIME_MODEL, type RouteSort } from './routes.service.js';
+import { planRoutes, TIME_MODEL, type RouteSort, type Route } from './routes.service.js';
+import { pairCircuits } from './round-trip.js';
 import { CommanderPositionService, positionAge } from './commander-position.service.js';
+
+/**
+ * How wide the circuit search casts.
+ *
+ * ★ EVERY DESTINATION COSTS A FULL ROUTE SEARCH ★
+ *
+ * `planRoutes` queries per commodity, so exploring returns from six destinations is six times the
+ * work of a one-way plan. These three numbers are the whole cost model, kept together so the
+ * trade-off is visible in one place rather than buried at three call sites.
+ */
+const ROUTE_CANDIDATES = 12;
+const RETURN_SEARCHES = 5;
+const CIRCUIT_LIMIT = 12;
+
 
 /**
  * The commodities market.
@@ -54,6 +69,16 @@ function feedBanner(health: { newestAt: Date | null; hoursBehind: number; stale:
         : `Newest price is ${Math.floor(h / 24)} day${Math.floor(h / 24) === 1 ? '' : 's'} old — the market feed has stopped.`;
 
   return { stale: health.stale, text, newestAt: health.newestAt };
+}
+
+/**
+ * The smallest pad a member's ship can use, off the wire.
+ *
+ * Re-read rather than trusted, and anything unrecognised is NO filter rather than a guess: a
+ * mistyped value quietly excluding half the galaxy would look like the market having no routes.
+ */
+function readPad(raw: string | undefined): 'small' | 'medium' | 'large' | undefined {
+  return raw === 'small' || raw === 'medium' || raw === 'large' ? raw : undefined;
 }
 
 @Controller('v1/logistics')
@@ -200,6 +225,7 @@ export class MarketController {
     @Query('withinLy') withinLy?: string,
     @Query('carriers') carriers?: string,
     @Query('largePad') largePad?: string,
+    @Query('padSize') padSize?: string,
     @Query('minQty') minQty?: string,
     @Query('freshDays') freshDays?: string,
     @Query('hours') hours?: string,
@@ -231,6 +257,7 @@ export class MarketController {
       // and the dearest prices in the galaxy and can be somewhere else tomorrow.
       excludeCarriers: carriers !== '1',
       largePadOnly: largePad === '1',
+      ...(readPad(padSize) === undefined ? {} : { minPad: readPad(padSize) }),
       minQuantity: numberOr(minQty, 0),
       seenSince: daysAgo(numberOr(freshDays, 0)),
       near: origin?.coords ?? null,
@@ -256,7 +283,17 @@ export class MarketController {
       origin:
         origin === null
           ? null
-          : { system: origin.system, station: origin.station, from: origin.from },
+          : {
+              system: origin.system,
+              station: origin.station,
+              from: origin.from,
+              /*
+               * The coordinates too, so the page can route a basket of picked runs in the browser.
+               * The manifest planner is pure and the client already holds every leg — a round trip
+               * to reorder three stops would be latency buying nothing.
+               */
+              coords: origin.coords,
+            },
       /*
        * ★ SAID OUT LOUD, BECAUSE THE SILENT VERSION WAS DANGEROUS ★
        *
@@ -300,6 +337,7 @@ export class MarketController {
     @Query('sellWithinLy') sellWithinLy?: string,
     @Query('budget') budget?: string,
     @Query('largePad') largePad?: string,
+    @Query('padSize') padSize?: string,
     @Query('carriers') carriers?: string,
     @Query('freshDays') freshDays?: string,
     @Query('commodity') commodity?: string,
@@ -344,6 +382,7 @@ export class MarketController {
       sellWithinLy: clamp(numberOr(sellWithinLy, 100), 1, 500),
       budget: budget === undefined || budget.trim() === '' ? null : Math.max(0, numberOr(budget, 0)),
       largePadOnly: largePad === '1',
+      ...(readPad(padSize) === undefined ? {} : { minPad: readPad(padSize) }),
       includeCarriers: carriers === '1',
       /*
        * ★ SEVEN DAYS, NOT "ANY AGE" — MEASURED 2026-08-04 ★
@@ -374,11 +413,164 @@ export class MarketController {
         system: origin.system,
         station: origin.station,
         from: origin.from,
+        /*
+         * ★ THE COORDINATES, WITHOUT WHICH THE BASKET CANNOT ROUTE — FOUND 2026-08-06 ★
+         *
+         * `RoutePlan.origin.coords` was declared on the client and never sent by this endpoint. The
+         * multi-route manifest plans a shortest path FROM the member, so with no origin it silently
+         * fell back to grouping stops by system — and the page dutifully printed "grouped, not
+         * routed" for everybody, for every basket, with nothing to explain why.
+         *
+         * The owner asked for "the optimised order" and then for "true routing between pickups".
+         * This one field is what makes both real rather than a label.
+         */
+        coords: origin.coords,
         // Undefined for a typed origin. The page prints the age only when there is one to print.
         ...(origin.age === undefined ? {} : { age: origin.age, stale: origin.stale === true }),
       },
       unknownSystem: null,
       // The page prints these beside every per-hour figure — an estimate with named assumptions.
+      timeModel: TIME_MODEL,
+    };
+  }
+
+  /**
+   * The Freight Office: plan a run out AND a way back.
+   *
+   * ★ SQUADRON OWNER, 2026-08-06 ★
+   *
+   * "we want to give the ability to create round trip hauling routes! plan this out, make this
+   * feature ritch!"
+   *
+   * ★ WHY THIS CANNOT BE DONE BY CALLING /routes TWICE ★
+   *
+   * Taking the best run out of home and then the best run out of wherever it lands is a greedy
+   * choice made blind — the outbound was picked without knowing what its destination offers on the
+   * way back. A slightly worse outbound ending somewhere with a rich return beats it, and no
+   * re-ranking of one-way routes can find that pair because it was never in either list.
+   *
+   * So the returns are planned FROM each candidate destination and the pair is scored together, on
+   * credits per hour of the complete circuit.
+   *
+   * ★ BOUNDED, AND HONEST ABOUT IT ★
+   *
+   * Each destination costs a full route search. `RETURN_SEARCHES` caps how many are explored, and
+   * the response says how many destinations were considered — a silently truncated search reads as
+   * "there is nothing better", which is a claim this endpoint has not earned.
+   */
+  @Public()
+  @Get('circuits')
+  async circuits(
+    @User() caller: CurrentUser | undefined,
+    @Query('near') near?: string,
+    @Query('cargo') cargo?: string,
+    @Query('buyWithinLy') buyWithinLy?: string,
+    @Query('sellWithinLy') sellWithinLy?: string,
+    @Query('homeWithinLy') homeWithinLy?: string,
+    @Query('budget') budget?: string,
+    @Query('largePad') largePad?: string,
+    @Query('padSize') padSize?: string,
+    @Query('carriers') carriers?: string,
+    @Query('freshDays') freshDays?: string,
+  ) {
+    await this.#assertMarket(caller);
+
+    const typed = near?.trim() ?? '';
+    const origin: Origin | null =
+      typed !== ''
+        ? await this.#typedOrigin(typed)
+        : await this.#whereTheyAre(caller?.userId ?? null);
+
+    if (origin === null) {
+      return {
+        circuits: [],
+        considered: [],
+        destinationsSearched: 0,
+        origin: null,
+        unknownSystem: typed === '' ? null : typed,
+        timeModel: TIME_MODEL,
+      };
+    }
+
+    const shared = {
+      cargo: clamp(numberOr(cargo, 64), 1, MAX_CARGO_TONNES),
+      buyWithinLy: clamp(numberOr(buyWithinLy, 50), 1, 500),
+      sellWithinLy: clamp(numberOr(sellWithinLy, 100), 1, 500),
+      budget: budget === undefined || budget.trim() === '' ? null : Math.max(0, numberOr(budget, 0)),
+      largePadOnly: largePad === '1',
+      ...(readPad(padSize) === undefined ? {} : { minPad: readPad(padSize) }),
+      includeCarriers: carriers === '1',
+      seenSince: daysAgo(numberOr(freshDays, 7)),
+      only: null,
+      // Ranked on the whole circuit afterwards, so the leg ordering here does not matter; 'trip'
+      // simply gives the richest legs to pair from.
+      sort: 'trip' as RouteSort,
+    };
+
+    const out = await planRoutes(
+      this.store,
+      { ...shared, origin: origin.coords, originName: origin.system },
+      ROUTE_CANDIDATES,
+    );
+
+    /*
+     * One search per DESTINATION, not per route. Several outbound runs commonly land in the same
+     * system, and searching it twice would spend the budget on a duplicate answer.
+     */
+    const seen = new Set<string>();
+    const destinations: Array<{ name: string; coords: Coords }> = [];
+    for (const r of out.routes) {
+      const key = r.sell.systemName.trim().toLowerCase();
+      if (seen.has(key) || r.sell.coords === null) continue;
+      seen.add(key);
+      destinations.push({ name: r.sell.systemName, coords: r.sell.coords });
+      if (destinations.length >= RETURN_SEARCHES) break;
+    }
+
+    const homeLimit = clamp(numberOr(homeWithinLy, 50), 0, 500);
+
+    const returns: Route[] = [];
+    for (const d of destinations) {
+      const plan = await planRoutes(
+        this.store,
+        {
+          ...shared,
+          origin: d.coords,
+          originName: d.name,
+          /*
+           * The pickup for the way home is AT the destination — the member is already docked there.
+           * A wide buy radius would plan a return that starts with a detour, which is not a return.
+           */
+          buyWithinLy: 1,
+          // Far enough to reach home, whatever the member set for the outbound.
+          sellWithinLy: Math.max(shared.sellWithinLy, homeLimit),
+        },
+        ROUTE_CANDIDATES,
+      );
+      returns.push(...plan.routes);
+    }
+
+    const circuits = pairCircuits(out.routes, returns, {
+      home: origin.system,
+      homeWithinLy: homeLimit,
+      homeCoords: origin.coords,
+    });
+
+    return {
+      circuits: circuits.slice(0, CIRCUIT_LIMIT),
+      considered: out.considered,
+      // Said out loud: the search was bounded, and a member reading a short list deserves to know
+      // it is a sample rather than the whole galaxy.
+      destinationsSearched: destinations.length,
+      origin: {
+        system: origin.system,
+        station: origin.station,
+        from: origin.from,
+        coords: origin.coords,
+        ...(origin.age === undefined ? {} : { age: origin.age, stale: origin.stale === true }),
+      },
+      unknownSystem: null,
+      feed: feedBanner(await this.store.feedHealth()),
       timeModel: TIME_MODEL,
     };
   }

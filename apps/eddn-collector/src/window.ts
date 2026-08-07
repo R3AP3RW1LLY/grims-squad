@@ -48,6 +48,27 @@ function readWindowMinutes(): number {
 }
 
 /** What happened during one window. */
+/** How many distinct offenders to name on the log line. Enough to act on, short enough to read. */
+const NAMED_UNKNOWNS = 3;
+
+/**
+ * The worst unnamed symbols, for the log line.
+ *
+ * Empty string when there is nothing to say, so the segment disappears rather than rendering an
+ * empty bracket.
+ */
+export function topUnknown(symbols: Map<string, number> | undefined): string {
+  if (symbols === undefined || symbols.size === 0) return '';
+
+  const worst = [...symbols.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, NAMED_UNKNOWNS)
+    .map(([symbol, n]) => `${symbol}×${n}`);
+
+  const more = symbols.size - worst.length;
+  return ` (${worst.join(', ')}${more > 0 ? `, +${more} more` : ''})`;
+}
+
 export interface WindowCounts {
   /** Market messages successfully written. */
   markets: number;
@@ -55,16 +76,39 @@ export interface WindowCounts {
   rows: number;
   /** Rows dropped and not put back — commodities stations have stopped trading. See `ApplyResult`. */
   removed: number;
-  /** Messages for stations we do not hold. Normal, and worth watching if it dominates. */
+  /**
+   * Market ids we held nothing for, which are CREATED rather than skipped. Normal, and worth
+   * watching only if it dominates — see the log wording, which used to say the opposite.
+   */
   unknownStations: number;
-  /** Commodity symbols we could not name. Should be zero except after a game update. */
+  /** Commodity LINES we could not name — not distinct commodities. See `unknownSymbols`. */
   unresolved: number;
+  /**
+   * The actual symbols behind `unresolved`, so the number is answerable.
+   *
+   * ★ THE ANSWER WAS ALWAYS IN MEMORY ★
+   *
+   * `CommodityNames.unknown` has collected these since the collector was written, and nothing ever
+   * read it — `refresh()` cleared the set hourly. Weeks of "42 unnamed commodities" with no way to
+   * learn which, until somebody sampled the live feed by hand.
+   *
+   * Bounded: EDDN is an untrusted feed and an unbounded key set is a slow leak.
+   */
+  unknownSymbols: Map<string, number>;
   /** Messages that failed to write. */
   failed: number;
 }
 
 export function emptyCounts(): WindowCounts {
-  return { markets: 0, rows: 0, removed: 0, unknownStations: 0, unresolved: 0, failed: 0 };
+  return {
+    markets: 0,
+    rows: 0,
+    removed: 0,
+    unknownStations: 0,
+    unresolved: 0,
+    unknownSymbols: new Map(),
+    failed: 0,
+  };
 }
 
 /**
@@ -193,8 +237,22 @@ export async function closeWindow(
     message:
       `${counts.markets.toLocaleString()} markets refreshed, ${counts.rows.toLocaleString()} prices` +
       `${counts.removed > 0 ? ` · ${counts.removed.toLocaleString()} stale rows dropped` : ''}` +
-      `${counts.unknownStations > 0 ? ` · ${counts.unknownStations.toLocaleString()} stations we do not hold` : ''}` +
-      `${counts.unresolved > 0 ? ` · ${counts.unresolved.toLocaleString()} unnamed commodities` : ''}` +
+      /*
+       * ★ WORDING, NOT BEHAVIOUR — SQUADRON OWNER, 2026-08-06 ★
+       *
+       * This read "N stations we do not hold", and the owner reasonably took it as prices being
+       * thrown away. They are not: since the provisional-station work, an unknown market id is
+       * CREATED and its prices written under it — 1,577 such stations currently hold 245,903 rows.
+       * The counter survived the change and its wording did not, so a success has been reporting
+       * itself as a loss every fifteen minutes.
+       */
+      `${counts.unknownStations > 0 ? ` · ${counts.unknownStations.toLocaleString()} new station${counts.unknownStations === 1 ? '' : 's'} written live` : ''}` +
+      /*
+       * Lines, not distinct commodities — and now it says so, with the worst offenders named.
+       * The collector held the symbols in memory and cleared them hourly without ever reporting
+       * one, which is why "which ones?" had no answer until somebody sampled the live feed.
+       */
+      `${counts.unresolved > 0 ? ` · ${counts.unresolved.toLocaleString()} unnamed price${counts.unresolved === 1 ? '' : 's'}${topUnknown(counts.unknownSymbols)}` : ''}` +
       `${counts.failed > 0 ? ` · ${counts.failed.toLocaleString()} failed` : ''}`,
     tookMs,
   });

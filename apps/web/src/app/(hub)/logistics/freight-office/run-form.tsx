@@ -122,6 +122,23 @@ export function RunForm({
           </datalist>
         </label>
 
+        {/*
+          ★ SQUADRON OWNER, 2026-08-06 ★
+
+          "we want to give the ability to create round trip hauling routes!"
+
+          A shape of trip, not a filter — which is why it sits first, next to the hull. Everything
+          to the right of it means the same thing in both modes, so switching does not invalidate
+          what the member has already typed.
+        */}
+        <label className="flex flex-col gap-1">
+          <span className={LABEL}>Trip</span>
+          <select name="trip" defaultValue={val('trip', 'one-way')} className={FIELD}>
+            <option value="one-way">One way</option>
+            <option value="round">Round trip</option>
+          </select>
+        </label>
+
         <label className="flex flex-col gap-1">
           <span className={LABEL}>Go to load</span>
           <select name="buyWithinLy" defaultValue={val('buyWithinLy', '50')} className={FIELD}>
@@ -139,6 +156,22 @@ export function RunForm({
             {['20', '50', '100', '200', '500'].map((ly) => (
               <option key={ly} value={ly}>
                 {ly} ly
+              </option>
+            ))}
+          </select>
+        </label>
+
+        {/*
+          Only meaningful on a round trip, and shown always rather than toggled: a field that
+          appears and disappears as you change a dropdown is how a form loses what somebody typed.
+          Ignored outright by the one-way planner.
+        */}
+        <label className="flex flex-col gap-1">
+          <span className={LABEL}>Finish within</span>
+          <select name="homeWithinLy" defaultValue={val('homeWithinLy', '50')} className={FIELD}>
+            {['0', '20', '50', '100', '200'].map((ly) => (
+              <option key={ly} value={ly}>
+                {ly === '0' ? 'exactly home' : `${ly} ly of home`}
               </option>
             ))}
           </select>
@@ -193,14 +226,24 @@ export function RunForm({
           </select>
         </label>
 
-        <label className="flex items-center gap-2 pb-2 text-sm text-[var(--color-text-secondary)]">
-          <input
-            type="checkbox"
-            name="largePad"
-            value="1"
-            defaultChecked={query['largePad'] === '1'}
-          />
-          Large pad only
+        <label className="flex flex-col gap-1">
+          {/*
+            ★ SQUADRON OWNER, 2026-08-06: "add one that filters for pad size" ★
+
+            This was a "Large pad only" checkbox, which can ask exactly one question: does a LARGE
+            ship fit. Across the stations we hold, 43% have a large pad, 54% have a medium one and
+            no large, and 1.2% are small-only.
+
+            So a Python pilot had to choose between ticking it — discarding fifty-four per cent of
+            the galaxy for no reason — and leaving it off, which offers them outposts they cannot
+            land at. Neither answers the question they actually have.
+          */}
+          <span className={LABEL}>My ship needs</span>
+          <select name="padSize" defaultValue={val('padSize', '')} className={FIELD}>
+            <option value="">Any pad</option>
+            <option value="medium">Medium pad or better</option>
+            <option value="large">Large pad</option>
+          </select>
         </label>
 
         <label className="flex items-center gap-2 pb-2 text-sm text-[var(--color-text-secondary)]">

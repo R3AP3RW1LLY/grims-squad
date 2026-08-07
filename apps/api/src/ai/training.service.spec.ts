@@ -1,3 +1,4 @@
+import { EMBEDDED_SOURCES, STORAGE_KIND } from '@grims/shared';
 import { describe, it, expect } from 'vitest';
 import type { PrismaClient } from '@grims/db';
 import { KNOWLEDGE_SOURCES, REFRESH_HOURS } from '@grims/shared';
@@ -210,5 +211,44 @@ describe('an error never arrives unbounded', () => {
     const galaxy = (await svc.status(NOW)).find((r) => r.source === 'galaxy');
 
     expect(galaxy?.lastError?.length).toBe(300);
+  });
+});
+
+/**
+ * A backlog that can never drain is not a backlog.
+ *
+ * ★ SQUADRON OWNER, 2026-08-06 ★
+ *
+ * "we need to start making sure that our embedding is done before the job ends so our data is as
+ * current as possible please!"
+ *
+ * ★ THE JOB WAS NEVER BEHIND ★
+ *
+ * The training page showed "Live markets — 79,109 awaiting embedding", and it never went down,
+ * because `eddn` is a LOOKUP source: market prices are found by exact query, never by similarity.
+ * `EMBEDDED_SOURCES` excludes it and no sweep is scheduled, so those rows are not waiting for
+ * anything. All 83,542 of them will still be "awaiting" next year.
+ *
+ * The rule was already written down here — "Zero for a source that is never embedded" — and the
+ * code did not implement it, so the page invited the owner to fix a job that was working. The real
+ * backlog is the embedded sources, and that one does drain.
+ */
+describe('what counts as awaiting embedding', () => {
+  it('MANDATORY: a lookup-only source is never reported as waiting', () => {
+    /*
+     * `eddn` holds the most rows of anything on the platform, so counting it makes the number
+     * meaningless AND alarming — the two worst properties a status figure can have.
+     */
+    expect(EMBEDDED_SOURCES).not.toContain('eddn');
+    expect(STORAGE_KIND['eddn']).toBe('lookup');
+  });
+
+  it('MANDATORY: sources that ARE embedded still report their backlog', () => {
+    // The number has to keep working where it means something, or this fix trades one lie for another.
+    for (const source of EMBEDDED_SOURCES) {
+      expect(STORAGE_KIND[source]).not.toBe('lookup');
+    }
+    expect(EMBEDDED_SOURCES).toContain('galaxy');
+    expect(EMBEDDED_SOURCES).toContain('journal');
   });
 });

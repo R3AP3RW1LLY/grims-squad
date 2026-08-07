@@ -1,3 +1,6 @@
+import { EMPTY_PROSPECTING } from './prospector.js';
+import { EMPTY_REFINING } from './refinery.js';
+import { EMPTY_BGS } from './bgs-session.js';
 import { describe, expect, it } from 'vitest';
 import { ACTIVITY_MAX, append, bytes, gameLine, linesFor, pairingLine } from './activity.js';
 import type { WatchOutcome } from './watcher.js';
@@ -17,6 +20,10 @@ const QUIET: WatchOutcome = {
   trip: { lots: {}, lastSale: null, since: 'start' },
   // And an empty carrier hold: the log has no carrier lines either.
   carrierHold: { carrier: null, hold: {}, dockedCarrierId: null, totalTonnes: null, totalAt: null },
+  prospecting: EMPTY_PROSPECTING,
+  refining: EMPTY_REFINING,
+  // No influence moved: the activity log has no BGS lines either.
+  bgs: EMPTY_BGS,
   gameRunning: false,
   filesRead: 0,
   newFilesRead: 0,

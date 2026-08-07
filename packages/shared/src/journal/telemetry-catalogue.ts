@@ -124,6 +124,31 @@ export const TELEMETRY_CATALOGUE: readonly CatalogueGroup[] = [
       { event: 'FSDJump', label: 'Hyperspace jumps', reveals: 'Each system you jump to, how far it was, and the fuel it cost.' },
       { event: 'Location', label: 'Current system', reveals: 'The system you are in, and whether you are docked.' },
       { event: 'Docked', label: 'Docking', reveals: 'The station you docked at and the faction that runs it.' },
+      /*
+       * ★ ADDED 2026-08-06, SO THE DASHBOARD CAN SAY WHERE YOU ARE ★
+       *
+       * The three events that make "where in the system" answerable. Without them the dashboard
+       * could only say a system name, and a station name for as long as you stayed docked — so a
+       * member flying around a planet showed as still docked at wherever they last were.
+       *
+       * Written the same way as the rest: what the event REVEALS, in the member's terms, because
+       * this catalogue is the page where they decide whether to send it.
+       */
+      {
+        event: 'SupercruiseExit',
+        label: 'Arriving at a body',
+        reveals: 'The planet, moon or star you drop out of supercruise at.',
+      },
+      {
+        event: 'ApproachSettlement',
+        label: 'Approaching a settlement',
+        reveals: 'The name of a surface settlement you fly up to, and the body it sits on.',
+      },
+      {
+        event: 'Undocked',
+        label: 'Leaving a station',
+        reveals: 'That you have left a station — which is how your location stops showing you docked there.',
+      },
     ],
   },
   {
@@ -158,8 +183,20 @@ export const TELEMETRY_CATALOGUE: readonly CatalogueGroup[] = [
          * "the station's prices" without "shared with everyone" would be true
          * and still misleading.
          */
+        /*
+         * ★ THE FILE IS NAMED, AS OF 2026-08-06 ★
+         *
+         * This already promised the prices were shared, and for the whole life of the feature they
+         * were not: Frontier's journal event carries no prices at all, and the app was reading only
+         * the journal. Production had 1,092 of these events, zero market rows and zero data
+         * bounties paid.
+         *
+         * The app now reads `Market.json` — the file the game writes the price list into — when one
+         * of these events fires. Saying so is the point: a member deciding whether to leave this on
+         * should be told which file it reads, not only what the result is used for.
+         */
         reveals:
-          'Which station you opened the commodity market at. The prices on that screen are shared with the squadron so route-finding works from what someone actually saw rather than from last night — your name is not attached to them.',
+          'Which station you opened the commodity market at, and the prices on that screen — read from the game’s own Market.json the moment you open it. They are shared with the squadron so route-finding works from what someone actually saw rather than from last night; your name is not attached to them.',
       },
       { event: 'MarketBuy', label: 'Cargo bought', reveals: 'The commodity, the quantity and the station.' },
       { event: 'MarketSell', label: 'Cargo sold', reveals: 'The commodity, the quantity, the station and the price.' },
@@ -256,6 +293,48 @@ export const TELEMETRY_CATALOGUE: readonly CatalogueGroup[] = [
         event: 'ColonisationContribution',
         label: 'What you delivered',
         reveals: 'The cargo you hand over to a construction site, and which site it was.',
+      },
+    ],
+  },
+  {
+    /*
+     * ★ MINING — SQUADRON OWNER, 2026-08-06 ★
+     *
+     * "our own version of EDminer ... must meet / exceed ED tools as it works currently!"
+     *
+     * ★ ITS OWN GROUP, AND THE HONEST REASON IS VOLUME ★
+     *
+     * MiningRefined already sits under Trading, and the tempting thing was to put the rest there
+     * too. It would have been wrong. A prospected rock is reported for EVERY limpet — several
+     * hundred an hour while somebody is mining, against roughly twenty refined tonnes.
+     *
+     * A member happy for us to see what they hauled has not thereby agreed to send a row for every
+     * rock they shoot at, and burying that inside an existing switch would make the switch mean
+     * something other than what it says. So it is its own, and the purpose line below says plainly
+     * what it buys them: the ring intelligence is the whole reason to leave it on.
+     */
+    category: 'mining',
+    label: 'Mining',
+    purpose:
+      'Every rock you prospect, so the app can show what is in it before you shoot — and so the squadron can tell which rings are actually paying this week, which no single-player tool can do.',
+    required: false,
+    entries: [
+      {
+        event: 'ProspectedAsteroid',
+        label: 'Rocks you prospect',
+        reveals:
+          'What each asteroid contains and in what proportions, whether it holds a motherlode, and the ring it was in. This is the busiest thing the app sends — one report per limpet.',
+      },
+      {
+        event: 'AsteroidCracked',
+        label: 'Cores you crack',
+        reveals: 'That you cracked a core, and where. Counts toward the Deep Core board’s achievements.',
+      },
+      {
+        event: 'LaunchDrone',
+        label: 'Limpets you launch',
+        reveals:
+          'Which kind of limpet you launched — so the app can tell you how many prospectors you have left before you run out mid-ring.',
       },
     ],
   },

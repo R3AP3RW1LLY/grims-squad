@@ -62,6 +62,38 @@
     "./tenure": {
       "types": "./dist/tenure.d.ts",
       "default": "./dist/tenure.js"
+    },
+    "./manifest": {
+      "types": "./dist/manifest.d.ts",
+      "default": "./dist/manifest.js"
+    },
+    "./market-depth": {
+      "types": "./dist/market-depth.d.ts",
+      "default": "./dist/market-depth.js"
+    },
+    "./body-order": {
+      "types": "./dist/body-order.d.ts",
+      "default": "./dist/body-order.js"
+    },
+    "./colony-plan-check": {
+      "types": "./dist/colony-plan-check.d.ts",
+      "default": "./dist/colony-plan-check.js"
+    },
+    "./colony-scout": {
+      "types": "./dist/colony-scout.d.ts",
+      "default": "./dist/colony-scout.js"
+    },
+    "./colony-badge": {
+      "types": "./dist/colony-badge.d.ts",
+      "default": "./dist/colony-badge.js"
+    },
+    "./mining": {
+      "types": "./dist/mining.d.ts",
+      "default": "./dist/mining.js"
+    },
+    "./bgs": {
+      "types": "./dist/bgs.d.ts",
+      "default": "./dist/bgs.js"
     }
   },
   "scripts": {

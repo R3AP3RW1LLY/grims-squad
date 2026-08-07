@@ -20,6 +20,8 @@ import { Permission, hasAnyPermission, type PermissionMask } from '@grims/shared
 export interface NavItem {
   readonly href: string;
   readonly label: string;
+  /** A count worth showing beside the entry. Absent when there is nothing to say. */
+  readonly badge?: number;
   /** Groups items under a heading in the sidebar. */
   /*
    * ★ 'ai' ADDED 2026-08-01, ON THE OWNER'S INSTRUCTION ★
@@ -63,7 +65,7 @@ interface NavDefinition extends NavItem {
  * were rebuilt.
  */
 const NAV: readonly NavDefinition[] = [
-  // ---- squadron ------------------------------------------------------------
+// ---- squadron ------------------------------------------------------------
   {
     href: '/dashboard',
     label: 'Dashboard',
@@ -72,28 +74,199 @@ const NAV: readonly NavDefinition[] = [
     requires: null,
   },
   {
-    href: '/forum',
-    label: 'Forum',
+    href: '/fleet',
+    label: 'Fleet',
     section: 'squadron',
-    blurb: 'The boards. Where the squadron talks when it is not in Discord.',
-    /*
-     * FORUM_VIEW_MEMBER, not null.
-     *
-     * Squadron owner, 2026-07-29: "all forum users must be in our discord." The
-     * nav entry follows the same rule as the content — somebody who cannot see a
-     * single category should not be shown a door that opens onto nothing.
-     *
-     * Per-category `viewPerm` still governs what is behind it, so a future
-     * public-readable category is a data change rather than a code one.
-     */
-    requires: Permission.FORUM_VIEW_MEMBER,
+    blurb: 'Ships, builds, and what the doctrine asks for.',
+    requires: Permission.FLEET_VIEW,
   },
   {
-    href: '/roster',
-    label: 'Roster',
+    /*
+     * ★ SQUADRON OWNER, 2026-08-04 ★
+     *
+     * "create a new page under squadrons called Data bounty's and create a list of all stations
+     * and systems we need to dock at to shore up market data ... turn this into our first offical
+     * Data Runner Leaderboard please!"
+     *
+     * Gated on TRADE_QUERY like the market pages it feeds: the board is market metadata, and one
+     * mask governing both means taking the market away takes the bounty hunt with it.
+     */
+    /*
+     * ★ ANSWER THE CALL — SQUADRON OWNER, 2026-08-04 ★
+     *
+     * "Put the data bounties nav link under a new category called Answer the Call please ...
+     * it should be placed under the Colonization category." A group appears where its first
+     * member appears, so this entry sitting after the Colonisation block IS the placement.
+     * One entry today; the category exists because more calls to answer are coming.
+     */
+    href: '/bounties',
+    label: 'Data Bounties',
     section: 'squadron',
-    blurb: 'Who flies with the squadron.',
-    requires: null,
+    subsection: 'Answer the Call',
+    blurb: 'Stations whose market data has gone dark. Dock, open the market, collect the points.',
+    requires: Permission.TRADE_QUERY,
+  },
+  {
+    /*
+     * Mining sits under "Answer the Call" beside Data Bounties because it asks the same thing of a
+     * member: go somewhere and come back with something the squadron did not have. The rings page
+     * is built entirely from members' own prospector limpets — it is worth nothing until people fly
+     * it, and worth more than any single-player tool once they do.
+     */
+    href: '/mining',
+    label: 'Mining',
+    section: 'squadron',
+    subsection: 'Answer the Call',
+    blurb: 'Which rings the squadron has actually been finding worth mining, this fortnight.',
+    // Its own bit since 2026-08-06. It rode on TRADE_QUERY for a day, which meant taking the
+    // market away from somebody took mining with it.
+    requires: Permission.MINING_VIEW,
+  },
+  /*
+   * Colonisation, under the same subcategory. Gated on COLONY_VIEW, which guests do NOT hold —
+   * unlike the two above. Squadron owner, 2026-08-02: "Squadron projects members-only, personal
+   * projects publishable by choice", and a project board says who is building what and where.
+   *
+   * A published personal project is reachable without a session, but on a TOKEN rather than through
+   * this entry — the same shape as a shared ship build.
+   */
+  /*
+   * ★ ITS OWN GROUP, NOT A LINE UNDER LOGISTICS — SQUADRON OWNER, 2026-08-02 ★
+   *
+   * "remove colonization from the Logistics and Trade subcategory and create a colonization category
+   * that matches up with the companion app please!"
+   *
+   * The companion app's sidebar has a collapsible Colonisation group with exactly these three
+   * destinations, in exactly this order — New project first, then squadron above members. A member
+   * who learns one of the two apps should not have to learn the other, and a subsection exists here
+   * purely because several entries share a `subsection` string, so this is the whole mechanism.
+   *
+   * Definition order is sidebar order, and a group renders where its first member appears — so
+   * these three sitting together, after the Logistics & Trade entries, is what puts the group in
+   * the right place.
+   */
+  /*
+   * ★ THE CATALOGUE COMES FIRST — SQUADRON OWNER, 2026-08-03 ★
+   *
+   * "move the build types link in the navbar to be above New Project."
+   *
+   * Which is the right order for how the feature is actually used: you look up what a build costs
+   * BEFORE you commit to posting one, and a member who has never done this needs the reference more
+   * than they need the form.
+   */
+  /*
+   * ★ PLANNING — SQUADRON OWNER, 2026-08-03 ★
+   *
+   * "add a new page to colonization called Planning."
+   *
+   * First in the group, because it is where a system starts: you lay one out before you fly there
+   * to post the first construction site, and the two boards below are what that plan becomes.
+   */
+  /*
+   * ★ SCOUT — SQUADRON OWNER, 2026-08-07 ★
+   *
+   * "can we build a tool ... that literally does what we just did here for this planning and
+   * research and system selection?"
+   *
+   * Above Planning because it is the step BEFORE it: planning lays out a system already chosen,
+   * scouting is the choosing.
+   */
+  {
+    href: '/colonisation/scout',
+    label: 'Scout',
+    section: 'squadron',
+    subsection: 'Colonisation',
+    blurb: 'Find the next system worth claiming, and where its permit is bought.',
+    requires: Permission.COLONY_VIEW,
+  },
+  {
+    href: '/colonisation/planning',
+    label: 'Planning',
+    section: 'squadron',
+    subsection: 'Colonisation',
+    blurb: 'Lay out a whole system before you build any of it.',
+    requires: Permission.COLONY_VIEW,
+  },
+  {
+    href: '/colonisation/build-types',
+    label: 'Build types',
+    section: 'squadron',
+    subsection: 'Colonisation',
+    blurb: 'What every kind of construction site costs to build.',
+    requires: Permission.COLONY_VIEW,
+  },
+  {
+    href: '/colonisation/new',
+    // "Start New Project", not "New project": a verb says it is something you DO, where a noun
+    // reads as a place that lists them.
+    label: 'Start New Project',
+    section: 'squadron',
+    subsection: 'Colonisation',
+    blurb: 'Post a construction site so the squadron can help build it.',
+    requires: Permission.COLONY_VIEW,
+  },
+  {
+    href: '/colonisation/squadron',
+    label: 'Squadron projects',
+    section: 'squadron',
+    subsection: 'Colonisation',
+    blurb: 'What the squadron is building, and what it still needs hauled.',
+    requires: Permission.COLONY_VIEW,
+  },
+  {
+    href: '/colonisation/members',
+    label: 'Members’ projects',
+    section: 'squadron',
+    subsection: 'Colonisation',
+    blurb: 'Builds members have asked the squadron for help with.',
+    requires: Permission.COLONY_VIEW,
+  },
+  /*
+   * ★ LOGISTICS & TRADE — SQUADRON OWNER, 2026-08-02 ★
+   *
+   * "create another subcategory under Squadron called Logistics & Trade please. the first thing i
+   * want to build is a realt time commodities market ... this market will also be the basis for our
+   * version of a trade route planner ... put that under the new subcategory too."
+   *
+   * The planner's name is the owner's pick from a shortlist: the Freight Office. It reads as a
+   * PLACE you go to get hauling work, which is the same shape as Shipyard → Outfitter above.
+   *
+   * Both are gated on TRADE_QUERY, which guests now hold — "this will also be available to the
+   * public for use". Sitting under `squadron` is not a contradiction: the section is where the
+   * pages LIVE in the sidebar, and the permission is what decides who may open them. The Outfitter
+   * has been exactly this since 2026-08-01.
+   */
+  {
+    href: '/logistics/commodities',
+    label: 'Commodities',
+    section: 'squadron',
+    subsection: 'Logistics & Trade',
+    blurb: 'What every commodity is worth, where to buy it, and which way the price is moving.',
+    requires: Permission.TRADE_QUERY,
+  },
+  {
+    href: '/logistics/freight-office',
+    label: 'Freight Office',
+    section: 'squadron',
+    subsection: 'Logistics & Trade',
+    blurb: 'Plan a run: pick the cargo, the hull and the range, and get the route.',
+    requires: Permission.TRADE_QUERY,
+  },
+  {
+    href: '/ops',
+    label: 'Operations',
+    section: 'squadron',
+    subsection: 'Command',
+    blurb: 'Wings forming up, and what they need.',
+    requires: Permission.OPS_VIEW,
+  },
+  {
+    href: '/bgs',
+    label: 'BGS',
+    section: 'squadron',
+    subsection: 'Command',
+    blurb: 'The faction, its systems, and this week’s orders.',
+    requires: Permission.BGS_VIEW,
   },
   /*
    * ★ THE SHIPYARD — SQUADRON OWNER, 2026-08-01 ★
@@ -138,145 +311,6 @@ const NAV: readonly NavDefinition[] = [
     requires: Permission.SHIPYARD_VIEW,
   },
   /*
-   * ★ LOGISTICS & TRADE — SQUADRON OWNER, 2026-08-02 ★
-   *
-   * "create another subcategory under Squadron called Logistics & Trade please. the first thing i
-   * want to build is a realt time commodities market ... this market will also be the basis for our
-   * version of a trade route planner ... put that under the new subcategory too."
-   *
-   * The planner's name is the owner's pick from a shortlist: the Freight Office. It reads as a
-   * PLACE you go to get hauling work, which is the same shape as Shipyard → Outfitter above.
-   *
-   * Both are gated on TRADE_QUERY, which guests now hold — "this will also be available to the
-   * public for use". Sitting under `squadron` is not a contradiction: the section is where the
-   * pages LIVE in the sidebar, and the permission is what decides who may open them. The Outfitter
-   * has been exactly this since 2026-08-01.
-   */
-  {
-    href: '/logistics/commodities',
-    label: 'Commodities',
-    section: 'squadron',
-    subsection: 'Logistics & Trade',
-    blurb: 'What every commodity is worth, where to buy it, and which way the price is moving.',
-    requires: Permission.TRADE_QUERY,
-  },
-  {
-    href: '/logistics/freight-office',
-    label: 'Freight Office',
-    section: 'squadron',
-    subsection: 'Logistics & Trade',
-    blurb: 'Plan a run: pick the cargo, the hull and the range, and get the route.',
-    requires: Permission.TRADE_QUERY,
-  },
-  /*
-   * Colonisation, under the same subcategory. Gated on COLONY_VIEW, which guests do NOT hold —
-   * unlike the two above. Squadron owner, 2026-08-02: "Squadron projects members-only, personal
-   * projects publishable by choice", and a project board says who is building what and where.
-   *
-   * A published personal project is reachable without a session, but on a TOKEN rather than through
-   * this entry — the same shape as a shared ship build.
-   */
-  /*
-   * ★ ITS OWN GROUP, NOT A LINE UNDER LOGISTICS — SQUADRON OWNER, 2026-08-02 ★
-   *
-   * "remove colonization from the Logistics and Trade subcategory and create a colonization category
-   * that matches up with the companion app please!"
-   *
-   * The companion app's sidebar has a collapsible Colonisation group with exactly these three
-   * destinations, in exactly this order — New project first, then squadron above members. A member
-   * who learns one of the two apps should not have to learn the other, and a subsection exists here
-   * purely because several entries share a `subsection` string, so this is the whole mechanism.
-   *
-   * Definition order is sidebar order, and a group renders where its first member appears — so
-   * these three sitting together, after the Logistics & Trade entries, is what puts the group in
-   * the right place.
-   */
-  /*
-   * ★ THE CATALOGUE COMES FIRST — SQUADRON OWNER, 2026-08-03 ★
-   *
-   * "move the build types link in the navbar to be above New Project."
-   *
-   * Which is the right order for how the feature is actually used: you look up what a build costs
-   * BEFORE you commit to posting one, and a member who has never done this needs the reference more
-   * than they need the form.
-   */
-  /*
-   * ★ PLANNING — SQUADRON OWNER, 2026-08-03 ★
-   *
-   * "add a new page to colonization called Planning."
-   *
-   * First in the group, because it is where a system starts: you lay one out before you fly there
-   * to post the first construction site, and the two boards below are what that plan becomes.
-   */
-  {
-    href: '/colonisation/planning',
-    label: 'Planning',
-    section: 'squadron',
-    subsection: 'Colonisation',
-    blurb: 'Lay out a whole system before you build any of it.',
-    requires: Permission.COLONY_VIEW,
-  },
-  {
-    href: '/colonisation/build-types',
-    label: 'Build types',
-    section: 'squadron',
-    subsection: 'Colonisation',
-    blurb: 'What every kind of construction site costs to build.',
-    requires: Permission.COLONY_VIEW,
-  },
-  {
-    href: '/colonisation/new',
-    // "Start New Project", not "New project": a verb says it is something you DO, where a noun
-    // reads as a place that lists them.
-    label: 'Start New Project',
-    section: 'squadron',
-    subsection: 'Colonisation',
-    blurb: 'Post a construction site so the squadron can help build it.',
-    requires: Permission.COLONY_VIEW,
-  },
-  {
-    href: '/colonisation/squadron',
-    label: 'Squadron projects',
-    section: 'squadron',
-    subsection: 'Colonisation',
-    blurb: 'What the squadron is building, and what it still needs hauled.',
-    requires: Permission.COLONY_VIEW,
-  },
-  {
-    href: '/colonisation/members',
-    label: 'Members’ projects',
-    section: 'squadron',
-    subsection: 'Colonisation',
-    blurb: 'Builds members have asked the squadron for help with.',
-    requires: Permission.COLONY_VIEW,
-  },
-  {
-    /*
-     * ★ SQUADRON OWNER, 2026-08-04 ★
-     *
-     * "create a new page under squadrons called Data bounty's and create a list of all stations
-     * and systems we need to dock at to shore up market data ... turn this into our first offical
-     * Data Runner Leaderboard please!"
-     *
-     * Gated on TRADE_QUERY like the market pages it feeds: the board is market metadata, and one
-     * mask governing both means taking the market away takes the bounty hunt with it.
-     */
-    /*
-     * ★ ANSWER THE CALL — SQUADRON OWNER, 2026-08-04 ★
-     *
-     * "Put the data bounties nav link under a new category called Answer the Call please ...
-     * it should be placed under the Colonization category." A group appears where its first
-     * member appears, so this entry sitting after the Colonisation block IS the placement.
-     * One entry today; the category exists because more calls to answer are coming.
-     */
-    href: '/bounties',
-    label: 'Data Bounties',
-    section: 'squadron',
-    subsection: 'Answer the Call',
-    blurb: 'Stations whose market data has gone dark. Dock, open the market, collect the points.',
-    requires: Permission.TRADE_QUERY,
-  },
-  /*
    * ★ LEADERBOARDS — SQUADRON OWNER, 2026-08-04 ★
    *
    * "make a new category called leaderboards ... gamify the colonization leaderboard, make badges
@@ -319,25 +353,52 @@ const NAV: readonly NavDefinition[] = [
     requires: Permission.TRADE_QUERY,
   },
   {
-    href: '/ops',
-    label: 'Operations',
+    href: '/leaderboards/mining',
+    label: 'Deep Core',
     section: 'squadron',
-    blurb: 'Wings forming up, and what they need.',
-    requires: Permission.OPS_VIEW,
+    subsection: 'Leaderboards',
+    blurb: 'Who has refined the most — scored on what came out of the refinery, not what it sold for.',
+    requires: Permission.MINING_VIEW,
   },
   {
-    href: '/bgs',
-    label: 'BGS',
+    href: '/leaderboards/recruit',
+    label: 'The Welcome',
     section: 'squadron',
-    blurb: 'The faction, its systems, and this week’s orders.',
+    subsection: 'Leaderboards',
+    blurb: 'Who brought people in — and whose recruits are still flying with us.',
+    requires: Permission.RECRUIT_VIEW,
+  },
+  {
+    href: '/leaderboards/bgs',
+    label: 'Faction Hands',
+    section: 'squadron',
+    subsection: 'Leaderboards',
+    blurb: 'Who has moved influence where the orders asked — and only where the orders asked.',
     requires: Permission.BGS_VIEW,
   },
   {
-    href: '/fleet',
-    label: 'Fleet',
+    href: '/forum',
+    label: 'Forum',
     section: 'squadron',
-    blurb: 'Ships, builds, and what the doctrine asks for.',
-    requires: Permission.FLEET_VIEW,
+    blurb: 'The boards. Where the squadron talks when it is not in Discord.',
+    /*
+     * FORUM_VIEW_MEMBER, not null.
+     *
+     * Squadron owner, 2026-07-29: "all forum users must be in our discord." The
+     * nav entry follows the same rule as the content — somebody who cannot see a
+     * single category should not be shown a door that opens onto nothing.
+     *
+     * Per-category `viewPerm` still governs what is behind it, so a future
+     * public-readable category is a data change rather than a code one.
+     */
+    requires: Permission.FORUM_VIEW_MEMBER,
+  },
+  {
+    href: '/roster',
+    label: 'Roster',
+    section: 'squadron',
+    blurb: 'Who flies with the squadron.',
+    requires: null,
   },
   /*
    * ★ THE CHANGELOG — EVERY MEMBER, NO GATE ★
@@ -372,6 +433,7 @@ const NAV: readonly NavDefinition[] = [
     href: '/roadmap',
     label: 'Roadmap',
     section: 'squadron',
+    subsection: 'About',
     blurb: 'What is being built for the platform — from members’ ideas, through your votes, to shipped.',
     requires: null,
   },
@@ -379,6 +441,7 @@ const NAV: readonly NavDefinition[] = [
     href: '/changelog',
     label: 'Changelog',
     section: 'squadron',
+    subsection: 'About',
     blurb: 'What each deploy changed — on the website, in the companion app, and behind the scenes.',
     requires: null,
   },
@@ -565,13 +628,33 @@ const NAV: readonly NavDefinition[] = [
  * copied it, so no member would ever have seen the subcategory. `nav-shape.spec.ts` now fails if
  * any displayable field goes missing here.
  */
-export function navFor(mask: PermissionMask): NavItem[] {
+/**
+ * Counts to show beside sidebar entries, keyed by href.
+ *
+ * ★ SQUADRON OWNER, 2026-08-06 ★
+ *
+ * "we also need to add this notification/badge to the web site too" — the companion has carried
+ * these since colonisation shipped and the website never has.
+ *
+ * Passed in rather than computed here, because this function is pure and has no database. It is
+ * also what keeps the badge from becoming a side channel: the filter below runs FIRST, so a count
+ * for a page a member cannot reach is simply never rendered (INV-002).
+ */
+export type NavBadges = Readonly<Record<string, number>>;
+
+export function navFor(mask: PermissionMask, badges: NavBadges = {}): NavItem[] {
   return NAV.filter((item) => item.requires === null || hasAnyPermission(mask, item.requires)).map(
     ({ href, label, section, subsection, blurb }) => ({
       href,
       label,
       section,
       blurb,
+      /*
+       * Zero is deliberately NO badge rather than a "0". A grey nought beside every link is clutter
+       * that teaches members to stop reading the numbers at all, and "nothing to say" is what the
+       * sidebar should look like most of the time.
+       */
+      ...(typeof badges[href] === 'number' && badges[href] > 0 ? { badge: badges[href] } : {}),
       // Conditional, not `subsection: subsection` — `exactOptionalPropertyTypes` forbids assigning
       // undefined to an optional field, and an explicit `"subsection": undefined` in the JSON is a
       // different shape from its absence.

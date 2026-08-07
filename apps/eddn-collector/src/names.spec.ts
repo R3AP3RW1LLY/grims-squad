@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseEdcdCsv, squash } from './names.js';
+import { parseEdcdCsv, squash, symbolKey, bridges } from './names.js';
 
 /**
  * The naming layer is the part of the collector that can be wrong SILENTLY.
@@ -187,5 +187,62 @@ describe('a commodity we do not hold yet', () => {
      * is not. Gold resolves directly, so no alias is written for it at all.
      */
     expect(aliases().has('gold')).toBe(false);
+  });
+});
+
+/**
+ * The symbols the feed sends that we could not name.
+ *
+ * ★ SQUADRON OWNER, 2026-08-06 ★
+ *
+ * "if commodities are unnamed, we need to figure this out and get them added! this is
+ * non-negotiable!"
+ *
+ * ★ WHY NOBODY COULD ANSWER "WHICH ONES" ★
+ *
+ * The collector has been counting unresolved lines for weeks and reporting the integer on the live
+ * log. It also collected the SYMBOLS, in `CommodityNames.unknown` — and nothing ever read them, and
+ * `refresh()` cleared the set every hour. The answer was in memory the whole time and thrown away
+ * before anybody could look.
+ *
+ * A live sample settled it: essentially every unresolved line in the steady state is one symbol,
+ * `curatedcommodity`. It is our own Curated Commodity Package, EDCD's FDevIDs has no entry for it,
+ * and `#find` tolerates only a trailing "s" so it cannot bridge the "Package" suffix.
+ */
+describe('symbols the matcher cannot reach', () => {
+  it('MANDATORY: a localised journal key is unwrapped before matching', () => {
+    /*
+     * Some uploaders send the raw journal localisation key — `$platinum_name;` — instead of the
+     * bare symbol. `squash` turns that into `platinumname`, which matches nothing.
+     *
+     * The consequence is worse than one lost line: when EVERY line in a message is unresolved the
+     * collector writes no rows at all, so the whole station is dropped rather than merely
+     * incomplete. One sampled message carried 351 commodities and lost all of them.
+     */
+    expect(symbolKey('$platinum_name;')).toBe('platinum');
+    expect(symbolKey('$lowtemperaturediamond_name;')).toBe('lowtemperaturediamond');
+    // A bare symbol is untouched, so nothing that works today changes.
+    expect(symbolKey('platinum')).toBe('platinum');
+    expect(symbolKey('LowTemperatureDiamond')).toBe('lowtemperaturediamond');
+  });
+
+  it('MANDATORY: a name that only differs by a trailing word is reachable', () => {
+    /*
+     * `curatedcommodity` against our own "Curated Commodity Package". This single symbol accounts
+     * for essentially the whole 42-per-window figure, at about a quarter of all markets, and no
+     * amount of waiting for EDCD will fix it — their table has no entry at all.
+     */
+    expect(bridges('curatedcommodity', 'curatedcommoditypackage')).toBe(true);
+  });
+
+  it('MANDATORY: the bridge does not join two genuinely different commodities', () => {
+    /*
+     * The risk of any loosened match. "Gold" must never reach "Gold Ore"-style neighbours, and a
+     * prefix rule that swallowed unrelated names would silently file one commodity's prices under
+     * another — corrupting exactly the table every route query reads.
+     */
+    expect(bridges('gold', 'goldenrod')).toBe(false);
+    expect(bridges('water', 'waterpurifiers')).toBe(false);
+    expect(bridges('opal', 'opalescentgemstones')).toBe(false);
   });
 });

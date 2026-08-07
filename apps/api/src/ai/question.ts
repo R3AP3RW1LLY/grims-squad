@@ -31,6 +31,18 @@ export interface Plan {
   /** Set when the question is about proximity to a named system. */
   readonly near: { readonly system: string; readonly radiusLy: number } | null;
   /**
+   * Set when the question is "WHERE should I mine", as distinct from "what should I fly for
+   * mining" (the fitter) and "where do I sell what I mined" (the market).
+   *
+   * ★ SQUADRON OWNER, 2026-08-06: "if we can add our AI into this some way that would be epic!" ★
+   *
+   * Its own leg because the answer comes from a source no other leg touches: `prospected_rocks`,
+   * every member's limpets pooled. A model asked this without it would answer from whatever mining
+   * prose the semantic leg found, which is a wiki page about Painite hotspots from two years ago
+   * presented with the same confidence as a measurement taken last Tuesday.
+   */
+  readonly rings: { readonly material: string | null } | null;
+  /**
    * Set when the question is "what should I fly for X".
    *
    * ★ SQUADRON OWNER ★
@@ -52,6 +64,43 @@ export interface Plan {
     readonly budget: number | null;
     readonly shipId: string | null;
   } | null;
+  /**
+   * Set when the question is "what does the squadron want done in the background sim".
+   *
+   * ★ SQUADRON OWNER, 2026-08-06: "incorporate AI where we can too" ★
+   *
+   * Its own leg for exactly the reason the rings are: the answer lives somewhere no other leg
+   * touches — `bgs_orders`, written by an officer this week. Asked without it, a model answers from
+   * whatever BGS prose the semantic leg found, which is a wiki page explaining what influence IS,
+   * delivered with the same confidence as tonight's actual instructions.
+   *
+   * `system` is null when the member named none. Guessing one would answer about the wrong place
+   * with total confidence, which is worse than listing everything and letting them find their own.
+   */
+  readonly orders: { readonly system: string | null } | null;
+  /**
+   * Set when the question is "what is the squadron doing".
+   *
+   * ★ THE MOST ASKED QUESTION IN ANY SQUADRON, AND IT HAD NO ANSWER ★
+   *
+   * `operations` is read by no other leg. Without this, "what's on tonight" is answered from
+   * whatever forum prose the semantic search turned up — an op that ran in March, delivered with
+   * exactly the confidence of tonight's actual roster.
+   */
+  readonly ops: Record<string, never> | null;
+  /**
+   * Set when the question is "where should we colonise next".
+   *
+   * ★ ANSWERED FROM THE SCOUT, NOT FROM PROSE ★
+   *
+   * The candidate set is live: claimable systems in range of an anchor, each with the station that
+   * sells its permit and the power that purchase extends. Asked without this leg, the assistant
+   * answers from forum posts about a system somebody claimed months ago.
+   *
+   * `anchor` is null when the member named no system, in which case the leg says what it needs
+   * rather than guessing at one.
+   */
+  readonly colonise: { readonly anchor: string | null } | null;
 }
 
 /**
@@ -93,6 +142,16 @@ export function planFor(
   const market = marketIn(q, commodities);
   const near = nearIn(q);
   const fit = fitIn(q, ships);
+  /*
+   * ★ THE FITTER WINS A BUILD QUESTION OUTRIGHT ★
+   *
+   * "What should I fly for mining on a 200 million budget" says "what" and says "mining", so the
+   * ring grammar matches it — and answering it with a list of rings would be the same class of
+   * failure as answering a sell question with buy prices. `fitIn` already demanded build-intent
+   * phrasing, a budget or a named hull before it claimed the question, so its yes is the stronger
+   * evidence and it consumes the sentence.
+   */
+  const rings = fit === null ? ringsIn(q, commodities) : null;
 
   /*
    * ★ A TERM IS CONSUMED BY THE LEG THAT UNDERSTOOD IT ★
@@ -108,6 +167,9 @@ export function planFor(
   const consumed = new Set<string>();
   if (market !== null) consumed.add(market.commodity.toLowerCase());
   if (near !== null) consumed.add(near.system.toLowerCase());
+  // The ring leg knows what Painite is and is measuring real rocks for it. Looking the same word
+  // up by name a second way can only add stations that merely share letters with it.
+  if (rings?.material != null) consumed.add(rings.material.toLowerCase());
 
   return {
     // Always. See the note above about routing being a bet.
@@ -116,6 +178,15 @@ export function planFor(
     market,
     near,
     fit,
+    rings,
+    /*
+     * The fitter still wins a build question outright, as it does for rings — "what should I fly
+     * for BGS work" is a question about a ship, and answering it with a faction list would be a
+     * confident non-answer. `ordersIn` steps aside for the build verbs itself.
+     */
+    orders: ordersIn(q),
+    ops: opsIn(q),
+    colonise: coloniseIn(q),
   };
 }
 
@@ -217,6 +288,151 @@ function fitIn(
   if (!BUILD_INTENT.test(q) && budget === null && hull === null) return null;
 
   return { role, budget, shipId: hull?.id ?? null };
+}
+
+/**
+ * Phrasings that mean "tell me WHERE to dig".
+ *
+ * ★ THE WORD "MINING" IS NOT ENOUGH, AND NEITHER IS "WHERE" ★
+ *
+ * Three different questions contain a mining word:
+ *
+ *   "What should I fly for mining"  → the fitter
+ *   "Where do I sell mined Painite" → the market
+ *   "Where should I mine Painite"   → here
+ *
+ * So this needs BOTH a mining word and a place-seeking phrase, and it steps aside for a selling
+ * question outright — a member with a full hold has already done the mining, and a list of rings is
+ * the one answer that cannot help them.
+ */
+/**
+ * "What are we doing in the BGS", in the forms members and officers actually type.
+ *
+ * ★ IT MUST NAME THE SUBJECT, NOT JUST A VERB ★
+ *
+ * "support" and "faction" turn up in questions with nothing to do with standing orders, so a bare
+ * verb is not enough — the question has to be about factions, influence or the BGS itself. The
+ * alternative is a leg that answers "where do I sell this" with a list of factions.
+ */
+const ORDERS_INTENT =
+  /\bbgs\b|\bbackground\s+simulation\b|\b(?:faction|factions)\b[^?.!]{0,40}\b(?:run|running|mission|missions|support|supporting|back|backing|push|pushing|help|helping|work|working|target|targeting)\b|\b(?:run|running|mission|missions|support|supporting|push|pushing|suppress|suppressing|back|backing|target|targeting)\b[^?.!]{0,40}\b(?:faction|factions|influence)\b|\b(?:standing\s+orders|our\s+orders)\b/i;
+
+/**
+ * Questions that merely CONTAIN a faction word but are about something else entirely.
+ *
+ * A member with a full hold asking where to sell it has already decided who they are helping.
+ */
+const ORDERS_NOT = /\b(?:sell|selling|sold|buy|buying|offload|unload|fly|fit|build|loadout)\b/i;
+
+/**
+ * "Who are we pushing", "which factions is the squadron backing" — the subject is implied.
+ *
+ * These carry a BGS verb and a first-person plural but never the word "faction", so the paired
+ * patterns above miss them. They are how people actually ask, which is the only argument that
+ * matters for a grammar.
+ */
+const ORDERS_IMPLIED =
+  /\b(?:who|which|what|where)\b[^?.!]{0,24}\b(?:we|us|our|squadron)\b[^?.!]{0,24}\b(?:push|pushing|suppress|suppressing|back|backing|support|supporting|target|targeting|helping)\b|\b(?:are|is)\s+(?:we|the\s+squadron)\b[^?.!]{0,24}\b(?:push|pushing|suppress|suppressing|back|backing|support|supporting|target|targeting)\b/i;
+
+/**
+ * The system an orders question names.
+ *
+ * ★ "IN DECIAT", NOT "NEAR DECIAT" ★
+ *
+ * `nearIn` answers proximity — "within 50 ly of" — which is the right grammar for a market search
+ * and the wrong one here. Influence is per-system and members say "in": an order applies to one
+ * system exactly, and treating "in Deciat" as "somewhere around Deciat" would answer about a
+ * different system with total confidence.
+ *
+ * Requires a capital letter, which is what separates a system name from "in the bgs".
+ */
+const ORDERS_SYSTEM = /\b(?:in|at|for)\s+([A-Z][A-Za-z0-9'’-]*(?:\s+[A-Z0-9][A-Za-z0-9'’-]*)*)/;
+
+/**
+ * "What is the squadron doing", in the forms members actually type.
+ *
+ * ★ THE SUBJECT MUST BE THE SQUADRON, NOT THE CLOCK ★
+ *
+ * "tonight", "next" and "coming up" appear constantly in trade and mining questions, so a time word
+ * alone can never be enough — "where should I mine tonight" answered with an operations roster is a
+ * confident non-answer. Either the question names ops directly, or it asks what *we* are doing.
+ */
+const OPS_INTENT =
+  /\b(?:ops|op)\b|\boperations?\b(?!\s+(?:of|manual))|\bops\s+board\b|\b(?:what|anything|something|who)\b[^?.!]{0,30}\b(?:we|us|our|squadron|everyone)\b[^?.!]{0,30}\b(?:doing|running|flying|planning|up\s+to|on)\b|\b(?:anything|something)\b[^?.!]{0,20}\bon\b[^?.!]{0,20}\b(?:tonight|tomorrow|weekend|later|this\s+week)\b/i;
+
+/**
+ * Questions that merely contain an operations word but are about something else.
+ *
+ * "How do I operate the fuel scoop" is the obvious false positive; the trade and mining verbs catch
+ * the rest, because a member asking where to sell has not asked what the squadron is doing.
+ */
+const OPS_NOT =
+  /\b(?:operate|operating)\b|\b(?:sell|selling|buy|buying|mine|mining|haul|hauling|fly|fit|build|loadout|route)\b/i;
+
+/**
+ * "Where should we colonise", in the forms members type.
+ *
+ * ★ IT MUST BE ABOUT CLAIMING, NOT ABOUT AN EXISTING COLONY ★
+ *
+ * "Colony" turns up constantly in hauling questions — what the colony needs, where to deliver to
+ * it. Answering those with a list of systems to claim would be a confident non-answer, so the
+ * grammar demands a claiming verb alongside the subject.
+ */
+const COLONISE_INTENT =
+  /\b(?:colonis|coloniz)\w*\b|\b(?:claim|settle|expand)\w*\b[^?.!]{0,30}\b(?:system|systems|next|somewhere)\b|\b(?:where|what|which|find)\b[^?.!]{0,30}\b(?:system|systems)\b[^?.!]{0,30}\b(?:claim|settle|colonis|coloniz|take|put)\w*|\b(?:put|start|found|place|build)\b[^?.!]{0,25}\b(?:next\s+|new\s+|another\s+)?colony\b/i;
+
+/** Questions about a colony that already exists — hauling, deliveries, what it still needs. */
+const COLONISE_NOT =
+  /\b(?:deliver|delivery|deliveries|haul|hauling|need|needs|needed|still|buy|buying|sell|selling|commodit|cargo|progress|remaining)\w*/i;
+
+/** The system to search around, when the member names one. Same grammar the spatial leg uses. */
+const COLONISE_NEAR = /\b(?:near|around|close to|by|from|next to)\s+([A-Z][A-Za-z0-9'’-]*(?:\s+[A-Z0-9][A-Za-z0-9'’-]*)*)/;
+
+function coloniseIn(q: string): { anchor: string | null } | null {
+  if (!COLONISE_INTENT.test(q)) return null;
+  if (COLONISE_NOT.test(q)) return null;
+  return { anchor: COLONISE_NEAR.exec(q)?.[1]?.trim() ?? null };
+}
+
+function opsIn(q: string): Record<string, never> | null {
+  if (!OPS_INTENT.test(q)) return null;
+  if (OPS_NOT.test(q)) return null;
+  return {};
+}
+
+function ordersIn(q: string): { system: string | null } | null {
+  if (!ORDERS_INTENT.test(q) && !ORDERS_IMPLIED.test(q)) return null;
+  if (ORDERS_NOT.test(q)) return null;
+
+  const named = ORDERS_SYSTEM.exec(q)?.[1]?.trim() ?? null;
+
+  // A proximity phrasing still works — "our bgs orders near Deciat" is somebody being loose about
+  // it, and the system they named is still the one they meant.
+  return { system: named ?? nearIn(q)?.system ?? null };
+}
+
+const RING_INTENT =
+  /\b(where|which|what|best|good|top|richest)\b[^?.!]{0,40}\b(mine|mining|ring|rings|hotspot|hotspots|prospect)\b|\b(rings?|hotspots?)\b[^?.!]{0,40}\b(mine|mining|worth|best|good)\b/i;
+
+/** Words that mean the member is holding the cargo already, not looking for it in a rock. */
+const ALREADY_MINED = /\b(sell|selling|sold|unload|offload|dump)\b/i;
+
+function ringsIn(q: string, commodities: readonly string[]): Plan['rings'] {
+  if (!RING_INTENT.test(q)) return null;
+  // A selling question is the market's, whatever else it says. See ALREADY_MINED.
+  if (ALREADY_MINED.test(q)) return null;
+
+  /*
+   * Longest commodity name first, for the same reason the market matcher does it: "Low Temperature
+   * Diamonds" contains "Diamonds", and matching the shorter one would survey rings for a different
+   * mineral from the one asked about.
+   */
+  const material =
+    [...commodities]
+      .sort((a, b) => b.length - a.length)
+      .find((c) => q.toLowerCase().includes(c.toLowerCase())) ?? null;
+
+  return { material };
 }
 
 /**
