@@ -74,6 +74,10 @@
     "./body-order": {
       "types": "./dist/body-order.d.ts",
       "default": "./dist/body-order.js"
+    },
+    "./colony-plan-check": {
+      "types": "./dist/colony-plan-check.d.ts",
+      "default": "./dist/colony-plan-check.js"
     }
   },
   "scripts": {
