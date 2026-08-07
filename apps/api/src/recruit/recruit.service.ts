@@ -238,4 +238,130 @@ export class RecruitService {
       points: milestonePoints(milestone),
     }));
   }
+
+  /**
+   * The recruiting manager's view: every link, and every join with its state.
+   *
+   * ★ THE UNATTRIBUTED QUEUE IS THE POINT OF THIS PAGE ★
+   *
+   * Two people joining at once, a link minted between refreshes, an arrival through an invite a
+   * member made by hand — all of them land here rather than being guessed at, because a wrong
+   * attribution puts points beside somebody's name publicly while the real recruiter watches.
+   * Somewhere to fix that by hand is what makes refusing to guess affordable.
+   */
+  async manage(): Promise<{
+    readonly links: readonly { owner: string; code: string; recruits: number; revokedAt: Date | null }[];
+    readonly joins: readonly {
+      discordId: string;
+      name: string;
+      recruiter: string | null;
+      attribution: string;
+      joinedAt: Date;
+      points: number;
+      voidedAt: Date | null;
+    }[];
+  }> {
+    const links = await this.db.$queryRawUnsafe<
+      Array<{ owner: string; code: string; recruits: number; revoked_at: Date | null }>
+    >(
+      `SELECT u.display_name AS owner, ri.code, ri.revoked_at,
+              (SELECT count(*)::int FROM recruit_joins j
+                WHERE j.recruiter_id = ri.user_id AND j.voided_at IS NULL) AS recruits
+         FROM recruit_invites ri
+         JOIN users u ON u.id = ri.user_id
+        ORDER BY recruits DESC, u.display_name`,
+    );
+
+    const joins = await this.db.$queryRawUnsafe<
+      Array<{
+        discord_id: string;
+        name: string;
+        recruiter: string | null;
+        attribution: string;
+        joined_at: Date;
+        points: number;
+        voided_at: Date | null;
+      }>
+    >(
+      `SELECT j.discord_id,
+              COALESCE(u.display_name, g.username, j.discord_id) AS name,
+              r.display_name AS recruiter,
+              j.attribution, j.joined_at, j.voided_at,
+              COALESCE((SELECT sum(m.points)::int FROM recruit_milestones m
+                         WHERE m.discord_id = j.discord_id), 0) AS points
+         FROM recruit_joins j
+         LEFT JOIN users u ON u.id = j.user_id
+         LEFT JOIN users r ON r.id = j.recruiter_id
+         LEFT JOIN discord_guild_members g ON g.discord_id = j.discord_id
+        ORDER BY (j.recruiter_id IS NULL) DESC, j.joined_at DESC
+        LIMIT 500`,
+    );
+
+    return {
+      links: links.map((l) => ({
+        owner: l.owner,
+        code: l.code,
+        recruits: l.recruits,
+        revokedAt: l.revoked_at,
+      })),
+      joins: joins.map((j) => ({
+        discordId: j.discord_id,
+        name: j.name,
+        recruiter: j.recruiter,
+        attribution: j.attribution,
+        joinedAt: j.joined_at,
+        points: j.points,
+        voidedAt: j.voided_at,
+      })),
+    };
+  }
+
+  /**
+   * Credit a join to a member by hand.
+   *
+   * Recorded as `manual` rather than overwriting the row to look automatic: "we could not tell" and
+   * "an officer decided" are different facts, and a later audit needs to know which this was.
+   */
+  async assign(discordId: string, recruiterId: string): Promise<void> {
+    await this.db.$executeRawUnsafe(
+      `UPDATE recruit_joins
+          SET recruiter_id = $2::uuid, attribution = 'manual'
+        WHERE discord_id = $1 AND voided_at IS NULL`,
+      discordId,
+      recruiterId,
+    );
+  }
+
+  /**
+   * Void a claim.
+   *
+   * Points already banked are left alone. Reversing them is a separate, deliberate act — this stops
+   * the claim ACCRUING, which is what an officer means when they say a credit was not earned, and
+   * silently rewriting a leaderboard's history from a moderation screen is not.
+   *
+   * A reason is required by the caller, not defaulted here: an unexplained void is the kind of
+   * thing that gets argued about in Discord six weeks later.
+   */
+  async void(discordId: string, officerId: string, reason: string): Promise<void> {
+    await this.db.$executeRawUnsafe(
+      `UPDATE recruit_joins
+          SET voided_at = now(), voided_by = $2::uuid, void_reason = $3
+        WHERE discord_id = $1`,
+      discordId,
+      officerId,
+      reason,
+    );
+  }
+
+  /** Revoke somebody's link. The joins it already earned keep their provenance. */
+  async revoke(code: string, officerId: string, reason: string): Promise<void> {
+    await this.db.$executeRawUnsafe(
+      `UPDATE recruit_invites
+          SET revoked_at = now(), revoked_by = $2::uuid, revoke_reason = $3
+        WHERE code = $1`,
+      code,
+      officerId,
+      reason,
+    );
+  }
 }
