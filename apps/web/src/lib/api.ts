@@ -2068,6 +2068,24 @@ export interface RecruitStatus {
 export const getRecruitStatus = (): Promise<RecruitStatus | null> =>
   get('/v1/recruit', { authed: true });
 
+/** The officer's view: every link, every join, and which of them nobody could be credited for. */
+export interface RecruitManage {
+  links: { owner: string; code: string; recruits: number; revokedAt: string | null }[];
+  joins: {
+    discordId: string;
+    name: string;
+    recruiter: string | null;
+    /** auto | foreign | manual | ambiguous | unknown — see the bot's attribution notes. */
+    attribution: string;
+    joinedAt: string;
+    points: number;
+    voidedAt: string | null;
+  }[];
+}
+
+export const getRecruitManage = (): Promise<RecruitManage | null> =>
+  get('/v1/recruit/manage', { authed: true });
+
 // ── Leaderboards ─────────────────────────────────────────────────────────────
 //
 // Squadron owner, 2026-08-04: "make a new category called leaderboards." Three boards — Data

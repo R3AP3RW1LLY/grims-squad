@@ -10,6 +10,7 @@ import {
   getMe,
   getSupportConsole,
   getSupportConsoleGated,
+  getRecruitManage,
   getSuggestionInboxGated,
   getRoadmapManageGated,
   getTrainingQueueGated,
@@ -26,6 +27,7 @@ import { MonthTabs } from './month-tabs';
 import { PromotionRun } from './promotion-run';
 import { Moderation } from './moderation';
 import { Support } from './support';
+import { RecruitingConsole } from './recruiting';
 import { SupportTabBadge } from './support-tab-badge';
 import { SuggestionsTabBadge } from './suggestions-tab-badge';
 import { TrainingImagesTabBadge } from './training-images-tab-badge';
@@ -114,6 +116,17 @@ const TABS: readonly PageTab[] = [
    * who know Elite, not whoever manages the roster.
    */
   { key: 'training-images', label: 'Training images' },
+  /*
+   * ★ SQUADRON OWNER, 2026-08-06 ★
+   *
+   * "the ops/and bgs need admin pages in the administration category on the website please to
+   * manage them etc, same with the recruiting manager"
+   *
+   * Gated on RECRUIT_MANAGE rather than the console's MEMBER_MANAGE, for the same reason Support
+   * and Training images are: assigning credit and voiding claims is a different job from managing
+   * the roster, and the people who should do it are not necessarily the same people.
+   */
+  { key: 'recruiting', label: 'Recruiting' },
   { key: 'roles', label: 'Roles & permissions' },
 ];
 
@@ -143,7 +156,7 @@ export default async function AdminPage({
    * though — every tab needs to know whether the second factor is fresh, and
    * a null from any admin read is that answer.
    */
-  const [dashboard, activity, audit, held, aiHealth, support, me, suggestions, roadmap, trainingQueue] =
+  const [dashboard, activity, audit, held, aiHealth, support, recruiting, me, suggestions, roadmap, trainingQueue] =
     await Promise.all([
     /*
      * Fetched for the ACTIVITY tab too, and only for its `availableMonths`.
@@ -165,6 +178,7 @@ export default async function AdminPage({
      */
     tab === 'moderation' ? getAiHealth() : Promise.resolve(null),
     tab === 'support' ? getSupportConsole('open') : Promise.resolve(null),
+    tab === 'recruiting' ? getRecruitManage() : Promise.resolve(null),
     /*
      * For the support and suggestions tabs' clocks. INV-025 wants each queue's absolute times
      * in the VIEWER's stored timezone, and that zone lives on /v1/me.
@@ -361,6 +375,15 @@ export default async function AdminPage({
           description="Posts the screener held before anybody could read them. Nothing here is public — releasing a post is what publishes it."
         >
           <Moderation initial={held.posts} total={held.total} health={aiHealth} />
+        </Section>
+      )}
+
+      {tab === 'recruiting' && recruiting !== null && (
+        <Section
+          title="Recruiting"
+          description="Who brought whom in. Attribution refuses to guess when it cannot tell — the rows needing a decision are at the top."
+        >
+          <RecruitingConsole data={recruiting} />
         </Section>
       )}
 
