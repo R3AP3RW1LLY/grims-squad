@@ -23,7 +23,7 @@ import { HelpWidget } from './help-widget.js';
 import { GroupIcon, PageIcon } from './icons.js';
 import { MiningSettingsPanel } from './mining-settings-panel.js';
 import { readMiningSettings } from '../mining-settings.js';
-import { openProjectCounts } from '@grims/shared';
+import { openProjectCounts } from '@grims/shared/colony-badge';
 // The shapes come from the hub client, which is where they are defined — re-exporting them through
 // the component file would be a second name for one type.
 import type { ColonyProject, ColonyRights } from '../hub-colony.js';

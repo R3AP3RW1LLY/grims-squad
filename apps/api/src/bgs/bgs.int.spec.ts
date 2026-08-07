@@ -31,6 +31,10 @@ async function cleanUp(userId: string): Promise<void> {
     `${TAG}%`,
   );
   await db.$executeRawUnsafe(`DELETE FROM tracked_factions WHERE name LIKE $1`, `${TAG}%`);
+  await db.$executeRawUnsafe(
+    `DELETE FROM knowledge_items WHERE kind = 'system' AND name LIKE $1`,
+    `${TAG}%`,
+  );
   await db.$executeRawUnsafe(`DELETE FROM users WHERE id = $1::uuid`, userId);
 }
 
@@ -71,13 +75,21 @@ describe('the BGS watchlist, against Postgres', () => {
          * From the GALAXY data, not from `systems` — which is empty, and legitimately so: it is a
          * narrow relational table filled lazily as things start pointing at systems. Ordering
          * against a name we hold is exactly what an officer will type.
+         *
+         * ★ SEEDED, NOT BORROWED — CAUGHT BY CI ★
+         *
+         * This used to take any real galaxy row and throw when it found none. A fresh CI database
+         * has no galaxy dump and never will, so the spec could not pass there by construction. It
+         * passed locally only because this machine happens to have 303,816 systems loaded.
          */
-        const [anySystem] = await db.$queryRawUnsafe<Array<{ name: string }>>(
-          `SELECT name FROM knowledge_items
-            WHERE kind = 'system' AND coords IS NOT NULL AND source = 'galaxy'
-            GROUP BY name, coords HAVING count(*) = 1 LIMIT 1`,
+        const anySystem = { name: `${TAG} Order System` };
+        await db.$executeRawUnsafe(
+          `INSERT INTO knowledge_items (source, kind, ext_key, name, data, coords, text)
+           VALUES ('galaxy', 'system', $1, $2, '{}'::jsonb, cube(array[4.0, 5.0, 6.0]), $2)
+           ON CONFLICT (source, kind, ext_key) DO UPDATE SET coords = EXCLUDED.coords`,
+          '900000000000002',
+          anySystem.name,
         );
-        if (anySystem === undefined) throw new Error('no galaxy systems held — load the dump first');
 
         await svc.order({
           factionId: mine?.id ?? '',

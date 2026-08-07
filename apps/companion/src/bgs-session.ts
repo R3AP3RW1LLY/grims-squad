@@ -1,4 +1,4 @@
-import { readFactionEffects, scoreContribution, type BgsStance } from '@grims/shared';
+import { readFactionEffects, scoreContribution, type BgsStance } from '@grims/shared/bgs';
 
 /**
  * What the member has moved for the squadron this session, and what applies where they are standing.

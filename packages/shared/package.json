@@ -82,6 +82,18 @@
     "./colony-scout": {
       "types": "./dist/colony-scout.d.ts",
       "default": "./dist/colony-scout.js"
+    },
+    "./colony-badge": {
+      "types": "./dist/colony-badge.d.ts",
+      "default": "./dist/colony-badge.js"
+    },
+    "./mining": {
+      "types": "./dist/mining.d.ts",
+      "default": "./dist/mining.js"
+    },
+    "./bgs": {
+      "types": "./dist/bgs.d.ts",
+      "default": "./dist/bgs.js"
     }
   },
   "scripts": {

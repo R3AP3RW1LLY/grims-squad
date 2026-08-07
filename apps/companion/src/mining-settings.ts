@@ -22,7 +22,7 @@
  * the alert useless in exactly the mixed rings where it matters most.
  */
 
-import { DEFAULT_PROSPECT_THRESHOLD, type ProspectThresholds } from '@grims/shared';
+import { DEFAULT_PROSPECT_THRESHOLD, type ProspectThresholds } from '@grims/shared/mining';
 
 export interface MiningSettings extends ProspectThresholds {
   readonly default: number;

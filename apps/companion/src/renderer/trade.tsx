@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
-import { depthOf } from '@grims/shared';
+import { depthOf } from '@grims/shared/market-depth';
 import type { TradePlan, TradeRoute } from '../hub-trade.js';
 import { Button, C, Card, Empty, Problem, R, Section, inputStyle } from './ui.js';
 import { writeTradePlan, type PickedRun } from '../trade-plan.js';

@@ -61,19 +61,24 @@ describe('docking at a station nothing has ever catalogued', () => {
        * make this fail for a reason that is not a defect (see the note on ambiguity in
        * `ensureLiveStation`).
        */
-      const [sys] = await db.$queryRawUnsafe<Array<{ name: string }>>(
-        `SELECT name FROM knowledge_items
-          WHERE kind = 'system' AND coords IS NOT NULL AND source = 'galaxy'
-          GROUP BY name, coords
-         HAVING count(*) = 1
-          LIMIT 1`,
+      /*
+       * ★ SEEDED, NOT BORROWED — CAUGHT BY CI ★
+       *
+       * This used to take any unambiguous galaxy row and throw when it found none. A fresh CI
+       * database has no galaxy dump and never will, so the spec was red by construction there and
+       * green here purely because this machine has the dump loaded.
+       *
+       * Seeding guarantees the unambiguity the test needs rather than hoping for it — the name is
+       * this spec's own, so nothing else can collide with it.
+       */
+      const system = 'new-station-discovery-int-spec System';
+      await db.$executeRawUnsafe(
+        `INSERT INTO knowledge_items (source, kind, ext_key, name, data, coords, text)
+         VALUES ('galaxy', 'system', $1, $2, '{}'::jsonb, cube(array[7.0, 8.0, 9.0]), $2)
+         ON CONFLICT (source, kind, ext_key) DO UPDATE SET coords = EXCLUDED.coords`,
+        '900000000000003',
+        system,
       );
-
-      const system = (sys as { name: string } | undefined)?.name;
-      if (system === undefined) {
-        // A development database with no galaxy data cannot exercise this. Say so rather than pass.
-        throw new Error('no unambiguous system with coordinates — load the galaxy dump first');
-      }
 
       await cleanUp(system);
 
@@ -154,6 +159,11 @@ describe('docking at a station nothing has ever catalogued', () => {
         ).toBe(true);
       } finally {
         await cleanUp(system);
+        // The seeded galaxy row: this spec created it, so this spec removes it.
+        await db.$executeRawUnsafe(
+          `DELETE FROM knowledge_items WHERE kind = 'system' AND ext_key = $1`,
+          '900000000000003',
+        );
         await db.$disconnect();
       }
     },

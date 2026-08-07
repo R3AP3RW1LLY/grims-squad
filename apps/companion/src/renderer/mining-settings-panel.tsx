@@ -7,7 +7,7 @@ import {
   clearMaterialThreshold,
   type MiningSettings,
 } from '../mining-settings.js';
-import { CORE_ONLY_MATERIALS } from '@grims/shared';
+import { CORE_ONLY_MATERIALS } from '@grims/shared/mining';
 
 /**
  * The percentages a member chooses, on screen.
