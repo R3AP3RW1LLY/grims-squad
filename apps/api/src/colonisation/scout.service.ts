@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaClient } from '@grims/db';
 import { systemsNear, claimableOnly } from '@grims/ed-clients';
+import { canonicalSystemName } from './system-name.js';
 import {
   CLAIM_RANGE_LY,
   bestPermitSource,
@@ -223,10 +224,25 @@ export class ScoutService {
     };
   }
 
-  /** The system somebody named. Null when we hold no coordinates, so nothing can be measured. */
+  /**
+   * The system somebody named.
+   *
+   * ★ OUR TABLE FIRST, THEN THE GALAXY SERVICE ★
+   *
+   * Reported by the owner: searching from their OWN system returned "we hold no coordinates". Our
+   * galaxy table covers populated systems plus wherever members have flown, and a system that was
+   * uninhabited until somebody claimed it is in neither set — so the one anchor a colonist most
+   * wants to search from is precisely the one we were least likely to hold.
+   *
+   * Falling back to the galaxy service fixes it and validates the name at the same time: a request
+   * for systems within a light year of a name Spansh does not recognise comes back empty.
+   */
   async #anchor(
     name: string,
   ): Promise<{ name: string; x: number; y: number; z: number; allegiance: string | null; faction: string | null } | null> {
+    const typed = name.trim();
+    if (typed === '') return null;
+
     const [row] = await this.db.$queryRawUnsafe<
       Array<{ name: string; x: number; y: number; z: number; allegiance: string | null; faction: string | null }>
     >(
@@ -239,17 +255,61 @@ export class ScoutService {
          FROM knowledge_items
         WHERE kind = 'system' AND coords IS NOT NULL AND lower(name) = lower($1)
         LIMIT 1`,
-      name.trim(),
+      typed,
     );
 
-    if (row === undefined) return null;
-    return {
-      name: row.name,
-      x: Number(row.x),
-      y: Number(row.y),
-      z: Number(row.z),
-      allegiance: row.allegiance,
-      faction: row.faction,
-    };
+    if (row !== undefined) {
+      return {
+        name: row.name,
+        x: Number(row.x),
+        y: Number(row.y),
+        z: Number(row.z),
+        allegiance: row.allegiance,
+        faction: row.faction,
+      };
+    }
+
+    /*
+     * Not ours. Ask the galaxy service for anything within a light year of it — the system itself
+     * comes back at distance zero, which gives us the coordinates and confirms the name exists.
+     */
+    /*
+     * As typed first, then with the case repaired. The galaxy service is case-SENSITIVE and answers
+     * a mis-cased name with an empty result rather than an error — which is why the owner typing
+     * their own system in caps looked exactly like a system that does not exist.
+     */
+    for (const attempt of [typed, canonicalSystemName(typed)]) {
+      if (attempt === '') continue;
+      const found = await this.#fromGalaxy(attempt);
+      if (found !== null) return found;
+      // No point asking twice when the repair changed nothing.
+      if (canonicalSystemName(typed) === typed) break;
+    }
+    return null;
+  }
+
+  /** One galaxy lookup: anything within a light year, which includes the system itself. */
+  async #fromGalaxy(
+    name: string,
+  ): Promise<{ name: string; x: number; y: number; z: number; allegiance: string | null; faction: string | null } | null> {
+    try {
+      const near = await this.galaxy(name, 1, {});
+      const self =
+        near.find((s) => s.name.trim().toLowerCase() === name.toLowerCase()) ??
+        near.find((s) => s.distance === 0);
+      if (self === undefined) return null;
+
+      return {
+        name: self.name,
+        x: self.x,
+        y: self.y,
+        z: self.z,
+        allegiance: self.allegiance,
+        // The galaxy service does not carry the controlling faction; null rather than invented.
+        faction: null,
+      };
+    } catch {
+      return null;
+    }
   }
 }
