@@ -1104,20 +1104,39 @@ async function recordRecruitJoin(discordId: string): Promise<void> {
 
   const code = verdict.outcome === 'attributed' ? verdict.code : null;
 
+  /*
+   * ★ A CODE WE MATCHED IS NOT NECESSARILY A CODE WE OWN ★
+   *
+   * The guild is full of invites members made by hand — 23 of them when this was written — and the
+   * use-count diff matches those exactly as well as it matches ours. Recording such a join as
+   * `auto` would claim we knew who to credit while leaving the recruiter null: a row that reads as
+   * confident and resolves to nobody.
+   *
+   * So the owner is looked up FIRST, and a code with no owner is recorded as `foreign` — which is
+   * information worth having ("they came through a link we do not track") rather than the silence
+   * of `unknown`.
+   */
+  const owner =
+    code === null
+      ? null
+      : (
+          await prisma.$queryRawUnsafe<Array<{ user_id: string }>>(
+            `SELECT user_id FROM recruit_invites WHERE code = $1 AND revoked_at IS NULL`,
+            code,
+          )
+        )[0]?.user_id ?? null;
+
+  const attribution =
+    verdict.outcome !== 'attributed' ? verdict.outcome : owner === null ? 'foreign' : 'auto';
+
   await prisma.$executeRawUnsafe(
     `INSERT INTO recruit_joins (discord_id, recruiter_id, invite_code, attribution)
-     VALUES (
-       $1,
-       -- The owner of the link, resolved here rather than later: the invite could be revoked
-       -- between now and whenever the tracker is next read, and the credit is already earned.
-       (SELECT user_id FROM recruit_invites WHERE code = $2),
-       $2,
-       $3
-     )
+     VALUES ($1, $2::uuid, $3, $4)
      ON CONFLICT (discord_id) DO NOTHING`,
     discordId,
+    owner,
     code,
-    verdict.outcome === 'attributed' ? 'auto' : verdict.outcome,
+    attribution,
   );
 
   /*

@@ -37,8 +37,12 @@ CREATE TABLE IF NOT EXISTS "recruit_joins" (
   -- not a failure, and the recruiting manager can assign it by hand.
   "recruiter_id" UUID REFERENCES "users"("id") ON DELETE SET NULL,
   "invite_code"  TEXT,
-  -- auto | manual | ambiguous | unknown. Recorded because "we could not tell" and "an officer
-  -- decided" are different facts about the same row, and only one of them should be trusted later.
+  -- auto | foreign | manual | ambiguous | unknown.
+  --
+  -- Recorded because these are genuinely different facts about the same row and only some of them
+  -- should be trusted later. `foreign` in particular means "we matched a link, but it is not one of
+  -- ours" — the guild is full of invites members made by hand, and the use-count diff matches those
+  -- just as well. Calling that `auto` would read as confident and resolve to nobody.
   "attribution"  TEXT NOT NULL DEFAULT 'unknown',
   "joined_at"    TIMESTAMPTZ NOT NULL DEFAULT now(),
   -- Set when the joiner links a hub account, which is what makes the later milestones knowable.
