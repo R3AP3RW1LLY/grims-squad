@@ -47,6 +47,17 @@ export interface ScoutCandidate extends Point {
   readonly nearestLandableLs: number | null;
   /** Hotspot counts by material, deduplicated per ring. */
   readonly hotspots: Readonly<Record<string, number>>;
+  /**
+   * Whether the body survey has actually run for this system.
+   *
+   * ★ UNKNOWN IS NOT ZERO ★
+   *
+   * The candidate search returns systems long before anything is known about their bodies. Scoring
+   * an unsurveyed system as though it had no landable bodies buried EVERY fresh candidate under a
+   * forty-point penalty and made the whole list negative — which reads as "all of these are bad"
+   * rather than "none of these have been looked at yet".
+   */
+  readonly surveyed: boolean;
   readonly pristine: boolean;
   /** Where the permit would be bought. Null means this cannot be claimed at all. */
   readonly permit: PermitSource | null;
@@ -125,8 +136,24 @@ export function scoreCandidate(c: ScoutCandidate): number {
    * loses most of the value of everything it contains, which is what is actually true.
    */
   const ls = c.nearestLandableLs;
-  const reach =
-    ls === null ? 0 : ls < 1_000 ? 1 : ls < 5_000 ? 0.9 : ls < 25_000 ? 0.55 : ls < 100_000 ? 0.2 : 0.08;
+
+  /*
+   * An unsurveyed system is scored on what we DO know — its body count — at a neutral reach, and
+   * nothing is assumed about bodies nobody has looked at. Surveying it later can only move it.
+   */
+  const reach = !c.surveyed
+    ? 0.6
+    : ls === null
+      ? 0
+      : ls < 1_000
+        ? 1
+        : ls < 5_000
+          ? 0.9
+          : ls < 25_000
+            ? 0.55
+            : ls < 100_000
+              ? 0.2
+              : 0.08;
 
   /*
    * ★ LANDABLE BODIES ARE THE REAL CAPACITY ★
@@ -138,8 +165,9 @@ export function scoreCandidate(c: ScoutCandidate): number {
   score += Math.min(c.bodyCount, 60) * (0.4 + 0.6 * reach);
 
   // A flat bonus on top for genuinely doorstep systems, where the whole colony is one approach.
-  if (ls !== null && ls < 1_000) score += 15;
-  if (ls === null) score -= 40; // nothing to land on at all
+  if (c.surveyed && ls !== null && ls < 1_000) score += 15;
+  // Only a SURVEYED system can be known to have nothing worth landing on.
+  if (c.surveyed && ls === null) score -= 40;
 
   if (c.pristine) score += 15;
 

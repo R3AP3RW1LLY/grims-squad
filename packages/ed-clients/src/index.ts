@@ -10,6 +10,7 @@ export * from './galnet/galnet.adapter.js';
  * system X, right now" in one call — see the note at the top of the module.
  */
 export * from './edsm-bodies.js';
+export * from './spansh-systems.js';
 
 export {
   InaraAdapter,

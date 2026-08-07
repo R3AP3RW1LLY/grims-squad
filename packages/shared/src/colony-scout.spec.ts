@@ -113,6 +113,7 @@ const candidate = (over: Partial<ScoutCandidate> = {}): ScoutCandidate => ({
   nearestLandableLs: 500,
   hotspots: {},
   pristine: true,
+  surveyed: true,
   permit: OFFICE,
   permitLy: 5,
   ...over,
@@ -206,5 +207,32 @@ describe('scoring a candidate', () => {
     });
     const plainButClose = candidate({ system: 'plain', hotspots: {}, landableCount: 8, nearestLandableLs: 100 });
     expect(scoreCandidate(plainButClose)).toBeGreaterThan(scoreCandidate(richButFar));
+  });
+});
+
+describe('candidates nobody has surveyed yet', () => {
+  it('MANDATORY: an unsurveyed system is not scored as though it had no landable bodies', () => {
+    /*
+     * ★ FOUND BY RUNNING THE REAL SEARCH ★
+     *
+     * The candidate search returns systems before anything is known about their bodies. Treating
+     * that as "no landables" applied the forty-point nothing-to-land-on penalty to every fresh
+     * candidate and made the entire live result set negative — which reads as "all of these are
+     * bad" when the truth is "none of these have been looked at".
+     */
+    const fresh = candidate({ surveyed: false, landableCount: 0, nearestLandableLs: null, bodyCount: 20 });
+    const known = candidate({ surveyed: true, landableCount: 0, nearestLandableLs: null, bodyCount: 20 });
+
+    expect(scoreCandidate(fresh)).toBeGreaterThan(scoreCandidate(known));
+    expect(scoreCandidate(fresh)).toBeGreaterThan(0);
+  });
+
+  it('lets a survey move a candidate in either direction', () => {
+    const fresh = candidate({ surveyed: false, bodyCount: 10, landableCount: 0, nearestLandableLs: null });
+    const good = candidate({ surveyed: true, bodyCount: 10, landableCount: 6, nearestLandableLs: 7 });
+    const bad = candidate({ surveyed: true, bodyCount: 10, landableCount: 6, nearestLandableLs: 190_000 });
+
+    expect(scoreCandidate(good)).toBeGreaterThan(scoreCandidate(fresh));
+    expect(scoreCandidate(bad)).toBeLessThan(scoreCandidate(fresh));
   });
 });
