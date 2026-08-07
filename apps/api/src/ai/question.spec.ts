@@ -157,3 +157,56 @@ describe('planFor — terms consumed by the leg that understood them', () => {
     expect(plan.names).toContain('Krait Mk II');
   });
 });
+
+describe('asking what the squadron wants done in the background sim', () => {
+  /**
+   * ★ SQUADRON OWNER, 2026-08-06 ★
+   *
+   * "we also want to create the BGS component too ... Make this extremely feature ritch, incorporate
+   * AI where we can too"
+   *
+   * ★ ITS OWN LEG, FOR THE SAME REASON THE RINGS ARE ★
+   *
+   * The answer comes from a source no other leg touches: `bgs_orders`, written by officers this
+   * week. A model asked this without it answers from whatever BGS prose the semantic leg found —
+   * a wiki page explaining what influence IS, presented with the same confidence as tonight's
+   * actual instructions.
+   */
+  it('routes "what factions should I run missions for" to the orders leg', () => {
+    const plan = planFor('what factions should I be running missions for?', COMMODITIES);
+    expect(plan.orders).not.toBeNull();
+  });
+
+  it('routes the plain forms an officer or member would type', () => {
+    for (const q of [
+      'what are our bgs orders',
+      'who are we pushing right now',
+      'which faction should I support',
+      'what is the squadron working on in bgs',
+      'are we suppressing anyone',
+    ]) {
+      expect(planFor(q, COMMODITIES).orders, `"${q}" did not reach the orders leg`).not.toBeNull();
+    }
+  });
+
+  it('picks up the system when the member names one', () => {
+    const plan = planFor('what are our bgs orders in Deciat?', COMMODITIES);
+    expect(plan.orders?.system).toBe('Deciat');
+  });
+
+  it('leaves the system null when none is named, rather than guessing', () => {
+    // A guess would answer about the wrong system with total confidence, which is worse than
+    // listing everything and letting the member find their own.
+    expect(planFor('what are our bgs orders', COMMODITIES).orders?.system).toBeNull();
+  });
+
+  it('MANDATORY: does not hijack a question about selling cargo', () => {
+    /*
+     * "faction" and "support" appear in questions that have nothing to do with standing orders.
+     * Answering "where do I sell this" with a list of factions would be a confident non-answer.
+     */
+    expect(planFor('where do I sell Painite', COMMODITIES).orders).toBeNull();
+    expect(planFor('what should I fly for combat', COMMODITIES).orders).toBeNull();
+    expect(planFor('where can I buy gold near Sol', COMMODITIES).orders).toBeNull();
+  });
+});

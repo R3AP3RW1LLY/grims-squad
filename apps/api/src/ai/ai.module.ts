@@ -23,6 +23,8 @@ import { ShipBuildService, ShipBuildQueries, ShipyardService } from './ship-buil
 import { CorpusService } from './corpus.service.js';
 import { MiningModule } from '../mining/mining.module.js';
 import { MiningService } from '../mining/mining.service.js';
+import { BgsModule } from '../bgs/bgs.module.js';
+import { BgsService } from '../bgs/bgs.service.js';
 import { JobLogListener } from './job-log.listener.js';
 import { ArtworkController } from './artwork.controller.js';
 import { LIVE_SERVICE } from '../live/live.tokens.js';
@@ -146,9 +148,12 @@ export class ModelWarmer implements OnModuleInit, OnModuleDestroy {
    * on answering ring questions from stale wiki prose, which is the exact failure the leg was
    * written to prevent, with nothing anywhere to say so.
    *
-   * MiningModule does not import AiModule, so there is no cycle.
+   * MiningModule does not import AiModule, so there is no cycle. BgsModule is imported for the
+   * standing-orders leg on exactly the same terms — and it is the leg where a silent absence costs
+   * most, because "who are we pushing" answered from wiki prose sends a member to work against
+   * their own squadron.
    */
-  imports: [MiningModule],
+  imports: [MiningModule, BgsModule],
   providers: [
     {
       provide: AiStreamService,
@@ -275,6 +280,7 @@ export class ModelWarmer implements OnModuleInit, OnModuleDestroy {
         AiLog,
         ShipBuildService,
         { token: MiningService, optional: true },
+        { token: BgsService, optional: true },
       ],
       useFactory: (
         db: PrismaClient,
@@ -283,7 +289,8 @@ export class ModelWarmer implements OnModuleInit, OnModuleDestroy {
         log: AiLog,
         builds: ShipBuildService,
         mining?: MiningService,
-      ) => new AssistantService(db, ai, knowledge, log, builds, mining),
+        bgs?: BgsService,
+      ) => new AssistantService(db, ai, knowledge, log, builds, mining, bgs),
     },
     /*
      * The help chat's answer leg — GMSD AI reading the help corpus and nothing else. Constructed

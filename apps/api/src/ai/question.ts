@@ -64,6 +64,20 @@ export interface Plan {
     readonly budget: number | null;
     readonly shipId: string | null;
   } | null;
+  /**
+   * Set when the question is "what does the squadron want done in the background sim".
+   *
+   * ★ SQUADRON OWNER, 2026-08-06: "incorporate AI where we can too" ★
+   *
+   * Its own leg for exactly the reason the rings are: the answer lives somewhere no other leg
+   * touches — `bgs_orders`, written by an officer this week. Asked without it, a model answers from
+   * whatever BGS prose the semantic leg found, which is a wiki page explaining what influence IS,
+   * delivered with the same confidence as tonight's actual instructions.
+   *
+   * `system` is null when the member named none. Guessing one would answer about the wrong place
+   * with total confidence, which is worse than listing everything and letting them find their own.
+   */
+  readonly orders: { readonly system: string | null } | null;
 }
 
 /**
@@ -142,6 +156,12 @@ export function planFor(
     near,
     fit,
     rings,
+    /*
+     * The fitter still wins a build question outright, as it does for rings — "what should I fly
+     * for BGS work" is a question about a ship, and answering it with a faction list would be a
+     * confident non-answer. `ordersIn` steps aside for the build verbs itself.
+     */
+    orders: ordersIn(q),
   };
 }
 
@@ -260,6 +280,60 @@ function fitIn(
  * question outright — a member with a full hold has already done the mining, and a list of rings is
  * the one answer that cannot help them.
  */
+/**
+ * "What are we doing in the BGS", in the forms members and officers actually type.
+ *
+ * ★ IT MUST NAME THE SUBJECT, NOT JUST A VERB ★
+ *
+ * "support" and "faction" turn up in questions with nothing to do with standing orders, so a bare
+ * verb is not enough — the question has to be about factions, influence or the BGS itself. The
+ * alternative is a leg that answers "where do I sell this" with a list of factions.
+ */
+const ORDERS_INTENT =
+  /\bbgs\b|\bbackground\s+simulation\b|\b(?:faction|factions)\b[^?.!]{0,40}\b(?:run|running|mission|missions|support|supporting|back|backing|push|pushing|help|helping|work|working|target|targeting)\b|\b(?:run|running|mission|missions|support|supporting|push|pushing|suppress|suppressing|back|backing|target|targeting)\b[^?.!]{0,40}\b(?:faction|factions|influence)\b|\b(?:standing\s+orders|our\s+orders)\b/i;
+
+/**
+ * Questions that merely CONTAIN a faction word but are about something else entirely.
+ *
+ * A member with a full hold asking where to sell it has already decided who they are helping.
+ */
+const ORDERS_NOT = /\b(?:sell|selling|sold|buy|buying|offload|unload|fly|fit|build|loadout)\b/i;
+
+/**
+ * "Who are we pushing", "which factions is the squadron backing" — the subject is implied.
+ *
+ * These carry a BGS verb and a first-person plural but never the word "faction", so the paired
+ * patterns above miss them. They are how people actually ask, which is the only argument that
+ * matters for a grammar.
+ */
+const ORDERS_IMPLIED =
+  /\b(?:who|which|what|where)\b[^?.!]{0,24}\b(?:we|us|our|squadron)\b[^?.!]{0,24}\b(?:push|pushing|suppress|suppressing|back|backing|support|supporting|target|targeting|helping)\b|\b(?:are|is)\s+(?:we|the\s+squadron)\b[^?.!]{0,24}\b(?:push|pushing|suppress|suppressing|back|backing|support|supporting|target|targeting)\b/i;
+
+/**
+ * The system an orders question names.
+ *
+ * ★ "IN DECIAT", NOT "NEAR DECIAT" ★
+ *
+ * `nearIn` answers proximity — "within 50 ly of" — which is the right grammar for a market search
+ * and the wrong one here. Influence is per-system and members say "in": an order applies to one
+ * system exactly, and treating "in Deciat" as "somewhere around Deciat" would answer about a
+ * different system with total confidence.
+ *
+ * Requires a capital letter, which is what separates a system name from "in the bgs".
+ */
+const ORDERS_SYSTEM = /\b(?:in|at|for)\s+([A-Z][A-Za-z0-9'’-]*(?:\s+[A-Z0-9][A-Za-z0-9'’-]*)*)/;
+
+function ordersIn(q: string): { system: string | null } | null {
+  if (!ORDERS_INTENT.test(q) && !ORDERS_IMPLIED.test(q)) return null;
+  if (ORDERS_NOT.test(q)) return null;
+
+  const named = ORDERS_SYSTEM.exec(q)?.[1]?.trim() ?? null;
+
+  // A proximity phrasing still works — "our bgs orders near Deciat" is somebody being loose about
+  // it, and the system they named is still the one they meant.
+  return { system: named ?? nearIn(q)?.system ?? null };
+}
+
 const RING_INTENT =
   /\b(where|which|what|best|good|top|richest)\b[^?.!]{0,40}\b(mine|mining|ring|rings|hotspot|hotspots|prospect)\b|\b(rings?|hotspots?)\b[^?.!]{0,40}\b(mine|mining|worth|best|good)\b/i;
 

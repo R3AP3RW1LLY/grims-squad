@@ -6,6 +6,7 @@ import { KnowledgeService, type Fact } from './knowledge.service.js';
 import { planFor } from './question.js';
 import { ShipBuildService } from './ship-build.service.js';
 import type { MiningService } from '../mining/mining.service.js';
+import type { BgsService } from '../bgs/bgs.service.js';
 
 /**
  * The assistant — the surface everything else has been building towards.
@@ -128,6 +129,20 @@ export class AssistantService {
      * that constructs this class with five arguments.
      */
     private readonly mining?: MiningService,
+    /**
+     * The standing orders.
+     *
+     * ★ SQUADRON OWNER, 2026-08-06: "incorporate AI where we can too" ★
+     *
+     * The SAME service the admin console writes and the companion overlay reads. A member asking
+     * "who are we pushing" and an officer reading the console must not be told different things —
+     * and unlike every other leg, being wrong here means a member spends their evening working
+     * against the squadron.
+     *
+     * Optional for the same reason the ring survey is: every existing test constructs this class
+     * without it.
+     */
+    private readonly bgs?: BgsService,
   ) {}
 
   async ask(
@@ -296,6 +311,10 @@ export class AssistantService {
       legs.push(this.#ringLeg(plan.rings.material));
     }
 
+    if (plan.orders !== null && this.bgs !== undefined) {
+      legs.push(this.#ordersLeg(plan.orders.system));
+    }
+
     const settled = await Promise.allSettled(legs);
 
     const seen = new Set<string>();
@@ -365,6 +384,76 @@ export class AssistantService {
         `${r.hitRate.toFixed(0)}% of them worth shooting. Mostly running ${r.topMaterial}; ` +
         `richest rock seen was ${r.bestPercent.toFixed(1)}%. Last prospected ${r.lastSeen.toISOString().slice(0, 10)}.`,
       url: '/mining',
+    }));
+  }
+
+  /**
+   * What the officers have actually ordered, rendered as facts.
+   *
+   * ★ THE ONE LEG WHERE BEING VAGUE IS WORSE THAN SILENCE ★
+   *
+   * Every other leg answers a question about the galaxy; this one answers a question about the
+   * squadron's own intent, and a member who acts on a wrong answer spends an evening pushing a
+   * faction the officers wanted held back. So it states the stance as a word, names the system, and
+   * says plainly when there is nothing rather than producing something plausible.
+   */
+  async #ordersLeg(system: string | null): Promise<Fact[]> {
+    if (this.bgs === undefined) return [];
+
+    const watchlist = await this.bgs.watchlist();
+
+    const want = system?.trim().toLowerCase() ?? null;
+    const orders = watchlist.flatMap((f) =>
+      f.orders
+        .filter((o) => o.activeUntil === null || o.activeUntil.getTime() > Date.now())
+        .filter(
+          (o) =>
+            want === null ||
+            (o.systemName !== null && o.systemName.trim().toLowerCase() === want),
+        )
+        .map((o) => ({ faction: f.name, isOurs: f.isOurs, ...o })),
+    );
+
+    /*
+     * Nothing ordered is a real answer and must not become silence — dropping back to the semantic
+     * leg is exactly the stale-prose failure this leg exists to prevent. It would find a wiki page
+     * explaining what influence is and present it as though it were tonight's instructions.
+     */
+    if (orders.length === 0) {
+      return [
+        {
+          source: 'bgs',
+          kind: 'orders',
+          name: system === null ? 'standing orders' : `standing orders in ${system}`,
+          text:
+            system === null
+              ? 'The officers have no standing BGS orders in force. Nothing is being pushed, held or suppressed right now, so no mission hand-in scores on the Faction Hands board until an order is set.'
+              : `The officers have no standing BGS orders for ${system}. Work done there counts for nothing on the Faction Hands board until one is set.`,
+          url: '/bgs',
+        },
+      ];
+    }
+
+    // Most important first, which is also the order an officer set them in.
+    orders.sort((a, b) => a.priority - b.priority);
+
+    return orders.map((o) => ({
+      source: 'bgs',
+      kind: 'order',
+      name: `${o.stance} ${o.faction}`,
+      text:
+        `Standing order: ${o.stance.toUpperCase()} ${o.faction}` +
+        `${o.isOurs ? ' (the squadron’s own faction)' : ''}` +
+        `${o.systemName === null ? '' : ` in ${o.systemName}`}, priority ${o.priority}. ` +
+        (o.stance === 'suppress'
+          ? 'Work that WEAKENS this faction scores; helping them costs points.'
+          : o.stance === 'hold'
+            ? 'Keep influence steady — pushing it higher can trigger an expansion nobody wants. Scores at half rate.'
+            : o.stance === 'ignore'
+              ? 'Not a target. Nothing done for or against them scores.'
+              : 'Missions handed in for this faction score on the Faction Hands board.') +
+        (o.guidance === null ? '' : ` Officer's note: ${o.guidance}`),
+      url: '/bgs',
     }));
   }
 
