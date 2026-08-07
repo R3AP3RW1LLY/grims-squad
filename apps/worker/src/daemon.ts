@@ -15,6 +15,7 @@ import { rebuildBountyBoard } from './jobs/bounty-board.js';
 import { refreshEdsyIds } from './jobs/edsy-refresh.js';
 import { scoreLeaderboards } from './jobs/leaderboard-scores.js';
 import { ingestMining } from './jobs/mining-ingest.js';
+import { awardRecruitMilestones } from './jobs/recruit-milestones.js';
 import { rollUpTelemetry } from './jobs/telemetry-rollup.js';
 import { PrismaTelemetryRollupStore } from './jobs/telemetry-rollup.wiring.js';
 import { EdsmStationSource, PrismaStationStore } from './jobs/resolve-stations.wiring.js';
@@ -719,6 +720,18 @@ function startLeaderboardScoring(db: PrismaClient): void {
       if (mining.rocks > 0 || mining.tonnes > 0) {
         console.log(
           `daemon: mining — ${mining.rocks} rocks, ${mining.tonnes} t refined, ${mining.points} points, ${mining.sessions} sessions opened`,
+        );
+      }
+
+      /*
+       * Recruit milestones fold in the same tick, and BEFORE the scorers, so a recruit reaching
+       * Cadet pays their recruiter and the badge sweep at the end of `scoreLeaderboards` sees the
+       * points in the same pass rather than a cycle later.
+       */
+      const recruits = await awardRecruitMilestones(db);
+      if (recruits.reached > 0) {
+        console.log(
+          `daemon: recruits — ${recruits.reached} milestone(s) reached, ${recruits.points} points`,
         );
       }
 
