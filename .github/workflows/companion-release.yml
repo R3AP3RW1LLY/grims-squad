@@ -206,20 +206,94 @@ jobs:
             echo "  $(basename "$f") — $((size / 1048576)) MB"
           done
 
-          # ---- UPLOAD FIRST -------------------------------------------------
+          # ★ THE MANIFESTS MUST NOT BE EMPTY EITHER ★
           #
-          # Installers first, manifests LAST. The manifest is the updater's pointer: uploading it
-          # before the installer it names would hand a checking app a manifest for a file that is
-          # not there yet.
+          # Only the installers were size-checked above. `latest-mac.yml` and `latest-linux.yml`
+          # went into the bucket at 0 bytes on 2026-08-05 and nothing objected, because nothing
+          # looked. An empty manifest is worse than a missing one: electron-updater fetches it,
+          # parses nothing, and swallows the error — auto-update that looks shipped and never runs.
+          for f in "${UPDATE_FILES[@]}"; do
+            size=$(stat -c%s "$f")
+            if [ "$size" -eq 0 ]; then
+              echo "::error::${f} is empty — auto-update would silently die. Refusing to publish."
+              exit 1
+            fi
+          done
+
+          # ---- UPLOAD, THEN PROVE IT ARRIVED --------------------------------
+          #
+          # ★ THE UPLOAD REPORTED SUCCESS AND THE BUCKET GOT NOTHING ★
+          #
+          # On 2026-08-05 this job uploaded six installers and reported success for all of them.
+          # Five arrived as ZERO BYTES. Every macOS and Linux download was dead for two days, and
+          # so was auto-update on both, because the manifests pointing at them were empty too.
+          #
+          # It was not the packaging: the size guard above measured them at 121-128 MB immediately
+          # before the upload. It was not the client and it was not the endpoint — both were
+          # re-tested against this bucket afterwards, including a forced 17-part multipart of
+          # 136 MB, and both round-tripped exactly.
+          #
+          # The evidence is in the ETags the bucket still held: every corrupted object ended in
+          # `-16` or `-17` (multipart, assembled from that many parts) with a ContentLength of 0,
+          # while the one intact file — the Windows exe — had a plain single-PUT ETag. Vultr's
+          # CompleteMultipartUpload answered 200 and assembled nothing.
+          #
+          # That cannot be prevented from this side. A provider that lies about a completed
+          # multipart will do it again. What CAN be done is refuse to believe it: HEAD every
+          # object back and compare the byte count to the file that was just sent.
+          #
+          # ★ AND THE ORDER IS WHAT MAKES IT SAFE ★
+          #
+          # Installers are uploaded and verified FIRST, manifests only after every one of them has
+          # been proved. A failure therefore exits while the bucket still holds the PREVIOUS
+          # release's manifests, so installed apps keep updating to the last build known to work
+          # rather than to a hole. The prune never runs either, so the old installers survive.
+          upload_and_verify() {
+            local f=$1 name=$2 want got attempt
+            want=$(stat -c%s "$f")
+
+            for attempt in 1 2 3; do
+              aws s3 cp "$f" "s3://${BUCKET}/companion/${name}" \
+                --endpoint-url "${ENDPOINT}" \
+                --content-type application/octet-stream \
+                --only-show-errors
+
+              # `|| echo -1` so a HEAD that fails outright is a mismatch rather than an empty
+              # string, which would compare equal to nothing and read as success.
+              got=$(aws s3api head-object \
+                --bucket "${BUCKET}" --key "companion/${name}" \
+                --endpoint-url "${ENDPOINT}" \
+                --query ContentLength --output text 2>/dev/null || echo -1)
+
+              if [ "$got" = "$want" ]; then
+                # Manifests are a few hundred bytes; rounding those to "0 MB" would read as the
+                # very failure this check exists to catch.
+                if [ "$want" -ge 1048576 ]; then
+                  echo "  ✓ ${name} — $((want / 1048576)) MB verified in the bucket"
+                else
+                  echo "  ✓ ${name} — ${want} bytes verified in the bucket"
+                fi
+                KEPT+=("companion/${name}")
+                return 0
+              fi
+
+              echo "::warning::${name}: sent ${want} bytes, bucket reports ${got} — retrying (${attempt}/3)"
+            done
+
+            echo "::error::${name} is ${got} bytes in the bucket, expected ${want}. Refusing to publish."
+            exit 1
+          }
+
           KEPT=()
-          for f in "${FILES[@]}" "${UPDATE_FILES[@]}"; do
-            name="$(basename "$f")"
-            echo "  uploading ${name}"
-            aws s3 cp "$f" "s3://${BUCKET}/companion/${name}" \
-              --endpoint-url "${ENDPOINT}" \
-              --content-type application/octet-stream \
-              --only-show-errors
-            KEPT+=("companion/${name}")
+          echo "uploading installers"
+          for f in "${FILES[@]}"; do
+            upload_and_verify "$f" "$(basename "$f")"
+          done
+
+          # Only now, with every installer proved present and whole.
+          echo "uploading update manifests"
+          for f in "${UPDATE_FILES[@]}"; do
+            upload_and_verify "$f" "$(basename "$f")"
           done
 
           # ---- THEN PRUNE ---------------------------------------------------
