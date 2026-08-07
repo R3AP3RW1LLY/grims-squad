@@ -162,6 +162,23 @@ const NAV: readonly NavDefinition[] = [
    * First in the group, because it is where a system starts: you lay one out before you fly there
    * to post the first construction site, and the two boards below are what that plan becomes.
    */
+  /*
+   * ★ SCOUT — SQUADRON OWNER, 2026-08-07 ★
+   *
+   * "can we build a tool ... that literally does what we just did here for this planning and
+   * research and system selection?"
+   *
+   * Above Planning because it is the step BEFORE it: planning lays out a system already chosen,
+   * scouting is the choosing.
+   */
+  {
+    href: '/colonisation/scout',
+    label: 'Scout',
+    section: 'squadron',
+    subsection: 'Colonisation',
+    blurb: 'Find the next system worth claiming, and where its permit is bought.',
+    requires: Permission.COLONY_VIEW,
+  },
   {
     href: '/colonisation/planning',
     label: 'Planning',

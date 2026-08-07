@@ -36,6 +36,7 @@ import {
   MegaphoneIcon,
   NewspaperIcon,
   MapIcon,
+  ViewfinderCircleIcon,
   // Added 2026-08-06, when every nav link got its own icon. Chosen for what the page DOES rather
   // than what it is called: a build list is a clipboard, a hauling run is a truck, a board is a
   // trophy — and two links sharing an icon is two links with no icon.
@@ -139,6 +140,8 @@ const ICONS: Record<string, typeof HomeIcon> = {
   '/recruit': TicketIcon,
   '/mining': CubeIcon,
   '/colonisation/new': PlusCircleIcon,
+  // A reticle: scouting is picking a target before anything is built.
+  '/colonisation/scout': ViewfinderCircleIcon,
   '/colonisation/planning': ClipboardDocumentListIcon,
   '/colonisation/build-types': QueueListIcon,
   '/colonisation/squadron': BuildingOffice2Icon,

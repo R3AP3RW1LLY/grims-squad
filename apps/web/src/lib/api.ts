@@ -2866,3 +2866,79 @@ export const getChangelog = (): Promise<{ releases: ChangelogRelease[] } | null>
  */
 export const getChangelogPendingGated = (): Promise<AdminRead<{ pending: PendingChangelog | null }>> =>
   getAdmin('/v1/changelog/pending');
+
+// ── Colonisation scout ───────────────────────────────────────────────────────
+//
+// Finding the next system worth claiming, and taking a proper look at one.
+
+export interface ScoutPermit {
+  system: string;
+  allegiance: string | null;
+  controllingFaction: string | null;
+  stationCount: number;
+  hasOrbital: boolean;
+}
+
+export interface ScoutCandidateRow {
+  system: string;
+  bodyCount: number;
+  landableCount: number;
+  nearestLandableLs: number | null;
+  hotspots: Record<string, number>;
+  /** False until somebody surveys it. Distinct from "surveyed and empty". */
+  surveyed: boolean;
+  pristine: boolean;
+  /** Null means this system cannot be claimed from anywhere in range. */
+  permit: ScoutPermit | null;
+  permitLy: number | null;
+  score: number;
+}
+
+export interface ScoutResult {
+  anchor: { system: string; allegiance: string | null; controllingFaction: string | null } | null;
+  candidates: ScoutCandidateRow[];
+  consideredSystems: number;
+  permitSources: number;
+  unknownAnchor: string | null;
+}
+
+/** Search for claimable systems around an anchor. `prefer` extends that power. */
+export const getScout = (
+  anchor: string,
+  opts: { range?: string; prefer?: string } = {},
+): Promise<AdminRead<ScoutResult>> => {
+  const q = new URLSearchParams({ anchor });
+  if (opts.range !== undefined && opts.range !== '') q.set('range', opts.range);
+  if (opts.prefer !== undefined && opts.prefer !== '') q.set('prefer', opts.prefer);
+  return getAdmin(`/v1/colonisation/scout?${q.toString()}`);
+};
+
+export interface SurveyedBodyRow {
+  bodyId: number;
+  name: string;
+  subType: string | null;
+  landable: boolean;
+  distanceLs: number | null;
+  gravity: number | null;
+  hasRings: boolean;
+  terraformable: boolean;
+  orbitalSlots: number | null;
+  surfaceSlots: number | null;
+}
+
+export interface SystemSurveyResult {
+  system: string;
+  bodyCount: number | null;
+  bodies: SurveyedBodyRow[];
+  landableCount: number;
+  nearestLandableLs: number | null;
+  ringedCount: number;
+  hotspots: Record<string, number>;
+  fetchedAt: string | null;
+  hasSlotData: boolean;
+  /** Present instead of the survey when the system could not be found at all. */
+  notFound?: string;
+}
+
+export const getSystemSurvey = (system: string): Promise<AdminRead<SystemSurveyResult>> =>
+  getAdmin(`/v1/colonisation/survey?system=${encodeURIComponent(system)}`);
