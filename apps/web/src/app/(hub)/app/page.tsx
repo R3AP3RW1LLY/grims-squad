@@ -11,6 +11,7 @@ import {
   getSupportConsole,
   getSupportConsoleGated,
   getRecruitManage,
+  getBgsWatchlist,
   getSuggestionInboxGated,
   getRoadmapManageGated,
   getTrainingQueueGated,
@@ -28,6 +29,7 @@ import { PromotionRun } from './promotion-run';
 import { Moderation } from './moderation';
 import { Support } from './support';
 import { RecruitingConsole } from './recruiting';
+import { BgsConsole } from './bgs-console';
 import { SupportTabBadge } from './support-tab-badge';
 import { SuggestionsTabBadge } from './suggestions-tab-badge';
 import { TrainingImagesTabBadge } from './training-images-tab-badge';
@@ -127,6 +129,12 @@ const TABS: readonly PageTab[] = [
    * the roster, and the people who should do it are not necessarily the same people.
    */
   { key: 'recruiting', label: 'Recruiting' },
+  /*
+   * Gated on BGS_SET_ORDERS rather than the console's MEMBER_MANAGE. Directing where the squadron
+   * spends an evening is a different job from managing the roster, and the officers who do one are
+   * not necessarily the ones who do the other — the same reasoning Support and Recruiting use.
+   */
+  { key: 'bgs', label: 'BGS orders' },
   { key: 'roles', label: 'Roles & permissions' },
 ];
 
@@ -156,7 +164,7 @@ export default async function AdminPage({
    * though — every tab needs to know whether the second factor is fresh, and
    * a null from any admin read is that answer.
    */
-  const [dashboard, activity, audit, held, aiHealth, support, recruiting, me, suggestions, roadmap, trainingQueue] =
+  const [dashboard, activity, audit, held, aiHealth, support, recruiting, bgs, me, suggestions, roadmap, trainingQueue] =
     await Promise.all([
     /*
      * Fetched for the ACTIVITY tab too, and only for its `availableMonths`.
@@ -179,6 +187,7 @@ export default async function AdminPage({
     tab === 'moderation' ? getAiHealth() : Promise.resolve(null),
     tab === 'support' ? getSupportConsole('open') : Promise.resolve(null),
     tab === 'recruiting' ? getRecruitManage() : Promise.resolve(null),
+    tab === 'bgs' ? getBgsWatchlist() : Promise.resolve(null),
     /*
      * For the support and suggestions tabs' clocks. INV-025 wants each queue's absolute times
      * in the VIEWER's stored timezone, and that zone lives on /v1/me.
@@ -384,6 +393,15 @@ export default async function AdminPage({
           description="Who brought whom in. Attribution refuses to guess when it cannot tell — the rows needing a decision are at the top."
         >
           <RecruitingConsole data={recruiting} />
+        </Section>
+      )}
+
+      {tab === 'bgs' && bgs !== null && (
+        <Section
+          title="BGS orders"
+          description="The factions the squadron backs, and what to do about each of them. Nothing scores for a faction that is not on this list."
+        >
+          <BgsConsole factions={bgs.factions} />
         </Section>
       )}
 

@@ -2086,6 +2086,35 @@ export interface RecruitManage {
 export const getRecruitManage = (): Promise<RecruitManage | null> =>
   get('/v1/recruit/manage', { authed: true });
 
+// ── BGS ──────────────────────────────────────────────────────────────────────
+//
+// Squadron owner, 2026-08-06: "allow the officers to choose what factions we want to be running
+// missions for etc, give instructions to the squad members etc." Nothing scores for a faction that
+// is not on this list, which is what makes the watchlist an instrument of direction.
+
+export interface BgsOrderRow {
+  id: string;
+  /** push | hold | suppress | ignore — the schema's own BgsDirective. */
+  stance: string;
+  systemName: string | null;
+  priority: number;
+  guidance: string | null;
+  activeFrom: string;
+  activeUntil: string | null;
+}
+
+export interface BgsFactionRow {
+  id: string;
+  name: string;
+  /** The squadron's own player faction, as opposed to an ally worth supporting. */
+  isOurs: boolean;
+  notes: string | null;
+  orders: BgsOrderRow[];
+}
+
+export const getBgsWatchlist = (): Promise<{ factions: BgsFactionRow[] } | null> =>
+  get('/v1/bgs/watchlist', { authed: true });
+
 // ── Leaderboards ─────────────────────────────────────────────────────────────
 //
 // Squadron owner, 2026-08-04: "make a new category called leaderboards." Three boards — Data
