@@ -52,6 +52,48 @@ const OPS_RADIUS_LY = 200;
 const OPS_LIMIT = 300;
 const GALAXY_LIMIT = 200;
 
+/**
+ * ★ THE SCALE COLLAPSED, AND TOOK WHOLE SYSTEMS OFF THE BOARD WITH IT — 2026-08-08 ★
+ *
+ * A member cleared one bounty in BD+16 1001 and watched the rest of the system vanish. The claim
+ * was not the cause; claiming deletes one row, keyed by station. The cut line was.
+ *
+ * Measured on production that morning: 300 ops rows, 284 of them tied at the 3,650 ceiling, cut
+ * line 3,642, one system (Khwar) holding twenty slots, and not one never-seen station anywhere on
+ * the board. Almost every stale market row we hold dates from the same 2021 import, so once that
+ * data aged past the five-year cap the scores stopped distinguishing anything: the board became
+ * three hundred ties, and the cut climbed two points a day.
+ *
+ * A system's stations share an import timestamp, so they share a score, so they cross the line as
+ * a block. That is the whole bug — twenty bounties disappearing between one half-hourly rebuild
+ * and the next, with nothing in the product to explain it.
+ */
+
+/** Beyond this a station is simply "ancient" and the exact figure stops carrying information. */
+export const STALE_CAP_DAYS = 1825;
+
+/**
+ * A station we hold NO market for, scored so it outranks the stalest one we do.
+ *
+ * The header has always claimed this ("a station we hold NO market for outranks 2.7 years of
+ * stale", "precisely the biggest bounty there is") and the arithmetic stopped honouring it years
+ * ago: 1,000 against a capped 1,825 meant never-seen sank below anything older than 1,000 days.
+ * Production held zero of them. Above the cap, so the claim is true at every multiplier.
+ */
+export const NEVER_SEEN_POINTS = 2000;
+
+/**
+ * How many stations one system may put on the board at once.
+ *
+ * ★ THE FIX FOR THE BLOCK EVICTION ★
+ *
+ * Three, not twenty. A system whose stations all score alike can no longer occupy a twentieth of
+ * the board and then lose the lot in one rebuild; it shows its best three, and as those are
+ * claimed the next three rotate in — which is the behaviour the member expected in the first
+ * place. It also widens coverage: three hundred slots now reach at least a hundred systems.
+ */
+export const PER_SYSTEM_LIMIT = 3;
+
 export async function rebuildBountyBoard(db: PrismaClient): Promise<BountyBoardReport> {
   return db.$transaction(
     async (tx) => {
@@ -133,37 +175,60 @@ export async function rebuildBountyBoard(db: PrismaClient): Promise<BountyBoardR
         INSERT INTO data_bounties
           (station_key, station_name, system_name, station_type, large_pads,
            last_seen_at, days_stale, points, jackpot, in_ops, distance_ly, computed_at)
-        SELECT
-          k.ext_key,
-          k.name,
-          COALESCE(k.data->>'system', ''),
-          k.data->>'type',
-          (k.data->'landingPads'->>'large')::int,
-          s.last_seen,
-          CASE WHEN s.last_seen IS NULL THEN NULL
-               ELSE (extract(epoch FROM now() - s.last_seen) / 86400)::int END,
-          (CASE WHEN s.last_seen IS NULL THEN 1000
-                ELSE LEAST((extract(epoch FROM now() - s.last_seen) / 86400)::int, 1825) END)
-            * (CASE WHEN s.last_seen IS NULL
-                      OR s.last_seen < now() - interval '365 days' THEN 2 ELSE 1 END),
-          (s.last_seen IS NULL OR s.last_seen < now() - interval '365 days'),
-          true,
-          a.dist,
-          now()
-        FROM knowledge_items k
-        LEFT JOIN bounty_seen s ON s.station_key = k.ext_key
-        JOIN LATERAL (
-          SELECT min(cube_distance(k.coords, ba.coords)) AS dist
-            FROM bounty_anchors ba
-           WHERE k.coords <@ cube_enlarge(ba.coords, ${OPS_RADIUS_LY}, 3)
-             AND cube_distance(k.coords, ba.coords) <= ${OPS_RADIUS_LY}
-        ) a ON a.dist IS NOT NULL
-        WHERE k.kind = 'station'
-          AND k.coords IS NOT NULL
-          AND (k.data->>'type' IS NULL OR k.data->>'type' NOT ILIKE '%carrier%')
-          AND (s.last_seen IS NULL OR s.last_seen < now() - interval '${BELIEVABLE_DAYS} days')
-        ORDER BY 8 DESC, k.ext_key
-        LIMIT ${OPS_LIMIT}`);
+        SELECT station_key, station_name, system_name, station_type, large_pads,
+               last_seen, days_stale, points, jackpot, true, dist, now()
+          FROM (
+            /*
+             * ★ AT MOST ${PER_SYSTEM_LIMIT} PER SYSTEM, RANKED INSIDE THE SYSTEM FIRST ★
+             *
+             * A window, not a correlated subquery. The first version of this fix asked, for every
+             * candidate, how many better ones its system held — which is quadratic and took the
+             * rebuild past two minutes against 18.8M market rows. The window ranks each system's
+             * candidates in one pass over the same set that was already being sorted.
+             *
+             * The cap is what stops a system putting twenty near-identical scores shoulder to
+             * shoulder at the cut line, where they are all evicted by the same two-point drift.
+             */
+            SELECT *, ROW_NUMBER() OVER (
+                        PARTITION BY system_name
+                            ORDER BY points DESC, station_key
+                      ) AS rank_in_system
+              FROM (
+                SELECT
+                  k.ext_key                          AS station_key,
+                  k.name                             AS station_name,
+                  COALESCE(k.data->>'system', '')    AS system_name,
+                  k.data->>'type'                    AS station_type,
+                  (k.data->'landingPads'->>'large')::int AS large_pads,
+                  s.last_seen                        AS last_seen,
+                  CASE WHEN s.last_seen IS NULL THEN NULL
+                       ELSE (extract(epoch FROM now() - s.last_seen) / 86400)::int END AS days_stale,
+                  (CASE WHEN s.last_seen IS NULL THEN ${NEVER_SEEN_POINTS}
+                        ELSE LEAST((extract(epoch FROM now() - s.last_seen) / 86400)::int,
+                                   ${STALE_CAP_DAYS}) END)
+                    * (CASE WHEN s.last_seen IS NULL
+                              OR s.last_seen < now() - interval '365 days' THEN 2 ELSE 1 END)
+                                                     AS points,
+                  (s.last_seen IS NULL OR s.last_seen < now() - interval '365 days') AS jackpot,
+                  a.dist                             AS dist
+                FROM knowledge_items k
+                LEFT JOIN bounty_seen s ON s.station_key = k.ext_key
+                JOIN LATERAL (
+                  SELECT min(cube_distance(k.coords, ba.coords)) AS dist
+                    FROM bounty_anchors ba
+                   WHERE k.coords <@ cube_enlarge(ba.coords, ${OPS_RADIUS_LY}, 3)
+                     AND cube_distance(k.coords, ba.coords) <= ${OPS_RADIUS_LY}
+                ) a ON a.dist IS NOT NULL
+                WHERE k.kind = 'station'
+                  AND k.coords IS NOT NULL
+                  AND (k.data->>'type' IS NULL OR k.data->>'type' NOT ILIKE '%carrier%')
+                  AND (s.last_seen IS NULL
+                       OR s.last_seen < now() - interval '${BELIEVABLE_DAYS} days')
+              ) scored
+          ) ranked
+         WHERE rank_in_system <= ${PER_SYSTEM_LIMIT}
+         ORDER BY points DESC, station_key
+         LIMIT ${OPS_LIMIT}`);
 
       /*
        * The galaxy tail: the stalest stations anywhere that still hold market rows. Ordered
@@ -173,36 +238,56 @@ export async function rebuildBountyBoard(db: PrismaClient): Promise<BountyBoardR
         INSERT INTO data_bounties
           (station_key, station_name, system_name, station_type, large_pads,
            last_seen_at, days_stale, points, jackpot, in_ops, distance_ly, computed_at)
-        SELECT
-          pick.station_key,
-          k.name,
-          COALESCE(k.data->>'system', ''),
-          k.data->>'type',
-          (k.data->'landingPads'->>'large')::int,
-          pick.last_seen,
-          (extract(epoch FROM now() - pick.last_seen) / 86400)::int,
-          LEAST((extract(epoch FROM now() - pick.last_seen) / 86400)::int, 1825),
-          false,
-          false,
-          NULL,
-          now()
-        FROM (
-          /*
-           * Carriers are excluded BEFORE the candidate window, not after. The first board proved
-           * why: the stalest keys in the whole table are almost all carriers, so filtering after
-           * the LIMIT left six real stations out of four hundred candidates.
-           */
-          SELECT station_key, last_seen
-            FROM bounty_seen
-           WHERE last_seen IS NOT NULL
-             AND last_seen < now() - interval '${BELIEVABLE_DAYS} days'
-             AND (station_type IS NULL OR station_type NOT ILIKE '%carrier%')
-           ORDER BY last_seen ASC, station_key
-           LIMIT ${GALAXY_LIMIT * 2}
-        ) pick
-        JOIN knowledge_items k ON k.kind = 'station' AND k.ext_key = pick.station_key
-        ORDER BY pick.last_seen ASC
-        LIMIT ${GALAXY_LIMIT}
+        SELECT station_key, station_name, system_name, station_type, large_pads,
+               last_seen, days_stale, points, false, false, NULL, now()
+          FROM (
+            /*
+             * ★ THE SAME PER-SYSTEM CAP AS THE OPS BOARD ★
+             *
+             * The tail had the identical defect and it is the half that actually bit: the ops list
+             * capped at three and the tail then put all twelve of the same system's stations back.
+             * Found by the regression test rather than by reading, which is the only reason the fix
+             * is not still half done.
+             */
+            SELECT *, ROW_NUMBER() OVER (
+                        PARTITION BY system_name
+                            ORDER BY last_seen ASC, station_key
+                      ) AS rank_in_system
+              FROM (
+                SELECT
+                  pick.station_key                       AS station_key,
+                  k.name                                 AS station_name,
+                  COALESCE(k.data->>'system', '')        AS system_name,
+                  k.data->>'type'                        AS station_type,
+                  (k.data->'landingPads'->>'large')::int AS large_pads,
+                  pick.last_seen                         AS last_seen,
+                  (extract(epoch FROM now() - pick.last_seen) / 86400)::int AS days_stale,
+                  LEAST((extract(epoch FROM now() - pick.last_seen) / 86400)::int,
+                        ${STALE_CAP_DAYS})               AS points
+                FROM (
+                  /*
+                   * Carriers are excluded BEFORE the candidate window, not after. The first board
+                   * proved why: the stalest keys in the whole table are almost all carriers, so
+                   * filtering after the LIMIT left six real stations out of four hundred candidates.
+                   *
+                   * The pool is deliberately far wider than the board. Diversity can only spread
+                   * across systems that made the candidate list, and at twice the board size a
+                   * handful of crowded systems used the whole pool up.
+                   */
+                  SELECT station_key, last_seen
+                    FROM bounty_seen
+                   WHERE last_seen IS NOT NULL
+                     AND last_seen < now() - interval '${BELIEVABLE_DAYS} days'
+                     AND (station_type IS NULL OR station_type NOT ILIKE '%carrier%')
+                   ORDER BY last_seen ASC, station_key
+                   LIMIT ${GALAXY_LIMIT * 10}
+                ) pick
+                JOIN knowledge_items k ON k.kind = 'station' AND k.ext_key = pick.station_key
+              ) scored
+          ) ranked
+         WHERE rank_in_system <= ${PER_SYSTEM_LIMIT}
+         ORDER BY last_seen ASC
+         LIMIT ${GALAXY_LIMIT}
         ON CONFLICT (station_key) DO NOTHING`);
 
       const [j] = await tx.$queryRawUnsafe<Array<{ n: number }>>(
