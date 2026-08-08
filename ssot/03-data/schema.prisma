@@ -560,6 +560,12 @@ model User {
   /// relations because sending and judging are different acts done by different people.
   suggestions          Suggestion[]          @relation("SuggestionAuthor")
   suggestionsReviewed  Suggestion[]          @relation("SuggestionReviewer")
+
+  /// Systems they pinned or recently used, and their small UI settings. Both exist so that the
+  /// fourteen "type a system" boxes and the freight office's ranking control remember a person
+  /// rather than a browser.
+  systemMarks MemberSystemMark[]
+  preferences MemberPreference[]
 }
 
 /// 1:1 link to a Discord account. `guildRoles` is the input to the entire authorization model.
@@ -4880,4 +4886,74 @@ model RecruitMilestone {
   @@unique([discordId, milestone], map: "recruit_milestones_once")
   @@index([discordId, reachedAt])
   @@map("recruit_milestones")
+}
+
+/// A system a member wants back without typing it again.
+///
+/// ★ SQUADRON OWNER, 2026-08-08 ★
+///
+/// "any where that asks to enter a system ... saves entries and keeps them in a dropdown or a
+/// 'book mark' system so that they can just find stuff they have entered quick".
+///
+/// Fourteen fields ask for a system across the two surfaces, seven each, and every one is a bare
+/// text box. This is the store behind all of them.
+///
+/// ★ SERVER-SIDE, NOT LOCAL STORAGE ★
+///
+/// The whole point is that a system pinned on the website is there in the app, on the second
+/// monitor, ten seconds later. Browser storage cannot do that, and a member with two devices would
+/// get two different dropdowns for one account.
+model MemberSystemMark {
+  id     String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  userId String @map("user_id") @db.Uuid
+
+  /// Canonical spelling, as the galaxy holds it — NOT what was typed. Normalised through
+  /// `canonicalSystemName` on the way in, so `col 285 sector gl-w c2-12` and the real thing are one
+  /// row rather than two.
+  systemName String  @map("system_name")
+  /// Known when the system came from our own tables; null when a member typed something we do not
+  /// hold yet, which is allowed — refusing it would make the box worse than the text field it
+  /// replaces.
+  systemId64 BigInt? @map("system_id64")
+
+  /// `pinned` survives forever; `recent` is trimmed to the newest twenty. Text rather than an enum
+  /// for the same reason RecruitMilestone is: this is a product decision that may grow a rung, and
+  /// an enum migration locks a table every page reads.
+  kind String @default("recent")
+
+  /// A member's own name for a pin — "Home", "The dodec". Matched on as well as the real name.
+  label String?
+
+  lastUsedAt DateTime @default(now()) @map("last_used_at") @db.Timestamptz(6)
+  useCount   Int      @default(1) @map("use_count")
+  createdAt  DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// One row per system per member. The upsert on every successful search depends on this.
+  @@unique([userId, systemName], map: "member_system_marks_once")
+  /// The dropdown's own query: this member, newest first, pins included.
+  @@index([userId, kind, lastUsedAt])
+  @@map("member_system_marks")
+}
+
+/// Small per-member settings that are not worth a column each.
+///
+/// Opened for the freight office's ranking control — "let the member pick, remembered per person"
+/// — and deliberately general, because the alternative is a migration every time a screen grows a
+/// preference. Values are jsonb so a preference can become an object without another migration.
+///
+/// NOT for anything with an ACL or anything another service reads: this is UI state, and a
+/// key-value bag is the wrong place for a fact the platform depends on.
+model MemberPreference {
+  userId    String   @map("user_id") @db.Uuid
+  /// Namespaced by feature, e.g. `freight.sort`, `freight.range`.
+  key       String
+  value     Json     @db.JsonB
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, key])
+  @@map("member_preferences")
 }

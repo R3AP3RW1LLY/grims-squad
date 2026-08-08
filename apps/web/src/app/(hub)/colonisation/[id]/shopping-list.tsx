@@ -1,6 +1,7 @@
 import type { ColonyShoppingRow } from '../../../../lib/api';
 import { CopySystem } from '../../../../components/copy-system';
 import { BarLegend, SegmentedBar } from './needs-table';
+import { SystemPicker } from '../../../../components/system-picker';
 
 /**
  * Where to buy what a project still needs.
@@ -115,7 +116,7 @@ export function ShoppingList({
           <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-secondary)]">
             Buying from
           </span>
-          <input
+          <SystemPicker
             name="near"
             defaultValue={query['near'] ?? ''}
             placeholder="a system near you"

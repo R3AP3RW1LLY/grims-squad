@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { apiPost } from '../../../lib/api-client';
+import { SystemPicker } from '../../../components/system-picker';
 
 /**
  * Posting a colonisation project.
@@ -65,7 +66,7 @@ export function PostProject({ canPostSquadron = false }: { canPostSquadron?: boo
 
         <label className="flex flex-col gap-1">
           <span className={LABEL}>System</span>
-          <input name="systemName" required placeholder="HIP 58832" className={FIELD} />
+          <SystemPicker name="systemName" required placeholder="HIP 58832" className={FIELD} />
         </label>
 
         <label className="flex flex-col gap-1">

@@ -71,6 +71,10 @@
       "types": "./dist/market-depth.d.ts",
       "default": "./dist/market-depth.js"
     },
+    "./system-picker": {
+      "types": "./dist/system-picker.d.ts",
+      "default": "./dist/system-picker.js"
+    },
     "./body-order": {
       "types": "./dist/body-order.d.ts",
       "default": "./dist/body-order.js"

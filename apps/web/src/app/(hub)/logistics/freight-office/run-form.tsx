@@ -4,6 +4,7 @@
 // shipping permissions and the rich-document schema to a browser.
 import { MAX_CARGO_TONNES } from '@grims/shared/logistics';
 import type { RoutePlan } from '../../../../lib/api';
+import { SystemPicker } from '../../../../components/system-picker';
 
 /**
  * What the member flies, how far, and with how much.
@@ -101,7 +102,7 @@ export function RunForm({
       <form method="get" className="flex flex-wrap items-end gap-3">
         <label className="flex flex-col gap-1">
           <span className={LABEL}>Starting system</span>
-          <input name="near" defaultValue={val('near')} placeholder="Deciat" className={`${FIELD} w-[190px]`} />
+          <SystemPicker name="near" defaultValue={val('near')} placeholder="Deciat" className={`${FIELD} w-[190px]`} />
         </label>
 
         <label className="flex flex-col gap-1">
