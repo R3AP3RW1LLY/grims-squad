@@ -263,3 +263,102 @@ describe('what the finished system would be', () => {
     });
   });
 });
+
+/**
+ * What economy the plan actually produces.
+ *
+ * ★ THE OUTPUT THE BUILD BOOKS LEAN ON AND THE APP DID NOT SHOW ★
+ *
+ * A colonisation plan's most consequential result is not its point balance or its tonnage — it is
+ * what the system BECOMES. Two plans with identical costs and identical effect totals can produce
+ * a refinery or an extraction site depending only on which influences outnumber which, and a
+ * member could not see that anywhere in the website or the app.
+ *
+ * It is also the one decision that cannot be taken back: a build carrying `fixed`, placed first,
+ * sets the economy permanently. That rule is enforced by `checkColonyPlan` and the tally here has
+ * to agree with it exactly, or the two halves of the same page contradict each other.
+ */
+describe('the economy a plan produces', () => {
+  const infl = (id: string, influence: string | null, fixed: string | null = null): SimBuildType =>
+    build({ id, influence, fixed, givesTier: 2, givesPoints: 1 });
+
+  it('counts every influence in the order and names the leader as primary', () => {
+    const catalogue = new Map(
+      [infl('a', 'hightech'), infl('b', 'hightech'), infl('c', 'industrial')].map((t) => [t.id, t]),
+    );
+
+    const { economy } = simulatePlan(plan('a', 'b', 'c'), catalogue);
+
+    expect(economy.counts).toEqual({ hightech: 2, industrial: 1 });
+    expect(economy.primary).toBe('hightech');
+    expect(economy.secondary).toBe('industrial');
+    expect(economy.locked).toBe(false);
+  });
+
+  it('ignores builds that carry no economy at all', () => {
+    // `none` is a real value in the catalogue, not a missing one, and counting it would invent a
+    // fictional economy that outvotes the real ones.
+    const catalogue = new Map(
+      [infl('a', 'none'), infl('b', null), infl('c', 'refinery')].map((t) => [t.id, t]),
+    );
+
+    const { economy } = simulatePlan(plan('a', 'b', 'c'), catalogue);
+
+    expect(economy.counts).toEqual({ refinery: 1 });
+    expect(economy.primary).toBe('refinery');
+    expect(economy.secondary).toBeNull();
+  });
+
+  it('★ MANDATORY: a fixed build placed FIRST locks the economy, whatever the counts say ★', () => {
+    /*
+     * The whole reason this is worth showing. Eight high-tech influences lose to one industrial
+     * one, because the industrial build opened the plan. A member who cannot see this hauls a
+     * fortnight of cargo to a system that will never be what they intended.
+     */
+    const catalogue = new Map(
+      [infl('vulcan', 'industrial', 'industrial'), infl('a', 'hightech'), infl('b', 'hightech')].map(
+        (t) => [t.id, t],
+      ),
+    );
+
+    const { economy } = simulatePlan(plan('vulcan', 'a', 'b'), catalogue);
+
+    expect(economy.locked).toBe(true);
+    expect(economy.lockedBy).toBe('vulcan');
+    expect(economy.primary).toBe('industrial');
+    // The votes are still counted and still reported — they just no longer decide.
+    expect(economy.counts).toEqual({ industrial: 1, hightech: 2 });
+  });
+
+  it('treats a fixed build placed LATER as an ordinary vote', () => {
+    const catalogue = new Map(
+      [infl('a', 'hightech'), infl('b', 'hightech'), infl('vulcan', 'industrial', 'industrial')].map(
+        (t) => [t.id, t],
+      ),
+    );
+
+    const { economy } = simulatePlan(plan('a', 'b', 'vulcan'), catalogue);
+
+    expect(economy.locked).toBe(false);
+    expect(economy.lockedBy).toBeNull();
+    expect(economy.primary).toBe('hightech');
+  });
+
+  it('breaks a tie by name, so the panel does not change on a redraw', () => {
+    const catalogue = new Map([infl('a', 'refinery'), infl('b', 'industrial')].map((t) => [t.id, t]));
+
+    const { economy } = simulatePlan(plan('a', 'b'), catalogue);
+
+    expect(economy.primary).toBe('industrial');
+    expect(economy.secondary).toBe('refinery');
+  });
+
+  it('reports nothing at all for an empty order', () => {
+    const { economy } = simulatePlan([], new Map());
+
+    expect(economy.counts).toEqual({});
+    expect(economy.primary).toBeNull();
+    expect(economy.secondary).toBeNull();
+    expect(economy.locked).toBe(false);
+  });
+});

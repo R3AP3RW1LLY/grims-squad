@@ -1207,6 +1207,128 @@ function Balance({ step }: { step: PlanSimStep | undefined }): JSX.Element | nul
   );
 }
 
+/** Catalogue economies are stored lowercase and single-word. Members read them as words. */
+const ECONOMY_NAMES: Readonly<Record<string, string>> = {
+  agriculture: 'Agriculture',
+  colony: 'Colony',
+  extraction: 'Extraction',
+  hightech: 'High Tech',
+  industrial: 'Industrial',
+  military: 'Military',
+  refinery: 'Refinery',
+  service: 'Service',
+  terraforming: 'Terraforming',
+  tourism: 'Tourism',
+};
+
+const economyName = (key: string): string => ECONOMY_NAMES[key] ?? key;
+
+/**
+ * What the system BECOMES — the answer the build books lead with.
+ *
+ * ★ THE MOST CONSEQUENTIAL LINE ON THE PAGE, AND IT WAS NOT HERE ★
+ *
+ * The panel below says how good the system gets. This one says what it IS, which is the question a
+ * member is really answering when they choose a build order: two plans with identical tonnage and
+ * identical effect totals produce a refinery or an extraction site depending only on which
+ * influences outnumber which.
+ *
+ * It is also the only decision here that cannot be undone. A build carrying a fixed economy, placed
+ * FIRST, sets the system permanently — eight high-tech installations lose to one industrial opener.
+ *
+ * Word for word the website's panel, because a member reading the plan on the second monitor and
+ * the same plan in the browser must not be told two different things.
+ */
+function Economy({ plan }: { plan: ColonyPlan }): JSX.Element | null {
+  const { counts, primary, secondary, locked, lockedBy } = plan.simulation.economy;
+  if (primary === null) return null;
+
+  const votes = Object.entries(counts);
+
+  return (
+    <div
+      style={{
+        marginTop: '18px',
+        border: `1px solid ${C.subtle}`,
+        borderRadius: '4px',
+        padding: '10px 14px',
+      }}
+    >
+      <p
+        style={{
+          ...MONO,
+          margin: 0,
+          fontSize: '10px',
+          letterSpacing: '0.2em',
+          textTransform: 'uppercase',
+          color: C.dim,
+        }}
+      >
+        What this system becomes
+      </p>
+
+      <div
+        style={{
+          marginTop: '6px',
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'baseline',
+          gap: '4px 14px',
+        }}
+      >
+        <span style={{ fontSize: '17px', color: C.orangeBright }}>{economyName(primary)}</span>
+        {secondary === null ? null : (
+          <span style={{ fontSize: '11px', color: C.dim }}>
+            with {economyName(secondary)} second
+          </span>
+        )}
+      </div>
+
+      {votes.length === 0 ? null : (
+        <div style={{ marginTop: '8px', display: 'flex', flexWrap: 'wrap', gap: '6px 22px' }}>
+          {votes.map(([key, n]) => (
+            <span key={key} style={{ fontSize: '11px', color: C.dim }}>
+              {economyName(key)}{' '}
+              <span
+                style={{ ...MONO, color: C.text }}
+                title={`${n} build${n === 1 ? '' : 's'} in this order push the system towards ${economyName(key)}.`}
+              >
+                &times;{n}
+              </span>
+            </span>
+          ))}
+        </div>
+      )}
+
+      {locked ? (
+        <p
+          style={{
+            margin: '10px 0 0',
+            borderLeft: `2px solid ${C.warn}`,
+            paddingLeft: '10px',
+            fontSize: '11px',
+            color: C.dim,
+          }}
+        >
+          <strong style={{ color: C.text }}>This economy is locked.</strong>{' '}
+          <span style={MONO}>{lockedBy}</span> opens the order and permanently fixes the system to{' '}
+          {economyName(primary)}. Nothing built later can change it, whatever the counts above say.
+          To keep the choice open, start with a build that carries no economy of its own — a colony
+          port such as <span style={MONO}>plutus</span>, <span style={MONO}>vesta</span> or{' '}
+          <span style={MONO}>hestia</span>.
+        </p>
+      ) : (
+        <p style={{ margin: '10px 0 0', fontSize: '11px', color: C.faint }}>
+          The economy with the most builds behind it becomes the system&rsquo;s primary; the
+          runner-up becomes its secondary. Reordering the list above does not change this — only
+          adding or removing builds does. One exception: a build that fixes an economy decides it
+          outright if it is placed first.
+        </p>
+      )}
+    </div>
+  );
+}
+
 /**
  * What the system becomes if the whole order is built.
  *
@@ -1430,6 +1552,8 @@ function BuildOrder({
         total · the first is the primary port, and moving it changes which build that is
       </p>
 
+      {/* What it becomes before how good it gets: the economy is the decision, the scalars grade it. */}
+      <Economy plan={plan} />
       <Effects plan={plan} />
     </div>
   );

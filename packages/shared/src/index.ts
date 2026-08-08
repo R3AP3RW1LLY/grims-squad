@@ -36,6 +36,7 @@ export {
  */
 export { NO_EFFECTS, prerequisiteName, simulatePlan, surchargedCost } from './colony-simulation.js';
 export type {
+  PlanEconomy,
   SimBuildType,
   SimProblem,
   SimResult,
