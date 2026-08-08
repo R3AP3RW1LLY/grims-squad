@@ -7,7 +7,11 @@ import {
   telemetryCategoryFor,
 
   canonicalJson,
+  readDockSighting,
+  readSystemSighting,
+  type DockSighting,
   type JournalEventName,
+  type SystemSighting,
   type TelemetryCategoryName,
 } from '@grims/shared';
 
@@ -56,6 +60,22 @@ export interface MarketUpdater {
    * anonymous data pays no bounty, which is the design rather than a gap.
    */
   apply(event: Record<string, unknown> & { event: string }, memberId?: string): Promise<number>;
+}
+
+/**
+ * Writes what a member saw into the galaxy tables.
+ *
+ * ★ INJECTED, LIKE THE MARKET AND COLONY WRITERS, AND FOR THE SAME REASON ★
+ *
+ * A unit test of ingestion should not need a database. Parsing an event is a rule worth testing on
+ * its own and lives in @grims/shared; writing it is a database concern and lives in @grims/db. This
+ * interface is the seam between them, so this service imports neither.
+ */
+export interface GalaxyWriter {
+  /** A system somebody jumped into. Idempotent: the same jump teaches the same coordinates. */
+  recordSystem(seen: SystemSighting): Promise<void>;
+  /** A station somebody docked at, which is how a brand-new one first appears on the map. */
+  recordDock(dock: DockSighting): Promise<void>;
 }
 
 export interface IngestStore {
@@ -214,6 +234,13 @@ type Row = Parameters<IngestStore['insertIgnoringDuplicates']>[0][number];
  */
 const MARKET_EVENTS = new Set(['Market', 'MarketBuy', 'MarketSell']);
 
+/*
+ * The events that say where a system IS. `CarrierJump` is here too: it is an FSDJump in all but
+ * name, and a carrier arriving somewhere uncharted is one of the likelier ways this squadron
+ * reaches a system nobody has dumped.
+ */
+const SYSTEM_EVENTS = new Set(['FSDJump', 'Location', 'CarrierJump']);
+
 /**
  * The one thing this service needs in order to import a fitted ship.
  *
@@ -280,6 +307,14 @@ export class JournalIngestService {
      * scheduled pass picks them up as it always did.
      */
     private readonly colony: ColonyApplier | null = null,
+    /**
+     * Records systems and stations members fly to.
+     *
+     * Optional like the rest: a deployment without the knowledge store still accepts journals, and
+     * a unit test of ingestion still needs no database.
+     */
+    private readonly galaxy: GalaxyWriter | null = null,
+
   ) {}
 
   /** How much this member has contributed in total. See `IngestStore`. */
@@ -366,6 +401,14 @@ export class JournalIngestService {
     const colonySites = new Set<bigint>();
     /** `Loadout` events, for importing the member's own ship. See the note below the insert. */
     const loadouts: Array<{ key: string; payload: unknown }> = [];
+
+    /*
+     * Systems and stations a member actually flew to, deduped within the batch: somebody running
+     * missions in one system produces a dozen identical sightings, and writing them once is the
+     * difference between one statement and a dozen.
+     */
+    const sightings = new Map<string, SystemSighting>();
+    const docks = new Map<number, DockSighting>();
     const refused: Record<string, number> = {};
     let rejected = 0;
 
@@ -461,10 +504,69 @@ export class JournalIngestService {
         const marketId = marketIdOf(payload);
         if (marketId !== null) colonySites.add(marketId);
       }
+
+      /*
+       * ★ WHERE MEMBERS HAVE ACTUALLY BEEN — SQUADRON OWNER, 2026-08-08 ★
+       *
+       * "we need system data that our members discover to update our market data near instantly,
+       * ingested, so its all as real time as possible ... as users of our app are entering systems,
+       * visiting stations etc".
+       *
+       * Nothing needed adding to the companion. It has sent whole journal events since 2026-07-29,
+       * so production had ALREADY taken 866 FSDJump, 987 Docked and 188 Location events in a single
+       * week — and routed none of them anywhere. 502 systems sat in telemetry_events that
+       * knowledge_items did not hold, one of which was almost certainly the owner's own, which the
+       * scout had rejected the day before with "check the spelling".
+       *
+       * Collected here, after the consent gates, exactly like market and colonisation events: a
+       * member who has switched `location` off contributes nothing, because the event never reaches
+       * this line.
+       */
+      if (SYSTEM_EVENTS.has(e.name)) {
+        const seen = readSystemSighting(payload);
+        // Keyed by address so a batch full of jumps around one system writes it once.
+        if (seen !== null) sightings.set(seen.systemAddress, seen);
+      }
+
+      /*
+       * ★ THE FUNCTION THAT WAS WRITTEN FOR THIS AND NEVER CALLED ★
+       *
+       * `enrichStationFromDock` has existed in @grims/db for weeks, complete, handling all three
+       * cases — galaxy row, provisional row, nothing at all — and NOTHING invoked it. `Docked` was
+       * never routed, and the field allowlist threw away MarketID before it could have been, so a
+       * week of docks taught us nothing.
+       *
+       * This is the wire. A member opening a new station now has it on the map from the moment they
+       * land at it, which is the case the owner asked for by name.
+       */
+      if (e.name === 'Docked') {
+        const dock = readDockSighting(payload);
+        if (dock !== null) docks.set(dock.marketId, dock);
+      }
     }
 
     const insertedKeys = rows.length === 0 ? [] : await this.store.insertIgnoringDuplicates(rows);
     const accepted = insertedKeys.length;
+
+    /*
+     * ★ THE MAP, UPDATED FROM WHERE PEOPLE ACTUALLY FLEW ★
+     *
+     * Applied unconditionally rather than only for NEW event keys, unlike the market path. A repeat
+     * of the same jump teaches the same coordinates, so re-applying costs one idempotent upsert and
+     * protects against the case where the event row was deduped away but the map write had failed
+     * the first time.
+     *
+     * Each is caught individually and swallowed: a member's upload must never fail because the
+     * galaxy table was busy. The next jump writes it again.
+     */
+    if (this.galaxy !== null) {
+      for (const seen of sightings.values()) {
+        await this.galaxy.recordSystem(seen).catch(() => undefined);
+      }
+      for (const dock of docks.values()) {
+        await this.galaxy.recordDock(dock).catch(() => undefined);
+      }
+    }
 
     /*
      * ★ LIVE MARKET UPDATES, AND ONLY FROM EVENTS THAT WERE GENUINELY NEW ★

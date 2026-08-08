@@ -153,7 +153,7 @@ export async function learnSystem(
 
   const [row] = await db.$queryRawUnsafe<Array<{ n: number }>>(
     `SELECT count(*)::int AS n FROM knowledge_items
-      WHERE kind = 'system' AND ext_key = $1 AND source IN ('galaxy', 'eddn')`,
+      WHERE kind = 'system' AND ext_key = $1 AND source IN ('galaxy', 'eddn', 'companion')`,
     key,
   );
 

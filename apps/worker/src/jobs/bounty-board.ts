@@ -115,7 +115,7 @@ export async function rebuildBountyBoard(db: PrismaClient): Promise<BountyBoardR
           FROM colony_projects p
           JOIN knowledge_items k
             ON k.kind = 'system'
-           AND k.source IN ('galaxy', 'eddn')
+           AND k.source IN ('galaxy', 'eddn', 'companion')
            AND k.coords IS NOT NULL
            AND (
                  (p.system_id64 IS NOT NULL AND k.ext_key = p.system_id64::text)

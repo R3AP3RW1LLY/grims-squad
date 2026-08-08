@@ -1,5 +1,11 @@
 import { Module } from '@nestjs/common';
-import { notifyMembers, PrismaClient } from '@grims/db';
+import type { DockSighting, SystemSighting } from '@grims/shared';
+import {
+  enrichStationFromDock,
+  notifyMembers,
+  PrismaClient,
+  recordSystemSighting,
+} from '@grims/db';
 import { DatabaseModule } from '../database.module.js';
 import { ShipBuildService } from '../ai/ship-build.service.js';
 import { ColonyLiveService } from '../logistics/colony-live.service.js';
@@ -106,6 +112,22 @@ import type { LiveService } from '../live/live.service.js';
           // The nudge rides to the sync's markComplete transition, so a build finished by THIS
           // upload announces itself through this process's own SSE service.
           new ColonyLiveService(db, liveNudgeOf(live)),
+          /*
+           * ★ THE MAP, UPDATED FROM WHERE PEOPLE ACTUALLY FLEW — 2026-08-08 ★
+           *
+           * `enrichStationFromDock` was written weeks ago, complete, and called by NOTHING. Docked
+           * was never routed to it and the field allowlist discarded MarketID before it could have
+           * been, so 987 docks a week taught us nothing and a member opening a new station stayed
+           * invisible until EDDN caught up.
+           *
+           * Wired here for the same reason the colony sync is: the API is the process that must be
+           * up for the events to have arrived at all, so it is the one place the conversion cannot
+           * be missed.
+           */
+          {
+            recordSystem: (seen: SystemSighting) => recordSystemSighting(db, seen),
+            recordDock: (dock: DockSighting) => enrichStationFromDock(db, dock),
+          },
         ),
     },
     {
