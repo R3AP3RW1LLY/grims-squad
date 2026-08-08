@@ -131,3 +131,19 @@ overrides:
   #
   # Not reached by the api, web or worker at all, so no server surface is exposed.
   "js-yaml@>=4.0.0 <4.3.1": ">=4.3.1"
+  # HIGH: nanoid <3.3.17 — a custom generator loops indefinitely when asked for size zero, i.e. a
+  # hang rather than a leak.
+  #
+  # Reached through postcss, and postcss is reached four ways. Three are dev tooling (next,
+  # @tailwindcss/postcss, vite/vitest). The fourth is not: `sanitize-html` in @grims/api pulls it,
+  # and sanitize-html runs on member-submitted forum and profile content on every request that
+  # carries any. We do not call nanoid with a zero size and nothing lets a member choose one — but
+  # "our caller happens to pass a safe argument today" is the reasoning that ages badly, and the
+  # fix is a patch bump.
+  #
+  # ★ PINNED INSIDE THE 3.x LINE, NOT TO A BARE FLOOR ★
+  #
+  # `>=3.3.17` alone resolved to 6.0.1, and nanoid dropped CommonJS at v4. postcss is CJS and
+  # `require`s it, so the bare floor swaps a theoretical hang for a certain ERR_REQUIRE_ESM in the
+  # web build. The upper bound is the whole point of this entry.
+  "nanoid@<3.3.17": ">=3.3.17 <4"

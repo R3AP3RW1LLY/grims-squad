@@ -52,6 +52,39 @@ export interface SimBuildType {
   /** The prerequisite keys this build satisfies for others. */
   readonly satisfies: readonly string[];
   readonly effects: SystemEffects;
+  /**
+   * The economy this build votes for, or null. `none` is a real catalogue value meaning "no vote"
+   * and is treated the same as null.
+   */
+  readonly influence?: string | null | undefined;
+  /**
+   * Set only on builds that FIX the system's economy. It binds only when the build opens the plan;
+   * see `PlanEconomy`.
+   */
+  readonly fixed?: string | null | undefined;
+}
+
+/**
+ * What the system ends up being, as opposed to what it ends up scoring.
+ *
+ * ★ THE RESULT A MEMBER ACTUALLY CARES ABOUT ★
+ *
+ * Effects say how good the system gets. This says what it IS — refinery, high tech, extraction —
+ * and that is what decides whether the plan was worth building. It is decided by simple majority
+ * of influences, except when it is not: a build carrying `fixed`, placed first, sets it outright
+ * and no later vote can move it.
+ */
+export interface PlanEconomy {
+  /** Every economy voted for, and how many builds voted for it. */
+  readonly counts: Readonly<Record<string, number>>;
+  /** What the system becomes. Null when nothing in the order votes. */
+  readonly primary: string | null;
+  /** The runner-up, which is the system's secondary economy. Null when only one economy votes. */
+  readonly secondary: string | null;
+  /** True when the opening build fixed the economy, making `primary` permanent. */
+  readonly locked: boolean;
+  /** The build id that locked it, for a message that can name the culprit. */
+  readonly lockedBy: string | null;
 }
 
 /** What a finished build does to the system it is in. */
@@ -115,6 +148,8 @@ export interface SimResult {
   readonly problems: readonly SimProblem[];
   /** The system's totals if the whole order is built. */
   readonly effects: SystemEffects;
+  /** What the system becomes: the economy the order votes for, or the one its opener fixed. */
+  readonly economy: PlanEconomy;
   /** How many non-primary tier-2/3 starports carried a surcharge. */
   readonly surchargedPorts: number;
 }
@@ -194,6 +229,15 @@ export function simulatePlan(
 
   /* What the system already satisfies, accumulated as the order proceeds. */
   const satisfied = new Set<string>();
+
+  /*
+   * The economy vote. Counted for every build in the order, including ones that turn out to be
+   * unbuildable: a member fixing a broken plan needs to see what it WOULD become, not a tally that
+   * empties out because step four ran short of points.
+   */
+  const counts = new Map<string, number>();
+  let lockedTo: string | null = null;
+  let lockedBy: string | null = null;
 
   const effects = {
     population: 0,
@@ -296,6 +340,23 @@ export function simulatePlan(
 
     for (const key of type.satisfies) satisfied.add(key);
 
+    /*
+     * `none` is a real catalogue value, not a missing one. Counting it would invent an economy that
+     * outvotes the genuine ones, which is exactly the kind of quiet wrongness this panel exists to
+     * prevent.
+     */
+    const vote = type.influence ?? null;
+    if (vote !== null && vote !== 'none') counts.set(vote, (counts.get(vote) ?? 0) + 1);
+
+    /*
+     * The lock binds ONLY on the opener, matching `checkColonyPlan` exactly. Placed later the same
+     * build is an ordinary vote. The two must not disagree — they are read side by side on one page.
+     */
+    if (index === 0 && type.fixed != null && type.fixed !== '') {
+      lockedTo = type.fixed;
+      lockedBy = type.id;
+    }
+
     effects.population += type.effects.population;
     effects.maxPopulation += type.effects.maxPopulation;
     effects.security += type.effects.security;
@@ -318,5 +379,22 @@ export function simulatePlan(
     });
   });
 
-  return { steps, tier2, tier3, problems, effects, surchargedPorts };
+  /*
+   * Ranked by votes, ties broken by NAME. Without the tiebreak two economies on equal counts would
+   * swap places between renders depending on Map insertion order, and a panel that reorders itself
+   * on a redraw reads as a bug in the plan rather than in the sort.
+   */
+  const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  const voted = ranked[0]?.[0] ?? null;
+
+  const economy: PlanEconomy = {
+    counts: Object.fromEntries(ranked),
+    primary: lockedTo ?? voted,
+    // A locked system has no runner-up worth naming: the votes no longer decide anything.
+    secondary: lockedTo !== null ? null : (ranked[1]?.[0] ?? null),
+    locked: lockedTo !== null,
+    lockedBy,
+  };
+
+  return { steps, tier2, tier3, problems, effects, economy, surchargedPorts };
 }

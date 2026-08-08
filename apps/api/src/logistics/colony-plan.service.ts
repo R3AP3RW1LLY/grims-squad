@@ -544,7 +544,8 @@ export class ColonyPlanService {
       `SELECT id, display_name, tier, build_class, needs_tier, needs_points,
               gives_tier, gives_points, requires, satisfies,
               eff_population, eff_max_population, eff_security, eff_technology,
-              eff_wealth, eff_standard_of_living, eff_development
+              eff_wealth, eff_standard_of_living, eff_development,
+              economy_influence, economy_fixed
          FROM colony_build_types
         WHERE id = ANY($1::text[])`,
       ids,
@@ -573,6 +574,10 @@ export class ColonyPlanService {
             standardOfLiving: Number(r['eff_standard_of_living']),
             development: Number(r['eff_development']),
           },
+          // What the system BECOMES. Selected here because the simulation cannot vote without it,
+          // and an absent column reads as "no economy at all" rather than as a missing join.
+          influence: r['economy_influence'] === null ? null : String(r['economy_influence']),
+          fixed: r['economy_fixed'] === null ? null : String(r['economy_fixed']),
         },
       ]),
     );

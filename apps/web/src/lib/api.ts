@@ -2717,12 +2717,30 @@ export interface PlanEconomies {
   blindSpots: string[];
 }
 
+/**
+ * What the system BECOMES if the order is built — the result the build books lead with and the
+ * planner did not show. Mirrors `PlanEconomy` in @grims/shared; the server computes it.
+ */
+export interface PlanEconomyView {
+  /** Every economy the order votes for, and how many builds vote for it. Ranked, highest first. */
+  counts: Record<string, number>;
+  /** What the system becomes. Null when nothing in the order carries an economy. */
+  primary: string | null;
+  /** The runner-up. Null when only one economy votes, or when the economy is locked. */
+  secondary: string | null;
+  /** True when the OPENING build fixed the economy permanently. */
+  locked: boolean;
+  /** Which build did the locking, so the warning can name it. */
+  lockedBy: string | null;
+}
+
 export interface PlanSimulation {
   steps: PlanSimStep[];
   tier2: number;
   tier3: number;
   problems: PlanProblem[];
   effects: PlanEffects;
+  economy: PlanEconomyView;
   surchargedPorts: number;
 }
 
