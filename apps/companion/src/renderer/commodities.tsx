@@ -4,6 +4,7 @@ import type { CommoditiesIndex, CommodityRow } from '../hub-trade.js';
 import { Button, C, Card, Empty, Problem, Section, inputStyle } from './ui.js';
 import { useLive } from './use-live.js';
 import { CommodityDetailPage } from './commodity-detail.js';
+import { SystemPicker } from './system-picker.js';
 
 /**
  * The commodities market, in the app.
@@ -109,10 +110,10 @@ export function CommoditiesPage(): JSX.Element {
               <span style={{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.14em', color: C.faint, display: 'block', marginBottom: '4px' }}>
                 Measure from
               </span>
-              <input
+              <SystemPicker
                 style={{ ...inputStyle, width: '170px' }}
                 value={near}
-                onInput={(e) => setNear((e.target as HTMLInputElement).value)}
+                onValueChange={setNear}
                 placeholder="where your ship is"
               />
             </label>

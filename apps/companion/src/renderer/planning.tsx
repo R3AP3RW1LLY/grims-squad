@@ -24,6 +24,7 @@ import {
   Tabs,
   inputStyle,
 } from './ui.js';
+import { SystemPicker } from './system-picker.js';
 
 /**
  * Colonisation planning, in the companion app.
@@ -328,11 +329,11 @@ function NewPlan({ onMade }: { onMade: (id: string) => void }): JSX.Element {
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-end', gap: '10px' }}>
         <div style={{ minWidth: '190px', flex: 1 }}>
           <Field label="System">
-            <input
+            <SystemPicker
               value={systemName}
-              onInput={(e) => setSystemName((e.target as HTMLInputElement).value)}
+              onValueChange={setSystemName}
               placeholder="the system you are claiming"
-              style={inputStyle}
+              
             />
           </Field>
         </div>

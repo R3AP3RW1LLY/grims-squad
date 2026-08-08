@@ -2,7 +2,9 @@ import { Module } from '@nestjs/common';
 import { PrismaClient } from '@grims/db';
 import { DatabaseModule } from '../database.module.js';
 import { AuthzModule } from '../authz/authz.module.js';
+import { TelemetryModule } from '../telemetry/telemetry.module.js';
 import { SystemMarksController } from './system-marks.controller.js';
+import { SystemMarksDeviceController } from './system-marks-device.controller.js';
 import { SystemMarksService } from './system-marks.service.js';
 
 /**
@@ -13,8 +15,9 @@ import { SystemMarksService } from './system-marks.service.js';
  * need it too, and none of them should have to import the market to get a dropdown.
  */
 @Module({
-  imports: [DatabaseModule, AuthzModule],
-  controllers: [SystemMarksController],
+  // TelemetryModule for PAIRING_SERVICE: the app's door authenticates a paired device.
+  imports: [DatabaseModule, AuthzModule, TelemetryModule],
+  controllers: [SystemMarksController, SystemMarksDeviceController],
   providers: [
     {
       provide: SystemMarksService,

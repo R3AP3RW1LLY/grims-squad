@@ -101,6 +101,12 @@ import {
   type CompanionConfig,
 } from './config.js';
 import { Uploader } from './uploader.js';
+import {
+  fetchSavedSystems,
+  pinSystem,
+  recordSystemUsed,
+  unpinSystem,
+} from './hub-systems.js';
 import { runWatchPass, type JournalFs, type WatchOutcome } from './watcher.js';
 import {
   isFresh,
@@ -1813,6 +1819,33 @@ if (!app.requestSingleInstanceLock()) {
         ? surveySystem(hub(), system.trim())
         : Promise.resolve({ ok: false as const, error: 'Name a system to survey.' }),
     );
+
+    /*
+     * ★ THE SAME SAVED SYSTEMS AS THE WEBSITE ★
+     *
+     * Seven boxes in this app ask for a system and seven more do on the site. They share one table
+     * and one ranking, because a member who pins something in the browser and cannot find it here
+     * would rightly stop trusting the star.
+     *
+     * `systemsUse`, `systemsPin` and `systemsUnpin` all resolve regardless of what the hub says:
+     * remembering a system must never be able to fail the search that prompted it.
+     */
+    ipcMain.handle('systemsSaved', () => fetchSavedSystems(hub()));
+    ipcMain.handle('systemsUse', async (_e, system: unknown, id64: unknown) => {
+      if (typeof system !== 'string' || system.trim() === '') return { ok: true as const };
+      await recordSystemUsed(hub(), system.trim(), typeof id64 === 'string' ? id64 : null);
+      return { ok: true as const };
+    });
+    ipcMain.handle('systemsPin', async (_e, system: unknown, label: unknown) => {
+      if (typeof system !== 'string' || system.trim() === '') return { ok: true as const };
+      await pinSystem(hub(), system.trim(), typeof label === 'string' ? label : null);
+      return { ok: true as const };
+    });
+    ipcMain.handle('systemsUnpin', async (_e, system: unknown) => {
+      if (typeof system !== 'string' || system.trim() === '') return { ok: true as const };
+      await unpinSystem(hub(), system.trim());
+      return { ok: true as const };
+    });
 
     ipcMain.handle('shipyardShips', () => shipyardShips(hub()));
     ipcMain.handle('shipyardOutfit', (_e, shipId: unknown) =>

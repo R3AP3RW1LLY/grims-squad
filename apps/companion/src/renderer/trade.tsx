@@ -5,6 +5,7 @@ import type { TradePlan, TradeRoute } from '../hub-trade.js';
 import { Button, C, Card, Empty, Problem, R, Section, inputStyle } from './ui.js';
 import { writeTradePlan, type PickedRun } from '../trade-plan.js';
 import { useLive } from './use-live.js';
+import { SystemPicker } from './system-picker.js';
 
 /**
  * The Freight Office, in the app.
@@ -329,10 +330,10 @@ export function TradePage(): JSX.Element {
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
             <label>
               <span style={LABEL}>Starting system</span>
-              <input
+              <SystemPicker
                 style={{ ...inputStyle, width: '160px' }}
                 value={near}
-                onInput={(e) => setNear((e.target as HTMLInputElement).value)}
+                onValueChange={setNear}
                 placeholder="where your ship is"
               />
             </label>
