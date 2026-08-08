@@ -1,3 +1,5 @@
+import { SystemPicker } from '../../../../components/system-picker';
+
 /**
  * Where to search from, and whose space to extend.
  *
@@ -18,7 +20,7 @@ export function ScoutForm({ query }: { query: { anchor: string; range: string; p
     <form method="get" className="flex flex-wrap items-end gap-3">
       <label className="flex flex-1 flex-col gap-1">
         <span className={LABEL}>Search around</span>
-        <input
+        <SystemPicker
           name="anchor"
           defaultValue={query.anchor}
           placeholder="the station you buy claims from, or a colony you hold"

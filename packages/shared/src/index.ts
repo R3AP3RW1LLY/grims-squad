@@ -95,6 +95,12 @@ export {
   NEVER_SENT,
   isSendable,
 } from './journal/journal-events.js';
+/*
+ * Reading a journal event for what it says about the galaxy. The WRITERS are in @grims/db; these
+ * are pure, so the ingest service can parse an event without depending on a database.
+ */
+export { readSystemSighting, readDockSighting } from './journal/sightings.js';
+export type { SystemSighting, DockSighting } from './journal/sightings.js';
 export {
   ELITE_RANK_LADDERS,
   ELITE_RANK_LABELS,

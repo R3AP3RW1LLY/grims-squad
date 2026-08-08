@@ -269,7 +269,25 @@ export const EVENT_FIELDS: Record<JournalEventName, readonly string[]> = {
   // anything but credits is not a trade leaderboard, and a bounty board that
   // cannot say what a bounty was worth is a list of names. The member opted in
   // to exactly this — see BASELINE_CATEGORIES for what they did not.
-  FSDJump: ['StarSystem', 'SystemAddress', 'StarPos', 'JumpDist', 'FuelUsed'],
+  /*
+   * `StarPos` was already here and is the valuable one: it is the coordinates, and 502 systems sat
+   * in our telemetry that our galaxy table did not hold — including the owner's own, which the
+   * scout rejected with "check the spelling" on 2026-08-07. The rest describes the system well
+   * enough to be worth holding for anybody who arrives after.
+   */
+  FSDJump: [
+    'StarSystem',
+    'SystemAddress',
+    'StarPos',
+    'JumpDist',
+    'FuelUsed',
+    'SystemAllegiance',
+    'SystemEconomy',
+    'SystemSecondEconomy',
+    'SystemGovernment',
+    'SystemSecurity',
+    'Population',
+  ],
   /*
    * ★ `Body` ADDED 2026-08-06 ★
    *
@@ -281,8 +299,63 @@ export const EVENT_FIELDS: Record<JournalEventName, readonly string[]> = {
    * `BodyType` comes with it because "Hyades Sector WO-Y b1-4 A 2" reads very differently
    * depending on whether it is a star, a planet or a ring, and the column is one line wide.
    */
-  Location: ['StarSystem', 'SystemAddress', 'StationName', 'Docked', 'Body', 'BodyType'],
-  Docked: ['StarSystem', 'StationName', 'StationType', 'StationFaction'],
+  /*
+   * `Location` is the same fact as FSDJump for a session that STARTED somewhere rather than jumped
+   * there, so it carries the same system fields. Without StarPos here, logging in inside an
+   * uncharted system taught us nothing.
+   */
+  Location: [
+    'StarSystem',
+    'SystemAddress',
+    'StarPos',
+    'StationName',
+    'MarketID',
+    'Docked',
+    'Body',
+    'BodyType',
+    'SystemAllegiance',
+    'SystemEconomy',
+    'SystemGovernment',
+    'SystemSecurity',
+    'Population',
+  ],
+  /*
+   * ★ WIDENED 2026-08-08, TO MAKE A STATION APPEAR THE MOMENT SOMEBODY DOCKS AT IT ★
+   *
+   * The squadron owner: "we have members opening new dodec stations, they wont be visible on eddn
+   * yet, but we should be ingesting that market data etc ... so its all as real time as possible."
+   *
+   * `enrichStationFromDock` was written for exactly this and had never been called by anything —
+   * partly because `Docked` was not routed, and partly because this list threw away the two fields
+   * it needs before it could have been. 987 Docked events arrived in one week and every one was
+   * reduced to four fields and forgotten.
+   *
+   * MarketID is the identity: it is the only key every source shares and no station ever changes,
+   * so it is what ties a live sighting to its market rows and to a colonisation project.
+   * SystemAddress places it. LandingPads and DistFromStarLS drive the large-pad and
+   * arrival-distance filters for stations EDDN has never catalogued. Economy and services are what
+   * let the platform stop sending somebody to a station with no market.
+   *
+   * All of it is already leaving the member's machine — the app has sent whole events since
+   * 2026-07-29 and the server decides what to keep. This widens what is KEPT, under the same
+   * `location` category and the same consent switch, so it adds no new consent surface. The
+   * settings page names every event and says what it reveals, and its copy names these too.
+   */
+  Docked: [
+    'StarSystem',
+    'StationName',
+    'StationType',
+    'StationFaction',
+    'MarketID',
+    'SystemAddress',
+    'LandingPads',
+    'DistFromStarLS',
+    'StationEconomy',
+    'StationEconomies',
+    'StationServices',
+    'StationGovernment',
+    'StationAllegiance',
+  ],
   /*
    * The three that were never collectable. Each contributes exactly one thing: where the member
    * dropped out of supercruise, which settlement they flew up to, and the fact that they have left

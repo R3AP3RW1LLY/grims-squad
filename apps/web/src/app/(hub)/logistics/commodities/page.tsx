@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { PageHeader, PageBody, Section, CouldNotLoad } from '../../../../components/hub-page';
 import { getCommodities } from '../../../../lib/api';
 import { MarketTable } from './market-table';
+import { SystemPicker } from '../../../../components/system-picker';
 
 /**
  * The commodities market.
@@ -85,7 +86,7 @@ export default async function CommoditiesPage({
               </p>
             )}
             <form method="get" className="flex items-end gap-2">
-              <input
+              <SystemPicker
                 name="near"
                 defaultValue={near}
                 placeholder="Measure from system…"

@@ -95,11 +95,11 @@ export async function ensureLiveStation(
          'firstSeenAt', now()
        ),
        (SELECT s.coords FROM knowledge_items s
-         WHERE s.source IN ('galaxy', 'eddn') AND s.kind = 'system'
+         WHERE s.source IN ('galaxy', 'eddn', 'companion') AND s.kind = 'system'
            AND s.name = $4 AND s.coords IS NOT NULL
          GROUP BY s.coords
          HAVING count(*) = (SELECT count(*) FROM knowledge_items t
-                             WHERE t.source IN ('galaxy', 'eddn') AND t.kind = 'system'
+                             WHERE t.source IN ('galaxy', 'eddn', 'companion') AND t.kind = 'system'
                                AND t.name = $4 AND t.coords IS NOT NULL)
          LIMIT 1),
        $5,
@@ -157,7 +157,7 @@ export async function enrichStationFromDock(db: PrismaClient, dock: DockFacts): 
   const rows = await db.$queryRawUnsafe<Array<{ source: string; ext_key: string }>>(
     `SELECT source, ext_key FROM knowledge_items
       WHERE kind = 'station' AND data->>'marketId' = $1
-        AND source IN ('galaxy', 'eddn')`,
+        AND source IN ('galaxy', 'eddn', 'companion')`,
     String(dock.marketId),
   );
 
@@ -223,14 +223,14 @@ export async function enrichStationFromDock(db: PrismaClient, dock: DockFacts): 
        )),
        COALESCE(
          (SELECT s.coords FROM knowledge_items s
-           WHERE s.source IN ('galaxy', 'eddn') AND s.kind = 'system' AND s.ext_key = $5
+           WHERE s.source IN ('galaxy', 'eddn', 'companion') AND s.kind = 'system' AND s.ext_key = $5
            LIMIT 1),
          (SELECT s.coords FROM knowledge_items s
-           WHERE s.source IN ('galaxy', 'eddn') AND s.kind = 'system'
+           WHERE s.source IN ('galaxy', 'eddn', 'companion') AND s.kind = 'system'
              AND s.name = $4 AND s.coords IS NOT NULL
            GROUP BY s.coords
            HAVING count(*) = (SELECT count(*) FROM knowledge_items t
-                               WHERE t.source IN ('galaxy', 'eddn') AND t.kind = 'system'
+                               WHERE t.source IN ('galaxy', 'eddn', 'companion') AND t.kind = 'system'
                                  AND t.name = $4 AND t.coords IS NOT NULL)
            LIMIT 1)
        ),
@@ -290,7 +290,7 @@ export async function lookupByMarketId(
             (data->'landingPads'->>'large')::int AS pads,
             source
        FROM knowledge_items
-      WHERE kind = 'station' AND source IN ('galaxy', 'eddn')
+      WHERE kind = 'station' AND source IN ('galaxy', 'eddn', 'companion')
         AND data->>'marketId' = $1
       ORDER BY CASE source WHEN 'galaxy' THEN 0 ELSE 1 END
       LIMIT 1`,

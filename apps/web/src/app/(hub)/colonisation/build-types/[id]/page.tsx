@@ -3,6 +3,7 @@ import { PageHeader, PageBody, Section, StatGrid, StatTile } from '../../../../.
 import { NoAccess, AdminUnavailable } from '../../../app/no-access';
 import { getBuildType } from '../../../../../lib/api';
 import { CopySystem } from '../../../../../components/copy-system';
+import { SystemPicker } from '../../../../../components/system-picker';
 
 /**
  * One build type, costed.
@@ -136,7 +137,7 @@ export default async function BuildTypePage({
               <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-secondary)]">
                 Buying from
               </span>
-              <input
+              <SystemPicker
                 name="near"
                 defaultValue={near}
                 placeholder="a system you can reach"

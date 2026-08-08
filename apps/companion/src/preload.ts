@@ -233,6 +233,19 @@ contextBridge.exposeInMainWorld('scout', {
   survey: (system: string) => ipcRenderer.invoke('scoutSurvey', system),
 });
 
+/**
+ * Saved systems, shared with the website.
+ *
+ * `use`, `pin` and `unpin` are fire-and-forget from the renderer's side: a dropdown remembering
+ * something must never be able to fail the search that prompted it.
+ */
+contextBridge.exposeInMainWorld('systems', {
+  saved: () => ipcRenderer.invoke('systemsSaved'),
+  use: (system: string, systemId64?: string) => ipcRenderer.invoke('systemsUse', system, systemId64),
+  pin: (system: string, label?: string) => ipcRenderer.invoke('systemsPin', system, label),
+  unpin: (system: string) => ipcRenderer.invoke('systemsUnpin', system),
+});
+
 contextBridge.exposeInMainWorld('colony', {
   /** Both boards, plus what this member is allowed to do with them. */
   projects: () => ipcRenderer.invoke('colonyProjects'),

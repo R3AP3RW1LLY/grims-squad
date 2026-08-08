@@ -547,7 +547,7 @@ export class PrismaMarketStore implements MarketStore {
               -- probes for each row RETURNED, not for each row considered.
               (SELECT NULLIF(ki.data->>'distanceToArrival', '')::float
                  FROM knowledge_items ki
-                WHERE ki.kind = 'station' AND ki.source IN ('galaxy', 'eddn')
+                WHERE ki.kind = 'station' AND ki.source IN ('galaxy', 'eddn', 'companion')
                   AND ki.ext_key = market_entries.station_key
                 LIMIT 1) AS arrival_ls,
               cube_ll_coord(coords, 1) AS cx,

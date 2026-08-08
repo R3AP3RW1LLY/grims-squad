@@ -13,6 +13,7 @@ import {
 import type { CommodityDetail, HistoryPoint, TradePlace } from '../hub-trade.js';
 import { Button, C, Card, Copy, Empty, Problem, Section, Stat, inputStyle, tonnes } from './ui.js';
 import { useLive } from './use-live.js';
+import { SystemPicker } from './system-picker.js';
 
 /**
  * One commodity: what it is worth, where to trade it, and how it has moved.
@@ -645,10 +646,10 @@ export function CommodityDetailPage({
             <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
               <label>
                 <span style={LABEL}>Near system</span>
-                <input
+                <SystemPicker
                   style={{ ...inputStyle, width: '160px' }}
                   value={near}
-                  onInput={(e) => setNear((e.target as HTMLInputElement).value)}
+                  onValueChange={setNear}
                   placeholder="where your ship is"
                 />
               </label>

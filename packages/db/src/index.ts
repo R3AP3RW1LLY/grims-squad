@@ -46,6 +46,7 @@ export * from './colony-catalogue.js';
  * path — so an unknown station is added the same way whichever feed sees it first.
  */
 export * from './live-stations.js';
+export * from './live-systems.js';
 export * from './notify.js';
 /*
  * Announcements — Discord channel posts and forum carbon-copies, produced in three processes

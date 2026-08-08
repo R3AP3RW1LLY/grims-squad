@@ -229,8 +229,18 @@ describe('P0.2 database schema', () => {
      * is to bump it — which is right ONLY when the SSOT genuinely declares the new tables, and
      * wrong when a migration created something the schema never mentioned. That is exactly how the
      * mining tables were caught: the migration was ahead of the models.
+     *
+     * 128 since 2026-08-08: `member_system_marks` and `member_preferences`, for the system picker.
+     * Checked against the rule above rather than simply bumped — both are declared in
+     * ssot/03-data/schema.prisma as MemberSystemMark and MemberPreference, and the migration was
+     * written from that, not ahead of it.
+     *
+     * Worth recording that this guard fired the same day the migration had to be hand-written:
+     * `prisma migrate dev` refused to generate it without resetting the database, so the DDL was
+     * authored by hand — which is precisely the situation where a migration CAN drift ahead of the
+     * models, and precisely why this count exists.
      */
-    expect(Number(r[0]?.n)).toBe(126);
+    expect(Number(r[0]?.n)).toBe(128);
   });
 
   describe('hand-written DDL that Prisma cannot express', () => {

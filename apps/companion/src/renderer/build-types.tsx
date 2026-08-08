@@ -2,6 +2,7 @@ import { useEffect, useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 import type { BuildTypeDetail, BuildTypeRow } from '../hub-colony.js';
 import { Button, C, Card, Copy, Empty, Problem, Section, Stat, credits, inputStyle, tonnes } from './ui.js';
+import { SystemPicker } from './system-picker.js';
 
 /**
  * The build catalogue, in the app.
@@ -354,9 +355,9 @@ function BuildTypeDetailPage({
         <Section title="Price it from">
           <Card>
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-              <input
+              <SystemPicker
                 value={near}
-                onInput={(e) => setNear((e.target as HTMLInputElement).value)}
+                onValueChange={setNear}
                 placeholder="a system you can reach"
                 style={{ ...inputStyle, flex: 1 }}
               />

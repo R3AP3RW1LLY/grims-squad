@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { SystemPicker } from '../../../../../components/system-picker';
 
 /**
  * Where distances are measured from, and the filters that go with it.
@@ -73,10 +74,15 @@ export function OriginBox({
           <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-secondary)]">
             Near system
           </span>
-          <input
+          {/*
+            Controlled, unlike the GET-form pickers elsewhere: this box drives a live re-fetch from
+            React state rather than a page navigation, so it owns its value and the picker reports
+            changes back rather than keeping its own.
+          */}
+          <SystemPicker
             name="near"
             value={system}
-            onChange={(e) => setSystem(e.target.value)}
+            onValueChange={setSystem}
             placeholder="Deciat"
             className="w-[200px] rounded-md border border-[var(--color-border-hairline)] bg-[var(--color-surface-void)] px-3 py-2 text-sm text-[var(--color-text-primary)] outline-none focus:border-[var(--color-border-subtle)]"
           />

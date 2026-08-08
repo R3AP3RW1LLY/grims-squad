@@ -40,6 +40,7 @@ import {
   Tabs,
 } from './ui.js';
 import { CALLSIGN_LENGTH, formatCallsign, normaliseCallsign } from '@grims/shared/carrier';
+import { SystemPicker } from './system-picker.js';
 
 /**
  * Colonisation, in the companion app.
@@ -2220,11 +2221,10 @@ function ShoppingControls({
     >
       <div style={{ minWidth: '150px' }}>
         <Field label="Buying from">
-          <input
+          <SystemPicker
             value={draft.near}
-            onInput={(e) => setDraft({ ...draft, near: (e.target as HTMLInputElement).value })}
+            onValueChange={(next) => setDraft({ ...draft, near: next })}
             placeholder="the build’s own system"
-            style={inputStyle}
           />
         </Field>
       </div>

@@ -2,6 +2,7 @@ import { useState } from 'preact/hooks';
 import type { JSX } from 'preact';
 import type { ScoutResult, SystemSurvey } from '../hub-scout.js';
 import { Button, C, Card, Empty, Problem, Section, inputStyle } from './ui.js';
+import { SystemPicker } from './system-picker.js';
 
 /**
  * Finding the next system worth claiming, from the cockpit.
@@ -87,12 +88,16 @@ export function ScoutPage(): JSX.Element {
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'flex-end' }}>
             <label style={{ flex: 1, minWidth: '200px', display: 'grid', gap: '4px' }}>
               <span style={{ color: C.dim, fontSize: '11px' }}>Search around</span>
-              <input
+              {/*
+                `onEnter` keeps what this box already did: Enter runs the search. The picker only
+                takes Enter when a suggestion is actually highlighted, so the habit survives.
+              */}
+              <SystemPicker
                 value={anchor}
-                onChange={(e) => setAnchor((e.target as HTMLInputElement).value)}
-                onKeyDown={(e) => { if ((e as KeyboardEvent).key === 'Enter') run(); }}
+                onValueChange={setAnchor}
+                onPick={() => run()}
+                onEnter={() => run()}
                 placeholder="the station you buy claims from"
-                style={inputStyle}
               />
             </label>
 
