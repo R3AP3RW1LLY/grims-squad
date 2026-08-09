@@ -92,12 +92,39 @@ function count(value: unknown): number {
   return Number.isFinite(n) && n > 0 ? Math.trunc(n) : 0;
 }
 
-/** The display name a journal cargo entry carries. Localised when present, symbol otherwise. */
+/**
+ * The display name a journal cargo entry carries. Localised when present, symbol otherwise.
+ *
+ * ★ THE SYMBOL FALLBACK WAS SHIPPING LOWER-CASE NAMES — 2026-08-09 ★
+ *
+ * Frontier omits `Type_Localised` for exactly the commodities whose symbol is already the word:
+ * `steel`, `aluminium`, `tritium`, `bertrandite`. It supplies it when the display name differs
+ * materially — `Low Temp. Diamonds`, `CMM Composite`.
+ *
+ * So the fallback fired precisely for the plain ones and stored `steel`, while every other table in
+ * the platform calls it `Steel`. `colony_needs.commodity` is a display name, so the carrier-cover
+ * join found nothing and the yellow "already aboard" segment never appeared for those commodities.
+ * Measured on production: 1,298 t of Steel and 1,186 t of Aluminium invisible across four builds.
+ *
+ * Title-casing the fallback is sound rather than a guess BECAUSE of when it fires: the game gives
+ * us the symbol alone only when the symbol is the plain word, so capitalising it reproduces the
+ * display name. Anything harder than that arrives localised and never reaches this branch.
+ *
+ * The server normalises too, against the commodity names it actually holds — that is the fix that
+ * covers members running an older build of this app. This one keeps the data right at the source.
+ */
 function nameOf(entry: Record<string, unknown>): string | null {
   const localised = text(entry['Type_Localised']);
   if (localised !== '') return localised;
+
   const raw = text(entry['Type']);
-  return raw === '' ? null : raw;
+  if (raw === '') return null;
+
+  // Per word, so `low_temp_diamond`-style symbols would not become one run-on capital either.
+  return raw
+    .split(/([\s_-]+)/)
+    .map((part) => (/^[a-z]/.test(part) ? part.charAt(0).toUpperCase() + part.slice(1) : part))
+    .join('');
 }
 
 function adjust(

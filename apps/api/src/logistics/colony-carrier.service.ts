@@ -737,6 +737,56 @@ export class ColonyCarrierService {
    * Stored only for a carrier attached to at least one build. Anything else is dropped without
    * error — the app pushes optimistically and does not hold the attachment list.
    */
+  /** Cached because a hauling member pushes often and the answer changes about once a year. */
+  static #commodityNames: { at: number; byLower: Map<string, string> } | null = null;
+
+  /**
+   * The display name we hold for a commodity, by its lower-cased form.
+   *
+   * ★ SQUADRON OWNER, 2026-08-09 ★
+   *
+   * "ensure that what is in a carriers hold is tracking on the whats needed and where to buy tabs
+   * ... its supposed to appear in yellow so we know what we need and dont need"
+   *
+   * It was not, and this is why. The companion reads a journal cargo entry as `Type_Localised` when
+   * the game supplies it and the raw `Type` symbol when it does not — and Frontier omits the
+   * localised field for exactly the commodities whose symbol is a plain lower-case word. So a hold
+   * carrying `Low Temp. Diamonds` (localised, present) stored correctly, while `steel`, `aluminium`,
+   * `tritium`, `bertrandite`, `beryllium`, `gallite` and `indite` all stored as symbols.
+   *
+   * `colony_needs.commodity` holds the DISPLAY name, so none of those matched anything.
+   * `carrierCover` is keyed on the commodity, the join found nothing, and the yellow segment never
+   * appeared. Measured on production: 1,298 t of Steel and 1,186 t of Aluminium aboard a carrier
+   * serving four builds, invisible on every one of them — and the shopping list was pricing a trip
+   * to buy Steel the squadron already owned.
+   *
+   * ★ FIXED ON THE SERVER, NOT ONLY IN THE APP ★
+   *
+   * The app's fallback is also corrected, but that alone would not have been a fix: members run
+   * whatever version they last installed, and an old build would go on writing symbols into a
+   * column the rest of the system reads as display names. Normalising at the door fixes every
+   * client at once, including ones nobody has updated.
+   *
+   * `commodity_snapshots` is the source rather than `market_entries`: 393 distinct names against
+   * nineteen million rows, and it already holds the same display vocabulary the needs use. An
+   * unrecognised name is stored UNCHANGED — a commodity we have never priced is still a real thing
+   * somebody is carrying, and dropping it would be worse than failing to match it.
+   */
+  async #canonicalCommodityNames(): Promise<Map<string, string>> {
+    const cached = ColonyCarrierService.#commodityNames;
+    if (cached !== null && Date.now() - cached.at < 60 * 60_000) return cached.byLower;
+
+    const rows = await this.db.$queryRawUnsafe<Array<{ commodity: string }>>(
+      `SELECT DISTINCT commodity FROM commodity_snapshots`,
+    );
+
+    const byLower = new Map(rows.map((r) => [r.commodity.toLowerCase(), r.commodity]));
+    // Only cached once it has something in it: an empty answer on a fresh database would otherwise
+    // be held for an hour and quietly disable the normalisation.
+    if (byLower.size > 0) ColonyCarrierService.#commodityNames = { at: Date.now(), byLower };
+    return byLower;
+  }
+
   async journalSnapshot(input: {
     marketId: string;
     commodities: ReadonlyArray<{ commodity?: unknown; tonnes?: unknown }>;
@@ -776,6 +826,8 @@ export class ColonyCarrierService {
     );
     if (attached === undefined) return { stored: false };
 
+    const canonical = await this.#canonicalCommodityNames();
+
     for (const row of rows) {
       await this.db.$executeRawUnsafe(
         `INSERT INTO colony_carrier_cargo (market_id, commodity, source, tonnes, updated_by_id, updated_at)
@@ -783,7 +835,7 @@ export class ColonyCarrierService {
          ON CONFLICT (market_id, commodity, source) DO UPDATE SET
            tonnes = EXCLUDED.tonnes, updated_by_id = NULL, updated_at = now()`,
         input.marketId,
-        row.commodity,
+        canonical.get(row.commodity.toLowerCase()) ?? row.commodity,
         row.tonnes,
       );
     }
