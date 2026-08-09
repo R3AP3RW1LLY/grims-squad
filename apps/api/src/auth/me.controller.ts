@@ -5,7 +5,7 @@ import { resolveMemberRank, LEADERSHIP_CEILING, hasPermission, Permission
 } from '@grims/shared';
 import { NO_PERMISSIONS, requiresTwoFactor } from '@grims/shared';
 import { Public } from './auth.guard.js';
-import { navFor, hasAdminArea, type NavItem } from './nav.js';
+import { navFor, navDeniedFor, hasAdminArea, type NavItem } from './nav.js';
 import {
   nextOnboardingStep,
   shouldPromptForVerification,
@@ -51,6 +51,11 @@ export interface MeResponse {
     timezone: string;
   } | null;
   nav: NavItem[];
+  /**
+   * Governed pages this member may not open, so the hub layout can answer 404 rather than draw a
+   * page whose every fetch will be refused. Hrefs only — never the mask. See `navDeniedFor`.
+   */
+  navDenied: string[];
   isAdmin: boolean;
   /** Privileged AND unenrolled — the chrome uses this to keep admin links honest. */
   mustSecureAccount: boolean;
@@ -131,6 +136,12 @@ export class MeController {
       return {
         user: null,
         nav: [],
+        /*
+         * Empty, not "everything": a signed-out visitor is redirected to sign in by the layout
+         * before this list is ever consulted, and claiming every page is denied would 404 the
+         * public pages that live under the same layout.
+         */
+        navDenied: [],
         isAdmin: false,
         mustSecureAccount: false,
         // Signed out: no preview can be running, and saying null is more honest than omitting it.
@@ -163,6 +174,12 @@ export class MeController {
       return {
         user: null,
         nav: [],
+        /*
+         * Empty, not "everything": a signed-out visitor is redirected to sign in by the layout
+         * before this list is ever consulted, and claiming every page is denied would 404 the
+         * public pages that live under the same layout.
+         */
+        navDenied: [],
         isAdmin: false,
         mustSecureAccount: false,
         // Signed out: no preview can be running, and saying null is more honest than omitting it.
@@ -236,6 +253,7 @@ export class MeController {
        * lies.
        */
       nav: mustSecure ? [] : navFor(mask, await this.#colonyBadges(mask)),
+      navDenied: navDeniedFor(mask),
       // Still reported truthfully. The UI needs to know they ARE an admin to
       // explain why they are being asked; it just must not link them anywhere.
       isAdmin: hasAdminArea(mask),

@@ -1,5 +1,5 @@
 import { headers } from 'next/headers';
-import { redirect } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import { HubShell } from '../../components/hub-shell';
 import { UpdateBanner } from '../../components/update-banner';
 import { SecureAccountBanner } from '../../components/secure-account-banner';
@@ -132,6 +132,34 @@ export default async function HubLayout({ children }: { children: React.ReactNod
    */
   if (me.user !== null && me.onboarding.path !== null) {
     redirect(me.onboarding.path);
+  }
+
+  /*
+   * ★ A PAGE IS REACHABLE EXACTLY WHEN ITS SIDEBAR LINK IS — SQUADRON OWNER, 2026-08-09 ★
+   *
+   * "why are the operations and BGS panels are not being protected by the roles and permissions...
+   * those pages are still appearing for everyone even though permissions are not granted"
+   *
+   * They were half protected, in the way that is hardest to notice. `navFor` hid the link and the
+   * API refused the data with a cloak-404, so no squadron information was ever served to somebody
+   * without the permission. But nothing checked the PAGE: typing `/ops` drew the whole shell for
+   * any signed-in member, and the refused fetch then rendered "could not load the operations
+   * board". A member reads that as a broken site, and an owner reads it as permissions not working.
+   *
+   * 404, not a redirect and not "you do not have access", because that is the rule the API already
+   * follows for these routes (INV-002): a page you may not see does not exist. Telling somebody a
+   * page is there but barred is itself information about the squadron's structure.
+   *
+   * The list comes from the server, derived from the same `requires` that builds the sidebar, so a
+   * page and its link cannot drift apart. A path is denied if it IS a denied entry or lives beneath
+   * one — `/ops/3f2a` is as much the operations board as `/ops` is.
+   */
+  const clean = path.split('?')[0] ?? path;
+  if (
+    me.user !== null &&
+    me.navDenied.some((href) => clean === href || clean.startsWith(`${href}/`))
+  ) {
+    notFound();
   }
 
   /*

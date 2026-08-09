@@ -642,6 +642,37 @@ const NAV: readonly NavDefinition[] = [
  */
 export type NavBadges = Readonly<Record<string, number>>;
 
+/**
+ * The governed destinations this mask CANNOT reach.
+ *
+ * ★ SQUADRON OWNER, 2026-08-09 ★
+ *
+ * "why are the operations and BGS panels are not being protected by the roles and permissions... we
+ * literally have these rules in place but those pages are still appearing for everyone"
+ *
+ * The rules were in place and they were being applied to exactly one of the two things that need
+ * them. `navFor` hides the sidebar link, and the API refuses the data with a cloak-404 — so no
+ * squadron information ever leaked. What nothing checked was the PAGE. Typing `/ops` served the
+ * whole shell to any signed-in member, and because the API then refused the fetch, what they saw
+ * was "could not load the operations board" — a page that looks broken rather than one that is not
+ * theirs.
+ *
+ * ★ WHY THE DENIAL LIST AND NOT A SECOND PERMISSION CHECK IN THE WEB APP ★
+ *
+ * A page guard written separately from the sidebar is a second copy of the same rule, and the two
+ * would drift the first time a permission changed — with the drift invisible, because a page that
+ * wrongly allows looks identical to one that correctly allows. Derived from the same `requires`
+ * that builds the sidebar, they cannot disagree: a page is reachable exactly when its link is.
+ *
+ * Hrefs only. The mask itself must not travel to the browser, for the same reason `navFor` lists
+ * its fields rather than spreading them.
+ */
+export function navDeniedFor(mask: PermissionMask): string[] {
+  return NAV.filter(
+    (item) => item.requires !== null && !hasAnyPermission(mask, item.requires),
+  ).map((item) => item.href);
+}
+
 export function navFor(mask: PermissionMask, badges: NavBadges = {}): NavItem[] {
   return NAV.filter((item) => item.requires === null || hasAnyPermission(mask, item.requires)).map(
     ({ href, label, section, subsection, blurb }) => ({
