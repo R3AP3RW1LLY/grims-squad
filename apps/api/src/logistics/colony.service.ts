@@ -6,7 +6,7 @@ import {
   type LiveNudge,
   type PrismaClient,
 } from '@grims/db';
-import { AppError, ErrorCode, Permission } from '@grims/shared';
+import { AppError, cleanStationName, ErrorCode, Permission } from '@grims/shared';
 import { DEFAULT_TIMEZONE, isValidTimezone } from '../common/timezone.js';
 import type { AclDbService } from '../authz/acl-db.service.js';
 import type { MarketStore, PlaceQuery } from './market.store.js';
@@ -1237,6 +1237,19 @@ export class ColonyService {
     if (title === '') {
       throw new AppError(ErrorCode.VALIDATION_FAILED, 'Give the project a name.');
     }
+
+    /*
+     * ★ THE GAME'S WORD FOR THE PLACE, NOT THE PLAYER'S — 2026-08-09 ★
+     *
+     * A member's project showed its location as `$EXT_PANEL_ColonisationShip; Mitra Horizons`. That
+     * prefix is Elite's localisation key for "System Colonisation Ship": the client looks it up in
+     * its language files, and anything reading the journal directly gets the key instead.
+     *
+     * Cleaned here rather than in the page, because BOTH doors into a project come through this
+     * method — the website's and the companion's — and every surface downstream (the planner, the
+     * shopping list, the assistant, the app) reads what this writes.
+     */
+    const stationName = cleanStationName(input.stationName);
     if (input.systemName.trim() === '') {
       throw new AppError(ErrorCode.VALIDATION_FAILED, 'Name the system the site is in.');
     }
@@ -1270,7 +1283,7 @@ export class ColonyService {
         postedById: input.userId,
         marketId: input.marketId,
         systemName: input.systemName.trim(),
-        stationName: input.stationName?.trim() === '' ? null : input.stationName,
+        stationName: stationName?.trim() === '' ? null : stationName,
         title,
         notes: input.notes?.trim() === '' ? null : input.notes,
       },
@@ -1302,9 +1315,9 @@ export class ColonyService {
         kind: 'colony.project-started',
         title: `${title} — new colonisation project`,
         body:
-          input.stationName === null || input.stationName.trim() === ''
+          stationName === null || stationName.trim() === ''
             ? input.systemName.trim()
-            : `${input.stationName.trim()}, ${input.systemName.trim()}`,
+            : `${stationName.trim()}, ${input.systemName.trim()}`,
         link: `/colonisation/${created.id}`,
         actorUserId: input.userId,
       },
