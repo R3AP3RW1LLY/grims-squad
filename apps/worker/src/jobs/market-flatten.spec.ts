@@ -86,6 +86,99 @@ describe('the rebuild recreates exactly what the migration created', () => {
   });
 });
 
+describe('the live table is never locked for the length of the rebuild', () => {
+  /*
+   * ★ THE OUTAGE OF 2026-08-09 — FORTY MINUTES, EVERY NIGHT A DUMP LANDED ★
+   *
+   * The rebuild used to run in place: TRUNCATE, drop the indexes, reload eighteen million rows,
+   * recreate them, all inside one transaction. TRUNCATE takes ACCESS EXCLUSIVE and Postgres holds a
+   * lock until COMMIT, so the table members read was unreachable for the whole rebuild — 40m 20s
+   * measured, of which 24.8 minutes was the INSERT and 15.7 the index builds.
+   *
+   * What made it a SITE outage rather than a market outage is the connection pool. Every request
+   * touching market_entries queued on the lock while holding one of twenty-five connections; the
+   * pool was fully consumed 52 seconds in, and from then on requests reading `device_pairings` or
+   * `sessions` failed too. 1,486 pool timeouts, stopping dead at the commit.
+   *
+   * ★ WHY THESE ASSERTIONS AND NOT A TIMING TEST ★
+   *
+   * The defect is not "slow". It is "holds an exclusive lock on the table members read while doing
+   * something slow", and that is a property of WHICH TABLE the expensive statements name — which
+   * source text can check and a test against a seeded database cannot, because at fixture scale the
+   * whole rebuild finishes before anything could observe the lock.
+   */
+  const src = readFileSync(join(import.meta.dirname, 'market-flatten.ts'), 'utf8');
+
+  /** The statements that take ACCESS EXCLUSIVE, and must therefore never name the live table. */
+  const EXCLUSIVE = [/TRUNCATE\s+TABLE\s+market_entries\b/i, /DROP\s+INDEX[^\n]*market_entries/i];
+
+  it('★ MANDATORY: nothing truncates or drops an index on the live table ★', () => {
+    for (const pattern of EXCLUSIVE) {
+      expect(
+        src,
+        `a statement matching ${pattern} names the live table. Anything taking ACCESS EXCLUSIVE on ` +
+          'market_entries holds it until COMMIT, and every request touching the table then queues ' +
+          'on it holding a pool connection until the pool is gone and the whole site is down.',
+      ).not.toMatch(pattern);
+    }
+  });
+
+  it('★ MANDATORY: the bulk load and the index builds target the shadow table ★', () => {
+    const insert = /INSERT INTO \$\{SHADOW\}/.test(src);
+    expect(insert, 'the bulk INSERT does not target the shadow table').toBe(true);
+
+    // Every CREATE INDEX is issued through onShadow(), which retargets and renames it. A raw
+    // CREATE INDEX would build on the live table and take a lock for the length of the build.
+    expect(src, 'an index is created without going through onShadow()').toMatch(
+      /\$executeRawUnsafe\(onShadow\(ddl\)\)/,
+    );
+  });
+
+  it('MANDATORY: the swap does only catalogue work', () => {
+    /*
+     * The swap is the one place the live table IS exclusively locked, so what happens inside it is
+     * the thing that decides whether that lock lasts milliseconds or minutes. Renames are catalogue
+     * updates; anything that reads or writes rows is not.
+     */
+    const start = src.indexOf('ALTER TABLE market_entries RENAME TO');
+    expect(start, 'the swap has moved — this test is reading the wrong file').toBeGreaterThan(0);
+
+    const swap = src.slice(src.lastIndexOf('await db.$transaction(', start), start + 1200);
+    for (const forbidden of [/INSERT INTO/i, /\bDELETE FROM/i, /\bUPDATE\s+market/i, /CREATE INDEX/i]) {
+      expect(swap, `the swap transaction contains ${forbidden}, which is not catalogue work`).not.toMatch(
+        forbidden,
+      );
+    }
+  });
+
+  it('MANDATORY: live rows are merged both before the swap and after it', () => {
+    /*
+     * Twice, and both are load-bearing. The first pass carries the ~905,000 live rows into the
+     * shadow before the indexes are built. The second carries whatever the feeds wrote during the
+     * index phase — sixteen minutes on 2026-08-09 — out of the retired table before it is dropped.
+     * Without the second, every rebuild would silently discard the last quarter-hour of live market
+     * data, which is a quieter version of the massacre the merge was written to stop.
+     */
+    const merges = [...src.matchAll(/mergeLiveRows\((?!from)/g)];
+    expect(
+      merges.length,
+      'the live-row merge does not run exactly twice — once into the shadow, once out of the retired table',
+    ).toBe(2);
+
+    expect(src).toMatch(/mergeLiveRows\('market_entries', SHADOW\)/);
+    expect(src).toMatch(/mergeLiveRows\(RETIRED, 'market_entries'\)/);
+  });
+
+  it('MANDATORY: a shrunken dump is refused rather than published', () => {
+    // Building beside the live table means the result can be inspected before it is adopted. A
+    // truncated download must not be able to replace eighteen million rows with a handful.
+    expect(src).toMatch(/MIN_ACCEPTABLE_FRACTION/);
+    expect(src, 'a refused rebuild must leave the live table alone by dropping the shadow').toMatch(
+      /DROP TABLE IF EXISTS \$\{SHADOW\}[\s\S]{0,400}throw new Error/,
+    );
+  });
+});
+
 describe('the planner is told the table is no longer empty', () => {
   /*
    * ★ THE 600-FOLD LIE — MEASURED IN PRODUCTION, 2026-08-06 ★
@@ -115,30 +208,38 @@ describe('the planner is told the table is no longer empty', () => {
    */
   const src = readFileSync(join(import.meta.dirname, 'market-flatten.ts'), 'utf8');
 
-  it('MANDATORY: ANALYZE runs after the transaction commits, not inside it', () => {
-    const closingBrace = src.indexOf('{ timeout: 4 * 60 * 60_000');
-    expect(closingBrace, 'the transaction options moved — this test is reading the wrong file').toBeGreaterThan(0);
+  it('★ MANDATORY: ANALYZE runs on the shadow, before it becomes the live table ★', () => {
+    /*
+     * ★ WHY THIS MOVED, 2026-08-09 ★
+     *
+     * The old shape had to run ANALYZE after the transaction committed, because inside it the
+     * counters were describing a table the TRUNCATE had replaced. Building beside the live table
+     * removes the trap entirely: the shadow is analysed while it is still private, so the instant
+     * it becomes `market_entries` it already carries statistics. There is no window in which the
+     * live table is both queryable and unanalysed — which is what the old ordering could only
+     * approximate.
+     */
+    const analyze = src.indexOf('ANALYZE ${SHADOW}');
+    expect(analyze, 'nothing analyses the shadow table').toBeGreaterThan(0);
 
-    const afterCommit = src.slice(closingBrace);
+    const swap = src.indexOf('ALTER TABLE market_entries RENAME TO');
+    expect(swap, 'the swap has moved — this test is reading the wrong file').toBeGreaterThan(0);
     expect(
-      afterCommit,
-      'no ANALYZE runs after the transaction commits — the planner keeps whatever statistics the TRUNCATE left behind',
-    ).toMatch(/ANALYZE market_entries/i);
+      analyze,
+      'the ANALYZE runs after the swap, so the table is live and unanalysed in between — which is ' +
+        'how a 600-fold underestimate made route queries take 70-115 seconds on 2026-08-06',
+    ).toBeLessThan(swap);
   });
 
-  it('MANDATORY: it uses the pooled client, not the transaction client', () => {
+  it('MANDATORY: it uses the pooled client, not a transaction client', () => {
     /*
-     * `tx.$executeRawUnsafe` after the transaction has committed is a use-after-free: Prisma's
-     * interactive transaction client is invalid outside its callback. It must be `db`.
+     * `tx.$executeRawUnsafe` outside its callback is a use-after-free: Prisma's interactive
+     * transaction client is invalid the moment the callback returns. The ANALYZE stands alone
+     * between two transactions and must be issued on `db`.
      */
-    const closingBrace = src.indexOf('{ timeout: 4 * 60 * 60_000');
-    const afterCommit = src.slice(closingBrace);
-    const analyzeCall = /(\w+)\.\$executeRawUnsafe\(\s*[`'"]ANALYZE market_entries/i.exec(afterCommit);
+    const analyzeCall = /(\w+)\.\$executeRawUnsafe\(\s*[`'"]ANALYZE \$\{SHADOW\}/i.exec(src);
 
-    expect(analyzeCall?.[1], 'the post-commit ANALYZE is not issued through a client this test recognises').toBeDefined();
-    expect(
-      analyzeCall?.[1],
-      'the post-commit ANALYZE uses the transaction client, which is invalid once the transaction has ended',
-    ).not.toBe('tx');
+    expect(analyzeCall?.[1], 'the ANALYZE is not issued through a client this test recognises').toBeDefined();
+    expect(analyzeCall?.[1], 'the ANALYZE uses a transaction client').not.toBe('tx');
   });
 });

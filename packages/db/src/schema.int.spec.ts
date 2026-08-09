@@ -85,9 +85,23 @@ describe('P0.2 database schema', () => {
   // two_factor_recovery_codes, 58 before rank progression.
   it('creates every table in the SSOT schema', async () => {
     const r = await rows<{ n: string }>(
+      /*
+       * ★ THE MARKET REBUILD'S WORKING TABLES ARE NOT SCHEMA — EXCLUDED 2026-08-09 ★
+       *
+       * `rebuildMarketEntries` builds the new market beside the live one and swaps them by renaming,
+       * so that the table members read is never locked for the forty minutes the build takes. While
+       * it runs there is a `market_entries_next`, and between the swap and the drop a
+       * `market_entries_old` — so for part of every dump day this count is 129 or 130, and after a
+       * rebuild that died mid-flight the shadow survives until the next run drops it.
+       *
+       * Named explicitly rather than loosening the assertion to a range: the point of this test is
+       * that the SSOT schema is fully applied, and a range would let a genuinely missing table hide
+       * behind a transient one.
+       */
       `select count(*)::text as n from information_schema.tables
        where table_schema = 'public' and table_type = 'BASE TABLE'
-         and table_name not like '\\_prisma%'`,
+         and table_name not like '\\_prisma%'
+         and table_name not in ('market_entries_next', 'market_entries_old')`,
     );
     // 71 tables: 70 Prisma models plus screen_decisions, added 2026-07-31 for the screening
     // feedback loop. Its vector column is hand-written in the migration because Prisma has no
