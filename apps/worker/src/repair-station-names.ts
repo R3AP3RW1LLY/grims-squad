@@ -128,15 +128,30 @@ async function repairMarketEntries(apply: boolean): Promise<number> {
     if (cleaned === name) continue;
     changed += Number(n);
     if (apply) {
-      await db.$transaction(async (tx) => {
-        // The same courtesy every other market write pays: give up rather than queue.
-        await tx.$executeRawUnsafe(`SET LOCAL lock_timeout = '5s'`);
-        await tx.$executeRawUnsafe(
-          `UPDATE market_entries SET station_name = $1 WHERE station_name = $2`,
-          cleaned,
-          name,
-        );
-      });
+      await db.$transaction(
+        async (tx) => {
+          // The same courtesy every other market write pays: give up rather than queue.
+          await tx.$executeRawUnsafe(`SET LOCAL lock_timeout = '5s'`);
+          await tx.$executeRawUnsafe(
+            `UPDATE market_entries SET station_name = $1 WHERE station_name = $2`,
+            cleaned,
+            name,
+          );
+        },
+        /*
+         * ★ STATED, BECAUSE THE DEFAULT HAS NOW STOPPED THIS RUN TWICE ★
+         *
+         * Prisma's interactive transactions default to a FIVE SECOND budget. Run against production
+         * this repair fixes every knowledge_items row and the colonisation project, then dies part
+         * way through the market table: "the timeout for this transaction was 5000 ms, however
+         * 5456 ms passed". One station's name can be on thousands of rows and `station_name` carries
+         * no index, so each UPDATE is a sequential scan over nineteen million rows.
+         *
+         * The `lock_timeout` above is a different budget for a different hazard — it bounds WAITING
+         * for a lock, not HOLDING the transaction — so it could never have caught this.
+         */
+        { timeout: 10 * 60_000, maxWait: 60_000 },
+      );
     }
   }
   return changed;
