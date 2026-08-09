@@ -871,6 +871,11 @@ export interface MeResponse {
     timezone: string;
   } | null;
   nav: NavItem[];
+  /**
+   * Governed pages this member may not open. The hub layout answers 404 for these rather than
+   * drawing a page whose every fetch the API will refuse — see the note in `(hub)/layout.tsx`.
+   */
+  navDenied: string[];
   isAdmin: boolean;
   mustSecureAccount: boolean;
   /**
@@ -914,6 +919,12 @@ export const getMe = async (): Promise<MeResponse> =>
   (await get<MeResponse>('/v1/me', { authed: true })) ?? {
     user: null,
     nav: [],
+    /*
+     * Empty on an unreachable API, deliberately. This fallback is what renders when /v1/me itself
+     * fails, and a list that denied everything would turn an API outage into a site-wide 404 —
+     * hiding the outage behind a page that claims nothing exists.
+     */
+    navDenied: [],
     isAdmin: false,
     mustSecureAccount: false,
     viewingAs: null,

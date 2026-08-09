@@ -91,7 +91,19 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
-    shm_size: 1gb
+    # ★ RAISED FROM 1gb ON 2026-08-09, BECAUSE AN INDEX REBUILD HAD NEVER SUCCEEDED ★
+    #
+    # `maintenance_work_mem` is 2GB on this server, and a parallel index build allocates its work
+    # area as a shared memory segment — out of /dev/shm, which this sets. At 1gb every rebuild of
+    # the HNSW vector index died with "could not resize shared memory segment ... to 2144375744
+    # bytes: No space left on device", both the CONCURRENTLY attempt and the plain fallback, on
+    # every run since the job was written. Nothing failed loudly: retrieval kept returning rows and
+    # they were simply the wrong ones.
+    #
+    # 3gb rather than 2gb so the setting that has to change is the one a person would think to
+    # change — a value exactly equal to maintenance_work_mem leaves no room for anything else using
+    # the same segment, and the box has 24GB.
+    shm_size: 3gb
 
   redis:
     image: redis:7-alpine

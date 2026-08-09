@@ -1,5 +1,49 @@
 import type { PrismaClient } from '@prisma/client';
-import { normaliseStationType } from '@grims/shared';
+import { cleanStationName, normaliseStationType } from '@grims/shared';
+
+/**
+ * A write to `market_entries` that gives up rather than queues behind the nightly rebuild.
+ *
+ * ★ THIS IS WHAT ACTUALLY STOPPED INGESTION ON 2026-08-09 ★
+ *
+ * The collector's own market path has carried `SET LOCAL lock_timeout = '5s'` since it was written
+ * (apps/eddn-collector/src/apply.ts) precisely so a rebuild cannot park it — and on the night it
+ * mattered that path behaved perfectly: nine DELETEs failed in five seconds each and were counted
+ * and dropped, exactly as designed.
+ *
+ * The two statements below are the ones that had no such protection. They are reached from a
+ * journal `Docked` message, on the EXTRAS path, which the collector's own comment deliberately
+ * excludes from the failure streak on the grounds that "the extras tables never contend with" the
+ * rebuild. That was true of every extras table and false of these two, because they write
+ * `market_entries` — the one table the rebuild holds ACCESS EXCLUSIVE for forty minutes.
+ *
+ * With no `lock_timeout` these do not fail. They WAIT, on a pooled connection, inside the
+ * collector's single serial message loop, for as long as the lock is held. The loop stops, so
+ * `beat()` never runs, so the heartbeat freezes, so the watch fires `collector-stalled` — and the
+ * failure-streak escape hatch never trips because reaching 25 needs two minutes of market messages
+ * and a Docked event arrives every couple of seconds to park the loop first. It got to nine.
+ *
+ * Measured: 38.97 minutes deaf, ~9,700 extras messages lost — outfitting, shipyards, carrier
+ * positions, body signals — and unlike the market rows, none of that is recoverable from the dump.
+ *
+ * ★ WHY A TRANSACTION FOR A SINGLE STATEMENT ★
+ *
+ * `SET LOCAL` is scoped to a transaction and Postgres discards it outside one, with nothing worse
+ * than a warning — the same silent no-op that has been leaving `maintenance_work_mem` unset in the
+ * embedding job. On a pooled client a plain `SET` would be worse than useless: it would leak the
+ * timeout onto whichever connection happened to serve it, for every later caller.
+ */
+async function guardedMarketWrite(
+  db: PrismaClient,
+  sql: string,
+  ...params: unknown[]
+): Promise<number> {
+  return db.$transaction(async (tx) => {
+    await tx.$executeRawUnsafe(`SET LOCAL lock_timeout = '5s'`);
+    await tx.$executeRawUnsafe(`SET LOCAL statement_timeout = '20s'`);
+    return tx.$executeRawUnsafe(sql, ...params);
+  });
+}
 
 /**
  * Stations learned from the live feeds, added in full.
@@ -75,6 +119,14 @@ export async function ensureLiveStation(
   const known = await lookupByMarketId(db, sighting.marketId);
   if (known !== null) return known;
 
+  /*
+   * The game's localisation key, stripped before it becomes this station's name. See
+   * `cleanStationName` — a colonisation ship arrives as `$EXT_PANEL_ColonisationShip; <name>`,
+   * and whatever is written here is what the Freight Office, the station page and the assistant
+   * all show from then on.
+   */
+  const stationName = cleanStationName(sighting.stationName);
+
   const key = `${PROVISIONAL_PREFIX}${sighting.marketId}`;
 
   /*
@@ -111,16 +163,16 @@ export async function ensureLiveStation(
        data = knowledge_items.data || jsonb_build_object('system', $4::text),
        ingested_at = now()`,
     key,
-    sighting.stationName,
+    stationName,
     String(sighting.marketId),
     sighting.systemName,
     // A sentence, because knowledge rows are embedded and retrieved as text by the assistant.
-    `${sighting.stationName} is a station in ${sighting.systemName}, first seen live on the market feed.`,
+    `${stationName} is a station in ${sighting.systemName}, first seen live on the market feed.`,
   );
 
   return {
     key,
-    name: sighting.stationName,
+    name: stationName,
     system: sighting.systemName,
     type: null,
     pads: -1,
@@ -153,6 +205,9 @@ export async function enrichStationFromDock(db: PrismaClient, dock: DockFacts): 
    * (see CARRIER_STATION_TYPES) because 673 rows were written the other way before this existed.
    */
   const stationType = normaliseStationType(dock.stationType);
+  // Same localisation key as the market feed strips — a Docked event on a colonisation ship
+  // carries it too, and this is the write that names the station for everything downstream.
+  const dockedName = cleanStationName(dock.stationName);
 
   const rows = await db.$queryRawUnsafe<Array<{ source: string; ext_key: string }>>(
     `SELECT source, ext_key FROM knowledge_items
@@ -191,7 +246,8 @@ export async function enrichStationFromDock(db: PrismaClient, dock: DockFacts): 
        * market rows move to the galaxy key and the provisional identity is retired, so no station
        * ever answers under two keys.
        */
-      await db.$executeRawUnsafe(
+      await guardedMarketWrite(
+        db,
         `UPDATE market_entries SET station_key = $1 WHERE station_key = $2`,
         galaxy.ext_key,
         key,
@@ -243,14 +299,14 @@ export async function enrichStationFromDock(db: PrismaClient, dock: DockFacts): 
        coords = COALESCE(EXCLUDED.coords, knowledge_items.coords),
        ingested_at = now()`,
     key,
-    dock.stationName,
+    dockedName,
     String(dock.marketId),
     dock.systemName,
     dock.systemAddress === null ? null : String(dock.systemAddress),
     stationType,
     dock.largePads,
     dock.distFromStarLs,
-    `${dock.stationName} is a ${stationType ?? 'station'} in ${dock.systemName}, seen live on the journal feed.`,
+    `${dockedName} is a ${stationType ?? 'station'} in ${dock.systemName}, seen live on the journal feed.`,
   );
 
   /*
@@ -258,7 +314,8 @@ export async function enrichStationFromDock(db: PrismaClient, dock: DockFacts): 
    * already written under the provisional key were saved with NULL coords and invisible to every
    * radius search — backfill them so they start being found.
    */
-  await db.$executeRawUnsafe(
+  await guardedMarketWrite(
+    db,
     `UPDATE market_entries m
         SET coords = k.coords
        FROM knowledge_items k

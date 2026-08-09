@@ -200,25 +200,66 @@ export async function embedKnowledge(
    * journal sweep would be constant work for nothing.
    */
   if (embedded >= REINDEX_AFTER) {
-    await db
-      .$executeRawUnsafe(
-        /*
-         * Bounded memory, deliberately. The default lets Postgres request a work area larger than
-         * Docker's /dev/shm and the rebuild fails with "could not resize shared memory segment" —
-         * which is what happened the first time this was run by hand.
-         */
-        `SET LOCAL maintenance_work_mem = '256MB'`,
-      )
-      .catch(() => undefined);
-    await db
+    /*
+     * ★ THIS HAS NEVER ONCE SUCCEEDED — FOUND 2026-08-09 ★
+     *
+     * The memory cap was issued as `SET LOCAL` on the pooled client, outside any transaction.
+     * Postgres discards that and says so — "WARNING: SET LOCAL can only be used in transaction
+     * blocks" — so the server's 2 GB value stood, every rebuild asked for a work area larger than
+     * the container's /dev/shm, and both the CONCURRENTLY attempt and the plain fallback died with
+     * "could not resize shared memory segment ... No space left on device".
+     *
+     * Both failures were swallowed by `.catch(() => undefined)`, so the job printed nothing and
+     * reported success. The consequence is the one this reindex exists to prevent and it has been
+     * live the whole time: the HNSW index is stale, retrieval keeps returning rows, and they are
+     * simply the wrong ones — which is how "what do I need to do to become a member" came back with
+     * ship descriptions.
+     *
+     * ★ WHY THE TWO PATHS ARE SET UP DIFFERENTLY ★
+     *
+     * `SET LOCAL` needs a transaction and REINDEX CONCURRENTLY cannot run in one, so the cap and
+     * the concurrent rebuild are mutually exclusive. The plain rebuild CAN run in a transaction, so
+     * the fallback gets the cap it always needed.
+     *
+     * The concurrent attempt gets nothing from here, and does not need to: `shm_size` in
+     * `compose.prod.yml` was raised from 1 GB to 3 GB in the same change, which is what actually
+     * makes the server's own 2 GB `maintenance_work_mem` allocatable. Measured on the box: /dev/shm
+     * was 1.0G and the rebuild asked for 2,144,375,744 bytes. A session-level `SET` was rejected as
+     * the alternative — on a pooled client it would leak the value onto whichever connection served
+     * it, for every later caller.
+     */
+    const reindexed = await db
       .$executeRawUnsafe(`REINDEX INDEX CONCURRENTLY knowledge_items_embedding_idx`)
-      .catch(async () => {
-        // CONCURRENTLY cannot run inside a transaction and needs the index to be valid. A plain
-        // rebuild is the fallback: slower and it takes a lock, but this is a nightly job.
-        await db
-          .$executeRawUnsafe(`REINDEX INDEX knowledge_items_embedding_idx`)
-          .catch(() => undefined);
+      .then(() => true)
+      .catch(async (concurrentError: unknown) => {
+        /*
+         * CONCURRENTLY cannot run inside a transaction and needs the index to be valid. A plain
+         * rebuild is the fallback: it takes an ACCESS EXCLUSIVE lock on the index, which blocks
+         * planning for every SELECT on knowledge_items, so it is bounded and it is reported.
+         */
+        return db
+          .$transaction(async (tx) => {
+            await tx.$executeRawUnsafe(`SET LOCAL maintenance_work_mem = '256MB'`);
+            await tx.$executeRawUnsafe(`SET LOCAL lock_timeout = '30s'`);
+            await tx.$executeRawUnsafe(`REINDEX INDEX knowledge_items_embedding_idx`);
+            return true;
+          })
+          .catch((plainError: unknown) => {
+            /*
+             * Reported, not swallowed. A silent failure here degrades every answer the assistant
+             * gives and changes nothing a person can see — which is exactly how it survived
+             * unnoticed from the day it was written.
+             */
+            console.error(
+              `embed: the vector index was NOT rebuilt — retrieval will keep returning the ` +
+                `wrong rows until it is. concurrent: ${String(concurrentError)}; plain: ` +
+                String(plainError),
+            );
+            return false;
+          });
       });
+
+    if (reindexed) console.log('embed: vector index rebuilt');
   }
 
   return { pending, embedded, failed };

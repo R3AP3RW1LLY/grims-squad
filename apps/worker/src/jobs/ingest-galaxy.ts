@@ -1,6 +1,7 @@
 import { createReadStream } from 'node:fs';
 import { createGunzip } from 'node:zlib';
 import { createInterface } from 'node:readline';
+import { cleanStationName } from '@grims/shared';
 
 /**
  * Systems and stations, from the Spansh galaxy dump.
@@ -130,9 +131,30 @@ export function parseSystemLine(line: string): SystemRow[] | null {
     rows.push({
       source: 'galaxy',
       kind: 'station',
-      // Namespaced by system: station names repeat across the galaxy constantly.
+      /*
+       * Namespaced by system: station names repeat across the galaxy constantly.
+       *
+       * ★ BUILT FROM THE RAW NAME, DELIBERATELY — 2026-08-09 ★
+       *
+       * The display name below is cleaned; this key must NOT be. It is the station's identity, it
+       * is already stored on 882 galaxy rows and on every `market_entries.station_key` derived from
+       * them, and recomputing it from the cleaned name would not rename those stations — it would
+       * create a second one beside each, with the market rows split between the two.
+       */
       extKey: `${id64}/${sName}`,
-      name: sName,
+      /*
+       * ★ THE DUMP CARRIES THE GAME'S LOCALISATION KEYS ★
+       *
+       * 882 stations in the galaxy dump are named `$EXT_PANEL_ColonisationShip; <name>`, and a
+       * further variant `$EXT_PANEL_ColonisationShip:#index=1;` for the unnamed ones. That is how a
+       * member's colonisation project came to be labelled `$EXT_PANEL_ColonisationShip; Mitra
+       * Horizons` on the site.
+       *
+       * Cleaning it at the live doors alone would not have held: `market_entries.station_name` is
+       * copied from `knowledge_items.name` on every rebuild, so the dump would have put the key
+       * back every night.
+       */
+      name: cleanStationName(sName),
       /*
        * ★ THE MARKET IS KEPT, AND IT WAS NOT AT FIRST ★
        *
