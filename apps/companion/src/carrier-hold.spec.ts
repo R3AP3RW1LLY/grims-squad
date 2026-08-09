@@ -322,3 +322,101 @@ describe('the snapshot carries the true total', () => {
     expect(carrierSnapshot(EMPTY_CARRIER_HOLD)).toBeNull();
   });
 });
+
+/**
+ * ★ THE NAME THE HUB IS SENT — SQUADRON OWNER, 2026-08-09 ★
+ *
+ * "ensure that what is in a carriers hold is tracking on the whats needed and where to buy tabs ...
+ * its supposed to appear in yellow so we know what we need and dont need"
+ *
+ * ★ WHY NOTHING IN THIS FILE CAUGHT IT ★
+ *
+ * Every fixture above supplies `Type_Localised`. The helper at the top of this file builds it
+ * automatically — `Type: e.type.toLowerCase(), Type_Localised: e.type` — so the localised branch is
+ * the only one any of these tests has ever taken.
+ *
+ * Frontier does not always supply it. It is omitted for exactly the commodities whose symbol is
+ * already the plain word: `steel`, `aluminium`, `tritium`, `bertrandite`. So the fallback fired in
+ * production and nowhere else, and it stored `steel` where every other table says `Steel`.
+ *
+ * `colony_needs.commodity` is a display name, so the carrier-cover join matched nothing and the
+ * yellow "already aboard" segment never appeared. Measured on production: 1,298 t of Steel and
+ * 1,186 t of Aluminium aboard one carrier serving four builds, invisible on all four, with the
+ * shopping list quoting a trip to buy Steel the squadron already owned.
+ */
+describe('the commodity name sent to the hub', () => {
+  const bare = (type: string, count: number): ParsedLike =>
+    ev('CargoTransfer', { Transfers: [{ Type: type, Count: count, Direction: 'tocarrier' }] });
+
+  it('★ MANDATORY: a symbol with no localised name is stored as a display name ★', () => {
+    const state = foldCarrierHold(EMPTY_CARRIER_HOLD, [stats(3700000001), bare('steel', 500)]);
+    const snapshot = carrierSnapshot(state);
+
+    expect(
+      snapshot?.commodities.map((c) => c.commodity),
+      'sent as the raw symbol, which matches no colonisation need and stays invisible',
+    ).toEqual(['Steel']);
+  });
+
+  it('MANDATORY: every commodity Frontier omits the localised name for', () => {
+    // The seven found in production on a real carrier, all stored as lower-case symbols.
+    const events = [stats(3700000001)];
+    for (const symbol of [
+      'steel',
+      'aluminium',
+      'tritium',
+      'bertrandite',
+      'beryllium',
+      'gallite',
+      'indite',
+    ]) {
+      events.push(bare(symbol, 100));
+    }
+
+    const names = carrierSnapshot(foldCarrierHold(EMPTY_CARRIER_HOLD, events))?.commodities.map(
+      (c) => c.commodity,
+    );
+
+    expect(names?.sort()).toEqual([
+      'Aluminium',
+      'Bertrandite',
+      'Beryllium',
+      'Gallite',
+      'Indite',
+      'Steel',
+      'Tritium',
+    ]);
+  });
+
+  it('still prefers the localised name when the game gives one', () => {
+    /*
+     * The localised name is authoritative and is NOT reconstructed from the symbol — `Low Temp.
+     * Diamonds` could never be derived from `lowtemperaturediamond`, which is why the game sends it.
+     */
+    const state = foldCarrierHold(EMPTY_CARRIER_HOLD, [
+      stats(3700000001),
+      ev('CargoTransfer', {
+        Transfers: [
+          {
+            Type: 'lowtemperaturediamond',
+            Type_Localised: 'Low Temp. Diamonds',
+            Count: 20,
+            Direction: 'tocarrier',
+          },
+        ],
+      }),
+    ]);
+
+    expect(carrierSnapshot(state)?.commodities.map((c) => c.commodity)).toEqual([
+      'Low Temp. Diamonds',
+    ]);
+  });
+
+  it('leaves an already-capitalised symbol alone', () => {
+    const state = foldCarrierHold(EMPTY_CARRIER_HOLD, [
+      stats(3700000001),
+      bare('CMM Composite', 264),
+    ]);
+    expect(carrierSnapshot(state)?.commodities.map((c) => c.commodity)).toEqual(['CMM Composite']);
+  });
+});
