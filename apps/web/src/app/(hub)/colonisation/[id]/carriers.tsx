@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useState } from 'react';
 import { CALLSIGN_LENGTH, formatCallsign } from '@grims/shared/carrier';
@@ -195,6 +196,22 @@ export function Carriers({
                     </span>
 
                     <span className="flex items-center gap-3">
+                      {/*
+                        ★ THE RUN THIS CARRIER IS ACTUALLY ON — SQUADRON OWNER, 2026-08-09 ★
+
+                        A carrier is rarely serving one build. This page can only ever answer "what
+                        is aboard for THIS one", and adding that answer up across the builds it
+                        serves double-counts the hold — the cargo can only be delivered once.
+
+                        So the combined view is one click from here rather than something a member
+                        has to know exists.
+                      */}
+                      <Link
+                        href={`/colonisation/carriers/${encodeURIComponent(c.marketId)}`}
+                        className="font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--color-brand-orange)] no-underline hover:underline"
+                      >
+                        Combined run
+                      </Link>
                       <span className="font-mono text-xs tabular-nums text-[var(--color-text-secondary)]">
                         {c.totalTonnes.toLocaleString()} t towards this build
                         {/*

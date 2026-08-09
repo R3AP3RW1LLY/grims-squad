@@ -278,6 +278,9 @@ contextBridge.exposeInMainWorld('colony', {
 
   /** Fleet carriers helping with a build, and what each is holding. */
   carriers: (id: string, q: string) => ipcRenderer.invoke('colonyCarriers', id, q),
+  // Keyed on the carrier, not a project — see the handler in main.ts.
+  carrierManifest: (marketId: string, opts?: unknown) =>
+    ipcRenderer.invoke('colonyCarrierManifest', marketId, opts ?? {}),
   carrierAdd: (id: string, body: unknown) => ipcRenderer.invoke('colonyCarrierAdd', id, body),
   carrierRemove: (id: string, marketId: string) =>
     ipcRenderer.invoke('colonyCarrierRemove', id, marketId),

@@ -663,6 +663,89 @@ export class ColonyDeviceController {
   }
 
   /**
+   * One carrier's whole run, for the app.
+   *
+   * ★ SQUADRON OWNER, 2026-08-09 ★
+   *
+   * "an aggregated total of all materials needed to get all the builds completed if i am buying and
+   * storing on a fleet carrier"
+   *
+   * ★ THE APP IS WHERE THIS GETS USED ★
+   *
+   * The website is where somebody plans the run; the app is what is open while they fly it, next to
+   * the commodity market they are standing in. A combined list that existed only on the website
+   * would be the one surface it is least useful on.
+   *
+   * Same service and the same arithmetic as the website's route — the netting that subtracts a
+   * shared hold once rather than once per build lives in `manifest`, so the two cannot disagree
+   * about how much is left to buy.
+   */
+  @Public()
+  @Get('carriers/:marketId/manifest')
+  async carrierManifest(
+    @Req() req: FastifyRequest,
+    @Param('marketId') marketId: string,
+    @Query('near') near?: string,
+    @Query('withinLy') withinLy?: string,
+    @Query('largePad') largePad?: string,
+    @Query('sort') sort?: string,
+  ) {
+    await this.#caller(
+      req,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    // Rejected rather than coerced: `BigInt('')` is 0n, which is a market id somebody might hold.
+    if (!/^\d{1,19}$/.test(marketId)) {
+      throw new AppError(ErrorCode.VALIDATION_FAILED, 'That is not a market id.');
+    }
+
+    const manifest = await this.carriers.manifest(BigInt(marketId));
+    if (manifest.carrier === null) {
+      throw new AppError(ErrorCode.RESOURCE_NOT_VISIBLE, 'Not found.');
+    }
+
+    /*
+     * Coordinates the same way the project route above resolves them — by name, through the market
+     * store. No origin means no prices, which is the rule that route already states: a
+     * cheapest-anywhere figure is a number nobody can act on.
+     */
+    const typed = (near ?? '').trim();
+    const coords = typed === '' ? null : await this.market.systemCoords(typed);
+
+    /*
+     * The manifest has already netted what is aboard, so the sourcing gets what is left to BUY and
+     * no cover. Passing cover again here would subtract the same cargo twice.
+     */
+    const shopping = await this.colony.shoppingListForNeeds(
+      JSON.stringify([
+        'carrier',
+        marketId,
+        coords === null ? null : [coords.x, coords.y, coords.z],
+        withinLy ?? '',
+        largePad ?? '',
+        sort ?? '',
+        manifest.lines.map((l) => `${l.commodity}:${l.toBuy}`).join(','),
+      ]),
+      manifest.lines.map((l) => ({
+        commodity: l.commodity,
+        remaining: l.toBuy,
+        required: l.needed,
+        observedAt: new Date(),
+      })),
+      {
+        near: coords,
+        withinLy: clamp(numberOr(withinLy, 100), 1, 500),
+        largePadOnly: largePad === '1',
+        sort: sort === 'closest' ? 'closest' : sort === 'cheapest' ? 'cheapest' : 'local',
+      },
+    );
+
+    return { ...manifest, shopping };
+  }
+
+  /**
    * Fleet carriers, for the app. Same service, same rules — see the note on the planner routes.
    */
   @Public()

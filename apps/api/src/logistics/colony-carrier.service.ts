@@ -825,4 +825,136 @@ export class ColonyCarrierService {
 
     return { stored: true };
   }
+
+  /**
+   * Everything the builds this carrier serves still need, added up once.
+   *
+   * ★ SQUADRON OWNER, 2026-08-09 ★
+   *
+   * "so that we can click the this is my current build it can be active on many projects and it will
+   * give me an aggregated total of all materials needed to get all the builds completed if i am
+   * buying and storing on a fleet carrier"
+   *
+   * ★ THE PER-PROJECT VIEW IS WRONG ABOUT A SHARED CARRIER, AND ONLY THIS IS RIGHT ★
+   *
+   * This is not a convenience that saves opening three pages. It is the only place the arithmetic
+   * works out.
+   *
+   * A carrier attached to three builds, holding 100 t of Steel, appears on all three project pages
+   * as 100 t of cover — because `carrierCover` is asked "what do the carriers attached to THIS build
+   * hold", and the honest answer for each of them is 100. Read one page at a time that is correct.
+   * Added up it says 300 t are covered, and the cargo can only be delivered once.
+   *
+   * So the netting happens HERE, against the summed need, exactly once. `colony_carrier_cargo` was
+   * keyed on the carrier rather than the project for this reason — the schema already says "a
+   * carrier has one hold ... attaching it to two builds must not mean two sets of cargo" — and this
+   * is the read that finally honours it.
+   *
+   * ★ ATTACHMENT IS THE ACTIVE SET ★
+   *
+   * No new flag. A carrier is serving a build exactly when it is attached to it, which is a thing
+   * members already do, already understand, and already see on the project page. A second notion of
+   * "active" beside it would be two switches that can disagree, and the first bug report would be
+   * somebody's cargo missing from a total because the other switch was off.
+   */
+  async manifest(marketId: bigint): Promise<{
+    readonly carrier: { readonly marketId: string; readonly name: string; readonly callsign: string | null } | null;
+    readonly projects: ReadonlyArray<{ readonly id: string; readonly title: string; readonly systemName: string }>;
+    readonly lines: ReadonlyArray<{
+      readonly commodity: string;
+      /** Summed `remaining` across every build this carrier serves. */
+      readonly needed: number;
+      /** Effective tonnes aboard THIS carrier — counted once, however many builds want them. */
+      readonly aboard: number;
+      /** What still has to be bought. Never negative: surplus covers, it does not credit. */
+      readonly toBuy: number;
+    }>;
+  }> {
+    const [carrierRow] = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
+      `SELECT market_id::text AS market_id, name, callsign
+         FROM colony_carriers WHERE market_id = $1::bigint LIMIT 1`,
+      String(marketId),
+    );
+
+    if (carrierRow === undefined) {
+      return { carrier: null, projects: [], lines: [] };
+    }
+
+    const projects = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
+      `SELECT p.id::text AS id, p.title, p.system_name
+         FROM colony_carriers c
+         JOIN colony_projects p ON p.id = c.project_id
+        WHERE c.market_id = $1::bigint
+        ORDER BY p.title`,
+      String(marketId),
+    );
+
+    /*
+     * Summed in SQL rather than in Node. A carrier serving six builds of twenty-five commodities is
+     * 150 rows to ship and fold by hand, and the database already knows how to add.
+     */
+    const needRows = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
+      `SELECT n.commodity, sum(n.remaining)::int AS needed
+         FROM colony_needs n
+         JOIN colony_carriers c ON c.project_id = n.project_id
+        WHERE c.market_id = $1::bigint AND n.remaining > 0
+        GROUP BY n.commodity
+        ORDER BY sum(n.remaining) DESC`,
+      String(marketId),
+    );
+
+    /*
+     * The carrier's own cargo, through the SAME merge rule the project page uses — manual beats
+     * journal beats the market mirror. Reusing `effectiveTonnes` rather than restating the
+     * precedence, because a second copy would be wrong the first time the rule changed.
+     */
+    const cargoRows = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
+      `SELECT commodity, source, tonnes FROM colony_carrier_cargo WHERE market_id = $1::bigint`,
+      String(marketId),
+    );
+    const mirrorRows = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
+      `SELECT commodity, tonnes FROM carrier_cargo WHERE market_id = $1::bigint`,
+      String(marketId),
+    );
+
+    const pick = (commodity: string, source: string): number | null => {
+      const row = cargoRows.find(
+        (r) => String(r['commodity']) === commodity && String(r['source']) === source,
+      );
+      return row === undefined ? null : Number(row['tonnes']);
+    };
+
+    const lines = needRows.map((r) => {
+      const commodity = String(r['commodity']);
+      const needed = Number(r['needed']);
+      const mirror = mirrorRows.find((m) => String(m['commodity']) === commodity);
+
+      const aboard = effectiveTonnes({
+        manual: pick(commodity, 'manual'),
+        journal: pick(commodity, 'journal'),
+        mirror: mirror === undefined ? null : Number(mirror['tonnes']),
+      });
+
+      /*
+       * Capped at the need. A carrier holding more Steel than every build wants covers them, it does
+       * not earn credit against something else — the same rule the per-project list applies, for the
+       * same reason.
+       */
+      return { commodity, needed, aboard, toBuy: Math.max(0, needed - Math.min(needed, aboard)) };
+    });
+
+    return {
+      carrier: {
+        marketId: String(carrierRow['market_id']),
+        name: String(carrierRow['name']),
+        callsign: carrierRow['callsign'] === null ? null : String(carrierRow['callsign']),
+      },
+      projects: projects.map((p) => ({
+        id: String(p['id']),
+        title: String(p['title']),
+        systemName: String(p['system_name']),
+      })),
+      lines,
+    };
+  }
 }

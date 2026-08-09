@@ -83,12 +83,28 @@ function Seen({ at }: { at: string | null }) {
 export function ShoppingList({
   rows,
   projectId,
+  action,
   origin,
   unknownSystem,
   query,
 }: {
   rows: readonly ColonyShoppingRow[];
-  projectId: string;
+  /** The build this list belongs to. Absent when the list spans several — see `action`. */
+  projectId?: string;
+  /**
+   * Where the filter form submits.
+   *
+   * ★ ADDED 2026-08-09, FOR THE CARRIER'S COMBINED LIST ★
+   *
+   * This component used to derive its own action from `projectId`, which quietly assumed every
+   * shopping list belongs to exactly one build. A carrier serving several has the same rows, the
+   * same ranking and the same arithmetic — only a different URL to filter against.
+   *
+   * Passing the destination in rather than reaching for a second copy of the component: the "three
+   * kinds of line" counting below, the carrier-covered rule and the price-age marking are all
+   * correctness this list has already paid for, and a duplicate would start out without it.
+   */
+  action?: string;
   origin: { system: string } | null;
   unknownSystem: string | null;
   query: Record<string, string>;
@@ -109,7 +125,7 @@ export function ShoppingList({
     <div>
       <form
         method="get"
-        action={`/colonisation/${projectId}`}
+        action={action ?? `/colonisation/${projectId ?? ''}`}
         className="mb-4 flex flex-wrap items-end gap-3"
       >
         <label className="flex flex-col gap-1">

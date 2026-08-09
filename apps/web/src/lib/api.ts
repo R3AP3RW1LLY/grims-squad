@@ -2846,6 +2846,43 @@ export const getColonyProject = (
   );
 };
 
+/**
+ * One carrier's whole run: every build it serves, added up once.
+ *
+ * ★ WHY THE TOTAL IS NOT THE SUM OF THE PROJECT PAGES ★
+ *
+ * A carrier holds one hold. Each build it serves correctly reports the whole of that hold as its
+ * own cover, so reading three project pages and adding them counts the same cargo three times. The
+ * server nets it against the summed need exactly once — see `manifest` in colony-carrier.service.
+ */
+export interface CarrierManifestLine {
+  commodity: string;
+  /** Summed across every build this carrier serves. */
+  needed: number;
+  /** Aboard this carrier — counted once, however many builds want it. */
+  aboard: number;
+  /** What still has to be bought. */
+  toBuy: number;
+}
+
+export interface CarrierManifest {
+  carrier: { marketId: string; name: string; callsign: string | null };
+  projects: Array<{ id: string; title: string; systemName: string }>;
+  lines: CarrierManifestLine[];
+  /** Where to buy the combined quantities, priced on the aggregate rather than per build. */
+  shopping: ColonyShoppingRow[];
+}
+
+export const getCarrierManifest = (
+  marketId: string,
+  query: Record<string, string> = {},
+): Promise<AdminRead<CarrierManifest>> => {
+  const qs = new URLSearchParams(query).toString();
+  return getAdmin(
+    `/v1/logistics/colony/carriers/${encodeURIComponent(marketId)}/manifest${qs === '' ? '' : `?${qs}`}`,
+  );
+};
+
 /** A published project, by its token. No session: the token is the capability. */
 export const getSharedColonyProject = (
   token: string,

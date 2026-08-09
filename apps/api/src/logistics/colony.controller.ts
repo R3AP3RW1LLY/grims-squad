@@ -338,6 +338,86 @@ export class ColonyController {
    * cannot say so. Marking one as the SQUADRON'S needs COLONY_MANAGE — that is a claim about whose
    * it is, checked in the service.
    */
+  /**
+   * One carrier's whole run: every build it serves, added up, and where to buy the difference.
+   *
+   * ★ SQUADRON OWNER, 2026-08-09 ★
+   *
+   * "it can be active on many projects and it will give me an aggregated total of all materials
+   * needed to get all the builds completed if i am buying and storing on a fleet carrier"
+   *
+   * ★ KEYED ON THE CARRIER, WHICH IS THE WHOLE POINT ★
+   *
+   * Not "projects I picked". A carrier holds one hold, and the arithmetic only works when the thing
+   * doing the holding is the thing being asked — see `manifest`, which subtracts its cargo once
+   * rather than once per build the way three project pages read together would.
+   *
+   * The sourcing runs on the aggregate for the same reason. Priced per project and added up, a
+   * commodity two builds both want would name two stations for two part-loads; priced once, it names
+   * the station that can actually fill the run.
+   */
+  @Get('carriers/:marketId/manifest')
+  async carrierManifest(
+    @User() caller: CurrentUser | undefined,
+    @Param('marketId') marketId: string,
+    @Query('near') near?: string,
+    @Query('withinLy') withinLy?: string,
+    @Query('largePad') largePad?: string,
+    @Query('sort') sort?: string,
+  ) {
+    await this.#assert(
+      caller,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    // Rejected rather than coerced: `BigInt('')` is 0n, which is a market id somebody might hold.
+    if (!/^\d{1,19}$/.test(marketId)) {
+      throw new AppError(ErrorCode.VALIDATION_FAILED, 'That is not a market id.');
+    }
+
+    const manifest = await this.carriers.manifest(BigInt(marketId));
+    if (manifest.carrier === null) {
+      // Cloak, like every other colonisation read: a carrier nobody has attached is not ours to
+      // confirm the existence of.
+      throw new AppError(ErrorCode.RESOURCE_NOT_VISIBLE, 'Not found.');
+    }
+
+    const origin = await this.#origin(near);
+
+    /*
+     * The manifest already did the netting, so the sourcing is handed what is left to BUY and no
+     * cover at all. Passing the cover again here would subtract the same cargo a second time.
+     */
+    const shopping = await this.colony.shoppingListForNeeds(
+      // The flight key is the carrier's, not a project's — see `shoppingListForNeeds`.
+      JSON.stringify([
+        'carrier',
+        marketId,
+        origin === null ? null : [origin.coords.x, origin.coords.y, origin.coords.z],
+        withinLy ?? '',
+        largePad ?? '',
+        sort ?? '',
+        // The needs themselves, so a delivery landing mid-cache does not serve a stale run.
+        manifest.lines.map((l) => `${l.commodity}:${l.toBuy}`).join(','),
+      ]),
+      manifest.lines.map((l) => ({
+        commodity: l.commodity,
+        remaining: l.toBuy,
+        required: l.needed,
+        observedAt: new Date(),
+      })),
+      {
+        near: origin?.coords ?? null,
+        withinLy: clamp(numberOr(withinLy, 100), 1, 500),
+        largePadOnly: largePad === '1',
+        sort: sort === 'closest' ? 'closest' : sort === 'cheapest' ? 'cheapest' : 'local',
+      },
+    );
+
+    return { ...manifest, shopping };
+  }
+
   @Get('projects/:id/carriers')
   async carrierSearch(
     @User() caller: CurrentUser | undefined,

@@ -30,6 +30,7 @@ import {
   colonyRemove,
   colonyReopen,
   colonyCarrierSearch,
+  colonyCarrierManifest,
   detachCarrier,
   colonyPlan,
   colonyPlans,
@@ -2155,6 +2156,22 @@ if (!app.requestSingleInstanceLock()) {
     ipcMain.handle('colonyCarriers', (_e, id: unknown, q: unknown) =>
       colonyCarrierSearch(hub(), projectId(id), typeof q === 'string' ? q : ''),
     );
+    /*
+     * ★ THE COMBINED RUN — SQUADRON OWNER, 2026-08-09 ★
+     *
+     * Keyed on the CARRIER rather than a project, which is why it takes no project id: a carrier
+     * holds one hold, and the whole point is to subtract it once across every build it serves
+     * rather than once per build.
+     */
+    ipcMain.handle('colonyCarrierManifest', (_e, marketId: unknown, opts: unknown) => {
+      const o = (opts ?? {}) as Record<string, unknown>;
+      return colonyCarrierManifest(hub(), typeof marketId === 'string' ? marketId : '', {
+        ...(typeof o['near'] === 'string' ? { near: o['near'] } : {}),
+        ...(typeof o['withinLy'] === 'number' ? { withinLy: o['withinLy'] } : {}),
+        ...(o['largePad'] === true ? { largePad: true } : {}),
+        ...(typeof o['sort'] === 'string' ? { sort: o['sort'] } : {}),
+      });
+    });
     ipcMain.handle('colonyCarrierAdd', (_e, id: unknown, body: unknown) => {
       const b = (body ?? {}) as Record<string, unknown>;
       return attachCarrier(hub(), projectId(id), {

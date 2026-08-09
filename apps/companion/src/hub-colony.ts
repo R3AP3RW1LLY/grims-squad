@@ -817,6 +817,61 @@ export const colonyCarrierSearch = (
 ): Promise<Answer<{ carriers: CarrierMatch[] }>> =>
   hubColony(call, `/projects/${encodeURIComponent(id)}/carriers?q=${encodeURIComponent(q)}`);
 
+/**
+ * One carrier's whole run: every build it serves, added up once.
+ *
+ * ★ SQUADRON OWNER, 2026-08-09 ★
+ *
+ * "an aggregated total of all materials needed to get all the builds completed if i am buying and
+ * storing on a fleet carrier"
+ *
+ * ★ WHY THE APP NEEDS THIS MORE THAN THE WEBSITE DOES ★
+ *
+ * The website is where the run gets planned. The app is what is open while it is being flown, beside
+ * the commodity market somebody is standing in — which is the moment the question "how much of this
+ * do I actually need" gets asked.
+ *
+ * ★ AND WHY THE NUMBER DIFFERS FROM THE PROJECT SCREENS ★
+ *
+ * A carrier holds ONE hold. Each build it serves reports the whole of that hold as its own cover,
+ * correctly, because each is answering "what do the carriers attached to me hold". Opening three
+ * builds and adding them counts the same cargo three times. This subtracts it once. Same server
+ * method the website calls, so the two surfaces cannot disagree.
+ */
+export interface CarrierManifestLine {
+  commodity: string;
+  /** Summed across every build this carrier serves. */
+  needed: number;
+  /** Aboard this carrier — counted once, however many builds want it. */
+  aboard: number;
+  toBuy: number;
+}
+
+export const colonyCarrierManifest = (
+  call: HubCall,
+  marketId: string,
+  opts: { near?: string; withinLy?: number; largePad?: boolean; sort?: string } = {},
+): Promise<
+  Answer<{
+    carrier: { marketId: string; name: string; callsign: string | null };
+    projects: Array<{ id: string; title: string; systemName: string }>;
+    lines: CarrierManifestLine[];
+    shopping: ColonyShoppingRow[];
+  }>
+> => {
+  const q = new URLSearchParams();
+  if (opts.near !== undefined && opts.near.trim() !== '') q.set('near', opts.near.trim());
+  if (opts.withinLy !== undefined) q.set('withinLy', String(opts.withinLy));
+  if (opts.largePad === true) q.set('largePad', '1');
+  if (opts.sort !== undefined) q.set('sort', opts.sort);
+
+  const qs = q.toString();
+  return hubColony(
+    call,
+    `/carriers/${encodeURIComponent(marketId)}/manifest${qs === '' ? '' : `?${qs}`}`,
+  );
+};
+
 export const attachCarrier = (
   call: HubCall,
   id: string,
