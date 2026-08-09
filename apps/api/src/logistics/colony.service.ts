@@ -985,12 +985,54 @@ export class ColonyService {
      * share an answer that was already being computed, which is a refusal that buys nothing.
      */
     return ColonyService.shoppingFlight.run(key, SHOPPING_LIST_TTL_MS, () =>
-      ColonyService.shoppingBulkhead.run(() => this.#computeShoppingList(projectId, opts)),
+      ColonyService.shoppingBulkhead.run(() =>
+        this.#computeShoppingList(() => this.needs(projectId), opts),
+      ),
+    );
+  }
+
+  /**
+   * The same list, for needs that did not come from one project.
+   *
+   * ★ SQUADRON OWNER, 2026-08-09 ★
+   *
+   * "add multiple shopping lists for colonization projects into the build list overlay ... it will
+   * give me an aggregated total of all materials needed to get all the builds completed if i am
+   * buying and storing on a fleet carrier"
+   *
+   * ★ WHY THE SOURCING IS SHARED RATHER THAN COPIED ★
+   *
+   * Everything below the needs — the local-before-distant ranking, the carrier netting, the bounded
+   * concurrency, the fallbacks — is correctness this list has already paid for. "Always prioritize
+   * local markets before sending out of system" was a real bug, fixed here; a second implementation
+   * would start out without that fix and nothing would say so.
+   *
+   * So only the QUESTION differs. One project asks "what does this build still need"; a carrier asks
+   * "what do all the builds I am serving still need, once". The answer is sourced identically.
+   *
+   * The flight key is the caller's to choose, because a carrier's list is not a project's and
+   * sharing one key would serve the wrong answer to whichever asked second.
+   */
+  async shoppingListForNeeds(
+    key: string,
+    needs: readonly NeedDetail[],
+    opts: {
+      near: { x: number; y: number; z: number } | null;
+      withinLy: number;
+      largePadOnly: boolean;
+      sort?: 'local' | 'cheapest' | 'closest';
+      carrierCover?: Readonly<Record<string, number>>;
+    },
+  ): Promise<readonly ShoppingRow[]> {
+    return ColonyService.shoppingFlight.run(key, SHOPPING_LIST_TTL_MS, () =>
+      ColonyService.shoppingBulkhead.run(() =>
+        this.#computeShoppingList(() => Promise.resolve(needs), opts),
+      ),
     );
   }
 
   async #computeShoppingList(
-    projectId: string,
+    loadNeeds: () => Promise<readonly NeedDetail[]>,
     opts: {
       near: { x: number; y: number; z: number } | null;
       withinLy: number;
@@ -1016,7 +1058,7 @@ export class ColonyService {
       carrierCover?: Readonly<Record<string, number>>;
     },
   ): Promise<readonly ShoppingRow[]> {
-    const needs = await this.needs(projectId);
+    const needs = await loadNeeds();
     const now = Date.now();
     const cover = opts.carrierCover ?? {};
 
