@@ -1275,7 +1275,19 @@ export class ColonyService {
      */
     snapshot?: OpeningSnapshot | null;
   }): Promise<{ id: string }> {
-    const title = input.title.trim();
+    /*
+     * ★ THE TITLE CARRIES THE SAME LEAK AS THE STATION NAME — 2026-08-09 ★
+     *
+     * Cleaning `stationName` alone was not enough, and the miss was visible on the board: a project
+     * still listed as `$EXT_PANEL_ColonisationShip; Mitra Horizons` while its location column read
+     * "Mitra Horizons". Both surfaces offer the station's name as the default title, so whatever the
+     * game called it lands here too — and the title is the bigger of the two, because it is what the
+     * board, the sidebar badge and every notification say.
+     *
+     * Safe to apply to a member-typed title: it strips a leading `$KEY;` and nothing else, and no
+     * member types that on purpose.
+     */
+    const title = cleanStationName(input.title).trim();
     if (title === '') {
       throw new AppError(ErrorCode.VALIDATION_FAILED, 'Give the project a name.');
     }

@@ -65,25 +65,42 @@ async function repairKnowledgeItems(apply: boolean): Promise<number> {
   return changed;
 }
 
+/**
+ * ★ THE TITLE AS WELL AS THE STATION NAME — WIDENED 2026-08-09 ★
+ *
+ * The first run of this repaired `station_name` and left `title` alone, and the miss was plain on
+ * the board: a project reading `$EXT_PANEL_ColonisationShip; Mitra Horizons` beside a location
+ * column that correctly said "Mitra Horizons". Both surfaces offer the station's name as the default
+ * title, so the game's string lands in both columns — and the title is the one the board, the
+ * sidebar badge and every notification show.
+ */
 async function repairColonyProjects(apply: boolean): Promise<number> {
-  const rows = await db.$queryRawUnsafe<Row[]>(
-    `SELECT id::text AS id, station_name AS name FROM colony_projects WHERE station_name LIKE $1`,
+  const rows = await db.$queryRawUnsafe<Array<{ id: string; title: string; station: string | null }>>(
+    `SELECT id::text AS id, title, station_name AS station
+       FROM colony_projects
+      WHERE title LIKE $1 OR station_name LIKE $1`,
     SUSPECT,
   );
 
   let changed = 0;
   for (const row of rows) {
-    if (!hasLocalisationToken(row.name)) continue;
-    const cleaned = cleanStationName(row.name);
-    if (cleaned === row.name) continue;
-    changed += 1;
-    console.log(`  colony_projects  ${row.name}  ->  ${cleaned}`);
-    if (apply) {
-      await db.$executeRawUnsafe(
-        `UPDATE colony_projects SET station_name = $1 WHERE id = $2::uuid`,
-        cleaned,
-        row.id,
-      );
+    for (const [column, value] of [
+      ['title', row.title],
+      ['station_name', row.station],
+    ] as const) {
+      if (!hasLocalisationToken(value)) continue;
+      const cleaned = cleanStationName(value);
+      if (cleaned === value || cleaned === null) continue;
+
+      changed += 1;
+      console.log(`  colony_projects.${column}  ${value}  ->  ${cleaned}`);
+      if (apply) {
+        await db.$executeRawUnsafe(
+          `UPDATE colony_projects SET ${column} = $1 WHERE id = $2::uuid`,
+          cleaned,
+          row.id,
+        );
+      }
     }
   }
   return changed;
