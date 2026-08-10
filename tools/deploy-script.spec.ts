@@ -538,3 +538,89 @@ describe('the deploy still refuses to start without its configuration', () => {
     }
   });
 });
+
+/**
+ * ★ THE BOX RAN A DEPLOY SCRIPT FROM 30 JULY FOR ELEVEN DAYS — FOUND 2026-08-10 ★
+ *
+ * `/srv/grims/deploy.sh` was a COPY of `infra/scripts/deploy.sh`, taken once and never taken again.
+ * This file kept improving; the box's copy did not, and nothing anywhere compared the two.
+ *
+ * By the time anybody looked, the running entrypoint was missing the backup pruning (61 dumps and
+ * 101 GB on the disk that also holds Postgres), every required-variable check added since, the
+ * changelog and announcement steps, and the line that reads PUBLIC_URL from the env file — so its
+ * health gate had been pronouncing the site healthy by probing the old sslip.io hostname rather than
+ * the domain members actually use.
+ *
+ * ★ AND EVERY TEST IN THIS FILE PASSED THROUGHOUT ★
+ *
+ * That is the part worth pinning. The tests above read `infra/scripts/deploy.sh` from the repo, and
+ * the repo's copy was always correct. Nothing was wrong with the file under test; the wrong file was
+ * being run. A source scan cannot see that, so the guard has to be structural: the entrypoint must
+ * be something that CANNOT hold a stale copy, and the script must keep it installed.
+ */
+describe('the deploy entrypoint cannot go stale', () => {
+  const bootstrap = readFileSync(join(REPO, 'infra', 'scripts', 'deploy-bootstrap.sh'), 'utf8');
+
+  it('★ MANDATORY: the bootstrap runs the deploy script from the ref, not a copy of it ★', () => {
+    expect(bootstrap, 'the bootstrap does not fetch, so it would run whatever the box last had')
+      .toMatch(/git -C .* fetch/);
+    expect(
+      bootstrap,
+      'the bootstrap does not read the script out of the ref being deployed',
+    ).toMatch(/git -C .* show .*infra\/scripts\/deploy\.sh/);
+    expect(bootstrap, 'the bootstrap never hands control to the real script').toMatch(/exec /);
+  });
+
+  it('★ MANDATORY: the bootstrap holds no deploy logic to fall behind on ★', () => {
+    /*
+     * The whole point. A bootstrap that grew steps would be the same bug with a later date on it —
+     * so anything that belongs to deploying is forbidden here, and this fails the moment somebody
+     * starts moving work into it.
+     */
+    for (const forbidden of [
+      'docker compose',
+      'migrate',
+      'pg_dump',
+      'curl',
+      'KEEP_BACKUPS',
+      'psql',
+    ]) {
+      expect(
+        bootstrap.includes(forbidden),
+        `the bootstrap has grown "${forbidden}" — it is becoming a second deploy script, which is ` +
+          'exactly the thing that went stale',
+      ).toBe(false);
+    }
+  });
+
+  it('★ MANDATORY: it extracts to a temp file rather than executing inside the repo ★', () => {
+    /*
+     * A symlink into the repo would be the obvious fix and a subtle disaster: the deploy's own
+     * fetch and checkout rewrite files in the repo — including the script being executed — and bash
+     * reads a script incrementally, so a running deploy can jump into the middle of a different
+     * version of itself.
+     */
+    expect(bootstrap, 'the bootstrap executes a file the deploy itself rewrites mid-run').toMatch(
+      /mktemp/,
+    );
+  });
+
+  it('★ MANDATORY: the deploy reinstalls the entrypoint, so the two cannot drift again ★', () => {
+    expect(
+      current,
+      'nothing keeps /srv/grims/deploy.sh in step, so a hand-run of this script leaves a stale ' +
+        'entrypoint behind exactly as before',
+    ).toContain('deploy-bootstrap.sh');
+    expect(current, 'the entrypoint repair does not actually install anything').toMatch(
+      /install .*deploy-bootstrap\.sh|install .*BOOTSTRAP/,
+    );
+  });
+
+  it('the entrypoint repair cannot fail a deploy that already succeeded', () => {
+    // Housekeeping, after the health gate. A verified-up site must never be reported as a failure
+    // because it could not rewrite a helper script.
+    const step = current.slice(current.indexOf('BOOTSTRAP='));
+    expect(step, 'the entrypoint repair dies instead of warning').not.toMatch(/\bdie /);
+    expect(step, 'a failed repair says nothing at all').toMatch(/warn /);
+  });
+});
