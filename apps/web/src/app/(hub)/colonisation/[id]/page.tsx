@@ -12,6 +12,7 @@ import { getColonyProject, getColonyPurchases, getMe } from '../../../../lib/api
 import { NeedsTable } from './needs-table';
 import { ShoppingList } from './shopping-list';
 import { PurchaseCatalogue } from './purchase-catalogue';
+import { DeclarePurchase } from './declare-purchase';
 import { Carriers } from './carriers';
 import { HaulerBoard } from './hauler-board';
 import { DeliveryTimeline } from './delivery-charts';
@@ -281,13 +282,16 @@ export default async function ColonyProjectPage({
 
         {tab !== 'buy' ? null : (
           <>
-          {boughtAt.length === 0 ? null : (
+          {purchases.state !== 'ok' || purchases.data.systemName === null ? null : (
             <Section title="Where the squadron has bought it">
               {/*
                 Above the market suggestions on purpose. A station a squadmate actually filled up at
                 beats a mirror row from four months ago, and half our market data is older than that.
               */}
               <PurchaseCatalogue stations={boughtAt} />
+              <div className="mt-3">
+                <DeclarePurchase projectId={project.id} />
+              </div>
             </Section>
           )}
 
