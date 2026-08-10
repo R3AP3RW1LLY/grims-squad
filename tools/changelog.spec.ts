@@ -1,4 +1,9 @@
 import { describe, it, expect } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { dirname, join } from 'node:path';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { fileURLToPath } from 'node:url';
 import {
   fitForMembers,
   sectionsFor,
@@ -12,6 +17,9 @@ import {
   renderAnnounceSql,
   type ChangelogCommit,
 } from './changelog.mjs';
+
+/** The repo root, so the CLI tests can run the real tool against real git history. */
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
  * The changelog generator's pure core.
@@ -622,5 +630,160 @@ describe('a release that says nothing about a member-facing change says so', () 
   it('a range with no commits at all reports nothing to report', () => {
     // A redeploy of the same revision. There is no silence to complain about when nothing shipped.
     expect(release([]).silentSections).toEqual([]);
+  });
+});
+
+
+/**
+ * ★ THE SQUADRON WAS PINGED FOR A RELEASE WITH NOTHING IN IT — 2026-08-10 ★
+ *
+ * A deploy went out whose only commit changed `tools/changelog.mjs`. Every member got
+ * "📡 The hub just updated — 1 change is live" in Discord, plus the forum carbon-copy, linking to a
+ * changelog page that had nothing on it.
+ *
+ * The changelog ROW is still right to write — it is the deployment record, and "we shipped and
+ * nothing member-visible changed" is worth having written down. The announcement is a notification,
+ * and one about nothing spends the attention the next real one needs.
+ *
+ * ★ THEY RUN THE CLI, AND THEY BUILD THEIR OWN HISTORY TO RUN IT AGAINST ★
+ *
+ * The bug was never in what the announcement SAID — it was in one being rendered at all — so these
+ * exercise the real command rather than `buildAnnouncement`.
+ *
+ * The first version pointed at real commits in this repository and passed locally, then failed in
+ * CI: the checkout is shallow, so `c5dc5a6` simply is not there. A test that depends on the host
+ * repository's history is a test that passes on the machine that wrote it. So each builds a
+ * throwaway repository with exactly the commits it needs and runs the tool against it with
+ * `--repo`.
+ */
+describe('a release with nothing to say does not announce itself', () => {
+  const git = (cwd: string, args: string[]): string =>
+    execFileSync('git', args, {
+      cwd,
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: 'spec',
+        GIT_AUTHOR_EMAIL: 'spec@example.invalid',
+        GIT_COMMITTER_NAME: 'spec',
+        GIT_COMMITTER_EMAIL: 'spec@example.invalid',
+      },
+    });
+
+  /** A repository with one commit per (file, message) pair. Returns its path and every sha. */
+  const historyOf = (commits: ReadonlyArray<{ file: string; message: string }>) => {
+    const dir = mkdtempSync(join(tmpdir(), 'changelog-spec-'));
+    git(dir, ['init', '--quiet', '--initial-branch=main']);
+
+    const shas: string[] = [];
+    for (const { file, message } of commits) {
+      const target = join(dir, file);
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, 'x\n', 'utf8');
+      git(dir, ['add', '-A']);
+      git(dir, ['commit', '--quiet', '-m', message]);
+      shas.push(git(dir, ['rev-parse', 'HEAD']).trim());
+    }
+    return { dir, shas };
+  };
+
+  const announceSql = (dir: string, from: string, to: string): string =>
+    execFileSync(
+      process.execPath,
+      [
+        join(REPO_ROOT, 'tools', 'changelog.mjs'),
+        '--announce-sql',
+        '--repo',
+        dir,
+        '--from',
+        from,
+        '--to',
+        to,
+        '--public-url',
+        'https://grims-squad.com',
+      ],
+      { encoding: 'utf8' },
+    );
+
+  it('★ MANDATORY: a tooling-only release renders no INSERT into announcements ★', () => {
+    // The real shape of c5dc5a6..d59d9a7: one commit, tooling only, no `Members:` trailer.
+    const { dir, shas } = historyOf([
+      { file: 'README.md', message: 'chore: base' },
+      {
+        file: 'tools/changelog.mjs',
+        message: 'fix(changelog): a release that says nothing to members says so',
+      },
+    ]);
+
+    try {
+      const sql = announceSql(dir, shas[0] as string, shas[1] as string);
+      expect(sql, 'it still announces a release nobody can read').not.toMatch(
+        /INSERT INTO announcements/i,
+      );
+      expect(sql, 'and it does not say why it stayed quiet').toMatch(/says nothing to members/i);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('★ MANDATORY: a release that DOES say something still announces ★', () => {
+    /*
+     * The half that must not regress. Suppression widening into real releases would be a worse
+     * failure than the noise it was written to stop — members would simply stop being told.
+     */
+    const { dir, shas } = historyOf([
+      { file: 'README.md', message: 'chore: base' },
+      {
+        file: 'apps/web/src/app/page.tsx',
+        message:
+          'feat(colonisation): a shopping route\n\n' +
+          'Members: Where the squadron has bought it is a route now — no fleet carriers, and each ' +
+          'material is listed at one station.',
+      },
+    ]);
+
+    try {
+      const sql = announceSql(dir, shas[0] as string, shas[1] as string);
+      expect(sql, 'a release with member text must still be announced').toMatch(
+        /INSERT INTO announcements/i,
+      );
+      /*
+       * The SUBJECT, not the member paragraph. The announcement is a short ping with a link — the
+       * detail lives on the changelog page it points at, and Discord rejects rather than trims a
+       * message over 2000 characters. Asserting on the paragraph here would be pinning behaviour
+       * the tool has never had.
+       */
+      expect(sql, 'the ping does not name what changed').toMatch(/A shopping route/);
+      expect(sql, 'the ping does not link members to the detail').toMatch(
+        /grims-squad\.com\/changelog/,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('MANDATORY: a platform change that DOES address members is still announced', () => {
+    /*
+     * Why the suppression checks all three sections rather than the two member-facing ones. "The
+     * colonisation pages are fast again" is a platform commit and unambiguously member news.
+     */
+    const { dir, shas } = historyOf([
+      { file: 'README.md', message: 'chore: base' },
+      {
+        file: 'apps/api/src/logistics/colony.service.ts',
+        message:
+          'perf(colonisation): the purchase catalogue stops scanning every station\n\n' +
+          'Members: Colonisation project pages open straight away again instead of timing out.',
+      },
+    ]);
+
+    try {
+      const sql = announceSql(dir, shas[0] as string, shas[1] as string);
+      expect(sql, 'a platform change written FOR members was swallowed').toMatch(
+        /INSERT INTO announcements/i,
+      );
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
