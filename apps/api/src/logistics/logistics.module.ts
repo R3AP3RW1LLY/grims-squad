@@ -106,13 +106,17 @@ import type { LiveService } from '../live/live.service.js';
     },
     {
       /*
-       * The purchase catalogue: where the squadron has actually bought a build's materials. Half of
-       * it is derived from MarketBuy telemetry and half is hand-typed, so it needs nothing but the
-       * database.
+       * The shopping route: where to fly for what this build still needs. Half of it is derived from
+       * MarketBuy telemetry and half is hand-typed.
+       *
+       * It takes the carrier service because "what is still to buy" has to subtract what is already
+       * aboard, and the three-source merge that decides how much that is lives there. Asking for it
+       * rather than re-deriving it in SQL is what stops the two answers drifting apart.
        */
       provide: ColonyPurchasesService,
-      inject: [PrismaClient],
-      useFactory: (db: PrismaClient) => new ColonyPurchasesService(db),
+      inject: [PrismaClient, ColonyCarrierService],
+      useFactory: (db: PrismaClient, carriers: ColonyCarrierService) =>
+        new ColonyPurchasesService(db, carriers),
     },
     {
       provide: ColonyCatalogueService,

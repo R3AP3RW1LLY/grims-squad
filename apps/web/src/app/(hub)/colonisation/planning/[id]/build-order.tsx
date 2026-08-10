@@ -72,14 +72,8 @@ export function BuildOrder({ plan, canEdit }: { plan: ColonyPlan; canEdit: boole
     );
   }
 
-  const move = async (from: number, to: number): Promise<void> => {
-    const ids = plan.sites.map((s) => s.id);
-    const moved = ids[from];
-    if (moved === undefined || to < 0 || to >= ids.length) return;
-
-    ids.splice(from, 1);
-    ids.splice(to, 0, moved);
-
+  /** Every order change goes through one save, so the failure path is one path. */
+  const save = async (ids: readonly string[]): Promise<void> => {
     setBusy(true);
     try {
       await apiPatch(`/v1/logistics/colony/plans/${encodeURIComponent(plan.id)}/order`, {
@@ -95,6 +89,16 @@ export function BuildOrder({ plan, canEdit }: { plan: ColonyPlan; canEdit: boole
     } finally {
       setBusy(false);
     }
+  };
+
+  const move = async (from: number, to: number): Promise<void> => {
+    const ids = plan.sites.map((s) => s.id);
+    const moved = ids[from];
+    if (moved === undefined || to < 0 || to >= ids.length) return;
+
+    ids.splice(from, 1);
+    ids.splice(to, 0, moved);
+    await save(ids);
   };
 
   /*
@@ -114,6 +118,13 @@ export function BuildOrder({ plan, canEdit }: { plan: ColonyPlan; canEdit: boole
       )}
 
       <Verdict problems={sim.problems} />
+
+      <Suggestion
+        plan={plan}
+        canEdit={canEdit}
+        busy={busy}
+        onApply={(ids) => void save(ids)}
+      />
 
       <ol className="m-0 list-none p-0">
         {plan.sites.map((s, i) => {
@@ -222,6 +233,86 @@ export function BuildOrder({ plan, canEdit }: { plan: ColonyPlan; canEdit: boole
       {/* What it becomes before how good it gets: the economy is the decision, the scalars grade it. */}
       <Economy plan={plan} />
       <Effects plan={plan} />
+    </div>
+  );
+}
+
+/**
+ * A better order, when there is one.
+ *
+ * ★ SQUADRON OWNER, 2026-08-10 ★
+ *
+ * "you have an editable order, but nothing suggests the feeder→hub pairing that would get your
+ * economy producing after ~50k t instead of ~257k t. That's a real gap inside a feature that exists."
+ *
+ * ★ THE NUMBER IS THE WHOLE ARGUMENT ★
+ *
+ * "A better order" persuades nobody. "Your economy opens 240,000 tonnes earlier" is a decision
+ * somebody can actually make, so the tonnage is the headline and the ordering is the detail.
+ *
+ * ★ IT STAYS QUIET WHEN THERE IS NOTHING TO SAY ★
+ *
+ * `worthIt` is false when the order is already good, when there is no economy build to bring
+ * forward, and when the saving is under ten thousand tonnes. A panel that always has advice is one
+ * people stop reading, and this sits directly above a list somebody is trying to use.
+ *
+ * ★ AND IT NEVER APPLIES ITSELF ★
+ *
+ * One button, pressed on purpose, sending the same whole-order save the arrows send. A member's own
+ * order can encode things this cannot see — a body they want finished first, a carrier already
+ * parked somewhere — and a planner that silently rearranged a fortnight of hauling is one nobody
+ * trusts twice.
+ */
+function Suggestion({
+  plan,
+  canEdit,
+  busy,
+  onApply,
+}: {
+  plan: ColonyPlan;
+  canEdit: boolean;
+  busy: boolean;
+  onApply: (ids: readonly string[]) => void;
+}) {
+  const s = plan.suggestion;
+  if (s === undefined || !s.worthIt) return null;
+
+  const saved = s.tonnesBefore.current - s.tonnesBefore.suggested;
+  const at = s.firstEconomyAt.suggested;
+  if (at === null) return null;
+
+  return (
+    <div className="mb-4 rounded border border-[var(--color-brand-cyan)] bg-[color-mix(in_srgb,var(--color-brand-cyan)_6%,transparent)] px-3 py-2">
+      <p className="m-0 text-sm text-[var(--color-text-primary)]">
+        Your economy could open{' '}
+        <span className="font-mono tabular-nums text-[var(--color-brand-cyan-bright)]">
+          {saved.toLocaleString()} t
+        </span>{' '}
+        earlier.
+      </p>
+      <p className="m-0 mt-1 text-[11px] text-[var(--color-text-secondary)]">
+        {/*
+          Both figures, because the saving alone is a claim and the pair is a comparison somebody can
+          check against the list right below this.
+        */}
+        The first economy build currently lands at step{' '}
+        {(s.firstEconomyAt.current ?? plan.sites.length) + 1} after{' '}
+        {s.tonnesBefore.current.toLocaleString()} t of hauling. Pairing each feeder with the hub it
+        pays for puts one at step {at + 1}, after {s.tonnesBefore.suggested.toLocaleString()} t —
+        so the system starts producing what the rest of the build has to buy. The primary port stays
+        where you put it.
+      </p>
+
+      {canEdit ? (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => onApply(s.order)}
+          className="mt-2 rounded-md border border-[var(--color-brand-cyan)] px-3 py-1 text-xs text-[var(--color-text-primary)] transition-colors hover:bg-[color-mix(in_srgb,var(--color-brand-cyan)_14%,transparent)] disabled:opacity-50"
+        >
+          {busy ? 'Reordering…' : 'Reorder the plan this way'}
+        </button>
+      ) : null}
     </div>
   );
 }

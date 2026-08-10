@@ -259,6 +259,15 @@ contextBridge.exposeInMainWorld('colony', {
   buildTypes: () => ipcRenderer.invoke('colonyBuildTypes'),
   buildType: (id: string, near: string) => ipcRenderer.invoke('colonyBuildType', id, near),
 
+  /**
+   * Where to fly for what a build still needs — carriers excluded, each material named once.
+   *
+   * A route rather than a record: the hub applies every rule, so the tab renders what it is given.
+   */
+  purchases: (id: string) => ipcRenderer.invoke('colonyPurchases', id),
+  declarePurchase: (id: string, body: unknown) =>
+    ipcRenderer.invoke('colonyDeclarePurchase', id, body),
+
   /** Who is on a build, what they have taken on, and what they have delivered. */
   roster: (id: string) => ipcRenderer.invoke('colonyRoster', id),
   join: (id: string) => ipcRenderer.invoke('colonyJoin', id),

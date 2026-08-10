@@ -1119,6 +1119,81 @@ function AddSite({
 }
 
 /**
+ * A better build order, when there is one.
+ *
+ * ★ SQUADRON OWNER, 2026-08-10 ★
+ *
+ * "you have an editable order, but nothing suggests the feeder→hub pairing that would get your
+ * economy producing after ~50k t instead of ~257k t. That's a real gap inside a feature that exists."
+ *
+ * ★ THE NUMBER IS THE WHOLE ARGUMENT ★
+ *
+ * "A better order" persuades nobody. "Your economy opens 240,000 tonnes earlier" is a decision
+ * somebody can make, so the tonnage is the headline.
+ *
+ * The suggestion itself is computed by the hub, so this app and the website propose the SAME order —
+ * two implementations of a rule this fiddly would drift, and the half that drifted would be the one
+ * telling somebody how to spend a fortnight. It stays silent unless the saving is real, and it never
+ * applies itself: one button, pressed on purpose, sending the same whole-order save the arrows send.
+ */
+function Suggestion({
+  plan,
+  canEdit,
+  busy,
+  onApply,
+}: {
+  plan: ColonyPlan;
+  canEdit: boolean;
+  busy: boolean;
+  onApply: (ids: readonly string[]) => void;
+}): JSX.Element | null {
+  const s = plan.suggestion;
+  if (s === undefined || !s.worthIt) return null;
+
+  const at = s.firstEconomyAt.suggested;
+  if (at === null) return null;
+  const saved = s.tonnesBefore.current - s.tonnesBefore.suggested;
+
+  return (
+    <div
+      style={{
+        border: `1px solid ${C.cyanCore}`,
+        background: C.cyanTint,
+        borderRadius: '4px',
+        padding: '8px 12px',
+        marginBottom: '12px',
+      }}
+    >
+      <p style={{ margin: 0, fontSize: '13px', color: C.text }}>
+        Your economy could open{' '}
+        <span style={{ color: C.cyan, fontVariantNumeric: 'tabular-nums' }}>
+          {saved.toLocaleString()} t
+        </span>{' '}
+        earlier.
+      </p>
+      <p style={{ margin: '4px 0 0', fontSize: '11px', color: C.dim }}>
+        {/* Both figures, because the saving alone is a claim and the pair is a comparison somebody
+            can check against the list right below. */}
+        The first economy build currently lands at step{' '}
+        {(s.firstEconomyAt.current ?? plan.sites.length) + 1} after{' '}
+        {s.tonnesBefore.current.toLocaleString()} t of hauling. Pairing each feeder with the hub it
+        pays for puts one at step {at + 1}, after {s.tonnesBefore.suggested.toLocaleString()} t — so
+        the system starts producing what the rest of the build has to buy. The primary port stays
+        where you put it.
+      </p>
+
+      {canEdit ? (
+        <div style={{ marginTop: '8px' }}>
+          <Button disabled={busy} onClick={() => onApply(s.order)}>
+            {busy ? 'Reordering…' : 'Reorder the plan this way'}
+          </Button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
  * Everything wrong with the plan, at the top where it cannot be missed.
  *
  * Silence when there is nothing wrong. A permanent "0 problems" banner trains people to ignore the
@@ -1442,13 +1517,20 @@ function BuildOrder({
     );
   }
 
+  /** Every order change goes through one save, so the arrows and the suggestion cannot diverge. */
+  const saveOrder = (ids: readonly string[]): void => {
+    // Copied rather than passed through: the bridge takes a mutable array, and handing it one that
+    // the suggestion still holds a reference to is how a caller's data quietly changes underneath it.
+    act(() => window.colony.planReorder(plan.id, { version: plan.version, siteIds: [...ids] }));
+  };
+
   const move = (from: number, to: number): void => {
     const ids = plan.sites.map((s) => s.id);
     const moved = ids[from];
     if (moved === undefined || to < 0 || to >= ids.length) return;
     ids.splice(from, 1);
     ids.splice(to, 0, moved);
-    act(() => window.colony.planReorder(plan.id, { version: plan.version, siteIds: ids }));
+    saveOrder(ids);
   };
 
   /*
@@ -1462,6 +1544,8 @@ function BuildOrder({
   return (
     <div>
       <Verdict problems={sim.problems} />
+
+      <Suggestion plan={plan} canEdit={canEdit} busy={busy} onApply={saveOrder} />
 
       {plan.sites.map((s, i) => {
         running += s.totalTonnes ?? 0;

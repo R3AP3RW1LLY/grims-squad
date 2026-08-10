@@ -448,9 +448,9 @@ export class ColonyController {
 
     const scope = await this.purchases.visibleFor(id);
     // Not an error: a project outside the gate simply has no catalogue, and the page hides the panel.
-    if (scope === null) return { systemName: null, stations: [] };
+    if (scope === null) return { systemName: null, stations: [], uncovered: [] };
 
-    return { systemName: scope.systemName, stations: await this.purchases.forSystem(scope.systemName) };
+    return this.purchases.forProject(id);
   }
 
   @Post('projects/:id/purchases')

@@ -190,6 +190,27 @@ $COMPOSE exec -T postgres pg_dump -U "$(envval POSTGRES_USER)" -d "$(envval POST
 [[ -s $DUMP ]] || die "the dump is empty — refusing to migrate"
 ok "$(du -h "$DUMP" | cut -f1) → $DUMP"
 
+# ★ KEEP THE LAST FEW, NOT ALL OF THEM — 2026-08-10 ★
+#
+# Nothing has ever removed these. Found at 60 files and 97 GB, going back to the first deploy on
+# 29 July, on a 469 GB disk that was 55% full and climbing by roughly 3 GB per deploy. Eight deploys
+# in one afternoon is 24 GB, and the failure mode when the disk fills is not a failed deploy — it is
+# Postgres unable to write, which is the whole platform.
+#
+# Ten is about a fortnight at the usual rate and covers the case these exist for: something shipped
+# an hour ago was wrong and the migration needs undoing. A dump from July would restore a schema
+# nothing in this repo still speaks.
+#
+# `ls -t` newest-first, `tail -n +11` everything past the tenth. Deliberately after the dump has been
+# checked non-empty, so a failed backup never prunes the one that would have saved us.
+KEEP_BACKUPS=10
+mapfile -t OLD_DUMPS < <(ls -t /srv/grims/backups/pre-deploy-*.sql.gz 2>/dev/null | tail -n "+$((KEEP_BACKUPS + 1))")
+if (( ${#OLD_DUMPS[@]} > 0 )); then
+  FREED="$(du -ch "${OLD_DUMPS[@]}" 2>/dev/null | tail -1 | cut -f1)"
+  rm -f "${OLD_DUMPS[@]}"
+  ok "pruned ${#OLD_DUMPS[@]} older backup(s), $FREED reclaimed"
+fi
+
 # ─────────────────────────────────────────────────────────── 4. build
 #
 # Built BEFORE anything is replaced, so a compile error costs nothing. Images

@@ -12,6 +12,7 @@ import type {
   ColonyProject,
   ColonyRights,
   ColonyShoppingRow,
+  PurchaseStation,
 } from '../hub-colony.js';
 import { projectTitleFrom } from '../docked.js';
 import { DEFAULT_SHOPPING, type ShoppingFilters } from '../hub-colony.js';
@@ -79,6 +80,32 @@ declare global {
           unknownSystem: string | null;
         }>
       >;
+      /**
+       * The shopping route — where to fly for what this build still needs.
+       *
+       * Carriers are excluded, materials already delivered or aboard are dropped, and each one is
+       * named at exactly one stop. All of that is decided by the hub so this app and the website
+       * cannot give two answers to the same question.
+       */
+      purchases(id: string): Promise<
+        Answer<{
+          systemName: string | null;
+          stations: PurchaseStation[];
+          uncovered: string[];
+        }>
+      >;
+      declarePurchase(
+        id: string,
+        body: {
+          commodity: string;
+          stationName: string;
+          stationSystem: string;
+          tonnes?: number;
+          price?: number;
+          note?: string;
+        },
+      ): Promise<Answer<{ ok: true }>>;
+
       roster(id: string): Promise<Answer<{ roster: RosterEntry[] }>>;
       join(id: string): Promise<Answer<{ ok: true }>>;
       leave(id: string): Promise<Answer<{ ok: true }>>;
@@ -1307,6 +1334,14 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
       )}
 
       {tab !== 'buy' ? null : (
+      <>
+      {/*
+        Above the market suggestions, exactly as on the website. A station a squadmate actually
+        filled up at beats a mirror row from four months ago, and half our market data is older
+        than that.
+      */}
+      <PurchaseRoute projectId={project.id} />
+
       <Section title="Where to buy it">
         <ShoppingControls value={filters} busy={refreshing} onApply={setFilters} />
 
@@ -1370,6 +1405,7 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
           </Card>
         )}
       </Section>
+      </>
       )}
 
       {tab !== 'carriers' ? null : (
@@ -1739,6 +1775,332 @@ function CarrierRun({
         )}
       </Section>
     </div>
+  );
+}
+
+/**
+ * The shopping route — where to fly for what this build still needs.
+ *
+ * ★ SQUADRON OWNER, 2026-08-10 ★
+ *
+ * "from this section in both the website and the companion app: WHERE THE SQUADRON HAS BOUGHT IT --
+ * do not show fleet carriers in here at all! ... should only show materials for the specific project
+ * at hand ... only show the closet stations not every station ... dont show duplicate materials ...
+ * so we dont have people buying duplicte materials etc and showing up and they already exist etc!"
+ *
+ * ★ THE HUB DECIDES, THE APP DRAWS ★
+ *
+ * Every one of those rules is applied server-side: carriers dropped, settled and carrier-held
+ * materials removed, and a greedy set cover naming each remaining material at exactly ONE stop. Two
+ * surfaces deciding independently which station covers most of a list is two answers to a question
+ * that has one, and the owner asked for a mirror rather than a second opinion.
+ *
+ * So this fetches and draws. If two stops here both listed Steel it would be a fault in the hub, not
+ * something to paper over in a renderer.
+ */
+function PurchaseRoute({ projectId }: { projectId: string }): JSX.Element | null {
+  const [route, setRoute] = useState<{
+    systemName: string | null;
+    stations: readonly PurchaseStation[];
+    uncovered: readonly string[];
+  } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
+
+  const load = async (): Promise<void> => {
+    const answer = await window.colony.purchases(projectId);
+    if (answer.ok) {
+      setRoute(answer.data);
+      setError(null);
+    } else {
+      setError(answer.error);
+    }
+  };
+
+  useEffect(() => {
+    void load();
+  }, [projectId]);
+
+  /*
+   * ★ A BUILD OUTSIDE THE GATE HAS NO PANEL, AND THAT IS NOT AN ERROR ★
+   *
+   * The catalogue exists for a system ONE commander is colonising. A system several people post into
+   * gets `systemName: null` and the tab renders exactly as it did before this shipped. A refusal
+   * sentence here would be describing a rule as a fault.
+   */
+  if (route !== null && route.systemName === null) return null;
+
+  // A failed first load must not sit on "Loading…" for ever — the hub's own sentence is shown.
+  if (error !== null) {
+    return (
+      <Section title="Where the squadron has bought it">
+        <Problem>{error}</Problem>
+      </Section>
+    );
+  }
+  if (route === null) return null;
+
+  const covered = route.stations.reduce((n, s) => n + s.lines.length, 0);
+
+  return (
+    <Section title="Where the squadron has bought it">
+      {route.stations.length === 0 && route.uncovered.length === 0 ? (
+        <Empty>
+          Nothing bought for this system yet. Anything you buy with this app running appears here on
+          its own.
+        </Empty>
+      ) : null}
+
+      {route.stations.length === 0 ? null : (
+        <p style={{ margin: '0 0 10px', fontSize: '11px', color: C.dim }}>
+          {/* The point of the panel in one line: each material is named once, so two people reading
+              this do not both fly for it. */}
+          {covered} {covered === 1 ? 'material' : 'materials'} across {route.stations.length}{' '}
+          {route.stations.length === 1 ? 'stop' : 'stops'}. Each is listed at a single station, so
+          nobody buys the same thing twice.
+        </p>
+      )}
+
+      {route.stations.map((station) => (
+        <Card key={`${station.systemName} ${station.stationName}`}>
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              alignItems: 'baseline',
+              justifyContent: 'space-between',
+              gap: '4px 16px',
+            }}
+          >
+            <span style={{ fontSize: '13px', color: C.text }}>
+              {station.stationName}
+              <span style={{ marginLeft: '8px', fontSize: '11px', color: C.dim }}>
+                {station.systemName}
+              </span>
+              {/* The navigable part, copiable for the same reason it is everywhere else: nobody
+                  should retype a procedurally generated system name into the galaxy map. */}
+              <Copy value={station.systemName} />
+            </span>
+            <span
+              style={{
+                fontSize: '10px',
+                letterSpacing: '0.16em',
+                textTransform: 'uppercase',
+                color: C.dim,
+              }}
+            >
+              {/* Distance first: it is what decides whether the stop is worth the trip. Omitted
+                  rather than guessed when we cannot place one end of it. */}
+              {station.distanceLy === null ? '' : `${station.distanceLy.toFixed(1)} ly · `}
+              {station.lines.length} {station.lines.length === 1 ? 'material' : 'materials'}
+            </span>
+          </div>
+
+          {station.lines.map((line) => (
+            <div
+              key={line.commodity}
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                alignItems: 'baseline',
+                justifyContent: 'space-between',
+                gap: '2px 16px',
+                fontSize: '11px',
+                color: C.dim,
+                marginTop: '4px',
+              }}
+            >
+              <span style={{ color: C.text }}>
+                {line.commodity}
+                {line.note === null ? null : (
+                  <span style={{ marginLeft: '8px', color: C.dim }}>{line.note}</span>
+                )}
+              </span>
+              <span style={{ fontVariantNumeric: 'tabular-nums' }}>
+                {line.tonnes === null ? 'seen here' : `${line.tonnes.toLocaleString()} t`}
+                {line.price === null ? '' : ` · ${credits(line.price)}`}
+                {line.by === null ? '' : ` · ${line.by}`}
+                {/*
+                  Said out loud, because the two mean different things. A watched row is what an
+                  app saw somebody actually buy; a declared row is somebody's word for it, which
+                  can be newer than any purchase and is the only source that can say "it is gone".
+                */}
+                <span style={{ marginLeft: '8px', fontSize: '10px', color: C.faint }}>
+                  {line.source === 'manual' ? 'DECLARED' : 'BOUGHT'}
+                </span>
+              </span>
+            </div>
+          ))}
+        </Card>
+      ))}
+
+      {route.uncovered.length === 0 ? null : (
+        <Card>
+          {/*
+            ★ SAID, NOT OMITTED ★
+
+            A route that quietly leaves these off reads as "this trip gets you everything", and
+            somebody flies the whole thing and comes home still needing them. The market suggestions
+            below are where to look next, which is why the sentence points there.
+          */}
+          <p style={{ margin: 0, fontSize: '11px', color: C.dim }}>
+            <span style={{ color: C.text }}>
+              Nobody has bought{' '}
+              {route.uncovered.length === 1 ? 'this one' : `these ${route.uncovered.length}`} yet
+            </span>{' '}
+            — the market suggestions below are the place to start, and adding the station afterwards
+            puts it on this route for everybody else.
+          </p>
+          <p style={{ margin: '8px 0 0', fontSize: '11px', color: C.text }}>
+            {route.uncovered.join(' · ')}
+          </p>
+        </Card>
+      )}
+
+      {adding ? (
+        <DeclarePurchase
+          projectId={projectId}
+          onDone={() => {
+            setAdding(false);
+            void load();
+          }}
+          onCancel={() => setAdding(false)}
+        />
+      ) : (
+        <div style={{ marginTop: '10px' }}>
+          <Button onClick={() => setAdding(true)}>Add a station you bought from</Button>
+        </div>
+      )}
+    </Section>
+  );
+}
+
+/**
+ * Telling the squadron where you found something.
+ *
+ * ★ WHY THIS EXISTS WHEN THE APP ALREADY WATCHES ★
+ *
+ * The automatic half covers whoever has this app open with trade telemetry on. This covers everybody
+ * else, everything bought before they installed it, and the one thing no journal can ever say:
+ * "there is thirty thousand tonnes sitting here RIGHT NOW". A purchase is proof somebody took some
+ * away; a declaration is a claim about what is still there — the more useful statement, and the only
+ * one a person can make.
+ *
+ * The system is a picker rather than a text box: station names repeat across the galaxy and system
+ * names are procedurally generated, so a typo here sends somebody to the wrong side of the bubble.
+ */
+function DeclarePurchase({
+  projectId,
+  onDone,
+  onCancel,
+}: {
+  projectId: string;
+  onDone: () => void;
+  onCancel: () => void;
+}): JSX.Element {
+  const [commodity, setCommodity] = useState('');
+  const [stationName, setStationName] = useState('');
+  const [stationSystem, setStationSystem] = useState('');
+  const [tonnes_, setTonnes] = useState('');
+  const [price, setPrice] = useState('');
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const num = (v: string): number | undefined => {
+    const n = Number(v.replace(/[, ]/g, ''));
+    return v.trim() === '' || !Number.isFinite(n) || n < 0 ? undefined : Math.trunc(n);
+  };
+
+  const ready =
+    commodity.trim() !== '' && stationName.trim() !== '' && stationSystem.trim() !== '' && !busy;
+
+  const submit = async (): Promise<void> => {
+    setBusy(true);
+    const answer = await window.colony.declarePurchase(projectId, {
+      commodity,
+      stationName,
+      stationSystem,
+      ...(num(tonnes_) === undefined ? {} : { tonnes: num(tonnes_) as number }),
+      ...(num(price) === undefined ? {} : { price: num(price) as number }),
+      ...(note.trim() === '' ? {} : { note }),
+    });
+    setBusy(false);
+
+    // The hub refuses a fleet carrier by name. Its sentence says why, so it is shown rather than
+    // replaced with a generic failure the member cannot act on.
+    if (!answer.ok) {
+      setError(answer.error);
+      return;
+    }
+    onDone();
+  };
+
+  return (
+    <Card>
+      <p style={{ margin: '0 0 8px', fontSize: '11px', color: C.dim }}>
+        Anyone building in this system will see it. Leave the tonnage out if you did not check —
+        “it is here” is still worth saying.
+      </p>
+
+      <Field label="Commodity">
+        <input
+          style={inputStyle}
+          value={commodity}
+          placeholder="Steel"
+          onInput={(e) => setCommodity((e.target as HTMLInputElement).value)}
+        />
+      </Field>
+      <Field label="Station">
+        <input
+          style={inputStyle}
+          value={stationName}
+          placeholder="Armstrong Legacy"
+          onInput={(e) => setStationName((e.target as HTMLInputElement).value)}
+        />
+      </Field>
+      <Field label="System it is in">
+        {/* Picked, not typed: a mistyped system is an entry that sends somebody to the wrong side
+            of the bubble. */}
+        <SystemPicker
+          value={stationSystem}
+          onValueChange={setStationSystem}
+          placeholder="System the station is in"
+        />
+      </Field>
+      <Field label="Tonnes seen (optional)">
+        <input
+          style={inputStyle}
+          value={tonnes_}
+          inputMode="numeric"
+          onInput={(e) => setTonnes((e.target as HTMLInputElement).value)}
+        />
+      </Field>
+      <Field label="Credits per tonne (optional)">
+        <input
+          style={inputStyle}
+          value={price}
+          inputMode="numeric"
+          onInput={(e) => setPrice((e.target as HTMLInputElement).value)}
+        />
+      </Field>
+      <Field label="Anything the next person should know (optional)">
+        <input
+          style={inputStyle}
+          value={note}
+          onInput={(e) => setNote((e.target as HTMLInputElement).value)}
+        />
+      </Field>
+
+      {error === null ? null : <Problem>{error}</Problem>}
+
+      <div style={{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+        <Button disabled={!ready} onClick={() => void submit()}>
+          {busy ? 'Saving…' : 'Add it'}
+        </Button>
+        <Button onClick={onCancel}>Cancel</Button>
+      </div>
+    </Card>
   );
 }
 

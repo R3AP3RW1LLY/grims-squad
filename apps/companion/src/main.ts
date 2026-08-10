@@ -43,6 +43,8 @@ import {
   colonyLeave,
   colonyProject,
   colonyProjects,
+  colonyDeclarePurchase,
+  colonyPurchases,
   colonyRoster,
   colonyUnassign,
   colonyCurrent,
@@ -2060,6 +2062,23 @@ if (!app.requestSingleInstanceLock()) {
     ipcMain.handle('colonyBuildTypes', () => colonyBuildTypes(hub()));
     ipcMain.handle('colonyBuildType', (_e, id: unknown, near: unknown) =>
       colonyBuildType(hub(), projectId(id), typeof near === 'string' ? near : ''),
+    );
+
+    /*
+     * ★ THE SHOPPING ROUTE — SQUADRON OWNER, 2026-08-10 ★
+     *
+     * "so we dont have people buying duplicte materials etc and showing up and they already exist".
+     * Every rule that produces the route — no carriers, this build's outstanding materials only,
+     * each one named at a single stop — is applied by the hub, so this app and the website cannot
+     * give two answers to a question that has one.
+     */
+    ipcMain.handle('colonyPurchases', (_e, id: unknown) => colonyPurchases(hub(), projectId(id)));
+    ipcMain.handle('colonyDeclarePurchase', (_e, id: unknown, body: unknown) =>
+      colonyDeclarePurchase(
+        hub(),
+        projectId(id),
+        (body ?? {}) as Parameters<typeof colonyDeclarePurchase>[2],
+      ),
     );
 
     ipcMain.handle('colonyRoster', (_e, id: unknown) => colonyRoster(hub(), projectId(id)));

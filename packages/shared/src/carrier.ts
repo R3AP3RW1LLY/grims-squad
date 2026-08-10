@@ -116,6 +116,44 @@ export function isCompleteCallsign(raw: string): boolean {
 }
 
 /**
+ * Whether a station NAME is written in callsign shape — three alphanumerics, a dash, three more.
+ *
+ * ★ NOT `isCompleteCallsign`, AND THE DIFFERENCE MATTERS ★
+ *
+ * That one strips punctuation and whitespace before measuring, because it reads a search box where
+ * `w8k w1y` and `W8K-W1Y` are the same thing somebody is typing. Fed a station name it answers true
+ * for `Armstrong Legacy` — six letters after the space is removed — so using it to identify carriers
+ * would hide most of the galaxy. This is the strict form, for reading data rather than a person.
+ */
+const CALLSIGN_SHAPE = /^[A-Za-z0-9]{3}-[A-Za-z0-9]{3}$/;
+
+export function hasCallsignShape(name: string): boolean {
+  return CALLSIGN_SHAPE.test(name.trim());
+}
+
+/**
+ * Whether something we are about to recommend as a DESTINATION is a fleet carrier.
+ *
+ * ★ SQUADRON OWNER, 2026-08-10 ★
+ *
+ * "do not show fleet carriers in here at all!"
+ *
+ * A carrier is the one station that moves. Sending a member to one is sending them to a place that
+ * has gone, so every surface that answers "where do I fly" excludes them — and does it through this,
+ * so the rule cannot drift apart across the website, the companion and the API.
+ *
+ * ★ TWO NETS, BECAUSE THE FIRST ONE HAS HOLES ★
+ *
+ * The station type is the real answer, when it is filled in. On production the day this was written,
+ * 37 stations named in callsign shape had no type at all — and a hand-typed declaration has no type
+ * to check by construction, since the member typed only a name. Not one station of any other type,
+ * out of ~318,000, was named in that shape, so the second net costs nothing.
+ */
+export function looksLikeCarrier(name: string, type: string | null | undefined): boolean {
+  return isCarrierStationType(type) || hasCallsignShape(name);
+}
+
+/**
  * A complete callsign written the way the game writes it — `W8KW1Y` becomes `W8K-W1Y`.
  *
  * Anything shorter is returned as its own bare characters rather than with a trailing dash: a

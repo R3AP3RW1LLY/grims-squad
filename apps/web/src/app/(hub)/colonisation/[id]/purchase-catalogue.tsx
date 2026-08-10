@@ -2,30 +2,30 @@ import { CopySystem } from '../../../../components/copy-system';
 import type { PurchaseStation } from '../../../../lib/api';
 
 /**
- * Where the squadron has actually bought this build's materials.
+ * The shopping route — where to fly for what this build still needs.
  *
  * ★ SQUADRON OWNER, 2026-08-10 ★
  *
- * "a way to declare what station a commander purchased various materials from so if they are
- * colonizing their own system, they can create their own catalogue that can be shared with other
- * people building in that system so that all materials that have been found and delivered can be
- * easily procurred without having to go hunt them down"
+ * "the stations shown where weve bought it from should only show materials for the specific project
+ * at hand, and should also only show the closet stations not every station ... also dont show
+ * duplicate materials plan this so that the stations show the most matierals that can be bought for
+ * the project ... we need it to work like this so we dont have people buying duplicte materials etc
+ * and showing up and they already exist etc!"
  *
- * ★ GROUPED BY STATION, BECAUSE THAT IS THE TRIP ★
+ * ★ WHAT THIS PANEL USED TO BE ★
  *
- * "group all materials bought at each station by the station name and system name please! so its
- * easy for us to identify where to go!"
+ * A record: every station the squadron had ever bought at, everything ever bought there. Accurate,
+ * and the wrong shape — four people read it and all four flew for the same Steel, and one of them
+ * flew for something that had been delivered the week before.
  *
- * The shopping list above answers "where is the cheapest Steel", one commodity at a time. That is
- * the right question while planning and the wrong shape while flying: a hauler with a 720-tonne hold
- * wants ONE destination that fills it, not six holding one commodity each. So this is keyed on the
- * station — go here, and these are the things the squadron has actually got out of it.
+ * ★ SO IT RENDERS A PLAN, AND MAKES NO DECISIONS OF ITS OWN ★
  *
- * ★ THE SYSTEM IS THE NAVIGABLE PART, SO IT IS COPIABLE ★
+ * The API has already dropped fleet carriers, anything the build no longer needs, and anything
+ * already aboard an attached carrier — and it names each material at exactly ONE stop. Two stops
+ * both listing Steel would be a fault upstream, not something to paper over here.
  *
- * A station name alone is not somewhere you can go. The system it sits in is what gets pasted into
- * the galaxy map, which is why it is beside every heading with the same copy control the rest of
- * the site uses rather than as plain text somebody has to retype.
+ * The two things this page adds are the two a person needs to decide whether to go: how far it is,
+ * and what the trip will NOT get them.
  */
 
 const CARD =
@@ -41,8 +41,14 @@ function ago(iso: string): string {
   return months < 24 ? `${months} months ago` : `${Math.round(months / 12)} years ago`;
 }
 
-export function PurchaseCatalogue({ stations }: { stations: readonly PurchaseStation[] }) {
-  if (stations.length === 0) {
+export function PurchaseCatalogue({
+  stations,
+  uncovered,
+}: {
+  stations: readonly PurchaseStation[];
+  uncovered: readonly string[];
+}) {
+  if (stations.length === 0 && uncovered.length === 0) {
     return (
       <p className="m-0 text-sm text-[var(--color-text-secondary)]">
         Nothing bought for this system yet. Anything a member buys with the companion app running
@@ -51,8 +57,20 @@ export function PurchaseCatalogue({ stations }: { stations: readonly PurchaseSta
     );
   }
 
+  const covered = stations.reduce((n, s) => n + s.lines.length, 0);
+
   return (
     <div className="flex flex-col gap-3">
+      {stations.length === 0 ? null : (
+        <p className="m-0 text-sm text-[var(--color-text-secondary)]">
+          {/* The whole point of the panel, said in one line: each material is named once, so two
+              people reading this do not both fly for it. */}
+          {covered} {covered === 1 ? 'material' : 'materials'} across {stations.length}{' '}
+          {stations.length === 1 ? 'stop' : 'stops'}. Each one is listed at a single station, so
+          nobody buys the same thing twice.
+        </p>
+      )}
+
       {stations.map((station) => (
         <div key={`${station.systemName} ${station.stationName}`} className={CARD}>
           <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
@@ -66,6 +84,9 @@ export function PurchaseCatalogue({ stations }: { stations: readonly PurchaseSta
               <CopySystem system={station.systemName} size="small" />
             </span>
             <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-secondary)]">
+              {/* Distance first: it is what decides whether this stop is worth the trip. Omitted
+                  rather than guessed when we cannot place one end of it. */}
+              {station.distanceLy === null ? '' : `${station.distanceLy.toFixed(1)} ly · `}
               {station.lines.length} {station.lines.length === 1 ? 'material' : 'materials'} ·{' '}
               {ago(station.lastSeen)}
             </span>
@@ -103,6 +124,29 @@ export function PurchaseCatalogue({ stations }: { stations: readonly PurchaseSta
           </ul>
         </div>
       ))}
+
+      {uncovered.length === 0 ? null : (
+        <div className={CARD}>
+          {/*
+            ★ SAID, NOT OMITTED ★
+
+            A route that quietly leaves these off reads as "this trip gets you everything", and
+            somebody flies the whole thing and comes home still needing them. The market suggestions
+            below this panel are exactly where to look next, which is why the sentence points there.
+          */}
+          <p className="m-0 text-xs text-[var(--color-text-secondary)]">
+            <span className="text-[var(--color-text-primary)]">
+              Nobody has bought {uncovered.length === 1 ? 'this one' : `these ${uncovered.length}`}{' '}
+              yet
+            </span>{' '}
+            — the market suggestions below are the place to start looking, and adding the station
+            afterwards puts it on this route for everybody else.
+          </p>
+          <p className="m-0 mt-2 text-xs text-[var(--color-text-primary)]">
+            {uncovered.join(' · ')}
+          </p>
+        </div>
+      )}
     </div>
   );
 }

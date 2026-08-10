@@ -2807,9 +2807,28 @@ export interface ColonyPlan {
   bodiesFetchedAt: string | null;
   sites: PlanSite[];
   simulation: PlanSimulation;
+  /**
+   * A better build order and what it saves, when there is one worth showing.
+   *
+   * Decided by the hub, not here: `worthIt` is false when the order is already good, when there is
+   * no economy build to bring forward, and when the saving is too small to interrupt somebody over.
+   * Optional so a cached page rendered before this shipped does not throw.
+   */
+  suggestion?: OrderSuggestion;
   economies: PlanEconomies;
   /** Per chosen site, what its market would trade. Empty on the board — bodies are not loaded there. */
   markets: PlanSiteMarket[];
+}
+
+/** A proposed build order, the tonnage it saves, and whether it is worth reading. */
+export interface OrderSuggestion {
+  /** Site ids, always a permutation of the plan's own. Sent verbatim to the order endpoint. */
+  order: string[];
+  /** Step index where an economy build first lands, in each order. Null when there is none. */
+  firstEconomyAt: { current: number | null; suggested: number | null };
+  /** Tonnage hauled before that step, in each order — the number that makes the case. */
+  tonnesBefore: { current: number; suggested: number };
+  worthIt: boolean;
 }
 
 export const getColonyPlans = (
@@ -2900,12 +2919,19 @@ export const getCarrierManifest = (
 };
 
 /**
- * Where the squadron has actually bought this build's materials, grouped by station.
+ * The shopping ROUTE — where to fly for what this build still needs.
  *
  * ★ ONE DESTINATION THAT FILLS A HOLD ★
  *
  * The shopping list answers one commodity at a time, which is right for planning and wrong for
  * flying. This is keyed on the station: go here, and these are the things you can get.
+ *
+ * ★ AND IT IS A PLAN, NOT A RECORD ★
+ *
+ * The API has already dropped fleet carriers, anything this build no longer needs, and anything
+ * already sitting in an attached carrier — and it names each material at exactly one stop. So this
+ * renders what it is given: two stops both listing Steel would mean a fault upstream, not a display
+ * decision to make here.
  */
 export interface PurchaseLine {
   commodity: string;
@@ -2922,14 +2948,22 @@ export interface PurchaseStation {
   stationName: string;
   /** The STATION's system — what a member pastes into the galaxy map. Never the build's. */
   systemName: string;
+  /** Light years from the build. Null when we cannot place one end of it. */
+  distanceLy: number | null;
   lines: PurchaseLine[];
   lastSeen: string;
 }
 
 export const getColonyPurchases = (
   projectId: string,
-): Promise<AdminRead<{ systemName: string | null; stations: PurchaseStation[] }>> =>
-  getAdmin(`/v1/logistics/colony/projects/${encodeURIComponent(projectId)}/purchases`);
+): Promise<
+  AdminRead<{
+    systemName: string | null;
+    stations: PurchaseStation[];
+    /** Still needed, and on no stop of the route. Shown rather than silently omitted. */
+    uncovered: string[];
+  }>
+> => getAdmin(`/v1/logistics/colony/projects/${encodeURIComponent(projectId)}/purchases`);
 
 /** A published project, by its token. No session: the token is the capability. */
 export const getSharedColonyProject = (

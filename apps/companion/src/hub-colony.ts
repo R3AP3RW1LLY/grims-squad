@@ -503,9 +503,28 @@ export interface ColonyPlan {
   bodiesFetchedAt: string | null;
   sites: PlanSite[];
   simulation: PlanSimulation;
+  /**
+   * A better build order and what it saves, when there is one worth showing.
+   *
+   * Decided by the hub, exactly like the simulation beside it — the website and this app both draw
+   * it, and two implementations of the rule would drift. Optional so an app built before this
+   * shipped keeps working against a newer hub.
+   */
+  suggestion?: OrderSuggestion;
   economies: PlanEconomies;
   /** Per chosen site, what its market would trade. Empty on the board — bodies are not loaded there. */
   markets: PlanSiteMarket[];
+}
+
+/** A proposed build order, the tonnage it saves, and whether it is worth reading. */
+export interface OrderSuggestion {
+  /** Site ids, always a permutation of the plan's own. Sent verbatim to the reorder call. */
+  readonly order: string[];
+  /** Step index where an economy build first lands, in each order. Null when there is none. */
+  readonly firstEconomyAt: { current: number | null; suggested: number | null };
+  /** Tonnage hauled before that step, in each order — the number that makes the case. */
+  readonly tonnesBefore: { current: number; suggested: number };
+  readonly worthIt: boolean;
 }
 
 export const colonyProjects = (
@@ -568,6 +587,70 @@ export const colonyProject = (
   });
   return hubColony(call, `/projects/${encodeURIComponent(id)}?${q.toString()}`);
 };
+
+/**
+ * The shopping ROUTE — where to fly for what this build still needs.
+ *
+ * ★ SQUADRON OWNER, 2026-08-10 ★
+ *
+ * "the stations shown where weve bought it from should only show materials for the specific project
+ * at hand ... only show the closet stations not every station ... dont show duplicate materials ...
+ * so we dont have people buying duplicte materials etc and showing up and they already exist etc!"
+ *
+ * Every one of those rules is applied by the hub, so this app and the website cannot disagree about
+ * where nineteen people should fly. Two surfaces deciding independently which stop covers most of a
+ * list is two answers to a question that has one.
+ *
+ * `systemName` is null when this build's system has more than one commander posting into it — that
+ * is not an error, it is a build with no private catalogue, and the tab simply omits the panel.
+ */
+export interface PurchaseLine {
+  readonly commodity: string;
+  readonly category: string | null;
+  readonly tonnes: number | null;
+  readonly price: number | null;
+  readonly source: 'journal' | 'manual';
+  readonly by: string | null;
+  readonly at: string;
+  readonly note: string | null;
+}
+
+export interface PurchaseStation {
+  readonly stationName: string;
+  /** The STATION's own system — what a member pastes into the galaxy map. Never the build's. */
+  readonly systemName: string;
+  /** Light years from the build. Null when we cannot place one end of it. */
+  readonly distanceLy: number | null;
+  readonly lines: readonly PurchaseLine[];
+  readonly lastSeen: string;
+}
+
+export const colonyPurchases = (
+  call: HubCall,
+  id: string,
+): Promise<
+  Answer<{
+    systemName: string | null;
+    stations: PurchaseStation[];
+    /** Still needed, and on no stop of the route. Shown rather than quietly left off. */
+    uncovered: string[];
+  }>
+> => hubColony(call, `/projects/${encodeURIComponent(id)}/purchases`);
+
+/** Recording a station somebody actually bought at. Refused for fleet carriers, which move. */
+export const colonyDeclarePurchase = (
+  call: HubCall,
+  id: string,
+  body: {
+    commodity: string;
+    stationName: string;
+    stationSystem: string;
+    tonnes?: number;
+    price?: number;
+    note?: string;
+  },
+): Promise<Answer<{ ok: true }>> =>
+  hubColony(call, `/projects/${encodeURIComponent(id)}/purchases`, { method: 'POST', body });
 
 /** The project for the site the member is docked at, if the squadron holds one. */
 export const colonyAtMarket = (
