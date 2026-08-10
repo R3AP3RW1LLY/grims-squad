@@ -324,6 +324,37 @@ export function buildRelease({ fromSha, toSha, commits, generatedAt, version = n
     companionMd: sectionMd('companion'),
     platformMd: sectionMd('platform'),
     entries,
+    /*
+     * Sections where something SHIPPED and nothing was said about it.
+     *
+     * ★ A RELEASE WENT OUT WITH AN EMPTY CHANGELOG — 2026-08-10 ★
+     *
+     * The colonisation shopping list was rebuilt: carriers dropped from it, each material named at
+     * one station instead of six, a whole panel members read before deciding where to fly. It
+     * shipped with no `Members:` trailer on the commit, so this tool correctly published nothing —
+     * and said nothing about having published nothing. The deploy reported success, the changelog
+     * row was empty, and the first anybody would have known was noticing the page had changed.
+     *
+     * Omitting plumbing is the design and is right. Omitting a rewritten page in silence is not the
+     * same thing, and the difference is knowable here: the commits touched `apps/web/`, so somebody
+     * meant to change what members see.
+     *
+     * Reported rather than enforced. The tool cannot know whether a web change is member news — a
+     * type-only refactor under `apps/web/` genuinely is not — so it names the gap and leaves the
+     * judgement with the person reading the preview, which is what `--write-pending` is for.
+     *
+     * ★ THE TWO MEMBER-FACING SHELVES ONLY — CAUGHT BY ITS OWN TEST ★
+     *
+     * The first version included `platform`, and a test written to say "plumbing stays silent
+     * without complaint" failed against it immediately. Platform is where the API, the worker, the
+     * packages, the infra and this very tool land: almost every release has silent platform
+     * commits, by design. Warning about them would fire on essentially every deploy, and a warning
+     * that always fires is one nobody reads — which would have made the website case, the one this
+     * exists for, invisible again.
+     */
+    silentSections: ['website', 'companion'].filter(
+      (key) => sectionMd(key) === '' && entries.some((entry) => entry.sections.includes(key)),
+    ),
   };
 }
 
@@ -555,6 +586,27 @@ function main() {
     // same holds a fortiori for announcing it to the whole squadron.
     process.stdout.write(`-- no commits between ${fromSha} and ${toSha}; nothing to record\n`);
     return;
+  }
+
+  /*
+   * ★ SAID ON STDERR, SO IT SURVIVES THE PIPE INTO psql ★
+   *
+   * Every mode that matters is piped somewhere — `--sql | psql`, `--announce-sql | psql` — so
+   * stdout belongs to the consumer and a warning written there would become a syntax error. stderr
+   * is the one channel that reaches the operator watching the deploy, and it is where deploy.sh's
+   * own `warn` writes for the same reason.
+   *
+   * Never fatal. A release that shipped is a fact; refusing to record it because nobody wrote a
+   * sentence for members would turn a missing note into a missing changelog, which is worse.
+   */
+  if (release.silentSections.length > 0) {
+    const names = { website: 'the website', companion: 'the companion app', platform: 'the platform' };
+    console.error(
+      `changelog: ${release.silentSections.map((s) => names[s]).join(' and ')} changed in ` +
+        `${fromSha.slice(0, 8)}..${toSha.slice(0, 8)} and no commit said what members should be ` +
+        'told — add a `Members:` trailer to the commit body, or accept that this release is silent ' +
+        'for them',
+    );
   }
 
   if (opts.mode === 'json') {

@@ -512,3 +512,115 @@ describe('members are told what changed for them, not how it was built', () => {
     expect(release.websiteMd).not.toContain('shit');
   });
 });
+
+/**
+ * ★ A RELEASE WENT OUT WITH AN EMPTY CHANGELOG — 2026-08-10 ★
+ *
+ * The colonisation shopping list was rebuilt that day: fleet carriers dropped from it, each
+ * material named at ONE station instead of six, a fresh "nobody has bought these yet" list. A panel
+ * members read before deciding where to fly, changed completely.
+ *
+ * The commit carried no `Members:` trailer, so this tool published nothing — correctly, by its own
+ * rules — and said nothing about having published nothing. The deploy reported success, the
+ * changelog row went in empty, and the first anybody would have known was noticing the page had
+ * changed under them.
+ *
+ * ★ THE OMISSION IS THE DESIGN; THE SILENCE IS NOT ★
+ *
+ * Leaving plumbing out is right and stays. But the tool can tell the two apart: a commit that
+ * touched `apps/web/` was somebody meaning to change what members see, and producing nothing for
+ * that section is worth a sentence to whoever is watching the deploy.
+ *
+ * Reported, never enforced — a type-only refactor under `apps/web/` genuinely is not member news,
+ * and a tool that refused to record a release over a missing sentence would turn a missing note
+ * into a missing changelog.
+ */
+describe('a release that says nothing about a member-facing change says so', () => {
+  const release = (commits) =>
+    buildRelease({
+      fromSha: 'a'.repeat(40),
+      toSha: 'b'.repeat(40),
+      commits,
+      generatedAt: '2026-08-10T22:00:00.000Z',
+    });
+
+  it('★ MANDATORY: the website changed and nobody wrote a member note — that is named ★', () => {
+    /*
+     * This is 4ddb936 in miniature: real work under apps/web, a body written for engineers, no
+     * trailer. Before this existed the tool returned three empty sections and exited 0.
+     */
+    const out = release([
+      {
+        sha: 'c'.repeat(40),
+        subject: 'feat(colonisation): a shopping route, not a shopping record',
+        body: 'The panel listed every station the squadron had ever bought at.',
+        files: ['apps/web/src/app/(hub)/colonisation/[id]/purchase-catalogue.tsx'],
+      },
+    ]);
+
+    expect(out.websiteMd, 'the rules are unchanged: no trailer still means no entry').toBe('');
+    expect(
+      out.silentSections,
+      'the website changed and the release is silent about it, and nothing said so',
+    ).toEqual(['website']);
+  });
+
+  it('★ MANDATORY: plumbing stays silent WITHOUT complaint — that is the design ★', () => {
+    /*
+     * The half that must not regress. An index, a CI retry, a deploy script: genuinely not member
+     * news, deliberately omitted, and warning about them would train everybody to ignore the
+     * warning that matters.
+     */
+    const out = release([
+      {
+        sha: 'd'.repeat(40),
+        subject: 'fix(deploy): the box had been running a deploy script from 30 July',
+        body: 'A copy taken once on 30 July and never taken again.',
+        files: ['infra/scripts/deploy.sh', 'tools/deploy-script.spec.ts'],
+      },
+    ]);
+
+    expect(out.platformMd).toBe('');
+    expect(out.silentSections, 'plumbing with no note is not a problem to report').toEqual([]);
+  });
+
+  it('MANDATORY: a commit that DOES tell members is not reported as silent', () => {
+    const out = release([
+      {
+        sha: 'e'.repeat(40),
+        subject: 'feat(colonisation): a shopping route',
+        body:
+          'Engineering detail nobody outside this repo needs.\n\n' +
+          'Members: Where the squadron has bought it is now a route — no fleet carriers, and each ' +
+          'material is listed at a single station so two people do not fly for the same Steel.',
+        files: ['apps/web/src/app/(hub)/colonisation/[id]/purchase-catalogue.tsx'],
+      },
+    ]);
+
+    expect(out.websiteMd).toContain('no fleet carriers');
+    expect(out.silentSections).toEqual([]);
+  });
+
+  it('MANDATORY: it names every silent section, not just the first', () => {
+    // A release that changes both apps and says nothing about either must report both, or the
+    // second one is exactly as invisible as it was before.
+    const out = release([
+      {
+        sha: 'f'.repeat(40),
+        subject: 'feat(colonisation): route on both surfaces',
+        body: 'No trailer here either.',
+        files: [
+          'apps/web/src/lib/api.ts',
+          'apps/companion/src/renderer/colonisation.tsx',
+        ],
+      },
+    ]);
+
+    expect([...out.silentSections].sort()).toEqual(['companion', 'website']);
+  });
+
+  it('a range with no commits at all reports nothing to report', () => {
+    // A redeploy of the same revision. There is no silence to complain about when nothing shipped.
+    expect(release([]).silentSections).toEqual([]);
+  });
+});
