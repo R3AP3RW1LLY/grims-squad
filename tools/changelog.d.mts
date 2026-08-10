@@ -35,6 +35,13 @@ export interface ChangelogRelease {
   companionMd: string;
   platformMd: string;
   entries: ChangelogEntry[];
+  /**
+   * Member-facing sections where something shipped and nothing was said about it.
+   *
+   * `'website'` and `'companion'` only — platform is the plumbing shelf and is silent by design,
+   * so including it would fire on nearly every release and train everybody to ignore the warning.
+   */
+  silentSections: Array<'website' | 'companion'>;
 }
 
 /** The deploy announcement's three member-facing texts — see buildAnnouncement. */

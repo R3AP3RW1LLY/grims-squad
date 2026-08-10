@@ -536,7 +536,7 @@ describe('members are told what changed for them, not how it was built', () => {
  * into a missing changelog.
  */
 describe('a release that says nothing about a member-facing change says so', () => {
-  const release = (commits) =>
+  const release = (commits: ChangelogCommit[]) =>
     buildRelease({
       fromSha: 'a'.repeat(40),
       toSha: 'b'.repeat(40),
