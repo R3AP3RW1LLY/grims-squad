@@ -2807,9 +2807,28 @@ export interface ColonyPlan {
   bodiesFetchedAt: string | null;
   sites: PlanSite[];
   simulation: PlanSimulation;
+  /**
+   * A better build order and what it saves, when there is one worth showing.
+   *
+   * Decided by the hub, not here: `worthIt` is false when the order is already good, when there is
+   * no economy build to bring forward, and when the saving is too small to interrupt somebody over.
+   * Optional so a cached page rendered before this shipped does not throw.
+   */
+  suggestion?: OrderSuggestion;
   economies: PlanEconomies;
   /** Per chosen site, what its market would trade. Empty on the board — bodies are not loaded there. */
   markets: PlanSiteMarket[];
+}
+
+/** A proposed build order, the tonnage it saves, and whether it is worth reading. */
+export interface OrderSuggestion {
+  /** Site ids, always a permutation of the plan's own. Sent verbatim to the order endpoint. */
+  order: string[];
+  /** Step index where an economy build first lands, in each order. Null when there is none. */
+  firstEconomyAt: { current: number | null; suggested: number | null };
+  /** Tonnage hauled before that step, in each order — the number that makes the case. */
+  tonnesBefore: { current: number; suggested: number };
+  worthIt: boolean;
 }
 
 export const getColonyPlans = (

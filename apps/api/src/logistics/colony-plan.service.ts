@@ -6,8 +6,10 @@ import {
   predictMarket,
   resolveEconomies,
   simulatePlan,
+  suggestBuildOrder,
   type EconBuildType,
   type EconomyResult,
+  type OrderSuggestion,
   type PredictedMarket,
   type SimBuildType,
   type SimResult,
@@ -98,6 +100,26 @@ export interface PlanDetail {
    * legal. The shared module runs once, on the server, and both ends render the same answer.
    */
   readonly simulation: SimResult;
+
+  /**
+   * A better build order, when there is one — and the tonnage it saves.
+   *
+   * ★ SQUADRON OWNER, 2026-08-10 ★
+   *
+   * "The build-order optimiser is still worth doing — you have an editable order, but nothing
+   * suggests the feeder→hub pairing that would get your economy producing after ~50k t instead of
+   * ~257k t. That's a real gap inside a feature that exists."
+   *
+   * Computed on the server for the same reason the simulation is: the website and the companion both
+   * draw it, and two implementations of a rule this fiddly would drift. It is a SUGGESTION — it never
+   * applies itself, because a member's own order can encode a body they want finished first or a
+   * carrier already parked somewhere, and a planner that silently rearranged a fortnight of work is
+   * one nobody trusts twice.
+   *
+   * `worthIt` is false when the order is already good, so the panel stays quiet rather than always
+   * having advice.
+   */
+  readonly suggestion: OrderSuggestion;
 
   /**
    * What economy each planned station would end up with.
@@ -385,7 +407,7 @@ export class ColonyPlanService {
     const head = this.#head(row);
     const [bodies, sites] = await Promise.all([this.#bodiesOf(head.systemId64), this.#sitesOf(id)]);
 
-    const [simulation, economies] = await Promise.all([
+    const [order, economies] = await Promise.all([
       this.#simulate(sites),
       this.#economies(sites, bodies),
     ]);
@@ -393,7 +415,15 @@ export class ColonyPlanService {
     // Markets follow from the economies, so they cannot join the parallel block above.
     const markets = await this.#markets(sites, economies);
 
-    return { ...head, bodies, sites, simulation, economies, markets };
+    return {
+      ...head,
+      bodies,
+      sites,
+      simulation: order.simulation,
+      suggestion: order.suggestion,
+      economies,
+      markets,
+    };
   }
 
   /**
@@ -438,13 +468,37 @@ export class ColonyPlanService {
     return out;
   }
 
-  /** Runs the construction-point rules over one plan's build order. */
-  async #simulate(sites: readonly PlanSite[]): Promise<SimResult> {
+  /**
+   * Runs the construction-point rules over one plan's build order, and looks for a better one.
+   *
+   * Both from the SAME catalogue read. They answer two halves of one question — can this be built,
+   * and is this the order to build it in — and loading the build types twice to ask them separately
+   * would be a second query for no new information.
+   *
+   * ★ TONNAGE COMES FROM THE SITES, NOT THE CATALOGUE ★
+   *
+   * `SimBuildType` carries what the simulation needs — points, tiers, prerequisites — and not what a
+   * structure weighs. The sites already know: `totalTonnes` is on each one. So the lookup is built
+   * here rather than by widening a type the whole planner shares.
+   */
+  async #simulate(sites: readonly PlanSite[]): Promise<{
+    simulation: SimResult;
+    suggestion: OrderSuggestion;
+  }> {
     const catalogue = await this.#catalogueFor(sites.map((s) => s.buildTypeId));
-    return simulatePlan(
-      sites.map((s) => ({ id: s.id, buildTypeId: s.buildTypeId })),
-      catalogue,
-    );
+    const order = sites.map((s) => ({ id: s.id, buildTypeId: s.buildTypeId }));
+
+    const tonnes = new Map<string, number>();
+    for (const site of sites) {
+      if (site.buildTypeId !== null && site.totalTonnes !== null) {
+        tonnes.set(site.buildTypeId, site.totalTonnes);
+      }
+    }
+
+    return {
+      simulation: simulatePlan(order, catalogue),
+      suggestion: suggestBuildOrder(order, catalogue, (id) => tonnes.get(id) ?? 0),
+    };
   }
 
   /**
@@ -675,6 +729,11 @@ export class ColonyPlanService {
       // The head row alone knows nothing about the build order. Both callers fill this in — `byId`
       // from the plan's own sites, `list` from one query across every plan.
       simulation: simulatePlan([], new Map()),
+      /*
+       * No advice on the board. A suggestion is worth reading beside the order it would replace, and
+       * a card that says "there is a better order" with no way to see it is a nag rather than a tool.
+       */
+      suggestion: suggestBuildOrder([], new Map()),
       /*
        * Left empty on the board deliberately. An economy depends on the BODIES the sites stand on,
        * and the board loads none of them — computing it there would produce a number that looks
