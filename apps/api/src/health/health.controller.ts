@@ -4,9 +4,22 @@ import type { FastifyReply } from 'fastify';
 import { PrismaClient } from '@prisma/client';
 import { Redis } from 'ioredis';
 import { Meilisearch } from 'meilisearch';
+import { PLATFORM_VERSION } from '@grims/shared/version';
 import { HealthService, type DependencyProbe } from './health.service.js';
 
-const VERSION = process.env['npm_package_version'] ?? '0.0.0';
+/**
+ * ★ THIS HAS REPORTED "0.0.0" SINCE IT WAS WRITTEN — FIXED 2026-08-09 ★
+ *
+ * It read `process.env.npm_package_version`, which npm and pnpm set for a process THEY started. The
+ * container runs `node apps/api/dist/main.js` directly, so the variable has never existed in
+ * production and the fallback has always won. Every health check, every uptime probe and every
+ * "what is deployed" question got 0.0.0, which is worse than no version at all: it looks like an
+ * answer.
+ *
+ * Read from the platform version instead — the same constant both sidebars print and the companion's
+ * package.json is held equal to, so there is one number and no environment can lose it.
+ */
+const VERSION = PLATFORM_VERSION;
 
 /**
  * Real connectivity checks, not liveness stubs. Each probe issues an actual
