@@ -7,6 +7,9 @@ import {
   withEditMode,
   OVERLAY_IDS,
   OVERLAY_FIELDS,
+  OVERLAY_BAR_TITLES,
+  OVERLAY_LABELS,
+  overlayHeading,
   type OverlayLayout,
 } from './overlay-config.js';
 
@@ -305,5 +308,80 @@ describe('a field added in a later release', () => {
     expect(out.cargo.style.offered, 'nothing recorded what this version offered').toEqual([
       ...OVERLAY_FIELDS.cargo,
     ]);
+  });
+});
+
+/**
+ * ★ SQUADRON OWNER, 2026-08-10 ★
+ *
+ * "in the build tracker overlay in the companion app, can we move the project name out of the build
+ * tracker overlay and onto the overlay title bar so it would look like Build Tracker - Project Name?"
+ *
+ * ★ WHY THE STRING IS BUILT HERE AND NOT IN THE RENDERER ★
+ *
+ * `overlay.tsx` mounts itself on import, so nothing can import it to ask what a bar would say. The
+ * decision — which is a real one, with a field toggle and three ways of having no project — belongs
+ * somewhere a test can reach, and the renderer is left drawing whatever it is handed.
+ */
+describe('what the overlay title bar says', () => {
+  const ON = ['title', 'needs', 'progress', 'haulers'];
+
+  it('★ MANDATORY: the build tracker names the project it is tracking ★', () => {
+    expect(overlayHeading('build', 'Parazynski Prospect', ON)).toBe(
+      'Build tracker - Parazynski Prospect',
+    );
+  });
+
+  it('★ MANDATORY: turning the Project name field off still turns it off ★', () => {
+    /*
+     * The field did not disappear, it moved. A member who unticked "Project name" did so to keep it
+     * off their screen, and honouring that in the old place and ignoring it in the new one would be
+     * a setting that silently stopped working.
+     */
+    expect(overlayHeading('build', 'Parazynski Prospect', ['needs', 'progress'])).toBe(
+      'Build tracker',
+    );
+  });
+
+  it('★ MANDATORY: no build, no dash left hanging ★', () => {
+    // The overlay is open and waiting long before anything is being tracked. "Build tracker - "
+    // with nothing after it reads as a panel that has lost something.
+    expect(overlayHeading('build', null, ON)).toBe('Build tracker');
+    expect(overlayHeading('build', '', ON)).toBe('Build tracker');
+    expect(overlayHeading('build', '   ', ON)).toBe('Build tracker');
+  });
+
+  it('trims a name that arrived with whitespace around it', () => {
+    expect(overlayHeading('build', '  Mitra Horizons  ', ON)).toBe('Build tracker - Mitra Horizons');
+  });
+
+  it('MANDATORY: every other overlay is untouched, and never takes a project name', () => {
+    /*
+     * Only the build tracker follows a project. Passing one to the cargo hold would be a caller's
+     * mistake, and the bar answering with it would put a colonisation project on a panel about the
+     * hold of a ship.
+     */
+    for (const id of OVERLAY_IDS) {
+      if (id === 'build') continue;
+      expect(overlayHeading(id, 'Parazynski Prospect', ON), id).toBe(OVERLAY_BAR_TITLES[id]);
+    }
+  });
+
+  it('MANDATORY: the bar titles are the short ones, not the settings labels', () => {
+    /*
+     * Two maps, deliberately. The settings list has room for "Cargo hold" and "Upload status"; a
+     * 9px bar over a game does not, and reads "Cargo" and "Uplink". Somebody tidying one into the
+     * other would silently rewrite what is drawn over the game.
+     */
+    expect(OVERLAY_BAR_TITLES.cargo).toBe('Cargo');
+    expect(OVERLAY_LABELS.cargo).toBe('Cargo hold');
+    expect(OVERLAY_BAR_TITLES.status).toBe('Uplink');
+    expect(OVERLAY_LABELS.status).toBe('Upload status');
+  });
+
+  it('MANDATORY: every overlay has a bar title, so none draws an empty bar', () => {
+    for (const id of OVERLAY_IDS) {
+      expect(OVERLAY_BAR_TITLES[id], id).toBeTruthy();
+    }
   });
 });

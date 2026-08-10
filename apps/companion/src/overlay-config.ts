@@ -45,6 +45,66 @@ export const OVERLAY_LABELS: Record<OverlayId, string> = {
 };
 
 /**
+ * What each overlay's own TITLE BAR says, over the game.
+ *
+ * ★ NOT THE SAME AS `OVERLAY_LABELS`, AND THAT IS DELIBERATE ★
+ *
+ * The settings list has a whole row per overlay and can afford "Cargo hold" and "Upload status".
+ * The bar is nine pixels tall with 0.18em of letter-spacing on a panel a few hundred pixels wide,
+ * and says "Cargo" and "Uplink". They are two audiences, not one word written twice — tidying
+ * either into the other silently rewrites what is drawn over somebody's game.
+ */
+export const OVERLAY_BAR_TITLES: Record<OverlayId, string> = {
+  build: 'Build tracker',
+  route: 'Trade run',
+  cargo: 'Cargo',
+  status: 'Uplink',
+  prospector: 'Prospector',
+  refinery: 'Refinery',
+  bgs: 'Faction orders',
+};
+
+/**
+ * What the bar reads, including the build tracker's project.
+ *
+ * ★ SQUADRON OWNER, 2026-08-10 ★
+ *
+ * "can we move the project name out of the build tracker overlay and onto the overlay title bar so
+ * it would look like Build Tracker - Project Name?"
+ *
+ * A good trade: the bar is already drawn and already has room, and the row it replaces was costing
+ * a line of the list underneath — which is the part somebody is actually reading mid-flight.
+ *
+ * ★ THE FIELD TOGGLE STILL MEANS WHAT IT MEANT ★
+ *
+ * "Project name" did not disappear, it moved. Somebody who unticked it did so to keep it off their
+ * screen, and honouring that in the old place while ignoring it in the new one is a setting that
+ * quietly stops working — so the toggle governs the bar exactly as it governed the row.
+ *
+ * ★ AND NO DASH LEFT HANGING ★
+ *
+ * The overlay is open long before anything is being tracked, so "Build tracker - " with nothing
+ * after it is the normal state rather than an edge case, and it reads as a panel that has lost
+ * something.
+ *
+ * Pure and here rather than in the renderer, which mounts itself on import and so cannot be asked
+ * what a bar would say.
+ */
+export function overlayHeading(
+  id: OverlayId,
+  projectName: string | null,
+  fields: readonly string[],
+): string {
+  const title = OVERLAY_BAR_TITLES[id];
+  // Only the build tracker follows a project. Anything else asking is a caller's mistake, and
+  // answering would put a colonisation project on a panel about the hold of a ship.
+  if (id !== 'build' || !fields.includes('title')) return title;
+
+  const project = (projectName ?? '').trim();
+  return project === '' ? title : `${title} - ${project}`;
+}
+
+/**
  * Which fields each overlay can show.
  *
  * Named here rather than in the renderer so that "which fields show" is part of the SAVED CONFIG
