@@ -245,6 +245,10 @@ describe('P0.2 database schema', () => {
      * mining tables were caught: the migration was ahead of the models.
      *
      * 128 since 2026-08-08: `member_system_marks` and `member_preferences`, for the system picker.
+     *
+     * 129 as of 2026-08-10: `colony_purchases`. Where a member declares having bought a build's
+     * materials — the hand-typed half of the purchase catalogue. The other half is derived from
+     * `MarketBuy` telemetry on read, which is why one table and not two.
      * Checked against the rule above rather than simply bumped — both are declared in
      * ssot/03-data/schema.prisma as MemberSystemMark and MemberPreference, and the migration was
      * written from that, not ahead of it.
@@ -254,7 +258,7 @@ describe('P0.2 database schema', () => {
      * authored by hand — which is precisely the situation where a migration CAN drift ahead of the
      * models, and precisely why this count exists.
      */
-    expect(Number(r[0]?.n)).toBe(128);
+    expect(Number(r[0]?.n)).toBe(129);
   });
 
   describe('hand-written DDL that Prisma cannot express', () => {

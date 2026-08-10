@@ -8,9 +8,10 @@ import {
 } from '../../../../components/hub-page';
 import { PageTabs, resolveTab, type PageTab } from '../../../../components/page-tabs';
 import { NoAccess, AdminUnavailable } from '../../app/no-access';
-import { getColonyProject, getMe } from '../../../../lib/api';
+import { getColonyProject, getColonyPurchases, getMe } from '../../../../lib/api';
 import { NeedsTable } from './needs-table';
 import { ShoppingList } from './shopping-list';
+import { PurchaseCatalogue } from './purchase-catalogue';
 import { Carriers } from './carriers';
 import { HaulerBoard } from './hauler-board';
 import { DeliveryTimeline } from './delivery-charts';
@@ -125,7 +126,17 @@ export default async function ColonyProjectPage({
    * of HTML (see lib/time.ts), so the ledger renders the member's own clock with no flicker and
    * no hydration mismatch. Fetched alongside the project read because neither waits on the other.
    */
-  const [read, me] = await Promise.all([getColonyProject(id, query), getMe()]);
+  /*
+   * The purchase catalogue rides along with the project read. It is gated server-side — a build in a
+   * system with more than one poster gets an empty answer — so the page can simply not draw the
+   * section rather than deciding the rule a second time here.
+   */
+  const [read, me, purchases] = await Promise.all([
+    getColonyProject(id, query),
+    getMe(),
+    getColonyPurchases(id),
+  ]);
+  const boughtAt = purchases.state === 'ok' ? purchases.data.stations : [];
   const viewerTz = me.user?.timezone ?? 'UTC';
 
   if (read.state === 'forbidden') {
@@ -269,6 +280,17 @@ export default async function ColonyProjectPage({
         )}
 
         {tab !== 'buy' ? null : (
+          <>
+          {boughtAt.length === 0 ? null : (
+            <Section title="Where the squadron has bought it">
+              {/*
+                Above the market suggestions on purpose. A station a squadmate actually filled up at
+                beats a mirror row from four months ago, and half our market data is older than that.
+              */}
+              <PurchaseCatalogue stations={boughtAt} />
+            </Section>
+          )}
+
           <Section title="Where to buy it">
             <ShoppingList
               rows={shopping}
@@ -278,6 +300,7 @@ export default async function ColonyProjectPage({
               query={query}
             />
           </Section>
+          </>
         )}
 
         {/*
