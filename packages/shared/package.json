@@ -11,6 +11,10 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./commodity-category": {
+      "types": "./dist/commodity-category.d.ts",
+      "default": "./dist/commodity-category.js"
+    },
     "./version": {
       "types": "./dist/version.d.ts",
       "default": "./dist/version.js"

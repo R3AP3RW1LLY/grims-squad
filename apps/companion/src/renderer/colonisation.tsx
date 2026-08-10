@@ -40,6 +40,7 @@ import {
   Tabs,
 } from './ui.js';
 import { CALLSIGN_LENGTH, formatCallsign, normaliseCallsign } from '@grims/shared/carrier';
+import { groupByCategory } from '@grims/shared/commodity-category';
 import { SystemPicker } from './system-picker.js';
 
 /**
@@ -192,7 +193,13 @@ export interface Delivery {
 export interface CarrierManifestData {
   carrier: { marketId: string; name: string; callsign: string | null };
   projects: Array<{ id: string; title: string; systemName: string }>;
-  lines: Array<{ commodity: string; needed: number; aboard: number; toBuy: number }>;
+  lines: Array<{
+    commodity: string;
+    category?: string | null;
+    needed: number;
+    aboard: number;
+    toBuy: number;
+  }>;
   shopping: ColonyShoppingRow[];
 }
 
@@ -1183,8 +1190,38 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
               Outstanding first, then the finished ones, each with its bar filled — the record of
               what the squadron has actually done, in the same place they watched it happen.
             */}
-            {[...outstanding, ...done].map((n) => (
-              <CommodityRow key={n.commodity} need={n} aboard={cover[n.commodity] ?? 0} />
+            {/*
+              ★ GROUPED LIKE THE COMMODITY BOARD — SQUADRON OWNER, 2026-08-10 ★
+
+              "break down all materials into their respective market categories ... so that its
+              easier to search for these commodities". This screen is the one most often open beside
+              the actual market, so it is the one the grouping matters most on.
+
+              Same pure function as the website and the overlay — five surfaces a member reads side
+              by side, grouped once so they cannot disagree.
+            */}
+            {groupByCategory([...outstanding, ...done]).map((group) => (
+              <div key={group.category}>
+                <p
+                  style={{
+                    margin: '12px 0 2px',
+                    fontSize: '10px',
+                    letterSpacing: '0.18em',
+                    textTransform: 'uppercase',
+                    color: C.orange,
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                  }}
+                >
+                  <span>{group.category}</span>
+                  <span style={{ color: C.faint, letterSpacing: 0 }}>
+                    {group.complete ? 'complete' : `${tonnes(group.outstanding)} to go`}
+                  </span>
+                </p>
+                {group.rows.map((n) => (
+                  <CommodityRow key={n.commodity} need={n} aboard={cover[n.commodity] ?? 0} />
+                ))}
+              </div>
             ))}
             <BarLegendLine />
             {/*
@@ -1299,8 +1336,24 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
           <Empty>Nothing to buy.</Empty>
         ) : (
           <Card>
-            {shopping.map((r) => (
-              <ShoppingRow key={r.commodity} row={r} />
+            {/* Grouped like the needs list it serves, and like the board it is bought from. */}
+            {groupByCategory(shopping.map((r) => ({ ...r, remaining: toBuyOf(r) }))).map((group) => (
+              <div key={group.category}>
+                <p
+                  style={{
+                    margin: '12px 0 2px',
+                    fontSize: '10px',
+                    letterSpacing: '0.18em',
+                    textTransform: 'uppercase',
+                    color: C.orange,
+                  }}
+                >
+                  {group.category}
+                </p>
+                {group.rows.map((r) => (
+                  <ShoppingRow key={r.commodity} row={r} />
+                ))}
+              </div>
             ))}
             <BarLegendLine />
             <p style={{ margin: '10px 0 0', fontSize: '11px', color: C.dim }}>
@@ -1612,7 +1665,20 @@ function CarrierRun({
           <Empty>Nothing outstanding. Every build this carrier serves has what it needs.</Empty>
         ) : (
           <Card>
-            {data.lines.map((l) => (
+            {groupByCategory(data.lines.map((l) => ({ ...l, remaining: l.toBuy }))).map((group) => (
+              <div key={group.category}>
+                <p
+                  style={{
+                    margin: '12px 0 2px',
+                    fontSize: '10px',
+                    letterSpacing: '0.18em',
+                    textTransform: 'uppercase',
+                    color: C.orange,
+                  }}
+                >
+                  {group.category}
+                </p>
+                {group.rows.map((l) => (
               <div key={l.commodity} style={{ padding: '6px 0', borderTop: `1px solid ${C.hairline}` }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
                   <span style={{ fontSize: '13px' }}>{l.commodity}</span>
@@ -1636,6 +1702,8 @@ function CarrierRun({
                   {l.aboard > 0 ? ` · ${Math.min(l.needed, l.aboard).toLocaleString()} aboard` : ''}
                 </p>
               </div>
+                ))}
+              </div>
             ))}
             <BarLegendLine />
           </Card>
@@ -1647,8 +1715,25 @@ function CarrierRun({
           <Empty>Set an origin on a build&rsquo;s shopping list to price this run.</Empty>
         ) : (
           <Card>
-            {data.shopping.map((r) => (
-              <ShoppingRow key={r.commodity} row={r} />
+            {groupByCategory(
+              data.shopping.map((r) => ({ ...r, remaining: Number.isFinite(r.toBuy) ? r.toBuy : r.remaining })),
+            ).map((group) => (
+              <div key={group.category}>
+                <p
+                  style={{
+                    margin: '12px 0 2px',
+                    fontSize: '10px',
+                    letterSpacing: '0.18em',
+                    textTransform: 'uppercase',
+                    color: C.orange,
+                  }}
+                >
+                  {group.category}
+                </p>
+                {group.rows.map((r) => (
+                  <ShoppingRow key={r.commodity} row={r} />
+                ))}
+              </div>
             ))}
           </Card>
         )}

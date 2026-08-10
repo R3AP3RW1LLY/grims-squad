@@ -2,6 +2,7 @@ import { render } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { OverlayId, OverlayState } from '../overlay-config.js';
 import { C } from './ui.js';
+import { groupByCategory } from '@grims/shared/commodity-category';
 import { ProspectorPanel, RefineryPanel } from './mining-panels.js';
 import { BgsPanel } from './bgs-panel.js';
 
@@ -42,7 +43,12 @@ interface OverlayMessage {
 export interface OverlayData {
   readonly build: {
     readonly title: string | null;
-    readonly needs: ReadonlyArray<{ commodity: string; remaining: number; required: number | null }>;
+    readonly needs: ReadonlyArray<{
+      commodity: string;
+      category?: string | null;
+      remaining: number;
+      required: number | null;
+    }>;
     readonly delivered: number;
     readonly required: number;
     readonly haulers: number;
@@ -418,6 +424,12 @@ function BuildPanel({
    * the height cap the panel scrolls rather than clipping.
    */
   const needs = [...data.needs].sort((a, b) => b.remaining - a.remaining);
+  /*
+   * Null means "this list has no categories", which is the journal path — see the render below.
+   * A single categorised row is enough to group by, because the hub sends the field for every row
+   * or for none.
+   */
+  const grouped = needs.some((n) => (n.category ?? null) !== null) ? groupByCategory(needs) : null;
 
   return (
     <div>
@@ -425,8 +437,21 @@ function BuildPanel({
         <p style={{ margin: '0 0 4px', fontWeight: 600 }}>{data.title}</p>
       ) : null}
 
-      {show('needs')
-        ? needs.map((n) => (
+      {show('needs') ? (
+        grouped === null ? (
+          /*
+           * ★ FLAT WHEN THERE IS NOTHING TO GROUP BY ★
+           *
+           * The overlay fills two ways. Following a marked build brings the categories down with the
+           * needs; docking at a construction site reads the depot straight out of the journal, which
+           * carries no market data at all.
+           *
+           * Grouping that second list would file EVERY commodity under "Not sold on any market" —
+           * a heading that is false about all of them, on the surface a member trusts most because
+           * it is the one in front of them mid-flight. So the grouping appears exactly when it is
+           * real, and the panel looks the way it always did when it is not.
+           */
+          needs.map((n) => (
             <div key={n.commodity} style={ROW}>
               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {n.commodity}
@@ -436,7 +461,36 @@ function BuildPanel({
               </span>
             </div>
           ))
-        : null}
+        ) : (
+          grouped.map((group) => (
+            <div key={group.category}>
+              <p
+                style={{
+                  margin: '5px 0 1px',
+                  fontSize: '0.75em',
+                  letterSpacing: '0.16em',
+                  textTransform: 'uppercase',
+                  color: C.dim,
+                }}
+              >
+                {group.category}
+              </p>
+              {group.rows.map((n) => (
+                <div key={n.commodity} style={ROW}>
+                  <span
+                    style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                  >
+                    {n.commodity}
+                  </span>
+                  <span style={{ fontVariantNumeric: 'tabular-nums', color: accent }}>
+                    {n.remaining.toLocaleString()} t
+                  </span>
+                </div>
+              ))}
+            </div>
+          ))
+        )
+      ) : null}
 
       {show('progress') && pct !== null ? (
         <div style={{ marginTop: '6px' }}>

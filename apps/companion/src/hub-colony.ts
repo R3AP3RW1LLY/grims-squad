@@ -53,6 +53,16 @@ export interface ColonyProject {
 
 export interface ColonyNeed {
   readonly commodity: string;
+  /**
+   * The market's own category — Metals, Technology, Machinery. Null when no market anywhere has
+   * ever listed it, which is true of two colonisation commodities.
+   *
+   * Optional because an OLDER HUB does not send it. The grouping treats a list with no categories
+   * as ungroupable and renders flat, which is what the overlay did before this existed — so an app
+   * pointed at a hub that predates the field behaves exactly as it used to rather than filing
+   * everything under one wrong heading.
+   */
+  readonly category?: string | null;
   readonly remaining: number;
   readonly required: number | null;
   /**
@@ -73,6 +83,17 @@ export interface ColonyHauler {
 
 export interface ColonyShoppingRow {
   readonly commodity: string;
+  /**
+   * The market's own category — Metals, Technology, Machinery. Null when no market anywhere has
+   * ever listed it, which is true of two colonisation commodities.
+   *
+   * Optional because an OLDER HUB does not send it. The grouping treats a list with no categories
+   * as ungroupable and renders flat, which is what the overlay did before this existed — so an app
+   * pointed at a hub that predates the field behaves exactly as it used to rather than filing
+   * everything under one wrong heading.
+   */
+  readonly category?: string | null;
+
   readonly remaining: number;
   /** The site's total ask, when the journal has given it. What the three-segment bar divides by. */
   readonly required: number | null;

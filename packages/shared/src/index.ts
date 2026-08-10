@@ -22,6 +22,7 @@ export * from './dto/common.js';
 export * from './redirect.js';
 export * from './carrier.js';
 export * from './station-name.js';
+export * from './commodity-category.js';
 
 export {
   EARLIEST_PROMOTION_AT,

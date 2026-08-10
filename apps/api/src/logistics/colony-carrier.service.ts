@@ -1,4 +1,5 @@
 import type { PrismaClient } from '@grims/db';
+import { commodityCategories } from './commodity-categories.js';
 import {
   AppError,
   CARRIER_STATION_TYPES,
@@ -914,6 +915,7 @@ export class ColonyCarrierService {
     readonly projects: ReadonlyArray<{ readonly id: string; readonly title: string; readonly systemName: string }>;
     readonly lines: ReadonlyArray<{
       readonly commodity: string;
+      readonly category: string | null;
       /** Summed `remaining` across every build this carrier serves. */
       readonly needed: number;
       /** Effective tonnes aboard THIS carrier — counted once, however many builds want them. */
@@ -976,6 +978,9 @@ export class ColonyCarrierService {
       return row === undefined ? null : Number(row['tonnes']);
     };
 
+    // The same category map the needs list and the shopping list use — one source, five surfaces.
+    const categories = await commodityCategories(this.db);
+
     const lines = needRows.map((r) => {
       const commodity = String(r['commodity']);
       const needed = Number(r['needed']);
@@ -992,7 +997,13 @@ export class ColonyCarrierService {
        * not earn credit against something else — the same rule the per-project list applies, for the
        * same reason.
        */
-      return { commodity, needed, aboard, toBuy: Math.max(0, needed - Math.min(needed, aboard)) };
+      return {
+        commodity,
+        category: categories.get(commodity) ?? null,
+        needed,
+        aboard,
+        toBuy: Math.max(0, needed - Math.min(needed, aboard)),
+      };
     });
 
     return {
