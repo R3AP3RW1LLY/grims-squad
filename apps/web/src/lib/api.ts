@@ -2899,6 +2899,38 @@ export const getCarrierManifest = (
   );
 };
 
+/**
+ * Where the squadron has actually bought this build's materials, grouped by station.
+ *
+ * ★ ONE DESTINATION THAT FILLS A HOLD ★
+ *
+ * The shopping list answers one commodity at a time, which is right for planning and wrong for
+ * flying. This is keyed on the station: go here, and these are the things you can get.
+ */
+export interface PurchaseLine {
+  commodity: string;
+  category: string | null;
+  tonnes: number | null;
+  price: number | null;
+  source: 'journal' | 'manual';
+  by: string | null;
+  at: string;
+  note: string | null;
+}
+
+export interface PurchaseStation {
+  stationName: string;
+  /** The STATION's system — what a member pastes into the galaxy map. Never the build's. */
+  systemName: string;
+  lines: PurchaseLine[];
+  lastSeen: string;
+}
+
+export const getColonyPurchases = (
+  projectId: string,
+): Promise<AdminRead<{ systemName: string | null; stations: PurchaseStation[] }>> =>
+  getAdmin(`/v1/logistics/colony/projects/${encodeURIComponent(projectId)}/purchases`);
+
 /** A published project, by its token. No session: the token is the capability. */
 export const getSharedColonyProject = (
   token: string,

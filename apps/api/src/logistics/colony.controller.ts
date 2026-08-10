@@ -7,6 +7,7 @@ import { ColonyService, type ColonyOwner, type ColonyVisibility } from './colony
 import { ColonyRosterService } from './colony-roster.service.js';
 import { ColonyCatalogueService } from './colony-catalogue.service.js';
 import { ColonyCarrierService, carrierCover } from './colony-carrier.service.js';
+import { ColonyPurchasesService } from './colony-purchases.service.js';
 import { ColonyPlanService } from './colony-plan.service.js';
 import { MARKET_STORE } from './logistics.tokens.js';
 import type { MarketStore } from './market.store.js';
@@ -41,6 +42,7 @@ export class ColonyController {
     @Inject(ColonyRosterService) private readonly rosters: ColonyRosterService,
     @Inject(ColonyCatalogueService) private readonly catalogue: ColonyCatalogueService,
     @Inject(ColonyCarrierService) private readonly carriers: ColonyCarrierService,
+    @Inject(ColonyPurchasesService) private readonly purchases: ColonyPurchasesService,
     // `plans_` because `plans` is the route method below it, and a field cannot share its name.
     @Inject(ColonyPlanService) private readonly plans_: ColonyPlanService,
   ) {}
@@ -416,6 +418,109 @@ export class ColonyController {
     );
 
     return { ...manifest, shopping };
+  }
+
+  /**
+   * Where the squadron has actually bought this build's materials, grouped by station.
+   *
+   * ★ SQUADRON OWNER, 2026-08-10 ★
+   *
+   * "group all materials bought at each station by the station name and system name please! so its
+   * easy for us to identify where to go!"
+   *
+   * The shopping list answers one commodity at a time, which is right for planning and wrong for
+   * flying. A hauler wants one destination that fills the hold, so this is keyed on the station.
+   *
+   * ★ THE GATE IS THE OWNER'S, AND IT NEEDS NO NEW FIELD ★
+   *
+   * "only for projects in systems that are being colonized by the commander that started the
+   * colonization project". Every system with projects has exactly one distinct poster, measured on
+   * production — so the coloniser IS the poster, and a system with several posters returns nothing
+   * and the page renders exactly as it does today.
+   */
+  @Get('projects/:id/purchases')
+  async purchaseCatalogue(@User() caller: CurrentUser | undefined, @Param('id') id: string) {
+    await this.#assert(
+      caller,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    const scope = await this.purchases.visibleFor(id);
+    // Not an error: a project outside the gate simply has no catalogue, and the page hides the panel.
+    if (scope === null) return { systemName: null, stations: [] };
+
+    return { systemName: scope.systemName, stations: await this.purchases.forSystem(scope.systemName) };
+  }
+
+  @Post('projects/:id/purchases')
+  async declarePurchase(
+    @User() caller: CurrentUser | undefined,
+    @Param('id') id: string,
+    @Body()
+    body: {
+      commodity?: string;
+      stationName?: string;
+      stationSystem?: string;
+      tonnes?: number;
+      price?: number;
+      note?: string;
+    },
+  ) {
+    const me = this.#requireSession(caller);
+    await this.#assert(
+      caller,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    const scope = await this.purchases.visibleFor(id);
+    if (scope === null) {
+      // Refused rather than silently stored: a row written into a catalogue nobody can see is a
+      // member's effort thrown away without telling them.
+      throw new AppError(
+        ErrorCode.RESOURCE_NOT_VISIBLE,
+        'This build does not keep a purchase catalogue.',
+      );
+    }
+
+    const num = (v: unknown): number | null =>
+      typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.trunc(v) : null;
+
+    return this.purchases.declare({
+      systemName: scope.systemName,
+      stationName: body.stationName ?? '',
+      stationSystem: body.stationSystem ?? '',
+      commodity: body.commodity ?? '',
+      tonnes: num(body.tonnes),
+      price: num(body.price),
+      note: typeof body.note === 'string' && body.note.trim() !== '' ? body.note : null,
+      userId: me.userId,
+    });
+  }
+
+  @Post('projects/:id/purchases/withdraw')
+  async withdrawPurchase(
+    @User() caller: CurrentUser | undefined,
+    @Param('id') id: string,
+    @Body() body: { commodity?: string; stationName?: string },
+  ) {
+    const me = this.#requireSession(caller);
+    await this.#assert(
+      caller,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    const scope = await this.purchases.visibleFor(id);
+    if (scope === null) throw new AppError(ErrorCode.RESOURCE_NOT_VISIBLE, 'Not found.');
+
+    return this.purchases.withdraw({
+      systemName: scope.systemName,
+      stationName: (body.stationName ?? '').trim(),
+      commodity: (body.commodity ?? '').trim(),
+      userId: me.userId,
+    });
   }
 
   @Get('projects/:id/carriers')

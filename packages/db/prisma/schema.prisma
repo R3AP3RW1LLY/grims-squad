@@ -537,6 +537,7 @@ model User {
   /// Plans this member drew up. See ColonyPlan — a plan is a system's shape before it is built.
   colonyPlans          ColonyPlan[]
   colonyContributions  ColonyContribution[] @relation("ColonyContributor")
+  colonyPurchases      ColonyPurchase[]     @relation("ColonyPurchaseDeclarer")
   /// Projects they have joined, what they have taken on, what they have handed out, and carriers
   /// they have offered. Four relations because they are four different acts.
   colonyMemberships    ColonyMember[]       @relation("ColonyMemberOf")
@@ -2768,6 +2769,63 @@ model ColonyContribution {
   @@index([projectId, deliveredAt])
   @@index([userId])
   @@map("colony_contributions")
+}
+
+/// Where a member actually bought a build's materials.
+///
+/// ★ SQUADRON OWNER, 2026-08-10 ★
+///
+/// "a way to declare what station a commander purchased various materials from so if they are
+/// colonizing their own system, they can create their own catalogue that can be shared with other
+/// people building in that system so that all materials that have been found and delivered can be
+/// easily procurred without having to go hunt them down"
+///
+/// ★ ONLY THE HAND-TYPED ROWS LIVE HERE ★
+///
+/// The other half of the catalogue is already in `telemetry_events`: `MarketBuy` has carried
+/// commodity, quantity, price and MarketID all along, and production holds 1,181 of them across 128
+/// stations going back to March 2025. Copying those into a second table would be a rollup job to
+/// write, a backfill to run and two places for the same fact to disagree — so the journal half is
+/// derived on read and this table holds only what a person typed.
+///
+/// That also decides the merge, which is the same rule the carrier holds use: a hand-typed row wins
+/// over a watched one, because the only thing a person can say that a journal cannot is "that is
+/// wrong" or "it is gone now".
+///
+/// ★ KEYED BY SYSTEM, NOT BY PROJECT ★
+///
+/// The owner asked for a catalogue shared "with other people building in that system". A member who
+/// finds 30,000 t of Steel two jumps out has found it for everybody building there, not for one
+/// project — and projects finish while the shopping run stays useful.
+model ColonyPurchase {
+  id BigInt @id @default(autoincrement())
+
+  /// The system being built, which is what the catalogue belongs to. Stored as the NAME because
+  /// that is what a member types and what every colonisation row already keys on.
+  systemName String @map("system_name")
+
+  commodity String
+  /// Where it was bought. Free text: a member declaring a station we have never catalogued is
+  /// exactly the case this exists for, so it must not require a station we already hold.
+  stationName String @map("station_name")
+  /// The system the STATION is in — not the one being built. These are rarely the same, and a
+  /// station name with no system is a place nobody can navigate to.
+  stationSystem String @map("station_system")
+  /// Tonnes seen available, when the member says. Null means "it is here" without a quantity.
+  tonnes Int?
+  /// Credits per tonne, when the member says.
+  price Int?
+  /// Anything the buyer wants the next person to know — "pad 3 is blocked", "restocks slowly".
+  note String?
+  declaredById String   @map("declared_by_id") @db.Uuid
+  declaredAt   DateTime @default(now()) @map("declared_at") @db.Timestamptz(6)
+  updatedAt    DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  declaredBy User @relation("ColonyPurchaseDeclarer", fields: [declaredById], references: [id], onDelete: Cascade)
+  /// One row per person per commodity per station: re-declaring updates rather than duplicating, so
+  /// a member correcting yesterday's figure does not leave both on the page.
+  @@unique([systemName, stationName, commodity, declaredById])
+  @@index([systemName])
+  @@map("colony_purchases")
 }
 
 /// Somebody who has put their name to a colonisation project.

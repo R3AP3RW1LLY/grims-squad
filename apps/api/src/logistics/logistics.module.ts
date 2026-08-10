@@ -12,6 +12,7 @@ import { ColonyService } from './colony.service.js';
 import { ColonyCatalogueService } from './colony-catalogue.service.js';
 import { ColonyPlanService } from './colony-plan.service.js';
 import { ColonyCarrierService } from './colony-carrier.service.js';
+import { ColonyPurchasesService } from './colony-purchases.service.js';
 import { CommanderPositionService } from './commander-position.service.js';
 import { ColonyRosterService } from './colony-roster.service.js';
 import { PrismaMarketStore, type MarketStore } from './market.store.js';
@@ -102,6 +103,16 @@ import type { LiveService } from '../live/live.service.js';
       provide: ColonyCarrierService,
       inject: [PrismaClient],
       useFactory: (db: PrismaClient) => new ColonyCarrierService(db),
+    },
+    {
+      /*
+       * The purchase catalogue: where the squadron has actually bought a build's materials. Half of
+       * it is derived from MarketBuy telemetry and half is hand-typed, so it needs nothing but the
+       * database.
+       */
+      provide: ColonyPurchasesService,
+      inject: [PrismaClient],
+      useFactory: (db: PrismaClient) => new ColonyPurchasesService(db),
     },
     {
       provide: ColonyCatalogueService,
