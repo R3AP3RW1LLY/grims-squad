@@ -236,3 +236,60 @@ describe('reading ComfyUI’s history', () => {
     expect(isFinished({ status: { status_str: 'error' } })).toBe(true);
   });
 });
+
+/**
+ * ★ THE CARD IS SHARED, AND NOTHING GAVE IT BACK — 2026-08-10 ★
+ *
+ * Within half an hour of image generation being switched on in production, ComfyUI held 6.9 GB,
+ * Ollama held 6.9 GB, and the 15.9 GB card had 0.5 GB free. Ollama's weights were still resident
+ * with no headroom to work in, so a two-token reply took eighteen seconds — screening timed out at
+ * 20s, the health check at 63s, and forum posts started being held for review.
+ *
+ * None of those symptoms mentions a GPU, which is what made it worth a test rather than a comment.
+ */
+describe('releasing the card', () => {
+  it('★ MANDATORY: a configured client asks ComfyUI to unload ★', async () => {
+    const calls: Array<{ url: string; body: unknown }> = [];
+    const fetchImpl = (async (url: string, init?: RequestInit) => {
+      calls.push({ url: String(url), body: JSON.parse(String(init?.body ?? '{}')) });
+      return new Response('{}', { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await new ImageClient(imageConfigFrom({ IMAGE_BASE_URL: 'http://host:8188' }), fetchImpl).release();
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe('http://host:8188/free');
+    expect(
+      calls[0]?.body,
+      'unload_models frees the weights; free_memory returns the allocator pool. Sending one without ' +
+        'the other leaves most of the card held.',
+    ).toEqual({ unload_models: true, free_memory: true });
+  });
+
+  it('MANDATORY: an unconfigured client calls nothing', async () => {
+    // Same rule as generate(): with no base URL there is no host to talk to, and inventing one
+    // would turn "artwork is off" into a connection error on an unrelated code path.
+    let called = false;
+    const fetchImpl = (async () => {
+      called = true;
+      return new Response('{}', { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await new ImageClient(null, fetchImpl).release();
+    expect(called).toBe(false);
+  });
+
+  it('MANDATORY: a failure to free never surfaces as an error', async () => {
+    /*
+     * A banner that generated is a banner the member should get. Being unable to tidy up afterwards
+     * must not turn a success into a failure they see.
+     */
+    const fetchImpl = (async () => {
+      throw new Error('comfyui is gone');
+    }) as unknown as typeof fetch;
+
+    await expect(
+      new ImageClient(imageConfigFrom({ IMAGE_BASE_URL: 'http://host:8188' }), fetchImpl).release(),
+    ).resolves.toBeUndefined();
+  });
+});

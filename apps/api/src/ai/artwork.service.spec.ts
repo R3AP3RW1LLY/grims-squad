@@ -60,11 +60,29 @@ async function genSizedPng(): Promise<Uint8Array> {
   return new Uint8Array(buf);
 }
 
+/**
+ * `release` is part of the shape, not an afterthought.
+ *
+ * ★ WHY THE FAKE CARRIES IT — 2026-08-10 ★
+ *
+ * The service hands the GPU back after every batch, because the card is shared with the squadron's
+ * AI and with the owner's game. Leaving it off this fake made eleven tests fail with
+ * "this.images.release is not a function" the moment the real call was added — which is the fake
+ * doing its job, but it is also a reminder that a stub narrower than the interface only tests the
+ * part somebody remembered.
+ */
 function fakeClient(
   generate: (prompt: string, seed: number | null) => Promise<RawImage | null>,
   configured = true,
+  onRelease: () => void = () => undefined,
 ): ImageClient {
-  return { configured, generate } as unknown as ImageClient;
+  return {
+    configured,
+    generate,
+    release: async () => {
+      onRelease();
+    },
+  } as unknown as ImageClient;
 }
 
 describe('when generation is not available', () => {
@@ -338,5 +356,53 @@ describe('downscaling to banner size', () => {
   it('still writes a PNG, so alpha and sharp edges survive', async () => {
     const meta = await sharp(await toBannerSize(await genSizedPng())).metadata();
     expect(meta.format).toBe('png');
+  });
+});
+
+
+/**
+ * ★ THE CARD GOES BACK — SQUADRON OWNER, 2026-08-10 ★
+ *
+ * "my GPU is stuck at 100% we need to fix this! ASAP!"
+ *
+ * Switching image generation on in production left ComfyUI holding 6.9 GB of a 15.9 GB card with an
+ * empty queue, beside Ollama's 6.9 GB and the game. Ollama's weights stayed resident with no room
+ * left to work in, so a two-token reply took eighteen seconds — screening timed out at 20s, the
+ * health check at 63s, and forum posts were held for review. None of those symptoms mentions a GPU.
+ *
+ * After the release: 14.58 GB free and replies back to two seconds.
+ */
+describe('handing the GPU back', () => {
+  it('★ MANDATORY: the card is released after a batch ★', async () => {
+    let released = 0;
+    const svc = new ArtworkService(
+      fakeClient(async () => ({ png: await genSizedPng(), seed: 1, tookMs: 10 }), true, () => {
+        released += 1;
+      }),
+      new RecordingLog(),
+      new FakeQuota(),
+    );
+
+    await svc.generate('a starfield', 'user-1', null, 1);
+    expect(released, 'nothing gave the card back, so the AI beside it starves').toBe(1);
+  });
+
+  it('MANDATORY: it is released even when every option failed', async () => {
+    /*
+     * The failing path is the one that matters most. A generation that died part way through is
+     * exactly when memory is still held and nobody is coming back for it.
+     */
+    let released = 0;
+    const svc = new ArtworkService(
+      fakeClient(async () => null, true, () => {
+        released += 1;
+      }),
+      new RecordingLog(),
+      new FakeQuota(),
+    );
+
+    const out = await svc.generate('a starfield', 'user-1', null, 3);
+    expect(out.ok).toBe(false);
+    expect(released).toBe(1);
   });
 });

@@ -142,6 +142,13 @@ export class ArtworkService {
       });
     }
 
+    /*
+     * The card goes back before the response does — see `ImageClient.release`. Awaited rather than
+     * fired off, because the next thing this machine does is answer an AI health check, and a
+     * release that has not happened yet is a release that does not help.
+     */
+    await this.images.release();
+
     void this.log
       .record({
         userId,

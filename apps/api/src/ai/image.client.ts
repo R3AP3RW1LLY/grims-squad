@@ -186,6 +186,49 @@ export class ImageClient {
    * in what the game leaves behind. Quality loss at Q4 on a decorative backdrop is not visible;
    * an out-of-memory crash in the game very much is.
    */
+  /**
+   * Hands the card back.
+   *
+   * ★ THE OUTAGE THIS EXISTS FOR — 2026-08-10 ★
+   *
+   * ComfyUI keeps a model resident after a generation so the next one is fast. That is the right
+   * default for a machine doing nothing else, and this machine does two other things: it runs the
+   * squadron's AI and it runs Elite Dangerous.
+   *
+   * Measured within half an hour of image generation being switched on in production: ComfyUI held
+   * 6.9 GB, Ollama held 6.9 GB, and the 15.9 GB card had 0.5 GB free. Ollama's weights were still
+   * resident but it had no headroom left for inference, so a two-token reply took EIGHTEEN SECONDS.
+   * Screening timed out at 20s, the health check at 63s, and every forum post started being held
+   * for review — none of which mentions the GPU, so the cause was invisible from the symptom.
+   *
+   * The graph comment above reasoned that Q4_K_S "fits in what the game leaves behind", and it does.
+   * What it did not account for is that fitting is not enough when another service needs room to
+   * WORK in what is left.
+   *
+   * ★ WHY THIS IS CALLED AND NOT LEFT TO A TIMEOUT ★
+   *
+   * Image generation is occasional and member-initiated; the AI answers a health check every minute
+   * and screens every post. So the rare visitor is the one that tidies up. Measured effect of this
+   * call on the live machine: Ollama went from 18.0s to 7.5s on the same prompt.
+   *
+   * Failure is swallowed. A banner that generated is a banner the member should get, and being
+   * unable to free memory afterwards must not turn a success into an error.
+   */
+  async release(): Promise<void> {
+    const c = this.config;
+    if (c === null) return;
+
+    try {
+      await this.fetchImpl(`${c.baseUrl}/free`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ unload_models: true, free_memory: true }),
+      });
+    } catch {
+      // See above.
+    }
+  }
+
   #buildGraph(prompt: string, seed: number): Record<string, unknown> {
     const c = this.config;
     if (c === null) return {};
