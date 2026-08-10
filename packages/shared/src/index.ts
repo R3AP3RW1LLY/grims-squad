@@ -23,6 +23,8 @@ export * from './redirect.js';
 export * from './carrier.js';
 export * from './station-name.js';
 export * from './commodity-category.js';
+export { suggestBuildOrder } from './colony-order.js';
+export type { OrderSuggestion } from './colony-order.js';
 
 export {
   EARLIEST_PROMOTION_AT,
