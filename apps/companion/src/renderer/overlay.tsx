@@ -1,6 +1,7 @@
 import { render } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { OverlayId, OverlayState } from '../overlay-config.js';
+import { overlayHeading } from '../overlay-config.js';
 import { C } from './ui.js';
 import { groupByCategory } from '@grims/shared/commodity-category';
 import { ProspectorPanel, RefineryPanel } from './mining-panels.js';
@@ -268,7 +269,16 @@ function App(): preact.JSX.Element | null {
         overflow: 'hidden',
       }}
     >
-      <Header id={ID} state={state} arranging={arranging} />
+      {/*
+        The build tracker names its project up here rather than spending a row of the list on it —
+        "Build tracker - Parazynski Prospect". The decision lives in `overlayHeading` so it can be
+        tested; this hands the result to a bar that draws what it is given.
+      */}
+      <Header
+        heading={overlayHeading(ID, data.build?.title ?? null, state.style.fields)}
+        state={state}
+        arranging={arranging}
+      />
       {/*
         `overflow: auto` rather than hidden: the window grows to fit its content up to a cap, and
         past that cap the list has to remain reachable rather than being silently clipped — which is
@@ -282,11 +292,12 @@ function App(): preact.JSX.Element | null {
 }
 
 function Header({
-  id,
+  heading,
   state,
   arranging,
 }: {
-  id: OverlayId;
+  /** Already assembled — see `overlayHeading`. This draws it and makes no decisions of its own. */
+  heading: string;
   state: OverlayState;
   arranging: boolean;
 }): preact.JSX.Element {
@@ -322,30 +333,38 @@ function Header({
           letterSpacing: '0.18em',
           textTransform: 'uppercase',
           color: state.style.accent,
+          /*
+            ★ ONE LINE, ALWAYS ★
+
+            A project name is arbitrary length and the bar is a few hundred pixels wide. Wrapping it
+            would push the header taller — and the window's height is measured from the BODY only,
+            with the chrome allowed for by a constant, so a two-line bar does not make the window
+            grow. It eats a row of the needs list instead, silently, on the panel somebody is
+            reading mid-flight.
+
+            `minWidth: 0` because a flex child will not shrink below its content without it, which
+            is what makes the ellipsis actually happen rather than the text simply overflowing.
+          */
+          minWidth: 0,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
         }}
       >
-        {TITLES[id]}
+        {heading}
       </span>
       {/*
         Shown only while arranging, and it is the only affordance that has to be there: a member who
         has just switched an overlay on and unlocked it needs to know the bar is the handle.
       */}
       {arranging ? (
-        <span style={{ fontSize: '9px', color: C.dim }}>drag · resize edges</span>
+        // `flexShrink: 0` so the hint keeps its width and the heading is what gives — the heading
+        // can say less and still be useful; "drag · resize edges" cut in half cannot.
+        <span style={{ fontSize: '9px', color: C.dim, flexShrink: 0 }}>drag · resize edges</span>
       ) : null}
     </div>
   );
 }
-
-const TITLES: Record<OverlayId, string> = {
-  build: 'Build tracker',
-  route: 'Trade run',
-  cargo: 'Cargo',
-  status: 'Uplink',
-  prospector: 'Prospector',
-  refinery: 'Refinery',
-  bgs: 'Faction orders',
-};
 
 function Panel({
   id,
@@ -433,10 +452,16 @@ function BuildPanel({
 
   return (
     <div>
-      {show('title') && data.title !== null ? (
-        <p style={{ margin: '0 0 4px', fontWeight: 600 }}>{data.title}</p>
-      ) : null}
+      {/*
+        ★ THE PROJECT NAME IS ON THE TITLE BAR NOW — SQUADRON OWNER, 2026-08-10 ★
 
+        "can we move the project name out of the build tracker overlay and onto the overlay title
+        bar so it would look like Build Tracker - Project Name?"
+
+        It used to be this row. The bar was already drawn and already had the room, and the row was
+        costing a line of the list underneath — which is the part somebody reads mid-flight. The
+        `title` field toggle still governs it; see `overlayHeading`.
+      */}
       {show('needs') ? (
         grouped === null ? (
           /*
