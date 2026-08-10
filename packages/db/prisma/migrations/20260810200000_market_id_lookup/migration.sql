@@ -1,0 +1,35 @@
+-- Finding a station by the market id a journal event carries.
+--
+-- ★ THE PURCHASE CATALOGUE MADE THIS A HOT PATH — 2026-08-10 ★
+--
+-- The catalogue turns "somebody bought 923 t of Titanium at MarketID 3708694784" into a station name
+-- and system a member can fly to. That join had no index behind it, so Postgres hash-joined EVERY
+-- station row against the purchases on every project page:
+--
+--   Parallel Hash Join  (k.data->>'marketId' = t.payload->>'MarketID')
+--     -> Parallel Index Scan on knowledge_items (kind = 'station')   -- 318,383 rows
+--     -> Parallel Seq Scan on telemetry_events                       -- 82,922 rows
+--
+-- Measured on production: 2.2 seconds, on a panel that decorates a page rather than carrying it.
+-- With this index the same lookup is an index scan at 5 ms.
+--
+-- ★ PARTIAL, AND ON THE EXPRESSION ★
+--
+-- `marketId` lives inside the JSONB `data` column, so the index is on the extracted text rather than
+-- on a column — which is why Prisma cannot express it and this file is hand-written like every other
+-- migration here.
+--
+-- Partial on `kind = 'station'` because nothing else in `knowledge_items` has a market id: 318,383
+-- of 854,559 rows, so the index is a third of the size it would otherwise be and every query that
+-- uses it already carries that predicate.
+--
+-- ★ WHY A PLAIN CREATE AND NOT CONCURRENTLY ★
+--
+-- A plain CREATE INDEX blocks writes to the table while it builds, and the EDDN collector writes
+-- knowledge_items continuously — so the question is how long. Measured on a copy with the same
+-- station count: 1.55 seconds. CONCURRENTLY cannot run inside the transaction a migration runs in,
+-- and trading a guaranteed-atomic migration for one and a half seconds of write pause is the wrong
+-- way round.
+CREATE INDEX IF NOT EXISTS "knowledge_items_market_id_idx"
+  ON "knowledge_items" (("data"->>'marketId'))
+  WHERE "kind" = 'station';

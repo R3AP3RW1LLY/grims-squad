@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, it } from 'vitest';
 import { PrismaClient } from '@grims/db';
-import { ColonyPurchasesService } from './colony-purchases.service.js';
+import { ColonyPurchasesService, stationKey } from './colony-purchases.service.js';
 
 /**
  * The purchase catalogue, against real Postgres.
@@ -206,5 +206,42 @@ describe('the purchase catalogue', () => {
 
   it('a system nobody has bought in answers empty rather than throwing', async () => {
     expect(await service.forSystem('a system with no purchases at all')).toEqual([]);
+  });
+});
+
+/**
+ * ★ THE CARRIER THAT WAS TWO PLACES — CAUGHT IN PRODUCTION, 2026-08-10 ★
+ *
+ * The catalogue shipped, and the first thing the live data showed was `B2W-04T` listed twice:
+ * seventeen materials under Xinca and the same seventeen under ICZ EW-V b2-4. A fleet carrier is the
+ * one station that changes system, so its market id matches a station record per place we have seen
+ * it, and a plain join produced one entry per sighting.
+ *
+ * Two destinations where there is one — and it is at neither of them any more.
+ */
+describe('a station is keyed by identity, not by where it was last seen', () => {
+  it('★ MANDATORY: one market id is one place, whatever system it was in ★', () => {
+    expect(stationKey('B2W-04T', 'Xinca', '3708694784')).toBe(
+      stationKey('B2W-04T', 'ICZ EW-V b2-4', '3708694784'),
+    );
+  });
+
+  it('MANDATORY: two different carriers never collapse into one', () => {
+    expect(stationKey('B2W-04T', 'Xinca', '3708694784')).not.toBe(
+      stationKey('W8K-W1Y', 'Xinca', '3713238272'),
+    );
+  });
+
+  it('a hand-typed row has no market id and keys on name and system', () => {
+    /*
+     * Right for declarations: a member naming a station we have never catalogued is exactly the case
+     * the manual half exists for, and it has no id to key on.
+     */
+    expect(stationKey('Armstrong Legacy', 'Col 285 Sector US-Q b6-5')).toBe(
+      'Col 285 Sector US-Q b6-5 Armstrong Legacy',
+    );
+    expect(stationKey('Armstrong Legacy', 'Somewhere Else')).not.toBe(
+      stationKey('Armstrong Legacy', 'Col 285 Sector US-Q b6-5'),
+    );
   });
 });
