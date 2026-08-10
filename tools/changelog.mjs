@@ -609,6 +609,28 @@ function main() {
     );
   }
 
+  /*
+   * ★ A RELEASE WITH NOTHING TO SAY DOES NOT PING NINETEEN PEOPLE — 2026-08-10 ★
+   *
+   * The changelog ROW is still written: it is the deployment record, and "we shipped and it changed
+   * nothing members can see" is a true and useful thing to have written down.
+   *
+   * The ANNOUNCEMENT is different. It is a Discord notification and a forum post, and it went out
+   * that evening for a release whose only commit changed this file — "📡 The hub just updated —
+   * 1 change is live", with a link to a changelog page that had nothing on it. Every member got
+   * that. The next one they will read a little less carefully.
+   *
+   * All THREE sections, not just the member-facing two: a platform commit that carries a `Members:`
+   * trailer is genuinely member news ("the colonisation pages are fast again"), and suppressing
+   * that would be the opposite mistake.
+   */
+  if (opts.mode === 'announce' && release.websiteMd === '' && release.companionMd === '' && release.platformMd === '') {
+    process.stdout.write(
+      `-- ${fromSha.slice(0, 8)}..${toSha.slice(0, 8)} says nothing to members; not announcing\n`,
+    );
+    return;
+  }
+
   if (opts.mode === 'json') {
     process.stdout.write(`${JSON.stringify(release, null, 2)}\n`);
   } else if (opts.mode === 'sql') {

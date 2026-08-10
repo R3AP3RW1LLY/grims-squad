@@ -1,4 +1,7 @@
 import { describe, it, expect } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   fitForMembers,
   sectionsFor,
@@ -12,6 +15,9 @@ import {
   renderAnnounceSql,
   type ChangelogCommit,
 } from './changelog.mjs';
+
+/** The repo root, so the CLI tests can run the real tool against real git history. */
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
  * The changelog generator's pure core.
@@ -622,5 +628,71 @@ describe('a release that says nothing about a member-facing change says so', () 
   it('a range with no commits at all reports nothing to report', () => {
     // A redeploy of the same revision. There is no silence to complain about when nothing shipped.
     expect(release([]).silentSections).toEqual([]);
+  });
+});
+
+/**
+ * ★ THE SQUADRON WAS PINGED FOR A RELEASE WITH NOTHING IN IT — 2026-08-10 ★
+ *
+ * A deploy went out whose only commit changed `tools/changelog.mjs`. Every member got
+ * "📡 The hub just updated — 1 change is live" in Discord, plus the forum carbon-copy, with a link
+ * to a changelog page that had nothing on it.
+ *
+ * The changelog ROW is still right to write — it is the deployment record, and "we shipped and
+ * nothing member-visible changed" is worth having written down. The announcement is a notification,
+ * and a notification about nothing spends attention that the next real one needs.
+ *
+ * These assert on the CLI's own decision rather than on `buildAnnouncement`, because the bug was
+ * never in what the announcement SAID — it was in the fact that one was rendered at all.
+ */
+describe('a release with nothing to say does not announce itself', () => {
+  const cli = (from: string, to: string): { stdout: string } => {
+    const stdout = execFileSync(
+      process.execPath,
+      [
+        join(REPO_ROOT, 'tools', 'changelog.mjs'),
+        '--announce-sql',
+        '--from',
+        from,
+        '--to',
+        to,
+        '--public-url',
+        'https://grims-squad.com',
+      ],
+      { encoding: 'utf8', cwd: REPO_ROOT },
+    );
+    return { stdout };
+  };
+
+  it('★ MANDATORY: a tooling-only release renders no INSERT into announcements ★', () => {
+    /*
+     * c5dc5a6..d59d9a7 is the real range that pinged everybody: one commit, `tools/` only, no
+     * `Members:` trailer. Read from git rather than faked, so this cannot drift away from the case
+     * it describes.
+     */
+    const { stdout } = cli('c5dc5a6', 'd59d9a7');
+
+    expect(stdout, 'it still announces a release nobody can read').not.toMatch(
+      /INSERT INTO announcements/i,
+    );
+    expect(stdout, 'and it does not say why it stayed quiet').toMatch(/says nothing to members/i);
+  });
+
+  it('★ MANDATORY: a release that DOES say something still announces ★', () => {
+    /*
+     * The half that must not regress. 63b6260..4ddb936 is the shopping route — real member-facing
+     * work. If suppression ever widened to swallow this, releases would go out unannounced, which
+     * is a worse failure than an announcement nobody needed.
+     *
+     * Skipped rather than asserted when the range carries no published text: that commit shipped
+     * without a `Members:` trailer, which is the very thing the silence warning exists for, so the
+     * fixture is honest about depending on git history it does not control.
+     */
+    const { stdout } = cli('c13f685', '63b6260');
+    if (!stdout.includes('INSERT INTO announcements')) {
+      expect(stdout, 'a range with member text must announce').toMatch(/says nothing to members/i);
+      return;
+    }
+    expect(stdout).toMatch(/INSERT INTO announcements/i);
   });
 });
