@@ -2377,6 +2377,11 @@ export interface ColonyProject {
 
 export interface ColonyNeed {
   commodity: string;
+  /**
+   * The market's own category — Metals, Technology, Machinery. Null when no market anywhere has
+   * listed it, which is true of two colonisation commodities and is shown rather than hidden.
+   */
+  category?: string | null;
   remaining: number;
   required: number | null;
   /** When the game last reported this. Null before anybody has docked at the site. */
@@ -2399,6 +2404,11 @@ export interface ColonyHauler {
 /** Where to buy what a project still needs — the Freight Office answering for each line. */
 export interface ColonyShoppingRow {
   commodity: string;
+  /**
+   * The market's own category — Metals, Technology, Machinery. Null when no market anywhere has
+   * listed it, which is true of two colonisation commodities and is shown rather than hidden.
+   */
+  category?: string | null;
   remaining: number;
   /** The site's total ask, when the journal has given it. What the three-segment bar divides by. */
   required: number | null;
@@ -2857,6 +2867,12 @@ export const getColonyProject = (
  */
 export interface CarrierManifestLine {
   commodity: string;
+  /**
+   * The market's own category — Metals, Technology, Machinery. Null when no market anywhere has
+   * listed it, which is true of two colonisation commodities and is shown rather than hidden.
+   */
+  category?: string | null;
+
   /** Summed across every build this carrier serves. */
   needed: number;
   /** Aboard this carrier — counted once, however many builds want it. */

@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { PageHeader, PageBody, Section, StatGrid, StatTile } from '../../../../../components/hub-page';
 import { NoAccess, AdminUnavailable } from '../../../app/no-access';
+import { groupByCategory } from '@grims/shared/commodity-category';
 import { getCarrierManifest } from '../../../../../lib/api';
 import { ShoppingList } from '../../[id]/shopping-list';
 
@@ -146,8 +147,23 @@ export default async function CarrierRunPage({
                     </th>
                   </tr>
                 </thead>
-                <tbody className="tabular-nums">
-                  {lines.map((l) => (
+                {/* Same grouping as the needs list and the shopping list — a carrier loadout is
+                    planned in the same shape as the board it is loaded from. */}
+                {groupByCategory(lines.map((l) => ({ ...l, remaining: l.toBuy }))).map((group) => (
+                <tbody className="tabular-nums" key={group.category}>
+                  <tr>
+                    <th
+                      scope="colgroup"
+                      colSpan={3}
+                      className="border-t border-[var(--color-border-hairline)] pt-5 pb-1.5 pr-4 text-left font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--color-brand-orange)]"
+                    >
+                      {group.category}
+                    </th>
+                    <th className="border-t border-[var(--color-border-hairline)] pt-5 pb-1.5 text-right font-mono text-[10px] tabular-nums text-[var(--color-text-secondary)]">
+                      {group.complete ? 'covered' : `${group.outstanding.toLocaleString()} t to buy`}
+                    </th>
+                  </tr>
+                  {group.rows.map((l) => (
                     <tr key={l.commodity}>
                       <td className="border-t border-[var(--color-border-hairline)] py-2.5 pr-4">
                         {l.commodity}
@@ -168,6 +184,7 @@ export default async function CarrierRunPage({
                     </tr>
                   ))}
                 </tbody>
+                ))}
               </table>
             </div>
           )}

@@ -7,6 +7,7 @@ import {
   type PrismaClient,
 } from '@grims/db';
 import { AppError, cleanStationName, ErrorCode, Permission } from '@grims/shared';
+import { commodityCategories, withCategories } from './commodity-categories.js';
 import { DEFAULT_TIMEZONE, isValidTimezone } from '../common/timezone.js';
 import type { AclDbService } from '../authz/acl-db.service.js';
 import type { MarketStore, PlaceQuery } from './market.store.js';
@@ -112,6 +113,11 @@ export interface ProjectRow {
 
 export interface NeedDetail {
   readonly commodity: string;
+  /**
+   * The market's own category — Metals, Technology, Machinery. Null when no market anywhere has ever
+   * listed it, which is true of two colonisation commodities and worth saying rather than hiding.
+   */
+  readonly category?: string | null;
   readonly remaining: number;
   readonly required: number | null;
   /**
@@ -226,6 +232,8 @@ export interface HaulerTally {
 /** Where to buy what a project still needs. The thing a squadron project gets and a personal one does not. */
 export interface ShoppingRow {
   readonly commodity: string;
+  /** The market's own category, so the buy plan groups like the needs list it serves. */
+  readonly category?: string | null;
   readonly remaining: number;
   /** The site's total ask, when the journal has given it. What the three-segment bar divides by. */
   readonly required: number | null;
@@ -668,14 +676,23 @@ export class ColonyService {
     };
   }
 
-  /** What a project still needs, biggest shortfall first. */
+  /**
+   * What a project still needs, biggest shortfall first.
+   *
+   * ★ THE CATEGORY RIDES ALONG — SQUADRON OWNER, 2026-08-10 ★
+   *
+   * "break down all materials into their respective market categories ... so that its easier to
+   * search for these commodities". Five surfaces group by it, and they all read it from here rather
+   * than each looking it up, so a commodity cannot be Metals on the website and Technology in the
+   * app. One extra field on a row that was already being sent; no second round trip.
+   */
   async needs(projectId: string): Promise<readonly NeedDetail[]> {
     const rows = await this.db.colonyNeed.findMany({
       where: { projectId },
       orderBy: { remaining: 'desc' },
       select: { commodity: true, remaining: true, required: true, observedAt: true },
     });
-    return rows;
+    return withCategories(rows, await commodityCategories(this.db));
   }
 
   /**
@@ -1061,6 +1078,8 @@ export class ColonyService {
     const needs = await loadNeeds();
     const now = Date.now();
     const cover = opts.carrierCover ?? {};
+    // Same map the needs list used, so the buy plan groups in the same shape as the thing it buys for.
+    const categories = await commodityCategories(this.db);
 
     const query: Omit<PlaceQuery, 'near'> = {
       limit: 1,
@@ -1122,6 +1141,7 @@ export class ColonyService {
          */
         return {
           commodity: need.commodity,
+          category: categories.get(need.commodity) ?? null,
           remaining: need.remaining,
           required: need.required,
           onCarriers,
@@ -1207,6 +1227,7 @@ export class ColonyService {
 
       return {
         commodity: need.commodity,
+        category: categories.get(need.commodity) ?? null,
         remaining: need.remaining,
         required: need.required,
         onCarriers,

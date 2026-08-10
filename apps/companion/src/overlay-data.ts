@@ -381,6 +381,12 @@ function buildPanel(input: OverlayInput): OverlayData['build'] {
       needs: current.needs
         .map((n) => ({
           commodity: n.commodity,
+          /*
+           * Only the HUB path knows the category — it comes down with the needs. The journal path
+           * below reads a depot directly and has no market data at all, which is why the overlay
+           * groups only when it actually has categories to group by.
+           */
+          category: n.category ?? null,
           // Floored for the same reason as the depot path: an over-delivered line can report a
           // negative remainder, and "-40 t still needed" is worse than saying nothing.
           remaining: Math.max(0, n.remaining),

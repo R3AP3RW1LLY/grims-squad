@@ -1,3 +1,4 @@
+import { groupByCategory } from '@grims/shared/commodity-category';
 import type { ColonyNeed } from '../../../../lib/api';
 
 /**
@@ -193,6 +194,21 @@ function NeedRows({
   rows: readonly ColonyNeed[];
   carrierCover: Readonly<Record<string, number>>;
 }) {
+  /*
+   * ★ GROUPED THE WAY THE COMMODITY BOARD IS GROUPED — SQUADRON OWNER, 2026-08-10 ★
+   *
+   * "break down all materials into their respective market categories ... so that its easier to
+   * search for these commodities"
+   *
+   * The case is a member docked at a station with the market on one screen and this on the other.
+   * Elite's board is grouped; a flat list of thirty commodities is not, so every line was a fresh
+   * hunt down an alphabetical list that matched nothing in front of them.
+   *
+   * The grouping itself is in @grims/shared, shared with the companion, its shopping list and the
+   * in-game overlay — five surfaces that a member reads side by side and would notice disagreeing.
+   */
+  const groups = groupByCategory(rows);
+
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[520px] border-collapse text-sm">
@@ -212,64 +228,80 @@ function NeedRows({
             </th>
           </tr>
         </thead>
-        <tbody>
-          {rows.map((n) => {
-            // A bar drawn with an unknown total claims nothing has been delivered, which is a
-            // different statement from "we do not know the total" — so it stays "unknown".
-            const knowsTotal = n.required !== null && n.required > 0;
-            const staged = Math.min(n.remaining, Math.max(0, carrierCover[n.commodity] ?? 0));
-            const done = n.remaining <= 0;
-
-            return (
-              <tr
-                key={n.commodity}
-                className={`hover:bg-[var(--color-surface-panel)] ${done ? 'opacity-70' : ''}`}
+        {groups.map((group) => (
+          <tbody key={group.category}>
+            <tr>
+              <th
+                scope="colgroup"
+                colSpan={3}
+                className="border-t border-[var(--color-border-hairline)] pt-5 pb-1.5 pr-4 text-left font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--color-brand-orange)]"
               >
-                <td className={TD}>
-                  <a
-                    href={`/logistics/commodities/${encodeURIComponent(n.commodity)}`}
-                    className="text-[var(--color-text-primary)] no-underline hover:underline"
-                  >
-                    {n.commodity}
-                  </a>
-                </td>
-                <td className={`${TD} text-right font-mono tabular-nums`}>
-                  {done ? (
-                    <span className="text-[var(--color-semantic-success)]">done</span>
-                  ) : (
-                    `${n.remaining.toLocaleString()} t`
-                  )}
-                  {staged > 0 ? (
-                    <span
-                      className="ml-1.5 text-[11px] text-[var(--color-semantic-warning)]"
-                      title="Effective tonnes already aboard the build's attached carriers."
-                    >
-                      {staged.toLocaleString()} t aboard
-                    </span>
-                  ) : null}
-                </td>
-                <td
-                  className={`${TD} text-right font-mono tabular-nums text-[var(--color-text-secondary)]`}
+                {group.category}
+              </th>
+              <th className="border-t border-[var(--color-border-hairline)] pt-5 pb-1.5 text-right font-mono text-[10px] tabular-nums text-[var(--color-text-secondary)]">
+                {/* The heading carries its own number so a group can be judged without reading it. */}
+                {group.complete ? 'complete' : `${group.outstanding.toLocaleString()} t to go`}
+              </th>
+            </tr>
+
+            {group.rows.map((n) => {
+              // A bar drawn with an unknown total claims nothing has been delivered, which is a
+              // different statement from "we do not know the total" — so it stays "unknown".
+              const knowsTotal = n.required !== null && n.required > 0;
+              const staged = Math.min(n.remaining, Math.max(0, carrierCover[n.commodity] ?? 0));
+              const done = n.remaining <= 0;
+
+              return (
+                <tr
+                  key={n.commodity}
+                  className={`hover:bg-[var(--color-surface-panel)] ${done ? 'opacity-70' : ''}`}
                 >
-                  {n.required === null
-                    ? '—'
-                    : `${(n.required - n.remaining).toLocaleString()} / ${n.required.toLocaleString()}`}
-                </td>
-                <td className={TD}>
-                  {!knowsTotal ? (
-                    <span className="text-[11px] text-[var(--color-text-secondary)]">unknown</span>
-                  ) : (
-                    <SegmentedBar
-                      delivered={(n.required ?? 0) - n.remaining}
-                      staged={staged}
-                      required={n.required ?? 0}
-                    />
-                  )}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
+                  <td className={TD}>
+                    <a
+                      href={`/logistics/commodities/${encodeURIComponent(n.commodity)}`}
+                      className="text-[var(--color-text-primary)] no-underline hover:underline"
+                    >
+                      {n.commodity}
+                    </a>
+                  </td>
+                  <td className={`${TD} text-right font-mono tabular-nums`}>
+                    {done ? (
+                      <span className="text-[var(--color-semantic-success)]">done</span>
+                    ) : (
+                      `${n.remaining.toLocaleString()} t`
+                    )}
+                    {staged > 0 ? (
+                      <span
+                        className="ml-1.5 text-[11px] text-[var(--color-semantic-warning)]"
+                        title="Effective tonnes already aboard the build's attached carriers."
+                      >
+                        {staged.toLocaleString()} t aboard
+                      </span>
+                    ) : null}
+                  </td>
+                  <td
+                    className={`${TD} text-right font-mono tabular-nums text-[var(--color-text-secondary)]`}
+                  >
+                    {n.required === null
+                      ? '—'
+                      : `${(n.required - n.remaining).toLocaleString()} / ${n.required.toLocaleString()}`}
+                  </td>
+                  <td className={TD}>
+                    {!knowsTotal ? (
+                      <span className="text-[11px] text-[var(--color-text-secondary)]">unknown</span>
+                    ) : (
+                      <SegmentedBar
+                        delivered={(n.required ?? 0) - n.remaining}
+                        staged={staged}
+                        required={n.required ?? 0}
+                      />
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        ))}
       </table>
 
       <BarLegend />

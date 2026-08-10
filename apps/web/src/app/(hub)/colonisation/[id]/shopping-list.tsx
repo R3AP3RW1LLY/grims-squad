@@ -1,3 +1,4 @@
+import { groupByCategory } from '@grims/shared/commodity-category';
 import type { ColonyShoppingRow } from '../../../../lib/api';
 import { CopySystem } from '../../../../components/copy-system';
 import { BarLegend, SegmentedBar } from './needs-table';
@@ -259,118 +260,135 @@ export function ShoppingList({
                   </th>
                 </tr>
               </thead>
-              <tbody>
-                {rows.map((r) => (
-                  <tr key={r.commodity} className="hover:bg-[var(--color-surface-panel)]">
-                    <td className={TD}>
-                      <a
-                        href={`/logistics/commodities/${encodeURIComponent(r.commodity)}`}
-                        className="text-[var(--color-text-primary)] no-underline hover:underline"
-                      >
-                        {r.commodity}
-                      </a>
-                      {/*
-                        The three-segment bar, on the surface where buying is decided: delivered,
-                        aboard attached carriers, still to source. Only when the site has stated a
-                        total — a bar against an unknown total is a claim, not a picture.
-                      */}
-                      {r.required !== null && r.required > 0 ? (
-                        <div className="mt-1.5 max-w-[220px]">
-                          <SegmentedBar
-                            delivered={r.required - r.remaining}
-                            staged={r.onCarriers}
-                            required={r.required}
-                          />
-                        </div>
-                      ) : null}
-                    </td>
-                    <td className={`${TD} text-right font-mono tabular-nums`}>
-                      {r.toBuy.toLocaleString()} t
-                      {r.onCarriers > 0 ? (
-                        <div
-                          className="text-[11px] text-[var(--color-semantic-warning)]"
-                          title="Effective tonnes already aboard the build's attached carriers, subtracted from the quantity to buy."
-                        >
-                          {r.onCarriers.toLocaleString()} t aboard
-                        </div>
-                      ) : null}
-                    </td>
-                    <td className={`${TD} text-[var(--color-text-secondary)]`}>
-                      {r.toBuy === 0 ? (
-                        /*
-                         * ★ FULLY COVERED SAYS SO — IT DOES NOT QUOTE A MARKET ★
-                         *
-                         * Naming a station here would send somebody to buy cargo the squadron
-                         * already owns, which is the exact trip this feature exists to prevent.
-                         */
-                        <span className="text-[var(--color-semantic-success)]">
-                          already aboard the attached carriers — nothing to buy
-                        </span>
-                      ) : r.stationName === null ? (
-                        /*
-                         * ★ NOT A DEAD END — SQUADRON OWNER, 2026-08-03 ★
-                         *
-                         * "if a commodty is listed as 'nobody in range sells this' can we display
-                         * the actual nearest location that does sell it, with an estimated light
-                         * years in distance please."
-                         *
-                         * "Nobody in range" was true and useless: it said the search failed and
-                         * nothing about what to do next. Somebody still has to go and get forty
-                         * thousand tonnes of CMM Composite from somewhere.
-                         */
-                        <div>
-                          <span className="text-[var(--color-semantic-warning)]">
-                            nobody in range sells this
-                          </span>
-                          {r.nearestOutOfRange === null ? null : (
-                            <div className="mt-1 text-[11px] text-[var(--color-text-secondary)]">
-                              nearest is{' '}
-                              <span className="text-[var(--color-text-primary)]">
-                                {r.nearestOutOfRange.stationName}
-                              </span>{' '}
-                              in {r.nearestOutOfRange.systemName}
-                              <CopySystem system={r.nearestOutOfRange.systemName} size="small" />
-                              <span className="ml-2 font-mono tabular-nums">
-                                {r.nearestOutOfRange.distance === null
-                                  ? ''
-                                  : `${r.nearestOutOfRange.distance.toFixed(0)} ly · `}
-                                {r.nearestOutOfRange.price.toLocaleString()} cr ·{' '}
-                                {r.nearestOutOfRange.supply.toLocaleString()} in stock
-                                <Seen at={r.nearestOutOfRange.seenAt} />
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <>
-                          {r.stationName}
-                          <span className="ml-1.5 text-[11px]">
-                            {r.systemName}
-                            {r.distance === null ? '' : ` · ${r.distance.toFixed(0)} ly`}
-                          </span>
-                          {/* The system alone, because the galaxy map searches systems — a station
-                              name pasted into it finds nothing. */}
-                          {r.systemName === null ? null : (
-                            <CopySystem system={r.systemName} size="small" />
-                          )}
-                          <Seen at={r.seenAt} />
-                        </>
-                      )}
-                    </td>
-                    <td className={`${TD} text-right font-mono tabular-nums`}>
-                      {r.price === null ? '—' : r.price.toLocaleString()}
-                    </td>
-                    <td
-                      className={`${TD} text-right font-mono tabular-nums text-[var(--color-text-secondary)]`}
+              {/*
+                ★ GROUPED LIKE THE COMMODITY BOARD — SQUADRON OWNER, 2026-08-10 ★
+
+                The buy plan reads in the same shape as the needs list it serves, and as the board a
+                member is standing in front of. Same pure grouping as every other surface.
+              */}
+              {groupByCategory(rows).map((group) => (
+                <tbody key={group.category}>
+                  <tr>
+                    <th
+                      scope="colgroup"
+                      colSpan={5}
+                      className="border-t border-[var(--color-border-hairline)] pt-5 pb-1.5 pr-4 text-left font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--color-brand-orange)]"
                     >
-                      {r.supply === null ? '—' : `${r.supply.toLocaleString()} t`}
-                    </td>
-                    <td className={`${TD} text-right font-mono tabular-nums`}>
-                      {r.cost === null ? '—' : r.cost.toLocaleString()}
-                    </td>
+                      {group.category}
+                    </th>
                   </tr>
-                ))}
-              </tbody>
+                  {group.rows.map((r) => (
+                    <tr key={r.commodity} className="hover:bg-[var(--color-surface-panel)]">
+                      <td className={TD}>
+                        <a
+                          href={`/logistics/commodities/${encodeURIComponent(r.commodity)}`}
+                          className="text-[var(--color-text-primary)] no-underline hover:underline"
+                        >
+                          {r.commodity}
+                        </a>
+                        {/*
+                          The three-segment bar, on the surface where buying is decided: delivered,
+                          aboard attached carriers, still to source. Only when the site has stated a
+                          total — a bar against an unknown total is a claim, not a picture.
+                        */}
+                        {r.required !== null && r.required > 0 ? (
+                          <div className="mt-1.5 max-w-[220px]">
+                            <SegmentedBar
+                              delivered={r.required - r.remaining}
+                              staged={r.onCarriers}
+                              required={r.required}
+                            />
+                          </div>
+                        ) : null}
+                      </td>
+                      <td className={`${TD} text-right font-mono tabular-nums`}>
+                        {r.toBuy.toLocaleString()} t
+                        {r.onCarriers > 0 ? (
+                          <div
+                            className="text-[11px] text-[var(--color-semantic-warning)]"
+                            title="Effective tonnes already aboard the build's attached carriers, subtracted from the quantity to buy."
+                          >
+                            {r.onCarriers.toLocaleString()} t aboard
+                          </div>
+                        ) : null}
+                      </td>
+                      <td className={`${TD} text-[var(--color-text-secondary)]`}>
+                        {r.toBuy === 0 ? (
+                          /*
+                           * ★ FULLY COVERED SAYS SO — IT DOES NOT QUOTE A MARKET ★
+                           *
+                           * Naming a station here would send somebody to buy cargo the squadron
+                           * already owns, which is the exact trip this feature exists to prevent.
+                           */
+                          <span className="text-[var(--color-semantic-success)]">
+                            already aboard the attached carriers — nothing to buy
+                          </span>
+                        ) : r.stationName === null ? (
+                          /*
+                           * ★ NOT A DEAD END — SQUADRON OWNER, 2026-08-03 ★
+                           *
+                           * "if a commodty is listed as 'nobody in range sells this' can we display
+                           * the actual nearest location that does sell it, with an estimated light
+                           * years in distance please."
+                           *
+                           * "Nobody in range" was true and useless: it said the search failed and
+                           * nothing about what to do next. Somebody still has to go and get forty
+                           * thousand tonnes of CMM Composite from somewhere.
+                           */
+                          <div>
+                            <span className="text-[var(--color-semantic-warning)]">
+                              nobody in range sells this
+                            </span>
+                            {r.nearestOutOfRange === null ? null : (
+                              <div className="mt-1 text-[11px] text-[var(--color-text-secondary)]">
+                                nearest is{' '}
+                                <span className="text-[var(--color-text-primary)]">
+                                  {r.nearestOutOfRange.stationName}
+                                </span>{' '}
+                                in {r.nearestOutOfRange.systemName}
+                                <CopySystem system={r.nearestOutOfRange.systemName} size="small" />
+                                <span className="ml-2 font-mono tabular-nums">
+                                  {r.nearestOutOfRange.distance === null
+                                    ? ''
+                                    : `${r.nearestOutOfRange.distance.toFixed(0)} ly · `}
+                                  {r.nearestOutOfRange.price.toLocaleString()} cr ·{' '}
+                                  {r.nearestOutOfRange.supply.toLocaleString()} in stock
+                                  <Seen at={r.nearestOutOfRange.seenAt} />
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <>
+                            {r.stationName}
+                            <span className="ml-1.5 text-[11px]">
+                              {r.systemName}
+                              {r.distance === null ? '' : ` · ${r.distance.toFixed(0)} ly`}
+                            </span>
+                            {/* The system alone, because the galaxy map searches systems — a station
+                                name pasted into it finds nothing. */}
+                            {r.systemName === null ? null : (
+                              <CopySystem system={r.systemName} size="small" />
+                            )}
+                            <Seen at={r.seenAt} />
+                          </>
+                        )}
+                      </td>
+                      <td className={`${TD} text-right font-mono tabular-nums`}>
+                        {r.price === null ? '—' : r.price.toLocaleString()}
+                      </td>
+                      <td
+                        className={`${TD} text-right font-mono tabular-nums text-[var(--color-text-secondary)]`}
+                      >
+                        {r.supply === null ? '—' : `${r.supply.toLocaleString()} t`}
+                      </td>
+                      <td className={`${TD} text-right font-mono tabular-nums`}>
+                        {r.cost === null ? '—' : r.cost.toLocaleString()}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              ))}
             </table>
           </div>
 
