@@ -1126,16 +1126,29 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
           </Empty>
         ) : (
           <Card>
-            {outstanding.map((n) => (
+            {/*
+              ★ A FINISHED COMMODITY KEEPS ITS ROW — SQUADRON OWNER, 2026-08-09 ★
+
+              "OUR WEBSITE AND COMPANION APP ARE NOT UPDATING WHEN ITEMS ARE DELIVERED ... BLUE
+              DENOTES WHAT IS DELIVERED! THIS IS NOT WORKING AS IT SHOULD"
+
+              It was updating, and that was the problem: the list mapped `outstanding`, so the moment
+              a commodity was finished its row LEFT. Hauling the last 730 t of Steel and watching the
+              Steel row vanish is indistinguishable from the page ignoring the delivery — the bar
+              never went blue because there was no bar left.
+
+              This screen was the less bad of the two. It named the finished commodities in a line of
+              small text underneath, which is a footnote where the owner asked for a full blue bar.
+              Measured on production: 207 of 302 rows across the squadron, 584,108 tonnes of
+              completed work, shown as a comma-separated list or not at all.
+
+              Outstanding first, then the finished ones, each with its bar filled — the record of
+              what the squadron has actually done, in the same place they watched it happen.
+            */}
+            {[...outstanding, ...done].map((n) => (
               <CommodityRow key={n.commodity} need={n} aboard={cover[n.commodity] ?? 0} />
             ))}
             <BarLegendLine />
-            {done.length === 0 ? null : (
-              <p style={{ margin: '10px 0 0', fontSize: '11px', color: C.faint }}>
-                {done.length} commodit{done.length === 1 ? 'y' : 'ies'} fully delivered:{' '}
-                {done.map((n) => n.commodity).join(', ')}
-              </p>
-            )}
             {/*
               ★ WHEN THE SITE ITSELF LAST SAID SO ★
 
@@ -1414,7 +1427,12 @@ function CommodityRow({ need, aboard = 0 }: { need: ColonyNeed; aboard?: number 
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
         <span style={{ fontSize: '13px' }}>{need.commodity}</span>
         <span style={{ fontSize: '13px', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
-          {tonnes(need.remaining)} left
+          {/* "0 t left" is technically true and reads like a shortfall. Finished says finished. */}
+          {need.remaining <= 0 ? (
+            <span style={{ color: C.good }}>done</span>
+          ) : (
+            `${tonnes(need.remaining)} left`
+          )}
           {staged > 0 ? (
             <span
               style={{ marginLeft: '7px', fontSize: '11px', color: C.warn }}

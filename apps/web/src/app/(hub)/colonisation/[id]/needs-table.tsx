@@ -50,6 +50,32 @@ function freshness(needs: readonly ColonyNeed[]): string | null {
  * server's effective figure (manual beats journal beats mirror), capped so the bar never claims
  * more than the site still wants.
  */
+/**
+ * The two filled widths, as percentages.
+ *
+ * Pulled out of the component because this is the arithmetic the legend promises — blue is
+ * delivered, yellow is aboard a carrier — and it is the part that can be wrong while the page still
+ * renders. This repo has no DOM testing library, so logic that matters lives where a test can reach
+ * it rather than inside JSX nobody can assert on.
+ */
+export function barSegments({
+  delivered,
+  staged,
+  required,
+}: {
+  delivered: number;
+  staged: number;
+  required: number;
+}): { deliveredPct: number; stagedPct: number } {
+  const deliveredPct = Math.max(0, Math.min(100, (delivered / required) * 100));
+  return {
+    deliveredPct,
+    // Capped by what is left of the bar: a carrier holding more than the site wants covers it, it
+    // does not make the bar longer than itself.
+    stagedPct: Math.max(0, Math.min(100 - deliveredPct, (staged / required) * 100)),
+  };
+}
+
 export function SegmentedBar({
   delivered,
   staged,
@@ -60,8 +86,7 @@ export function SegmentedBar({
   required: number;
 }) {
   if (required <= 0) return null;
-  const deliveredPct = Math.max(0, Math.min(100, (delivered / required) * 100));
-  const stagedPct = Math.max(0, Math.min(100 - deliveredPct, (staged / required) * 100));
+  const { deliveredPct, stagedPct } = barSegments({ delivered, staged, required });
 
   return (
     <div className="flex h-1.5 w-full overflow-hidden rounded-full bg-[var(--color-surface-panel-sunken)]">
@@ -111,16 +136,63 @@ export function NeedsTable({
     );
   }
 
-  const outstanding = needs.filter((n) => n.remaining > 0);
+  /*
+   * ★ A FINISHED COMMODITY STAYS ON THE TABLE — SQUADRON OWNER, 2026-08-09 ★
+   *
+   * "OUR WEBSITE AND COMPANION APP ARE NOT UPDATING WHEN ITEMS ARE DELIVERED TO THE COLONIZATION
+   * PROJECTS ... BLUE DENOTES WHAT IS DELIVERED! THIS IS NOT WORKING AS IT SHOULD"
+   *
+   * It was updating. That was the problem. This filtered on `remaining > 0`, so the instant a
+   * commodity was finished its row LEFT THE TABLE — and from where a member sits, hauling the last
+   * 730 t of Steel and watching the Steel row vanish is indistinguishable from the page ignoring
+   * the delivery. The bar never went blue because there was no bar left to look at.
+   *
+   * Measured on production the day it was reported: 207 of 302 need rows were being hidden this way,
+   * 584,108 tonnes of completed work. On the build the owner was watching, a member had just
+   * finished six commodities and the page showed none of them.
+   *
+   * So everything the site asked for is listed, and finishing something turns its bar fully blue
+   * instead of deleting the evidence. Outstanding first, because that is what somebody is planning
+   * around; the finished ones settle underneath as the record of what the squadron has done.
+   *
+   * The shopping list still drops them, and should — that one answers "what do I go and buy".
+   */
+  const rows = orderedNeeds(needs);
+  const allDelivered = rows.every((n) => n.remaining <= 0);
 
-  if (outstanding.length === 0) {
-    return (
-      <p className="m-0 text-sm text-[var(--color-semantic-success)]">
-        Everything this site asked for has been delivered.
-      </p>
-    );
-  }
+  return (
+    <>
+      {!allDelivered ? null : (
+        <p className="m-0 mb-4 text-sm text-[var(--color-semantic-success)]">
+          Everything this site asked for has been delivered.
+        </p>
+      )}
+      <NeedRows rows={rows} carrierCover={carrierCover} />
+    </>
+  );
+}
 
+/**
+ * Every commodity the site asked for: outstanding first, then the finished ones.
+ *
+ * ★ NOTHING IS FILTERED OUT, AND THAT IS THE WHOLE FIX ★
+ *
+ * A `remaining > 0` filter deleted a row the moment its commodity was finished, which is what the
+ * owner reported as the page not updating. Ordering is a presentation choice; removal is a lie
+ * about what the squadron has done.
+ */
+export function orderedNeeds(needs: readonly ColonyNeed[]): readonly ColonyNeed[] {
+  return [...needs.filter((n) => n.remaining > 0), ...needs.filter((n) => n.remaining <= 0)];
+}
+
+/** The rows themselves, so a finished build still shows its record rather than an empty panel. */
+function NeedRows({
+  rows,
+  carrierCover,
+}: {
+  rows: readonly ColonyNeed[];
+  carrierCover: Readonly<Record<string, number>>;
+}) {
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[520px] border-collapse text-sm">
@@ -141,14 +213,18 @@ export function NeedsTable({
           </tr>
         </thead>
         <tbody>
-          {outstanding.map((n) => {
+          {rows.map((n) => {
             // A bar drawn with an unknown total claims nothing has been delivered, which is a
             // different statement from "we do not know the total" — so it stays "unknown".
             const knowsTotal = n.required !== null && n.required > 0;
             const staged = Math.min(n.remaining, Math.max(0, carrierCover[n.commodity] ?? 0));
+            const done = n.remaining <= 0;
 
             return (
-              <tr key={n.commodity} className="hover:bg-[var(--color-surface-panel)]">
+              <tr
+                key={n.commodity}
+                className={`hover:bg-[var(--color-surface-panel)] ${done ? 'opacity-70' : ''}`}
+              >
                 <td className={TD}>
                   <a
                     href={`/logistics/commodities/${encodeURIComponent(n.commodity)}`}
@@ -158,7 +234,11 @@ export function NeedsTable({
                   </a>
                 </td>
                 <td className={`${TD} text-right font-mono tabular-nums`}>
-                  {n.remaining.toLocaleString()} t
+                  {done ? (
+                    <span className="text-[var(--color-semantic-success)]">done</span>
+                  ) : (
+                    `${n.remaining.toLocaleString()} t`
+                  )}
                   {staged > 0 ? (
                     <span
                       className="ml-1.5 text-[11px] text-[var(--color-semantic-warning)]"
@@ -195,9 +275,9 @@ export function NeedsTable({
       <BarLegend />
 
       {/* Design principle: every number carries its provenance. This one is the provenance. */}
-      {freshness(needs) === null ? null : (
+      {freshness(rows) === null ? null : (
         <p className="m-0 mt-3 font-mono text-[11px] text-[var(--color-text-secondary)]">
-          {freshness(needs)}
+          {freshness(rows)}
         </p>
       )}
     </div>
