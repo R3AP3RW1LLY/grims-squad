@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Post, Query } from '@nestjs/common';
 import { AppError, ErrorCode } from '@grims/shared';
 import { User, type CurrentUser } from '../auth/current-user.js';
 import { SystemMarksService } from './system-marks.service.js';
@@ -16,7 +16,7 @@ import { SystemMarksService } from './system-marks.service.js';
  */
 @Controller('v1/me/systems')
 export class SystemMarksController {
-  constructor(private readonly marks: SystemMarksService) {}
+  constructor(@Inject(SystemMarksService) private readonly marks: SystemMarksService) {}
 
   #me(caller: CurrentUser | undefined): string {
     if (caller === undefined) {

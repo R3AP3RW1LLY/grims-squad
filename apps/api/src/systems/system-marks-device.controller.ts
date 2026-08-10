@@ -30,7 +30,7 @@ import { SystemMarksService } from './system-marks.service.js';
 @Controller('v1/companion/systems')
 export class SystemMarksDeviceController {
   constructor(
-    private readonly marks: SystemMarksService,
+    @Inject(SystemMarksService) private readonly marks: SystemMarksService,
     @Inject(PAIRING_SERVICE) private readonly pairing: PairingService,
   ) {}
 

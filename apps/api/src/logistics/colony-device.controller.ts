@@ -21,6 +21,7 @@ import { ColonyRosterService } from './colony-roster.service.js';
 import { ColonyCatalogueService } from './colony-catalogue.service.js';
 import { ColonyPlanService } from './colony-plan.service.js';
 import { ColonyCarrierService, carrierCover } from './colony-carrier.service.js';
+import { ColonyPurchasesService } from './colony-purchases.service.js';
 import { MARKET_STORE } from './logistics.tokens.js';
 import type { MarketStore } from './market.store.js';
 
@@ -63,6 +64,9 @@ export class ColonyDeviceController {
     // a route method on this class, and a field of that name would shadow it.
     @Inject(ColonyPlanService) private readonly plans_: ColonyPlanService,
     @Inject(ColonyCarrierService) private readonly carriers: ColonyCarrierService,
+    // The shopping route. The same instance the website's controller uses, so "where do I fly for
+    // this" has one answer rather than one per surface.
+    @Inject(ColonyPurchasesService) private readonly purchases: ColonyPurchasesService,
     @Inject(MARKET_STORE) private readonly market: MarketStore,
     @Inject(PermissionService) private readonly permissions: PermissionService,
     @Inject(PAIRING_SERVICE) private readonly pairing: PairingService,
@@ -400,6 +404,96 @@ export class ColonyDeviceController {
        * progress bar divides by.
        */
       snapshot: readSnapshot(body.snapshot),
+    });
+  }
+
+  /**
+   * The shopping route — where to fly for what this build still needs.
+   *
+   * ★ SQUADRON OWNER, 2026-08-10 ★
+   *
+   * "in the companion app under the new Where the squadron has bought it we get this error: Cannot
+   * GET /v1/companion/colony/projects/.../purchases"
+   *
+   * ★ THE ROUTE SHIPPED TO ONE CONTROLLER AND THE APP TALKS TO THE OTHER ★
+   *
+   * The website's endpoint went on `ColonyController` (`/v1/logistics/colony`). This is a separate
+   * class serving `/v1/companion/colony`, and it had no such route — so the client function, the IPC
+   * channel and the renderer were all correct and all pointed at nothing. Every test on both ends
+   * passed, because each end WAS right; the gap was between them. `companion-route-parity.spec.ts`
+   * now reads both files and fails on exactly this.
+   *
+   * Same service as the website's, so the two cannot disagree about where to send somebody — which
+   * is the whole point of the owner's "must be a mirror".
+   */
+  @Public()
+  @Get('projects/:id/purchases')
+  async purchaseRoute(@Req() req: FastifyRequest, @Param('id') id: string) {
+    await this.#caller(
+      req,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    const scope = await this.purchases.visibleFor(id);
+    // Not an error. A build outside the gate has no catalogue, and the tab omits the panel — the
+    // same answer the website gives, so neither surface has to special-case the other's shape.
+    if (scope === null) return { systemName: null, stations: [], uncovered: [] };
+
+    return this.purchases.forProject(id);
+  }
+
+  /**
+   * Recording a station somebody actually bought at, from the app.
+   *
+   * The one thing no journal can say is "there is thirty thousand tonnes sitting here RIGHT NOW" —
+   * a purchase is proof somebody took some away, a declaration is a claim about what is still there.
+   * The service refuses a fleet carrier by name and says why; that sentence is passed through rather
+   * than replaced, because it tells the member what to do instead.
+   */
+  @Public()
+  @Post('projects/:id/purchases')
+  async declarePurchase(
+    @Req() req: FastifyRequest,
+    @Param('id') id: string,
+    @Body()
+    body: {
+      commodity?: string;
+      stationName?: string;
+      stationSystem?: string;
+      tonnes?: number;
+      price?: number;
+      note?: string;
+    },
+  ) {
+    const me = await this.#caller(
+      req,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    const scope = await this.purchases.visibleFor(id);
+    if (scope === null) {
+      // Refused rather than silently stored: a row written into a catalogue nobody can see is a
+      // member's effort thrown away without telling them.
+      throw new AppError(
+        ErrorCode.RESOURCE_NOT_VISIBLE,
+        'This build does not keep a purchase catalogue.',
+      );
+    }
+
+    const num = (v: unknown): number | null =>
+      typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.trunc(v) : null;
+
+    return this.purchases.declare({
+      systemName: scope.systemName,
+      stationName: body.stationName ?? '',
+      stationSystem: body.stationSystem ?? '',
+      commodity: body.commodity ?? '',
+      tonnes: num(body.tonnes),
+      price: num(body.price),
+      note: typeof body.note === 'string' && body.note.trim() !== '' ? body.note : null,
+      userId: me.userId,
     });
   }
 
