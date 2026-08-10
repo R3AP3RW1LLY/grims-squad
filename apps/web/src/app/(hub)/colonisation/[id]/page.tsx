@@ -138,6 +138,7 @@ export default async function ColonyProjectPage({
     getColonyPurchases(id),
   ]);
   const boughtAt = purchases.state === 'ok' ? purchases.data.stations : [];
+  const notBoughtYet = purchases.state === 'ok' ? (purchases.data.uncovered ?? []) : [];
   const viewerTz = me.user?.timezone ?? 'UTC';
 
   if (read.state === 'forbidden') {
@@ -287,8 +288,11 @@ export default async function ColonyProjectPage({
               {/*
                 Above the market suggestions on purpose. A station a squadmate actually filled up at
                 beats a mirror row from four months ago, and half our market data is older than that.
+
+                It is a ROUTE, not a record: the API has already dropped carriers, settled materials
+                and anything sitting in an attached carrier's hold, and names each material once.
               */}
-              <PurchaseCatalogue stations={boughtAt} />
+              <PurchaseCatalogue stations={boughtAt} uncovered={notBoughtYet} />
               <div className="mt-3">
                 <DeclarePurchase projectId={project.id} />
               </div>

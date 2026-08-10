@@ -2900,12 +2900,19 @@ export const getCarrierManifest = (
 };
 
 /**
- * Where the squadron has actually bought this build's materials, grouped by station.
+ * The shopping ROUTE — where to fly for what this build still needs.
  *
  * ★ ONE DESTINATION THAT FILLS A HOLD ★
  *
  * The shopping list answers one commodity at a time, which is right for planning and wrong for
  * flying. This is keyed on the station: go here, and these are the things you can get.
+ *
+ * ★ AND IT IS A PLAN, NOT A RECORD ★
+ *
+ * The API has already dropped fleet carriers, anything this build no longer needs, and anything
+ * already sitting in an attached carrier — and it names each material at exactly one stop. So this
+ * renders what it is given: two stops both listing Steel would mean a fault upstream, not a display
+ * decision to make here.
  */
 export interface PurchaseLine {
   commodity: string;
@@ -2922,14 +2929,22 @@ export interface PurchaseStation {
   stationName: string;
   /** The STATION's system — what a member pastes into the galaxy map. Never the build's. */
   systemName: string;
+  /** Light years from the build. Null when we cannot place one end of it. */
+  distanceLy: number | null;
   lines: PurchaseLine[];
   lastSeen: string;
 }
 
 export const getColonyPurchases = (
   projectId: string,
-): Promise<AdminRead<{ systemName: string | null; stations: PurchaseStation[] }>> =>
-  getAdmin(`/v1/logistics/colony/projects/${encodeURIComponent(projectId)}/purchases`);
+): Promise<
+  AdminRead<{
+    systemName: string | null;
+    stations: PurchaseStation[];
+    /** Still needed, and on no stop of the route. Shown rather than silently omitted. */
+    uncovered: string[];
+  }>
+> => getAdmin(`/v1/logistics/colony/projects/${encodeURIComponent(projectId)}/purchases`);
 
 /** A published project, by its token. No session: the token is the capability. */
 export const getSharedColonyProject = (
