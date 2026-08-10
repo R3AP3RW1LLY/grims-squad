@@ -621,4 +621,41 @@ if [[ -f "$ANNOUNCE_ONCE" ]]; then
   fi
 fi
 
+# ─────────────────────────────────────────────────────────── 9. entrypoint
+#
+# ★ THE BOX RAN A DEPLOY SCRIPT FROM 30 JULY FOR ELEVEN DAYS — FOUND 2026-08-10 ★
+#
+# `/srv/grims/deploy.sh` was a COPY of this file, taken once and never taken again. This file kept
+# improving; the box's copy did not, and nothing anywhere compared them. What the box was missing by
+# the time anybody looked:
+#
+#   - the backup pruning, which is why 61 dumps and 101 GB had piled up on a disk that also holds
+#     Postgres
+#   - every required-variable check added since — each of which exists because unset is a SILENCE
+#   - reading PUBLIC_URL from the env file, so its health gate probed the old sslip.io hostname and
+#     pronounced the site healthy by asking a name members no longer use
+#   - the changelog and announcement steps entirely
+#
+# A deploy still ran, still said "no downtime", and was telling the truth about the part it knew.
+# That is the shape of the thing: a mirror that drifts does not fail, it just quietly stops doing
+# the newest half of its job.
+#
+# So the entrypoint is now `deploy-bootstrap.sh` — a file with no deploy logic in it, which fetches
+# and execs THIS script from the ref being deployed. It cannot go stale because there is nothing in
+# it to go stale. And this step keeps it installed, so running the repo copy by hand repairs the
+# entrypoint rather than bypassing it.
+#
+# Last, and non-fatal, for the same reason every record step is: the site is already verified up,
+# and a deploy that succeeded must not be reported as failed over its own housekeeping.
+BOOTSTRAP="$REPO/infra/scripts/deploy-bootstrap.sh"
+ENTRYPOINT=/srv/grims/deploy.sh
+if [[ -r $BOOTSTRAP ]] && ! cmp -s "$BOOTSTRAP" "$ENTRYPOINT"; then
+  say "Repairing the deploy entrypoint"
+  if install -m 0700 "$BOOTSTRAP" "$ENTRYPOINT"; then
+    ok "$ENTRYPOINT now bootstraps this script instead of being a copy of it"
+  else
+    warn "could not update $ENTRYPOINT — it is a stale copy; install $BOOTSTRAP over it by hand"
+  fi
+fi
+
 say "Deployed ${TARGET_SHA:0:8} with no downtime"
