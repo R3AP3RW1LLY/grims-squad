@@ -104,6 +104,15 @@ declare global {
 
       /** Fleet carriers helping with a build, and what each is holding. */
       carriers(id: string, q: string): Promise<Answer<{ carriers: CarrierMatch[] }>>;
+      /*
+       * One carrier's whole run. Takes a MARKET ID and no project, because a carrier holds one
+       * hold and the point is to subtract it once across every build it serves rather than once
+       * per build — which is what reading three project screens and adding them up does.
+       */
+      carrierManifest(
+        marketId: string,
+        opts?: { near?: string; withinLy?: number; largePad?: boolean; sort?: string },
+      ): Promise<Answer<CarrierManifestData>>;
       carrierAdd(
         id: string,
         body: { marketId: string; isSquadron: boolean },
@@ -177,6 +186,14 @@ export interface Delivery {
   readonly commander: string;
   readonly commodity: string;
   readonly amount: number;
+}
+
+/** One carrier's combined run: every build it serves, added up once. */
+export interface CarrierManifestData {
+  carrier: { marketId: string; name: string; callsign: string | null };
+  projects: Array<{ id: string; title: string; systemName: string }>;
+  lines: Array<{ commodity: string; needed: number; aboard: number; toBuy: number }>;
+  shopping: ColonyShoppingRow[];
 }
 
 export interface ProjectDetailData {
@@ -810,6 +827,12 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
   const [data, setData] = useState<ProjectDetailData | null>(null);
   const [error, setError] = useState<string | null>(null);
   /*
+   * The carrier whose combined run is open, or null for this build's own screen. Held here rather
+   * than inside CarrierPanel because the run REPLACES the project view — a panel cannot unmount the
+   * screen containing it.
+   */
+  const [runMarketId, setRunMarketId] = useState<string | null>(null);
+  /*
    * ★ WHICH WAY THE TIME CHART IS STACKED — SQUADRON OWNER, 2026-08-02 ★
    *
    * Both cuts of the same bars, and they answer different questions. By commodity: what went in on
@@ -907,6 +930,21 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
     // Filters are a property of the request, so changing one re-runs the whole read rather than
     // filtering a list the hub already narrowed.
   }, [id, filters]);
+
+  /*
+   * The combined run REPLACES this screen, keyed so opening a second carrier resets its state
+   * rather than showing the first one's numbers until the fetch lands — the same reasoning as the
+   * key on ProjectDetail itself.
+   */
+  if (runMarketId !== null) {
+    return (
+      <CarrierRun
+        key={runMarketId}
+        marketId={runMarketId}
+        onBack={() => setRunMarketId(null)}
+      />
+    );
+  }
 
   if (error !== null) {
     return (
@@ -1290,6 +1328,7 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
           canManage={data.can.manage}
           isCrew={data.can.isCrew === true}
           onChanged={() => void reloadDetail()}
+          onOpenRun={setRunMarketId}
         />
       )}
 
@@ -1458,6 +1497,166 @@ function CommodityRow({ need, aboard = 0 }: { need: ColonyNeed; aboard?: number 
   );
 }
 
+/**
+ * One carrier's whole run: every build it serves, added up once.
+ *
+ * ★ SQUADRON OWNER, 2026-08-09 ★
+ *
+ * "it can be active on many projects and it will give me an aggregated total of all materials needed
+ * to get all the builds completed if i am buying and storing on a fleet carrier"
+ *
+ * ★ WHY THE APP NEEDS THIS MORE THAN THE WEBSITE DOES ★
+ *
+ * The website is where the run gets planned. This is what is open while it is being flown, beside
+ * the commodity market somebody is standing in — which is the moment "how much of this do I actually
+ * need" gets asked.
+ *
+ * ★ AND WHY THE NUMBER DIFFERS FROM THE PROJECT SCREENS ★
+ *
+ * A carrier holds ONE hold. Each build it serves reports the whole of that hold as its own cover,
+ * correctly, because each is answering "what do the carriers attached to me hold". Opening three
+ * builds and adding them counts the same cargo three times. This subtracts it once — on the hub, by
+ * the same method the website calls, so the two cannot disagree.
+ */
+function CarrierRun({
+  marketId,
+  onBack,
+}: {
+  marketId: string;
+  onBack: () => void;
+}): JSX.Element {
+  const [data, setData] = useState<CarrierManifestData | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    void window.colony.carrierManifest(marketId).then((a) => {
+      if (!live) return;
+      if (a.ok) {
+        setData(a.data);
+        setError(null);
+      } else {
+        setError(a.error);
+      }
+    });
+    return () => {
+      live = false;
+    };
+  }, [marketId]);
+
+  if (error !== null) {
+    return (
+      <div>
+        <Button onClick={onBack}>← Back</Button>
+        <div style={{ marginTop: '14px' }}>
+          <Problem>{error}</Problem>
+        </div>
+      </div>
+    );
+  }
+
+  if (data === null) {
+    return (
+      <div>
+        <Button onClick={onBack}>← Back</Button>
+        <div style={{ marginTop: '14px' }}>
+          <Empty>Loading…</Empty>
+        </div>
+      </div>
+    );
+  }
+
+  const needed = data.lines.reduce((sum, l) => sum + l.needed, 0);
+  const aboard = data.lines.reduce((sum, l) => sum + Math.min(l.needed, l.aboard), 0);
+  const toBuy = data.lines.reduce((sum, l) => sum + l.toBuy, 0);
+
+  return (
+    <div>
+      <Button onClick={onBack}>← Back</Button>
+
+      <h2 style={{ margin: '14px 0 4px', fontSize: '17px' }}>
+        {data.carrier.callsign === null
+          ? data.carrier.name
+          : `${data.carrier.name} · ${data.carrier.callsign}`}
+      </h2>
+      <p style={{ margin: '0 0 14px', fontSize: '12px', color: C.dim }}>
+        {data.projects.length === 1
+          ? 'Everything the build this carrier serves still needs'
+          : `Everything the ${data.projects.length} builds this carrier serves still need, added up once`}
+      </p>
+
+      <Card>
+        <Row left="Builds served" right={String(data.projects.length)} />
+        <Row left="Still needed" right={tonnes(needed)} />
+        <Row left="Aboard" right={tonnes(aboard)} />
+        <Row left="Left to buy" right={tonnes(toBuy)} />
+      </Card>
+
+      <Section title="The builds this carrier is on">
+        {data.projects.length === 0 ? (
+          <Empty>
+            This carrier is not attached to any build yet. Attach it from a project&rsquo;s carriers
+            panel and its needs appear here.
+          </Empty>
+        ) : (
+          <Card>
+            {data.projects.map((p) => (
+              <Row key={p.id} left={p.title} right={p.systemName} />
+            ))}
+          </Card>
+        )}
+      </Section>
+
+      <Section title="Combined manifest">
+        {data.lines.length === 0 ? (
+          <Empty>Nothing outstanding. Every build this carrier serves has what it needs.</Empty>
+        ) : (
+          <Card>
+            {data.lines.map((l) => (
+              <div key={l.commodity} style={{ padding: '6px 0', borderTop: `1px solid ${C.hairline}` }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
+                  <span style={{ fontSize: '13px' }}>{l.commodity}</span>
+                  <span
+                    style={{ fontSize: '13px', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}
+                  >
+                    {l.toBuy <= 0 ? (
+                      <span style={{ color: C.good }}>covered</span>
+                    ) : (
+                      `${tonnes(l.toBuy)} to buy`
+                    )}
+                  </span>
+                </div>
+                <div style={{ marginTop: '4px' }}>
+                  {/* Nothing is delivered from a carrier's point of view — the whole bar is the
+                      yellow "aboard" segment against what the builds still want. */}
+                  <Bar done={0} total={l.needed} staged={Math.min(l.needed, l.aboard)} />
+                </div>
+                <p style={{ margin: '3px 0 0', fontSize: '11px', color: C.faint }}>
+                  {l.needed.toLocaleString()} wanted
+                  {l.aboard > 0 ? ` · ${Math.min(l.needed, l.aboard).toLocaleString()} aboard` : ''}
+                </p>
+              </div>
+            ))}
+            <BarLegendLine />
+          </Card>
+        )}
+      </Section>
+
+      <Section title="Where to buy it">
+        {data.shopping.length === 0 ? (
+          <Empty>Set an origin on a build&rsquo;s shopping list to price this run.</Empty>
+        ) : (
+          <Card>
+            {data.shopping.map((r) => (
+              <ShoppingRow key={r.commodity} row={r} />
+            ))}
+          </Card>
+        )}
+      </Section>
+    </div>
+  );
+}
+
 /** The legend the segmented bars earn — once per list, not once per row. */
 function BarLegendLine(): JSX.Element {
   const swatch = (color: string): JSX.CSSProperties => ({
@@ -1576,6 +1775,7 @@ function CarrierPanel({
   canManage,
   isCrew,
   onChanged,
+  onOpenRun,
 }: {
   projectId: string;
   carriers: readonly AttachedCarrier[];
@@ -1586,6 +1786,8 @@ function CarrierPanel({
   /** Declaring a hold is crew work; the pen is drawn only for members on the roster. */
   isCrew: boolean;
   onChanged: () => void;
+  /** Opens the carrier's combined run — see the button below. */
+  onOpenRun: (marketId: string) => void;
 }): JSX.Element {
   /** What is in the boxes. Six characters, no dash — the dash is drawn, never stored. */
   const [callsign, setCallsign] = useState('');
@@ -1688,6 +1890,18 @@ function CarrierPanel({
                 </span>
                 <span style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                   <span style={{ fontSize: '12px', color: C.dim }}>{tonnes(c.totalTonnes)}</span>
+                  {/*
+                    ★ THE RUN THIS CARRIER IS ACTUALLY ON — SQUADRON OWNER, 2026-08-09 ★
+
+                    A carrier is rarely serving one build. This screen can only answer "what is
+                    aboard for THIS one", and adding that answer up across the builds it serves
+                    double-counts the hold — the cargo can only be delivered once.
+
+                    One tap from here, rather than something a member has to know exists. The route
+                    and the bridge shipped before this button did, which made it a feature nobody
+                    could reach — the same shape as three others found in this codebase.
+                  */}
+                  <Button onClick={() => onOpenRun(c.marketId)}>Combined run</Button>
                   {/* Whoever attached it, or an officer. Anybody being able to detach anybody's
                       carrier would let one member quietly remove twenty thousand tonnes another
                       was counting on. */}

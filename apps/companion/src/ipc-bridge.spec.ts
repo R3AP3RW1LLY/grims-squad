@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -82,5 +82,80 @@ describe('the IPC bridge is joined up at both ends', () => {
     const seen = new Set<string>();
     const duplicates = handled().filter((c) => (seen.has(c) ? true : (seen.add(c), false)));
     expect(duplicates, `registered more than once: ${duplicates.join(', ')}`).toEqual([]);
+  });
+});
+
+/**
+ * ★ THE LAYER THE GUARD ABOVE DOES NOT COVER — ADDED 2026-08-09 ★
+ *
+ * The checks above prove `main.ts` and `preload.ts` agree. They said nothing about whether anything
+ * in the WINDOW ever calls what the bridge exposes — and that is exactly the gap the combined-run
+ * feature fell into on the day the guard above was written: an API route, a hub client, an
+ * `ipcMain.handle` and a `preload.ts` entry all shipped, and no renderer file called any of it. The
+ * app had the plumbing and nothing to press.
+ *
+ * Four for four on the same failure now: `enrichStationFromDock` with no caller, the freight filters
+ * with no bridge entry, the N+1 with no measurement, and this.
+ *
+ * ★ WHY AN ALLOWLIST RATHER THAN A FLAT RULE ★
+ *
+ * Seven methods were already unused when this was written. Some are probably dead and some may be
+ * called in ways this cannot see; either way, deleting them is not this test's business and failing
+ * on them would mean switching the test off. They are listed so the CURRENT state is the baseline
+ * and an eighth cannot appear quietly.
+ *
+ * Removing a name from this list when its caller lands is the point. It is meant to shrink.
+ */
+const KNOWN_UNCALLED: readonly string[] = [
+  'resendHistory',
+  'chooseJournalFolder',
+  'preview',
+  'refreshSettings',
+  'valuation',
+  'at',
+  'planRemove',
+];
+
+/** Method names the preload bridge hands to the window. */
+function exposedMethods(): string[] {
+  return [...read('preload.ts').matchAll(/^ {2}([a-zA-Z][a-zA-Z0-9]*)\s*:\s*\(/gm)].map(
+    (m) => m[1] ?? '',
+  );
+}
+
+describe('what the bridge exposes, the window actually uses', () => {
+  it('★ MANDATORY: no NEW bridge method ships without a caller ★', () => {
+    const dir = join(process.cwd(), 'src', 'renderer');
+    const renderer = readdirSync(dir)
+      .filter((f) => f.endsWith('.tsx') || f.endsWith('.ts'))
+      .map((f) => readFileSync(join(dir, f), 'utf8'))
+      .join('\n');
+
+    const orphans = [...new Set(exposedMethods())]
+      .filter((name) => !renderer.includes(`.${name}(`))
+      .filter((name) => !KNOWN_UNCALLED.includes(name));
+
+    expect(
+      orphans,
+      'These are exposed on the bridge and no renderer file calls them, so the feature exists and ' +
+        'nobody can reach it. Either wire the screen or do not ship the bridge entry.\n\n' +
+        orphans.join('\n'),
+    ).toEqual([]);
+  });
+
+  it('the allowlist does not outlive what it describes', () => {
+    // A name that HAS gained a caller must leave the list, or the list slowly stops meaning
+    // anything and starts hiding real orphans.
+    const dir = join(process.cwd(), 'src', 'renderer');
+    const renderer = readdirSync(dir)
+      .filter((f) => f.endsWith('.tsx') || f.endsWith('.ts'))
+      .map((f) => readFileSync(join(dir, f), 'utf8'))
+      .join('\n');
+
+    const nowCalled = KNOWN_UNCALLED.filter((name) => renderer.includes(`.${name}(`));
+    expect(
+      nowCalled,
+      `these now have callers and should be removed from KNOWN_UNCALLED: ${nowCalled.join(', ')}`,
+    ).toEqual([]);
   });
 });
