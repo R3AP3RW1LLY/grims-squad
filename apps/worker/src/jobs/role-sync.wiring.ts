@@ -49,6 +49,21 @@ export class PrismaRoleSyncStore implements IRoleSyncStore {
     return rows.map((r) => r.role.key);
   }
 
+  /**
+   * Every role the member holds, whatever granted it.
+   *
+   * Unscoped by source ON PURPOSE — see IRoleSyncStore.heldGrants. Scoping this the way
+   * `discordGrants` is scoped is precisely the bug: a rank the promotion engine wrote as `system`
+   * was invisible here, so it was granted again every sixty seconds, for ever.
+   */
+  async heldGrants(userId: string): Promise<readonly string[]> {
+    const rows = await this.db.userRole.findMany({
+      where: { userId },
+      select: { role: { select: { key: true } } },
+    });
+    return rows.map((r) => r.role.key);
+  }
+
   async grant(userId: string, roleKey: string, source: GrantSource): Promise<void> {
     const role = await this.db.role.findUnique({ where: { key: roleKey }, select: { id: true } });
     // A mapping pointing at a role that no longer exists is a configuration

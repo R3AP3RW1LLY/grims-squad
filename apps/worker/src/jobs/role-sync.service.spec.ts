@@ -174,3 +174,83 @@ describe('cache invalidation', () => {
     expect(store.invalidated).toEqual([]);
   });
 });
+
+describe('a rank the promotion engine granted', () => {
+  /**
+   * ★ THE INFINITE RE-GRANT LOOP, FOUND IN PRODUCTION 2026-08-11 ★
+   *
+   * Within a minute of role-sync being switched on, the daemon logged this on every single tick:
+   *
+   *     daemon: role sync — 3 granted, 0 revoked, 0 failed of 20
+   *
+   * The three were exactly the members promoted an hour earlier. It wrote three `role.grant` audit
+   * rows a minute — 4,320 a day — and would have done so for ever.
+   *
+   * ★ WHY IT HAPPENS, AND WHY THE OBVIOUS FIX IS FORBIDDEN ★
+   *
+   * The promotion engine writes the rank row with source `system`. `discordGrants` deliberately
+   * reads only source `discord`, so `held` never contains it and `granted` never empties. `grant`
+   * then upserts with `update: {}` — which is CORRECT and load-bearing: re-granting must never move
+   * `grantedAt`, because promotion eligibility counts qualifying months from that timestamp and
+   * touching it every minute would reset every member's tenure for ever.
+   *
+   * So the row is never updated, the source stays `system`, and the loop cannot break itself.
+   *
+   * ★ THE FIX KEEPS BOTH INVARIANTS ★
+   *
+   * The two questions are separated. "Do they already hold this?" is asked of EVERY grant whatever
+   * its source, so nothing is granted or audited twice. "What may this service revoke?" is still
+   * asked only of `discord` grants, so a manual or system grant survives a Discord revocation.
+   */
+
+  it('★ MANDATORY: a rank already held via another source is NOT re-granted ★', async () => {
+    const store = new InMemoryRoleSyncStore();
+    store.addMapping('discord-sergeant', 'rank_sergeant');
+    // Exactly what the promotion engine leaves behind.
+    store.grantSync('u1', 'rank_sergeant', 'system');
+
+    const svc = new RoleSyncService(store);
+    const first = await svc.sync('u1', ['discord-sergeant']);
+
+    expect(first.granted, 'already held — nothing to grant').toEqual([]);
+    expect(store.audit.filter((a) => a.action === 'role.grant'), 'and nothing to audit').toEqual([]);
+  });
+
+  it('★ MANDATORY: it converges — the second run grants nothing ★', async () => {
+    /*
+     * The property the loop violated. Whatever the first run does, a second run over unchanged
+     * inputs must be silent. This is what would have caught it: the old code passed a single-run
+     * test and failed on the second tick, sixty seconds later, in production.
+     */
+    const store = new InMemoryRoleSyncStore();
+    store.addMapping('discord-sergeant', 'rank_sergeant');
+
+    const svc = new RoleSyncService(store);
+    const first = await svc.sync('u1', ['discord-sergeant']);
+    const second = await svc.sync('u1', ['discord-sergeant']);
+
+    expect(first.granted, 'the first run does the work').toEqual(['rank_sergeant']);
+    expect(second.granted, 'the second must find nothing left to do').toEqual([]);
+    expect(second.revoked).toEqual([]);
+    expect(
+      store.audit.filter((a) => a.action === 'role.grant'),
+      'one grant, one audit row — not one per tick for ever',
+    ).toHaveLength(1);
+  });
+
+  it('★ MANDATORY: a system grant still survives Discord removing the role ★', async () => {
+    /*
+     * The safety story that must not be traded away for the fix. Revocation stays scoped to
+     * `discord` grants, so the rank the promotion engine awarded is not deleted because somebody
+     * edited a Discord role.
+     */
+    const store = new InMemoryRoleSyncStore();
+    store.addMapping('discord-sergeant', 'rank_sergeant');
+    store.grantSync('u1', 'rank_sergeant', 'system');
+
+    const svc = new RoleSyncService(store);
+    await svc.sync('u1', []); // Discord no longer says sergeant.
+
+    expect(store.rolesOf('u1'), 'the promotion survives').toContain('rank_sergeant');
+  });
+});
