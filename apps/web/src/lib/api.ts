@@ -2833,6 +2833,48 @@ export interface ColonyPlan {
   economies: PlanEconomies;
   /** Per chosen site, what its market would trade. Empty on the board — bodies are not loaded there. */
   markets: PlanSiteMarket[];
+
+  /**
+   * What the SYSTEM trades, rolled up from its stations, and how much of its own bill it covers.
+   *
+   * Optional so a page rendered against an older hub does not throw; the section simply does not
+   * appear, which is how the tab behaved before this existed.
+   */
+  trade?: SystemTrade;
+  selfSufficiency?: SelfSufficiency;
+  /** What the GALAXY pays today — a reference, never a prediction about your own stations. */
+  prices?: CommodityPrice[];
+}
+
+export interface SystemTradeLine {
+  commodity: string;
+  strength: 'major' | 'minor';
+  /** Which economies put it on the board. The audit trail for one row of the market. */
+  economies: string[];
+  siteIds: string[];
+}
+
+export interface SystemTrade {
+  sells: SystemTradeLine[];
+  buys: SystemTradeLine[];
+  /** Sold AND bought — one station exports what another imports. A system feeding itself. */
+  internal: string[];
+}
+
+export interface SelfSufficiency {
+  covered: Array<{ commodity: string; remaining: number }>;
+  notCovered: Array<{ commodity: string; remaining: number }>;
+  coveredTonnes: number;
+  outstandingTonnes: number;
+  pctCovered: number | null;
+}
+
+export interface CommodityPrice {
+  commodity: string;
+  avgSell: number | null;
+  avgBuy: number | null;
+  sellMarkets: number;
+  observedAt: string | null;
 }
 
 /** A proposed build order, the tonnage it saves, and whether it is worth reading. */

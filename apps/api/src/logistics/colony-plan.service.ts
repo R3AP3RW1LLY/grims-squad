@@ -15,6 +15,12 @@ import {
   type SimResult,
 } from '@grims/shared';
 import { fetchSystemBodies, type EdsmSystemBodies } from '@grims/ed-clients';
+import {
+  selfSufficiency,
+  systemTrade,
+  type SelfSufficiency,
+  type SystemTrade,
+} from '@grims/shared';
 
 /**
  * Planning a whole system before any of it is built.
@@ -160,6 +166,38 @@ export interface PlanDetail {
    * answer, never two computations that drift. Empty on the board, where bodies are not loaded.
    */
   readonly markets: ReadonlyArray<{ readonly siteId: string; readonly market: PredictedMarket }>;
+
+  /**
+   * What the SYSTEM trades, rolled up from its stations, and how much of its own bill it covers.
+   *
+   * ★ SQUADRON OWNER, 2026-08-11 ★
+   *
+   * "a section on what our system will produce ... an indepth view on everything about it"
+   *
+   * Every line here was already computed by `predictMarket` and only ever rendered as chips under
+   * individual sites. Nothing asked what the system as a whole would trade, and nothing had ever
+   * put the economy model and the build's own shopping list in the same sentence.
+   */
+  readonly trade: SystemTrade;
+  /** What the finished system would supply against what its own builds still want. */
+  readonly selfSufficiency: SelfSufficiency;
+  /**
+   * What the galaxy pays for each traded commodity today.
+   *
+   * ★ A REFERENCE, NOT A PREDICTION — THE OWNER'S OWN CHOICE ★
+   *
+   * We do not model Elite's pricing: it moves with supply, demand and economy strength, none of
+   * which this simulates. So these are observed figures from `commodity_snapshots` — what the
+   * galaxy actually trades at — and the page labels them as such. A guessed price sends somebody on
+   * a worthless run, and they do not come back to check whether the tool was right.
+   */
+  readonly prices: ReadonlyArray<{
+    readonly commodity: string;
+    readonly avgSell: number | null;
+    readonly avgBuy: number | null;
+    readonly sellMarkets: number;
+    readonly observedAt: Date | null;
+  }>;
 }
 
 /** Injected so the service is testable without a network. */
@@ -432,6 +470,21 @@ export class ColonyPlanService {
     // Markets follow from the economies, so they cannot join the parallel block above.
     const markets = await this.#markets(sites, economies);
 
+    /*
+     * ★ THE SYSTEM'S OWN TRADE, AND WHETHER IT PAYS FOR ITSELF ★
+     *
+     * The rollup is pure and shared. The two reads it needs are the build's outstanding materials
+     * — every colonisation project in THIS system, not only ones linked to the plan, because a
+     * member hauling to an unlinked site is still hauling it — and what the galaxy pays for
+     * whatever the system will trade.
+     */
+    const trade = systemTrade(markets.map((m) => ({ siteId: m.siteId, market: m.market })));
+
+    const [needs, prices] = await Promise.all([
+      this.#outstandingIn(head.systemName),
+      this.#pricesFor([...trade.sells, ...trade.buys].map((l) => l.commodity)),
+    ]);
+
     return {
       ...head,
       bodies,
@@ -440,6 +493,9 @@ export class ColonyPlanService {
       suggestion: order.suggestion,
       economies,
       markets,
+      trade,
+      selfSufficiency: selfSufficiency(trade.sells, needs),
+      prices,
     };
   }
 
@@ -451,6 +507,76 @@ export class ColonyPlanService {
    * get their honest "no market of its own" answer from the model itself, so every CHOSEN site
    * appears here and the pages decide what is worth drawing.
    */
+  /**
+   * Every commodity the colonisation projects in this system still want.
+   *
+   * By SYSTEM rather than by linked project, deliberately: a member hauling to a construction site
+   * nobody has linked to this plan is still hauling it, and ignoring their work would understate
+   * what the system has to import.
+   */
+  async #outstandingIn(
+    systemName: string,
+  ): Promise<ReadonlyArray<{ commodity: string; remaining: number }>> {
+    const rows = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
+      `SELECT n.commodity, SUM(n.remaining)::bigint AS remaining
+         FROM colony_needs n
+         JOIN colony_projects p ON p.id = n.project_id
+        WHERE p.system_name = $1 AND n.remaining > 0
+        GROUP BY n.commodity`,
+      systemName,
+    );
+    return rows.map((r) => ({
+      commodity: String(r['commodity']),
+      remaining: Number(r['remaining'] ?? 0),
+    }));
+  }
+
+  /**
+   * What the galaxy pays for these commodities today.
+   *
+   * ★ OBSERVED, NEVER PREDICTED — THE OWNER'S OWN CHOICE ★
+   *
+   * `commodity_snapshots` records what markets across the galaxy actually trade at. It says nothing
+   * about what THIS system's stations will charge: that moves with supply, demand and economy
+   * strength, none of which we model. The page labels these as galaxy figures for exactly that
+   * reason — a guessed price sends somebody on a worthless run, and they do not come back to check
+   * whether the tool was right.
+   *
+   * DISTINCT ON the newest row per commodity: the table keeps a history, and averaging six months
+   * of readings would produce a number describing no particular day.
+   */
+  async #pricesFor(
+    commodities: readonly string[],
+  ): Promise<
+    ReadonlyArray<{
+      commodity: string;
+      avgSell: number | null;
+      avgBuy: number | null;
+      sellMarkets: number;
+      observedAt: Date | null;
+    }>
+  > {
+    const wanted = [...new Set(commodities)];
+    if (wanted.length === 0) return [];
+
+    const rows = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
+      `SELECT DISTINCT ON (c.commodity)
+              c.commodity, c.avg_sell, c.avg_buy, c.sell_markets, c.observed_at
+         FROM commodity_snapshots c
+        WHERE c.commodity = ANY($1::text[])
+        ORDER BY c.commodity, c.observed_at DESC`,
+      wanted,
+    );
+
+    return rows.map((r) => ({
+      commodity: String(r['commodity']),
+      avgSell: r['avg_sell'] === null ? null : Number(r['avg_sell']),
+      avgBuy: r['avg_buy'] === null ? null : Number(r['avg_buy']),
+      sellMarkets: Number(r['sell_markets'] ?? 0),
+      observedAt: (r['observed_at'] as Date | null) ?? null,
+    }));
+  }
+
   async #markets(
     sites: readonly PlanSite[],
     economies: EconomyResult,
@@ -790,6 +916,16 @@ export class ColonyPlanService {
       economies: resolveEconomies([], [], new Map()),
       // Markets follow the economies, so the board leaves them empty for the same reason.
       markets: [],
+      // And the trade rollup follows the markets. A board card has no system economy to show.
+      trade: { sells: [], buys: [], internal: [] },
+      selfSufficiency: {
+        covered: [],
+        notCovered: [],
+        coveredTonnes: 0,
+        outstandingTonnes: 0,
+        pctCovered: null,
+      },
+      prices: [],
     };
   }
 

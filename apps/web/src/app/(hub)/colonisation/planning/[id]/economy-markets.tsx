@@ -1,4 +1,4 @@
-import type { ColonyPlan } from '../../../../../lib/api';
+import type { ColonyPlan, CommodityPrice, SystemTradeLine } from '../../../../../lib/api';
 
 /**
  * What the system BECOMES, and what its markets would then trade.
@@ -40,7 +40,277 @@ export function EconomyAndMarkets({ plan }: { plan: ColonyPlan }) {
   return (
     <div>
       <Economy plan={plan} />
+
+      {/*
+        ★ THE QUESTION UNDERNEATH THE WHOLE PLANNER — SQUADRON OWNER, 2026-08-11 ★
+
+        A system that sells the Steel its own construction sites need stops being a place you haul
+        TO and becomes a place you haul FROM. Nothing had ever put the economy model and the build's
+        shopping list in the same sentence, though both have existed for weeks.
+      */}
+      <SelfSufficiency plan={plan} />
+      <Trade plan={plan} />
+      <PerStation plan={plan} />
       <Effects plan={plan} />
+    </div>
+  );
+}
+
+/** Tonnes, in the form a member reads at a glance. */
+const t = (n: number): string => `${n.toLocaleString()} t`;
+
+/**
+ * How much of its own bill this system would cover.
+ *
+ * ★ ANSWERED IN TONNAGE, NOT IN COMMODITY COUNT ★
+ *
+ * "4 of 17 materials" sounds meagre. "132,500 t of 142,500 t outstanding" is the same fact and the
+ * opposite conclusion — a plan that pays for itself. The count alone hides which four.
+ */
+function SelfSufficiency({ plan }: { plan: ColonyPlan }) {
+  const ss = plan.selfSufficiency;
+  if (ss === undefined || ss.outstandingTonnes === 0) return null;
+
+  const covered = ss.covered.length;
+  const total = covered + ss.notCovered.length;
+
+  return (
+    <div className="mt-6 rounded border border-[var(--color-brand-cyan)] bg-[color-mix(in_srgb,var(--color-brand-cyan)_6%,transparent)] px-4 py-3">
+      <p className="m-0 font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-secondary)]">
+        What you would stop importing
+      </p>
+
+      <p className="m-0 mt-2 text-sm text-[var(--color-text-primary)]">
+        {covered === 0 ? (
+          <>
+            Nothing this system produces is on your builds&rsquo; shopping list. All{' '}
+            <span className="font-mono tabular-nums">{t(ss.outstandingTonnes)}</span> outstanding
+            would still have to be hauled in.
+          </>
+        ) : (
+          <>
+            This system would produce{' '}
+            <span className="text-[var(--color-brand-cyan-bright)]">
+              {covered} of the {total}
+            </span>{' '}
+            materials your builds still need —{' '}
+            <span className="font-mono tabular-nums text-[var(--color-brand-cyan-bright)]">
+              {t(ss.coveredTonnes)}
+            </span>{' '}
+            of {t(ss.outstandingTonnes)} outstanding
+            {ss.pctCovered === null ? '' : ` (${ss.pctCovered}%)`}.
+          </>
+        )}
+      </p>
+
+      {covered === 0 ? null : (
+        <ul className="m-0 mt-3 list-none space-y-1 p-0">
+          {ss.covered.slice(0, 6).map((c) => (
+            <li
+              key={c.commodity}
+              className="flex flex-wrap justify-between gap-x-4 text-[11px] text-[var(--color-text-secondary)]"
+            >
+              <span className="text-[var(--color-text-primary)]">{c.commodity}</span>
+              <span className="font-mono tabular-nums">{t(c.remaining)} still needed</span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {ss.notCovered.length === 0 ? null : (
+        <p className="m-0 mt-3 text-[11px] text-[var(--color-text-dim)]">
+          {/* The half that decides the evening. Reading only what is covered, somebody finds out
+              the hard way that the rest comes in by hand for the whole build. */}
+          Still imported: {ss.notCovered.slice(0, 8).map((c) => c.commodity).join(' · ')}
+          {ss.notCovered.length > 8 ? ` and ${ss.notCovered.length - 8} more` : ''}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** One side of the system's trade, with what the galaxy pays for each line. */
+function TradeList({
+  lines,
+  prices,
+  side,
+}: {
+  lines: readonly SystemTradeLine[];
+  prices: readonly CommodityPrice[];
+  side: 'sells' | 'buys';
+}) {
+  if (lines.length === 0) {
+    return (
+      <p className="m-0 text-[11px] text-[var(--color-text-dim)]">
+        Nothing — no planned station has a market of its own. Only starports and outposts trade; an
+        installation feeds the port on its body rather than having a board.
+      </p>
+    );
+  }
+
+  return (
+    <ul className="m-0 list-none space-y-1.5 p-0">
+      {lines.map((l) => {
+        const p = prices.find((x) => x.commodity === l.commodity);
+        const cr = side === 'sells' ? p?.avgSell : p?.avgBuy;
+
+        return (
+          <li
+            key={l.commodity}
+            className="flex flex-wrap items-baseline justify-between gap-x-4 text-[11px] text-[var(--color-text-secondary)]"
+          >
+            <span>
+              <span
+                className={
+                  l.strength === 'major'
+                    ? 'font-semibold text-[var(--color-text-primary)]'
+                    : 'text-[var(--color-text-secondary)]'
+                }
+              >
+                {l.commodity}
+              </span>
+              <span
+                className="ml-2 font-mono text-[9px] uppercase tracking-[0.14em] text-[var(--color-text-dim)]"
+                title={`Put on the board by this system's ${l.economies.join(' and ')} economy.`}
+              >
+                {l.strength} · {l.economies.join('+')}
+              </span>
+              {l.siteIds.length > 1 ? (
+                <span className="ml-2 font-mono text-[9px] text-[var(--color-text-dim)]">
+                  {l.siteIds.length} stations
+                </span>
+              ) : null}
+            </span>
+
+            {/* Galaxy figures, never a claim about this station. See the note below the lists. */}
+            {cr === null || cr === undefined ? (
+              <span className="font-mono text-[10px] text-[var(--color-text-dim)]">
+                no price data
+              </span>
+            ) : (
+              <span className="font-mono tabular-nums">
+                {cr.toLocaleString()} cr
+                {p !== undefined && p.sellMarkets > 0 ? (
+                  <span className="ml-2 text-[10px] text-[var(--color-text-dim)]">
+                    {p.sellMarkets.toLocaleString()} markets
+                  </span>
+                ) : null}
+              </span>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+/**
+ * What the system will sell and buy.
+ *
+ * ★ THE PRICES ARE THE GALAXY'S, AND THE PAGE SAYS SO ★
+ *
+ * The squadron owner's own choice when asked. We do not model Elite's pricing — it moves with
+ * supply, demand and economy strength, none of which this simulates — so showing what the galaxy
+ * actually pays is honest and useful, while inventing what YOUR station will charge would be a
+ * guess wearing a figure's clothes. A wrong price sends somebody on a worthless run.
+ */
+function Trade({ plan }: { plan: ColonyPlan }) {
+  const trade = plan.trade;
+  if (trade === undefined) return null;
+  if (trade.sells.length === 0 && trade.buys.length === 0) return null;
+
+  const prices = plan.prices ?? [];
+
+  return (
+    <div className="mt-6 grid gap-4 md:grid-cols-2">
+      <div className="rounded border border-[var(--color-border-hairline)] px-4 py-3">
+        <p className="m-0 mb-2 font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-secondary)]">
+          What this system will sell
+        </p>
+        <TradeList lines={trade.sells} prices={prices} side="sells" />
+      </div>
+
+      <div className="rounded border border-[var(--color-border-hairline)] px-4 py-3">
+        <p className="m-0 mb-2 font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-secondary)]">
+          What it will buy
+        </p>
+        <TradeList lines={trade.buys} prices={prices} side="buys" />
+      </div>
+
+      <div className="md:col-span-2">
+        {trade.internal.length === 0 ? null : (
+          <p className="m-0 mb-2 text-[11px] text-[var(--color-text-secondary)]">
+            {/* Not a contradiction, and the most useful line here: one station exports what another
+                imports, which is a system feeding itself. */}
+            <span className="text-[var(--color-text-primary)]">Traded within the system:</span>{' '}
+            {trade.internal.join(' · ')} — one station sells what another buys, so these need never
+            leave the system.
+          </p>
+        )}
+        <p className="m-0 text-[11px] text-[var(--color-text-dim)]">
+          Prices are what the galaxy pays today, from the markets we hold — not a prediction of what
+          your own stations will charge. What a station actually pays moves with its supply, demand
+          and economy strength, which nothing here models.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * What each planned station trades, side by side.
+ *
+ * These lines existed only as chips under individual sites in the system tree, where comparing two
+ * ports meant scrolling between them.
+ */
+function PerStation({ plan }: { plan: ColonyPlan }) {
+  const trading = plan.markets.filter(
+    (m) => m.market.exports.length > 0 || m.market.imports.length > 0,
+  );
+  if (trading.length === 0) return null;
+
+  const nameOf = (siteId: string): string => {
+    const site = plan.sites.find((s) => s.id === siteId);
+    if (site === undefined) return 'a planned site';
+    const body = plan.bodies.find((b) => b.bodyId === site.bodyId);
+    const where = body === undefined ? '' : ` · ${body.name.replace(plan.systemName, '').trim()}`;
+    return `${site.buildTypeName ?? 'nothing chosen'}${where}`;
+  };
+
+  return (
+    <div className="mt-6">
+      <p className="m-0 mb-2 font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-secondary)]">
+        Station by station
+      </p>
+      <div className="grid gap-3 md:grid-cols-2">
+        {trading.map((m) => (
+          <div
+            key={m.siteId}
+            className="rounded border border-[var(--color-border-hairline)] px-4 py-3"
+          >
+            <p className="m-0 text-sm text-[var(--color-text-primary)]">{nameOf(m.siteId)}</p>
+            {m.market.exports.length === 0 ? null : (
+              <p className="m-0 mt-1 text-[11px] text-[var(--color-text-secondary)]">
+                <span className="font-mono text-[9px] uppercase tracking-[0.16em] text-[var(--color-text-dim)]">
+                  sells{' '}
+                </span>
+                {m.market.exports.map((e) => e.commodity).join(' · ')}
+              </p>
+            )}
+            {m.market.imports.length === 0 ? null : (
+              <p className="m-0 mt-1 text-[11px] text-[var(--color-text-secondary)]">
+                <span className="font-mono text-[9px] uppercase tracking-[0.16em] text-[var(--color-text-dim)]">
+                  buys{' '}
+                </span>
+                {m.market.imports.map((e) => e.commodity).join(' · ')}
+              </p>
+            )}
+            {m.market.note === '' ? null : (
+              <p className="m-0 mt-2 text-[10px] text-[var(--color-text-dim)]">{m.market.note}</p>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

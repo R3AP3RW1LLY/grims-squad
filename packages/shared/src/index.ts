@@ -27,6 +27,8 @@ export { suggestBuildOrder } from './colony-order.js';
 export { rankOpportunities, STALE_DAYS, NEARLY_DONE } from './colony-opportunity.js';
 export { REVIEW_PROMPT, renderPlanFacts, reviewableReason } from './colony-plan-review.js';
 export { planProgress, siteProgress } from './colony-plan-progress.js';
+export { systemTrade, selfSufficiency } from './colony-economy-view.js';
+export type { SystemTrade, SystemTradeLine, SelfSufficiency, TradeSite } from './colony-economy-view.js';
 export type {
   PlanProgress,
   ProgressSite,

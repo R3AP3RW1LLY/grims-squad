@@ -26,13 +26,34 @@ import { EARLIEST_PROMOTION_AT } from '@grims/shared';
  * WOULD do; a human reviews that report before anything is ever written.
  */
 
+/*
+ * `cumulativeMonths` mirrors the SSOT exactly — 1, 2, 3, 9, 12 — including the deliberate gaps
+ * before Lord General and Grand Master General. It is what the Discord-tenure requirement measures
+ * against, and a fixture that omitted it would quietly fall back to the per-rank figure and test a
+ * rule the production ladder does not have.
+ */
 const LADDER: LadderRung[] = [
-  { rank: 'Cadet', qualifyingMonthsRequired: 1, next: 'Sergeant' },
-  { rank: 'Sergeant', qualifyingMonthsRequired: 1, next: 'Master Sergeant' },
-  { rank: 'Master Sergeant', qualifyingMonthsRequired: 1, next: '2nd Lieutenant' },
-  { rank: 'General', qualifyingMonthsRequired: 2, next: 'Lord General' },
-  { rank: 'Lord General', qualifyingMonthsRequired: 3, next: 'Grand Master General' },
-  { rank: 'Grand Master General', qualifyingMonthsRequired: null, next: null },
+  { rank: 'Cadet', qualifyingMonthsRequired: 1, next: 'Sergeant', cumulativeMonths: 1 },
+  { rank: 'Sergeant', qualifyingMonthsRequired: 1, next: 'Master Sergeant', cumulativeMonths: 2 },
+  {
+    rank: 'Master Sergeant',
+    qualifyingMonthsRequired: 1,
+    next: '2nd Lieutenant',
+    cumulativeMonths: 3,
+  },
+  { rank: 'General', qualifyingMonthsRequired: 2, next: 'Lord General', cumulativeMonths: 9 },
+  {
+    rank: 'Lord General',
+    qualifyingMonthsRequired: 3,
+    next: 'Grand Master General',
+    cumulativeMonths: 12,
+  },
+  {
+    rank: 'Grand Master General',
+    qualifyingMonthsRequired: null,
+    next: null,
+    cumulativeMonths: 12,
+  },
 ];
 
 const AFTER_FLOOR = new Date('2026-08-01T00:00:00.000Z');
@@ -65,6 +86,18 @@ const member = (over: Partial<MemberStanding> = {}): MemberStanding => ({
   currentRank: 'Cadet',
   qualifyingMonthsAtRank: 1,
   heldRankSince: new Date('2026-06-01T00:00:00Z'),
+  /*
+   * ★ ADDED WITH THE DISCORD-TENURE RULE — SQUADRON OWNER, 2026-08-11 ★
+   *
+   * Long-standing by default, so the tests either side of this line keep testing what they were
+   * written to test — activity eligibility and the floor — rather than silently becoming tests of
+   * the tenure gate. The gate has its own tests below, and `promotion-tenure.spec.ts` covers the
+   * date arithmetic.
+   *
+   * Every one of these went red when the gate landed, which is the gate working: a fixture with no
+   * join date is exactly the case that must be refused.
+   */
+  joinedServerAt: new Date('2020-01-01T00:00:00Z'),
   ...over,
 });
 
@@ -254,5 +287,124 @@ describe('the report', () => {
     store.rows = [member()];
     expect((await engine.run({ now: AFTER_FLOOR })).dryRun).toBe(true);
     expect((await engine.run({ now: AFTER_FLOOR, dryRun: false })).dryRun).toBe(false);
+  });
+});
+
+/**
+ * ★ TIME IN THE DISCORD SERVER — SQUADRON OWNER, 2026-08-11 ★
+ *
+ * "for the initial promotion from cadet to sargeant, the member needs to be in the discord server
+ * for 1 calender month ... then add this as a requirement for all other ranks"
+ *
+ * Activity and belonging are different questions. The qualifying-months rule measures whether
+ * somebody took part; it says nothing about how long they have been here, and a member who joins on
+ * the 28th, talks for three days and plays can bank a whole qualifying month.
+ *
+ * The date arithmetic itself is pinned in `promotion-tenure.spec.ts`. These are about the ENGINE
+ * honouring it, and about the two rules being independent — passing one must not excuse the other.
+ */
+describe('time in the Discord server', () => {
+  it('★ MANDATORY: an active member who just joined is held back ★', () => {
+    /*
+     * madhatter100690 on production: joined 16 July, banked a qualifying month, and was due
+     * Cadet → Sergeant on the August run. Under this rule they wait until 16 August.
+     */
+    const store = new FakeStore();
+    store.rows = [
+      member({
+        handle: 'madhatter100690',
+        qualifyingMonthsAtRank: 1,
+        heldRankSince: new Date('2026-07-16T00:00:00Z'),
+        joinedServerAt: new Date('2026-07-16T00:00:00Z'),
+      }),
+    ];
+
+    const engine = new PromotionEngine(store);
+    return engine.run({ now: new Date('2026-08-11T00:00:00Z'), dryRun: true }).then((report) => {
+      expect(report.wouldPromote).toEqual([]);
+      expect(report.skipped[0]?.reason, 'the refusal must say WHEN, not merely no').toMatch(
+        /2026-08-16/,
+      );
+    });
+  });
+
+  it('★ MANDATORY: the same member promotes on the day they reach a month ★', async () => {
+    const store = new FakeStore();
+    store.rows = [
+      member({
+        qualifyingMonthsAtRank: 1,
+        heldRankSince: new Date('2026-07-16T00:00:00Z'),
+        joinedServerAt: new Date('2026-07-16T00:00:00Z'),
+      }),
+    ];
+
+    const engine = new PromotionEngine(store);
+    const report = await engine.run({ now: new Date('2026-08-16T00:00:00Z'), dryRun: true });
+    expect(report.wouldPromote).toHaveLength(1);
+    expect(report.wouldPromote[0]?.to).toBe('Sergeant');
+  });
+
+  it('★ MANDATORY: no join date on record REFUSES, and says how to fix it ★', async () => {
+    /*
+     * The owner's own choice, and deliberately the opposite of the game-activity check which fails
+     * open. There, failing open costs a member a month they earned; here it would grant a rank they
+     * did not, in public, on a record nobody can defend.
+     */
+    const store = new FakeStore();
+    store.rows = [member({ qualifyingMonthsAtRank: 12, joinedServerAt: null })];
+
+    const engine = new PromotionEngine(store);
+    const report = await engine.run({ now: new Date('2026-09-01T00:00:00Z'), dryRun: true });
+
+    expect(report.wouldPromote).toEqual([]);
+    expect(report.skipped[0]?.reason).toMatch(/no discord join date/i);
+    expect(report.skipped[0]?.reason, 'a refusal nobody can act on is a dead end').toMatch(
+      /officer/i,
+    );
+  });
+
+  it('★ MANDATORY: the senior ranks demand the ladder’s cumulative months in the server ★', async () => {
+    /*
+     * The point of applying it beyond Cadet. Somebody three months in the server cannot hold a rank
+     * the ladder says represents nine, however active they have been — which is precisely what a
+     * tenure rule is for.
+     */
+    const store = new FakeStore();
+    store.rows = [
+      member({
+        currentRank: 'General',
+        qualifyingMonthsAtRank: 12,
+        heldRankSince: new Date('2026-01-01T00:00:00Z'),
+        joinedServerAt: new Date('2026-06-01T00:00:00Z'), // three months by the run date
+      }),
+    ];
+
+    const engine = new PromotionEngine(store);
+    const report = await engine.run({ now: new Date('2026-09-01T00:00:00Z'), dryRun: true });
+
+    expect(report.wouldPromote, 'General → Lord General is a 9-month rank').toEqual([]);
+    expect(report.skipped[0]?.reason).toMatch(/discord server/i);
+  });
+
+  it('★ MANDATORY: time at the RANK is checked as well as time in the server ★', async () => {
+    /*
+     * The gap the qualifying-month count leaves open: a member granted Cadet on the 28th who is
+     * active for four days banks a whole qualifying month, because the rollup is keyed on the month
+     * rather than on their grant. Long-standing in the server, and still not a month at the rank.
+     */
+    const store = new FakeStore();
+    store.rows = [
+      member({
+        qualifyingMonthsAtRank: 1,
+        heldRankSince: new Date('2026-08-28T00:00:00Z'),
+        joinedServerAt: new Date('2020-01-01T00:00:00Z'),
+      }),
+    ];
+
+    const engine = new PromotionEngine(store);
+    const report = await engine.run({ now: new Date('2026-09-02T00:00:00Z'), dryRun: true });
+
+    expect(report.wouldPromote).toEqual([]);
+    expect(report.skipped[0]?.reason).toMatch(/Held Cadet since 2026-08-28/);
   });
 });
