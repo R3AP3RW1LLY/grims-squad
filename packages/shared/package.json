@@ -11,6 +11,10 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./colony-opportunity": {
+      "types": "./dist/colony-opportunity.d.ts",
+      "default": "./dist/colony-opportunity.js"
+    },
     "./commodity-category": {
       "types": "./dist/commodity-category.d.ts",
       "default": "./dist/commodity-category.js"

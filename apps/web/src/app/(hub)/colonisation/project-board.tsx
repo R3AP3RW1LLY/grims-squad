@@ -1,3 +1,4 @@
+import type { Opportunity } from '@grims/shared/colony-opportunity';
 import type { ColonyProject } from '../../../lib/api';
 import { CopySystem } from '../../../components/copy-system';
 
@@ -23,9 +24,17 @@ function pct(project: ColonyProject): number | null {
 export function ProjectBoard({
   projects,
   emptyMessage,
+  notes,
 }: {
   projects: readonly ColonyProject[];
   emptyMessage: string;
+  /**
+   * Per project — how far it is, whether it has gone quiet, and why it ranks where it does.
+   *
+   * Optional so the board still renders for a caller with no position and on any page that has not
+   * ranked. A missing note draws the card exactly as it drew before this existed.
+   */
+  notes?: ReadonlyMap<string, Opportunity>;
 }) {
   if (projects.length === 0) {
     return <p className="m-0 text-sm text-[var(--color-text-secondary)]">{emptyMessage}</p>;
@@ -36,6 +45,7 @@ export function ProjectBoard({
       {projects.map((p) => {
         const progress = pct(p);
         const done = p.completedAt !== null;
+        const note = notes?.get(p.id);
 
         return (
           <article
@@ -82,6 +92,26 @@ export function ProjectBoard({
                   {p.stationName === null ? null : ` · ${p.stationName}`}
                   {p.postedBy === null ? null : ` · posted by ${p.postedBy}`}
                 </span>
+                {/*
+                  ★ HOW FAR, AND WHETHER IT HAS GONE QUIET ★
+
+                  The two facts a member needs to choose between nineteen rows, and neither was on
+                  the card. Distance is omitted rather than guessed when either end cannot be
+                  placed — people haul to systems our galaxy dump has never heard of.
+                */}
+                {note?.distanceLy === null || note?.distanceLy === undefined ? null : (
+                  <span className="font-mono tabular-nums text-[var(--color-text-primary)]">
+                    · {note.distanceLy} ly
+                  </span>
+                )}
+                {note?.stalled !== true ? null : (
+                  <span
+                    className="font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--color-semantic-warning)]"
+                    title="A build nobody has hauled to in over a week looks exactly like a healthy one on a board, which is why it is said here."
+                  >
+                    · quiet {note.daysSinceDelivery} days
+                  </span>
+                )}
               </p>
             </header>
 

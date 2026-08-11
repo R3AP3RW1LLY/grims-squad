@@ -12,6 +12,7 @@ import type {
   ColonyProject,
   ColonyRights,
   ColonyShoppingRow,
+  BoardViewer,
   PurchaseStation,
 } from '../hub-colony.js';
 import { projectTitleFrom } from '../docked.js';
@@ -42,6 +43,7 @@ import {
 } from './ui.js';
 import { CALLSIGN_LENGTH, formatCallsign, normaliseCallsign } from '@grims/shared/carrier';
 import { groupByCategory } from '@grims/shared/commodity-category';
+import { rankOpportunities, type Opportunity } from '@grims/shared/colony-opportunity';
 import { SystemPicker } from './system-picker.js';
 
 /**
@@ -60,7 +62,9 @@ import { SystemPicker } from './system-picker.js';
 declare global {
   interface Window {
     readonly colony: {
-      projects(): Promise<Answer<{ projects: ColonyProject[]; can: ColonyRights }>>;
+      projects(): Promise<
+        Answer<{ projects: ColonyProject[]; can: ColonyRights; you?: BoardViewer | null }>
+      >;
       project(id: string, filters?: ShoppingFilters): Promise<Answer<ProjectDetailData>>;
       at(marketId: string): Promise<Answer<{ project: ColonyProject | null; needs: ColonyNeed[] }>>;
       post(body: unknown): Promise<Answer<{ id: string }>>;
@@ -353,18 +357,31 @@ export interface DockedAt {
  * the counts anyway — a second fetch per page would be the same data arriving twice and two chances
  * for the badge and the list to disagree.
  */
+const BOARD_SORTS = [
+  { key: 'best', label: 'Best for you' },
+  { key: 'nearest', label: 'Nearest' },
+  { key: 'progress', label: 'Closest to done' },
+  { key: 'stalled', label: 'Needs attention' },
+] as const;
+
+type BoardSort = (typeof BOARD_SORTS)[number]['key'];
+
 export function ColonyBoardPage({
   owner,
   projects,
+  you,
   error,
   onReload,
 }: {
   owner: 'squadron' | 'personal';
+  /** Where the member was last seen, so the board can rank by distance. Null disables that term. */
+  you?: BoardViewer | null;
   projects: readonly ColonyProject[];
   error: string | null;
   onReload: () => void;
 }): JSX.Element {
   const [openId, setOpenId] = useState<string | null>(null);
+  const [sort, setSort] = useState<BoardSort>('best');
 
   if (openId !== null) {
     /*
@@ -383,6 +400,61 @@ export function ColonyBoardPage({
 
   const mine = projects.filter((p) => p.owner === owner);
 
+  /*
+   * ★ RANKED BY THE SAME RULE THE WEBSITE USES ★
+   *
+   * `rankOpportunities` comes out of @grims/shared and the website calls it with the same inputs.
+   * Two implementations of "which build wants me most" would drift, and the half that drifted would
+   * be the one sending somebody nine hundred light years for a build the other surface knew was
+   * finished.
+   */
+  const ranked = rankOpportunities(
+    mine.map((p) => ({
+      id: p.id,
+      title: p.title,
+      systemName: p.systemName,
+      owner: p.owner,
+      isPriority: p.isPriority,
+      remaining: p.remaining,
+      required: p.required,
+      coords: p.coords ?? null,
+      lastDeliveryAt:
+        p.lastDeliveryAt === null || p.lastDeliveryAt === undefined
+          ? null
+          : new Date(p.lastDeliveryAt),
+    })),
+    { coords: you?.coords ?? null, now: Date.now() },
+  );
+
+  const notes = new Map<string, Opportunity>(ranked.map((o) => [o.id, o]));
+  const byId = new Map(mine.map((p) => [p.id, p]));
+
+  const sorted = [...ranked].sort((a, b) => {
+    if (sort === 'nearest') {
+      // Unknown distance sorts last: "we cannot place it" is not "it is here".
+      const x = a.distanceLy ?? Number.POSITIVE_INFINITY;
+      const y = b.distanceLy ?? Number.POSITIVE_INFINITY;
+      return x !== y ? x - y : a.id.localeCompare(b.id);
+    }
+    if (sort === 'progress') {
+      return (b.pctDone ?? -1) - (a.pctDone ?? -1) || a.id.localeCompare(b.id);
+    }
+    if (sort === 'stalled') {
+      return (b.daysSinceDelivery ?? -1) - (a.daysSinceDelivery ?? -1) || a.id.localeCompare(b.id);
+    }
+    return b.score - a.score || a.id.localeCompare(b.id);
+  });
+
+  /*
+   * Finished builds are NOT dropped. The ranking refuses to offer them — it answers "what could I
+   * do tonight" — but the board is the record of what the squadron is doing, and a project
+   * vanishing the moment it completes would read as deletion.
+   */
+  const shown = [
+    ...sorted.map((o) => byId.get(o.id)).filter((p): p is ColonyProject => p !== undefined),
+    ...mine.filter((p) => !notes.has(p.id)),
+  ];
+
   return (
     <div>
       {error === null ? null : (
@@ -391,8 +463,26 @@ export function ColonyBoardPage({
         </div>
       )}
       <Section title={owner === 'squadron' ? 'Squadron projects' : 'Members’ projects'}>
+        {mine.length === 0 ? null : (
+          <div style={{ marginBottom: '10px' }}>
+            <Tabs
+              tabs={BOARD_SORTS}
+              current={sort}
+              onChange={setSort}
+              label="Sort the board"
+            />
+            {(you?.coords ?? null) !== null ? null : (
+              <p style={{ margin: '6px 0 0', fontSize: '11px', color: C.dim }}>
+                {/* Said rather than silently degraded: without a position the ranking still works
+                    on priority, progress and silence — it just cannot weigh distance. */}
+                We do not know where you are yet, so distance is not counted.
+              </p>
+            )}
+          </div>
+        )}
         <Board
-          projects={mine}
+          projects={shown}
+          notes={notes}
           onOpen={setOpenId}
           /*
            * The website's strings, verbatim. The app's said "New project" for a destination its own
@@ -691,10 +781,13 @@ function Board({
   projects,
   onOpen,
   empty,
+  notes,
 }: {
   projects: readonly ColonyProject[];
   onOpen: (id: string) => void;
   empty: string;
+  /** Per project — how far it is and whether it has gone quiet. Optional: no note draws as before. */
+  notes?: ReadonlyMap<string, Opportunity>;
 }): JSX.Element {
   if (projects.length === 0) return <Empty>{empty}</Empty>;
 
@@ -762,6 +855,34 @@ function Board({
                   COMPLETE
                 </span>
               ) : null}
+              {/*
+                ★ HOW FAR, AND WHETHER IT HAS GONE QUIET ★
+
+                The two facts that let somebody choose between nineteen rows, and neither was here.
+                Distance is omitted rather than guessed when either end cannot be placed — people
+                haul to systems our galaxy dump has never heard of.
+              */}
+              {notes?.get(p.id)?.distanceLy === null ||
+              notes?.get(p.id)?.distanceLy === undefined ? null : (
+                <span
+                  style={{
+                    marginLeft: '8px',
+                    fontSize: '11px',
+                    fontVariantNumeric: 'tabular-nums',
+                    color: C.dim,
+                  }}
+                >
+                  {notes.get(p.id)?.distanceLy} ly
+                </span>
+              )}
+              {notes?.get(p.id)?.stalled !== true ? null : (
+                <span
+                  style={{ marginLeft: '8px', fontSize: '9px', letterSpacing: '0.16em', color: C.warn }}
+                  title="A build nobody has hauled to in over a week looks exactly like a healthy one on a board."
+                >
+                  QUIET {notes.get(p.id)?.daysSinceDelivery} DAYS
+                </span>
+              )}
             </span>
             {/*
               System, site and who posted it — all three already on the wire and none of them

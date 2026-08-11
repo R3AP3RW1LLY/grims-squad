@@ -8,6 +8,7 @@ import { ColonyRosterService } from './colony-roster.service.js';
 import { ColonyCatalogueService } from './colony-catalogue.service.js';
 import { ColonyCarrierService, carrierCover } from './colony-carrier.service.js';
 import { ColonyPurchasesService } from './colony-purchases.service.js';
+import { CommanderPositionService } from './commander-position.service.js';
 import { ColonyPlanService } from './colony-plan.service.js';
 import { MARKET_STORE } from './logistics.tokens.js';
 import type { MarketStore } from './market.store.js';
@@ -45,6 +46,14 @@ export class ColonyController {
     @Inject(ColonyPurchasesService) private readonly purchases: ColonyPurchasesService,
     // `plans_` because `plans` is the route method below it, and a field cannot share its name.
     @Inject(ColonyPlanService) private readonly plans_: ColonyPlanService,
+    /*
+     * Where the caller was last seen, so the boards can rank builds by how far they are.
+     *
+     * The SAME service the shopping list resolves an origin with — a member's position worked out
+     * two different ways is two different answers to one question, and the one that disagreed would
+     * be the one deciding where somebody flies tonight.
+     */
+    @Inject(CommanderPositionService) private readonly position: CommanderPositionService,
   ) {}
 
   async #mask(caller: CurrentUser | undefined): Promise<bigint> {
@@ -80,8 +89,23 @@ export class ColonyController {
     const scope: ColonyOwner | 'all' =
       owner === 'squadron' || owner === 'personal' ? owner : 'all';
 
+    /*
+     * ★ RANKED BY THE CLIENTS, FROM FACTS SENT BY THE SERVER ★
+     *
+     * The board carries `lastDeliveryAt` and each build's coordinates; `you` carries where the
+     * caller was last seen. Both surfaces then call the SAME `rankOpportunities` out of
+     * @grims/shared, so the website and the app cannot put a different build at the top of the same
+     * member's list — and re-sorting is instant rather than a round trip.
+     */
+    const you =
+      caller === undefined ? null : await this.position.lastKnown(caller.userId).catch(() => null);
+
     return {
       projects: await this.colony.board(scope, caller === undefined ? null : { userId: caller.userId }),
+      you:
+        you === null
+          ? null
+          : { systemName: you.systemName, coords: you.coords, at: you.at, source: you.source },
       /*
        * ★ WHAT THE CALLER MAY DO, SENT WITH WHAT THEY MAY SEE ★
        *

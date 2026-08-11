@@ -26,7 +26,7 @@ import { readMiningSettings } from '../mining-settings.js';
 import { openProjectCounts } from '@grims/shared/colony-badge';
 // The shapes come from the hub client, which is where they are defined — re-exporting them through
 // the component file would be a second name for one type.
-import type { ColonyProject, ColonyRights } from '../hub-colony.js';
+import type { BoardViewer, ColonyProject, ColonyRights } from '../hub-colony.js';
 import { OverlaysPanel } from './overlays-panel.js';
 
 /**
@@ -322,7 +322,12 @@ function App(): JSX.Element {
    * and the list to disagree — which is the kind of difference a member notices and nobody can
    * reproduce.
    */
-  const [colony, setColony] = useState<{ projects: ColonyProject[]; can: ColonyRights } | null>(null);
+  const [colony, setColony] = useState<{
+    projects: ColonyProject[];
+    can: ColonyRights;
+    /** Where the member was last seen, so the boards can rank builds by distance. */
+    you?: BoardViewer | null;
+  } | null>(null);
   const [colonyError, setColonyError] = useState<string | null>(null);
 
   /*
@@ -598,6 +603,7 @@ function App(): JSX.Element {
           <ColonyBoardPage
             owner="squadron"
             projects={colony?.projects ?? []}
+            you={colony?.you ?? null}
             error={colonyError}
             onReload={loadColony}
           />
@@ -606,6 +612,7 @@ function App(): JSX.Element {
           <ColonyBoardPage
             owner="personal"
             projects={colony?.projects ?? []}
+            you={colony?.you ?? null}
             error={colonyError}
             onReload={loadColony}
           />

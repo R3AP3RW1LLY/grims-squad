@@ -109,6 +109,16 @@ export interface ProjectRow {
    * above zero, because removing the project would erase somebody's hauling record.
    */
   readonly deliveryCount: number;
+  /**
+   * When anybody last hauled here. Null when nobody ever has.
+   *
+   * NOT the same as "stalled", and the difference is the whole point: a project posted an hour ago
+   * has no deliveries and is perfectly healthy, while one untouched for nine days is the only thing
+   * on a board that looks fine and is not.
+   */
+  readonly lastDeliveryAt: Date | null;
+  /** The build system's galactic coordinates, for ranking by distance. Null when unplaceable. */
+  readonly coords: { readonly x: number; readonly y: number; readonly z: number } | null;
 }
 
 export interface NeedDetail {
@@ -528,8 +538,36 @@ export class ColonyService {
                * the delivery rows and quietly inflate every total on the page.
                */
               (SELECT count(*) FROM colony_contributions c WHERE c.project_id = p.id)::int
-                                                    AS delivery_count
+                                                    AS delivery_count,
+              /*
+               * ★ WHEN ANYBODY LAST HAULED HERE — FOR "WHAT CAN I DO TONIGHT" ★
+               *
+               * A stalled build looks exactly like a healthy one on a board: same title, same
+               * tonnage, just an older number nobody compares. This is the only field that can tell
+               * them apart, and it is the one thing the boards could never show by themselves.
+               *
+               * Correlated, like delivery_count above and for the same reason: joining the ledger
+               * into a statement already grouping over colony_needs would multiply the need rows by
+               * the delivery rows and inflate every total on the page.
+               */
+              (SELECT max(c.delivered_at) FROM colony_contributions c WHERE c.project_id = p.id)
+                                                    AS last_delivery_at,
+              /*
+               * Where the build IS, so a member can be told how far it is from where they are.
+               * LEFT JOIN and a LATERAL limit 1: a system name we have never catalogued yields
+               * nulls and a project that ranks without a distance, rather than vanishing from the
+               * board — people haul to systems our galaxy dump has never heard of.
+               */
+              sys.x AS sys_x, sys.y AS sys_y, sys.z AS sys_z
          FROM colony_projects p
+         LEFT JOIN LATERAL (
+           SELECT cube_ll_coord(k.coords, 1) AS x,
+                  cube_ll_coord(k.coords, 2) AS y,
+                  cube_ll_coord(k.coords, 3) AS z
+             FROM knowledge_items k
+            WHERE k.kind = 'system' AND k.name = p.system_name AND k.coords IS NOT NULL
+            LIMIT 1
+         ) sys ON true
          LEFT JOIN colony_build_types bt ON bt.id = p.build_type_id
          JOIN users u ON u.id = p.posted_by_id
          LEFT JOIN colony_needs n ON n.project_id = p.id
@@ -543,7 +581,7 @@ export class ColonyService {
             OR ($2::uuid IS NOT NULL AND p.visibility = 'squadron')
             OR ($2::uuid IS NOT NULL AND p.posted_by_id = $2::uuid)
           )
-        GROUP BY p.id, u.display_name, bt.id
+        GROUP BY p.id, u.display_name, bt.id, sys.x, sys.y, sys.z
         -- Priority first, then live before finished, then most recently touched.
         ORDER BY p.is_priority DESC, (p.completed_at IS NOT NULL), p.updated_at DESC`,
       owner,
@@ -650,6 +688,11 @@ export class ColonyService {
       stationName: r['station_name'] === null ? null : String(r['station_name']),
       marketId: String(r['market_id'] ?? ''),
       buildType: r['build_type'] === null ? null : String(r['build_type']),
+      lastDeliveryAt: (r['last_delivery_at'] as Date | null) ?? null,
+      coords:
+        r['sys_x'] === null || r['sys_x'] === undefined
+          ? null
+          : { x: Number(r['sys_x']), y: Number(r['sys_y']), z: Number(r['sys_z']) },
       identified:
         r['build_type_id'] === null || r['build_type_id'] === undefined
           ? null

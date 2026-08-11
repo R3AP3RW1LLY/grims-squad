@@ -3,6 +3,8 @@ import { PageHeader, PageBody, Section } from '../../../../components/hub-page';
 import { LiveRefresh } from '../../../../components/live-refresh';
 import { NoAccess, AdminUnavailable } from '../../app/no-access';
 import { getColonyProjects } from '../../../../lib/api';
+import { orderBoard, resolveSort } from '../board-order';
+import { BoardSortLinks } from '../board-sort-links';
 import { ProjectBoard } from '../project-board';
 
 /**
@@ -30,8 +32,12 @@ export const metadata: Metadata = {
 
 export const dynamic = 'force-dynamic';
 
-export default async function MemberProjectsPage() {
-  const read = await getColonyProjects('personal');
+export default async function MemberProjectsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ sort?: string }>;
+}) {
+  const [read, params] = await Promise.all([getColonyProjects('personal'), searchParams]);
 
   if (read.state === 'forbidden') {
     return <NoAccess what="colonisation" permission="COLONY_VIEW" />;
@@ -41,6 +47,10 @@ export default async function MemberProjectsPage() {
   }
 
   const personal = read.data.projects.filter((p) => p.owner === 'personal');
+
+  // Ranked for whoever is reading, by the same shared rule the companion and the squadron board use.
+  const sort = resolveSort(params.sort);
+  const board = orderBoard(personal, read.data.you ?? null, sort);
 
   return (
     <>
@@ -65,8 +75,14 @@ export default async function MemberProjectsPage() {
         lead="Somebody’s own construction site, posted so the squadron can see what it needs. Open one to take a commodity on."
       >
         <Section title={`Members’ projects (${personal.length})`}>
+          <BoardSortLinks
+            basePath="/colonisation/members"
+            current={sort}
+            positionless={board.positionless}
+          />
           <ProjectBoard
-            projects={personal}
+            projects={board.projects}
+            notes={board.notes}
             emptyMessage="Nobody has posted a project yet. Post yours from Start New Project and the squadron can see what you need."
           />
         </Section>

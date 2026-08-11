@@ -49,6 +49,24 @@ export interface ColonyProject {
   readonly remaining: number;
   readonly required: number;
   readonly needCount: number;
+  /**
+   * When anybody last hauled here. Null when nobody ever has — which is NOT "stalled": a project
+   * posted an hour ago has no deliveries and is perfectly healthy.
+   *
+   * Optional because an OLDER HUB does not send it; the ranking then treats every build as never
+   * delivered to, which is exactly how the board behaved before this existed.
+   */
+  readonly lastDeliveryAt?: string | null;
+  /** The build system's coordinates, for ranking by distance. Null when we cannot place it. */
+  readonly coords?: { readonly x: number; readonly y: number; readonly z: number } | null;
+}
+
+/** Where the member was last seen, sent with the boards so they can be ranked by distance. */
+export interface BoardViewer {
+  readonly systemName: string;
+  readonly coords: { readonly x: number; readonly y: number; readonly z: number } | null;
+  readonly at: string;
+  readonly source: string;
 }
 
 export interface ColonyNeed {
@@ -529,7 +547,7 @@ export interface OrderSuggestion {
 
 export const colonyProjects = (
   call: HubCall,
-): Promise<Answer<{ projects: ColonyProject[]; can: ColonyRights }>> =>
+): Promise<Answer<{ projects: ColonyProject[]; can: ColonyRights; you?: BoardViewer | null }>> =>
   hubColony(call, '/projects');
 
 /**

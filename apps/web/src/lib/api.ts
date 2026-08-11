@@ -2373,6 +2373,13 @@ export interface ColonyProject {
    * question, stricter answer, and it left a mistyped market id undeletable.
    */
   deliveryCount: number;
+  /**
+   * When anybody last hauled here. Null when nobody ever has — which is NOT "stalled": a project
+   * posted an hour ago has no deliveries and is perfectly healthy.
+   */
+  lastDeliveryAt: string | null;
+  /** The build system's galactic coordinates, for ranking by distance. Null when unplaceable. */
+  coords: { x: number; y: number; z: number } | null;
 }
 
 export interface ColonyNeed {
@@ -2860,10 +2867,19 @@ export const getBuildType = (
   );
 };
 
+/** Where the caller was last seen, sent with the boards so they can be ranked by distance. */
+export interface BoardViewer {
+  systemName: string;
+  coords: { x: number; y: number; z: number } | null;
+  at: string;
+  source: string;
+}
+
 export const getColonyProjects = (
   owner: 'squadron' | 'personal' | 'all' = 'all',
-): Promise<AdminRead<{ projects: ColonyProject[]; can: ColonyRights }>> =>
-  getAdmin(`/v1/logistics/colony/projects?owner=${owner}`);
+): Promise<
+  AdminRead<{ projects: ColonyProject[]; can: ColonyRights; you?: BoardViewer | null }>
+> => getAdmin(`/v1/logistics/colony/projects?owner=${owner}`);
 
 export const getColonyProject = (
   id: string,
