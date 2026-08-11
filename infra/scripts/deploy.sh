@@ -655,6 +655,45 @@ say "Recording the release"
 printf '%s\n' "$TARGET_SHA" > /srv/grims/deployed.sha
 ok "deployed revision recorded → /srv/grims/deployed.sha"
 
+# ─────────────────────────────────────────────── the ingestion box
+#
+# ★ THE SECOND BOX, WHICH THIS SCRIPT USED TO LEAVE BEHIND — 2026-08-11 ★
+#
+# infra/runbooks/workers-second-box.md §9 has said since the box was stood up: "deploy.sh currently
+# deploys one machine. Until it knows about this one, a deploy updates the primary and leaves the
+# workers on the old revision." It was never implemented, and it is not survivable in the way the
+# runbook hoped — on 2026-08-11 the ingestion box was found running the build from PR #144 while
+# production ran thirteen commits ahead, and every scheduled job on it was resolving `:latest`.
+#
+# ★ AFTER THE HEALTH GATE, DELIBERATELY ★
+#
+# The primary has already been proved serving this revision. Pushing a build to the workers that the
+# member-facing box could not run would take down ingestion for a revision we are about to roll
+# back — so this only ever ships what has already been verified.
+#
+# ★ NON-FATAL, AND LOUD ★
+#
+# The primary is UP and members are being served. Failing the whole deploy here would report a
+# failure that is not one, and — worse — the EXIT trap would roll a healthy site back to punish the
+# other machine. The workers stay on their previous revision, which the wrapper enforces itself, and
+# the line below says so in a way nobody can mistake for success.
+#
+# The key is restricted server-side to `deploy <sha>` (infra/scripts/worker-box-deploy.sh), so this
+# cannot do anything else to that box even if this script is wrong.
+WORKERS_HOST="${WORKERS_HOST:-$(envval WORKERS_HOST)}"
+WORKERS_KEY="${WORKERS_KEY:-/root/.ssh/worker_deploy_ed25519}"
+
+if [[ -z $WORKERS_HOST ]]; then
+  ok "no WORKERS_HOST configured — skipping the ingestion box"
+elif [[ ! -r $WORKERS_KEY ]]; then
+  ok "✖ ingestion box NOT deployed — no key at $WORKERS_KEY. It is still on its previous revision."
+elif ssh -i "$WORKERS_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=15 \
+       "root@${WORKERS_HOST}" "deploy $TARGET_SHA"; then
+  ok "ingestion box deployed ${TARGET_SHA:0:8}"
+else
+  ok "✖ ingestion box FAILED and rolled ITSELF back — it is on its previous revision, the primary is fine. Recover: ssh -i $WORKERS_KEY root@$WORKERS_HOST 'deploy $TARGET_SHA'"
+fi
+
 # The changelog release row: what changed between the revision members WERE on
 # and the one they are on now, grouped Website / Companion App / Platform, and
 # served by GET /v1/changelog. Generated here because this is the only moment

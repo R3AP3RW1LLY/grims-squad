@@ -34,6 +34,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = join(HERE, '..');
 const SCRIPT = join(REPO, 'infra', 'scripts', 'worker-job.sh');
 const CRONTAB = join(REPO, 'infra', 'cron', 'root.crontab');
+const INGESTION_CRONTAB = join(REPO, 'infra', 'cron', 'ingestion-box.crontab');
 
 /** Git Bash accepts `D:/x`, not `D:\x`. Harmless on Linux, where there is nothing to replace. */
 const forBash = (p: string): string => p.replace(/\\/g, '/');
@@ -203,7 +204,7 @@ describe('the crontab that is actually installed', () => {
   const crontab = readFileSync(CRONTAB, 'utf8');
   const jobLines = crontab
     .split('\n')
-    .filter((l) => /^\s*[\d*]/.test(l) && !/^\s*(CRON_TZ|SHELL|MAILTO)/.test(l));
+    .filter((l) => /^\s*[\d*]/.test(l) && !/^\s*(CRON_TZ|SHELL|MAILTO|COMPOSE_FILE)/.test(l));
 
   it('★ MANDATORY: no job invokes docker compose directly ★', () => {
     /*
@@ -252,5 +253,101 @@ describe('the crontab that is actually installed', () => {
     for (const line of fenced.split('\n').filter((l) => /^\s*[\d*]/.test(l))) {
       expect(line, `the doc teaches an unpinned job — ${line.trim()}`).not.toMatch(/docker\s+compose/);
     }
+  });
+});
+
+describe('the two boxes, and what each one runs', () => {
+  const primary = readFileSync(CRONTAB, 'utf8');
+  const ingestion = readFileSync(INGESTION_CRONTAB, 'utf8');
+
+  const jobs = (crontab: string): string[] =>
+    crontab
+      .split(/\r?\n/)
+      .filter((l) => /^\s*[\d*]/.test(l) && !/^\s*(CRON_TZ|SHELL|MAILTO|COMPOSE_FILE)/.test(l));
+
+  it('★ MANDATORY: the reconcile runs on EXACTLY ONE box ★', () => {
+    /*
+     * ★ THE BUG, FOUND 2026-08-11 ★
+     *
+     * `0 3 * * * ... main.js` sat in the primary's crontab AND in /etc/cron.d/grims-worker on the
+     * ingestion box. Two containers reconciled Discord roles against the same database at the same
+     * minute every night, and nothing had ever noticed — both runs do the same work, so the second
+     * simply finds nothing left to fix and exits cleanly.
+     *
+     * That is the shape of the failure this guards: not a crash, but silent duplicated work that
+     * looks exactly like success from either side.
+     */
+    const runners = [
+      ...jobs(primary).filter((l) => l.includes('dist/main.js')),
+      ...jobs(ingestion).filter((l) => l.includes('dist/main.js')),
+    ];
+
+    expect(runners, `the reconcile is scheduled ${runners.length} times across the two boxes`)
+      .toHaveLength(1);
+  });
+
+  it('★ MANDATORY: no job is scheduled on both boxes ★', () => {
+    // The general form of the rule above, so the next job added cannot repeat it.
+    const scriptOf = (line: string): string => /dist\/([\w-]+\.js)/.exec(line)?.[1] ?? line.trim();
+
+    const onPrimary = new Set(jobs(primary).map(scriptOf));
+    const both = jobs(ingestion).map(scriptOf).filter((s) => onPrimary.has(s));
+
+    expect(both, `scheduled on BOTH boxes: ${both.join(', ')}`).toEqual([]);
+  });
+
+  it('★ MANDATORY: the ingestion box names its own compose file ★', () => {
+    /*
+     * compose.workers.yml, not compose.prod.yml. That box has no api and no web service at all, so
+     * a job pointed at the primary's stack asks compose to resolve services which are not there.
+     */
+    expect(ingestion).toMatch(/^COMPOSE_FILE=infra\/docker\/compose\.workers\.yml$/m);
+    expect(primary, 'the primary uses the default and must not need to say so')
+      .not.toMatch(/^COMPOSE_FILE=/m);
+  });
+
+  it('MANDATORY: the sweeps are on the ingestion box, the promotion run is not', () => {
+    // The owner's choice, 2026-08-11: background work on the box that exists for it; the primary
+    // keeps only the member-facing ceremony.
+    const ingestionScripts = jobs(ingestion).join(' ');
+    expect(ingestionScripts).toContain('inara-sync.js');
+    expect(ingestionScripts).toContain('daily-audit.js');
+    expect(ingestionScripts).toContain('main.js');
+
+    expect(jobs(primary).join(' '), 'promotions stay on the primary').toContain('promote.js');
+    expect(ingestionScripts, 'and are not duplicated here').not.toContain('promote.js');
+  });
+
+  it('MANDATORY: every ingestion job goes through the wrapper too', () => {
+    expect(jobs(ingestion).length).toBeGreaterThan(0);
+    for (const line of jobs(ingestion)) {
+      expect(line, `this job would run :latest — ${line.trim()}`).not.toMatch(/docker\s+compose/);
+      expect(line).toMatch(/worker-job\.sh/);
+    }
+  });
+
+  it('MANDATORY: the commander audit does not collide with the promotion run', () => {
+    /*
+     * Both were documented at `15 0`. Two jobs pulling the whole roster in the same minute, on two
+     * machines, against one database is avoidable contention — and the audit is the one with no
+     * deadline, so it moves.
+     */
+    const audit = jobs(ingestion).find((l) => l.includes('daily-audit.js'));
+    const promote = jobs(primary).find((l) => l.includes('promote.js'));
+
+    const at = (line: string | undefined): string =>
+      (line ?? '').trim().split(/\s+/).slice(0, 5).join(' ');
+
+    expect(at(audit)).not.toBe(at(promote));
+  });
+
+  it('MANDATORY: role-sync is in NEITHER crontab — it lives in the daemon', () => {
+    /*
+     * Squadron owner, 2026-08-11. As a cron entry it is 1,440 container starts a day, each paying
+     * Node and Prisma boot to run a handful of indexed queries, and the runbook already blames
+     * container churn for a load incident. It runs as a tick inside the daemon that is already up.
+     */
+    expect(jobs(primary).join(' ')).not.toContain('role-sync');
+    expect(jobs(ingestion).join(' ')).not.toContain('role-sync');
   });
 });

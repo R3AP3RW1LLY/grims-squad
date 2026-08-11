@@ -1,0 +1,59 @@
+# Grim's Squad Hub — scheduled jobs on the INGESTION box (149.248.39.225).
+#
+# Install with:  crontab infra/cron/ingestion-box.crontab
+# Read with:     crontab -l
+#
+# ★ THIS BOX OWNS THE SCHEDULED SWEEPS — SQUADRON OWNER, 2026-08-11 ★
+#
+# The primary serves members: api, web, bot, Postgres, Caddy. This box exists for background work
+# and already runs the worker daemon and the EDDN collector. Sweeps belong here, where a slow one
+# cannot make a page slow — which is exactly what the second box was stood up to fix, after the
+# primary sat at load 6.84 (infra/runbooks/workers-second-box.md).
+#
+# The primary keeps ONLY the promotion run, because a promotion is a member-facing ceremony that
+# posts to Discord and the forum, and it is the one job somebody watches.
+#
+# ★ THE 03:00 RECONCILE WAS RUNNING TWICE, ON BOTH BOXES ★
+#
+# It sat in /etc/cron.d/grims-worker here AND in the primary's crontab, so two containers reconciled
+# Discord roles against the same database at the same minute every night. Nothing had noticed. It
+# lives here now and has been removed from the primary — see infra/cron/root.crontab.
+#
+# ★ EVERY JOB GOES THROUGH worker-job.sh ★
+#
+# compose.workers.yml names images `:${GRIMS_IMAGE_TAG:-latest}` exactly as the primary's file does,
+# and cron has no such variable in scope. Without the wrapper these ran `:latest` — a tag deploy.sh
+# does not move — which is why this box sat on a build from PR #144 while production ran thirteen
+# commits ahead. COMPOSE_FILE points the wrapper at this box's stack.
+
+CRON_TZ=UTC
+SHELL=/bin/bash
+MAILTO=""
+COMPOSE_FILE=infra/docker/compose.workers.yml
+
+# Inara profile sweep — pilot ranks for the roster (ADR-004, amended 2026-07-28).
+#
+# Every 15 minutes is affordable because the adapter batches 30 commanders per request: the whole
+# squadron costs about four requests against a budget of 2/minute (INV-033). One name per request
+# would have taken ~50 minutes and could only ever have run nightly.
+*/15 * * * *   /srv/grims/repo/infra/scripts/worker-job.sh apps/worker/dist/inara-sync.js >> /var/log/grims-inara-sync.log 2>&1
+
+# Discord reconciliation — role drift, orphaned identities, anomalies.
+0 3 * * *      /srv/grims/repo/infra/scripts/worker-job.sh apps/worker/dist/main.js >> /var/log/grims-reconcile.log 2>&1
+
+# Commander audit — every commander's squadron and nickname, nightly.
+#
+# ★ 04:15, NOT 00:15 — deliberately staggered ★
+#
+# The docs put this at 15 0, the same minute as the promotion run on the primary. Two jobs pulling
+# the whole roster at once is avoidable contention, and the audit is the one with no deadline.
+15 4 * * *     /srv/grims/repo/infra/scripts/worker-job.sh apps/worker/dist/daily-audit.js >> /var/log/grims-daily-audit.log 2>&1
+
+# ★ role-sync IS NOT HERE, ON PURPOSE — SQUADRON OWNER, 2026-08-11 ★
+#
+# It is documented as running every minute, which as a cron entry is 1,440 container starts a day,
+# each paying Node and Prisma boot to run a handful of indexed queries. The runbook already blames
+# container churn for a load incident on the primary.
+#
+# It runs inside the worker daemon instead — a 60-second tick in a process that is already up, with
+# the same job lock every other daemon job uses. See apps/worker/src/daemon.ts.
