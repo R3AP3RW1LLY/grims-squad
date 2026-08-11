@@ -103,6 +103,36 @@ export function CandidateList({ result }: { result: ScoutResult }) {
             </span>
           </header>
 
+          {/*
+            ★ WHY THIS ONE — SQUADRON OWNER, 2026-08-10 ★
+
+            The ranking was a bare order with a hidden number behind it. Every term of that number
+            already knew why it fired; it just never said. Computed in the same pass as the score,
+            so the explanation cannot drift from the ranking it explains.
+
+            Deliberately NOT a model call: ten seconds and a tunnel to a machine in somebody's house
+            to paraphrase arithmetic that is free, instant and cannot be wrong.
+          */}
+          {c.reasons === undefined || c.reasons.length === 0 ? null : (
+            <p className="m-0 mb-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-[var(--color-text-dim)]">
+              {c.reasons.slice(0, 4).map((r) => (
+                <span key={r.text}>
+                  {r.text}
+                  <span
+                    className={
+                      r.points < 0
+                        ? 'ml-1 font-mono tabular-nums text-[var(--color-semantic-warning)]'
+                        : 'ml-1 font-mono tabular-nums text-[var(--color-text-secondary)]'
+                    }
+                  >
+                    {r.points > 0 ? '+' : ''}
+                    {r.points}
+                  </span>
+                </span>
+              ))}
+            </p>
+          )}
+
           <p className="m-0 mb-2 flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs tabular-nums text-[var(--color-text-secondary)]">
             <span>
               {c.bodyCount > 0 ? `${c.bodyCount} bodies` : 'body count unknown'}

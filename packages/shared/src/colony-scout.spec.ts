@@ -3,6 +3,7 @@ import {
   CLAIM_RANGE_LY,
   bestPermitSource,
   scoreCandidate,
+  explainCandidate,
   rankCandidates,
   type PermitSource,
   type ScoutCandidate,
@@ -236,3 +237,89 @@ describe('candidates nobody has surveyed yet', () => {
     expect(scoreCandidate(bad)).toBeLessThan(scoreCandidate(fresh));
   });
 });
+
+/**
+ * ★ WHY THIS SYSTEM — SQUADRON OWNER, 2026-08-10 ★
+ *
+ * Picked from the colonisation suggestions, listed there as an AI feature. It is not one, and
+ * should not be: this scorer is built from named terms that already know exactly why they fired. A
+ * model asked to explain them could only paraphrase — ten seconds and a tunnel to a machine in
+ * somebody's house, to say something the arithmetic already knows for free and cannot get wrong.
+ *
+ * So the score explains itself, in the same pass that computes it.
+ */
+describe('a candidate score that shows its working', () => {
+  const base = {
+    system: 'Col 285 Sector GL-W c2-12',
+    x: 0,
+    y: 0,
+    z: 0,
+    bodyCount: 22,
+    landableCount: 8,
+    nearestLandableLs: 640,
+    hotspots: {},
+    surveyed: true,
+    pristine: false,
+    permit: 'Somewhere',
+    permitLy: 6,
+    permitAllegiance: null,
+    permitStations: 3,
+  } as unknown as Parameters<typeof explainCandidate>[0];
+
+  it('★ MANDATORY: the reasons add up to the score ★', () => {
+    /*
+     * The property that makes an explanation trustworthy. If the reasons can drift from the number
+     * they explain, the panel is lying with arithmetic — and nobody would be able to tell, because
+     * both halves look authoritative.
+     */
+    for (const c of [
+      base,
+      { ...base, surveyed: false },
+      { ...base, nearestLandableLs: null },
+      { ...base, pristine: true, hotspots: { Painite: 3, Platinum: 2 } },
+      { ...base, permitLy: 19 },
+    ]) {
+      const out = explainCandidate(c);
+      const summed = out.reasons.reduce((n, r) => n + r.points, 0);
+      // Rounded to a tenth per reason, so the sum is compared at that tolerance rather than exactly.
+      expect(Math.abs(summed - out.score), `${JSON.stringify(c.system)} ${summed} vs ${out.score}`)
+        .toBeLessThan(reasonsTolerance(out.reasons.length));
+    }
+  });
+
+  it('★ MANDATORY: it still returns exactly the score it always did ★', () => {
+    // The refactor split the arithmetic out; if it changed a single term every ranking would
+    // silently reorder, which is the one thing nobody would notice from a green suite.
+    for (const c of [base, { ...base, surveyed: false }, { ...base, permitLy: 19 }]) {
+      expect(scoreCandidate(c)).toBe(explainCandidate(c).score);
+    }
+  });
+
+  it('★ MANDATORY: an unclaimable system says so, and says nothing else ★', () => {
+    /*
+     * -1000 is not a score somebody should have to interpret. It means one thing, and listing body
+     * counts beside it would suggest the system is merely poor rather than impossible.
+     */
+    const out = explainCandidate({ ...base, permit: null, permitLy: null } as typeof base);
+    expect(out.score).toBe(-1000);
+    expect(out.reasons).toHaveLength(1);
+    expect(out.reasons[0]?.text).toMatch(/cannot be claimed/i);
+  });
+
+  it('MANDATORY: the heaviest term is named first', () => {
+    // A list that leads with a two-point bonus buries the forty-point penalty that decided it.
+    const out = explainCandidate({ ...base, nearestLandableLs: null, pristine: true });
+    expect(out.reasons[0]?.text).toMatch(/nothing landable/i);
+  });
+
+  it('an unsurveyed system is described as unsurveyed, not as empty', () => {
+    // "Unknown is not zero" — the same distinction the scorer itself is built on.
+    const out = explainCandidate({ ...base, surveyed: false });
+    expect(out.reasons.map((r) => r.text).join(' ')).toMatch(/not yet surveyed/i);
+  });
+});
+
+/** Each reason is rounded to a tenth, so n reasons can drift by at most n×0.05 from the raw sum. */
+function reasonsTolerance(count: number): number {
+  return Math.max(0.11, count * 0.06);
+}

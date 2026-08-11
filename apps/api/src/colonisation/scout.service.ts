@@ -5,8 +5,8 @@ import { canonicalSystemName } from './system-name.js';
 import {
   CLAIM_RANGE_LY,
   bestPermitSource,
+  explainCandidate,
   rankCandidates,
-  scoreCandidate,
   type PermitSource,
   type ScoutCandidate,
 } from '@grims/shared/colony-scout';
@@ -61,7 +61,13 @@ export interface ScoutRequest {
 
 export interface ScoutResult {
   readonly anchor: { readonly system: string; readonly allegiance: string | null; readonly controllingFaction: string | null } | null;
-  readonly candidates: ReadonlyArray<ScoutCandidate & { readonly score: number }>;
+  readonly candidates: ReadonlyArray<
+    ScoutCandidate & {
+      readonly score: number;
+      /** Every term that made the score, heaviest first. See `explainCandidate`. */
+      readonly reasons: ReadonlyArray<{ readonly points: number; readonly text: string }>;
+    }
+  >;
   /** How many claimable systems were in range before ranking. Says how wide the net was. */
   readonly consideredSystems: number;
   readonly permitSources: number;
@@ -217,7 +223,20 @@ export class ScoutService {
         allegiance: anchor.allegiance,
         controllingFaction: anchor.faction,
       },
-      candidates: rankCandidates(candidates).map((c) => ({ ...c, score: scoreCandidate(c) })),
+      /*
+       * ★ THE SCORE EXPLAINS ITSELF — SQUADRON OWNER, 2026-08-10 ★
+       *
+       * "why this system", from the colonisation suggestions. Listed there as an AI feature and
+       * deliberately not built as one: the scorer is made of named terms that already know why they
+       * fired, and a model could only paraphrase them — ten seconds and a tunnel to a machine in
+       * somebody's house to say what the arithmetic knows for free and cannot get wrong.
+       *
+       * Computed in the same pass as the score, so the two cannot disagree.
+       */
+      candidates: rankCandidates(candidates).map((c) => {
+        const { score, reasons } = explainCandidate(c);
+        return { ...c, score, reasons };
+      }),
       consideredSystems: claimableRows.length,
       permitSources: sources.length,
       unknownAnchor: null,

@@ -235,6 +235,43 @@ export function ScoutPage({ onPlan }: { onPlan?: (system: string) => void } = {}
                   </span>
                 </div>
 
+                {/*
+                  ★ WHY THIS ONE — SQUADRON OWNER, 2026-08-10 ★
+
+                  The ranking was a bare order with a hidden number behind it. Every term of that
+                  number already knew why it fired; it just never said. Computed in the same pass as
+                  the score, so the explanation cannot drift from the ranking it explains — and
+                  deliberately not a model call, which could only paraphrase it slower.
+                */}
+                {c.reasons === undefined || c.reasons.length === 0 ? null : (
+                  <div
+                    style={{
+                      marginTop: '6px',
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      gap: '10px',
+                      fontSize: '11px',
+                      color: C.faint,
+                    }}
+                  >
+                    {c.reasons.slice(0, 4).map((r) => (
+                      <span key={r.text}>
+                        {r.text}
+                        <span
+                          style={{
+                            marginLeft: '4px',
+                            fontVariantNumeric: 'tabular-nums',
+                            color: r.points < 0 ? C.warn : C.dim,
+                          }}
+                        >
+                          {r.points > 0 ? '+' : ''}
+                          {r.points}
+                        </span>
+                      </span>
+                    ))}
+                  </div>
+                )}
+
                 <div style={{ marginTop: '6px', display: 'flex', flexWrap: 'wrap', gap: '12px', fontSize: '12px', color: C.dim }}>
                   <span>{c.bodyCount > 0 ? `${c.bodyCount} bodies` : 'bodies unknown'}</span>
                   {c.surveyed ? (
