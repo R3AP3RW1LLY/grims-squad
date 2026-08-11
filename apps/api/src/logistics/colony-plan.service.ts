@@ -72,6 +72,23 @@ export interface PlanSite {
   readonly position: number;
   readonly isPrimary: boolean;
   readonly projectId: string | null;
+  /**
+   * What the project this site became actually reports.
+   *
+   * ★ THE PLAN'S FIGURE IS AN ESTIMATE; THIS ONE IS MEASURED ★
+   *
+   * `totalTonnes` above is what the catalogue says a build of this kind costs. This is what the
+   * site itself asked for, read off a commander's journal when they docked there. Null until the
+   * site has been placed and posted, which is the normal state of most of a plan.
+   *
+   * `required` can be zero on a posted project nobody has docked at yet — a different thing from a
+   * site that wants nothing, and the reason `siteProgress` falls back to the catalogue there.
+   */
+  readonly project: {
+    readonly required: number;
+    readonly remaining: number;
+    readonly completedAt: Date | null;
+  } | null;
 }
 
 export interface PlanDetail {
@@ -678,12 +695,35 @@ export class ColonyPlanService {
 
   async #sitesOf(planId: string): Promise<readonly PlanSite[]> {
     const rows = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
+      /*
+       * ★ WHAT HAS ACTUALLY BEEN BUILT — SQUADRON OWNER, 2026-08-11 ★
+       *
+       * "on the build order page, can we track what has been built please?"
+       *
+       * Answerable only since a planned site can point at the project it became. The plan knows
+       * what a build WOULD cost from the catalogue; the project knows what it actually still wants,
+       * because a docked commander's journal reports it. Joining them is the difference between a
+       * plan and a progress report.
+       *
+       * LEFT JOINs throughout: most sites have no project, which is not a gap but the normal state
+       * of a plan — somebody has to fly out and place them first.
+       */
       `SELECT s.id, s.body_id, s.location, s.build_type_id, s.position, s.is_primary,
               s.project_id::text AS project_id,
               t.display_name AS build_type_name, t.tier, t.total_tonnes,
-              t.economy_influence
+              t.economy_influence,
+              pr.completed_at AS project_completed_at,
+              need.required AS project_required,
+              need.remaining AS project_remaining
          FROM colony_plan_sites s
          LEFT JOIN colony_build_types t ON t.id = s.build_type_id
+         LEFT JOIN colony_projects pr ON pr.id = s.project_id
+         LEFT JOIN LATERAL (
+           SELECT COALESCE(SUM(n.required), 0)::bigint  AS required,
+                  COALESCE(SUM(n.remaining), 0)::bigint AS remaining
+             FROM colony_needs n
+            WHERE n.project_id = s.project_id
+         ) need ON s.project_id IS NOT NULL
         WHERE s.plan_id = $1::uuid
         ORDER BY s.position`,
       planId,
@@ -708,6 +748,14 @@ export class ColonyPlanService {
       position: Number(r['position']),
       isPrimary: r['is_primary'] === true,
       projectId: r['project_id'] === null ? null : String(r['project_id']),
+      project:
+        r['project_id'] === null || r['project_id'] === undefined
+          ? null
+          : {
+              required: Number(r['project_required'] ?? 0),
+              remaining: Number(r['project_remaining'] ?? 0),
+              completedAt: (r['project_completed_at'] as Date | null) ?? null,
+            },
     };
   }
 

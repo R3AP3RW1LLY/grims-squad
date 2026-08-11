@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import type { ColonyPlan, PlanProblem, PlanSimStep } from '../../../../../lib/api';
 import { apiPatch } from '../../../../../lib/api-client';
+import { siteProgress } from '@grims/shared/colony-plan-progress';
 import { PlanReview } from './plan-review';
 
 /**
@@ -146,6 +147,19 @@ export function BuildOrder({ plan, canEdit }: { plan: ColonyPlan; canEdit: boole
                 : body.name;
 
           const broken = (step?.problems.length ?? 0) > 0;
+          const progress = siteProgress({
+            id: s.id,
+            totalTonnes: s.totalTonnes,
+            project:
+              s.project === null || s.project === undefined
+                ? null
+                : {
+                    required: s.project.required,
+                    remaining: s.project.remaining,
+                    completedAt:
+                      s.project.completedAt === null ? null : new Date(s.project.completedAt),
+                  },
+          });
 
           return (
             <li
@@ -177,12 +191,47 @@ export function BuildOrder({ plan, canEdit }: { plan: ColonyPlan; canEdit: boole
                       primary
                     </span>
                   ) : null}
+                  {/*
+                    ★ WHAT HAS ACTUALLY BEEN BUILT — SQUADRON OWNER, 2026-08-11 ★
+
+                    Three states, not two: a project posted an hour ago with nothing delivered is
+                    NOT built, and counting it as built would overstate the number somebody plans a
+                    fortnight around. A site with no project stays silent rather than being labelled
+                    "planned" eighty-one times over.
+                  */}
+                  {progress.state === 'complete' ? (
+                    <a
+                      href={s.projectId === null ? undefined : `/colonisation/${s.projectId}`}
+                      className="ml-2 font-mono text-[9px] uppercase tracking-[0.16em] text-[var(--color-semantic-success)] no-underline hover:underline"
+                    >
+                      built
+                    </a>
+                  ) : progress.state === 'building' ? (
+                    <a
+                      href={s.projectId === null ? undefined : `/colonisation/${s.projectId}`}
+                      className="ml-2 font-mono text-[9px] uppercase tracking-[0.16em] text-[var(--color-brand-cyan-bright)] no-underline hover:underline"
+                    >
+                      building
+                      {progress.hauled === null || progress.total === 0
+                        ? null
+                        : ` ${Math.round((progress.hauled / progress.total) * 100)}%`}
+                    </a>
+                  ) : null}
                 </span>
 
                 <span className="flex items-center gap-3">
                   <Cost step={step} />
                   <span className="font-mono text-[11px] tabular-nums text-[var(--color-text-secondary)]">
-                    {s.totalTonnes === null ? '—' : `${s.totalTonnes.toLocaleString()} t`}
+                    {/*
+                      A site that has been posted reports its OWN tonnage off a commander's journal.
+                      That figure beats the catalogue's guess, and where hauling has started the
+                      remaining is what somebody actually has to fly.
+                    */}
+                    {progress.measured && progress.state === 'building'
+                      ? `${progress.remaining.toLocaleString()} t left`
+                      : s.totalTonnes === null
+                        ? '—'
+                        : `${s.totalTonnes.toLocaleString()} t`}
                     <span className="ml-2 text-[var(--color-text-dim)]">
                       Σ {running.toLocaleString()}
                     </span>

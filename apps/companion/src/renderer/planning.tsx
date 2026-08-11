@@ -25,6 +25,7 @@ import {
   inputStyle,
 } from './ui.js';
 import { SystemPicker } from './system-picker.js';
+import { planProgress, siteProgress } from '@grims/shared/colony-plan-progress';
 
 /**
  * Colonisation planning, in the companion app.
@@ -481,6 +482,29 @@ function PlanDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.Ele
 
   const costed = plan.sites.filter((s) => s.totalTonnes !== null);
   const total = costed.reduce((sum, s) => sum + (s.totalTonnes ?? 0), 0);
+
+  /*
+   * ★ WHAT HAS ACTUALLY BEEN BUILT — SQUADRON OWNER, 2026-08-11 ★
+   *
+   * The SAME `planProgress` the website calls, from @grims/shared. Two implementations of "how far
+   * through is this build" would drift, and the half that drifted would be the one somebody planned
+   * a fortnight around.
+   */
+  const progress = planProgress(
+    plan.sites.map((s) => ({
+      id: s.id,
+      totalTonnes: s.totalTonnes,
+      project:
+        s.project === null || s.project === undefined
+          ? null
+          : {
+              required: s.project.required,
+              remaining: s.project.remaining,
+              completedAt: s.project.completedAt === null ? null : new Date(s.project.completedAt),
+            },
+    })),
+  );
+
   const withSlots = plan.bodies.filter(
     (b) => b.orbitalSlots !== null || b.surfaceSlots !== null,
   ).length;
@@ -540,13 +564,39 @@ function PlanDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.Ele
         }}
       >
         <Stat label="Bodies" value={String(plan.bodies.length)} />
-        <Stat label="Sites planned" value={String(plan.sites.length)} />
+        {/* The breakdown appears only once something is posted — "0 complete · 0 building ·
+            81 planned" on a fresh plan is three numbers saying one thing. */}
+        <Stat
+          label="Sites planned"
+          value={String(plan.sites.length)}
+          {...(progress.complete + progress.building === 0
+            ? {}
+            : {
+                hint: `${progress.complete} complete · ${progress.building} building · ${progress.planned} planned`,
+              })}
+        />
         {/* Spread rather than `tone={cond ? x : undefined}`: with exactOptionalPropertyTypes an
             absent prop and a prop explicitly set to undefined are different types, and only the
             absent one means "use the default". */}
         <Stat
           label="To haul"
-          value={costed.length === 0 ? '—' : `${total.toLocaleString()} t`}
+          value={
+            costed.length === 0
+              ? '—'
+              : `${progress.remainingTonnes.toLocaleString()} t of ${total.toLocaleString()}`
+          }
+          /*
+            The gap stated plainly, as on the website. Most sites have never been placed, so their
+            tonnage is a catalogue estimate — a blended "13% hauled" would be a guess wearing a
+            measurement's clothes.
+          */
+          hint={
+            progress.measuredSites === 0
+              ? 'Nothing posted yet, so every figure is a catalogue estimate.'
+              : `${progress.hauledTonnes.toLocaleString()} t hauled${
+                  progress.pctHauled === null ? '' : ` (${progress.pctHauled}%)`
+                } · measured across ${progress.measuredSites}, estimated for ${progress.estimatedSites}`
+          }
           {...(total > 0 ? { tone: C.orangeBright } : {})}
         />
         <Stat
@@ -869,6 +919,51 @@ function SystemTree({
                               primary
                             </span>
                           ) : null}
+                          {/*
+                            ★ THREE STATES, NOT TWO — SQUADRON OWNER, 2026-08-11 ★
+
+                            A project posted an hour ago with nothing delivered is NOT built.
+                            A site with no project stays silent rather than being labelled
+                            "planned" eighty-one times over.
+                          */}
+                          {(() => {
+                            const pr = siteProgress({
+                              id: s.id,
+                              totalTonnes: s.totalTonnes,
+                              project:
+                                s.project === null || s.project === undefined
+                                  ? null
+                                  : {
+                                      required: s.project.required,
+                                      remaining: s.project.remaining,
+                                      completedAt:
+                                        s.project.completedAt === null
+                                          ? null
+                                          : new Date(s.project.completedAt),
+                                    },
+                            });
+                            if (pr.state === 'planned') return null;
+                            const pct =
+                              pr.hauled === null || pr.total === 0
+                                ? null
+                                : Math.round((pr.hauled / pr.total) * 100);
+                            return (
+                              <span
+                                style={{
+                                  ...MONO,
+                                  marginLeft: '7px',
+                                  fontSize: '9px',
+                                  letterSpacing: '0.16em',
+                                  textTransform: 'uppercase',
+                                  color: pr.state === 'complete' ? C.good : C.cyan,
+                                }}
+                              >
+                                {pr.state === 'complete'
+                                  ? 'built'
+                                  : `building${pct === null ? '' : ` ${pct}%`}`}
+                              </span>
+                            );
+                          })()}
                           {/*
                             ★ A PLANNED SITE THAT GOT BUILT SAYS SO — SQUADRON OWNER, 2026-08-10 ★
 

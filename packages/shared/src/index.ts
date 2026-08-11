@@ -26,6 +26,13 @@ export * from './commodity-category.js';
 export { suggestBuildOrder } from './colony-order.js';
 export { rankOpportunities, STALE_DAYS, NEARLY_DONE } from './colony-opportunity.js';
 export { REVIEW_PROMPT, renderPlanFacts, reviewableReason } from './colony-plan-review.js';
+export { planProgress, siteProgress } from './colony-plan-progress.js';
+export type {
+  PlanProgress,
+  ProgressSite,
+  SiteProgress,
+  SiteState,
+} from './colony-plan-progress.js';
 export type { PlanFacts } from './colony-plan-review.js';
 export type { Opportunity, OpportunityInput, Viewer as OpportunityViewer } from './colony-opportunity.js';
 export type { OrderSuggestion } from './colony-order.js';
