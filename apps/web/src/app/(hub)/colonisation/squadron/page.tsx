@@ -3,6 +3,8 @@ import { PageHeader, PageBody, Section } from '../../../../components/hub-page';
 import { LiveRefresh } from '../../../../components/live-refresh';
 import { NoAccess, AdminUnavailable } from '../../app/no-access';
 import { getColonyProjects } from '../../../../lib/api';
+import { orderBoard, resolveSort } from '../board-order';
+import { BoardSortLinks } from '../board-sort-links';
 import { ProjectBoard } from '../project-board';
 
 /**
@@ -30,8 +32,12 @@ export const metadata: Metadata = {
 
 export const dynamic = 'force-dynamic';
 
-export default async function SquadronProjectsPage() {
-  const read = await getColonyProjects('squadron');
+export default async function SquadronProjectsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ sort?: string }>;
+}) {
+  const [read, params] = await Promise.all([getColonyProjects('squadron'), searchParams]);
 
   if (read.state === 'forbidden') {
     return <NoAccess what="colonisation" permission="COLONY_VIEW" />;
@@ -46,6 +52,14 @@ export default async function SquadronProjectsPage() {
    * parameter was dropped somewhere is a lie this costs one line to make impossible.
    */
   const squadron = read.data.projects.filter((p) => p.owner === 'squadron');
+
+  /*
+   * Ranked for the member reading it — nearest, most urgent, closest to done, or gone quiet. The
+   * ranking itself is shared with the companion so the two boards cannot disagree about which build
+   * wants somebody most. See board-order.ts.
+   */
+  const sort = resolveSort(params.sort);
+  const board = orderBoard(squadron, read.data.you ?? null, sort);
 
   return (
     <>
@@ -70,8 +84,14 @@ export default async function SquadronProjectsPage() {
         lead="Every site the squadron has taken on. Open one to see what it still needs, who has hauled to it, and where to buy the rest."
       >
         <Section title={`Squadron projects (${squadron.length})`}>
+          <BoardSortLinks
+            basePath="/colonisation/squadron"
+            current={sort}
+            positionless={board.positionless}
+          />
           <ProjectBoard
-            projects={squadron}
+            projects={board.projects}
+            notes={board.notes}
             emptyMessage="No squadron projects yet. An officer can post one from Start New Project."
           />
         </Section>

@@ -131,6 +131,14 @@ const MONO: JSX.CSSProperties = { fontFamily: 'var(--font-mono)', fontVariantNum
 const PLAN_TABS = [
   { key: 'system', label: 'The system' },
   { key: 'order', label: 'Build order' },
+  /*
+   * ★ ITS OWN TAB — SQUADRON OWNER, 2026-08-10 ★
+   *
+   * Same split as the website, decided together: the economy and the system effects were rendered
+   * under an eighty-one row editable list, and they are not an ordering question — the economy is
+   * decided by WHICH builds are in the plan, not by their sequence.
+   */
+  { key: 'economy', label: 'Economy & markets' },
 ] as const;
 
 type PlanTab = (typeof PLAN_TABS)[number]['key'];
@@ -573,6 +581,12 @@ function PlanDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.Ele
       {tab !== 'order' ? null : (
         <Section title="Build order">
           <BuildOrder plan={plan} busy={busy} canEdit={canEdit} act={act} />
+        </Section>
+      )}
+
+      {tab !== 'economy' ? null : (
+        <Section title="Economy & markets">
+          <EconomyAndMarkets plan={plan} />
         </Section>
       )}
     </div>
@@ -1637,7 +1651,37 @@ function BuildOrder({
         total · the first is the primary port, and moving it changes which build that is
       </p>
 
-      {/* What it becomes before how good it gets: the economy is the decision, the scalars grade it. */}
+      {/*
+        The economy and the system effects used to render here, below the whole editable list. They
+        moved to their own tab — see EconomyAndMarkets — because they answer a question this tab
+        cannot ask: the economy follows WHICH builds are planned, not the order of them.
+      */}
+    </div>
+  );
+}
+
+/**
+ * What the system becomes, and what its markets would then trade.
+ *
+ * Both panels, in the order that matters: what it becomes before how good it gets — the economy is
+ * the decision, the scalars grade it.
+ */
+function EconomyAndMarkets({ plan }: { plan: ColonyPlan }): JSX.Element {
+  const nothingYet =
+    plan.simulation.economy.primary === null &&
+    !Object.values(plan.simulation.effects).some((v) => v !== 0);
+
+  if (nothingYet) {
+    return (
+      <Empty>
+        Nothing to work out yet. Choose builds for the bodies on the system tab and what the system
+        becomes is worked out from them.
+      </Empty>
+    );
+  }
+
+  return (
+    <div>
       <Economy plan={plan} />
       <Effects plan={plan} />
     </div>
