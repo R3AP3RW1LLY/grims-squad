@@ -11,9 +11,19 @@ schedule shows up in cron's own mail rather than looking healthy forever.
 
 ## The crontab
 
+The installed crontab is version-controlled at
+[`infra/cron/root.crontab`](../infra/cron/root.crontab) — install it with
+`crontab infra/cron/root.crontab`. What follows explains it.
+
+**Every job goes through `worker-job.sh`, never `docker compose` directly.**
+`compose.prod.yml` names each image `:${GRIMS_IMAGE_TAG:-latest}` and cron has no
+such variable in scope, so a direct invocation silently resolved `:latest` — a
+tag `deploy.sh` does not move, and which was **twenty-one hours** behind the
+running site the day this was found (2026-08-11), with no upper bound on the
+drift. The wrapper reads the deployed sha and **refuses to run** if it cannot.
+
 ```cron
 CRON_TZ=UTC
-COMPOSE=docker compose -f /srv/grims/repo/infra/docker/compose.prod.yml --env-file /srv/grims/.env
 
 # Discord roles onto platform roles. EVERY MINUTE (owner, 2026-07-29).
 #
@@ -21,13 +31,13 @@ COMPOSE=docker compose -f /srv/grims/repo/infra/docker/compose.prod.yml --env-fi
 # gateway events, so this reads roles that are already fresh and costs a handful
 # of indexed queries. Asking Discord for 109 members every minute would be
 # 157,000 requests a day and would be rate-limited within the hour.
-* * * * *      cd /srv/grims/repo && $COMPOSE run --rm worker node apps/worker/dist/role-sync.js >> /var/log/grims-role-sync.log 2>&1
+* * * * *      /srv/grims/repo/infra/scripts/worker-job.sh apps/worker/dist/role-sync.js >> /var/log/grims-role-sync.log 2>&1
 
 # Discord reconciliation — role drift, orphaned identities, anomalies.
-0 3 * * *      cd /srv/grims/repo && $COMPOSE run --rm worker node apps/worker/dist/main.js
+0 3 * * *      /srv/grims/repo/infra/scripts/worker-job.sh apps/worker/dist/main.js
 
 # Inara profile sweep — pilot ranks for the roster (ADR-004, amended 2026-07-28).
-*/15 * * * *   cd /srv/grims/repo && $COMPOSE run --rm worker node apps/worker/dist/inara-sync.js
+*/15 * * * *   /srv/grims/repo/infra/scripts/worker-job.sh apps/worker/dist/inara-sync.js
 
 # Promotions — DAILY, 00:15 UTC. NOT before 1 August 2026.
 #
@@ -44,11 +54,19 @@ COMPOSE=docker compose -f /srv/grims/repo/infra/docker/compose.prod.yml --env-fi
 #
 # --live and --post are both required and both deliberate: the engine writes nothing without the
 # first and announces nothing without the second, on top of the coded floor.
-15 0 * * *     cd /srv/grims/repo && $COMPOSE run --rm worker node apps/worker/dist/promote.js --live --post
+15 0 * * *     /srv/grims/repo/infra/scripts/worker-job.sh apps/worker/dist/promote.js --live --post >> /var/log/grims-promote.log 2>&1
 
 # Commander audit — every commander's squadron and nickname, nightly.
-15 0 * * *     cd /srv/grims/repo && $COMPOSE run --rm worker node apps/worker/dist/daily-audit.js
+15 0 * * *     /srv/grims/repo/infra/scripts/worker-job.sh apps/worker/dist/daily-audit.js
 ```
+
+**What is documented here is more than what is installed.** As of 2026-08-11 the
+box runs the reconciliation and the promotion sweep, and nothing else: the role
+sweep, the Inara sweep and the commander audit are described above but are not in
+[`infra/cron/root.crontab`](../infra/cron/root.crontab). That divergence was
+invisible while the crontab lived only on the box — the file above is now the
+copy that gets reviewed, and turning the other three on is the squadron owner's
+call rather than a side effect of fixing the promotion schedule.
 
 **`node dist/…`, not `pnpm <script>`.** The package scripts run `tsx` against
 TypeScript source. That works, but it pays a compile on every one of the 96
