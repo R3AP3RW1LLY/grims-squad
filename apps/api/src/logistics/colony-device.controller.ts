@@ -22,6 +22,7 @@ import { ColonyCatalogueService } from './colony-catalogue.service.js';
 import { ColonyPlanService } from './colony-plan.service.js';
 import { ColonyCarrierService, carrierCover } from './colony-carrier.service.js';
 import { ColonyPurchasesService } from './colony-purchases.service.js';
+import { ColonyPlanReviewService } from './colony-plan-review.service.js';
 import { MARKET_STORE } from './logistics.tokens.js';
 import type { MarketStore } from './market.store.js';
 
@@ -67,6 +68,8 @@ export class ColonyDeviceController {
     // The shopping route. The same instance the website's controller uses, so "where do I fly for
     // this" has one answer rather than one per surface.
     @Inject(ColonyPurchasesService) private readonly purchases: ColonyPurchasesService,
+    // The plan review. Same service as the website's, so one plan cannot get two verdicts.
+    @Inject(ColonyPlanReviewService) private readonly review: ColonyPlanReviewService,
     @Inject(MARKET_STORE) private readonly market: MarketStore,
     @Inject(PermissionService) private readonly permissions: PermissionService,
     @Inject(PAIRING_SERVICE) private readonly pairing: PairingService,
@@ -1122,6 +1125,31 @@ export class ColonyDeviceController {
   }
 
   /** The whole build order at once, which is what the up and down buttons send. */
+  /**
+   * "Read my plan and tell me what is wrong with it."
+   *
+   * ★ CAUGHT BY THE PARITY GUARD, 2026-08-10 ★
+   *
+   * This route was written on the WEBSITE controller and not here, exactly as the purchases route
+   * was this morning — and `companion-route-parity.spec.ts`, written that same morning for that
+   * same mistake, named it before anybody opened the app. The guard earned itself inside a day.
+   *
+   * POST rather than GET: it costs a model call, so it happens when somebody asks.
+   */
+  @Public()
+  @Post('plans/:id/review')
+  async planReview(@Req() req: FastifyRequest, @Param('id') id: string) {
+    const me = await this.#caller(
+      req,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation planner.',
+    );
+
+    const out = await this.review.review(id, me.userId);
+    if (out === null) throw new AppError(ErrorCode.RESOURCE_NOT_VISIBLE, 'No such plan.');
+    return out;
+  }
+
   @Public()
   @Patch('plans/:id/order')
   async reorderPlan(

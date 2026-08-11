@@ -192,6 +192,10 @@ declare global {
         siteId: string,
         version: number,
       ): Promise<Answer<{ version: number }>>;
+      /** Asks the assistant what is wrong with a plan, from the simulation's own findings. */
+      planReview(
+        id: string,
+      ): Promise<Answer<{ review: string; facts: string; unavailable: string | null }>>;
       planReorder(
         id: string,
         body: { version: number; siteIds: string[] },

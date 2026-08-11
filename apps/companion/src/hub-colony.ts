@@ -643,6 +643,20 @@ export interface PurchaseStation {
   readonly lastSeen: string;
 }
 
+/**
+ * "Read my plan and tell me what is wrong with it."
+ *
+ * The model is handed only what the simulation worked out and told to invent nothing. `facts` is
+ * exactly what it was given, so a review that looks wrong can be traced to bad data or a bad
+ * sentence — and `unavailable` is set when there was nothing to review or the AI could not be
+ * reached, in which case the facts are still worth reading.
+ */
+export const colonyPlanReview = (
+  call: HubCall,
+  id: string,
+): Promise<Answer<{ review: string; facts: string; unavailable: string | null }>> =>
+  hubColony(call, `/plans/${encodeURIComponent(id)}/review`, { method: 'POST', body: {} });
+
 export const colonyPurchases = (
   call: HubCall,
   id: string,

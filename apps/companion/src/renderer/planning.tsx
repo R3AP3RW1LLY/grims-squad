@@ -1252,6 +1252,115 @@ function Suggestion({
 }
 
 /**
+ * "Read my plan and tell me what is wrong with it."
+ *
+ * ★ SQUADRON OWNER, 2026-08-10 ★
+ *
+ * The planner already SAYS whether a plan is payable and what it becomes; nothing read those
+ * findings back in a member's own language, or decided which of eleven problems will cost them a
+ * fortnight.
+ *
+ * Asked for rather than automatic: it costs a model call on a machine in the owner's house, and a
+ * tab that spent that on every glance would make the assistant slower for everybody who actually
+ * asked it something.
+ *
+ * The facts come back with the review and are shown, because it is the only way to tell a retrieved
+ * fact from a generated sentence — and the only way somebody looking at a review that seems wrong
+ * can tell whether the data was wrong or the model was.
+ */
+function PlanReview({ planId }: { planId: string }): JSX.Element {
+  const [busy, setBusy] = useState(false);
+  const [out, setOut] = useState<{
+    review: string;
+    facts: string;
+    unavailable: string | null;
+  } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [showFacts, setShowFacts] = useState(false);
+
+  const ask = (): void => {
+    setBusy(true);
+    void window.colony.planReview(planId).then((a) => {
+      setBusy(false);
+      if (a.ok) {
+        setOut(a.data);
+        setError(null);
+      } else {
+        setError(a.error);
+      }
+    });
+  };
+
+  return (
+    <Card>
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          alignItems: 'baseline',
+          justifyContent: 'space-between',
+          gap: '10px',
+        }}
+      >
+        <span style={{ fontSize: '13px', color: C.text }}>
+          Ask the assistant what is wrong with this plan
+        </span>
+        <Button disabled={busy} onClick={ask}>
+          {busy ? 'Reading it…' : out === null ? 'Review this plan' : 'Ask again'}
+        </Button>
+      </div>
+
+      <p style={{ margin: '4px 0 0', fontSize: '11px', color: C.faint }}>
+        It is given only what the simulation on this page worked out, and is told not to invent
+        anything else.
+      </p>
+
+      {error === null ? null : (
+        <div style={{ marginTop: '8px' }}>
+          <Problem>{error}</Problem>
+        </div>
+      )}
+
+      {out === null ? null : (
+        <div style={{ marginTop: '10px' }}>
+          {out.unavailable === null ? null : (
+            <p style={{ margin: '0 0 8px', fontSize: '12px', color: C.warn }}>{out.unavailable}</p>
+          )}
+          {out.review === '' ? null : (
+            <div style={{ whiteSpace: 'pre-wrap', fontSize: '12px', color: C.text }}>
+              {out.review}
+            </div>
+          )}
+          {out.facts === '' ? null : (
+            <div style={{ marginTop: '10px' }}>
+              <Button onClick={() => setShowFacts(!showFacts)}>
+                {showFacts ? 'Hide what it was told' : 'What it was told'}
+              </Button>
+              {!showFacts ? null : (
+                <pre
+                  style={{
+                    marginTop: '8px',
+                    whiteSpace: 'pre-wrap',
+                    fontSize: '11px',
+                    color: C.dim,
+                    background: C.sunken,
+                    padding: '8px',
+                    borderRadius: '4px',
+                    overflowX: 'auto',
+                  }}
+                >
+                  {out.facts}
+                </pre>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+/**
  * Everything wrong with the plan, at the top where it cannot be missed.
  *
  * Silence when there is nothing wrong. A permanent "0 problems" banner trains people to ignore the
@@ -1602,6 +1711,11 @@ function BuildOrder({
   return (
     <div>
       <Verdict problems={sim.problems} />
+
+      {/* Under the verdict, where "what is wrong with this plan" already lives. */}
+      <div style={{ marginBottom: '12px' }}>
+        <PlanReview planId={plan.id} />
+      </div>
 
       <Suggestion plan={plan} canEdit={canEdit} busy={busy} onApply={saveOrder} />
 
