@@ -29,7 +29,31 @@ export const metadata: Metadata = {
 
 export const dynamic = 'force-dynamic';
 
-export default async function NewProjectPage() {
+export default async function NewProjectPage({
+  searchParams,
+}: {
+  /*
+   * Arrives from a planned site — see the note in post-project.tsx on why a plan cannot create the
+   * project itself. Everything the plan genuinely knows is carried; the market id is not, because
+   * it does not exist until the member places the site.
+   */
+  searchParams: Promise<{
+    planId?: string;
+    planSiteId?: string;
+    title?: string;
+    system?: string;
+  }>;
+}) {
+  const q = await searchParams;
+  const from =
+    q.planId !== undefined && q.planSiteId !== undefined
+      ? {
+          planId: q.planId,
+          planSiteId: q.planSiteId,
+          title: q.title ?? '',
+          systemName: q.system ?? '',
+        }
+      : undefined;
   /*
    * Read for the RIGHTS, not for the list. `getColonyProjects` is what says whether this member may
    * post at all and whether they may post on the squadron's behalf — the same call the boards make,
@@ -96,7 +120,7 @@ export default async function NewProjectPage() {
 
         <Section title="Post a project">
           {read.data.can.post ? (
-            <PostProject canPostSquadron={read.data.can.manage} />
+            <PostProject canPostSquadron={read.data.can.manage} from={from} />
           ) : (
             <p className="m-0 text-sm text-[var(--color-text-secondary)]">
               Posting a colonisation project belongs to a higher rank. The squadron and members’

@@ -869,6 +869,34 @@ function SystemTree({
                               primary
                             </span>
                           ) : null}
+                          {/*
+                            ★ A PLANNED SITE THAT GOT BUILT SAYS SO — SQUADRON OWNER, 2026-08-10 ★
+
+                            `colony_plan_sites.project_id` has been read out by the planner since it
+                            shipped and written by nothing at all. The website now writes it when a
+                            member posts a planned site as a project.
+
+                            The APP does not offer "post as project" and that is deliberate rather
+                            than missing: this app posts the site you are DOCKED at, which is the
+                            only moment the construction site's market id exists — and the market id
+                            is precisely why a plan cannot create a project by itself. The app
+                            already solves the harder half; it just needed to show the answer.
+                          */}
+                          {s.projectId === null ? null : (
+                            <span
+                              style={{
+                                ...MONO,
+                                marginLeft: '7px',
+                                fontSize: '9px',
+                                letterSpacing: '0.16em',
+                                textTransform: 'uppercase',
+                                color: C.good,
+                              }}
+                              title="This planned site has been posted as a project and is being hauled to."
+                            >
+                              built
+                            </span>
+                          )}
                           {s.totalTonnes === null ? null : (
                             <span style={{ ...MONO, marginLeft: '7px', color: C.faint }}>
                               {s.totalTonnes.toLocaleString()} t
