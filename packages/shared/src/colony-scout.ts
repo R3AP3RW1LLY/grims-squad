@@ -117,9 +117,51 @@ export function bestPermitSource(
  * Negative means "cannot be claimed", which is a different thing from "poor" and must never sort
  * among the merely mediocre.
  */
+/**
+ * One reason a candidate scores what it does, in the member's words.
+ *
+ * ★ SQUADRON OWNER, 2026-08-10 ★
+ *
+ * "why this system" — picked from the colonisation suggestions, as an AI feature. It is not one,
+ * and should not be: this scorer is built from named terms that already know exactly why they
+ * fired. A model asked to explain them could only paraphrase — ten seconds and a tunnel to a
+ * machine in somebody's house, to say something the arithmetic already knows for free and cannot
+ * get wrong.
+ *
+ * So the score explains itself. Instant, always available, and incapable of disagreeing with the
+ * number it is explaining, because it is computed in the same pass.
+ */
+export interface ScoreReason {
+  readonly points: number;
+  readonly text: string;
+}
+
 export function scoreCandidate(c: ScoutCandidate): number {
+  return explainCandidate(c).score;
+}
+
+/**
+ * The score, and every term that made it.
+ *
+ * Reasons are ordered by absolute weight — what moved this candidate most, first — because a list
+ * that leads with a two-point bonus buries the forty-point penalty that actually decided it.
+ */
+export function explainCandidate(c: ScoutCandidate): {
+  readonly score: number;
+  readonly reasons: readonly ScoreReason[];
+} {
+  const reasons: ScoreReason[] = [];
+  const add = (points: number, text: string): void => {
+    if (points !== 0) reasons.push({ points: Math.round(points * 10) / 10, text });
+  };
+
   // No permit, no colony. Nothing else about the system can compensate.
-  if (c.permit === null || c.permitLy === null) return -1000;
+  if (c.permit === null || c.permitLy === null) {
+    return {
+      score: -1000,
+      reasons: [{ points: -1000, text: 'No station in claim range — this cannot be claimed at all' }],
+    };
+  }
 
   let score = 0;
 
@@ -161,27 +203,53 @@ export function scoreCandidate(c: ScoutCandidate): number {
    * A body you cannot land on hosts orbital structures only. Landables carry the settlements and
    * hubs, so they are worth several times a bare body — but only if you can get to them.
    */
-  score += c.landableCount * 6 * reach;
-  score += Math.min(c.bodyCount, 60) * (0.4 + 0.6 * reach);
+  const landablePoints = c.landableCount * 6 * reach;
+  const bodyPoints = Math.min(c.bodyCount, 60) * (0.4 + 0.6 * reach);
+  score += landablePoints + bodyPoints;
+
+  if (!c.surveyed) {
+    add(landablePoints + bodyPoints, `${c.bodyCount} bodies, not yet surveyed — a survey can only move this`);
+  } else {
+    add(landablePoints, `${c.landableCount} landable bodies` + (ls === null ? '' : ` at ${Math.round(ls).toLocaleString()} Ls`));
+    add(bodyPoints, `${c.bodyCount} bodies in the system`);
+  }
 
   // A flat bonus on top for genuinely doorstep systems, where the whole colony is one approach.
-  if (c.surveyed && ls !== null && ls < 1_000) score += 15;
+  if (c.surveyed && ls !== null && ls < 1_000) {
+    score += 15;
+    add(15, 'Everything is on the doorstep — under 1,000 Ls');
+  }
   // Only a SURVEYED system can be known to have nothing worth landing on.
-  if (c.surveyed && ls === null) score -= 40;
+  if (c.surveyed && ls === null) {
+    score -= 40;
+    add(-40, 'Nothing landable — orbital structures only');
+  }
 
-  if (c.pristine) score += 15;
+  if (c.pristine) {
+    score += 15;
+    add(15, 'Pristine — untouched rings');
+  }
 
   // Hotspots are a bonus, deliberately capped: a rich ring cannot rescue an unbuildable system.
   const hotspotTotal = Object.values(c.hotspots).reduce((sum, n) => sum + n, 0);
   score += Math.min(hotspotTotal, 20);
+  add(Math.min(hotspotTotal, 20), `${hotspotTotal} mining hotspots`);
 
   /*
    * A permit source at the very edge of range is fragile — a slightly-off measurement or a claim
    * mechanic we have mis-modelled turns it into no claim at all. Comfort is worth points.
    */
-  score -= Math.max(0, c.permitLy - 8) * 1.5;
+  const edge = Math.max(0, c.permitLy - 8) * 1.5;
+  score -= edge;
+  add(-edge, `The claim is bought ${c.permitLy.toFixed(1)} ly away — near the edge of range`);
 
-  return score;
+  /*
+   * Ordered by what moved the candidate MOST. A list that leads with a two-point bonus buries the
+   * forty-point penalty that actually decided the ranking.
+   */
+  reasons.sort((a, b) => Math.abs(b.points) - Math.abs(a.points));
+
+  return { score, reasons };
 }
 
 /** Rank candidates, best first. */

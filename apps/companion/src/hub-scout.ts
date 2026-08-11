@@ -34,6 +34,8 @@ export interface ScoutCandidate {
   readonly permit: ScoutPermit | null;
   readonly permitLy: number | null;
   readonly score: number;
+  /** Every term that made the score, heaviest first. Optional: an older hub does not send it. */
+  readonly reasons?: ReadonlyArray<{ readonly points: number; readonly text: string }>;
 }
 
 export interface ScoutResult {

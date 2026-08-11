@@ -3056,6 +3056,8 @@ export interface ScoutCandidateRow {
   permit: ScoutPermit | null;
   permitLy: number | null;
   score: number;
+  /** Every term that made the score, heaviest first. Optional: an older hub does not send it. */
+  reasons?: Array<{ points: number; text: string }>;
 }
 
 export interface ScoutResult {
