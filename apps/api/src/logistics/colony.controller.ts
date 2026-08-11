@@ -9,6 +9,7 @@ import { ColonyCatalogueService } from './colony-catalogue.service.js';
 import { ColonyCarrierService, carrierCover } from './colony-carrier.service.js';
 import { ColonyPurchasesService } from './colony-purchases.service.js';
 import { CommanderPositionService } from './commander-position.service.js';
+import { ColonyPlanReviewService } from './colony-plan-review.service.js';
 import { ColonyPlanService } from './colony-plan.service.js';
 import { MARKET_STORE } from './logistics.tokens.js';
 import type { MarketStore } from './market.store.js';
@@ -54,6 +55,8 @@ export class ColonyController {
      * be the one deciding where somebody flies tonight.
      */
     @Inject(CommanderPositionService) private readonly position: CommanderPositionService,
+    // The plan review: the simulation's own findings, read back in the member's language.
+    @Inject(ColonyPlanReviewService) private readonly review: ColonyPlanReviewService,
   ) {}
 
   async #mask(caller: CurrentUser | undefined): Promise<bigint> {
@@ -800,6 +803,34 @@ export class ColonyController {
   }
 
   /** The whole build order at once, which is what a drag produces. */
+  /**
+   * "Read my plan and tell me what is wrong with it."
+   *
+   * ★ SQUADRON OWNER, 2026-08-10 ★
+   *
+   * Chosen from the colonisation suggestions. The planner already says whether a plan is payable
+   * and what it becomes; nothing read those findings back in a member's own language, or decided
+   * which of eleven problems is the one that will cost them a fortnight.
+   *
+   * POST rather than GET: it costs a model call, so it happens when somebody asks for it rather
+   * than every time a page renders.
+   */
+  @Post('plans/:id/review')
+  async reviewPlan(@User() caller: CurrentUser | undefined, @Param('id') id: string) {
+    const me = this.#requireSession(caller);
+    await this.#assert(
+      caller,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation planner.',
+    );
+
+    const out = await this.review.review(id, me.userId);
+    // Cloaked as not-visible rather than not-found, per INV-002: a plan somebody may not read must
+    // not be distinguishable from one that does not exist.
+    if (out === null) throw new AppError(ErrorCode.RESOURCE_NOT_VISIBLE, 'No such plan.');
+    return out;
+  }
+
   @Patch('plans/:id/order')
   async reorderPlan(
     @User() caller: CurrentUser | undefined,

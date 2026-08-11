@@ -44,6 +44,7 @@ import {
   colonyProject,
   colonyProjects,
   colonyDeclarePurchase,
+  colonyPlanReview,
   colonyPurchases,
   colonyRoster,
   colonyUnassign,
@@ -2073,6 +2074,7 @@ if (!app.requestSingleInstanceLock()) {
      * give two answers to a question that has one.
      */
     ipcMain.handle('colonyPurchases', (_e, id: unknown) => colonyPurchases(hub(), projectId(id)));
+    ipcMain.handle('colonyPlanReview', (_e, id: unknown) => colonyPlanReview(hub(), projectId(id)));
     ipcMain.handle('colonyDeclarePurchase', (_e, id: unknown, body: unknown) =>
       colonyDeclarePurchase(
         hub(),
