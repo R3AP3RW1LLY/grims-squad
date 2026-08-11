@@ -11,6 +11,7 @@ import { getBuildTypes, getColonyPlan } from '../../../../../lib/api';
 import { CopySystem } from '../../../../../components/copy-system';
 import { PageTabs, resolveTab, type PageTab } from '../../../../../components/page-tabs';
 import { SystemTree } from './system-tree';
+import { EconomyAndMarkets } from './economy-markets';
 import { BuildOrder } from './build-order';
 
 /**
@@ -46,6 +47,17 @@ export const dynamic = 'force-dynamic';
 const TABS: readonly PageTab[] = [
   { key: 'system', label: 'The system' },
   { key: 'order', label: 'Build order' },
+  /*
+   * ★ ITS OWN TAB — SQUADRON OWNER, 2026-08-10 ★
+   *
+   * The economy and the system effects were rendered at the bottom of the build-order tab, under an
+   * editable list that runs to eighty-one rows on the owner's own plan. The most consequential fact
+   * about a plan — what the system permanently becomes — sat below a fortnight of scrolling.
+   *
+   * And it was on the wrong tab: the economy is decided by WHICH builds are in the plan, not by
+   * their sequence, which the panel itself says in as many words.
+   */
+  { key: 'economy', label: 'Economy & markets' },
 ];
 
 export default async function PlanPage({
@@ -162,6 +174,12 @@ export default async function PlanPage({
         {tab !== 'order' ? null : (
           <Section title="Build order">
             <BuildOrder plan={plan} canEdit={canEdit} />
+          </Section>
+        )}
+
+        {tab !== 'economy' ? null : (
+          <Section title="Economy &amp; markets">
+            <EconomyAndMarkets plan={plan} />
           </Section>
         )}
       </PageBody>
