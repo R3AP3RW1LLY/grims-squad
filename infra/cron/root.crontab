@@ -1,0 +1,55 @@
+# Grim's Squad Hub — scheduled jobs, as actually installed on the primary box.
+#
+# Install with:  crontab infra/cron/root.crontab
+# Read with:     crontab -l
+#
+# ★ THIS FILE IS THE COPY THAT IS REVIEWED — ADDED 2026-08-11 ★
+#
+# The crontab lived only on the box. docs/scheduled-jobs.md described a different set of jobs to
+# the one running, and nobody could see that: the doc listed a role sweep every minute, an Inara
+# sweep every fifteen, a nightly commander audit and a promotion run, and the box carried the
+# explanatory COMMENTS for several of those with no line beneath them. The promotion run had
+# therefore never once happened.
+#
+# A schedule nobody can diff is a schedule nobody can check. This file is that diff.
+#
+# Every job is a ONE-SHOT container. The `worker` service carries profiles: ['jobs'], so
+# `docker compose up` never starts one by itself.
+#
+# ★ EVERY JOB GOES THROUGH worker-job.sh — SEE THAT FILE ★
+#
+# Not `docker compose run` directly. compose.prod.yml names images `:${GRIMS_IMAGE_TAG:-latest}`,
+# and cron has no such variable in scope, so a direct invocation silently ran `:latest` — a tag
+# deploy.sh does not move, and which was twenty-one hours stale the day this was found. The wrapper
+# reads the deployed sha and refuses to run if it cannot.
+
+CRON_TZ=UTC
+SHELL=/bin/bash
+MAILTO=""
+
+# Discord reconciliation — role drift, orphaned identities. 03:00 UTC daily.
+0 3 * * *      /srv/grims/repo/infra/scripts/worker-job.sh apps/worker/dist/main.js >> /var/log/grims-reconcile.log 2>&1
+
+# Promotions — DAILY, 00:15 UTC. NOT before 1 August 2026.
+#
+# ★ DAILY, NOT THE 1st OF THE MONTH — SQUADRON OWNER, 2026-08-11 ★
+#
+# "update the auto promotion service so that it promotes based on length of time and promotion
+# requirements, based on tier join dates etc, instead of running this on the first of the month"
+#
+# Eligibility is per-member — time at the rank, time in the Discord server, and qualifying
+# activity — so a monthly sweep would hold somebody who qualified on the 3rd for twenty-nine days
+# for no reason anybody could explain to them.
+#
+# --live and --post are both required and both deliberate: the engine writes nothing without the
+# first and announces nothing without the second, on top of the coded floor at 2026-08-01 that it
+# refuses to run before regardless.
+15 0 * * *     /srv/grims/repo/infra/scripts/worker-job.sh apps/worker/dist/promote.js --live --post >> /var/log/grims-promote.log 2>&1
+
+# ★ DOCUMENTED BUT DELIBERATELY NOT INSTALLED ★
+#
+# docs/scheduled-jobs.md also describes a role sweep (every minute), an Inara profile sweep (every
+# fifteen), a nightly commander audit and a nightly database backup. None of them are installed
+# here, and this file does not install them: turning on four unattended jobs — two of which talk to
+# Discord and one of which talks to Inara — is a decision for the squadron owner, not a side effect
+# of fixing the promotion schedule. Raised 2026-08-11 and left with them.
