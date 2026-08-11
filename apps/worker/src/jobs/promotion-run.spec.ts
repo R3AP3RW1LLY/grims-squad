@@ -98,6 +98,17 @@ const member = (over: Partial<MemberStanding> = {}): MemberStanding => ({
    * join date is exactly the case that must be refused.
    */
   joinedServerAt: new Date('2020-01-01T00:00:00Z'),
+  /*
+   * ★ SQUADRON OWNER, 2026-08-11 ★
+   *
+   * "to qualify for a promotion the commander must have a linked inara account on our profile
+   * this is non-negotiable."
+   *
+   * Linked by default for the same reason as the join date above: the tests either side of this
+   * line are about activity and the floor, and must not quietly become tests of this gate. It has
+   * its own below.
+   */
+  inaraLinked: true,
   ...over,
 });
 
@@ -309,7 +320,6 @@ describe('time in the Discord server', () => {
      * madhatter100690 on production: joined 16 July, banked a qualifying month, and was due
      * Cadet → Sergeant on the August run. Under this rule they wait until 16 August.
      */
-    const store = new FakeStore();
     store.rows = [
       member({
         handle: 'madhatter100690',
@@ -329,7 +339,6 @@ describe('time in the Discord server', () => {
   });
 
   it('★ MANDATORY: the same member promotes on the day they reach a month ★', async () => {
-    const store = new FakeStore();
     store.rows = [
       member({
         qualifyingMonthsAtRank: 1,
@@ -350,7 +359,6 @@ describe('time in the Discord server', () => {
      * open. There, failing open costs a member a month they earned; here it would grant a rank they
      * did not, in public, on a record nobody can defend.
      */
-    const store = new FakeStore();
     store.rows = [member({ qualifyingMonthsAtRank: 12, joinedServerAt: null })];
 
     const engine = new PromotionEngine(store);
@@ -369,7 +377,6 @@ describe('time in the Discord server', () => {
      * the ladder says represents nine, however active they have been — which is precisely what a
      * tenure rule is for.
      */
-    const store = new FakeStore();
     store.rows = [
       member({
         currentRank: 'General',
@@ -392,7 +399,6 @@ describe('time in the Discord server', () => {
      * active for four days banks a whole qualifying month, because the rollup is keyed on the month
      * rather than on their grant. Long-standing in the server, and still not a month at the rank.
      */
-    const store = new FakeStore();
     store.rows = [
       member({
         qualifyingMonthsAtRank: 1,
@@ -408,3 +414,87 @@ describe('time in the Discord server', () => {
     expect(report.skipped[0]?.reason).toMatch(/Held Cadet since 2026-08-28/);
   });
 });
+
+describe('a linked Inara account', () => {
+  /**
+   * ★ SQUADRON OWNER, 2026-08-11 — GIVEN AS NON-NEGOTIABLE ★
+   *
+   * "to qualify for a promotion the commander must have a linked inara account on our profile
+   * this is non-negotiable."
+   *
+   * It is also the SSOT's own rule, written a fortnight earlier and never enforced in code:
+   *
+   *     failureMode.noLinkedCmdr: NOT eligible, and surfaced on the admin dashboard so an
+   *     officer can fix the cause. Silently promoting on missing data would make the
+   *     requirement meaningless.
+   *
+   * ★ WHY IT HAS TO BE ITS OWN GATE, NOT A SIDE EFFECT OF THE ACTIVITY CHECK ★
+   *
+   * Until now the only thing standing between an unlinked member and a promotion was that their
+   * `gameActivity` sat at `unknown`, and `unknown` is not in ('observed','assumed'). That is an
+   * accident, not a rule — it holds only while nothing else sets the column. The moment a month is
+   * credited as `assumed` under the fail-open rule (D26), an unlinked member sails straight
+   * through. The two must be independent, because they answer different questions: "did they
+   * play" and "can we ever check".
+   */
+
+  it('★ MANDATORY: no linked Inara account is REFUSED, however active they are ★', async () => {
+    store.rows = [
+      member({ handle: 'durgisnibble', inaraLinked: false, qualifyingMonthsAtRank: 12 }),
+    ];
+
+    const report = await engine.run({ now: AFTER_FLOOR, dryRun: true });
+
+    expect(report.wouldPromote, 'twelve qualifying months must not buy past this').toHaveLength(0);
+    expect(report.skipped[0]?.reason).toMatch(/inara/i);
+  });
+
+  it('★ MANDATORY: the refusal says how to fix it ★', async () => {
+    // A rule somebody cannot act on is a dead end. The member links their account, or an officer
+    // tells them to — either way the sentence has to name the thing to do.
+    store.rows = [member({ inaraLinked: false })];
+
+    const report = await engine.run({ now: AFTER_FLOOR, dryRun: true });
+
+    expect(report.skipped[0]?.reason).toMatch(/link/i);
+  });
+
+  it('★ MANDATORY: an ABSENT flag refuses too — it does not pass by omission ★', async () => {
+    /*
+     * The field is optional so a store written before this rule still compiles. That is exactly
+     * the shape that fails open by accident: a caller who forgets it would promote everybody.
+     *
+     * Absent means "we do not know", and an unknown must never satisfy a requirement the owner
+     * called non-negotiable. Failing closed here is loud — nobody is promoted and somebody asks
+     * why — where failing open is silent and public.
+     */
+    const { inaraLinked: _omitted, ...withoutTheFlag } = member();
+    store.rows = [withoutTheFlag as MemberStanding];
+
+    const report = await engine.run({ now: AFTER_FLOOR, dryRun: true });
+
+    expect(report.wouldPromote).toHaveLength(0);
+    expect(report.skipped[0]?.reason).toMatch(/inara/i);
+  });
+
+  it('MANDATORY: a linked member is unaffected by this gate', async () => {
+    store.rows = [member({ inaraLinked: true })];
+
+    const report = await engine.run({ now: AFTER_FLOOR, dryRun: true });
+
+    expect(report.wouldPromote).toHaveLength(1);
+  });
+
+  it('MANDATORY: it is not mentioned to somebody at the top of the ladder', async () => {
+    // "Already at the top" is the true reason. Telling a Grand Master General to link Inara for a
+    // promotion that does not exist is noise an officer would have to work out how to action.
+    store.rows = [
+      member({ currentRank: 'Grand Master General', inaraLinked: false }),
+    ];
+
+    const report = await engine.run({ now: AFTER_FLOOR, dryRun: true });
+
+    expect(report.skipped[0]?.reason).toMatch(/top of the ladder/i);
+    expect(report.skipped[0]?.reason).not.toMatch(/inara/i);
+  });
+})

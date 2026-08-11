@@ -57,6 +57,19 @@ export interface MemberStanding {
    * this compiles; absent is treated as null, which is the safe direction.
    */
   readonly joinedServerAt?: Date | null;
+  /**
+   * Whether the member has a linked Inara account on their profile.
+   *
+   * ★ SQUADRON OWNER, 2026-08-11 — NON-NEGOTIABLE ★
+   *
+   * "to qualify for a promotion the commander must have a linked inara account on our profile
+   * this is non-negotiable."
+   *
+   * Optional so a store written before the rule still compiles — but anything other than an
+   * explicit `true` REFUSES. Absent is "we do not know", and the engine must never treat an unknown
+   * as satisfying a requirement given as non-negotiable.
+   */
+  readonly inaraLinked?: boolean;
 }
 
 export interface PromotionStore {
@@ -184,6 +197,48 @@ export class PromotionEngine {
           handle: m.handle,
           rank: m.currentRank,
           reason: 'Already at the top of the ladder.',
+        });
+        continue;
+      }
+
+      /*
+       * ★ A LINKED INARA ACCOUNT — SQUADRON OWNER, 2026-08-11, GIVEN AS NON-NEGOTIABLE ★
+       *
+       * "to qualify for a promotion the commander must have a linked inara account on our profile
+       * this is non-negotiable."
+       *
+       * It is also the SSOT's own rule, written a fortnight earlier and never once enforced:
+       *
+       *     gameActivity.failureMode.noLinkedCmdr: NOT eligible, and surfaced on the admin
+       *     dashboard so an officer can fix the cause. Silently promoting on missing data would
+       *     make the requirement meaningless.
+       *
+       * ★ WHY IT IS ITS OWN GATE AND NOT A CONSEQUENCE OF THE ACTIVITY CHECK ★
+       *
+       * Until now the only thing between an unlinked member and a promotion was that their
+       * `gameActivity` sat at `unknown`, and `unknown` is not in ('observed','assumed'). That is an
+       * ACCIDENT rather than a rule: it holds exactly as long as nothing else writes that column.
+       * The moment a month is credited `assumed` under the fail-open rule — which is precisely what
+       * the retroactive correction does — an unlinked member would sail through untouched.
+       *
+       * The two questions are independent. "Did they play" is the activity check. "Can we ever
+       * check" is this one, and it is the one the owner called non-negotiable.
+       *
+       * ★ ABSENT REFUSES ★
+       *
+       * The field is optional so a store predating this rule still compiles, and that is exactly
+       * the shape that fails open by accident. Absent means "we do not know", and an unknown must
+       * never satisfy a non-negotiable requirement. Failing closed is loud — nobody is promoted and
+       * somebody asks why. Failing open is silent, public, and about someone's standing.
+       */
+      if (m.inaraLinked !== true) {
+        skipped.push({
+          userId: m.userId,
+          handle: m.handle,
+          rank: m.currentRank,
+          reason:
+            'No linked Inara account — required for promotion. The member can link one on their ' +
+            'profile, or an officer can check why it is missing.',
         });
         continue;
       }

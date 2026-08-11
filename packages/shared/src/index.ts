@@ -46,6 +46,12 @@ export {
   promotionsPermitted,
 } from './promotion-floor.js';
 
+export {
+  GO_LIVE_AT,
+  ROSTER_ARTEFACT_BEFORE,
+  effectiveGrantAt,
+} from './promotion-backdate.js';
+
 /*
  * The colonisation simulation. Exported from here so the website and the companion app run the
  * IDENTICAL rules — two copies would drift, and the half that drifted would be the one deciding

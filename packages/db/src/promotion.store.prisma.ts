@@ -96,6 +96,39 @@ export class PrismaPromotionStore implements PromotionStore {
       select: { discordId: true, joinedAt: true },
     });
 
+    /*
+     * ★ A LINKED INARA ACCOUNT — SQUADRON OWNER, 2026-08-11, NON-NEGOTIABLE ★
+     *
+     * "to qualify for a promotion the commander must have a linked inara account on our profile
+     * this is non-negotiable."
+     *
+     * TWO tables, because there are two ways a commander is linked and refusing somebody who took
+     * the other route would be the rule punishing the member for our own plumbing:
+     *
+     *   inara_links         the member added their own Inara API key. `cmdrName` is null until the
+     *                       first successful call, so a non-null name is the proof the key WORKS —
+     *                       a row alone would count an unverified paste as a link.
+     *   cmdr_verifications  a proven claim of a CMDR by any method, including an officer vouching.
+     *                       `revokedAt IS NULL` because a revoked verification is not a link.
+     *
+     * One query each for the whole roster rather than two per member — this runs over everybody.
+     */
+    const [inaraRows, cmdrRows] = await Promise.all([
+      this.#db.inaraLink.findMany({
+        where: { userId: { in: users.map((u) => u.id) }, cmdrName: { not: null } },
+        select: { userId: true },
+      }),
+      this.#db.cmdrVerification.findMany({
+        where: { userId: { in: users.map((u) => u.id) }, revokedAt: null },
+        select: { userId: true },
+      }),
+    ]);
+
+    const linked = new Set<string>([
+      ...inaraRows.map((r) => r.userId),
+      ...cmdrRows.map((r) => r.userId),
+    ]);
+
     const byDiscordId = new Map(guildRows.map((g) => [g.discordId, g.joinedAt]));
     const joined = new Map<string, Date | null>(
       joinRows.map((r) => [r.userId, byDiscordId.get(r.discordId) ?? null]),
@@ -157,6 +190,7 @@ export class PrismaPromotionStore implements PromotionStore {
         qualifyingMonthsAtRank: months,
         heldRankSince: rankGrant.grantedAt,
         joinedServerAt: joined.get(u.id) ?? null,
+        inaraLinked: linked.has(u.id),
       });
     }
     return out;

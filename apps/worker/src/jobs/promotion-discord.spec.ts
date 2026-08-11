@@ -79,6 +79,12 @@ const member = (over: Partial<MemberStanding> = {}): MemberStanding => ({
    * reaches the applier — which is the gate working, and not what this file is about.
    */
   joinedServerAt: new Date('2020-01-01T00:00:00Z'),
+  /*
+   * Linked, for the same reason as the join date above: without it the engine refuses before it
+   * ever reaches the applier, and these would silently become tests of the Inara gate (squadron
+   * owner, 2026-08-11, non-negotiable) instead of tests of the Discord half.
+   */
+  inaraLinked: true,
   ...over,
 });
 

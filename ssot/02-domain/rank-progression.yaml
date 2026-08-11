@@ -234,6 +234,37 @@ rules:
       Deliberate (human decision). 56 of 108 members currently hold no ladder
       rank; they enter only when an officer grants Cadet.
 
+  - id: inara_link_required
+    rule: >
+      A member with NO linked Inara account on their profile is never promoted,
+      whatever their activity and however many qualifying months they have
+      banked. Enforced as its own gate in the engine, with tests.
+    decidedBy: squadron owner, 2026-08-11, given as non-negotiable
+    quote: >
+      "to qualify for a promotion the commander must have a linked inara account
+      on our profile this is non-negotiable."
+    why: >
+      It restates gameActivity.failureMode.noLinkedCmdr, which has been in this
+      file since 2026-07-27 and was never once enforced in code. Until now the
+      only thing standing between an unlinked member and a promotion was that
+      their `gameActivity` sat at `unknown` and `unknown` is not in
+      ('observed','assumed') — an ACCIDENT, not a rule. It holds exactly as long
+      as nothing else writes that column, and the retroactive correction of
+      2026-08-11 writes it. Without an independent gate, the fail-open rule below
+      would have promoted the two members nobody can check.
+    linkedMeans: >
+      Either an `inara_links` row whose `cmdrName` is non-null — null until the
+      first successful call, so a non-null name is proof the key WORKS rather
+      than proof somebody pasted something — or a live `cmdr_verifications` row
+      (revokedAt IS NULL), which covers an officer vouching for a commander.
+      Refusing somebody who took the second route would be the rule punishing a
+      member for our own plumbing.
+    absentMeans: >
+      REFUSES. The field is optional on the interface so a store predating the
+      rule still compiles, and that is exactly the shape that fails open by
+      accident. Absent is "we do not know", and an unknown must never satisfy a
+      requirement given as non-negotiable.
+
   - id: audited
     rule: >
       Every promotion writes an audit row with actor `system`, the member, the
