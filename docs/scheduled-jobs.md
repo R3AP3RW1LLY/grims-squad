@@ -29,8 +29,22 @@ COMPOSE=docker compose -f /srv/grims/repo/infra/docker/compose.prod.yml --env-fi
 # Inara profile sweep — pilot ranks for the roster (ADR-004, amended 2026-07-28).
 */15 * * * *   cd /srv/grims/repo && $COMPOSE run --rm worker node apps/worker/dist/inara-sync.js
 
-# Promotions — the 1st of the month, 00:00 UTC. NOT before 1 August 2026.
-0 0 1 * *      cd /srv/grims/repo && $COMPOSE run --rm worker node apps/worker/dist/promote.js
+# Promotions — DAILY, 00:15 UTC. NOT before 1 August 2026.
+#
+# ★ WAS THE 1st OF THE MONTH, AND WAS NEVER INSTALLED — 2026-08-11 ★
+#
+# Two things were found together. The schedule below said `0 0 1 * *`, and the crontab on the box
+# carried the explanatory comment for it with NO LINE BENEATH — so the automatic run has never once
+# happened. Promotions were only ever manual, which is how the owner had been doing them.
+#
+# And the cadence changed: a member is now promoted on the day they earn it rather than waiting up
+# to a month for the 1st. Eligibility is per-member — time at the rank, time in the Discord server,
+# and qualifying activity — so a monthly sweep would hold somebody who qualified on the 3rd for
+# twenty-nine days for no reason anybody could explain to them.
+#
+# --live and --post are both required and both deliberate: the engine writes nothing without the
+# first and announces nothing without the second, on top of the coded floor.
+15 0 * * *     cd /srv/grims/repo && $COMPOSE run --rm worker node apps/worker/dist/promote.js --live --post
 
 # Commander audit — every commander's squadron and nickname, nightly.
 15 0 * * *     cd /srv/grims/repo && $COMPOSE run --rm worker node apps/worker/dist/daily-audit.js

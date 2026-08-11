@@ -1,4 +1,5 @@
 import { assertPromotionsPermitted } from './promotion-floor.js';
+import { tenureMet } from './promotion-tenure.js';
 
 /**
  * The monthly promotion engine.
@@ -26,6 +27,15 @@ export interface LadderRung {
   /** Months at THIS rank before advancing. `null` at the top of the ladder. */
   readonly qualifyingMonthsRequired: number | null;
   readonly next: string | null;
+  /**
+   * Total months the rank is meant to represent — 1, 2, 3, 4, 5, 6, 7, 9, 12 in the SSOT, gaps
+   * included. The Discord-tenure requirement is measured against this, so somebody cannot reach
+   * Grand Master General three months after joining however much they take part.
+   *
+   * Optional so a ladder built in a test without it still compiles; absent falls back to the
+   * per-rank figure, which is the safe direction.
+   */
+  readonly cumulativeMonths?: number | null;
 }
 
 export interface MemberStanding {
@@ -34,6 +44,19 @@ export interface MemberStanding {
   readonly currentRank: string;
   readonly qualifyingMonthsAtRank: number;
   readonly heldRankSince: Date;
+  /**
+   * When they joined the squadron's Discord.
+   *
+   * ★ SQUADRON OWNER, 2026-08-11 ★
+   *
+   * "the member needs to be in the discord server for 1 calender month ... then add this as a
+   * requirement for all other ranks"
+   *
+   * Null when we have no record, which BLOCKS rather than passes — a promotion granted on an
+   * unknown is one nobody can defend afterwards. Optional on the interface so a store that predates
+   * this compiles; absent is treated as null, which is the safe direction.
+   */
+  readonly joinedServerAt?: Date | null;
 }
 
 export interface PromotionStore {
@@ -172,6 +195,54 @@ export class PromotionEngine {
           handle: m.handle,
           rank: m.currentRank,
           reason: `${m.qualifyingMonthsAtRank} of ${rung.qualifyingMonthsRequired} qualifying months at ${m.currentRank} — ${short} more needed.`,
+        });
+        continue;
+      }
+
+      /*
+       * ★ TIME AT THE RANK — SQUADRON OWNER, 2026-08-11 ★
+       *
+       * "promotes based on length of time and promotion requirements, based on tier join dates"
+       *
+       * Qualifying months and elapsed months are NOT the same thing, and the gap is exploitable:
+       * somebody granted Cadet on the 28th who talks and plays for four days banks a whole
+       * qualifying month, because the rollup is keyed on the month rather than on their grant. The
+       * clock for the next rank starts when the current one was given — the owner's own choice.
+       */
+      const atRank = tenureMet(m.heldRankSince, rung.qualifyingMonthsRequired, now);
+      if (!atRank.met) {
+        skipped.push({
+          userId: m.userId,
+          handle: m.handle,
+          rank: m.currentRank,
+          reason: `Held ${m.currentRank} since ${m.heldRankSince.toISOString().slice(0, 10)} — ${
+            rung.qualifyingMonthsRequired === 1 ? '1 month' : `${rung.qualifyingMonthsRequired} months`
+          } at the rank required, eligible ${atRank.eligibleAt?.toISOString().slice(0, 10) ?? 'unknown'}.`,
+        });
+        continue;
+      }
+
+      /*
+       * ★ TIME IN THE SERVER ★
+       *
+       * "the member needs to be in the discord server for 1 calender month ... then add this as a
+       * requirement for all other ranks"
+       *
+       * Measured against the ladder's own `cumulativeMonths` — the total the rank is meant to
+       * represent — so nobody reaches Grand Master General three months after joining however much
+       * they talk. A missing join date blocks, and says how to fix it.
+       */
+      const inServer = tenureMet(
+        m.joinedServerAt ?? null,
+        rung.cumulativeMonths ?? rung.qualifyingMonthsRequired,
+        now,
+      );
+      if (!inServer.met) {
+        skipped.push({
+          userId: m.userId,
+          handle: m.handle,
+          rank: m.currentRank,
+          reason: inServer.reason,
         });
         continue;
       }

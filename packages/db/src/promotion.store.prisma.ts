@@ -71,6 +71,36 @@ export class PrismaPromotionStore implements PromotionStore {
       },
     });
 
+    /*
+     * ★ WHEN EACH MEMBER JOINED THE DISCORD — SQUADRON OWNER, 2026-08-11 ★
+     *
+     * "the member needs to be in the discord server for 1 calender month ... then add this as a
+     * requirement for all other ranks"
+     *
+     * From `discord_guild_members`, which is the BOT'S OWN SWEEP of the server — refreshed on every
+     * bot start, and it survives somebody leaving and rejoining. `discord_identities.guildJoinedAt`
+     * carries the same fact but is a snapshot taken once at website sign-in and never revisited, so
+     * it can only go stale. The schema already documents the sweep as authoritative where the two
+     * disagree; measured on 2026-08-11 they agreed for all twenty members, which is the moment to
+     * pick the one that will still be right later.
+     *
+     * One query for everybody rather than one per member: this runs over the whole roster.
+     */
+    const joinRows = await this.#db.discordIdentity.findMany({
+      where: { userId: { in: users.map((u) => u.id) } },
+      select: { userId: true, discordId: true },
+    });
+
+    const guildRows = await this.#db.discordGuildMember.findMany({
+      where: { discordId: { in: joinRows.map((r) => r.discordId) } },
+      select: { discordId: true, joinedAt: true },
+    });
+
+    const byDiscordId = new Map(guildRows.map((g) => [g.discordId, g.joinedAt]));
+    const joined = new Map<string, Date | null>(
+      joinRows.map((r) => [r.userId, byDiscordId.get(r.discordId) ?? null]),
+    );
+
     const out: MemberStanding[] = [];
     for (const u of users) {
       const rankGrant = u.userRoles.find((r) => ladderNames.has(r.role.name));
@@ -126,6 +156,7 @@ export class PrismaPromotionStore implements PromotionStore {
         currentRank: rankGrant.role.name,
         qualifyingMonthsAtRank: months,
         heldRankSince: rankGrant.grantedAt,
+        joinedServerAt: joined.get(u.id) ?? null,
       });
     }
     return out;

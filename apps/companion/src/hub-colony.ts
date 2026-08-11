@@ -388,6 +388,14 @@ export interface PlanSite {
   /** The system's first station. The game charges nothing for it. */
   isPrimary: boolean;
   projectId: string | null;
+  /**
+   * What the project this site became actually reports. Null until it has been placed and posted.
+   *
+   * The plan's own `totalTonnes` is a catalogue ESTIMATE; these are MEASURED off a commander's
+   * journal. Optional because an older hub does not send it, in which case every site reads as
+   * planned — exactly how the page behaved before this existed.
+   */
+  project?: { required: number; remaining: number; completedAt: string | null } | null;
 }
 
 /**

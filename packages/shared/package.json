@@ -11,6 +11,14 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./colony-economy-view": {
+      "types": "./dist/colony-economy-view.d.ts",
+      "default": "./dist/colony-economy-view.js"
+    },
+    "./colony-plan-progress": {
+      "types": "./dist/colony-plan-progress.d.ts",
+      "default": "./dist/colony-plan-progress.js"
+    },
     "./colony-opportunity": {
       "types": "./dist/colony-opportunity.d.ts",
       "default": "./dist/colony-opportunity.js"

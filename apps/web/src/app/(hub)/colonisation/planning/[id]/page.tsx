@@ -11,6 +11,7 @@ import { getBuildTypes, getColonyPlan } from '../../../../../lib/api';
 import { CopySystem } from '../../../../../components/copy-system';
 import { PageTabs, resolveTab, type PageTab } from '../../../../../components/page-tabs';
 import { SystemTree } from './system-tree';
+import { planProgress } from '@grims/shared/colony-plan-progress';
 import { EconomyAndMarkets } from './economy-markets';
 import { BuildOrder } from './build-order';
 
@@ -92,7 +93,32 @@ export default async function PlanPage({
   const buildTypes = catalogue.state === 'ok' ? catalogue.data.buildTypes : [];
 
   const costed = plan.sites.filter((s) => s.totalTonnes !== null);
-  const tonnes = costed.reduce((sum, s) => sum + (s.totalTonnes ?? 0), 0);
+
+  /*
+   * ★ WHAT HAS ACTUALLY BEEN BUILT — SQUADRON OWNER, 2026-08-11 ★
+   *
+   * "can we track the remaining To haul or add in the To haul card the remaining | whats been
+   * hauled"
+   *
+   * Answerable only since a planned site can point at the project it became. Sites with a project
+   * report MEASURED tonnages off a commander's journal; the rest are catalogue ESTIMATES. The card
+   * says which is which rather than blending them into one confident figure — see the hint below.
+   */
+  const progress = planProgress(
+    plan.sites.map((s) => ({
+      id: s.id,
+      totalTonnes: s.totalTonnes,
+      project:
+        s.project === null || s.project === undefined
+          ? null
+          : {
+              required: s.project.required,
+              remaining: s.project.remaining,
+              completedAt: s.project.completedAt === null ? null : new Date(s.project.completedAt),
+            },
+    })),
+  );
+  const tonnes = progress.totalTonnes;
   const bodiesWithSlots = plan.bodies.filter(
     (b) => b.orbitalSlots !== null || b.surfaceSlots !== null,
   ).length;
@@ -134,10 +160,38 @@ export default async function PlanPage({
       <PageBody wide>
         <StatGrid>
           <StatTile label="Bodies" value={String(plan.bodies.length)} />
-          <StatTile label="Sites planned" value={String(plan.sites.length)} />
+          {/* The breakdown only appears once something has actually been posted — "0 complete ·
+              0 building · 81 planned" on a fresh plan is three numbers saying one thing. */}
+          {progress.complete + progress.building === 0 ? (
+            <StatTile label="Sites planned" value={String(plan.sites.length)} />
+          ) : (
+            <StatTile
+              label="Sites planned"
+              value={String(plan.sites.length)}
+              hint={`${progress.complete} complete · ${progress.building} building · ${progress.planned} planned`}
+            />
+          )}
           <StatTile
             label="To haul"
-            value={costed.length === 0 ? '—' : `${tonnes.toLocaleString()} t`}
+            value={
+              costed.length === 0
+                ? '—'
+                : `${progress.remainingTonnes.toLocaleString()} t of ${tonnes.toLocaleString()}`
+            }
+            /*
+              The gap stated plainly. Most sites in a plan have never been placed, so their tonnage
+              is a catalogue estimate — presenting "13% hauled" as measured fact would be a guess
+              wearing a measurement's clothes, on the figure a squadron plans a fortnight around.
+            */
+            hint={
+              progress.measuredSites === 0
+                ? 'Nothing posted as a project yet, so every figure is a catalogue estimate.'
+                : `${progress.hauledTonnes.toLocaleString()} t hauled${
+                    progress.pctHauled === null ? '' : ` (${progress.pctHauled}%)`
+                  } · measured across ${progress.measuredSites} build${
+                    progress.measuredSites === 1 ? '' : 's'
+                  }, estimated for ${progress.estimatedSites}`
+            }
             tone={tonnes > 0 ? 'accent' : 'default'}
           />
           <StatTile

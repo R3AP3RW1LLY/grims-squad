@@ -299,10 +299,13 @@ export function Stat({
   label,
   value,
   tone,
+  hint,
 }: {
   label: string;
   value: string;
   tone?: string;
+  /** A qualifying line under the figure — what it measured, or what it could not. */
+  hint?: string;
 }): JSX.Element {
   return (
     <div>
@@ -318,6 +321,16 @@ export function Stat({
       >
         {value}
       </p>
+      {/*
+        The web's StatTile has always had this and the app's Stat did not, so a figure that needed
+        qualifying could only be shown bare. A number a member plans a fortnight around should be
+        able to say what it measured.
+      */}
+      {hint === undefined ? null : (
+        <p style={{ margin: '3px 0 0', fontSize: '10px', color: C.faint, lineHeight: 1.35 }}>
+          {hint}
+        </p>
+      )}
     </div>
   );
 }

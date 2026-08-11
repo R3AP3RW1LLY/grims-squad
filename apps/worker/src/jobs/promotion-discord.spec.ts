@@ -73,6 +73,12 @@ const member = (over: Partial<MemberStanding> = {}): MemberStanding => ({
   currentRank: 'Cadet',
   qualifyingMonthsAtRank: 1,
   heldRankSince: new Date('2026-06-01T00:00:00Z'),
+  /*
+   * Long-standing, so these stay tests of the DISCORD half rather than becoming tests of the
+   * Discord-tenure gate added on 2026-08-11. Without a join date the engine refuses before it ever
+   * reaches the applier — which is the gate working, and not what this file is about.
+   */
+  joinedServerAt: new Date('2020-01-01T00:00:00Z'),
   ...over,
 });
 

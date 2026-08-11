@@ -30,6 +30,15 @@ export function readLadderFromSsot(repoRoot: string): LadderRung[] {
     const rank = /\brank:\s*(.+)/.exec(block)?.[1]?.trim();
     const nextRaw = /\bnext:\s*(.+)/.exec(block)?.[1]?.trim();
     const monthsRaw = /\bqualifyingMonthsRequired:\s*(\S+)/.exec(block)?.[1]?.trim();
+    /*
+     * ★ READ FROM THE SSOT, NOT RE-DERIVED — SQUADRON OWNER, 2026-08-11 ★
+     *
+     * The yaml has carried `cumulativeMonths` since the ladder was written — 1, 2, 3, 4, 5, 6, 7,
+     * 9, 12, including the deliberate gaps before Lord General and Grand Master General — and
+     * nothing has ever read it. The Discord-tenure requirement is measured against it, so summing
+     * the rungs here instead would quietly disagree with the file the moment somebody edits a gap.
+     */
+    const cumulativeRaw = /\bcumulativeMonths:\s*(\S+)/.exec(block)?.[1]?.trim();
     if (rank === undefined) continue;
 
     rungs.push({
@@ -37,6 +46,8 @@ export function readLadderFromSsot(repoRoot: string): LadderRung[] {
       next: nextRaw === undefined || nextRaw === 'null' ? null : nextRaw,
       qualifyingMonthsRequired:
         monthsRaw === undefined || monthsRaw === 'null' ? null : Number(monthsRaw),
+      cumulativeMonths:
+        cumulativeRaw === undefined || cumulativeRaw === 'null' ? null : Number(cumulativeRaw),
     });
   }
 
