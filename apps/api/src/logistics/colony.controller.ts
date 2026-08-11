@@ -259,6 +259,15 @@ export class ColonyController {
       stationName?: string;
       title?: string;
       notes?: string;
+      /**
+       * The planned site this project realises, when it was posted from a plan.
+       *
+       * Optional and non-fatal: a project posted from a plan is a project first. If the link cannot
+       * be made — the plan changed, the rank does not reach it — the project still exists, because
+       * failing the post over its own bookkeeping would lose the thing the member actually wanted.
+       */
+      planId?: string;
+      planSiteId?: string;
     },
   ) {
     const me = this.#requireSession(caller);
@@ -283,7 +292,7 @@ export class ColonyController {
      */
     const marketId = parseMarketId(body.marketId);
 
-    return this.colony.create({
+    const made = await this.colony.create({
       userId: me.userId,
       owner,
       marketId,
@@ -292,6 +301,31 @@ export class ColonyController {
       title: body.title ?? '',
       notes: body.notes ?? null,
     });
+
+    /*
+     * ★ CLOSING THE LOOP A PLAN CANNOT CLOSE BY ITSELF ★
+     *
+     * `colony_plan_sites.project_id` was read by the planner and written by nothing. A plan cannot
+     * generate its projects — a project needs the construction site's market id, which does not
+     * exist until somebody places the site in game — so the link can only be made in this
+     * direction, at the one moment the market id is known.
+     *
+     * Non-fatal by construction. The project is created and returned whatever happens here; a
+     * failed link is a plan that still shows the site as unbuilt, which is untidy rather than wrong.
+     */
+    if (body.planId !== undefined && body.planSiteId !== undefined) {
+      await this.plans_
+        .linkProject({
+          planId: body.planId,
+          siteId: body.planSiteId,
+          projectId: made.id,
+          callerId: me.userId,
+          callerMask: await this.#mask(caller),
+        })
+        .catch(() => undefined);
+    }
+
+    return made;
   }
 
   @Patch('projects/:id/visibility')

@@ -28,7 +28,13 @@ export const metadata: Metadata = {
 
 export const dynamic = 'force-dynamic';
 
-export default async function PlanningPage() {
+export default async function PlanningPage({
+  searchParams,
+}: {
+  /** `?system=` arrives from the scout — see the note in new-plan.tsx. */
+  searchParams: Promise<{ system?: string }>;
+}) {
+  const { system } = await searchParams;
   const read = await getColonyPlans('all');
 
   if (read.state === 'forbidden') {
@@ -54,7 +60,7 @@ export default async function PlanningPage() {
         lead="Name a system and its bodies are drawn from what commanders have scanned. Put builds on them, order them, and see what the whole thing costs before anybody flies anywhere."
       >
         <Section title="Start a plan">
-          <NewPlan />
+          <NewPlan system={system} />
         </Section>
 
         <Section title="Squadron plans">

@@ -76,12 +76,31 @@ export function CandidateList({ result }: { result: ScoutResult }) {
         >
           <header className="mb-2 flex flex-wrap items-baseline justify-between gap-3">
             <h3 className="m-0 text-base text-[var(--color-text-primary)]">{c.system}</h3>
-            <Link
-              href={`/colonisation/scout/${encodeURIComponent(c.system)}`}
-              className="font-mono text-xs text-[var(--color-brand-orange-bright)] underline hover:text-[var(--color-brand-orange)]"
-            >
-              Survey it →
-            </Link>
+            <span className="flex flex-wrap items-baseline gap-x-4">
+              <Link
+                href={`/colonisation/scout/${encodeURIComponent(c.system)}`}
+                className="font-mono text-xs text-[var(--color-brand-orange-bright)] underline hover:text-[var(--color-brand-orange)]"
+              >
+                Survey it →
+              </Link>
+              {/*
+                ★ SCOUT → PLAN, IN ONE CLICK — SQUADRON OWNER, 2026-08-10 ★
+
+                Scouting and planning were strangers. A member found a claimable system here, wrote
+                the name down, walked to the planner and typed it back in — a procedural name like
+                "Col 285 Sector GL-W c2-12", which is exactly the string a person mistypes.
+
+                Second, and quieter, because surveying first is usually the right order: the bodies
+                a survey caches are the same ones the planner needs, so scouting then planning costs
+                one fetch instead of two.
+              */}
+              <Link
+                href={`/colonisation/planning?system=${encodeURIComponent(c.system)}`}
+                className="font-mono text-xs text-[var(--color-text-secondary)] underline hover:text-[var(--color-text-primary)]"
+              >
+                Plan it →
+              </Link>
+            </span>
           </header>
 
           <p className="m-0 mb-2 flex flex-wrap gap-x-4 gap-y-1 font-mono text-xs tabular-nums text-[var(--color-text-secondary)]">

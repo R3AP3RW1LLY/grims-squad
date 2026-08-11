@@ -366,6 +366,35 @@ export function SystemTree({
                                   site={s}
                                   economy={plan.economies.sites.find((e) => e.siteId === s.id)}
                                 />
+                                {/*
+                                  ★ A PLAN CANNOT CREATE ITS PROJECTS — SQUADRON OWNER, 2026-08-10 ★
+
+                                  A project needs the construction site's market id: it is how a
+                                  depot event finds the project again, and it does not exist until
+                                  somebody actually places the site in game. So the plan carries
+                                  everything it genuinely knows — the build's name and the system —
+                                  and the member supplies the one field only they can read off the
+                                  game.
+
+                                  Once posted, the site says so and links through, which is what
+                                  `colony_plan_sites.project_id` was always for and what nothing had
+                                  ever written.
+                                */}
+                                {s.projectId !== null ? (
+                                  <a
+                                    href={`/colonisation/${s.projectId}`}
+                                    className="ml-2 font-mono text-[9px] uppercase tracking-[0.16em] text-[var(--color-semantic-success)] no-underline hover:underline"
+                                  >
+                                    built · open project →
+                                  </a>
+                                ) : s.buildTypeName === null ? null : (
+                                  <a
+                                    href={`/colonisation/new?planId=${encodeURIComponent(plan.id)}&planSiteId=${encodeURIComponent(s.id)}&title=${encodeURIComponent(s.buildTypeName)}&system=${encodeURIComponent(plan.systemName)}`}
+                                    className="ml-2 font-mono text-[9px] uppercase tracking-[0.16em] text-[var(--color-text-dim)] no-underline hover:text-[var(--color-text-primary)] hover:underline"
+                                  >
+                                    post as project →
+                                  </a>
+                                )}
                               </span>
                               {canEdit ? (
                                 <button

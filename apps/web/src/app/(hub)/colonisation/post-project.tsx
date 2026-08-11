@@ -29,7 +29,26 @@ const FIELD =
 const LABEL =
   'font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--color-text-secondary)]';
 
-export function PostProject({ canPostSquadron = false }: { canPostSquadron?: boolean }) {
+export function PostProject({
+  canPostSquadron = false,
+  from,
+}: {
+  canPostSquadron?: boolean;
+  /**
+   * The planned site this project realises, when the member came here from a plan.
+   *
+   * ★ WHY THE PLAN CANNOT JUST CREATE THE PROJECT — SQUADRON OWNER, 2026-08-10 ★
+   *
+   * A project needs the construction site's market id: it is how a depot event finds the project
+   * again, and it does not exist until somebody places the site in the game. So a plan can prefill
+   * the name and the system — everything it genuinely knows — and the market id is the one field
+   * only the member can supply, which is why they are standing here at all.
+   *
+   * `planId`/`planSiteId` ride along so the server can point the planned site at the project it
+   * became. That link is bookkeeping: if it fails the project is still posted.
+   */
+  from?: { planId: string; planSiteId: string; title: string; systemName: string } | undefined;
+}) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -45,6 +64,7 @@ export function PostProject({ canPostSquadron = false }: { canPostSquadron?: boo
         stationName: String(form.get('stationName') ?? '').trim(),
         title: String(form.get('title') ?? '').trim(),
         notes: String(form.get('notes') ?? '').trim(),
+        ...(from === undefined ? {} : { planId: from.planId, planSiteId: from.planSiteId }),
       });
       // Refreshes the server component above rather than pushing a route: the new project belongs
       // on the board the member is already looking at.
@@ -61,12 +81,24 @@ export function PostProject({ canPostSquadron = false }: { canPostSquadron?: boo
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="flex flex-col gap-1">
           <span className={LABEL}>What to call it</span>
-          <input name="title" required placeholder="Ambrose Dock" className={FIELD} />
+          <input
+            name="title"
+            required
+            placeholder="Ambrose Dock"
+            defaultValue={from?.title ?? ''}
+            className={FIELD}
+          />
         </label>
 
         <label className="flex flex-col gap-1">
           <span className={LABEL}>System</span>
-          <SystemPicker name="systemName" required placeholder="HIP 58832" className={FIELD} />
+          <SystemPicker
+            name="systemName"
+            required
+            placeholder="HIP 58832"
+            defaultValue={from?.systemName ?? ''}
+            className={FIELD}
+          />
         </label>
 
         <label className="flex flex-col gap-1">
