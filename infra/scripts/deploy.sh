@@ -480,6 +480,33 @@ wait_healthy() {
   die "$service did not become healthy in time"
 }
 
+# ★ THE ROLLBACK WAS UNREACHABLE — PRODUCTION OUTAGE, 2026-08-10 ★
+#
+# This script has had a rollback since it was written, wired as `trap 'rollback' ERR`. It had never
+# once run, because bash does NOT fire an ERR trap when a script calls `exit` — and every failure
+# path here goes through `die`, which does exactly that.
+#
+# So the gate that exists to catch a bad build (`wait_healthy api` seeing "Restarting") fired
+# correctly, printed its refusal, exited — and left the WEB container already swapped to the new
+# revision while the API stayed broken until somebody rolled it back by hand. Production served a
+# newer website against an older API: a button calling an endpoint that did not exist.
+#
+# Reproduced before believing it:
+#
+#     trap 'echo ROLLBACK' ERR;  die() { exit 1; }; die   # prints nothing
+#     trap 'echo ROLLBACK' EXIT; die() { exit 1; }; die   # prints ROLLBACK
+#
+# ★ SO IT HANGS OFF EXIT, WITH TWO FLAGS TO KEEP IT HONEST ★
+#
+# EXIT fires on success too, so the handler needs to know whether a rollback is warranted:
+#
+#   SWAPPED   set the instant the first new container starts. Before that nothing has moved, and a
+#             preflight failure must leave production untouched rather than restarting healthy
+#             containers for no reason.
+#   VERIFIED  set once the public URL has answered every gate. After that an exit is the script
+#             finishing, and undoing a deploy that worked would be the worse failure.
+SWAPPED=0
+VERIFIED=0
 rollback() {
   printf '\n\033[31m✖ rolling back to %s\033[0m\n' "${PREVIOUS_SHA:0:8}" >&2
   git -C "$REPO" reset --quiet --hard "$PREVIOUS_SHA"
@@ -490,14 +517,42 @@ rollback() {
   # images are in the registry and usually still in the local cache, so this is now seconds.
   export GRIMS_IMAGE_TAG="$PREVIOUS_SHA"
   $COMPOSE --profile jobs pull --quiet api web bot worker >/dev/null 2>&1 || true
+  # EVERY service, not just the API. The outage this exists for left a new web against an old API
+  # because only one of them had been put back.
   $COMPOSE up -d api web bot >/dev/null 2>&1 || true
+
+  # ★ AND THEN PROVE IT ★
+  #
+  # `|| true` above keeps a failing rollback from cascading, which also means it cannot report one.
+  # A rollback that quietly did nothing is the worst possible ending: the operator reads "rolled
+  # back" and walks away from a dead site.
+  local back
+  back="$(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "$PUBLIC_URL/v1/health" || echo 000)"
+  if [[ $back == "200" ]]; then
+    printf '[31m  rolled back and %s/v1/health answers 200.[0m
+' "$PUBLIC_URL" >&2
+  else
+    printf '[1;31m  ROLLBACK DID NOT RESTORE THE SITE — /v1/health answered %s. The site is DOWN and needs a person.[0m
+' "$back" >&2
+  fi
+
   printf '\033[31m  rolled back. The database was NOT reverted — %s holds the pre-deploy state.\033[0m\n' "$DUMP" >&2
 }
-trap 'rollback' ERR
+# EXIT, not ERR: `die` calls `exit`, which an ERR trap never sees. See the note above the rollback.
+on_exit() {
+  local code=$?
+  if (( code != 0 )) && (( SWAPPED == 1 )) && (( VERIFIED == 0 )); then rollback; fi
+}
+trap 'on_exit' EXIT
 
 # The API first and alone. It is the one that refuses to start on bad config,
 # so if anything is wrong this is where it surfaces — while the old web
 # container is still serving the old API's responses.
+# From here on, a failure must undo itself — see `on_exit`. Before this line nothing has moved and
+# a preflight failure leaves production untouched, which is why the flag is set here and not at the
+# top of the script.
+SWAPPED=1
+
 $COMPOSE up -d api
 wait_healthy api
 
@@ -521,8 +576,6 @@ wait_healthy bot
 # putting either back is a test failure rather than a discovery weeks later.
 #
 # Deploying THEM is a separate step; see infra/runbooks/workers-second-box.md.
-
-trap - ERR
 
 # ─────────────────────────────────────────────────────────── 7. verify
 #
@@ -577,6 +630,12 @@ fi
 # Members-only, so a redirect to sign-in is the CORRECT answer. A 200 here would
 # mean the gate had come off.
 check /roster 307
+
+# ★ PAST THIS LINE THE DEPLOY IS DONE ★
+#
+# The public URL has answered on every gate, so an exit from here on is the script finishing rather
+# than failing, and `on_exit` must not undo a deploy that worked. Everything below is bookkeeping.
+VERIFIED=1
 
 # ─────────────────────────────────────────────────────────── 8. record
 #

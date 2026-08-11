@@ -685,3 +685,103 @@ describe('the deploy says whether the AI is actually reachable', () => {
     expect(step, 'no guard on the variable being set at all').toMatch(/-n \$AI_BASE|-n "\$AI_BASE"/);
   });
 });
+
+/**
+ * ★ THE ROLLBACK WAS UNREACHABLE — PRODUCTION OUTAGE, 2026-08-10 ★
+ *
+ * This script has had a rollback since it was written, wired as `trap 'rollback' ERR`. It had never
+ * once run. Bash does not fire an ERR trap when a script calls `exit`, and every failure path here
+ * goes through `die`, which does exactly that.
+ *
+ * So on 2026-08-10 the gate that exists for this — `wait_healthy api` seeing "Restarting" — fired
+ * correctly, printed its refusal, and exited. The API was left broken and the WEB container was
+ * left already swapped to the new revision, so production served a newer website against an older
+ * API: a button calling an endpoint that did not exist. Nothing was undone.
+ *
+ * The tests below are the four outcomes, because the failure was never in one line — it was in
+ * which of them the handler runs for.
+ */
+describe('a failed deploy actually rolls itself back', () => {
+  it('★ MANDATORY: the trap is on EXIT, because `die` calls exit and ERR never sees it ★', () => {
+    /*
+     * The bug, in one assertion. `trap 'rollback' ERR` looks exactly like a working rollback and is
+     * dead code — which is why it survived from the day the script was written until a deploy
+     * needed it.
+     */
+    /*
+     * Code lines only. The comment above the rollback quotes `trap 'rollback' ERR` verbatim while
+     * explaining why it never worked — documentation that must not fail the test describing it.
+     */
+    const code = current
+      .split('\n')
+      .filter((l) => !l.trim().startsWith('#'))
+      .join('\n');
+
+    expect(code, 'the rollback still hangs off ERR, which `die` bypasses').not.toMatch(
+      /trap\s+'rollback'\s+ERR/,
+    );
+    expect(current, 'nothing traps EXIT, so no failure path can roll back').toMatch(
+      /trap\s+'on_exit'\s+EXIT/,
+    );
+  });
+
+  it('★ MANDATORY: a preflight failure rolls back NOTHING ★', () => {
+    /*
+     * EXIT fires on every exit, including one before a single container has moved. Rolling back
+     * there would restart healthy containers to "undo" a deploy that never started — downtime
+     * caused by the thing meant to prevent it.
+     */
+    expect(current, 'no SWAPPED guard — a preflight failure would restart production').toMatch(
+      /SWAPPED == 1/,
+    );
+    expect(current, 'SWAPPED is never initialised, and `set -u` would abort the deploy').toMatch(
+      /^SWAPPED=0$/m,
+    );
+    expect(current, 'SWAPPED is never set, so a real failure would not roll back').toMatch(
+      /^SWAPPED=1$/m,
+    );
+  });
+
+  it('★ MANDATORY: a SUCCESSFUL deploy is not rolled back on the way out ★', () => {
+    // The opposite mistake, and a worse one: undoing a deploy that worked, every single time.
+    expect(current, 'no VERIFIED guard — every successful deploy would roll itself back').toMatch(
+      /VERIFIED == 0/,
+    );
+    expect(current, 'VERIFIED is never initialised').toMatch(/^VERIFIED=0$/m);
+    expect(current, 'VERIFIED is never set after the gates pass').toMatch(/^VERIFIED=1$/m);
+  });
+
+  it('★ MANDATORY: the rollback restores the WEB too, not just the API ★', () => {
+    /*
+     * The specific shape of the outage. Only the API had been put back by hand, so production ran a
+     * newer web against an older API and every new button 404ed.
+     */
+    const step = current.slice(current.indexOf('rollback() {'), current.indexOf('on_exit()'));
+    expect(step, 'the rollback leaves the web on the failed revision').toMatch(
+      /up -d api web bot/,
+    );
+  });
+
+  it('★ MANDATORY: the rollback proves it worked rather than assuming ★', () => {
+    /*
+     * Every command in the rollback ends in `|| true` so a failure cannot cascade — which also
+     * means it cannot be noticed. "rolled back" printed over a still-dead site is the worst possible
+     * ending, because the operator reads it and walks away.
+     */
+    const step = current.slice(current.indexOf('rollback() {'), current.indexOf('on_exit()'));
+    expect(step, 'the rollback never checks whether the site came back').toMatch(/v1\/health/);
+    expect(step, 'a failed rollback is not reported as needing a person').toMatch(
+      /ROLLBACK DID NOT RESTORE/,
+    );
+  });
+
+  it('VERIFIED is set only after the public checks, not before them', () => {
+    // Set too early it disarms the rollback while the gates are still running, which is the same
+    // as having no rollback at all.
+    const verifiedAt = current.indexOf('VERIFIED=1');
+    expect(current.indexOf('check /v1/health 200'), 'VERIFIED is set before the health gate').
+      toBeLessThan(verifiedAt);
+    expect(current.indexOf('check /roster 307'), 'VERIFIED is set before the last gate').
+      toBeLessThan(verifiedAt);
+  });
+});
