@@ -11,6 +11,8 @@ import { rollUpCommodities } from './jobs/commodity-rollup.js';
 import { PrismaRollupStore } from './jobs/commodity-rollup.wiring.js';
 import { takeJobLock } from './lib/job-lock.js';
 import { resolveStations } from './jobs/resolve-stations.js';
+import { RoleSyncService } from './jobs/role-sync.service.js';
+import { PrismaRoleSyncStore, membersToSync } from './jobs/role-sync.wiring.js';
 import { rebuildBountyBoard } from './jobs/bounty-board.js';
 import { refreshEdsyIds } from './jobs/edsy-refresh.js';
 import { scoreLeaderboards } from './jobs/leaderboard-scores.js';
@@ -335,6 +337,7 @@ function startScheduler(db: PrismaClient): void {
   startColonySync(db);
   startCommodityRollup(db);
   startIngestionWatch(db);
+  startRoleSync(db);
   startStationResolver(db);
   startBountyBoard(db);
   startLeaderboardScoring(db);
@@ -595,6 +598,83 @@ function startIngestionWatch(db: PrismaClient): void {
  * markets themselves are no longer lost while stations wait, only their enrichment is.
  */
 const STATION_RESOLVE_MS = 30 * 60_000;
+
+/**
+ * Discord roles onto platform roles, every sixty seconds.
+ *
+ * ★ MOVED OUT OF CRON — SQUADRON OWNER, 2026-08-11 ★
+ *
+ * It was documented in docs/scheduled-jobs.md as `* * * * *` and, like the three jobs beside it,
+ * never actually installed on any box. Installing it as written would have been 1,440 CONTAINER
+ * STARTS A DAY — each one paying Node and Prisma boot to run a handful of indexed queries — and
+ * infra/runbooks/workers-second-box.md already blames container churn for the load incident that
+ * caused the second box to exist at all.
+ *
+ * The daemon is up regardless, so the same work costs a timer here. It also gains what a cron entry
+ * could never have: the job lock every other daemon loop uses, so the sweep cannot overlap itself
+ * if one run is slow.
+ *
+ * ★ WHY EVERY MINUTE IS STILL THE RIGHT CADENCE ★
+ *
+ * It touches Discord not at all. `discord_guild_members` is kept current by the bot from gateway
+ * events, so this reads roles that are already fresh and writes only when something differs. The
+ * alternative — asking Discord for 109 members a minute — is 157,000 requests a day and would be
+ * rate-limited into uselessness within the hour.
+ *
+ * Before this ran anywhere, the only thing granting a platform role from Discord was the nightly
+ * reconciliation: a member promoted in Discord at 09:00 held nothing on the site until 03:00 the
+ * next morning.
+ */
+const ROLE_SYNC_MS = 60_000;
+
+function startRoleSync(db: PrismaClient): void {
+  const svc = new RoleSyncService(new PrismaRoleSyncStore(db));
+
+  const run = async (): Promise<void> => {
+    const lock = await takeJobLock('role-sync');
+    if (lock === null) return;
+    try {
+      const members = await membersToSync(db);
+
+      let granted = 0;
+      let revoked = 0;
+      let failed = 0;
+
+      for (const member of members) {
+        try {
+          const result = await svc.sync(member.userId, member.discordRoleIds);
+          granted += result.granted.length;
+          revoked += result.revoked.length;
+        } catch {
+          /*
+           * One member's failure must not abandon the rest. This runs every minute, so a transient
+           * error costs that member sixty seconds — where aborting the sweep would leave everybody
+           * after them unsynced, and the next run would hit the same row first and do it again.
+           */
+          failed += 1;
+        }
+      }
+
+      /*
+       * Logged ONLY when something happened. At once a minute, a line per run is 1,440 a day saying
+       * nothing changed, which is how a log stops being read.
+       */
+      if (granted > 0 || revoked > 0 || failed > 0) {
+        console.log(
+          `daemon: role sync — ${granted} granted, ${revoked} revoked, ` +
+            `${failed} failed of ${members.length}`,
+        );
+      }
+    } catch (e) {
+      console.error(`daemon: role sync failed (${e instanceof Error ? e.message : String(e)})`);
+    } finally {
+      await lock.release();
+    }
+  };
+
+  void run();
+  setInterval(() => void run(), ROLE_SYNC_MS);
+}
 
 function startStationResolver(db: PrismaClient): void {
   const run = async (): Promise<void> => {

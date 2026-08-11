@@ -34,6 +34,12 @@ set -euo pipefail
 REPO=${REPO:-/srv/grims/repo}
 ENV_FILE=${ENV_FILE:-/srv/grims/.env}
 SHA_FILE=${SHA_FILE:-/srv/grims/deployed.sha}
+# ★ WHICH STACK — the two boxes run different compose files ★
+#
+# The primary runs compose.prod.yml (api, web, bot, postgres). The ingestion box runs
+# compose.workers.yml (worker-daemon, eddn-collector) and has no api or web at all, so its jobs must
+# name that file or compose tries to resolve services which are not there.
+COMPOSE_FILE=${COMPOSE_FILE:-infra/docker/compose.prod.yml}
 # Overridable so the regression test can watch what this hands to docker, rather than asserting on
 # the text of the script and proving nothing about what runs.
 DOCKER=${DOCKER:-docker}
@@ -62,7 +68,7 @@ export GRIMS_IMAGE_TAG="$SHA"
 echo "worker-job: $* @ ${SHA:0:12} — $(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 exec "$DOCKER" compose \
-  -f "$REPO/infra/docker/compose.prod.yml" \
+  -f "$REPO/$COMPOSE_FILE" \
   --env-file "$ENV_FILE" \
   --profile jobs \
   run --rm worker node "$@"

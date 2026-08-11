@@ -11,9 +11,26 @@ schedule shows up in cron's own mail rather than looking healthy forever.
 
 ## The crontab
 
-The installed crontab is version-controlled at
-[`infra/cron/root.crontab`](../infra/cron/root.crontab) — install it with
-`crontab infra/cron/root.crontab`. What follows explains it.
+There are **two boxes and two crontabs**, both version-controlled:
+
+| Box | Crontab | Runs |
+|---|---|---|
+| primary `45.63.35.93` | [`infra/cron/root.crontab`](../infra/cron/root.crontab) | the promotion run, and nothing else |
+| ingestion `149.248.39.225` | [`infra/cron/ingestion-box.crontab`](../infra/cron/ingestion-box.crontab) | Inara sweep, reconcile, commander audit |
+
+Install either with `crontab infra/cron/<file>`.
+
+**Background sweeps live on the ingestion box** (squadron owner, 2026-08-11).
+The primary serves members, and a sweep there competes with the API for the same
+CPU — which is what the second box was stood up to stop. The primary keeps only
+the promotion run, because that is the one job somebody watches.
+
+**The 03:00 reconcile used to run on BOTH boxes.** It sat in the primary's
+crontab and in `/etc/cron.d/grims-worker` on the ingestion box, so two containers
+reconciled Discord roles against the same database at the same minute every
+night. Nothing had noticed, because both runs do the same work and the second
+finds nothing left to fix. `tools/worker-job-script.spec.ts` now fails if any job
+appears in both files.
 
 **Every job goes through `worker-job.sh`, never `docker compose` directly.**
 `compose.prod.yml` names each image `:${GRIMS_IMAGE_TAG:-latest}` and cron has no
@@ -23,50 +40,49 @@ running site the day this was found (2026-08-11), with no upper bound on the
 drift. The wrapper reads the deployed sha and **refuses to run** if it cannot.
 
 ```cron
+# ── PRIMARY BOX — infra/cron/root.crontab
 CRON_TZ=UTC
 
-# Discord roles onto platform roles. EVERY MINUTE (owner, 2026-07-29).
-#
-# Touches Discord not at all: the bot keeps `discord_guild_members` current from
-# gateway events, so this reads roles that are already fresh and costs a handful
-# of indexed queries. Asking Discord for 109 members every minute would be
-# 157,000 requests a day and would be rate-limited within the hour.
-* * * * *      /srv/grims/repo/infra/scripts/worker-job.sh apps/worker/dist/role-sync.js >> /var/log/grims-role-sync.log 2>&1
-
-# Discord reconciliation — role drift, orphaned identities, anomalies.
-0 3 * * *      /srv/grims/repo/infra/scripts/worker-job.sh apps/worker/dist/main.js
-
-# Inara profile sweep — pilot ranks for the roster (ADR-004, amended 2026-07-28).
-*/15 * * * *   /srv/grims/repo/infra/scripts/worker-job.sh apps/worker/dist/inara-sync.js
-
 # Promotions — DAILY, 00:15 UTC. NOT before 1 August 2026.
-#
-# ★ WAS THE 1st OF THE MONTH, AND WAS NEVER INSTALLED — 2026-08-11 ★
-#
-# Two things were found together. The schedule below said `0 0 1 * *`, and the crontab on the box
-# carried the explanatory comment for it with NO LINE BENEATH — so the automatic run has never once
-# happened. Promotions were only ever manual, which is how the owner had been doing them.
-#
-# And the cadence changed: a member is now promoted on the day they earn it rather than waiting up
-# to a month for the 1st. Eligibility is per-member — time at the rank, time in the Discord server,
-# and qualifying activity — so a monthly sweep would hold somebody who qualified on the 3rd for
-# twenty-nine days for no reason anybody could explain to them.
 #
 # --live and --post are both required and both deliberate: the engine writes nothing without the
 # first and announces nothing without the second, on top of the coded floor.
 15 0 * * *     /srv/grims/repo/infra/scripts/worker-job.sh apps/worker/dist/promote.js --live --post >> /var/log/grims-promote.log 2>&1
-
-# Commander audit — every commander's squadron and nickname, nightly.
-15 0 * * *     /srv/grims/repo/infra/scripts/worker-job.sh apps/worker/dist/daily-audit.js
 ```
 
-**What is documented here is more than what is installed.** As of 2026-08-11 the
-box runs the reconciliation and the promotion sweep, and nothing else: the role
-sweep, the Inara sweep and the commander audit are described above but are not in
-[`infra/cron/root.crontab`](../infra/cron/root.crontab). That divergence was
-invisible while the crontab lived only on the box — the file above is now the
-copy that gets reviewed, and turning the other three on is the squadron owner's
-call rather than a side effect of fixing the promotion schedule.
+```cron
+# ── INGESTION BOX — infra/cron/ingestion-box.crontab
+CRON_TZ=UTC
+COMPOSE_FILE=infra/docker/compose.workers.yml
+
+# Inara profile sweep — pilot ranks for the roster (ADR-004, amended 2026-07-28).
+*/15 * * * *   /srv/grims/repo/infra/scripts/worker-job.sh apps/worker/dist/inara-sync.js >> /var/log/grims-inara-sync.log 2>&1
+
+# Discord reconciliation — role drift, orphaned identities, anomalies.
+0 3 * * *      /srv/grims/repo/infra/scripts/worker-job.sh apps/worker/dist/main.js >> /var/log/grims-reconcile.log 2>&1
+
+# Commander audit — every commander's squadron and nickname, nightly.
+# 04:15, not 00:15: the docs put this on the same minute as the promotion run, and two jobs pulling
+# the whole roster at once is avoidable contention. The audit is the one with no deadline.
+15 4 * * *     /srv/grims/repo/infra/scripts/worker-job.sh apps/worker/dist/daily-audit.js >> /var/log/grims-daily-audit.log 2>&1
+```
+
+`COMPOSE_FILE` on the ingestion box points the wrapper at `compose.workers.yml`.
+That box has no `api` and no `web` service, so a job aimed at the primary's stack
+asks compose to resolve services which are not there.
+
+**`role-sync` is in neither crontab — it runs inside the worker daemon.**
+It was documented as `* * * * *`, which as a cron entry is **1,440 container
+starts a day**, each paying Node and Prisma boot to run a handful of indexed
+queries. The daemon is already up on the ingestion box, so the same work costs a
+60-second timer — and it gains the job lock every other daemon loop uses, so the
+sweep cannot overlap itself if one run is slow. See `startRoleSync` in
+[`apps/worker/src/daemon.ts`](../apps/worker/src/daemon.ts).
+
+**Both crontabs are now installed and match these files.** They did not for a
+fortnight: the doc described a role sweep, an Inara sweep and a commander audit
+that were not on any box, and that divergence was invisible while the crontabs
+lived only on the machines.
 
 **`node dist/…`, not `pnpm <script>`.** The package scripts run `tsx` against
 TypeScript source. That works, but it pays a compile on every one of the 96

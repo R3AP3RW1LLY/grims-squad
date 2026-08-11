@@ -27,8 +27,15 @@ CRON_TZ=UTC
 SHELL=/bin/bash
 MAILTO=""
 
-# Discord reconciliation — role drift, orphaned identities. 03:00 UTC daily.
-0 3 * * *      /srv/grims/repo/infra/scripts/worker-job.sh apps/worker/dist/main.js >> /var/log/grims-reconcile.log 2>&1
+# ★ THE RECONCILE MOVED TO THE INGESTION BOX — SQUADRON OWNER, 2026-08-11 ★
+#
+# It ran HERE and in /etc/cron.d/grims-worker on 149.248.39.225, so two containers reconciled
+# Discord roles against the same database at 03:00 every night. Nothing had ever noticed, because
+# both runs do the same work and the second finds nothing left to fix.
+#
+# Background sweeps belong on the box that exists for them — see infra/cron/ingestion-box.crontab.
+# This box serves members, and a sweep here competes with the API for the same CPU, which is what
+# the second box was stood up to stop.
 
 # Promotions — DAILY, 00:15 UTC. NOT before 1 August 2026.
 #
