@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import type { ColonyPlan, PlanProblem, PlanSimStep } from '../../../../../lib/api';
 import { apiPatch } from '../../../../../lib/api-client';
+import { PlanReview } from './plan-review';
 
 /**
  * The order things get built in, what each step costs, and whether it can be paid for.
@@ -118,6 +119,12 @@ export function BuildOrder({ plan, canEdit }: { plan: ColonyPlan; canEdit: boole
       )}
 
       <Verdict problems={sim.problems} />
+
+      {/*
+        Directly under the verdict, because that is where "what is wrong with this plan" already
+        lives. The verdict lists the problems; this explains which one will cost the most.
+      */}
+      <PlanReview planId={plan.id} />
 
       <Suggestion
         plan={plan}

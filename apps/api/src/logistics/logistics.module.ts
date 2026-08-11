@@ -13,6 +13,9 @@ import { ColonyCatalogueService } from './colony-catalogue.service.js';
 import { ColonyPlanService } from './colony-plan.service.js';
 import { ColonyCarrierService } from './colony-carrier.service.js';
 import { ColonyPurchasesService } from './colony-purchases.service.js';
+import { ColonyPlanReviewService } from './colony-plan-review.service.js';
+import { AiClient } from '../ai/ai.client.js';
+import { AiModule } from '../ai/ai.module.js';
 import { CommanderPositionService } from './commander-position.service.js';
 import { ColonyRosterService } from './colony-roster.service.js';
 import { PrismaMarketStore, type MarketStore } from './market.store.js';
@@ -38,7 +41,9 @@ import type { LiveService } from '../live/live.service.js';
   // TelemetryModule for PAIRING_SERVICE: the companion identifies itself with a paired device
   // token rather than a session, and the colonisation routes it reaches resolve it the same way
   // the telemetry upload does.
-  imports: [DatabaseModule, AuthzModule, TelemetryModule],
+  // AiModule for AiClient: the plan review hands the simulation's own findings to the model and
+  // asks it to explain them. Same client the assistant uses, so "the AI is down" is one answer.
+  imports: [DatabaseModule, AuthzModule, TelemetryModule, AiModule],
   controllers: [MarketController, ColonyController, ColonyDeviceController, TradeDeviceController],
   providers: [
     {
@@ -117,6 +122,17 @@ import type { LiveService } from '../live/live.service.js';
       inject: [PrismaClient, ColonyCarrierService],
       useFactory: (db: PrismaClient, carriers: ColonyCarrierService) =>
         new ColonyPurchasesService(db, carriers),
+    },
+    {
+      /*
+       * The plan review. Takes the planner (for the plan and its simulation) and the AI client —
+       * the model supplies sentences, the simulation supplies every fact, and the facts come back
+       * with the answer so a bad review can be told from bad data.
+       */
+      provide: ColonyPlanReviewService,
+      inject: [ColonyPlanService, AiClient],
+      useFactory: (plans: ColonyPlanService, ai: AiClient) =>
+        new ColonyPlanReviewService(plans, ai),
     },
     {
       provide: ColonyCatalogueService,
