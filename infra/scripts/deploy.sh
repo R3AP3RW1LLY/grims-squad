@@ -172,6 +172,37 @@ if ! grep -q 'ghcr\.io' /root/.docker/config.json 2>/dev/null; then
 fi
 ok "registry credentials present"
 
+# ★ THE AI TUNNEL — SQUADRON OWNER, 2026-08-10 ★
+#
+# "ensuring its running and connected should also be part of the deployment process!"
+#
+# Every AI feature on the platform — the assistant, the knowledge search, the screening, the
+# artwork — answers through a reverse SSH tunnel to a machine in the owner's house. When that tunnel
+# is down or nothing is listening on it, NOTHING says so: the features simply time out one request
+# at a time, on member-facing pages, and the first anybody knows is somebody reporting that the
+# assistant "does not work".
+#
+# ★ CHECKED HERE, AND NOT FATAL ★
+#
+# Warned rather than died, deliberately. The AI is one feature among many and blocking a security
+# fix because a desktop at home is asleep would be the wrong trade — but a deploy is the one moment
+# somebody is watching the output, which makes it exactly the right moment to say so.
+#
+# ★ AND THE PATH MATTERS ★
+#
+# AI_BASE_URL ends in /v1 (it is the OpenAI-compatible surface), so the models list is $URL/models.
+# Asking for /api/tags against it returns 404 from a perfectly healthy tunnel — which is how this
+# check was nearly written to report a working AI as broken.
+AI_BASE="$(envval AI_BASE_URL)"
+if [[ -n $AI_BASE ]]; then
+  AI_CODE="$(curl -s -o /dev/null -w '%{http_code}' --max-time 8 "${AI_BASE%/}/models" || echo 000)"
+  if [[ $AI_CODE == "200" ]]; then
+    ok "AI reachable at $AI_BASE"
+  else
+    warn "AI at $AI_BASE answered ${AI_CODE} — the assistant, knowledge search and artwork will time out until the tunnel is up and Ollama is serving (nothing else is affected)"
+  fi
+fi
+
 # ─────────────────────────────────────────────────────────── 2. fetch
 say "Fetching $REF"
 git -C "$REPO" fetch --quiet origin

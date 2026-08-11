@@ -624,3 +624,64 @@ describe('the deploy entrypoint cannot go stale', () => {
     expect(step, 'a failed repair says nothing at all').toMatch(/warn /);
   });
 });
+
+/**
+ * ★ THE AI TUNNEL IS PART OF THE DEPLOY NOW — SQUADRON OWNER, 2026-08-10 ★
+ *
+ * "ensuring its running and connected should also be part of the deployment process!"
+ *
+ * Every AI feature — the assistant, the knowledge search, the screening, the artwork — answers
+ * through a reverse SSH tunnel to a machine in the owner's house. When it is down, NOTHING says so:
+ * the features time out one request at a time on member-facing pages, and the first anybody knows
+ * is somebody reporting that the assistant "does not work".
+ *
+ * ★ THE PATH IS THE PART THAT GOES WRONG ★
+ *
+ * `AI_BASE_URL` ends in `/v1` — it is the OpenAI-compatible surface — so the models list is
+ * `$URL/models`. Probing `/api/tags` against it returns 404 from a perfectly healthy tunnel, which
+ * is exactly how this check was nearly written to report a working AI as broken. Measured on
+ * production while writing it: `/v1/api/tags` → 404, `/v1/models` → the five models.
+ */
+describe('the deploy says whether the AI is actually reachable', () => {
+  it('★ MANDATORY: it probes the AI at all ★', () => {
+    expect(current, 'nothing in the deploy checks the AI tunnel').toMatch(/AI_BASE_URL/);
+  });
+
+  it('★ MANDATORY: it asks for /models, not /api/tags ★', () => {
+    /*
+     * The whole failure this test exists for. A healthy tunnel answers 404 to /api/tags because the
+     * base already ends in /v1, so the wrong path turns a working AI into a nightly false alarm —
+     * and a warning that is usually wrong is one nobody reads when it is right.
+     */
+    const step = current.slice(current.indexOf('AI_BASE='));
+    expect(step, 'the AI probe uses a path that 404s against a healthy tunnel').not.toMatch(
+      /api\/tags/,
+    );
+    expect(step, 'the AI probe does not ask for the models list').toMatch(/\/models/);
+  });
+
+  it('★ MANDATORY: an unreachable AI warns and does NOT stop the deploy ★', () => {
+    /*
+     * The AI is one feature among many, and blocking a security fix because a desktop at home is
+     * asleep would be the wrong trade. Loud, not fatal.
+     */
+    const step = current.slice(current.indexOf('AI_BASE='), current.indexOf('# ─', current.indexOf('AI_BASE=')));
+    expect(step, 'a sleeping desktop at home now blocks every deploy').not.toMatch(/\bdie /);
+    expect(step, 'an unreachable AI passes in silence').toMatch(/warn /);
+  });
+
+  it('MANDATORY: the warning names what stops working, so it is actionable', () => {
+    const step = current.slice(current.indexOf('AI_BASE='));
+    expect(
+      /assistant|knowledge|artwork/i.test(step),
+      'the warning does not say which features are affected, so nobody can judge whether to care',
+    ).toBe(true);
+  });
+
+  it('an unset AI_BASE_URL is skipped rather than reported as broken', () => {
+    // A deployment with no AI configured is a valid arrangement, not a fault to warn about on
+    // every single deploy.
+    const step = current.slice(current.indexOf('AI_BASE='));
+    expect(step, 'no guard on the variable being set at all').toMatch(/-n \$AI_BASE|-n "\$AI_BASE"/);
+  });
+});
