@@ -14,8 +14,7 @@ import { ColonyPlanService } from './colony-plan.service.js';
 import { ColonyCarrierService } from './colony-carrier.service.js';
 import { ColonyPurchasesService } from './colony-purchases.service.js';
 import { ColonyPlanReviewService } from './colony-plan-review.service.js';
-import { AiClient } from '../ai/ai.client.js';
-import { AiModule } from '../ai/ai.module.js';
+import { AiClient, aiConfigFrom } from '../ai/ai.client.js';
 import { CommanderPositionService } from './commander-position.service.js';
 import { ColonyRosterService } from './colony-roster.service.js';
 import { PrismaMarketStore, type MarketStore } from './market.store.js';
@@ -41,9 +40,7 @@ import type { LiveService } from '../live/live.service.js';
   // TelemetryModule for PAIRING_SERVICE: the companion identifies itself with a paired device
   // token rather than a session, and the colonisation routes it reaches resolve it the same way
   // the telemetry upload does.
-  // AiModule for AiClient: the plan review hands the simulation's own findings to the model and
-  // asks it to explain them. Same client the assistant uses, so "the AI is down" is one answer.
-  imports: [DatabaseModule, AuthzModule, TelemetryModule, AiModule],
+  imports: [DatabaseModule, AuthzModule, TelemetryModule],
   controllers: [MarketController, ColonyController, ColonyDeviceController, TradeDeviceController],
   providers: [
     {
@@ -130,9 +127,25 @@ import type { LiveService } from '../live/live.service.js';
        * with the answer so a bad review can be told from bad data.
        */
       provide: ColonyPlanReviewService,
-      inject: [ColonyPlanService, AiClient],
-      useFactory: (plans: ColonyPlanService, ai: AiClient) =>
-        new ColonyPlanReviewService(plans, ai),
+      inject: [ColonyPlanService],
+      /*
+       * ★ THE CLIENT IS BUILT HERE, NOT IMPORTED — PRODUCTION OUTAGE, 2026-08-10 ★
+       *
+       * The first version added `AiModule` to this module's imports, which closed a cycle:
+       *
+       *     LogisticsModule -> AiModule -> MiningModule -> LogisticsModule
+       *
+       * ESM evaluates that as `ReferenceError: Cannot access 'LogisticsModule' before
+       * initialization` — the API crash-looped, the website kept serving its static pages, and the
+       * health monitor caught it a minute later. Typecheck, lint and every unit test were green:
+       * nothing in this repository loads the real module graph, so nothing could see it.
+       *
+       * `AiClient` is a plain class over `fetch` with no Nest dependencies of its own — the same
+       * construction `AiModule` performs, minus the admin stream, which is optional by design and
+       * only feeds the AI activity panel. Building it here costs one object and closes the cycle.
+       */
+      useFactory: (plans: ColonyPlanService) =>
+        new ColonyPlanReviewService(plans, new AiClient(aiConfigFrom(process.env), fetch)),
     },
     {
       provide: ColonyCatalogueService,
