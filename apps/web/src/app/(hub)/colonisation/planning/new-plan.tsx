@@ -18,10 +18,21 @@ const FIELD =
   'rounded border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel-sunken)] ' +
   'px-3 py-1.5 text-sm text-[var(--color-text-primary)]';
 
-export function NewPlan() {
+export function NewPlan({ system }: { system?: string | undefined }) {
   const router = useRouter();
-  const [title, setTitle] = useState('');
-  const [systemName, setSystemName] = useState('');
+  /*
+   * ★ SCOUT → PLAN, IN ONE CLICK — SQUADRON OWNER, 2026-08-10 ★
+   *
+   * Chosen from the colonisation suggestions. Scouting and planning were strangers: a member found
+   * a claimable system, wrote the name down, walked to another page and typed it back in — a
+   * hand-copied procedural name like "Col 285 Sector GL-W c2-12", which is exactly the string a
+   * person mistypes.
+   *
+   * The title is prefilled too, because a plan needs one and "the system I just scouted" is the
+   * answer nine times in ten. Both stay editable; neither is a decision taken away.
+   */
+  const [title, setTitle] = useState(system === undefined ? '' : system);
+  const [systemName, setSystemName] = useState(system ?? '');
   const [owner, setOwner] = useState<'personal' | 'squadron'>('personal');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

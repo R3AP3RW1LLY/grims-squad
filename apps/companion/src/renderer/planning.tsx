@@ -145,7 +145,7 @@ type PlanTab = (typeof PLAN_TABS)[number]['key'];
 
 // ---------------------------------------------------------------------------- the page
 
-export function PlanningPage(): JSX.Element {
+export function PlanningPage({ system }: { system?: string | undefined } = {}): JSX.Element {
   const [plans, setPlans] = useState<ColonyPlan[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -202,7 +202,7 @@ export function PlanningPage(): JSX.Element {
       )}
 
       <Section title="Start a plan">
-        <NewPlan onMade={setOpenId} />
+        <NewPlan onMade={setOpenId} system={system} />
       </Section>
 
       <Section title="Squadron plans">
@@ -313,9 +313,25 @@ function PlanList({
  * the button says what it is about to do — a form that pauses with no explanation reads as one that
  * hung.
  */
-function NewPlan({ onMade }: { onMade: (id: string) => void }): JSX.Element {
-  const [title, setTitle] = useState('');
-  const [systemName, setSystemName] = useState('');
+function NewPlan({
+  onMade,
+  system,
+}: {
+  onMade: (id: string) => void;
+  /**
+   * ★ SCOUT → PLAN, IN ONE CLICK — SQUADRON OWNER, 2026-08-10 ★
+   *
+   * Arrives from the Scout tab. Scouting and planning were strangers: a member found a claimable
+   * system, wrote the name down, walked to another tab and typed it back in — a procedural name
+   * like "Col 285 Sector GL-W c2-12", which is exactly the string a person mistypes.
+   *
+   * The title is prefilled with it too, because a plan needs one and the system is the answer nine
+   * times in ten. Both stay editable; neither is a decision taken away.
+   */
+  system?: string | undefined;
+}): JSX.Element {
+  const [title, setTitle] = useState(system ?? '');
+  const [systemName, setSystemName] = useState(system ?? '');
   const [owner, setOwner] = useState<'personal' | 'squadron'>('personal');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
