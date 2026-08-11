@@ -7,6 +7,7 @@ import { promotionsPermitted, EARLIEST_PROMOTION_AT } from '@grims/shared';
 import { PromotionEngine, formatReport } from './jobs/promotion-run.js';
 import { readLadderFromSsot, PrismaPromotionStore } from './jobs/promotion-run.wiring.js';
 import { WebhookReporter } from './jobs/discord-reconcile.wiring.js';
+import { worthPosting } from './jobs/promotion-post.js';
 import { DiscordRankApplier, ladderRoleIds } from './jobs/rank-applier.discord.js';
 
 /**
@@ -131,8 +132,12 @@ async function main(): Promise<number> {
      * `notifyMembers` swallows its own failures; the promotions are written by now, and a bell
      * must never turn a completed run into a non-zero exit.
      */
+    // The engine moves anyone Discord refused into `failed`, and their rank did not change. Used
+    // by the personal notices, the squadron announcement, and the decision of whether this run has
+    // anything to say at all — one definition of "actually promoted", not three.
+    const refused = new Set(report.failed.map((f) => f.userId));
+
     if (live) {
-      const refused = new Set(report.failed.map((f) => f.userId));
       for (const p of report.wouldPromote) {
         if (refused.has(p.userId)) continue;
         await notifyMembers(
@@ -184,10 +189,26 @@ async function main(): Promise<number> {
      * So the report goes to the console, and reaches Discord only when someone
      * explicitly asks for it. A live run still does not post by default either
      * — the announcement is a separate decision from the promotion.
+     *
+     * ★ AND WITH --post, ONLY WHEN THERE IS SOMETHING TO SAY — 2026-08-11 ★
+     *
+     * This was unconditional, which was right for a monthly run. It became daily on the owner's
+     * instruction, and the same line would then post "Nobody is eligible this run" plus eighteen
+     * skipped lines EVERY NIGHT — eighteen consecutive nights of nothing before the next member
+     * comes eligible. That does not annoy a channel, it mutes one, and the message then missed is
+     * the promotion announcement itself. See jobs/promotion-post.ts.
      */
-    if (post) {
+    const decision = worthPosting({
+      live,
+      promoted: report.wouldPromote.filter((p) => !refused.has(p.userId)).length,
+      failed: report.failed.length,
+    });
+
+    if (post && decision.post) {
       await new WebhookReporter(process.env['DISCORD_ADMIN_WEBHOOK_URL'] ?? '').report(text, []);
-      console.log('\n(Posted to the admin channel.)');
+      console.log(`\n(Posted to the admin channel — ${decision.why}.)`);
+    } else if (post) {
+      console.log(`\n(Not posted: ${decision.why}.)`);
     } else {
       console.log('\n(Not posted to Discord. Pass --post to send this to the admin channel.)');
     }
