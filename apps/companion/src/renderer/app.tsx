@@ -341,6 +341,15 @@ function App(): JSX.Element {
    */
   const [support, setSupport] = useState<{ agent: boolean; waiting: number } | null>(null);
 
+  /*
+   * ★ SCOUT → PLAN, IN ONE CLICK — SQUADRON OWNER, 2026-08-10 ★
+   *
+   * The website does this with a query string; the app has no URLs, so the system rides here for
+   * exactly one hop. Cleared as soon as the planner has read it, because a stale prefill sitting in
+   * the form a week later is worse than an empty one — it is a name somebody did not choose.
+   */
+  const [planSystem, setPlanSystem] = useState<string | undefined>(undefined);
+
   const loadColony = (): void => {
     void window.colony.projects().then((answer) => {
       if (answer.ok) {
@@ -586,7 +595,14 @@ function App(): JSX.Element {
 
       <main style={{ flex: 1, overflowY: 'auto', padding: '22px 26px' }}>
         {page === 'status' ? <Status state={state} /> : null}
-        {page === 'colony-planning' ? <PlanningPage /> : null}
+        {page === 'colony-planning' ? (
+          /*
+           * Keyed on the prefill so arriving from the Scout with a system REMOUNTS the planner —
+           * without it the form keeps whatever was typed before and silently ignores the system the
+           * member just clicked, which looks like the button did nothing.
+           */
+          <PlanningPage key={planSystem ?? 'plain'} system={planSystem} />
+        ) : null}
         {page === 'colony-build-types' ? (
           <BuildTypesPage dockedSystem={state.dockedAt?.systemName ?? null} />
         ) : null}
@@ -630,7 +646,14 @@ function App(): JSX.Element {
         {page === 'mining' ? <MiningPage /> : null}
         {page === 'bgs' ? <BgsPage /> : null}
         {page === 'ops' ? <OpsPage /> : null}
-        {page === 'scout' ? <ScoutPage /> : null}
+        {page === 'scout' ? (
+          <ScoutPage
+            onPlan={(system) => {
+              setPlanSystem(system);
+              setPage('colony-planning');
+            }}
+          />
+        ) : null}
         {page === 'recruit' ? <RecruitPage /> : null}
         {page === 'commodities' ? <CommoditiesPage /> : null}
         {page === 'outfitter' ? <OutfitterPage /> : null}

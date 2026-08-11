@@ -992,6 +992,51 @@ export class ColonyPlanService {
     return { version: await this.#bump(input.planId, input.version) };
   }
 
+  /**
+   * Points a planned site at the project that got built there.
+   *
+   * ★ THE COLUMN WAS ALREADY THERE, AND NOTHING EVER WROTE IT — FOUND 2026-08-10 ★
+   *
+   * `colony_plan_sites.project_id` has been read out by this service since the planner shipped and
+   * set by nothing at all: a link the schema plainly anticipated and no code ever made.
+   *
+   * ★ WHY A PLAN CANNOT SIMPLY GENERATE ITS PROJECTS ★
+   *
+   * The obvious feature — "turn this plan into projects" — is impossible, and the reason is a NOT
+   * NULL: `colony_projects.market_id` is how a ColonisationConstructionDepot event finds the project
+   * a member posted, and a construction site has no market id until somebody actually places it in
+   * the game. A plan is an intention; a project is a thing that exists.
+   *
+   * So the direction is reversed. The member places the site, posts it as a project with the market
+   * id only they can read off the game, and THIS closes the loop — after the fact, which is the only
+   * time the fact exists.
+   *
+   * Idempotent, and it refuses to steal: a site already pointing at a different project is left
+   * alone rather than repointed, because two builds in one system are exactly the case this would
+   * otherwise scramble.
+   */
+  async linkProject(input: {
+    planId: string;
+    siteId: string;
+    projectId: string;
+    callerId: string;
+    callerMask: bigint;
+  }): Promise<{ linked: boolean }> {
+    await this.#mayEdit(input.planId, input.callerId, input.callerMask);
+
+    const done = await this.db.$executeRawUnsafe(
+      `UPDATE colony_plan_sites
+          SET project_id = $3::uuid
+        WHERE id = $1::uuid AND plan_id = $2::uuid
+          AND (project_id IS NULL OR project_id = $3::uuid)`,
+      input.siteId,
+      input.planId,
+      input.projectId,
+    );
+
+    return { linked: done > 0 };
+  }
+
   /** Deletes a plan outright. Nothing was built, so nothing is lost but the intention. */
   async remove(planId: string, callerId: string, mask: bigint): Promise<void> {
     await this.#mayEdit(planId, callerId, mask);

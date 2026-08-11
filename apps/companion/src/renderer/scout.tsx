@@ -44,7 +44,7 @@ function reachColour(v: number | null): string {
   return v < 5_000 ? C.good : v < 50_000 ? C.warn : C.bad;
 }
 
-export function ScoutPage(): JSX.Element {
+export function ScoutPage({ onPlan }: { onPlan?: (system: string) => void } = {}): JSX.Element {
   const [anchor, setAnchor] = useState('');
   const [range, setRange] = useState('15');
   const [prefer, setPrefer] = useState('');
@@ -218,7 +218,21 @@ export function ScoutPage(): JSX.Element {
               <Card key={c.system}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '10px', flexWrap: 'wrap' }}>
                   <strong style={{ color: C.text, fontSize: '14px' }}>{c.system}</strong>
-                  <Button onClick={() => look(c.system)} disabled={busy}>Survey</Button>
+                  <span style={{ display: 'flex', gap: '6px' }}>
+                    <Button onClick={() => look(c.system)} disabled={busy}>Survey</Button>
+                    {/*
+                      ★ SCOUT → PLAN, IN ONE CLICK ★
+
+                      Second, and quieter, because surveying first is usually the right order: the
+                      bodies a survey caches are the same ones the planner needs, so scouting then
+                      planning costs one fetch rather than two.
+                    */}
+                    {onPlan === undefined ? null : (
+                      <Button onClick={() => onPlan(c.system)} disabled={busy}>
+                        Plan it
+                      </Button>
+                    )}
+                  </span>
                 </div>
 
                 <div style={{ marginTop: '6px', display: 'flex', flexWrap: 'wrap', gap: '12px', fontSize: '12px', color: C.dim }}>

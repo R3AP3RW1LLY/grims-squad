@@ -145,7 +145,7 @@ type PlanTab = (typeof PLAN_TABS)[number]['key'];
 
 // ---------------------------------------------------------------------------- the page
 
-export function PlanningPage(): JSX.Element {
+export function PlanningPage({ system }: { system?: string | undefined } = {}): JSX.Element {
   const [plans, setPlans] = useState<ColonyPlan[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -202,7 +202,7 @@ export function PlanningPage(): JSX.Element {
       )}
 
       <Section title="Start a plan">
-        <NewPlan onMade={setOpenId} />
+        <NewPlan onMade={setOpenId} system={system} />
       </Section>
 
       <Section title="Squadron plans">
@@ -313,9 +313,25 @@ function PlanList({
  * the button says what it is about to do — a form that pauses with no explanation reads as one that
  * hung.
  */
-function NewPlan({ onMade }: { onMade: (id: string) => void }): JSX.Element {
-  const [title, setTitle] = useState('');
-  const [systemName, setSystemName] = useState('');
+function NewPlan({
+  onMade,
+  system,
+}: {
+  onMade: (id: string) => void;
+  /**
+   * ★ SCOUT → PLAN, IN ONE CLICK — SQUADRON OWNER, 2026-08-10 ★
+   *
+   * Arrives from the Scout tab. Scouting and planning were strangers: a member found a claimable
+   * system, wrote the name down, walked to another tab and typed it back in — a procedural name
+   * like "Col 285 Sector GL-W c2-12", which is exactly the string a person mistypes.
+   *
+   * The title is prefilled with it too, because a plan needs one and the system is the answer nine
+   * times in ten. Both stay editable; neither is a decision taken away.
+   */
+  system?: string | undefined;
+}): JSX.Element {
+  const [title, setTitle] = useState(system ?? '');
+  const [systemName, setSystemName] = useState(system ?? '');
   const [owner, setOwner] = useState<'personal' | 'squadron'>('personal');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -853,6 +869,34 @@ function SystemTree({
                               primary
                             </span>
                           ) : null}
+                          {/*
+                            ★ A PLANNED SITE THAT GOT BUILT SAYS SO — SQUADRON OWNER, 2026-08-10 ★
+
+                            `colony_plan_sites.project_id` has been read out by the planner since it
+                            shipped and written by nothing at all. The website now writes it when a
+                            member posts a planned site as a project.
+
+                            The APP does not offer "post as project" and that is deliberate rather
+                            than missing: this app posts the site you are DOCKED at, which is the
+                            only moment the construction site's market id exists — and the market id
+                            is precisely why a plan cannot create a project by itself. The app
+                            already solves the harder half; it just needed to show the answer.
+                          */}
+                          {s.projectId === null ? null : (
+                            <span
+                              style={{
+                                ...MONO,
+                                marginLeft: '7px',
+                                fontSize: '9px',
+                                letterSpacing: '0.16em',
+                                textTransform: 'uppercase',
+                                color: C.good,
+                              }}
+                              title="This planned site has been posted as a project and is being hauled to."
+                            >
+                              built
+                            </span>
+                          )}
                           {s.totalTonnes === null ? null : (
                             <span style={{ ...MONO, marginLeft: '7px', color: C.faint }}>
                               {s.totalTonnes.toLocaleString()} t
