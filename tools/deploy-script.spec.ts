@@ -785,3 +785,72 @@ describe('a failed deploy actually rolls itself back', () => {
       toBeLessThan(verifiedAt);
   });
 });
+
+describe('the ingestion box', () => {
+  /**
+   * ★ THE SECOND BOX, WHICH THIS SCRIPT USED TO LEAVE BEHIND ★
+   *
+   * infra/runbooks/workers-second-box.md §9 said from the day that box was stood up that deploy.sh
+   * "deploys one machine ... a deploy updates the primary and leaves the workers on the old
+   * revision". It was never implemented, and on 2026-08-11 the box was found running the build from
+   * PR #144 while production ran thirteen commits ahead.
+   */
+
+  it('★ MANDATORY: it deploys the workers only AFTER the primary health gate ★', () => {
+    /*
+     * The safety property. Shipping the workers a build the member-facing box could not serve would
+     * take down ingestion for a revision we are about to roll back — and this runs inside the
+     * section that only executes once the public URL has answered.
+     */
+    const verify = current.indexOf('Recording the release');
+    const workers = current.indexOf('deploy_workers');
+
+    expect(verify, 'the record section must exist').toBeGreaterThan(0);
+    expect(workers, 'the ingestion step must exist').toBeGreaterThan(0);
+    expect(workers, 'the ingestion box is deployed after the primary is proved healthy')
+      .toBeGreaterThan(verify);
+  });
+
+  it('★ MANDATORY: a failure there must not fail the deploy or trigger rollback ★', () => {
+    /*
+     * The primary is UP and members are being served. Failing here would report a failure that is
+     * not one and — far worse — the EXIT trap would roll a healthy site back to punish the other
+     * machine. The workers stay on their previous revision, which the wrapper enforces itself.
+     */
+    const block = current.slice(current.indexOf('deploy_workers()'), current.indexOf('─────', current.indexOf('deploy_workers()')) + 1);
+
+    expect(block, 'no `die` in the ingestion step').not.toMatch(/die/);
+    expect(current, 'the failure is still reported loudly').toMatch(/ingestion box FAILED/);
+  });
+
+  it('★ MANDATORY: it retries a PULL failure — it races the image build ★', () => {
+    /*
+     * The first real run failed exactly this way: api, web, bot and worker had finished building
+     * but eddn-collector had not, so the box refused the pull and rolled itself back. The primary
+     * needs four images and starts the moment they exist; this box needs a fifth.
+     *
+     * A deploy that needs a human to re-run it minutes later is one that gets forgotten, and
+     * forgetting is how that box ended up thirteen commits behind.
+     */
+    expect(current).toMatch(/could not pull images/);
+    expect(current, 'and it waits between attempts').toMatch(/sleep 60/);
+  });
+
+  it('★ MANDATORY: it does NOT retry a failure that is not about images ★', () => {
+    // A daemon that starts and dies is a real failure. Retrying it five times only takes five times
+    // as long to say so.
+    const guard = current.slice(current.indexOf('deploy_workers()'));
+    const bail = guard.indexOf('!= *"could not pull images"*');
+    const retry = guard.indexOf('sleep 60');
+
+    expect(bail, 'a non-image failure is detected').toBeGreaterThan(0);
+    expect(bail, 'and it bails out BEFORE reaching the wait').toBeLessThan(retry);
+    expect(guard.slice(bail, retry)).toMatch(/return 1/);
+  });
+
+  it('MANDATORY: the revision is passed to a key restricted server-side', () => {
+    // infra/scripts/worker-box-deploy.sh is pinned as the forced command for this key, so it cannot
+    // open a shell or read a file even if this script is wrong.
+    expect(current).toMatch(/"root@\$\{WORKERS_HOST\}" "deploy \$TARGET_SHA"/);
+  });
+});

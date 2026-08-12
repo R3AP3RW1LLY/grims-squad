@@ -683,12 +683,45 @@ ok "deployed revision recorded → /srv/grims/deployed.sha"
 WORKERS_HOST="${WORKERS_HOST:-$(envval WORKERS_HOST)}"
 WORKERS_KEY="${WORKERS_KEY:-/root/.ssh/worker_deploy_ed25519}"
 
+# ★ IT RETRIES, BECAUSE IT RACES THE IMAGE BUILD — FIXED 2026-08-11 ★
+#
+# The first real run of this step failed, and correctly: `api`, `web`, `bot` and `worker` had
+# finished building but `eddn-collector` had not, so the ingestion box refused the pull and rolled
+# itself back while the primary stayed healthy.
+#
+# That is not a fault, it is arithmetic. The primary needs four images and starts the moment they
+# exist; this box needs a fifth, and the matrix job that builds it is frequently the last to finish.
+# A deploy that needs a human to re-run it minutes later is a deploy that will be forgotten, and
+# forgetting is exactly how that box ended up thirteen commits behind in the first place.
+#
+# Only a PULL failure is retried. A daemon that starts and dies is a real failure and retrying it
+# five times would just take five times as long to tell us so.
+deploy_workers() {
+  local attempt out
+  for attempt in 1 2 3 4 5; do
+    if out="$(ssh -i "$WORKERS_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=15 \
+               "root@${WORKERS_HOST}" "deploy $TARGET_SHA" 2>&1)"; then
+      printf '%s\n' "$out"
+      return 0
+    fi
+    printf '%s\n' "$out"
+
+    if [[ $out != *"could not pull images"* ]]; then
+      return 1
+    fi
+    if (( attempt < 5 )); then
+      ok "images for ${TARGET_SHA:0:8} are not published yet — retrying in 60s (${attempt}/4)"
+      sleep 60
+    fi
+  done
+  return 1
+}
+
 if [[ -z $WORKERS_HOST ]]; then
   ok "no WORKERS_HOST configured — skipping the ingestion box"
 elif [[ ! -r $WORKERS_KEY ]]; then
   ok "✖ ingestion box NOT deployed — no key at $WORKERS_KEY. It is still on its previous revision."
-elif ssh -i "$WORKERS_KEY" -o BatchMode=yes -o StrictHostKeyChecking=no -o ConnectTimeout=15 \
-       "root@${WORKERS_HOST}" "deploy $TARGET_SHA"; then
+elif deploy_workers; then
   ok "ingestion box deployed ${TARGET_SHA:0:8}"
 else
   ok "✖ ingestion box FAILED and rolled ITSELF back — it is on its previous revision, the primary is fine. Recover: ssh -i $WORKERS_KEY root@$WORKERS_HOST 'deploy $TARGET_SHA'"
