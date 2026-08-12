@@ -42,6 +42,7 @@ import {
   Tabs,
 } from './ui.js';
 import { CALLSIGN_LENGTH, formatCallsign, normaliseCallsign } from '@grims/shared/carrier';
+import { needsFreshness, type FreshnessVerdict } from '@grims/shared/needs-freshness';
 import { groupByCategory } from '@grims/shared/commodity-category';
 import { rankOpportunities, type Opportunity } from '@grims/shared/colony-opportunity';
 import { SystemPicker } from './system-picker.js';
@@ -289,21 +290,14 @@ export interface ProjectDetailData {
  * around. Both can be true and far apart: the app can have synced a second ago and be showing a
  * fortnight-old depot reading.
  */
-function siteFreshness(needs: readonly ColonyNeed[]): string | null {
+function siteFreshness(needs: readonly ColonyNeed[]): FreshnessVerdict {
   const stamps = needs
     .map((n) => (n.observedAt === null ? null : Date.parse(n.observedAt)))
     .filter((t): t is number => t !== null && Number.isFinite(t));
 
-  if (stamps.length === 0) return null;
-
-  const minutes = Math.floor((Date.now() - Math.max(...stamps)) / 60_000);
-  if (minutes < 2) return 'Read from the site moments ago.';
-  if (minutes < 90) return `Read from the site ${minutes} minutes ago.`;
-
-  const hours = Math.round(minutes / 60);
-  if (hours < 48) return `Read from the site ${hours} hours ago.`;
-
-  return `Read from the site ${Math.round(hours / 24)} days ago — somebody docking there refreshes it.`;
+  // The NEWEST reading, because one commodity refreshed today makes the whole list that current.
+  const newest = stamps.length === 0 ? null : new Date(Math.max(...stamps));
+  return needsFreshness(newest, new Date());
 }
 
 /**
@@ -1384,11 +1378,39 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
               around: ten minutes old and it is, a fortnight old and half of it may already be
               delivered. Without it the two look identical.
             */}
-            {siteFreshness(needs) === null ? null : (
-              <p style={{ margin: '6px 0 0', fontSize: '11px', color: C.faint }}>
-                {siteFreshness(needs)}
-              </p>
-            )}
+            {(() => {
+              /*
+                ★ WHEN THE READING IS OLD THIS STOPS BEING A FOOTNOTE — 2026-08-12 ★
+
+                "someone without the companion app completed a project and it did not update ...
+                this causes our members to go buy materials for a project thats completed and not
+                needed."
+
+                A finished installation is not dockable, so nothing will ever report it again. The
+                age of the reading is the only warning there can be, and at a fortnight it is the
+                most important thing on this card.
+              */
+              const f = siteFreshness(needs);
+              if (!f.warn) {
+                return (
+                  <p style={{ margin: '6px 0 0', fontSize: '11px', color: C.faint }}>{f.sentence}</p>
+                );
+              }
+              return (
+                <p
+                  style={{
+                    margin: '8px 0 0',
+                    padding: '6px 10px',
+                    border: `1px solid ${C.orangeBright}`,
+                    borderRadius: '4px',
+                    fontSize: '12px',
+                    color: C.orangeBright,
+                  }}
+                >
+                  {f.sentence}
+                </p>
+              );
+            })()}
           </Card>
         )}
       </Section>
