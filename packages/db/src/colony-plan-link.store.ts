@@ -58,6 +58,8 @@ interface ProjectRow {
   system_name: string;
   system_id64: string | null;
   build_type_id: string | null;
+  /** From the `Docked` journal event we already collect. Null when nobody has docked there. */
+  arrival_ls: number | null;
 }
 
 interface SiteRow {
@@ -65,6 +67,8 @@ interface SiteRow {
   plan_id: string;
   build_type_id: string | null;
   project_id: string | null;
+  body_distance_ls: number | null;
+  position: number;
 }
 
 /**
@@ -85,9 +89,25 @@ export async function linkProjectsToPlans(
    * settles it, and `matchProjectToSite` returns the existing link unchanged when there is one.
    */
   const projects = await db.$queryRawUnsafe<ProjectRow[]>(
-    `SELECT p.id, p.system_name, p.system_id64::text AS system_id64, p.build_type_id
-       FROM colony_projects p
-      WHERE p.completed_at IS NULL OR p.completed_at IS NOT NULL`,
+    /*
+     * ★ THE ARRIVAL DISTANCE IS WHAT MAKES THIS WORK AT ALL — 2026-08-11 ★
+     *
+     * The first dry run linked nothing: GL-W c2-12 plans twenty-five identical Satellite
+     * Installations, and Elite names construction sites with generated names ("Tan Prospect"), so
+     * neither the build type nor the name singles one out.
+     *
+     * `Docked` carries DistFromStarLS and we have been storing it all along. A site at 1,302.78 Ls
+     * is orbiting the body planned at 1,301, and no other. Newest sighting wins — a site does not
+     * move, so any of them would do, and the newest is the one most likely to be complete.
+     */
+    `SELECT p.id, p.system_name, p.system_id64::text AS system_id64, p.build_type_id,
+            (SELECT (t.payload->>'DistFromStarLS')::numeric
+               FROM telemetry_events t
+              WHERE t.event_type = 'Docked'
+                AND (t.payload->>'MarketID')::bigint = p.market_id
+              ORDER BY t.occurred_at DESC
+              LIMIT 1)::float8 AS arrival_ls
+       FROM colony_projects p`,
   );
 
   const linked: Array<PlanLinkReport['linked'][number]> = [];
@@ -110,9 +130,12 @@ export async function linkProjectsToPlans(
      * exists to backfill.
      */
     const sites = await db.$queryRawUnsafe<SiteRow[]>(
-      `SELECT s.id, s.plan_id, s.build_type_id, s.project_id::text AS project_id
+      `SELECT s.id, s.plan_id, s.build_type_id, s.project_id::text AS project_id, s.position,
+              b.distance_ls::float8 AS body_distance_ls
          FROM colony_plan_sites s
          JOIN colony_plans pl ON pl.id = s.plan_id
+         LEFT JOIN colony_bodies b
+                ON b.system_id64 = s.system_id64 AND b.body_id = s.body_id
         WHERE ($1::text IS NOT NULL AND pl.system_id64::text = $1::text)
            OR lower(pl.system_name) = lower($2)`,
       project.system_id64,
@@ -131,11 +154,13 @@ export async function linkProjectsToPlans(
 
     for (const [planId, planSites] of byPlan) {
       const outcome = matchProjectToSite(
-        { id: project.id, buildTypeId: project.build_type_id },
+        { id: project.id, buildTypeId: project.build_type_id, arrivalLs: project.arrival_ls },
         planSites.map((s) => ({
           id: s.id,
           buildTypeId: s.build_type_id,
           projectId: s.project_id,
+          bodyDistanceLs: s.body_distance_ls,
+          position: s.position,
         })),
       );
 
@@ -193,7 +218,11 @@ export async function linkProjectsToPlans(
             planId,
             systemName: project.system_name,
             buildTypeId: project.build_type_id,
-            reason: 'Matched on system and identified build type; exactly one planned site fitted.',
+            reason:
+              project.arrival_ls === null
+                ? 'Matched on system and identified build type; exactly one planned site fitted.'
+                : `Matched on system, identified build type, and arrival distance ${project.arrival_ls} Ls against the planned body. Where several identical structures sit on that body they are interchangeable and the earliest in build order was taken.`,
+            arrivalLs: project.arrival_ls,
           } as never,
         },
       });

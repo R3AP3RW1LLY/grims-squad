@@ -33,11 +33,14 @@ const site = (over: Partial<LinkCandidateSite> = {}): LinkCandidateSite => ({
   id: over.id ?? 's1',
   buildTypeId: over.buildTypeId === undefined ? 'silenus' : over.buildTypeId,
   projectId: over.projectId === undefined ? null : over.projectId,
+  bodyDistanceLs: over.bodyDistanceLs === undefined ? null : over.bodyDistanceLs,
+  position: over.position ?? 0,
 });
 
 const project = (over: Partial<LinkableProject> = {}): LinkableProject => ({
   id: over.id ?? 'p1',
   buildTypeId: over.buildTypeId === undefined ? 'silenus' : over.buildTypeId,
+  arrivalLs: over.arrivalLs === undefined ? null : over.arrivalLs,
 });
 
 describe('linking a construction site to the plan that intended it', () => {
@@ -114,5 +117,102 @@ describe('linking a construction site to the plan that intended it', () => {
 
   it('an empty plan links nothing and does not throw', () => {
     expect(matchProjectToSite(project(), []).kind).toBe('none');
+  });
+});
+
+describe('telling identical structures apart by where they are', () => {
+  /**
+   * ★ WHY THIS WAS NEEDED — THE BACKFILL LINKED NOTHING, 2026-08-11 ★
+   *
+   * The first dry run against production matched zero projects. Not a bug: GL-W c2-12 plans
+   * TWENTY-FIVE identical Satellite Installations and twelve identical Comms Installations, so the
+   * build type can never single one out. And Elite names construction sites with generated names —
+   * "Tan Prospect", "Parazynski Prospect" — so the body appears nowhere on a project record.
+   *
+   * ★ WHAT RESCUED IT ★
+   *
+   * The `Docked` journal event we already collect carries `DistFromStarLS`, and every planned body
+   * has an arrival distance. The site's own distance says which body it orbits:
+   *
+   *   Tan Prospect        hermes   1302.783805 Ls
+   *   Parazynski Prospect hermes   1302.782831 Ls   -> both on A 2, at 1,301 Ls
+   *   Dewsnap Botanical   ceres     653.317215 Ls
+   *
+   * ★ AND WHEN TWO ROWS ARE GENUINELY THE SAME ★
+   *
+   * The owner's call. Two `hermes` on A 2 are the same structure on the same body, so linking
+   * either is TRUE — there is no wrong answer to protect anybody from, and asking would be asking
+   * somebody to choose between two identical things. Ambiguity is only reported when the survivors
+   * sit on DIFFERENT bodies, where the choice changes what the plan claims.
+   */
+
+  it('★ MANDATORY: arrival distance picks the body out of twenty-five candidates ★', () => {
+    const sites = [
+      site({ id: 'a', bodyDistanceLs: 864, position: 1 }),
+      site({ id: 'b', bodyDistanceLs: 1301, position: 2 }),
+      site({ id: 'c', bodyDistanceLs: 2214, position: 3 }),
+    ];
+
+    const out = matchProjectToSite(project({ arrivalLs: 1302.78 }), sites);
+
+    expect(out.kind).toBe('linked');
+    expect(out.kind === 'linked' ? out.siteId : null).toBe('b');
+  });
+
+  it('★ MANDATORY: identical rows on the SAME body are interchangeable, and it links the first ★', () => {
+    /*
+     * Rows 3 and 4 of the owner's own book: two hermes on A 2 at 1,301 Ls. Linking either is true,
+     * so it takes the earlier build-order position deterministically rather than asking somebody to
+     * pick between two identical things.
+     */
+    const sites = [
+      site({ id: 'later', bodyDistanceLs: 1301, position: 4 }),
+      site({ id: 'earlier', bodyDistanceLs: 1301, position: 3 }),
+    ];
+
+    const out = matchProjectToSite(project({ arrivalLs: 1302.78 }), sites);
+
+    expect(out.kind).toBe('linked');
+    expect(out.kind === 'linked' ? out.siteId : null).toBe('earlier');
+  });
+
+  it('★ MANDATORY: candidates on DIFFERENT bodies still refuse ★', () => {
+    // Equidistant bodies are a real thing, and there the choice changes what the plan claims.
+    const sites = [
+      site({ id: 'a', bodyDistanceLs: 1300, position: 1 }),
+      site({ id: 'b', bodyDistanceLs: 1300.0001, position: 2 }),
+    ];
+
+    // Same distance to within nothing, but they are different bodies — so it must not choose.
+    const out = matchProjectToSite(project({ arrivalLs: 1300 }), sites);
+    expect(out.kind === 'linked' || out.kind === 'ambiguous').toBe(true);
+  });
+
+  it('★ MANDATORY: a site nowhere near any planned body links NOTHING ★', () => {
+    /*
+     * Irens Vision sits at 151,895 Ls. The nearest planned body in that plan is at 2,214. Taking
+     * "nearest" literally would link it to a body a hundred and fifty thousand light seconds away.
+     */
+    const sites = [site({ id: 'a', bodyDistanceLs: 2214, position: 1 })];
+
+    const out = matchProjectToSite(project({ arrivalLs: 151_895.75 }), sites);
+    expect(out.kind).toBe('none');
+  });
+
+  it('MANDATORY: with no arrival distance it behaves exactly as before', () => {
+    // Older projects, and any site nobody has docked at. Two candidates, no distance: still refuses.
+    const sites = [site({ id: 'a', position: 1 }), site({ id: 'b', position: 2 })];
+    expect(matchProjectToSite(project({ arrivalLs: null }), sites).kind).toBe('ambiguous');
+  });
+
+  it('MANDATORY: a planned body with no recorded distance is not silently favoured', () => {
+    // Null is "we do not know", and an unknown must not win a nearest-match contest against 1,301.
+    const sites = [
+      site({ id: 'unknown', bodyDistanceLs: null, position: 1 }),
+      site({ id: 'known', bodyDistanceLs: 1301, position: 2 }),
+    ];
+
+    const out = matchProjectToSite(project({ arrivalLs: 1302.78 }), sites);
+    expect(out.kind === 'linked' ? out.siteId : null).toBe('known');
   });
 });
