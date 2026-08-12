@@ -34,6 +34,10 @@ export class InMemoryRoleSyncStore implements IRoleSyncStore {
       .filter((g) => g.userId === userId && g.source === 'discord')
       .map((g) => g.roleKey);
   }
+  async heldGrants(userId: string): Promise<readonly string[]> {
+    // EVERY source, unlike discordGrants above — that distinction is the fix for the re-grant loop.
+    return this.#grants.filter((g) => g.userId === userId).map((g) => g.roleKey);
+  }
   async revoke(userId: string, roleKey: string): Promise<void> {
     const i = this.#grants.findIndex(
       (g) => g.userId === userId && g.roleKey === roleKey && g.source === 'discord',

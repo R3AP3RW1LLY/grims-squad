@@ -35,8 +35,23 @@ export interface AuditEntry {
 export interface IRoleSyncStore {
   /** discordRoleId -> platform role key. Data, never hard-coded (INV-008). */
   mappings(): Promise<ReadonlyMap<string, string>>;
-  /** Only the grants this service is allowed to manage. */
+  /** Only the grants this service is allowed to REVOKE. */
   discordGrants(userId: string): Promise<readonly string[]>;
+  /**
+   * Every role the member holds, whatever granted it.
+   *
+   * ★ SEPARATE FROM `discordGrants` — THE RE-GRANT LOOP, 2026-08-11 ★
+   *
+   * "Do they already hold this?" and "may this service take it away?" are different questions, and
+   * answering the first with the second is what made role-sync re-grant the same three ranks every
+   * sixty seconds in production, writing 4,320 audit rows a day.
+   *
+   * The promotion engine writes a rank with source `system`. `discordGrants` cannot see it, so the
+   * sweep granted it again on every tick — and `grant` upserts with an empty `update`, deliberately,
+   * because moving `grantedAt` would reset every member's promotion tenure. The row therefore never
+   * changed and the loop could never break itself.
+   */
+  heldGrants(userId: string): Promise<readonly string[]>;
   grant(userId: string, roleKey: string, source: GrantSource): Promise<void>;
   revoke(userId: string, roleKey: string): Promise<void>;
   writeAudit(entry: AuditEntry): Promise<void>;
@@ -81,10 +96,22 @@ export class RoleSyncService {
      */
     if (wanted.size === 0) wanted.add(UNRANKED_ROLE_KEY);
 
-    const held = new Set(await this.store.discordGrants(userId));
+    /*
+     * Two reads, two questions.
+     *
+     * `heldAny` decides what to GRANT: if the member already holds the role — because an officer
+     * granted it, or because the promotion engine did — there is nothing to do and nothing to
+     * audit, whatever put it there.
+     *
+     * `discordHeld` decides what to REVOKE, and stays scoped to this service's own grants. That is
+     * the original safety story and it is not traded away: a rank awarded by a promotion, or a
+     * webmaster role granted by hand, must survive somebody editing a Discord role.
+     */
+    const heldAny = new Set(await this.store.heldGrants(userId));
+    const discordHeld = new Set(await this.store.discordGrants(userId));
 
-    const granted = [...wanted].filter((k) => !held.has(k));
-    const revoked = [...held].filter((k) => !wanted.has(k));
+    const granted = [...wanted].filter((k) => !heldAny.has(k));
+    const revoked = [...discordHeld].filter((k) => !wanted.has(k));
 
     for (const key of granted) {
       await this.store.grant(userId, key, 'discord');
