@@ -333,7 +333,18 @@ export async function identifyBuildTypes(db: PrismaClient): Promise<{
   const catalogue = new Map<string, Map<string, number>>();
   for (const row of costs) {
     const forType = catalogue.get(row.build_type_id) ?? new Map<string, number>();
-    forType.set(row.commodity, row.tonnes);
+    /*
+     * ★ BOTH SIDES THROUGH THE SAME KEY — 2026-08-12 ★
+     *
+     * This loop is a SECOND implementation of `matchBuildType`, and keying only the project side
+     * broke every comparison rather than just the aliased one: one side lowercased, the other not,
+     * so nothing matched at all. Caught by running it against production and getting zero
+     * identifications where the alias fix should have produced three.
+     *
+     * The duplication is the real defect and is worth removing; keying both sides identically is
+     * the correct fix for it today.
+     */
+    forType.set(commodityKey(row.commodity), row.tonnes);
     catalogue.set(row.build_type_id, forType);
   }
 
