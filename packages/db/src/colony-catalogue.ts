@@ -246,6 +246,43 @@ export async function seedBuildCatalogue(
  * Matched on REQUIRED, never on remaining: remaining changes with every delivery, and required is
  * the constant the game set when the site was placed.
  */
+
+/**
+ * Is this project's requirement exactly this build's bill of materials?
+ *
+ * ★ ONE DEFINITION, BECAUSE TWO NEARLY COST US EVERYTHING — 2026-08-12 ★
+ *
+ * `matchBuildType` and `identifyBuildTypes` each carried their own copy of this comparison. When
+ * the H.E. Suits alias fix added `commodityKey` to one side of one of them, the other kept
+ * comparing a lowercased key against a raw name — so EVERY commodity mismatched and nothing could
+ * identify at all. Ninety-seven db tests passed, because they cover the exported function and not
+ * the inline copy; it failed on the first real database.
+ *
+ * So the keying and the equality live together, here, and neither caller can drift from the other.
+ *
+ * Exact on every line and deliberately so: two settlement types can differ by a single commodity,
+ * and a fuzzy match would confidently mislabel a build and pre-fill the wrong shopping list.
+ */
+export function sameBill(
+  required: ReadonlyMap<string, number>,
+  costs: ReadonlyMap<string, number>,
+): boolean {
+  if (required.size !== costs.size) return false;
+
+  /*
+   * BOTH sides, here. Keying only one was the original defect and it survived the first attempt at
+   * this very function — a comparison that works only if the caller prepared its input is a trap,
+   * and it is the trap that broke identification entirely.
+   */
+  const want = new Map<string, number>();
+  for (const [name, tonnes] of required) want.set(commodityKey(name), tonnes);
+
+  for (const [commodity, tonnes] of costs) {
+    if (want.get(commodityKey(commodity)) !== tonnes) return false;
+  }
+  return true;
+}
+
 export function matchBuildType(
   required: ReadonlyMap<string, number>,
   catalogue: readonly BuildTypeSeed[],
@@ -263,11 +300,9 @@ export function matchBuildType(
    * its own semantics instead, and `commodityKey` is idempotent, so a caller that has already
    * normalised loses nothing.
    */
-  const byKey = new Map<string, number>();
-  for (const [name, tonnes] of required) byKey.set(commodityKey(name), tonnes);
 
   for (const type of catalogue) {
-    if (type.costs.length !== byKey.size) continue;
+    if (type.costs.length !== required.size) continue;
 
     /*
      * Exact on every commodity. Not "close enough": two settlement types can differ by a single
@@ -283,8 +318,7 @@ export function matchBuildType(
      * The exactness is unchanged: still every line, still to the tonne. Only the name comparison
      * stopped being naive.
      */
-    const same = type.costs.every((c) => byKey.get(commodityKey(c.commodity)) === c.tonnes);
-    if (same) return type;
+    if (sameBill(required, new Map(type.costs.map((c) => [c.commodity, c.tonnes])))) return type;
   }
 
   return null;
@@ -344,7 +378,7 @@ export async function identifyBuildTypes(db: PrismaClient): Promise<{
      * The duplication is the real defect and is worth removing; keying both sides identically is
      * the correct fix for it today.
      */
-    forType.set(commodityKey(row.commodity), row.tonnes);
+    forType.set(row.commodity, row.tonnes);
     catalogue.set(row.build_type_id, forType);
   }
 
@@ -353,16 +387,8 @@ export async function identifyBuildTypes(db: PrismaClient): Promise<{
 
   for (const [projectId, want] of wanted) {
     for (const [typeId, costsFor] of catalogue) {
-      if (costsFor.size !== want.size) continue;
-
-      let same = true;
-      for (const [commodity, tonnes] of costsFor) {
-        if (want.get(commodity) !== tonnes) {
-          same = false;
-          break;
-        }
-      }
-      if (!same) continue;
+      // The SAME comparison the exported matcher uses. See sameBill for why that matters.
+      if (!sameBill(want, costsFor)) continue;
 
       await db.$executeRawUnsafe(
         `UPDATE colony_projects SET build_type_id = $1 WHERE id = $2::uuid`,
