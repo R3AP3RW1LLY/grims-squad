@@ -152,5 +152,30 @@ export async function systemsNear(
 
 /** Uninhabited, unlocked, not already colonised — the set a claim can actually be made in. */
 export function claimableOnly(systems: readonly SpanshSystem[]): SpanshSystem[] {
-  return systems.filter((s) => !s.isColonised && !s.needsPermit && s.population === 0);
+  /*
+   * ★ NOTHING DOCKED IN IT — SQUADRON OWNER, 2026-08-12 ★
+   *
+   * "when were using the scout module, and looking for unclaimed systems its showing us systems
+   * that are claimed, we need this fixed ASAP! this is only supposed to find unclaimed systems!"
+   *
+   * The three tests below were all true of a system claimed an hour earlier: population is still 0,
+   * no permit is needed, and `is_colonised` lags. That field is only ever written `true`, so ABSENT
+   * reads as unclaimed — the safe direction for an uninhabited system, and the wrong one for a
+   * fresh claim.
+   *
+   * What a fresh claim always has is a System Colonisation Ship docked in it, and a genuinely
+   * unclaimed system has NOTHING docked in it at all. So a station count above zero is the
+   * observable proof that somebody got there first, and it does not depend on Spansh having caught
+   * up with anything.
+   *
+   * The owner also asked that a system with a System Architect attached be excluded. Spansh exposes
+   * no architect, no owner and no claimant — checked against the live API on 2026-08-12, which
+   * returns is_colonised, population, stations and nothing about who holds it. The colonisation ship
+   * IS how an attached architect shows up in this data, so this is that rule rather than a
+   * substitute for it. Cross-checking our own EDDN feed, which may see a claim before Spansh
+   * publishes it, is the owner's second choice and is still owed.
+   */
+  return systems.filter(
+    (s) => !s.isColonised && !s.needsPermit && s.population === 0 && s.stationCount === 0,
+  );
 }
