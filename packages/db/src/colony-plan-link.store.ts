@@ -110,6 +110,18 @@ export async function linkProjectsToPlans(
        FROM colony_projects p`,
   );
 
+  /*
+   * ★ A DRY RUN MUST SEE ITS OWN PENDING WRITES — 2026-08-12 ★
+   *
+   * The sites query runs per project, fresh from the database. Live that is correct: the first
+   * project writes its link and the second then sees that site taken. A DRY RUN writes nothing, so
+   * every project saw the same site free and the report showed two projects claiming one row —
+   * alarming to read, and a misrepresentation of what --live would actually do.
+   *
+   * The two must agree, because this report is what a human approves.
+   */
+  const claimed = new Set<string>();
+
   const linked: Array<PlanLinkReport['linked'][number]> = [];
   const ambiguous: Array<PlanLinkReport['ambiguous'][number]> = [];
   const skipped: Array<{ projectId: string; why: string }> = [];
@@ -158,7 +170,8 @@ export async function linkProjectsToPlans(
         planSites.map((s) => ({
           id: s.id,
           buildTypeId: s.build_type_id,
-          projectId: s.project_id,
+          // Claimed earlier in THIS run counts as taken, or a dry run contradicts the live one.
+          projectId: s.project_id ?? (claimed.has(s.id) ? '(claimed in this run)' : null),
           bodyDistanceLs: s.body_distance_ls,
           position: s.position,
         })),
@@ -184,6 +197,7 @@ export async function linkProjectsToPlans(
       const site = planSites.find((s) => s.id === outcome.siteId);
       if (site?.project_id === project.id) continue;
 
+      claimed.add(outcome.siteId);
       linked.push({
         projectId: project.id,
         planId,
