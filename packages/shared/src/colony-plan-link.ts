@@ -35,6 +35,13 @@ export interface LinkCandidateSite {
   readonly buildTypeId: string | null;
   /** Already spoken for, by this project or another. */
   readonly projectId: string | null;
+  /**
+   * How far the planned BODY is from the system's arrival point, in light seconds. Null until
+   * somebody has surveyed it — and null must never win a nearest-match contest against a number.
+   */
+  readonly bodyDistanceLs?: number | null;
+  /** Build-order position, used only to break a tie between rows that are genuinely identical. */
+  readonly position?: number;
 }
 
 export interface LinkableProject {
@@ -44,6 +51,17 @@ export interface LinkableProject {
    * Null until a commander has docked there and the bill of materials is known.
    */
   readonly buildTypeId: string | null;
+  /**
+   * The construction site's own distance from the arrival star, from the `Docked` journal event.
+   *
+   * ★ WHAT RESCUED THE BACKFILL — 2026-08-11 ★
+   *
+   * The first dry run linked nothing: GL-W c2-12 plans twenty-five identical Satellite
+   * Installations, and Elite names construction sites with generated names, so neither the build
+   * type nor the name can single one out. This can — a site at 1,302.78 Ls is orbiting the body
+   * planned at 1,301, and no other.
+   */
+  readonly arrivalLs?: number | null;
 }
 
 export type LinkOutcome =
@@ -89,7 +107,36 @@ export function matchProjectToSite(
     };
   }
 
+  /*
+   * The sanity check runs whatever the count. A plan with exactly ONE unlinked `pistis` and a
+   * project 151,895 Ls away would otherwise link them for want of an alternative — which is how a
+   * plan claims a build is under way in a place nobody has been.
+   */
+  const narrowed = nearestBody(candidates, project.arrivalLs ?? null);
+
+  if (narrowed === 'nowhere-near') {
+    return {
+      kind: 'none',
+      why:
+        'This site is nowhere near any body the plan intends. Taking the nearest anyway would ' +
+        'link it to somewhere it plainly is not.',
+    };
+  }
+
   if (candidates.length > 1) {
+    if (narrowed !== null) {
+      /*
+       * ★ IDENTICAL ROWS ARE INTERCHANGEABLE — SQUADRON OWNER, 2026-08-11 ★
+       *
+       * Two `hermes` on A 2 are the same structure on the same body, so linking either is TRUE.
+       * There is no wrong answer to protect anybody from, and asking would be asking somebody to
+       * choose between two identical things. The earliest build-order position wins, so the choice
+       * is deterministic and a re-run reaches the same answer.
+       */
+      const first = [...narrowed].sort((a, b) => (a.position ?? 0) - (b.position ?? 0))[0];
+      if (first !== undefined) return { kind: 'linked', siteId: first.id };
+    }
+
     return { kind: 'ambiguous', siteIds: candidates.map((s) => s.id) };
   }
 
@@ -100,4 +147,41 @@ export function matchProjectToSite(
     return { kind: 'none', why: 'No planned site fitted.' };
   }
   return { kind: 'linked', siteId: only.id };
+}
+
+/**
+ * The candidates orbiting the body this site actually sits at, or null when that cannot be told.
+ *
+ * Returns `'nowhere-near'` when the closest planned body is implausibly far — Irens Vision sits at
+ * 151,895 Ls and the nearest body in its plan is at 2,214, and taking "nearest" literally there
+ * would link it to somewhere it plainly is not.
+ */
+function nearestBody(
+  candidates: readonly LinkCandidateSite[],
+  arrivalLs: number | null,
+): readonly LinkCandidateSite[] | 'nowhere-near' | null {
+  if (arrivalLs === null) return null;
+
+  // Null distance is "we have not surveyed it", which must not beat a real number.
+  const placed = candidates.filter(
+    (c): c is LinkCandidateSite & { bodyDistanceLs: number } =>
+      typeof c.bodyDistanceLs === 'number',
+  );
+  if (placed.length === 0) return null;
+
+  const gap = (c: { bodyDistanceLs: number }): number => Math.abs(c.bodyDistanceLs - arrivalLs);
+  const best = Math.min(...placed.map(gap));
+
+  /*
+   * A station orbits its body a short way out, so a few light seconds of slack is expected and
+   * anything beyond a wide margin is a different place entirely. Proportional rather than fixed:
+   * 5 Ls of slop is generous at 800 Ls and meaningless at 150,000.
+   */
+  if (best > Math.max(50, arrivalLs * 0.05)) return 'nowhere-near';
+
+  // Same body, not merely a similar distance: two bodies can sit at the same range from the star.
+  const winner = placed.find((c) => gap(c) === best);
+  if (winner === undefined) return null;
+
+  return placed.filter((c) => c.bodyDistanceLs === winner.bodyDistanceLs);
 }
