@@ -200,6 +200,15 @@ export const TELEMETRY_CATALOGUE: readonly CatalogueGroup[] = [
       },
       { event: 'MarketBuy', label: 'Cargo bought', reveals: 'The commodity, the quantity and the station.' },
       { event: 'MarketSell', label: 'Cargo sold', reveals: 'The commodity, the quantity, the station and the price.' },
+      {
+        event: 'Cargo',
+        label: 'What is in your hold',
+        reveals:
+          'Everything your ship is carrying right now, including anything the game has flagged as '
+          + 'stolen. It is what stops two members buying the same materials for the same build — a '
+          + 'colonisation project shows who is already holding what, so nobody flies out for steel '
+          + 'somebody else has aboard. Your carrier’s hold is reported separately and is not this.',
+      },
       { event: 'MiningRefined', label: 'Ore refined', reveals: 'What you refined while mining.' },
     ],
   },

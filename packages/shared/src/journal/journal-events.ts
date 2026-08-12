@@ -98,6 +98,50 @@ export const JOURNAL_EVENTS = {
   MarketBuy: 'trade',
   MarketSell: 'trade',
   /**
+   * The complete contents of the member's hold, as the game sees it right now.
+   *
+   * ★ JOINED 2026-08-12, SO TWO PEOPLE STOP BUYING THE SAME STEEL ★
+   *
+   * The squadron owner: "we need the ability to track when someone has bought something in a
+   * project they are currently on and display it in the WHAT IT STILL NEEDS section and on the
+   * Where to buy it tab. Right now we can see cargo holds for fleet carriers - we need the same for
+   * individual ships when they buy it so people are not buying the same materials."
+   *
+   * ★ WHY NOT JUST SUM MarketBuy, WHICH IS ALREADY HERE ★
+   *
+   * Because a purchase log is a record of things that HAPPENED and a hold is a record of what IS,
+   * and the two come apart within the hour. Steel gets sold back when the price moves, jettisoned
+   * to outrun an interdiction, transferred to a carrier, or lost with the ship. Every one of those
+   * makes an accumulated total wrong, silently and permanently, in the direction that does the most
+   * damage: it claims the squadron holds materials it does not, so nobody buys them.
+   *
+   * `Cargo` is a SNAPSHOT. It replaces rather than adds, so it needs no reconciliation and no code
+   * that reasons about sells, jettisons, transfers or deaths — the next one is simply correct. That
+   * self-correction is the reason this event was chosen over anything cleverer.
+   *
+   * ★ WHY `trade` AND NOT `colonisation` ★
+   *
+   * Colonisation is what asked for it, and `CargoTransfer` above is the precedent for ignoring
+   * that: it was added for the colonisation carrier holds and filed under `carrier`, because the
+   * category names the DISCLOSURE, not the feature that wanted it.
+   *
+   * What this discloses is the member's entire hold — everything in it, whatever they bought it for
+   * and wherever they are going with it. That is the same fact `MarketBuy` and `MarketSell` already
+   * disclose, one step fresher. `colonisation` would have been actively wrong: it is collected ON BY
+   * DEFAULT, on the reasoning that posting a project implies sending its progress, and a continuous
+   * general inventory feed is not the progress of a project. It would arrive on the one switch a
+   * member never had to agree to, under a label that says "construction sites".
+   *
+   * `carrier` is wrong for the mirror-image reason. That is where cargo on the member's own CARRIER
+   * lives; this event's entire job is to be about their SHIP, and a member who owns no carrier has
+   * no reason to leave the carrier switch on.
+   *
+   * Under `trade` this adds no new consent surface for the people the feature serves: the purchases
+   * it corrects are `MarketBuy`, which is `trade` already. Somebody who has switched trade off
+   * contributes nothing to the shopping list today and will contribute nothing after this.
+   */
+  Cargo: 'trade',
+  /**
    * Opening a station's commodity screen.
    *
    * ★ THE MOST VALUABLE EVENT IN THE JOURNAL, AND WE WERE NOT READING IT ★
@@ -387,6 +431,63 @@ export const EVENT_FIELDS: Record<JournalEventName, readonly string[]> = {
    */
   MarketBuy: ['Type', 'Type_Localised', 'Count', 'BuyPrice', 'TotalCost', 'MarketID'],
   MarketSell: ['Type', 'Type_Localised', 'Count', 'SellPrice', 'TotalSale', 'AvgPricePaid', 'MarketID'],
+  /*
+   * ★ THREE FIELDS, AND THE EVENT ONLY HAS THREE ★
+   *
+   * Worth saying outright, because a list that keeps everything looks like a list nobody thought
+   * about. `Cargo` carries `Vessel`, `Count` and `Inventory` and nothing else — there is no station,
+   * no position, no price and no id in it. This is a narrow event that happens to be entirely the
+   * part we want, not a wide one waved through.
+   *
+   * It is also the highest-frequency thing under `trade`: the game writes one every time the hold
+   * changes, so anything added here is written into a member's telemetry hundreds of times a
+   * session. That is the reason to hold the line at three even when a fourth looks free.
+   *
+   * ★ `Vessel` — THE ONE THAT KEEPS THE ANSWER CORRECT ★
+   *
+   * It says whether this hold belongs to the SHIP, the SRV, or the member's fleet carrier. Carrier
+   * holds are already modelled and already surfaced, built from `CargoTransfer`, and the game writes
+   * `Cargo` for the carrier too. Without `Vessel` the two are indistinguishable and the same eight
+   * hundred tonnes is counted twice — once as a carrier hold and once as a ship hold — so "WHAT IT
+   * STILL NEEDS" reports a project nearer done than it is and members stop buying materials nobody
+   * ever bought.
+   *
+   * That failure is worse than having no data at all. A hold that is missing is visibly missing; a
+   * hold that is doubled looks exactly like a correct one.
+   *
+   * ★ `Count` — HOW AN UNKNOWN HOLD IS TOLD FROM AN EMPTY ONE ★
+   *
+   * The obvious objection is that the inventory already sums to it. It does, when the inventory is
+   * there. Frontier does not always write it: on a change mid-session the journal can carry the
+   * header alone and put the contents in Cargo.json, which arrives separately or not at all.
+   *
+   * Without `Count`, those records are indistinguishable from an empty hold — and since this event
+   * REPLACES rather than accumulates, which is the whole reason it was chosen, treating one as empty
+   * would wipe a member's declared holdings and put the steel they are standing on back onto the
+   * shopping list. With it, a consumer can see thirty-two tonnes it has no breakdown for and leave
+   * the last good snapshot alone.
+   *
+   * ★ `Inventory` — THE ARRAY, KEPT, LIKE `ResourcesRequired` AND UNLIKE `Market.Items` ★
+   *
+   * The test for keeping an array here has been consistent: is it a HOLD or is it a MARKET. This is
+   * a hold — a few dozen entries at the absolute most, bounded by the cargo racks somebody fitted,
+   * against the hundred-odd rows of `Market.Items` that are public data filed under a person.
+   *
+   * Its entries carry `Name`, `Name_Localised`, `Count` and `Stolen`. `Name` is what the shopping
+   * list matches on and `Name_Localised` is what a member reads; they are different strings, and
+   * matching "Steel" against a table keyed on "steel" fails quietly and shows an empty hold.
+   *
+   * `Stolen` earns its place by preventing the owner's complaint in reverse. Hot cargo cannot be
+   * handed to a construction site, so counting it as stock held toward a project means nobody buys
+   * the steel because the board says somebody already has it — and that somebody can never hand it
+   * over. It is a disclosure, plainly: it says a member is carrying stolen goods. It is the same
+   * disclosure `trade` already makes with `MarketSell`, on the same switch, and a member who does
+   * not want their hauling seen switches trade off and sends none of it.
+   *
+   * Nothing strips the fields INSIDE this array beyond `stripMoney`, which finds no prices here.
+   * That is the accepted cost of keeping an array at all, and the reason the array kept is a hold.
+   */
+  Cargo: ['Vessel', 'Count', 'Inventory'],
   /*
    * ★ DELIBERATELY NOT `Items` ★
    *
