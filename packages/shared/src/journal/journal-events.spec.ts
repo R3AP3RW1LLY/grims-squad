@@ -127,6 +127,34 @@ describe('the event allowlist', () => {
       'AsteroidCracked',
       'Bounty',
       /*
+       * ★ ADDED 2026-08-12, FOR "WHAT IT STILL NEEDS" — SQUADRON OWNER ★
+       *
+       * "we need the ability to track when someone has bought something in a project they are
+       * currently on ... Right now we can see cargo holds for fleet carriers - we need the same for
+       * individual ships when they buy it so people are not buying the same materials."
+       *
+       * `MarketBuy` alone cannot answer that. A purchase is a thing that HAPPENED; a hold is a thing
+       * that IS, and the two diverge the moment somebody sells the steel back, jettisons it, dies
+       * with it, or transfers it to a carrier. Summing purchases would have the shopping list
+       * confidently telling members not to buy steel that burned up two hours ago.
+       *
+       * ★ UNDER `trade`, WHICH IS WHERE MarketBuy ALREADY LIVES ★
+       *
+       * Not `colonisation`, and the reason matters: this is a snapshot of the member's ENTIRE hold,
+       * whatever is in it and whatever it was bought for, and `colonisation` is collected ON BY
+       * DEFAULT. Filing a continuous general inventory feed under a switch labelled "construction
+       * sites" would make that switch mean something other than what it says — and would do it on
+       * the one category a member has not had to agree to.
+       *
+       * Not `carrier` either. `CargoTransfer` is there because it is about the member's own CARRIER;
+       * this event's whole job is to be about their SHIP.
+       *
+       * `trade` adds no new consent surface for the members this feature serves: the purchases it
+       * corrects are `MarketBuy`, which is already `trade`, so anybody who has switched trade off is
+       * already contributing nothing to the shopping list and will carry on contributing nothing.
+       */
+      'Cargo',
+      /*
        * Added 2026-08-04 for the colonisation carrier holds. Under `carrier` with the other
        * own-carrier events: cargo moved between a member's ship and their own carrier is the only
        * record that staged build cargo exists — the public mirror sees only sell orders. The
@@ -453,5 +481,215 @@ describe('mining is its own category, and its own decision', () => {
     });
 
     expect(kept['Type_Localised'] ?? kept['Type']).toBeDefined();
+  });
+});
+
+describe('the ship hold, so two people do not buy the same steel', () => {
+  /*
+   * ★ SQUADRON OWNER, 2026-08-12 ★
+   *
+   * "we need the ability to track when someone has bought something in a project they are currently
+   * on and display it in the WHAT IT STILL NEEDS section and on the Where to buy it tab. Right now
+   * we can see cargo holds for fleet carriers - we need the same for individual ships when they buy
+   * it so people are not buying the same materials."
+   *
+   * ★ WHY A PURCHASE LOG IS NOT A HOLD ★
+   *
+   * `MarketBuy` has been flowing for weeks — 1,284 events from 10 commanders — and it is the wrong
+   * shape for this on its own. It records that somebody bought thirty-two tonnes of steel at some
+   * point, and nothing at all about the four separate ways that steel stops existing: sold back,
+   * jettisoned under interdiction, transferred to a carrier, or lost with the ship.
+   *
+   * The `Cargo` event is a FULL SNAPSHOT of the hold. It does not need to be reconciled against
+   * anything, because it replaces rather than accumulates — which means it self-corrects on the next
+   * one, and every one of those four cases fixes itself with no code that has to think about them.
+   *
+   * That is the entire reason it is being collected, and these tests exist so that the three fields
+   * it brings with it stay three.
+   */
+  it('MANDATORY: the event is collectable at all', () => {
+    /*
+     * The `SuitLoadout` lesson, which cost weeks: an event missing from `JOURNAL_EVENTS` is
+     * discarded by the ingest with no error and no row. The feature would ship, look finished, and
+     * show an empty hold for everybody, for ever.
+     */
+    expect(
+      isAllowedEvent('Cargo'),
+      'Cargo is not on the allowlist, so the companion never sends it and the ingest drops it silently',
+    ).toBe(true);
+  });
+
+  it('MANDATORY: it is `trade`, with MarketBuy — not colonisation, not carrier', () => {
+    /*
+     * ★ THE CATEGORY IS THE CONSENT SWITCH, SO PICKING ONE IS A PRIVACY DECISION ★
+     *
+     * `colonisation` is the tempting one, because colonisation is what asked for this. It would be
+     * wrong twice over. This event is the member's WHOLE hold — everything in it, whatever it was
+     * bought for and whoever it was bought from — and `colonisation` is on by default, so a general
+     * inventory feed would arrive on the one switch nobody had to agree to, under a label that says
+     * "construction sites".
+     *
+     * `carrier` is where `CargoTransfer` sits, and the note there says why: "the same disclosure:
+     * what the member's own carrier is doing". This event exists to describe their SHIP. Filing it
+     * under the carrier switch would mean a member who owns no carrier — and has no reason to leave
+     * that switch on — silently contributes nothing to the shopping list.
+     *
+     * `trade` is where it belongs and where it costs nothing: the purchases this corrects are
+     * `MarketBuy`, already `trade`. A member who has declined trade telemetry is already sending no
+     * purchases and appearing in no hold. The switch keeps meaning exactly what it said.
+     */
+    expect(telemetryCategoryFor('Cargo')).toBe('trade');
+    expect(telemetryCategoryFor('MarketBuy')).toBe('trade');
+  });
+
+  it('MANDATORY: keeps exactly three fields, and no more', () => {
+    /*
+     * ★ PINNED, BECAUSE WIDENING THIS IS THE EASY MISTAKE ★
+     *
+     * A snapshot event is the kind that grows: it is already an inventory, so one more field always
+     * looks free. It is not — this fires continuously while somebody plays, so anything added here
+     * is written into a member's telemetry hundreds of times a session.
+     *
+     * Three, and each one earns it:
+     *   Vessel    — tells a SHIP hold from a carrier hold. Without it the feature double-counts.
+     *   Count     — the hold total, which is how a snapshot with no inventory is told from an empty
+     *               hold.
+     *   Inventory — the commodities. It is the feature.
+     */
+    expect(EVENT_FIELDS['Cargo']).toEqual(['Vessel', 'Count', 'Inventory']);
+  });
+
+  it('MANDATORY: keeps Vessel, or a carrier hold is counted twice', () => {
+    /*
+     * ★ THE FAILURE THIS PREVENTS IS A WRONG ANSWER, NOT A MISSING ONE ★
+     *
+     * Carrier holds already exist and are already surfaced, built from `CargoTransfer`. The game
+     * writes `Cargo` for the carrier as well as the ship. Drop `Vessel` and the two become
+     * indistinguishable: the same eight hundred tonnes of steel is counted once as a carrier hold
+     * and once as a ship hold, and "WHAT IT STILL NEEDS" reports the project as further along than
+     * it is. Members stop buying steel that was never bought.
+     *
+     * A missing hold is visibly missing. A doubled one looks exactly like a correct one.
+     */
+    const kept = pickAllowedFields('Cargo', {
+      Vessel: 'Ship',
+      Count: 32,
+      Inventory: [{ Name: 'steel', Count: 32, Stolen: 0 }],
+    });
+
+    expect(kept['Vessel'], 'a ship hold can no longer be told from a carrier hold').toBe('Ship');
+  });
+
+  it('MANDATORY: an unlisted field is stripped, whatever the client sends', () => {
+    /*
+     * The allowlist runs twice — on the member's machine before transmission, and again on the
+     * server on receipt. The second pass is not because the app is untrusted in a way that fixes
+     * anything (a modified client can send whatever it likes) but so a future version of the app
+     * with a bug cannot widen what we store.
+     *
+     * `MissionID` is real: it appears on mission cargo. It answers nothing about a construction
+     * site. `Credits` is the one that would hurt — it is a named earnings field, so if it ever
+     * reached the money exception it would be kept intact. It never does, because the field
+     * allowlist is applied FIRST and this event does not name it.
+     */
+    const kept = pickAllowedFields('Cargo', {
+      Vessel: 'Ship',
+      Count: 32,
+      Inventory: [{ Name: 'steel', Count: 32, Stolen: 0 }],
+      MissionID: 918_273_645,
+      Credits: 1_204_998_221,
+    });
+
+    expect(Object.keys(kept).sort()).toEqual(['Count', 'Inventory', 'Vessel']);
+    expect(kept['MissionID'], 'an unnamed field survived the allowlist').toBeUndefined();
+    expect(
+      kept['Credits'],
+      'the balance survived on an event that never named it — the money exception ran before the allowlist',
+    ).toBeUndefined();
+  });
+
+  it('MANDATORY: the real event survives a round trip intact', () => {
+    /*
+     * The shape the game actually writes, copied from a live journal. Everything the feature reads
+     * is in here and it all has to come out the far side unchanged — `pickAllowedFields` rebuilds
+     * every nested object on its way through `stripMoney`, so "the array is on the list" is not by
+     * itself proof that what is inside the array arrives.
+     *
+     * `Name_Localised` is what a member reads. `Name` is what the shopping list matches on, and the
+     * two are not the same string — matching "Steel" against a commodity table keyed on "steel"
+     * fails silently and shows a hold with nothing in it.
+     */
+    const raw = {
+      event: 'Cargo',
+      Vessel: 'Ship',
+      Count: 32,
+      Inventory: [{ Name: 'steel', Name_Localised: 'Steel', Count: 32, Stolen: 0 }],
+    };
+
+    expect(pickAllowedFields('Cargo', raw)).toEqual({
+      Vessel: 'Ship',
+      Count: 32,
+      Inventory: [{ Name: 'steel', Name_Localised: 'Steel', Count: 32, Stolen: 0 }],
+    });
+  });
+
+  it('MANDATORY: keeps Stolen, because stolen steel can never be delivered', () => {
+    /*
+     * Hot cargo cannot be handed to a construction site. Counting it as stock held toward a project
+     * is the owner's complaint in reverse: instead of two members buying the same steel, nobody buys
+     * it, because the board says somebody already has it — and that somebody can never hand it over.
+     *
+     * It rides inside `Inventory` rather than being named separately, and it is worth saying plainly
+     * that "this member is carrying stolen goods" is a disclosure. It is one the `trade` switch
+     * already makes: `MarketSell` says what they sold and where. A member who does not want their
+     * hauling seen switches trade off and sends none of this.
+     */
+    const kept = pickAllowedFields('Cargo', {
+      Vessel: 'Ship',
+      Count: 4,
+      Inventory: [{ Name: 'gold', Name_Localised: 'Gold', Count: 4, Stolen: 4 }],
+    });
+
+    expect(kept['Inventory']).toEqual([
+      { Name: 'gold', Name_Localised: 'Gold', Count: 4, Stolen: 4 },
+    ]);
+  });
+
+  it('MANDATORY: a snapshot with no inventory is not an empty hold', () => {
+    /*
+     * ★ WHY `Count` IS ON THE LIST AT ALL, WHEN THE INVENTORY ALREADY SUMS ★
+     *
+     * Frontier does not always write the inventory. On a change mid-session the journal can carry
+     * the header alone and put the contents in Cargo.json, which arrives separately or not at all.
+     *
+     * Without `Count` those records are indistinguishable from a genuinely empty hold, and a
+     * snapshot that REPLACES — which is the whole reason this event was chosen — would wipe a
+     * member's declared holdings and put the steel they are standing on back onto the shopping list.
+     * With it, a consumer can see thirty-two tonnes it has no breakdown for and leave the last good
+     * snapshot alone.
+     *
+     * Note the absent key rather than an explicit undefined: `pickAllowedFields` omits what was not
+     * there, so "we have no inventory" is distinguishable from "the inventory is empty".
+     */
+    const kept = pickAllowedFields('Cargo', { Vessel: 'Ship', Count: 32 });
+
+    expect(Object.keys(kept)).toEqual(['Vessel', 'Count']);
+    expect(kept['Count']).toBe(32);
+    expect(kept).not.toHaveProperty('Inventory');
+  });
+
+  it('an SRV hold is still reported as what it is', () => {
+    /*
+     * `Vessel` is not a two-value flag. The game writes `SRV` for the buggy's own small hold, and a
+     * consumer that treats anything-not-Ship as a carrier would file two tonnes of scavenged alloy
+     * as staged build cargo. Kept verbatim so the reading is made where it can be reasoned about.
+     */
+    const kept = pickAllowedFields('Cargo', {
+      Vessel: 'SRV',
+      Count: 2,
+      Inventory: [{ Name: 'usscargoblackbox', Name_Localised: 'Black Box', Count: 2, Stolen: 0 }],
+    });
+
+    expect(kept['Vessel']).toBe('SRV');
   });
 });
