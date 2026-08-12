@@ -1,4 +1,5 @@
 import type { PrismaClient } from '@prisma/client';
+import { commodityKey } from '@grims/shared';
 
 /**
  * The build catalogue: what a construction site of a given kind costs.
@@ -259,7 +260,16 @@ export function matchBuildType(
      * commodity, and a fuzzy match would confidently mislabel a build — which then pre-fills the
      * wrong shopping list and costs somebody a wasted trip.
      */
-    const same = type.costs.every((c) => required.get(c.commodity) === c.tonnes);
+    /*
+     * Compared through `commodityKey`, because the journal and the catalogue spell one commodity
+     * two ways — "H.E. Suits" against "Hazardous Environment Suits". Nineteen of twenty lines
+     * matched to the tonne and the twentieth failed on its name, so three real builds sat
+     * unidentified and unlinkable, silently, for a fortnight.
+     *
+     * The exactness is unchanged: still every line, still to the tonne. Only the name comparison
+     * stopped being naive.
+     */
+    const same = type.costs.every((c) => required.get(commodityKey(c.commodity)) === c.tonnes);
     if (same) return type;
   }
 
@@ -297,7 +307,8 @@ export async function identifyBuildTypes(db: PrismaClient): Promise<{
   const wanted = new Map<string, Map<string, number>>();
   for (const row of projects) {
     const forProject = wanted.get(row.id) ?? new Map<string, number>();
-    forProject.set(row.commodity, row.required);
+    // Keyed the same way the comparison looks it up — see commodityKey and matchBuildType.
+    forProject.set(commodityKey(row.commodity), row.required);
     wanted.set(row.id, forProject);
   }
 
