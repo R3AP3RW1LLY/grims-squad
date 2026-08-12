@@ -513,6 +513,14 @@ export interface PlanSiteMarket {
   market: PredictedSiteMarket;
 }
 
+/*
+ * ★ SUBPATH, NOT THE BARREL ★
+ *
+ * `@grims/shared` resolves to a barrel that reaches `node:crypto`, which cannot be bundled into the
+ * renderer. The economy view is exported on its own path for exactly this.
+ */
+import type { SystemTrade, SelfSufficiency } from '@grims/shared/colony-economy-view';
+
 export interface ColonyPlan {
   id: string;
   owner: 'squadron' | 'personal';
@@ -540,6 +548,42 @@ export interface ColonyPlan {
   economies: PlanEconomies;
   /** Per chosen site, what its market would trade. Empty on the board — bodies are not loaded there. */
   markets: PlanSiteMarket[];
+  /**
+   * What the WHOLE system would trade, rolled up from the per-site markets above.
+   *
+   * ★ THE HUB HAS ALWAYS SENT THESE — SQUADRON OWNER, 2026-08-11 ★
+   *
+   * "ensure the Companion app matches and has all the same pages in colonization that the website
+   * has please! must be a mirror!"
+   *
+   * The device route is the website's route with the door changed: same `ColonyPlanService`, same
+   * `byId`, same payload. These three fields were in it from the day the economy tab shipped and
+   * this interface simply never named them, so the app quietly dropped them on the floor and the
+   * tab rendered two of its five sections.
+   *
+   * Optional because an app is not redeployed the instant the hub is — a companion built before
+   * this must keep working against a newer hub, and a newer app must survive an older one.
+   */
+  trade?: SystemTrade;
+  /** How much of its own outstanding bill the system would cover. Tonnage, not commodity count. */
+  selfSufficiency?: SelfSufficiency;
+  /** What the GALAXY pays for the traded commodities — never a claim about these stations. */
+  prices?: CommodityPrice[];
+}
+
+/**
+ * What the galaxy currently pays for one commodity, across the markets we hold.
+ *
+ * Deliberately not a prediction about the member's own station: what a station pays moves with its
+ * supply, demand and economy strength, none of which the simulation models. Showing the galaxy's
+ * figure is honest and useful; inventing this station's would be a guess wearing a figure's
+ * clothes, and a wrong price sends somebody on a worthless run.
+ */
+export interface CommodityPrice {
+  readonly commodity: string;
+  readonly avgSell: number | null;
+  readonly avgBuy: number | null;
+  readonly sellMarkets: number;
 }
 
 /** A proposed build order, the tonnage it saves, and whether it is worth reading. */

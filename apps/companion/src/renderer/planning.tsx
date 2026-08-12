@@ -1,9 +1,11 @@
+import type { SystemTradeLine } from '@grims/shared/colony-economy-view';
 import { useEffect, useState } from 'preact/hooks';
 import { compareBodyNames } from '@grims/shared/body-order';
 import type { JSX } from 'preact';
 import type {
   BuildTypeRow,
   ColonyPlan,
+  CommodityPrice,
   PlanBody,
   PlanProblem,
   PlanSimStep,
@@ -1936,7 +1938,322 @@ function EconomyAndMarkets({ plan }: { plan: ColonyPlan }): JSX.Element {
   return (
     <div>
       <Economy plan={plan} />
+
+      {/*
+        ★ THE QUESTION UNDERNEATH THE WHOLE PLANNER — SQUADRON OWNER, 2026-08-11 ★
+
+        A system that sells the Steel its own construction sites need stops being a place you haul
+        TO and becomes a place you haul FROM. These three sections shipped on the website while this
+        tab rendered two of its five — the hub had been sending the data all along.
+      */}
+      <SelfSufficiency plan={plan} />
+      <Trade plan={plan} />
+      <PerStation plan={plan} />
       <Effects plan={plan} />
+    </div>
+  );
+}
+
+/** Tonnes, in the form a member reads at a glance. */
+const tonnes = (n: number): string => `${n.toLocaleString()} t`;
+
+const LABEL: JSX.CSSProperties = {
+  ...MONO,
+  margin: 0,
+  fontSize: '10px',
+  letterSpacing: '0.2em',
+  textTransform: 'uppercase',
+  color: C.dim,
+};
+
+const CARD: JSX.CSSProperties = {
+  border: `1px solid ${C.subtle}`,
+  borderRadius: '4px',
+  padding: '10px 14px',
+};
+
+/**
+ * How much of its own bill this system would cover.
+ *
+ * ★ ANSWERED IN TONNAGE, NOT IN COMMODITY COUNT ★
+ *
+ * "4 of 17 materials" sounds meagre. "132,500 t of 142,500 t outstanding" is the same fact and the
+ * opposite conclusion — a plan that pays for itself. The count alone hides which four.
+ */
+function SelfSufficiency({ plan }: { plan: ColonyPlan }): JSX.Element | null {
+  const ss = plan.selfSufficiency;
+  if (ss === undefined || ss.outstandingTonnes === 0) return null;
+
+  const covered = ss.covered.length;
+  const total = covered + ss.notCovered.length;
+
+  return (
+    <div
+      style={{
+        marginTop: '18px',
+        border: `1px solid ${C.cyan}`,
+        background: C.cyanTint,
+        borderRadius: '4px',
+        padding: '10px 14px',
+      }}
+    >
+      <p style={LABEL}>What you would stop importing</p>
+
+      <p style={{ margin: '8px 0 0', fontSize: '13px', color: C.text }}>
+        {covered === 0 ? (
+          <>
+            Nothing this system produces is on your builds&rsquo; shopping list. All{' '}
+            <span style={MONO}>{tonnes(ss.outstandingTonnes)}</span> outstanding would still have to
+            be hauled in.
+          </>
+        ) : (
+          <>
+            This system would produce{' '}
+            <span style={{ color: C.cyan }}>
+              {covered} of the {total}
+            </span>{' '}
+            materials your builds still need —{' '}
+            <span style={{ ...MONO, color: C.cyan }}>{tonnes(ss.coveredTonnes)}</span> of{' '}
+            {tonnes(ss.outstandingTonnes)} outstanding
+            {ss.pctCovered === null ? '' : ` (${ss.pctCovered}%)`}.
+          </>
+        )}
+      </p>
+
+      {covered === 0 ? null : (
+        <ul style={{ margin: '10px 0 0', padding: 0, listStyle: 'none' }}>
+          {ss.covered.slice(0, 6).map((c) => (
+            <li
+              key={c.commodity}
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                gap: '16px',
+                fontSize: '11px',
+                color: C.dim,
+                marginTop: '2px',
+              }}
+            >
+              <span style={{ color: C.text }}>{c.commodity}</span>
+              <span style={MONO}>{tonnes(c.remaining)} still needed</span>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {ss.notCovered.length === 0 ? null : (
+        <p style={{ margin: '10px 0 0', fontSize: '11px', color: C.faint }}>
+          {/* The half that decides the evening. Reading only what is covered, somebody finds out
+              the hard way that the rest comes in by hand for the whole build. */}
+          Still imported: {ss.notCovered.slice(0, 8).map((c) => c.commodity).join(' · ')}
+          {ss.notCovered.length > 8 ? ` and ${ss.notCovered.length - 8} more` : ''}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** One side of the system's trade, with what the galaxy pays for each line. */
+function TradeList({
+  lines,
+  prices,
+  side,
+}: {
+  lines: readonly SystemTradeLine[];
+  prices: readonly CommodityPrice[];
+  side: 'sells' | 'buys';
+}): JSX.Element {
+  if (lines.length === 0) {
+    return (
+      <p style={{ margin: 0, fontSize: '11px', color: C.faint }}>
+        Nothing — no planned station has a market of its own. Only starports and outposts trade; an
+        installation feeds the port on its body rather than having a board.
+      </p>
+    );
+  }
+
+  return (
+    <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+      {lines.map((l) => {
+        const p = prices.find((x) => x.commodity === l.commodity);
+        const cr = side === 'sells' ? p?.avgSell : p?.avgBuy;
+
+        return (
+          <li
+            key={l.commodity}
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              alignItems: 'baseline',
+              justifyContent: 'space-between',
+              gap: '16px',
+              fontSize: '11px',
+              color: C.dim,
+              marginTop: '6px',
+            }}
+          >
+            <span>
+              <span
+                style={
+                  l.strength === 'major' ? { color: C.text, fontWeight: 600 } : { color: C.dim }
+                }
+              >
+                {l.commodity}
+              </span>
+              <span
+                style={{
+                  ...MONO,
+                  marginLeft: '8px',
+                  fontSize: '9px',
+                  letterSpacing: '0.14em',
+                  textTransform: 'uppercase',
+                  color: C.faint,
+                }}
+                title={`Put on the board by this system's ${l.economies.join(' and ')} economy.`}
+              >
+                {l.strength} · {l.economies.join('+')}
+              </span>
+              {l.siteIds.length > 1 ? (
+                <span style={{ ...MONO, marginLeft: '8px', fontSize: '9px', color: C.faint }}>
+                  {l.siteIds.length} stations
+                </span>
+              ) : null}
+            </span>
+
+            {/* Galaxy figures, never a claim about this station. See the note below the lists. */}
+            {cr === null || cr === undefined ? (
+              <span style={{ ...MONO, fontSize: '10px', color: C.faint }}>no price data</span>
+            ) : (
+              <span style={MONO}>
+                {cr.toLocaleString()} cr
+                {p !== undefined && p.sellMarkets > 0 ? (
+                  <span style={{ marginLeft: '8px', fontSize: '10px', color: C.faint }}>
+                    {p.sellMarkets.toLocaleString()} markets
+                  </span>
+                ) : null}
+              </span>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+/**
+ * What the system will sell and buy.
+ *
+ * ★ THE PRICES ARE THE GALAXY'S, AND THE PAGE SAYS SO ★
+ *
+ * The squadron owner's own choice when asked. We do not model Elite's pricing — it moves with
+ * supply, demand and economy strength, none of which this simulates — so showing what the galaxy
+ * actually pays is honest and useful, while inventing what YOUR station will charge would be a
+ * guess wearing a figure's clothes. A wrong price sends somebody on a worthless run.
+ */
+function Trade({ plan }: { plan: ColonyPlan }): JSX.Element | null {
+  const trade = plan.trade;
+  if (trade === undefined) return null;
+  if (trade.sells.length === 0 && trade.buys.length === 0) return null;
+
+  const prices = plan.prices ?? [];
+
+  return (
+    <div style={{ marginTop: '18px', display: 'grid', gap: '12px' }}>
+      <div style={CARD}>
+        <p style={{ ...LABEL, marginBottom: '8px' }}>What this system will sell</p>
+        <TradeList lines={trade.sells} prices={prices} side="sells" />
+      </div>
+
+      <div style={CARD}>
+        <p style={{ ...LABEL, marginBottom: '8px' }}>What it will buy</p>
+        <TradeList lines={trade.buys} prices={prices} side="buys" />
+      </div>
+
+      <div>
+        {trade.internal.length === 0 ? null : (
+          <p style={{ margin: '0 0 8px', fontSize: '11px', color: C.dim }}>
+            {/* Not a contradiction, and the most useful line here: one station exports what another
+                imports, which is a system feeding itself. */}
+            <span style={{ color: C.text }}>Traded within the system:</span>{' '}
+            {trade.internal.join(' · ')} — one station sells what another buys, so these need never
+            leave the system.
+          </p>
+        )}
+        <p style={{ margin: 0, fontSize: '11px', color: C.faint }}>
+          Prices are what the galaxy pays today, from the markets we hold — not a prediction of what
+          your own stations will charge. What a station actually pays moves with its supply, demand
+          and economy strength, which nothing here models.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * What each planned station trades, side by side.
+ *
+ * These lines existed only as chips under individual sites in the system tree, where comparing two
+ * ports meant scrolling between them.
+ */
+function PerStation({ plan }: { plan: ColonyPlan }): JSX.Element | null {
+  const trading = plan.markets.filter(
+    (m) => m.market.exports.length > 0 || m.market.imports.length > 0,
+  );
+  if (trading.length === 0) return null;
+
+  const nameOf = (siteId: string): string => {
+    const site = plan.sites.find((s) => s.id === siteId);
+    if (site === undefined) return 'a planned site';
+    const body = plan.bodies.find((b) => b.bodyId === site.bodyId);
+    const where = body === undefined ? '' : ` · ${body.name.replace(plan.systemName, '').trim()}`;
+    return `${site.buildTypeName ?? 'nothing chosen'}${where}`;
+  };
+
+  return (
+    <div style={{ marginTop: '18px' }}>
+      <p style={{ ...LABEL, marginBottom: '8px' }}>Station by station</p>
+      <div style={{ display: 'grid', gap: '10px' }}>
+        {trading.map((m) => (
+          <div key={m.siteId} style={CARD}>
+            <p style={{ margin: 0, fontSize: '13px', color: C.text }}>{nameOf(m.siteId)}</p>
+            {m.market.exports.length === 0 ? null : (
+              <p style={{ margin: '4px 0 0', fontSize: '11px', color: C.dim }}>
+                <span
+                  style={{
+                    ...MONO,
+                    fontSize: '9px',
+                    letterSpacing: '0.16em',
+                    textTransform: 'uppercase',
+                    color: C.faint,
+                  }}
+                >
+                  sells{' '}
+                </span>
+                {m.market.exports.map((e) => e.commodity).join(' · ')}
+              </p>
+            )}
+            {m.market.imports.length === 0 ? null : (
+              <p style={{ margin: '4px 0 0', fontSize: '11px', color: C.dim }}>
+                <span
+                  style={{
+                    ...MONO,
+                    fontSize: '9px',
+                    letterSpacing: '0.16em',
+                    textTransform: 'uppercase',
+                    color: C.faint,
+                  }}
+                >
+                  buys{' '}
+                </span>
+                {m.market.imports.map((e) => e.commodity).join(' · ')}
+              </p>
+            )}
+            {m.market.note === '' ? null : (
+              <p style={{ margin: '8px 0 0', fontSize: '10px', color: C.faint }}>{m.market.note}</p>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
