@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { matchBuildType, type BuildTypeSeed } from './colony-catalogue.js';
+import { matchBuildType, type BuildTypeSeed, sameBill } from './colony-catalogue.js';
 
 /**
  * Identifying a construction site from what it asks for.
@@ -134,5 +134,46 @@ describe('identifying a build from what it wants', () => {
 
   it('says nothing about a site nobody has docked at', () => {
     expect(matchBuildType(new Map(), CATALOGUE)).toBeNull();
+  });
+});
+
+describe('one bill, two spellings', () => {
+  /**
+   * ★ THE COMPARISON THAT LIVED IN TWO PLACES — 2026-08-12 ★
+   *
+   * `matchBuildType` and `identifyBuildTypes` each carried their own copy. Adding `commodityKey` to
+   * one side of one of them left the other comparing a lowercased key against a raw name, so every
+   * commodity mismatched and NOTHING could identify. Ninety-seven tests here passed, because they
+   * covered the exported function and not the inline copy, and it failed on the first real database.
+   *
+   * `sameBill` is now the single definition and owns both the keying and the equality. These are the
+   * tests that would have caught it.
+   */
+  const bill = (o: Record<string, number>): Map<string, number> => new Map(Object.entries(o));
+
+  it('★ MANDATORY: the journal spelling equals the catalogue spelling ★', () => {
+    // The exact pair that hid two finished Refinery Hubs: the game says one, our catalogue the other.
+    const required = bill({ Steel: 3720, 'H.E. Suits': 117 });
+    const costs = bill({ Steel: 3720, 'Hazardous Environment Suits': 117 });
+
+    expect(sameBill(required, costs)).toBe(true);
+  });
+
+  it('★ MANDATORY: it does not require the caller to have keyed anything ★', () => {
+    /*
+     * The regression itself. A caller passing plain, differently-cased names must still match —
+     * pre-keying was a hidden precondition, and a comparison with a hidden precondition is a trap.
+     */
+    expect(sameBill(bill({ steel: 3720 }), bill({ Steel: 3720 }))).toBe(true);
+  });
+
+  it('★ MANDATORY: one tonne out is not the same bill ★', () => {
+    // The exactness this rests on: two settlement types can differ by a single commodity.
+    expect(sameBill(bill({ Steel: 3720 }), bill({ Steel: 3719 }))).toBe(false);
+  });
+
+  it('MANDATORY: a missing or extra line is not the same bill', () => {
+    expect(sameBill(bill({ Steel: 3720 }), bill({ Steel: 3720, Polymers: 744 }))).toBe(false);
+    expect(sameBill(bill({ Steel: 3720, Polymers: 744 }), bill({ Steel: 3720 }))).toBe(false);
   });
 });
