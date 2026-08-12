@@ -93,6 +93,11 @@ export function matchProjectToSite(
     return { kind: 'ambiguous', siteIds: candidates.map((s) => s.id) };
   }
 
-  // Non-null: length is exactly 1.
-  return { kind: 'linked', siteId: candidates[0]!.id };
+  const only = candidates[0];
+  if (only === undefined) {
+    // Unreachable: length is exactly 1 here. Written as a check rather than an assertion because
+    // the compiler cannot see that, and a wrong link is the failure this whole file exists to avoid.
+    return { kind: 'none', why: 'No planned site fitted.' };
+  }
+  return { kind: 'linked', siteId: only.id };
 }
