@@ -118,6 +118,10 @@
     "./colony-plan-link": {
       "types": "./dist/colony-plan-link.d.ts",
       "default": "./dist/colony-plan-link.js"
+    },
+    "./commander-colour": {
+      "types": "./dist/commander-colour.d.ts",
+      "default": "./dist/commander-colour.js"
     }
   },
   "scripts": {
