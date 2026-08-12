@@ -1,4 +1,5 @@
 import { groupByCategory } from '@grims/shared/commodity-category';
+import { needsFreshness, type FreshnessVerdict } from '@grims/shared/needs-freshness';
 import type { ColonyNeed } from '../../../../lib/api';
 
 /**
@@ -14,30 +15,33 @@ const TH =
 const TD = 'border-t border-[var(--color-border-hairline)] py-2.5 pr-4 align-middle';
 
 /**
- * How long ago the game told us this, in words.
+ * How old this reading is, and whether somebody about to spend credits should stop and check.
  *
  * ★ A NEEDS LIST IS A SNAPSHOT, NOT A FEED ★
  *
  * It is only as current as the last time somebody docked at the site. Ten minutes old and it is
- * worth planning an evening around; a fortnight old and half of it may already be delivered. Those
- * two look identical without this line, which is why `observedAt` being stored and never shown was
- * worse than not storing it.
+ * worth planning an evening around; a fortnight old and half of it may already be delivered — or
+ * the whole build may be finished. Those look identical without this line, which is why
+ * `observedAt` being stored and never shown was worse than not storing it.
+ *
+ * ★ NOW THE SHARED MODEL, NOT A SECOND OPINION — SQUADRON OWNER, 2026-08-12 ★
+ *
+ * "someone without the companion app completed a project and it did not update ... this causes our
+ * members to go buy materials for a project thats completed and not needed."
+ *
+ * This used to compute its own answer here, in words that stopped at "N days ago" and never said
+ * the thing a member needed to hear. It now asks `needsFreshness`, which the companion asks too, so
+ * the two apps cannot tell somebody different things about the same figure — the same reason the
+ * build catalogue collapsed its duplicate comparison earlier today.
  */
-function freshness(needs: readonly ColonyNeed[]): string | null {
+function freshness(needs: readonly ColonyNeed[]): FreshnessVerdict {
   const stamps = needs
     .map((n) => (n.observedAt === null ? null : Date.parse(n.observedAt)))
     .filter((t): t is number => t !== null && Number.isFinite(t));
 
-  if (stamps.length === 0) return null;
-
-  const minutes = Math.floor((Date.now() - Math.max(...stamps)) / 60_000);
-  if (minutes < 2) return 'Read from the site moments ago.';
-  if (minutes < 90) return `Read from the site ${minutes} minutes ago.`;
-
-  const hours = Math.round(minutes / 60);
-  if (hours < 48) return `Read from the site ${hours} hours ago.`;
-
-  return `Read from the site ${Math.round(hours / 24)} days ago — somebody docking there refreshes it.`;
+  // The NEWEST reading, because one commodity refreshed today makes the whole list that current.
+  const newest = stamps.length === 0 ? null : new Date(Math.max(...stamps));
+  return needsFreshness(newest, new Date());
 }
 
 /**
@@ -306,12 +310,30 @@ function NeedRows({
 
       <BarLegend />
 
-      {/* Design principle: every number carries its provenance. This one is the provenance. */}
-      {freshness(rows) === null ? null : (
-        <p className="m-0 mt-3 font-mono text-[11px] text-[var(--color-text-secondary)]">
-          {freshness(rows)}
-        </p>
-      )}
+      {/*
+        Design principle: every number carries its provenance. This one is the provenance — and
+        when the provenance is a fortnight old it stops being a footnote and becomes the most
+        important thing on the page, because the build may be finished and the table above is then
+        a shopping list for nothing.
+      */}
+      {(() => {
+        const f = freshness(rows);
+        if (!f.warn) {
+          return (
+            <p className="m-0 mt-3 font-mono text-[11px] text-[var(--color-text-secondary)]">
+              {f.sentence}
+            </p>
+          );
+        }
+        return (
+          <p
+            className="m-0 mt-3 rounded border border-[var(--color-semantic-warning)] bg-[color-mix(in_srgb,var(--color-semantic-warning)_8%,transparent)] px-3 py-2 text-[12px] text-[var(--color-semantic-warning)]"
+            role="status"
+          >
+            {f.sentence}
+          </p>
+        );
+      })()}
     </div>
   );
 }
