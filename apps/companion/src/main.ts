@@ -25,6 +25,7 @@ import {
   attachCarrier,
   colonyBuildTypes,
   colonyClose,
+  colonyReportBuilt,
   DEFAULT_SHOPPING,
   colonyPriority,
   colonyRemove,
@@ -2168,6 +2169,9 @@ if (!app.requestSingleInstanceLock()) {
      * member may — the app only asks.
      */
     ipcMain.handle('colonyClose', (_e, id: unknown) => colonyClose(hub(), projectId(id)));
+    ipcMain.handle('colonyReportBuilt', (_e, id: unknown) =>
+      colonyReportBuilt(hub(), projectId(id)),
+    );
     ipcMain.handle('colonyReopen', (_e, id: unknown) => colonyReopen(hub(), projectId(id)));
     ipcMain.handle('colonyRemove', (_e, id: unknown) => colonyRemove(hub(), projectId(id)));
     ipcMain.handle('colonyPriority', (_e, id: unknown, on: unknown) =>

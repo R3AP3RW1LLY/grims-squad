@@ -103,6 +103,33 @@ export function ProjectActions({
           </button>
         ) : null}
 
+        {/*
+          ★ ANY MEMBER, NOT JUST AN OFFICER — SQUADRON OWNER, 2026-08-12 ★
+
+          "someone without the companion app completed a project and it did not update ... this
+          causes our members to go buy materials for a project thats completed and not needed."
+
+          The person who discovers a build is finished is almost never an officer: it is whoever
+          flew out with a full hold and found nothing to deliver to. `Close this build` below is
+          gated on directing the project, so until now they had no way to tell anybody and the next
+          member repeated the trip.
+
+          It closes rather than flags because it is reversible, audited against them by name, and
+          announced at once — where flagging would leave the wasted trips running until an officer
+          noticed, which is the behaviour being fixed.
+        */}
+        {closed ? null : (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void call('/report-built', 'PATCH')}
+            className={`${BTN} border-[var(--color-semantic-warning)] text-[var(--color-semantic-warning)] hover:bg-[color-mix(in_srgb,var(--color-semantic-warning)_10%,transparent)]`}
+            title="Tell the squadron this build is already finished, so nobody else hauls to it."
+          >
+            It&rsquo;s already built
+          </button>
+        )}
+
         {mayDirect ? (
           <button
             type="button"

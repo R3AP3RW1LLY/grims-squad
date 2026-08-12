@@ -733,6 +733,25 @@ export class ColonyDeviceController {
     return { ok: true };
   }
 
+  /**
+   * "I flew out and it is already built." The app's door onto the same report.
+   *
+   * This one matters MORE here than on the website: the member making the discovery is in their
+   * ship, at the pad, with the app open — not at a browser. Same service, same COLONY_VIEW check,
+   * same announcement.
+   */
+  @Public()
+  @Patch('projects/:id/report-built')
+  async reportBuilt(@Req() req: FastifyRequest, @Param('id') id: string) {
+    const me = await this.#caller(
+      req,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+    await this.colony.reportBuilt(id, me.userId);
+    return { ok: true };
+  }
+
   @Public()
   @Patch('projects/:id/reopen')
   async reopen(@Req() req: FastifyRequest, @Param('id') id: string) {
