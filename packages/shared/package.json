@@ -114,6 +114,10 @@
     "./bgs": {
       "types": "./dist/bgs.d.ts",
       "default": "./dist/bgs.js"
+    },
+    "./colony-plan-link": {
+      "types": "./dist/colony-plan-link.d.ts",
+      "default": "./dist/colony-plan-link.js"
     }
   },
   "scripts": {

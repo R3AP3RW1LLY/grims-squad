@@ -957,12 +957,30 @@ function SystemTree({
                                   fontSize: '9px',
                                   letterSpacing: '0.16em',
                                   textTransform: 'uppercase',
-                                  color: pr.state === 'complete' ? C.good : C.cyan,
+                                  color:
+                                    pr.state === 'complete'
+                                      ? C.good
+                                      : pr.state === 'started'
+                                        ? C.orangeBright
+                                        : C.cyan,
                                 }}
                               >
+                                {/*
+                                  ★ STARTED IS NOT BUILDING — SQUADRON OWNER, 2026-08-11 ★
+
+                                  "we should aslo make a way to denote started, in progress and
+                                  complete etc."
+
+                                  A site posted with nothing delivered needs somebody to fly the
+                                  FIRST load; one at 38% already has a hauler. They read identically
+                                  before this, so the row most in need of a volunteer looked exactly
+                                  like the one that already had one.
+                                */}
                                 {pr.state === 'complete'
                                   ? 'built'
-                                  : `building${pct === null ? '' : ` ${pct}%`}`}
+                                  : pr.state === 'started'
+                                    ? 'started · nothing hauled'
+                                    : `building${pct === null ? '' : ` ${pct}%`}`}
                               </span>
                             );
                           })()}

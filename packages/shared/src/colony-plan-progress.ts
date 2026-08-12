@@ -26,7 +26,17 @@
  * page can say it.
  */
 
-export type SiteState = 'planned' | 'building' | 'complete';
+/**
+ * ★ FOUR STATES — SQUADRON OWNER, 2026-08-11 ★
+ *
+ * "we should aslo make a way to denote started, in progress and complete etc."
+ *
+ * `started` and `building` are genuinely different questions for whoever is reading the list.
+ * A site posted an hour ago with nothing delivered needs somebody to fly the first load; one at
+ * 12,400 of 33,000 t already has a hauler and needs them to keep going. Collapsing them showed a
+ * build that nobody had touched as though it were under way.
+ */
+export type SiteState = 'planned' | 'started' | 'building' | 'complete';
 
 /** A planned site, as this arithmetic needs to see it. */
 export interface ProgressSite {
@@ -66,6 +76,8 @@ export interface PlanProgress {
   readonly estimatedSites: number;
   readonly complete: number;
   readonly building: number;
+  /** Posted, with nothing hauled to it yet — the ones waiting on a first load. */
+  readonly started: number;
   readonly planned: number;
 }
 
@@ -91,7 +103,8 @@ export function siteProgress(site: ProgressSite): SiteProgress {
   if (required <= 0) {
     return {
       id: site.id,
-      state: completedAt === null ? 'building' : 'complete',
+      // Nothing measured and not finished: posted, and nobody has hauled to it yet.
+      state: completedAt === null ? 'started' : 'complete',
       hauled: completedAt === null ? 0 : estimate,
       remaining: completedAt === null ? estimate : 0,
       total: estimate,
@@ -104,7 +117,8 @@ export function siteProgress(site: ProgressSite): SiteProgress {
 
   return {
     id: site.id,
-    state: done ? 'complete' : 'building',
+    // `started` is measured too — the site reported its bill and nothing has arrived against it.
+    state: done ? 'complete' : hauled > 0 ? 'building' : 'started',
     hauled,
     remaining: done ? 0 : remaining,
     total: required,
@@ -131,6 +145,7 @@ export function planProgress(sites: readonly ProgressSite[]): PlanProgress {
     estimatedSites: rows.filter((r) => !r.measured).length,
     complete: rows.filter((r) => r.state === 'complete').length,
     building: rows.filter((r) => r.state === 'building').length,
+    started: rows.filter((r) => r.state === 'started').length,
     planned: rows.filter((r) => r.state === 'planned').length,
   };
 }

@@ -41,6 +41,7 @@ export { PrismaPromotionStore } from './promotion.store.prisma.js';
 export * from './colony-sync.js';
 export { PrismaColonyStore } from './colony.store.prisma.js';
 export * from './colony-catalogue.js';
+export * from './colony-plan-link.store.js';
 /*
  * Stations learned live, shared by BOTH market writers — the EDDN collector and the API's journal
  * path — so an unknown station is added the same way whichever feed sees it first.

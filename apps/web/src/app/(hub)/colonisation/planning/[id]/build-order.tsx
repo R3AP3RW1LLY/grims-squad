@@ -216,6 +216,22 @@ export function BuildOrder({ plan, canEdit }: { plan: ColonyPlan; canEdit: boole
                         ? null
                         : ` ${Math.round((progress.hauled / progress.total) * 100)}%`}
                     </a>
+                  ) : progress.state === 'started' ? (
+                    /*
+                      ★ STARTED IS NOT BUILDING — SQUADRON OWNER, 2026-08-11 ★
+
+                      "we should aslo make a way to denote started, in progress and complete etc."
+
+                      A site posted with nothing delivered needs somebody to fly the FIRST load; one
+                      at 38% already has a hauler. Before this they read identically, and the row
+                      that most needs a volunteer was indistinguishable from the one that has one.
+                    */
+                    <a
+                      href={s.projectId === null ? undefined : `/colonisation/${s.projectId}`}
+                      className="ml-2 font-mono text-[9px] uppercase tracking-[0.16em] text-[var(--color-semantic-warning)] no-underline hover:underline"
+                    >
+                      started · nothing hauled
+                    </a>
                   ) : null}
                 </span>
 
@@ -227,7 +243,7 @@ export function BuildOrder({ plan, canEdit }: { plan: ColonyPlan; canEdit: boole
                       That figure beats the catalogue's guess, and where hauling has started the
                       remaining is what somebody actually has to fly.
                     */}
-                    {progress.measured && progress.state === 'building'
+                    {progress.measured && (progress.state === 'building' || progress.state === 'started')
                       ? `${progress.remaining.toLocaleString()} t left`
                       : s.totalTonnes === null
                         ? '—'

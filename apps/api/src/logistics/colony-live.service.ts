@@ -1,5 +1,6 @@
 import {
   identifyBuildTypes,
+  linkProjectsToPlans,
   PrismaColonyStore,
   syncColonyProjects,
   type LiveNudge,
@@ -68,6 +69,25 @@ export class ColonyLiveService {
        * measurement.
        */
       await identifyBuildTypes(this.db);
+
+      /*
+       * ★ AND TELL THE PLAN THAT INTENDED IT — SQUADRON OWNER, 2026-08-11 ★
+       *
+       * "when we start one through the members or squadron projects ... it updates the build plan
+       * we have"
+       *
+       * Immediately after identification, because that is the first instant a project CAN be
+       * matched: the link is made on the catalogue row its bill of materials fingerprints to, and
+       * that row did not exist a line ago.
+       *
+       * `colony_plan_sites.project_id` has been read by the planner since it shipped. It was
+       * written only when somebody posted a planned site from the plan page — and almost nobody
+       * does, because a construction site's market id only exists while you are docked at it, which
+       * is where the app posts from. 0 of 81 sites were linked in production.
+       *
+       * Not dry: this is the live path. The same function run with `dryRun` is the backfill.
+       */
+      await linkProjectsToPlans(this.db, { dryRun: false });
     } catch {
       // Swallowed deliberately. See above: the ingest has already stored the truth.
     }

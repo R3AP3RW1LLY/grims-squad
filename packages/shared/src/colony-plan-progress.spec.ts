@@ -46,16 +46,27 @@ describe('one planned site', () => {
     expect(out.measured).toBe(true);
   });
 
-  it('★ MANDATORY: a project posted an hour ago is NOT built ★', () => {
+  it('★ MANDATORY: a project posted an hour ago is STARTED, not built and not under way ★', () => {
     /*
-     * The owner chose three states for exactly this. Counting a freshly posted project as built
-     * would overstate the number somebody steers a fortnight by.
+     * Counting a freshly posted project as built would overstate the number somebody steers a
+     * fortnight by. It is not "building" either — the owner asked for the two to be told apart on
+     * 2026-08-11, because a site nobody has hauled to needs a first load and one at 12,400 of
+     * 33,000 t already has somebody flying it.
      */
     const out = siteProgress(
       site({ project: { required: 9_919, remaining: 9_919, completedAt: null } }),
     );
-    expect(out.state).toBe('building');
+    expect(out.state).toBe('started');
     expect(out.hauled).toBe(0);
+  });
+
+  it('★ MANDATORY: one tonne delivered moves it from started to building ★', () => {
+    // The boundary between the two states, stated exactly. Anything hauled means somebody is on it.
+    const out = siteProgress(
+      site({ project: { required: 9_919, remaining: 9_918, completedAt: null } }),
+    );
+    expect(out.state).toBe('building');
+    expect(out.hauled).toBe(1);
   });
 
   it('★ MANDATORY: nothing outstanding is COMPLETE, even without a completion date ★', () => {
@@ -78,7 +89,7 @@ describe('one planned site', () => {
     const out = siteProgress(
       site({ project: { required: 0, remaining: 0, completedAt: null } }),
     );
-    expect(out.state).toBe('building');
+    expect(out.state, 'posted, and nobody has hauled to it').toBe('started');
     expect(out.total, 'the plan total must not collapse on posting').toBe(6_721);
     expect(out.remaining).toBe(6_721);
     expect(out.measured, 'a fallback to the catalogue is not measured').toBe(false);
