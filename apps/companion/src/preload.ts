@@ -283,6 +283,7 @@ contextBridge.exposeInMainWorld('colony', {
 
   /** Closing, reopening, deleting, and flagging the squadron's current effort. */
   close: (id: string) => ipcRenderer.invoke('colonyClose', id),
+  reportBuilt: (id: string) => ipcRenderer.invoke('colonyReportBuilt', id),
   reopen: (id: string) => ipcRenderer.invoke('colonyReopen', id),
   remove: (id: string) => ipcRenderer.invoke('colonyRemove', id),
   priority: (id: string, on: boolean) => ipcRenderer.invoke('colonyPriority', id, on),

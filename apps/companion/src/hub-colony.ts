@@ -1129,6 +1129,25 @@ export const setCarrierCargo = (
 export const colonyClose = (call: HubCall, id: string): Promise<Answer<{ ok: true }>> =>
   hubColony(call, `/projects/${encodeURIComponent(id)}/close`, { method: 'PATCH', body: {} });
 
+/**
+ * "I flew out and it is already built."
+ *
+ * ★ ANY MEMBER, NOT JUST AN OFFICER — SQUADRON OWNER, 2026-08-12 ★
+ *
+ * `colonyClose` above needs permission to DIRECT the build, which on a squadron project
+ * means an officer. The member who discovers a build is finished is almost never one — it is
+ * whoever arrived with a full hold and found nothing to deliver to, and until now they had no way
+ * to tell anybody, so the next member repeated the trip.
+ *
+ * It matters more here than on the website: that discovery happens in the ship, at the pad, with
+ * this app open and no browser in reach.
+ */
+export const colonyReportBuilt = (
+  call: HubCall,
+  id: string,
+): Promise<Answer<{ ok: true }>> =>
+  hubColony(call, `/projects/${encodeURIComponent(id)}/report-built`, { method: 'PATCH', body: {} });
+
 export const colonyReopen = (call: HubCall, id: string): Promise<Answer<{ ok: true }>> =>
   hubColony(call, `/projects/${encodeURIComponent(id)}/reopen`, { method: 'PATCH', body: {} });
 

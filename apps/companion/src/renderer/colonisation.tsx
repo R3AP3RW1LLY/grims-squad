@@ -131,6 +131,7 @@ declare global {
 
       /** Closing, reopening, deleting, and flagging the squadron's current effort. */
       close(id: string): Promise<Answer<{ ok: true }>>;
+      reportBuilt(id: string): Promise<Answer<{ ok: true }>>;
       reopen(id: string): Promise<Answer<{ ok: true }>>;
       remove(id: string): Promise<Answer<{ ok: true }>>;
       priority(id: string, on: boolean): Promise<Answer<{ ok: true }>>;
@@ -2956,6 +2957,29 @@ function ProjectActions({
             {project.isPriority ? 'Current effort' : 'Make current effort'}
           </Button>
         ) : null}
+
+        {/*
+          ★ ANY MEMBER, NOT JUST AN OFFICER — SQUADRON OWNER, 2026-08-12 ★
+
+          "someone without the companion app completed a project and it did not update ... this
+          causes our members to go buy materials for a project thats completed and not needed."
+
+          `Close this build` below needs permission to DIRECT the project, which on a squadron
+          build means an officer. The member who discovers a build is finished is almost never one
+          — it is whoever arrived with a full hold and found nothing to deliver to.
+
+          This button matters more in the app than on the website, because that discovery happens
+          in the ship, at the pad, with no browser in reach. It closes rather than flags: reversible
+          with Reopen, audited against the reporter by name, and announced at once.
+        */}
+        {closed ? null : (
+          <Button
+            disabled={busy}
+            onClick={() => act(() => window.colony.reportBuilt(project.id))}
+          >
+            It&rsquo;s already built
+          </Button>
+        )}
 
         {mayDirect ? (
           <Button

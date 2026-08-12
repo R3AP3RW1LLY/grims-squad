@@ -1619,6 +1619,86 @@ export class ColonyService {
     await completeColonyProject(this.db, projectId, at, this.nudge);
   }
 
+  /**
+   * A member reports, from the pad, that this build is already finished.
+   *
+   * ★ SQUADRON OWNER, 2026-08-12 ★
+   *
+   * "someone without the companion app completed a project and it did not update ... this causes
+   * confusion and causes our members to go buy materials for a project thats completed and not
+   * needed."
+   *
+   * ★ WHY THIS EXISTS WHEN close() ALREADY DOES ★
+   *
+   * `close()` requires COLONY_MANAGE on a squadron build — officers only. The person who discovers
+   * a build is finished is almost never an officer: it is whoever flew out with a hold full of
+   * steel and found nothing to deliver to. They had no way to tell anybody, so the next member
+   * repeated the trip, and the one after that.
+   *
+   * ★ WHY IT CLOSES RATHER THAN FLAGGING ★
+   *
+   * The owner's decision, on these grounds:
+   *
+   *   - It is REVERSIBLE. `reopen` exists and is one tap.
+   *   - It is AUDITED with the reporter's name, so a mistaken or malicious close is traceable to a
+   *     person rather than appearing as an act of the system.
+   *   - It ANNOUNCES, so an officer learns immediately instead of discovering it later.
+   *   - Flagging leaves the harm in place until an officer happens to act — which is exactly the
+   *     current behaviour, and the thing being fixed.
+   *
+   * A member standing at the site is the best evidence that exists. No feed can produce better: a
+   * finished installation is not dockable, so nothing will ever report it again.
+   *
+   * ★ IT TAKES THE SAME PATH AS EVERY OTHER ENDING ★
+   *
+   * `completeColonyProject`, exactly as close(), the depot flag and the 100% path do — so all five
+   * ways a build can end announce once, from one place, and a project already closed stays a quiet
+   * no-op.
+   */
+  async reportBuilt(projectId: string, callerId: string, at = new Date()): Promise<void> {
+    /*
+     * Deliberately NOT #mayDirect. The whole point is that the reporter is not an officer. Access to
+     * the board is checked by the controller; beyond that, being able to see the build is the only
+     * standing this needs — you cannot report a build you cannot see.
+     */
+    const db = this.acl.forSystem('recording that a member found a build already finished');
+
+    const project = await db.colonyProject.findFirst({
+      where: { id: projectId },
+      select: { title: true, systemName: true, stationName: true, completedAt: true },
+    });
+
+    if (project === null) {
+      throw new AppError(ErrorCode.RESOURCE_NOT_VISIBLE, 'That project is not available.');
+    }
+
+    // Already closed: say nothing, write nothing, announce nothing. Two members reporting the same
+    // finished build within a minute of each other is the expected case, not a conflict.
+    if (project.completedAt !== null) return;
+
+    await db.auditLog.create({
+      data: {
+        actorType: 'user',
+        actorId: callerId,
+        action: 'colony.project.reported_built',
+        targetType: 'colony_project',
+        targetId: projectId,
+        before: { completedAt: null },
+        after: {
+          completedAt: at.toISOString(),
+          title: project.title,
+          systemName: project.systemName,
+          stationName: project.stationName,
+          reason:
+            'A member reported from the site that this build is already finished. Reversible with ' +
+            'reopen; recorded against the member who reported it.',
+        },
+      },
+    });
+
+    await completeColonyProject(this.db, projectId, at, this.nudge);
+  }
+
   /** Puts a closed project back on the board — for one closed by mistake. */
   async reopen(projectId: string, callerId: string, mask: bigint): Promise<void> {
     await this.#mayDirect(projectId, callerId, mask);

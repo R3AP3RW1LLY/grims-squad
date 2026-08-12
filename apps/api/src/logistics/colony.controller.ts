@@ -1052,6 +1052,32 @@ export class ColonyController {
     return { ok: true };
   }
 
+  /**
+   * "I flew out and it is already built."
+   *
+   * ★ COLONY_VIEW, NOT COLONY_MANAGE — SQUADRON OWNER, 2026-08-12 ★
+   *
+   * Every other write on this controller asks whose build it is. This one deliberately does not.
+   * The member who discovers a build is finished is almost never an officer — it is whoever arrived
+   * with a full hold and found nothing to deliver to — and until now they had no way to tell
+   * anybody, so the next member repeated the trip.
+   *
+   * It closes rather than flags because it is reversible, audited against the reporter by name, and
+   * announced the moment it happens. Flagging would leave the wasted trips running until an officer
+   * noticed, which is the behaviour being fixed.
+   */
+  @Patch('projects/:id/report-built')
+  async reportBuilt(@User() caller: CurrentUser | undefined, @Param('id') id: string) {
+    const me = this.#requireSession(caller);
+    await this.#assert(
+      caller,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+    await this.colony.reportBuilt(id, me.userId);
+    return { ok: true };
+  }
+
   @Patch('projects/:id/reopen')
   async reopen(@User() caller: CurrentUser | undefined, @Param('id') id: string) {
     const me = this.#requireSession(caller);
