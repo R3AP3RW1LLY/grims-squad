@@ -252,8 +252,22 @@ export function matchBuildType(
 ): BuildTypeSeed | null {
   if (required.size === 0) return null;
 
+  /*
+   * ★ NORMALISED HERE, NOT BY THE CALLER — 2026-08-12 ★
+   *
+   * The first version of this fix looked up `commodityKey(c.commodity)` against whatever map it was
+   * handed, which quietly required every caller to have keyed theirs the same way. The existing
+   * tests caught it: they pass plain names and every match returned null.
+   *
+   * A comparison function that only works if you prepared its input correctly is a trap. It owns
+   * its own semantics instead, and `commodityKey` is idempotent, so a caller that has already
+   * normalised loses nothing.
+   */
+  const byKey = new Map<string, number>();
+  for (const [name, tonnes] of required) byKey.set(commodityKey(name), tonnes);
+
   for (const type of catalogue) {
-    if (type.costs.length !== required.size) continue;
+    if (type.costs.length !== byKey.size) continue;
 
     /*
      * Exact on every commodity. Not "close enough": two settlement types can differ by a single
@@ -269,7 +283,7 @@ export function matchBuildType(
      * The exactness is unchanged: still every line, still to the tonne. Only the name comparison
      * stopped being naive.
      */
-    const same = type.costs.every((c) => required.get(commodityKey(c.commodity)) === c.tonnes);
+    const same = type.costs.every((c) => byKey.get(commodityKey(c.commodity)) === c.tonnes);
     if (same) return type;
   }
 
