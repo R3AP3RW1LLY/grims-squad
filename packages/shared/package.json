@@ -122,6 +122,10 @@
     "./commander-colour": {
       "types": "./dist/commander-colour.d.ts",
       "default": "./dist/commander-colour.js"
+    },
+    "./needs-freshness": {
+      "types": "./dist/needs-freshness.d.ts",
+      "default": "./dist/needs-freshness.js"
     }
   },
   "scripts": {
