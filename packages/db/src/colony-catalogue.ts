@@ -1,4 +1,5 @@
 import type { PrismaClient } from '@prisma/client';
+import { commodityKey } from '@grims/shared';
 
 /**
  * The build catalogue: what a construction site of a given kind costs.
@@ -251,15 +252,38 @@ export function matchBuildType(
 ): BuildTypeSeed | null {
   if (required.size === 0) return null;
 
+  /*
+   * ★ NORMALISED HERE, NOT BY THE CALLER — 2026-08-12 ★
+   *
+   * The first version of this fix looked up `commodityKey(c.commodity)` against whatever map it was
+   * handed, which quietly required every caller to have keyed theirs the same way. The existing
+   * tests caught it: they pass plain names and every match returned null.
+   *
+   * A comparison function that only works if you prepared its input correctly is a trap. It owns
+   * its own semantics instead, and `commodityKey` is idempotent, so a caller that has already
+   * normalised loses nothing.
+   */
+  const byKey = new Map<string, number>();
+  for (const [name, tonnes] of required) byKey.set(commodityKey(name), tonnes);
+
   for (const type of catalogue) {
-    if (type.costs.length !== required.size) continue;
+    if (type.costs.length !== byKey.size) continue;
 
     /*
      * Exact on every commodity. Not "close enough": two settlement types can differ by a single
      * commodity, and a fuzzy match would confidently mislabel a build — which then pre-fills the
      * wrong shopping list and costs somebody a wasted trip.
      */
-    const same = type.costs.every((c) => required.get(c.commodity) === c.tonnes);
+    /*
+     * Compared through `commodityKey`, because the journal and the catalogue spell one commodity
+     * two ways — "H.E. Suits" against "Hazardous Environment Suits". Nineteen of twenty lines
+     * matched to the tonne and the twentieth failed on its name, so three real builds sat
+     * unidentified and unlinkable, silently, for a fortnight.
+     *
+     * The exactness is unchanged: still every line, still to the tonne. Only the name comparison
+     * stopped being naive.
+     */
+    const same = type.costs.every((c) => byKey.get(commodityKey(c.commodity)) === c.tonnes);
     if (same) return type;
   }
 
@@ -297,7 +321,8 @@ export async function identifyBuildTypes(db: PrismaClient): Promise<{
   const wanted = new Map<string, Map<string, number>>();
   for (const row of projects) {
     const forProject = wanted.get(row.id) ?? new Map<string, number>();
-    forProject.set(row.commodity, row.required);
+    // Keyed the same way the comparison looks it up — see commodityKey and matchBuildType.
+    forProject.set(commodityKey(row.commodity), row.required);
     wanted.set(row.id, forProject);
   }
 
