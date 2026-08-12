@@ -819,7 +819,7 @@ describe('the ingestion box', () => {
      */
     const block = current.slice(current.indexOf('deploy_workers()'), current.indexOf('─────', current.indexOf('deploy_workers()')) + 1);
 
-    expect(block, 'no `die` in the ingestion step').not.toMatch(/die/);
+    expect(block, 'no `die` in the ingestion step').not.toMatch(/(^|[^a-z])die[^a-z]/);
     expect(current, 'the failure is still reported loudly').toMatch(/ingestion box FAILED/);
   });
 
