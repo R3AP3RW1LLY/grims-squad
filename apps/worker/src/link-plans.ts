@@ -1,4 +1,4 @@
-import { PrismaClient, linkProjectsToPlans } from '@grims/db';
+import { PrismaClient, identifyBuildTypes, linkProjectsToPlans } from '@grims/db';
 
 /**
  * The one-off backfill that tells existing plans which of their sites are already under way.
@@ -33,6 +33,25 @@ async function main(): Promise<number> {
   const prisma = new PrismaClient();
 
   try {
+    /*
+     * ★ IDENTIFY FIRST, ALWAYS — 2026-08-12 ★
+     *
+     * A project cannot be linked until it is identified, and identification normally happens only
+     * when telemetry arrives for that market. So a backfill that does not identify can never link
+     * anything historical: the first run after the H.E. Suits alias fix reported "nothing new to
+     * link" purely because the three affected projects had not been re-examined since.
+     *
+     * This runs in a DRY RUN too, and deliberately. Working out what a build IS from its own bill
+     * of materials is a factual correction, not a change to anybody's plan — the live path does it
+     * every time a commander docks — and a dry run that could not see the corrected types would be
+     * reporting on a database that does not exist.
+     */
+    const ident = await identifyBuildTypes(prisma);
+    if (ident.identified > 0) {
+      console.log(`Identified ${ident.identified} project(s) from their bill of materials.
+`);
+    }
+
     const report = await linkProjectsToPlans(prisma, { dryRun: !live });
 
     console.log(`**Plan linking${live ? '' : ' — DRY RUN'}** — ${new Date().toISOString()}\n`);
