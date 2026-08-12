@@ -30,6 +30,8 @@ export { planProgress, siteProgress } from './colony-plan-progress.js';
 export { systemTrade, selfSufficiency } from './colony-economy-view.js';
 export { commodityKey } from './commodity-name.js';
 export { commanderColour, COMMANDER_PALETTE } from './commander-colour.js';
+export { needsFreshness } from './needs-freshness.js';
+export type { Freshness, FreshnessVerdict } from './needs-freshness.js';
 export { matchProjectToSite } from './colony-plan-link.js';
 export type { LinkOutcome, LinkCandidateSite, LinkableProject } from './colony-plan-link.js';
 export type { SystemTrade, SystemTradeLine, SelfSufficiency, TradeSite } from './colony-economy-view.js';
