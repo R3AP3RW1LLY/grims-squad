@@ -57,3 +57,29 @@ COMPOSE_FILE=infra/docker/compose.workers.yml
 #
 # It runs inside the worker daemon instead — a 60-second tick in a process that is already up, with
 # the same job lock every other daemon job uses. See apps/worker/src/daemon.ts.
+
+# ---------------------------------------------------------------------------
+# EMBEDDING — the AI corpus. Every source is useless until it is embedded.
+#
+# ★ THESE WERE DESTROYED BY INSTALLING THIS FILE — 2026-08-11 ★
+#
+# `crontab <file>` REPLACES the crontab. This file carried only the sweeps, so
+# installing it silently deleted four embedding schedules that had been running
+# here since the box was stood up. Nothing failed and nothing said so: the
+# knowledge pages went on reporting "Trained within the hour" while the pending
+# counts climbed for two days.
+#
+# They live here now so the file is the whole truth about what this box runs.
+# Anything missing from it gets deleted the next time somebody installs it, and
+# that is a property of `crontab <file>` nobody can fix — only guard against by
+# keeping the file complete.
+#
+# `grims-embed` is a wrapper at /usr/local/bin, not a worker-job.sh call: it
+# predates the wrapper and runs compose.workers.yml directly. It therefore still
+# resolves `:latest` rather than the deployed sha — worth correcting, but a
+# separate change from restoring what was lost.
+# ---------------------------------------------------------------------------
+*/3 * * * *    /usr/local/bin/grims-embed journal >/dev/null 2>&1
+*/5 * * * *    /usr/local/bin/grims-embed forum >/dev/null 2>&1
+17 * * * *     /usr/local/bin/grims-embed >/dev/null 2>&1
+40 4 * * *     /usr/local/bin/grims-embed inara >/dev/null 2>&1

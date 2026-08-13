@@ -318,12 +318,39 @@ describe('the two boxes, and what each one runs', () => {
     expect(ingestionScripts, 'and are not duplicated here').not.toContain('promote.js');
   });
 
-  it('MANDATORY: every ingestion job goes through the wrapper too', () => {
+  it('MANDATORY: no ingestion job invokes docker compose inline', () => {
+    /*
+     * The property that matters is that a job cannot resolve `:latest` by accident. An inline
+     * `docker compose` in a crontab has no GRIMS_IMAGE_TAG in scope and always will.
+     */
     expect(jobs(ingestion).length).toBeGreaterThan(0);
     for (const line of jobs(ingestion)) {
       expect(line, `this job would run :latest — ${line.trim()}`).not.toMatch(/docker\s+compose/);
-      expect(line).toMatch(/worker-job\.sh/);
     }
+  });
+
+  it('★ MANDATORY: every ingestion job goes through a wrapper, and only one is unpinned ★', () => {
+    /*
+     * ★ grims-embed IS KNOWN-UNPINNED, AND SAYING SO IS THE POINT — 2026-08-13 ★
+     *
+     * Four embedding schedules were restored to this box after `crontab <file>` silently deleted
+     * them. They call `/usr/local/bin/grims-embed`, a wrapper that predates worker-job.sh and runs
+     * compose.workers.yml directly — so it still resolves `:latest` rather than the deployed sha.
+     *
+     * That is a real defect and it is TRACKED HERE rather than waved through, because the honest
+     * choices were to fix it in the same breath as an outage restoration (changing a job that had
+     * just been proved working) or to write it down. It is written down.
+     *
+     * The list is exact: adding a second unpinned job fails this test, and fixing grims-embed to
+     * pin the tag also fails it — which is the correct prompt to delete the exemption.
+     */
+    const unpinned = jobs(ingestion).filter((l) => !/worker-job\.sh/.test(l));
+
+    for (const line of unpinned) {
+      expect(line, `unexpected unpinned job — ${line.trim()}`).toMatch(/grims-embed/);
+    }
+
+    expect(unpinned, 'exactly the four embedding schedules, no more').toHaveLength(4);
   });
 
   it('MANDATORY: the commander audit does not collide with the promotion run', () => {
