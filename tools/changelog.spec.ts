@@ -656,7 +656,22 @@ describe('a release that says nothing about a member-facing change says so', () 
  * throwaway repository with exactly the commits it needs and runs the tool against it with
  * `--repo`.
  */
-describe('a release with nothing to say does not announce itself', () => {
+/*
+ * ★ A LONGER TIMEOUT, BECAUSE THESE TESTS BUILD REAL GIT REPOSITORIES ★
+ *
+ * Every test in this block runs `git init` and a commit per fixture in a temp directory, then spawns
+ * `changelog.mjs` in a child node process. That is a handful of process launches per test, and on a
+ * cold Windows filesystem with the rest of the monorepo's suites running in parallel it measured
+ * over three seconds — against vitest's five-second default.
+ *
+ * So it flaked: green when run alone, red under a full `pnpm test`, with a failure that reads like a
+ * broken assertion rather than a clock running out. It has already cost one CI run.
+ *
+ * The number is not a guess at how slow the machine is. It is far enough above the observed time
+ * that only a genuine hang reaches it — a real regression still fails, it simply does not fail for
+ * being busy.
+ */
+describe('a release with nothing to say does not announce itself', { timeout: 30_000 }, () => {
   const git = (cwd: string, args: string[]): string =>
     execFileSync('git', args, {
       cwd,
