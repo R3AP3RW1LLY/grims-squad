@@ -1720,6 +1720,75 @@ export class ColonyService {
   }
 
   /**
+   * Gives up on a build, or takes that back.
+   *
+   * ★ SQUADRON OWNER, 2026-08-15 ★
+   *
+   * "we also need to allow admins to mark builds as abandoned and not always just as complete."
+   *
+   * ★ WHY THIS IS NOT `remove` AND NOT `markComplete` ★
+   *
+   * `remove` refuses once anybody has hauled to a project, because the ledger is a record of what
+   * real people carried. That is exactly the project most likely to be abandoned — one the squadron
+   * put a fortnight into and then thought better of — so delete is unavailable precisely when this
+   * is needed.
+   *
+   * `markComplete` is the button people have been using instead, and it enters a station that was
+   * never finished into the record the squadron measures itself by.
+   *
+   * So this is a third ending, and it keeps the ledger intact: the deliveries happened, whatever
+   * became of the site.
+   *
+   * ★ COLONY_MANAGE, LIKE ADOPTING — NOT THE POSTER ★
+   *
+   * Abandoning a build hides it from every other member, which stops work the squadron may have
+   * committed playing time to. That was never one member's to decide, the same reasoning that keeps
+   * `setPriority` and `setOwner` with officers. `#mayDirect` already encodes it.
+   */
+  async setAbandoned(input: {
+    projectId: string;
+    callerId: string;
+    mask: bigint;
+    abandoned: boolean;
+    note?: string | undefined;
+  }): Promise<void> {
+    await this.#mayDirect(input.projectId, input.callerId, input.mask);
+
+    const db = this.acl.forSystem('abandoning a colonisation project');
+    const note = input.note?.trim();
+
+    await db.colonyProject.update({
+      where: { id: input.projectId },
+      data: input.abandoned
+        ? {
+            abandonedAt: new Date(),
+            abandonedById: input.callerId,
+            abandonedNote: note === undefined || note === '' ? null : note,
+          }
+        : /*
+           * Cleared together. Leaving the officer and the note behind on a project that is live
+           * again would leave a reason attached to a decision that was reversed — and the next
+           * officer reading the row would find an author for a state it is not in.
+           */
+          { abandonedAt: null, abandonedById: null, abandonedNote: null },
+    });
+
+    await db.auditLog
+      .create({
+        data: {
+          actorType: 'user',
+          actorId: input.callerId,
+          action: input.abandoned ? 'colony.project.abandon' : 'colony.project.unabandon',
+          targetType: 'colony_project',
+          targetId: input.projectId,
+          before: {},
+          after: note === undefined || note === '' ? {} : { note },
+        },
+      })
+      .catch(() => undefined);
+  }
+
+  /**
    * Deletes a project outright.
    *
    * ★ REFUSED ONCE ANYBODY HAS HAULED TO IT, AND THAT IS DELIBERATE ★
@@ -1820,7 +1889,6 @@ export class ColonyService {
      */
     if (owner === 'squadron') {
       void announceColonyProject(this.db, projectId, siteUrl(), actorId).catch(() => undefined);
-      await this.#markAnnounced(db, projectId);
     }
 
     await db.auditLog.create({
@@ -1840,28 +1908,24 @@ export class ColonyService {
       },
     }).catch(() => undefined);
 
-    return { owner };
-  }
+    /*
+     * ★ AND MARK IT ANNOUNCED, OR THE SWEEP POSTS IT AGAIN ★
+     *
+     * A project adopted before its build type was identified is still sitting unannounced, so
+     * `announcePendingColonyProjects` would follow the adoption notice with "a new squadron
+     * colonisation project" for the same build, minutes later and out of order.
+     *
+     * Adoption announces immediately rather than waiting for the type, unlike a creation: an
+     * officer committing the squadron to a build is itself the news, and the type is on the page
+     * the message links to.
+     */
+    if (owner === 'squadron') {
+      await db.colonyProject
+        .update({ where: { id: projectId }, data: { announcedAt: new Date() } })
+        .catch(() => undefined);
+    }
 
-  /**
-   * Records that the squadron has been told about this build, so the sweep does not tell them again.
-   *
-   * ★ WHY THE ADOPT PATH NEEDS THIS ★
-   *
-   * A project adopted before its build type was identified is still sitting unannounced. Without the
-   * stamp, `announcePendingColonyProjects` would follow the adoption notice with "a new squadron
-   * colonisation project" for the same build, minutes later and out of order.
-   *
-   * Adoption announces immediately rather than waiting for the type, unlike a creation: an officer
-   * committing the squadron to a build is itself the news, and the type is on the linked page.
-   */
-  async #markAnnounced(
-    db: { colonyProject: { update: (a: unknown) => Promise<unknown> } },
-    projectId: string,
-  ): Promise<void> {
-    await db.colonyProject
-      .update({ where: { id: projectId }, data: { announcedAt: new Date() } })
-      .catch(() => undefined);
+    return { owner };
   }
 
   /** Marks a squadron project as the current effort, or stops doing so. Requires COLONY_MANAGE. */
