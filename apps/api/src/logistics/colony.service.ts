@@ -1820,21 +1820,7 @@ export class ColonyService {
      */
     if (owner === 'squadron') {
       void announceColonyProject(this.db, projectId, siteUrl(), actorId).catch(() => undefined);
-
-      /*
-       * ★ AND MARK IT ANNOUNCED, OR THE SWEEP POSTS IT AGAIN ★
-       *
-       * A project adopted before its build type was identified is still sitting unannounced. Without
-       * this stamp the sweep would follow the adoption notice with "a new squadron colonisation
-       * project" for the same build, minutes later and out of order.
-       *
-       * Adoption is a deliberate act at a chosen moment, so unlike a creation it announces
-       * immediately rather than waiting for the type: an officer committing the squadron to a build
-       * is the news, and the type is on the linked page.
-       */
-      await db.colonyProject
-        .update({ where: { id: projectId }, data: { announcedAt: new Date() } })
-        .catch(() => undefined);
+      await this.#markAnnounced(db, projectId);
     }
 
     await db.auditLog.create({
@@ -1855,6 +1841,27 @@ export class ColonyService {
     }).catch(() => undefined);
 
     return { owner };
+  }
+
+  /**
+   * Records that the squadron has been told about this build, so the sweep does not tell them again.
+   *
+   * ★ WHY THE ADOPT PATH NEEDS THIS ★
+   *
+   * A project adopted before its build type was identified is still sitting unannounced. Without the
+   * stamp, `announcePendingColonyProjects` would follow the adoption notice with "a new squadron
+   * colonisation project" for the same build, minutes later and out of order.
+   *
+   * Adoption announces immediately rather than waiting for the type, unlike a creation: an officer
+   * committing the squadron to a build is itself the news, and the type is on the linked page.
+   */
+  async #markAnnounced(
+    db: { colonyProject: { update: (a: unknown) => Promise<unknown> } },
+    projectId: string,
+  ): Promise<void> {
+    await db.colonyProject
+      .update({ where: { id: projectId }, data: { announcedAt: new Date() } })
+      .catch(() => undefined);
   }
 
   /** Marks a squadron project as the current effort, or stops doing so. Requires COLONY_MANAGE. */
