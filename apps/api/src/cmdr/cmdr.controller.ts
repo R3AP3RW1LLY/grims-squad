@@ -9,6 +9,8 @@ import {
   Inject,
   Optional,
   UseGuards,
+  Query,
+  Res,
 } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
 import { AppError, ErrorCode, Permission } from '@grims/shared';
@@ -16,7 +18,10 @@ import { User, type CurrentUser } from '../auth/current-user.js';
 import { RequiresPermission, CloakAsNotFound } from '../authz/requires-permission.guard.js';
 import { AdminGateGuard, RequiresTwoFactor } from '../auth/admin-gate.guard.js';
 import { verifyCsrf, readCsrfCookie } from '../common/csrf.js';
-import { CMDR_SERVICE, NONCE_SERVICE, INARA_LINK, NICKNAME_SERVICE } from './cmdr.tokens.js';
+import { CMDR_SERVICE, NONCE_SERVICE, INARA_LINK, NICKNAME_SERVICE, CAPI_SERVICE } from './cmdr.tokens.js';
+import type { CapiService } from './capi.service.js';
+import { Public } from '../auth/auth.guard.js';
+import type { FastifyReply } from 'fastify';
 import type { NicknameService } from './nickname.service.js';
 import { LIVE_SERVICE } from '../live/live.tokens.js';
 import type { CmdrService, ClaimRecord, QueueEntry } from './cmdr.service.js';
@@ -53,6 +58,7 @@ export class CmdrController {
     @Inject(CMDR_SERVICE) private readonly cmdr: CmdrService,
     @Inject(NONCE_SERVICE) private readonly nonce: NonceService,
     @Inject(INARA_LINK) private readonly inara: InaraLinkService,
+    @Inject(CAPI_SERVICE) private readonly capi: CapiService,
     /*
      * ★ @Optional, AND THAT IS A DELIBERATE RISK ACCEPTED HERE ★
      *
@@ -142,6 +148,77 @@ export class CmdrController {
    * `source` distinguishes the website from the companion app, because a key
    * added in the app shows up here with no action from the member.
    */
+  /**
+   * Begin linking a Frontier account.
+   *
+   * ★ SQUADRON OWNER, 2026-08-15 ★
+   *
+   * "the primary feature must be so that players that are playing on Geforce Now and cloud
+   * platforms can use the companion app like everyone else"
+   *
+   * Returns the URL rather than redirecting, because both doors call it: the website opens it in a
+   * tab, and the companion opens it in the member's default browser. The app never handles the
+   * token — a distributed desktop application cannot keep a secret, and every token stays here.
+   */
+  @Post('me/capi/start')
+  async capiStart(
+    @User() caller: CurrentUser | undefined,
+    @Req() req: FastifyRequest,
+  ): Promise<{ url: string }> {
+    const userId = requireUser(caller);
+    csrf(req);
+    const { url } = await this.capi.begin(userId);
+    return { url };
+  }
+
+  /**
+   * Frontier's callback.
+   *
+   * ★ @Public, AND IT HAS TO BE ★
+   *
+   * The member arrives here from Frontier's domain, in whatever browser state that leaves them —
+   * there is no session cookie to rely on and no CSRF token to present. Authority comes from the
+   * `state` we minted and stored server-side, not from anything the browser claims: the userId
+   * travels WITH the verifier in Redis, never in the state parameter, because state is echoed back
+   * through the member's browser and is therefore something an attacker can choose.
+   *
+   * It redirects rather than returning JSON. A member who has just authorised is looking at a
+   * browser tab, and a page of JSON is indistinguishable from a failure to somebody who did not ask
+   * for one.
+   */
+  @Public()
+  @Get('cmdr/capi/callback')
+  async capiCallback(
+    @Query('code') code: string | undefined,
+    @Query('state') state: string | undefined,
+    @Query('error') error: string | undefined,
+    @Res() reply: FastifyReply,
+  ): Promise<void> {
+    const site = process.env['PUBLIC_SITE_URL'] ?? '';
+
+    /*
+     * A member who pressed "cancel" on Frontier's page is not an error to be logged and forgotten —
+     * they are somebody who changed their mind and is now looking at a blank tab. Send them back
+     * where they came from with something that says so.
+     */
+    if (error !== undefined || code === undefined || state === undefined) {
+      void reply.redirect(`${site}/settings/privacy?frontier=cancelled`, 302);
+      return;
+    }
+
+    try {
+      await this.capi.complete(code, state);
+      void reply.redirect(`${site}/settings/privacy?frontier=connected`, 302);
+    } catch {
+      /*
+       * The reason is deliberately not put in the URL. It would be in the member's history, in any
+       * proxy log on the way, and in the Referer of whatever loads next — and "expired state" and
+       * "Frontier refused" are both, to the member, the same instruction: start again.
+       */
+      void reply.redirect(`${site}/settings/privacy?frontier=failed`, 302);
+    }
+  }
+
   @Post('me/inara')
   async linkInara(
     @User() caller: CurrentUser | undefined,

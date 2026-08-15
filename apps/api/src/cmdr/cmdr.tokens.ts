@@ -8,3 +8,4 @@ export type { CmdrService, ClaimRecord, QueueEntry, CmdrStore } from './cmdr.ser
 export type { NonceService, NonceClaim, CheckResult } from '@grims/shared';
 export type { InaraLinkService, LinkStatus } from './inara-link.service.js';
 export type { NicknameService, NicknameState } from './nickname.service.js';
+export const CAPI_SERVICE = Symbol('CapiService');
