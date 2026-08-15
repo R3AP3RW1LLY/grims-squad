@@ -25,6 +25,8 @@
  * than being served unfiltered.
  */
 
+import { hasPermission, Permission } from '@grims/shared';
+
 /** Who is asking. `null` mask means anonymous, which is not the same as absent. */
 export interface AclPrincipal {
   readonly userId: string | null;
@@ -292,7 +294,36 @@ function predicateFor(model: AclModel, p: AclPrincipal): object {
         or.push({ visibility: 'squadron' });
         or.push({ postedById: p.userId });
       }
-      return { OR: or };
+
+      /*
+       * ★ AN ABANDONED BUILD IS HIDDEN FROM EVERYBODY ELSE — SQUADRON OWNER, 2026-08-15 ★
+       *
+       * "abandond projects should be hidden to all other members except the project owner please."
+       *
+       * Enforced HERE and not in a service, for the reason this layer exists at all: a project the
+       * caller may not see must not be reachable through a count, an aggregate, or a relation
+       * loaded from somewhere else. Filtering in application code leaks through all three.
+       *
+       * ANDed with the visibility clause above rather than folded into it. They are two independent
+       * questions — "may you open this project" and "has it been given up on" — and a single OR
+       * list mixing them would let `visibility: 'public'` satisfy the abandonment test, which is
+       * exactly the leak.
+       *
+       * The mask is tested in JS rather than in the predicate because the ACL is a bitmask in a
+       * NUMERIC column and Postgres has no bitwise operator for NUMERIC — the same reason
+       * `visibleIds` exists. An officer simply gets a different predicate.
+       */
+      const abandoned: object[] = [{ abandonedAt: null }];
+      if (p.userId !== null) {
+        abandoned.push({ postedById: p.userId });
+        if (hasPermission(p.mask, Permission.COLONY_MANAGE)) {
+          // Officers see them all: a state only its author can see is one nobody can audit —
+          // including the officer who set it, who could not find it again to undo it.
+          abandoned.push({ abandonedAt: { not: null } });
+        }
+      }
+
+      return { AND: [{ OR: or }, { OR: abandoned }] };
     }
     case 'Loadout': {
       // Ownership is part of the ACL, not a separate check bolted on top: a

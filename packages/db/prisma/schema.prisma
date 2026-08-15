@@ -2390,6 +2390,28 @@ model ColonyProject {
   isPriority Boolean @default(false) @map("is_priority")
 
   completedAt DateTime? @map("completed_at") @db.Timestamptz(6)
+
+  /// Given up on. Set by an officer (COLONY_MANAGE), never by the sync.
+  ///
+  /// ★ SQUADRON OWNER, 2026-08-15 ★
+  ///
+  /// "we also need to allow admins to mark builds as abandoned and not always just as complete.
+  /// abandond projects should be hidden to all other members except the project owner please."
+  ///
+  /// Before this, a build the squadron gave up on had two possible endings and both were false:
+  /// leave it open and it asks for materials nobody will haul, for ever; or mark it complete and a
+  /// station that was never finished enters the record the squadron measures itself by. People
+  /// chose the second, because closing it was the only button there was.
+  ///
+  /// SEPARATE from `completedAt` rather than a status enum replacing it, because both can be true:
+  /// a project marked complete and later corrected by an officer who knows it never was. Collapsing
+  /// them would destroy the fact that somebody had called it finished.
+  abandonedAt   DateTime? @map("abandoned_at") @db.Timestamptz(6)
+  /// The officer who marked it. Kept because abandoning is a judgement call somebody made, and a
+  /// state with no author is one nobody can be asked about.
+  abandonedById String?   @map("abandoned_by_id") @db.Uuid
+  /// Why. Shown to the poster, who is owed a reason their build was closed out from under them.
+  abandonedNote String?   @map("abandoned_note")
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
