@@ -68,8 +68,7 @@ jobs:
           # apps/web and apps/companion are the two surfaces members look at. A
           # change to either is a change they can SEE, and one they should be
           # told about — the API and the worker reach them only through these.
-          if printf '%s
-' "$changed" | grep -qE '^apps/(web|companion)/'; then
+          if echo "$changed" | grep -qE '^apps/(web|companion)/'; then
             echo "member_facing=true" >> "$GITHUB_OUTPUT"
           else
             echo "member_facing=false" >> "$GITHUB_OUTPUT"
