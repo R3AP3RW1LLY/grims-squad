@@ -28,6 +28,84 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
+  # A release members can read.
+  #
+  # ★ THE MISS THIS EXISTS FOR — 2026-08-12 ★
+  #
+  # Three PRs shipped in one evening touching apps/web and apps/companion — the
+  # companion economy parity, the stale-reading warning and the "It's already
+  # built" button — and every one of them merged without a `Members:` trailer.
+  # All three were real, member-visible changes. The changelog published nothing
+  # about any of them, and nothing anywhere said so.
+  #
+  # tools/changelog.mjs already carries a comment about this exact failure
+  # happening once before: "three carefully written trailers, none of them in git
+  # any more" after a squash ate the branch bodies. Knowing about a trap is not
+  # the same as being stopped by one.
+  #
+  # ★ IT CHECKS THE PR BODY, NOT THE COMMITS ★
+  #
+  # Deliberately. A squash merge takes its message from the PR, so the PR body is
+  # what will actually reach git — and a trailer written beautifully in a branch
+  # commit is exactly what went missing last time.
+  # ---------------------------------------------------------------------------
+  members-trailer:
+    name: members trailer
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: does this PR change anything a member would notice
+        id: surfaces
+        run: |
+          base="origin/${{ github.event.pull_request.base.ref }}"
+          git fetch --quiet origin "${{ github.event.pull_request.base.ref }}"
+          changed=$(git diff --name-only "$base"...HEAD || true)
+
+          # apps/web and apps/companion are the two surfaces members look at. A
+          # change to either is a change they can SEE, and one they should be
+          # told about — the API and the worker reach them only through these.
+          if echo "$changed" | grep -qE '^apps/(web|companion)/'; then
+            echo "member_facing=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "member_facing=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: a member-facing change needs a Members trailer
+        if: steps.surfaces.outputs.member_facing == 'true'
+        env:
+          # Through the environment, not interpolated into the script: a PR body
+          # is attacker-controlled text and `${{ }}` inside `run` is a shell
+          # injection waiting for somebody to title a branch with a backtick.
+          BODY: ${{ github.event.pull_request.body }}
+        run: |
+          if printf '%s' "$BODY" | grep -qiE '^[[:space:]]*Members:'; then
+            echo "Members trailer present."
+            exit 0
+          fi
+
+          cat >&2 <<'EOF'
+          This PR changes apps/web or apps/companion, so a member will see it —
+          but the body carries no `Members:` trailer, which means the changelog
+          would publish nothing about it.
+
+          Add one to the PR BODY (not just a commit message — a squash takes its
+          message from the body, and a trailer that lives only in a branch commit
+          is exactly what has gone missing before):
+
+            Members: what changed, written for somebody who does not read code.
+
+          A change genuinely invisible to members — a refactor, a test, a build
+          fix — should say so in the body instead, and this check will still ask
+          for the trailer. That is deliberate: saying "no member impact" out loud
+          is cheap, and guessing wrong is how a release goes out silent.
+          EOF
+          exit 1
+
+  # ---------------------------------------------------------------------------
   # Fast, no-infrastructure checks. These fan out in parallel.
   # ---------------------------------------------------------------------------
   static:
