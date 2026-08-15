@@ -1,6 +1,6 @@
 import { Fragment } from 'react';
 import { formatLocal } from '../lib/time';
-import type { RosterMember, FoundingStanding } from '../lib/api';
+import type { RosterMember, FoundingStanding, FrontierVerification } from '../lib/api';
 import { RoleChip } from './role-chip';
 import { SessionTimer } from './session-timer';
 
@@ -439,6 +439,50 @@ export function RosterCard({
             <dd className="flex min-w-0 flex-wrap gap-1.5">
               <VerificationBadge verified={member.squadronVerified} />
             </dd>
+
+            {/*
+              ★ THE SECOND BADGE — SQUADRON OWNER, 2026-08-15 ★
+
+              "add a badge to the Roster page per user that shows Frontier
+              Verified too please like we have for Inara verified"
+
+              ★ A ROW OF ITS OWN, NOT A SECOND PILL BESIDE THE FIRST ★
+
+              Two identical pills on one line is one badge with a bug. They are
+              the same shape by design — the owner asked for "like we have for
+              Inara" — so what separates them cannot be the pill itself, and it
+              must not be the colour: both go green with a tick when both checks
+              pass, and a green tick beside a green tick is unreadable to anybody
+              who cannot distinguish them and ambiguous to everybody else.
+
+              The label column is what separates them. It already exists, it is
+              already carrying Member / Rank / Awards / Inara, and a reader gets
+              the source of the answer from the same place they get the source of
+              every other row. The pill then names its source again in its own
+              words, and the rows are in a fixed order on every card in the grid.
+              Three signals, none of them a colour.
+
+              ★ IT SAYS SOMETHING SMALLER THAN THE ROW ABOVE IT ★
+
+              Inara's badge asserts a commander name AND squadron membership.
+              This one asserts the NAME, proven against Frontier itself — which
+              is the strongest identity check on the platform and still says
+              nothing about who somebody flies with. Squadron verification via
+              cAPI was dropped from scope; the tooltip disclaims it out loud
+              rather than leaving a reader to assume the two badges mean the same
+              thing because they look the same.
+
+              ★ WHY BELOW INARA RATHER THAN ABOVE IT ★
+
+              Not a ranking — the rows above are not ranked either. The Inara row
+              has been in that position for weeks and members know where to look
+              for it; moving it to make room would cost every one of them that,
+              and buy nothing.
+            */}
+            <dt className="pt-0.5 text-[var(--color-text-secondary)]">Frontier</dt>
+            <dd className="flex min-w-0 flex-wrap gap-1.5">
+              <Badge {...frontierBadge(member.frontierVerification)} />
+            </dd>
           </dl>
         </div>
 
@@ -626,6 +670,57 @@ export function RosterCard({
 }
 
 /**
+ * How a verification pill is drawn.
+ *
+ * ★ ONE CHROME, TWO CLAIMS — AND THAT IS THE DELIBERATE PART ★
+ *
+ * The squadron owner asked for the Frontier badge "like we have for Inara
+ * verified", so both wear the same pill. Extracted rather than copied because
+ * two hand-maintained copies of the same twelve Tailwind classes drift, and the
+ * day they drift the difference between them reads as meaning — a reader would
+ * assume a badge that sits a pixel differently is saying something different.
+ *
+ * ★ NEVER COLOUR ALONE ★
+ *
+ * The tone is the LAST of three signals, not the only one. Every state carries
+ * its own glyph and its own words, because green-versus-amber-versus-grey is
+ * nothing to a reader who cannot distinguish them, and reaches a screen reader
+ * not at all. Anything added here must keep that: a state that can only be told
+ * apart by its colour is a state nobody can read.
+ */
+const BADGE_TONES = {
+  good: 'border-[var(--color-semantic-success)] text-[var(--color-semantic-success)]',
+  warn: 'border-[var(--color-semantic-warning)] text-[var(--color-semantic-warning)]',
+  dim: 'border-[var(--color-border-hairline)] text-[var(--color-text-dim)]',
+} as const;
+
+export type BadgeTone = keyof typeof BADGE_TONES;
+
+function Badge({
+  tone,
+  glyph,
+  label,
+  title,
+}: {
+  tone: BadgeTone;
+  /** Carries the same meaning as the tone, for anybody the tone does not reach. */
+  glyph: string;
+  label: string;
+  /** WHAT was checked. A bare "Not verified" invites the reader to assume the worst. */
+  title: string;
+}) {
+  return (
+    <span
+      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.14em] ${BADGE_TONES[tone]}`}
+      title={title}
+    >
+      <span aria-hidden="true">{glyph}</span>
+      {label}
+    </span>
+  );
+}
+
+/**
  * Whether Inara confirms this commander AND their squadron.
  *
  * ★ A GLYPH AS WELL AS A COLOUR ★
@@ -640,22 +735,98 @@ export function RosterCard({
  */
 function VerificationBadge({ verified }: { verified: boolean }) {
   return (
-    <span
-      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-0.5 font-mono text-[9px] uppercase tracking-[0.14em] ${
-        verified
-          ? 'border-[var(--color-semantic-success)] text-[var(--color-semantic-success)]'
-          : 'border-[var(--color-border-hairline)] text-[var(--color-text-dim)]'
-      }`}
+    <Badge
+      tone={verified ? 'good' : 'dim'}
+      glyph={verified ? '✓' : '○'}
+      label={verified ? 'Inara verified' : 'Not verified'}
       title={
         verified
           ? 'Inara confirms this commander name and that they fly with the squadron.'
           : 'Inara has not yet confirmed both the commander name and squadron membership.'
       }
-    >
-      <span aria-hidden="true">{verified ? '✓' : '○'}</span>
-      {verified ? 'Inara verified' : 'Not verified'}
-    </span>
+    />
   );
+}
+
+/**
+ * What the Frontier badge says, for each of the three answers the server gives.
+ *
+ * ★ AN IDENTITY, NOT A SQUADRON — AND THE TOOLTIP SAYS SO ★
+ *
+ * Frontier confirms WHICH COMMANDER a member is: they signed in to Frontier
+ * themselves and Frontier named them. It is the strongest identity check on the
+ * platform, and it has no idea who they fly with. Squadron verification via cAPI
+ * was dropped from scope, so the verified tooltip disclaims the squadron half
+ * explicitly — sitting directly beneath a badge that DOES assert a squadron,
+ * wearing the same pill, silence would be read as agreement.
+ *
+ * ★ WHY EXPIRED IS ITS OWN STATE ★
+ *
+ * Frontier honours a link for 25 days and no longer, and connecting Frontier is
+ * a mandatory step — so the entire squadron crosses that ceiling roughly monthly,
+ * for as long as the platform exists. Folding that into "not verified" would say
+ * the same thing about a member who proved their identity three weeks ago and
+ * needs thirty seconds to reconnect as about somebody who has never linked, and
+ * an officer scanning the roster could not tell which of them to go and speak to.
+ *
+ * It never overstates. An expired grant is amber and says "expired"; the only
+ * thing that renders as verified is a live grant with a name against it.
+ *
+ * ★ THE WORDS ARE PLAIN, AND THEY DO NOT NEGOTIATE ★
+ *
+ * Nothing here tells a member what they are and are not obliged to do — squadron
+ * owner's standing instruction, and it applies to every surface. These sentences
+ * say what the platform knows and what reconnecting would prove, and stop.
+ *
+ * Returned as data rather than rendered here so the wording can be asserted
+ * directly. A tooltip that quietly grew a claim about the squadron is exactly
+ * the kind of change no screenshot review would catch.
+ */
+export function frontierBadge(state: FrontierVerification): {
+  tone: BadgeTone;
+  glyph: string;
+  label: string;
+  title: string;
+} {
+  if (state === 'verified') {
+    return {
+      tone: 'good',
+      glyph: '✓',
+      label: 'Frontier verified',
+      title:
+        'Frontier confirms this commander name belongs to this member. It says nothing about which ' +
+        'squadron they fly with.',
+    };
+  }
+
+  if (state === 'expired') {
+    return {
+      tone: 'warn',
+      /*
+       * Not a tick and not a ring. The three states have three shapes, so the
+       * badge is legible in greyscale and to anybody who reads shape faster than
+       * text — which at nine pixels is most people.
+       */
+      glyph: '!',
+      label: 'Frontier expired',
+      title:
+        'Frontier confirmed this commander name, and the connection has since lapsed — Frontier ' +
+        'honours a link for 25 days. Reconnecting proves it again.',
+    };
+  }
+
+  return {
+    tone: 'dim',
+    glyph: '○',
+    /*
+     * The same two words the Inara badge uses when it has nothing, deliberately:
+     * the row's label is what says WHICH check is being answered, and inventing a
+     * second vocabulary for the same answer would imply a difference that is not
+     * there.
+     */
+    label: 'Not verified',
+    title: 'Frontier has not confirmed a commander name for this member.',
+  };
 }
 
 /**

@@ -102,6 +102,43 @@ export const DEFAULT_PRIVACY: PrivacySettings = {
   plainFonts: false,
 };
 
+/**
+ * What Frontier currently says about a member's identity.
+ *
+ * ★ THREE STATES, NOT A BOOLEAN — AND THE MIDDLE ONE IS WHY ★
+ *
+ * Frontier honours a refresh grant for 25 DAYS and no longer (ADR-003, a hard
+ * ceiling nothing on our side can move). The owner made connecting Frontier a
+ * mandatory step for every member, so the whole squadron crosses that ceiling
+ * roughly once a month, every month, for as long as the platform exists. Expiry
+ * is not an edge case here; it is the ordinary weather.
+ *
+ * A boolean would have to fold that into `false`, which says the same thing
+ * about two people who are nothing alike: somebody who proved their identity
+ * cryptographically three weeks ago and needs thirty seconds to reconnect, and
+ * somebody who has never linked at all. It also makes the badge look broken —
+ * an officer would watch most of the roster go dark on a rolling basis with no
+ * indication that anything was wrong or what to do about it.
+ *
+ * `expired` is the honest sentence: we DID prove this, and we cannot prove it
+ * today. It never overstates — an expired grant is never rendered as verified —
+ * and it is the only one of the three that tells the reader an action exists.
+ *
+ * `none` deliberately also covers LINKED-BUT-NOT-YET-IDENTIFIED. The row is
+ * created the instant a member authorises, carrying an empty `cmdrName`, and the
+ * name arrives from a separate profile call moments later. Holding somebody's
+ * tokens is not knowing who they are, and for the seconds that gap lasts the
+ * truthful answer is that nothing is verified yet.
+ *
+ * ★ WHAT IT DOES NOT MEAN ★
+ *
+ * Squadron membership. Squadron verification via cAPI was dropped from scope;
+ * this asserts that Frontier confirms the commander name and nothing else. No
+ * copy anywhere may imply the squadron half — that is Inara's badge, and it is
+ * a separate claim with a separate check.
+ */
+export type FrontierVerification = 'verified' | 'expired' | 'none';
+
 export interface ProfileLocation {
   readonly system: string;
   readonly station: string | null;
@@ -167,6 +204,18 @@ export interface ProfileSource {
    * identical to a verified one — which is the confusion it exists to remove.
    */
   readonly squadronVerified?: boolean;
+  /**
+   * Frontier's own answer about this member's identity.
+   *
+   * Optional here and REQUIRED on the way out, exactly as `squadronVerified` is:
+   * an internal row that predates the field is `undefined`, and the serializer
+   * resolves that to `none` rather than letting a missing key reach a badge.
+   *
+   * Not privacy-governed, for the same reason the Inara one is not: it describes
+   * the standing of a name that is already on the card, and hiding it would
+   * leave an unverified name looking identical to a verified one.
+   */
+  readonly frontierVerification?: FrontierVerification;
   readonly location?: ProfileLocation | null;
   readonly credits?: bigint | null;
   readonly fleet?: readonly ProfileShip[] | null;
@@ -222,6 +271,14 @@ export interface PublicProfile {
   readonly cmdrName: string | null;
   /** Inara confirms both the commander name and squadron membership. */
   readonly squadronVerified: boolean;
+  /**
+   * Frontier confirms the commander NAME. Never the squadron — see the type.
+   *
+   * Required, like `squadronVerified` and for the same reason: it is always
+   * emitted, `none` is a real answer, and a card must not have to tell a missing
+   * key apart from a negative result.
+   */
+  readonly frontierVerification: FrontierVerification;
   readonly location?: ProfileLocation | null;
   /** A STRING. Balances exceed 2^53, where a JS number rounds silently. */
   readonly credits?: string | null;
@@ -323,6 +380,17 @@ export function serializeProfile(
      * badge that is silent in both cases cannot be trusted in either.
      */
     squadronVerified: source.squadronVerified === true,
+    /*
+     * Emitted UNCONDITIONALLY too, and `none` when there is no grant at all —
+     * the same argument as the line above. A badge that is silent for "we
+     * checked and Frontier does not confirm this" and silent for "this build
+     * does not report it" cannot be trusted in either case.
+     *
+     * `?? 'none'` rather than a cast: an internal row assembled by something
+     * that does not know about this field must land on the claim-nothing state,
+     * never on `undefined` leaking through to a component's switch.
+     */
+    frontierVerification: source.frontierVerification ?? 'none',
   };
 
   // Keys are ASSIGNED, never assigned-then-deleted. Assigning `undefined` would

@@ -31,6 +31,30 @@ export const DEFAULT_API_ORIGIN = 'http://localhost:5001';
 
 const SERVER_API = process.env['API_INTERNAL_URL'] ?? DEFAULT_API_ORIGIN;
 
+/**
+ * What Frontier currently says about a member's identity.
+ *
+ * ★ THREE STATES, BECAUSE THE MIDDLE ONE IS THE COMMON ONE ★
+ *
+ * Frontier honours a link for 25 days and no longer, and connecting Frontier is
+ * a mandatory step for every member — so the whole squadron crosses that ceiling
+ * roughly monthly, forever. A boolean would say the same thing about somebody
+ * who proved their identity three weeks ago and needs thirty seconds to
+ * reconnect as about somebody who has never linked, and most of the roster would
+ * read as unverified on a rolling basis with nothing saying why.
+ *
+ * `expired` never overstates: an expired grant is never rendered as verified. It
+ * is simply the honest version of "no" — we proved this, and we cannot prove it
+ * today.
+ *
+ * ★ IT IS AN IDENTITY, NOT A SQUADRON ★
+ *
+ * Frontier confirms which commander a member is. It has no idea who they fly
+ * with, and squadron verification via cAPI is out of scope — that is Inara's
+ * badge and a separate check. No copy on this badge may blur the two.
+ */
+export type FrontierVerification = 'verified' | 'expired' | 'none';
+
 export interface PublicProfile {
   handle: string;
   displayName: string;
@@ -54,6 +78,14 @@ export interface PublicProfile {
    * ambiguity the badge exists to remove.
    */
   squadronVerified: boolean;
+  /**
+   * Frontier confirms the commander NAME. Never the squadron — see the type.
+   *
+   * Required for the same reason as the field above: it is always emitted, and
+   * `none` is a real answer. Typing it as optional would let a card treat a
+   * missing key and a negative result the same way.
+   */
+  frontierVerification: FrontierVerification;
   /*
    * These are OPTIONAL in the type, not nullable, and that is deliberate
    * (INV-027). A member who has not opted in produces a response with the key

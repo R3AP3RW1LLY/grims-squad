@@ -1,5 +1,10 @@
 import type { PrismaClient } from '@grims/db';
-import type { PrivacySettings, ProfileSource } from './profile.serializer.js';
+import { tokenState } from '@grims/ed-clients';
+import type {
+  PrivacySettings,
+  ProfileSource,
+  FrontierVerification,
+} from './profile.serializer.js';
 import {
   SNAPSHOT_EVENT_TYPES,
   type InaraRanks,
@@ -188,7 +193,97 @@ export class PrismaMembersStore implements MembersStore {
     },
   };
 
-  #toRow(u: {
+  /**
+   * What Frontier says about each of these members, right now.
+   *
+   * ★ THE PREDICATE, AND EVERY CLAUSE IN IT ★
+   *
+   *   method: 'fdev_capi'   Only Frontier's own answer counts. An Inara claim or
+   *                         an officer's manual grant is a different badge with
+   *                         a different meaning and a lower trust tier.
+   *   revokedAt: null       A superseded claim is KEPT as the record that
+   *                         somebody claimed it in good faith. It must never
+   *                         vouch for anybody afterwards.
+   *   cmdrName: { not: '' } The row is created the moment a member authorises,
+   *                         with an EMPTY name, and the name arrives from a
+   *                         separate profile call. Holding somebody's tokens is
+   *                         not knowing who they are — linked-but-unidentified
+   *                         is not verified.
+   *   isStale === false     Applied below rather than in SQL, because the column
+   *                         alone is not the whole truth. See the ceiling note.
+   *
+   * ★ WHY THIS IS A SECOND QUERY AND NOT PART OF `#SELECT` ★
+   *
+   * Two reasons, either sufficient.
+   *
+   * First, `#SELECT` filters `cmdrVerifications` on `isVerified: true`, which is
+   * load-bearing there and pinned by a test — and NO cAPI ROW EVER SATISFIES IT.
+   * `CapiService` creates its row with the column at its default of false and
+   * only ever writes `cmdrName` afterwards; every writer of `isVerified: true`
+   * in the tree is on the Inara or officer-manual path. Reading the badge off
+   * that relation would have produced a badge that is dark for the entire
+   * squadron with nothing to explain why.
+   *
+   * Second, that relation takes ONE row ordered by `verifiedAt desc`. A member
+   * can hold an Inara row and a Frontier row at once, so whichever was touched
+   * last would decide both badges — linking Frontier would put out the Inara
+   * badge, and an Inara re-check would put out this one. Two independent claims
+   * need two independent reads.
+   *
+   * Prisma cannot select the same relation twice under two filters, so a second
+   * query it is: one indexed read (`@@index([userId])`) for the whole page,
+   * never one per member.
+   *
+   * ★ THE CEILING IS READ FROM THE CLOCK, NOT ONLY FROM THE COLUMN ★
+   *
+   * `isStale` is written LAZILY — by whoever next tries to spend the token. A
+   * member nothing has polled (worker down, 30-minute idle cadence, never plays)
+   * sails past Frontier's hard 25-day ceiling with the column still false, and
+   * trusting it alone would keep a badge lit days after its proof expired.
+   *
+   * So `tokenState` decides as well, which is the SAME function the token
+   * refresher and the connection banner already use. This is deliberately not a
+   * second opinion about when 25 days is up: there is one definition of that
+   * ceiling and it lives in `@grims/ed-clients`.
+   */
+  async #frontier(
+    userIds: readonly string[],
+    now: Date,
+  ): Promise<Map<string, FrontierVerification>> {
+    const states = new Map<string, FrontierVerification>();
+    if (userIds.length === 0) return states;
+
+    const rows = await this.#db.cmdrVerification.findMany({
+      where: {
+        userId: { in: [...userIds] },
+        method: 'fdev_capi',
+        revokedAt: null,
+        cmdrName: { not: '' },
+      },
+      select: { userId: true, isStale: true, verifiedAt: true },
+      /*
+       * ASCENDING, so the last row written into the map for a member is their
+       * NEWEST grant. `CapiService` maintains one live row per member, but
+       * nothing in the schema enforces it and a raced double-authorisation would
+       * leave two — at which point an abandoned grant from three weeks ago must
+       * not black out a link made this morning. Same rule as the Inara relation,
+       * which orders `verifiedAt desc` and takes one.
+       */
+      orderBy: { verifiedAt: 'asc' },
+    });
+
+    for (const row of rows) {
+      states.set(
+        row.userId,
+        row.isStale || tokenState(row.verifiedAt, now).stale ? 'expired' : 'verified',
+      );
+    }
+
+    return states;
+  }
+
+  #toRow(
+    u: {
     id: string;
     handle: string;
     displayName: string;
@@ -216,7 +311,15 @@ export class PrismaMembersStore implements MembersStore {
         permMask: unknown;
       };
     }>;
-  }): MemberRow {
+    },
+    /*
+     * Passed in rather than derived here, because it comes from a different
+     * query — see `#frontier`. Required rather than defaulted, so a future
+     * caller that assembles a row cannot forget it and silently publish `none`
+     * for a squadron that is verified.
+     */
+    frontier: FrontierVerification,
+  ): MemberRow {
     return {
       source: {
         id: u.id,
@@ -270,6 +373,19 @@ export class PrismaMembersStore implements MembersStore {
          * what remains to decide.
          */
         squadronVerified: u.cmdrVerifications[0]?.squadronVerifiedAt != null,
+        /*
+         * ★ A DIFFERENT CLAIM, DELIBERATELY BESIDE THE ONE ABOVE ★
+         *
+         * Inara's badge asserts a name AND a squadron. Frontier's asserts the
+         * NAME only — proven against Frontier itself, which is the strongest
+         * identity check on the platform and still says nothing about who
+         * somebody flies with. Squadron verification via cAPI is out of scope
+         * and no copy on this journey may imply it.
+         *
+         * Kept adjacent so the next person to touch either one can see that
+         * they are two answers to two questions, not one fact stored twice.
+         */
+        frontierVerification: frontier,
         // location, credits and fleet arrive with cAPI (P1.8, blocked on
         // Frontier). Absent here means absent from the response, which is the
         // correct behaviour rather than a placeholder to fill in.
@@ -283,7 +399,16 @@ export class PrismaMembersStore implements MembersStore {
       where: { handle, status: { not: 'banned' } },
       select: PrismaMembersStore.#SELECT,
     });
-    return u === null ? null : this.#toRow(u as never);
+    if (u === null) return null;
+
+    /*
+     * The profile page reads through here, and it must give the same answer as
+     * the card that linked to it. A page that showed a Frontier badge the roster
+     * did not is the kind of contradiction nobody reports and everybody notices
+     * — so the SAME predicate answers both, from the same function.
+     */
+    const frontier = await this.#frontier([u.id], new Date());
+    return this.#toRow(u as never, frontier.get(u.id) ?? 'none');
   }
 
   /**
@@ -384,7 +509,27 @@ export class PrismaMembersStore implements MembersStore {
       select: PrismaMembersStore.#SELECT,
       orderBy: { joinedAt: 'asc' },
     });
-    return rows.map((u) => this.#toRow(u as never));
+
+    /*
+     * ONE query for the whole roster's Frontier state, not one per member — the
+     * same rule as the journal snapshots and the Discord role catalogue above.
+     * It cannot run in parallel with the query above because it is scoped to the
+     * ids that one returns, and scoping it is what keeps a deactivated member's
+     * row out of the read entirely.
+     *
+     * ★ ONE CLOCK FOR THE WHOLE PAGE ★
+     *
+     * `new Date()` is taken ONCE and passed down. Calling it per row would let
+     * two members' badges be decided by two different instants, which on a
+     * hundred-card page is a real chance of the same member reading differently
+     * from one refresh to the next at exactly the moment their grant expires.
+     */
+    const frontier = await this.#frontier(
+      rows.map((u) => u.id),
+      new Date(),
+    );
+
+    return rows.map((u) => this.#toRow(u as never, frontier.get(u.id) ?? 'none'));
   }
 
   /**

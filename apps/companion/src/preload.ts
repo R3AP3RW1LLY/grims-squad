@@ -35,6 +35,15 @@ contextBridge.exposeInMainWorld('companion', {
   cancelSignIn: () => ipcRenderer.invoke('cancelSignIn'),
   /** Opens the approval page again — the browser may have failed to open, or been closed. */
   reopenLink: () => ipcRenderer.invoke('reopenLink'),
+  /*
+   * The mandatory Frontier step. Opens the member's own browser at our settings page and starts
+   * watching for the hub to report the link — see the handler in main.ts for why the app takes no
+   * part in the exchange itself.
+   *
+   * Takes no argument for the same reason `signIn` does not: there is nothing for the member to
+   * supply, and anything this could accept would be a URL the page got to choose.
+   */
+  connectFrontier: () => ipcRenderer.invoke('connectFrontier'),
   unpair: () => ipcRenderer.invoke('unpair'),
   /*
    * Forget this hub's reading positions so the next pass re-reads every journal from the top.
