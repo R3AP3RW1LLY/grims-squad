@@ -60,6 +60,7 @@ export {
   type Pkce,
   type TokenState,
 } from './capi/capi-auth.js';
+export { fetchProfile, type CapiProfile } from './capi/capi-profile.js';
 export {
   CapiAuthError,
   exchangeCode,
