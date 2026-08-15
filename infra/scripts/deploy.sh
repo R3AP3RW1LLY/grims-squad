@@ -112,6 +112,29 @@ REQUIRED=(
   # change there (infra/cutover-grims-squad.md). Until the cutover, set both to
   # https://45-63-35-93.sslip.io; this preflight failing is the reminder.
   PUBLIC_URL PUBLIC_SITE_URL
+  # ★ FRONTIER cAPI, REQUIRED FROM NOW ON — SQUADRON OWNER, 2026-08-15 ★
+  #
+  # "we have been approved and have our keys from frontier ... the primary feature must be so that
+  # players that are playing on Geforce Now and cloud platforms can use the companion app like
+  # everyone else"
+  #
+  # These are REQUIRED rather than optional-with-a-fallback, and that is the whole point of listing
+  # them here. cAPI is how a cloud player exists on this platform at all: unset, they simply have no
+  # journal, no cargo, no deliveries and no promotion activity — and every one of those failures
+  # looks exactly like a member who has not played, which is the worst possible way to be wrong
+  # about somebody.
+  #
+  # An unset secret is silent. A refused deploy is not.
+  #
+  # FDEV_CAPI_REDIRECT_URI must match what is registered with Frontier character for character; a
+  # mismatch is rejected at the authorise step, before any of our code runs, with an error the
+  # member sees and we never do.
+  #
+  # FDEV_CAPI_SHARED_KEY is included because Frontier issued one and it is set. Its exact role in
+  # the exchange is confirmed against their documentation when the token step lands — required here
+  # so it cannot go missing between now and then, which is the failure this whole list exists to
+  # prevent.
+  FDEV_CAPI_CLIENT_ID FDEV_CAPI_REDIRECT_URI FDEV_CAPI_SHARED_KEY
   # ★ THE ANNOUNCEMENT PIPELINE'S THREE SETTINGS, REQUIRED FROM NOW ON ★
   #
   # Squadron owner, 2026-08-04: the announcement wiring must be part of the
