@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { PrismaClient, PrismaNonceStore } from '@grims/db';
 import { NonceService } from '@grims/shared';
 import { createKeyring, TokenCipher } from '@grims/shared/server';
+import { Redis } from 'ioredis';
+import { CapiService } from './capi.service.js';
 import {
   DiscordAdapter,
   InaraAdapter,
@@ -16,7 +18,8 @@ import { InaraLinkService } from './inara-link.service.js';
 import { PrismaInaraLinkStore } from './inara-link.store.prisma.js';
 import { NicknameSyncService } from './nickname-sync.service.js';
 import { LEADERSHIP_CEILING } from '../members/members.store.js';
-import { CMDR_SERVICE, NONCE_SERVICE, INARA_LINK, NICKNAME_SERVICE } from './cmdr.tokens.js';
+import { CMDR_SERVICE,
+  CAPI_SERVICE, NONCE_SERVICE, INARA_LINK, NICKNAME_SERVICE } from './cmdr.tokens.js';
 import { NicknameService } from './nickname.service.js';
 import { logger } from '../logging.js';
 import { LIVE_SERVICE } from '../live/live.tokens.js';
@@ -195,6 +198,51 @@ function nicknameReconciler(prisma: PrismaClient): NicknameSyncService | undefin
       provide: NONCE_SERVICE,
       inject: [PrismaClient],
       useFactory: (db: PrismaClient) => new NonceService(new PrismaNonceStore(db)),
+    },
+    {
+      provide: CAPI_SERVICE,
+      inject: [PrismaClient],
+      useFactory: (db: PrismaClient): CapiService => {
+        const keyring = process.env['TOKEN_ENCRYPTION_KEYRING'] ?? '';
+        if (keyring === '') {
+          /*
+           * Same refusal as the Inara link beside it, for the same reason: INV-012 has no degraded
+           * mode. A Frontier refresh token is a standing grant to read a member's game account —
+           * storing one in plaintext is worse than not storing it, and failing at BOOT is where
+           * that is obvious rather than on the first member who tries to link.
+           */
+          throw new Error(
+            'TOKEN_ENCRYPTION_KEYRING is required: a Frontier refresh token must not be stored unencrypted.',
+          );
+        }
+
+        const clientId = process.env['FDEV_CAPI_CLIENT_ID'] ?? '';
+        const redirectUri = process.env['FDEV_CAPI_REDIRECT_URI'] ?? '';
+        if (clientId === '' || redirectUri === '') {
+          /*
+           * The deploy preflight already refuses without these, so reaching here means somebody
+           * started the API another way. Refusing at boot keeps the two consistent: a running API
+           * that cannot link Frontier accounts would leave every cloud player unable to join, and
+           * would say so only when one of them tried.
+           */
+          throw new Error(
+            'FDEV_CAPI_CLIENT_ID and FDEV_CAPI_REDIRECT_URI are required to link Frontier accounts.',
+          );
+        }
+
+        return new CapiService(
+          db,
+          new Redis(process.env['REDIS_URL'] ?? 'redis://localhost:6379'),
+          new TokenCipher(createKeyring(keyring)),
+          {
+            authBase: process.env['FDEV_CAPI_AUTH_BASE'] ?? 'https://auth.frontierstore.net',
+            apiBase: process.env['FDEV_CAPI_API_BASE'] ?? 'https://companion.orerve.net',
+            clientId,
+            redirectUri,
+            clientSecret: process.env['FDEV_CAPI_SHARED_KEY'],
+          },
+        );
+      },
     },
     {
       provide: INARA_LINK,

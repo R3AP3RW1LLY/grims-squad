@@ -48,6 +48,11 @@ describe('verification broadcast', () => {
       null as never,
       null as never,
       null as never,
+      // The cAPI service. Required rather than @Optional, unlike the live service below: without
+      // it a member cannot link a Frontier account at all, and for a commander on GeForce Now that
+      // is the difference between existing on this platform and not. A stub here rather than a
+      // silent no-op there.
+      null as never,
       live as never,
     );
   });
@@ -96,7 +101,7 @@ describe('verification broadcast', () => {
         throw new Error('socket gone');
       },
     };
-    const c = new CmdrController(null as never, null as never, null as never, exploding as never);
+    const c = new CmdrController(null as never, null as never, null as never, null as never, exploding as never);
     expect(() => publish(c, 'u1')).not.toThrow();
   });
 
@@ -106,7 +111,7 @@ describe('verification broadcast', () => {
    * people. Silence is the correct behaviour, not a crash.
    */
   it('does nothing at all when there is no live service', () => {
-    const c = new CmdrController(null as never, null as never, null as never, undefined);
+    const c = new CmdrController(null as never, null as never, null as never, null as never, undefined);
     expect(() => publish(c, 'u1')).not.toThrow();
   });
 });

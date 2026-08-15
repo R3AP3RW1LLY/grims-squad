@@ -43,3 +43,27 @@ export { decodeLoadout } from './builds/journal.js';
 export { computeStats, type BuildStats } from './builds/stats.js';
 export { decodeEdsy, readEntries, type EdsySymbolLookup } from './builds/edsy.js';
 export { fitForRole, fitShip, type FitRole, type FitRequest, type FitResult } from './builds/fit.js';
+
+/*
+ * Frontier's Companion API.
+ *
+ * The only route by which a commander on GeForce Now or any cloud platform exists on this platform
+ * at all: there is no local journal to read, no folder to watch and no process to install, and cAPI
+ * is served by Frontier so it does not care where the game runs.
+ */
+export {
+  CAPI_REFRESH_CEILING_DAYS,
+  authorizeUrl,
+  makePkce,
+  refreshDue,
+  tokenState,
+  type Pkce,
+  type TokenState,
+} from './capi/capi-auth.js';
+export {
+  CapiAuthError,
+  exchangeCode,
+  refreshAccess,
+  type CapiTokens,
+  type CapiFailure,
+} from './capi/capi-token.js';
