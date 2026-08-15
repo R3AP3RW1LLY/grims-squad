@@ -146,4 +146,9 @@ overrides:
   # `>=3.3.17` alone resolved to 6.0.1, and nanoid dropped CommonJS at v4. postcss is CJS and
   # `require`s it, so the bare floor swaps a theoretical hang for a certain ERR_REQUIRE_ESM in the
   # web build. The upper bound is the whole point of this entry.
-  "nanoid@<3.3.17": ">=3.3.17 <4"
+  # ★ FLOOR RAISED 3.3.17 -> 3.3.18 — 2026-08-15 ★
+  #
+  # GHSA-2v37-7h3g-55p8 re-scored the same package: the old pin let 3.3.17 through and that is now
+  # the vulnerable version. Everything below still applies unchanged — including the upper bound,
+  # which is the load-bearing half of this entry.
+  "nanoid@<3.3.18": ">=3.3.18 <4"
