@@ -1466,10 +1466,22 @@ export class ColonyService {
      * it, and a channel post would hand it to everybody — announcing something the visibility
      * setting exists to prevent.
      *
-     * Fire-and-forget, like the squadron notice above it: the project is created by the time this
-     * runs, and no announcement is worth failing a creation over.
+     * ★ AND IT NO LONGER FIRES FROM HERE — SQUADRON OWNER, 2026-08-15 ★
+     *
+     * "we need this to announce with the type of build it is please. even if there is a short delay
+     * in this information please. its very important."
+     *
+     * It cannot name the build type from this path. `buildTypeId` is filled in by the colonisation
+     * sync, which fingerprints the bill of materials against the catalogue — so at this exact
+     * instant it is null, and has been for every project ever posted. The channel has therefore
+     * received "build type not identified yet" every single time, and a hauler learned a system
+     * name and nothing about whether they were being asked for twenty thousand tonnes or two
+     * hundred.
+     *
+     * So the announcement moved to `announcePendingColonyProjects`, swept from the same sync that
+     * does the identifying. It posts the moment the type is known, or after thirty minutes without
+     * it. `announced_at` on the row is what keeps a repeating sweep to exactly one message.
      */
-    void announceColonyProject(this.db, created.id, siteUrl()).catch(() => undefined);
 
     return created;
   }
@@ -1808,6 +1820,21 @@ export class ColonyService {
      */
     if (owner === 'squadron') {
       void announceColonyProject(this.db, projectId, siteUrl(), actorId).catch(() => undefined);
+
+      /*
+       * ★ AND MARK IT ANNOUNCED, OR THE SWEEP POSTS IT AGAIN ★
+       *
+       * A project adopted before its build type was identified is still sitting unannounced. Without
+       * this stamp the sweep would follow the adoption notice with "a new squadron colonisation
+       * project" for the same build, minutes later and out of order.
+       *
+       * Adoption is a deliberate act at a chosen moment, so unlike a creation it announces
+       * immediately rather than waiting for the type: an officer committing the squadron to a build
+       * is the news, and the type is on the linked page.
+       */
+      await db.colonyProject
+        .update({ where: { id: projectId }, data: { announcedAt: new Date() } })
+        .catch(() => undefined);
     }
 
     await db.auditLog.create({

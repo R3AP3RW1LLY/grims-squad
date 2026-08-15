@@ -1,3 +1,4 @@
+import { announcementDue } from '@grims/shared';
 import type { PrismaClient } from './index.js';
 
 /**
@@ -456,6 +457,99 @@ export async function announceColonyProject(
   }
 }
 
+
+/**
+ * Announces the builds that are ready to be announced.
+ *
+ * ★ SQUADRON OWNER, 2026-08-15 ★
+ *
+ * "we need to fix the discord annoucement that is made when we start a new colonization project, we
+ * need this to announce with the type of build it is please. even if there is a short delay in this
+ * information please. its very important."
+ *
+ * ★ WHY THIS IS A SWEEP AND NOT A LINE IN THE CREATE PATH ★
+ *
+ * It used to be a line in the create path, and that is precisely why it never worked. `build_type_id`
+ * is set by the colonisation sync, which fingerprints the project's bill of materials against the
+ * catalogue — so at the instant a project is created it is null, always. Every announcement the
+ * channel has ever received said "build type not identified yet".
+ *
+ * Running from the sync means the type is usually known by the first or second pass. `announcementDue`
+ * holds the decision and the reasoning; this is the query and the write around it.
+ *
+ * ★ THE STAMP IS THE DEDUP ★
+ *
+ * `announce` has no key — it appends to a queue the bot drains. Exactly-once used to come from the
+ * create path being reached exactly once, and a sweep cannot inherit that. `announced_at` is stamped
+ * whether or not the insert succeeded, and that is deliberate: a retry loop around an announcement
+ * that keeps failing would post the backlog all at once the moment it recovered, into a channel
+ * people read.
+ *
+ * Never throws. The projects exist whatever this manages — see the module header.
+ */
+export async function announcePendingColonyProjects(
+  db: PrismaClient,
+  siteUrl: string,
+  now = new Date(),
+): Promise<{ announced: number; waiting: number }> {
+  try {
+    const rows = await db.$queryRaw<
+      Array<{
+        id: string;
+        created_at: Date;
+        build_type_id: string | null;
+        announced_at: Date | null;
+        visibility: string;
+      }>
+    >`
+      SELECT id, created_at, build_type_id, announced_at, visibility::text AS visibility
+        FROM colony_projects
+       WHERE announced_at IS NULL
+       ORDER BY created_at ASC`;
+
+    let announced = 0;
+    let waiting = 0;
+
+    for (const row of rows) {
+      const decision = announcementDue(
+        {
+          createdAt: row.created_at,
+          buildTypeId: row.build_type_id,
+          announcedAt: row.announced_at,
+          visibility: row.visibility,
+        },
+        now,
+      );
+
+      if (!decision.announce) {
+        if (decision.reason === 'waiting') waiting += 1;
+        /*
+         * A private build is skipped every pass, for ever, and that is correct but wasteful — it
+         * would sit in the unannounced index permanently. Stamping it closes the row without ever
+         * having posted it: the column means "this project's announcement is settled", not "a
+         * message was sent".
+         */
+        if (decision.reason === 'private') {
+          await db.$executeRaw`
+            UPDATE colony_projects SET announced_at = ${now} WHERE id = ${row.id}::uuid`;
+        }
+        continue;
+      }
+
+      await announceColonyProject(db, row.id, siteUrl);
+
+      // Stamped even if the announcement failed. See the header: a backlog that eventually floods
+      // the channel is worse than one message nobody got.
+      await db.$executeRaw`
+        UPDATE colony_projects SET announced_at = ${now} WHERE id = ${row.id}::uuid`;
+      announced += 1;
+    }
+
+    return { announced, waiting };
+  } catch {
+    return { announced: 0, waiting: 0 };
+  }
+}
 
 /* ────────────────────────────────────── companion app releases ── */
 

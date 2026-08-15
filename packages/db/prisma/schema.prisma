@@ -2409,6 +2409,20 @@ model ColonyProject {
   /// TYPED when they posted, and this is what the site's requirement actually fingerprints to. Two
   /// fields with one name is how they get confused for each other, and Prisma refuses it outright.
   identifiedType ColonyBuildType? @relation(fields: [buildTypeId], references: [id], onDelete: SetNull)
+  /// When the squadron was told about this build in Discord. Null means never.
+  ///
+  /// ★ WHY A COLUMN AND NOT JUST "ANNOUNCE ON CREATE" (2026-08-15) ★
+  ///
+  /// The announcement used to fire from the create path, where `buildTypeId` above is ALWAYS null —
+  /// it is filled in later, by the sync that fingerprints the bill of materials. So every message
+  /// the channel ever received said "build type not identified yet", and a hauler learned a system
+  /// name and nothing about whether they were being asked for twenty thousand tonnes or two hundred.
+  ///
+  /// The owner asked for the type and accepted a delay for it, so the announcement became a sweep
+  /// that waits for identification. `announce()` has no dedup key — exactly-once was a property of
+  /// the create path being reached once — so a repeating sweep needs this to replace it, or the
+  /// channel gets the same build posted every few minutes for ever.
+  announcedAt DateTime? @map("announced_at") @db.Timestamptz(6)
   /// Plan entries that became this project. A planned site links to the real build once it exists,
   /// so a plan can show its own progress rather than only its intention.
   plannedAs      ColonyPlanSite[]
