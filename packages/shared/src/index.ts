@@ -34,6 +34,8 @@ export { needsFreshness } from './needs-freshness.js';
 export { nextPoll, initialPoll, START_MS, ACTIVE_FLOOR_MS, IDLE_MS, type PollState } from './capi-cadence.js';
 export { resolveClaim, type ClaimOutcome, type ExistingClaim, type ClaimMethod } from './cmdr-claim.js';
 export type { Freshness, FreshnessVerdict } from './needs-freshness.js';
+export { rankBuySources } from './buy-priority.js';
+export type { BuyContext, BuySource } from './buy-priority.js';
 export {
   colonyStatusOf,
   matchesColonyFilter,
