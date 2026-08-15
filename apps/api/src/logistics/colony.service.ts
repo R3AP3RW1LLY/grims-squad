@@ -95,6 +95,10 @@ export interface ProjectRow {
   readonly shareToken: string | null;
   readonly isPriority: boolean;
   readonly completedAt: Date | null;
+  /** Given up on. See `colonyStatusOf` — abandoned outranks complete where both are set. */
+  readonly abandonedAt: Date | null;
+  /** Why an officer gave up on it. Shown to the poster, who is owed a reason. */
+  readonly abandonedNote: string | null;
   readonly postedBy: string | null;
   readonly postedById: string;
   readonly updatedAt: Date;
@@ -508,7 +512,7 @@ export class ColonyService {
    */
   async board(
     owner: ColonyOwner | 'all',
-    caller: { userId: string } | null,
+    caller: { userId: string; canManage?: boolean } | null,
   ): Promise<readonly ProjectRow[]> {
     const rows = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
       `SELECT p.id, p.owner::text AS owner, p.title, p.system_name, p.station_name, p.build_type,
@@ -519,7 +523,7 @@ export class ColonyService {
               bt.pad_size AS build_pad, bt.location AS build_location,
               bt.total_tonnes AS build_total,
               p.notes, p.visibility::text AS visibility, p.share_token, p.is_priority,
-              p.completed_at, p.posted_by_id, p.updated_at,
+              p.completed_at, p.abandoned_at, p.abandoned_note, p.posted_by_id, p.updated_at,
               u.display_name AS posted_by,
               COALESCE(SUM(n.remaining), 0)::bigint AS remaining,
               COALESCE(SUM(n.required), 0)::bigint  AS required,
@@ -581,11 +585,32 @@ export class ColonyService {
             OR ($2::uuid IS NOT NULL AND p.visibility = 'squadron')
             OR ($2::uuid IS NOT NULL AND p.posted_by_id = $2::uuid)
           )
+          /*
+           * ★ ABANDONED BUILDS ARE HIDDEN HERE TOO, AND THIS IS NOT REDUNDANT ★
+           *
+           * Squadron owner, 2026-08-15: "abandond projects should be hidden to all other members
+           * except the project owner please."
+           *
+           * The ACL extension carries the same rule, and it does NOT apply to this query. A raw
+           * query goes straight to the driver, so the Prisma extension never sees it. That is
+           * exactly why the visibility clause above is hand-written as well, and the
+           * abandonment rule has to be written beside it or the main board would keep listing
+           * abandoned projects to everybody while every other route hid them.
+           *
+           * $3 is the caller's COLONY_MANAGE. An officer sees them: a state only its author can see
+           * is one nobody can audit, including the officer who set it.
+           */
+          AND (
+            p.abandoned_at IS NULL
+            OR $3::boolean
+            OR ($2::uuid IS NOT NULL AND p.posted_by_id = $2::uuid)
+          )
         GROUP BY p.id, u.display_name, bt.id, sys.x, sys.y, sys.z
         -- Priority first, then live before finished, then most recently touched.
         ORDER BY p.is_priority DESC, (p.completed_at IS NOT NULL), p.updated_at DESC`,
       owner,
       caller?.userId ?? null,
+      caller?.canManage === true,
     );
 
     return rows.map((r) => this.#row(r));
@@ -671,6 +696,15 @@ export class ColonyService {
         -- token that still worked after the member set the project back to private would be a link
         -- they believed they had taken back.
         WHERE p.share_token = $1 AND p.visibility = 'public'
+          /*
+           * ★ AND NOT ABANDONED — 2026-08-15 ★
+           *
+           * Publishing a build is a member sharing something they are working on. Giving up on it
+           * is not a decision to keep serving that page to the internet, and the share link is the
+           * one route with no session behind it at all: there is no poster to recognise and no
+           * officer to allow, so the answer here is simply no.
+           */
+          AND p.abandoned_at IS NULL
         GROUP BY p.id, u.display_name, bt.id`,
       token,
     );
@@ -709,6 +743,8 @@ export class ColonyService {
       shareToken: r['share_token'] === null ? null : String(r['share_token']),
       isPriority: r['is_priority'] === true,
       completedAt: (r['completed_at'] as Date | null) ?? null,
+      abandonedAt: (r['abandoned_at'] as Date | null) ?? null,
+      abandonedNote: r['abandoned_note'] == null ? null : String(r['abandoned_note']),
       postedBy: r['posted_by'] === null ? null : String(r['posted_by']),
       postedById: String(r['posted_by_id']),
       updatedAt: r['updated_at'] as Date,

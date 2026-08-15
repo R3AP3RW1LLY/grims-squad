@@ -104,7 +104,14 @@ export class ColonyController {
       caller === undefined ? null : await this.position.lastKnown(caller.userId).catch(() => null);
 
     return {
-      projects: await this.colony.board(scope, caller === undefined ? null : { userId: caller.userId }),
+      projects: await this.colony.board(
+        scope,
+        caller === undefined
+          ? null
+          : // The officer flag rides with the caller because the board is raw SQL and cannot
+            // consult the ACL extension — see the abandonment clause in `board`.
+            { userId: caller.userId, canManage: has(mask, Permission.COLONY_MANAGE) },
+      ),
       you:
         you === null
           ? null
