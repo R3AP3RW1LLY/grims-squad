@@ -129,7 +129,12 @@ REQUIRED=(
   # FDEV_CAPI_REDIRECT_URI must match what is registered with Frontier character for character; a
   # mismatch is rejected at the authorise step, before any of our code runs, with an error the
   # member sees and we never do.
-  FDEV_CAPI_CLIENT_ID FDEV_CAPI_REDIRECT_URI
+  #
+  # FDEV_CAPI_SHARED_KEY is included because Frontier issued one and it is set. Its exact role in
+  # the exchange is confirmed against their documentation when the token step lands — required here
+  # so it cannot go missing between now and then, which is the failure this whole list exists to
+  # prevent.
+  FDEV_CAPI_CLIENT_ID FDEV_CAPI_REDIRECT_URI FDEV_CAPI_SHARED_KEY
   # ★ THE ANNOUNCEMENT PIPELINE'S THREE SETTINGS, REQUIRED FROM NOW ON ★
   #
   # Squadron owner, 2026-08-04: the announcement wiring must be part of the
