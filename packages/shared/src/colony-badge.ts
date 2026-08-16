@@ -20,6 +20,13 @@ export interface CountableProject {
   readonly owner: 'squadron' | 'personal';
   /** ISO timestamp when the build was finished, or null while it still wants hauling. */
   readonly completedAt: string | null;
+  /**
+   * ISO timestamp when an officer gave up on it, or null.
+   *
+   * Optional because two callers construct these rows from payloads that predate the column, and a
+   * required field would make an older companion build stop counting anything at all.
+   */
+  readonly abandonedAt?: string | null | undefined;
 }
 
 export interface OpenProjectCounts {
@@ -35,7 +42,21 @@ export interface OpenProjectCounts {
  * it — the opposite of the bug this fixes, and the worse of the two.
  */
 function finished(project: CountableProject): boolean {
-  return typeof project.completedAt === 'string' && project.completedAt.trim() !== '';
+  return stamped(project.completedAt) || stamped(project.abandonedAt);
+}
+
+/**
+ * ★ ABANDONED COUNTS AS CLOSED, AND MISSING THIS WAS A REAL BUG ★
+ *
+ * The badge says how many builds still want hauling. A build an officer gave up on wants nothing —
+ * so counting it sends members to a sidebar number that promises work which does not exist, on both
+ * the website and the app, from the same shared function.
+ *
+ * It is the same complaint that produced the completion safeguard, arriving through a different
+ * door: "causes our members to go buy materials for a project thats completed".
+ */
+function stamped(at: string | null | undefined): boolean {
+  return typeof at === 'string' && at.trim() !== '';
 }
 
 /** Projects still wanting hauling, split by who owns them. */

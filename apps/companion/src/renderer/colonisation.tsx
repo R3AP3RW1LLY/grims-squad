@@ -45,6 +45,20 @@ import { CALLSIGN_LENGTH, formatCallsign, normaliseCallsign } from '@grims/share
 import { needsFreshness, type FreshnessVerdict } from '@grims/shared/needs-freshness';
 import { groupByCategory } from '@grims/shared/commodity-category';
 import { rankOpportunities, type Opportunity } from '@grims/shared/colony-opportunity';
+/*
+ * SUBPATH, never the barrel: this module is browser code and the barrel reaches `node:crypto`.
+ * `renderer-imports.spec.ts` fails the build if that rule is broken.
+ *
+ * The website filters its boards with these exact functions. Two implementations of "is this build
+ * still wanting hauling" is how the app and the site start disagreeing about what a member sees.
+ */
+import {
+  COLONY_STATUS_FILTERS,
+  DEFAULT_COLONY_FILTER,
+  colonyStatusOf,
+  matchesColonyFilter,
+  type ColonyStatusFilter,
+} from '@grims/shared/colony-status';
 import { SystemPicker } from './system-picker.js';
 
 /**
@@ -135,6 +149,8 @@ declare global {
       reopen(id: string): Promise<Answer<{ ok: true }>>;
       remove(id: string): Promise<Answer<{ ok: true }>>;
       priority(id: string, on: boolean): Promise<Answer<{ ok: true }>>;
+      /** Giving up on a build, or taking that back. Officers only — the hub decides, not this. */
+      abandoned(id: string, on: boolean, note?: string): Promise<Answer<{ ok: true }>>;
 
       /** Fleet carriers helping with a build, and what each is holding. */
       carriers(id: string, q: string): Promise<Answer<{ carriers: CarrierMatch[] }>>;
@@ -365,6 +381,20 @@ const BOARD_SORTS = [
 
 type BoardSort = (typeof BOARD_SORTS)[number]['key'];
 
+/** The JSON board sends timestamps as strings; the shared rule works in Dates. */
+const asDate = (raw: string | null | undefined): Date | null => {
+  if (typeof raw !== 'string' || raw.trim() === '') return null;
+  const at = new Date(raw);
+  return Number.isNaN(at.getTime()) ? null : at;
+};
+
+const FILTER_LABELS: Record<ColonyStatusFilter, string> = {
+  'in-progress': 'In progress',
+  complete: 'Complete',
+  abandoned: 'Abandoned',
+  all: 'All',
+};
+
 export function ColonyBoardPage({
   owner,
   projects,
@@ -381,6 +411,12 @@ export function ColonyBoardPage({
 }): JSX.Element {
   const [openId, setOpenId] = useState<string | null>(null);
   const [sort, setSort] = useState<BoardSort>('best');
+  /*
+   * In progress by default, matching the website. The filter exists because the board fills with
+   * finished builds — defaulting to "all" would leave the screen exactly as it is today and make
+   * the filter something every member sets on every visit.
+   */
+  const [filter, setFilter] = useState<ColonyStatusFilter>(DEFAULT_COLONY_FILTER);
 
   if (openId !== null) {
     /*
@@ -449,10 +485,43 @@ export function ColonyBoardPage({
    * do tonight" — but the board is the record of what the squadron is doing, and a project
    * vanishing the moment it completes would read as deletion.
    */
-  const shown = [
+  const ordered = [
     ...sorted.map((o) => byId.get(o.id)).filter((p): p is ColonyProject => p !== undefined),
     ...mine.filter((p) => !notes.has(p.id)),
   ];
+
+  /*
+   * ★ THE VIEW FILTER — SQUADRON OWNER, 2026-08-15 ★
+   *
+   * "we need to add view filters one for inprogress and one for complete"
+   *
+   * Counted over the WHOLE board and filtered afterwards. Counting the filtered list would make
+   * every tab report the size of the tab already open, which looks right until somebody presses a
+   * different one.
+   */
+  const statusOf = (p: ColonyProject) =>
+    colonyStatusOf({ completedAt: asDate(p.completedAt), abandonedAt: asDate(p.abandonedAt) });
+
+  const counts = ordered.reduce(
+    (acc, p) => ({ ...acc, [statusOf(p)]: acc[statusOf(p)] + 1, all: acc.all + 1 }),
+    { 'in-progress': 0, complete: 0, abandoned: 0, all: 0 } as Record<ColonyStatusFilter, number>,
+  );
+
+  const shown = ordered.filter((p) =>
+    matchesColonyFilter(
+      { completedAt: asDate(p.completedAt), abandonedAt: asDate(p.abandonedAt) },
+      filter,
+    ),
+  );
+
+  /*
+   * An abandoned build reaches this app only when the member may see it — the hub decides that. A
+   * tab that is permanently empty for most of the squadron teaches people the controls do not work,
+   * so it is offered only to somebody who has one to look at.
+   */
+  const filterTabs = COLONY_STATUS_FILTERS.filter(
+    (k) => k !== 'abandoned' || counts.abandoned > 0,
+  ).map((key) => ({ key, label: FILTER_LABELS[key] + ' ' + String(counts[key]) }));
 
   return (
     <div>
@@ -464,6 +533,13 @@ export function ColonyBoardPage({
       <Section title={owner === 'squadron' ? 'Squadron projects' : 'Members’ projects'}>
         {mine.length === 0 ? null : (
           <div style={{ marginBottom: '10px' }}>
+            <Tabs
+              tabs={filterTabs}
+              current={filter}
+              onChange={setFilter}
+              label="Show which builds"
+            />
+            <div style={{ height: '6px' }} />
             <Tabs
               tabs={BOARD_SORTS}
               current={sort}
@@ -830,8 +906,18 @@ function Board({
           style={{
             cursor: 'pointer',
             padding: '12px 14px',
-            // Priority builds keep their brighter edge. It is the only thing distinguishing them.
-            ...(p.isPriority ? { borderColor: C.orange } : {}),
+            /*
+             * ★ ABANDONED WINS THE EDGE — 2026-08-15 ★
+             *
+             * Read before priority, because a build that was the squadron's current effort and then
+             * abandoned is exactly the row somebody must not mistake for live work. Both stamps can
+             * be set; the more recent decision is the one that matters.
+             */
+            ...(p.abandonedAt !== null
+              ? { borderColor: C.bad, opacity: 0.72 }
+              : p.isPriority
+                ? { borderColor: C.orange }
+                : {}),
           }}
         >
           <div
@@ -849,9 +935,19 @@ function Board({
                   CURRENT EFFORT
                 </span>
               ) : null}
-              {p.completedAt !== null ? (
+              {p.completedAt !== null && p.abandonedAt === null ? (
                 <span style={{ marginLeft: '8px', fontSize: '9px', letterSpacing: '0.18em', color: C.good }}>
                   COMPLETE
+                </span>
+              ) : null}
+              {/*
+                Its own word, in red, rather than a shade of COMPLETE. "Finished" and "given up on"
+                are opposite instructions about whether to load a hold, and a member scanning the
+                board has to tell them apart at a glance.
+              */}
+              {p.abandonedAt !== null ? (
+                <span style={{ marginLeft: '8px', fontSize: '9px', letterSpacing: '0.18em', color: C.bad }}>
+                  ABANDONED
                 </span>
               ) : null}
               {/*
@@ -1244,13 +1340,19 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
           <Stat
             label="Status"
             value={
-              project.completedAt !== null
-                ? 'Complete'
-                : project.isPriority
-                  ? 'Current effort'
-                  : 'Live'
+              project.abandonedAt !== null
+                ? 'Abandoned'
+                : project.completedAt !== null
+                  ? 'Complete'
+                  : project.isPriority
+                    ? 'Current effort'
+                    : 'Live'
             }
-            {...(project.completedAt !== null ? { tone: C.cyan } : {})}
+            {...(project.abandonedAt !== null
+              ? { tone: C.bad }
+              : project.completedAt !== null
+                ? { tone: C.cyan }
+                : {})}
           />
         </div>
       </Card>
@@ -2922,6 +3024,7 @@ function ProjectActions({
   if (!mayDirect && !can.manage) return null;
 
   const closed = project.completedAt !== null;
+  const abandoned = project.abandonedAt !== null;
 
   const act = (fn: () => Promise<Answer<unknown>>, gone = false): void => {
     setBusy(true);
@@ -2991,6 +3094,40 @@ function ProjectActions({
             }
           >
             {closed ? 'Reopen' : 'Close this build'}
+          </Button>
+        ) : null}
+
+        {/*
+          ★ GIVING UP ON A BUILD — SQUADRON OWNER, 2026-08-15 ★
+
+          "we also need to allow admins to mark builds as abandoned and not always just as complete"
+
+          The third ending, because the other two were both false for a build the squadron walked
+          away from: left open it keeps asking for materials nobody will haul, and closed it writes
+          a station that was never finished into the record the squadron measures itself by.
+
+          `can.manage`, not `mayDirect` — abandoning takes the build off everybody else's board and
+          stops work the squadron may have committed playing time to, which was never one member's
+          call. The hub checks again; this only decides what to draw.
+        */}
+        {can.manage ? (
+          <Button
+            disabled={busy}
+            onClick={() => {
+              if (abandoned) {
+                act(() => window.colony.abandoned(project.id, false));
+                return;
+              }
+              const note = window.prompt(
+                'Why is this build being abandoned? The member who posted it will see this.',
+                '',
+              );
+              // Cancelling is the officer changing their mind, not an empty reason.
+              if (note === null) return;
+              act(() => window.colony.abandoned(project.id, true, note));
+            }}
+          >
+            {abandoned ? 'Bring this build back' : 'Abandon this build'}
           </Button>
         ) : null}
 

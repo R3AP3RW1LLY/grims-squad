@@ -48,6 +48,7 @@ export function ProjectActions({
    */
   const mayDirect = project.owner === 'squadron' ? canManage : isPoster;
   const closed = project.completedAt !== null;
+  const abandoned = project.abandonedAt !== null;
 
   if (!mayDirect && !canManage) return null;
 
@@ -129,6 +130,57 @@ export function ProjectActions({
             It&rsquo;s already built
           </button>
         )}
+
+        {/*
+          ★ GIVING UP ON A BUILD — SQUADRON OWNER, 2026-08-15 ★
+
+          "we also need to allow admins to mark builds as abandoned and not always just as complete"
+
+          The third ending, and it exists because the other two were both lies for a build the
+          squadron walked away from. Leaving it open keeps asking for materials nobody will haul;
+          closing it writes a station that was never finished into the record the squadron measures
+          itself by — and closing it was, until now, the only button there was.
+
+          COLONY_MANAGE rather than the poster, matching adoption: abandoning hides the build from
+          everybody else and stops work the squadron may have committed playing time to, which was
+          never one member's call. The server checks this again; this only decides what to draw.
+
+          The reason is asked for rather than required. An officer who has one should be able to
+          give it — the poster is owed it — and one who is tidying up a duplicate should not be made
+          to invent prose to finish the job.
+        */}
+        {canManage ? (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              if (abandoned) {
+                void call('/abandoned', 'PATCH', { abandoned: false });
+                return;
+              }
+              const note = window.prompt(
+                'Why is this build being abandoned? The member who posted it will see this.',
+                '',
+              );
+              // A cancelled prompt returns null, and that is the officer changing their mind — not
+              // an empty reason. Only a real answer, including a deliberate blank, goes through.
+              if (note === null) return;
+              void call('/abandoned', 'PATCH', { abandoned: true, note });
+            }}
+            className={
+              abandoned
+                ? `${BTN} border-[var(--color-border-hairline)] text-[var(--color-text-secondary)] hover:border-[var(--color-border-active)] hover:text-[var(--color-text-primary)]`
+                : `${BTN} border-[var(--color-semantic-hostile)] text-[var(--color-semantic-hostile-bright)] hover:bg-[color-mix(in_srgb,var(--color-semantic-hostile)_10%,transparent)]`
+            }
+            title={
+              abandoned
+                ? 'Put this build back on the boards.'
+                : 'Take this build off the boards. Only you, other officers and the member who posted it will see it.'
+            }
+          >
+            {abandoned ? 'Bring this build back' : 'Abandon this build'}
+          </button>
+        ) : null}
 
         {mayDirect ? (
           <button

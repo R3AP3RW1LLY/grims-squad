@@ -45,6 +45,14 @@ export function ProjectBoard({
       {projects.map((p) => {
         const progress = pct(p);
         const done = p.completedAt !== null;
+        /*
+         * ★ ABANDONED IS READ FIRST, AND OUTRANKS COMPLETE ★
+         *
+         * Both stamps can be set: the ordinary case is a build marked complete and then corrected
+         * by an officer who knows it never was. Drawing "complete" for that row would undo the very
+         * correction the officer made, on the board everybody reads.
+         */
+        const abandoned = p.abandonedAt !== null && p.abandonedAt !== undefined;
         const note = notes?.get(p.id);
 
         return (
@@ -59,7 +67,11 @@ export function ProjectBoard({
              * globals.css the whole time and were simply not applied here.
              */
             className={`panel panel-interactive p-4 ${
-              p.isPriority ? 'border-[var(--color-brand-orange)]' : ''
+              abandoned
+                ? 'border-[var(--color-semantic-hostile)] opacity-70'
+                : p.isPriority
+                  ? 'border-[var(--color-brand-orange)]'
+                  : ''
             }`}
           >
             <header className="flex flex-wrap items-baseline justify-between gap-2">
@@ -75,12 +87,33 @@ export function ProjectBoard({
                     current effort
                   </span>
                 ) : null}
-                {done ? (
+                {done && !abandoned ? (
                   <span className="ml-2 font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--color-semantic-success)]">
                     complete
                   </span>
                 ) : null}
+                {/*
+                  Red, and its own word rather than a shade of "complete". A member scanning the
+                  board has to be able to tell "this is finished" from "this was given up on" at a
+                  glance — they are opposite instructions about whether to load a hold.
+                */}
+                {abandoned ? (
+                  <span className="ml-2 font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--color-semantic-hostile)]">
+                    abandoned
+                  </span>
+                ) : null}
               </h3>
+              {/*
+                ★ THE REASON, WHERE THE POSTER WILL ACTUALLY SEE IT ★
+
+                Somebody's build was closed out from under them by an officer. Putting the reason on
+                a detail page they have no reason to open again would be telling them nowhere.
+              */}
+              {!abandoned || p.abandonedNote === null ? null : (
+                <p className="m-0 basis-full text-[11px] text-[var(--color-semantic-hostile-bright)]">
+                  {p.abandonedNote}
+                </p>
+              )}
               <p className="m-0 flex flex-wrap items-center gap-x-1 text-[11px] text-[var(--color-text-secondary)]">
                 <span>{p.systemName}</span>
                 {/*

@@ -95,6 +95,10 @@ export interface ProjectRow {
   readonly shareToken: string | null;
   readonly isPriority: boolean;
   readonly completedAt: Date | null;
+  /** Given up on. See `colonyStatusOf` — abandoned outranks complete where both are set. */
+  readonly abandonedAt: Date | null;
+  /** Why an officer gave up on it. Shown to the poster, who is owed a reason. */
+  readonly abandonedNote: string | null;
   readonly postedBy: string | null;
   readonly postedById: string;
   readonly updatedAt: Date;
@@ -508,7 +512,7 @@ export class ColonyService {
    */
   async board(
     owner: ColonyOwner | 'all',
-    caller: { userId: string } | null,
+    caller: { userId: string; canManage?: boolean } | null,
   ): Promise<readonly ProjectRow[]> {
     const rows = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
       `SELECT p.id, p.owner::text AS owner, p.title, p.system_name, p.station_name, p.build_type,
@@ -519,7 +523,7 @@ export class ColonyService {
               bt.pad_size AS build_pad, bt.location AS build_location,
               bt.total_tonnes AS build_total,
               p.notes, p.visibility::text AS visibility, p.share_token, p.is_priority,
-              p.completed_at, p.posted_by_id, p.updated_at,
+              p.completed_at, p.abandoned_at, p.abandoned_note, p.posted_by_id, p.updated_at,
               u.display_name AS posted_by,
               COALESCE(SUM(n.remaining), 0)::bigint AS remaining,
               COALESCE(SUM(n.required), 0)::bigint  AS required,
@@ -581,11 +585,32 @@ export class ColonyService {
             OR ($2::uuid IS NOT NULL AND p.visibility = 'squadron')
             OR ($2::uuid IS NOT NULL AND p.posted_by_id = $2::uuid)
           )
+          /*
+           * ★ ABANDONED BUILDS ARE HIDDEN HERE TOO, AND THIS IS NOT REDUNDANT ★
+           *
+           * Squadron owner, 2026-08-15: "abandond projects should be hidden to all other members
+           * except the project owner please."
+           *
+           * The ACL extension carries the same rule, and it does NOT apply to this query. A raw
+           * query goes straight to the driver, so the Prisma extension never sees it. That is
+           * exactly why the visibility clause above is hand-written as well, and the
+           * abandonment rule has to be written beside it or the main board would keep listing
+           * abandoned projects to everybody while every other route hid them.
+           *
+           * $3 is the caller's COLONY_MANAGE. An officer sees them: a state only its author can see
+           * is one nobody can audit, including the officer who set it.
+           */
+          AND (
+            p.abandoned_at IS NULL
+            OR $3::boolean
+            OR ($2::uuid IS NOT NULL AND p.posted_by_id = $2::uuid)
+          )
         GROUP BY p.id, u.display_name, bt.id, sys.x, sys.y, sys.z
         -- Priority first, then live before finished, then most recently touched.
         ORDER BY p.is_priority DESC, (p.completed_at IS NOT NULL), p.updated_at DESC`,
       owner,
       caller?.userId ?? null,
+      caller?.canManage === true,
     );
 
     return rows.map((r) => this.#row(r));
@@ -627,7 +652,18 @@ export class ColonyService {
     const wanted = marketId.toString();
     return (
       (await this.board('all', caller)).find(
-        (p) => p.marketId === wanted && p.completedAt === null,
+        /*
+         * ★ AND NOT ABANDONED — 2026-08-15 ★
+         *
+         * `board` already hides abandoned builds from members who may not see them, so for most
+         * callers this changes nothing. It changes everything for the POSTER: their own abandoned
+         * project is visible to them by design, and without this line docking at that market would
+         * still announce a live build to haul for.
+         *
+         * That is the complaint this whole third state exists to answer — somebody filling a hold
+         * for a project nobody is building any more.
+         */
+        (p) => p.marketId === wanted && p.completedAt === null && p.abandonedAt === null,
       ) ?? null
     );
   }
@@ -671,6 +707,15 @@ export class ColonyService {
         -- token that still worked after the member set the project back to private would be a link
         -- they believed they had taken back.
         WHERE p.share_token = $1 AND p.visibility = 'public'
+          /*
+           * ★ AND NOT ABANDONED — 2026-08-15 ★
+           *
+           * Publishing a build is a member sharing something they are working on. Giving up on it
+           * is not a decision to keep serving that page to the internet, and the share link is the
+           * one route with no session behind it at all: there is no poster to recognise and no
+           * officer to allow, so the answer here is simply no.
+           */
+          AND p.abandoned_at IS NULL
         GROUP BY p.id, u.display_name, bt.id`,
       token,
     );
@@ -709,6 +754,8 @@ export class ColonyService {
       shareToken: r['share_token'] === null ? null : String(r['share_token']),
       isPriority: r['is_priority'] === true,
       completedAt: (r['completed_at'] as Date | null) ?? null,
+      abandonedAt: (r['abandoned_at'] as Date | null) ?? null,
+      abandonedNote: r['abandoned_note'] == null ? null : String(r['abandoned_note']),
       postedBy: r['posted_by'] === null ? null : String(r['posted_by']),
       postedById: String(r['posted_by_id']),
       updatedAt: r['updated_at'] as Date,
@@ -1466,10 +1513,22 @@ export class ColonyService {
      * it, and a channel post would hand it to everybody — announcing something the visibility
      * setting exists to prevent.
      *
-     * Fire-and-forget, like the squadron notice above it: the project is created by the time this
-     * runs, and no announcement is worth failing a creation over.
+     * ★ AND IT NO LONGER FIRES FROM HERE — SQUADRON OWNER, 2026-08-15 ★
+     *
+     * "we need this to announce with the type of build it is please. even if there is a short delay
+     * in this information please. its very important."
+     *
+     * It cannot name the build type from this path. `buildTypeId` is filled in by the colonisation
+     * sync, which fingerprints the bill of materials against the catalogue — so at this exact
+     * instant it is null, and has been for every project ever posted. The channel has therefore
+     * received "build type not identified yet" every single time, and a hauler learned a system
+     * name and nothing about whether they were being asked for twenty thousand tonnes or two
+     * hundred.
+     *
+     * So the announcement moved to `announcePendingColonyProjects`, swept from the same sync that
+     * does the identifying. It posts the moment the type is known, or after thirty minutes without
+     * it. `announced_at` on the row is what keeps a repeating sweep to exactly one message.
      */
-    void announceColonyProject(this.db, created.id, siteUrl()).catch(() => undefined);
 
     return created;
   }
@@ -1708,6 +1767,75 @@ export class ColonyService {
   }
 
   /**
+   * Gives up on a build, or takes that back.
+   *
+   * ★ SQUADRON OWNER, 2026-08-15 ★
+   *
+   * "we also need to allow admins to mark builds as abandoned and not always just as complete."
+   *
+   * ★ WHY THIS IS NOT `remove` AND NOT `markComplete` ★
+   *
+   * `remove` refuses once anybody has hauled to a project, because the ledger is a record of what
+   * real people carried. That is exactly the project most likely to be abandoned — one the squadron
+   * put a fortnight into and then thought better of — so delete is unavailable precisely when this
+   * is needed.
+   *
+   * `markComplete` is the button people have been using instead, and it enters a station that was
+   * never finished into the record the squadron measures itself by.
+   *
+   * So this is a third ending, and it keeps the ledger intact: the deliveries happened, whatever
+   * became of the site.
+   *
+   * ★ COLONY_MANAGE, LIKE ADOPTING — NOT THE POSTER ★
+   *
+   * Abandoning a build hides it from every other member, which stops work the squadron may have
+   * committed playing time to. That was never one member's to decide, the same reasoning that keeps
+   * `setPriority` and `setOwner` with officers. `#mayDirect` already encodes it.
+   */
+  async setAbandoned(input: {
+    projectId: string;
+    callerId: string;
+    mask: bigint;
+    abandoned: boolean;
+    note?: string | undefined;
+  }): Promise<void> {
+    await this.#mayDirect(input.projectId, input.callerId, input.mask);
+
+    const db = this.acl.forSystem('abandoning a colonisation project');
+    const note = input.note?.trim();
+
+    await db.colonyProject.update({
+      where: { id: input.projectId },
+      data: input.abandoned
+        ? {
+            abandonedAt: new Date(),
+            abandonedById: input.callerId,
+            abandonedNote: note === undefined || note === '' ? null : note,
+          }
+        : /*
+           * Cleared together. Leaving the officer and the note behind on a project that is live
+           * again would leave a reason attached to a decision that was reversed — and the next
+           * officer reading the row would find an author for a state it is not in.
+           */
+          { abandonedAt: null, abandonedById: null, abandonedNote: null },
+    });
+
+    await db.auditLog
+      .create({
+        data: {
+          actorType: 'user',
+          actorId: input.callerId,
+          action: input.abandoned ? 'colony.project.abandon' : 'colony.project.unabandon',
+          targetType: 'colony_project',
+          targetId: input.projectId,
+          before: {},
+          after: note === undefined || note === '' ? {} : { note },
+        },
+      })
+      .catch(() => undefined);
+  }
+
+  /**
    * Deletes a project outright.
    *
    * ★ REFUSED ONCE ANYBODY HAS HAULED TO IT, AND THAT IS DELIBERATE ★
@@ -1826,6 +1954,23 @@ export class ColonyService {
         },
       },
     }).catch(() => undefined);
+
+    /*
+     * ★ AND MARK IT ANNOUNCED, OR THE SWEEP POSTS IT AGAIN ★
+     *
+     * A project adopted before its build type was identified is still sitting unannounced, so
+     * `announcePendingColonyProjects` would follow the adoption notice with "a new squadron
+     * colonisation project" for the same build, minutes later and out of order.
+     *
+     * Adoption announces immediately rather than waiting for the type, unlike a creation: an
+     * officer committing the squadron to a build is itself the news, and the type is on the page
+     * the message links to.
+     */
+    if (owner === 'squadron') {
+      await db.colonyProject
+        .update({ where: { id: projectId }, data: { announcedAt: new Date() } })
+        .catch(() => undefined);
+    }
 
     return { owner };
   }

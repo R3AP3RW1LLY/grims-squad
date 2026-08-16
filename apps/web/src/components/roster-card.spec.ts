@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { isPlayingNow, nicknameNote, titleRoles } from './roster-card';
+import { isPlayingNow, nicknameNote, titleRoles, frontierBadge } from './roster-card';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -211,6 +211,93 @@ describe('the verification badge', () => {
 
   it('MANDATORY: carries a glyph as well as a colour', () => {
     expect(source).toMatch(/verified \? '✓' : '○'/);
+  });
+});
+
+/**
+ * The SECOND badge — squadron owner, 2026-08-15.
+ *
+ * "add a badge to the Roster page per user that shows Frontier Verified too
+ *  please like we have for Inara verified"
+ *
+ * ★ THE SAME PILL, A DIFFERENT CLAIM ★
+ *
+ * Inara's badge asserts a commander name AND squadron membership. Frontier's
+ * asserts the name ALONE, proven against Frontier itself. Squadron verification
+ * via cAPI was dropped from scope, so nothing this badge says — on the card or in
+ * its tooltip — may imply the squadron half.
+ */
+describe('the Frontier verified badge', () => {
+  it('MANDATORY: says FRONTIER, never that the squadron was confirmed', () => {
+    /*
+     * The whole risk of a second badge that looks like the first. A reader who
+     * takes "verified" to mean the same thing in both places has been told
+     * something we did not check, by a platform that has no way to check it.
+     */
+    const verified = frontierBadge('verified');
+
+    expect(verified.label).toBe('Frontier verified');
+    expect(verified.title).toMatch(/says nothing about/i);
+    expect(verified.title).not.toMatch(/confirms.{0,40}squadron/i);
+  });
+
+  it('MANDATORY: an expired grant is never rendered as verified', () => {
+    /*
+     * Frontier honours a link for 25 days and no longer. Past that we cannot ask
+     * Frontier anything about this member, and a badge still reading "verified"
+     * would be the platform vouching for something it can no longer check.
+     */
+    const expired = frontierBadge('expired');
+
+    expect(expired.label).not.toMatch(/^Frontier verified$/);
+    expect(expired.label).toBe('Frontier expired');
+    expect(expired.tone).toBe('warn');
+  });
+
+  it('MANDATORY: expired is DISTINCT from never linked', () => {
+    /*
+     * ★ WHY THIS IS NOT A BOOLEAN ★
+     *
+     * Connecting Frontier is mandatory and the grant lasts 25 days, so the whole
+     * squadron crosses that ceiling roughly monthly, forever. Folding "proved it
+     * three weeks ago, needs thirty seconds to reconnect" into the same answer as
+     * "never linked" would make most of the roster read as unverified on a
+     * rolling basis, with nothing saying that an action exists.
+     */
+    expect(frontierBadge('expired').label).not.toBe(frontierBadge('none').label);
+    expect(frontierBadge('expired').glyph).not.toBe(frontierBadge('none').glyph);
+  });
+
+  it('MANDATORY: the three states are told apart by SHAPE, not only by colour', () => {
+    // Tone is a colour and colour is not readable to everybody. Every state
+    // carries its own glyph and its own words as well.
+    const glyphs = (['verified', 'expired', 'none'] as const).map((s) => frontierBadge(s).glyph);
+    expect(new Set(glyphs).size).toBe(3);
+
+    const labels = (['verified', 'expired', 'none'] as const).map((s) => frontierBadge(s).label);
+    expect(new Set(labels).size).toBe(3);
+  });
+
+  it('MANDATORY: the card renders it from the SERVER field', () => {
+    // Deriving it in the browser from anything else — a name, a date — would be
+    // a second opinion about a verification, and the wrong one.
+    expect(source).toContain('frontierBadge(member.frontierVerification)');
+  });
+
+  it('MANDATORY: it sits in the squadron block, on the same label column', () => {
+    /*
+     * The header has no room: the badge that used to live there truncated the
+     * commander name and wrapped the title line. This one is a labelled row like
+     * "Inara" above it, which is also what makes the two badges tell themselves
+     * apart — a reader gets the source from the label column, not from the
+     * colour of the pill.
+     */
+    const squadronAt = source.indexOf('Squadron\n');
+    const inaraLabelAt = source.indexOf('>Inara</dt>');
+    const frontierLabelAt = source.indexOf('>Frontier</dt>');
+
+    expect(inaraLabelAt).toBeGreaterThan(squadronAt);
+    expect(frontierLabelAt).toBeGreaterThan(inaraLabelAt);
   });
 });
 

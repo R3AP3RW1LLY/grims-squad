@@ -70,3 +70,43 @@ describe('counting projects that still need hauling', () => {
     expect(openProjectCounts([project('squadron', '')]).squadron).toBe(1);
   });
 });
+
+describe('a build the squadron gave up on', () => {
+  it('★ MANDATORY: an abandoned project is not counted as wanting hauling ★', () => {
+    /*
+     * ★ THE BADGE PROMISED WORK THAT DID NOT EXIST ★
+     *
+     * This count is the sidebar number on BOTH the website and the companion app — one function,
+     * so one bug in two places. `finished` tested only `completedAt`, which meant a build an
+     * officer had given up on went on advertising itself as needing haulers indefinitely.
+     *
+     * It is the complaint that produced the completion safeguard, arriving through another door:
+     * "causes our members to go buy materials for a project thats completed".
+     */
+    const counts = openProjectCounts([
+      { owner: 'squadron', completedAt: null, abandonedAt: '2026-08-15T12:00:00Z' },
+      { owner: 'squadron', completedAt: null },
+      { owner: 'personal', completedAt: null, abandonedAt: '2026-08-15T12:00:00Z' },
+    ]);
+
+    expect(counts.squadron, 'only the live one').toBe(1);
+    expect(counts.personal).toBe(0);
+  });
+
+  it('MANDATORY: a row with no abandonedAt at all still counts, as it always did', () => {
+    /*
+     * The field is optional because an older companion build sends payloads that predate the
+     * column. Treating "absent" as "abandoned" would make every project vanish from the badge the
+     * moment somebody ran a version that had not been updated.
+     */
+    expect(openProjectCounts([{ owner: 'squadron', completedAt: null }]).squadron).toBe(1);
+  });
+
+  it('MANDATORY: an empty string is not a date here either', () => {
+    // The same reasoning `completedAt` already carries: a blank is not a stamp, and treating it as
+    // one hides a live build from the people meant to be hauling for it.
+    expect(
+      openProjectCounts([{ owner: 'squadron', completedAt: null, abandonedAt: '  ' }]).squadron,
+    ).toBe(1);
+  });
+});

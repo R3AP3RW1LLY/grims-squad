@@ -5,7 +5,7 @@ import { Client } from 'pg';
 import { PrismaClient } from '@grims/db';
 import { JOB_REQUEST_CHANNEL } from '@grims/shared';
 import { dueSources, lastRuns, TICK_MS } from './scheduler.js';
-import { PrismaColonyStore, syncColonyProjects } from '@grims/db';
+import { announcePendingColonyProjects, PrismaColonyStore, syncColonyProjects } from '@grims/db';
 import { announce } from './jobs/job-log.js';
 import { rollUpCommodities } from './jobs/commodity-rollup.js';
 import { PrismaRollupStore } from './jobs/commodity-rollup.wiring.js';
@@ -371,6 +371,21 @@ function startColonySync(db: PrismaClient): void {
       // The nudge rides to the sync's markComplete transition: a build this pass finishes
       // announces itself, and connected browsers hear about it through the Redis bridge.
       const report = await syncColonyProjects(new PrismaColonyStore(db, notificationNudge));
+
+      /*
+       * ★ ANNOUNCED FROM HERE, AFTER THE SYNC, ON PURPOSE — SQUADRON OWNER, 2026-08-15 ★
+       *
+       * "we need this to announce with the type of build it is please."
+       *
+       * The sync above is what identifies a build type, so running the sweep immediately after it
+       * gives a project the best chance of being announced WITH its type on the very first pass.
+       * Announced from the create path — where it lived until now — the type is null by definition
+       * and the channel got "build type not identified yet" every time.
+       */
+      const posted = await announcePendingColonyProjects(db, siteUrl());
+      if (posted.announced > 0) {
+        console.log(`daemon: colony sync — announced ${posted.announced} new build(s)`);
+      }
       // Only worth a line when something changed. A squadron with no live projects would otherwise
       // print an identical zero every five minutes for ever.
       if (report.needsUpdated > 0 || report.contributionsAdded > 0 || report.completed > 0) {
@@ -489,6 +504,19 @@ const GALAXY_STALL_MS = 30 * 60 * 60_000;
  * Derived from PUBLIC_URL's host rather than a NODE_ENV string, because that is the address the
  * deployment actually serves and it is already required in production.
  */
+/**
+ * Where the site lives, for the link in a Discord message.
+ *
+ * The same pair the API's colony service reads, in the same order: `WEB_BASE_URL` where somebody has
+ * set one explicitly, `PUBLIC_URL` otherwise — the one the deploy preflight already requires. An
+ * unset pair yields a relative link, which is ugly in Discord but cannot point at the wrong hub.
+ */
+function siteUrl(env: NodeJS.ProcessEnv = process.env): string {
+  const explicit = (env['WEB_BASE_URL'] ?? '').trim();
+  const fallback = (env['PUBLIC_URL'] ?? '').trim();
+  return explicit === '' ? fallback : explicit;
+}
+
 function environmentLabel(env: NodeJS.ProcessEnv = process.env): string {
   const raw = env['PUBLIC_URL'] ?? '';
   try {

@@ -235,10 +235,34 @@ export default async function ColonyProjectPage({
             value={project.required > 0 ? `${delivered.toLocaleString()} t` : '—'}
           />
           <StatTile label="Commodities" value={String(project.needCount)} />
+          {/*
+            ★ ABANDONED IS READ FIRST — 2026-08-15 ★
+
+            Both stamps can be set, and the ordinary way that happens is an officer correcting a
+            build somebody wrongly called complete. Reporting "Complete" here would show the reader
+            precisely the state the officer acted to overturn.
+          */}
           <StatTile
             label="Status"
-            value={project.completedAt !== null ? 'Complete' : project.isPriority ? 'Current effort' : 'Live'}
-            tone={project.completedAt !== null ? 'accent' : 'default'}
+            value={
+              project.abandonedAt !== null
+                ? 'Abandoned'
+                : project.completedAt !== null
+                  ? 'Complete'
+                  : project.isPriority
+                    ? 'Current effort'
+                    : 'Live'
+            }
+            tone={
+              project.abandonedAt !== null
+                ? 'bad'
+                : project.completedAt !== null
+                  ? 'accent'
+                  : 'default'
+            }
+            {...(project.abandonedAt === null || project.abandonedNote === null
+              ? {}
+              : { hint: project.abandonedNote })}
           />
         </StatGrid>
 

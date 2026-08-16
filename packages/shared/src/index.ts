@@ -34,6 +34,24 @@ export { needsFreshness } from './needs-freshness.js';
 export { nextPoll, initialPoll, START_MS, ACTIVE_FLOOR_MS, IDLE_MS, type PollState } from './capi-cadence.js';
 export { resolveClaim, type ClaimOutcome, type ExistingClaim, type ClaimMethod } from './cmdr-claim.js';
 export type { Freshness, FreshnessVerdict } from './needs-freshness.js';
+export { isOrbitalStation } from './station-orbital.js';
+export { rankBuySources } from './buy-priority.js';
+export type { BuyContext, BuySource } from './buy-priority.js';
+export {
+  colonyStatusOf,
+  matchesColonyFilter,
+  maySeeAbandoned,
+  COLONY_STATUS_FILTERS,
+  DEFAULT_COLONY_FILTER,
+} from './colony-status.js';
+export type {
+  AbandonedViewer,
+  ColonyStatus,
+  ColonyStatusFilter,
+  ColonyStatusRow,
+} from './colony-status.js';
+export { announcementDue, IDENTIFY_GRACE_MS } from './announce-when-identified.js';
+export type { AnnounceDecision, AnnounceReason, PendingAnnouncement } from './announce-when-identified.js';
 export { matchProjectToSite } from './colony-plan-link.js';
 export type { LinkOutcome, LinkCandidateSite, LinkableProject } from './colony-plan-link.js';
 export type { SystemTrade, SystemTradeLine, SelfSufficiency, TradeSite } from './colony-economy-view.js';

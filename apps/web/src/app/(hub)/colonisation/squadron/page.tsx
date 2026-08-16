@@ -5,6 +5,8 @@ import { NoAccess, AdminUnavailable } from '../../app/no-access';
 import { getColonyProjects } from '../../../../lib/api';
 import { orderBoard, resolveSort } from '../board-order';
 import { BoardSortLinks } from '../board-sort-links';
+import { BoardFilterLinks } from '../board-filter-links';
+import { filterBoard, resolveFilter } from '../board-filter';
 import { ProjectBoard } from '../project-board';
 
 /**
@@ -35,7 +37,7 @@ export const dynamic = 'force-dynamic';
 export default async function SquadronProjectsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ sort?: string }>;
+  searchParams: Promise<{ sort?: string; filter?: string }>;
 }) {
   const [read, params] = await Promise.all([getColonyProjects('squadron'), searchParams]);
 
@@ -61,6 +63,16 @@ export default async function SquadronProjectsPage({
   const sort = resolveSort(params.sort);
   const board = orderBoard(squadron, read.data.you ?? null, sort);
 
+  /*
+   * ★ FILTERED AFTER RANKING, NOT BEFORE ★
+   *
+   * The counts in the tabs have to describe the whole board, so the ranking runs over
+   * everything and the chosen view is taken out of the result. Filtering first would make
+   * every tab report the size of the tab you are already looking at.
+   */
+  const filter = resolveFilter(params.filter);
+  const view = filterBoard(board.projects, filter, read.data.can.manage);
+
   return (
     <>
       <PageHeader
@@ -84,13 +96,22 @@ export default async function SquadronProjectsPage({
         lead="Every site the squadron has taken on. Open one to see what it still needs, who has hauled to it, and where to buy the rest."
       >
         <Section title={`Squadron projects (${squadron.length})`}>
+          <BoardFilterLinks
+            basePath="/colonisation/squadron"
+            current={filter}
+            sort={sort}
+            canManage={read.data.can.manage}
+            hasAbandoned={view.hasAbandoned}
+            counts={view.counts}
+          />
           <BoardSortLinks
             basePath="/colonisation/squadron"
             current={sort}
+            filter={filter}
             positionless={board.positionless}
           />
           <ProjectBoard
-            projects={board.projects}
+            projects={view.projects}
             notes={board.notes}
             emptyMessage="No squadron projects yet. An officer can post one from Start New Project."
           />

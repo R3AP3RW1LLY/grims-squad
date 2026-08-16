@@ -765,6 +765,43 @@ export class ColonyDeviceController {
     return { ok: true };
   }
 
+  /**
+   * Giving up on a build from the app, or taking that back.
+   *
+   * ★ THE APP GETS EVERY WRITE THE WEBSITE HAS — SQUADRON OWNER, 2026-08-15 ★
+   *
+   * "we also need to allow admins to mark builds as abandoned" was asked for on BOTH surfaces, and
+   * `companion-route-parity.spec.ts` exists precisely because a hub call with no device route here
+   * is a button in the app that fails at runtime with nothing catching it beforehand.
+   *
+   * COLONY_MANAGE is enforced in the service, not here — this guard says only that the caller may
+   * use the colonisation boards at all, matching every other write on this controller.
+   */
+  @Public()
+  @Patch('projects/:id/abandoned')
+  async setAbandoned(
+    @Req() req: FastifyRequest,
+    @Param('id') id: string,
+    @Body() body: { abandoned?: unknown; note?: unknown },
+  ) {
+    const me = await this.#caller(
+      req,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+    const mask = await this.permissions.effectiveMask(me.userId);
+
+    await this.colony.setAbandoned({
+      projectId: id,
+      callerId: me.userId,
+      mask,
+      // Explicit, like `colonyPriority`'s own coercion: a malformed body must not read as "abandon it".
+      abandoned: body.abandoned === true,
+      ...(typeof body.note === 'string' ? { note: body.note } : {}),
+    });
+    return { ok: true };
+  }
+
   @Public()
   @Delete('projects/:id')
   async remove(@Req() req: FastifyRequest, @Param('id') id: string) {

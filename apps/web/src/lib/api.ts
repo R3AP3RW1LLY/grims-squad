@@ -31,6 +31,30 @@ export const DEFAULT_API_ORIGIN = 'http://localhost:5001';
 
 const SERVER_API = process.env['API_INTERNAL_URL'] ?? DEFAULT_API_ORIGIN;
 
+/**
+ * What Frontier currently says about a member's identity.
+ *
+ * ★ THREE STATES, BECAUSE THE MIDDLE ONE IS THE COMMON ONE ★
+ *
+ * Frontier honours a link for 25 days and no longer, and connecting Frontier is
+ * a mandatory step for every member — so the whole squadron crosses that ceiling
+ * roughly monthly, forever. A boolean would say the same thing about somebody
+ * who proved their identity three weeks ago and needs thirty seconds to
+ * reconnect as about somebody who has never linked, and most of the roster would
+ * read as unverified on a rolling basis with nothing saying why.
+ *
+ * `expired` never overstates: an expired grant is never rendered as verified. It
+ * is simply the honest version of "no" — we proved this, and we cannot prove it
+ * today.
+ *
+ * ★ IT IS AN IDENTITY, NOT A SQUADRON ★
+ *
+ * Frontier confirms which commander a member is. It has no idea who they fly
+ * with, and squadron verification via cAPI is out of scope — that is Inara's
+ * badge and a separate check. No copy on this badge may blur the two.
+ */
+export type FrontierVerification = 'verified' | 'expired' | 'none';
+
 export interface PublicProfile {
   handle: string;
   displayName: string;
@@ -54,6 +78,14 @@ export interface PublicProfile {
    * ambiguity the badge exists to remove.
    */
   squadronVerified: boolean;
+  /**
+   * Frontier confirms the commander NAME. Never the squadron — see the type.
+   *
+   * Required for the same reason as the field above: it is always emitted, and
+   * `none` is a real answer. Typing it as optional would let a card treat a
+   * missing key and a negative result the same way.
+   */
+  frontierVerification: FrontierVerification;
   /*
    * These are OPTIONAL in the type, not nullable, and that is deliberate
    * (INV-027). A member who has not opted in produces a response with the key
@@ -2358,6 +2390,16 @@ export interface ColonyProject {
     totalTonnes: number;
   } | null;
   completedAt: string | null;
+  /**
+   * When an officer gave up on this build, or null.
+   *
+   * Distinct from `completedAt` because both can be set: the ordinary case is a project marked
+   * complete and later corrected by an officer who knows it never was. `colonyStatusOf` reads this
+   * one first, so the correction wins without erasing the fact that somebody called it finished.
+   */
+  abandonedAt: string | null;
+  /** Why. Shown to the poster, who is owed a reason their build was closed out from under them. */
+  abandonedNote: string | null;
   postedBy: string | null;
   postedById: string;
   updatedAt: string;
@@ -3016,6 +3058,14 @@ export interface PurchaseStation {
   systemName: string;
   /** Light years from the build. Null when we cannot place one end of it. */
   distanceLy: number | null;
+  /**
+   * In orbit, on the ground, or unknown.
+   *
+   * The server already orders the list by it — a ground stop costs a descent and a launch on every
+   * run. Carried so the panel can SAY which it is, because "why is this one first" is a question the
+   * order alone cannot answer.
+   */
+  isOrbital: boolean | null;
   lines: PurchaseLine[];
   lastSeen: string;
 }

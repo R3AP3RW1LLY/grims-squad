@@ -28,6 +28,7 @@ import {
   colonyReportBuilt,
   DEFAULT_SHOPPING,
   colonyPriority,
+  colonyAbandoned,
   colonyRemove,
   colonyReopen,
   colonyCarrierSearch,
@@ -140,6 +141,12 @@ import {
   type BackoffState,
 } from './upload-backoff.js';
 import { fetchHubSettings, type HubSettings } from './hub-settings.js';
+import {
+  FRONTIER_POLL_MS,
+  FRONTIER_WATCH_MS,
+  frontierGate,
+  type FrontierGate,
+} from './frontier-gate.js';
 import { updateAvailable } from './update-check.js';
 import { searchForJournalDir, searchRootsFor, type SearchFs } from './journal-search.js';
 import {
@@ -1362,6 +1369,21 @@ function state(): Record<string, unknown> {
     hub: hubSettings,
     hubError,
     /*
+     * ★ THE MANDATORY FRONTIER STEP — SQUADRON OWNER, 2026-08-15 ★
+     *
+     * "after a member connects with discord and connects the app ... they are then given the login
+     * with frontier, this is a manditory step"
+     *
+     * Published as a verdict rather than as raw facts, so the window has nothing to decide. Every
+     * rule about WHEN somebody is stopped — and the several cases where they deliberately are not —
+     * lives in `frontier-gate.ts` next to the reasoning and the tests, rather than being spelled
+     * out again in JSX where it cannot be exercised.
+     *
+     * Recomputed on every push, never stored. That is what makes an existing paired member and a
+     * fresh install behave identically the moment this build lands.
+     */
+    frontier: currentFrontierGate(),
+    /*
      * The update banner.
      *
      * The version comes from Electron rather than a constant, so it is
@@ -1468,6 +1490,79 @@ async function refreshHubSettings(force = false): Promise<void> {
     hubError = result.error;
   }
   push();
+}
+
+/**
+ * Whether the window should be showing the Frontier step, and in which words.
+ *
+ * ★ EVERY INPUT COMES FROM THE HUB OR FROM THIS SESSION ★
+ *
+ * `config` supplies exactly one thing — whether there is a device token, which is what makes the
+ * question askable at all — and nothing about Frontier is read from disk or written to it. The
+ * owner's requirement that "existing members who already paired must see this on update" is only
+ * satisfiable that way: any remembered "already done" would be this machine's opinion about a fact
+ * that lives on the hub, and it would go on being believed after a grant was revoked.
+ */
+function currentFrontierGate(): FrontierGate {
+  return frontierGate({
+    paired: config.deviceToken !== '',
+    /*
+     * Has the hub answered AT ALL this launch — not what it said. `hubSettings` starts null and is
+     * KEPT across a later failure, which is precisely the distinction the gate needs: never
+     * answered is an outage, answered-without-the-field is a hub too old to be asked.
+     */
+    answered: hubSettings !== null,
+    link: hubSettings?.frontier,
+    error: hubError,
+  });
+}
+
+/**
+ * The fast poll that runs while the member is away in their browser.
+ *
+ * ★ IT LIVES HERE, NOT IN THE WINDOW ★
+ *
+ * The member can close the window mid-flow — it is a tray app and closing it is the normal thing to
+ * do with it. A timer in the renderer would die with the page and the gate would still be standing
+ * when they came back, having missed the moment it cleared.
+ *
+ * ★ AND IT STOPS ★
+ *
+ * `device-link.ts` earned this rule: "A poll loop with no exit is how an app ends up hammering an
+ * endpoint forever because somebody closed the browser tab." Three things end it — the link
+ * arriving, the ceiling passing, and the device being unpaired underneath it. Pressing Connect
+ * again while one is already running extends the deadline rather than starting a second timer.
+ */
+let frontierWatch: NodeJS.Timeout | null = null;
+let frontierWatchUntil = 0;
+
+function stopWatchingFrontier(): void {
+  if (frontierWatch === null) return;
+  clearInterval(frontierWatch);
+  frontierWatch = null;
+}
+
+function watchFrontier(): void {
+  frontierWatchUntil = Date.now() + FRONTIER_WATCH_MS;
+  if (frontierWatch !== null) return;
+
+  frontierWatch = setInterval(() => {
+    if (
+      Date.now() > frontierWatchUntil ||
+      config.deviceToken === '' ||
+      hubSettings?.frontier?.linked === true
+    ) {
+      stopWatchingFrontier();
+      return;
+    }
+    /*
+     * Forced past the five-minute cache, which is the entire point: the member has just changed
+     * something on our side of the world and a cached answer would be a gate that stays shut for
+     * minutes after they cleared it. That is the same reasoning the `refreshSettings` button was
+     * written with, on a timer instead of a press.
+     */
+    void refreshHubSettings(true);
+  }, FRONTIER_POLL_MS);
 }
 
 function refreshTray(): void {
@@ -1717,6 +1812,22 @@ if (!app.requestSingleInstanceLock()) {
      */
     setInterval(() => void refreshStandingOrders(), STANDING_ORDERS_MS);
     void refreshStandingOrders();
+
+    /*
+     * ★ THE HUB IS ASKED EVEN WHILE SENDING IS PAUSED ★
+     *
+     * `refreshHubSettings` was reachable only from `tick()`, and `tick()` runs only while
+     * `config.enabled`. That was survivable while its answer merely populated a settings panel. It
+     * is not survivable now that the same answer decides whether the window opens at all: a member
+     * who had pressed Pause would never be told anything, and the Frontier gate would sit on
+     * "checking" for the rest of the session with nothing on screen that could resolve it.
+     *
+     * Its own clock, for the same reason the current build and the standing orders have theirs —
+     * pausing uploads is not a statement about wanting the rest of the app dark. TTL-guarded
+     * inside, so on a machine that is also ticking this costs nothing.
+     */
+    setInterval(() => void refreshHubSettings(), HUB_SETTINGS_TTL_MS);
+    void refreshHubSettings();
 
     startOverlays({
       layout: () => config.overlays,
@@ -2177,6 +2288,16 @@ if (!app.requestSingleInstanceLock()) {
     ipcMain.handle('colonyPriority', (_e, id: unknown, on: unknown) =>
       colonyPriority(hub(), projectId(id), on === true),
     );
+    ipcMain.handle('colonyAbandoned', (_e, id: unknown, on: unknown, note: unknown) =>
+      colonyAbandoned(
+        hub(),
+        projectId(id),
+        // `on === true` like the line above: anything else arriving over IPC must not read as
+        // "abandon it", and a renderer bug should fail closed rather than take a build off the board.
+        on === true,
+        typeof note === 'string' ? note : undefined,
+      ),
+    );
 
     ipcMain.handle('colonyCarriers', (_e, id: unknown, q: unknown) =>
       colonyCarrierSearch(hub(), projectId(id), typeof q === 'string' ? q : ''),
@@ -2327,6 +2448,48 @@ if (!app.requestSingleInstanceLock()) {
     ipcMain.handle('refreshSettings', async () => {
       await refreshHubSettings(true);
       return state();
+    });
+
+    /**
+     * Starts the mandatory Frontier step.
+     *
+     * ★ THE APP DOES NOT DO OAUTH — SQUADRON OWNER, 2026-08-15 ★
+     *
+     * "the primary feature must be so that players that are playing on Geforce Now and cloud
+     * platforms can use the companion app like everyone else"
+     *
+     * This opens the member's REAL browser at our own settings page and stops there. It is the same
+     * decision `device-link.ts` argues at length for the Discord sign-in, and every word of it
+     * applies again: a distributed desktop application has nowhere to keep a client secret, a
+     * window the app controls asking for credentials is the habit phishing depends on, and a
+     * loopback redirect can be raced by anything else on the machine.
+     *
+     * So the ceremony happens where the member already has a session, in a window with an address
+     * bar, and the PKCE verifier, the code and both tokens live and die on the hub. The app learns
+     * one boolean, afterwards, over a call it was already making.
+     *
+     * ★ THE WEBSITE, NOT THE API ★
+     *
+     * `POST /v1/me/capi/start` is session-authenticated and this app deliberately holds no session —
+     * its whole identity is a device token, which is a far smaller credential than a cookie that can
+     * act as the member anywhere on the site. Sending a device token at that route would be a 401,
+     * so the browser goes to the page where the session already is and the WEBSITE calls it.
+     *
+     * `webBaseUrlFor` rather than `apiBaseUrlFor` for the reason recorded on `openHub`: one origin
+     * serves both in production, but on a development machine the site is on :5000 and the API on
+     * :5001, and building this from the API base opens a JSON 404.
+     */
+    ipcMain.handle('connectFrontier', () => {
+      const url = `${webBaseUrlFor(config, process.env)}/settings/privacy`;
+      void shell.openExternal(url);
+      /*
+       * The watch starts on the PRESS, not on the return. Whether the browser actually opened is
+       * not something Electron reports usefully, and a member who copies the link out of the screen
+       * and pastes it into another browser has done the same thing by a different route — the poll
+       * must be running for them too.
+       */
+      watchFrontier();
+      return { ok: true, url };
     });
 
     /*

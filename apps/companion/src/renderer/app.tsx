@@ -27,6 +27,9 @@ import { openProjectCounts } from '@grims/shared/colony-badge';
 // The shapes come from the hub client, which is where they are defined — re-exporting them through
 // the component file would be a second name for one type.
 import type { BoardViewer, ColonyProject, ColonyRights } from '../hub-colony.js';
+// The verdict, not the facts behind it. Every rule about who is stopped and who deliberately is
+// not lives in that module, beside its reasoning and its tests — see the gate below.
+import type { FrontierGate } from '../frontier-gate.js';
 import { OverlaysPanel } from './overlays-panel.js';
 
 /**
@@ -67,6 +70,11 @@ declare global {
       onState(handler: (state: AppState) => void): void;
       signIn(): Promise<unknown>;
       cancelSignIn(): Promise<unknown>;
+      /*
+       * Takes no argument, like signIn: there is nothing for the member to supply, and anything
+       * this could accept would be a URL the renderer got to choose.
+       */
+      connectFrontier(): Promise<unknown>;
       reopenLink(): Promise<unknown>;
       unpair(): Promise<unknown>;
       setEnabled(enabled: boolean): Promise<unknown>;
@@ -82,6 +90,12 @@ declare global {
 /** Only the parts of the main process's state this UI reads. */
 interface AppState {
   paired: boolean;
+  /*
+   * The VERDICT, not the facts behind it. main.ts computes this from hub state every time it
+   * publishes, so the renderer never decides who is gated — every rule about that lives in
+   * frontier-gate.ts beside its reasoning and its seventeen tests.
+   */
+  frontier: FrontierGate;
   linking: boolean;
   linkCode: string | null;
   tokenHint: string;
@@ -399,6 +413,27 @@ function App(): JSX.Element {
    * say "pair this device first" is five ways to be told the same thing. One screen, one action.
    */
   if (!state.paired) return <SignIn state={state} />;
+
+  /*
+   * ★ FRONTIER IS MANDATORY — SQUADRON OWNER, 2026-08-15 ★
+   *
+   * "after a member connects with discord and connects the app to their grims squad account as is
+   * done now, they are then given the login with frontier, this is a manditory step"
+   *
+   * Second gate, and for the same reason as the first: nothing offered behind it would work for a
+   * commander on GeForce Now, who has no local journal at all. One screen, one action.
+   *
+   * ★ IT READS A VERDICT, AND THAT IS WHAT MAKES IT WORK ON UPDATE ★
+   *
+   * `state.frontier` comes from the hub every publish — nothing about it is remembered on this
+   * machine. That is the only way the owner's "existing members must see this when they update"
+   * can hold: anything stored at first run would be this machine's opinion about a fact that lives
+   * on the hub, and it would go on being believed after a grant was revoked.
+   *
+   * `undefined` passes deliberately. An app that gated on a missing verdict would lock every member
+   * out the moment it met a hub too old to send one.
+   */
+  if (state.frontier.step !== 'pass') return <ConnectFrontier gate={state.frontier} />;
 
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden' }}>
@@ -799,6 +834,114 @@ function NavButton({
         </span>
       )}
     </button>
+  );
+}
+
+/**
+ * The mandatory Frontier step.
+ *
+ * ★ SQUADRON OWNER, 2026-08-15 ★
+ *
+ * "they are then given the login with frontier, this is a manditory step"
+ *
+ * ★ WHY THE COPY CHANGES BUT THE SCREEN DOES NOT ★
+ *
+ * Four verdicts land here and only the words differ. A member being asked for the first time, one
+ * whose grant has died, one waiting on the hub, and one who cannot reach it at all are in very
+ * different situations — but the thing in front of them is the same single action, and rendering
+ * four layouts would make the app look broken in three of them.
+ *
+ * ★ AN OUTAGE IS NAMED AS AN OUTAGE ★
+ *
+ * Mandatory means a Frontier or hub outage locks a member out of mining overlays, colonisation
+ * boards and bounty tracking that have nothing to do with cAPI. The gate stays — the owner was
+ * explicit — but it must never imply the member did something wrong, and it must always offer the
+ * way forward. "We cannot reach the hub" is a true sentence somebody can act on; a Connect button
+ * that silently fails is not.
+ */
+function ConnectFrontier({ gate }: { gate: FrontierGate }): JSX.Element {
+  const waiting = gate.step === 'checking';
+  const broken = gate.step === 'unreachable';
+
+  const heading =
+    gate.step === 'reconnect' ? 'RECONNECT FRONTIER' : broken ? 'CANNOT REACH THE HUB' : 'CONNECT FRONTIER';
+
+  /*
+   * The hub's own sentence wins where it has one — it knows how many days are left on the grant and
+   * this window does not. Paraphrasing it here would be a second copy of a rule that already lives
+   * in one place.
+   */
+  const body =
+    gate.sentence ??
+    (broken
+      ? 'The squadron hub is not answering, so this step cannot be completed yet. Nothing is wrong ' +
+        'with your account — try again in a moment.'
+      : waiting
+        ? 'Checking your Frontier connection…'
+        : 'Connect your Frontier account so the squadron can see what you fly and haul. This is how ' +
+          'commanders playing on GeForce Now and other cloud platforms take part at all.');
+
+  return (
+    <div
+      style={{
+        height: '100vh',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: '18px',
+        padding: '40px',
+      }}
+    >
+      <p
+        style={{
+          margin: 0,
+          fontFamily: 'var(--font-display)',
+          fontSize: '15px',
+          letterSpacing: '0.2em',
+          color: broken ? C.orangeBright : C.cyan,
+        }}
+      >
+        {heading}
+      </p>
+
+      <p style={{ margin: 0, maxWidth: '46ch', textAlign: 'center', fontSize: '13px', color: C.dim }}>
+        {body}
+      </p>
+
+      {/*
+        The last failure, when there was one. Shown separately from the instruction because it is a
+        fact about this attempt rather than about the member — and because a screen that changes its
+        instruction on every hiccup reads as though the instruction were the problem.
+      */}
+      {gate.problem === null ? null : (
+        <p style={{ margin: 0, maxWidth: '46ch', textAlign: 'center', fontSize: '12px', color: C.faint }}>
+          {gate.problem}
+        </p>
+      )}
+
+      <div style={{ display: 'flex', gap: '10px' }}>
+        <Button tone="primary" onClick={() => void window.companion.connectFrontier()}>
+          {gate.step === 'reconnect' ? 'Reconnect with Frontier' : 'Connect with Frontier'}
+        </Button>
+      </div>
+
+      <p style={{ margin: 0, maxWidth: '46ch', textAlign: 'center', fontSize: '11px', color: C.faint }}>
+        Your browser will open. Nothing about your Frontier sign-in is stored on this machine.
+      </p>
+
+      {/*
+        ★ NOT DECORATION ★
+
+        A member told they cannot use the app, while the app is in fact still reading and uploading
+        their journals, has been misled about what is happening on their own machine. This is the
+        sentence that turns the screen from a wall into a wait — and it is true: the overlays and
+        the uploader know nothing about this gate and keep running behind it.
+      */}
+      <p style={{ margin: 0, maxWidth: '46ch', textAlign: 'center', fontSize: '11px', color: C.faint }}>
+        Your journals are still uploading in the background — nothing is paused while you do this.
+      </p>
+    </div>
   );
 }
 

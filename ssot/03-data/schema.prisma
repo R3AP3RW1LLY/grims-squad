@@ -2390,6 +2390,28 @@ model ColonyProject {
   isPriority Boolean @default(false) @map("is_priority")
 
   completedAt DateTime? @map("completed_at") @db.Timestamptz(6)
+
+  /// Given up on. Set by an officer (COLONY_MANAGE), never by the sync.
+  ///
+  /// ★ SQUADRON OWNER, 2026-08-15 ★
+  ///
+  /// "we also need to allow admins to mark builds as abandoned and not always just as complete.
+  /// abandond projects should be hidden to all other members except the project owner please."
+  ///
+  /// Before this, a build the squadron gave up on had two possible endings and both were false:
+  /// leave it open and it asks for materials nobody will haul, for ever; or mark it complete and a
+  /// station that was never finished enters the record the squadron measures itself by. People
+  /// chose the second, because closing it was the only button there was.
+  ///
+  /// SEPARATE from `completedAt` rather than a status enum replacing it, because both can be true:
+  /// a project marked complete and later corrected by an officer who knows it never was. Collapsing
+  /// them would destroy the fact that somebody had called it finished.
+  abandonedAt   DateTime? @map("abandoned_at") @db.Timestamptz(6)
+  /// The officer who marked it. Kept because abandoning is a judgement call somebody made, and a
+  /// state with no author is one nobody can be asked about.
+  abandonedById String?   @map("abandoned_by_id") @db.Uuid
+  /// Why. Shown to the poster, who is owed a reason their build was closed out from under them.
+  abandonedNote String?   @map("abandoned_note")
   createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
 
@@ -2409,6 +2431,20 @@ model ColonyProject {
   /// TYPED when they posted, and this is what the site's requirement actually fingerprints to. Two
   /// fields with one name is how they get confused for each other, and Prisma refuses it outright.
   identifiedType ColonyBuildType? @relation(fields: [buildTypeId], references: [id], onDelete: SetNull)
+  /// When the squadron was told about this build in Discord. Null means never.
+  ///
+  /// ★ WHY A COLUMN AND NOT JUST "ANNOUNCE ON CREATE" (2026-08-15) ★
+  ///
+  /// The announcement used to fire from the create path, where `buildTypeId` above is ALWAYS null —
+  /// it is filled in later, by the sync that fingerprints the bill of materials. So every message
+  /// the channel ever received said "build type not identified yet", and a hauler learned a system
+  /// name and nothing about whether they were being asked for twenty thousand tonnes or two hundred.
+  ///
+  /// The owner asked for the type and accepted a delay for it, so the announcement became a sweep
+  /// that waits for identification. `announce()` has no dedup key — exactly-once was a property of
+  /// the create path being reached once — so a repeating sweep needs this to replace it, or the
+  /// channel gets the same build posted every few minutes for ever.
+  announcedAt DateTime? @map("announced_at") @db.Timestamptz(6)
   /// Plan entries that became this project. A planned site links to the real build once it exists,
   /// so a plan can show its own progress rather than only its intention.
   plannedAs      ColonyPlanSite[]

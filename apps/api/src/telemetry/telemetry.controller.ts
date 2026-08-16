@@ -10,6 +10,7 @@ import type { PairingService } from './pairing.service.js';
 import { DeviceLinkService } from './device-link.service.js';
 import type { JournalIngestService, IncomingEvent } from './journal-ingest.service.js';
 import type { ConsentService } from './consent.service.js';
+import { CAPI_SERVICE } from '../cmdr/cmdr.tokens.js';
 import { LIVE_SERVICE } from '../live/live.tokens.js';
 import type { LiveService } from '../live/live.service.js';
 import { TELEMETRY_CATALOGUE, REQUIRED_CATEGORY } from '@grims/shared';
@@ -28,6 +29,15 @@ export class TelemetryController {
      * a member's upload is the thing that matters and a notification is not.
      */
     @Optional() @Inject(LIVE_SERVICE) private readonly live: LiveService | null = null,
+    /*
+     * OPTIONAL, exactly like the release store below. A deployment without Frontier keys
+     * configured must still serve this call — the app relies on it for what it collects, and
+     * failing the whole thing because a link could not be read would be a far worse trade than
+     * omitting one field.
+     */
+    @Optional()
+    @Inject(CAPI_SERVICE)
+    private readonly capi: { status(userId: string): Promise<{ linked: boolean; daysLeft: number; warn: boolean; sentence: string } | null> } | null = null,
     /*
      * OPTIONAL, like the live service. The companion's settings call must not
      * fail because no release store is configured — what a member has switched
@@ -300,10 +310,31 @@ export class TelemetryController {
     storedEvents: number;
     firstEventAt: string | null;
     latestVersion: string | null;
+    /*
+     * ★ THE FRONTIER GATE READS THIS — SQUADRON OWNER, 2026-08-15 ★
+     *
+     * "after a member connects with discord and connects the app ... they are then given the login
+     * with frontier, this is a manditory step"
+     *
+     * It rides along here for the same reason the update check does: every paired app already asks
+     * for these settings, so this costs no extra request and no second authentication path.
+     *
+     * THREE-VALUED, and the three are genuinely different — the companion's gate depends on telling
+     * them apart:
+     *
+     *   an object    the hub knows, and this is the state of their grant
+     *   null         the hub knows, and this member has never linked
+     *   ABSENT       this hub is too old to have an opinion
+     *
+     * The last one is why the field is optional rather than defaulted. An app that gates on
+     * `linked === false` would lock every member out the moment it met a hub that predates this
+     * line — so the hub says nothing rather than saying "no".
+     */
+    frontier?: { linked: boolean; daysLeft: number; warn: boolean; sentence: string } | null | undefined;
   }> {
     const device = await this.#device(req);
 
-    const [state, contribution, assets] = await Promise.all([
+    const [state, contribution, assets, frontier] = await Promise.all([
       this.consent.get(device.userId),
       this.ingest.contribution(device.userId),
       /*
@@ -318,6 +349,13 @@ export class TelemetryController {
        * on for what it collects.
        */
       this.releases?.list().catch(() => []) ?? Promise.resolve([]),
+      /*
+       * Optional in exactly the same way the release store is: a deployment without cAPI configured
+       * returns `undefined` here, the field is omitted, and the companion holds nobody to a gate
+       * this hub cannot service. Failing this whole call — which the app relies on for what it
+       * collects — because a Frontier link could not be read would be a far worse trade.
+       */
+      this.capi?.status(device.userId).catch(() => undefined) ?? Promise.resolve(undefined),
     ]);
 
     /*
@@ -371,6 +409,13 @@ export class TelemetryController {
        * which build is current.
        */
       latestVersion: published,
+      /*
+       * `undefined` when cAPI is not configured on this deployment — and the field then vanishes
+       * from the JSON entirely rather than appearing as null, which is the distinction the
+       * companion's gate is built around: "never linked" and "this hub cannot tell you" must not
+       * look alike.
+       */
+      frontier,
     };
   }
 

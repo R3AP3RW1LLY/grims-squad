@@ -21,6 +21,8 @@
  * somebody.
  */
 
+import { readFrontierLink, type FrontierLink } from './frontier-gate.js';
+
 export interface CatalogueEntry {
   readonly event: string;
   readonly label: string;
@@ -43,6 +45,24 @@ export interface HubSettings {
   /** Rows the hub actually holds for this member, across every device. */
   readonly storedEvents: number;
   readonly firstEventAt: string | null;
+  /**
+   * Whether the hub considers this member's Frontier account linked.
+   *
+   * ★ IT RIDES HERE RATHER THAN ON A ROUTE OF ITS OWN ★
+   *
+   * Same reasoning `latestVersion` gives two fields down, and it applies harder to this one: the
+   * app already makes this call with its device token, at launch and on a clock. A dedicated
+   * endpoint would be a second request, a second authentication path and a second thing that can
+   * be down — for a fact the hub is already answering a question next to.
+   *
+   * ★ THREE-VALUED, AND THAT IS THE WHOLE DESIGN ★
+   *
+   * `undefined` means the hub did not send the field: an older build than this app, which happens
+   * for a while after every release. `null` means the hub sent it and this member has never linked.
+   * They are not the same and must never be collapsed — see `readFrontierLink`, and the long note
+   * in `frontier-gate.ts` about why one of them gates and the other does not.
+   */
+  readonly frontier: FrontierLink | null | undefined;
   /**
    * The newest version published on the hub, or null.
    *
@@ -131,6 +151,15 @@ export async function fetchHubSettings(
             : 'session',
         storedEvents: typeof body.storedEvents === 'number' ? body.storedEvents : 0,
         firstEventAt: typeof body.firstEventAt === 'string' ? body.firstEventAt : null,
+        /*
+         * Read off the RAW body, not off the typed one, because the distinction
+         * that matters is whether the key was there at all — and every other
+         * field here is allowed to fall back to a default while this one is
+         * not. A hub that has never heard of Frontier linking must arrive as
+         * absence and stay as absence, or the gate it feeds locks out every
+         * member of a squadron running a hub older than their app.
+         */
+        frontier: readFrontierLink((body as Record<string, unknown>)['frontier']),
         // Null on anything unexpected. A malformed value must not become a
         // banner pointing at a release that does not exist.
         latestVersion: typeof body.latestVersion === 'string' ? body.latestVersion : null,

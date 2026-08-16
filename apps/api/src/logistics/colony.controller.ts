@@ -104,7 +104,14 @@ export class ColonyController {
       caller === undefined ? null : await this.position.lastKnown(caller.userId).catch(() => null);
 
     return {
-      projects: await this.colony.board(scope, caller === undefined ? null : { userId: caller.userId }),
+      projects: await this.colony.board(
+        scope,
+        caller === undefined
+          ? null
+          : // The officer flag rides with the caller because the board is raw SQL and cannot
+            // consult the ACL extension — see the abandonment clause in `board`.
+            { userId: caller.userId, canManage: has(mask, Permission.COLONY_MANAGE) },
+      ),
       you:
         you === null
           ? null
@@ -1087,6 +1094,41 @@ export class ColonyController {
       'You do not have access to the colonisation boards.',
     );
     await this.colony.reopen(id, me.userId, mask);
+    return { ok: true };
+  }
+
+  /**
+   * Gives up on a build, or takes that back.
+   *
+   * Squadron owner, 2026-08-15: "we also need to allow admins to mark builds as abandoned and not
+   * always just as complete."
+   *
+   * The permission check is COLONY_VIEW here and COLONY_MANAGE inside the service, matching every
+   * other write on this controller: the guard says "you may use the colonisation boards at all",
+   * and whose build it is — and whether this particular member may direct it — is the service's
+   * question, because it needs the row to answer.
+   */
+  @Patch('projects/:id/abandoned')
+  async setAbandoned(
+    @User() caller: CurrentUser | undefined,
+    @Param('id') id: string,
+    @Body() body: { abandoned?: unknown; note?: unknown },
+  ) {
+    const me = this.#requireSession(caller);
+    const mask = await this.#assert(
+      caller,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    await this.colony.setAbandoned({
+      projectId: id,
+      callerId: me.userId,
+      mask,
+      // Explicit, not truthy. `{}` posted by a broken client must not read as "abandon it".
+      abandoned: body.abandoned === true,
+      ...(typeof body.note === 'string' ? { note: body.note } : {}),
+    });
     return { ok: true };
   }
 
