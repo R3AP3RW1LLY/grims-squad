@@ -652,7 +652,18 @@ export class ColonyService {
     const wanted = marketId.toString();
     return (
       (await this.board('all', caller)).find(
-        (p) => p.marketId === wanted && p.completedAt === null,
+        /*
+         * ★ AND NOT ABANDONED — 2026-08-15 ★
+         *
+         * `board` already hides abandoned builds from members who may not see them, so for most
+         * callers this changes nothing. It changes everything for the POSTER: their own abandoned
+         * project is visible to them by design, and without this line docking at that market would
+         * still announce a live build to haul for.
+         *
+         * That is the complaint this whole third state exists to answer — somebody filling a hold
+         * for a project nobody is building any more.
+         */
+        (p) => p.marketId === wanted && p.completedAt === null && p.abandonedAt === null,
       ) ?? null
     );
   }

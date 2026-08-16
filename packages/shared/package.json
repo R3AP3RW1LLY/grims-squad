@@ -19,6 +19,14 @@
       "types": "./dist/colony-plan-progress.d.ts",
       "default": "./dist/colony-plan-progress.js"
     },
+    "./colony-status": {
+      "types": "./dist/colony-status.d.ts",
+      "default": "./dist/colony-status.js"
+    },
+    "./buy-priority": {
+      "types": "./dist/buy-priority.d.ts",
+      "default": "./dist/buy-priority.js"
+    },
     "./colony-opportunity": {
       "types": "./dist/colony-opportunity.d.ts",
       "default": "./dist/colony-opportunity.js"
