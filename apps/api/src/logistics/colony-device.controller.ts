@@ -1016,6 +1016,50 @@ export class ColonyDeviceController {
    * COLONY_VIEW like every other door here: the write lands in colonisation tables, and a member
    * whose rank cannot see the boards has no business filling them.
    */
+  /**
+   * The member's own ship hold.
+   *
+   * ★ SQUADRON OWNER, 2026-08-16 ★
+   *
+   * "materials being added to fleet carriers and in player holds are not registering properly"
+   *
+   * The overlay was always right — it reads `Cargo.json` on the member's machine. The hub had never
+   * received a hold at all: zero `Cargo` rows against 8,706 depot readings, because nothing ever
+   * sent one. This is the door that was missing.
+   *
+   * ★ THE WHOLE HOLD IS SENT; ALMOST NONE OF IT IS KEPT ★
+   *
+   * `scopeHold` discards every commodity no live build the member is on still wants, so a mining
+   * run, a trade loop and mission cargo never reach storage. That boundary is enforced HERE rather
+   * than in the app, because a rule that lives on a member's machine is a rule that can be edited.
+   */
+  @Public()
+  @Post('ship-hold')
+  async shipHold(
+    @Req() req: FastifyRequest,
+    @Body() body: { commodities?: unknown },
+  ) {
+    const me = await this.#caller(
+      req,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    const lines = Array.isArray(body.commodities) ? body.commodities : [];
+    const held = lines
+      .map((l) => {
+        const row = l as { commodity?: unknown; tonnes?: unknown };
+        return {
+          commodity: typeof row.commodity === 'string' ? row.commodity : '',
+          tonnes: Number(row.tonnes),
+        };
+      })
+      .filter((l) => l.commodity !== '' && Number.isFinite(l.tonnes));
+
+    const stored = await this.colony.recordHold(me.userId, held);
+    return { ok: true, stored };
+  }
+
   @Public()
   @Post('carrier-cargo')
   async carrierCargo(

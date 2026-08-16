@@ -266,8 +266,14 @@ describe('P0.2 database schema', () => {
      * Checked against the rule above rather than bumped: it is declared in ssot/03-data/schema.prisma
      * as CapiPollState, and the migration was written from that model rather than ahead of it. This
      * guard fired on exactly the hand-written migration it exists to watch.
+     *
+     * 131 as of 2026-08-16: `colony_member_holds`. What a member is carrying of what a build they
+     * are on still wants. Added because the hub had NEVER received a hold — zero `Cargo` telemetry
+     * rows against 8,706 depot readings — so the website's player-holds column had no data behind
+     * it and never had. Declared in ssot/03-data/schema.prisma as ColonyMemberHold; the migration
+     * was written from that model.
      */
-    expect(Number(r[0]?.n)).toBe(130);
+    expect(Number(r[0]?.n)).toBe(131);
   });
 
   describe('hand-written DDL that Prisma cannot express', () => {

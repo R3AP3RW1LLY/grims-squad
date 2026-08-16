@@ -1106,6 +1106,34 @@ export const detachCarrier = (
  * Not tied to any project: the hub knows which builds the carrier is attached to, and quietly
  * ignores one that is attached to none. The app's only job is to say what it watched.
  */
+/**
+ * Pushes the member's OWN ship hold to the hub.
+ *
+ * ★ SQUADRON OWNER, 2026-08-16 ★
+ *
+ * "materials being added to fleet carriers and in player holds are not registering properly"
+ *
+ * ★ WHY THE HUB HAD NOTHING, AND THE OVERLAY WAS RIGHT ALL ALONG ★
+ *
+ * The overlay reads `Cargo.json` on this machine, so it has always been accurate live — which is
+ * exactly what was observed. The HUB had never received a single hold: the journal's `Cargo` event
+ * is on the allowlist and nothing ever sent one, so the website's column had no data behind it at
+ * all. Zero rows, against 8,706 depot readings.
+ *
+ * It is a snapshot rather than a journal event on purpose. Elite writes `Cargo` to the journal with
+ * only a count, and keeps the actual inventory in `Cargo.json` — so forwarding the event would send
+ * a number with no commodities in it. The app already reads the file for its own overlay; this
+ * sends what it read.
+ *
+ * The hub decides what to KEEP. `scopeHold` there discards everything no live build wants, so a
+ * member's mining run and trade loop never reach storage even though the whole hold is sent.
+ */
+export const pushShipHold = (
+  call: HubCall,
+  body: { commodities: ReadonlyArray<{ commodity: string; tonnes: number }> },
+): Promise<Answer<{ ok: true }>> =>
+  hubColony(call, '/ship-hold', { method: 'POST', body });
+
 export const pushCarrierCargo = (
   call: HubCall,
   body: {
