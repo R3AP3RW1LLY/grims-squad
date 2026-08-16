@@ -3058,6 +3058,14 @@ export interface PurchaseStation {
   systemName: string;
   /** Light years from the build. Null when we cannot place one end of it. */
   distanceLy: number | null;
+  /**
+   * In orbit, on the ground, or unknown.
+   *
+   * The server already orders the list by it — a ground stop costs a descent and a launch on every
+   * run. Carried so the panel can SAY which it is, because "why is this one first" is a question the
+   * order alone cannot answer.
+   */
+  isOrbital: boolean | null;
   lines: PurchaseLine[];
   lastSeen: string;
 }

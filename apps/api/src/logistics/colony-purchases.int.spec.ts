@@ -74,6 +74,11 @@ async function cleanUp(): Promise<void> {
   await db.$executeRawUnsafe(`DELETE FROM colony_purchases WHERE system_name = $1`, SYSTEM);
   await db.$executeRawUnsafe(`DELETE FROM colony_projects WHERE system_name = $1`, SYSTEM);
   await db.$executeRawUnsafe(`DELETE FROM users WHERE handle LIKE $1`, `${TAG}%`);
+  // The station fixture the orbital test seeds. Left behind it would collide on the next run and
+  // fail a test that has nothing to do with what it is asserting.
+  await db.$executeRawUnsafe(
+    `DELETE FROM knowledge_items WHERE ext_key = 'purchases-int-orbital-dock'`,
+  );
 }
 
 /** A project with three outstanding materials and one member. */
@@ -141,6 +146,49 @@ describe('the shopping route', () => {
 
     expect(listed).toContain('Titanium');
     expect(listed, 'bought here, but not on this build’s list').not.toContain('Palladium');
+  });
+
+  it('★ MANDATORY: the station’s KIND reaches the route, orbital or ground ★', async () => {
+    /*
+     * ★ MUTATION TESTING FOUND THIS UNTESTED ★
+     *
+     * `rankBuySources` puts orbital stations ahead of ground ones because a descent and a launch on
+     * every run costs more than the light years between two stops. All of that reasoning is dead
+     * weight if the flag never arrives — and replacing `isOrbitalStation(type)` with a bare `null`
+     * broke nothing in any unit test, because they build candidates by hand.
+     *
+     * This is the only path where a real station type is read out of `knowledge_items` and turned
+     * into the flag the ordering depends on.
+     */
+    const { owner, project } = await seedBuild();
+
+    await db.$executeRawUnsafe(
+      `INSERT INTO knowledge_items (source, kind, ext_key, name, data)
+       VALUES ('galaxy', 'station', $5, $1, jsonb_build_object('system', $2, 'type', $3, 'marketId', $4))
+       ON CONFLICT (source, kind, ext_key) DO UPDATE SET data = EXCLUDED.data, name = EXCLUDED.name`,
+      'Orbital Test Dock',
+      'Col 285 Sector US-Q b6-5',
+      'Coriolis Starport',
+      '9900001',
+      'purchases-int-orbital-dock',
+    );
+
+    await service.declare({
+      systemName: SYSTEM,
+      stationName: 'Orbital Test Dock',
+      stationSystem: 'Col 285 Sector US-Q b6-5',
+      commodity: 'Titanium',
+      tonnes: 900,
+      price: null,
+      note: null,
+      userId: owner,
+    });
+
+    const route = await service.forProject(project);
+    const stop = route.stations.find((s) => s.stationName === 'Orbital Test Dock');
+
+    expect(stop, 'the declared stop is on the route').toBeDefined();
+    expect(stop?.isOrbital, 'a Coriolis Starport is in orbit').toBe(true);
   });
 
   it('★ MANDATORY: what is already aboard a carrier is not on the shopping list ★', async () => {

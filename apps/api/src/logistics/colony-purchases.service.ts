@@ -1,6 +1,14 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { PrismaClient } from '@grims/db';
-import { AppError, CARRIER_STATION_TYPES, ErrorCode, looksLikeCarrier } from '@grims/shared';
+import {
+  AppError,
+  CARRIER_STATION_TYPES,
+  ErrorCode,
+  isOrbitalStation,
+  looksLikeCarrier,
+  rankBuySources,
+  type BuyContext,
+} from '@grims/shared';
 import { commodityCategories } from './commodity-categories.js';
 import { carrierCover, ColonyCarrierService } from './colony-carrier.service.js';
 
@@ -68,6 +76,14 @@ export interface RouteCandidate {
   readonly systemName: string;
   /** Light years from the build. Null when we cannot place one end of it. */
   readonly distanceLy: number | null;
+  /**
+   * In orbit, on the ground, or unknown.
+   *
+   * Carried because a ground stop costs a descent and a launch on every run, which over a long haul
+   * outweighs the light years between two candidates. `rankBuySources` weighs it; see the note on
+   * the ordering below.
+   */
+  readonly isOrbital: boolean | null;
   readonly lines: readonly PurchaseLine[];
 }
 
@@ -123,6 +139,30 @@ export function stationKey(name: string, system: string, marketId?: string): str
 export function planRoute(
   wanted: ReadonlySet<string>,
   candidates: readonly RouteCandidate[],
+  /*
+   * ★ THE OWNER'S PRIORITY, ADDED 2026-08-15 ★
+   *
+   * "it must always show in this priority, materials available in the system the build is
+   * happening, 2. materials available in stations in systems that are architected by squadron
+   * members, 3. all other locations ... the priority is on orbital stations, followed by ground
+   * stations. and it must always be closest to the build system!"
+   *
+   * ★ HOW THAT SITS WITH THE COVERAGE RULE ALREADY HERE ★
+   *
+   * Two owner decisions meet at this function and they are not the same decision. Coverage answers
+   * "how many stops is this trip"; the priority answers "which stop first". Neither replaces the
+   * other, so:
+   *
+   *   - coverage still chooses WHICH stops, because one visit at 40 ly beats four at 5, and that
+   *     was the earlier explicit choice;
+   *   - the priority breaks TIES between stops covering the same amount, replacing plain distance;
+   *   - and the finished list is ORDERED by the priority, because "must always show in this
+   *     priority" is about what a member reads.
+   *
+   * Optional so the existing tests, which know nothing about a build system, keep describing the
+   * coverage rule on its own.
+   */
+  context?: BuyContext | undefined,
 ): { readonly stations: readonly PurchaseStation[]; readonly uncovered: readonly string[] } {
   const uncovered = new Set(wanted);
   const chosen: PurchaseStation[] = [];
@@ -145,7 +185,27 @@ export function planRoute(
 
       // A station we cannot place must LOSE a tie, not win it: unknown is not nearer than 3 ly.
       const ly = candidate.distanceLy ?? Infinity;
-      if (brings.length > bestBrings.length || (brings.length === bestBrings.length && ly < bestLy)) {
+
+      if (brings.length > bestBrings.length) {
+        bestAt = i;
+        bestBrings = brings;
+        bestLy = ly;
+        continue;
+      }
+
+      if (brings.length !== bestBrings.length) continue;
+
+      /*
+       * The tie, decided by the owner's priority rather than by distance alone. With no context we
+       * fall back to the original rule, which is what the coverage tests still assert.
+       */
+      const incumbent = bestAt === -1 ? undefined : candidates[bestAt];
+      const better =
+        context === undefined || incumbent === undefined
+          ? ly < bestLy
+          : rankBuySources([candidate, incumbent], context)[0] === candidate;
+
+      if (better) {
         bestAt = i;
         bestBrings = brings;
         bestLy = ly;
@@ -172,7 +232,15 @@ export function planRoute(
     for (const c of bestBrings) uncovered.delete(c);
   }
 
-  return { stations: chosen, uncovered: [...uncovered].sort() };
+  /*
+   * Ordered for reading, not for flying. "it must always show in this priority" is about the list a
+   * member scans before they undock — the stop in the build's own system first, then squadron
+   * space, then everywhere else, orbital ahead of ground and nearest ahead of far.
+   */
+  return {
+    stations: context === undefined ? chosen : (rankBuySources(chosen, context) as PurchaseStation[]),
+    uncovered: [...uncovered].sort(),
+  };
 }
 
 /** `steel` -> `Steel`. Frontier omits Type_Localised for exactly the plain-word commodities. */
@@ -320,6 +388,19 @@ export class ColonyPurchasesService {
           WHERE kind = 'system' AND name = $1 AND coords IS NOT NULL LIMIT 1)
        SELECT c.station_name, c.station_system, c.commodity, c.tonnes, c.price, c.note,
               u.display_name AS bought_by, c.updated_at AS at,
+              /*
+               * ★ THE STATION'S KIND, LOOKED UP RATHER THAN LEFT NULL ★
+               *
+               * A declared row carries a name a member typed and nothing about the port. Without
+               * this join every hand-declared stop sorted as "kind unknown", which the ranking
+               * deliberately treats as GROUND — so declaring a purchase at a Coriolis pushed it
+               * behind every ground station in range, and the member who took the trouble to
+               * report a good stop was the one whose stop got buried.
+               *
+               * Found by a test, not by reading: the wiring typechecked and every unit test passed,
+               * because they build candidates by hand and never come through here.
+               */
+              t.data->>'type' AS station_type,
               CASE WHEN s.coords IS NULL OR (SELECT coords FROM origin) IS NULL THEN NULL
                    ELSE round((s.coords <-> (SELECT coords FROM origin))::numeric, 1) END AS ly
          FROM colony_purchases c
@@ -328,6 +409,12 @@ export class ColonyPurchasesService {
            SELECT coords FROM knowledge_items
             WHERE kind = 'system' AND name = c.station_system AND coords IS NOT NULL LIMIT 1
          ) s ON true
+         LEFT JOIN LATERAL (
+           SELECT data FROM knowledge_items
+            WHERE kind = 'station' AND name = c.station_name
+              AND data->>'system' = c.station_system
+            LIMIT 1
+         ) t ON true
         WHERE c.system_name = $1`,
       systemName,
     );
@@ -336,6 +423,8 @@ export class ColonyPurchasesService {
       readonly name: string;
       readonly system: string;
       ly: number | null;
+      /** Mutable like `ly`, and for the same reason: a later row may carry what the first lacked. */
+      isOrbital: boolean | null;
       readonly lines: Map<string, PurchaseLine>;
     }
     const places = new Map<string, Place>();
@@ -356,19 +445,30 @@ export class ColonyPurchasesService {
       const key = stationKey(name, system, marketId);
       let place = places.get(key);
       if (place === undefined) {
-        place = { name, system, ly, lines: new Map<string, PurchaseLine>() };
+        place = {
+          name,
+          system,
+          ly,
+          // Null when the type column is empty or Frontier added a kind we do not know. The ranking
+          // sorts an unknown WITH ground rather than guessing it into the fast lane.
+          isOrbital: isOrbitalStation(type),
+          lines: new Map<string, PurchaseLine>(),
+        };
         places.set(key, place);
-      } else if (place.ly === null) {
-        place.ly = ly;
+      } else {
+        if (place.ly === null) place.ly = ly;
+        // A later row may carry the type when the first did not — the same fill-in the distance gets.
+        if (place.isOrbital === null) place.isOrbital = isOrbitalStation(type);
       }
+      const at = place;
 
-      const held = place.lines.get(line.commodity);
+      const held = at.lines.get(line.commodity);
       // Manual beats journal; between two of a kind the newer wins. Same rule as carrier holds.
       const beats =
         held === undefined ||
         (line.source === 'manual' && held.source === 'journal') ||
         (line.source === held.source && line.at > held.at);
-      if (beats) place.lines.set(line.commodity, line);
+      if (beats) at.lines.set(line.commodity, line);
     };
 
     for (const row of journal) {
@@ -408,7 +508,9 @@ export class ColonyPurchasesService {
       offer(
         String(row['station_name']),
         String(row['station_system']),
-        null,
+        row['station_type'] === null || row['station_type'] === undefined
+          ? null
+          : String(row['station_type']),
         row['ly'] === null || row['ly'] === undefined ? null : Number(row['ly']),
         {
           commodity: String(row['commodity']),
@@ -429,11 +531,60 @@ export class ColonyPurchasesService {
         stationName: p.name,
         systemName: p.system,
         distanceLy: p.ly,
+        isOrbital: p.isOrbital,
         lines: [...p.lines.values()],
       })),
+      { buildSystem: systemName ?? '', architectedSystems: await this.#architectedSystems() },
     );
 
     return { systemName, stations: route.stations, uncovered: route.uncovered };
+  }
+
+  /**
+   * The systems the squadron architected.
+   *
+   * ★ TWO SOURCES, AND THE OWNER ASKED FOR BOTH ★
+   *
+   * The colonisation PLANS are the systems we are actively building out, and they are the obvious
+   * half. They are not the whole picture: a system the squadron holds but never planned here — an
+   * older claim, or one somebody laid out before the planner existed — is just as much squadron
+   * space to a hauler, and would rank as neutral territory on the plans alone.
+   *
+   * So an officer-maintained list supplements them, kept in `site_config` rather than a table
+   * because it is a handful of names an officer edits occasionally, and a migration for that is
+   * more machinery than the fact deserves.
+   *
+   * Failure is not fatal. If either read fails the ordering degrades to "build system, then
+   * everything else, nearest first", which is still useful — where throwing would take out the
+   * whole purchases panel to make a list slightly better ordered.
+   */
+  async #architectedSystems(): Promise<ReadonlySet<string>> {
+    const systems = new Set<string>();
+
+    try {
+      const planned = await this.db.$queryRawUnsafe<Array<{ system_name: string }>>(
+        `SELECT DISTINCT system_name FROM colony_plans WHERE system_name <> ''`,
+      );
+      for (const row of planned) systems.add(row.system_name);
+    } catch {
+      // Left as it is. See the note above.
+    }
+
+    try {
+      const rows = await this.db.$queryRawUnsafe<Array<{ value: unknown }>>(
+        `SELECT value FROM site_config WHERE key = 'colony.architected_systems'`,
+      );
+      const raw = rows[0]?.value;
+      if (Array.isArray(raw)) {
+        for (const name of raw) {
+          if (typeof name === 'string' && name.trim() !== '') systems.add(name.trim());
+        }
+      }
+    } catch {
+      // Same.
+    }
+
+    return systems;
   }
 
   /** Records what somebody found. Re-declaring the same commodity at the same station updates it. */
