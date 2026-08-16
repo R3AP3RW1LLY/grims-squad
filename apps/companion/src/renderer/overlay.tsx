@@ -63,6 +63,52 @@ interface OverlayMessage {
  * The column goes blank instead — the same distinction `needsFreshness` draws between "none" and
  * "we have not looked".
  */
+/**
+ * The column headings for the grid.
+ *
+ * ★ SQUADRON OWNER, 2026-08-16 ★
+ *
+ * "we need headers and smaller font size i think so it all fits"
+ *
+ * Four bare numbers in a row mean nothing without them. The first version relied on `title`
+ * tooltips, which do not exist on an overlay nobody hovers — it sits over a cockpit and is read at
+ * a glance, so anything that needs a hover to be understood is not there at all.
+ *
+ * Abbreviated because the width is the constraint the owner is actually reporting: NEED / HOLD /
+ * CARR / BUY reads at a glance and leaves the commodity name the room it needs.
+ */
+function NeedHeader({ accent }: { accent: string }): preact.JSX.Element {
+  const cell = {
+    fontSize: '0.62em',
+    letterSpacing: '0.1em',
+    textTransform: 'uppercase' as const,
+    color: C.dim,
+  };
+
+  return (
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: GRID_COLUMNS,
+        gap: '0 8px',
+        alignItems: 'baseline',
+        padding: '0 0 2px',
+        borderBottom: `1px solid ${C.hairline}`,
+        marginBottom: '2px',
+      }}
+    >
+      <span style={cell} />
+      <span style={cell}>Need</span>
+      <span style={cell}>Hold</span>
+      <span style={cell}>Carr</span>
+      <span style={{ ...cell, color: accent }}>Buy</span>
+    </div>
+  );
+}
+
+/** One shared template, so the header and every row cannot drift out of alignment. */
+const GRID_COLUMNS = 'minmax(0, 1fr) auto auto auto auto';
+
 function NeedRow({
   need,
   accent,
@@ -78,11 +124,13 @@ function NeedRow({
         display: 'grid',
         // The commodity takes what is left; the four figures are fixed so the columns line up down
         // the panel. `tabular-nums` below is what keeps them from jittering as tonnages change.
-        gridTemplateColumns: 'minmax(0, 1fr) auto auto auto auto',
+        gridTemplateColumns: GRID_COLUMNS,
         gap: '0 8px',
         alignItems: 'baseline',
         padding: '1px 0',
-        fontSize: '0.95em',
+        // Smaller than the panel's body text: five columns over a cockpit is a lot of width, and
+        // the numbers must fit without the commodity name being clipped to nothing.
+        fontSize: '0.82em',
       }}
     >
       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -557,7 +605,12 @@ function BuildPanel({
            * it is the one in front of them mid-flight. So the grouping appears exactly when it is
            * real, and the panel looks the way it always did when it is not.
            */
-          needs.map((n) => <NeedRow key={n.commodity} need={n} accent={accent} />)
+          <>
+            <NeedHeader accent={accent} />
+            {needs.map((n) => (
+              <NeedRow key={n.commodity} need={n} accent={accent} />
+            ))}
+          </>
         ) : (
           grouped.map((group) => (
             <div key={group.category}>
@@ -572,6 +625,11 @@ function BuildPanel({
               >
                 {group.category}
               </p>
+              {/*
+                Repeated per category rather than once at the top: the panel scrolls, and a heading
+                that has scrolled away is a heading that is not doing its job.
+              */}
+              <NeedHeader accent={accent} />
               {group.rows.map((n) => (
                 <NeedRow key={n.commodity} need={n} accent={accent} />
               ))}

@@ -11,6 +11,7 @@ import { ShipBuildService } from '../ai/ship-build.service.js';
 import { ColonyLiveService } from '../logistics/colony-live.service.js';
 import { AclDbService } from '../authz/acl-db.service.js';
 import { CompanionModule } from '../companion/companion.module.js';
+import { CmdrModule } from '../cmdr/cmdr.module.js';
 import { TelemetryController } from './telemetry.controller.js';
 import { PairingService } from './pairing.service.js';
 import { DeviceLinkService } from './device-link.service.js';
@@ -28,7 +29,9 @@ import type { LiveService } from '../live/live.service.js';
    * CompanionModule for the release store: the settings endpoint tells the app
    * the newest published version, which is what drives the update banner.
    */
-  imports: [DatabaseModule, CompanionModule],
+  // CmdrModule supplies CAPI_SERVICE, which the settings endpoint needs to tell the companion
+  // whether this member has linked Frontier. Without it the app is never told to ask.
+  imports: [DatabaseModule, CompanionModule, CmdrModule],
   controllers: [TelemetryController],
   providers: [
     {
