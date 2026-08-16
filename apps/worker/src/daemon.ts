@@ -5,10 +5,12 @@ import { Client } from 'pg';
 import { PrismaClient } from '@grims/db';
 import { JOB_REQUEST_CHANNEL } from '@grims/shared';
 import { dueSources, lastRuns, TICK_MS } from './scheduler.js';
+import { initialPoll, nextPoll } from '@grims/shared';
 import { announcePendingColonyProjects, PrismaColonyStore, syncColonyProjects } from '@grims/db';
 import { TokenCipher, createKeyring } from '@grims/shared/server';
 import { pollCapiJournals } from './jobs/capi-journal-poll.js';
 import { PrismaCapiPollStore } from './jobs/capi-journal-poll.wiring.js';
+import { PrismaBuildWatchStore, runBuildCompletionWatch } from './jobs/build-completion-watch.wiring.js';
 import { announce } from './jobs/job-log.js';
 import { rollUpCommodities } from './jobs/commodity-rollup.js';
 import { PrismaRollupStore } from './jobs/commodity-rollup.wiring.js';
@@ -342,6 +344,7 @@ function startScheduler(db: PrismaClient): void {
   startIngestionWatch(db);
   startRoleSync(db);
   startCapiJournalPoll(db);
+  startBuildCompletionWatch(db);
   startStationResolver(db);
   startBountyBoard(db);
   startLeaderboardScoring(db);
@@ -797,6 +800,74 @@ function startCapiJournalPoll(db: PrismaClient): void {
 
   void run();
   setInterval(() => void run(), CAPI_POLL_MS);
+}
+
+/**
+ * The build watch scales itself, like the poller does.
+ *
+ * ★ SQUADRON OWNER, 2026-08-16 ★
+ *
+ * "we didnt want a 20 minute cadence for capi we wanted auto scaling fast if active slow if now!"
+ *
+ * A fixed twenty minutes is wrong in both directions at once. While members are actively hauling to
+ * a site, twenty minutes is twenty minutes of the board asking for materials that are already
+ * delivered. While nothing is happening — which is most of the time — it is a query every twenty
+ * minutes for ever, answering the same nothing.
+ *
+ * So it is MEASURED, exactly as the journal poller's interval is: each pass reports whether anything
+ * new was seen at any watched build, and `nextPoll` walks the interval toward whatever that turns
+ * out to be. Same function, same floors — one minute when the sites are busy, thirty when they are
+ * not — so there is one idea of "how active is this" in the codebase rather than two.
+ *
+ * ★ SCHEDULED WITH setTimeout, NOT setInterval ★
+ *
+ * The interval changes after every pass, and `setInterval` fixes it at the value it was created
+ * with. Re-arming after each run is what makes an adaptive cadence adaptive rather than decorative.
+ */
+function startBuildCompletionWatch(db: PrismaClient): void {
+  const store = new PrismaBuildWatchStore(db);
+  let poll = initialPoll();
+  let lastSighting: Date | null = null;
+
+  const run = async (): Promise<void> => {
+    // Two daemons must not both close and both announce the same completion.
+    const lock = await takeJobLock('build-completion-watch');
+
+    if (lock !== null) {
+      try {
+        const now = new Date();
+        const report = await runBuildCompletionWatch(store, now);
+
+        /*
+         * "Something happened" means a build closed, or a sighting arrived that we had not seen
+         * before. A pass that merely re-read the same old sighting is exactly the pass that was not
+         * worth making, and it is what should widen the interval.
+         */
+        const advanced =
+          report.newestSightingAt !== null &&
+          (lastSighting === null || report.newestSightingAt > lastSighting);
+        if (report.newestSightingAt !== null) lastSighting = report.newestSightingAt;
+
+        poll = nextPoll(poll, report.closed > 0 || advanced, now);
+
+        // Only when something closed. A line per pass saying nothing changed is how a log stops
+        // being read — and a close is the event somebody may need to find later.
+        if (report.closed > 0) {
+          console.log(
+            `daemon: build watch — closed ${report.closed} finished build(s) of ${report.checked} live`,
+          );
+        }
+      } catch (e) {
+        console.error(`daemon: build watch failed (${e instanceof Error ? e.message : String(e)})`);
+      } finally {
+        await lock.release();
+      }
+    }
+
+    setTimeout(() => void run(), poll.intervalMs);
+  };
+
+  void run();
 }
 
 function startStationResolver(db: PrismaClient): void {
