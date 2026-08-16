@@ -2480,7 +2480,22 @@ if (!app.requestSingleInstanceLock()) {
      * :5001, and building this from the API base opens a JSON 404.
      */
     ipcMain.handle('connectFrontier', () => {
-      const url = `${webBaseUrlFor(config, process.env)}/settings/privacy`;
+      /*
+       * ★ STRAIGHT TO FRONTIER — SQUADRON OWNER, 2026-08-16 ★
+       *
+       * "whe i click connect with frontier in the companion app it sends me to the suqadron website
+       * not frontier!"
+       *
+       * It did, and there was nothing there to press: `capiStart` had no caller anywhere in the web
+       * app, so /settings/privacy showed no Connect button at all. The member landed on a settings
+       * page and was stuck behind a step this app makes MANDATORY.
+       *
+       * /connect/frontier starts the handshake on arrival and forwards to Frontier. The browser is
+       * still where it has to happen — the authorisation URL carries a PKCE challenge the hub must
+       * remember, so it can only come from a session-authenticated call, and this app holds no
+       * session on purpose.
+       */
+      const url = `${webBaseUrlFor(config, process.env)}/connect/frontier`;
       void shell.openExternal(url);
       /*
        * The watch starts on the PRESS, not on the return. Whether the browser actually opened is
