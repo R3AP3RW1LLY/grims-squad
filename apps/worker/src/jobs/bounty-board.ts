@@ -94,6 +94,47 @@ export const NEVER_SEEN_POINTS = 2000;
  */
 export const PER_SYSTEM_LIMIT = 3;
 
+/**
+ * A station a member could actually file a market report from.
+ *
+ * ★ 72 OF THE 496 BOUNTIES ON THE BOARD COULD NOT BE CLEARED — MEASURED 2026-08-16 ★
+ *
+ * A bounty is an instruction to fly somewhere and bring back a market. If the station has no market
+ * to bring back, the trip is wasted and the bounty NEVER clears: nothing can refresh it, so it sits
+ * at the top of the board for ever, paying nobody and displacing a station somebody could have
+ * helped with.
+ *
+ * Fifty-seven Outposts, one Planetary Outpost and fourteen stations we hold no catalogue row for at
+ * all. The member who flew to one had no way to know, and no way to say so.
+ *
+ * ★ ABSENT IS NOT THE SAME AS UNKNOWN, AND THE DIFFERENCE DECIDES 459 STATIONS ★
+ *
+ * The rule is deliberately `services is an array AND that array lacks Market` — NOT `services does
+ * not contain Market`. Four hundred and fifty-nine stations carry no services data whatsoever, and
+ * under the shorter form every one would be struck off. "We have never been told what this station
+ * offers" is the strongest possible case for sending somebody to look, not a reason to stop.
+ *
+ * ★ AND IT IS A FILTER, NOT A PROOF ★
+ *
+ * The services list comes from the galaxy dump and can be stale: a station that has GAINED a market
+ * since the last import still reads as marketless here. That is why this is one layer of several
+ * rather than the answer — a member who flies out and finds a market anyway refreshes it, and the
+ * upload clears the bounty by the ordinary path.
+ *
+ * ★ THE `COALESCE` IS LOAD-BEARING, AND IT IS NOT DEFENSIVE STYLE ★
+ *
+ * Written without it first. For a station carrying no services key, `k.data->'services'` is SQL
+ * NULL, so `jsonb_typeof(NULL) = 'array'` is NULL, the conjunction is NULL, and `NOT NULL` is NULL
+ * — which a WHERE clause discards. The predicate meant to protect the 459 unknown stations was
+ * silently removing every one of them, including the never-seen station this job's own header calls
+ * "precisely the biggest bounty there is".
+ *
+ * Nothing about the SQL looked wrong; it read exactly like the rule it was supposed to be. The
+ * regression test caught it on the first run.
+ */
+const HAS_NO_MARKET = `COALESCE(jsonb_typeof(k.data->'services') = 'array'
+                                AND NOT (k.data->'services' @> '["Market"]'::jsonb), false)`;
+
 export async function rebuildBountyBoard(db: PrismaClient): Promise<BountyBoardReport> {
   return db.$transaction(
     async (tx) => {
@@ -222,6 +263,8 @@ export async function rebuildBountyBoard(db: PrismaClient): Promise<BountyBoardR
                 WHERE k.kind = 'station'
                   AND k.coords IS NOT NULL
                   AND (k.data->>'type' IS NULL OR k.data->>'type' NOT ILIKE '%carrier%')
+                  -- A station with no market cannot be refreshed, so a bounty on it never clears.
+                  AND NOT ${HAS_NO_MARKET}
                   AND (s.last_seen IS NULL
                        OR s.last_seen < now() - interval '${BELIEVABLE_DAYS} days')
               ) scored
@@ -283,6 +326,11 @@ export async function rebuildBountyBoard(db: PrismaClient): Promise<BountyBoardR
                    LIMIT ${GALAXY_LIMIT * 10}
                 ) pick
                 JOIN knowledge_items k ON k.kind = 'station' AND k.ext_key = pick.station_key
+                 -- Applied HERE as well, and the comment above about the per-system cap says why in
+                 -- so many words: "the tail had the identical defect and it is the half that
+                 -- actually bit". A filter on the ops list alone leaves the tail free to put every
+                 -- marketless station straight back on the board.
+                 AND NOT ${HAS_NO_MARKET}
               ) scored
           ) ranked
          WHERE rank_in_system <= ${PER_SYSTEM_LIMIT}

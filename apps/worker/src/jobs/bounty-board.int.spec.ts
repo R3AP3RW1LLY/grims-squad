@@ -188,4 +188,89 @@ describe('the data bounty board, against Postgres', () => {
     },
     120_000,
   );
+  it(
+    '★ MANDATORY: a station with no market is not a bounty, but an UNKNOWN one still is ★',
+    async () => {
+      /*
+       * ★ 72 OF THE 496 BOUNTIES ON THE BOARD COULD NOT BE CLEARED — MEASURED 2026-08-16 ★
+       *
+       * A bounty is an instruction to fly somewhere and bring back a market. A station with no
+       * market has none to bring back, so nothing can ever refresh it: the bounty sits at the top
+       * of the board for ever, pays nobody, and displaces a station somebody could have helped
+       * with. Fifty-seven Outposts and one Planetary Outpost were in exactly that state, plus
+       * fourteen we hold no catalogue row for.
+       *
+       * ★ AND THE SECOND HALF IS THE HALF THAT IS EASY TO GET WRONG ★
+       *
+       * The rule is `services is an ARRAY and that array lacks Market` — not `services does not
+       * contain Market`. Four hundred and fifty-nine stations carry no services data at all, and
+       * under the shorter form every one would be struck off. "Nobody has ever told us what this
+       * station offers" is the strongest case there is for sending somebody to look.
+       *
+       * Both halves are asserted here because either alone passes with the wrong rule in place.
+       */
+      await cleanUp();
+
+      const [user] = await db.$queryRawUnsafe<Array<{ id: string }>>(
+        `INSERT INTO users (handle, display_name) VALUES ($1, $1) RETURNING id`,
+        TAG,
+      );
+      const userId = (user as { id: string }).id;
+
+      await db.$executeRawUnsafe(
+        `INSERT INTO knowledge_items (source, kind, ext_key, name, data, coords, text)
+         VALUES ('galaxy', 'system', $1, $2, '{}'::jsonb, cube(array[11.0, 12.0, 13.0]), $2)`,
+        SYS_ID,
+        CROWDED,
+      );
+      await db.$executeRawUnsafe(
+        `INSERT INTO colony_projects (owner, posted_by_id, market_id, system_name, system_id64, title)
+         VALUES ('squadron', $1::uuid, $2::bigint, $3, $4::bigint, $5)`,
+        userId,
+        '900000000000902',
+        CROWDED,
+        SYS_ID,
+        `${TAG} anchor`,
+      );
+
+      // Never seen, so all three are maximum-value candidates and only the RULE can separate them.
+      const station = async (suffix: string, services: string | null): Promise<void> => {
+        await db.$executeRawUnsafe(
+          `INSERT INTO knowledge_items (source, kind, ext_key, name, data, coords, text)
+           VALUES ('galaxy', 'station', $1, $2,
+                   jsonb_build_object('system', $3, 'type', 'Coriolis')
+                     || CASE WHEN $4::text IS NULL THEN '{}'::jsonb
+                             ELSE jsonb_build_object('services', $4::jsonb) END,
+                   cube(array[11.0, 12.0, 13.0]), $2)`,
+          `${SYS_ID}/${TAG} ${suffix}`,
+          `${TAG} ${suffix}`,
+          CROWDED,
+          services,
+        );
+      };
+
+      await station('HasMarket', '["Dock", "Market", "Refuel"]');
+      await station('NoMarket', '["Dock", "Refuel"]');
+      await station('Unknown', null);
+
+      await rebuildBountyBoard(db);
+
+      const listed = await db.$queryRawUnsafe<Array<{ station_key: string }>>(
+        `SELECT station_key FROM data_bounties WHERE station_key LIKE $1 ORDER BY station_key`,
+        `${SYS_ID}/${TAG} %`,
+      );
+      const names = listed.map((r) => r.station_key.split('/')[1]);
+
+      expect(names, 'a station that HAS a market is still a bounty').toContain(`${TAG} HasMarket`);
+      expect(
+        names,
+        'a station whose services say it has NO market can never be cleared and must not be listed',
+      ).not.toContain(`${TAG} NoMarket`);
+      expect(
+        names,
+        'and a station we know NOTHING about is the strongest bounty of all — unknown is not absent',
+      ).toContain(`${TAG} Unknown`);
+    },
+    60_000,
+  );
 });
