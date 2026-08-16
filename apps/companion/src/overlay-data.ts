@@ -4,6 +4,11 @@ import { unrealised } from './cargo-value.js';
 import { markWanted, type Hold } from './cargo.js';
 import type { CurrentBuild } from './hub-colony.js';
 import type { TripLedger } from './trip-ledger.js';
+/*
+ * SUBPATH, not the barrel — this module is reachable from the overlay entry point and the barrel
+ * reaches `node:crypto`. `renderer-imports.spec.ts` fails the build if that rule is broken.
+ */
+import { coverNeeds, type Holder } from '@grims/shared/colony-held-cargo';
 import type { OverlayData } from './renderer/overlay.js';
 import { hitRate, type ProspectingState } from './prospector.js';
 import { refinedRate, sessionMinutes, type RefiningState } from './refinery.js';
@@ -180,6 +185,70 @@ function routePanel(input: OverlayInput): OverlayData['route'] {
     spare: manifest.spare,
     routeLy: manifest.routeLy,
   };
+}
+
+/** Tonnes of one commodity in the member's own hold, by the need's spelling. */
+function holdTonnesOf(hold: Hold | null, commodity: string): number {
+  const key = commodity.trim().toLowerCase();
+  let tonnes = 0;
+  for (const line of hold?.items ?? []) {
+    if (line.commodity.trim().toLowerCase() === key) tonnes += line.count;
+  }
+  return tonnes;
+}
+
+/**
+ * The build's outstanding lines, with what is already held against each.
+ *
+ * ★ SQUADRON OWNER, 2026-08-15 ★
+ *
+ * "show What is actually remaining vs what is in player cargo holds vs what it actually in assigned
+ * fleet carrier holds."
+ *
+ * ★ THE TWO HOLDERS COME FROM COMPLETELY DIFFERENT PLACES ★
+ *
+ * The member's own ship is read off THEIR machine — `Cargo.json`, already in `input.hold`, with no
+ * network involved and no lag. The carriers only the hub knows, and they arrive with the build.
+ *
+ * Which is why this is computed here rather than server-side: nothing in the API tracks per-member
+ * ship cargo at all, and the overlay is the one surface that does not need it to, because it is
+ * running on the member's own PC.
+ *
+ * `coverNeeds` does the arithmetic, and the cap in it is the load-bearing part: three commanders
+ * holding 500 t against a 900 t need is 900 t covered, not 1,500 t.
+ */
+function coveredNeeds(
+  current: CurrentBuild,
+  hold: Hold | null,
+): ReturnType<typeof coverNeeds> {
+  const holders: Holder[] = [];
+
+  for (const line of hold?.items ?? []) {
+    holders.push({
+      kind: 'ship',
+      commodity: line.commodity,
+      tonnes: line.count,
+      userId: 'me',
+      commander: 'You',
+      carrierCallsign: null,
+    });
+  }
+
+  for (const h of current.carrierHolds ?? []) {
+    holders.push({
+      kind: 'carrier',
+      commodity: h.commodity,
+      tonnes: h.tonnes,
+      userId: `carrier:${h.carrier}`,
+      commander: h.carrier,
+      carrierCallsign: h.carrier,
+    });
+  }
+
+  return coverNeeds(
+    current.needs.map((n) => ({ commodity: n.commodity, remaining: Math.max(0, n.remaining) })),
+    holders,
+  );
 }
 
 export function buildOverlayData(input: OverlayInput): OverlayData {
@@ -368,7 +437,7 @@ function buildPanel(input: OverlayInput): OverlayData['build'] {
     // Physically at the current build, with a live depot reading: prefer it — see the header.
     if (site !== null && dock !== null && dock.marketId === current.marketId) {
       return {
-        ...fromDepot(dock, site),
+        ...fromDepot(dock, site, input.hold),
         // The project's own name and crew, which the heartbeat cannot supply.
         title: current.title,
         haulers: current.haulers.length,
@@ -378,20 +447,34 @@ function buildPanel(input: OverlayInput): OverlayData['build'] {
 
     return {
       title: current.title,
-      needs: current.needs
-        .map((n) => ({
+      needs: coveredNeeds(current, input.hold)
+        .map((n) => {
+          // `CoveredNeed` is only about tonnage. Category and the original requirement come from the
+          // need it was computed from, matched by the need's own spelling which `coverNeeds` keeps.
+          const source = current.needs.find((x) => x.commodity === n.commodity);
+          return {
           commodity: n.commodity,
           /*
            * Only the HUB path knows the category — it comes down with the needs. The journal path
            * below reads a depot directly and has no market data at all, which is why the overlay
            * groups only when it actually has categories to group by.
            */
-          category: n.category ?? null,
+          category: source?.category ?? null,
           // Floored for the same reason as the depot path: an over-delivered line can report a
           // negative remainder, and "-40 t still needed" is worse than saying nothing.
           remaining: Math.max(0, n.remaining),
-          required: n.required,
-        }))
+          required: source?.required ?? null,
+          inHold: n.shipTonnes,
+          onCarriers: n.carrierTonnes,
+          stillToBuy: n.stillToBuy,
+          /*
+           * Whether the carrier figure is a FACT or an absence. The hub path knows; the journal
+           * path below reads a depot off the pad and knows nothing about carriers, and a `0 t`
+           * there would be a claim rather than a gap. The renderer leaves it blank instead.
+           */
+          knowsCarriers: true,
+          };
+        })
         .filter((n) => n.remaining > 0),
       delivered: current.progress.delivered,
       required: current.progress.required,
@@ -403,13 +486,15 @@ function buildPanel(input: OverlayInput): OverlayData['build'] {
 
   // No current build set: the journal-docked behaviour this panel has always had.
   if (site === null || dock === null) return null;
-  return { ...fromDepot(dock, site), fromHub: false };
+  return { ...fromDepot(dock, site, input.hold), fromHub: false };
 }
 
 /** The panel's numbers, straight off a depot heartbeat. Shared by both docked paths above. */
 function fromDepot(
   dock: DockedAt,
   site: NonNullable<DockedAt['site']>,
+  /** The member's own cargo. Read off their machine, so it is true even at a site the hub never saw. */
+  hold: Hold | null,
 ): Omit<NonNullable<OverlayData['build']>, 'fromHub'> {
   const title = projectTitleFrom(dock.stationName);
 
@@ -418,13 +503,29 @@ function fromDepot(
     // "Planetary Construction Site:" prefix, and an empty result means we have no name yet.
     title: title === '' ? null : title,
     needs: site.resources
-      .map((r) => ({
-        commodity: r.commodity,
-        // Floored: an over-delivered site reports a negative remainder, and "-40 t still needed"
-        // on an overlay is worse than saying nothing.
-        remaining: Math.max(0, r.required - r.provided),
-        required: r.required,
-      }))
+      .map((r) => {
+        const remaining = Math.max(0, r.required - r.provided);
+        /*
+         * The member's OWN hold still counts here — it is read off their machine and is true at a
+         * depot the hub has never heard of. What is missing is the carriers, which only the hub
+         * knows, and `knowsCarriers: false` is how the grid says so rather than printing a zero.
+         *
+         * A `0 t` in the carrier column is a CLAIM — "no carrier has any" — where a blank is the
+         * truth: we did not ask. The same distinction `needsFreshness` draws elsewhere.
+         */
+        const inHold = holdTonnesOf(hold, r.commodity);
+        return {
+          commodity: r.commodity,
+          // Floored: an over-delivered site reports a negative remainder, and "-40 t still needed"
+          // on an overlay is worse than saying nothing.
+          remaining,
+          required: r.required,
+          inHold,
+          onCarriers: 0,
+          stillToBuy: Math.max(0, remaining - inHold),
+          knowsCarriers: false,
+        };
+      })
       // Finished commodities are dropped. The overlay is small and it exists to answer "what do I
       // still need to bring" — a completed line is a row of noise on a panel over a cockpit.
       .filter((n) => n.remaining > 0),

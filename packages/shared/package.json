@@ -23,6 +23,10 @@
       "types": "./dist/colony-status.d.ts",
       "default": "./dist/colony-status.js"
     },
+    "./colony-held-cargo": {
+      "types": "./dist/colony-held-cargo.d.ts",
+      "default": "./dist/colony-held-cargo.js"
+    },
     "./station-orbital": {
       "types": "./dist/station-orbital.d.ts",
       "default": "./dist/station-orbital.js"

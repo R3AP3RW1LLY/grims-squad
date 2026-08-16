@@ -819,6 +819,19 @@ export interface CurrentBuild {
   readonly progress: { readonly delivered: number; readonly required: number };
   readonly needs: readonly ColonyNeed[];
   readonly haulers: readonly ColonyHauler[];
+  /**
+   * What the attached fleet carriers are holding of this build's materials.
+   *
+   * Squadron owner, 2026-08-15: the overlay must show "what is in player cargo holds vs what it
+   * actually in assigned fleet carrier holds". The member's own hold the app reads from Cargo.json
+   * on their own machine; the carriers only the hub knows.
+   *
+   * Optional because an older hub does not send it, and a required field would make the overlay
+   * fail to parse a payload it could otherwise use most of.
+   */
+  readonly carrierHolds?:
+    | ReadonlyArray<{ commodity: string; tonnes: number; carrier: string }>
+    | undefined;
 }
 
 export const colonyCurrent = (

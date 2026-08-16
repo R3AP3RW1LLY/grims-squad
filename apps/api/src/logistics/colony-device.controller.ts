@@ -604,9 +604,20 @@ export class ColonyDeviceController {
     const project = await this.colony.byId(held.projectId, me);
     if (project === null) return { current: null };
 
-    const [needs, haulers] = await Promise.all([
+    const [needs, haulers, carriers] = await Promise.all([
       this.colony.needs(project.id),
       this.colony.haulers(project.id),
+      /*
+       * ★ FOR THE OVERLAY'S GRID — SQUADRON OWNER, 2026-08-15 ★
+       *
+       * "show What is actually remaining vs what is in player cargo holds vs what it actually in
+       * assigned fleet carrier holds."
+       *
+       * The member's own hold the overlay already has — it reads Cargo.json on their machine. The
+       * carriers it cannot know, so they ride down here. Failing soft: an overlay that loses its
+       * carrier column is worth far less than one that stops drawing because a join was slow.
+       */
+      this.carriers.forProject(project.id).catch(() => []),
     ]);
 
     return {
@@ -623,6 +634,17 @@ export class ColonyDeviceController {
         progress: { delivered: project.required - project.remaining, required: project.required },
         needs,
         haulers,
+        /*
+         * Flattened to commodity and tonnes, and named by callsign. The overlay is a few hundred
+         * pixels over a cockpit: it needs "who has it and how much", not a carrier's full record.
+         */
+        carrierHolds: carriers.flatMap((c) =>
+          c.holds.map((h) => ({
+            commodity: h.commodity,
+            tonnes: h.tonnes,
+            carrier: c.callsign ?? c.name,
+          })),
+        ),
       },
     };
   }
