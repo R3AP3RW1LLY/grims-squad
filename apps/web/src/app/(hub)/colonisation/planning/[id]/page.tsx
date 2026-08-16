@@ -228,6 +228,26 @@ export default async function PlanPage({
         {tab !== 'order' ? null : (
           <Section title="Build order">
             <BuildOrder plan={plan} canEdit={canEdit} />
+
+            {/*
+              ★ THE BUILD BOOK — SQUADRON OWNER, 2026-08-16 ★
+
+              "the build guide generator is also not anywhere i can find it?"
+
+              A plain link, and a download rather than a page. The book is read BESIDE the game — on
+              a second monitor, or on paper — and a browser tab is the one place it cannot be while
+              somebody is flying. It carries the build id and body id on every row so they can be
+              typed straight into the game's own planner.
+            */}
+            <p className="m-0 mt-4 text-[11px] text-[var(--color-text-secondary)]">
+              <a
+                href={`/v1/logistics/colony/plans/${plan.id}/book`}
+                className="text-[var(--color-brand-orange)] no-underline hover:underline"
+              >
+                Download the build book
+              </a>{' '}
+              — one page per system, with every build id and body id, ready to print.
+            </p>
           </Section>
         )}
 
