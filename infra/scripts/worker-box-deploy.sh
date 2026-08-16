@@ -49,6 +49,26 @@ SHA="${ARGS[1]:-}"
 
 [[ -r $ENV_FILE ]] || die "cannot read $ENV_FILE"
 
+# ★ THE FEATURES THIS BOX RUNS NEED THEIR OWN SETTINGS, AND IT HAS ITS OWN .env ★
+#
+# Found on 2026-08-16, and it is exactly the failure this whole script exists to make impossible.
+#
+# The journal poller runs in `worker-daemon`, which lives HERE — not on the primary. Its settings
+# were configured on the primary only, because that is where the API needed them, so the poller
+# would have started, found no client id, logged "Frontier is not configured on this box" once, and
+# never polled. The feature would have looked shipped and done nothing, for the cloud players it
+# was built for, with nothing failing anywhere.
+#
+# So the deploy REFUSES rather than starting a daemon that cannot do its job. A missing setting is
+# knowable in a second here; discovered later it is a fortnight of a member wondering why their
+# flying never counted.
+for key in FDEV_CAPI_CLIENT_ID FDEV_CAPI_REDIRECT_URI FDEV_CAPI_SHARED_KEY TOKEN_ENCRYPTION_KEYRING; do
+  value="$(grep -E "^${key}=" "$ENV_FILE" | head -1 | cut -d= -f2-)"
+  [[ -n $value && $value != *CHANGE_ME* ]]     || die "missing $key in $ENV_FILE — the journal poller would start disabled and say nothing.
+     Copy it from the primary's /srv/grims/.env."
+done
+say "cAPI settings present"
+
 PREVIOUS="$(git -C "$REPO" rev-parse HEAD)"
 say "rollback point ${PREVIOUS:0:8}"
 
