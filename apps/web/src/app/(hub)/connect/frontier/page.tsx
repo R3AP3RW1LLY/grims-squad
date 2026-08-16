@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { PageHeader, PageBody } from '../../../../components/hub-page';
 import { StartFrontier } from './start-frontier';
 
 /**
@@ -32,5 +33,22 @@ export const metadata: Metadata = {
 export const dynamic = 'force-dynamic';
 
 export default function ConnectFrontierPage() {
-  return <StartFrontier />;
+  return (
+    <>
+      {/*
+        The shared header, like every other hub page — `hub-page.spec.tsx` enforces it, and it is
+        right to: a page that is a staging post to somewhere else is exactly the one a member is most
+        likely to land on unexpectedly, and it should still look like part of the site rather than a
+        bare redirect they cannot place.
+      */}
+      <PageHeader
+        eyebrow="Account"
+        title="CONNECT WITH FRONTIER"
+        subtitle="Signing in to Frontier so the app can read your journal"
+      />
+      <PageBody>
+        <StartFrontier />
+      </PageBody>
+    </>
+  );
 }
