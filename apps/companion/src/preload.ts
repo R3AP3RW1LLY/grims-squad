@@ -296,6 +296,9 @@ contextBridge.exposeInMainWorld('colony', {
   reopen: (id: string) => ipcRenderer.invoke('colonyReopen', id),
   remove: (id: string) => ipcRenderer.invoke('colonyRemove', id),
   priority: (id: string, on: boolean) => ipcRenderer.invoke('colonyPriority', id, on),
+  /** Giving up on a build, or taking that back. Officers only — the hub decides, not this. */
+  abandoned: (id: string, on: boolean, note?: string) =>
+    ipcRenderer.invoke('colonyAbandoned', id, on, note),
 
   /** Fleet carriers helping with a build, and what each is holding. */
   carriers: (id: string, q: string) => ipcRenderer.invoke('colonyCarriers', id, q),

@@ -45,6 +45,15 @@ export interface ColonyProject {
   } | null;
   readonly isPriority: boolean;
   readonly completedAt: string | null;
+  /**
+   * When an officer gave up on this build, or null.
+   *
+   * Separate from `completedAt` because both can be set — a build wrongly called finished and later
+   * corrected. `colonyStatusOf` reads this one first so the correction wins.
+   */
+  readonly abandonedAt: string | null;
+  /** Why. The member who posted it is owed a reason their build was closed out from under them. */
+  readonly abandonedNote: string | null;
   readonly postedBy: string | null;
   readonly remaining: number;
   readonly required: number;
@@ -1153,6 +1162,26 @@ export const colonyReopen = (call: HubCall, id: string): Promise<Answer<{ ok: tr
 
 export const colonyRemove = (call: HubCall, id: string): Promise<Answer<{ ok: true }>> =>
   hubColony(call, `/projects/${encodeURIComponent(id)}`, { method: 'DELETE' });
+
+/**
+ * Giving up on a build, or taking that back. Officers only — the hub checks.
+ *
+ * Squadron owner, 2026-08-15: "we also need to allow admins to mark builds as abandoned and not
+ * always just as complete."
+ *
+ * It belongs in the app at least as much as on the site: the officer who realises the squadron has
+ * walked away from a build is usually the one flying past it.
+ */
+export const colonyAbandoned = (
+  call: HubCall,
+  id: string,
+  abandoned: boolean,
+  note?: string | undefined,
+): Promise<Answer<{ ok: true }>> =>
+  hubColony(call, `/projects/${encodeURIComponent(id)}/abandoned`, {
+    method: 'PATCH',
+    body: { abandoned, ...(note === undefined ? {} : { note }) },
+  });
 
 export const colonyPriority = (
   call: HubCall,

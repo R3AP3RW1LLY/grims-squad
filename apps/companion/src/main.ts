@@ -28,6 +28,7 @@ import {
   colonyReportBuilt,
   DEFAULT_SHOPPING,
   colonyPriority,
+  colonyAbandoned,
   colonyRemove,
   colonyReopen,
   colonyCarrierSearch,
@@ -2286,6 +2287,16 @@ if (!app.requestSingleInstanceLock()) {
     ipcMain.handle('colonyRemove', (_e, id: unknown) => colonyRemove(hub(), projectId(id)));
     ipcMain.handle('colonyPriority', (_e, id: unknown, on: unknown) =>
       colonyPriority(hub(), projectId(id), on === true),
+    );
+    ipcMain.handle('colonyAbandoned', (_e, id: unknown, on: unknown, note: unknown) =>
+      colonyAbandoned(
+        hub(),
+        projectId(id),
+        // `on === true` like the line above: anything else arriving over IPC must not read as
+        // "abandon it", and a renderer bug should fail closed rather than take a build off the board.
+        on === true,
+        typeof note === 'string' ? note : undefined,
+      ),
     );
 
     ipcMain.handle('colonyCarriers', (_e, id: unknown, q: unknown) =>
