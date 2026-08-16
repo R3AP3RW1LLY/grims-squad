@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 
 /**
  * The abandoned state, in the app.
@@ -24,10 +23,16 @@ import { fileURLToPath } from 'node:url';
  * and NOT the latter, so a `.spec.tsx` would be compiled into `dist` and shipped.
  */
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-const SRC = readFileSync(join(HERE, 'renderer/colonisation.tsx'), 'utf8');
-const PRELOAD = readFileSync(join(HERE, 'preload.ts'), 'utf8');
-const MAIN = readFileSync(join(HERE, 'main.ts'), 'utf8');
+/*
+ * Resolved from `process.cwd()` like `colonisation-mirror.spec.ts` beside it, and NOT from
+ * `import.meta.url`: this package compiles to CommonJS, where `import.meta` is a hard build error.
+ */
+const SRC_DIR = join(process.cwd(), 'src');
+const read = (rel: string): string => readFileSync(join(SRC_DIR, rel), 'utf8');
+
+const SRC = read('renderer/colonisation.tsx');
+const PRELOAD = read('preload.ts');
+const MAIN = read('main.ts');
 
 describe('the rule comes from @grims/shared, not from here', () => {
   it('★ MANDATORY: the app filters with the same function the website filters with ★', () => {
