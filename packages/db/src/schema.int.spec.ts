@@ -257,8 +257,17 @@ describe('P0.2 database schema', () => {
      * `prisma migrate dev` refused to generate it without resetting the database, so the DDL was
      * authored by hand — which is precisely the situation where a migration CAN drift ahead of the
      * models, and precisely why this count exists.
+     *
+     * 130 as of 2026-08-16: `capi_poll_state`. The journal poller's per-member cadence — how often
+     * to ask Frontier for one commander's journal and where we got to. Separate from
+     * `cmdr_verifications` because it is rewritten every sixty seconds for an actively flying member
+     * and that row holds their identity and their tokens.
+     *
+     * Checked against the rule above rather than bumped: it is declared in ssot/03-data/schema.prisma
+     * as CapiPollState, and the migration was written from that model rather than ahead of it. This
+     * guard fired on exactly the hand-written migration it exists to watch.
      */
-    expect(Number(r[0]?.n)).toBe(129);
+    expect(Number(r[0]?.n)).toBe(130);
   });
 
   describe('hand-written DDL that Prisma cannot express', () => {
