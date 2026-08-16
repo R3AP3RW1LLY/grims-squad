@@ -34,8 +34,22 @@ async function seedMember(): Promise<{ userId: string; deviceId: string }> {
   );
   const userId = (u as { id: string }).id;
 
+  /*
+   * ★ IDEMPOTENT, LIKE THE INSERT ABOVE IT — 2026-08-16 ★
+   *
+   * `token_hash` is unique and this spec uses a FIXED one, so a plain INSERT works exactly once per
+   * clean database. The cleanup at the end of each test removed it, which held right up until a run
+   * was killed part-way through — after which every future run failed on the leftover row, in a
+   * file that had not changed, with an error naming a unique index rather than the real cause.
+   *
+   * A test that needs somebody to go and clean the database by hand before it can pass again is a
+   * test people learn to skip. `ON CONFLICT` adopts the orphan instead, which is what the `users`
+   * insert directly above has always done.
+   */
   const [d] = await db.$queryRawUnsafe<Array<{ id: string }>>(
-    `INSERT INTO device_tokens (user_id, label, token_hash) VALUES ($1::uuid, $2, $2) RETURNING id`,
+    `INSERT INTO device_tokens (user_id, label, token_hash) VALUES ($1::uuid, $2, $2)
+     ON CONFLICT (token_hash) DO UPDATE SET user_id = EXCLUDED.user_id, label = EXCLUDED.label
+     RETURNING id`,
     userId,
     TAG,
   );

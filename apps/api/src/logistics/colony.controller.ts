@@ -190,6 +190,21 @@ export class ColonyController {
     const carriers = await this.carriers.forProject(id);
     const cover = carrierCover(carriers);
 
+    /*
+     * ★ THE ATTACH PROMPT — SQUADRON OWNER, 2026-08-16 ★
+     *
+     * "your carrier is holding 800 t this build needs — attach it?", shown to the carrier's OWNER
+     * and to nobody else. A carrier that is not attached is deliberately on no squadron board, and
+     * telling officers what is inside one before its owner has offered it would publish a private
+     * hold to make a prompt slightly more effective.
+     *
+     * Fails soft: a prompt is worth less than the page it sits on.
+     */
+    const canAttach =
+      caller === undefined
+        ? []
+        : await this.carriers.unattachedHoldingFor(id, caller.userId).catch(() => []);
+
     const [needs, haulers, shopping, deliveries, chart, isCrew] = await Promise.all([
       this.colony.needs(id),
       this.colony.haulers(id),
@@ -217,6 +232,8 @@ export class ColonyController {
       deliveries,
       chart,
       carriers,
+      /** Your own carriers holding what this build wants, unattached. Owner-only — see above. */
+      canAttach,
       /*
        * The effective per-commodity cover — manual beats journal beats mirror, summed across the
        * attached carriers. Computed ONCE here and sent down, so the needs bars, the shopping list

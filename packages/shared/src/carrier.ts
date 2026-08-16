@@ -154,6 +154,27 @@ export function looksLikeCarrier(name: string, type: string | null | undefined):
 }
 
 /**
+ * The callsign out of a carrier's full name — what a member would say out loud.
+ *
+ * Most carriers are named by their callsign alone. An owner who has titled theirs gets
+ * `W8K-W1Y Hauling Co`, and the six characters at the front are still the part anybody would use to
+ * find it on a contacts panel.
+ *
+ * ★ WHY THIS IS SHARED RATHER THAN A REGEX PER CALLER ★
+ *
+ * It was written inline where a carrier is attached, and the attach prompt needed the same answer.
+ * Two copies of a naming rule is two chances for the prompt to call a carrier something the
+ * carriers tab does not — on the same page, about the same carrier.
+ *
+ * Falls back to the name itself, trimmed to a length that fits a line: a carrier whose name is not
+ * in callsign shape still has to be called something.
+ */
+export function callsignFromName(name: string): string {
+  const trimmed = name.trim();
+  return /^([A-Za-z0-9]{3}-[A-Za-z0-9]{3})\b/.exec(trimmed)?.[1]?.toUpperCase() ?? trimmed.slice(0, 12);
+}
+
+/**
  * A complete callsign written the way the game writes it — `W8KW1Y` becomes `W8K-W1Y`.
  *
  * Anything shorter is returned as its own bare characters rather than with a trailing dash: a

@@ -1072,7 +1072,7 @@ export class ColonyDeviceController {
       totalAt?: unknown;
     },
   ) {
-    await this.#caller(
+    const me = await this.#caller(
       req,
       Permission.COLONY_VIEW,
       'You do not have access to the colonisation boards.',
@@ -1080,6 +1080,8 @@ export class ColonyDeviceController {
 
     return this.carriers.journalSnapshot({
       marketId: (body.marketId ?? '').trim(),
+      // Whose carrier this is. Without it the hub holds the cargo and cannot tell anybody it has it.
+      pushedBy: me.userId,
       commodities: Array.isArray(body.commodities) ? body.commodities : [],
       /*
        * The game's own total, kept apart from the witnessed rows. Validated in the service, like

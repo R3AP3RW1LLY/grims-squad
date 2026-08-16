@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CARRIER_STATION_TYPES,
   CALLSIGN_LENGTH,
+  callsignFromName,
   formatCallsign,
   hasCallsignShape,
   isCarrierStationType,
@@ -223,5 +224,35 @@ describe('formatCallsign — putting the dash back for a person to read', () => 
     // Both surfaces hold the value without the dash and draw the dash between cells, so this is
     // the exact conversion the search request and the refusal sentence both go through.
     expect(formatCallsign(normaliseCallsign('w8k w1y'))).toBe('W8K-W1Y');
+  });
+});
+
+describe('callsignFromName — what to call a carrier on screen', () => {
+  it('★ MANDATORY: a titled carrier is still known by its callsign ★', () => {
+    /*
+     * Most carriers ARE their callsign, and an owner who has titled theirs gets it prefixed. The
+     * six characters at the front are what a member reads off the contacts panel either way.
+     */
+    expect(callsignFromName('W8K-W1Y')).toBe('W8K-W1Y');
+    expect(callsignFromName('W8K-W1Y Hauling Co')).toBe('W8K-W1Y');
+  });
+
+  it('upper-cases it, because the boxed input and the carriers tab both do', () => {
+    // The same carrier written two ways on one page reads as two carriers.
+    expect(callsignFromName('w8k-w1y')).toBe('W8K-W1Y');
+  });
+
+  it('a name in no callsign shape still gets called something', () => {
+    /*
+     * A hand-declared carrier has whatever the member typed. Returning an empty string would draw a
+     * prompt about a carrier with no name at all, which is worse than a truncated one.
+     */
+    expect(callsignFromName('Armstrong Legacy')).toBe('Armstrong Le');
+    expect(callsignFromName('  Kraken  ')).toBe('Kraken');
+  });
+
+  it('does not mistake a longer run of characters for a callsign', () => {
+    // `\b` is what stops `W8K-W1YZ` reading as `W8K-W1Y` and naming the wrong carrier.
+    expect(callsignFromName('W8K-W1YZ')).toBe('W8K-W1YZ');
   });
 });
