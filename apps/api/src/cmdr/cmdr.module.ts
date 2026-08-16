@@ -284,5 +284,22 @@ function nicknameReconciler(prisma: PrismaClient): NicknameSyncService | undefin
       },
     },
   ],
+  /*
+   * ★ EXPORTED, OR THE MANDATORY FRONTIER STEP NEVER FIRES — 2026-08-16 ★
+   *
+   * Reported by the squadron owner: "why was i not asked to connect frontier Capi to my app?"
+   *
+   * `TelemetryController` injects CAPI_SERVICE with `@Optional()` so the settings endpoint still
+   * answers on a deployment where Frontier is not configured. With no `exports` here the token was
+   * private to this module, so that injection resolved to `undefined` in EVERY deployment — the
+   * settings payload carried no Frontier opinion at all.
+   *
+   * The companion's gate treats "no opinion" as PASS, deliberately: a hub that cannot answer must
+   * not lock members out of their own app. So the two safeties combined into silence. Nothing
+   * errored, nothing logged, and the step the owner made mandatory simply never appeared.
+   *
+   * `@Optional()` is still right. What was missing is the module actually being able to supply it.
+   */
+  exports: [CAPI_SERVICE],
 })
 export class CmdrModule {}
