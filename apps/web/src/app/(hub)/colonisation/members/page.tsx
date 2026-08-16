@@ -5,6 +5,8 @@ import { NoAccess, AdminUnavailable } from '../../app/no-access';
 import { getColonyProjects } from '../../../../lib/api';
 import { orderBoard, resolveSort } from '../board-order';
 import { BoardSortLinks } from '../board-sort-links';
+import { BoardFilterLinks } from '../board-filter-links';
+import { filterBoard, resolveFilter } from '../board-filter';
 import { ProjectBoard } from '../project-board';
 
 /**
@@ -35,7 +37,7 @@ export const dynamic = 'force-dynamic';
 export default async function MemberProjectsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ sort?: string }>;
+  searchParams: Promise<{ sort?: string; filter?: string }>;
 }) {
   const [read, params] = await Promise.all([getColonyProjects('personal'), searchParams]);
 
@@ -51,6 +53,16 @@ export default async function MemberProjectsPage({
   // Ranked for whoever is reading, by the same shared rule the companion and the squadron board use.
   const sort = resolveSort(params.sort);
   const board = orderBoard(personal, read.data.you ?? null, sort);
+
+  /*
+   * ★ FILTERED AFTER RANKING, NOT BEFORE ★
+   *
+   * The counts in the tabs have to describe the whole board, so the ranking runs over
+   * everything and the chosen view is taken out of the result. Filtering first would make
+   * every tab report the size of the tab you are already looking at.
+   */
+  const filter = resolveFilter(params.filter);
+  const view = filterBoard(board.projects, filter, read.data.can.manage);
 
   return (
     <>
@@ -75,13 +87,22 @@ export default async function MemberProjectsPage({
         lead="Somebody’s own construction site, posted so the squadron can see what it needs. Open one to take a commodity on."
       >
         <Section title={`Members’ projects (${personal.length})`}>
+          <BoardFilterLinks
+            basePath="/colonisation/members"
+            current={filter}
+            sort={sort}
+            canManage={read.data.can.manage}
+            hasAbandoned={view.hasAbandoned}
+            counts={view.counts}
+          />
           <BoardSortLinks
             basePath="/colonisation/members"
             current={sort}
+            filter={filter}
             positionless={board.positionless}
           />
           <ProjectBoard
-            projects={board.projects}
+            projects={view.projects}
             notes={board.notes}
             emptyMessage="Nobody has posted a project yet. Post yours from Start New Project and the squadron can see what you need."
           />

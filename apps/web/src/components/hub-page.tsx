@@ -321,14 +321,17 @@ export function StatTile({
   label: string;
   value: string;
   hint?: string;
-  tone?: 'default' | 'accent' | 'warn';
+  /** `bad` is for a state somebody must not mistake for a normal one — an abandoned build. */
+  tone?: 'default' | 'accent' | 'warn' | 'bad';
 }) {
   const colour =
     tone === 'accent'
       ? 'text-[var(--color-brand-cyan-bright)]'
       : tone === 'warn'
         ? 'text-[var(--color-semantic-warning)]'
-        : 'text-[var(--color-text-primary)]';
+        : tone === 'bad'
+          ? 'text-[var(--color-semantic-hostile-bright)]'
+          : 'text-[var(--color-text-primary)]';
 
   return (
     <div className="rounded-lg border border-[var(--color-border-hairline)] bg-[var(--color-surface-panel)] p-5">

@@ -2390,6 +2390,16 @@ export interface ColonyProject {
     totalTonnes: number;
   } | null;
   completedAt: string | null;
+  /**
+   * When an officer gave up on this build, or null.
+   *
+   * Distinct from `completedAt` because both can be set: the ordinary case is a project marked
+   * complete and later corrected by an officer who knows it never was. `colonyStatusOf` reads this
+   * one first, so the correction wins without erasing the fact that somebody called it finished.
+   */
+  abandonedAt: string | null;
+  /** Why. Shown to the poster, who is owed a reason their build was closed out from under them. */
+  abandonedNote: string | null;
   postedBy: string | null;
   postedById: string;
   updatedAt: string;

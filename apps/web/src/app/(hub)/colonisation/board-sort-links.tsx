@@ -1,4 +1,6 @@
+import type { ColonyStatusFilter } from '@grims/shared/colony-status';
 import { BOARD_SORTS, type BoardSort } from './board-order';
+import { boardHref } from './board-filter';
 
 /**
  * The board's sort control.
@@ -14,10 +16,20 @@ import { BOARD_SORTS, type BoardSort } from './board-order';
 export function BoardSortLinks({
   basePath,
   current,
+  filter,
   positionless,
 }: {
   basePath: string;
   current: BoardSort;
+  /**
+   * The status filter in force.
+   *
+   * Carried because this control used to build `${basePath}?sort=${key}` and nothing else — which
+   * was correct while sort was the only control on the page, and became a bug the moment a second
+   * one arrived: choosing a sort would silently discard the filter, and the two would appear to
+   * reset each other at random.
+   */
+  filter: ColonyStatusFilter;
   /** True when we do not know where the member is, which changes what these sorts can promise. */
   positionless: boolean;
 }) {
@@ -32,7 +44,7 @@ export function BoardSortLinks({
           return (
             <a
               key={s.key}
-              href={`${basePath}?sort=${s.key}`}
+              href={boardHref({ basePath, sort: s.key, filter })}
               aria-current={active ? 'true' : undefined}
               className={
                 'rounded-md border px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.16em] no-underline transition-colors ' +
