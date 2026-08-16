@@ -1,4 +1,5 @@
-import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Res } from '@nestjs/common';
+import type { FastifyReply } from 'fastify';
 import { AppError, ErrorCode, Permission, ROLE_PRESETS } from '@grims/shared';
 import { Public } from '../auth/auth.guard.js';
 import { User, type CurrentUser } from '../auth/current-user.js';
@@ -690,6 +691,46 @@ export class ColonyController {
 
     const scope = owner === 'squadron' || owner === 'personal' ? owner : 'all';
     return { plans: await this.plans_.list(scope, me.userId) };
+  }
+
+  /**
+   * The plan as a build book — one printable HTML file.
+   *
+   * Squadron owner: "the build guide generator is also not anywhere i can find it?"
+   *
+   * Served as a DOWNLOAD rather than a page. It is read beside the game, on a second monitor or on
+   * paper, and a browser tab is the one place it cannot be while somebody is flying.
+   */
+  @Get('plans/:id/book')
+  async planBook(
+    @User() caller: CurrentUser | undefined,
+    @Param('id') id: string,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ) {
+    const me = this.#requireSession(caller);
+    await this.#assert(
+      caller,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+
+    const html = await this.plans_.book(id, me.userId);
+    if (html === null) {
+      /*
+       * RESOURCE_NOT_VISIBLE, not NOT_FOUND: the two are the same answer on purpose. "It exists but
+       * is not yours" tells somebody a plan is there, which is a fact about another member's work
+       * they had no way to learn.
+       */
+      throw new AppError(
+        ErrorCode.RESOURCE_NOT_VISIBLE,
+        'That plan does not exist, or is not yours to read.',
+      );
+    }
+
+    void reply.header('content-type', 'text/html; charset=utf-8');
+    // A filename, so it lands in Downloads as something recognisable rather than "book".
+    void reply.header('content-disposition', `attachment; filename="build-book-${id}.html"`);
+    return html;
   }
 
   @Get('plans/:id')

@@ -13,6 +13,7 @@ import {
   type PredictedMarket,
   type SimBuildType,
   type SimResult,
+  renderBuildBook,
 } from '@grims/shared';
 import { fetchSystemBodies, type EdsmSystemBodies } from '@grims/ed-clients';
 import {
@@ -444,6 +445,50 @@ export class ColonyPlanService {
   }
 
   /** One plan, with its system laid out and its sites in build order. */
+  /**
+   * The plan as a printable build book.
+   *
+   * ★ SQUADRON OWNER, 2026-08-16 ★
+   *
+   * "the build guide generator is also not anywhere i can find it?"
+   *
+   * ★ IT READS THROUGH THE SAME VISIBILITY AS THE PLAN ITSELF ★
+   *
+   * `byId` is what decides whether this member may see this plan at all. Reading the sites directly
+   * here would be a second answer to that question, and the second answer is the one that gets
+   * forgotten — so the book is built from what `byId` already returned, and a plan the caller cannot
+   * open produces no book.
+   *
+   * A site with no build type chosen is a slot somebody has reserved and not filled. It is left OUT
+   * rather than printed blank: a row with no structure and no tonnage is a line a member has to
+   * puzzle over on paper, where nothing can explain it.
+   */
+  async book(planId: string, userId: string, now = new Date()): Promise<string | null> {
+    const plan = await this.byId(planId, userId);
+    if (plan === null) return null;
+
+    const sites = (plan.sites ?? [])
+      .filter((s) => s.buildTypeId !== null && s.buildTypeId !== undefined)
+      .map((s, i) => ({
+        order: i + 1,
+        buildId: String(s.buildTypeId),
+        displayName: String(s.buildTypeName ?? s.buildTypeId),
+        // The body as the game spells it. Null while somebody is still deciding where it goes.
+        body: s.location === null || s.location === undefined ? 'not placed' : String(s.location),
+        tier: Number(s.tier ?? 1),
+        totalTonnes: Number(s.totalTonnes ?? 0),
+        // Linked to a real project is how a plan knows a site actually exists.
+        built: s.projectId !== null && s.projectId !== undefined,
+      }));
+
+    return renderBuildBook({
+      systemName: plan.systemName,
+      architect: plan.postedBy ?? 'the squadron',
+      generatedAt: now,
+      sites,
+    });
+  }
+
   async byId(id: string, callerId: string): Promise<PlanDetail | null> {
     const [row] = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
       `SELECT p.id, p.owner::text AS owner, p.title, p.system_name, p.system_id64::text AS system_id64,
