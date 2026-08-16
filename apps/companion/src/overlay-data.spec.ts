@@ -82,12 +82,74 @@ describe('the overlay payload', () => {
   it('reports what the site still needs, and drops what is finished', () => {
     const { build } = buildOverlayData(input());
 
-    expect(build?.needs).toEqual([
+    /*
+     * The row grew a grid in 2026-08-15 — outstanding, in your hold, on carriers, still to buy.
+     * `toMatchObject` rather than `toEqual` so this test keeps asserting the thing it is named for
+     * (what is still needed, and that finished lines are dropped) instead of failing every time a
+     * column is added. The columns themselves are asserted in their own test below.
+     */
+    expect(build?.needs).toMatchObject([
       { commodity: 'Steel', remaining: 20_064, required: 60_984 },
       { commodity: 'Aluminium', remaining: 25_756, required: 42_282 },
     ]);
     // Titanium is done. A completed line is a row of noise on a panel over a cockpit.
     expect(build?.needs.map((n) => n.commodity)).not.toContain('Titanium');
+  });
+
+  it('★ MANDATORY: at a depot it reports YOUR hold, and says it does not know about carriers ★', () => {
+    /*
+     * ★ SQUADRON OWNER, 2026-08-15 ★
+     *
+     * "show What is actually remaining vs what is in player cargo holds vs what it actually in
+     * assigned fleet carrier holds."
+     *
+     * This is the JOURNAL path — docked at a construction depot, reading the pad. It knows the
+     * member's own hold, because that is read off their machine, and it has never heard of a
+     * carrier.
+     *
+     * So `knowsCarriers` is false, and the panel prints a mark rather than `0 t`. A zero there is a
+     * CLAIM — "no carrier holds any" — and we did not ask. The same distinction `needsFreshness`
+     * draws between "none" and "we have not looked".
+     */
+    const { build } = buildOverlayData(input());
+    const steel = build?.needs.find((n) => n.commodity === 'Steel');
+
+    expect(steel?.knowsCarriers, 'a depot cannot know what a carrier holds').toBe(false);
+    expect(steel?.onCarriers).toBe(0);
+    expect(steel?.stillToBuy, 'nothing in the hold, so all of it is still to buy').toBe(20_064);
+  });
+
+  it('★ MANDATORY: what is already in your hold comes OFF what you still have to buy ★', () => {
+    /*
+     * ★ THE WHOLE POINT OF THE COLUMN ★
+     *
+     * A member sitting on 800 t of Steel must not be told to buy the full outstanding figure. That
+     * is the mistake this grid exists to stop — it sends somebody to a market for tonnage they are
+     * already carrying, which is the same wasted trip the owner has reported twice under other
+     * names.
+     *
+     * Written against a hold that actually CONTAINS the commodity, because a fixture with an empty
+     * hold cannot tell `remaining - inHold` apart from `remaining` — mutation testing found exactly
+     * that hole in the first version of these tests.
+     */
+    const { build } = buildOverlayData(
+      input({
+        hold: {
+          used: 800,
+          at: '2026-08-03T17:00:00Z',
+          items: [{ commodity: 'Steel', count: 800, wanted: true }],
+        },
+      }),
+    );
+
+    const steel = build?.needs.find((n) => n.commodity === 'Steel');
+
+    expect(steel?.inHold, 'read off the member’s own machine').toBe(800);
+    expect(steel?.stillToBuy, '20,064 outstanding less the 800 already aboard').toBe(19_264);
+
+    const aluminium = build?.needs.find((n) => n.commodity === 'Aluminium');
+    expect(aluminium?.inHold, 'none of this one aboard').toBe(0);
+    expect(aluminium?.stillToBuy).toBe(25_756);
   });
 
   it('totals the whole site, including what is already finished', () => {
