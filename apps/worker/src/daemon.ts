@@ -10,6 +10,9 @@ import { announcePendingColonyProjects, PrismaColonyStore, syncColonyProjects } 
 import { TokenCipher, createKeyring } from '@grims/shared/server';
 import { pollCapiJournals } from './jobs/capi-journal-poll.js';
 import { PrismaCapiPollStore } from './jobs/capi-journal-poll.wiring.js';
+import { fetchCarrier } from '@grims/ed-clients';
+import { pollCapiCarriers } from './jobs/capi-carrier-poll.js';
+import { PrismaCarrierPollStore } from './jobs/capi-carrier-poll.wiring.js';
 import { PrismaBuildWatchStore, runBuildCompletionWatch } from './jobs/build-completion-watch.wiring.js';
 import { announce } from './jobs/job-log.js';
 import { rollUpCommodities } from './jobs/commodity-rollup.js';
@@ -344,6 +347,7 @@ function startScheduler(db: PrismaClient): void {
   startIngestionWatch(db);
   startRoleSync(db);
   startCapiJournalPoll(db);
+  startCapiCarrierPoll(db);
   startBuildCompletionWatch(db);
   startStationResolver(db);
   startBountyBoard(db);
@@ -800,6 +804,105 @@ function startCapiJournalPoll(db: PrismaClient): void {
 
   void run();
   setInterval(() => void run(), CAPI_POLL_MS);
+}
+
+/**
+ * How often the squadron's carriers are asked about.
+ *
+ * ★ FAR SLOWER THAN THE JOURNAL POLL, AND FOR A DIFFERENT REASON ★
+ *
+ * The journal poll runs every minute because it is chasing events that only exist for a moment. A
+ * carrier's hold is a STATE: it is whatever it is until somebody moves cargo, and asking every
+ * minute would answer the same thing 1,439 times a day against a rate limit the whole squadron
+ * shares with the poll that actually needs it.
+ *
+ * Ten minutes is chosen against what it is for. The figure it corrects is one somebody reads before
+ * flying out to a carrier — a decision made in tens of minutes, not seconds — and the source it
+ * replaces is a journal reading that could be a fortnight old. Ten minutes late is not the problem
+ * this job exists to fix.
+ */
+const CAPI_CARRIER_POLL_MS = 10 * 60_000;
+
+/**
+ * What the squadron's fleet carriers are actually holding, from Frontier.
+ *
+ * ★ THE ONLY SOURCE THAT CAN SAY A HOLD IS EMPTY ★
+ *
+ * The market mirror sees public sell orders, the journal sees what one member's app watched move,
+ * and a crew member sees what they counted. Every one of them can only UNDERSTATE, and none can
+ * tell "sold" from "nobody looked" — so a carrier emptied yesterday reads as full on every board we
+ * have until somebody flies out to it.
+ *
+ * ★ LIVE ONLY WHEN FRONTIER IS CONFIGURED ★
+ *
+ * Same gate as the journal poll, for the same reason: without the client id and the keyring this
+ * can do nothing, and starting it anyway logs a failure every ten minutes for ever on a box where
+ * the feature is simply not set up.
+ */
+function startCapiCarrierPoll(db: PrismaClient): void {
+  const clientId = process.env['FDEV_CAPI_CLIENT_ID'] ?? '';
+  const redirectUri = process.env['FDEV_CAPI_REDIRECT_URI'] ?? '';
+  const keyring = process.env['TOKEN_ENCRYPTION_KEYRING'] ?? '';
+
+  if (clientId === '' || redirectUri === '' || keyring === '') {
+    console.log('daemon: cAPI carrier poll disabled — Frontier is not configured on this box');
+    return;
+  }
+
+  const apiBase = process.env['FDEV_CAPI_API_BASE'] ?? 'https://companion.orerve.net';
+  const store = new PrismaCarrierPollStore(db, new TokenCipher(createKeyring(keyring)), {
+    authBase: process.env['FDEV_CAPI_AUTH_BASE'] ?? 'https://auth.frontierstore.net',
+    clientId,
+    redirectUri,
+    clientSecret: process.env['FDEV_CAPI_SHARED_KEY'] ?? '',
+  });
+
+  const run = async (): Promise<void> => {
+    /*
+     * ★ ITS OWN LOCK, AND THE SPACING IS STILL SHARED ★
+     *
+     * A separate lock from the journal poll so one does not block the other, because they are not
+     * the same work and a carrier read must not wait behind a journal backfill. What they DO share
+     * is Frontier's per-client-id budget — which is why this job runs a tenth as often and caps
+     * itself at 25 requests, rather than trying to coordinate with a job it cannot see.
+     */
+    const lock = await takeJobLock('capi-carrier-poll');
+    if (lock === null) return;
+
+    try {
+      const report = await pollCapiCarriers({
+        store,
+        fetchCarrier: (input) => fetchCarrier({ apiBase, accessToken: input.accessToken }),
+        now: () => new Date(),
+        sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+      });
+
+      /*
+       * Said only when something happened or the run was cut short. A line per run is 144 a day
+       * reporting nothing, which is how a log stops being read — but a run that stopped early is
+       * the squadron's budget going quiet, and that must always be said out loud.
+       */
+      if (report.stoppedBecause !== undefined) {
+        console.warn(
+          `daemon: cAPI carrier poll stopped early — ${report.stoppedBecause} ` +
+            `(asked ${report.asked}, stored ${report.stored})`,
+        );
+      } else if (report.stored > 0) {
+        console.log(
+          `daemon: cAPI carrier poll — ${report.stored} manifest(s) from ${report.asked} member(s)`,
+        );
+      }
+    } catch (e) {
+      console.error(
+        `daemon: cAPI carrier poll failed (${e instanceof Error ? e.message : String(e)})`,
+      );
+    } finally {
+      await lock.release();
+    }
+  };
+
+  void run();
+  setInterval(() => void run(), CAPI_CARRIER_POLL_MS);
 }
 
 /**

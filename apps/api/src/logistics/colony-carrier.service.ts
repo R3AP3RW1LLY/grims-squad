@@ -50,15 +50,16 @@ export interface CarrierHold {
 }
 
 /**
- * What a carrier's hold DECLARES it is carrying, per commodity — the two sources the market
+ * What a carrier's hold DECLARES it is carrying, per commodity — the three sources the market
  * mirror cannot see. `journal` rows are written by the owner's companion app from what it watched;
- * `manual` rows are typed by crew. See the merge rule on `effectiveTonnes`.
+ * `capi` rows are Frontier's own manifest; `manual` rows are typed by crew. See the merge rule on
+ * `effectiveTonnes`.
  */
 export interface DeclaredCargo {
   readonly commodity: string;
   readonly tonnes: number;
-  readonly source: 'journal' | 'manual';
-  /** Who typed a manual figure. Null for journal rows — the app writes those, not a person. */
+  readonly source: 'journal' | 'manual' | 'capi';
+  /** Who typed a manual figure. Null for journal and cAPI rows — no person writes those. */
   readonly updatedBy: string | null;
   readonly updatedAt: Date;
 }
@@ -97,24 +98,46 @@ export interface AttachedCarrier {
 /**
  * ★ THE MERGE RULE, IN ONE PLACE ★
  *
- * Three sources can speak about one commodity in one hold, and they are not equals:
+ * Four sources can speak about one commodity in one hold, and they are not equals:
  *
  *   manual   a crew member's own hand. The only source that can say "this figure is wrong",
  *            so it wins outright — including a manual ZERO, which retires a stale claim.
+ *   capi     Frontier's own manifest for the carrier. Not a floor — see below.
  *   journal  what the owner's app actually watched move. A floor: it misses whatever moved
  *            while the app was closed.
  *   mirror   the carrier's public sell orders. Also a floor: staged cargo is exactly the
  *            cargo that is not on sale.
  *
- * Two floors argue by size — the larger is the better floor — and the hand beats both. Exported
- * pure so the rule is spec-tested without a database, and so nobody re-derives it in a component.
+ * ★ WHY cAPI IS NOT A FLOOR, AND WHY THAT IS THE WHOLE POINT ★
+ *
+ * The journal and the mirror are both LOWER BOUNDS: each knows some of what is aboard and cannot
+ * distinguish "sold" from "nobody looked". That is why they argue by size — the larger is the
+ * better floor.
+ *
+ * Frontier answers with the COMPLETE manifest. A commodity absent from it is absent from the hold,
+ * which makes it the only source that can prove a hold empty. So it REPLACES the two floors rather
+ * than joining their argument: `max`-ing it with a fortnight-old journal reading would throw away
+ * the one thing it can say that nothing else can, and the board would keep promising cargo that was
+ * sold days ago — which is the wasted trip this module keeps reinventing under new names.
+ *
+ * ★ AND THE HAND STILL BEATS IT — SQUADRON OWNER, 2026-08-16 ★
+ *
+ * Asked directly where Frontier should rank, the answer was above the journal and below the hand.
+ * A member standing on the deck can always correct the board; the cost is that a stale hand-typed
+ * figure outlives a live one, and that is the trade that was chosen.
+ *
+ * Exported pure so the rule is spec-tested without a database, and so nobody re-derives it in a
+ * component.
  */
 export function effectiveTonnes(sources: {
   readonly manual: number | null;
+  readonly capi: number | null;
   readonly journal: number | null;
   readonly mirror: number | null;
 }): number {
   if (sources.manual !== null) return Math.max(0, sources.manual);
+  // Replaces, never argues — a cAPI zero is a statement, not a missing reading.
+  if (sources.capi !== null) return Math.max(0, sources.capi);
   return Math.max(0, sources.journal ?? 0, sources.mirror ?? 0);
 }
 
@@ -135,15 +158,14 @@ export function carrierCover(
     ]);
 
     for (const commodity of commodities) {
-      const manual = carrier.declared.find((d) => d.source === 'manual' && d.commodity === commodity);
-      const journal = carrier.declared.find(
-        (d) => d.source === 'journal' && d.commodity === commodity,
-      );
+      const declared = (source: string) =>
+        carrier.declared.find((d) => d.source === source && d.commodity === commodity);
       const mirror = carrier.holds.find((h) => h.commodity === commodity);
 
       const tonnes = effectiveTonnes({
-        manual: manual?.tonnes ?? null,
-        journal: journal?.tonnes ?? null,
+        manual: declared('manual')?.tonnes ?? null,
+        capi: declared('capi')?.tonnes ?? null,
+        journal: declared('journal')?.tonnes ?? null,
         mirror: mirror?.tonnes ?? null,
       });
       if (tonnes > 0) cover[commodity] = (cover[commodity] ?? 0) + tonnes;
@@ -621,7 +643,12 @@ export class ColonyCarrierService {
         {
           commodity: String(d['commodity']),
           tonnes: Number(d['tonnes']),
-          source: d['source'] === 'manual' ? 'manual' : 'journal',
+          /*
+           * Named explicitly rather than defaulted. This read `=== 'manual' ? 'manual' : 'journal'`,
+           * which quietly relabelled every cAPI row as a journal one the moment a third source
+           * existed — and the page would then have printed "journal" beside Frontier's own figure.
+           */
+          source: d['source'] === 'manual' ? 'manual' : d['source'] === 'capi' ? 'capi' : 'journal',
           updatedBy: d['updated_by'] === null ? null : String(d['updated_by']),
           updatedAt: d['updated_at'] as Date,
         },
@@ -708,7 +735,7 @@ export class ColonyCarrierService {
           WHERE g.updated_by_id = $2::uuid
             AND g.tonnes > 0
           ORDER BY g.market_id, lower(g.commodity),
-                   CASE g.source WHEN 'manual' THEN 0 WHEN 'journal' THEN 1 ELSE 2 END
+                   CASE g.source WHEN 'manual' THEN 0 WHEN 'capi' THEN 1 WHEN 'journal' THEN 2 ELSE 3 END
        )
        SELECT m.market_id::text AS market_id,
               m.commodity,
@@ -1165,6 +1192,7 @@ export class ColonyCarrierService {
 
       const aboard = effectiveTonnes({
         manual: pick(commodity, 'manual'),
+        capi: pick(commodity, 'capi'),
         journal: pick(commodity, 'journal'),
         mirror: mirror === undefined ? null : Number(mirror['tonnes']),
       });
