@@ -1,5 +1,6 @@
 import { CopySystem } from '../../../../components/copy-system';
 import type { PurchaseStation } from '../../../../lib/api';
+import { commanderColour } from '@grims/shared/commander-colour';
 
 /**
  * The shopping route — where to fly for what this build still needs.
@@ -109,7 +110,33 @@ export function PurchaseCatalogue({
                 <span className="font-mono tabular-nums">
                   {line.tonnes === null ? 'seen here' : `${line.tonnes.toLocaleString()} t`}
                   {line.price === null ? '' : ` · ${line.price.toLocaleString()} cr`}
-                  {line.by === null ? '' : ` · ${line.by}`}
+                  {/*
+                    ★ WHO HAS IT, IN THEIR OWN COLOUR — SQUADRON OWNER ★
+
+                    "assign different and random colors for each player and list the carrier id and
+                    each player commander name with a color legend under each item that they hold"
+
+                    A name in the same grey as the tonnage beside it is read as part of the number.
+                    The colour is what makes a member scan a long list and see at once that three of
+                    these lines are theirs and four are somebody else's — which is the whole point:
+                    it stops two people buying the same commodity for the same build.
+
+                    The colour is derived from the id, not stored, so the same commander is the same
+                    colour on every row of every project without anything having to remember it.
+                  */}
+                  {line.by === null ? null : (
+                    <span
+                      className="ml-2 rounded px-1.5 py-0.5 text-[10px]"
+                      style={{
+                        color: commanderColour(line.by),
+                        // A tint of their own colour rather than a flat panel, so the chip reads as
+                        // belonging to them at a glance even before the name is read.
+                        backgroundColor: `color-mix(in srgb, ${commanderColour(line.by)} 14%, transparent)`,
+                      }}
+                    >
+                      {line.by}
+                    </span>
+                  )}
                   {/*
                     Said out loud, because the two mean different things. A watched row is what the
                     app saw somebody actually buy; a declared row is somebody's word for it, which

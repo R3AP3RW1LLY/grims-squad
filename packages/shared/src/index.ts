@@ -35,6 +35,8 @@ export { nextPoll, initialPoll, START_MS, ACTIVE_FLOOR_MS, IDLE_MS, type PollSta
 export { resolveClaim, type ClaimOutcome, type ExistingClaim, type ClaimMethod } from './cmdr-claim.js';
 export type { Freshness, FreshnessVerdict } from './needs-freshness.js';
 export { isOrbitalStation } from './station-orbital.js';
+export { completedBuilds } from './build-completion-watch.js';
+export type { WatchedBuild, StationSighting, CompletedBuild } from './build-completion-watch.js';
 export { rankBuySources } from './buy-priority.js';
 export type { BuyContext, BuySource } from './buy-priority.js';
 export {
