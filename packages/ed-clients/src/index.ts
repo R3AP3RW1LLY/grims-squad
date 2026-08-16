@@ -61,6 +61,8 @@ export {
   type TokenState,
 } from './capi/capi-auth.js';
 export { fetchProfile, type CapiProfile } from './capi/capi-profile.js';
+export { fetchCarrier } from './capi/capi-carrier.js';
+export type { CarrierManifest, CarrierHoldLine } from './capi/capi-carrier.js';
 /*
  * The journal endpoint — the whole reason the rest of cAPI exists. A commander on a cloud platform
  * has no local journal to read, so this is the only source of their flying there will ever be.
