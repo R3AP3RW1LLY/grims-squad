@@ -64,3 +64,12 @@ export { DiscordRankApplier, ladderRoleIds } from './rank-applier.discord.js';
  * members wearing one commander name.
  */
 export * from './verified-name.js';
+
+export {
+  CAPI_LOCK_NAMESPACE,
+  capiLockKey,
+  shouldRefresh,
+  withCapiRefreshLock,
+  type LockSession,
+  type StoredToken,
+} from './capi-token-owner.js';

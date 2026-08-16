@@ -6,6 +6,9 @@ import { PrismaClient } from '@grims/db';
 import { JOB_REQUEST_CHANNEL } from '@grims/shared';
 import { dueSources, lastRuns, TICK_MS } from './scheduler.js';
 import { announcePendingColonyProjects, PrismaColonyStore, syncColonyProjects } from '@grims/db';
+import { TokenCipher, createKeyring } from '@grims/shared/server';
+import { pollCapiJournals } from './jobs/capi-journal-poll.js';
+import { PrismaCapiPollStore } from './jobs/capi-journal-poll.wiring.js';
 import { announce } from './jobs/job-log.js';
 import { rollUpCommodities } from './jobs/commodity-rollup.js';
 import { PrismaRollupStore } from './jobs/commodity-rollup.wiring.js';
@@ -338,6 +341,7 @@ function startScheduler(db: PrismaClient): void {
   startCommodityRollup(db);
   startIngestionWatch(db);
   startRoleSync(db);
+  startCapiJournalPoll(db);
   startStationResolver(db);
   startBountyBoard(db);
   startLeaderboardScoring(db);
@@ -702,6 +706,97 @@ function startRoleSync(db: PrismaClient): void {
 
   void run();
   setInterval(() => void run(), ROLE_SYNC_MS);
+}
+
+/**
+ * How often the journal poller runs.
+ *
+ * ★ SIXTY SECONDS, MATCHING THE FASTEST CADENCE A MEMBER CAN REACH ★
+ *
+ * The job does not poll everybody every tick — each member has their own interval, measured from
+ * how fast Frontier actually publishes for them. This is only how often we come back to LOOK, and
+ * it is set to the floor so a member who has earned the fast cadence actually gets it. A slower tick
+ * would silently cap everyone at the tick.
+ */
+const CAPI_POLL_MS = 60_000;
+
+/**
+ * Frontier's journals, for the members who cannot run the companion app.
+ *
+ * ★ SQUADRON OWNER ★
+ *
+ * "the primary feature must be so that players that are playing on Geforce Now and cloud platforms
+ * can use the companion app like everyone else"
+ *
+ * They cannot install anything beside the game, so Frontier's copy of their journal is the only way
+ * they exist on this platform at all. It also fills the gap that kept them out of promotions: game
+ * activity sat at `unknown` because the only thing that ever set it was the companion's own ingest.
+ *
+ * ★ LIVE ONLY WHEN FRONTIER IS CONFIGURED ★
+ *
+ * Without the client id and the keyring this cannot do anything useful, and starting it anyway would
+ * log a failure every minute for ever on a box where the feature is simply not set up.
+ */
+function startCapiJournalPoll(db: PrismaClient): void {
+  const clientId = process.env['FDEV_CAPI_CLIENT_ID'] ?? '';
+  const redirectUri = process.env['FDEV_CAPI_REDIRECT_URI'] ?? '';
+  const keyring = process.env['TOKEN_ENCRYPTION_KEYRING'] ?? '';
+
+  if (clientId === '' || redirectUri === '' || keyring === '') {
+    console.log('daemon: cAPI journal poll disabled — Frontier is not configured on this box');
+    return;
+  }
+
+  const store = new PrismaCapiPollStore(db, new TokenCipher(createKeyring(keyring)), {
+    authBase: process.env['FDEV_CAPI_AUTH_BASE'] ?? 'https://auth.frontierstore.net',
+    clientId,
+    redirectUri,
+    clientSecret: process.env['FDEV_CAPI_SHARED_KEY'] ?? '',
+  });
+
+  const run = async (): Promise<void> => {
+    /*
+     * ★ THE LOCK IS NOT ABOUT THIS BOX ★
+     *
+     * Frontier's rate limit is per CLIENT ID, across every process using it. Two daemons polling
+     * would double the squadron's spend against a budget sized for one, and the member who gets the
+     * 429 is not the member who caused it.
+     */
+    const lock = await takeJobLock('capi-journal-poll');
+    if (lock === null) return;
+
+    try {
+      const report = await pollCapiJournals(store, {
+        now: new Date(),
+        live: true,
+        apiBase: process.env['FDEV_CAPI_API_BASE'] ?? 'https://companion.orerve.net',
+        tickMs: CAPI_POLL_MS,
+      });
+
+      /*
+       * Logged only when something happened, or when the run was cut short. At once a minute a line
+       * per run is 1,440 a day saying nothing, which is how a log stops being read — but an
+       * abandoned run is the squadron's whole budget going quiet and must always be said.
+       */
+      if (report.abandoned) {
+        console.warn(`daemon: cAPI journal poll stopped early — ${report.note ?? 'rate limited'}`);
+      } else if (report.stored > 0 || report.deferred > 0) {
+        console.log(
+          `daemon: cAPI journal poll — ${report.stored} new entries from ${report.asked} member(s)` +
+            (report.deferred > 0 ? `, ${report.deferred} deferred to the next run` : ''),
+        );
+      }
+    } catch (e) {
+      console.error(
+        `daemon: cAPI journal poll failed (${e instanceof Error ? e.message : String(e)})`,
+      );
+    } finally {
+      await lock.release();
+    }
+  };
+
+  void run();
+  setInterval(() => void run(), CAPI_POLL_MS);
 }
 
 function startStationResolver(db: PrismaClient): void {
