@@ -534,6 +534,8 @@ model User {
   /// Colonisation. Projects they posted, and cargo they hauled to anybody's — two relations
   /// because helping with somebody else's build is the common case, not the exception.
   colonyProjects       ColonyProject[]      @relation("ColonyProjectPoster")
+  /// The journal poller's per-member cadence. One row, written every poll.
+  capiPollState        CapiPollState?
   /// Plans this member drew up. See ColonyPlan — a plan is a system's shape before it is built.
   colonyPlans          ColonyPlan[]
   colonyContributions  ColonyContribution[] @relation("ColonyContributor")
@@ -2359,6 +2361,40 @@ enum ColonyVisibility {
 /// the owner chose: "Member posts it; journal then tracks it". So a row here exists because
 /// somebody decided it should, and `marketId` is what lets their journal keep it current from then
 /// on. A board of things people asked for help with, rather than everywhere anyone has flown.
+/// How often to ask Frontier for one member's journal, and where we got to.
+///
+/// ★ WHY THE CADENCE IS STORED PER MEMBER RATHER THAN CONFIGURED ★
+///
+/// Frontier rewrites the journal on their schedule, not ours, and it is not documented anywhere
+/// worth trusting. So it is MEASURED: each poll reports whether anything was new, and the interval
+/// walks toward whatever that turns out to be for this member. A number nobody had to know in
+/// advance, and one that stays right if Frontier changes it.
+///
+/// Separate from `cmdr_verifications` because it is operational state with a completely different
+/// write rate — this row changes every sixty seconds for an active member, and the verification row
+/// must not be rewritten that often.
+model CapiPollState {
+  userId      String    @id @map("user_id") @db.Uuid
+  /// The current interval. Floors at 60s while flying, widens to 30m when not.
+  intervalMs  Int       @default(120000) @map("interval_ms")
+  /// Consecutive polls that brought nothing new. Three is a pattern; one is a commander in supercruise.
+  unchanged   Int       @default(0)
+  /// The newest journal entry we have seen. Null for a member who linked and never flew.
+  lastEntryAt DateTime? @map("last_entry_at") @db.Timestamptz(6)
+  /// When this member is next due. The poller serves the most overdue first.
+  dueAt       DateTime  @default(now()) @map("due_at") @db.Timestamptz(6)
+  /// The newest entry stored, so the next poll knows how far back to ask for fingerprints.
+  watermark   DateTime? @db.Timestamptz(6)
+  /// The last day already read to completion, so a finished day is never re-read.
+  closedDay   String?   @map("closed_day")
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([dueAt])
+  @@map("capi_poll_state")
+}
+
 model ColonyProject {
   id    String      @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   owner ColonyOwner

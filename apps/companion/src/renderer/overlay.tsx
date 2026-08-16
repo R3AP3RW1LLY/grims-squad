@@ -40,6 +40,73 @@ interface OverlayMessage {
   readonly destination: 'over-game' | 'detached';
 }
 
+/**
+ * One line of the build panel, as a grid.
+ *
+ * ★ SQUADRON OWNER, 2026-08-15 ★
+ *
+ * "show What is actually remaining vs what is in player cargo holds vs what it actually in assigned
+ * fleet carrier holds. turn this into a grid view please but keep it organized by category like it
+ * currently is!"
+ *
+ * ★ THE COLUMNS ARE ORDERED THE WAY THE DECISION IS MADE ★
+ *
+ * A member reads this mid-flight to answer one question: how much do I still have to BUY. So the
+ * outstanding figure comes first, what is already accounted for sits in the middle, and the number
+ * they act on is last and in the accent colour — the owner's own choice that "remaining" means
+ * still-to-buy.
+ *
+ * ★ AND A BLANK IS NOT A ZERO ★
+ *
+ * `knowsCarriers` is false on the journal path, which reads a depot off the pad and has never heard
+ * of a carrier. Printing `0 t` there would assert that no carrier holds any, which we do not know.
+ * The column goes blank instead — the same distinction `needsFreshness` draws between "none" and
+ * "we have not looked".
+ */
+function NeedRow({
+  need,
+  accent,
+}: {
+  need: NonNullable<OverlayData['build']>['needs'][number];
+  accent: string;
+}): preact.JSX.Element {
+  const num = (n: number | undefined): string => (n ?? 0).toLocaleString();
+
+  return (
+    <div
+      style={{
+        display: 'grid',
+        // The commodity takes what is left; the four figures are fixed so the columns line up down
+        // the panel. `tabular-nums` below is what keeps them from jittering as tonnages change.
+        gridTemplateColumns: 'minmax(0, 1fr) auto auto auto auto',
+        gap: '0 8px',
+        alignItems: 'baseline',
+        padding: '1px 0',
+        fontSize: '0.95em',
+      }}
+    >
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {need.commodity}
+      </span>
+      <span style={{ fontVariantNumeric: 'tabular-nums', color: C.dim }} title="Still outstanding">
+        {num(need.remaining)}
+      </span>
+      <span style={{ fontVariantNumeric: 'tabular-nums', color: C.dim }} title="In your hold">
+        {need.inHold === undefined ? '' : `${num(need.inHold)}`}
+      </span>
+      <span style={{ fontVariantNumeric: 'tabular-nums', color: C.dim }} title="On fleet carriers">
+        {need.knowsCarriers === false ? '·' : num(need.onCarriers)}
+      </span>
+      <span
+        style={{ fontVariantNumeric: 'tabular-nums', color: accent }}
+        title="Still to buy"
+      >
+        {num(need.stillToBuy ?? need.remaining)} t
+      </span>
+    </div>
+  );
+}
+
 /** Everything any panel might draw. Sent whole; each panel takes the part it needs. */
 export interface OverlayData {
   readonly build: {
@@ -49,6 +116,20 @@ export interface OverlayData {
       category?: string | null;
       remaining: number;
       required: number | null;
+      /** Tonnes of it in the member's OWN hold, read off their machine. */
+      inHold?: number | undefined;
+      /** Tonnes of it parked on the build's attached carriers. */
+      onCarriers?: number | undefined;
+      /** `remaining` less everything already held. The number read immediately before buying. */
+      stillToBuy?: number | undefined;
+      /**
+       * Whether the carrier figure is a fact or an absence.
+       *
+       * False on the journal path, which reads a depot off the pad and has never heard of a
+       * carrier. A `0 t` there would be a CLAIM — "no carrier has any" — where a blank says the
+       * true thing: we did not ask.
+       */
+      knowsCarriers?: boolean | undefined;
     }>;
     readonly delivered: number;
     readonly required: number;
@@ -476,16 +557,7 @@ function BuildPanel({
            * it is the one in front of them mid-flight. So the grouping appears exactly when it is
            * real, and the panel looks the way it always did when it is not.
            */
-          needs.map((n) => (
-            <div key={n.commodity} style={ROW}>
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {n.commodity}
-              </span>
-              <span style={{ fontVariantNumeric: 'tabular-nums', color: accent }}>
-                {n.remaining.toLocaleString()} t
-              </span>
-            </div>
-          ))
+          needs.map((n) => <NeedRow key={n.commodity} need={n} accent={accent} />)
         ) : (
           grouped.map((group) => (
             <div key={group.category}>
@@ -501,16 +573,7 @@ function BuildPanel({
                 {group.category}
               </p>
               {group.rows.map((n) => (
-                <div key={n.commodity} style={ROW}>
-                  <span
-                    style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                  >
-                    {n.commodity}
-                  </span>
-                  <span style={{ fontVariantNumeric: 'tabular-nums', color: accent }}>
-                    {n.remaining.toLocaleString()} t
-                  </span>
-                </div>
+                <NeedRow key={n.commodity} need={n} accent={accent} />
               ))}
             </div>
           ))

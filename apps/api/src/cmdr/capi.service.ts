@@ -13,6 +13,8 @@ import {
   type CapiTokens,
 } from '@grims/ed-clients';
 import { randomBytes } from 'node:crypto';
+import { Client } from 'pg';
+import { shouldRefresh, withCapiRefreshLock, type LockSession } from '@grims/db';
 import { resolveClaim, type ClaimMethod } from '@grims/shared';
 
 /**
@@ -72,6 +74,22 @@ export class CapiService {
    * cannot be decrypted as somebody else's, because the additional data it was sealed with names
    * whose it is.
    */
+  /**
+   * A dedicated connection to hold the refresh lock on.
+   *
+   * The lock belongs to the SESSION, so it cannot ride on Prisma's pool: the pool would hand the
+   * connection back mid-refresh and release the lock inside the window it exists to protect.
+   * `withCapiRefreshLock` closes this again however the refresh ends.
+   */
+  async #lockSession(): Promise<LockSession> {
+    const client = new Client({ connectionString: process.env['DATABASE_URL'] });
+    await client.connect();
+    return {
+      query: (sql, values) => client.query(sql, values === undefined ? undefined : [...values]),
+      end: () => client.end(),
+    };
+  }
+
   #context(userId: string): string {
     return `capi:${userId}`;
   }
@@ -316,6 +334,23 @@ export class CapiService {
    * "this member cannot be polled" is an ordinary state a poller must handle for most of the
    * squadron, not an exception.
    */
+  /**
+   * A usable access token, refreshing through the shared lock when one is needed.
+   *
+   * ★ THE LOCK IS NOT OPTIONAL — 2026-08-16 ★
+   *
+   * Frontier ROTATES the refresh token, so a second process refreshing the same member at the same
+   * moment sends the same still-valid token, loses the race, and then persists one Frontier has
+   * already killed. That member's link dies with no error anywhere: the write succeeded and the row
+   * looks healthy, so it reads exactly like the 25-day ceiling expiring early.
+   *
+   * It was theoretical while this service was the only refresher. The journal poller is a SECOND
+   * process refreshing the same rows on a timer, for the members most likely to be active — which
+   * is exactly when this method is also being called for them. Both take the lock, or neither is
+   * protected.
+   *
+   * See `capi-token-owner.ts` in @grims/db, which both sides import so the key cannot drift.
+   */
   async accessToken(userId: string, now = new Date()): Promise<string | null> {
     const row = await this.#db.cmdrVerification.findFirst({
       where: { userId, method: 'fdev_capi', revokedAt: null },
@@ -350,21 +385,53 @@ export class CapiService {
       return this.#cipher.decrypt(Buffer.from(row.fdevAccessEnc).toString('utf8'), context);
     }
 
-    try {
-      const tokens = await refreshAccess({
-        authBase: this.#config.authBase,
-        clientId: this.#config.clientId,
-        redirectUri: this.#config.redirectUri,
-        clientSecret: this.#config.clientSecret,
-        refreshToken: this.#cipher.decrypt(
-          Buffer.from(row.fdevRefreshEnc).toString('utf8'),
-          context,
-        ),
-        now,
-      });
+    const session = await this.#lockSession();
 
-      await this.#store(userId, tokens, row.verifiedAt);
-      return tokens.accessToken;
+    try {
+      return await withCapiRefreshLock(session, userId, async () => {
+        /*
+         * ★ RE-READ INSIDE THE LOCK ★
+         *
+         * Whoever waited here was waiting for somebody else's refresh to finish. That refresh has
+         * already stored a fresh token — and the refresh token this closure was about to send is
+         * the one Frontier killed to issue it. Sending it anyway is the exact failure the lock was
+         * taken to prevent, so the first thing inside the lock is to look again.
+         */
+        const fresh = await this.#db.cmdrVerification.findFirst({
+          where: { id: row.id },
+          select: { fdevAccessEnc: true, fdevRefreshEnc: true, fdevExpiresAt: true },
+        });
+
+        if (fresh === null || fresh.fdevRefreshEnc === null) return null;
+
+        if (
+          !shouldRefresh(
+            {
+              accessEnc: fresh.fdevAccessEnc === null ? null : 'stored',
+              expiresAt: fresh.fdevExpiresAt,
+            },
+            now,
+          ) &&
+          fresh.fdevAccessEnc !== null
+        ) {
+          return this.#cipher.decrypt(Buffer.from(fresh.fdevAccessEnc).toString('utf8'), context);
+        }
+
+        const tokens = await refreshAccess({
+          authBase: this.#config.authBase,
+          clientId: this.#config.clientId,
+          redirectUri: this.#config.redirectUri,
+          clientSecret: this.#config.clientSecret,
+          refreshToken: this.#cipher.decrypt(
+            Buffer.from(fresh.fdevRefreshEnc).toString('utf8'),
+            context,
+          ),
+          now,
+        });
+
+        await this.#store(userId, tokens, row.verifiedAt);
+        return tokens.accessToken;
+      });
     } catch (e) {
       /*
        * ★ ONLY A DEAD GRANT MARKS THE ROW ★
