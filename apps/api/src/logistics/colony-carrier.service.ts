@@ -795,8 +795,8 @@ export class ColonyCarrierService {
     totalTonnes?: number | null;
     /** The journal timestamp of that reading. */
     totalAt?: string | null;
-  }): Promise<{ stored: boolean }> {
-    if (!/^\d+$/.test(input.marketId)) return { stored: false };
+  }): Promise<{ stored: boolean; attached: boolean; wanted: readonly string[] }> {
+    if (!/^\d+$/.test(input.marketId)) return { stored: false, attached: false, wanted: [] };
 
     const rows = input.commodities
       .slice(0, 200)
@@ -819,13 +819,27 @@ export class ColonyCarrierService {
       input.totalTonnes >= 0
         ? Math.trunc(input.totalTonnes)
         : null;
-    if (rows.length === 0 && total === null) return { stored: false };
+    // Nothing to record at all. Distinct from an unattached carrier, which now stores and prompts.
+    if (rows.length === 0 && total === null) return { stored: false, attached: false, wanted: [] };
 
     const [attached] = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
       `SELECT 1 AS yes FROM colony_carriers WHERE market_id = $1::bigint LIMIT 1`,
       input.marketId,
     );
-    if (attached === undefined) return { stored: false };
+
+    /*
+     * ★ IT USED TO RETURN HERE, AND SAY NOTHING — SQUADRON OWNER, 2026-08-16 ★
+     *
+     * A carrier that is not attached to any build had its snapshot DISCARDED. No error, no message:
+     * a member transferred eight hundred tonnes, the app pushed it, the hub dropped it, and nothing
+     * anywhere explained why the board still showed nothing. That is a large part of "materials
+     * being added to fleet carriers ... are not registering".
+     *
+     * The owner's answer was to keep it and offer to attach. So the snapshot is stored either way —
+     * `colony_carrier_cargo` is keyed by market id and needs no attachment to hold a row — and the
+     * caller is told which live builds actually want what is aboard, so it can ask rather than
+     * guess. Attaching stays a deliberate act; nothing is put on a squadron board automatically.
+     */
 
     const canonical = await this.#canonicalCommodityNames();
 
@@ -876,7 +890,27 @@ export class ColonyCarrierService {
       );
     }
 
-    return { stored: true };
+    /*
+     * Which live builds actually want what is aboard. This is what turns "your carrier is not
+     * attached" into something a member can act on — "it is holding 800 t this build needs" — and it
+     * is computed rather than assumed, so an unattached carrier full of Painite prompts nothing.
+     */
+    const wanted =
+      attached !== undefined
+        ? []
+        : (
+            await this.db.$queryRawUnsafe<Array<{ commodity: string }>>(
+              `SELECT DISTINCT n.commodity
+                 FROM colony_carrier_cargo g
+                 JOIN colony_needs n ON lower(n.commodity) = lower(g.commodity) AND n.remaining > 0
+                 JOIN colony_projects p ON p.id = n.project_id
+                WHERE g.market_id = $1::bigint
+                  AND p.completed_at IS NULL AND p.abandoned_at IS NULL`,
+              input.marketId,
+            )
+          ).map((r) => r.commodity);
+
+    return { stored: true, attached: attached !== undefined, wanted };
   }
 
   /**
