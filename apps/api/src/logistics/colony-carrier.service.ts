@@ -656,6 +656,56 @@ export class ColonyCarrierService {
    * `tonnes: null` clears the override; ZERO is a real figure ("none of this is aboard") and
    * overrides journal and mirror alike — that is the entire point of a manual row.
    */
+  /**
+   * Carriers of THIS member that are holding what this build wants, and are not attached to it.
+   *
+   * ★ SQUADRON OWNER, 2026-08-16 ★
+   *
+   * The prompt: "your carrier is holding 800 t this build needs — attach it?" Shown to the carrier's
+   * owner, on the project page, and to nobody else.
+   *
+   * ★ WHY IT IS THE OWNER AND ONLY THE OWNER ★
+   *
+   * A carrier that is not attached is not on any squadron board, deliberately. Telling officers what
+   * is inside one before its owner has offered it would publish a private hold to make a prompt
+   * slightly more effective — and attaching is meant to stay the owner's decision.
+   *
+   * `updated_by_id` on the journal rows is what makes "yours" answerable at all. It was stored as
+   * NULL until this change, so the hub could see the cargo and had no idea whose it was.
+   */
+  async unattachedHoldingFor(
+    projectId: string,
+    userId: string,
+  ): Promise<readonly { marketId: string; commodity: string; tonnes: number }[]> {
+    const rows = await this.db.$queryRawUnsafe<
+      Array<{ market_id: string; commodity: string; tonnes: number }>
+    >(
+      `SELECT g.market_id::text AS market_id, g.commodity, g.tonnes::int AS tonnes
+         FROM colony_carrier_cargo g
+         JOIN colony_needs n
+           ON lower(n.commodity) = lower(g.commodity)
+          AND n.project_id = $1::uuid
+          AND n.remaining > 0
+        WHERE g.updated_by_id = $2::uuid
+          AND g.tonnes > 0
+          -- Not already attached to THIS build. A carrier attached elsewhere is still worth
+          -- prompting about here: the materials are aboard either way.
+          AND NOT EXISTS (
+            SELECT 1 FROM colony_carriers c
+             WHERE c.market_id = g.market_id AND c.project_id = $1::uuid
+          )
+        ORDER BY g.tonnes DESC`,
+      projectId,
+      userId,
+    );
+
+    return rows.map((r) => ({
+      marketId: r.market_id,
+      commodity: r.commodity,
+      tonnes: Number(r.tonnes),
+    }));
+  }
+
   async setManual(input: {
     projectId: string;
     marketId: string;
@@ -790,6 +840,19 @@ export class ColonyCarrierService {
 
   async journalSnapshot(input: {
     marketId: string;
+    /**
+     * Who pushed it — the member whose own carrier this is.
+     *
+     * ★ RECORDED SO THE PROMPT CAN BE ADDRESSED TO SOMEBODY ★
+     *
+     * The journal path stored NULL here, so nothing knew whose carrier a snapshot came from. That
+     * is exactly what makes "your carrier is holding 800 t this build needs" unanswerable: without
+     * it the hub can see the cargo and has no idea who to tell.
+     *
+     * Optional because older app builds do not send it, and a snapshot from one of those is still
+     * worth storing — it simply cannot be prompted on.
+     */
+    pushedBy?: string | null;
     commodities: ReadonlyArray<{ commodity?: unknown; tonnes?: unknown }>;
     /** The game's own total tonnage aboard, from `CarrierStats`. Null when never read. */
     totalTonnes?: number | null;
@@ -846,12 +909,13 @@ export class ColonyCarrierService {
     for (const row of rows) {
       await this.db.$executeRawUnsafe(
         `INSERT INTO colony_carrier_cargo (market_id, commodity, source, tonnes, updated_by_id, updated_at)
-         VALUES ($1::bigint, $2, 'journal', $3, NULL, now())
+         VALUES ($1::bigint, $2, 'journal', $3, $4::uuid, now())
          ON CONFLICT (market_id, commodity, source) DO UPDATE SET
-           tonnes = EXCLUDED.tonnes, updated_by_id = NULL, updated_at = now()`,
+           tonnes = EXCLUDED.tonnes, updated_by_id = EXCLUDED.updated_by_id, updated_at = now()`,
         input.marketId,
         canonical.get(row.commodity.toLowerCase()) ?? row.commodity,
         row.tonnes,
+        input.pushedBy ?? null,
       );
     }
 
