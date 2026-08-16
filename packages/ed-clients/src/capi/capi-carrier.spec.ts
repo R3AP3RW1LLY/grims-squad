@@ -50,8 +50,9 @@ describe('reading the manifest', () => {
       ),
     );
 
-    expect(out.callsign).toBe('K7Q-B4T');
-    expect(out.cargo).toEqual([
+    expect(out).not.toBeNull();
+    expect(out?.callsign).toBe('K7Q-B4T');
+    expect(out?.cargo).toEqual([
       { commodity: 'Titanium', tonnes: 480 },
       { commodity: 'Steel', tonnes: 1_200 },
     ]);
@@ -86,7 +87,7 @@ describe('reading the manifest', () => {
       ),
     );
 
-    expect(out.cargo).toEqual([{ commodity: 'Titanium', tonnes: 800 }]);
+    expect(out?.cargo).toEqual([{ commodity: 'Titanium', tonnes: 800 }]);
   });
 
   it('stolen and mission cargo is counted, because it is still aboard', async () => {
@@ -95,7 +96,7 @@ describe('reading the manifest', () => {
       input(ok({ name: { callsign: 'X' }, cargo: [{ commodity: 'Gold', qty: 5, stolen: true }] })),
     );
 
-    expect(out.cargo).toEqual([{ commodity: 'Gold', tonnes: 5 }]);
+    expect(out?.cargo).toEqual([{ commodity: 'Gold', tonnes: 5 }]);
   });
 });
 
