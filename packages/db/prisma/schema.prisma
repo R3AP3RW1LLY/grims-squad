@@ -536,6 +536,8 @@ model User {
   colonyProjects       ColonyProject[]      @relation("ColonyProjectPoster")
   /// The journal poller's per-member cadence. One row, written every poll.
   capiPollState        CapiPollState?
+  /// What they are carrying, of what the builds they are on still want.
+  colonyHolds          ColonyMemberHold[]
   /// Plans this member drew up. See ColonyPlan — a plan is a system's shape before it is built.
   colonyPlans          ColonyPlan[]
   colonyContributions  ColonyContribution[] @relation("ColonyContributor")
@@ -2373,6 +2375,43 @@ enum ColonyVisibility {
 /// Separate from `cmdr_verifications` because it is operational state with a completely different
 /// write rate — this row changes every sixty seconds for an active member, and the verification row
 /// must not be rewritten that often.
+/// What a member is carrying, of what a build they are on still wants.
+///
+/// ★ SQUADRON OWNER, 2026-08-16 ★
+///
+/// "materials being added to fleet carriers and in player holds are not registering properly"
+///
+/// The overlay was always right — it reads Cargo.json on the member's own machine. The HUB had
+/// never received a hold at all: zero `Cargo` telemetry rows against 8,706 depot readings, because
+/// nothing ever sent one. This table is what the website's column finally reads from.
+///
+/// ★ SCOPED, ON THE OWNER'S INSTRUCTION ★
+///
+/// "only while on a project." The companion sends the whole hold and the server keeps ONLY
+/// commodities a live build the member is on still wants — so a mining run, a trade loop and
+/// mission cargo never land here. The filter is on the server because a rule on a member's machine
+/// is a rule that can be edited.
+///
+/// ★ REPLACED WHOLESALE, NEVER MERGED ★
+///
+/// Each push is the whole truth about that hold. The writer deletes the member's rows first, so
+/// selling 480 t down to 180 reads 180 and undocking empty clears them — a merge would leave the
+/// larger figure with no event that ever corrects it.
+model ColonyMemberHold {
+  projectId String   @map("project_id") @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  commodity String
+  tonnes    Int
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  project ColonyProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([projectId, userId, commodity])
+  @@index([projectId])
+  @@map("colony_member_holds")
+}
+
 model CapiPollState {
   userId      String    @id @map("user_id") @db.Uuid
   /// The current interval. Floors at 60s while flying, widens to 30m when not.
@@ -2481,6 +2520,8 @@ model ColonyProject {
   /// the create path being reached once — so a repeating sweep needs this to replace it, or the
   /// channel gets the same build posted every few minutes for ever.
   announcedAt DateTime? @map("announced_at") @db.Timestamptz(6)
+  /// What the members on this build are carrying of what it still needs.
+  memberHolds ColonyMemberHold[]
   /// Plan entries that became this project. A planned site links to the real build once it exists,
   /// so a plan can show its own progress rather than only its intention.
   plannedAs      ColonyPlanSite[]

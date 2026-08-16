@@ -6,7 +6,7 @@ import {
   type LiveNudge,
   type PrismaClient,
 } from '@grims/db';
-import { AppError, cleanStationName, ErrorCode, Permission } from '@grims/shared';
+import { AppError, cleanStationName, ErrorCode, Permission, scopeHold } from '@grims/shared';
 import { commodityCategories, withCategories } from './commodity-categories.js';
 import { DEFAULT_TIMEZONE, isValidTimezone } from '../common/timezone.js';
 import type { AclDbService } from '../authz/acl-db.service.js';
@@ -794,6 +794,163 @@ export class ColonyService {
    * would turn a contribution board into an activity log of who was online at what hour — a
    * different thing entirely, and not what anybody agreed to by delivering cargo.
    */
+  /**
+   * Records a member's hold, keeping only what the builds they are on still want.
+   *
+   * ★ SQUADRON OWNER, 2026-08-16 ★
+   *
+   * The boundary they chose: "only while on a project", cleared when they undock empty or leave it.
+   *
+   * ★ ENFORCED HERE, NOT IN THE APP ★
+   *
+   * The companion sends the whole hold. `scopeHold` throws away everything no live build wants, so a
+   * mining run and a trade loop never reach storage — and that rule lives on the server because a
+   * rule on a member's machine is a rule that can be edited.
+   *
+   * ★ REPLACE, NEVER MERGE ★
+   *
+   * The snapshot is the whole truth about that hold at that moment. Deleting first is what makes
+   * selling work: 480 t sold down to 180 must READ 180, and a merge would leave the larger figure
+   * with no event that ever corrects it. An empty hold therefore clears the member's rows entirely,
+   * which is exactly what undocking empty should do.
+   */
+  async recordHold(
+    userId: string,
+    held: readonly { commodity: string; tonnes: number }[],
+  ): Promise<number> {
+    const db = this.acl.forSystem('recording a member hold against their builds');
+
+    // Every live build this member is on, with what it still wants.
+    const wants = await this.db.$queryRawUnsafe<
+      Array<{ project_id: string; commodity: string; remaining: number }>
+    >(
+      `SELECT n.project_id::text AS project_id, n.commodity, n.remaining::int AS remaining
+         FROM colony_needs n
+         JOIN colony_projects p ON p.id = n.project_id
+         JOIN colony_members m ON m.project_id = p.id AND m.user_id = $1::uuid
+        WHERE p.completed_at IS NULL AND p.abandoned_at IS NULL`,
+      userId,
+    );
+
+    const byProject = new Map<string, { commodity: string; remaining: number }[]>();
+    for (const w of wants) {
+      const bucket = byProject.get(w.project_id);
+      const line = { commodity: w.commodity, remaining: Number(w.remaining) };
+      if (bucket === undefined) byProject.set(w.project_id, [line]);
+      else bucket.push(line);
+    }
+
+    /*
+     * Cleared FIRST, and for every project — including ones that keep nothing this pass. A member
+     * who sold their Titanium has rows that no longer describe anything, and leaving them is how the
+     * board goes on promising materials that were spent hours ago.
+     */
+    await db.$executeRawUnsafe(`DELETE FROM colony_member_holds WHERE user_id = $1::uuid`, userId);
+
+    let stored = 0;
+    for (const [projectId, projectWants] of byProject) {
+      for (const line of scopeHold(held, projectWants)) {
+        await db.$executeRawUnsafe(
+          `INSERT INTO colony_member_holds (project_id, user_id, commodity, tonnes, updated_at)
+           VALUES ($1::uuid, $2::uuid, $3, $4, now())
+           ON CONFLICT (project_id, user_id, commodity)
+             DO UPDATE SET tonnes = EXCLUDED.tonnes, updated_at = now()`,
+          projectId,
+          userId,
+          line.commodity,
+          Math.trunc(line.tonnes),
+        );
+        stored += 1;
+      }
+    }
+
+    return stored;
+  }
+
+  /**
+   * What the members on this build are carrying, of what it still needs.
+   *
+   * ★ SQUADRON OWNER, 2026-08-16 ★
+   *
+   * Asked how far ship-hold tracking should go: "only while on a project", cleared when they undock
+   * empty or leave it.
+   *
+   * ★ DERIVED ON READ, NOT STORED ★
+   *
+   * `Cargo` events are already collected under the existing `trade` consent — they carry the whole
+   * inventory and have done since journal ingest existed. Adding a holds table would store the same
+   * facts a second time and give them a life of their own: a row nothing deletes when a member sells,
+   * leaves the project, or withdraws consent.
+   *
+   * Reading the NEWEST Cargo event instead makes the boundary automatic. It is the whole truth about
+   * that hold at that moment, so selling 300 of 480 reads 180 with no correcting event needed, and a
+   * member who undocks empty simply has an empty inventory. `scopeHold` then keeps only what this
+   * build still wants, so nothing else they carry is ever surfaced here.
+   *
+   * ★ AND IT IS SCOPED TO THE ROSTER ★
+   *
+   * Only members signed up to THIS project. Somebody's hold is shown to the people they are hauling
+   * with, not to the whole squadron on any build they happen to open.
+   */
+  async memberHolds(projectId: string): Promise<
+    readonly { userId: string; commander: string; commodity: string; tonnes: number }[]
+  > {
+    const [wants, rows] = await Promise.all([
+      this.db.$queryRawUnsafe<Array<{ commodity: string; remaining: number }>>(
+        `SELECT commodity, remaining::int AS remaining FROM colony_needs WHERE project_id = $1::uuid`,
+        projectId,
+      ),
+      /*
+       * One row per member: their latest Cargo event. `DISTINCT ON` takes it, and the join to the
+       * roster is what limits this to people actually on the build.
+       */
+      this.db.$queryRawUnsafe<
+        Array<{ user_id: string; commander: string | null; payload: Record<string, unknown> }>
+      >(
+        `SELECT DISTINCT ON (t.user_id)
+                t.user_id, COALESCE(u.display_name, u.handle) AS commander, t.payload
+           FROM telemetry_events t
+           JOIN colony_members r ON r.user_id = t.user_id AND r.project_id = $1::uuid
+           LEFT JOIN users u ON u.id = t.user_id
+          WHERE t.event_type = 'Cargo'
+          ORDER BY t.user_id, t.occurred_at DESC`,
+        projectId,
+      ),
+    ]);
+
+    if (wants.length === 0 || rows.length === 0) return [];
+
+    const wanted = wants.map((w) => ({ commodity: w.commodity, remaining: Number(w.remaining) }));
+    const out: { userId: string; commander: string; commodity: string; tonnes: number }[] = [];
+
+    for (const row of rows) {
+      const inventory = Array.isArray(row.payload['Inventory']) ? row.payload['Inventory'] : [];
+      const held = inventory
+        .map((i) => {
+          const line = i as { Name_Localised?: unknown; Name?: unknown; Count?: unknown };
+          const commodity =
+            typeof line.Name_Localised === 'string'
+              ? line.Name_Localised
+              : typeof line.Name === 'string'
+                ? line.Name
+                : '';
+          return { commodity, tonnes: Number(line.Count) };
+        })
+        .filter((l) => l.commodity !== '' && Number.isFinite(l.tonnes));
+
+      for (const line of scopeHold(held, wanted)) {
+        out.push({
+          userId: row.user_id,
+          commander: row.commander ?? 'a commander',
+          commodity: line.commodity,
+          tonnes: line.tonnes,
+        });
+      }
+    }
+
+    return out;
+  }
+
   async haulers(projectId: string): Promise<readonly HaulerTally[]> {
     const rows = await this.db.$queryRawUnsafe<Array<{ name: string | null; tonnes: bigint }>>(
       `SELECT u.display_name AS name, SUM(c.amount)::bigint AS tonnes

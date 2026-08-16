@@ -34,6 +34,8 @@ export { needsFreshness } from './needs-freshness.js';
 export { nextPoll, initialPoll, START_MS, ACTIVE_FLOOR_MS, IDLE_MS, type PollState } from './capi-cadence.js';
 export { resolveClaim, type ClaimOutcome, type ExistingClaim, type ClaimMethod } from './cmdr-claim.js';
 export type { Freshness, FreshnessVerdict } from './needs-freshness.js';
+export { scopeHold } from './hold-scope.js';
+export type { HeldLine, ProjectWant } from './hold-scope.js';
 export { isOrbitalStation } from './station-orbital.js';
 export { completedBuilds } from './build-completion-watch.js';
 export type { WatchedBuild, StationSighting, CompletedBuild } from './build-completion-watch.js';

@@ -55,6 +55,7 @@ import {
   colonyClearCurrent,
   postColonyProject,
   pushCarrierCargo,
+  pushShipHold,
   setCarrierCargo,
   type CurrentBuild,
 } from './hub-colony.js';
@@ -411,6 +412,54 @@ async function pushCarrierHold(): Promise<void> {
     snapshot,
   );
   if (answer.ok) lastCarrierPush = serialised;
+}
+
+/**
+ * The last ship-hold snapshot the hub ACCEPTED.
+ *
+ * Same debounce as the carrier one beside it: identical means silence, different means one small
+ * POST, and a failed push leaves this unchanged so the next pass retries without a queue.
+ */
+let lastHoldPush = '';
+
+/**
+ * Pushes the member's own hold to the hub when it has changed.
+ *
+ * ★ WHY THIS EXISTS AT ALL — SQUADRON OWNER, 2026-08-16 ★
+ *
+ * "materials being added to fleet carriers and in player holds are not registering properly"
+ *
+ * The overlay has always been right: it reads `Cargo.json` on this machine. The HUB had never
+ * received a single hold — the website's column had no data behind it, zero rows against 8,706
+ * depot readings — because nothing ever sent one.
+ *
+ * A snapshot rather than the journal's `Cargo` event, because Elite writes that event with a count
+ * and keeps the inventory in the file. Forwarding the event would send a number with no commodities
+ * in it.
+ *
+ * Never throws. A journal pass must not fail because this POST did.
+ */
+async function pushHold(): Promise<void> {
+  if (config.deviceToken === '') return;
+
+  const items = hold?.items ?? [];
+  /*
+   * An EMPTY hold is pushed, deliberately. Undocking empty is the event that clears what the hub is
+   * showing, and skipping it would leave the board promising materials that were spent hours ago —
+   * the wasted trip this module keeps producing under other names.
+   */
+  const snapshot = {
+    commodities: items.map((i) => ({ commodity: i.commodity, tonnes: i.count })),
+  };
+
+  const serialised = JSON.stringify(snapshot);
+  if (serialised === lastHoldPush) return;
+
+  const answer = await pushShipHold(
+    { apiBaseUrl: apiBaseUrlFor(config, process.env), deviceToken: config.deviceToken },
+    snapshot,
+  );
+  if (answer.ok) lastHoldPush = serialised;
 }
 
 /**
@@ -902,6 +951,7 @@ async function tick(): Promise<void> {
     // about a member's journal upload waits on it.
     carrierHold = pass.outcome.carrierHold;
     void pushCarrierHold();
+    void pushHold();
 
     /*
      * The mining session, carried the same way. Omitting these two lines was a real bug and the

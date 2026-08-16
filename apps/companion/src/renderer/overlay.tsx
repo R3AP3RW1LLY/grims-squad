@@ -83,20 +83,13 @@ function NeedHeader({ accent }: { accent: string }): preact.JSX.Element {
     letterSpacing: '0.1em',
     textTransform: 'uppercase' as const,
     color: C.dim,
+    // Right-aligned like the figures beneath them, or the heading sits over the wrong edge of its
+    // own column and the eye follows the heading rather than the number.
+    textAlign: 'right' as const,
   };
 
   return (
-    <div
-      style={{
-        display: 'grid',
-        gridTemplateColumns: GRID_COLUMNS,
-        gap: '0 8px',
-        alignItems: 'baseline',
-        padding: '0 0 2px',
-        borderBottom: `1px solid ${C.hairline}`,
-        marginBottom: '2px',
-      }}
-    >
+    <div style={{ display: 'contents' }}>
       <span style={cell} />
       <span style={cell}>Need</span>
       <span style={cell}>Hold</span>
@@ -107,7 +100,60 @@ function NeedHeader({ accent }: { accent: string }): preact.JSX.Element {
 }
 
 /** One shared template, so the header and every row cannot drift out of alignment. */
-const GRID_COLUMNS = 'minmax(0, 1fr) auto auto auto auto';
+/**
+ * ★ THE COLUMNS ARE FIXED, AND THE ROWS JOIN ONE GRID — SQUADRON OWNER, 2026-08-16 ★
+ *
+ * "the quantities layout is really weird, we need this formatted much better so its all in a
+ * straight line up and down and easy to read"
+ *
+ * The first version gave every ROW its own grid with `auto` columns. `auto` sizes to content, and a
+ * grid only aligns the things inside IT — so each row measured itself independently and the numbers
+ * landed wherever that row's own digits put them. Nothing lined up vertically, which is the entire
+ * job of a table of figures.
+ *
+ * Two changes fix it and both are needed. The numeric columns are a fixed character width instead of
+ * `auto`, so 8 and 24,600 occupy the same space. And the rows use `display: contents`, which makes
+ * their cells children of the ONE grid that wraps the whole list — so a column is a column down the
+ * entire panel rather than per line.
+ *
+ * 7ch holds six digits and a separator, which covers every tonnage a colonisation build produces.
+ */
+const GRID_COLUMNS = 'minmax(0, 1fr) 7ch 7ch 7ch 7ch';
+
+/**
+ * Every figure, styled once.
+ *
+ * Right-aligned and tabular: digits share a width, so the columns stay still as tonnages change
+ * rather than shuffling sideways on every poll — which on a panel over a cockpit reads as flicker.
+ */
+const FIG = {
+  fontVariantNumeric: 'tabular-nums' as const,
+  textAlign: 'right' as const,
+  whiteSpace: 'nowrap' as const,
+};
+
+/**
+ * The one grid the header and every row live in.
+ *
+ * `display: contents` on the children is what makes a column a column down the WHOLE panel. Without
+ * this wrapper each row would measure itself, which is exactly the layout that was reported as
+ * "really weird".
+ */
+function NeedGrid({ children }: { children: preact.ComponentChildren }): preact.JSX.Element {
+  return (
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: GRID_COLUMNS,
+        gap: '1px 8px',
+        alignItems: 'baseline',
+        fontSize: '0.82em',
+      }}
+    >
+      {children}
+    </div>
+  );
+}
 
 function NeedRow({
   need,
@@ -119,37 +165,35 @@ function NeedRow({
   const num = (n: number | undefined): string => (n ?? 0).toLocaleString();
 
   return (
-    <div
-      style={{
-        display: 'grid',
-        // The commodity takes what is left; the four figures are fixed so the columns line up down
-        // the panel. `tabular-nums` below is what keeps them from jittering as tonnages change.
-        gridTemplateColumns: GRID_COLUMNS,
-        gap: '0 8px',
-        alignItems: 'baseline',
-        padding: '1px 0',
-        // Smaller than the panel's body text: five columns over a cockpit is a lot of width, and
-        // the numbers must fit without the commodity name being clipped to nothing.
-        fontSize: '0.82em',
-      }}
-    >
+    <div style={{ display: 'contents' }}>
       <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {need.commodity}
       </span>
-      <span style={{ fontVariantNumeric: 'tabular-nums', color: C.dim }} title="Still outstanding">
-        {num(need.remaining)}
-      </span>
-      <span style={{ fontVariantNumeric: 'tabular-nums', color: C.dim }} title="In your hold">
-        {need.inHold === undefined ? '' : `${num(need.inHold)}`}
-      </span>
-      <span style={{ fontVariantNumeric: 'tabular-nums', color: C.dim }} title="On fleet carriers">
-        {need.knowsCarriers === false ? '·' : num(need.onCarriers)}
+      <span style={{ ...FIG, color: C.dim }} title="Still outstanding">{num(need.remaining)}</span>
+      {/*
+        ★ COLOURED, BECAUSE THEY ANSWER DIFFERENT QUESTIONS — SQUADRON OWNER, 2026-08-16 ★
+
+        "Hold and Carrier quantities need to be colored"
+
+        Four grey numbers in a row are read as one number four times. Your own hold is cyan and the
+        carriers are orange, so a glance says "I am carrying some of this" or "the squadron has it
+        parked" without reading a heading. Zero stays dim: a coloured zero draws the eye to the one
+        row that has nothing to say.
+      */}
+      <span
+        style={{ ...FIG, color: (need.inHold ?? 0) > 0 ? C.cyan : C.dim }}
+        title="In your hold"
+      >
+        {need.inHold === undefined ? '' : num(need.inHold)}
       </span>
       <span
-        style={{ fontVariantNumeric: 'tabular-nums', color: accent }}
-        title="Still to buy"
+        style={{ ...FIG, color: (need.onCarriers ?? 0) > 0 ? C.orange : C.dim }}
+        title="On fleet carriers"
       >
-        {num(need.stillToBuy ?? need.remaining)} t
+        {need.knowsCarriers === false ? '·' : num(need.onCarriers)}
+      </span>
+      <span style={{ ...FIG, color: accent }} title="Still to buy">
+        {num(need.stillToBuy ?? need.remaining)}
       </span>
     </div>
   );
@@ -605,12 +649,12 @@ function BuildPanel({
            * it is the one in front of them mid-flight. So the grouping appears exactly when it is
            * real, and the panel looks the way it always did when it is not.
            */
-          <>
+          <NeedGrid>
             <NeedHeader accent={accent} />
             {needs.map((n) => (
               <NeedRow key={n.commodity} need={n} accent={accent} />
             ))}
-          </>
+          </NeedGrid>
         ) : (
           grouped.map((group) => (
             <div key={group.category}>
@@ -629,10 +673,12 @@ function BuildPanel({
                 Repeated per category rather than once at the top: the panel scrolls, and a heading
                 that has scrolled away is a heading that is not doing its job.
               */}
-              <NeedHeader accent={accent} />
-              {group.rows.map((n) => (
-                <NeedRow key={n.commodity} need={n} accent={accent} />
-              ))}
+              <NeedGrid>
+                <NeedHeader accent={accent} />
+                {group.rows.map((n) => (
+                  <NeedRow key={n.commodity} need={n} accent={accent} />
+                ))}
+              </NeedGrid>
             </div>
           ))
         )
