@@ -6,6 +6,7 @@ import {
   CALLSIGN_LENGTH,
   ErrorCode,
   Permission,
+  callsignFromName,
   formatCallsign,
   normaliseCallsign,
 } from '@grims/shared';
@@ -150,6 +151,22 @@ export function carrierCover(
   }
 
   return cover;
+}
+
+/**
+ * One of the asking member's own carriers, holding cargo this build wants, not yet attached to it.
+ *
+ * Grouped per carrier rather than per commodity because that is the unit the prompt is about and
+ * the unit the button attaches — and because leaving the grouping to each surface is how the
+ * website and the companion end up describing one carrier two different ways.
+ */
+export interface UnattachedHolding {
+  readonly marketId: string;
+  /** The callsign where the catalogue knows one, else the market id — see `callsignFromName`. */
+  readonly name: string;
+  /** Tonnes THIS BUILD CAN USE, summed across `lines`. Already clamped to what is outstanding. */
+  readonly tonnes: number;
+  readonly lines: readonly { readonly commodity: string; readonly tonnes: number }[];
 }
 
 /** A carrier somebody could attach, found by callsign or name. */
@@ -447,9 +464,9 @@ export class ColonyCarrierService {
     }
 
     const name = String(found['name']);
-    // The callsign is what everybody says out loud. It is the whole name for most carriers, and the
-    // trailing bracketed part when an owner has titled theirs.
-    const callsign = /^([A-Z0-9]{3}-[A-Z0-9]{3})\b/.exec(name)?.[1] ?? name.slice(0, 12);
+    // The callsign is what everybody says out loud. Shared with the attach prompt, so the two cannot
+    // come to call the same carrier different things on the same page.
+    const callsign = callsignFromName(name);
 
     await this.db.$executeRawUnsafe(
       `INSERT INTO colony_carriers (project_id, market_id, name, callsign, is_squadron, added_by_id, added_at)
@@ -643,20 +660,6 @@ export class ColonyCarrierService {
   }
 
   /**
-   * Sets or clears a MANUAL tonnage on an attached carrier — the crew's hand, for whatever the
-   * journals missed.
-   *
-   * ★ CREW MEMBERS ONLY — THE ROSTER IS THE CHECK ★
-   *
-   * The same membership the roster records is what earns the pen: declaring what is aboard a
-   * build's carrier is crew work, and a passer-by editing the squadron's cargo figures is exactly
-   * what the check refuses. Deliberately NOT rank-gated — the member standing on the carrier's
-   * deck counting the hold is rarely the one with COLONY_MANAGE.
-   *
-   * `tonnes: null` clears the override; ZERO is a real figure ("none of this is aboard") and
-   * overrides journal and mirror alike — that is the entire point of a manual row.
-   */
-  /**
    * Carriers of THIS member that are holding what this build wants, and are not attached to it.
    *
    * ★ SQUADRON OWNER, 2026-08-16 ★
@@ -672,39 +675,115 @@ export class ColonyCarrierService {
    *
    * `updated_by_id` on the journal rows is what makes "yours" answerable at all. It was stored as
    * NULL until this change, so the hub could see the cargo and had no idea whose it was.
+   *
+   * ★ THE TONNAGE IS CAPPED AT WHAT THE BUILD CAN USE ★
+   *
+   * A carrier holding 5,000 t of Titanium for a build that wants 200 t contributes 200 t. Leading
+   * with the bigger number would make the prompt bait: it would promise progress that attaching
+   * cannot deliver, and the carriers tab would then quote the smaller figure for the same carrier on
+   * the same page. `LEAST` is the same clamp the cover maths already applies.
    */
   async unattachedHoldingFor(
     projectId: string,
     userId: string,
-  ): Promise<readonly { marketId: string; commodity: string; tonnes: number }[]> {
+  ): Promise<readonly UnattachedHolding[]> {
     const rows = await this.db.$queryRawUnsafe<
-      Array<{ market_id: string; commodity: string; tonnes: number }>
+      Array<{ market_id: string; commodity: string; tonnes: number; name: string | null }>
     >(
-      `SELECT g.market_id::text AS market_id, g.commodity, g.tonnes::int AS tonnes
-         FROM colony_carrier_cargo g
+      /*
+       * ★ ONE ROW PER COMMODITY, PICKED BY THE MODULE'S OWN RULE ★
+       *
+       * `colony_carrier_cargo` is keyed (market, commodity, SOURCE), and both the journal push and
+       * a hand-declared figure stamp `updated_by_id` — so a commodity the member's app watched AND
+       * corrected by hand is two rows here. Summing them would double the carrier's hold and
+       * disagree with the carriers tab about the same cargo.
+       *
+       * Manual beats journal beats mirror, exactly as the shopping maths merges it. Anything else
+       * is a second opinion on a question this module already answered.
+       */
+      `WITH mine AS (
+         SELECT DISTINCT ON (g.market_id, lower(g.commodity))
+                g.market_id, g.commodity, g.tonnes
+           FROM colony_carrier_cargo g
+          WHERE g.updated_by_id = $2::uuid
+            AND g.tonnes > 0
+          ORDER BY g.market_id, lower(g.commodity),
+                   CASE g.source WHEN 'manual' THEN 0 WHEN 'journal' THEN 1 ELSE 2 END
+       )
+       SELECT m.market_id::text AS market_id,
+              m.commodity,
+              LEAST(m.tonnes, n.remaining)::int AS tonnes,
+              k.name
+         FROM mine m
          JOIN colony_needs n
-           ON lower(n.commodity) = lower(g.commodity)
+           ON lower(n.commodity) = lower(m.commodity)
           AND n.project_id = $1::uuid
           AND n.remaining > 0
-        WHERE g.updated_by_id = $2::uuid
-          AND g.tonnes > 0
+         -- The catalogue name, so the prompt can say W8K-W1Y rather than a market id no member has
+         -- ever seen. Rides knowledge_items_station_market_id_idx; LIMIT 1 because a carrier keeps
+         -- a catalogue row per system it has ever jumped to and they all carry the same name.
+         LEFT JOIN LATERAL (
+           SELECT ki.name FROM knowledge_items ki
+            WHERE ki.source = 'galaxy' AND ki.kind = 'station'
+              AND ki.data->>'marketId' = m.market_id::text
+            LIMIT 1
+         ) k ON true
+        WHERE NOT EXISTS (
           -- Not already attached to THIS build. A carrier attached elsewhere is still worth
           -- prompting about here: the materials are aboard either way.
-          AND NOT EXISTS (
-            SELECT 1 FROM colony_carriers c
-             WHERE c.market_id = g.market_id AND c.project_id = $1::uuid
-          )
-        ORDER BY g.tonnes DESC`,
+          SELECT 1 FROM colony_carriers c
+           WHERE c.market_id = m.market_id AND c.project_id = $1::uuid
+        )
+        ORDER BY LEAST(m.tonnes, n.remaining) DESC`,
       projectId,
       userId,
     );
 
-    return rows.map((r) => ({
-      marketId: r.market_id,
-      commodity: r.commodity,
-      tonnes: Number(r.tonnes),
-    }));
+    /*
+     * Grouped into one entry per CARRIER, because that is what the prompt is about and what the
+     * button attaches. Both surfaces render this shape as it stands — a flat list would have left
+     * the website and the companion each grouping it, which is how they come to disagree.
+     */
+    const byCarrier = new Map<string, { marketId: string; name: string; tonnes: number; lines: { commodity: string; tonnes: number }[] }>();
+
+    for (const r of rows) {
+      const tonnes = Number(r.tonnes);
+      if (!Number.isFinite(tonnes) || tonnes <= 0) continue;
+
+      let carrier = byCarrier.get(r.market_id);
+      if (carrier === undefined) {
+        carrier = {
+          marketId: r.market_id,
+          // A carrier the catalogue has never seen still has to be called something.
+          name: r.name === null ? r.market_id : callsignFromName(r.name),
+          tonnes: 0,
+          lines: [],
+        };
+        byCarrier.set(r.market_id, carrier);
+      }
+
+      carrier.lines.push({ commodity: r.commodity, tonnes });
+      carrier.tonnes += tonnes;
+    }
+
+    // Biggest contribution first: with more than one carrier, the one worth attaching leads.
+    return [...byCarrier.values()].sort((a, b) => b.tonnes - a.tonnes);
   }
+
+  /**
+   * Sets or clears a MANUAL tonnage on an attached carrier — the crew's hand, for whatever the
+   * journals missed.
+   *
+   * ★ CREW MEMBERS ONLY — THE ROSTER IS THE CHECK ★
+   *
+   * The same membership the roster records is what earns the pen: declaring what is aboard a
+   * build's carrier is crew work, and a passer-by editing the squadron's cargo figures is exactly
+   * what the check refuses. Deliberately NOT rank-gated — the member standing on the carrier's
+   * deck counting the hold is rarely the one with COLONY_MANAGE.
+   *
+   * `tonnes: null` clears the override; ZERO is a real figure ("none of this is aboard") and
+   * overrides journal and mirror alike — that is the entire point of a manual row.
+   */
 
   async setManual(input: {
     projectId: string;

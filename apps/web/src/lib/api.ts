@@ -2557,6 +2557,21 @@ export interface DeclaredCargo {
   updatedAt: string;
 }
 
+/**
+ * One of the reader's own carriers, holding cargo this build wants, not yet attached to it.
+ *
+ * Grouped per CARRIER by the server rather than per commodity, because that is what the prompt is
+ * about and what the button attaches. `tonnes` is already clamped to what the build still needs, so
+ * it agrees with the carriers tab rather than promising progress attaching cannot deliver.
+ */
+export interface UnattachedHolding {
+  marketId: string;
+  /** The callsign where the catalogue knows one, else the market id. */
+  name: string;
+  tonnes: number;
+  lines: { commodity: string; tonnes: number }[];
+}
+
 export interface AttachedCarrier {
   marketId: string;
   name: string;
@@ -2614,6 +2629,14 @@ export interface ColonyDetail {
    * so this sees every squadron carrier rather than only the one whose owner has the app open.
    */
   carriers: AttachedCarrier[];
+  /**
+   * The reader's OWN carriers holding what this build wants, not yet attached to it.
+   *
+   * Empty for everybody else, and empty for a signed-out browser — the server scopes it on who
+   * pushed the manifest. A carrier nobody has attached is on no squadron board deliberately, so
+   * this is never a way to see inside somebody else's.
+   */
+  canAttach: UnattachedHolding[];
   /**
    * Effective tonnes aboard the attached carriers per commodity — manual beats journal beats
    * mirror, summed on the server so every surface stages the same yellow tonnage.

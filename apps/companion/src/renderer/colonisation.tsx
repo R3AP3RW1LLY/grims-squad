@@ -14,6 +14,7 @@ import type {
   ColonyShoppingRow,
   BoardViewer,
   PurchaseStation,
+  UnattachedHolding,
 } from '../hub-colony.js';
 import { projectTitleFrom } from '../docked.js';
 import { DEFAULT_SHOPPING, type ShoppingFilters } from '../hub-colony.js';
@@ -280,6 +281,13 @@ export interface ProjectDetailData {
    * mirror, summed by the hub. The yellow segment of every three-segment bar.
    */
   carrierCover: Record<string, number>;
+  /**
+   * THIS member's own carriers holding what the build wants, not attached to it.
+   *
+   * Optional and defaulted at the render site: an older hub does not send it, and a mismatched pair
+   * is a normal condition here — see the chart-payload note in `ProjectDetail`.
+   */
+  canAttach?: UnattachedHolding[];
   needs: ColonyNeed[];
   haulers: ColonyHauler[];
   shopping: ColonyShoppingRow[];
@@ -1658,6 +1666,22 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
       </>
       )}
 
+      {/*
+        ★ ABOVE THE TABS, NOT INSIDE THE CARRIERS ONE — SQUADRON OWNER, 2026-08-16 ★
+
+        The carriers tab is where somebody goes who already knows a carrier is involved. This is for
+        the member who does not: their own app pushed a manifest and nothing has ever told them it
+        could help here.
+
+        `?? []` because an older hub sends no such field, and this app is expected to run against a
+        hub it was not built against — the same defence the chart payload needed.
+      */}
+      <AttachPrompt
+        projectId={data.project.id}
+        holdings={data.canAttach ?? []}
+        onChanged={() => void reloadDetail()}
+      />
+
       {tab !== 'carriers' ? null : (
         <CarrierPanel
           projectId={data.project.id}
@@ -2764,6 +2788,144 @@ function CarrierPanel({
   );
 }
 
+
+/**
+ * "Your carrier is holding 800 t this build needs — attach it?"
+ *
+ * ★ SQUADRON OWNER, 2026-08-16 ★
+ *
+ * Asked who should see this and where, the answer was: the carrier's owner, on the project page.
+ *
+ * ★ WHY IT IS NOT ON THE CARRIERS TAB ★
+ *
+ * That tab is where somebody goes who already knows a carrier is involved. The whole point of this
+ * prompt is the member who does NOT — whose app pushed a manifest days ago and who has never opened
+ * that tab. So it sits above the tab content, on every tab, and is the first thing on screen when
+ * the answer is yes.
+ *
+ * ★ AND IT IS ONLY EVER ABOUT THE READER'S OWN CARRIER ★
+ *
+ * The hub decides that and sends an empty list to everybody else. A carrier nobody has attached is
+ * deliberately on no squadron board, so this must never become a way to see inside one.
+ *
+ * Deliberately the same sentence, the same figures and the same two buttons as the website, because
+ * they are one feature on two screens — and the hub does the grouping and the clamping so neither
+ * surface can drift into quoting its own number.
+ */
+function AttachPrompt({
+  projectId,
+  holdings,
+  onChanged,
+}: {
+  projectId: string;
+  holdings: readonly UnattachedHolding[];
+  onChanged: () => void;
+}): JSX.Element | null {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  /*
+   * Dismissal lasts as long as this screen is open and is not stored. "Not now" answers the question
+   * for now; writing it down would need a table, and the prompt goes for good the moment they
+   * attach — which is the resolution it is actually asking for.
+   */
+  const [hidden, setHidden] = useState<readonly string[]>([]);
+
+  const showing = holdings.filter((h) => !hidden.includes(h.marketId));
+  if (showing.length === 0) return null;
+
+  const attach = (marketId: string): void => {
+    setBusy(true);
+    void window.colony.carrierAdd(projectId, { marketId, isSquadron: false }).then((a) => {
+      setBusy(false);
+      if (a.ok) {
+        setError(null);
+        onChanged();
+      } else {
+        // The hub's own sentence, which names the real condition and the real remedy.
+        setError(a.error);
+      }
+    });
+  };
+
+  return (
+    <div style={{ marginBottom: '16px' }}>
+      {error === null ? null : (
+        <div style={{ marginBottom: '8px' }}>
+          <Problem>{error}</Problem>
+        </div>
+      )}
+
+      {showing.map((h) => (
+        <div
+          key={h.marketId}
+          style={{
+            border: `1px solid ${C.orange}`,
+            background: C.orangeTint,
+            borderRadius: '4px',
+            padding: '10px 12px',
+            marginBottom: '8px',
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              alignItems: 'baseline',
+              justifyContent: 'space-between',
+              gap: '10px',
+            }}
+          >
+            <p style={{ margin: 0, fontSize: '13px', color: C.text }}>
+              <span style={{ color: C.orangeBright }}>{h.name}</span> is holding {tonnes(h.tonnes)}{' '}
+              this build needs.
+            </p>
+            <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Button tone="primary" disabled={busy} onClick={() => attach(h.marketId)}>
+                {busy ? 'Attaching…' : 'Attach it'}
+              </Button>
+              <Button
+                disabled={busy}
+                onClick={() => setHidden((prev) => [...prev, h.marketId])}
+              >
+                Not now
+              </Button>
+            </span>
+          </div>
+
+          {/*
+            ★ THE BREAKDOWN, BECAUSE ONE NUMBER IS NOT ENOUGH TO DECIDE ON ★
+
+            "800 t this build needs" could be one commodity the build is desperate for or eight it
+            barely wants. A prompt that will not say what it is about is one members learn to dismiss
+            without reading.
+
+            Each figure is clamped by the hub to what is OUTSTANDING, so these add up to the headline
+            and to what the carriers tab shows once it is attached.
+          */}
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: '4px 14px',
+              marginTop: '6px',
+            }}
+          >
+            {h.lines.map((l) => (
+              <span key={l.commodity} style={{ fontSize: '11px', color: C.dim }}>
+                {l.commodity} <span style={{ color: C.text }}>{tonnes(l.tonnes)}</span>
+              </span>
+            ))}
+          </div>
+
+          <p style={{ margin: '6px 0 0', fontSize: '11px', color: C.faint }}>
+            Attaching puts it on this build&rsquo;s carriers tab and takes what is aboard off the
+            shopping list. It stays yours, and you can take it off again at any time.
+          </p>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 /**
  * The declared hold: what the journals watched and what the crew has typed, per carrier.

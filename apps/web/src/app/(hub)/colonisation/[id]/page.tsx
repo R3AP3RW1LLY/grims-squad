@@ -13,6 +13,7 @@ import { NeedsTable } from './needs-table';
 import { ShoppingList } from './shopping-list';
 import { PurchaseCatalogue } from './purchase-catalogue';
 import { DeclarePurchase } from './declare-purchase';
+import { AttachPrompt } from './attach-prompt';
 import { Carriers } from './carriers';
 import { HaulerBoard } from './hauler-board';
 import { DeliveryTimeline } from './delivery-charts';
@@ -157,6 +158,7 @@ export default async function ColonyProjectPage({
     chart,
     carriers,
     carrierCover,
+    canAttach,
     can,
     origin,
     unknownSystem,
@@ -273,6 +275,17 @@ export default async function ColonyProjectPage({
         <div className="mb-8">
           <ProjectActions project={project} canManage={can.manage} isPoster={can.isPoster} />
         </div>
+
+        {/*
+          ★ ABOVE THE TABS, NOT INSIDE THE CARRIERS ONE — SQUADRON OWNER, 2026-08-16 ★
+
+          The carriers tab is where somebody goes who already knows a carrier is involved. This is
+          for the member who does not: their app pushed a manifest days ago and nothing has ever
+          told them it could help here. So it renders on every tab of the project page.
+
+          Server-scoped to the carrier's OWNER, and an empty list for everybody else.
+        */}
+        <AttachPrompt projectId={project.id} holdings={canAttach} />
 
         {project.notes === null ? null : (
           <Section title="Notes">

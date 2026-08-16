@@ -31,6 +31,23 @@ const CARRIER = strip('src/logistics/colony-carrier.service.ts');
 const DEVICE = strip('src/logistics/colony-device.controller.ts');
 const PROJECT = strip('src/logistics/colony.controller.ts');
 
+/**
+ * ★ THE WINDOW IS THE METHOD, NOT THE FILE ★
+ *
+ * Three assertions written for this feature turned out to match code in OTHER methods of this same
+ * service — `n.remaining > 0` and `AND n.project_id = $1::uuid` both appear in an unrelated query,
+ * so both passed with the clause deleted. Each said something true about the file and nothing
+ * whatever about the code it named. Mutation testing caught them; nothing else would have.
+ *
+ * So every claim about the prompt query is made against a slice bounded by the method itself.
+ */
+const QUERY = ((): string => {
+  const start = CARRIER.indexOf('async unattachedHoldingFor(');
+  if (start === -1) throw new Error('the prompt query no longer exists');
+  const end = CARRIER.indexOf('\n  async ', start + 1);
+  return CARRIER.slice(start, end === -1 ? undefined : end);
+})();
+
 describe('ownership is recorded', () => {
   it('★ MANDATORY: the journal path stores WHO pushed it ★', () => {
     // It stored NULL. Without this the prompt has no addressee and cannot exist.
@@ -52,7 +69,7 @@ describe('who the prompt reaches', () => {
      * `updated_by_id = $2::uuid` is the whole boundary. Without it the query would return every
      * unattached carrier in the squadron holding a wanted commodity, to anybody who opened the page.
      */
-    expect(CARRIER).toContain('g.updated_by_id = $2::uuid');
+    expect(QUERY).toContain('g.updated_by_id = $2::uuid');
   });
 
   it('★ MANDATORY: a signed-out reader gets nothing ★', () => {
@@ -61,27 +78,65 @@ describe('who the prompt reaches', () => {
   });
 
   it('★ MANDATORY: only commodities the build STILL wants ★', () => {
-    /*
-     * A carrier full of something already delivered is not worth interrupting anybody about.
-     *
-     * ★ ANCHORED ON A STRING UNIQUE TO THIS QUERY ★
-     *
-     * Two earlier attempts asserted on fragments — `n.remaining > 0`, then
-     * `AND n.project_id = $1::uuid` — that BOTH appear in an unrelated query elsewhere in this
-     * service. Each passed with the clause deleted, so each said something true about the file and
-     * nothing whatever about the code it named. Mutation testing caught both.
-     *
-     * The select list below exists once. Slicing from it is the only way to be sure the window
-     * being searched is this method's.
-     */
-    const start = CARRIER.indexOf('g.market_id::text AS market_id, g.commodity, g.tonnes::int');
-    expect(start, 'the prompt query itself must exist').toBeGreaterThan(-1);
-
-    expect(CARRIER.slice(start, start + 600)).toContain('n.remaining > 0');
+    // A carrier full of something already delivered is not worth interrupting anybody about.
+    expect(QUERY).toContain('n.remaining > 0');
+    expect(QUERY).toContain('n.project_id = $1::uuid');
   });
 
   it('★ MANDATORY: nothing already attached to THIS build is offered again ★', () => {
-    expect(CARRIER).toContain('NOT EXISTS');
+    expect(QUERY).toContain('NOT EXISTS');
+    expect(QUERY).toContain('FROM colony_carriers c');
+  });
+});
+
+describe('the number it leads with', () => {
+  it('★ MANDATORY: the tonnage is CLAMPED to what the build can use ★', () => {
+    /*
+     * A carrier holding 5,000 t of Titanium for a build that wants 200 t contributes 200 t.
+     * Leading with the bigger number makes the prompt bait — it promises progress attaching cannot
+     * deliver, and the carriers tab then quotes the smaller figure for the same carrier on the same
+     * page.
+     */
+    /*
+     * ★ ANCHORED ON THE SELECT LIST, NOT ON `LEAST` ★
+     *
+     * `LEAST(m.tonnes, n.remaining)` appears TWICE in this method — once in the select list and
+     * once in the ORDER BY. Asserting the bare call passed with the select list changed back to the
+     * raw tonnage, because the sort still contained the string. Mutation testing caught it. The
+     * `::int AS tonnes` suffix is what makes this about the value the prompt prints.
+     */
+    expect(QUERY).toContain('LEAST(m.tonnes, n.remaining)::int AS tonnes');
+  });
+
+  it('★ MANDATORY: one row per commodity, merged by the module’s own rule ★', () => {
+    /*
+     * `colony_carrier_cargo` is keyed (market, commodity, SOURCE) and BOTH the journal push and a
+     * hand-declared figure stamp `updated_by_id`. A commodity the member's app watched and then
+     * corrected by hand is two rows, and summing them doubles the carrier's hold.
+     *
+     * Manual beats journal beats mirror, exactly as the shopping maths merges it. A second opinion
+     * here is how one page comes to state two different tonnages for one carrier.
+     */
+    expect(QUERY).toContain('DISTINCT ON (g.market_id, lower(g.commodity))');
+    expect(QUERY).toContain("WHEN 'manual' THEN 0");
+    expect(QUERY).toContain("WHEN 'journal' THEN 1");
+  });
+
+  it('★ MANDATORY: it is grouped per CARRIER, not per commodity ★', () => {
+    /*
+     * The unit the prompt is about and the unit the button attaches. Leaving the grouping to each
+     * surface is how the website and the companion come to describe one carrier two ways.
+     */
+    expect(QUERY).toContain('byCarrier');
+    expect(QUERY, 'and the biggest contribution leads').toContain('b.tonnes - a.tonnes');
+  });
+
+  it('the carrier is named by its callsign, not by a market id', () => {
+    // "3707348992 is holding 800 t" is a sentence no member can act on.
+    expect(QUERY).toContain('callsignFromName');
+    expect(QUERY, 'through the catalogue, on the indexed expression').toContain(
+      "ki.data->>'marketId' = m.market_id::text",
+    );
   });
 });
 

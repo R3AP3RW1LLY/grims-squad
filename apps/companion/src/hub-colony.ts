@@ -636,6 +636,21 @@ export const DEFAULT_SHOPPING: ShoppingFilters = {
   largePadOnly: false,
 };
 
+/**
+ * One of this member's carriers, holding cargo a build wants, not yet attached to it.
+ *
+ * Grouped per CARRIER by the hub rather than per commodity — that is what the prompt is about and
+ * what the button attaches. `tonnes` is already clamped to what the build still needs, so the app
+ * and the website quote the same figure for the same carrier.
+ */
+export interface UnattachedHolding {
+  readonly marketId: string;
+  /** The callsign where the catalogue knows one, else the market id. */
+  readonly name: string;
+  readonly tonnes: number;
+  readonly lines: readonly { readonly commodity: string; readonly tonnes: number }[];
+}
+
 export const colonyProject = (
   call: HubCall,
   id: string,
@@ -652,6 +667,14 @@ export const colonyProject = (
      * mirror, summed across carriers. What the three-segment bars stage in yellow.
      */
     carrierCover: Record<string, number>;
+    /**
+     * THIS member's own carriers, holding what the build wants, not yet attached to it.
+     *
+     * Empty for everybody else — the hub scopes it on who pushed the manifest, because a carrier
+     * nobody has attached is deliberately on no squadron board. Optional because an older hub does
+     * not send it at all, and a mismatched pair is a normal condition here rather than a fault.
+     */
+    canAttach?: UnattachedHolding[];
     /** Echoed so the tab can say where it measured from — a distance with no origin is uncheckable. */
     shoppingFrom: string | null;
     shoppingSort: string;
