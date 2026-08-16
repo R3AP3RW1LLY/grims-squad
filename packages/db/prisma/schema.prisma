@@ -3078,19 +3078,34 @@ model CarrierCargo {
 /// ★ ONE ROW PER (CARRIER, COMMODITY, SOURCE), AND THE MERGE RULE IS WRITTEN DOWN ★
 ///
 /// `journal` rows are replaced by the owner's companion app from what it actually watched;
-/// `manual` rows are typed by crew. They deliberately do not overwrite each other: a journal
-/// update landing two minutes after a member corrected a figure by hand must not undo the
-/// correction. The EFFECTIVE value — what the shopping maths reads — is:
+/// `capi` rows are Frontier's own manifest for the carrier; `manual` rows are typed by crew. They
+/// deliberately do not overwrite each other: a journal update landing two minutes after a member
+/// corrected a figure by hand must not undo the correction. The EFFECTIVE value — what the shopping
+/// maths reads — is:
 ///
-///     manual if declared, else max(journal, market-mirror supply)
+///     manual if declared, else capi if present, else max(journal, market-mirror supply)
 ///
-/// Manual wins outright because it is the only source that can say "this figure is wrong"; the
-/// other two are both floors (the journal misses whatever moved while the app was closed, the
-/// mirror sees only sell orders), and the larger of two floors is the better floor.
+/// Manual wins outright because it is the only source that can say "this figure is wrong".
+///
+/// ★ WHY cAPI SITS ABOVE THE FLOORS RATHER THAN AMONG THEM — 2026-08-16 ★
+///
+/// The journal and the mirror are both LOWER BOUNDS: the journal misses whatever moved while the app
+/// was closed, the mirror sees only sell orders, and neither can tell "sold" from "nobody looked".
+/// That is why they argue by size — the larger of two floors is the better floor.
+///
+/// Frontier answers with the COMPLETE manifest, so a commodity absent from it is absent from the
+/// hold. That makes it the only source that can prove a hold EMPTY, and it is why a cAPI figure
+/// REPLACES the floors instead of joining their argument: max-ing it against a fortnight-old journal
+/// reading would discard the one thing it can say that nothing else can, and the board would go on
+/// promising cargo that was sold days ago.
+///
+/// Asked directly where Frontier should rank, the squadron owner chose above the journal and below
+/// the hand: a member on the deck can always correct the board, at the cost of a stale hand-typed
+/// figure outliving a live one.
 model ColonyCarrierCargo {
   marketId  BigInt @map("market_id")
   commodity String
-  /// `journal` or `manual`. See the merge rule above.
+  /// `journal`, `capi` or `manual`. See the merge rule above.
   source String
 
   /// Tonnes aboard, as this source last declared it. Zero is a real statement — "none of this is

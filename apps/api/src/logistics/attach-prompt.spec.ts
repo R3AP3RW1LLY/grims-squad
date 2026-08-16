@@ -118,8 +118,15 @@ describe('the number it leads with', () => {
      * here is how one page comes to state two different tonnages for one carrier.
      */
     expect(QUERY).toContain('DISTINCT ON (g.market_id, lower(g.commodity))');
-    expect(QUERY).toContain("WHEN 'manual' THEN 0");
-    expect(QUERY).toContain("WHEN 'journal' THEN 1");
+    /*
+     * Asserted as the WHOLE expression, not as fragments. Fragments would have survived cAPI being
+     * inserted into the middle of the order — the prompt would then have quietly preferred a
+     * fortnight-old journal reading over Frontier's live manifest, while every fragment still
+     * matched. The order is the claim, so the order is what is written down.
+     */
+    expect(QUERY).toContain(
+      "CASE g.source WHEN 'manual' THEN 0 WHEN 'capi' THEN 1 WHEN 'journal' THEN 2 ELSE 3 END",
+    );
   });
 
   it('★ MANDATORY: it is grouped per CARRIER, not per commodity ★', () => {

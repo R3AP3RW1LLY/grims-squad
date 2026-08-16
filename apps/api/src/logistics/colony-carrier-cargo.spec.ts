@@ -21,22 +21,62 @@ import type { MarketStore } from './market.store.js';
 
 describe('effectiveTonnes — the merge rule', () => {
   it('manual wins outright, including over a bigger journal or mirror figure', () => {
-    expect(effectiveTonnes({ manual: 100, journal: 5_000, mirror: 20_000 })).toBe(100);
+    expect(effectiveTonnes({ manual: 100, capi: null, journal: 5_000, mirror: 20_000 })).toBe(100);
   });
 
   it('★ a manual ZERO retires a stale claim — it is not "absent" ★', () => {
     // The mirror still shows 20,000 t of a sell order the owner cancelled last week. The crew
     // member standing on the deck says the hold is empty, and the hand beats the archive.
-    expect(effectiveTonnes({ manual: 0, journal: 300, mirror: 20_000 })).toBe(0);
+    expect(effectiveTonnes({ manual: 0, capi: null, journal: 300, mirror: 20_000 })).toBe(0);
   });
 
   it('without a manual figure, the two floors argue by size', () => {
     // Journal misses whatever moved while the app was closed; the mirror sees only sell orders.
     // Both understate, so the larger of two floors is the better floor.
-    expect(effectiveTonnes({ manual: null, journal: 300, mirror: 900 })).toBe(900);
-    expect(effectiveTonnes({ manual: null, journal: 1_200, mirror: 900 })).toBe(1_200);
-    expect(effectiveTonnes({ manual: null, journal: null, mirror: 900 })).toBe(900);
-    expect(effectiveTonnes({ manual: null, journal: null, mirror: null })).toBe(0);
+    const floors = (journal: number | null, mirror: number | null) =>
+      effectiveTonnes({ manual: null, capi: null, journal, mirror });
+
+    expect(floors(300, 900)).toBe(900);
+    expect(floors(1_200, 900)).toBe(1_200);
+    expect(floors(null, 900)).toBe(900);
+    expect(floors(null, null)).toBe(0);
+  });
+
+  /*
+   * ★ WHERE FRONTIER SITS — SQUADRON OWNER, 2026-08-16 ★
+   *
+   * Asked directly, the answer was: above the journal, below the hand.
+   */
+  describe('cAPI — Frontier’s own manifest', () => {
+    it('★ MANDATORY: a cAPI ZERO empties the hold, where a floor cannot ★', () => {
+      /*
+       * The whole reason to ask Frontier. The journal watched 5,000 t move aboard a fortnight ago
+       * and has not been running since; the mirror still lists a cancelled sell order. NEITHER can
+       * tell "sold" from "nobody looked", so both understate and both argue upwards.
+       *
+       * Frontier answers with the complete manifest. Absent means absent. If this were `max`-ed
+       * with the floors it would report 20,000 t of cargo that was sold days ago, and somebody
+       * would fly out for a hold that is empty — the wasted trip this module keeps reinventing.
+       */
+      expect(effectiveTonnes({ manual: null, capi: 0, journal: 5_000, mirror: 20_000 })).toBe(0);
+    });
+
+    it('★ MANDATORY: it REPLACES the floors rather than arguing by size ★', () => {
+      // Lower than both and still correct: a complete manifest is not a floor, so the larger
+      // reading does not win. This is the assertion that fails if somebody folds capi into the max.
+      expect(effectiveTonnes({ manual: null, capi: 400, journal: 5_000, mirror: 20_000 })).toBe(400);
+    });
+
+    it('★ MANDATORY: the crew’s hand still beats it ★', () => {
+      // The chosen trade. A member standing on the deck can always correct the board; the cost is
+      // that a stale hand-typed figure outlives a live one.
+      expect(effectiveTonnes({ manual: 100, capi: 0, journal: null, mirror: null })).toBe(100);
+      expect(effectiveTonnes({ manual: 0, capi: 9_000, journal: null, mirror: null })).toBe(0);
+    });
+
+    it('and it beats the floors when it is the only live source', () => {
+      expect(effectiveTonnes({ manual: null, capi: 800, journal: null, mirror: null })).toBe(800);
+    });
   });
 });
 
