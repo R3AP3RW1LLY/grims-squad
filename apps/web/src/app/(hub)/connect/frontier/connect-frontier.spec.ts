@@ -24,28 +24,58 @@ const WEB = join(process.cwd(), 'src/app/(hub)/connect/frontier');
 const MAIN = join(process.cwd(), '../companion/src/main.ts');
 
 describe('the website can start the handshake', () => {
-  it('★ MANDATORY: the page calls capiStart ★', () => {
-    // The route that had no caller. This is the caller.
-    expect(readFileSync(join(WEB, 'start-frontier.tsx'), 'utf8')).toContain('/v1/me/capi/start');
+  const route = (): string => readFileSync(join(WEB, 'route.ts'), 'utf8');
+
+  it('★ MANDATORY: it calls capiStart ★', () => {
+    // The route that had no caller anywhere in the web app. This is the caller.
+    expect(route()).toContain('/v1/me/capi/start');
   });
 
-  it('★ MANDATORY: it forwards to Frontier rather than showing a second button ★', () => {
+  it('★ MANDATORY: the redirect is decided on the SERVER ★', () => {
     /*
-     * The member already pressed a button — in the app, which is what sent them here. Asking again
-     * is a step that exists only because of how this is plumbed, and reads as the app not working.
+     * ★ THE BLACK SCREEN ★
+     *
+     * The first fix was a React page that called the API from the browser and then redirected.
+     * Everything the member saw therefore depended on JavaScript running, hydration finishing and a
+     * fetch resolving — and any one of those failing leaves a browser sitting on a document that has
+     * rendered nothing. On screen that is indistinguishable from the app being broken.
+     *
+     * A route handler cannot reach that state: what leaves the server is a 302 or a page that says
+     * what went wrong. Asserted as the absence of the client form, because "it happens to work now"
+     * is exactly what the previous version also looked like.
      */
-    const src = readFileSync(join(WEB, 'start-frontier.tsx'), 'utf8');
+    /*
+     * Comments stripped. The route's own header explains the blank page by naming
+     * `window.location.replace`, and an assertion that reads prose fails on the wording rather than
+     * on the code — the third time that trap has caught a test I wrote today, so it is worth the
+     * two lines to close it properly.
+     */
+    const src = route().replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*/g, '');
 
-    expect(src).toContain('window.location.replace(url)');
-    expect(src, 'Back from Frontier must not start a second handshake').not.toContain(
-      'window.location.assign',
+    expect(src).toContain('NextResponse.redirect(url, 302)');
+    expect(src, 'a browser-side redirect is what produced the blank page').not.toContain(
+      'window.location',
     );
+    expect(src, 'and it must not be a client component').not.toContain("'use client'");
+  });
+
+  it('★ MANDATORY: an EMPTY url is refused rather than followed ★', () => {
+    /*
+     * The likely black screen itself. `window.location.replace('')` reloads the current page, so an
+     * empty URL rendered nothing while looking like it had worked. Here it is said out loud.
+     */
+    expect(route()).toContain("if (url === '')");
   });
 
   it('★ MANDATORY: a signed-out browser is TOLD, not left blank ★', () => {
-    // The real failure: app paired, website not signed in, capiStart answers 401. Silence there is
-    // the same dead end being fixed.
-    expect(readFileSync(join(WEB, 'start-frontier.tsx'), 'utf8')).toContain('setProblem');
+    // App paired, website not signed in, capiStart answers 401. Silence there is the same dead end
+    // in a different place.
+    const src = route();
+
+    expect(src).toContain('You are not signed in to the website in this browser.');
+    expect(src, 'the CSRF cookie differs between origins and a wrong one is a 403 that reads as signed-out').toContain(
+      '__Host-gs_csrf',
+    );
   });
 });
 
