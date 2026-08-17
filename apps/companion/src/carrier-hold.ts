@@ -146,11 +146,33 @@ function count(value: unknown): number {
  * The server normalises too, against the commodity names it actually holds — that is the fix that
  * covers members running an older build of this app. This one keeps the data right at the source.
  */
-function nameOf(entry: Record<string, unknown>): string | null {
-  const localised = text(entry['Type_Localised']);
+function nameOf(
+  entry: Record<string, unknown>,
+  /*
+   * Journal CARGO entries key on `Type`; `Market.json` items key on `Name`. Same commodity, same
+   * localisation rule, two spellings — so the keys are a parameter rather than a second copy of the
+   * title-casing below, which is the part that took a production bug to get right.
+   */
+  keys: readonly [string, string] = ['Type_Localised', 'Type'],
+): string | null {
+  const localised = text(entry[keys[0]]);
   if (localised !== '') return localised;
 
-  const raw = text(entry['Type']);
+  const wrapped = text(entry[keys[1]]);
+  if (wrapped === '') return null;
+
+  /*
+   * ★ MARKET.JSON WRAPS ITS SYMBOLS AND THE JOURNAL DOES NOT ★
+   *
+   * A cargo entry carries `Type: "aluminium"`. A Market.json item carries
+   * `Name: "$aluminium_name;"` — the game's localisation key. Title-casing that verbatim produces
+   * `$aluminium_name;`, which joins to nothing on the hub and would have put a carrier's whole
+   * manifest under names no board has ever heard of.
+   *
+   * Unwrapped before the same title-casing runs, so both spellings land on the display name every
+   * other table in the platform uses.
+   */
+  const raw = wrapped.replace(/^\$/, '').replace(/_name;?$/i, '');
   if (raw === '') return null;
 
   // Per word, so `low_temp_diamond`-style symbols would not become one run-on capital either.
@@ -332,6 +354,58 @@ export function foldCarrierHold(
        * sell orders takes stock off, selling to its buy orders puts stock aboard. Identified by
        * MarketID — trades anywhere else are somebody else's shop and none of this fold's business.
        */
+      /*
+       * ★ THE WHOLE HOLD, FROM THE JOURNAL — SQUADRON OWNER, 2026-08-17 ★
+       *
+       * "why can we not see this from journal logs? we should!"
+       *
+       * We can, and nothing was looking. Every other case here is a DELTA — what moved while the app
+       * watched — so a carrier loaded before the app was running stayed invisible, and cAPI was the
+       * only thing that could ever have filled that in.
+       *
+       * `Market.json` is rewritten every time a market screen opens, and for a fleet carrier it
+       * lists the carrier's whole stock per commodity. The watcher ALREADY reads it and merges
+       * `Items` into this event for the price path — the data has been arriving here all along.
+       *
+       * ★ A COMPLETE READING, SO IT REPLACES ★
+       *
+       * This is the one source in this fold that can speak for the whole hold, so it REPLACES rather
+       * than adjusts: a commodity absent from the manifest is genuinely absent, and every entry is
+       * marked `witnessed` because we have now seen the hold itself rather than a movement across
+       * its edge. That is what lets a real zero be reported without the guesswork the witness rule
+       * exists to prevent.
+       *
+       * Only for the member's OWN carrier: docking at somebody else's writes their manifest to the
+       * same file, and storing that under our carrier's id would be the identity confusion the
+       * `Docked` case above is careful to avoid.
+       */
+      case 'Market': {
+        if (current.carrier === null) break;
+        if (marketIdOf(event.data['MarketID']) !== current.carrier.marketId) break;
+
+        const items = event.data['Items'];
+        if (!Array.isArray(items)) break;
+
+        const hold: Record<string, { commodity: string; tonnes: number; witnessed: boolean }> = {};
+        for (const raw of items) {
+          if (typeof raw !== 'object' || raw === null) continue;
+          const entry = raw as Record<string, unknown>;
+
+          const commodity = nameOf(entry, ['Name_Localised', 'Name']);
+          if (commodity === null) continue;
+
+          // `Stock` is what the carrier HOLDS. `Demand` is what it is asking to buy and is somebody
+          // else's cargo until it arrives.
+          const tonnes = count(entry['Stock']);
+          if (tonnes === 0) continue;
+
+          hold[commodity.toLowerCase()] = { commodity, tonnes, witnessed: true };
+        }
+
+        current = { ...current, hold };
+        break;
+      }
+
       case 'MarketBuy':
       case 'MarketSell': {
         if (current.carrier === null) break;

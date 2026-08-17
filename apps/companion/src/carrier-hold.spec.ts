@@ -462,3 +462,94 @@ describe('the commodity name sent to the hub', () => {
     expect(carrierSnapshot(state)?.commodities.map((c) => c.commodity)).toEqual(['CMM Composite']);
   });
 });
+
+/**
+ * The whole hold, read from the journal folder.
+ *
+ * ★ SQUADRON OWNER, 2026-08-17 ★
+ *
+ * "why can we not see this from journal logs? we should!"
+ *
+ * We can. Every other case in this fold is a DELTA — what moved while the app was watching — so a
+ * carrier loaded before the app started stayed invisible, and Frontier's cAPI was the only thing
+ * that could ever have filled it in. That made complete carrier cargo depend on a subsystem that
+ * has never once run in production.
+ *
+ * `Market.json` is rewritten whenever a market screen opens, and for a fleet carrier it lists the
+ * carrier's whole stock per commodity. The watcher already reads that file and merges `Items` into
+ * the `Market` event for the price path — the data has been arriving in this fold all along and
+ * nothing looked at it.
+ */
+describe('reading the whole hold from Market.json', () => {
+  const market = (marketId: number, items: ReadonlyArray<Record<string, unknown>>) => ({
+    name: 'Market',
+    occurredAt: '2026-08-17T12:00:00Z',
+    data: { event: 'Market', MarketID: marketId, Items: items },
+  });
+
+  it('★ MANDATORY: the manifest sets the hold, including cargo never watched arrive ★', () => {
+    /*
+     * The whole point. The fold has seen nothing move — this is a fresh app start on a carrier that
+     * was loaded last week — and it now knows the entire hold anyway.
+     */
+    const state = foldCarrierHold(EMPTY_CARRIER_HOLD, [
+      stats(3700000001),
+      market(3700000001, [
+        { Name: '$steel_name;', Name_Localised: 'Steel', Stock: 20261, Demand: 0 },
+        { Name: '$aluminium_name;', Stock: 858, Demand: 0 },
+      ]),
+    ]);
+
+    expect(tonnesOf(state, 'Steel')).toBe(20261);
+    expect(tonnesOf(state, 'Aluminium'), 'the symbol fallback is title-cased').toBe(858);
+    expect(
+      state.hold['steel']?.witnessed,
+      'a whole-manifest reading may speak for a zero later — it has seen the hold itself',
+    ).toBe(true);
+  });
+
+  it('★ MANDATORY: it REPLACES — a commodity absent from the manifest is gone ★', () => {
+    /*
+     * The property no delta can have. The fold watched 500 t of Titanium arrive; the manifest since
+     * read does not list it, so it has been sold. Adjusting would have kept it for ever.
+     */
+    const state = foldCarrierHold(EMPTY_CARRIER_HOLD, [
+      stats(3700000001),
+      transfer([{ type: 'Titanium', count: 500, direction: 'tocarrier' }]),
+      market(3700000001, [{ Name: '$steel_name;', Name_Localised: 'Steel', Stock: 300, Demand: 0 }]),
+    ]);
+
+    expect(tonnesOf(state, 'Steel')).toBe(300);
+    expect(state.hold['titanium'], 'absent from a complete manifest means absent').toBeUndefined();
+  });
+
+  it('★ MANDATORY: somebody ELSE’S carrier does not overwrite ours ★', () => {
+    /*
+     * Market.json holds only the LAST market opened, so docking at another commander's carrier
+     * writes their manifest to the same file. Storing that under our id is the identity confusion
+     * the `Docked` case is careful to avoid.
+     */
+    const state = foldCarrierHold(EMPTY_CARRIER_HOLD, [
+      stats(3700000001),
+      transfer([{ type: 'Steel', count: 400, direction: 'tocarrier' }]),
+      market(3999999999, [{ Name: '$gold_name;', Name_Localised: 'Gold', Stock: 9999, Demand: 0 }]),
+    ]);
+
+    expect(tonnesOf(state, 'Steel')).toBe(400);
+    expect(state.hold['gold']).toBeUndefined();
+  });
+
+  it('demand is not cargo — only Stock counts', () => {
+    // `Demand` is what the carrier is asking to BUY. It is somebody else's cargo until it arrives.
+    const state = foldCarrierHold(EMPTY_CARRIER_HOLD, [
+      stats(3700000001),
+      market(3700000001, [
+        { Name: '$steel_name;', Name_Localised: 'Steel', Stock: 0, Demand: 5000 },
+        { Name: '$gold_name;', Name_Localised: 'Gold', Stock: 12, Demand: 0 },
+      ]),
+    ]);
+
+    expect(state.hold['steel'], 'wanted is not held').toBeUndefined();
+    expect(tonnesOf(state, 'Gold')).toBe(12);
+  });
+});
