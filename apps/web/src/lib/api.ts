@@ -2551,7 +2551,14 @@ export interface DeclaredCargo {
   commodity: string;
   tonnes: number;
   /** `journal` rows are the owner's app reporting what it watched; `manual` rows are typed. */
-  source: 'journal' | 'manual';
+  /**
+   * Where the figure came from.
+   *
+   * `capi` was added when the carrier poller landed and this union was not widened here or in the
+   * companion, so neither surface could REPRESENT a Frontier manifest row — which is half of why
+   * both counted the tonnage and rendered none of it.
+   */
+  source: 'journal' | 'manual' | 'capi';
   /** Who typed a manual row. Null for journal rows. */
   updatedBy: string | null;
   updatedAt: string;
@@ -3069,7 +3076,14 @@ export interface PurchaseLine {
   category: string | null;
   tonnes: number | null;
   price: number | null;
-  source: 'journal' | 'manual';
+  /**
+   * Where the figure came from.
+   *
+   * `capi` was added when the carrier poller landed and this union was not widened here or in the
+   * companion, so neither surface could REPRESENT a Frontier manifest row — which is half of why
+   * both counted the tonnage and rendered none of it.
+   */
+  source: 'journal' | 'manual' | 'capi';
   by: string | null;
   at: string;
   note: string | null;

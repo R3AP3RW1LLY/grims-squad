@@ -175,7 +175,13 @@ export interface DeclaredCargo {
   readonly commodity: string;
   readonly tonnes: number;
   /** `journal` rows are the owner's app reporting what it watched; `manual` rows are typed. */
-  readonly source: 'journal' | 'manual';
+  /**
+   * Where the figure came from.
+   *
+   * `capi` was added when the carrier poller landed and this union was not widened, so the app
+   * could not even REPRESENT a Frontier manifest row — which is half of why it rendered none.
+   */
+  readonly source: 'journal' | 'manual' | 'capi';
   /** Who typed a manual row. Null for journal rows. */
   readonly updatedBy: string | null;
   readonly updatedAt: string;
@@ -711,7 +717,13 @@ export interface PurchaseLine {
   readonly category: string | null;
   readonly tonnes: number | null;
   readonly price: number | null;
-  readonly source: 'journal' | 'manual';
+  /**
+   * Where the figure came from.
+   *
+   * `capi` was added when the carrier poller landed and this union was not widened, so the app
+   * could not even REPRESENT a Frontier manifest row — which is half of why it rendered none.
+   */
+  readonly source: 'journal' | 'manual' | 'capi';
   readonly by: string | null;
   readonly at: string;
   readonly note: string | null;

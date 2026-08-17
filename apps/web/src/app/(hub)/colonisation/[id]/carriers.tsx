@@ -432,7 +432,22 @@ function DeclaredHold({
     void act(() => apiPatch(cargoUrl, { commodity, tonnes }));
   };
 
-  const journal = carrier.declared.filter((d) => d.source === 'journal');
+  /*
+   * ★ cAPI ROWS WERE COUNTED AND NEVER SHOWN — 2026-08-17 ★
+   *
+   * `declared` gained a third source when the carrier poller landed, and this split still asked for
+   * exactly two. A Frontier manifest therefore counted towards `carrierCover` — reducing the buy
+   * quantity on the shopping list and staging yellow on the needs bars — while rendering nowhere a
+   * member could inspect it. Worse, the "Nothing declared yet" fallback could not fire either,
+   * because `declared.length` was not zero: the panel drew a heading with silence under it.
+   *
+   * A figure that changes what somebody buys must be visible where they can check it. Grouped with
+   * the journal rows because both are read-only statements by a machine; the difference is that
+   * this one is the WHOLE manifest and the journal is a floor, which the badge says out loud.
+   */
+  const journal = carrier.declared.filter(
+    (d) => d.source === 'journal' || d.source === 'capi',
+  );
   const manual = carrier.declared.filter((d) => d.source === 'manual');
   const manualNames = new Set(manual.map((d) => d.commodity));
 
@@ -466,8 +481,19 @@ function DeclaredHold({
               >
                 <span>
                   {d.commodity}
-                  <span className="ml-1.5 font-mono text-[9px] uppercase tracking-[0.14em] text-[var(--color-text-dim)]">
-                    journal
+                    <span
+                    className={
+                      d.source === 'capi'
+                        ? 'ml-1.5 font-mono text-[9px] uppercase tracking-[0.14em] text-[var(--color-brand-cyan-bright)]'
+                        : 'ml-1.5 font-mono text-[9px] uppercase tracking-[0.14em] text-[var(--color-text-dim)]'
+                    }
+                    title={
+                      d.source === 'capi'
+                        ? 'Frontier’s own manifest for this carrier — the whole hold, not just what an app watched.'
+                        : 'What the owner’s app watched move. A floor: it misses whatever moved while the app was closed.'
+                    }
+                  >
+                    {d.source === 'capi' ? 'frontier' : 'journal'}
                   </span>
                   <span
                     className={

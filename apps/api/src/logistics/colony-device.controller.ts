@@ -263,6 +263,26 @@ export class ColonyDeviceController {
     const carriers = await this.carriers.forProject(id);
     const cover = carrierCover(carriers);
 
+    /*
+     * ★ THE PROMPT THE APP RENDERS AND THE HUB NEVER SENT — 2026-08-17 ★
+     *
+     * The attach prompt shipped on both surfaces. The companion renders it, defends against an
+     * older hub with `data.canAttach ?? []`, and has a spec asserting both of those things. Every
+     * one of those statements was true, and the prompt never appeared in the app for anybody,
+     * because THIS route — the only one the companion reads a project through — never put the
+     * field in the payload.
+     *
+     * Two correct halves with the data missing in between, which is the failure this module keeps
+     * producing: the website's route computed it, the app's did not, and nothing errored because
+     * an absent field is indistinguishable from an empty list.
+     *
+     * The parity spec asserted the app RENDERS the prompt. It could not have caught this: what was
+     * missing was on the other side of the wire.
+     */
+    const canAttach = await this.carriers
+      .unattachedHoldingFor(id, me.userId)
+      .catch(() => []);
+
     const [needs, haulers, shopping, deliveries, chart, isCrew] = await Promise.all([
       this.colony.needs(id),
       this.colony.haulers(id),
@@ -298,6 +318,8 @@ export class ColonyDeviceController {
       deliveries,
       chart,
       carriers,
+      /** This member's own carriers holding what the build wants, unattached. Owner-only. */
+      canAttach,
       // The effective per-commodity cover, computed once and sent down — same field, same maths,
       // same numbers as the website's door.
       carrierCover: cover,

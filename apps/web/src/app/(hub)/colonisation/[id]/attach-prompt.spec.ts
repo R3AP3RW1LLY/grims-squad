@@ -144,3 +144,117 @@ describe('what both surfaces say', () => {
     }
   });
 });
+
+/**
+ * ★ WHAT THIS SPEC COULD NOT CATCH, AND NOW DOES — 2026-08-17 ★
+ *
+ * Everything above passed while the prompt was INVISIBLE in the companion for everybody.
+ *
+ * Each assertion was true: the app renders `<AttachPrompt`, it defaults `data.canAttach ?? []`, it
+ * calls `carrierAdd`. All of it correct, and all of it about ONE SIDE OF THE WIRE. The device route
+ * — the only way the companion ever reads a project — never put `canAttach` in the payload, so the
+ * default fired every time and the prompt was never drawn.
+ *
+ * That is the module's signature failure once more: two halves each behaving exactly as written,
+ * with the data missing in between, and nothing to log because an absent field and an empty list
+ * are the same thing to `?? []`.
+ *
+ * So parity is now asserted across the WIRE as well as across the two renderers: a field a surface
+ * renders must be a field its own route sends.
+ */
+describe('the wire, not just the two renderers', () => {
+  const DEVICE = read('../api/src/logistics/colony-device.controller.ts');
+  const WEB_ROUTE = read('../api/src/logistics/colony.controller.ts');
+
+  /**
+   * The RETURN of a controller method, not the whole file.
+   *
+   * ★ THE FOURTH TIME THIS TRAP HAS CAUGHT AN ASSERTION TODAY ★
+   *
+   * `expect(DEVICE).toContain('canAttach')` passed with the field deleted from the payload, because
+   * the local `const canAttach = await ...` above it still matched. The test said something true
+   * about the file and nothing whatever about what the app receives — which is the exact defect it
+   * was written to prevent, reproduced inside its own regression test.
+   *
+   * Mutation testing caught it. Nothing else would have.
+   */
+  const payloadOf = (src: string, after: string): string => {
+    const from = src.indexOf(after);
+    if (from === -1) throw new Error(`no ${after} in this controller`);
+    const open = src.indexOf('return {', from);
+    if (open === -1) throw new Error('that method returns no object');
+    // A newline built rather than escaped. Writing this line through a script turned the escape
+    // into a REAL newline and left an unterminated string — the third time that has happened
+    // today, so it is simply avoided here.
+    const NL = String.fromCharCode(10);
+    return src.slice(open, src.indexOf(NL + '    };', open));
+  };
+
+  it('★ MANDATORY: the route the COMPANION reads sends canAttach ★', () => {
+    /*
+     * The website's route computed it from the day the feature landed. This one did not, and the
+     * app's own tests could not tell — they were reading the app.
+     */
+    expect(DEVICE, 'it must be computed').toContain('unattachedHoldingFor');
+    expect(
+      payloadOf(DEVICE, 'unattachedHoldingFor'),
+      'computing it and not sending it is exactly the bug this replaces',
+    ).toContain('canAttach,');
+  });
+
+  it('★ MANDATORY: both routes send it, so neither surface is the odd one out ★', () => {
+    for (const [name, src] of [
+      ['the website route', WEB_ROUTE],
+      ['the companion route', DEVICE],
+    ] as const) {
+      expect(payloadOf(src, 'unattachedHoldingFor'), `${name} must send canAttach`).toContain(
+        'canAttach,',
+      );
+      // Owner-scoped on both, and fail-soft on both: a prompt is worth less than the page it is on.
+      expect(src, `${name} must not let the prompt fail the page`).toContain('.catch(() => [])');
+    }
+  });
+});
+
+/**
+ * ★ A FIGURE THAT CHANGES WHAT SOMEBODY BUYS MUST BE VISIBLE — 2026-08-17 ★
+ *
+ * `declared` gained a third source when the carrier poller landed. Both surfaces still split it two
+ * ways, and BOTH type declarations still said `'journal' | 'manual'` — so neither could even
+ * represent a Frontier manifest row.
+ *
+ * The tonnage counted the whole time: it fed `carrierCover`, which stages the yellow segment on the
+ * needs bars and subtracts from the shopping list. A member saw their buy quantity reduced by cargo
+ * that appeared nowhere they could inspect or correct, under a "Declared hold" heading with silence
+ * beneath it — the empty-state could not fire either, because the list was not empty.
+ */
+describe('every source that counts is a source you can see', () => {
+  const WEB_CARRIERS = read('src/app/(hub)/colonisation/[id]/carriers.tsx');
+  const APP = read('../companion/src/renderer/colonisation.tsx');
+  const WEB_TYPES = read('src/lib/api.ts');
+  const APP_TYPES = read('../companion/src/hub-colony.ts');
+
+  it('★ MANDATORY: both surfaces RENDER cAPI rows ★', () => {
+    for (const [name, src] of [
+      ['the website', WEB_CARRIERS],
+      ['the companion', APP],
+    ] as const) {
+      expect(src, `${name} must not drop a source that changes the buy quantity`).toContain(
+        "d.source === 'capi'",
+      );
+    }
+  });
+
+  it('★ MANDATORY: both surfaces can REPRESENT one ★', () => {
+    // The half typecheck found. A union that omits the source is a surface that cannot show it
+    // however the rendering is written.
+    for (const [name, src] of [
+      ['the website', WEB_TYPES],
+      ['the companion', APP_TYPES],
+    ] as const) {
+      expect(src, `${name}'s DeclaredCargo union must include capi`).toContain(
+        "'journal' | 'manual' | 'capi'",
+      );
+    }
+  });
+});
