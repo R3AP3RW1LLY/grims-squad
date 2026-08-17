@@ -135,6 +135,28 @@ export const PER_SYSTEM_LIMIT = 3;
 const HAS_NO_MARKET = `COALESCE(jsonb_typeof(k.data->'services') = 'array'
                                 AND NOT (k.data->'services' @> '["Market"]'::jsonb), false)`;
 
+/**
+ * Odyssey settlements, which the board should not be sending anybody to.
+ *
+ * ★ SQUADRON OWNER, 2026-08-16 ★
+ *
+ * Asked which types to drop, given settlements were 291 of the 496 rows — the majority of the whole
+ * board, 116 of them never seen — the answer was settlements.
+ *
+ * The services list says they have markets and by its own lights it is right; what it cannot say is
+ * whether a member in a ship can get to one. A board that is three-fifths settlements is a board
+ * mostly made of trips that do not happen, and the stations somebody WOULD have flown to are the
+ * ones being displaced.
+ *
+ * ★ BOTH SPELLINGS, DELIBERATELY ★
+ *
+ * `Settlement` and `OnFootSettlement` both appear in the catalogue. This codebase has already had a
+ * carrier become unfindable because a query hard-coded one of two vocabularies for the same thing —
+ * see `@grims/shared/carrier` — and matching one spelling here would leave the other on the board
+ * with nothing to explain why.
+ */
+const IS_SETTLEMENT = `k.data->>'type' IN ('Settlement', 'OnFootSettlement')`;
+
 export async function rebuildBountyBoard(db: PrismaClient): Promise<BountyBoardReport> {
   return db.$transaction(
     async (tx) => {
@@ -230,9 +252,26 @@ export async function rebuildBountyBoard(db: PrismaClient): Promise<BountyBoardR
              * The cap is what stops a system putting twenty near-identical scores shoulder to
              * shoulder at the cut line, where they are all evicted by the same two-point drift.
              */
+            /*
+             * ★ TIES BREAK ON DISTANCE, NOT ON STATION KEY — SQUADRON OWNER, 2026-08-16 ★
+             *
+             * Measured: 299 of the 496 rows scored EXACTLY 4,000. Every never-seen station ties,
+             * because never-seen is a flat score by construction — so the order among three fifths
+             * of the board was station_key ascending, which is to say arbitrary, and so was which
+             * of them fell off at the cut line.
+             *
+             * That is the same shape as the block eviction in BD+16 1001 documented above, arrived
+             * at from the other direction: not one system's stations sharing a timestamp, but every
+             * never-seen station sharing a score.
+             *
+             * Distance is the tiebreak that means something to a member. Same points, ordered by
+             * how far they would actually have to fly, so the top of the board is the reachable
+             * work. station_key stays as the final term to keep the ordering total and the
+             * rebuild deterministic.
+             */
             SELECT *, ROW_NUMBER() OVER (
                         PARTITION BY system_name
-                            ORDER BY points DESC, station_key
+                            ORDER BY points DESC, dist ASC, station_key
                       ) AS rank_in_system
               FROM (
                 SELECT
@@ -265,12 +304,15 @@ export async function rebuildBountyBoard(db: PrismaClient): Promise<BountyBoardR
                   AND (k.data->>'type' IS NULL OR k.data->>'type' NOT ILIKE '%carrier%')
                   -- A station with no market cannot be refreshed, so a bounty on it never clears.
                   AND NOT ${HAS_NO_MARKET}
+                  AND NOT ${IS_SETTLEMENT}
                   AND (s.last_seen IS NULL
                        OR s.last_seen < now() - interval '${BELIEVABLE_DAYS} days')
               ) scored
           ) ranked
          WHERE rank_in_system <= ${PER_SYSTEM_LIMIT}
-         ORDER BY points DESC, station_key
+         -- The same tiebreak at the cut line, for the same reason: which of 299 tied rows survives
+         -- must not be decided by how a station key happens to sort.
+         ORDER BY points DESC, dist ASC, station_key
          LIMIT ${OPS_LIMIT}`);
 
       /*
@@ -331,6 +373,7 @@ export async function rebuildBountyBoard(db: PrismaClient): Promise<BountyBoardR
                  -- actually bit". A filter on the ops list alone leaves the tail free to put every
                  -- marketless station straight back on the board.
                  AND NOT ${HAS_NO_MARKET}
+                 AND NOT ${IS_SETTLEMENT}
               ) scored
           ) ranked
          WHERE rank_in_system <= ${PER_SYSTEM_LIMIT}

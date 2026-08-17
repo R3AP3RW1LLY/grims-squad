@@ -234,11 +234,15 @@ describe('the data bounty board, against Postgres', () => {
       );
 
       // Never seen, so all three are maximum-value candidates and only the RULE can separate them.
-      const station = async (suffix: string, services: string | null): Promise<void> => {
+      const station = async (
+        suffix: string,
+        services: string | null,
+        type = 'Coriolis',
+      ): Promise<void> => {
         await db.$executeRawUnsafe(
           `INSERT INTO knowledge_items (source, kind, ext_key, name, data, coords, text)
            VALUES ('galaxy', 'station', $1, $2,
-                   jsonb_build_object('system', $3, 'type', 'Coriolis')
+                   jsonb_build_object('system', $3, 'type', $5::text)
                      || CASE WHEN $4::text IS NULL THEN '{}'::jsonb
                              ELSE jsonb_build_object('services', $4::jsonb) END,
                    cube(array[11.0, 12.0, 13.0]), $2)`,
@@ -246,12 +250,15 @@ describe('the data bounty board, against Postgres', () => {
           `${TAG} ${suffix}`,
           CROWDED,
           services,
+          type,
         );
       };
 
       await station('HasMarket', '["Dock", "Market", "Refuel"]');
       await station('NoMarket', '["Dock", "Refuel"]');
       await station('Unknown', null);
+      await station('Settlement', '["Dock", "Market"]', 'Settlement');
+      await station('OnFoot', '["Dock", "Market"]', 'OnFootSettlement');
 
       await rebuildBountyBoard(db);
 
@@ -270,6 +277,24 @@ describe('the data bounty board, against Postgres', () => {
         names,
         'and a station we know NOTHING about is the strongest bounty of all — unknown is not absent',
       ).toContain(`${TAG} Unknown`);
+
+      /*
+       * ★ SETTLEMENTS, BOTH SPELLINGS — SQUADRON OWNER, 2026-08-16 ★
+       *
+       * They were 291 of the 496 rows: the majority of the whole board. The services list says they
+       * have markets and by its own lights it is right; what it cannot say is whether a member in a
+       * ship can get to one. A board that is three-fifths settlements is mostly trips that do not
+       * happen, and the stations somebody WOULD have flown to are the ones displaced.
+       *
+       * Both spellings asserted because both are in the catalogue, and this codebase has already
+       * had a carrier go unfindable from a query that hard-coded one of two vocabularies for one
+       * thing. Matching only `Settlement` would leave `OnFootSettlement` on the board with nothing
+       * on screen to explain why.
+       */
+      expect(names, 'a settlement is not a trip most members can make').not.toContain(
+        `${TAG} Settlement`,
+      );
+      expect(names, 'and the catalogue spells it two ways').not.toContain(`${TAG} OnFoot`);
     },
     60_000,
   );
