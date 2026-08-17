@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { carrierCover, carrierHoldLines } from './colony-carrier.service.js';
+import { carrierCover, carrierHoldLines, carrierTotalToward } from './colony-carrier.service.js';
 import type { AttachedCarrier } from './colony-carrier.service.js';
 
 /**
@@ -171,5 +171,71 @@ describe('the overlay route uses it', () => {
       src,
       'flattening c.holds by hand is what made the overlay mirror-only',
     ).not.toContain('c.holds.map');
+  });
+});
+
+/**
+ * ★ THE ROW AND THE SUMMARY DISAGREED ON THE SAME PAGE — 2026-08-17 ★
+ *
+ * Reported: members with full carriers see only some of their cargo.
+ *
+ * Each carrier's "N t towards this build" was the MARKET MIRROR alone — and a mirror sees SELL
+ * ORDERS, while cargo staged for a build is exactly the cargo that is not on sale. Measured on
+ * production: W8K-W1Y had one mirror commodity (CMM Composite, 3,465 t) and held Steel 20,261 t and
+ * Aluminium 858 t besides. The row said 3,465 t; the summary line directly above it, which has
+ * always used the merged rule, counted the lot.
+ */
+describe('what one carrier is holding towards a build', () => {
+  const wanted = new Set(['steel', 'titanium']);
+
+  it('★ MANDATORY: it counts the sources the mirror cannot see ★', () => {
+    const total = carrierTotalToward(
+      {
+        holds: [{ commodity: 'Steel', tonnes: 3_465, seenAt: at }],
+        declared: [
+          { commodity: 'Titanium', tonnes: 20_261, source: 'journal', updatedBy: null, updatedAt: at },
+        ],
+      },
+      wanted,
+    );
+
+    expect(total, 'the mirror alone would have said 3,465').toBe(23_726);
+  });
+
+  it('★ MANDATORY: it agrees with carrierCover, which is what the summary uses ★', () => {
+    /*
+     * Asserted against the other function rather than a number typed here, so the row and the
+     * summary cannot drift apart again without this failing.
+     */
+    const carrier = {
+      holds: [{ commodity: 'Steel', tonnes: 500, seenAt: at }],
+      declared: [
+        { commodity: 'Steel', tonnes: 900, source: 'journal' as const, updatedBy: null, updatedAt: at },
+        { commodity: 'Titanium', tonnes: 40, source: 'manual' as const, updatedBy: 'RUSTY', updatedAt: at },
+      ],
+    };
+
+    const cover = carrierCover([carrier]);
+    const fromCover = Object.entries(cover)
+      .filter(([commodity]) => wanted.has(commodity.toLowerCase()))
+      .reduce((sum, [, tonnes]) => sum + tonnes, 0);
+
+    expect(carrierTotalToward(carrier, wanted)).toBe(fromCover);
+  });
+
+  it('★ MANDATORY: cargo the build does not want is not counted towards it ★', () => {
+    // The declared rows are deliberately not filtered to the build's needs on the way in, so the
+    // filter has to happen here or a carrier full of Gold reads as help with a Steel build.
+    const total = carrierTotalToward(
+      {
+        holds: [],
+        declared: [
+          { commodity: 'Gold', tonnes: 9_999, source: 'journal', updatedBy: null, updatedAt: at },
+        ],
+      },
+      wanted,
+    );
+
+    expect(total).toBe(0);
   });
 });

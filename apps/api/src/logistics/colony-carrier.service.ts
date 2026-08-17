@@ -193,6 +193,59 @@ export function effectiveTonnes(sources: CargoSources): number {
 }
 
 /**
+ * What ONE carrier is holding of what a build still wants, through the merge rule.
+ *
+ * ★ THE ROW AND THE SUMMARY DISAGREED ON THE SAME PAGE — 2026-08-17 ★
+ *
+ * Reported: members with full carriers see only some of their cargo. This is one of the reasons.
+ *
+ * Each carrier's "N t towards this build" was `mine.reduce(sum of supply)` — the MARKET MIRROR
+ * alone. A mirror sees SELL ORDERS, and cargo staged for a build is exactly the cargo that is not
+ * on sale, so the figure was blind to the journal, to a crew member's hand and to Frontier.
+ *
+ * Measured on production: carrier W8K-W1Y had one mirror commodity (CMM Composite, 3,465 t) and
+ * held Steel 20,261 t and Aluminium 858 t besides. The row said 3,465 t while the summary line
+ * directly above it — which has always used the merged `carrierCover` — counted the lot.
+ *
+ * Two numbers about one hold, on one page, from two different rules. Now there is one rule.
+ */
+export function carrierTotalToward(
+  carrier: Pick<AttachedCarrier, 'holds' | 'declared'>,
+  wanted: ReadonlySet<string>,
+): number {
+  const commodities = new Set<string>([
+    ...carrier.holds.map((h) => h.commodity),
+    ...carrier.declared.map((d) => d.commodity),
+  ]);
+
+  let total = 0;
+  for (const commodity of commodities) {
+    /*
+     * Only what this build asked for. The declared rows are deliberately NOT filtered to the build's
+     * needs when they are fetched — a manual zero on a settled commodity is still worth showing —
+     * so the filter belongs here, where the question is "towards THIS build".
+     */
+    if (!wanted.has(commodity.toLowerCase())) continue;
+
+    const declared = (source: string) =>
+      carrier.declared.find((d) => d.source === source && d.commodity === commodity);
+    const capiRow = declared('capi');
+    const journalRow = declared('journal');
+
+    total += effectiveTonnes({
+      manual: declared('manual')?.tonnes ?? null,
+      capi: capiRow?.tonnes ?? null,
+      capiAt: capiRow?.updatedAt ?? null,
+      journal: journalRow?.tonnes ?? null,
+      journalAt: journalRow?.updatedAt ?? null,
+      mirror: carrier.holds.find((h) => h.commodity === commodity)?.tonnes ?? null,
+    });
+  }
+
+  return total;
+}
+
+/**
  * What the attached carriers effectively cover, per commodity — the merge rule applied per
  * (carrier, commodity) and summed across carriers. Pure: it reads only what `forProject` already
  * fetched, so the detail read costs no extra query and a spec can hold the arithmetic still.
@@ -698,6 +751,16 @@ export class ColonyCarrierService {
       ]),
     );
 
+    /*
+     * What this build still wants, so a carrier's headline total can be limited to it. Lower-cased
+     * because the declared rows are not name-normalised on the way in and the mirror join is exact.
+     */
+    const wantedRows = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
+      `SELECT commodity FROM colony_needs WHERE project_id = $1::uuid AND remaining > 0`,
+      projectId,
+    );
+    const wanted = new Set(wantedRows.map((r) => String(r['commodity']).toLowerCase()));
+
     const [holds, declared] = await Promise.all([
       this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
         /*
@@ -796,7 +859,19 @@ export class ColonyCarrierService {
           tonnes: Number(h['supply']),
           seenAt: (h['market_seen_at'] as Date | null) ?? null,
         })),
-        totalTonnes: mine.reduce((sum, h) => sum + Number(h['supply']), 0),
+        // Through the merge rule, not the mirror alone — see `carrierTotalToward`. This read
+        // `mine.reduce(sum of supply)` and disagreed with the summary line on its own page.
+        totalTonnes: carrierTotalToward(
+          {
+            holds: mine.map((h) => ({
+              commodity: String(h['commodity']),
+              tonnes: Number(h['supply']),
+              seenAt: (h['market_seen_at'] as Date | null) ?? null,
+            })),
+            declared: declaredByCarrier.get(marketId) ?? [],
+          },
+          wanted,
+        ),
         wholeHoldTonnes: wholeHold.get(marketId)?.tonnes ?? null,
         wholeHoldAt: wholeHold.get(marketId)?.at ?? null,
         declared: declaredByCarrier.get(marketId) ?? [],
