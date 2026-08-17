@@ -324,6 +324,11 @@ function followTheGame(): void {
     // flag is read anyway because "minimised" and "alt-tabbed" are different things to be sure of.
     gameIsForeground: front === null ? null : foregroundIsGame === true && !front.minimised,
     ourWindowFocused: BrowserWindow.getFocusedWindow() !== null,
+    /*
+     * Any of our windows minimised counts. The member tucks the app away to see the game, and the
+     * overlays are what they tucked it away FOR — see `ourWindowMinimised`.
+     */
+    ourWindowMinimised: BrowserWindow.getAllWindows().some((w) => w.isMinimized()),
     editing,
   });
 
