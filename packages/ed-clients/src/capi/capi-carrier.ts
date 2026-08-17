@@ -31,6 +31,23 @@ export interface CarrierManifest {
 interface RawCarrier {
   name?: { callsign?: unknown } | null;
   cargo?: unknown;
+  /**
+   * The carrier's own market. Its `commodities` carry a `stock` — cargo LISTED FOR SALE.
+   *
+   * ★ SQUADRON OWNER, 2026-08-17 ★
+   *
+   * "Titanium is wrong but the aluminum is right, we need to make sure every commodity is correct"
+   *
+   * Measured on the owner's carrier: Frontier reported Aluminium 10,241 t and Titanium 1,639 t,
+   * while the journal — older — had 7,601 t and 2,959 t. Aluminium HIGHER than the journal, Titanium
+   * LOWER. A source that were simply stale would be wrong in one direction, not both.
+   *
+   * The asymmetry is the answer: `cargo` holds what is in the hold and NOT on the market. Anything
+   * the owner has listed for sale moves into `market.commodities`, and reading `cargo` alone reports
+   * a carrier as empty of exactly the commodities it is trying to sell — which, on a build, is the
+   * cargo the squadron most wants to know about.
+   */
+  market?: { commodities?: unknown } | null;
 }
 
 export interface CarrierInput {
@@ -101,6 +118,40 @@ export async function fetchCarrier(input: CarrierInput): Promise<CarrierManifest
     // Stolen and mission cargo counts: the board asks whether it is ABOARD, not how it got there.
     if (commodity === '' || !Number.isFinite(qty) || qty <= 0) continue;
     totals.set(commodity, (totals.get(commodity) ?? 0) + qty);
+  }
+
+  /*
+   * ★ AND WHAT IS ON THE MARKET IS STILL ABOARD ★
+   *
+   * See the note on `market` above. Cargo the owner has listed for sale leaves `cargo` and appears
+   * here instead, so reading one without the other reports a carrier as empty of precisely the
+   * commodities it is selling.
+   *
+   * ADDED, not maxed: a carrier can hold 2,000 t of Titanium with 500 t of it listed, and those are
+   * different tonnes in the same hold. `stock` is what it HAS; `demand` is what it wants to buy and
+   * is somebody else's cargo until it arrives.
+   *
+   * Frontier names the commodity `name` here and `commodity` in `cargo`, and the market form is
+   * sometimes the localisation key — so both spellings are unwrapped to the display name the rest of
+   * the platform joins on.
+   */
+  for (const line of Array.isArray(raw.market?.commodities) ? raw.market.commodities : []) {
+    const row = line as { name?: unknown; locName?: unknown; stock?: unknown };
+    const wrapped = typeof row.name === 'string' ? row.name.trim() : '';
+    const localised = typeof row.locName === 'string' ? row.locName.trim() : '';
+    const commodity =
+      localised !== ''
+        ? localised
+        : wrapped
+            .replace(/^\$/, '')
+            .replace(/_name;?$/i, '')
+            .split(/([\s_-]+)/)
+            .map((part) => (/^[a-z]/.test(part) ? part.charAt(0).toUpperCase() + part.slice(1) : part))
+            .join('');
+
+    const stock = Number(row.stock);
+    if (commodity === '' || !Number.isFinite(stock) || stock <= 0) continue;
+    totals.set(commodity, (totals.get(commodity) ?? 0) + stock);
   }
 
   return {

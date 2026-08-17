@@ -264,34 +264,56 @@ describe('what it does not do', () => {
 describe('whose station it is', () => {
   const ctx = { buildSystem: 'Kaushpoos', architectedSystems: new Set<string>() };
 
-  it('★ MANDATORY: the squadron’s own station leads, then a member’s ★', () => {
-    const ranked = rankBuySources(
-      [
-        src({ stationName: 'Neutral', systemName: 'Kaushpoos', distanceLy: 0 }),
-        src({ stationName: 'Member', ownership: 'member', distanceLy: 40 }),
-        src({ stationName: 'Ours', ownership: 'squadron', distanceLy: 90 }),
-      ],
-      ctx,
-    );
-
-    expect(ranked.map((r) => r.stationName)).toEqual(['Ours', 'Member', 'Neutral']);
-  });
-
-  it('★ MANDATORY: ownership outranks even the build’s own system ★', () => {
+  it('★ MANDATORY: the build’s own system leads, then ours, then a member’s ★', () => {
     /*
-     * The build's own system used to be the top band, and it is not any more. "We own the pad" is a
-     * stronger reason to fly somewhere than "it is next door" — the squadron controls the stock and
-     * the prices at its own market.
+     * ★ THE ORDER THE OWNER SET — 2026-08-17 ★
+     *
+     * "the buy locations ordering should be as follows: 2, 0, 1, 3, 4"
+     *
+     * A station in the system somebody is building in needs no jump at all, and no amount of owning
+     * a pad elsewhere beats already being there. Ownership decides among everywhere ELSE, which is
+     * where it earns its place.
      */
     const ranked = rankBuySources(
       [
+        src({ stationName: 'Member', ownership: 'member', distanceLy: 40 }),
+        src({ stationName: 'Ours', ownership: 'squadron', distanceLy: 90 }),
         src({ stationName: 'AtTheBuild', systemName: 'Kaushpoos', distanceLy: 0 }),
-        src({ stationName: 'OursFarAway', ownership: 'squadron', distanceLy: 200 }),
       ],
       ctx,
     );
 
-    expect(ranked[0]?.stationName).toBe('OursFarAway');
+    expect(ranked.map((r) => r.stationName)).toEqual(['AtTheBuild', 'Ours', 'Member']);
+  });
+
+  it('★ MANDATORY: being AT the build outranks owning a pad elsewhere ★', () => {
+    /*
+     * The shortest run is the one you do not fly. This asserted the opposite for an hour, which is
+     * the wrong way round: a squadron pad 200 ly away costs a round trip that a station in the
+     * build's own system does not.
+     */
+    const ranked = rankBuySources(
+      [
+        src({ stationName: 'OursFarAway', ownership: 'squadron', distanceLy: 200 }),
+        src({ stationName: 'AtTheBuild', systemName: 'Kaushpoos', distanceLy: 0 }),
+      ],
+      ctx,
+    );
+
+    expect(ranked[0]?.stationName).toBe('AtTheBuild');
+  });
+
+  it('★ MANDATORY: ours still outranks a member’s, and both outrank architected space ★', () => {
+    const ranked = rankBuySources(
+      [
+        src({ stationName: 'Architected', systemName: 'Shinrarta', distanceLy: 5 }),
+        src({ stationName: 'Member', ownership: 'member', distanceLy: 60 }),
+        src({ stationName: 'Ours', ownership: 'squadron', distanceLy: 80 }),
+      ],
+      { ...ctx, architectedSystems: new Set(['Shinrarta']) },
+    );
+
+    expect(ranked.map((r) => r.stationName)).toEqual(['Ours', 'Member', 'Architected']);
   });
 
   it('★ MANDATORY: "closest" inverts the keys — nearest first, whoever owns it ★', () => {

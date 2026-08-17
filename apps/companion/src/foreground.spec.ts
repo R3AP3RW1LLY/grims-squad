@@ -20,6 +20,7 @@ function show(over: Partial<Parameters<typeof overlaysShouldShow>[0]>) {
     gameRunning: true,
     gameIsForeground: true,
     ourWindowFocused: false,
+    ourWindowMinimised: false,
     editing: false,
     ...over,
   });
@@ -147,5 +148,44 @@ describe('asking whether a process id is the game', () => {
     // A wedged or missing `tasklist` must not take the overlay runtime's tick with it.
     const run = vi.fn().mockRejectedValue(new Error('timed out'));
     await expect(isPidGame(4242, 'win32', run)).resolves.toBe(false);
+  });
+});
+
+/**
+ * Minimising the app must not hide the overlays.
+ *
+ * ★ SQUADRON OWNER, 2026-08-17 ★
+ *
+ * "the overlay keeps disappearing when we minimize the companion app, this should be visible if the
+ * game window is open"
+ *
+ * Minimising removed the `ourWindowFocused` override, and what the rule fell through to asks whether
+ * the GAME is the foreground window. Straight after a minimise it often is not — the desktop or
+ * whatever sat behind takes focus first — so every panel vanished at the exact moment the member had
+ * cleared the screen to look at them.
+ */
+describe('the app tucked out of the way', () => {
+  it('★ MANDATORY: minimising the app keeps the overlays up ★', () => {
+    expect(
+      show({ ourWindowMinimised: true, gameIsForeground: false, ourWindowFocused: false }),
+    ).toEqual({ overGame: true, detached: true });
+  });
+
+  it('★ MANDATORY: but a game that is not running still hides them ★', () => {
+    // Minimising the app is not a reason to draw panels over a desktop with no Elite on it.
+    expect(
+      show({ ourWindowMinimised: true, gameRunning: false, gameIsForeground: false }),
+    ).toEqual({ overGame: false, detached: false });
+  });
+
+  it('★ MANDATORY: merely UNFOCUSED is not minimised ★', () => {
+    /*
+     * The distinction is the whole point. Clicking a browser leaves our window unfocused, and
+     * treating that the same would put panels over the browser — which is the complaint the
+     * foreground rule was written to fix. Minimising is a deliberate act; losing focus is not.
+     */
+    expect(
+      show({ ourWindowMinimised: false, ourWindowFocused: false, gameIsForeground: false }),
+    ).toEqual({ overGame: false, detached: true });
   });
 });
