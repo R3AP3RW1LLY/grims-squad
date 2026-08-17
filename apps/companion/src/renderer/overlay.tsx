@@ -166,7 +166,21 @@ function NeedRow({
 
   return (
     <div style={{ display: 'contents' }}>
-      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+      {/*
+        ★ STRUCK THROUGH WHEN IT IS DONE — SQUADRON OWNER ★
+
+        The same treatment as the website and the desktop screens, and it matters most here: this
+        panel is read mid-flight, in the seconds before opening a commodity market. A finished line
+        that looks like every other line is the one somebody buys again.
+      */}
+      <span
+        style={{
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          ...((need.remaining ?? 0) <= 0 ? { color: C.good, textDecoration: 'line-through' } : {}),
+        }}
+      >
         {need.commodity}
       </span>
       <span style={{ ...FIG, color: C.dim }} title="Still outstanding">{num(need.remaining)}</span>

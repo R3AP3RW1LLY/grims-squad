@@ -52,7 +52,40 @@ export interface CarrierHoldState {
    * Tonnes aboard per commodity, keyed by lower-cased display name; the value keeps the display
    * casing the journal gave, because that is what the hub's tables join on.
    */
-  readonly hold: Readonly<Record<string, { readonly commodity: string; readonly tonnes: number }>>;
+  readonly hold: Readonly<
+    Record<
+      string,
+      {
+        readonly commodity: string;
+        readonly tonnes: number;
+        /**
+         * Whether this fold ever WATCHED any of this commodity arrive.
+         *
+         * ★ THE DIFFERENCE BETWEEN A ZERO AND AN ABSENCE — SQUADRON OWNER, 2026-08-17 ★
+         *
+         * "we did see carrier inventory in the overlay, but then it disappeared"
+         *
+         * This fold is a WITNESS: it knows what it watched move and nothing else. When a member
+         * sells cargo it never saw loaded, `adjust` clamps at zero — its own comment calls that
+         * "the fold's ignorance, not negative cargo" — and the snapshot then sent that zero to the
+         * hub, which stored it as a statement of fact.
+         *
+         * Downstream nothing could tell the two apart. A journal zero outranks the market mirror
+         * and, being the newest reading, outranks Frontier too. So one sale of cargo the app never
+         * saw arrive silently emptied a commodity off every board: the project page, the carriers
+         * tab and the overlay a member reads mid-flight.
+         *
+         * Measured on production the day this was written: 26 of 34 rows were zeros.
+         *
+         * A zero is only worth sending when we watched the cargo arrive AND watched it leave. That
+         * is a real statement. Anything else is an absence, and an absence must stay silent so a
+         * source that CAN see the whole hold — Frontier's manifest, the market mirror — is left to
+         * answer.
+         */
+        readonly witnessed: boolean;
+      }
+    >
+  >;
   /** The carrier pad the member is on right now, when the pad IS a carrier. Identity fuel only. */
   readonly dockedCarrierId: string | null;
   /**
@@ -133,11 +166,23 @@ function adjust(
   delta: number,
 ): CarrierHoldState['hold'] {
   const key = commodity.toLowerCase();
-  const held = hold[key]?.tonnes ?? 0;
+  const existing = hold[key];
+  const held = existing?.tonnes ?? 0;
   // Clamped at zero, never negative: a withdrawal we never saw the deposit for is the fold's
-  // ignorance, not negative cargo. The zero row stays — see the header.
+  // ignorance, not negative cargo.
   const tonnes = Math.max(0, held + delta);
-  return { ...hold, [key]: { commodity: hold[key]?.commodity ?? commodity, tonnes } };
+
+  /*
+   * An ARRIVAL is what earns the right to report a zero later. Watching cargo come aboard and then
+   * go again is a real account of the hold; watching only the going is ignorance, and `witnessed`
+   * is what keeps those two apart all the way to the hub. See the field's own note.
+   */
+  const witnessed = (existing?.witnessed ?? false) || delta > 0;
+
+  return {
+    ...hold,
+    [key]: { commodity: existing?.commodity ?? commodity, tonnes, witnessed },
+  };
 }
 
 /**
@@ -342,6 +387,17 @@ export interface CarrierCargoSnapshot {
 export function carrierSnapshot(state: CarrierHoldState): CarrierCargoSnapshot | null {
   if (state.carrier === null) return null;
   const commodities = Object.values(state.hold)
+    /*
+     * ★ A ZERO WE CANNOT VOUCH FOR IS NOT SENT ★
+     *
+     * See `witnessed`. A commodity clamped to zero by a withdrawal this fold never saw arrive is an
+     * absence, not a statement — and sending it as a statement is what emptied real cargo off the
+     * overlay, the carriers tab and the project page at once.
+     *
+     * Positive figures always go, whether witnessed or not: "I have seen at least this much" is
+     * useful even when incomplete, because every consumer treats the journal as a FLOOR.
+     */
+    .filter((h) => h.tonnes > 0 || h.witnessed)
     .map((h) => ({ commodity: h.commodity, tonnes: h.tonnes }))
     .sort((a, b) => (a.commodity < b.commodity ? -1 : a.commodity > b.commodity ? 1 : 0));
   /*

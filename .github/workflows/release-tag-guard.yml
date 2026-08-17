@@ -1,0 +1,99 @@
+name: Release tag guard
+
+# ---------------------------------------------------------------------------
+# A version bump that never became an installer.
+#
+# ★ THE FAILURE THIS EXISTS FOR ★
+#
+# The release chain has three links: `PLATFORM_VERSION` in packages/shared,
+# `version` in apps/companion/package.json, and a `companion-v*` GIT TAG.
+#
+# The first two are held equal by version-sync.spec.ts, so they cannot drift.
+# The third is guarded by NOTHING — and it is the only one that publishes
+# anything. `companion-release.yml` triggers on the tag alone, so a version
+# bumped, merged and deployed without one leaves every member's app sitting on
+# the previous build while the website reports a new number. Nothing errors.
+# Nothing logs. The changelog announces a release that cannot be installed.
+#
+# ★ WHY IT RUNS ON MAIN AND NOT ON THE PR ★
+#
+# The tag is created AFTER the squash merge — it has to be, because it points at
+# the commit the merge produces. A PR check could only ever ask for a tag that
+# does not exist yet, so it would either always fail or always pass.
+#
+# So this watches main: when a push CHANGES the version, the matching tag must
+# exist. It re-checks on tag pushes too, which is what turns a red run green the
+# moment the tag lands rather than leaving a permanent failure behind.
+# ---------------------------------------------------------------------------
+
+on:
+  push:
+    branches: [main]
+    tags: ['companion-v*']
+
+concurrency:
+  group: release-tag-guard
+  cancel-in-progress: false
+
+jobs:
+  tagged:
+    name: version bump is tagged
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Tags are what this job compares against, and a shallow clone has none.
+          fetch-depth: 0
+
+      - name: the version on main must have a companion-v tag
+        run: |
+          set -euo pipefail
+
+          VERSION_FILE=packages/shared/src/version.ts
+          VERSION=$(grep -oE "PLATFORM_VERSION = '[^']+'" "$VERSION_FILE" | grep -oE "[0-9]+\.[0-9]+\.[0-9]+")
+
+          if [ -z "$VERSION" ]; then
+            echo "::error::Could not read PLATFORM_VERSION from $VERSION_FILE."
+            exit 1
+          fi
+
+          echo "main is at $VERSION"
+
+          if git rev-parse -q --verify "refs/tags/companion-v${VERSION}" >/dev/null; then
+            echo "companion-v${VERSION} exists — the installer will have been built."
+            exit 0
+          fi
+
+          # ★ ONLY COMPLAIN WHEN THE VERSION ACTUALLY MOVED ★
+          #
+          # Most pushes to main do not touch the version, and an untagged version
+          # that has been sitting there since before this guard existed is not
+          # news. Comparing against the previous commit keeps this quiet until a
+          # bump is the thing that just happened — a check that cries every push
+          # is a check people stop reading.
+          PREVIOUS=$(git show "HEAD~1:$VERSION_FILE" 2>/dev/null \
+                       | grep -oE "[0-9]+\.[0-9]+\.[0-9]+" | head -1 || true)
+
+          if [ "$PREVIOUS" = "$VERSION" ]; then
+            echo "Version unchanged in this push ($VERSION) and untagged. Not this push's doing."
+            exit 0
+          fi
+
+          cat >&2 <<EOF
+          PLATFORM_VERSION moved ${PREVIOUS:-unknown} -> ${VERSION} and there is no
+          companion-v${VERSION} tag.
+
+          The tag is the ONLY thing that publishes an installer:
+          companion-release.yml triggers on it and nothing else. Without it every
+          member's app stays on the previous build while the website reports the
+          new number, the changelog announces a release nobody can install, and
+          nothing anywhere reports a problem.
+
+          Create it from the merge commit:
+
+            git tag -a companion-v${VERSION} -m "companion ${VERSION} — what changed"
+            git push origin companion-v${VERSION}
+
+          This job re-runs on the tag push and goes green by itself.
+          EOF
+          exit 1

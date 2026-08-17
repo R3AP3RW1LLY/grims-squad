@@ -96,19 +96,61 @@ describe('transfer semantics', () => {
     expect(tonnesOf(state, 'Titanium')).toBe(200);
   });
 
-  it('★ withdrawing what we never saw deposited clamps at zero, and the zero row STAYS ★', () => {
+  it('★ MANDATORY: a zero we never watched ARRIVE is not sent ★', () => {
     /*
-     * The fold starts empty on app launch, so cargo loaded last week is invisible to it. Watching
-     * 300 t leave must not produce -300 — and the zero row is kept because "we watched this empty
-     * out" is exactly the statement that lets the hub retire a stale figure.
+     * ★ THIS TEST ASSERTED THE BUG — SQUADRON OWNER, 2026-08-17 ★
+     *
+     * "we did see carrier inventory in the overlay, but then it disappeared"
+     *
+     * It used to be called "the zero row STAYS", and it was wrong in the way that matters. The fold
+     * starts empty on app launch, so cargo loaded last week is invisible to it. Watching 300 t of
+     * that leave clamps to zero — `adjust` calls this "the fold's ignorance, not negative cargo" —
+     * and the snapshot then shipped that ignorance to the hub as a statement of fact.
+     *
+     * Downstream nothing could tell it apart from a real zero. A journal figure outranks the market
+     * mirror and, being the newest reading, outranks Frontier's manifest too. So ONE sale of cargo
+     * the app never saw arrive silently emptied a commodity off the project page, the carriers tab
+     * and the overlay a member reads mid-flight. Measured on production: 26 of 34 rows were zeros.
+     *
+     * The clamp is still right — negative cargo is not a thing. What changed is that we no longer
+     * TELL anybody about a zero we cannot vouch for, so a source that can see the whole hold is
+     * left to answer instead.
      */
     const state = foldCarrierHold(EMPTY_CARRIER_HOLD, [
       stats(3700000001),
       transfer([{ type: 'Steel', count: 300, direction: 'toship' }]),
     ]);
+
+    expect(tonnesOf(state, 'Steel'), 'still clamped — negative cargo is not a thing').toBe(0);
+    expect(state.hold['steel']?.witnessed, 'but we never watched any arrive').toBe(false);
+    /*
+     * NO PUSH AT ALL, not a push carrying an empty list.
+     *
+     * The distinction matters more than it looks. `replaceCapiCargo` treats an empty manifest as
+     * proof a hold is empty, and the hub's journal path replaces rather than accumulates — so an
+     * empty list is a claim, not a silence. With nothing witnessed and no CarrierStats total, the
+     * honest act is to say nothing and leave the mirror and Frontier to answer.
+     */
+    expect(
+      carrierSnapshot(state),
+      'an absence must stay silent, or it overrules every source that can actually see the hold',
+    ).toBeNull();
+  });
+
+  it('★ MANDATORY: a zero we DID watch empty out is still sent ★', () => {
+    /*
+     * The other half, and the reason this is not simply "never send zeros". Watching cargo arrive
+     * and then leave is a real account of the hold, and it is the statement that lets the hub retire
+     * a stale figure — without it a sold-out commodity would be promised for ever.
+     */
+    const state = foldCarrierHold(EMPTY_CARRIER_HOLD, [
+      stats(3700000001),
+      transfer([{ type: 'Steel', count: 300, direction: 'tocarrier' }]),
+      transfer([{ type: 'Steel', count: 300, direction: 'toship' }]),
+    ]);
+
     expect(tonnesOf(state, 'Steel')).toBe(0);
-    expect(state.hold['steel']).toBeDefined();
-    // And the snapshot carries the zero out to the hub rather than staying silent about it.
+    expect(state.hold['steel']?.witnessed, 'we saw it arrive, so we may speak for it').toBe(true);
     expect(carrierSnapshot(state)?.commodities).toEqual([{ commodity: 'Steel', tonnes: 0 }]);
   });
 });

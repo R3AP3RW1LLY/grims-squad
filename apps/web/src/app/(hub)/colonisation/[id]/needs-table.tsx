@@ -261,9 +261,24 @@ function NeedRows({
                   className={`hover:bg-[var(--color-surface-panel)] ${done ? 'opacity-70' : ''}`}
                 >
                   <td className={TD}>
+                    {/*
+                      ★ STRUCK THROUGH WHEN IT IS DONE — SQUADRON OWNER ★
+
+                      The row is kept rather than filtered, for the reason recorded above
+                      `sortByOutstanding`: deleting a line the moment it finished hid 584,108 tonnes
+                      of completed work and made a build look barely started. But a kept row that
+                      looks like every other row is a line members keep hauling to.
+
+                      Struck through and green says "this is finished" at a glance, without removing
+                      the evidence that it was ever needed.
+                    */}
                     <a
                       href={`/logistics/commodities/${encodeURIComponent(n.commodity)}`}
-                      className="text-[var(--color-text-primary)] no-underline hover:underline"
+                      className={
+                        done
+                          ? 'text-[var(--color-semantic-success)] line-through decoration-[var(--color-semantic-success)]/60 no-underline hover:underline'
+                          : 'text-[var(--color-text-primary)] no-underline hover:underline'
+                      }
                     >
                       {n.commodity}
                     </a>
