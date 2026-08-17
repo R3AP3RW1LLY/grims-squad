@@ -335,8 +335,27 @@ export class PrismaCapiPollStore implements CapiPollStore {
     const rows = await this.db.$queryRawUnsafe<
       Array<{ cats: string[] | null; events: string[] | null }>
     >(
-      `SELECT telemetry_opt_out_categories::text[] AS cats, telemetry_opt_out_events AS events
-         FROM users WHERE id = $1::uuid`,
+      /*
+       * ★ privacy_settings, NOT users — 2026-08-17 ★
+       *
+       * These two columns live on `PrivacySetting` (@@map "privacy_settings"), and this asked
+       * `users` for them. Postgres answered `42703: column "telemetry_opt_out_categories" does not
+       * exist`, which threw, which the run's try/catch turned into one log line — and the ENTIRE
+       * journal poll died on its first member, every minute, storing nothing.
+       *
+       * Raw SQL is invisible to typecheck: nothing here could have caught a wrong table name, and
+       * `colony_roster` was exactly the same mistake earlier this month. It surfaced only once the
+       * token decode was fixed and the poll got far enough to reach this query.
+       *
+       * LEFT JOIN because a member with no privacy row has opted out of nothing — an INNER JOIN
+       * would silently drop them from telemetry entirely, which is the opposite of what an absent
+       * opt-out means.
+       */
+      `SELECT p.telemetry_opt_out_categories::text[] AS cats,
+              p.telemetry_opt_out_events AS events
+         FROM users u
+         LEFT JOIN privacy_settings p ON p.user_id = u.id
+        WHERE u.id = $1::uuid`,
       userId,
     );
 
