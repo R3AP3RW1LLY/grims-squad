@@ -5,7 +5,7 @@ import type {
   BountyLeaderboard,
   BountyRow,
 } from '../hub-bounties.js';
-import { C, Card, Empty, Problem, Section, Stat, Tabs, inputStyle } from './ui.js';
+import { Button, C, Card, Empty, Problem, Section, Stat, Tabs, inputStyle } from './ui.js';
 import { useLive } from './use-live.js';
 
 /**
@@ -28,6 +28,10 @@ declare global {
     readonly bounties: {
       board(): Promise<Answer<BountyBoard>>;
       leaderboard(month?: string): Promise<Answer<BountyLeaderboard>>;
+      /** "I flew there and there is no market." Pays what the bounty was worth. */
+      noMarket(
+        stationKey: string,
+      ): Promise<Answer<{ paid: boolean; stationName?: string; points?: number }>>;
     };
   }
 }
@@ -56,7 +60,16 @@ function ageOf(r: BountyRow): string {
   return `${r.daysStale}d dark`;
 }
 
-function BountyTable({ rows, kind }: { rows: BountyRow[]; kind: 'ops' | 'galaxy' }): JSX.Element {
+function BountyTable({
+  rows,
+  kind,
+  onChanged,
+}: {
+  rows: BountyRow[];
+  kind: 'ops' | 'galaxy';
+  /** Re-reads the board, so a station just reported leaves this screen rather than lingering. */
+  onChanged: () => void;
+}): JSX.Element {
   const [query, setQuery] = useState('');
 
   const shown = useMemo(() => {
@@ -95,6 +108,18 @@ function BountyTable({ rows, kind }: { rows: BountyRow[]; kind: 'ops' | 'galaxy'
               {kind === 'ops' ? <th style={TH}>From ops</th> : null}
               <th style={TH}>Data age</th>
               <th style={{ ...TH, textAlign: 'right' }}>Points</th>
+              {/*
+                ★ THE OTHER WAY A BOUNTY GETS CLEARED — SQUADRON OWNER, 2026-08-16 ★
+
+                72 of the 496 bounties on the board were on stations with NO MARKET. Flying to one
+                found nothing to report, so nothing could refresh it, so it stayed for ever and the
+                next member wasted the same evening.
+
+                Here rather than only on the website because a member discovers this while sitting
+                in the station. Making them alt-tab to a browser is how the report does not get
+                filed.
+              */}
+              <th style={{ ...TH, textAlign: 'right' }}>Nothing there?</th>
             </tr>
           </thead>
           <tbody>
@@ -123,6 +148,9 @@ function BountyTable({ rows, kind }: { rows: BountyRow[]; kind: 'ops' | 'galaxy'
                 <td style={{ ...TD, color: r.daysStale === null ? C.warn : C.dim }}>{ageOf(r)}</td>
                 <td style={{ ...TD, textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: C.text }}>
                   {r.points.toLocaleString()}
+                </td>
+                <td style={{ ...TD, textAlign: 'right' }}>
+                  <NoMarketButton row={r} onReported={onChanged} />
                 </td>
               </tr>
             ))}
@@ -238,12 +266,12 @@ export function BountiesPage(): JSX.Element {
       {error !== null ? <Problem>{error}</Problem> : null}
 
       <Section title="Squadron space — within 200 ly of our active projects">
-        <Card>{board === null ? <Empty>Loading the board…</Empty> : <BountyTable rows={board.ops} kind="ops" />}</Card>
+        <Card>{board === null ? <Empty>Loading the board…</Empty> : <BountyTable rows={board.ops} kind="ops" onChanged={load} />}</Card>
       </Section>
 
       <Section title="The galaxy tail — the stalest data we hold anywhere">
         <Card>
-          {board === null ? <Empty>Loading the board…</Empty> : <BountyTable rows={board.galaxy} kind="galaxy" />}
+          {board === null ? <Empty>Loading the board…</Empty> : <BountyTable rows={board.galaxy} kind="galaxy" onChanged={load} />}
         </Card>
       </Section>
 
@@ -251,5 +279,64 @@ export function BountiesPage(): JSX.Element {
         <Card>{standings === null ? <Empty>Loading standings…</Empty> : <Standings standings={standings} />}</Card>
       </Section>
     </div>
+  );
+}
+
+/**
+ * "I flew there and there is no market."
+ *
+ * ★ IT PAYS THE SAME AS A MARKET REPORT — SQUADRON OWNER, 2026-08-16 ★
+ *
+ * The member did the work the bounty asked for: they flew out and found out. That the answer was
+ * "nothing here" is the fault of the board that sent them, and a report that costs a trip and pays
+ * nothing is a report nobody files — which leaves the bounty there for the next member.
+ *
+ * Confirmed before it fires, because one person's word takes the station off the board for
+ * EVERYBODY. That is the deal the owner chose — trusted on one report from a verified commander —
+ * and the price of trusting people is that the button says what it does before it does it.
+ *
+ * Deliberately the same sentence, the same confirmation and the same two outcomes as the website:
+ * they are one feature on two screens.
+ */
+function NoMarketButton({
+  row,
+  onReported,
+}: {
+  row: BountyRow;
+  onReported: () => void;
+}): JSX.Element {
+  const [busy, setBusy] = useState(false);
+  const [said, setSaid] = useState<string | null>(null);
+
+  if (said !== null) {
+    return <span style={{ fontSize: '11px', color: C.dim }}>{said}</span>;
+  }
+
+  const report = (): void => {
+    const ok = window.confirm(
+      `Report that ${row.stationName} has no market?\n\n` +
+        'This takes it off the board for everybody and pays you the ' +
+        `${row.points.toLocaleString()} points the bounty was worth. An officer can put it back.`,
+    );
+    if (!ok) return;
+
+    setBusy(true);
+    void window.bounties.noMarket(row.stationKey).then((a) => {
+      setBusy(false);
+      if (a.ok) {
+        // Two different truths. "Somebody beat you to it" is not a failure and must not read as one.
+        setSaid(a.data.paid ? `+${(a.data.points ?? 0).toLocaleString()}` : 'already reported');
+        onReported();
+      } else {
+        // The hub's own sentence — it names what would make this a yes.
+        setSaid(a.error);
+      }
+    });
+  };
+
+  return (
+    <Button disabled={busy} onClick={report}>
+      {busy ? '…' : 'No market'}
+    </Button>
   );
 }

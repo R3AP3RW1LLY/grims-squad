@@ -101,6 +101,74 @@ async function hubBounties<T>(call: HubCall, path: string): Promise<Answer<T>> {
   }
 }
 
+/**
+ * Reports that a station has no market, and banks the bounty it was worth.
+ *
+ * A POST rather than the shared reader above, because it CHANGES something. Written out in full
+ * rather than generalising `hubBounties` into taking a method — one caller does not make a pattern,
+ * and the reader's job (fetch, time out, say so plainly) is the same either way.
+ */
+export const reportNoMarket = async (
+  call: HubCall,
+  stationKey: string,
+): Promise<Answer<{ paid: boolean; stationName?: string; points?: number }>> => {
+  if (call.deviceToken === '') return { ok: false, error: 'Pair this device first.' };
+
+  const doFetch = call.fetchImpl ?? fetch;
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), call.timeoutMs ?? 15_000);
+
+  try {
+    const res = await doFetch(
+      `${call.apiBaseUrl.replace(/\/+$/, '')}/v1/companion/bounties/no-market`,
+      {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${call.deviceToken}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ stationKey }),
+        signal: ac.signal,
+      },
+    );
+
+    const body = (await res.json().catch(() => ({}))) as {
+      paid?: boolean;
+      stationName?: string;
+      points?: number;
+      error?: { message?: string };
+    };
+
+    if (!res.ok) {
+      /*
+       * The hub's own sentence. The refusal here is the interesting one — "verify your commander
+       * name before reporting a station" tells somebody what would make this a yes, and replacing
+       * it with "something went wrong" throws away the only useful thing said.
+       */
+      return { ok: false, error: body.error?.message ?? `The hub refused (http ${res.status}).` };
+    }
+
+    return {
+      ok: true,
+      data: {
+        paid: body.paid === true,
+        ...(body.stationName === undefined ? {} : { stationName: body.stationName }),
+        ...(body.points === undefined ? {} : { points: body.points }),
+      },
+    };
+  } catch (error) {
+    const aborted = error instanceof Error && error.name === 'AbortError';
+    return {
+      ok: false,
+      error: aborted
+        ? 'The hub did not answer in time.'
+        : 'Could not reach the hub. Check your connection.',
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 export const bountyBoard = (call: HubCall): Promise<Answer<BountyBoard>> =>
   hubBounties<BountyBoard>(call, '');
 

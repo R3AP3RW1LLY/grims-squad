@@ -1,4 +1,4 @@
-import { Controller, Get, Inject, Query } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Post, Query } from '@nestjs/common';
 import { AppError, ErrorCode, Permission, ROLE_PRESETS } from '@grims/shared';
 import { Public } from '../auth/auth.guard.js';
 import { User, type CurrentUser } from '../auth/current-user.js';
@@ -68,5 +68,36 @@ export class BountiesController {
       throw new AppError(ErrorCode.VALIDATION_FAILED, 'month must look like 2026-08.');
     }
     return result;
+  }
+  /**
+   * "I flew there and there is no market."
+   *
+   * ★ SQUADRON OWNER, 2026-08-16 ★
+   *
+   * Paid the same as a market report; trusted on one report from a verified commander.
+   *
+   * The member did the work the bounty asked for — they flew out and found out. That the answer was
+   * "nothing here" is the fault of the board that sent them, and a report costing a trip and paying
+   * nothing is a report nobody files, which leaves the bounty there for the next member to waste
+   * the same evening on.
+   *
+   * No permission gate beyond a session: the bounty board is public to members and this is the only
+   * way to correct it from the cockpit. The verification check that actually matters lives in the
+   * service, because it is a rule about who may make the CLAIM rather than who may call the route.
+   */
+  @Post('no-market')
+  async reportNoMarket(
+    @User() caller: CurrentUser | undefined,
+    @Body() body: { stationKey?: string },
+  ) {
+    if (caller === undefined) {
+      throw new AppError(ErrorCode.UNAUTHENTICATED, 'Sign in to report a station.');
+    }
+    const stationKey = (body.stationKey ?? '').trim();
+    if (stationKey === '') {
+      throw new AppError(ErrorCode.VALIDATION_FAILED, 'Name the station you flew to.');
+    }
+
+    return this.bounties.reportNoMarket({ stationKey, userId: caller.userId });
   }
 }

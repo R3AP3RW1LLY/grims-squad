@@ -455,6 +455,7 @@ model User {
   inaraProfile        InaraCommanderProfile?
   cmdrVerifications   CmdrVerification[]
   bountyClaims        BountyClaim[]
+  noMarketReports     StationNoMarket[]
   miningSessions      MiningSession[]
   recruitInvite       RecruitInvite?  @relation("RecruitInviteOwner")
   recruitInvitesRevoked RecruitInvite[] @relation("RecruitInviteRevoker")
@@ -4473,6 +4474,43 @@ model BountyClaim {
   @@index([userId, claimedAt])
   @@index([claimedAt])
   @@map("bounty_claims")
+}
+
+/// A member's report that a station HAS NO MARKET — the other way a bounty gets cleared.
+///
+/// * SQUADRON OWNER, 2026-08-16 *
+///
+/// Paid the same as a market report, and trusted on one report from a verified commander.
+///
+/// * WHY IT NEEDS A TABLE AND NOT JUST A DELETE *
+///
+/// A market upload clears a bounty by making the data fresh: the half-hourly rebuild reads that
+/// freshness and does not re-list the station. A negative report writes NO market data, so a plain
+/// DELETE from `data_bounties` would be undone by the very next rebuild — the member would be paid,
+/// the bounty would reappear within thirty minutes, and the next member would fly the same wasted
+/// trip. The record has to outlive the board.
+///
+/// * WHY ONE REPORT IS ENOUGH *
+///
+/// The claim is small and checkable: "I docked here and there was no commodity market". A verified
+/// commander is somebody who has proved their identity to Frontier, and the cost of a wrong report
+/// is one station missing from a board of hundreds — against the cost of demanding corroboration,
+/// which is that nobody bothers and the unclearable bounties stay for ever. Reversible by an
+/// officer, because the alternative to trusting people is not checking them, it is nobody reporting.
+model StationNoMarket {
+  stationKey  String   @id @map("station_key")
+  stationName String   @map("station_name")
+  systemName  String   @map("system_name")
+  /// Who flew there and looked. Kept so an officer can ask, and so a pattern is visible.
+  reportedById String  @map("reported_by_id") @db.Uuid
+  reportedAt  DateTime @default(now()) @map("reported_at") @db.Timestamptz(6)
+  /// Set when an officer overturns it — the station goes back on the board from the next rebuild.
+  clearedAt   DateTime? @map("cleared_at") @db.Timestamptz(6)
+
+  reportedBy User @relation(fields: [reportedById], references: [id], onDelete: Cascade)
+
+  @@index([reportedAt])
+  @@map("station_no_market")
 }
 
 /// ═══════════════ MINING ═══════════════
