@@ -2959,7 +2959,18 @@ function CarrierDeclared({
 
   // Older-hub defense, like every panel here: no `declared` on the wire means none exist yet.
   const declared = carrier.declared ?? [];
-  const journal = declared.filter((d) => d.source === 'journal');
+  /*
+   * ★ THE SAME OMISSION AS THE WEBSITE, AND IT HAD TO BE — 2026-08-17 ★
+   *
+   * `declared` gained a third source when the carrier poller landed and this split asked for two.
+   * A Frontier manifest counted towards the cover — reducing the buy quantity and staging yellow on
+   * the bars — while rendering nowhere a member could inspect it, and the "nothing declared yet"
+   * fallback could not fire because the list was not empty.
+   *
+   * Both surfaces had it because both were written from the same two-source assumption, which is
+   * the argument for the parity spec that now reads them together.
+   */
+  const journal = declared.filter((d) => d.source === 'journal' || d.source === 'capi');
   const manual = declared.filter((d) => d.source === 'manual');
   const manualNames = new Set(manual.map((d) => d.commodity));
 
@@ -2997,7 +3008,7 @@ function CarrierDeclared({
             const overridden = manualNames.has(d.commodity);
             return (
               <div
-                key={`journal-${d.commodity}`}
+                key={`${d.source}-${d.commodity}`}
                 style={{
                   display: 'flex',
                   flexWrap: 'wrap',
@@ -3011,7 +3022,23 @@ function CarrierDeclared({
               >
                 <span>
                   {d.commodity}
-                  <span style={{ ...MONO_SMALL, marginLeft: '7px', fontSize: '9px' }}>journal</span>
+                  {/* Named apart because they are not the same claim: Frontier's is the WHOLE
+                      manifest and can prove a hold empty, the journal is a floor. */}
+                  <span
+                    style={{
+                      ...MONO_SMALL,
+                      marginLeft: '7px',
+                      fontSize: '9px',
+                      ...(d.source === 'capi' ? { color: C.cyan } : {}),
+                    }}
+                    title={
+                      d.source === 'capi'
+                        ? 'Frontier’s own manifest for this carrier — the whole hold, not just what an app watched.'
+                        : 'What the owner’s app watched move. A floor: it misses whatever moved while the app was closed.'
+                    }
+                  >
+                    {d.source === 'capi' ? 'frontier' : 'journal'}
+                  </span>
                   <span style={{ marginLeft: '7px', fontSize: '10px', color: C.faint }}>
                     {seenAgo(d.updatedAt)}
                   </span>
