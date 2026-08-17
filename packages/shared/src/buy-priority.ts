@@ -116,18 +116,29 @@ const key = (name: string): string => name.trim().toLowerCase();
  * own system beats architected space beats the rest of the bubble.
  */
 function band(source: BuySource, context: BuyContext): number {
-  if (source.ownership === 'squadron') return 0;
-  if (source.ownership === 'member') return 1;
-
   const system = key(source.systemName);
+
+  /*
+   * ★ THE BUILD'S OWN SYSTEM LEADS — SQUADRON OWNER, 2026-08-17 ★
+   *
+   * "the buy locations ordering should be as follows: 2, 0, 1, 3, 4"
+   *
+   * Checked BEFORE ownership, and the order was the other way round an hour ago. A station in the
+   * system somebody is building in needs no jump at all, and no amount of owning a pad elsewhere
+   * beats already being there — the shortest run is the one you do not fly.
+   *
+   * Ownership then decides among everywhere else, which is where it actually earns its place.
+   */
+  if (system === key(context.buildSystem)) return 0;
+
+  if (source.ownership === 'squadron') return 1;
+  if (source.ownership === 'member') return 2;
 
   /*
    * Checked before the architected set, and it matters: a build in a system the squadron architected
    * is the ORDINARY case, not an edge one. Testing membership first would rank the build's own
    * system as merely second.
    */
-  if (system === key(context.buildSystem)) return 2;
-
   for (const architected of context.architectedSystems) {
     if (key(architected) === system) return 3;
   }

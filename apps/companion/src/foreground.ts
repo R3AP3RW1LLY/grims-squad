@@ -156,6 +156,23 @@ export function overlaysShouldShow(input: {
   readonly gameRunning: boolean | null;
   readonly gameIsForeground: boolean | null;
   readonly ourWindowFocused: boolean;
+  /**
+   * Whether the companion's own window is minimised.
+   *
+   * ★ SQUADRON OWNER, 2026-08-17 ★
+   *
+   * "the overlay keeps disappearing when we minimize the companion app, this should be visible if
+   * the game window is open"
+   *
+   * Minimising the app removed the `ourWindowFocused` override, and what the rule fell through to
+   * asks whether the GAME is the foreground window. Straight after a minimise it often is not —
+   * the desktop or whatever sat behind takes focus first — so every panel vanished at the exact
+   * moment the member had cleared the screen to look at them.
+   *
+   * Tucking the app away is the most ordinary thing somebody does before flying. It must not be the
+   * gesture that hides the overlays.
+   */
+  readonly ourWindowMinimised: boolean;
   readonly editing: boolean;
 }): OverlayVisibility {
   // Arranging, or working in the app itself. Everything stays up, whatever the game is doing —
@@ -164,6 +181,18 @@ export function overlaysShouldShow(input: {
 
   // Not running at all. Nothing an overlay says is worth reading, wherever it is drawn.
   if (input.gameRunning === false) return { overGame: false, detached: false };
+
+  /*
+   * The app is out of the way and the game is up. Show them — see `ourWindowMinimised`.
+   *
+   * Deliberately NOT extended to "our window merely unfocused": that is the case the foreground
+   * rule below exists for, and treating it the same would put panels over a browser, which is the
+   * complaint the foreground rule was written to fix in the first place. Minimised is a deliberate
+   * act; unfocused is just clicking somewhere else.
+   */
+  if (input.ourWindowMinimised && input.gameRunning === true) {
+    return { overGame: true, detached: true };
+  }
 
   return { overGame: input.gameIsForeground !== false, detached: true };
 }

@@ -149,3 +149,79 @@ describe('when Frontier will not answer', () => {
     return expect(fetchCarrier(input(broken))).rejects.toMatchObject({ kind: 'malformed' });
   });
 });
+
+/**
+ * Cargo listed for sale is still aboard.
+ *
+ * ★ SQUADRON OWNER, 2026-08-17 ★
+ *
+ * "Titanium is wrong but the aluminum is right, we need to make sure every commodity is correct"
+ *
+ * Measured on the owner's carrier: Frontier reported Aluminium 10,241 t and Titanium 1,639 t, while
+ * the journal — an hour older — had 7,601 t and 2,959 t. Aluminium HIGHER than the journal, Titanium
+ * LOWER. A merely stale source is wrong in ONE direction; this was wrong in both, and that asymmetry
+ * is what identified the cause.
+ *
+ * `cargo` holds what is in the hold and NOT on the market. Anything the owner lists for sale moves
+ * into `market.commodities` — so reading `cargo` alone reports a carrier as empty of exactly the
+ * commodities it is trying to sell, which on a build is the cargo the squadron most wants to see.
+ */
+describe('cargo listed on the carrier’s market', () => {
+  it('★ MANDATORY: market stock is counted as aboard ★', async () => {
+    const out = await fetchCarrier(
+      input(
+        ok({
+          name: { callsign: 'W8K-W1Y' },
+          cargo: [{ commodity: 'Aluminium', qty: 10241 }],
+          market: { commodities: [{ name: '$titanium_name;', stock: 1639, demand: 0 }] },
+        }),
+      ),
+    );
+
+    expect(out?.cargo).toEqual([
+      { commodity: 'Aluminium', tonnes: 10241 },
+      { commodity: 'Titanium', tonnes: 1639 },
+    ]);
+  });
+
+  it('★ MANDATORY: hold and market ADD for one commodity, they do not replace ★', () => {
+    /*
+     * A carrier can hold 2,000 t of Titanium with 500 t of it listed. Those are different tonnes in
+     * the same hold — taking the larger would lose the unlisted half, and taking either alone is
+     * how the figure came to be wrong in the first place.
+     */
+    return expect(
+      fetchCarrier(
+        input(
+          ok({
+            name: { callsign: 'X' },
+            cargo: [{ commodity: 'Titanium', qty: 1500 }],
+            market: { commodities: [{ name: 'Titanium', stock: 500, demand: 0 }] },
+          }),
+        ),
+      ),
+    ).resolves.toMatchObject({ cargo: [{ commodity: 'Titanium', tonnes: 2000 }] });
+  });
+
+  it('★ MANDATORY: demand is not cargo ★', async () => {
+    // `demand` is what the carrier is asking to BUY — somebody else's cargo until it arrives.
+    const out = await fetchCarrier(
+      input(
+        ok({
+          name: { callsign: 'X' },
+          cargo: [],
+          market: { commodities: [{ name: 'Steel', stock: 0, demand: 5000 }] },
+        }),
+      ),
+    );
+
+    expect(out?.cargo).toEqual([]);
+  });
+
+  it('a carrier with no market at all is unchanged', () => {
+    // Most of the response is optional; a missing market must not empty the hold.
+    return expect(
+      fetchCarrier(input(ok({ name: { callsign: 'X' }, cargo: [{ commodity: 'Gold', qty: 12 }] }))),
+    ).resolves.toMatchObject({ cargo: [{ commodity: 'Gold', tonnes: 12 }] });
+  });
+});
