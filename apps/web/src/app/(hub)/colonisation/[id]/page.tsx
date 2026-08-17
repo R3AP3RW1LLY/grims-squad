@@ -13,6 +13,7 @@ import { NeedsTable } from './needs-table';
 import { ShoppingList } from './shopping-list';
 import { PurchaseCatalogue } from './purchase-catalogue';
 import { DeclarePurchase } from './declare-purchase';
+import { LiveRefresh } from '../../../../components/live-refresh';
 import { AttachPrompt } from './attach-prompt';
 import { Carriers } from './carriers';
 import { HaulerBoard } from './hauler-board';
@@ -198,6 +199,22 @@ export default async function ColonyProjectPage({
         <CopySystem system={project.systemName} />
         {project.stationName === null ? null : <span className="ml-2">· {project.stationName}</span>}
       </p>
+      {/*
+        ★ THE PROJECT PAGE NEVER REFRESHED ITSELF — SQUADRON OWNER, 2026-08-17 ★
+
+        "we can also increase the live polling ... on both web and companion app"
+
+        The two BOARD pages have carried this since they were written; the page that actually shows
+        a build's needs, carrier holds and shopping list did not. So a member watching this page
+        while somebody hauled — or while their own carrier transfer landed — saw the numbers they
+        loaded with until they reloaded by hand.
+
+        `telemetry` is the right channel rather than a timer: it fires when an upload arrives, which
+        is exactly when these figures change and never in between. `router.refresh()` re-runs the
+        server components and keeps scroll, focus and open menus, so a busy build does not make the
+        page jump under somebody reading it.
+      */}
+      <LiveRefresh types={['telemetry']} />
       <PageBody wide>
         {/*
           ★ WHAT THE SITE ACTUALLY IS ★

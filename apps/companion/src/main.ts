@@ -186,8 +186,20 @@ import {
  */
 const ours = (...parts: string[]): string => join(app.getAppPath(), 'dist', ...parts);
 
-/** How often to look for new journal lines. */
-const POLL_MS = 20_000;
+/**
+ * How often to look for new journal lines.
+ *
+ * ★ FIVE SECONDS, NOT TWENTY — SQUADRON OWNER, 2026-08-17 ★
+ *
+ * "can we also increase the live polling of the journal entries to try to make this as real-time as
+ * possible".
+ *
+ * A pass reads from a stored byte offset and usually finds nothing, so the cost of asking more often
+ * is a stat() on a file the OS already has cached — not a re-read. What it buys is the gap between
+ * moving cargo and the boards agreeing: twenty seconds was long enough for a member to transfer,
+ * look at the overlay, and see the old number.
+ */
+const POLL_MS = 5_000;
 
 /*
  * Upload backoff state. The RULES live in `upload-backoff.ts` so they can be unit tested — the
@@ -476,8 +488,20 @@ async function pushHold(): Promise<void> {
  */
 let currentProject: CurrentBuild | null = null;
 
-/** How often to ask the hub about the current build. Its numbers move on other members' hauling. */
-const CURRENT_BUILD_MS = 60_000;
+/**
+ * How often to ask the hub about the current build. Its numbers move on other members' hauling.
+ *
+ * ★ TEN SECONDS, NOT SIXTY ★
+ *
+ * This is the OTHER half of the lag. Even with the journal read every five seconds and pushed
+ * immediately, the overlay only learned the hub's answer once a minute — so a member's own transfer
+ * could take over a minute to come back to them, and a wingmate's delivery longer still.
+ *
+ * Sixty seconds was chosen when this route was expensive. It is much cheaper now that `byId` is no
+ * longer priced per call on this path, and ten seconds is the interval at which "I moved cargo and
+ * the panel agrees" reads as immediate rather than as a refresh.
+ */
+const CURRENT_BUILD_MS = 10_000;
 
 async function refreshCurrentProject(): Promise<void> {
   if (config.deviceToken === '') {
