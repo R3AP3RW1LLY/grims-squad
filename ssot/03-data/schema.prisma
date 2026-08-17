@@ -456,6 +456,7 @@ model User {
   cmdrVerifications   CmdrVerification[]
   bountyClaims        BountyClaim[]
   noMarketReports     StationNoMarket[]
+  stationClaims       StationOwnershipClaim[]
   miningSessions      MiningSession[]
   recruitInvite       RecruitInvite?  @relation("RecruitInviteOwner")
   recruitInvitesRevoked RecruitInvite[] @relation("RecruitInviteRevoker")
@@ -4548,6 +4549,52 @@ model StationNoMarket {
 
   @@index([reportedAt])
   @@map("station_no_market")
+}
+
+/// A station the squadron or one of its members owns, for ranking where to buy.
+///
+/// * SQUADRON OWNER, 2026-08-17 *
+///
+/// "the buy locations should be accurate based on the following criteria. 1 squadron owned stations,
+/// 2. squadron owned members stations, then closest stations to the build project"
+///
+/// * TWO SOURCES, AND THE OWNER ASKED FOR BOTH *
+///
+/// Stations we BUILT through colonisation are derivable from `colony_projects.owner` and cannot go
+/// stale — a squadron project makes a squadron station, a member's makes a member station. That
+/// covers everything we made ourselves and needs no upkeep.
+///
+/// It does not cover a station we hold but never built here, which is what this table is for: an
+/// officer's own claim, and their own correction when the derived answer is wrong.
+///
+/// * WHY A TABLE AND NOT A COLUMN ON THE CATALOGUE *
+///
+/// `knowledge_items` is a MIRROR of the galaxy dump — every row in it is rewritten by the importer,
+/// so a claim written there would survive exactly until the next import. The same reasoning that
+/// keeps colonisation's own annotations out of it.
+model StationOwnershipClaim {
+  /// The catalogue key, `"<systemAddress>/<stationName>"` — the same identifier the market mirror
+  /// and the carrier queries join on.
+  stationKey String @id @map("station_key")
+
+  /// `squadron` or `member`. Not an enum: the ranking treats anything else as unowned, and a third
+  /// value added here should degrade to "not ours" rather than break the sort.
+  ownership String
+
+  /// Why an officer claimed it, in their words. Read on the review list.
+  note String?
+
+  claimedById String   @map("claimed_by_id") @db.Uuid
+  claimedAt   DateTime @default(now()) @map("claimed_at") @db.Timestamptz(6)
+
+  /// Set when an officer withdraws the claim, so the row survives as a record of who said what.
+  /// A deleted row would lose the argument; a dated one settles it.
+  withdrawnAt DateTime? @map("withdrawn_at") @db.Timestamptz(6)
+
+  claimedBy User @relation(fields: [claimedById], references: [id], onDelete: Cascade)
+
+  @@index([ownership])
+  @@map("station_ownership_claims")
 }
 
 /// ═══════════════ MINING ═══════════════

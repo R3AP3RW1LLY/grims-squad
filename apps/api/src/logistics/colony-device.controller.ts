@@ -453,7 +453,11 @@ export class ColonyDeviceController {
    */
   @Public()
   @Get('projects/:id/purchases')
-  async purchaseRoute(@Req() req: FastifyRequest, @Param('id') id: string) {
+  async purchaseRoute(
+    @Req() req: FastifyRequest,
+    @Param('id') id: string,
+    @Query('order') order?: string,
+  ) {
     await this.#caller(
       req,
       Permission.COLONY_VIEW,
@@ -465,7 +469,16 @@ export class ColonyDeviceController {
     // same answer the website gives, so neither surface has to special-case the other's shape.
     if (scope === null) return { systemName: null, stations: [], uncovered: [] };
 
-    return this.purchases.forProject(id);
+    /*
+     * The member's sort choice, carried through rather than decided here.
+     *
+     * ★ A TOGGLE, NOT A DEFAULT — SQUADRON OWNER, 2026-08-17 ★
+     *
+     * Asked whether a squadron station far away should outrank a neutral one nearby, the answer was
+     * to show both orderings and let the member choose. Anything other than `closest` means "ours
+     * first", so a missing or mistyped value lands on the ordering the criteria describe.
+     */
+    return this.purchases.forProject(id, order === 'closest' ? 'closest' : 'ours');
   }
 
   /**

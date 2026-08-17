@@ -38,6 +38,8 @@ function stop(
     // These fixtures describe the COVERAGE rule, which is blind to the kind of port. Null keeps
     // them saying exactly what they always said — see the priority note on `planRoute`.
     isOrbital: null,
+    // Likewise blind to whose station it is: these fixtures are about coverage, not ranking.
+    ownership: null,
     lines: commodities.map((commodity) => ({
       commodity,
       category: null,
@@ -215,6 +217,9 @@ describe('the owner’s buying priority', () => {
     systemName,
     distanceLy,
     isOrbital,
+    // These fixtures pin the DISTANCE and port-kind ordering; ownership is exercised in
+    // buy-priority.spec.ts where the bands themselves are asserted.
+    ownership: null,
     lines: commodities.map((commodity) => ({
       commodity,
       category: null,

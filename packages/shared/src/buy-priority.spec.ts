@@ -39,6 +39,8 @@ const src = (over: Partial<BuySource> = {}): BuySource => ({
   systemName: over.systemName ?? 'Elsewhere',
   distanceLy: over.distanceLy === undefined ? 10 : over.distanceLy,
   isOrbital: over.isOrbital === undefined ? true : over.isOrbital,
+  // Null is the honest default: most of the ~318,000 stations in the catalogue are nobody's.
+  ownership: over.ownership ?? null,
 });
 
 const ctx = (over: Partial<BuyContext> = {}): BuyContext => ({
@@ -244,5 +246,90 @@ describe('what it does not do', () => {
       ],
       { buildSystem: 'home', architectedSystems: new Set<string>() },
     ).map((r) => r.stationName)).toEqual(['here', 'other']);
+  });
+});
+
+/**
+ * Whose station it is, and which ordering the member asked for.
+ *
+ * ★ SQUADRON OWNER, 2026-08-17 ★
+ *
+ * "the buy locations should be accurate based on the following criteria. 1 squadron owned stations,
+ * 2. squadron owned members stations, then closest stations to the build project"
+ *
+ * And asked whether a squadron station 200 ly away should beat a neutral one 10 ly away, the answer
+ * was to show both orderings and let the member choose — which is right, because the answer genuinely
+ * depends on the trip.
+ */
+describe('whose station it is', () => {
+  const ctx = { buildSystem: 'Kaushpoos', architectedSystems: new Set<string>() };
+
+  it('★ MANDATORY: the squadron’s own station leads, then a member’s ★', () => {
+    const ranked = rankBuySources(
+      [
+        src({ stationName: 'Neutral', systemName: 'Kaushpoos', distanceLy: 0 }),
+        src({ stationName: 'Member', ownership: 'member', distanceLy: 40 }),
+        src({ stationName: 'Ours', ownership: 'squadron', distanceLy: 90 }),
+      ],
+      ctx,
+    );
+
+    expect(ranked.map((r) => r.stationName)).toEqual(['Ours', 'Member', 'Neutral']);
+  });
+
+  it('★ MANDATORY: ownership outranks even the build’s own system ★', () => {
+    /*
+     * The build's own system used to be the top band, and it is not any more. "We own the pad" is a
+     * stronger reason to fly somewhere than "it is next door" — the squadron controls the stock and
+     * the prices at its own market.
+     */
+    const ranked = rankBuySources(
+      [
+        src({ stationName: 'AtTheBuild', systemName: 'Kaushpoos', distanceLy: 0 }),
+        src({ stationName: 'OursFarAway', ownership: 'squadron', distanceLy: 200 }),
+      ],
+      ctx,
+    );
+
+    expect(ranked[0]?.stationName).toBe('OursFarAway');
+  });
+
+  it('★ MANDATORY: "closest" inverts the keys — nearest first, whoever owns it ★', () => {
+    // A member in a hurry must never be sent across the bubble to shop at home.
+    const ranked = rankBuySources(
+      [
+        src({ stationName: 'OursFarAway', ownership: 'squadron', distanceLy: 200 }),
+        src({ stationName: 'NeutralNear', distanceLy: 10 }),
+      ],
+      { ...ctx, order: 'closest' },
+    );
+
+    expect(ranked.map((r) => r.stationName)).toEqual(['NeutralNear', 'OursFarAway']);
+  });
+
+  it('★ MANDATORY: "closest" still prefers ours at equal distance ★', () => {
+    /*
+     * Ownership is a free preference once distance is settled, and discarding it would make the
+     * toggle feel like it switched something off rather than reordering it.
+     */
+    const ranked = rankBuySources(
+      [
+        src({ stationName: 'Neutral', distanceLy: 25 }),
+        src({ stationName: 'Ours', ownership: 'squadron', distanceLy: 25 }),
+      ],
+      { ...ctx, order: 'closest' },
+    );
+
+    expect(ranked[0]?.stationName).toBe('Ours');
+  });
+
+  it('an unowned station is not demoted below one we merely suspect', () => {
+    // `null` means "not ours, or we do not know" — never a claim that it is somebody else's.
+    const ranked = rankBuySources(
+      [src({ stationName: 'A', distanceLy: 5 }), src({ stationName: 'B', distanceLy: 50 })],
+      ctx,
+    );
+
+    expect(ranked.map((r) => r.stationName)).toEqual(['A', 'B']);
   });
 });
