@@ -1827,7 +1827,24 @@ function CommodityRow({ need, aboard = 0 }: { need: ColonyNeed; aboard?: number 
   return (
     <div style={{ padding: '6px 0', borderTop: `1px solid ${C.hairline}` }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px' }}>
-        <span style={{ fontSize: '13px' }}>{need.commodity}</span>
+        {/*
+          ★ STRUCK THROUGH WHEN IT IS DONE — SQUADRON OWNER ★
+
+          The row is kept rather than filtered: deleting a line the moment it finished hid whole
+          categories of completed work and made a build look barely started. But a kept row that
+          looks like every other row is a line members keep hauling to.
+
+          Struck through and green says "finished" at a glance without removing the evidence that it
+          was ever needed. Same treatment as the website, because they are one board.
+        */}
+        <span
+          style={{
+            fontSize: '13px',
+            ...(need.remaining <= 0 ? { color: C.good, textDecoration: 'line-through' } : {}),
+          }}
+        >
+          {need.commodity}
+        </span>
         <span style={{ fontSize: '13px', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>
           {/* "0 t left" is technically true and reads like a shortfall. Finished says finished. */}
           {need.remaining <= 0 ? (
