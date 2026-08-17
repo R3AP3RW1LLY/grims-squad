@@ -476,6 +476,22 @@ function buildPanel(input: OverlayInput): OverlayData['build'] {
           };
         })
         .filter((n) => n.remaining > 0),
+      /*
+       * ★ HOW MANY ARE DONE, SAID OUT LOUD — SQUADRON OWNER, 2026-08-17 ★
+       *
+       * "the build tracker is also not showing all remaining commodities, one member is only showing
+       * 2 commodities remaining when they have more"
+       *
+       * It was showing two because two were outstanding — the other seventeen were finished and
+       * filtered away. The panel was right and looked broken, which is its own kind of wrong: a list
+       * that silently drops rows is indistinguishable from a list that is truncated.
+       *
+       * Asked which to show, the answer was outstanding plus a count. So the filter stays — this is
+       * a strip over a cockpit and finished rows are not what somebody is deciding from — and the
+       * count says the rest exist.
+       */
+      finished: current.needs.filter((n) => n.remaining <= 0).length,
+      total: current.needs.length,
       delivered: current.progress.delivered,
       required: current.progress.required,
       haulers: current.haulers.length,
@@ -528,7 +544,10 @@ function fromDepot(
       })
       // Finished commodities are dropped. The overlay is small and it exists to answer "what do I
       // still need to bring" — a completed line is a row of noise on a panel over a cockpit.
+      // The COUNT of them is kept below, so a short list never reads as a truncated one.
       .filter((n) => n.remaining > 0),
+    finished: site.resources.filter((r) => r.required - r.provided <= 0).length,
+    total: site.resources.length,
     delivered: site.resources.reduce((sum, r) => sum + r.provided, 0),
     required: site.resources.reduce((sum, r) => sum + r.required, 0),
     /*
