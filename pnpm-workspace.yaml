@@ -152,3 +152,22 @@ overrides:
   # the vulnerable version. Everything below still applies unchanged — including the upper bound,
   # which is the load-bearing half of this entry.
   "nanoid@<3.3.18": ">=3.3.18 <4"
+  # HIGH (GHSA-ggr8-5vv4-36mx): deepmerge-ts <8.0.0 exhausts the stack when merging recursive object
+  # graphs — a parse-time hang, not a leak.
+  #
+  # Reached ONLY through the Prisma CLI: prisma -> @prisma/config -> deepmerge-ts, which is how the
+  # CLI merges prisma.config.ts. It is not in @prisma/client's runtime path, so no server surface is
+  # exposed, and the only input it ever merges is our own config file in this repository.
+  #
+  # Pinned regardless. "The input is ours" is the same reasoning already rejected twice in this file
+  # (js-yaml's release manifest, nanoid's zero size), and it ages badly — the fix here is a major bump
+  # of a leaf package we do not call directly.
+  #
+  # ★ THE CJS ENTRY WAS CHECKED FIRST, BECAUSE OF THE nanoid ENTRY ABOVE ★
+  #
+  # A bare floor once dragged in a major that had dropped CommonJS and broke the web build. Verified
+  # before writing this line: 8.0.1 still ships `main: ./dist/index.cjs` and a `require` condition,
+  # exactly as 7.1.5 does, so no upper bound is needed here.
+  #
+  # No newer prisma fixes it — 6.19.3 is the latest release and still resolves 7.1.5.
+  "deepmerge-ts@<8.0.0": ">=8.0.1"
