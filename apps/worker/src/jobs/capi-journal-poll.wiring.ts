@@ -38,6 +38,20 @@ export interface CapiConfig {
 }
 
 export class PrismaCapiPollStore implements CapiPollStore {
+  /**
+   * Reasons already reported, so a cause that repeats every minute is said once.
+   *
+   * Held per store instance, which is per daemon process — so a restart says everything again,
+   * which is exactly when somebody is watching.
+   */
+  readonly #said = new Set<string>();
+
+  #sayOnce(reason: string): void {
+    if (this.#said.has(reason)) return;
+    this.#said.add(reason);
+    console.warn(`daemon: cAPI token — ${reason}`);
+  }
+
   constructor(
     private readonly db: PrismaClient,
     private readonly cipher: TokenCipher,
@@ -135,6 +149,19 @@ export class PrismaCapiPollStore implements CapiPollStore {
    * re-reads the row inside it — whoever waited was waiting for somebody else's refresh, and that
    * refresh has already stored the token this call wants.
    */
+  /**
+   * ★ FOUR WAYS TO RETURN NULL, AND THEY WERE INDISTINGUISHABLE — 2026-08-17 ★
+   *
+   * The caller reports every null as "the Frontier link expired — the member must reconnect",
+   * because its comment assumed the 25-day ceiling was the only cause. It is not, and the label sent
+   * an investigation down the wrong road: production showed 7x that message with `is_stale = false`
+   * on every row — which the ceiling path could not have produced, since it writes that column.
+   *
+   * A message that names one cause for four conditions is worse than no message. Each path now says
+   * which it is, once per distinct reason, so the log distinguishes "these grants are genuinely
+   * spent, ask the members to reconnect" from "our refresh call is broken and nobody needs to do
+   * anything". Those have completely different fixes and only one of them involves the squadron.
+   */
   async accessToken(userId: string): Promise<string | null> {
     const now = new Date();
 
@@ -155,7 +182,14 @@ export class PrismaCapiPollStore implements CapiPollStore {
     );
 
     const row = rows[0];
-    if (row === undefined || row.fdev_refresh_enc === null) return null;
+    if (row === undefined) {
+      this.#sayOnce('no cAPI verification row for a member livePollable returned');
+      return null;
+    }
+    if (row.fdev_refresh_enc === null) {
+      this.#sayOnce('a verification with no refresh token stored');
+      return null;
+    }
 
     /*
      * Past Frontier's ceiling no refresh will ever succeed. Marked once so the member drops out of
@@ -168,6 +202,8 @@ export class PrismaCapiPollStore implements CapiPollStore {
           row.id,
         );
       }
+      // The ONLY cause that genuinely requires a member to reconnect.
+      this.#sayOnce('past Frontier’s 25-day ceiling — this member must reconnect');
       return null;
     }
 
@@ -232,6 +268,15 @@ export class PrismaCapiPollStore implements CapiPollStore {
        * means try again shortly — writing `is_stale` for those would disconnect a member because
        * Frontier had a bad minute, and nothing would ever un-write it.
        */
+      /*
+       * The path production was actually taking, mislabelled as an expired link. Named with the
+       * error itself: "invalid_grant" means the member must reconnect, but "refused", "network" or
+       * "rate_limited" mean OUR call is at fault and no member can do anything about it.
+       */
+      const kind = e instanceof CapiAuthError ? e.kind : 'not a CapiAuthError';
+      const detail = e instanceof Error ? e.message : String(e);
+      this.#sayOnce(`the token refresh FAILED (${kind}): ${detail}`);
+
       if (e instanceof CapiAuthError && !e.retryable) {
         await this.db
           .$executeRawUnsafe(`UPDATE cmdr_verifications SET is_stale = true WHERE id = $1::uuid`, row.id)
