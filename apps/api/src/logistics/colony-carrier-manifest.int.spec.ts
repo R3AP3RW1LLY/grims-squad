@@ -30,6 +30,21 @@ const service = new ColonyCarrierService(db);
 const TAG = 'carrier-manifest-int-spec';
 const MARKET_ID = 3700000000009n;
 
+/**
+ * The carrier's catalogue key, so the mirror half of its hold can be seeded.
+ *
+ * ★ THIS SPEC HAD NO MIRROR FIXTURE, WHICH IS WHY THE BUG WAS GREEN — 2026-08-17 ★
+ *
+ * `manifest()` read its mirror tonnage from `carrier_cargo`, a table nothing has ever written: 0
+ * rows on production against 5,745,190 mirror rows in `market_entries`. The combined-run page was
+ * therefore blind to the source the module's own header calls the primary one.
+ *
+ * Every test here passed throughout, because with no mirror seeded `mirror` was null whichever table
+ * was queried. A spec that never supplies an input cannot notice that the input is read from the
+ * wrong place.
+ */
+const MIRROR_KEY = `9000000000042/${TAG} carrier`;
+
 async function seed(): Promise<{ userId: string; projectA: string; projectB: string }> {
   const [user] = await db.$queryRawUnsafe<Array<{ id: string }>>(
     `INSERT INTO users (handle, display_name) VALUES ($1, $1)
@@ -84,7 +99,11 @@ async function need(projectId: string, commodity: string, remaining: number): Pr
 
 async function cleanUp(userId: string): Promise<void> {
   await db.$executeRawUnsafe(`DELETE FROM colony_carrier_cargo WHERE market_id = $1::bigint`, String(MARKET_ID));
-  await db.$executeRawUnsafe(`DELETE FROM carrier_cargo WHERE market_id = $1::bigint`, String(MARKET_ID));
+  await db.$executeRawUnsafe(`DELETE FROM market_entries WHERE station_key = $1`, MIRROR_KEY);
+  await db.$executeRawUnsafe(
+    `DELETE FROM knowledge_items WHERE source = 'galaxy' AND kind = 'station' AND ext_key = $1`,
+    MIRROR_KEY,
+  );
   // colony_carriers and colony_needs cascade from the projects.
   await db.$executeRawUnsafe(`DELETE FROM colony_projects WHERE title LIKE $1`, `${TAG}%`);
   await db.$executeRawUnsafe(`DELETE FROM users WHERE id = $1::uuid`, userId);
@@ -191,5 +210,62 @@ describe('one carrier, several builds', () => {
     const manifest = await service.manifest(3799999999999n);
     expect(manifest.carrier).toBeNull();
     expect(manifest.lines).toEqual([]);
+  });
+
+  it('★ MANDATORY: the market MIRROR counts as aboard ★', async () => {
+    /*
+     * ★ THE READ THAT POINTED AT A DEAD TABLE — 2026-08-17 ★
+     *
+     * `manifest()` took its mirror tonnage from `carrier_cargo`: created 2026-08-02, superseded two
+     * days later, and never written by anything. Production held 0 rows against 5,745,190 mirror rows
+     * in `market_entries`.
+     *
+     * So this page — the authoritative combined answer for one carrier — reported `aboard 0` and
+     * `still to buy: everything` for a carrier the project page showed holding tens of thousands of
+     * tonnes, while its own comment claimed parity with that page. A member reads it and flies out to
+     * buy steel the squadron already owns.
+     *
+     * No error was possible: querying an empty table succeeds and returns nothing, which is
+     * indistinguishable from "this carrier has no cargo".
+     */
+    const seeded = await seed();
+    userId = seeded.userId;
+
+    await need(seeded.projectA, 'Gold', 500);
+
+    // The carrier in the galaxy catalogue, keyed the way the catalogue keys stations.
+    await db.$executeRawUnsafe(
+      `INSERT INTO knowledge_items (source, kind, ext_key, name, data, text)
+       VALUES ('galaxy', 'station', $1, $2,
+               jsonb_build_object('marketId', $3::text, 'type', 'Drake-Class Carrier',
+                                  'system', $4), $2)
+       ON CONFLICT (source, kind, ext_key) DO UPDATE SET data = EXCLUDED.data`,
+      MIRROR_KEY,
+      `${TAG} carrier`,
+      String(MARKET_ID),
+      `${TAG} system`,
+    );
+
+    // 300 t of Gold on its public market — the mirror half of the hold, and the ONLY source here.
+    await db.$executeRawUnsafe(
+      `INSERT INTO market_entries (station_key, station_name, system_name, commodity, supply,
+                                   market_seen_at, source)
+       VALUES ($1, $2, $3, 'Gold', 300, now(), 'eddn')
+       ON CONFLICT DO NOTHING`,
+      MIRROR_KEY,
+      `${TAG} carrier`,
+      `${TAG} system`,
+    );
+
+    const manifest = await service.manifest(MARKET_ID);
+    const gold = manifest.lines.find((l) => l.commodity === 'Gold');
+
+    expect(gold, 'the build wants Gold, so it must appear').toBeDefined();
+    expect(
+      gold?.aboard,
+      'the mirror is the source this module calls primary — reading it from an empty table made the ' +
+        'page say the carrier held nothing',
+    ).toBe(300);
+    expect(gold?.toBuy, '500 wanted less 300 aboard').toBe(200);
   });
 });

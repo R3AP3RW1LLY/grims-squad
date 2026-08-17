@@ -3048,6 +3048,23 @@ model ColonyCarrier {
 /// haul with the app closed, so accumulating deltas drifts permanently from the first one missed.
 /// Each reading replaces the commodity's row outright, and a stale figure carries its own timestamp
 /// so a page can say how old it is rather than implying it is current.
+/// ★ SUPERSEDED, AND IT COST US — 2026-08-17 ★
+///
+/// NOTHING WRITES THIS TABLE. It has no INSERT anywhere in the repository and never has. Measured on
+/// production the day this note was written: 0 rows, against 34 in `ColonyCarrierCargo` and 5,745,190
+/// mirror rows in `market_entries`.
+///
+/// Two days after it was created the design split in two: the DECLARED half (journal, cAPI, a crew
+/// member's hand) went to `ColonyCarrierCargo`, and the MIRROR half — a carrier's public sell orders —
+/// was read straight from `market_entries` through the freshest catalogue key.
+///
+/// One query was left pointing here. The carrier combined-run page, whose entire purpose is to be the
+/// authoritative answer for one carrier across every build it serves, took its mirror tonnage from
+/// this empty table. It therefore read `aboard 0` and `still to buy: everything` for a carrier the
+/// project page showed as holding tens of thousands of tonnes — and its own comment claimed parity
+/// with that page.
+///
+/// Do not read this table. `carrier-cargo-is-dead.spec.ts` fails the build if anything does.
 model CarrierCargo {
   marketId  BigInt @map("market_id")
   commodity String

@@ -1227,9 +1227,44 @@ export class ColonyCarrierService {
       `SELECT commodity, source, tonnes FROM colony_carrier_cargo WHERE market_id = $1::bigint`,
       String(marketId),
     );
+    /*
+     * ★ THIS READ A TABLE NOTHING HAS EVER WRITTEN — 2026-08-17 ★
+     *
+     * It was `SELECT commodity, tonnes FROM carrier_cargo`. That table is created by the 2026-08-02
+     * migration, carries an index, is selected here — and has no INSERT anywhere in the repository.
+     * Measured on production: 0 rows, against 34 in `colony_carrier_cargo` and 5,745,190 mirror rows
+     * in `market_entries`.
+     *
+     * It is the superseded 2026-08-02 design. Two days later the declared half moved to
+     * `colony_carrier_cargo` and the mirror half to `market_entries`, and this one query was left
+     * pointing at the corpse. So `mirror` has been NULL on this page for every carrier since — the
+     * combined-run screen, whose whole purpose is to be the authoritative answer for one carrier,
+     * has been blind to the source the file header calls the primary one.
+     *
+     * The comment directly above claiming parity with the project page was false about this input.
+     *
+     * ★ READ THE WAY `forProject` READS IT ★
+     *
+     * Same shape, and it has to be: one carrier has MANY catalogue rows — a new one for every system
+     * it has ever jumped to — so joining naively counts the hold once per berth. `FRESHEST_KEY`
+     * collapses a market id to the single key whose market we saw most recently, which is the
+     * correction recorded at length above `FRESHEST_KEY` itself (6,600 t of CMM Composite reading as
+     * 21,120 t).
+     */
     const mirrorRows = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
-      `SELECT commodity, tonnes FROM carrier_cargo WHERE market_id = $1::bigint`,
+      `WITH carriers AS (${carrierStation(2)}),
+            keys AS (
+              SELECT DISTINCT ON (c.market_id) c.market_id, c.ext_key
+                FROM carriers c${FRESHEST_KEY}
+               WHERE c.market_id = $1
+               ORDER BY c.market_id, f.seen_at DESC NULLS LAST, c.ext_key
+            )
+       SELECT m.commodity, m.supply AS tonnes
+         FROM market_entries m
+         JOIN keys k ON k.ext_key = m.station_key
+        WHERE m.supply > 0`,
       String(marketId),
+      CARRIER_STATION_TYPES,
     );
 
     const pick = (commodity: string, source: string): number | null => {
