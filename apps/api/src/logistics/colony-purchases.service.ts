@@ -72,6 +72,14 @@ export interface PurchaseLine {
 /** A stop somebody could fly to, before the route decides whether it is worth it. */
 export interface RouteCandidate {
   readonly stationName: string;
+  /**
+   * Whose station it is, for the ranking. Null means "not ours, or we do not know".
+   *
+   * Required rather than optional on purpose: `BuySource` demands it, and an optional field here
+   * would let a call site forget it and silently rank every station as unowned — the exact shape of
+   * failure this module keeps producing.
+   */
+  readonly ownership: 'squadron' | 'member' | null;
   /** The station's OWN system — what a member pastes into the galaxy map. Never the build's. */
   readonly systemName: string;
   /** Light years from the build. Null when we cannot place one end of it. */
@@ -321,7 +329,19 @@ export class ColonyPurchasesService {
    * because a route that quietly omits Ceramic Composites reads as "you can buy everything here",
    * and somebody flies the whole trip and comes home still needing it.
    */
-  async forProject(projectId: string): Promise<{
+  /**
+   * `order` is the member's sort choice, carried from the page.
+   *
+   * ★ A TOGGLE, NOT A DEFAULT — SQUADRON OWNER, 2026-08-17 ★
+   *
+   * Asked whether a squadron station 200 ly away should outrank a neutral one 10 ly away, the answer
+   * was to show both orderings and let the member decide. Undefined means "ours first", which is the
+   * ordering the criteria describe and the one a page renders before anybody touches the control.
+   */
+  async forProject(
+    projectId: string,
+    order?: 'ours' | 'closest' | undefined,
+  ): Promise<{
     readonly systemName: string;
     readonly stations: readonly PurchaseStation[];
     /** Wanted, but on no stop of this route. Said plainly rather than omitted. */
@@ -525,6 +545,12 @@ export class ColonyPurchasesService {
       );
     }
 
+    /*
+     * Resolved once for the whole route rather than per station: it is two small reads, and asking
+     * per candidate would turn a ranking into a query storm on a page members load constantly.
+     */
+    const owned = await this.#stationOwnership();
+
     const route = planRoute(
       new Set(wanted.keys()),
       [...places.values()].map((p) => ({
@@ -532,9 +558,14 @@ export class ColonyPurchasesService {
         systemName: p.system,
         distanceLy: p.ly,
         isOrbital: p.isOrbital,
+        ownership: owned.get(p.name.trim().toLowerCase()) ?? null,
         lines: [...p.lines.values()],
       })),
-      { buildSystem: systemName ?? '', architectedSystems: await this.#architectedSystems() },
+      {
+        buildSystem: systemName ?? '',
+        architectedSystems: await this.#architectedSystems(),
+        ...(order === undefined ? {} : { order }),
+      },
     );
 
     return { systemName, stations: route.stations, uncovered: route.uncovered };
@@ -585,6 +616,69 @@ export class ColonyPurchasesService {
     }
 
     return systems;
+  }
+
+  /**
+   * Which stations are ours, keyed by station NAME lower-cased.
+   *
+   * ★ SQUADRON OWNER, 2026-08-17 ★
+   *
+   * "1 squadron owned stations, 2. squadron owned members stations, then closest stations to the
+   * build project"
+   *
+   * ★ TWO SOURCES, BOTH ASKED FOR ★
+   *
+   * A station we BUILT is derivable and cannot go stale: a completed squadron colonisation project
+   * makes a squadron station, a member's project makes a member station. That covers everything we
+   * made ourselves and needs nobody to maintain it.
+   *
+   * An officer's claim covers the rest — a station we hold but never built here — and overrides the
+   * derived answer when it is wrong, which is why it is applied SECOND.
+   *
+   * Keyed on the station name because that is what a purchase row and a market row both carry; the
+   * catalogue key is not available on every path that needs to rank.
+   *
+   * Fails soft, like `#architectedSystems` beside it: a ranking that loses its ownership hints still
+   * ranks by distance, and a shopping list is worth more than a perfect sort.
+   */
+  async #stationOwnership(): Promise<ReadonlyMap<string, 'squadron' | 'member'>> {
+    const owned = new Map<string, 'squadron' | 'member'>();
+
+    try {
+      // Built by us. `owner` is the project's own column: 'squadron' or 'member'.
+      const built = await this.db.$queryRawUnsafe<Array<{ station_name: string; owner: string }>>(
+        `SELECT station_name, owner::text AS owner
+           FROM colony_projects
+          WHERE station_name IS NOT NULL AND station_name <> ''`,
+      );
+      for (const row of built) {
+        owned.set(row.station_name.trim().toLowerCase(), row.owner === 'squadron' ? 'squadron' : 'member');
+      }
+    } catch {
+      // Left as it is — see the header.
+    }
+
+    try {
+      /*
+       * The officer's list, applied AFTER the derived one so a claim wins. `withdrawn_at IS NULL`
+       * because a withdrawn claim is kept as a record of who said what rather than deleted.
+       *
+       * The key is a catalogue key, `"<systemAddress>/<stationName>"`, so the station name is the
+       * part after the separator — the same split the carrier queries use.
+       */
+      const claimed = await this.db.$queryRawUnsafe<Array<{ station_key: string; ownership: string }>>(
+        `SELECT station_key, ownership FROM station_ownership_claims WHERE withdrawn_at IS NULL`,
+      );
+      for (const row of claimed) {
+        const name = row.station_key.split('/').slice(1).join('/').trim().toLowerCase();
+        if (name === '') continue;
+        if (row.ownership === 'squadron' || row.ownership === 'member') owned.set(name, row.ownership);
+      }
+    } catch {
+      // Same.
+    }
+
+    return owned;
   }
 
   /** Records what somebody found. Re-declaring the same commodity at the same station updates it. */

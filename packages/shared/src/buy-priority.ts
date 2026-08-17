@@ -44,7 +44,30 @@ export interface BuySource {
   readonly distanceLy: number | null;
   /** Null when we do not know what kind of port it is. Treated as ground — see `convenience`. */
   readonly isOrbital: boolean | null;
+  /**
+   * Whose station this is.
+   *
+   * ★ SQUADRON OWNER, 2026-08-17 ★
+   *
+   * "the buy locations should be accurate based on the following criteria. 1 squadron owned
+   * stations, 2. squadron owned members stations, then closest stations to the build project"
+   *
+   * `null` is "not ours, or we do not know" — the honest default for the ~318,000 stations in the
+   * catalogue we have no claim on. It is deliberately not `'neutral'`: an absent claim and a
+   * positive statement that a station is somebody else's are different facts, and only one of them
+   * is something this platform can actually assert.
+   */
+  readonly ownership: StationOwnership | null;
 }
+
+/**
+ * Whose a station is, for ranking.
+ *
+ * Two sources feed it, and the owner asked for both: stations the squadron BUILT through
+ * colonisation, which is derivable and cannot go stale, and an officer's own list, which covers the
+ * ones we hold but never built here. Either alone would miss real squadron property.
+ */
+export type StationOwnership = 'squadron' | 'member';
 
 export interface BuyContext {
   readonly buildSystem: string;
@@ -56,6 +79,20 @@ export interface BuyContext {
    * hold but never planned here. Either alone would miss real squadron space.
    */
   readonly architectedSystems: ReadonlySet<string>;
+  /**
+   * Which ordering the member asked for.
+   *
+   * ★ THE OWNER CHOSE A TOGGLE, NOT A DEFAULT — SQUADRON OWNER, 2026-08-17 ★
+   *
+   * Asked whether a squadron station 200 ly away should outrank a neutral one 10 ly away, the answer
+   * was: show both orderings and let the member choose. That is the right call — the answer genuinely
+   * depends on the trip, and picking one would be wrong half the time.
+   *
+   * `ours` puts squadron property first whatever the distance. `closest` sorts by distance and uses
+   * ownership only to break ties, so a member in a hurry is never sent across the bubble to shop at
+   * home.
+   */
+  readonly order?: 'ours' | 'closest' | undefined;
 }
 
 /**
@@ -65,8 +102,23 @@ export interface BuyContext {
  */
 const key = (name: string): string => name.trim().toLowerCase();
 
-/** 0 = the build's own system, 1 = squadron-architected, 2 = everywhere else. */
+/**
+ * 0 = the squadron's own station, 1 = a member's, 2 = the build's own system,
+ * 3 = squadron-architected, 4 = everywhere else.
+ *
+ * ★ OWNERSHIP OUTRANKS GEOGRAPHY, IN `ours` MODE ★
+ *
+ * Ours before a member's before anything else, because "we already own the pad" is a stronger reason
+ * to fly somewhere than "it is nearby" — the squadron's own market is the one whose stock and prices
+ * the squadron controls.
+ *
+ * The system bands below it are unchanged and still matter: among stations nobody owns, the build's
+ * own system beats architected space beats the rest of the bubble.
+ */
 function band(source: BuySource, context: BuyContext): number {
+  if (source.ownership === 'squadron') return 0;
+  if (source.ownership === 'member') return 1;
+
   const system = key(source.systemName);
 
   /*
@@ -74,13 +126,13 @@ function band(source: BuySource, context: BuyContext): number {
    * is the ORDINARY case, not an edge one. Testing membership first would rank the build's own
    * system as merely second.
    */
-  if (system === key(context.buildSystem)) return 0;
+  if (system === key(context.buildSystem)) return 2;
 
   for (const architected of context.architectedSystems) {
-    if (key(architected) === system) return 1;
+    if (key(architected) === system) return 3;
   }
 
-  return 2;
+  return 4;
 }
 
 /**
@@ -115,6 +167,19 @@ export function rankBuySources(
   context: BuyContext,
 ): readonly BuySource[] {
   return [...sources].sort((a, b) => {
+    /*
+     * ★ CLOSEST FIRST INVERTS THE TWO KEYS, IT DOES NOT DISCARD OWNERSHIP ★
+     *
+     * A member who asked for the nearest station still wants ours when two are equally close — that
+     * is a free preference, and throwing it away would make the toggle feel like it turned something
+     * off rather than reordered it.
+     */
+    if (context.order === 'closest') {
+      const byReach = reach(a) - reach(b);
+      if (byReach !== 0) return byReach;
+      return band(a, context) - band(b, context);
+    }
+
     const byBand = band(a, context) - band(b, context);
     if (byBand !== 0) return byBand;
 

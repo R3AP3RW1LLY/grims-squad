@@ -278,8 +278,16 @@ describe('P0.2 database schema', () => {
      * because a negative report writes no market data, so the half-hourly board rebuild would put
      * the bounty straight back and the next member would fly the same wasted trip. Declared in
      * ssot/03-data/schema.prisma as StationNoMarket; the migration was written from that model.
+     *
+     * 133 as of 2026-08-18: `station_ownership_claims`. Which stations the squadron or its members
+     * own, so "where to buy" can rank ours first. Colonisation-built stations are derivable from
+     * `colony_projects.owner`; this table is the other half the owner asked for — a station we hold
+     * but never built, and an officer's correction when the derived answer is wrong.
+     *
+     * Not a column on `knowledge_items`: that table is a mirror of the galaxy dump and the importer
+     * rewrites every row, so a claim there would last until the next import.
      */
-    expect(Number(r[0]?.n)).toBe(132);
+    expect(Number(r[0]?.n)).toBe(133);
   });
 
   describe('hand-written DDL that Prisma cannot express', () => {

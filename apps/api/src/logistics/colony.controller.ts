@@ -525,7 +525,11 @@ export class ColonyController {
    * and the page renders exactly as it does today.
    */
   @Get('projects/:id/purchases')
-  async purchaseCatalogue(@User() caller: CurrentUser | undefined, @Param('id') id: string) {
+  async purchaseCatalogue(
+    @User() caller: CurrentUser | undefined,
+    @Param('id') id: string,
+    @Query('order') order?: string,
+  ) {
     await this.#assert(
       caller,
       Permission.COLONY_VIEW,
@@ -536,7 +540,16 @@ export class ColonyController {
     // Not an error: a project outside the gate simply has no catalogue, and the page hides the panel.
     if (scope === null) return { systemName: null, stations: [], uncovered: [] };
 
-    return this.purchases.forProject(id);
+    /*
+     * The member's sort choice, carried through rather than decided here.
+     *
+     * ★ A TOGGLE, NOT A DEFAULT — SQUADRON OWNER, 2026-08-17 ★
+     *
+     * Asked whether a squadron station far away should outrank a neutral one nearby, the answer was
+     * to show both orderings and let the member choose. Anything other than `closest` means "ours
+     * first", so a missing or mistyped value lands on the ordering the criteria describe.
+     */
+    return this.purchases.forProject(id, order === 'closest' ? 'closest' : 'ours');
   }
 
   @Post('projects/:id/purchases')
