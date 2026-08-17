@@ -15,7 +15,21 @@ import { useEffect } from 'preact/hooks';
  * the game is exactly when they want the screen to be current, and exactly when it is least
  * likely to be.
  */
-export function useLive(load: () => void, everyMs = 60_000): void {
+/**
+ * ★ FIFTEEN SECONDS, NOT SIXTY — SQUADRON OWNER, 2026-08-17 ★
+ *
+ * "we can also increase the live polling of the journal entries to try to make this as real-time as
+ * possible, on both web and companion app".
+ *
+ * Every read behind this is a cached or indexed query the hub answers in milliseconds, and the
+ * screens that use it are open on one machine at a time — so four times the cadence is still a
+ * handful of requests a minute per member. What it buys is a carrier figure that follows a transfer
+ * while somebody is still looking at it.
+ *
+ * Callers that watch something genuinely slow still pass their own interval; this is only the
+ * default for screens whose numbers move on other people's hauling.
+ */
+export function useLive(load: () => void, everyMs = 15_000): void {
   useEffect(() => {
     const timer = setInterval(load, everyMs);
     const onFocus = (): void => load();
