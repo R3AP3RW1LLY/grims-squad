@@ -272,8 +272,14 @@ describe('P0.2 database schema', () => {
      * rows against 8,706 depot readings — so the website's player-holds column had no data behind
      * it and never had. Declared in ssot/03-data/schema.prisma as ColonyMemberHold; the migration
      * was written from that model.
+     *
+     * 132 as of 2026-08-17: `station_no_market`. A member's report that a station has no market at
+     * all — the other way a data bounty gets cleared. It has to be a table rather than a DELETE
+     * because a negative report writes no market data, so the half-hourly board rebuild would put
+     * the bounty straight back and the next member would fly the same wasted trip. Declared in
+     * ssot/03-data/schema.prisma as StationNoMarket; the migration was written from that model.
      */
-    expect(Number(r[0]?.n)).toBe(131);
+    expect(Number(r[0]?.n)).toBe(132);
   });
 
   describe('hand-written DDL that Prisma cannot express', () => {

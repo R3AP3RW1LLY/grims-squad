@@ -2,7 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { PrismaClient } from '@grims/db';
 // The key the WORKER writes when it rebuilds the board. Imported rather than spelled again here,
 // so a rename cannot leave the reader silently looking up a row that no longer exists.
-import { BOUNTY_ANCHOR_COUNT_KEY } from '@grims/shared';
+import { AppError, BOUNTY_ANCHOR_COUNT_KEY, ErrorCode } from '@grims/shared';
 
 /**
  * Reads for the Data Bounty board and the Data Runner leaderboard.
@@ -223,5 +223,95 @@ export class BountiesService {
       allTimePoints: row?.ap ?? 0,
       allTimeClaims: row?.ac ?? 0,
     };
+  }
+  /**
+   * "I flew there and there is no market."
+   *
+   * ★ SQUADRON OWNER, 2026-08-16 ★
+   *
+   * Paid the same as a market report, and trusted on one report from a verified commander.
+   *
+   * ★ WHY IT PAYS AT ALL ★
+   *
+   * The member did the work the bounty asked for: they flew out and found out. That the answer was
+   * "nothing here" is the fault of the board that sent them, not of the person who went — and a
+   * report that costs a trip and pays nothing is a report nobody files. Which leaves the bounty on
+   * the board for the next member to waste the same evening on.
+   *
+   * ★ WHY IT WRITES A ROW RATHER THAN JUST DELETING ONE ★
+   *
+   * A market upload clears a bounty by making the data fresh; the rebuild reads that freshness and
+   * does not re-list the station. This writes no market data, so the DELETE alone would be undone
+   * within thirty minutes. `station_no_market` is what the board builder reads, and it is what makes
+   * the report mean anything beyond one payment.
+   *
+   * ★ ONE STATEMENT, FIRST COME FIRST SERVED ★
+   *
+   * The same shape as `awardBounty`, deliberately: DELETE .. RETURNING feeds the INSERT, so whoever
+   * lands first consumes the board row and is paid from what the board promised at that moment. A
+   * second member reporting five minutes later gets nothing, because there is nothing left to
+   * report — a bounty pays exactly once however it is cleared.
+   */
+  async reportNoMarket(input: {
+    stationKey: string;
+    userId: string;
+  }): Promise<{ paid: boolean; stationName?: string; points?: number }> {
+    /*
+     * Verified commanders only, and checked HERE rather than in the controller — the rule is about
+     * who may make this claim, which is a property of the statement and not of the route. A caller
+     * who has not proved an identity to Frontier can still fly there; they just cannot be the one
+     * whose single word takes a station off the board.
+     */
+    const [verified] = await this.db.$queryRawUnsafe<Array<{ yes: number }>>(
+      `SELECT 1 AS yes FROM cmdr_verifications
+        WHERE user_id = $1::uuid AND revoked_at IS NULL LIMIT 1`,
+      input.userId,
+    );
+    if (verified === undefined) {
+      throw new AppError(
+        ErrorCode.PERMISSION_DENIED,
+        'Verify your commander name before reporting a station. One verified report takes it off ' +
+          'the board for everybody, so it has to be attached to a name.',
+      );
+    }
+
+    const rows = await this.db.$queryRawUnsafe<
+      Array<{ station_name: string; points: number }>
+    >(
+      `WITH won AS (
+         DELETE FROM data_bounties WHERE station_key = $1
+         RETURNING station_key, station_name, system_name, points
+       ),
+       remembered AS (
+         INSERT INTO station_no_market (station_key, station_name, system_name, reported_by_id)
+         SELECT station_key, station_name, system_name, $2::uuid FROM won
+         ON CONFLICT (station_key) DO UPDATE SET
+           reported_by_id = EXCLUDED.reported_by_id,
+           reported_at = now(),
+           cleared_at = NULL
+         RETURNING station_key
+       ),
+       banked AS (
+         INSERT INTO bounty_claims
+           (user_id, station_key, station_name, system_name, points, jackpot, days_stale)
+         SELECT $2::uuid, station_key, station_name, system_name, points, false, NULL FROM won
+         RETURNING station_name, points
+       )
+       SELECT station_name, points FROM banked`,
+      input.stationKey,
+      input.userId,
+    );
+
+    const claim = rows[0];
+    if (claim === undefined) {
+      /*
+       * No board row. Either somebody got there first or the station was never bountied — and both
+       * are "nothing to do" rather than errors. Said as a plain false so the surfaces can tell the
+       * member their trip was not wasted, somebody else simply reported it.
+       */
+      return { paid: false };
+    }
+
+    return { paid: true, stationName: claim.station_name, points: claim.points };
   }
 }

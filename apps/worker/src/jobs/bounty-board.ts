@@ -157,6 +157,26 @@ const HAS_NO_MARKET = `COALESCE(jsonb_typeof(k.data->'services') = 'array'
  */
 const IS_SETTLEMENT = `k.data->>'type' IN ('Settlement', 'OnFootSettlement')`;
 
+/**
+ * A station a member has flown to and reported has no market.
+ *
+ * ★ WHY THE BOARD HAS TO READ THIS AND NOT JUST TRUST THE DELETE ★
+ *
+ * Reporting one pays the member and removes the row, exactly as a market upload does. But an upload
+ * also makes the market data FRESH, which is what stops the next rebuild re-listing the station.
+ * A negative report writes no market data at all — so without this clause the bounty would be back
+ * within thirty minutes, the next member would fly the same wasted trip, and the report would have
+ * bought nothing but one payment.
+ *
+ * `cleared_at` is an officer overturning a report: the station returns from the next rebuild, which
+ * is the whole reversal mechanism. A report is trusted on one verified commander's word, and the
+ * answer to trusting people is not to stop, it is to be able to correct it.
+ */
+const REPORTED_NO_MARKET = `EXISTS (
+                    SELECT 1 FROM station_no_market nm
+                     WHERE nm.station_key = k.ext_key AND nm.cleared_at IS NULL
+                  )`;
+
 export async function rebuildBountyBoard(db: PrismaClient): Promise<BountyBoardReport> {
   return db.$transaction(
     async (tx) => {
@@ -305,6 +325,7 @@ export async function rebuildBountyBoard(db: PrismaClient): Promise<BountyBoardR
                   -- A station with no market cannot be refreshed, so a bounty on it never clears.
                   AND NOT ${HAS_NO_MARKET}
                   AND NOT ${IS_SETTLEMENT}
+                  AND NOT ${REPORTED_NO_MARKET}
                   AND (s.last_seen IS NULL
                        OR s.last_seen < now() - interval '${BELIEVABLE_DAYS} days')
               ) scored
@@ -374,6 +395,7 @@ export async function rebuildBountyBoard(db: PrismaClient): Promise<BountyBoardR
                  -- marketless station straight back on the board.
                  AND NOT ${HAS_NO_MARKET}
                  AND NOT ${IS_SETTLEMENT}
+                 AND NOT ${REPORTED_NO_MARKET}
               ) scored
           ) ranked
          WHERE rank_in_system <= ${PER_SYSTEM_LIMIT}

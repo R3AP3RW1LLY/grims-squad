@@ -1,4 +1,4 @@
-import { Controller, Get, Inject, Query, Req } from '@nestjs/common';
+import { Body, Controller, Get, Inject, Post, Query, Req } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
 import { AppError, ErrorCode, Permission } from '@grims/shared';
 import { Public } from '../auth/auth.guard.js';
@@ -68,5 +68,26 @@ export class BountiesDeviceController {
       throw new AppError(ErrorCode.VALIDATION_FAILED, 'month must look like 2026-08.');
     }
     return result;
+  }
+  /**
+   * "I flew there and there is no market."
+   *
+   * ★ THE SAME FEATURE AS THE WEBSITE'S, ON THE SURFACE THAT IS ACTUALLY OPEN ★
+   *
+   * A member discovers a station has no market while sitting in it. Making them alt-tab to a
+   * browser to say so is how a report does not get filed — and an unfiled report leaves the bounty
+   * on the board for the next member to waste the same evening on.
+   *
+   * The rule about WHO may make the claim lives in the service, so both surfaces get it without
+   * either restating it.
+   */
+  @Post('no-market')
+  async reportNoMarket(@Req() req: FastifyRequest, @Body() body: { stationKey?: string }) {
+    const caller = await this.#caller(req);
+    const stationKey = (body.stationKey ?? '').trim();
+    if (stationKey === '') {
+      throw new AppError(ErrorCode.VALIDATION_FAILED, 'Name the station you flew to.');
+    }
+    return this.bounties.reportNoMarket({ stationKey, userId: caller.userId });
   }
 }

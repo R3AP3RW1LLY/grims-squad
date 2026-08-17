@@ -1,7 +1,9 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import type { BountyRow } from '../../../lib/api';
+import { apiPost } from '../../../lib/api-client';
 
 /**
  * The two bounty tables, filterable in the browser.
@@ -118,6 +120,19 @@ export function BountyBoardTables({
               {kind === 'ops' ? <th className={TH}>From ops</th> : null}
               <th className={TH}>Data age</th>
               <th className={`${TH} text-right`}>Points</th>
+              {/*
+                ★ THE OTHER WAY A BOUNTY GETS CLEARED — SQUADRON OWNER, 2026-08-16 ★
+
+                Measured the morning this shipped: 72 of the 496 bounties on the board were on
+                stations with NO MARKET. Flying to one found nothing to report, so nothing could
+                refresh it, so it sat at the top of the board for ever — and the next member wasted
+                the same evening.
+
+                The filters shipped alongside remove the ones the catalogue knows about. The
+                catalogue is a galaxy dump and it is wrong about some stations; the member in the
+                cockpit is the only source that can settle it.
+              */}
+              <th className={`${TH} text-right`}>Nothing there?</th>
             </tr>
           </thead>
           <tbody>
@@ -145,6 +160,9 @@ export function BountyBoardTables({
                   {ageOf(r)}
                 </td>
                 <td className={`${TD} text-right font-mono`}>{r.points.toLocaleString()}</td>
+                <td className={`${TD} text-right`}>
+                  <NoMarketButton row={r} />
+                </td>
               </tr>
             ))}
           </tbody>
@@ -156,6 +174,67 @@ export function BountyBoardTables({
         </p>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * "I flew there and there is no market."
+ *
+ * ★ IT PAYS THE SAME AS A MARKET REPORT — SQUADRON OWNER, 2026-08-16 ★
+ *
+ * The member did the work the bounty asked for: they flew out and found out. That the answer was
+ * "nothing here" is the fault of the board that sent them, and a report that costs a trip and pays
+ * nothing is a report nobody files — which leaves the bounty there for the next member.
+ *
+ * Confirmed before it fires, because it takes the station off the board for EVERYBODY on one
+ * person's word. That is the deal the owner chose — one report from a verified commander — and the
+ * price of trusting people is that the button has to say what it does before it does it.
+ */
+function NoMarketButton({ row }: { row: BountyRow }) {
+  const router = useRouter();
+  const [busy, setBusy] = useState(false);
+  const [said, setSaid] = useState<string | null>(null);
+
+  if (said !== null) {
+    return <span className="font-mono text-[10px] text-[var(--color-text-secondary)]">{said}</span>;
+  }
+
+  const report = async (): Promise<void> => {
+    const ok = window.confirm(
+      `Report that ${row.stationName} has no market?
+
+` +
+        'This takes it off the board for everybody and pays you the ' +
+        `${row.points.toLocaleString()} points the bounty was worth. An officer can put it back.`,
+    );
+    if (!ok) return;
+
+    setBusy(true);
+    try {
+      const out = await apiPost<{ paid: boolean; points?: number }>('/v1/bounties/no-market', {
+        stationKey: row.stationKey,
+      });
+      // Two different truths. "Somebody beat you to it" is not a failure and must not read as one.
+      setSaid(out.paid ? `+${(out.points ?? 0).toLocaleString()}` : 'already reported');
+      router.refresh();
+    } catch (err) {
+      // The hub's own sentence — it names what would make this a yes.
+      setSaid(err instanceof Error ? err.message : 'That did not work.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <button
+      type="button"
+      disabled={busy}
+      onClick={() => void report()}
+      title="Report that this station has no commodity market. Pays the same as a market report."
+      className="rounded border border-[var(--color-border-hairline)] px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.14em] text-[var(--color-text-secondary)] transition-colors hover:border-[var(--color-semantic-warning)] hover:text-[var(--color-semantic-warning)] disabled:opacity-40"
+    >
+      {busy ? '…' : 'No market'}
+    </button>
   );
 }
 

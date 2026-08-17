@@ -165,6 +165,7 @@ contextBridge.exposeInMainWorld('shipyard', {
 
 contextBridge.exposeInMainWorld('bounties', {
   board: () => ipcRenderer.invoke('bountyBoard'),
+  noMarket: (stationKey: string) => ipcRenderer.invoke('bountyNoMarket', stationKey),
   leaderboard: (month?: string) => ipcRenderer.invoke('bountyLeaderboard', month),
 });
 

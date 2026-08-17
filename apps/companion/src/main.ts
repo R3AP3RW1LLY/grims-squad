@@ -59,7 +59,7 @@ import {
   setCarrierCargo,
   type CurrentBuild,
 } from './hub-colony.js';
-import { bountyBoard, bountyLeaderboard } from './hub-bounties.js';
+import { bountyBoard, bountyLeaderboard, reportNoMarket } from './hub-bounties.js';
 import { leaderboardBoard } from './hub-leaderboards.js';
 import { miningRings, miningSessions, miningValuation, type HoldValue } from './hub-mining.js';
 import { holdOf, worthAsking } from './cargo-value.js';
@@ -1943,6 +1943,9 @@ if (!app.requestSingleInstanceLock()) {
     // cannot disagree — see hub-commander.ts.
     ipcMain.handle('commanderLocation', () => commanderLocation(hub()));
     ipcMain.handle('bountyBoard', () => bountyBoard(hub()));
+    ipcMain.handle('bountyNoMarket', (_e, stationKey: unknown) =>
+      reportNoMarket(hub(), typeof stationKey === 'string' ? stationKey : ''),
+    );
     ipcMain.handle('tradeCommodity', (_e, name: unknown, query: unknown) => {
       if (typeof name !== 'string' || name === '') {
         return { ok: false as const, error: 'No commodity asked for.' };
