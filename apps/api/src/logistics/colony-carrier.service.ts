@@ -176,6 +176,63 @@ export function carrierCover(
 }
 
 /**
+ * What each carrier effectively holds, per commodity, WITH the carrier still attached to the figure.
+ *
+ * ★ THE OVERLAY WAS READING THE MIRROR ALONE — 2026-08-17 ★
+ *
+ * The in-game overlay built its carrier column straight from `c.holds`, which is only the market
+ * mirror: a carrier's public SELL ORDERS. Cargo staged for a build is exactly the cargo that is NOT
+ * on sale — the reason the journal, cAPI and manual sources exist at all — so the panel a member
+ * reads in the seconds before opening a commodity market was blind to all three.
+ *
+ * The route never called `carrierCover`, though the same controller imports it and uses it on the
+ * project-detail route two hundred lines away. Same data, same file, two different answers.
+ *
+ * ★ WHY THIS IS NOT JUST `carrierCover` ★
+ *
+ * That one sums across carriers and returns commodity totals. The overlay needs "WHO has it and how
+ * much" — a few hundred pixels over a cockpit is no place for a carrier's full record, but the
+ * callsign is the whole point: it tells a member which carrier to dock at.
+ *
+ * So the merge is applied per (carrier, commodity) exactly as `carrierCover` applies it, and the
+ * identity is kept. Sharing `effectiveTonnes` rather than restating the precedence, because a third
+ * copy of the rule would be wrong the first time it changed — which is precisely how the overlay
+ * came to disagree with the page above it.
+ */
+export function carrierHoldLines(
+  carriers: ReadonlyArray<Pick<AttachedCarrier, 'holds' | 'declared' | 'callsign' | 'name'>>,
+): Array<{ commodity: string; tonnes: number; carrier: string }> {
+  const lines: Array<{ commodity: string; tonnes: number; carrier: string }> = [];
+
+  for (const carrier of carriers) {
+    const commodities = new Set<string>([
+      ...carrier.holds.map((h) => h.commodity),
+      ...carrier.declared.map((d) => d.commodity),
+    ]);
+
+    for (const commodity of commodities) {
+      const declared = (source: string) =>
+        carrier.declared.find((d) => d.source === source && d.commodity === commodity);
+
+      const tonnes = effectiveTonnes({
+        manual: declared('manual')?.tonnes ?? null,
+        capi: declared('capi')?.tonnes ?? null,
+        journal: declared('journal')?.tonnes ?? null,
+        mirror: carrier.holds.find((h) => h.commodity === commodity)?.tonnes ?? null,
+      });
+
+      // Zero is not worth a row on a panel this small: "somebody has none of it" is not news, and a
+      // cAPI or manual zero is exactly that statement.
+      if (tonnes > 0) {
+        lines.push({ commodity, tonnes, carrier: carrier.callsign ?? carrier.name });
+      }
+    }
+  }
+
+  return lines;
+}
+
+/**
  * One of the asking member's own carriers, holding cargo this build wants, not yet attached to it.
  *
  * Grouped per carrier rather than per commodity because that is the unit the prompt is about and

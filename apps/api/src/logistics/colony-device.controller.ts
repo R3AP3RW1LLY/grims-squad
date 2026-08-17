@@ -20,7 +20,7 @@ import { ColonyService, type ColonyOwner } from './colony.service.js';
 import { ColonyRosterService } from './colony-roster.service.js';
 import { ColonyCatalogueService } from './colony-catalogue.service.js';
 import { ColonyPlanService } from './colony-plan.service.js';
-import { ColonyCarrierService, carrierCover } from './colony-carrier.service.js';
+import { ColonyCarrierService, carrierCover, carrierHoldLines } from './colony-carrier.service.js';
 import { ColonyPurchasesService } from './colony-purchases.service.js';
 import { ColonyPlanReviewService } from './colony-plan-review.service.js';
 import { MARKET_STORE } from './logistics.tokens.js';
@@ -660,13 +660,22 @@ export class ColonyDeviceController {
          * Flattened to commodity and tonnes, and named by callsign. The overlay is a few hundred
          * pixels over a cockpit: it needs "who has it and how much", not a carrier's full record.
          */
-        carrierHolds: carriers.flatMap((c) =>
-          c.holds.map((h) => ({
-            commodity: h.commodity,
-            tonnes: h.tonnes,
-            carrier: c.callsign ?? c.name,
-          })),
-        ),
+        /*
+         * ★ THIS READ `c.holds` AND NOTHING ELSE — 2026-08-17 ★
+         *
+         * `holds` is only the market MIRROR: a carrier's public sell orders. Cargo staged for a build
+         * is exactly the cargo that is NOT on sale, which is the reason the journal, cAPI and manual
+         * sources exist at all — so the panel a member reads in the seconds before opening a
+         * commodity market was blind to all three.
+         *
+         * This controller already imports `carrierCover` and applies the merge on the project-detail
+         * route two hundred lines above. Same data, same file, two different answers, and the overlay
+         * showed the smaller one.
+         *
+         * `carrierHoldLines` applies the same rule per (carrier, commodity) and keeps the callsign,
+         * because which carrier to dock at is the whole point of naming one.
+         */
+        carrierHolds: carrierHoldLines(carriers),
       },
     };
   }
