@@ -3101,9 +3101,29 @@ model CarrierCargo {
 /// corrected a figure by hand must not undo the correction. The EFFECTIVE value — what the shopping
 /// maths reads — is:
 ///
-///     manual if declared, else capi if present, else max(journal, market-mirror supply)
+///     manual if declared,
+///     else whichever of journal / capi spoke MOST RECENTLY (journal takes ties):
+///       - journal leading -> a floor: max(journal, market-mirror supply)
+///       - capi leading    -> replaces outright, including a ZERO
+///     else market-mirror supply
 ///
 /// Manual wins outright because it is the only source that can say "this figure is wrong".
+///
+/// * THE JOURNAL LEADS WHILE THE APP IS WATCHING - SQUADRON OWNER, 2026-08-17 *
+///
+/// "tracked via both journals and capi depending on if the companion app is seeing the journal
+/// entries, the priority must be companion app journal ingestion, if nothing because a member is
+/// playing on a cloud service, then it should default to cAPI."
+///
+/// That cannot be a fixed rank: "is the app seeing entries" is a question about TIME. So the two
+/// argue by RECENCY and the journal takes ties. A member flying with the app open emits entries
+/// continuously and leads by themselves; a member on a cloud platform emits none, so Frontier's
+/// ten-minute poll is always the newer statement and takes over unaided. Nothing detects the
+/// platform and nothing is configured.
+///
+/// Measured the day this changed: carrier W8K-W1Y held eighteen journal rows reading ZERO, written
+/// by an app that had not run in two days, while its owner's carrier was full. Under a fixed rank
+/// those zeros were permanent. Under recency they lose the moment Frontier is asked.
 ///
 /// ★ WHY cAPI SITS ABOVE THE FLOORS RATHER THAN AMONG THEM — 2026-08-16 ★
 ///

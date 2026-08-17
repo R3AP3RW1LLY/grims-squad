@@ -96,6 +96,56 @@ afterAll(async () => {
 });
 
 describe('the carrier poll store, against Postgres', () => {
+  it('★ MANDATORY: a linked member with NO recorded carrier ownership is still polled ★', async () => {
+    /*
+     * ★ THE FILTER THAT REDUCED THIS FEATURE TO NOTHING — 2026-08-17 ★
+     *
+     * `candidates()` used to require the member to be "plausibly connected" to a carrier on a live
+     * build — either they had pushed a manifest for it (`colony_carrier_cargo.updated_by_id`) or
+     * they had attached it (`colony_carriers.added_by_id`).
+     *
+     * The first half is empty by construction: `updated_by_id` was NULL on the journal path until
+     * the day before this, so 31 of production's 34 rows carry no owner — and no amount of polling
+     * fills that in, because filling it in is what the polling was for.
+     *
+     * Measured on production: 7 members with a live cAPI link, ONE candidate, ZERO cAPI rows ever
+     * written. Members with full carriers watched the boards show a fraction of their cargo.
+     *
+     * The scope the squadron owner chose — only carriers attached to LIVE builds — is unchanged and
+     * is enforced where it belongs, in `isAttachedToLiveBuild` before anything is stored. This list
+     * is only "whose carrier may we ask about", and Frontier answers that itself: /fleetcarrier
+     * returns the caller's own carrier and nobody else's.
+     */
+    await clean();
+    const [u] = await db.$queryRawUnsafe<Array<{ id: string }>>(
+      `INSERT INTO users (handle, display_name) VALUES ($1, $1)
+       ON CONFLICT (handle) DO UPDATE SET display_name = EXCLUDED.display_name RETURNING id`,
+      `${TAG}-lonely`,
+    );
+    const userId = (u as { id: string }).id;
+
+    // A live Frontier link, and NOTHING ELSE. No carrier attached by them, no manifest pushed by
+    // them — exactly the state six of production's seven linked members are in.
+    await db.$executeRawUnsafe(
+      // `decode(...)` rather than a bytea literal: the escaped form has to survive a template
+      // literal, a JS string and Postgres's own parser, and it did not.
+      `INSERT INTO cmdr_verifications (user_id, cmdr_name, method, trust_tier, verified_at, fdev_refresh_enc)
+       VALUES ($1::uuid, $2, 'fdev_capi', 3, now(), decode('00', 'hex'))`,
+      userId,
+      `${TAG}-lonely`,
+    );
+
+    const who = await store.candidates();
+
+    expect(
+      who.map((c) => c.userId),
+      'a member whose carrier nobody has recorded is exactly the member worth asking Frontier about',
+    ).toContain(userId);
+
+    await db.$executeRawUnsafe(`DELETE FROM cmdr_verifications WHERE user_id = $1::uuid`, userId);
+    await db.$executeRawUnsafe(`DELETE FROM users WHERE id = $1::uuid`, userId);
+  });
+
   it('★ MANDATORY: every query runs — the table and column names are real ★', async () => {
     /*
      * The whole point of an integration spec here. `candidates` alone touches five tables and two

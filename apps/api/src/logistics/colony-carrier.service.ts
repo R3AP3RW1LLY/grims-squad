@@ -102,43 +102,147 @@ export interface AttachedCarrier {
  *
  *   manual   a crew member's own hand. The only source that can say "this figure is wrong",
  *            so it wins outright — including a manual ZERO, which retires a stale claim.
- *   capi     Frontier's own manifest for the carrier. Not a floor — see below.
- *   journal  what the owner's app actually watched move. A floor: it misses whatever moved
- *            while the app was closed.
- *   mirror   the carrier's public sell orders. Also a floor: staged cargo is exactly the
- *            cargo that is not on sale.
+ *   journal  what the owner's app actually watched move, live, as it moved.
+ *   capi     Frontier's own manifest for the carrier — the whole hold, but only as recent as the
+ *            last poll.
+ *   mirror   the carrier's public sell orders. A floor: staged cargo is exactly the cargo that is
+ *            not on sale.
  *
- * ★ WHY cAPI IS NOT A FLOOR, AND WHY THAT IS THE WHOLE POINT ★
+ * ★ THE JOURNAL LEADS WHEN IT IS WATCHING — SQUADRON OWNER, 2026-08-17 ★
  *
- * The journal and the mirror are both LOWER BOUNDS: each knows some of what is aboard and cannot
- * distinguish "sold" from "nobody looked". That is why they argue by size — the larger is the
- * better floor.
+ * "this is something that should be tracked via both journals and capi depending on if the companion
+ * app is seeing the journal entries, the priority must be companion app journal ingestion, if nothing
+ * because a member is playing on a cloud service, then it should default to cAPI."
  *
- * Frontier answers with the COMPLETE manifest. A commodity absent from it is absent from the hold,
- * which makes it the only source that can prove a hold empty. So it REPLACES the two floors rather
- * than joining their argument: `max`-ing it with a fortnight-old journal reading would throw away
- * the one thing it can say that nothing else can, and the board would keep promising cargo that was
- * sold days ago — which is the wasted trip this module keeps reinventing under new names.
+ * That cannot be expressed as a fixed rank. "Is the app seeing entries" is a question about TIME, so
+ * the rule is recency: between the journal and Frontier, whichever spoke most recently wins, and the
+ * journal takes ties.
  *
- * ★ AND THE HAND STILL BEATS IT — SQUADRON OWNER, 2026-08-16 ★
+ * A member flying with the app open produces journal entries every few minutes, so the journal leads
+ * — which is right, because it watched the cargo move rather than sampling the result ten minutes
+ * later. A member on a cloud platform produces none at all, so Frontier's manifest is always the
+ * newer statement and takes over by itself. Nothing has to detect the platform, and nothing has to be
+ * configured; the two sources simply sort themselves by who spoke last.
  *
- * Asked directly where Frontier should rank, the answer was above the journal and below the hand.
- * A member standing on the deck can always correct the board; the cost is that a stale hand-typed
- * figure outlives a live one, and that is the trade that was chosen.
+ * ★ AND IT FIXES WHAT A FIXED RANK COULD NOT ★
+ *
+ * Measured on production the day this changed: carrier W8K-W1Y carried eighteen journal rows reading
+ * ZERO, written on 2026-08-15 by an app that has not run since. Under a fixed rank those zeros were
+ * either permanent floors or permanently beaten. Under recency they lose the moment Frontier is
+ * asked, and win again the moment their owner opens the app.
+ *
+ * ★ WHAT EACH ANSWER MEANS WHEN IT WINS ★
+ *
+ * A cAPI reading REPLACES the mirror: it is a complete manifest, so a commodity absent from it is
+ * absent from the hold, and that is the only way the board can ever say a hold is empty.
+ *
+ * A journal reading is a FLOOR: it knows what it watched and nothing about what moved while it was
+ * closed, so it argues with the mirror by size and the larger wins.
  *
  * Exported pure so the rule is spec-tested without a database, and so nobody re-derives it in a
  * component.
  */
-export function effectiveTonnes(sources: {
+export interface CargoSources {
   readonly manual: number | null;
   readonly capi: number | null;
+  /**
+   * When Frontier last answered for this carrier. Null when it never has.
+   *
+   * ★ REQUIRED, NOT OPTIONAL, AND DELIBERATELY SO ★
+   *
+   * These two dates ARE the rule. Made optional first, and every call site compiled without them —
+   * which silently reduced the whole thing back to a fixed rank with nothing to notice. That is the
+   * exact shape of half the defects found in this module: a correct rule nothing reaches.
+   *
+   * Required, so the compiler asks the question at every call site.
+   */
+  readonly capiAt: Date | null;
   readonly journal: number | null;
+  /** When the owner's app last reported this commodity. Null when it never has. */
+  readonly journalAt: Date | null;
   readonly mirror: number | null;
-}): number {
+}
+
+export function effectiveTonnes(sources: CargoSources): number {
   if (sources.manual !== null) return Math.max(0, sources.manual);
-  // Replaces, never argues — a cAPI zero is a statement, not a missing reading.
-  if (sources.capi !== null) return Math.max(0, sources.capi);
-  return Math.max(0, sources.journal ?? 0, sources.mirror ?? 0);
+
+  const hasJournal = sources.journal !== null;
+  const hasCapi = sources.capi !== null;
+
+  /*
+   * Recency decides, and the journal takes ties — including the case where neither carries a date,
+   * which is how rows written before this rule existed behave. "The app is watching" is the
+   * condition the owner asked to lead, so an unclear tie resolves that way.
+   */
+  const journalLeads =
+    hasJournal &&
+    (!hasCapi ||
+      sources.capiAt == null ||
+      sources.journalAt == null ||
+      sources.journalAt.getTime() >= sources.capiAt.getTime());
+
+  if (journalLeads) {
+    // A floor: it saw what it saw. The mirror may know about cargo the app never watched.
+    return Math.max(0, sources.journal ?? 0, sources.mirror ?? 0);
+  }
+
+  // A complete manifest replaces the floor outright — a cAPI zero is a statement, not an absence.
+  if (hasCapi) return Math.max(0, sources.capi ?? 0);
+
+  return Math.max(0, sources.mirror ?? 0);
+}
+
+/**
+ * What ONE carrier is holding of what a build still wants, through the merge rule.
+ *
+ * ★ THE ROW AND THE SUMMARY DISAGREED ON THE SAME PAGE — 2026-08-17 ★
+ *
+ * Reported: members with full carriers see only some of their cargo. This is one of the reasons.
+ *
+ * Each carrier's "N t towards this build" was `mine.reduce(sum of supply)` — the MARKET MIRROR
+ * alone. A mirror sees SELL ORDERS, and cargo staged for a build is exactly the cargo that is not
+ * on sale, so the figure was blind to the journal, to a crew member's hand and to Frontier.
+ *
+ * Measured on production: carrier W8K-W1Y had one mirror commodity (CMM Composite, 3,465 t) and
+ * held Steel 20,261 t and Aluminium 858 t besides. The row said 3,465 t while the summary line
+ * directly above it — which has always used the merged `carrierCover` — counted the lot.
+ *
+ * Two numbers about one hold, on one page, from two different rules. Now there is one rule.
+ */
+export function carrierTotalToward(
+  carrier: Pick<AttachedCarrier, 'holds' | 'declared'>,
+  wanted: ReadonlySet<string>,
+): number {
+  const commodities = new Set<string>([
+    ...carrier.holds.map((h) => h.commodity),
+    ...carrier.declared.map((d) => d.commodity),
+  ]);
+
+  let total = 0;
+  for (const commodity of commodities) {
+    /*
+     * Only what this build asked for. The declared rows are deliberately NOT filtered to the build's
+     * needs when they are fetched — a manual zero on a settled commodity is still worth showing —
+     * so the filter belongs here, where the question is "towards THIS build".
+     */
+    if (!wanted.has(commodity.toLowerCase())) continue;
+
+    const declared = (source: string) =>
+      carrier.declared.find((d) => d.source === source && d.commodity === commodity);
+    const capiRow = declared('capi');
+    const journalRow = declared('journal');
+
+    total += effectiveTonnes({
+      manual: declared('manual')?.tonnes ?? null,
+      capi: capiRow?.tonnes ?? null,
+      capiAt: capiRow?.updatedAt ?? null,
+      journal: journalRow?.tonnes ?? null,
+      journalAt: journalRow?.updatedAt ?? null,
+      mirror: carrier.holds.find((h) => h.commodity === commodity)?.tonnes ?? null,
+    });
+  }
+
+  return total;
 }
 
 /**
@@ -162,10 +266,15 @@ export function carrierCover(
         carrier.declared.find((d) => d.source === source && d.commodity === commodity);
       const mirror = carrier.holds.find((h) => h.commodity === commodity);
 
+      const capiRow = declared('capi');
+      const journalRow = declared('journal');
+
       const tonnes = effectiveTonnes({
         manual: declared('manual')?.tonnes ?? null,
-        capi: declared('capi')?.tonnes ?? null,
-        journal: declared('journal')?.tonnes ?? null,
+        capi: capiRow?.tonnes ?? null,
+        capiAt: capiRow?.updatedAt ?? null,
+        journal: journalRow?.tonnes ?? null,
+        journalAt: journalRow?.updatedAt ?? null,
         mirror: mirror?.tonnes ?? null,
       });
       if (tonnes > 0) cover[commodity] = (cover[commodity] ?? 0) + tonnes;
@@ -214,10 +323,15 @@ export function carrierHoldLines(
       const declared = (source: string) =>
         carrier.declared.find((d) => d.source === source && d.commodity === commodity);
 
+      const capiRow = declared('capi');
+      const journalRow = declared('journal');
+
       const tonnes = effectiveTonnes({
         manual: declared('manual')?.tonnes ?? null,
-        capi: declared('capi')?.tonnes ?? null,
-        journal: declared('journal')?.tonnes ?? null,
+        capi: capiRow?.tonnes ?? null,
+        capiAt: capiRow?.updatedAt ?? null,
+        journal: journalRow?.tonnes ?? null,
+        journalAt: journalRow?.updatedAt ?? null,
         mirror: carrier.holds.find((h) => h.commodity === commodity)?.tonnes ?? null,
       });
 
@@ -637,6 +751,16 @@ export class ColonyCarrierService {
       ]),
     );
 
+    /*
+     * What this build still wants, so a carrier's headline total can be limited to it. Lower-cased
+     * because the declared rows are not name-normalised on the way in and the mirror join is exact.
+     */
+    const wantedRows = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
+      `SELECT commodity FROM colony_needs WHERE project_id = $1::uuid AND remaining > 0`,
+      projectId,
+    );
+    const wanted = new Set(wantedRows.map((r) => String(r['commodity']).toLowerCase()));
+
     const [holds, declared] = await Promise.all([
       this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
         /*
@@ -735,7 +859,19 @@ export class ColonyCarrierService {
           tonnes: Number(h['supply']),
           seenAt: (h['market_seen_at'] as Date | null) ?? null,
         })),
-        totalTonnes: mine.reduce((sum, h) => sum + Number(h['supply']), 0),
+        // Through the merge rule, not the mirror alone — see `carrierTotalToward`. This read
+        // `mine.reduce(sum of supply)` and disagreed with the summary line on its own page.
+        totalTonnes: carrierTotalToward(
+          {
+            holds: mine.map((h) => ({
+              commodity: String(h['commodity']),
+              tonnes: Number(h['supply']),
+              seenAt: (h['market_seen_at'] as Date | null) ?? null,
+            })),
+            declared: declaredByCarrier.get(marketId) ?? [],
+          },
+          wanted,
+        ),
         wholeHoldTonnes: wholeHold.get(marketId)?.tonnes ?? null,
         wholeHoldAt: wholeHold.get(marketId)?.at ?? null,
         declared: declaredByCarrier.get(marketId) ?? [],
@@ -1224,7 +1360,9 @@ export class ColonyCarrierService {
      * precedence, because a second copy would be wrong the first time the rule changed.
      */
     const cargoRows = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
-      `SELECT commodity, source, tonnes FROM colony_carrier_cargo WHERE market_id = $1::bigint`,
+      // `updated_at` because the merge rule decides between the journal and Frontier by RECENCY.
+      // Without it this page silently falls back to a fixed rank while every other surface does not.
+      `SELECT commodity, source, tonnes, updated_at FROM colony_carrier_cargo WHERE market_id = $1::bigint`,
       String(marketId),
     );
     /*
@@ -1267,11 +1405,19 @@ export class ColonyCarrierService {
       CARRIER_STATION_TYPES,
     );
 
-    const pick = (commodity: string, source: string): number | null => {
-      const row = cargoRows.find(
+    const rowFor = (commodity: string, source: string): Record<string, unknown> | undefined =>
+      cargoRows.find(
         (r) => String(r['commodity']) === commodity && String(r['source']) === source,
       );
+
+    const pick = (commodity: string, source: string): number | null => {
+      const row = rowFor(commodity, source);
       return row === undefined ? null : Number(row['tonnes']);
+    };
+
+    const pickAt = (commodity: string, source: string): Date | null => {
+      const at = rowFor(commodity, source)?.['updated_at'];
+      return at instanceof Date ? at : null;
     };
 
     // The same category map the needs list and the shopping list use — one source, five surfaces.
@@ -1285,7 +1431,9 @@ export class ColonyCarrierService {
       const aboard = effectiveTonnes({
         manual: pick(commodity, 'manual'),
         capi: pick(commodity, 'capi'),
+        capiAt: pickAt(commodity, 'capi'),
         journal: pick(commodity, 'journal'),
+        journalAt: pickAt(commodity, 'journal'),
         mirror: mirror === undefined ? null : Number(mirror['tonnes']),
       });
 
