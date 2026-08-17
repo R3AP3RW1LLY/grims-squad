@@ -213,7 +213,23 @@ export class PrismaCapiPollStore implements CapiPollStore {
       row.fdev_access_enc !== null &&
       !shouldRefresh({ accessEnc: 'stored', expiresAt: row.fdev_expires_at }, now)
     ) {
-      return this.cipher.decrypt(row.fdev_access_enc.toString('utf8'), context);
+      /*
+       * ★ Buffer.from(...), NOT .toString('utf8') ON THE RAW VALUE — 2026-08-17 ★
+       *
+       * Prisma 6 maps `bytea` from a RAW query to a Uint8Array, not a Buffer. `Uint8Array.toString`
+       * ignores its argument and returns the bytes comma-separated — "118,49,46,107..." — so the
+       * cipher was handed a list of numbers and answered "Malformed envelope".
+       *
+       * That error was caught, turned into a null token, and reported by the caller as "the Frontier
+       * link expired — the member must reconnect". Seven healthy grants, every one of them declared
+       * dead, for a fortnight. It is why not one cAPI row, poll state or token refresh has ever
+       * existed on production.
+       *
+       * THE SAME MISTAKE, WITH THE SAME COMMENT, IS ALREADY FIXED IN THREE OTHER FILES IN THIS
+       * WORKER: daily-commander-audit.wiring.ts, member-key-pool.ts, squadron-recheck.wiring.ts.
+       * The knowledge was in the repository; this file was written without it.
+       */
+      return this.cipher.decrypt(Buffer.from(row.fdev_access_enc).toString('utf8'), context);
     }
 
     const session = await this.#lockSession();
@@ -238,7 +254,7 @@ export class PrismaCapiPollStore implements CapiPollStore {
           fresh.fdev_access_enc !== null &&
           !shouldRefresh({ accessEnc: 'stored', expiresAt: fresh.fdev_expires_at }, now)
         ) {
-          return this.cipher.decrypt(fresh.fdev_access_enc.toString('utf8'), context);
+          return this.cipher.decrypt(Buffer.from(fresh.fdev_access_enc).toString('utf8'), context);
         }
 
         const tokens = await refreshAccess({
@@ -246,7 +262,7 @@ export class PrismaCapiPollStore implements CapiPollStore {
           clientId: this.config.clientId,
           clientSecret: this.config.clientSecret,
           redirectUri: this.config.redirectUri,
-          refreshToken: this.cipher.decrypt(fresh.fdev_refresh_enc.toString('utf8'), context),
+          refreshToken: this.cipher.decrypt(Buffer.from(fresh.fdev_refresh_enc).toString('utf8'), context),
           now,
         });
 
