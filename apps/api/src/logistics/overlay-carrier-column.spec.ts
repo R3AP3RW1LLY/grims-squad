@@ -28,6 +28,8 @@ import type { AttachedCarrier } from './colony-carrier.service.js';
  */
 
 const at = new Date('2026-08-17T00:00:00Z');
+/** Ten minutes later — the gap between a live journal entry and the next carrier poll. */
+const later = new Date('2026-08-17T00:10:00Z');
 
 const carrier = (
   over: Partial<Pick<AttachedCarrier, 'holds' | 'declared' | 'callsign' | 'name'>>,
@@ -90,23 +92,48 @@ describe('what the overlay is told a carrier holds', () => {
     expect(summed, 'the overlay and the project page read one hold two ways').toEqual(cover);
   });
 
-  it('★ MANDATORY: a cAPI zero removes the line rather than shrinking it ★', () => {
+  it('★ MANDATORY: a FRESHER cAPI zero removes the line rather than shrinking it ★', () => {
     /*
      * Frontier's manifest is complete, so a commodity it omits is gone — recorded as an explicit
      * cAPI zero. On a panel this small the honest rendering of "none aboard" is no row at all;
      * printing "K7Q-B4T · Steel · 0 t" tells a member to fly to an empty hold.
+     *
+     * ★ FRESHER, BECAUSE THE RULE IS RECENCY — SQUADRON OWNER, 2026-08-17 ★
+     *
+     * The journal leads while the app is watching, so Frontier only overrules it by being the newer
+     * statement. This test used to give both sources the same timestamp and passed on the old fixed
+     * rank; it failed the moment the rule changed, which is exactly what it was for.
      */
     const lines = carrierHoldLines([
       carrier({
         holds: [{ commodity: 'Steel', tonnes: 20_000, seenAt: at }],
         declared: [
           { commodity: 'Steel', tonnes: 5_000, source: 'journal', updatedBy: null, updatedAt: at },
+          { commodity: 'Steel', tonnes: 0, source: 'capi', updatedBy: null, updatedAt: later },
+        ],
+      }),
+    ]);
+
+    expect(lines, 'Frontier spoke last and says the hold is empty').toEqual([]);
+  });
+
+  it('★ MANDATORY: but a LIVE journal keeps its line against an older cAPI zero ★', () => {
+    /*
+     * The other half, and the one the owner asked for by name: the companion app's ingestion leads
+     * while it is running. A member actively hauling must not watch their own cargo vanish from the
+     * overlay because a poll ten minutes ago sampled the hold before they loaded it.
+     */
+    const lines = carrierHoldLines([
+      carrier({
+        holds: [],
+        declared: [
+          { commodity: 'Steel', tonnes: 5_000, source: 'journal', updatedBy: null, updatedAt: later },
           { commodity: 'Steel', tonnes: 0, source: 'capi', updatedBy: null, updatedAt: at },
         ],
       }),
     ]);
 
-    expect(lines, 'Frontier says the hold is empty, so there is nothing to draw').toEqual([]);
+    expect(lines).toEqual([{ commodity: 'Steel', tonnes: 5_000, carrier: 'W8K-W1Y' }]);
   });
 
   it('the crew’s hand still wins on this surface too', () => {

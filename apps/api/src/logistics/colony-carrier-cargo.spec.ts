@@ -19,64 +19,145 @@ import type { MarketStore } from './market.store.js';
  *      the wasted evening this feature exists to prevent.
  */
 
+/**
+ * ★ THE JOURNAL LEADS WHEN IT IS WATCHING — SQUADRON OWNER, 2026-08-17 ★
+ *
+ * "this is something that should be tracked via both journals and capi depending on if the companion
+ * app is seeing the journal entries, the priority must be companion app journal ingestion, if nothing
+ * because a member is playing on a cloud service, then it should default to cAPI."
+ *
+ * That is not a fixed rank — "is the app seeing entries" is a question about TIME. So between the
+ * journal and Frontier, whichever spoke most recently wins, and the journal takes ties.
+ *
+ * The consequence is that nothing has to detect the platform. A member flying with the app open
+ * emits journal entries continuously and leads by themselves; a member on a cloud platform emits
+ * none, so Frontier's ten-minute poll is always the newer statement and takes over on its own.
+ */
+const AUG16 = new Date('2026-08-16T00:00:00Z');
+const AUG17 = new Date('2026-08-17T00:00:00Z');
+
 describe('effectiveTonnes — the merge rule', () => {
-  it('manual wins outright, including over a bigger journal or mirror figure', () => {
-    expect(effectiveTonnes({ manual: 100, capi: null, journal: 5_000, mirror: 20_000 })).toBe(100);
+  it('manual wins outright, whatever anything else says or when', () => {
+    // The one source that can say "this figure is wrong". Unchanged by the recency rule.
+    expect(
+      effectiveTonnes({
+        manual: 100,
+        capi: 9_000,
+        capiAt: AUG17,
+        journal: 5_000,
+        journalAt: AUG17,
+        mirror: 20_000,
+      }),
+    ).toBe(100);
   });
 
   it('★ a manual ZERO retires a stale claim — it is not "absent" ★', () => {
-    // The mirror still shows 20,000 t of a sell order the owner cancelled last week. The crew
-    // member standing on the deck says the hold is empty, and the hand beats the archive.
-    expect(effectiveTonnes({ manual: 0, capi: null, journal: 300, mirror: 20_000 })).toBe(0);
+    expect(
+      effectiveTonnes({ manual: 0, capi: null, capiAt: null, journal: 300, journalAt: AUG17, mirror: 20_000 }),
+    ).toBe(0);
   });
 
-  it('without a manual figure, the two floors argue by size', () => {
-    // Journal misses whatever moved while the app was closed; the mirror sees only sell orders.
-    // Both understate, so the larger of two floors is the better floor.
-    const floors = (journal: number | null, mirror: number | null) =>
-      effectiveTonnes({ manual: null, capi: null, journal, mirror });
-
-    expect(floors(300, 900)).toBe(900);
-    expect(floors(1_200, 900)).toBe(1_200);
-    expect(floors(null, 900)).toBe(900);
-    expect(floors(null, null)).toBe(0);
-  });
-
-  /*
-   * ★ WHERE FRONTIER SITS — SQUADRON OWNER, 2026-08-16 ★
-   *
-   * Asked directly, the answer was: above the journal, below the hand.
-   */
-  describe('cAPI — Frontier’s own manifest', () => {
-    it('★ MANDATORY: a cAPI ZERO empties the hold, where a floor cannot ★', () => {
+  describe('the journal and Frontier, decided by who spoke last', () => {
+    it('★ MANDATORY: a LIVE journal leads over an older Frontier reading ★', () => {
       /*
-       * The whole reason to ask Frontier. The journal watched 5,000 t move aboard a fortnight ago
-       * and has not been running since; the mirror still lists a cancelled sell order. NEITHER can
-       * tell "sold" from "nobody looked", so both understate and both argue upwards.
-       *
-       * Frontier answers with the complete manifest. Absent means absent. If this were `max`-ed
-       * with the floors it would report 20,000 t of cargo that was sold days ago, and somebody
-       * would fly out for a hold that is empty — the wasted trip this module keeps reinventing.
+       * The priority the owner set. An app watching cargo move is a better account of the hold than
+       * a manifest sampled some minutes earlier — it saw the movement rather than its result.
        */
-      expect(effectiveTonnes({ manual: null, capi: 0, journal: 5_000, mirror: 20_000 })).toBe(0);
+      expect(
+        effectiveTonnes({
+          manual: null,
+          capi: 400,
+          capiAt: AUG16,
+          journal: 5_000,
+          journalAt: AUG17,
+          mirror: null,
+        }),
+      ).toBe(5_000);
     });
 
-    it('★ MANDATORY: it REPLACES the floors rather than arguing by size ★', () => {
-      // Lower than both and still correct: a complete manifest is not a floor, so the larger
-      // reading does not win. This is the assertion that fails if somebody folds capi into the max.
-      expect(effectiveTonnes({ manual: null, capi: 400, journal: 5_000, mirror: 20_000 })).toBe(400);
+    it('★ MANDATORY: with NO journal at all, Frontier answers — the cloud player ★', () => {
+      /*
+       * A member on a cloud platform cannot run the companion, so no journal row will ever exist for
+       * them. This is the case cAPI was brought in for, and it must need no configuration to work.
+       */
+      expect(
+        effectiveTonnes({ manual: null, capi: 800, capiAt: AUG17, journal: null, journalAt: null, mirror: null }),
+      ).toBe(800);
     });
 
-    it('★ MANDATORY: the crew’s hand still beats it ★', () => {
-      // The chosen trade. A member standing on the deck can always correct the board; the cost is
-      // that a stale hand-typed figure outlives a live one.
-      expect(effectiveTonnes({ manual: 100, capi: 0, journal: null, mirror: null })).toBe(100);
-      expect(effectiveTonnes({ manual: 0, capi: 9_000, journal: null, mirror: null })).toBe(0);
+    it('★ MANDATORY: a STALE journal loses to a fresher Frontier reading ★', () => {
+      /*
+       * Measured on production: carrier W8K-W1Y carried eighteen journal rows reading ZERO, written
+       * by an app that had not run for two days, while the member's carrier was full. Those zeros
+       * must lose the moment Frontier is asked — and win again the moment the app is opened.
+       */
+      expect(
+        effectiveTonnes({
+          manual: null,
+          capi: 12_400,
+          capiAt: AUG17,
+          journal: 0,
+          journalAt: AUG16,
+          mirror: null,
+        }),
+      ).toBe(12_400);
     });
 
-    it('and it beats the floors when it is the only live source', () => {
-      expect(effectiveTonnes({ manual: null, capi: 800, journal: null, mirror: null })).toBe(800);
+    it('★ MANDATORY: when Frontier leads, its ZERO empties the hold ★', () => {
+      /*
+       * The one thing no other source can say. A complete manifest REPLACES the floors rather than
+       * arguing with them by size — otherwise a fortnight-old journal or a cancelled sell order goes
+       * on promising cargo that was sold days ago.
+       */
+      expect(
+        effectiveTonnes({
+          manual: null,
+          capi: 0,
+          capiAt: AUG17,
+          journal: 5_000,
+          journalAt: AUG16,
+          mirror: 20_000,
+        }),
+      ).toBe(0);
     });
+
+    it('★ MANDATORY: when the JOURNAL leads it is a floor, not a replacement ★', () => {
+      /*
+       * The asymmetry is the point. The journal knows what it watched and nothing about what moved
+       * while it was closed, so the mirror may legitimately know more — and the larger of two floors
+       * is the better floor. Only Frontier's complete manifest earns the right to overrule.
+       */
+      expect(
+        effectiveTonnes({
+          manual: null,
+          capi: null,
+          capiAt: null,
+          journal: 300,
+          journalAt: AUG17,
+          mirror: 900,
+        }),
+      ).toBe(900);
+    });
+
+    it('a tie goes to the journal, and so does a pair with no dates at all', () => {
+      // "The app is watching" is the condition asked to lead, so an unclear tie resolves that way.
+      // Rows written before this rule existed carry no date and behave the same.
+      expect(
+        effectiveTonnes({ manual: null, capi: 99, capiAt: AUG17, journal: 5_000, journalAt: AUG17, mirror: null }),
+      ).toBe(5_000);
+      expect(
+        effectiveTonnes({ manual: null, capi: 99, capiAt: null, journal: 5_000, journalAt: null, mirror: null }),
+      ).toBe(5_000);
+    });
+  });
+
+  it('with neither declared source, the mirror stands alone', () => {
+    expect(
+      effectiveTonnes({ manual: null, capi: null, capiAt: null, journal: null, journalAt: null, mirror: 900 }),
+    ).toBe(900);
+    expect(
+      effectiveTonnes({ manual: null, capi: null, capiAt: null, journal: null, journalAt: null, mirror: null }),
+    ).toBe(0);
   });
 });
 

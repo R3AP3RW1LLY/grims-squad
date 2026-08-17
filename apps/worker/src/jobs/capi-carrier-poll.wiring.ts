@@ -34,43 +34,44 @@ export class PrismaCarrierPollStore implements CarrierPollStore {
   }
 
   /**
-   * cAPI-linked members plausibly connected to a carrier attached to a live build.
+   * Every member with a live Frontier link.
    *
-   * ★ PLAUSIBLY, BECAUSE THE HUB DOES NOT KNOW WHO OWNS A CARRIER ★
+   * ★ THIS FILTERED ON OWNERSHIP THE HUB HAS NEVER RECORDED — 2026-08-17 ★
    *
-   * Two things are recorded and neither is ownership: who PUSHED a manifest for it (their app was
-   * running while they were aboard, which is close) and who ATTACHED it to the build (which may be
-   * any officer who typed a callsign). Frontier settles it — `/fleetcarrier` answers only about the
-   * caller's own carrier, and the job matches the callsign it returns back against the attached set
-   * before storing anything.
+   * It used to ask for members "plausibly connected" to a carrier on a live build: either they had
+   * PUSHED a manifest for it (`colony_carrier_cargo.updated_by_id`) or they had ATTACHED it
+   * (`colony_carriers.added_by_id`).
    *
-   * ★ AND ONLY WHILE A BUILD IS RUNNING ★
+   * The first half is empty by construction. `updated_by_id` was stored as NULL on the journal path
+   * until the attach prompt landed the day before this — so 31 of the 34 rows on production carry no
+   * owner at all, and no amount of polling would have filled them in, because filling them in is
+   * what the polling was for.
    *
-   * The scope the owner chose. A completed or abandoned build is not a reason to spend a request
-   * against a limit the whole squadron shares.
+   * Measured: 7 members with a live cAPI link, ONE candidate, and ZERO cAPI rows ever written. The
+   * only source that can see a whole carrier hold had been shipped, deployed and silently reduced to
+   * nothing — while members with full carriers watched the boards show a fraction of their cargo,
+   * because the market mirror sees only what is on SALE and the journal sees only what an app
+   * happened to watch.
+   *
+   * ★ THE SCOPE THE OWNER CHOSE IS UNCHANGED ★
+   *
+   * "Only carriers attached to live builds" is a rule about what gets STORED, and it is enforced
+   * where it belongs — `pollCapiCarriers` checks `isAttachedToLiveBuild` against the callsign
+   * Frontier returns, and stores nothing otherwise. That check is the real boundary.
+   *
+   * This list is only "whose carrier may we ask about", and Frontier answers that question itself:
+   * `/fleetcarrier` returns the CALLER'S OWN carrier and nobody else's. Guessing beforehand bought
+   * nothing and cost the feature. Seven requests per pass against a cap of 25 is not a budget
+   * problem; a poller that reaches one member in seven is.
    */
   async candidates(): Promise<readonly CarrierCandidate[]> {
     const rows = await this.db.$queryRawUnsafe<Array<{ user_id: string; cmdr_name: string }>>(
-      `SELECT DISTINCT v.user_id, v.cmdr_name::text AS cmdr_name
+      `SELECT v.user_id, v.cmdr_name::text AS cmdr_name
          FROM cmdr_verifications v
         WHERE v.method = 'fdev_capi'
           AND v.revoked_at IS NULL
           AND v.is_stale = false
           AND v.fdev_refresh_enc IS NOT NULL
-          AND EXISTS (
-            SELECT 1
-              FROM colony_carriers c
-              JOIN colony_projects p ON p.id = c.project_id
-             WHERE p.completed_at IS NULL
-               AND p.abandoned_at IS NULL
-               AND (
-                 c.added_by_id = v.user_id
-                 OR EXISTS (
-                   SELECT 1 FROM colony_carrier_cargo g
-                    WHERE g.market_id = c.market_id AND g.updated_by_id = v.user_id
-                 )
-               )
-          )
         ORDER BY v.user_id`,
     );
 
