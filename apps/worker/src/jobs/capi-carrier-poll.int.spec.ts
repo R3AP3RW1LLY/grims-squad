@@ -167,6 +167,95 @@ describe('the carrier poll store, against Postgres', () => {
     expect(await heldNow()).toEqual([]);
   });
 
+  it('★ MANDATORY: an omitted commodity READS as zero, not as "no reading" ★', async () => {
+    /*
+     * ★ THE BUG THAT DEFEATED THE WHOLE FEATURE — 2026-08-17 ★
+     *
+     * Deleting the rows and writing only what Frontier reported LOOKS like it says "the rest is
+     * gone". It does not. `effectiveTonnes` reads `capi` as `pick(commodity, 'capi')`, which is
+     * NULL when there is no row, and null falls straight through to `max(journal, mirror)`. So
+     * "Frontier says there is no Steel aboard" arrived as "cAPI has never mentioned Steel", and the
+     * fortnight-old journal figure won.
+     *
+     * The one thing this source exists to do — prove a hold empty — was the one thing it could not
+     * do, and every test above passed the whole time. They asserted what the TABLE holds. This one
+     * asserts what the BOARD READS, which is the only claim that was ever worth making.
+     */
+    await clean();
+    const { userId } = await seed({ live: true });
+    const at = new Date();
+
+    // The journal watched 5,000 t of Steel go aboard a fortnight ago and has not run since.
+    await db.$executeRawUnsafe(
+      `INSERT INTO colony_carrier_cargo (market_id, commodity, source, tonnes, updated_by_id, updated_at)
+       VALUES ($1::bigint, 'Steel', 'journal', 5000, $2::uuid, now() - interval '14 days')`,
+      MARKET,
+      userId,
+    );
+
+    // Frontier now reports a manifest holding Titanium and NO Steel. The Steel is sold.
+    await store.replaceCapiCargo({
+      marketId: MARKET,
+      ownerId: userId,
+      lines: [{ commodity: 'Titanium', tonnes: 480 }],
+      at,
+    });
+
+    const [steel] = await db.$queryRawUnsafe<Array<{ tonnes: number }>>(
+      `SELECT tonnes::int AS tonnes FROM colony_carrier_cargo
+        WHERE market_id = $1::bigint AND commodity = 'Steel' AND source = 'capi'`,
+      MARKET,
+    );
+
+    expect(
+      steel?.tonnes,
+      'Frontier omitting Steel must be recorded as a ZERO, or the stale journal figure wins',
+    ).toBe(0);
+
+    // And the journal's own row is untouched — this corrects the READING, it does not rewrite
+    // somebody else's statement.
+    const [journal] = await db.$queryRawUnsafe<Array<{ tonnes: number }>>(
+      `SELECT tonnes::int AS tonnes FROM colony_carrier_cargo
+        WHERE market_id = $1::bigint AND commodity = 'Steel' AND source = 'journal'`,
+      MARKET,
+    );
+    expect(journal?.tonnes, "the journal's own claim is not this job's to edit").toBe(5000);
+  });
+
+  it('★ MANDATORY: an EMPTY manifest zeroes what other sources still claim ★', async () => {
+    // The strongest form of the same statement, and the case with no reported lines to compare
+    // against — a carrier Frontier says is completely empty.
+    await clean();
+    const { userId } = await seed({ live: true });
+
+    await db.$executeRawUnsafe(
+      `INSERT INTO colony_carrier_cargo (market_id, commodity, source, tonnes, updated_by_id, updated_at)
+       VALUES ($1::bigint, 'Steel', 'journal', 5000, $2::uuid, now() - interval '14 days')`,
+      MARKET,
+      userId,
+    );
+
+    await store.replaceCapiCargo({ marketId: MARKET, ownerId: userId, lines: [], at: new Date() });
+
+    const rows = await db.$queryRawUnsafe<Array<{ commodity: string; tonnes: number; source: string }>>(
+      `SELECT commodity, tonnes::int AS tonnes, source FROM colony_carrier_cargo
+        WHERE market_id = $1::bigint AND source = 'capi'`,
+      MARKET,
+    );
+    expect(rows).toEqual([{ commodity: 'Steel', tonnes: 0, source: 'capi' }]);
+  });
+
+  it('a commodity NOBODY has claimed gets no invented row', async () => {
+    // Bounded on purpose. Writing a zero for every commodity in the game would fill the table with
+    // statements about cargo nobody ever said was aboard.
+    await clean();
+    const { userId } = await seed({ live: true });
+
+    await store.replaceCapiCargo({ marketId: MARKET, ownerId: userId, lines: [], at: new Date() });
+
+    expect(await heldNow()).toEqual([]);
+  });
+
   it('★ MANDATORY: it touches only its OWN source ★', async () => {
     /*
      * A crew member's hand and the owner's journal are other sources' statements. A DELETE that
@@ -185,7 +274,27 @@ describe('the carrier poll store, against Postgres', () => {
 
     await store.replaceCapiCargo({ marketId: MARKET, ownerId: userId, lines: [], at });
 
-    expect(await heldNow()).toEqual([{ commodity: 'Steel', tonnes: 1234, source: 'manual' }]);
+    /*
+     * ★ THE ASSERTION WAS TIGHTER THAN ITS INTENT — 2026-08-17 ★
+     *
+     * This read `toEqual([the manual row])`, which said "no other row may exist". Its actual claim
+     * is narrower and is the one worth keeping: THIS JOB MUST NOT EDIT ANOTHER SOURCE'S STATEMENT.
+     *
+     * A cAPI zero now sits beside the manual figure, because Frontier reported an empty hold and
+     * that silence has to be written down or it reads as "cAPI never spoke". It changes nothing a
+     * member sees: manual outranks cAPI, so the board still reads 1,234 t. The crew member's hand
+     * is untouched, which is the whole point of the test.
+     */
+    const held = await heldNow();
+    const manual = held.filter((r) => r.source === 'manual');
+
+    expect(manual, "a crew member's own figure is not this job's to edit").toEqual([
+      { commodity: 'Steel', tonnes: 1234, source: 'manual' },
+    ]);
+    expect(
+      held.filter((r) => r.source === 'capi'),
+      'and Frontier’s "none aboard" is recorded rather than left as an absence',
+    ).toEqual([{ commodity: 'Steel', tonnes: 0, source: 'capi' }]);
   });
 
   it('★ MANDATORY: a COMPLETED build is not a live one ★', async () => {

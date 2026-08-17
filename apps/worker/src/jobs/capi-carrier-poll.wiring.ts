@@ -159,6 +159,62 @@ export class PrismaCarrierPollStore implements CarrierPollStore {
         input.marketId,
       );
 
+      /*
+       * ★ AN ABSENT ROW IS NOT A ZERO, AND THAT DEFEATED THE WHOLE FEATURE — 2026-08-17 ★
+       *
+       * Deleting the rows and writing only what Frontier reported LOOKS like it says "the rest is
+       * gone". It does not. `effectiveTonnes` reads `capi` as `pick(commodity, 'capi')`, which is
+       * NULL when there is no row — and null falls straight through to `max(journal, mirror)`. So
+       * "Frontier says there is no Steel aboard" arrived as "cAPI has never mentioned Steel", and
+       * the fortnight-old journal figure won.
+       *
+       * The one thing this source exists to do — prove a hold empty — was the one thing it could
+       * not do. The integration test asserted the ROWS were removed and never asserted what the
+       * board then READS, which is the gap that let it ship.
+       *
+       * So the silence is written down. A commodity another source still claims, which Frontier's
+       * complete manifest omits, gets an explicit cAPI ZERO — exactly the way a crew member's
+       * manual zero is "a real statement that retires a stale claim" rather than an absence. It
+       * also renders on the carriers tab, so a member can see the correction that changed their
+       * shopping list instead of watching a number move for no visible reason.
+       *
+       * ★ BOUNDED, AND HONEST ABOUT WHAT IT DOES NOT COVER ★
+       *
+       * Only commodities with an existing row on THIS carrier — never the whole commodity list, and
+       * never a row invented for something nobody has ever claimed. The market mirror lives in a
+       * different table and is not corrected here: its rows are public sell orders that EDDN
+       * refreshes on their own, and reaching across to zero them is a larger claim than this job
+       * has evidence for.
+       */
+      if (clean.length === 0) {
+        await tx.$executeRawUnsafe(
+          `INSERT INTO colony_carrier_cargo (market_id, commodity, source, tonnes, updated_by_id, updated_at)
+           SELECT DISTINCT market_id, commodity, 'capi', 0, $2::uuid, $3
+             FROM colony_carrier_cargo
+            WHERE market_id = $1::bigint AND source IN ('journal', 'manual')
+           ON CONFLICT (market_id, commodity, source) DO UPDATE SET
+             tonnes = 0, updated_by_id = EXCLUDED.updated_by_id, updated_at = EXCLUDED.updated_at`,
+          input.marketId,
+          input.ownerId,
+          input.at,
+        );
+      } else {
+        await tx.$executeRawUnsafe(
+          `INSERT INTO colony_carrier_cargo (market_id, commodity, source, tonnes, updated_by_id, updated_at)
+           SELECT DISTINCT market_id, commodity, 'capi', 0, $2::uuid, $3
+             FROM colony_carrier_cargo
+            WHERE market_id = $1::bigint
+              AND source IN ('journal', 'manual')
+              AND lower(commodity) <> ALL($4::text[])
+           ON CONFLICT (market_id, commodity, source) DO UPDATE SET
+             tonnes = 0, updated_by_id = EXCLUDED.updated_by_id, updated_at = EXCLUDED.updated_at`,
+          input.marketId,
+          input.ownerId,
+          input.at,
+          clean.map((l) => l.commodity.toLowerCase()),
+        );
+      }
+
       for (const line of clean) {
         await tx.$executeRawUnsafe(
           `INSERT INTO colony_carrier_cargo (market_id, commodity, source, tonnes, updated_by_id, updated_at)
