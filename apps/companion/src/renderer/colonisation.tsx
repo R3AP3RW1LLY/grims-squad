@@ -2987,7 +2987,36 @@ function CarrierDeclared({
    * Both surfaces had it because both were written from the same two-source assumption, which is
    * the argument for the parity spec that now reads them together.
    */
-  const journal = declared.filter((d) => d.source === 'journal' || d.source === 'capi');
+  /*
+   * ★ ONE ROW PER COMMODITY, THE ONE THAT WINS — SQUADRON OWNER, 2026-08-17 ★
+   *
+   * "its also listing both frontier and journal entries in the Declared hold section ... this should
+   * only show the journal entries where possible"
+   *
+   * Listing both showed the same cargo twice under two labels and invited a member to add them up.
+   * Only ONE is ever counted: the merge rule takes whichever spoke most recently, journal winning
+   * ties. Frontier's row now appears only where the journal has nothing to say — a cloud player, or
+   * cargo loaded before the app was running, which is the case it exists for.
+   *
+   * Same rule as the website, because they are one board.
+   */
+  const journal = (() => {
+    const byCommodity = new Map<string, (typeof declared)[number]>();
+    for (const d of declared) {
+      if (d.source === 'manual') continue;
+      const held = byCommodity.get(d.commodity);
+      if (held === undefined) {
+        byCommodity.set(d.commodity, d);
+        continue;
+      }
+      const heldAt = new Date(held.updatedAt).getTime();
+      const thisAt = new Date(d.updatedAt).getTime();
+      if (thisAt > heldAt || (thisAt === heldAt && d.source === 'journal')) {
+        byCommodity.set(d.commodity, d);
+      }
+    }
+    return [...byCommodity.values()];
+  })();
   const manual = declared.filter((d) => d.source === 'manual');
   const manualNames = new Set(manual.map((d) => d.commodity));
 

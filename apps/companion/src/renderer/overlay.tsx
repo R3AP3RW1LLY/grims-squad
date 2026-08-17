@@ -237,6 +237,23 @@ export interface OverlayData {
        */
       knowsCarriers?: boolean | undefined;
     }>;
+    /**
+     * How many of the build's commodities are FINISHED, and how many there are in total.
+     *
+     * ★ A SHORT LIST MUST NOT READ AS A TRUNCATED ONE — SQUADRON OWNER, 2026-08-17 ★
+     *
+     * "the build tracker is also not showing all remaining commodities, one member is only showing
+     * 2 commodities remaining when they have more"
+     *
+     * It was showing two because two were outstanding; the other seventeen were finished and
+     * filtered out. The panel was correct and looked broken — and a list that silently drops rows is
+     * indistinguishable from one that has been cut short.
+     *
+     * The filter stays: this is a strip over a cockpit, and a finished line is not what anybody is
+     * deciding from. The count is what says the rest exist.
+     */
+    readonly finished: number;
+    readonly total: number;
     readonly delivered: number;
     readonly required: number;
     readonly haulers: number;
@@ -637,6 +654,15 @@ function BuildPanel({
    */
   const grouped = needs.some((n) => (n.category ?? null) !== null) ? groupByCategory(needs) : null;
 
+  /*
+   * ★ SAID ONLY WHEN SOMETHING IS HIDDEN ★
+   *
+   * On a build where nothing is finished this line would be noise, and on a strip this size noise
+   * costs a row somebody needed. It appears exactly when the list is shorter than the bill.
+   */
+  const hidden = Math.max(0, (data.finished ?? 0));
+  const total = data.total ?? needs.length + hidden;
+
   return (
     <div>
       {/*
@@ -649,6 +675,19 @@ function BuildPanel({
         costing a line of the list underneath — which is the part somebody reads mid-flight. The
         `title` field toggle still governs it; see `overlayHeading`.
       */}
+      {show('needs') && hidden > 0 ? (
+        <p
+          style={{
+            margin: '0 0 4px',
+            fontSize: '10px',
+            letterSpacing: '0.1em',
+            textTransform: 'uppercase',
+            color: C.good,
+          }}
+        >
+          {hidden} of {total} complete
+        </p>
+      ) : null}
       {show('needs') ? (
         grouped === null ? (
           /*

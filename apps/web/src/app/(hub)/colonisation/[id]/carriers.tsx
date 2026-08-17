@@ -445,9 +445,40 @@ function DeclaredHold({
    * the journal rows because both are read-only statements by a machine; the difference is that
    * this one is the WHOLE manifest and the journal is a floor, which the badge says out loud.
    */
-  const journal = carrier.declared.filter(
-    (d) => d.source === 'journal' || d.source === 'capi',
-  );
+  /*
+   * ★ ONE ROW PER COMMODITY, THE ONE THAT WINS — SQUADRON OWNER, 2026-08-17 ★
+   *
+   * "its also listing both frontier and journal entries in the Declared hold section ... this should
+   * only show the journal entries where possible"
+   *
+   * Listing both was showing the same cargo twice under two labels, and inviting a member to add
+   * them up. Only ONE of them is ever counted: the merge rule takes whichever spoke most recently,
+   * with the journal winning ties — so the panel now shows exactly that one.
+   *
+   * Frontier's row appears only where the journal has nothing to say, which is precisely the case it
+   * exists for: a member on a cloud platform, or cargo loaded before the app was running.
+   */
+  const machine = (() => {
+    const byCommodity = new Map<string, (typeof carrier.declared)[number]>();
+    for (const d of carrier.declared) {
+      if (d.source === 'manual') continue;
+      const held = byCommodity.get(d.commodity);
+      if (held === undefined) {
+        byCommodity.set(d.commodity, d);
+        continue;
+      }
+      // Journal takes ties, matching the merge rule the shopping maths uses.
+      // `updatedAt` arrives as an ISO string over the wire; `new Date` handles both shapes.
+      const heldAt = new Date(held.updatedAt).getTime();
+      const thisAt = new Date(d.updatedAt).getTime();
+      if (thisAt > heldAt || (thisAt === heldAt && d.source === 'journal')) {
+        byCommodity.set(d.commodity, d);
+      }
+    }
+    return [...byCommodity.values()];
+  })();
+
+  const journal = machine;
   const manual = carrier.declared.filter((d) => d.source === 'manual');
   const manualNames = new Set(manual.map((d) => d.commodity));
 
