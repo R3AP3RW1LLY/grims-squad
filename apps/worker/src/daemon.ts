@@ -744,6 +744,14 @@ const CAPI_POLL_MS = 60_000;
  * Without the client id and the keyring this cannot do anything useful, and starting it anyway would
  * log a failure every minute for ever on a box where the feature is simply not set up.
  */
+/**
+ * The last "nothing happened" shape reported by the journal poll.
+ *
+ * Held so a quiet run is announced when its REASON changes rather than every minute. The first run
+ * after a deploy always speaks, which is the one that matters when diagnosing.
+ */
+let lastCapiJournalShape = '';
+
 function startCapiJournalPoll(db: PrismaClient): void {
   const clientId = process.env['FDEV_CAPI_CLIENT_ID'] ?? '';
   const redirectUri = process.env['FDEV_CAPI_REDIRECT_URI'] ?? '';
@@ -792,6 +800,45 @@ function startCapiJournalPoll(db: PrismaClient): void {
           `daemon: cAPI journal poll — ${report.stored} new entries from ${report.asked} member(s)` +
             (report.deferred > 0 ? `, ${report.deferred} deferred to the next run` : ''),
         );
+      } else if (report.members.length > 0) {
+        /*
+         * ★ A RUN THAT DID NOTHING HAS TO SAY SO — 2026-08-17 ★
+         *
+         * This branch did not exist, and its absence cost a day. The job logged only when it STORED
+         * something, so a poller that reached seven members and stored nothing was indistinguishable
+         * from a poller that was never running at all — and every other signal agreed with both
+         * readings. `capi_poll_state` sat empty, not one access token was ever refreshed, and there
+         * was no line anywhere to say why.
+         *
+         * Ruled out one at a time against production, all of them wrong: the code was deployed and
+         * called, the env reached the container, the keyring matched across boxes, no lock id
+         * collided, no advisory lock was held, and every member was genuinely due.
+         *
+         * The reasons are summarised rather than listed per member: at once a minute a line per
+         * member is thousands a day, which is how a log stops being read. One line naming the
+         * outcomes and their counts is enough to tell "nobody has a usable token" from "everybody
+         * was up to date".
+         *
+         * Rate-limited to one line a minute per distinct shape, because the common healthy case —
+         * everyone polled, nothing new — is not worth repeating for ever.
+         */
+        const tally = new Map<string, number>();
+        for (const o of report.members) {
+          // `skipped` carries the REASON no request was made — "the Frontier link expired", "the
+          // member revoked the feed". That sentence IS the diagnostic; a member actually asked
+          // counts as `polled`.
+          const reason = o.skipped ?? 'polled';
+          tally.set(reason, (tally.get(reason) ?? 0) + 1);
+        }
+        const shape = [...tally]
+          .map(([reason, n]) => `${n}x ${reason}`)
+          .sort()
+          .join('; ');
+
+        if (shape !== lastCapiJournalShape) {
+          lastCapiJournalShape = shape;
+          console.log(`daemon: cAPI journal poll — nothing stored from ${report.asked} member(s): ${shape}`);
+        }
       }
     } catch (e) {
       console.error(
