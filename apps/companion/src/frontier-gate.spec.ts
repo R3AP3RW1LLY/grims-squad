@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   FRONTIER_POLL_MS,
   FRONTIER_WATCH_MS,
+  frontierAccount,
   frontierGate,
   readFrontierLink,
   type FrontierLink,
@@ -234,5 +235,77 @@ describe('the cadence while somebody is in the browser', () => {
      */
     expect(FRONTIER_WATCH_MS).toBeGreaterThan(FRONTIER_POLL_MS);
     expect(FRONTIER_WATCH_MS).toBeLessThanOrEqual(15 * 60_000);
+  });
+});
+
+describe('the Frontier panel a member can always reach', () => {
+  const linked = { linked: true, daysLeft: 22, warn: false, sentence: '22 days left' };
+
+  it('★ MANDATORY: Reconnect is offered even when the hub says everything is fine ★', () => {
+    /*
+     * ★ THE FORTNIGHT THIS TEST EXISTS FOR — 2026-08-17 ★
+     *
+     * Seven grants were healthy at Frontier, stored correctly, and never once usable: the poller
+     * decoded the token wrong and every request failed. Throughout, `status()` answered `linked:
+     * true, 22 days left` — because it reports what is STORED, and what was stored was fine.
+     *
+     * So a Reconnect button shown only when the hub reports a problem is a button that is hidden
+     * during exactly the outage it would have fixed. It is available whenever the device is paired,
+     * full stop. Pressing it when nothing is wrong costs one sign-in and is never harmful.
+     */
+    const account = frontierAccount({ paired: true, answered: true, link: linked, error: null });
+
+    expect(account.canReconnect).toBe(true);
+    expect(account.state).toBe('linked');
+  });
+
+  it('offers it while the hub is unreachable, which is when somebody most wants to try', () => {
+    // The gate fails CLOSED here on purpose, but that is about entry. A member staring at an
+    // outage must still be able to do the one thing that might help.
+    const account = frontierAccount({ paired: false, answered: false, link: undefined, error: 'ECONNREFUSED' });
+    expect(account.canReconnect).toBe(false);
+
+    const paired = frontierAccount({ paired: true, answered: false, link: undefined, error: 'ECONNREFUSED' });
+    expect(paired.canReconnect).toBe(true);
+    expect(paired.state).toBe('unknown');
+  });
+
+  it('never says a member has no link when the hub simply did not say', () => {
+    // Same rule as the gate: absence is not "no". Telling somebody who linked in July that they
+    // have never connected is the one sentence this panel must not produce.
+    const older = frontierAccount({ paired: true, answered: true, link: undefined, error: null });
+    expect(older.state).toBe('unknown');
+    expect(older.state).not.toBe('never');
+  });
+
+  it('separates a grant that died from one that never existed', () => {
+    const dead = frontierAccount({
+      paired: true,
+      answered: true,
+      link: { linked: false, daysLeft: 0, warn: true, sentence: 'expired' },
+      error: null,
+    });
+    expect(dead.state).toBe('dead');
+
+    const never = frontierAccount({ paired: true, answered: true, link: null, error: null });
+    expect(never.state).toBe('never');
+  });
+
+  it('calls out a link that is running down before it dies', () => {
+    // `warn` is the hub's own judgement about its own clock. This app re-derives none of it —
+    // two opinions about one deadline is how the app and the website end up disagreeing.
+    const soon = frontierAccount({
+      paired: true,
+      answered: true,
+      link: { linked: true, daysLeft: 2, warn: true, sentence: '2 days left' },
+      error: null,
+    });
+    expect(soon.state).toBe('expiring');
+    expect(soon.sentence).toBe('2 days left');
+  });
+
+  it('carries the hub words through rather than writing its own', () => {
+    const account = frontierAccount({ paired: true, answered: true, link: linked, error: null });
+    expect(account.sentence).toBe('22 days left');
   });
 });

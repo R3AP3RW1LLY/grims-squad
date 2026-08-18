@@ -143,6 +143,74 @@ export function readFrontierLink(value: unknown): FrontierLink | null | undefine
   };
 }
 
+/**
+ * What the Frontier tab on the settings page shows.
+ *
+ * Distinct from `FrontierGate` because it answers a different question. The gate asks "must this
+ * member be stopped", and once the answer is no it has nothing more to say. This asks "what is the
+ * state of my Frontier link, and how do I fix it" — a question somebody is entitled to ask on a
+ * perfectly ordinary Tuesday when nothing is wrong.
+ */
+export interface FrontierAccount {
+  /**
+   * `unknown` covers both a hub that did not answer and one too old to be asked. Those are
+   * different situations that this panel treats identically, because the honest sentence for both
+   * is the same: we could not check.
+   */
+  readonly state: 'linked' | 'expiring' | 'dead' | 'never' | 'unknown';
+  /** The hub's own words about its own clock, or ours only when it had none. */
+  readonly sentence: string;
+  readonly canReconnect: boolean;
+}
+
+/**
+ * The state of this member's Frontier link, and whether they may act on it.
+ *
+ * ★ SQUADRON OWNER, 2026-08-16 ★
+ *
+ * "there is no reconnect to Frontier button in the companion app at all! you said there was!"
+ *
+ * He was right and I was wrong about my own code. The button exists — it has existed since the gate
+ * shipped — but it is rendered by the gate SCREEN, and the gate screen is what you see INSTEAD of
+ * the app when the link is broken. Once linked, `step` is `pass`, the whole screen is replaced by
+ * the app, and with it the only route to reconnecting. Reading the source told me the button was
+ * there. It never told me nobody could get to it.
+ *
+ * ★ WHY IT IS NOT CONDITIONAL ON ANYTHING BEING WRONG ★
+ *
+ * The obvious design — show Reconnect when the hub reports a problem — is the one that fails.
+ *
+ * For a fortnight this platform had seven Frontier grants that were healthy at Frontier, stored
+ * correctly, and completely unusable, because the poller decoded the stored token wrong. The hub's
+ * `status()` reports what is STORED, so all fourteen days it answered `linked: true`. A button
+ * conditioned on that answer would have been hidden for the entire outage — invisible during
+ * precisely the failure it fixes.
+ *
+ * So the only condition is `paired`, which is not a judgement about health but about whether there
+ * is a device token to ask with. Reconnecting when nothing is wrong costs one sign-in and a fresh
+ * refresh token. There is no state in which offering it does harm, and at least one well-documented
+ * fortnight in which withholding it did.
+ */
+export function frontierAccount(input: GateInput): FrontierAccount {
+  const canReconnect = input.paired;
+
+  if (input.link === undefined) {
+    // Absence is not "no" — the same rule the gate lives by. A member who linked in July must
+    // never be told they have never connected because the hub was quiet for a second.
+    return { state: 'unknown', sentence: 'We could not check with the hub just now.', canReconnect };
+  }
+
+  if (input.link === null) {
+    return { state: 'never', sentence: 'Not connected to Frontier yet.', canReconnect };
+  }
+
+  const { linked, warn, sentence } = input.link;
+  const words = sentence === '' ? (linked ? 'Connected to Frontier.' : 'The link has expired.') : sentence;
+
+  if (!linked) return { state: 'dead', sentence: words, canReconnect };
+  return { state: warn ? 'expiring' : 'linked', sentence: words, canReconnect };
+}
+
 const PASS: FrontierGate = { step: 'pass', problem: null, sentence: null };
 
 /**

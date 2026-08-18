@@ -29,7 +29,7 @@ import { openProjectCounts } from '@grims/shared/colony-badge';
 import type { BoardViewer, ColonyProject, ColonyRights } from '../hub-colony.js';
 // The verdict, not the facts behind it. Every rule about who is stopped and who deliberately is
 // not lives in that module, beside its reasoning and its tests — see the gate below.
-import type { FrontierGate } from '../frontier-gate.js';
+import type { FrontierAccount, FrontierGate } from '../frontier-gate.js';
 import { OverlaysPanel } from './overlays-panel.js';
 
 /**
@@ -96,6 +96,12 @@ interface AppState {
    * frontier-gate.ts beside its reasoning and its seventeen tests.
    */
   frontier: FrontierGate;
+  /*
+   * The same link, described for somebody who went looking for it in Settings rather than being
+   * stopped by it. Optional because a hub older than this build does not send one, and the panel
+   * says so rather than guessing.
+   */
+  frontierAccount?: FrontierAccount;
   linking: boolean;
   linkCode: string | null;
   tokenHint: string;
@@ -723,7 +729,7 @@ function App(): JSX.Element {
  * whole reason this page exists.
  */
 function SettingsPage({ state }: { state: AppState }): JSX.Element {
-  const [tab, setTab] = useState<'device' | 'overlays' | 'mining'>('device');
+  const [tab, setTab] = useState<'device' | 'frontier' | 'overlays' | 'mining'>('device');
 
   return (
     <div>
@@ -733,12 +739,14 @@ function SettingsPage({ state }: { state: AppState }): JSX.Element {
         label="Settings sections"
         tabs={[
           { key: 'device', label: 'This device' },
+          { key: 'frontier', label: 'Frontier' },
           { key: 'overlays', label: 'Overlays' },
           { key: 'mining', label: 'Mining' },
         ]}
       />
       <div style={{ marginTop: '16px' }}>
         {tab === 'device' ? <Device state={state} /> : null}
+        {tab === 'frontier' ? <FrontierSettings account={state.frontierAccount} /> : null}
         {tab === 'mining' ? (
           <MiningSettingsPanel
             settings={readMiningSettings(state.miningSettings)}
@@ -760,6 +768,81 @@ function SettingsPage({ state }: { state: AppState }): JSX.Element {
         ) : null}
       </div>
     </div>
+  );
+}
+
+/**
+ * The Frontier tab — the reconnect route that did not exist.
+ *
+ * ★ SQUADRON OWNER, 2026-08-16 ★
+ *
+ * "there is no reconnect to Frontier button in the companion app at all! you said there was!"
+ *
+ * There was one, and he still could not find it, because it lives on the GATE — the screen shown
+ * INSTEAD of the app when the link is broken. Once linked, the gate passes, the app replaces it,
+ * and the button goes with it. It was reachable only by people who did not need it.
+ *
+ * ★ ALWAYS OFFERED, NEVER NAGGING ★
+ *
+ * The button is here whatever the hub says, for a reason written out in `frontierAccount`: for a
+ * fortnight the hub reported seven healthy links that did not work, so "show it when something is
+ * wrong" would have hidden it for the whole outage. The tone changes with the state — a warning
+ * colour when it has died, plain when it is fine — but the action never disappears.
+ */
+function FrontierSettings({ account }: { account?: FrontierAccount | undefined }): JSX.Element {
+  /*
+   * A hub too old to send it, or the first render before any state has arrived. Assuming a state
+   * would mean putting words on this screen that no one has checked; saying so costs nothing.
+   */
+  const view: FrontierAccount = account ?? {
+    state: 'unknown',
+    sentence: 'We could not check with the hub just now.',
+    canReconnect: true,
+  };
+
+  const bad = view.state === 'dead' || view.state === 'never';
+  const tint = bad ? C.orangeBright : view.state === 'expiring' ? C.warn : C.good;
+
+  return (
+    <Section title="Frontier account">
+      <Card>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px' }}>
+            <span
+              style={{
+                width: '8px',
+                height: '8px',
+                borderRadius: '999px',
+                background: view.state === 'unknown' ? C.faint : tint,
+                flex: '0 0 auto',
+              }}
+            />
+            <p style={{ margin: 0, fontSize: '13px', color: C.text }}>{view.sentence}</p>
+          </div>
+
+          <p style={{ margin: 0, maxWidth: '62ch', fontSize: '12px', color: C.dim }}>
+            Frontier signs you back in about every 25 days. Reconnecting is also the fix if your
+            carrier or ship figures have stopped moving — it takes one sign-in and changes nothing
+            else about your account.
+          </p>
+
+          {view.canReconnect ? (
+            <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+              <Button tone={bad ? 'primary' : 'default'} onClick={() => void window.companion.connectFrontier()}>
+                {view.state === 'never' ? 'Connect with Frontier' : 'Reconnect with Frontier'}
+              </Button>
+              <span style={{ fontSize: '11px', color: C.faint }}>
+                Your browser will open. Nothing about your Frontier sign-in is stored on this machine.
+              </span>
+            </div>
+          ) : (
+            <p style={{ margin: 0, fontSize: '12px', color: C.faint }}>
+              Pair this device with the hub first — the Frontier step comes after it.
+            </p>
+          )}
+        </div>
+      </Card>
+    </Section>
   );
 }
 

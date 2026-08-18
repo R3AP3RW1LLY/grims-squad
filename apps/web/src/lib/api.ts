@@ -870,6 +870,26 @@ export const getCompanionReleases = (): Promise<{ assets: ReleaseAsset[] } | nul
 export const getInaraStatus = (): Promise<InaraStatus | null> =>
   get('/v1/me/inara', { authed: true });
 
+/**
+ * The state of this member's Frontier link.
+ *
+ * Two nulls, and they mean different things. The OUTER null is a failed call — the API did not
+ * answer, and the panel says so rather than inventing a state. The INNER `frontier: null` is a
+ * successful answer meaning this member has never linked. Collapsing them would let an outage
+ * render as "not connected", which is the sentence that sends somebody to re-do a link they
+ * already have.
+ */
+export const getFrontierStatus = (): Promise<{ frontier: FrontierLinkStatus | null } | null> =>
+  get('/v1/me/capi', { authed: true });
+
+export interface FrontierLinkStatus {
+  readonly linked: boolean;
+  readonly daysLeft: number;
+  readonly warn: boolean;
+  /** The API's own words about its own clock. The site never re-derives this — see CapiService. */
+  readonly sentence: string;
+}
+
 export interface NavItem {
   href: string;
   label: string;
