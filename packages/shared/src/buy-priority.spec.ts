@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { rankBuySources, type BuySource, type BuyContext } from './buy-priority.js';
+import { buyBandLabel, rankBuySources, type BuySource, type BuyContext } from './buy-priority.js';
 
 /**
  * Where to send somebody to buy the rest of a build.
@@ -353,5 +353,60 @@ describe('whose station it is', () => {
     );
 
     expect(ranked.map((r) => r.stationName)).toEqual(['A', 'B']);
+  });
+});
+
+describe('saying WHY a station ranks where it does', () => {
+  const ctx = {
+    buildSystem: 'Hyades Sector DB-X d1-112',
+    architectedSystems: new Set(['Col 285 Sector AA-A a1-1']),
+  };
+
+  const at = (systemName: string, ownership: 'squadron' | 'member' | null = null) => ({
+    stationName: 'Somewhere',
+    systemName,
+    distanceLy: 10,
+    isOrbital: true,
+    ownership,
+  });
+
+  it('★ MANDATORY: the label and the ranking come from one function ★', () => {
+    /*
+     * ★ WHY A LABEL AT ALL ★
+     *
+     * #213 reordered where-to-buy by ownership, and the list on screen said nothing about it. A
+     * member saw a station that used to be third sitting at the top with no explanation — which
+     * reads as the sort being broken, not as the platform knowing something they do not.
+     *
+     * A badge derived independently of the ordering would be worse than none: the two would drift,
+     * and a station marked "squadron station" would sit below one that is not. Both come from
+     * `band`, so a label that disagrees with the position is not expressible.
+     */
+    expect(buyBandLabel(at(ctx.buildSystem), ctx)).toBe('In the build’s system');
+    expect(buyBandLabel(at('Sol', 'squadron'), ctx)).toBe('Squadron station');
+    expect(buyBandLabel(at('Sol', 'member'), ctx)).toBe('Member’s station');
+    expect(buyBandLabel(at('Col 285 Sector AA-A a1-1'), ctx)).toBe('Squadron space');
+  });
+
+  it('says nothing at all about an ordinary station', () => {
+    /*
+     * The bottom band gets no badge. Labelling every row "Other" is four hundred pixels of noise
+     * that tells a member nothing — absence already says it, and the eye is drawn to the rows that
+     * DO carry a mark, which is the entire point.
+     */
+    expect(buyBandLabel(at('Shinrarta Dezhra'), ctx)).toBeNull();
+  });
+
+  it('labels by the same precedence the ordering uses, not by whichever fact is checked first', () => {
+    // A squadron station INSIDE the build's system is in band 0, and must say so: "In the build's
+    // system" is the stronger reason to fly there, and it is the one the ordering acted on.
+    expect(buyBandLabel(at(ctx.buildSystem, 'squadron'), ctx)).toBe('In the build’s system');
+    // And a squadron station in architected space is ours first, architected second.
+    expect(buyBandLabel(at('Col 285 Sector AA-A a1-1', 'squadron'), ctx)).toBe('Squadron station');
+  });
+
+  it('is case-insensitive about system names, like the ordering', () => {
+    // EDDN, Inara and a member typing into a box spell one system three ways.
+    expect(buyBandLabel(at('hyades sector db-x D1-112'), ctx)).toBe('In the build’s system');
   });
 });

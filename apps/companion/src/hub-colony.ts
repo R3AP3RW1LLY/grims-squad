@@ -735,6 +735,15 @@ export interface PurchaseStation {
   readonly systemName: string;
   /** Light years from the build. Null when we cannot place one end of it. */
   readonly distanceLy: number | null;
+  /**
+   * Why this stop ranks where it does, or null for an ordinary one.
+   *
+   * Decided by the hub from the same function that decided the ORDER. The app deliberately does not
+   * work it out for itself: the app and the website would then hold two copies of one precedence
+   * rule, and the first time they drifted a member would see a station marked as the squadron's on
+   * one screen and not the other.
+   */
+  readonly bandLabel: string | null;
   readonly lines: readonly PurchaseLine[];
   readonly lastSeen: string;
 }

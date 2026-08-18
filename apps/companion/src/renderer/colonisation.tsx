@@ -2180,6 +2180,25 @@ function PurchaseRoute({ projectId }: { projectId: string }): JSX.Element | null
                 color: C.dim,
               }}
             >
+              {/*
+                Why this stop is where it is. The ordering puts the build's own system first, then
+                the squadron's stations, then a member's — and without a word on screen a stop that
+                moved to the top just looks like a broken sort. Ordinary stations carry no badge:
+                marking every row says nothing, and the absence is what makes a mark worth reading.
+              */}
+              {station.bandLabel === null ? null : (
+                <span
+                  style={{
+                    marginRight: '8px',
+                    padding: '1px 5px',
+                    borderRadius: '3px',
+                    background: C.raised,
+                    color: C.orange,
+                  }}
+                >
+                  {station.bandLabel}
+                </span>
+              )}
               {/* Distance first: it is what decides whether the stop is worth the trip. Omitted
                   rather than guessed when we cannot place one end of it. */}
               {station.distanceLy === null ? '' : `${station.distanceLy.toFixed(1)} ly · `}

@@ -66,14 +66,42 @@ async function seedNeeds(projectId: string, needs: ReadonlyArray<[string, number
   }
 }
 
+/**
+ * Puts a system on the map so distance can actually be measured.
+ *
+ * ★ TEST-ONLY NAMES, DELIBERATELY ★
+ *
+ * The obvious thing is to seed the real system the owner named. That would write coordinates over
+ * a live catalogue row on a database this suite shares with real squadron data — and every later
+ * run would be measuring against whatever the last test decided. Both ends of the trip are
+ * TAG-prefixed and are deleted with everything else.
+ */
+async function placeSystem(name: string, x: number, y: number, z: number): Promise<void> {
+  await db.$executeRawUnsafe(
+    `INSERT INTO knowledge_items (source, kind, ext_key, name, coords, data)
+     VALUES ('galaxy', 'system', $1, $1, cube(array[$2::float8, $3::float8, $4::float8]), '{}'::jsonb)
+     ON CONFLICT (source, kind, ext_key) DO UPDATE SET coords = EXCLUDED.coords, name = EXCLUDED.name`,
+    name,
+    x,
+    y,
+    z,
+  );
+}
+
 async function cleanUp(): Promise<void> {
   await db.$executeRawUnsafe(
     `DELETE FROM colony_carrier_cargo WHERE market_id = $1::bigint`,
     String(CARRIER_MARKET),
   );
-  await db.$executeRawUnsafe(`DELETE FROM colony_purchases WHERE system_name = $1`, SYSTEM);
-  await db.$executeRawUnsafe(`DELETE FROM colony_projects WHERE system_name = $1`, SYSTEM);
+  await db.$executeRawUnsafe(`DELETE FROM colony_purchases WHERE system_name LIKE $1`, `${TAG}%`);
+  await db.$executeRawUnsafe(`DELETE FROM colony_projects WHERE system_name LIKE $1`, `${TAG}%`);
   await db.$executeRawUnsafe(`DELETE FROM users WHERE handle LIKE $1`, `${TAG}%`);
+  // The two systems `placeSystem` puts on the map. Left behind, they would silently change the
+  // distance every later run measures against.
+  await db.$executeRawUnsafe(
+    `DELETE FROM knowledge_items WHERE kind = 'system' AND ext_key LIKE $1`,
+    `${TAG}%`,
+  );
   // The station fixture the orbital test seeds. Left behind it would collide on the next run and
   // fail a test that has nothing to do with what it is asserting.
   await db.$executeRawUnsafe(
@@ -189,6 +217,115 @@ describe('the shopping route', () => {
 
     expect(stop, 'the declared stop is on the route').toBeDefined();
     expect(stop?.isOrbital, 'a Coriolis Starport is in orbit').toBe(true);
+  });
+
+  it('★ MANDATORY: where the squadron bought it is SQUADRON knowledge, not this project’s ★', async () => {
+    /*
+     * ★ SQUADRON OWNER, 2026-08-18 ★
+     *
+     * "stuff like this needs to be shared from other projects they should not be member specific
+     * this is information that should be shared, in this case this project is right next door to me
+     * so it should be showing the same or very similar results everywhere"
+     *
+     * ★ WHAT THE TWO SOURCES USED TO ASK ★
+     *
+     * The journal source required `EXISTS (... p.posted_by_id = t.user_id AND p.system_name = $1)`
+     * — only members who had themselves posted a project in THIS system — and the declared source
+     * required `c.system_name = $1`. So a member who bought 900 t of Copper at a dock eight light
+     * years away, for a build one system over, contributed nothing at all to this project's page.
+     *
+     * That is not a fact about a project. "This station sells Copper" is a fact about the galaxy,
+     * discovered by somebody in the squadron, and it was being thrown away because the person who
+     * discovered it was building somewhere else. Every project started from nothing while the
+     * platform already held the answer.
+     *
+     * The section still only appears for a system with one coloniser — `visibleFor` is unchanged
+     * and is a different question. What feeds it is squadron-wide.
+     */
+    const { project } = await seedBuild();
+
+    // Somebody else entirely, building somewhere else entirely.
+    const neighbour = await seedMember(`${TAG}-neighbour`);
+    await db.$executeRawUnsafe(
+      `INSERT INTO colony_projects (market_id, system_name, title, owner, posted_by_id, updated_at)
+       VALUES ($1::bigint, $2, $3, 'squadron', $4::uuid, now())
+       ON CONFLICT (market_id) DO UPDATE SET title = EXCLUDED.title`,
+      String(4900000000777n),
+      `${TAG} elsewhere`,
+      `${TAG} NEIGHBOUR`,
+      neighbour,
+    );
+
+    /*
+     * Both ends on the map, eight light years apart — "right next door", in the owner's words. The
+     * sharing is bounded by DISTANCE, so a test that leaves either end uncatalogued is not
+     * exercising the rule; it is exercising the fallback.
+     */
+    await placeSystem(SYSTEM, 0, 0, 0);
+    await placeSystem(`${TAG} nextdoor`, 8, 0, 0);
+
+    await service.declare({
+      // Filed against THEIR system, not ours. This is the whole point.
+      systemName: `${TAG} elsewhere`,
+      stationName: 'Wescott Platform',
+      stationSystem: `${TAG} nextdoor`,
+      commodity: 'Copper',
+      tonnes: 400,
+      price: null,
+      note: null,
+      userId: neighbour,
+    });
+
+    const route = await service.forProject(project);
+    const listed = route.stations.flatMap((s) => s.lines.map((l) => l.commodity));
+
+    expect(
+      listed,
+      'a neighbour’s purchase of something THIS build needs belongs on this route',
+    ).toContain('Copper');
+    expect(route.uncovered, 'and it must no longer be reported as nobody having bought it').not.toContain(
+      'Copper',
+    );
+  });
+
+  it('★ MANDATORY: sharing does not import things this build does not need ★', async () => {
+    /*
+     * The guard on the rule above. Widening the source from "this project" to "the squadron" must
+     * not widen WHAT is listed — `wanted` is still the gate, and a neighbour's Palladium run is
+     * still nobody's problem here. Losing this would turn every project page into a catalogue of
+     * everything the squadron has ever bought.
+     */
+    const { project } = await seedBuild();
+    const neighbour = await seedMember(`${TAG}-neighbour2`);
+
+    /*
+     * ★ WITHOUT THESE TWO LINES THIS TEST PASSED FOR THE WRONG REASON ★
+     *
+     * seedBuild() calls cleanUp(), which deletes the systems the previous test placed. With neither
+     * end on the map the proximity door is NULL and the Palladium row never reaches the route at
+     * all — so the assertion held whether or not the `wanted` filter existed. Mutation testing
+     * caught it: deleting `if (!wanted.has(...)) return;` broke nothing.
+     *
+     * The row has to be ADMITTED for its exclusion to mean anything.
+     */
+    await placeSystem(SYSTEM, 0, 0, 0);
+    await placeSystem(`${TAG} nextdoor`, 8, 0, 0);
+
+    await service.declare({
+      systemName: `${TAG} elsewhere`,
+      stationName: 'Wescott Platform',
+      stationSystem: `${TAG} nextdoor`,
+      commodity: 'Palladium',
+      tonnes: 400,
+      price: null,
+      note: null,
+      userId: neighbour,
+    });
+
+    const route = await service.forProject(project);
+    const listed = route.stations.flatMap((s) => s.lines.map((l) => l.commodity));
+
+    expect(listed, 'not on this build’s list, wherever it was bought').not.toContain('Palladium');
   });
 
   it('★ MANDATORY: what is already aboard a carrier is not on the shopping list ★', async () => {
