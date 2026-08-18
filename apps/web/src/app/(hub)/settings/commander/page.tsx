@@ -20,6 +20,8 @@ import { appVersionSummary } from '../../../../components/update-banner-rules';
 import { getMyPrivacy, getProfile, getUpdateStatus, getMyNickname } from '../../../../lib/api';
 import { NicknameChooser } from '../../../../components/nickname-chooser';
 import { SecurityBody } from '../security/body';
+import { FrontierPanel, readFrontierOutcome } from './frontier-panel';
+import { getFrontierStatus } from '../../../../lib/api';
 import { AccountBody } from '../account/body';
 
 export const metadata: Metadata = {
@@ -87,6 +89,17 @@ export default async function CommanderPage({
    * the signature editor has no use for it.
    */
   const nickname = tab === 'verification' ? await getMyNickname() : null;
+  /*
+   * Only on the tab that shows it, like the nickname above — this is a database read and a token
+   * clock, and the settings tab has no use for either.
+   *
+   * The two nulls are kept apart deliberately. A failed CALL becomes `undefined`, which the panel
+   * renders as "we could not check"; a successful answer of `frontier: null` stays `null` and means
+   * this member has never linked. Flattening them would show an API outage as "not connected" and
+   * send somebody to redo a link they already have.
+   */
+  const frontier = tab === 'verification' ? await getFrontierStatus() : null;
+  const frontierStatus = frontier === null ? undefined : frontier.frontier;
 
   /*
    * Privacy is fetched HERE as well as inside `PrivacyControls`, because the
@@ -402,6 +415,16 @@ export default async function CommanderPage({
             <SquadronStatus />
             <InaraForm />
           </VerificationProvider>
+
+          {/*
+            ★ THE OTHER WAY THIS ACCOUNT IS PROVEN ★
+
+            Frontier and Inara answer different questions — Frontier proves which Frontier account
+            is behind this member, Inara proves the commander name and the squadron — and both
+            belong on the tab about verification. Frontier's callback lands here now; it used to
+            land on the privacy page, which had never mentioned Frontier at all.
+          */}
+          <FrontierPanel status={frontierStatus} outcome={readFrontierOutcome(params['frontier'])} />
 
           {/*
             ★ YOUR NAME IN DISCORD, ON THE "NAME & VERIFICATION" TAB ★

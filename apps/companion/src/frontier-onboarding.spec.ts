@@ -74,9 +74,24 @@ describe('the gate is the hub’s answer, never something this machine remembers
   });
 
   it('the gate is computed from the hub settings, not from the config', () => {
-    const call = MAIN.slice(MAIN.indexOf('frontierGate({'));
-    const args = call.slice(0, call.indexOf('})') + 2);
-    expect(args).toContain('hubSettings');
+    /*
+     * The inputs moved into `gateInputs()` when the settings page grew a Frontier tab: the gate and
+     * the tab must describe one link, so they are built from one set of inputs rather than two
+     * reads that could drift. This follows them there — the property being guarded is unchanged
+     * and is what it always was: the ANSWER comes from the hub, and `config` supplies only whether
+     * there is a device token to ask with.
+     */
+    const call = MAIN.slice(MAIN.indexOf('function gateInputs('));
+    const args = call.slice(0, call.indexOf('\n}') + 2);
+
+    expect(args, 'gateInputs() must read the hub answer').toContain('hubSettings');
+    expect(args, 'and nothing about Frontier may come off the disk').not.toMatch(
+      /config\.(?!deviceToken)/,
+    );
+
+    // Both callers go through it, so neither can quietly grow a second source of truth.
+    expect(MAIN).toContain('frontierGate(gateInputs())');
+    expect(MAIN).toContain('frontierAccount(gateInputs())');
   });
 
   it('★ MANDATORY: the hub is asked even while sending is paused ★', () => {
@@ -145,5 +160,54 @@ describe('starting the link', () => {
      */
     expect(MAIN).not.toMatch(/code_verifier|code_challenge|client_secret/i);
     expect(APP).not.toMatch(/code_verifier|code_challenge|client_secret/i);
+  });
+});
+
+describe('the way back to Frontier once you are already through the gate', () => {
+  it('found the settings tab list to reason about', () => {
+    // The anchor. If the tab list is restructured this fails loudly rather than protecting nothing.
+    expect(APP).toContain("label=\"Settings sections\"");
+  });
+
+  it('★ MANDATORY: Settings carries a Frontier tab ★', () => {
+    /*
+     * ★ SQUADRON OWNER, 2026-08-16 ★
+     *
+     * "there is no reconnect to Frontier button in the companion app at all! you said there was!"
+     *
+     * He was right and my reading of the source was wrong in a way source-reading is prone to: the
+     * button existed, and I confirmed it existed, and it was still unreachable. It is rendered by
+     * `ConnectFrontier` — the GATE screen — which by construction only appears when the gate is
+     * NOT passing. Connect successfully and the screen is replaced by the app, taking the only
+     * route to reconnecting with it.
+     *
+     * So the assertion is not "a Reconnect button exists somewhere in this file". That was true
+     * throughout the complaint. It is that the SETTINGS page — which a member can open whenever
+     * they like, gate passed or not — offers one.
+     */
+    const tabs = APP.slice(APP.indexOf('label="Settings sections"'));
+    const list = tabs.slice(0, tabs.indexOf('/>'));
+
+    expect(list).toContain("{ key: 'frontier', label: 'Frontier' }");
+    expect(tabs).toContain("tab === 'frontier' ? <FrontierSettings");
+  });
+
+  it('★ MANDATORY: the reconnect action does not depend on anything looking broken ★', () => {
+    /*
+     * The fortnight in `frontierAccount`'s note: seven grants the hub reported as healthy and
+     * `linked: true` for fourteen days, none of which worked, because the poller decoded the stored
+     * token wrong. A button gated on the hub reporting a problem is hidden for the whole of an
+     * outage like that one.
+     *
+     * `canReconnect` is decided in frontier-gate.ts from `paired` alone, and this asserts the panel
+     * does not add a second condition of its own on top of it.
+     */
+    const panel = APP.slice(APP.indexOf('function FrontierSettings'));
+    const body = panel.slice(0, panel.indexOf('function NavButton'));
+
+    expect(body).toContain('view.canReconnect ?');
+    expect(body).toContain('window.companion.connectFrontier()');
+    // No second opinion about health standing between a member and the button.
+    expect(body).not.toMatch(/canReconnect\s*&&/);
   });
 });

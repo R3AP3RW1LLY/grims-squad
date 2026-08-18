@@ -145,8 +145,11 @@ import { fetchHubSettings, type HubSettings } from './hub-settings.js';
 import {
   FRONTIER_POLL_MS,
   FRONTIER_WATCH_MS,
+  frontierAccount,
   frontierGate,
+  type FrontierAccount,
   type FrontierGate,
+  type GateInput,
 } from './frontier-gate.js';
 import { updateAvailable } from './update-check.js';
 import { searchForJournalDir, searchRootsFor, type SearchFs } from './journal-search.js';
@@ -1458,6 +1461,15 @@ function state(): Record<string, unknown> {
      */
     frontier: currentFrontierGate(),
     /*
+     * The same facts, read for the settings page rather than for the door.
+     *
+     * The gate goes quiet the moment it decides to let somebody through — `pass` carries no
+     * sentence and no days — so the Frontier tab cannot be built from it. Both are derived from
+     * one set of inputs by one module, which is the point: the tab and the gate can never end up
+     * describing different links.
+     */
+    frontierAccount: currentFrontierAccount(),
+    /*
      * The update banner.
      *
      * The version comes from Electron rather than a constant, so it is
@@ -1577,8 +1589,18 @@ async function refreshHubSettings(force = false): Promise<void> {
  * satisfiable that way: any remembered "already done" would be this machine's opinion about a fact
  * that lives on the hub, and it would go on being believed after a grant was revoked.
  */
-function currentFrontierGate(): FrontierGate {
-  return frontierGate({
+/**
+ * The same question the gate asks, answered for somebody who came looking on purpose.
+ *
+ * Shares `gateInputs()` rather than re-reading `config` and `hubSettings`, so there is no way for
+ * the tab to describe a link the gate has already judged differently.
+ */
+function currentFrontierAccount(): FrontierAccount {
+  return frontierAccount(gateInputs());
+}
+
+function gateInputs(): GateInput {
+  return {
     paired: config.deviceToken !== '',
     /*
      * Has the hub answered AT ALL this launch — not what it said. `hubSettings` starts null and is
@@ -1588,7 +1610,11 @@ function currentFrontierGate(): FrontierGate {
     answered: hubSettings !== null,
     link: hubSettings?.frontier,
     error: hubError,
-  });
+  };
+}
+
+function currentFrontierGate(): FrontierGate {
+  return frontierGate(gateInputs());
 }
 
 /**

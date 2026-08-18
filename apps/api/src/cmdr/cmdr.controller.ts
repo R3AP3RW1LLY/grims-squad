@@ -172,6 +172,29 @@ export class CmdrController {
   }
 
   /**
+   * The state of this member's Frontier link, for the website's settings page.
+   *
+   * ★ THE COMPANION ALREADY HAD THIS; THE WEBSITE NEVER DID — 2026-08-17 ★
+   *
+   * `CapiService.status()` has existed since the link shipped, and the companion app reads it on
+   * every settings fetch. The website could not read it at all, so the site that OWNS the connect
+   * flow — the callback redirects into it — had no way to say whether a member was connected, when
+   * it runs out, or that it had gone wrong. The one page a member would think to look at was the
+   * one page that had never been told.
+   *
+   * Wrapped in an object rather than returned bare. `status()` answers `null` for "never linked",
+   * which is a real answer this endpoint must be able to give — and a response body of literally
+   * `null` is indistinguishable from an empty one to anything that parses it.
+   */
+  @Get('me/capi')
+  async capiStatus(
+    @User() caller: CurrentUser | undefined,
+  ): Promise<{ frontier: Awaited<ReturnType<CapiService['status']>> }> {
+    const userId = requireUser(caller);
+    return { frontier: await this.capi.status(userId) };
+  }
+
+  /**
    * Frontier's callback.
    *
    * ★ @Public, AND IT HAS TO BE ★
@@ -202,20 +225,20 @@ export class CmdrController {
      * where they came from with something that says so.
      */
     if (error !== undefined || code === undefined || state === undefined) {
-      void reply.redirect(`${site}/settings/privacy?frontier=cancelled`, 302);
+      void reply.redirect(`${site}/settings/commander?tab=verification&frontier=cancelled`, 302);
       return;
     }
 
     try {
       await this.capi.complete(code, state);
-      void reply.redirect(`${site}/settings/privacy?frontier=connected`, 302);
+      void reply.redirect(`${site}/settings/commander?tab=verification&frontier=connected`, 302);
     } catch {
       /*
        * The reason is deliberately not put in the URL. It would be in the member's history, in any
        * proxy log on the way, and in the Referer of whatever loads next — and "expired state" and
        * "Frontier refused" are both, to the member, the same instruction: start again.
        */
-      void reply.redirect(`${site}/settings/privacy?frontier=failed`, 302);
+      void reply.redirect(`${site}/settings/commander?tab=verification&frontier=failed`, 302);
     }
   }
 
