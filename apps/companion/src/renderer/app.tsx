@@ -31,6 +31,7 @@ import type { BoardViewer, ColonyProject, ColonyRights } from '../hub-colony.js'
 // not lives in that module, beside its reasoning and its tests — see the gate below.
 import type { FrontierAccount, FrontierGate } from '../frontier-gate.js';
 import { OverlaysPanel } from './overlays-panel.js';
+import { StationOwnershipPage } from './station-ownership.js';
 
 /**
  * The companion app's window.
@@ -130,6 +131,7 @@ type Page =
   | 'colony-new'
   | 'colony-squadron'
   | 'colony-members'
+  | 'colony-ownership'
   | 'bounties'
   | 'lb-bounties'
   | 'lb-colony'
@@ -263,6 +265,13 @@ const NAV: ReadonlyArray<NavItem | NavGroup> = [
       { id: 'colony-new', label: 'Start New Project', hint: 'Post the site you are docked at' },
       { id: 'colony-squadron', label: 'Squadron projects', hint: 'What the squadron is building' },
       { id: 'colony-members', label: 'Members’ projects', hint: 'What members have asked help with' },
+      /*
+       * Last, and officers only — the website puts it here for the same reason: it is a setting,
+       * not a destination. `colonisation-mirror.spec.ts` compares the two menus label for label,
+       * so a page added to one and not the other fails the build. That spec exists because the
+       * owner has objected to the two drifting twice.
+       */
+      { id: 'colony-ownership', label: 'Station ownership', hint: 'Which stations count as ours' },
     ],
   },
   {
@@ -674,6 +683,7 @@ function App(): JSX.Element {
             onReload={loadColony}
           />
         ) : null}
+        {page === 'colony-ownership' ? <StationOwnershipPage /> : null}
         {page === 'bounties' ? <BountiesPage /> : null}
         {page === 'lb-bounties' ? <LeaderboardPage board="bounties" /> : null}
         {page === 'lb-colony' ? <LeaderboardPage board="colony" /> : null}

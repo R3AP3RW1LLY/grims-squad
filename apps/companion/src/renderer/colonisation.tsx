@@ -7,6 +7,7 @@ import type {
   CarrierMatch,
   ColonyPlan,
   RosterEntry,
+  StationClaim,
   ColonyHauler,
   ColonyNeed,
   ColonyProject,
@@ -107,6 +108,18 @@ declare global {
        * named at exactly one stop. All of that is decided by the hub so this app and the website
        * cannot give two answers to the same question.
        */
+      /*
+       * Station ownership. Officer-only at the hub, on COLONY_MANAGE — the app shows the hub's own
+       * refusal rather than deciding from a rights flag it may be holding a stale copy of.
+       */
+      stationClaims(): Promise<Answer<{ claims: StationClaim[] }>>;
+      claimStation(body: {
+        stationName: string;
+        systemName: string;
+        ownership: 'squadron' | 'member';
+        note?: string;
+      }): Promise<Answer<{ ok: true; stationKey: string }>>;
+      withdrawStationClaim(key: string): Promise<Answer<{ ok: true }>>;
       purchases(
         id: string,
         order?: 'ours' | 'closest',

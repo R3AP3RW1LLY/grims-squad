@@ -47,7 +47,10 @@ import {
   colonyProjects,
   colonyDeclarePurchase,
   colonyPlanReview,
+  colonyClaimStation,
   colonyPurchases,
+  colonyStationClaims,
+  colonyWithdrawStationClaim,
   colonyRoster,
   colonyUnassign,
   colonyCurrent,
@@ -2288,6 +2291,29 @@ if (!app.requestSingleInstanceLock()) {
      * each one named at a single stop — is applied by the hub, so this app and the website cannot
      * give two answers to a question that has one.
      */
+    /*
+     * Station ownership. Officer-only at the hub, which is where the decision belongs — these
+     * handlers pass through and let the refusal come back as a sentence rather than pre-judging it
+     * from a rights flag this process may be holding a stale copy of.
+     */
+    ipcMain.handle('colonyStationClaims', () => colonyStationClaims(hub()));
+    ipcMain.handle('colonyClaimStation', (_e, body: unknown) => {
+      const raw = (body ?? {}) as Record<string, unknown>;
+      return colonyClaimStation(hub(), {
+        stationName: typeof raw['stationName'] === 'string' ? raw['stationName'] : '',
+        systemName: typeof raw['systemName'] === 'string' ? raw['systemName'] : '',
+        // Narrowed here as well as at the hub: the renderer must not be able to send a third value
+        // that stores cleanly and ranks as unowned.
+        ownership: raw['ownership'] === 'member' ? 'member' : 'squadron',
+        ...(typeof raw['note'] === 'string' && raw['note'].trim() !== ''
+          ? { note: raw['note'] }
+          : {}),
+      });
+    });
+    ipcMain.handle('colonyWithdrawStationClaim', (_e, key: unknown) =>
+      colonyWithdrawStationClaim(hub(), typeof key === 'string' ? key : ''),
+    );
+
     ipcMain.handle('colonyPurchases', (_e, id: unknown, order: unknown) =>
       /*
        * Anything that is not the string 'closest' becomes undefined, and the hub then applies its

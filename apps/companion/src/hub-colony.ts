@@ -787,6 +787,43 @@ export const colonyPurchases = (
       (order === undefined ? '' : `?order=${order}`),
   );
 
+export interface StationClaim {
+  readonly stationKey: string;
+  readonly stationName: string;
+  readonly ownership: string;
+  readonly note: string | null;
+  readonly claimedBy: string | null;
+  readonly claimedAt: string;
+  readonly withdrawnAt: string | null;
+}
+
+/**
+ * Which stations the squadron holds, as officers have declared them.
+ *
+ * ★ THE MIRROR IS THE OWNER'S RULE — SQUADRON OWNER, 2026-08-03 ★
+ *
+ * "ensure the Companion app matches and has all the same pages in colonization that the website
+ * has please! must be a mirror!"
+ *
+ * Officer-only at the hub. The app hides the page for everybody else rather than showing one that
+ * answers with a refusal — but the hub is the thing that decides, not this.
+ */
+export const colonyStationClaims = (
+  call: HubCall,
+): Promise<Answer<{ claims: StationClaim[] }>> => hubColony(call, '/station-claims');
+
+export const colonyClaimStation = (
+  call: HubCall,
+  body: { stationName: string; systemName: string; ownership: 'squadron' | 'member'; note?: string },
+): Promise<Answer<{ ok: true; stationKey: string }>> =>
+  hubColony(call, '/station-claims', { method: 'POST', body });
+
+export const colonyWithdrawStationClaim = (
+  call: HubCall,
+  stationKey: string,
+): Promise<Answer<{ ok: true }>> =>
+  hubColony(call, `/station-claims/${encodeURIComponent(stationKey)}`, { method: 'DELETE' });
+
 /** Recording a station somebody actually bought at. Refused for fleet carriers, which move. */
 export const colonyDeclarePurchase = (
   call: HubCall,
