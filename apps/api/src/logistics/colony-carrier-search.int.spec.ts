@@ -128,6 +128,29 @@ async function catalogue(
   );
 }
 
+/**
+ * The fixture's own owner, by handle.
+ *
+ * ★ THREE CALL SITES STILL BORROWED THE FIRST ROW OF `users` ★
+ *
+ * The note above records this being fixed once — and three `SELECT id FROM users LIMIT 1` calls
+ * were left behind. On a seeded machine they find a real member and pass. In CI the table holds
+ * only what the specs put there, so they borrow whichever fixture user another spec happened to
+ * create — and when that spec's cleanup deletes it mid-run, the insert here fails on
+ * `colony_carriers_added_by_id_fkey`.
+ *
+ * That is what made this file fail a pull request that touched nothing but the worker. A spec whose
+ * result depends on which other spec is running is not a test, it is a coin toss.
+ */
+async function fixtureOwner(): Promise<string> {
+  const [row] = await db.$queryRawUnsafe<Array<{ id: string }>>(
+    `SELECT id::text AS id FROM users WHERE handle = $1`,
+    FIXTURE_HANDLE,
+  );
+  if (row === undefined) throw new Error('the fixture owner is missing');
+  return row.id;
+}
+
 async function market(
   key: string,
   name: string,
@@ -275,9 +298,7 @@ describe('finding a carrier by callsign', () => {
         projectId,
         marketId: NO_MARKET,
         isSquadron: false,
-        callerId: (await db.$queryRawUnsafe<Array<{ id: string }>>(
-          `SELECT id::text AS id FROM users LIMIT 1`,
-        ))[0]!.id,
+        callerId: await fixtureOwner(),
         callerMask: 0n,
       }),
     ).resolves.toEqual({ marketId: NO_MARKET });
@@ -302,9 +323,7 @@ describe('finding a carrier by callsign', () => {
         projectId,
         marketId: '900000000000999',
         isSquadron: false,
-        callerId: (await db.$queryRawUnsafe<Array<{ id: string }>>(
-          `SELECT id::text AS id FROM users LIMIT 1`,
-        ))[0]!.id,
+        callerId: await fixtureOwner(),
         callerMask: 0n,
       }),
     ).rejects.toThrow(/We hold no fleet carrier under that identifier/);
@@ -339,9 +358,7 @@ describe('a carrier that has jumped is ONE carrier', () => {
   });
 
   it('does not double-count its hold once it is on the build', async () => {
-    const [owner] = await db.$queryRawUnsafe<Array<{ id: string }>>(
-      `SELECT id::text AS id FROM users LIMIT 1`,
-    );
+    const owner = { id: await fixtureOwner() };
     await service.attach({
       projectId,
       marketId: MOVED,
