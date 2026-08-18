@@ -64,8 +64,8 @@ export function FrontierPanel({
   const tone = unknown
     ? 'text-[var(--color-text-secondary)]'
     : never || dead
-      ? 'text-[var(--color-warning,#e0a458)]'
-      : 'text-[var(--color-success,#5fb865)]';
+      ? 'text-[var(--color-semantic-warning)]'
+      : 'text-[var(--color-semantic-success)]';
 
   return (
     <Section title="Frontier account">
@@ -76,7 +76,7 @@ export function FrontierPanel({
       */}
       {outcome !== null && (
         <p
-          className="mb-4 rounded-md border border-[var(--color-border)] bg-[var(--color-surface-raised)] px-4 py-3 text-sm"
+          className="mb-4 rounded-md border border-[var(--color-border-subtle)] bg-[var(--color-surface-panel-raised)] px-4 py-3 text-sm"
           role="status"
         >
           {outcome === 'connected'
@@ -108,12 +108,12 @@ export function FrontierPanel({
       <div className="mt-4 flex flex-wrap items-center gap-3">
         <Link
           href="/connect/frontier"
-          className="inline-flex items-center rounded-md bg-[var(--color-accent)] px-4 py-2 text-sm font-medium text-[var(--color-on-accent,#0b0b0d)] transition hover:opacity-90"
+          className="inline-flex items-center rounded-md bg-[var(--color-brand-orange)] px-4 py-2 text-sm font-medium text-[var(--color-text-on-accent)] transition hover:opacity-90"
           prefetch={false}
         >
           {never ? 'Connect with Frontier' : 'Reconnect with Frontier'}
         </Link>
-        <span className="text-xs text-[var(--color-text-muted,var(--color-text-secondary))]">
+        <span className="text-xs text-[var(--color-text-dim)]">
           Opens Frontier&rsquo;s sign-in page. Your Frontier password never reaches us.
         </span>
       </div>
