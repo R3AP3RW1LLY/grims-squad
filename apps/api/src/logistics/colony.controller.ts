@@ -1,6 +1,6 @@
 import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Res } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
-import { AppError, ErrorCode, Permission, ROLE_PRESETS } from '@grims/shared';
+import { AppError, ErrorCode, Permission, readClaimOwnership, ROLE_PRESETS } from '@grims/shared';
 import { Public } from '../auth/auth.guard.js';
 import { User, type CurrentUser } from '../auth/current-user.js';
 import { PermissionService } from '../authz/permission.service.js';
@@ -550,6 +550,62 @@ export class ColonyController {
      * first", so a missing or mistyped value lands on the ordering the criteria describe.
      */
     return this.purchases.forProject(id, order === 'closest' ? 'closest' : 'ours');
+  }
+
+  /**
+   * The officers' list of stations the squadron holds.
+   *
+   * ★ THE TABLE WAS READ BY THE RANKING AND WRITTEN BY NOTHING ★
+   *
+   * `station_ownership_claims` shipped with the buy-location ordering and is consulted on every
+   * where-to-buy query. It had no route, no service method and no screen, so the officer override
+   * the schema describes at length -- "it does not cover a station we hold but never built here" --
+   * could not be exercised by anybody. These three routes are that override.
+   *
+   * COLONY_MANAGE, not COLONY_VIEW: a claim changes where the whole squadron is sent to shop.
+   * Reading the list is gated the same way, because it names which officer said what and that is
+   * an officers' conversation.
+   */
+  @Get('station-claims')
+  async stationClaims(@User() caller: CurrentUser | undefined) {
+    await this.#assert(caller, Permission.COLONY_MANAGE, 'Only officers manage station ownership.');
+    return { claims: await this.purchases.listStationClaims() };
+  }
+
+  @Post('station-claims')
+  async claimStation(@User() caller: CurrentUser | undefined, @Body() body: unknown) {
+    const me = this.#requireSession(caller);
+    await this.#assert(caller, Permission.COLONY_MANAGE, 'Only officers manage station ownership.');
+
+    const raw = (body ?? {}) as Record<string, unknown>;
+    /*
+     * Narrowed here rather than defaulted. The schema says an unrecognised value "should degrade to
+     * 'not ours' rather than break the sort" -- right for a row already in the table, wrong for
+     * somebody pressing a button, because storing a claim that ranks as unowned looks like it
+     * worked and changes nothing.
+     */
+    const ownership = readClaimOwnership(raw['ownership']);
+    if (ownership === null) {
+      throw new AppError(ErrorCode.VALIDATION_FAILED, 'Say whose it is: the squadron or a member.');
+    }
+
+    return this.purchases.claimStation({
+      stationName: typeof raw['stationName'] === 'string' ? raw['stationName'] : '',
+      systemName: typeof raw['systemName'] === 'string' ? raw['systemName'] : '',
+      ownership,
+      note: typeof raw['note'] === 'string' && raw['note'].trim() !== '' ? raw['note'] : null,
+      callerId: me.userId,
+    });
+  }
+
+  @Delete('station-claims/:key')
+  async withdrawStationClaim(
+    @User() caller: CurrentUser | undefined,
+    @Param('key') key: string,
+  ) {
+    this.#requireSession(caller);
+    await this.#assert(caller, Permission.COLONY_MANAGE, 'Only officers manage station ownership.');
+    return this.purchases.withdrawStationClaim(decodeURIComponent(key));
   }
 
   @Post('projects/:id/purchases')

@@ -146,6 +146,7 @@ const ICONS: Record<string, typeof HomeIcon> = {
   '/colonisation/build-types': QueueListIcon,
   '/colonisation/squadron': BuildingOffice2Icon,
   '/colonisation/members': UserGroupIcon,
+  '/colonisation/ownership': BuildingOffice2Icon,
   '/logistics/commodities': ScaleIcon,
   '/logistics/freight-office': TruckIcon,
   '/shipyard': WrenchScrewdriverIcon,

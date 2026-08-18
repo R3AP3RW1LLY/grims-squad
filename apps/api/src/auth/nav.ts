@@ -196,6 +196,19 @@ const NAV: readonly NavDefinition[] = [
     requires: Permission.COLONY_VIEW,
   },
   {
+    href: '/colonisation/ownership',
+    label: 'Station ownership',
+    section: 'squadron',
+    subsection: 'Colonisation',
+    blurb: 'Which stations count as ours when the platform picks where to shop.',
+    /*
+     * COLONY_MANAGE, not COLONY_VIEW. A claim changes where the WHOLE squadron is sent to buy, and
+     * the list names which officer said what — an officers' conversation either way. The routes
+     * behind it are gated the same, so this entry hides a page nobody else could open anyway.
+     */
+    requires: Permission.COLONY_MANAGE,
+  },
+  {
     href: '/colonisation/new',
     // "Start New Project", not "New project": a verb says it is something you DO, where a noun
     // reads as a place that lists them.

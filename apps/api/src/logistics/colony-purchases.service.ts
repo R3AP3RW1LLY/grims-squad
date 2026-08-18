@@ -8,7 +8,10 @@ import {
   looksLikeCarrier,
   buyBandLabel,
   rankBuySources,
+  stationClaimKey,
+  stationNameFromClaimKey,
   type BuyContext,
+  type ClaimOwnership,
 } from '@grims/shared';
 import { commodityCategories } from './commodity-categories.js';
 import { carrierCover, ColonyCarrierService } from './colony-carrier.service.js';
@@ -781,6 +784,129 @@ export class ColonyPurchasesService {
     }
 
     return owned;
+  }
+
+  /**
+   * Every claim an officer has made, newest first, withdrawn ones included.
+   *
+   * ★ WITHDRAWN ROWS ARE RETURNED, NOT HIDDEN ★
+   *
+   * The schema keeps them deliberately: "A deleted row would lose the argument; a dated one settles
+   * it." Filtering them out of the officers' own list would be losing the argument by another
+   * route — the one screen where "who said this was ours, and who took it back" is the question
+   * being asked. The RANKING still ignores them; that filter lives in the query that does the
+   * ranking, where it belongs.
+   */
+  async listStationClaims(): Promise<
+    ReadonlyArray<{
+      stationKey: string;
+      stationName: string;
+      ownership: string;
+      note: string | null;
+      claimedBy: string | null;
+      claimedAt: Date;
+      withdrawnAt: Date | null;
+    }>
+  > {
+    const rows = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
+      `SELECT c.station_key, c.ownership, c.note, c.claimed_at, c.withdrawn_at,
+              u.display_name AS claimed_by
+         FROM station_ownership_claims c
+         LEFT JOIN users u ON u.id = c.claimed_by_id
+        ORDER BY c.claimed_at DESC
+        LIMIT 500`,
+    );
+
+    return rows.map((r) => ({
+      stationKey: String(r['station_key'] ?? ''),
+      stationName: stationNameFromClaimKey(String(r['station_key'] ?? '')),
+      ownership: String(r['ownership'] ?? ''),
+      note: r['note'] === null || r['note'] === undefined ? null : String(r['note']),
+      claimedBy: r['claimed_by'] === null || r['claimed_by'] === undefined ? null : String(r['claimed_by']),
+      claimedAt: r['claimed_at'] as Date,
+      withdrawnAt: (r['withdrawn_at'] as Date | null) ?? null,
+    }));
+  }
+
+  /**
+   * An officer says a station is the squadron's, or a member's.
+   *
+   * ★ THE ADDRESS IS LOOKED UP, NOT ASKED FOR ★
+   *
+   * Nobody knows their station's systemAddress and nobody should have to. The catalogue is asked,
+   * and the system NAME stands in when it has never heard of the port -- a hand-typed row, or one
+   * too new to have been imported. The half the ranking reads is the station name either way, so a
+   * fallback key still works; it is only less certain to be unique.
+   *
+   * ★ RE-CLAIMING IS AN UPDATE, AND IT UN-WITHDRAWS ★
+   *
+   * An officer who withdrew a claim in March and makes it again in August means it now. Leaving
+   * `withdrawn_at` set would store their decision and ignore it, which is the failure mode this
+   * whole feature exists to end.
+   */
+  async claimStation(input: {
+    stationName: string;
+    systemName: string;
+    ownership: ClaimOwnership;
+    note: string | null;
+    callerId: string;
+  }): Promise<{ ok: true; stationKey: string }> {
+    const stationName = input.stationName.trim().slice(0, 80);
+    const systemName = input.systemName.trim().slice(0, 80);
+    if (stationName === '' || systemName === '') {
+      throw new AppError(ErrorCode.VALIDATION_FAILED, 'Name the station and its system.');
+    }
+
+    const [found] = await this.db.$queryRawUnsafe<Array<{ system_address: string | null }>>(
+      `SELECT data->>'systemAddress' AS system_address
+         FROM knowledge_items
+        WHERE kind = 'station' AND lower(name) = lower($1) AND lower(data->>'system') = lower($2)
+        LIMIT 1`,
+      stationName,
+      systemName,
+    );
+
+    const left = found?.system_address ?? systemName;
+    const key = stationClaimKey(left, stationName);
+    if (key === '') {
+      throw new AppError(ErrorCode.VALIDATION_FAILED, 'That station could not be identified.');
+    }
+
+    await this.db.$executeRawUnsafe(
+      `INSERT INTO station_ownership_claims (station_key, ownership, note, claimed_by_id, claimed_at)
+       VALUES ($1, $2, $3, $4::uuid, now())
+       ON CONFLICT (station_key) DO UPDATE SET
+         ownership = EXCLUDED.ownership,
+         note = EXCLUDED.note,
+         claimed_by_id = EXCLUDED.claimed_by_id,
+         claimed_at = EXCLUDED.claimed_at,
+         withdrawn_at = NULL`,
+      key,
+      input.ownership,
+      input.note === null ? null : input.note.trim().slice(0, 200) || null,
+      input.callerId,
+    );
+
+    return { ok: true, stationKey: key };
+  }
+
+  /**
+   * An officer takes a claim back.
+   *
+   * Dated, never deleted -- the schema's own rule. The ranking reads `withdrawn_at IS NULL`, so the
+   * station stops counting as ours the moment this lands, while the record of who claimed it and
+   * who withdrew it survives.
+   */
+  async withdrawStationClaim(stationKey: string): Promise<{ ok: true }> {
+    const key = stationKey.trim();
+    if (key === '') throw new AppError(ErrorCode.VALIDATION_FAILED, 'Which claim?');
+
+    await this.db.$executeRawUnsafe(
+      `UPDATE station_ownership_claims SET withdrawn_at = now()
+        WHERE station_key = $1 AND withdrawn_at IS NULL`,
+      key,
+    );
+    return { ok: true };
   }
 
   /** Records what somebody found. Re-declaring the same commodity at the same station updates it. */

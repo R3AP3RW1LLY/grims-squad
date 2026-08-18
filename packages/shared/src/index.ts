@@ -42,6 +42,12 @@ export type { BookPlan, BookSite } from './build-book.js';
 export { completedBuilds } from './build-completion-watch.js';
 export type { WatchedBuild, StationSighting, CompletedBuild } from './build-completion-watch.js';
 export { buyBandLabel, rankBuySources } from './buy-priority.js';
+export {
+  readClaimOwnership,
+  stationClaimKey,
+  stationNameFromClaimKey,
+} from './station-claim.js';
+export type { ClaimOwnership } from './station-claim.js';
 export type { BuyContext, BuySource, StationOwnership } from './buy-priority.js';
 export {
   colonyStatusOf,
