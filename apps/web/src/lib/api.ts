@@ -2774,6 +2774,19 @@ export interface PlanSite {
   isPrimary: boolean;
   projectId: string | null;
   /**
+   * What this row asked for before the plan was corrected, and when.
+   *
+   * A site linked to a project naming a different structure is a plan that was wrong — the
+   * project's build type came from the game. The correction is automatic, and these fields are what
+   * make it honest: an edit to somebody's plan that leaves no trace is indistinguishable from the
+   * plan having been wrong all along.
+   *
+   * Both null for the ordinary row.
+   */
+  correctedFrom: string | null;
+  correctedFromName: string | null;
+  correctedAt: string | null;
+  /**
    * What the project this site became actually reports. Null until it has been placed and posted,
    * which is the normal state of most of a plan.
    *
