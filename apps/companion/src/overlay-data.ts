@@ -497,6 +497,18 @@ function buildPanel(input: OverlayInput): OverlayData['build'] {
       haulers: current.haulers.length,
       // The footer says "live from the squadron", because that is what these numbers are.
       fromHub: true,
+      /*
+       * ★ AND HOW OLD THEY ARE — AUDIT, 2026-08-18 ★
+       *
+       * "live from the squadron" was said unconditionally, so a needs list from a site nobody had
+       * docked at in a fortnight was captioned exactly like one read four minutes ago. A member
+       * hauling against the stale one had no way to tell, and the caption said it was fine.
+       *
+       * The NEWEST reading across the needs, for the same reason the needs table uses the newest:
+       * one commodity refreshed today makes the whole list that current, and taking the oldest
+       * would understate a list somebody had just updated.
+       */
+      observedAt: newestObservation(current.needs),
     };
   }
 
@@ -506,6 +518,21 @@ function buildPanel(input: OverlayInput): OverlayData['build'] {
 }
 
 /** The panel's numbers, straight off a depot heartbeat. Shared by both docked paths above. */
+/**
+ * The most recent moment any of these needs was read off the site.
+ *
+ * Null when none of them carries a stamp — a build nobody has docked at yet, whose figures are the
+ * catalogue's estimate rather than a stale reading. The two are different and the overlay says so.
+ */
+function newestObservation(needs: ReadonlyArray<{ readonly observedAt?: string | null }>): string | null {
+  let newest: number | null = null;
+  for (const need of needs) {
+    const at = need.observedAt == null ? NaN : Date.parse(need.observedAt);
+    if (Number.isFinite(at) && (newest === null || at > newest)) newest = at;
+  }
+  return newest === null ? null : new Date(newest).toISOString();
+}
+
 function fromDepot(
   dock: DockedAt,
   site: NonNullable<DockedAt['site']>,
@@ -515,6 +542,15 @@ function fromDepot(
   const title = projectTitleFrom(dock.stationName);
 
   return {
+    /*
+     * ★ THE JOURNAL'S OWN TIMESTAMP, WHICH WAS ALREADY THERE FOR THIS ★
+     *
+     * `DockedAt.at` carries the comment "the journal's own timestamp, so the UI can say how fresh
+     * this is" — and nothing had ever read it. On this path the member is standing on the pad, so
+     * it is almost always seconds old; using it anyway means the panel states its age from the
+     * source rather than assuming currency, which is the assumption that made the hub path wrong.
+     */
+    observedAt: dock.at,
     // Empty rather than the raw station name: `projectTitleFrom` strips Frontier's
     // "Planetary Construction Site:" prefix, and an empty result means we have no name yet.
     title: title === '' ? null : title,
