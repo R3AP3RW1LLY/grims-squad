@@ -11,7 +11,7 @@ import {
   Req,
 } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
-import { AppError, ErrorCode, Permission } from '@grims/shared';
+import { AppError, ErrorCode, Permission, readClaimOwnership } from '@grims/shared';
 import { Public } from '../auth/auth.guard.js';
 import { PermissionService } from '../authz/permission.service.js';
 import { PAIRING_SERVICE } from '../telemetry/telemetry.tokens.js';
@@ -451,6 +451,58 @@ export class ColonyDeviceController {
    * Same service as the website's, so the two cannot disagree about where to send somebody — which
    * is the whole point of the owner's "must be a mirror".
    */
+  /**
+   * Station ownership, from the app.
+   *
+   * ★ THE MIRROR IS THE OWNER'S RULE, NOT A NICETY — SQUADRON OWNER, 2026-08-03 ★
+   *
+   * "ensure the Companion app matches and has all the same pages in colonization that the website
+   * has please! must be a mirror!"
+   *
+   * A spec in the companion compares the two colonisation menus label for label, and adding the
+   * website's ownership page without these routes broke it. Weakening that spec was the tempting
+   * fix and the wrong one: it exists because the owner has objected to the two drifting twice.
+   *
+   * COLONY_MANAGE on all three, exactly as on the website. One rule, reached through two doors.
+   */
+  @Public()
+  @Get('station-claims')
+  async stationClaims(@Req() req: FastifyRequest) {
+    await this.#caller(req, Permission.COLONY_MANAGE, 'Only officers manage station ownership.');
+    return { claims: await this.purchases.listStationClaims() };
+  }
+
+  @Public()
+  @Post('station-claims')
+  async claimStation(@Req() req: FastifyRequest, @Body() body: unknown) {
+    const me = await this.#caller(
+      req,
+      Permission.COLONY_MANAGE,
+      'Only officers manage station ownership.',
+    );
+
+    const raw = (body ?? {}) as Record<string, unknown>;
+    const ownership = readClaimOwnership(raw['ownership']);
+    if (ownership === null) {
+      throw new AppError(ErrorCode.VALIDATION_FAILED, 'Say whose it is: the squadron or a member.');
+    }
+
+    return this.purchases.claimStation({
+      stationName: typeof raw['stationName'] === 'string' ? raw['stationName'] : '',
+      systemName: typeof raw['systemName'] === 'string' ? raw['systemName'] : '',
+      ownership,
+      note: typeof raw['note'] === 'string' && raw['note'].trim() !== '' ? raw['note'] : null,
+      callerId: me.userId,
+    });
+  }
+
+  @Public()
+  @Delete('station-claims/:key')
+  async withdrawStationClaim(@Req() req: FastifyRequest, @Param('key') key: string) {
+    await this.#caller(req, Permission.COLONY_MANAGE, 'Only officers manage station ownership.');
+    return this.purchases.withdrawStationClaim(decodeURIComponent(key));
+  }
+
   @Public()
   @Get('projects/:id/purchases')
   async purchaseRoute(

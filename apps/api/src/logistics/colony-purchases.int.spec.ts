@@ -609,6 +609,209 @@ describe('the shopping route', () => {
  *
  * Carriers are off the route entirely now, but the rule stands for anything else we hold twice.
  */
+describe('an officer claiming a station for the squadron', () => {
+  afterAll(async () => {
+    await db.$executeRawUnsafe(
+      `DELETE FROM station_ownership_claims WHERE station_key LIKE $1`,
+      `%${TAG}%`,
+    );
+  });
+
+  it('★ MANDATORY: a claim actually changes where members are sent ★', async () => {
+    /*
+     * ★ THE WHOLE POINT, AND THE ONLY THING WORTH ASSERTING ★
+     *
+     * `station_ownership_claims` shipped with the buy-location ordering, is read on every
+     * where-to-buy query, and had no route, no service method and no screen. The failure available
+     * once a write path exists is subtler than "it does not save": a claim that is accepted,
+     * stored, listed back to the officer who made it, and silently ignored by the ranking — because
+     * the writer and the reader disagree about where the station name starts in the key.
+     *
+     * So this does not assert a row appeared. It asserts the ORDER changed.
+     */
+    const { owner, project } = await seedBuild();
+    await placeSystem(SYSTEM, 0, 0, 0);
+    await placeSystem(`${TAG} near`, 5, 0, 0);
+    await placeSystem(`${TAG} far`, 60, 0, 0);
+
+    /*
+     * ★ NEITHER STOP IS IN THE BUILD'S OWN SYSTEM, AND THAT IS THE POINT ★
+     *
+     * The first draft put the near dock in SYSTEM itself and asserted the claimed station beat it.
+     * That assertion was wrong, and the code was right: the owner's ordering is 2, 0, 1, 3, 4 —
+     * the build's own system leads outright, because being there is no jump at all and no amount
+     * of owning a pad elsewhere beats already being in the system.
+     *
+     * Ownership decides among everywhere ELSE, which is what this test has to isolate. Both stops
+     * are out-system, so the only thing that can reorder them is the claim.
+     */
+    /*
+     * ★ DIFFERENT COMMODITIES, OR ONLY ONE STOP SURVIVES ★
+     *
+     * planRoute is a greedy set cover and lists each material at exactly ONE station — there is a
+     * test above asserting precisely that. Two stops both stocking only Titanium therefore produce
+     * a one-stop route, and an ordering assertion over one row proves nothing. Each stop covers a
+     * different need so both are on the route and their ORDER is the thing under test.
+     */
+    for (const [station, system, commodity] of [
+      [`${TAG} Near Dock`, `${TAG} near`, 'Copper'],
+      [`${TAG} Far Dock`, `${TAG} far`, 'Titanium'],
+    ] as const) {
+      await service.declare({
+        systemName: SYSTEM,
+        stationName: station,
+        stationSystem: system,
+        commodity,
+        tonnes: 900,
+        price: null,
+        note: null,
+        userId: owner,
+      });
+    }
+
+    const claim = await service.claimStation({
+      stationName: `${TAG} Far Dock`,
+      systemName: `${TAG} far`,
+      ownership: 'squadron',
+      note: 'ours since the war',
+      callerId: owner,
+    });
+    expect(claim.stationKey, 'the key must carry the station name after the separator').toContain(
+      `${TAG} Far Dock`,
+    );
+
+    /*
+     * Relative rather than absolute: this suite shares a database with real squadron data, and a
+     * genuine squadron station within 500 ly legitimately joins the list now that purchase history
+     * is shared. The property is the order of the two stops this test controls.
+     */
+    const ours = await service.forProject(project, 'ours');
+    const rank = (name: string): number => ours.stations.findIndex((st) => st.stationName === name);
+
+    expect(
+      rank(`${TAG} Far Dock`),
+      'a claimed station outranks a nearer one we do not own',
+    ).toBeLessThan(rank(`${TAG} Near Dock`));
+    expect(
+      ours.stations.find((st) => st.stationName === `${TAG} Far Dock`)?.bandLabel,
+      'and it says why',
+    ).toBe('Squadron station');
+
+    /*
+     * And the toggle still means what it says. "Closest" must not quietly inherit the ownership
+     * ordering — that would make the control look broken to the member who reached for it.
+     */
+    const closest = await service.forProject(project, 'closest');
+    const closeRank = (name: string): number =>
+      closest.stations.findIndex((st) => st.stationName === name);
+    expect(
+      closeRank(`${TAG} Near Dock`),
+      'closest means closest, claim or no claim',
+    ).toBeLessThan(closeRank(`${TAG} Far Dock`));
+  });
+
+  it('★ MANDATORY: withdrawing gives the ranking back, and keeps the record ★', async () => {
+    /*
+     * The schema is explicit: "A deleted row would lose the argument; a dated one settles it." So
+     * the row survives a withdrawal and the officers' list still shows who said what — while the
+     * ranking stops counting the station immediately.
+     */
+    const { owner, project } = await seedBuild();
+    await placeSystem(SYSTEM, 0, 0, 0);
+    await placeSystem(`${TAG} near`, 5, 0, 0);
+    await placeSystem(`${TAG} far`, 60, 0, 0);
+
+    for (const [station, system, commodity] of [
+      [`${TAG} Near Dock`, `${TAG} near`, 'Copper'],
+      [`${TAG} Far Dock`, `${TAG} far`, 'Titanium'],
+    ] as const) {
+      await service.declare({
+        systemName: SYSTEM,
+        stationName: station,
+        stationSystem: system,
+        commodity,
+        tonnes: 900,
+        price: null,
+        note: null,
+        userId: owner,
+      });
+    }
+
+    const { stationKey } = await service.claimStation({
+      stationName: `${TAG} Far Dock`,
+      systemName: `${TAG} far`,
+      ownership: 'squadron',
+      note: null,
+      callerId: owner,
+    });
+    await service.withdrawStationClaim(stationKey);
+
+    /*
+     * ★ RELATIVE, NOT ABSOLUTE — THE SUITE SHARES A DATABASE WITH REAL SQUADRON DATA ★
+     *
+     * The first version asserted the near dock was stations[0]. It is not, and correctly so: since
+     * purchase history became squadron-wide, genuine squadron stations within 500 ly join the list
+     * and outrank an unowned test fixture. Asserting a position makes this test a hostage to
+     * whatever the squadron bought this week.
+     *
+     * The property being tested is the ORDER OF THE TWO STOPS THIS TEST CONTROLS: with the claim
+     * withdrawn, the far one must no longer be ahead of the near one.
+     */
+    const after = await service.forProject(project, 'ours');
+    const at = (name: string): number => after.stations.findIndex((st) => st.stationName === name);
+
+    const far = at(`${TAG} Far Dock`);
+    const near = at(`${TAG} Near Dock`);
+
+    /*
+     * ★ ABSENT IS A STRONGER RESULT THAN DEMOTED, AND BOTH SATISFY THE RULE ★
+     *
+     * Withdrawn, the far dock drops out of the ownership bands and competes on distance alone —
+     * against real squadron stations that the shared purchase history now brings within reach. In
+     * practice it usually loses its slot outright rather than merely sliding down, because
+     * planRoute lists each material at exactly one station.
+     *
+     * Asserting "it moved to position N" would be asserting which real station the squadron
+     * happened to shop at this week. The property is that the claim no longer buys it any standing:
+     * it is behind the nearer stop, or not on the route at all.
+     */
+    expect(near, 'the unclaimed near stop is still reachable').toBeGreaterThanOrEqual(0);
+    expect(
+      far === -1 || far > near,
+      `withdrawn, the far stop must not outrank the near one (far=${far}, near=${near})`,
+    ).toBe(true);
+
+    const listed = (await service.listStationClaims()).find((c) => c.stationKey === stationKey);
+    expect(listed, 'the row survives as a record of who said what').toBeDefined();
+    expect(listed?.withdrawnAt, 'dated rather than deleted').not.toBeNull();
+  });
+
+  it('re-claiming a withdrawn station means it again', async () => {
+    // An officer who withdrew in March and claims again in August means it now. Leaving
+    // `withdrawn_at` set would store their decision and ignore it.
+    const { owner } = await seedBuild();
+    const first = await service.claimStation({
+      stationName: `${TAG} Far Dock`,
+      systemName: `${TAG} far`,
+      ownership: 'member',
+      note: null,
+      callerId: owner,
+    });
+    await service.withdrawStationClaim(first.stationKey);
+    await service.claimStation({
+      stationName: `${TAG} Far Dock`,
+      systemName: `${TAG} far`,
+      ownership: 'squadron',
+      note: null,
+      callerId: owner,
+    });
+
+    const row = (await service.listStationClaims()).find((c) => c.stationKey === first.stationKey);
+    expect(row?.withdrawnAt, 'claiming again un-withdraws it').toBeNull();
+    expect(row?.ownership, 'and takes the new answer').toBe('squadron');
+  });
+});
+
 describe('a station is keyed by identity, not by where it was last seen', () => {
   it('★ MANDATORY: one market id is one place, whatever system it was in ★', () => {
     expect(stationKey('B2W-04T', 'Xinca', '3708694784')).toBe(

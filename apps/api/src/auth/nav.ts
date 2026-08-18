@@ -221,6 +221,25 @@ const NAV: readonly NavDefinition[] = [
     blurb: 'Builds members have asked the squadron for help with.',
     requires: Permission.COLONY_VIEW,
   },
+  {
+    href: '/colonisation/ownership',
+    label: 'Station ownership',
+    section: 'squadron',
+    subsection: 'Colonisation',
+    blurb: 'Which stations count as ours when the platform picks where to shop.',
+    /*
+     * ★ LAST, AND OFFICER-ONLY ★
+     *
+     * COLONY_MANAGE rather than COLONY_VIEW: a claim changes where the WHOLE squadron is sent to
+     * buy, and the list names which officer said what — an officers' conversation either way.
+     *
+     * At the END of the subsection because it is a setting, not a destination. The five above are
+     * places a member goes during an evening's play; this is opened when something is wrong with
+     * how the shopping list ranks, which is rare and deliberate. Putting it fourth, between Build
+     * types and Start New Project, sat an administrative page in the middle of the daily run.
+     */
+    requires: Permission.COLONY_MANAGE,
+  },
   /*
    * ★ LOGISTICS & TRADE — SQUADRON OWNER, 2026-08-02 ★
    *

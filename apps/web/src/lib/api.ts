@@ -3136,6 +3136,26 @@ export interface PurchaseStation {
   lastSeen: string;
 }
 
+export interface StationClaimRow {
+  stationKey: string;
+  stationName: string;
+  ownership: string;
+  note: string | null;
+  claimedBy: string | null;
+  claimedAt: string;
+  withdrawnAt: string | null;
+}
+
+/**
+ * The officers' list of stations the squadron claims.
+ *
+ * `AdminRead` rather than a plain fetch: a member without COLONY_MANAGE must land on the refusal
+ * screen rather than on an empty list, which would read as "the squadron owns nothing" and is a
+ * different statement entirely.
+ */
+export const getStationClaims = (): Promise<AdminRead<{ claims: StationClaimRow[] }>> =>
+  getAdmin('/v1/logistics/colony/station-claims');
+
 export const getColonyPurchases = (
   projectId: string,
   /**

@@ -276,6 +276,9 @@ contextBridge.exposeInMainWorld('colony', {
    */
   purchases: (id: string, order?: 'ours' | 'closest') =>
     ipcRenderer.invoke('colonyPurchases', id, order),
+  stationClaims: () => ipcRenderer.invoke('colonyStationClaims'),
+  claimStation: (body: unknown) => ipcRenderer.invoke('colonyClaimStation', body),
+  withdrawStationClaim: (key: string) => ipcRenderer.invoke('colonyWithdrawStationClaim', key),
   /** Asks the assistant what is wrong with a plan, from the simulation's own findings. */
   planReview: (id: string) => ipcRenderer.invoke('colonyPlanReview', id),
   declarePurchase: (id: string, body: unknown) =>
