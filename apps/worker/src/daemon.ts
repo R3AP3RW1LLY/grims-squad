@@ -3,6 +3,12 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { Client } from 'pg';
 import { PrismaClient, correctLinkedDivergences } from '@grims/db';
+import { execFileSync } from 'node:child_process';
+import { hostname } from 'node:os';
+// Aliased: `announce` is already taken in this file by the job LOG helper below, which is a
+// different thing entirely. Two imports of one name is how the wrong one gets called.
+import { announce as announceToSquadron } from '@grims/db';
+import { judgeDisk } from './jobs/disk-watch.js';
 import { runSpanshWatch } from './jobs/spansh-watch.js';
 import { spanshWatchDeps } from './jobs/spansh-watch.wiring.js';
 import { JOB_REQUEST_CHANNEL } from '@grims/shared';
@@ -353,6 +359,7 @@ function startScheduler(db: PrismaClient): void {
   startBuildCompletionWatch(db);
   startPlanDivergenceCorrection(db);
   startSpanshWatch(db);
+  startDiskWatch(db);
   startStationResolver(db);
   startBountyBoard(db);
   startLeaderboardScoring(db);
@@ -1358,6 +1365,100 @@ function startSpanshWatch(db: PrismaClient): void {
 
   void run();
   setInterval(() => void run(), SPANSH_WATCH_MS);
+}
+
+/**
+ * How often to look at the disk.
+ *
+ * Every six hours, matching the janitor's own cadence. The condition it watches for takes days to
+ * develop and is only actionable by a person, so a tighter loop would buy nothing and only make the
+ * repeat rule work harder.
+ */
+const DISK_WATCH_MS = 6 * 60 * 60_000;
+
+/** Below this many gigabytes free, somebody should be told. Matches the janitor's own threshold. */
+const DISK_COMFORTABLE_GB = 40;
+
+const DISK_MEMORY_KEY = 'ops.disk_watch';
+
+/**
+ * Tells the squadron when a box is running out of disk, and does it once.
+ *
+ * ★ SQUADRON OWNER, 2026-08-18 ★
+ *
+ * "can we add this to our AI pipeline so it prunes daily or when the alarm goes off or when storage
+ * is limited and a clean up is required?"
+ *
+ * The janitor now clears space by itself, escalating until there is room — that is the "prunes when
+ * storage is limited" half and it needs nobody. This is the other half: what happens when it CANNOT.
+ *
+ * The ingestion box reached zero bytes with the janitor running nightly. It had cleaned everything
+ * its windows allowed, had noticed it was still tight, and had printed its alarm into a log file on
+ * a box with no operator. The first anybody knew was a deploy dying on "no space left on device".
+ *
+ * So the alarm goes where the squadron already reads: the same `announcements` table the bot posts
+ * to Discord from, and the same one deploys and releases use.
+ */
+function startDiskWatch(db: PrismaClient): void {
+  const run = async (): Promise<void> => {
+    // One announcement per event, not one per daemon. Both boxes run this.
+    const lock = await takeJobLock('disk-watch');
+    if (lock === null) return;
+    try {
+      /*
+       * `df` on the container's own root. It sits on the same device as /var/lib/docker, so it
+       * reports the disk that actually fills — which is the number the deploy fails on.
+       */
+      const out = execFileSync('df', ['-BG', '--output=avail', '/'], { encoding: 'utf8' });
+      const freeGb = Number((out.split(/\r?\n/)[1] ?? '').replace(/[^0-9]/g, ''));
+      if (!Number.isFinite(freeGb)) return;
+
+      const [row] = await db.$queryRawUnsafe<Array<{ value: unknown }>>(
+        `SELECT value FROM site_config WHERE key = $1`,
+        DISK_MEMORY_KEY,
+      );
+      const stored = (row?.value ?? null) as { alarming?: unknown; announcedAt?: unknown } | null;
+      const memory = {
+        alarming: stored?.alarming === true,
+        announcedAt: typeof stored?.announcedAt === 'string' ? stored.announcedAt : null,
+      };
+
+      const verdict = judgeDisk(
+        { freeGb, comfortableGb: DISK_COMFORTABLE_GB, host: hostname() },
+        memory,
+        new Date(),
+      );
+
+      if (verdict.kind !== 'quiet') {
+        console.log(`daemon: disk watch — ${verdict.kind} at ${freeGb}G free`);
+        await announceToSquadron(db, { kind: 'deploy', content: verdict.message });
+      }
+
+      /*
+       * The memory is written on EVERY pass, including the quiet ones. It is what stops the alarm
+       * repeating, so failing to write it would turn a single notice into one per six hours — the
+       * exact noise this job is designed not to make.
+       *
+       * jsonb, cast explicitly: this column has already taken two bare strings in this codebase and
+       * refused them both, silently, because the callers swallow the error by design.
+       */
+      await db.$executeRawUnsafe(
+        `INSERT INTO site_config (key, value) VALUES ($1, $2::jsonb)
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+        DISK_MEMORY_KEY,
+        JSON.stringify(verdict.memory),
+      );
+    } catch (e) {
+      // Logged and swallowed like its neighbours. A watcher that takes the daemon down when it
+      // cannot read a disk would cost far more than the thing it watches for.
+      console.error(`daemon: disk watch failed (${e instanceof Error ? e.message : String(e)})`);
+    } finally {
+      await lock.release();
+    }
+  };
+
+  void run();
+  setInterval(() => void run(), DISK_WATCH_MS);
 }
 
 async function main(): Promise<void> {

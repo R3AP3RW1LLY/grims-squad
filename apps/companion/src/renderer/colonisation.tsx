@@ -2984,10 +2984,36 @@ function AttachPrompt({
               gap: '10px',
             }}
           >
-            <p style={{ margin: 0, fontSize: '13px', color: C.text }}>
-              <span style={{ color: C.orangeBright }}>{h.name}</span> is holding {tonnes(h.tonnes)}{' '}
-              this build needs.
-            </p>
+            <div style={{ margin: 0 }}>
+              <p style={{ margin: 0, fontSize: '13px', color: C.text }}>
+                <span style={{ color: C.orangeBright }}>{h.name}</span> is holding{' '}
+                {tonnes(h.tonnes)} this build needs.
+              </p>
+              {/*
+                ★ "IS HOLDING" IS A CLAIM ABOUT NOW — AUDIT, 2026-08-18 ★
+
+                The reading may be four minutes or a fortnight old and this sentence was identical
+                either way. Dated through the same `needsFreshness` the website and the needs table
+                use, so one member cannot be told two different things about the same staleness.
+              */}
+              {(() => {
+                const verdict = needsFreshness(
+                  h.seenAt === null ? null : new Date(h.seenAt),
+                  new Date(),
+                );
+                return (
+                  <p
+                    style={{
+                      margin: '2px 0 0',
+                      fontSize: '11px',
+                      color: verdict.warn ? C.warn : C.dim,
+                    }}
+                  >
+                    {verdict.sentence}
+                  </p>
+                );
+              })()}
+            </div>
             <span style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <Button tone="primary" disabled={busy} onClick={() => attach(h.marketId)}>
                 {busy ? 'Attaching…' : 'Attach it'}

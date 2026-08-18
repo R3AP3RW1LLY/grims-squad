@@ -854,3 +854,96 @@ describe('the ingestion box', () => {
     expect(current).toMatch(/"root@\$\{WORKERS_HOST\}" "deploy \$TARGET_SHA"/);
   });
 });
+
+
+/**
+ * A shell script with its comments stripped.
+ *
+ * ★ MY OWN ASSERTION FAILED A FILE FOR SAYING THE RIGHT THING ★
+ *
+ * Every assertion about what a script DOES has to read what it does, not what it says about itself.
+ * These files explain their dangerous flags at length — the janitor names `--volumes` precisely to
+ * record why it must never appear — and a naive match failed it for that comment.
+ *
+ * A test that cannot tell an instruction from an explanation is worse than no test: it trains
+ * people to delete the reasoning rather than keep the rule.
+ */
+function codeOnly(src: string): string {
+  // Split on a regex rather than a newline literal: writing this file through a shell heredoc ate
+  // the escape twice and left an unterminated string. Same trap the bytea guard records.
+  return src
+    .split(/\r?\n/)
+    .filter((line) => !line.trimStart().startsWith('#'))
+    .join('\n');
+}
+
+describe('a deploy clears the images it superseded', () => {
+  /*
+   * ★ THE INGESTION BOX FILLED TO ZERO BYTES — 2026-08-18 ★
+   *
+   * Squadron owner: "yes add a prune step! this was supposed to be done a long time ago!"
+   *
+   * The nightly janitor keeps three days of images, which is right for a normal week and wrong for
+   * a day with six releases in it — each lands ~6GB. The box reached 100% between two nightly runs
+   * and the next deploy died on "no space left on device", then rolled itself back.
+   */
+  const worker = readFileSync(join(REPO, 'infra', 'scripts', 'worker-box-deploy.sh'), 'utf8');
+
+  it('MANDATORY: both deploy paths clear what they replaced', () => {
+    for (const [name, src] of [
+      ['the primary', current],
+      ['the ingestion box', worker],
+    ] as const) {
+      expect(src, `${name} must remove superseded images`).toMatch(/docker rmi/);
+    }
+  });
+
+  it('MANDATORY: the rollback image is protected BY NAME, not by age', () => {
+    /*
+     * The one thing this must never do. A rollback point can be any age, so an age filter that
+     * happened to delete it would turn the next bad deploy into an outage — the exact failure the
+     * whole health-gate-and-rollback design exists to prevent.
+     */
+    expect(current).toContain('grep -vF ":$PREVIOUS_SHA "');
+    expect(worker).toContain('grep -vF ":$PREVIOUS "');
+
+    // And the image just deployed, obviously.
+    expect(current).toContain('grep -vF ":$TARGET_SHA "');
+    expect(worker).toContain('grep -vF ":$SHA "');
+  });
+
+  it('MANDATORY: it never touches volumes, where the database lives', () => {
+    // The janitor carries this rule with its reasoning; the deploys inherit it. `--volumes` is the
+    // flag that would delete Postgres, and its absence is the whole guarantee.
+    for (const src of [current, worker]) {
+      expect(codeOnly(src)).not.toMatch(/prune[^\n]*--volumes/);
+    }
+  });
+});
+
+describe('the janitor clears space instead of only complaining about it', () => {
+  const janitor = readFileSync(join(REPO, 'infra', 'scripts', 'docker-janitor.sh'), 'utf8');
+
+  it('MANDATORY: it escalates when the disk is still tight', () => {
+    /*
+     * It used to prune within fixed windows, notice it was still tight, and print a red line into a
+     * log file on a box nobody logs into. That is how the box reached ZERO BYTES with the janitor
+     * running nightly and succeeding every time.
+     */
+    expect(janitor, 'it tightens the window').toContain('for WINDOW in');
+    expect(janitor, 'and eventually drops it entirely').toContain('last resort');
+    expect(janitor, 'and stops as soon as there is room').toMatch(/break/);
+  });
+
+  it('MANDATORY: escalation still never touches volumes', () => {
+    // Escalation is the most dangerous part of this script — it is the code that runs when somebody
+    // is desperate for space, which is exactly when deleting the database looks like an option.
+    expect(codeOnly(janitor)).not.toMatch(/prune[^\n]*--volumes/);
+  });
+
+  it('MANDATORY: it leaves a status file, so the alarm can reach somebody', () => {
+    // A red line in /var/log on a box with no operator is the same as silence. The worker daemon
+    // reads this and announces to Discord.
+    expect(janitor).toContain('DISK_STATUS_FILE');
+  });
+});

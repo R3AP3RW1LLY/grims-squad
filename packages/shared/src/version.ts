@@ -14,4 +14,4 @@
  * Both sidebars are CLIENT bundles, and the shared barrel reaches node:crypto — the same reason
  * ./leaderboards and ./builds are subpath exports. This module imports nothing and never may.
  */
-export const PLATFORM_VERSION = '0.9.15';
+export const PLATFORM_VERSION = '0.9.16';

@@ -78,12 +78,18 @@ async function seed(): Promise<{ projectId: string; userId: string }> {
   );
   const projectId = (project as { id: string }).id;
 
-  await db.$executeRawUnsafe(
-    `INSERT INTO colony_needs (project_id, commodity, remaining, required, observed_at)
-     VALUES ($1::uuid, 'Steel', 500, 500, now())
-     ON CONFLICT (project_id, commodity) DO UPDATE SET remaining = EXCLUDED.remaining`,
-    projectId,
-  );
+  // TWO commodities, so a carrier can hold both and each can carry its own reading date. With one,
+  // source precedence collapses the carrier to a single row and "first" and "newest" are the same
+  // value — which is exactly why the first version of the date test could not fail.
+  for (const commodity of ['Steel', 'Copper']) {
+    await db.$executeRawUnsafe(
+      `INSERT INTO colony_needs (project_id, commodity, remaining, required, observed_at)
+       VALUES ($1::uuid, $2, 500, 500, now())
+       ON CONFLICT (project_id, commodity) DO UPDATE SET remaining = EXCLUDED.remaining`,
+      projectId,
+      commodity,
+    );
+  }
 
   return { projectId, userId };
 }
@@ -93,10 +99,11 @@ async function hold(
   tonnes: number,
   userId: string,
   at: Date,
+  commodity = 'Steel',
 ): Promise<void> {
   await db.$executeRawUnsafe(
     `INSERT INTO colony_carrier_cargo (market_id, commodity, source, tonnes, updated_by_id, updated_at)
-     VALUES ($1::bigint, 'Steel', $2, $3, $4::uuid, $5)
+     VALUES ($1::bigint, $6, $2, $3, $4::uuid, $5)
      ON CONFLICT (market_id, commodity, source) DO UPDATE SET
        tonnes = EXCLUDED.tonnes, updated_by_id = EXCLUDED.updated_by_id, updated_at = EXCLUDED.updated_at`,
     String(MARKET),
@@ -104,6 +111,7 @@ async function hold(
     tonnes,
     userId,
     at,
+    commodity,
   );
 }
 
@@ -123,6 +131,47 @@ describe('the attach prompt and a hold that is empty', () => {
 
     const holdings = await service.unattachedHoldingFor(projectId, userId);
     expect(holdings.map((h) => h.marketId)).toContain(String(MARKET));
+  });
+
+  it('★ MANDATORY: the prompt is dated, because "is holding" is a claim about now ★', async () => {
+    /*
+     * The reading behind this prompt may be four minutes or a fortnight old, and the sentence read
+     * identically either way — so a member who loaded cargo, closed the app, and later sold it
+     * elsewhere was told in the present tense that the carrier still had it.
+     *
+     * The date is the NEWEST reading across the carrier's lines: the prompt speaks about the
+     * carrier as a whole, so anything older would understate how current the claim is and have
+     * members distrusting a prompt that was right.
+     */
+    const { projectId, userId } = await seed();
+    /*
+     * ★ TWO COMMODITIES, READ AT DIFFERENT TIMES — AND THE FIRST DRAFT HAD ONE ★
+     *
+     * With a single commodity, source precedence reduces the carrier to one row, so "the first
+     * reading" and "the newest reading" are the same value and the assertion cannot fail. Mutation
+     * testing proved it: replacing the newest-wins comparison with "keep whatever arrived first"
+     * broke nothing.
+     *
+     * ★ AND THE OLD ONE MUST SORT FIRST, WHICH TOOK A SECOND ATTEMPT ★
+     *
+     * The query orders by usable tonnage descending. Giving the fresh commodity the larger figure
+     * put it at the head of the list, so "first" and "newest" were the same row AGAIN and the
+     * mutation still survived.
+     *
+     * Steel is OLDER and LARGER, so it arrives first; Copper is fresher and smaller. The carrier's
+     * date must be Copper's, which is only true if the code compares rather than takes what it saw
+     * first.
+     */
+    await hold('journal', 400, userId, EARLIER, 'Steel');
+    await hold('journal', 300, userId, LATER, 'Copper');
+
+    const [holding] = await service.unattachedHoldingFor(projectId, userId);
+
+    expect(holding?.seenAt, 'the prompt carries a date at all').not.toBeNull();
+    expect(
+      holding?.seenAt?.toISOString(),
+      'and it is the newest reading, not the first one seen',
+    ).toBe(LATER.toISOString());
   });
 
   it('★ MANDATORY: a member’s own "none of this is aboard" is not overruled by a stale journal row ★', async () => {
