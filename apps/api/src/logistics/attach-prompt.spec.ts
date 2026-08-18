@@ -119,14 +119,40 @@ describe('the number it leads with', () => {
      */
     expect(QUERY).toContain('DISTINCT ON (g.market_id, lower(g.commodity))');
     /*
-     * Asserted as the WHOLE expression, not as fragments. Fragments would have survived cAPI being
-     * inserted into the middle of the order — the prompt would then have quietly preferred a
-     * fortnight-old journal reading over Frontier's live manifest, while every fragment still
-     * matched. The order is the claim, so the order is what is written down.
+     * ★ THE RANK CHANGED, AND THIS TEST IS WHY THE CHANGE HAD TO BE DELIBERATE — 2026-08-18 ★
+     *
+     * It used to assert `CASE g.source WHEN 'manual' THEN 0 WHEN 'capi' THEN 1 WHEN 'journal' THEN
+     * 2 ELSE 3 END` — cAPI ahead of the journal, always. That was written to stop a fortnight-old
+     * journal reading beating Frontier's live manifest, which was the right worry and the wrong
+     * fix: it also made a Frontier manifest from hours ago beat a journal reading from a minute
+     * ago, while a member watched the cargo load.
+     *
+     * `effectiveTonnes` — which every other surface reads — resolves those two by RECENCY, with the
+     * journal taking ties. One hold must not have two rules, so this query now asks the same
+     * question, and the two halves are asserted separately because they are two separate claims.
      */
-    expect(QUERY).toContain(
-      "CASE g.source WHEN 'manual' THEN 0 WHEN 'capi' THEN 1 WHEN 'journal' THEN 2 ELSE 3 END",
+    // The member's own hand always wins: a manual figure is a statement, not a reading.
+    expect(QUERY).toContain("CASE WHEN g.source = 'manual' THEN 0 ELSE 1 END");
+    // Then the newest reading, whichever source produced it.
+    expect(QUERY).toContain('g.updated_at DESC');
+    // And the journal takes a tie, because it is first-party and the app was standing right there.
+    expect(QUERY).toContain("CASE WHEN g.source = 'journal' THEN 0 ELSE 1 END");
+
+    /*
+     * ★ AND ZERO IS DISCARDED AFTER PRECEDENCE, NEVER BEFORE ★
+     *
+     * `AND g.tonnes > 0` used to sit inside the CTE, above the DISTINCT ON. Postgres therefore
+     * removed zero rows as candidates BEFORE choosing a winner, so a manual "none of this is
+     * aboard" or a cAPI zero could never win — and the prompt offered cargo already declared gone.
+     *
+     * The test belongs in the OUTER query, where it discards a zero that won rather than one that
+     * was never allowed to compete.
+     */
+    const cte = QUERY.slice(QUERY.indexOf('WITH mine AS'), QUERY.indexOf('SELECT m.market_id'));
+    expect(cte, 'the CTE must not filter zero out before precedence runs').not.toContain(
+      'g.tonnes > 0',
     );
+    expect(QUERY, 'the outer query drops a zero that won').toContain('WHERE m.tonnes > 0');
   });
 
   it('★ MANDATORY: it is grouped per CARRIER, not per commodity ★', () => {
