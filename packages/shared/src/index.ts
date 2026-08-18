@@ -41,8 +41,8 @@ export { renderBuildBook } from './build-book.js';
 export type { BookPlan, BookSite } from './build-book.js';
 export { completedBuilds } from './build-completion-watch.js';
 export type { WatchedBuild, StationSighting, CompletedBuild } from './build-completion-watch.js';
-export { rankBuySources } from './buy-priority.js';
-export type { BuyContext, BuySource } from './buy-priority.js';
+export { buyBandLabel, rankBuySources } from './buy-priority.js';
+export type { BuyContext, BuySource, StationOwnership } from './buy-priority.js';
 export {
   colonyStatusOf,
   matchesColonyFilter,

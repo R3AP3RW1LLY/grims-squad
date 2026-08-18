@@ -103,17 +103,16 @@ export interface BuyContext {
 const key = (name: string): string => name.trim().toLowerCase();
 
 /**
- * 0 = the squadron's own station, 1 = a member's, 2 = the build's own system,
- * 3 = squadron-architected, 4 = everywhere else.
+ * 0 = the build's own system, 1 = the squadron's own station, 2 = a member's,
+ * 3 = squadron-architected space, 4 = everywhere else.
  *
- * ★ OWNERSHIP OUTRANKS GEOGRAPHY, IN `ours` MODE ★
+ * ★ GEOGRAPHY LEADS, THEN OWNERSHIP OUTRANKS THE REST ★
  *
- * Ours before a member's before anything else, because "we already own the pad" is a stronger reason
- * to fly somewhere than "it is nearby" — the squadron's own market is the one whose stock and prices
- * the squadron controls.
+ * Being AT the build wins outright: it is no jump at all. Below that, ours before a member's before
+ * anything else, because "we already own the pad" is a stronger reason to fly somewhere than "it is
+ * nearby" — the squadron's own market is the one whose stock and prices the squadron controls.
  *
- * The system bands below it are unchanged and still matter: among stations nobody owns, the build's
- * own system beats architected space beats the rest of the bubble.
+ * Then architected space, then the rest of the bubble.
  */
 function band(source: BuySource, context: BuyContext): number {
   const system = key(source.systemName);
@@ -144,6 +143,41 @@ function band(source: BuySource, context: BuyContext): number {
   }
 
   return 4;
+}
+
+/**
+ * What to put on the row, so the order is legible rather than mysterious.
+ *
+ * ★ #213 REORDERED THE LIST AND TOLD NOBODY ★
+ *
+ * Ownership ranking shipped and the list on screen said nothing about it. A member saw a station
+ * that used to be third sitting at the top for no stated reason — which reads as the sort being
+ * broken, not as the platform knowing something they do not. A ranking nobody can see the logic of
+ * is indistinguishable from a bug.
+ *
+ * ★ DERIVED FROM `band`, NEVER RE-DERIVED ★
+ *
+ * The obvious implementation reads `ownership` and `systemName` again and decides on its own. That
+ * is how a station ends up marked "squadron station" while sitting below one that is not: two
+ * copies of a precedence rule, drifting. This asks `band` and names its answer, so a badge that
+ * contradicts the position is not expressible.
+ *
+ * Band 4 gets NO label. Marking every ordinary row "Other" is a column of noise that says nothing,
+ * and the eye is drawn to the rows that do carry a mark — which is the whole point of marking any.
+ */
+export function buyBandLabel(source: BuySource, context: BuyContext): string | null {
+  switch (band(source, context)) {
+    case 0:
+      return 'In the build’s system';
+    case 1:
+      return 'Squadron station';
+    case 2:
+      return 'Member’s station';
+    case 3:
+      return 'Squadron space';
+    default:
+      return null;
+  }
 }
 
 /**

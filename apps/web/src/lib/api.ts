@@ -3123,6 +3123,15 @@ export interface PurchaseStation {
    * order alone cannot answer.
    */
   isOrbital: boolean | null;
+  /**
+   * Why this stop ranks where it does — "In the build's system", "Squadron station", "Member's
+   * station", "Squadron space", or null for an ordinary one.
+   *
+   * Decided by the server from the same function that decided the order, for the same reason
+   * `isOrbital` is carried: "why is this one first" is a question the order alone cannot answer.
+   * Deriving it again in the browser is how a badge ends up contradicting the position it sits in.
+   */
+  bandLabel: string | null;
   lines: PurchaseLine[];
   lastSeen: string;
 }

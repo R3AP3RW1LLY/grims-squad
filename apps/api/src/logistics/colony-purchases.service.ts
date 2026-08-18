@@ -6,6 +6,7 @@ import {
   ErrorCode,
   isOrbitalStation,
   looksLikeCarrier,
+  buyBandLabel,
   rankBuySources,
   type BuyContext,
 } from '@grims/shared';
@@ -99,6 +100,18 @@ export interface RouteCandidate {
 export interface PurchaseStation extends RouteCandidate {
   /** Newest line here, so a reading nobody has refreshed in months reads as such. */
   readonly lastSeen: Date;
+  /**
+   * Why this stop sits where it does — "Squadron station", "In the build's system", or null for an
+   * ordinary one.
+   *
+   * ★ COMPUTED HERE BECAUSE THE CONTEXT LIVES HERE ★
+   *
+   * The badge needs the build's system and the architected set, which the browser has no reason to
+   * hold and the companion app would have to fetch separately. Worse, two surfaces deriving it
+   * independently is exactly how a station gets marked "squadron station" while ranking below one
+   * that is not. It is decided once, beside the ordering it explains, by the same function.
+   */
+  readonly bandLabel: string | null;
 }
 
 /**
@@ -110,6 +123,25 @@ export interface PurchaseStation extends RouteCandidate {
  * so the page can say so — a silent truncation would read as "that is everything".
  */
 export const MAX_STOPS = 8;
+
+/**
+ * How far out to look for what the squadron has already bought.
+ *
+ * ★ SQUADRON OWNER, 2026-08-18 ★
+ *
+ * "in this case this project is right next door to me so it should be showing the same or very
+ * similar results everywhere"
+ *
+ * Purchase history is squadron knowledge and is shared across every project — see the two queries
+ * that use this. It still needs a horizon, or a build in the Pleiades inherits a shopping list from
+ * Colonia and the row limit is spent on stops nobody would fly.
+ *
+ * 500 ly is roughly the radius the squadron actually operates in: it comfortably covers "right next
+ * door" and neighbouring squadron space, while a run of that length is already further than anybody
+ * hauls for a build. The ranking puts the near ones first regardless, and `MAX_STOPS` caps what
+ * survives — so this is a bound on what is CONSIDERED, not on what is shown.
+ */
+export const SHARED_PURCHASE_RADIUS_LY = 500;
 
 /**
  * The key a station is filed under.
@@ -235,6 +267,8 @@ export function planRoute(
       ...best,
       lines,
       lastSeen: lines.reduce((newest, l) => (l.at > newest ? l.at : newest), new Date(0)),
+      // Filled in after ranking, from the same context that decided the order.
+      bandLabel: null,
     });
 
     for (const c of bestBrings) uncovered.delete(c);
@@ -245,8 +279,19 @@ export function planRoute(
    * member scans before they undock — the stop in the build's own system first, then squadron
    * space, then everywhere else, orbital ahead of ground and nearest ahead of far.
    */
+  /*
+   * The label is attached AFTER ranking and from the same context, so the mark on a row and the row's
+   * position cannot disagree. Null throughout when there is no context to judge by — an unlabelled
+   * list is honest, a list labelled from a guess is not.
+   */
+  const ranked =
+    context === undefined ? chosen : (rankBuySources(chosen, context) as PurchaseStation[]);
+
   return {
-    stations: context === undefined ? chosen : (rankBuySources(chosen, context) as PurchaseStation[]),
+    stations: ranked.map((station) => ({
+      ...station,
+      bandLabel: context === undefined ? null : buyBandLabel(station, context),
+    })),
     uncovered: [...uncovered].sort(),
   };
 }
@@ -390,16 +435,59 @@ export class ColonyPurchasesService {
         WHERE t.event_type = 'MarketBuy'
           AND COALESCE(k.data->>'type', '') <> ALL ($2::text[])
           /*
-           * Only members BUILDING here. As a JOIN this fanned out — a poster with four projects in
-           * one system multiplied every purchase they had ever made by four, turning one 85 t
-           * Ceramic Composites line into four. Caught by running it, not by reading it.
+           * ★ WITHIN REACH OF THIS BUILD — NOT "BOUGHT BY SOMEBODY BUILDING HERE" ★
+           *
+           * Squadron owner, 2026-08-18: "stuff like this needs to be shared from other projects
+           * they should not be member specific this is information that should be shared".
+           *
+           * This used to be EXISTS (... p.posted_by_id = t.user_id AND p.system_name = $1) -- only
+           * members who had themselves posted a project in THIS system. A member who bought 900 t of
+           * Copper at a dock eight light years away, for a build one system over, contributed
+           * nothing at all here. Every project started from nothing while the platform already held
+           * the answer, and the page said "nobody has bought these yet" about commodities the
+           * squadron buys every week.
+           *
+           * "This station sells Copper" is a fact about the galaxy that somebody in the squadron
+           * discovered. Whose build they were flying for does not change whether it is true.
+           *
+           * ★ DISTANCE IS ADDED AS A SECOND WAY IN, NOT SWAPPED FOR THE FIRST ★
+           *
+           * Without a bound this is the whole bubble, and the LIMIT below gets spent on stations
+           * nobody would fly to. So proximity is the second door, and the old EXISTS stays as the
+           * first: a member building here counts however far they shopped, and everybody else
+           * counts within the radius.
+           *
+           * Additive on purpose. Replacing the EXISTS outright looked tidier and broke five tests
+           * by admitting the whole purchase table whenever the build system had no coordinates --
+           * a NULL distance is not false, so a COALESCE to true opened the doors completely. This
+           * shape cannot do that: with no coordinates the added half is NULL and the answer falls
+           * back to exactly what it was.
            */
-          AND EXISTS (SELECT 1 FROM colony_projects p
-                       WHERE p.posted_by_id = t.user_id AND p.system_name = $1)
+          AND (
+                /*
+                 * The original scope, kept as a FLOOR. Members building here still contribute
+                 * whatever their purchase distance works out to, including when it cannot be
+                 * measured at all.
+                 */
+                EXISTS (SELECT 1 FROM colony_projects p
+                         WHERE p.posted_by_id = t.user_id AND p.system_name = $1)
+                /*
+                 * ...and anybody else within reach. Strictly ADDITIVE: this only ever admits rows
+                 * the old clause rejected, so no stop that used to appear can vanish.
+                 *
+                 * A NULL distance -- an uncatalogued build system, a station with no coords --
+                 * makes this half NULL, the OR falls back to the EXISTS above, and the behaviour is
+                 * exactly what it was before sharing existed. Degrading to the old answer is the
+                 * honest failure here: if we cannot tell what is near, we must not present distant
+                 * stations as though we had checked.
+                 */
+                OR (k.coords <-> (SELECT coords FROM origin)) <= $3::float8
+              )
         ORDER BY t.occurred_at DESC
         LIMIT 4000`,
       systemName,
       CARRIER_STATION_TYPES,
+      SHARED_PURCHASE_RADIUS_LY,
     );
 
     const manual = await this.db.$queryRawUnsafe<Array<Record<string, unknown>>>(
@@ -435,8 +523,22 @@ export class ColonyPurchasesService {
               AND data->>'system' = c.station_system
             LIMIT 1
          ) t ON true
-        WHERE c.system_name = $1`,
+        /*
+         * ★ EVERY DECLARATION THE SQUADRON HAS FILED, WITHIN REACH ★
+         *
+         * This asked c.system_name = $1 : only declarations filed against THIS system. A member who
+         * took the trouble to write down a good stop for their own build was telling nobody but
+         * themselves. Same rule as the journal source above, same COALESCE, same reason — and it
+         * matters more here, because these rows exist only because a person chose to record them.
+         */
+        WHERE (
+                -- Filed against this system: the original scope, kept whole.
+                c.system_name = $1
+                -- Or filed anywhere, for a station within reach of this build.
+                OR (s.coords <-> (SELECT coords FROM origin)) <= $2::float8
+              )`,
       systemName,
+      SHARED_PURCHASE_RADIUS_LY,
     );
 
     interface Place {

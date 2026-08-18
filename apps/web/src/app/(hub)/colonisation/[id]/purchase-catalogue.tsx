@@ -85,6 +85,25 @@ export function PurchaseCatalogue({
               <CopySystem system={station.systemName} size="small" />
             </span>
             <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--color-text-secondary)]">
+              {/*
+                ★ WHY THIS STOP IS WHERE IT IS ★
+
+                The ordering was reworked to put the build's own system first, then the squadron's
+                stations, then a member's. None of that was visible: a stop that used to be third
+                simply appeared at the top, which reads as the sort being broken rather than as the
+                platform knowing something the member does not. A ranking whose logic cannot be seen
+                is indistinguishable from a bug.
+
+                Computed by the API from the same function that decided the order, so a row cannot
+                be marked "squadron station" while sitting below one that is not. Ordinary stations
+                carry no badge at all — labelling every row would be a column of noise, and the
+                absence is what makes the marked ones catch the eye.
+              */}
+              {station.bandLabel === null ? null : (
+                <span className="mr-2 rounded-sm bg-[var(--color-surface-panel-raised)] px-1.5 py-0.5 text-[var(--color-brand-orange)]">
+                  {station.bandLabel}
+                </span>
+              )}
               {/* Distance first: it is what decides whether this stop is worth the trip. Omitted
                   rather than guessed when we cannot place one end of it. */}
               {station.distanceLy === null ? '' : `${station.distanceLy.toFixed(1)} ly · `}
