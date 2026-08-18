@@ -41,14 +41,40 @@ async function cleanUp(): Promise<void> {
   );
 }
 
-/** Two catalogue rows that really exist, so the tonnage joins have something to find. */
+/**
+ * Two catalogue rows this test owns, so the tonnage joins have something to find.
+ *
+ * ★ SEEDED, NOT BORROWED — AND THAT COST A CI RUN ★
+ *
+ * The first version read the two lowest ids out of `colony_build_types`. That passes locally, where
+ * the development database is a production mirror carrying the whole catalogue, and fails in CI
+ * with "the build-type catalogue is empty" — CI builds a database from migrations, and migrations
+ * create tables rather than fill them.
+ *
+ * Borrowing rows also made the assertions depend on which two the catalogue happened to sort first,
+ * so a new build type shipping upstream could change what this file was testing without anybody
+ * touching it. Seeding is both the fix and the better test.
+ */
 async function twoBuildTypes(): Promise<{ a: string; b: string }> {
-  const rows = await db.$queryRawUnsafe<Array<{ id: string }>>(
-    `SELECT id FROM colony_build_types ORDER BY id LIMIT 2`,
-  );
-  const a = rows[0]?.id;
-  const b = rows[1]?.id;
-  if (a === undefined || b === undefined) throw new Error('the build-type catalogue is empty');
+  const a = `${TAG}-planned`;
+  const b = `${TAG}-built`;
+
+  for (const [id, name, tonnes] of [
+    [a, `${TAG} planned structure`, 5690],
+    [b, `${TAG} built structure`, 2845],
+  ] as const) {
+    await db.$executeRawUnsafe(
+      `INSERT INTO colony_build_types
+         (id, display_name, category, tier, location, pad_size, total_tonnes, source,
+          build_class, economy_influence)
+       VALUES ($1, $2, 'settlement', 1, 'surface', 'small', $3, 'community', 'settlement', 'none')
+       ON CONFLICT (id) DO UPDATE SET display_name = EXCLUDED.display_name`,
+      id,
+      name,
+      tonnes,
+    );
+  }
+
   return { a, b };
 }
 
@@ -109,6 +135,12 @@ async function seedLinkedSite(planned: string | null, built: string): Promise<st
 
 afterAll(async () => {
   await cleanUp();
+  /*
+   * The catalogue rows go LAST and only here. `cleanUp` runs before every case, and deleting the
+   * build types there would remove the rows that same case is about to reference — the plan sites
+   * hold a foreign key to them.
+   */
+  await db.$executeRawUnsafe(`DELETE FROM colony_build_types WHERE id LIKE $1`, `${TAG}%`);
   await db.$disconnect();
 });
 
