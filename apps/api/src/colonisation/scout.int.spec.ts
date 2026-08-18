@@ -58,6 +58,41 @@ async function galaxyIsLoaded(): Promise<boolean> {
 
 describe('the colonisation scout, against the real galaxy', () => {
   it(
+    '★ MANDATORY: a name typed in the wrong case still finds the system ★',
+    async () => {
+      /*
+       * ★ THE REGRESSION THE SPEED-UP COULD HAVE SHIPPED — 2026-08-18 ★
+       *
+       * The anchor lookup used `lower(name) = lower($1)`, which cannot use the plain btree on
+       * `name` — a sequential scan of the whole catalogue on every search, measured at 530 ms
+       * against 0.06 ms for an exact match.
+       *
+       * The easy fix is to make it exact and stop there. That would be a straight regression:
+       * somebody typing "col 285 sector ig-w c2-16" into the box would stop finding their own
+       * system, and the failure would look like the galaxy not holding it.
+       *
+       * So the exact match answers almost everything from the index and the case-insensitive form
+       * survives as a second query on the miss. This asserts the second half still exists, because
+       * the first half is the one anybody would be tempted to keep alone.
+       */
+      if (!(await galaxyIsLoaded())) {
+        console.warn(`SKIPPED: the galaxy dump has no coordinates for ${OFFICE} in this database.`);
+        return;
+      }
+
+      const svc = new ScoutService(db);
+      const shouted = await svc.scout({ anchor: OFFICE.toUpperCase() });
+      const whispered = await svc.scout({ anchor: OFFICE.toLowerCase() });
+
+      expect(shouted.unknownAnchor, 'SHOUTED still resolves').toBeNull();
+      expect(whispered.unknownAnchor, 'whispered still resolves').toBeNull();
+      expect(shouted.anchor?.system.toLowerCase()).toBe(OFFICE.toLowerCase());
+      expect(whispered.anchor?.system.toLowerCase()).toBe(OFFICE.toLowerCase());
+    },
+    60_000,
+  );
+
+  it(
     'finds claimable systems around a real anchor and resolves a permit source for them',
     async () => {
       if (!(await galaxyIsLoaded())) {

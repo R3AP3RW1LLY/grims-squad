@@ -145,6 +145,22 @@ export class ScoutService {
          ) st ON st.sys = k.ext_key
         WHERE k.kind = 'system'
           AND k.coords IS NOT NULL
+          /*
+           * ★ THE BOX IS INDEXED; THE SPHERE IS NOT — AUDIT, 2026-08-18 ★
+           *
+           * The exact distance below is a function of the column, so Postgres cannot use
+           * knowledge_items_coords_idx for it: it read every system in the galaxy and computed a
+           * square root on each. Measured on production, one search: 3,377 ms to return 318 rows.
+           *
+           * cube's <@ containment IS a GiST operator, so a bounding box around the sphere can be
+           * answered from the index. Same search, same 318 rows: 1,304 ms.
+           *
+           * The box is a superset of the sphere -- its corners reach further than the radius -- so
+           * the exact test still runs, on the few hundred rows the index handed back instead of on
+           * every system. Cheap filter first, precise filter second; the answer is unchanged.
+           */
+          AND k.coords <@ cube(array[$1 - $4, $2 - $4, $3 - $4],
+                               array[$1 + $4, $2 + $4, $3 + $4])
           AND sqrt(power(cube_ll_coord(k.coords,1) - $1, 2)
                  + power(cube_ll_coord(k.coords,2) - $2, 2)
                  + power(cube_ll_coord(k.coords,3) - $3, 2)) <= $4`,
@@ -262,20 +278,51 @@ export class ScoutService {
     const typed = name.trim();
     if (typed === '') return null;
 
-    const [row] = await this.db.$queryRawUnsafe<
-      Array<{ name: string; x: number; y: number; z: number; allegiance: string | null; faction: string | null }>
-    >(
-      `SELECT name,
+    type AnchorRow = {
+      name: string;
+      x: number;
+      y: number;
+      z: number;
+      allegiance: string | null;
+      faction: string | null;
+    };
+
+    const COLUMNS = `SELECT name,
               cube_ll_coord(coords, 1) AS x,
               cube_ll_coord(coords, 2) AS y,
               cube_ll_coord(coords, 3) AS z,
               data->>'allegiance' AS allegiance,
               data->>'controllingFaction' AS faction
          FROM knowledge_items
-        WHERE kind = 'system' AND coords IS NOT NULL AND lower(name) = lower($1)
-        LIMIT 1`,
-      typed,
-    );
+        WHERE kind = 'system' AND coords IS NOT NULL`;
+
+    /*
+     * ★ EXACT FIRST, BECAUSE lower() THREW AWAY THE INDEX — AUDIT, 2026-08-18 ★
+     *
+     * knowledge_items_name_idx is a plain btree on `name`. Wrapping the column in lower() makes it
+     * unusable, so this was a sequential scan of the whole catalogue on EVERY scout search.
+     * Measured on production: 530 ms for `lower(name) = lower($1)`, 0.06 ms for `name = $1`.
+     *
+     * Nearly every caller already holds the exact name — it came from the system picker, a project
+     * row, or the member's own journal — so this answers almost every search from the index.
+     */
+    const [exact] = await this.db.$queryRawUnsafe<AnchorRow[]>(`${COLUMNS} AND name = $1 LIMIT 1`, typed);
+
+    /*
+     * And the case-insensitive form survives as a SECOND query, run only when the first misses.
+     *
+     * Dropping it would have been the easy performance win and a regression: somebody typing
+     * "col 285 sector ig-w c2-16" by hand would stop finding their own system. This way the typo
+     * path pays the scan alone, instead of every search paying it on their behalf.
+     */
+    const row =
+      exact ??
+      (
+        await this.db.$queryRawUnsafe<AnchorRow[]>(
+          `${COLUMNS} AND lower(name) = lower($1) LIMIT 1`,
+          typed,
+        )
+      )[0];
 
     if (row !== undefined) {
       return {
