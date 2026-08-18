@@ -18,12 +18,28 @@ contextBridge.exposeInMainWorld('companion', {
   /** The current state, for a first paint. */
   getState: () => ipcRenderer.invoke('state'),
 
-  /** Pushed whenever the state changes, so the window does not have to poll. */
-  onState: (handler: (state: unknown) => void) => {
+  /**
+   * Pushed whenever the state changes, so the window does not have to poll.
+   *
+   * ★ RETURNS A WAY TO STOP LISTENING, AND THAT WAS MISSING — AUDIT, 2026-08-18 ★
+   *
+   * It registered and handed back nothing, so a caller inside a React effect had no way to undo it.
+   * The project page re-runs its effect on every id and filter change and added another listener
+   * each time: ten project pages meant ten live handlers, and every successful journal upload then
+   * fired ten identical reloads of the same board.
+   *
+   * The app got measurably chattier the longer a session ran, which is the kind of fault nobody
+   * reports as a bug — it reads as the app "getting slow".
+   */
+  onState: (handler: (state: unknown) => void): (() => void) => {
     // The listener is wrapped rather than passed through: the raw handler
     // receives an IpcRendererEvent whose `sender` is a live handle back into
     // the main process, and the page has no business holding one.
-    ipcRenderer.on('state', (_event, state) => handler(state));
+    const wrapped = (_event: unknown, state: unknown): void => handler(state);
+    ipcRenderer.on('state', wrapped);
+    // The SAME reference is removed. Registering one function and removing another is the shape
+    // this bug would take next time.
+    return () => ipcRenderer.removeListener('state', wrapped);
   },
 
   /*

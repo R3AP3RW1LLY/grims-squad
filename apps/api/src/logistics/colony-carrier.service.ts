@@ -926,9 +926,40 @@ export class ColonyCarrierService {
                 g.market_id, g.commodity, g.tonnes
            FROM colony_carrier_cargo g
           WHERE g.updated_by_id = $2::uuid
-            AND g.tonnes > 0
+          /*
+           * ★ PRECEDENCE DECIDES FIRST, AND ONLY THEN IS ZERO DISCARDED — 2026-08-18 ★
+           *
+           * This carried AND g.tonnes > 0 HERE, inside the CTE. Postgres therefore removed zero
+           * rows as candidates BEFORE the DISTINCT ON below chose a winner by source, so a zero
+           * from a higher-precedence source could never win and the lower-precedence positive row
+           * was promoted in its place.
+           *
+           * Both zero-writers are real. setManual writes one when a member says "none of this is
+           * aboard" -- its own note calls that the entire point of a manual row. The cAPI poller
+           * writes one for every commodity another source still claims that Frontier's COMPLETE
+           * manifest omits, which is the one thing that source exists to do.
+           *
+           * So the prompt offered cargo that Frontier, or the member's own hand, had already
+           * declared gone -- while the carriers tab read 0 t for the same commodity, because
+           * effectiveTonnes honours the zero. Two numbers for one hold.
+           *
+           * The test now lives in the outer query, where it discards a zero that WON rather than a
+           * zero that was never allowed to compete.
+           *
+           * ★ AND THE RANK NOW MATCHES effectiveTonnes ★
+           *
+           * It used to read: manual 0, capi 1, journal 2 -- capi ahead of journal, always. Every
+           * other surface resolves those two by RECENCY, with the journal taking ties. So a member
+           * watching cargo load onto their carrier could be told it was empty on the strength of a
+           * Frontier manifest from hours earlier. One hold must not have two rules.
+           */
           ORDER BY g.market_id, lower(g.commodity),
-                   CASE g.source WHEN 'manual' THEN 0 WHEN 'capi' THEN 1 WHEN 'journal' THEN 2 ELSE 3 END
+                   -- The member's own hand always wins; it is a statement, not a reading.
+                   CASE WHEN g.source = 'manual' THEN 0 ELSE 1 END,
+                   -- Then the newest reading, whichever source it came from.
+                   g.updated_at DESC,
+                   -- And the journal takes a tie: it is first-party and the app was right there.
+                   CASE WHEN g.source = 'journal' THEN 0 ELSE 1 END
        )
        SELECT m.market_id::text AS market_id,
               m.commodity,
@@ -948,7 +979,8 @@ export class ColonyCarrierService {
               AND ki.data->>'marketId' = m.market_id::text
             LIMIT 1
          ) k ON true
-        WHERE NOT EXISTS (
+        WHERE m.tonnes > 0
+          AND NOT EXISTS (
           -- Not already attached to THIS build. A carrier attached elsewhere is still worth
           -- prompting about here: the materials are aboard either way.
           SELECT 1 FROM colony_carriers c

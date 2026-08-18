@@ -68,7 +68,12 @@ declare global {
     };
     readonly companion: {
       getState(): Promise<AppState>;
-      onState(handler: (state: AppState) => void): void;
+      /**
+       * Returns a disposer. A caller inside an effect MUST call it in cleanup — see the project
+       * page, where not doing so stacked one listener per id and filter change and turned every
+       * journal upload into one reload per project page ever opened.
+       */
+      onState(handler: (state: AppState) => void): () => void;
       signIn(): Promise<unknown>;
       cancelSignIn(): Promise<unknown>;
       /*

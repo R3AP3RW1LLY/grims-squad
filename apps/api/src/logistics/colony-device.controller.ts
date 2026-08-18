@@ -22,6 +22,7 @@ import { ColonyCatalogueService } from './colony-catalogue.service.js';
 import { ColonyPlanService } from './colony-plan.service.js';
 import { ColonyCarrierService, carrierCover, carrierHoldLines } from './colony-carrier.service.js';
 import { ColonyPurchasesService } from './colony-purchases.service.js';
+import { CommanderPositionService } from './commander-position.service.js';
 import { ColonyPlanReviewService } from './colony-plan-review.service.js';
 import { MARKET_STORE } from './logistics.tokens.js';
 import type { MarketStore } from './market.store.js';
@@ -68,6 +69,22 @@ export class ColonyDeviceController {
     // The shopping route. The same instance the website's controller uses, so "where do I fly for
     // this" has one answer rather than one per surface.
     @Inject(ColonyPurchasesService) private readonly purchases: ColonyPurchasesService,
+    /*
+     * Where the caller was last seen.
+     *
+     * ★ THE APP'S DISTANCE SORT WAS DEAD FOR WANT OF THIS — AUDIT, 2026-08-18 ★
+     *
+     * The website's board route says it out loud: "Both surfaces then call the SAME
+     * rankOpportunities out of @grims/shared, so the website and the app cannot put a different
+     * build at the top of the same member's list."
+     *
+     * That was never true, because this route sent no position. The companion's client has always
+     * declared `you?: BoardViewer | null` and always received nothing, so every distance on its
+     * colonisation boards was unknown and the "Nearest" sort could not order anything — silently,
+     * with the app showing "we do not know where you are yet" to members whose position the hub
+     * had known all along.
+     */
+    @Inject(CommanderPositionService) private readonly position: CommanderPositionService,
     // The plan review. Same service as the website's, so one plan cannot get two verdicts.
     @Inject(ColonyPlanReviewService) private readonly review: ColonyPlanReviewService,
     @Inject(MARKET_STORE) private readonly market: MarketStore,
@@ -191,8 +208,20 @@ export class ColonyDeviceController {
     const scope: ColonyOwner | 'all' = owner === 'squadron' || owner === 'personal' ? owner : 'all';
     const mask = await this.permissions.effectiveMask(me.userId);
 
+    /*
+     * Fails soft, exactly as the website's does. A position lookup that throws must not take the
+     * whole board down — a board with no distances is worth far more than no board.
+     */
+    const you = await this.position.lastKnown(me.userId).catch(() => null);
+
     return {
       projects: await this.colony.board(scope, me),
+      // The same shape the website sends, so the shared ranker gets the same input on both
+      // surfaces and one member cannot be shown two different "nearest" builds.
+      you:
+        you === null
+          ? null
+          : { systemName: you.systemName, coords: you.coords, at: you.at, source: you.source },
       // The same rendering hints the website gets, so the app can offer the same controls without
       // a second round trip and without guessing.
       can: {

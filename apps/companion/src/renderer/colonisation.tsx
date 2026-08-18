@@ -1186,7 +1186,9 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
      * made by OTHER members, which this app never observes and cannot be told about any other way.
      */
     let lastSeenTransfer = 0;
-    window.companion.onState((next) => {
+    // Kept so the cleanup below can let go of it. Without this the effect stacked a new listener on
+    // every id or filter change and never dropped one.
+    const stopListening = window.companion.onState((next) => {
       const at = typeof next.lastTransferAt === 'number' ? next.lastTransferAt : 0;
       if (at > lastSeenTransfer) {
         lastSeenTransfer = at;
@@ -1200,6 +1202,9 @@ function ProjectDetail({ id, onBack }: { id: string; onBack: () => void }): JSX.
     return () => {
       live = false;
       clearInterval(timer);
+      // The listener goes with the timer. Leaving it behind is what made the app fire one reload
+      // per project page ever opened, on every upload.
+      stopListening();
     };
     // Filters are a property of the request, so changing one re-runs the whole read rather than
     // filtering a list the hub already narrowed.
@@ -3454,12 +3459,22 @@ function ProjectActions({
         ) : null}
 
         {/*
-          Delete is drawn only while nothing has been hauled. The hub refuses either way, but a
-          button that exists in order to be refused teaches people to distrust the page — and
-          `required` is zero exactly when the site has never reported a depot, which is the
-          mistyped-market-id case delete is for.
+          ★ THE SAME QUESTION THE HUB ASKS, NOT A DIFFERENT ONE — AUDIT, 2026-08-18 ★
+
+          The intent above is right — a button that exists in order to be refused teaches people to
+          distrust the page — but it asked the wrong thing. The hub refuses when somebody has
+          HAULED to the build: "People have already hauled to this build, and deleting it would
+          erase their deliveries." This asked whether the site had ever reported a depot.
+
+          Those are different builds. Post a duplicate, or one in the wrong system, wait for the
+          site to report what it wants, and `required` stops being zero while `colony_contributions`
+          is still empty. The hub would delete it happily; the app hid the button and left the
+          member with a build they created, are allowed to remove, and cannot.
+
+          `lastDeliveryAt` is null exactly when nobody has hauled — the hub's own question, asked
+          with a fact the board already carries.
         */}
-        {mayDirect && project.required === 0 ? (
+        {mayDirect && (project.lastDeliveryAt ?? null) === null ? (
           confirming ? (
             <>
               <Button
