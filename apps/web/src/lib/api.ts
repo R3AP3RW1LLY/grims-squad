@@ -3138,6 +3138,13 @@ export interface PurchaseStation {
 
 export const getColonyPurchases = (
   projectId: string,
+  /**
+   * Which ordering the member asked for.
+   *
+   * Passed through, never decided here. The API treats anything that is not `closest` as "ours
+   * first", so an absent value lands on the ordering the owner's criteria describe.
+   */
+  order?: 'ours' | 'closest' | undefined,
 ): Promise<
   AdminRead<{
     systemName: string | null;
@@ -3145,7 +3152,11 @@ export const getColonyPurchases = (
     /** Still needed, and on no stop of the route. Shown rather than silently omitted. */
     uncovered: string[];
   }>
-> => getAdmin(`/v1/logistics/colony/projects/${encodeURIComponent(projectId)}/purchases`);
+> =>
+  getAdmin(
+    `/v1/logistics/colony/projects/${encodeURIComponent(projectId)}/purchases` +
+      (order === undefined ? '' : `?order=${order}`),
+  );
 
 /** A published project, by its token. No session: the token is the capability. */
 export const getSharedColonyProject = (

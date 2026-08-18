@@ -765,6 +765,14 @@ export const colonyPlanReview = (
 export const colonyPurchases = (
   call: HubCall,
   id: string,
+  /**
+   * Which ordering the member asked for.
+   *
+   * Passed through, never decided here. The hub treats anything that is not `closest` as "ours
+   * first", so an absent or unrecognised value lands on the ordering the owner's criteria describe
+   * rather than on a third one this app invented.
+   */
+  order?: 'ours' | 'closest' | undefined,
 ): Promise<
   Answer<{
     systemName: string | null;
@@ -772,7 +780,12 @@ export const colonyPurchases = (
     /** Still needed, and on no stop of the route. Shown rather than quietly left off. */
     uncovered: string[];
   }>
-> => hubColony(call, `/projects/${encodeURIComponent(id)}/purchases`);
+> =>
+  hubColony(
+    call,
+    `/projects/${encodeURIComponent(id)}/purchases` +
+      (order === undefined ? '' : `?order=${order}`),
+  );
 
 /** Recording a station somebody actually bought at. Refused for fleet carriers, which move. */
 export const colonyDeclarePurchase = (

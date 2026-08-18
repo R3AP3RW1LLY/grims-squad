@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { CopySystem } from '../../../../components/copy-system';
 import type { PurchaseStation } from '../../../../lib/api';
 import { commanderColour } from '@grims/shared/commander-colour';
@@ -45,9 +46,23 @@ function ago(iso: string): string {
 export function PurchaseCatalogue({
   stations,
   uncovered,
+  order,
+  projectId,
 }: {
   stations: readonly PurchaseStation[];
   uncovered: readonly string[];
+  /**
+   * Which ordering is showing.
+   *
+   * ★ THE OWNER CHOSE A TOGGLE RATHER THAN AN ANSWER — 2026-08-17 ★
+   *
+   * Asked whether a squadron station 200 ly away should outrank a neutral one 10 ly away, the
+   * answer was to show both and let the member decide. That is right: it genuinely depends on the
+   * trip, and picking one would be wrong half the time. The control shipped in the API and was
+   * never drawn, which is the same way the cheapest-versus-closest sort spent weeks unreachable.
+   */
+  order: 'ours' | 'closest';
+  projectId: string;
 }) {
   if (stations.length === 0 && uncovered.length === 0) {
     return (
@@ -70,6 +85,48 @@ export function PurchaseCatalogue({
           {stations.length === 1 ? 'stop' : 'stops'}. Each one is listed at a single station, so
           nobody buys the same thing twice.
         </p>
+      )}
+
+      {/*
+        ★ TWO ORDERINGS, BOTH DEFENSIBLE, SO THE MEMBER PICKS ★
+
+        Plain links rather than a form: this is a GET with one parameter, it belongs in the URL so a
+        refresh, a bookmark and a link pasted into Discord all keep the choice — and it needs no
+        JavaScript to work at all. `scroll={false}` because the panel is well down the page and
+        jumping to the top to re-read the same list is how a toggle feels broken.
+      */}
+      {stations.length === 0 ? null : (
+        <div className="mb-3 flex items-center gap-2 text-[11px]">
+          <span className="font-mono uppercase tracking-[0.16em] text-[var(--color-text-secondary)]">
+            Order
+          </span>
+          {(
+            [
+              ['ours', 'Ours first'],
+              ['closest', 'Closest'],
+            ] as const
+          ).map(([value, label]) => (
+            <Link
+              key={value}
+              href={`/colonisation/${projectId}${value === 'ours' ? '' : '?buyOrder=closest'}`}
+              scroll={false}
+              prefetch={false}
+              aria-current={order === value ? 'true' : undefined}
+              className={
+                order === value
+                  ? 'rounded-sm bg-[var(--color-brand-orange)] px-2 py-1 text-[var(--color-text-on-accent)]'
+                  : 'rounded-sm border border-[var(--color-border-subtle)] px-2 py-1 text-[var(--color-text-secondary)] hover:border-[var(--color-border-active)]'
+              }
+            >
+              {label}
+            </Link>
+          ))}
+          <span className="text-[var(--color-text-dim)]">
+            {order === 'ours'
+              ? 'The build’s own system, then the squadron’s stations, then a member’s.'
+              : 'Nearest first — ownership only breaks a tie.'}
+          </span>
+        </div>
       )}
 
       {stations.map((station) => (

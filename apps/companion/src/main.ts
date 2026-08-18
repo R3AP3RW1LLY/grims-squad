@@ -2288,7 +2288,14 @@ if (!app.requestSingleInstanceLock()) {
      * each one named at a single stop — is applied by the hub, so this app and the website cannot
      * give two answers to a question that has one.
      */
-    ipcMain.handle('colonyPurchases', (_e, id: unknown) => colonyPurchases(hub(), projectId(id)));
+    ipcMain.handle('colonyPurchases', (_e, id: unknown, order: unknown) =>
+      /*
+       * Anything that is not the string 'closest' becomes undefined, and the hub then applies its
+       * own default. The renderer cannot smuggle a third ordering through here, and a stale build
+       * of the window sending nothing behaves exactly as it did before the toggle existed.
+       */
+      colonyPurchases(hub(), projectId(id), order === 'closest' ? 'closest' : undefined),
+    );
     ipcMain.handle('colonyPlanReview', (_e, id: unknown) => colonyPlanReview(hub(), projectId(id)));
     ipcMain.handle('colonyDeclarePurchase', (_e, id: unknown, body: unknown) =>
       colonyDeclarePurchase(
