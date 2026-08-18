@@ -413,3 +413,55 @@ describe('the overlay payload', () => {
     expect(buildOverlayData(input({ dock: null })).status).not.toBeNull();
   });
 });
+
+describe('the build panel says how old its numbers are', () => {
+  /**
+   * ★ "LIVE FROM THE SQUADRON" WAS SAID UNCONDITIONALLY — AUDIT, 2026-08-18 ★
+   *
+   * The footer claimed it whatever the age of the reading, so a needs list from a site nobody had
+   * docked at in a fortnight was captioned identically to one read four minutes ago. A member
+   * hauling against the stale one had no way to tell, and the caption actively said it was fine.
+   *
+   * The hub has always sent `observedAt` on every need, and `DockedAt.at` has always carried "the
+   * journal's own timestamp, so the UI can say how fresh this is". Both existed. Neither was read.
+   */
+
+  it('★ MANDATORY: carries the NEWEST reading, not the oldest ★', () => {
+    /*
+     * One commodity refreshed today makes the whole list that current — the same rule the website's
+     * needs table uses. Taking the oldest would understate a list somebody had just updated and
+     * would have members distrusting figures that were right.
+     */
+    const { build } = buildOverlayData(
+      input({
+        dock: null,
+        currentProject: currentBuild({
+          needs: [
+            { commodity: 'Steel', remaining: 100, required: 100, observedAt: '2026-08-01T00:00:00.000Z' },
+            { commodity: 'Copper', remaining: 50, required: 50, observedAt: '2026-08-18T00:00:00.000Z' },
+          ],
+        }),
+      }),
+    );
+
+    expect(build?.observedAt).toBe('2026-08-18T00:00:00.000Z');
+  });
+
+  it('★ MANDATORY: never observed is null, not "very old" ★', () => {
+    /*
+     * A build nobody has docked at yet has no reading at all — its figures are the catalogue's
+     * estimate. Reporting that as stale would be alarming and wrong, which is the same distinction
+     * `needsFreshness` draws for the website.
+     */
+    const { build } = buildOverlayData(
+      input({
+        dock: null,
+        currentProject: currentBuild({
+          needs: [{ commodity: 'Steel', remaining: 100, required: 100, observedAt: null }],
+        }),
+      }),
+    );
+
+    expect(build?.observedAt).toBeNull();
+  });
+});

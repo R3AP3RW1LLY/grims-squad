@@ -1,3 +1,4 @@
+import { needsFreshness } from '@grims/shared/needs-freshness';
 import { render } from 'preact';
 import { useEffect, useRef, useState } from 'preact/hooks';
 import type { OverlayId, OverlayState } from '../overlay-config.js';
@@ -262,6 +263,18 @@ export interface OverlayData {
      * while ANY member hauls. False when they come off the depot pad in front of the member.
      */
     readonly fromHub: boolean;
+    /**
+     * When the site last reported what it wanted, or null if nobody has docked there.
+     *
+     * * "LIVE FROM THE SQUADRON" IS A CLAIM, AND IT WAS UNCONDITIONAL - AUDIT, 2026-08-18 *
+     *
+     * The footer said it whatever the age of the reading, so a needs list from a site nobody had
+     * docked at in a fortnight was captioned identically to one read four minutes ago. A member
+     * hauling against the stale one had no way to tell, and the caption actively said it was fine.
+     *
+     * The hub has always sent `observedAt` on every need. The overlay simply dropped it.
+     */
+    readonly observedAt: string | null;
   } | null;
   /**
    * The run the member picked in the Freight Office.
@@ -745,14 +758,41 @@ function BuildPanel({
           <p style={{ margin: '3px 0 0', fontSize: '0.8em', color: C.dim }}>
             {data.delivered.toLocaleString()} of {data.required.toLocaleString()} t · {pct}%
             {show('haulers') && data.haulers > 0 ? ` · ${data.haulers} hauling` : ''}
-            {/* Says where these numbers come from: the whole squadron's deliveries, not just
-                this machine's journal — which is why they move while the member is elsewhere. */}
-            {data.fromHub ? ' · live from the squadron' : ''}
+            {/*
+              Where the numbers come from AND how old they are. "Live from the squadron" was said
+              unconditionally, so a fortnight-old reading was captioned exactly like a fresh one.
+
+              The age is what a member actually needs here: a strip over a cockpit has room for a
+              few words, and "read 12 days ago" changes a decision in a way "live" never could.
+            */}
+            {data.fromHub ? ` · ${sourceLine(data.observedAt)}` : ''}
           </p>
         </div>
       ) : null}
     </div>
   );
+}
+
+
+/**
+ * How the build panel describes where its numbers came from, and when.
+ *
+ * Deliberately terse: this is a strip over a cockpit, not a page. `needsFreshness` produces a full
+ * sentence for the website, which would wrap three times here — so the state it decides is reused
+ * and the words are the overlay's own.
+ *
+ * Null is NOT "very old". A build nobody has docked at yet has no reading at all, and its figures
+ * are the catalogue's estimate; reporting that as stale would be alarming and wrong.
+ */
+function sourceLine(observedAt: string | null): string {
+  if (observedAt === null) return 'squadron · not yet read';
+
+  const verdict = needsFreshness(new Date(observedAt), new Date());
+  if (verdict.state === 'fresh') return 'live from the squadron';
+
+  const days = verdict.days ?? 0;
+  if (days <= 0) return 'squadron · read today';
+  return `squadron · read ${days}d ago`;
 }
 
 function RoutePanel({
