@@ -107,7 +107,10 @@ declare global {
        * named at exactly one stop. All of that is decided by the hub so this app and the website
        * cannot give two answers to the same question.
        */
-      purchases(id: string): Promise<
+      purchases(
+        id: string,
+        order?: 'ours' | 'closest',
+      ): Promise<
         Answer<{
           systemName: string | null;
           stations: PurchaseStation[];
@@ -2097,9 +2100,18 @@ function PurchaseRoute({ projectId }: { projectId: string }): JSX.Element | null
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  /*
+   * ★ THE OWNER CHOSE A TOGGLE RATHER THAN AN ANSWER — 2026-08-17 ★
+   *
+   * Asked whether a squadron station 200 ly away should outrank a neutral one 10 ly away, the
+   * answer was to show both orderings and let the member decide — it genuinely depends on the trip.
+   * Local state rather than a stored setting: it is a way of reading one list, not a preference
+   * about the app, and it costs one tap to change back.
+   */
+  const [order, setOrder] = useState<'ours' | 'closest'>('ours');
 
   const load = async (): Promise<void> => {
-    const answer = await window.colony.purchases(projectId);
+    const answer = await window.colony.purchases(projectId, order);
     if (answer.ok) {
       setRoute(answer.data);
       setError(null);
@@ -2108,9 +2120,12 @@ function PurchaseRoute({ projectId }: { projectId: string }): JSX.Element | null
     }
   };
 
+  // Re-reads when the ordering changes as well as when the project does: the hub decides the order,
+  // so a toggle that only re-sorted what was already here would disagree with it the moment the
+  // route had more stops than the cap shows.
   useEffect(() => {
     void load();
-  }, [projectId]);
+  }, [projectId, order]);
 
   /*
    * ★ A BUILD OUTSIDE THE GATE HAS NO PANEL, AND THAT IS NOT AN ERROR ★
@@ -2150,6 +2165,46 @@ function PurchaseRoute({ projectId }: { projectId: string }): JSX.Element | null
           {route.stations.length === 1 ? 'stop' : 'stops'}. Each is listed at a single station, so
           nobody buys the same thing twice.
         </p>
+      )}
+
+      {route.stations.length === 0 ? null : (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            margin: '0 0 10px',
+            fontSize: '10px',
+          }}
+        >
+          <span style={{ letterSpacing: '0.16em', textTransform: 'uppercase', color: C.dim }}>
+            Order
+          </span>
+          {([['ours', 'Ours first'], ['closest', 'Closest']] as const).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setOrder(value)}
+              aria-pressed={order === value}
+              style={{
+                padding: '2px 7px',
+                borderRadius: '3px',
+                cursor: 'pointer',
+                border: order === value ? '1px solid transparent' : `1px solid ${C.hairline}`,
+                background: order === value ? C.orange : 'transparent',
+                color: order === value ? C.onAccent : C.dim,
+                font: 'inherit',
+              }}
+            >
+              {label}
+            </button>
+          ))}
+          <span style={{ color: C.faint }}>
+            {order === 'ours'
+              ? 'The build’s own system, then the squadron’s stations, then a member’s.'
+              : 'Nearest first — ownership only breaks a tie.'}
+          </span>
+        </div>
       )}
 
       {route.stations.map((station) => (

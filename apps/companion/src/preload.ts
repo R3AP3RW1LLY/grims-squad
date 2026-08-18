@@ -274,7 +274,8 @@ contextBridge.exposeInMainWorld('colony', {
    *
    * A route rather than a record: the hub applies every rule, so the tab renders what it is given.
    */
-  purchases: (id: string) => ipcRenderer.invoke('colonyPurchases', id),
+  purchases: (id: string, order?: 'ours' | 'closest') =>
+    ipcRenderer.invoke('colonyPurchases', id, order),
   /** Asks the assistant what is wrong with a plan, from the simulation's own findings. */
   planReview: (id: string) => ipcRenderer.invoke('colonyPlanReview', id),
   declarePurchase: (id: string, body: unknown) =>

@@ -137,7 +137,12 @@ export default async function ColonyProjectPage({
   const [read, me, purchases] = await Promise.all([
     getColonyProject(id, query),
     getMe(),
-    getColonyPurchases(id),
+    /*
+     * The member's sort choice, read off the URL so it survives a refresh, a bookmark and a link
+     * pasted into Discord. Anything unrecognised is left undefined and the API falls back to
+     * "ours first" — a mistyped query string must not produce a third, undocumented ordering.
+     */
+    getColonyPurchases(id, query['buyOrder'] === 'closest' ? 'closest' : undefined),
   ]);
   const boughtAt = purchases.state === 'ok' ? purchases.data.stations : [];
   const notBoughtYet = purchases.state === 'ok' ? (purchases.data.uncovered ?? []) : [];
@@ -346,7 +351,12 @@ export default async function ColonyProjectPage({
                 It is a ROUTE, not a record: the API has already dropped carriers, settled materials
                 and anything sitting in an attached carrier's hold, and names each material once.
               */}
-              <PurchaseCatalogue stations={boughtAt} uncovered={notBoughtYet} />
+              <PurchaseCatalogue
+                stations={boughtAt}
+                uncovered={notBoughtYet}
+                order={query['buyOrder'] === 'closest' ? 'closest' : 'ours'}
+                projectId={id}
+              />
               <div className="mt-3">
                 <DeclarePurchase projectId={project.id} />
               </div>
