@@ -2714,6 +2714,28 @@ model ColonyPlanSite {
   /// Set once this intention became a real construction site, so a plan can show its own progress.
   projectId String? @map("project_id") @db.Uuid
 
+  /// What this row asked for before the plan was corrected to match what actually stands.
+  ///
+  /// * SQUADRON OWNER, 2026-08-12 *
+  ///
+  /// At A 1 f the plan asked for an Extraction Settlement — Medium and a Military Settlement —
+  /// Small. What stands there is an Extraction Settlement — Small and a Military Settlement —
+  /// Medium: four different catalogue rows with four different bills of materials. Both builds
+  /// finished months ago and the plan showed neither, because nothing in it intended either
+  /// structure.
+  ///
+  /// * WHY RECORD IT RATHER THAN JUST FIXING IT *
+  ///
+  /// The correction is applied automatically, and an automatic edit to somebody's plan that leaves
+  /// no trace is indistinguishable from the plan having been wrong all along. Anybody who
+  /// remembers laying it out would find a structure they never chose and no way to tell whether
+  /// the platform decided that or they misremembered.
+  ///
+  /// So the previous build type survives, and the plan says out loud: this row was corrected, from
+  /// this, on this date, because that is what got built.
+  correctedFromBuildTypeId String?   @map("corrected_from_build_type_id")
+  correctedAt              DateTime? @map("corrected_at") @db.Timestamptz(6)
+
   plan      ColonyPlan       @relation(fields: [planId], references: [id], onDelete: Cascade)
   body      ColonyBody?      @relation(fields: [systemId64, bodyId], references: [systemId64, bodyId], onDelete: SetNull)
   buildType ColonyBuildType? @relation(fields: [buildTypeId], references: [id], onDelete: SetNull)

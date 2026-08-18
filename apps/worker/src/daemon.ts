@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { Client } from 'pg';
-import { PrismaClient } from '@grims/db';
+import { PrismaClient, correctLinkedDivergences } from '@grims/db';
 import { JOB_REQUEST_CHANNEL } from '@grims/shared';
 import { dueSources, lastRuns, TICK_MS } from './scheduler.js';
 import { initialPoll, nextPoll } from '@grims/shared';
@@ -349,6 +349,7 @@ function startScheduler(db: PrismaClient): void {
   startCapiJournalPoll(db);
   startCapiCarrierPoll(db);
   startBuildCompletionWatch(db);
+  startPlanDivergenceCorrection(db);
   startStationResolver(db);
   startBountyBoard(db);
   startLeaderboardScoring(db);
@@ -1225,6 +1226,73 @@ function startTelemetryRollup(db: PrismaClient): void {
   // being down should bank the months immediately rather than wait out the first interval.
   void run();
   setInterval(() => void run(), TELEMETRY_ROLLUP_MS);
+}
+
+/**
+ * How often to check whether any plan row describes a structure nobody built.
+ *
+ * Six hours. The condition only arises when a construction site is linked to a planned row and the
+ * two name different catalogue entries — which happens when somebody builds something other than
+ * what they laid out, an occasional and deliberate act rather than a stream of events. Production
+ * carried exactly one such row when this shipped. Checking every few minutes would be a query
+ * against every plan site in the squadron to find nothing, hundreds of times a day.
+ */
+const PLAN_DIVERGENCE_MS = 6 * 60 * 60_000;
+
+/**
+ * Corrects plan rows to the structure that actually stands there.
+ *
+ * ★ WHY THIS ONE MAY RUN BY ITSELF, WHEN ITS NEIGHBOUR MAY NOT ★
+ *
+ * `fixDivergedSites` is deliberately manual, and `colony-plan-diverged.ts` explains why at length:
+ * pairing a construction site with a planned row is exactly the fuzzy matching this codebase
+ * refuses, because Military-Small and Military-Medium are not close enough and treating them so
+ * would misreport thousands of tonnes.
+ *
+ * This pairs nothing. `colony_plan_sites.project_id` is already set — the exact-match linker, or a
+ * person, has already established that this site IS that build. The only question left is which of
+ * the two build types is true, and that is not a judgement call: the project's came from the game.
+ * The plan's is an intention that turned out to be wrong.
+ *
+ * ★ AND IT IS NOT ALLOWED TO BE SILENT ★
+ *
+ * Squadron owner: auto-correct, and say so. `corrected_from_build_type_id` and `corrected_at` keep
+ * the previous answer beside the date so the plan page can state what changed, and every correction
+ * also writes an audit row. An automatic edit to somebody's plan that leaves no trace is
+ * indistinguishable from the plan having been wrong all along.
+ */
+function startPlanDivergenceCorrection(db: PrismaClient): void {
+  const run = async (): Promise<void> => {
+    // Across processes, like every job here: the UPDATE is idempotent once applied — a corrected
+    // row no longer diverges — but two daemons correcting the same row would write two audit
+    // entries for one event, and the audit log is the record somebody reads to settle an argument.
+    const lock = await takeJobLock('plan-divergence-correction');
+    if (lock === null) return;
+    try {
+      const corrected = await correctLinkedDivergences(db, { dryRun: false });
+
+      // Only when something changed. A line per pass saying nothing diverged is how a log stops
+      // being read — and an edit to somebody's plan is exactly the event worth finding later.
+      for (const d of corrected) {
+        console.log(
+          `daemon: plan correction — site ${d.siteId.slice(0, 8)} planned ${d.planned ?? 'nothing'} ` +
+            `(${(d.plannedTonnes ?? 0).toLocaleString()} t), built ${d.built} ` +
+            `(${(d.builtTonnes ?? 0).toLocaleString()} t)`,
+        );
+      }
+    } catch (e) {
+      // Logged and swallowed, like its neighbours. A missed pass is caught six hours later; a throw
+      // would take the interval down and cost every pass after it.
+      console.error(
+        `daemon: plan divergence correction failed (${e instanceof Error ? e.message : String(e)})`,
+      );
+    } finally {
+      await lock.release();
+    }
+  };
+
+  void run();
+  setInterval(() => void run(), PLAN_DIVERGENCE_MS);
 }
 
 async function main(): Promise<void> {

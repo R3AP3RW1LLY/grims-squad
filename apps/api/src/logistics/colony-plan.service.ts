@@ -80,6 +80,22 @@ export interface PlanSite {
   readonly isPrimary: boolean;
   readonly projectId: string | null;
   /**
+   * What this row asked for before the plan was corrected, and when.
+   *
+   * ★ SQUADRON OWNER: AUTO-CORRECT, AND SAY SO ★
+   *
+   * A site linked to a project that names a different structure is a plan that was wrong: the
+   * project's build type came from the game, the plan's was an intention. The worker corrects it
+   * automatically — but an automatic edit to somebody's plan that leaves no trace is
+   * indistinguishable from the plan having been wrong all along. They would find a structure they
+   * never chose and no way to tell whether the platform decided that or they misremembered.
+   *
+   * Both null for the ordinary row, which is most of them.
+   */
+  readonly correctedFrom: string | null;
+  readonly correctedFromName: string | null;
+  readonly correctedAt: string | null;
+  /**
    * What the project this site became actually reports.
    *
    * ★ THE PLAN'S FIGURE IS AN ESTIMATE; THIS ONE IS MEASURED ★
@@ -751,10 +767,16 @@ export class ColonyPlanService {
       `SELECT s.plan_id::text AS plan_id,
               s.id, s.body_id, s.location, s.build_type_id, s.position, s.is_primary,
               s.project_id::text AS project_id,
+              s.corrected_from_build_type_id AS corrected_from,
+              s.corrected_at,
+              -- The old build type's display name, so the notice can say "an Extraction Settlement
+              -- — Medium" rather than a catalogue id nobody recognises.
+              c.display_name AS corrected_from_name,
               t.display_name AS build_type_name, t.tier, t.total_tonnes,
               t.economy_influence
          FROM colony_plan_sites s
          LEFT JOIN colony_build_types t ON t.id = s.build_type_id
+         LEFT JOIN colony_build_types c ON c.id = s.corrected_from_build_type_id
         WHERE s.plan_id = ANY($1::uuid[])
         ORDER BY s.position`,
       planIds,
@@ -919,6 +941,10 @@ export class ColonyPlanService {
       position: Number(r['position']),
       isPrimary: r['is_primary'] === true,
       projectId: r['project_id'] === null ? null : String(r['project_id']),
+      correctedFrom: r['corrected_from'] == null ? null : String(r['corrected_from']),
+      correctedFromName: r['corrected_from_name'] == null ? null : String(r['corrected_from_name']),
+      correctedAt:
+        r['corrected_at'] == null ? null : new Date(r['corrected_at'] as string).toISOString(),
       project:
         r['project_id'] === null || r['project_id'] === undefined
           ? null

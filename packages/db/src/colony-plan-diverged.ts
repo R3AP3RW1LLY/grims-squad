@@ -135,3 +135,133 @@ export async function fixDivergedSites(
 
   return out;
 }
+
+/**
+ * A plan row whose site is ALREADY LINKED to a project describing a different structure.
+ *
+ * ★ THIS IS A DIFFERENT OPERATION FROM THE ONE ABOVE, AND THE DIFFERENCE IS THE WHOLE ARGUMENT ★
+ *
+ * The header of this file says an edit to a plan "is not something a background sweep may do on its
+ * own. It is offered, and a human takes it." That still stands, and it is about PAIRING: deciding
+ * which construction site corresponds to which planned row is exactly the fuzzy matching this
+ * codebase refuses, because Military-Small and Military-Medium are not close enough and treating
+ * them so would misreport thousands of tonnes.
+ *
+ * This function pairs nothing. `colony_plan_sites.project_id` is already set — somebody, or the
+ * linker under its exact-match rule, has already established that this site IS that build. The only
+ * question left is which of the two build types is true, and that is not a judgement call: the
+ * project's is what a commander docked at and the game reported. The plan's is an intention that
+ * turned out to be wrong.
+ *
+ * ★ SQUADRON OWNER: AUTO-CORRECT, AND SAY SO ★
+ *
+ * So this one may run by itself. What it may not do is run silently: `corrected_from_build_type_id`
+ * and `corrected_at` keep the previous answer beside the date, and the plan page says out loud that
+ * the row was changed and what it used to be. An automatic edit that leaves no trace is
+ * indistinguishable from the plan having been wrong all along — anybody who remembers laying it out
+ * would find a structure they never chose and no way to tell who decided that.
+ */
+export interface LinkedDivergence {
+  readonly siteId: string;
+  readonly planId: string;
+  readonly projectId: string;
+  readonly planned: string | null;
+  readonly built: string;
+  readonly plannedTonnes: number | null;
+  readonly builtTonnes: number | null;
+}
+
+export async function findLinkedDivergences(
+  db: PrismaClient,
+): Promise<readonly LinkedDivergence[]> {
+  const rows = await db.$queryRawUnsafe<Array<Record<string, unknown>>>(
+    `SELECT s.id            AS site_id,
+            s.plan_id       AS plan_id,
+            p.id            AS project_id,
+            s.build_type_id AS planned,
+            p.build_type_id AS built,
+            sbt.total_tonnes::float8 AS planned_tonnes,
+            pbt.total_tonnes::float8 AS built_tonnes
+       FROM colony_plan_sites s
+       JOIN colony_projects p ON p.id = s.project_id
+       LEFT JOIN colony_build_types sbt ON sbt.id = s.build_type_id
+       LEFT JOIN colony_build_types pbt ON pbt.id = p.build_type_id
+      /*
+       * Refused rather than guessed at, exactly as the manual path refuses it: a project nobody has
+       * docked at has no identified build type, and correcting a considered intention to "unknown"
+       * is worse than leaving the disagreement visible.
+       */
+      WHERE p.build_type_id IS NOT NULL
+        AND s.build_type_id IS DISTINCT FROM p.build_type_id
+      ORDER BY s.id`,
+  );
+
+  return rows.map((r) => ({
+    siteId: String(r['site_id']),
+    planId: String(r['plan_id']),
+    projectId: String(r['project_id']),
+    planned: r['planned'] === null || r['planned'] === undefined ? null : String(r['planned']),
+    built: String(r['built']),
+    plannedTonnes: (r['planned_tonnes'] as number | null) ?? null,
+    builtTonnes: (r['built_tonnes'] as number | null) ?? null,
+  }));
+}
+
+/**
+ * Corrects every already-linked plan row to the structure that actually stands there.
+ *
+ * `dryRun` defaults TRUE, like its neighbour above and every other correction in this codebase.
+ * A caller that means it says so.
+ */
+export async function correctLinkedDivergences(
+  db: PrismaClient,
+  opts: { readonly dryRun?: boolean } = {},
+): Promise<readonly LinkedDivergence[]> {
+  const dryRun = opts.dryRun ?? true;
+  const found = await findLinkedDivergences(db);
+  if (dryRun) return found;
+
+  for (const d of found) {
+    await db.$transaction([
+      /*
+       * The previous build type is written in the SAME statement that replaces it. Two statements
+       * would leave a window where the row has been changed and cannot say what it used to be —
+       * and that window is precisely the state this feature exists to make impossible.
+       *
+       * `corrected_from` takes the value being overwritten, not whatever is already in the column:
+       * a row corrected twice should say what it was before THIS correction, which is what somebody
+       * comparing it against their memory of the plan needs.
+       */
+      db.$executeRawUnsafe(
+        `UPDATE colony_plan_sites
+            SET corrected_from_build_type_id = build_type_id,
+                corrected_at = now(),
+                build_type_id = $1
+          WHERE id = $2::uuid`,
+        d.built,
+        d.siteId,
+      ),
+      db.auditLog.create({
+        data: {
+          actorId: null,
+          actorType: 'system',
+          action: 'colony.plan_site.build_type_corrected',
+          targetType: 'colony_plan_site',
+          targetId: d.siteId,
+          before: { buildTypeId: d.planned, tonnes: d.plannedTonnes } as never,
+          after: {
+            buildTypeId: d.built,
+            tonnes: d.builtTonnes,
+            projectId: d.projectId,
+            reason:
+              'The site linked to this plan row is a different structure from the one planned. ' +
+              'Corrected to what actually stands there, so the plan stops asking for tonnage ' +
+              'nobody will haul and gives credit for the tonnage that was.',
+          } as never,
+        },
+      }),
+    ]);
+  }
+
+  return found;
+}

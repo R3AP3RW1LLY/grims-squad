@@ -362,10 +362,37 @@ export function SystemTree({
                                     {s.totalTonnes.toLocaleString()} t
                                   </span>
                                 )}
+                                {/*
+                                  ★ AUTO-CORRECTED, AND SAID OUT LOUD ★
+
+                                  A site linked to a project naming a different structure is a plan
+                                  that was wrong: the project's build type came from the game, the
+                                  plan's was an intention. The worker corrects it by itself, because
+                                  leaving it means the plan goes on asking for tonnage nobody will
+                                  haul and gives no credit for the tonnage that was.
+
+                                  What it must never do is change silently. Somebody who remembers
+                                  laying this out would otherwise find a structure they never chose,
+                                  with no way to tell whether we decided that or they misremembered.
+                                */}
+                                {s.correctedAt === null ? null : (
+                                  <span className="ml-2 font-mono text-[9px] uppercase tracking-[0.16em] text-[var(--color-semantic-warning)]">
+                                    corrected
+                                  </span>
+                                )}
                                 <SiteEconomyLine
                                   site={s}
                                   economy={plan.economies.sites.find((e) => e.siteId === s.id)}
                                 />
+                                {s.correctedAt === null ? null : (
+                                  <span className="mt-0.5 block text-[10px] text-[var(--color-text-dim)]">
+                                    This was planned as{' '}
+                                    {s.correctedFromName ?? s.correctedFrom ?? 'nothing in particular'}.
+                                    What actually got built is {s.buildTypeName ?? 'something else'},
+                                    so the plan was updated to match on{' '}
+                                    {new Date(s.correctedAt).toLocaleDateString('en-GB')}.
+                                  </span>
+                                )}
                                 {/*
                                   ★ A PLAN CANNOT CREATE ITS PROJECTS — SQUADRON OWNER, 2026-08-10 ★
 
