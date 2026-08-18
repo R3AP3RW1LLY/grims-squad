@@ -655,6 +655,12 @@ export interface UnattachedHolding {
   readonly name: string;
   readonly tonnes: number;
   readonly lines: readonly { readonly commodity: string; readonly tonnes: number }[];
+  /**
+   * When the newest reading behind this prompt was taken. Null when nothing dated it.
+   *
+   * "Is holding" is a claim about NOW, and the row behind it may be any age.
+   */
+  readonly seenAt: string | null;
 }
 
 export const colonyProject = (

@@ -360,6 +360,20 @@ export interface UnattachedHolding {
   /** Tonnes THIS BUILD CAN USE, summed across `lines`. Already clamped to what is outstanding. */
   readonly tonnes: number;
   readonly lines: readonly { readonly commodity: string; readonly tonnes: number }[];
+  /**
+   * When the newest reading behind this prompt was taken.
+   *
+   * ★ "IS HOLDING" IS A CLAIM ABOUT NOW, AND THE ROW MAY BE ANY AGE — AUDIT, 2026-08-18 ★
+   *
+   * The prompt says a carrier "is holding 800 t this build needs". That reading might be from four
+   * minutes ago or from a fortnight ago, and the sentence was identical either way — so a member
+   * who loaded cargo, closed the app, and later sold it elsewhere was told the carrier still had
+   * it, in the present tense, with nothing to argue with.
+   *
+   * Every other carrier surface on this platform dates its figures. This one did not, and it is the
+   * one that asks somebody to act.
+   */
+  readonly seenAt: Date | null;
 }
 
 /** A carrier somebody could attach, found by callsign or name. */
@@ -908,7 +922,13 @@ export class ColonyCarrierService {
     userId: string,
   ): Promise<readonly UnattachedHolding[]> {
     const rows = await this.db.$queryRawUnsafe<
-      Array<{ market_id: string; commodity: string; tonnes: number; name: string | null }>
+      Array<{
+        market_id: string;
+        commodity: string;
+        tonnes: number;
+        seen_at: Date | null;
+        name: string | null;
+      }>
     >(
       /*
        * ★ ONE ROW PER COMMODITY, PICKED BY THE MODULE'S OWN RULE ★
@@ -923,7 +943,7 @@ export class ColonyCarrierService {
        */
       `WITH mine AS (
          SELECT DISTINCT ON (g.market_id, lower(g.commodity))
-                g.market_id, g.commodity, g.tonnes
+                g.market_id, g.commodity, g.tonnes, g.updated_at
            FROM colony_carrier_cargo g
           WHERE g.updated_by_id = $2::uuid
           /*
@@ -964,6 +984,7 @@ export class ColonyCarrierService {
        SELECT m.market_id::text AS market_id,
               m.commodity,
               LEAST(m.tonnes, n.remaining)::int AS tonnes,
+              m.updated_at AS seen_at,
               k.name
          FROM mine m
          JOIN colony_needs n
@@ -996,7 +1017,16 @@ export class ColonyCarrierService {
      * button attaches. Both surfaces render this shape as it stands — a flat list would have left
      * the website and the companion each grouping it, which is how they come to disagree.
      */
-    const byCarrier = new Map<string, { marketId: string; name: string; tonnes: number; lines: { commodity: string; tonnes: number }[] }>();
+    const byCarrier = new Map<
+      string,
+      {
+        marketId: string;
+        name: string;
+        tonnes: number;
+        seenAt: Date | null;
+        lines: { commodity: string; tonnes: number }[];
+      }
+    >();
 
     for (const r of rows) {
       const tonnes = Number(r.tonnes);
@@ -1009,12 +1039,23 @@ export class ColonyCarrierService {
           // A carrier the catalogue has never seen still has to be called something.
           name: r.name === null ? r.market_id : callsignFromName(r.name),
           tonnes: 0,
+          seenAt: null,
           lines: [],
         };
         byCarrier.set(r.market_id, carrier);
       }
 
       carrier.lines.push({ commodity: r.commodity, tonnes });
+      /*
+       * The NEWEST reading across the carrier's lines, not the oldest and not the first.
+       *
+       * The prompt speaks about the carrier as a whole, so the date beside it has to be the most
+       * recent thing we know about that carrier — anything else understates how current the claim
+       * is and would have members distrusting a prompt that was right.
+       */
+      if (r.seen_at !== null && (carrier.seenAt === null || r.seen_at > carrier.seenAt)) {
+        carrier.seenAt = r.seen_at;
+      }
       carrier.tonnes += tonnes;
     }
 

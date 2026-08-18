@@ -2597,6 +2597,13 @@ export interface UnattachedHolding {
   name: string;
   tonnes: number;
   lines: { commodity: string; tonnes: number }[];
+  /**
+   * When the newest reading behind this prompt was taken. Null when nothing dated it.
+   *
+   * "Is holding" is a claim about NOW, and the row behind it may be any age. Without this the
+   * prompt read identically whether the reading was four minutes or a fortnight old.
+   */
+  seenAt: string | null;
 }
 
 export interface AttachedCarrier {

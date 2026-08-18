@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { needsFreshness } from '@grims/shared/needs-freshness';
 import type { UnattachedHolding } from '../../../../lib/api';
 import { apiPost } from '../../../../lib/api-client';
 
@@ -87,6 +88,35 @@ export function AttachPrompt({
               <span className="font-mono tabular-nums">{h.tonnes.toLocaleString()} t</span> this
               build needs.
             </p>
+
+            {/*
+              ★ "IS HOLDING" IS A CLAIM ABOUT NOW — AUDIT, 2026-08-18 ★
+
+              The reading behind it may be four minutes or a fortnight old, and this sentence was
+              identical either way. A member who loaded cargo, closed the app, and later sold it
+              elsewhere was told in the present tense that the carrier still had it, with nothing to
+              argue with.
+
+              Dated through the same `needsFreshness` every other colonisation surface uses, so the
+              prompt and the needs table cannot describe the same staleness in different words.
+            */}
+            {(() => {
+              const verdict = needsFreshness(
+                h.seenAt === null ? null : new Date(h.seenAt),
+                new Date(),
+              );
+              return (
+                <p
+                  className={`m-0 basis-full text-xs ${
+                    verdict.warn
+                      ? 'text-[var(--color-semantic-warning)]'
+                      : 'text-[var(--color-text-secondary)]'
+                  }`}
+                >
+                  {verdict.sentence}
+                </p>
+              );
+            })()}
 
             <span className="flex items-center gap-2">
               <button

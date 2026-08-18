@@ -843,4 +843,39 @@ if [[ -r $BOOTSTRAP ]] && ! cmp -s "$BOOTSTRAP" "$ENTRYPOINT"; then
   fi
 fi
 
+# ── clearing what this deploy superseded ────────────────────────────────────
+#
+# ★ THE INGESTION BOX FILLED TO ZERO BYTES AND ROLLED A DEPLOY BACK — 2026-08-18 ★
+#
+# Squadron owner: "yes add a prune step! this was supposed to be done a long time ago!"
+#
+# The nightly janitor runs on both boxes and keeps three days of images, which is right for a normal
+# week and wrong for a day with six releases in it. The ingestion box reached 100% between two
+# nightly runs and the next deploy died on "no space left on device".
+#
+# The janitor DID notice and printed its alarm — into a log file on a box nobody logs into. So this
+# runs where the images are created instead of waiting for 04:17 the next morning.
+#
+# ★ WHAT IT PROTECTS ★
+#
+# The image just deployed and the ROLLBACK image, BY NAME rather than by age. The rollback point can
+# be any age, and an age filter that happened to delete it would turn the next bad deploy into an
+# outage — the one thing this must never do.
+#
+# Last, and non-fatal, like every record step above it: the site is already verified up and a deploy
+# that succeeded must not be reported as failed over its own housekeeping.
+say "Clearing images this deploy superseded"
+SUPERSEDED=$(
+  docker images --format '{{.Repository}}:{{.Tag}} {{.ID}}' 2>/dev/null     | grep -F 'grims-squad/'     | grep -vF ":$TARGET_SHA "     | grep -vF ":$PREVIOUS_SHA "     | awk '{print $2}' | sort -u
+) || SUPERSEDED=""
+if [[ -n $SUPERSEDED ]]; then
+  printf '%s
+' "$SUPERSEDED" | xargs -r docker rmi -f >/dev/null 2>&1 || true
+  ok "cleared $(printf '%s
+' "$SUPERSEDED" | wc -l) superseded image(s); kept ${TARGET_SHA:0:8} and rollback ${PREVIOUS_SHA:0:8}"
+else
+  ok "nothing superseded to clear"
+fi
+ok "$(df -BG --output=avail / | tail -1 | tr -dc '0-9')G free on this box"
+
 say "Deployed ${TARGET_SHA:0:8} with no downtime"

@@ -124,4 +124,43 @@ done
 printf '%s\n' "$SHA" > "$SHA_FILE"
 say "deployed revision recorded → $SHA_FILE"
 
+# -- the prune ---------------------------------------------------------------
+#
+# * THIS BOX FILLED TO ZERO BYTES AND ROLLED A DEPLOY BACK - 2026-08-18 *
+#
+# Squadron owner: "yes add a prune step! this was supposed to be done a long time ago!"
+#
+# The nightly janitor already runs here and already keeps three days of images, which is the right
+# window for a normal week. It is not the right window for a day with six releases in it: each lands
+# ~6GB of worker and collector images, so the disk reached 100% between two nightly runs and the
+# next deploy died on "no space left on device".
+#
+# The janitor DID notice -- it printed "Only 8G free after cleanup - something else is growing" --
+# but it prints into a log file on a box nobody logs into, so the first anybody knew was a failed
+# deploy. This closes the gap where the images are created, rather than waiting for 04:17.
+#
+# * WHAT IT PROTECTS *
+#
+# The image just deployed and the ROLLBACK image, BY NAME. Not by age: the rollback point can be any
+# age, and an age filter that happened to delete it would turn the next bad deploy into an outage.
+# That is the one thing this must never do, so it is an exclusion rather than a window.
+#
+# * AND WHY IT IS LAST, AND NON-FATAL *
+#
+# Both services are already proved running by the health gate above. Housekeeping must never fail a
+# deploy that worked - the rule every record step in the primary script follows.
+say "clearing images this deploy superseded"
+SUPERSEDED=$(
+  docker images --format '{{.Repository}}:{{.Tag}} {{.ID}}' 2>/dev/null     | grep -F 'grims-squad/'     | grep -vF ":$SHA "     | grep -vF ":$PREVIOUS "     | awk '{print $2}' | sort -u
+) || SUPERSEDED=""
+if [[ -n $SUPERSEDED ]]; then
+  printf '%s
+' "$SUPERSEDED" | xargs -r docker rmi -f >/dev/null 2>&1 || true
+  ok "cleared $(printf '%s
+' "$SUPERSEDED" | wc -l) superseded image(s); kept ${SHA:0:8} and rollback ${PREVIOUS:0:8}"
+else
+  ok "nothing superseded to clear"
+fi
+ok "$(df -BG --output=avail / | tail -1 | tr -dc '0-9')G free on this box"
+
 say "deployed ${SHA:0:8}"

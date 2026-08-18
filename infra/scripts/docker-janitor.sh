@@ -71,6 +71,48 @@ say "Containers stopped over a day ago"
 docker container prune --force --filter 'until=24h' 2>&1 | tail -1 | sed 's/^/  /'
 
 FREE_AFTER=$(df -BG --output=avail / | tail -1 | tr -dc '0-9')
+# -- escalation --------------------------------------------------------------
+#
+# * THE NIGHTLY WINDOWS ARE RIGHT FOR A NORMAL WEEK AND WRONG FOR A BUSY ONE - 2026-08-18 *
+#
+# Squadron owner: "can we add this to our AI pipeline so it prunes daily or when the alarm goes off
+# or when storage is limited and a clean up is required?"
+#
+# The ingestion box reached ZERO BYTES between two nightly runs. This script had run, had cleaned
+# what its windows allowed, had noticed it was still tight, and had said so -- into a log file on a
+# box nobody logs into. The next deploy died on "no space left on device".
+#
+# The windows above are deliberately generous because they protect rollbacks and fast rebuilds. That
+# is the right default. It is NOT the right behaviour when the disk is nearly gone: keeping three
+# days of images so a hypothetical rollback is fast is worth less than the box continuing to work.
+#
+# So it escalates rather than merely reporting -- tighten the windows, then drop them entirely, and
+# stop the moment there is room. Every step is images and build cache only: regenerable, never data,
+# and `--volumes` stays absent for the reason written at the top of this file.
+if [[ ${FREE_AFTER} -lt ${DISK_COMFORTABLE_G:-40} ]]; then
+  say "Still tight at ${FREE_AFTER}G - escalating"
+
+  for WINDOW in 24h 6h none; do
+    if [[ ${WINDOW} == none ]]; then
+      # Everything no running container uses. The rollback image goes too, which is the trade being
+      # made knowingly: a re-pull costs minutes, a full disk costs the service.
+      ok "last resort: every image no container is using"
+      docker image prune --all --force >/dev/null 2>&1 || true
+      docker builder prune --all --force >/dev/null 2>&1 || true
+    else
+      ok "images and build cache older than ${WINDOW}"
+      docker image prune --all --force --filter "until=${WINDOW}" >/dev/null 2>&1 || true
+      docker builder prune --force --filter "until=${WINDOW}" >/dev/null 2>&1 || true
+    fi
+
+    FREE_AFTER=$(df -BG --output=avail / | tail -1 | tr -dc '0-9')
+    ok "now ${FREE_AFTER}G free"
+    # Stop as soon as there is room. Escalating further would throw away rollbacks and warm build
+    # cache for nothing.
+    [[ ${FREE_AFTER} -ge ${DISK_COMFORTABLE_G:-40} ]] && break
+  done
+fi
+
 say "Done"
 ok "after: ${FREE_AFTER}G free  (recovered $((FREE_AFTER - FREE_BEFORE))G)"
 
@@ -79,8 +121,25 @@ ok "after: ${FREE_AFTER}G free  (recovered $((FREE_AFTER - FREE_BEFORE))G)"
 # Cleaning up quietly forever would hide a real leak. If the disk is still uncomfortable AFTER a
 # prune, something is growing that this script is not responsible for — and that is worth a loud line
 # in the log rather than a tidy exit.
-if [[ ${FREE_AFTER} -lt 40 ]]; then
-  printf '\n\033[31m✖ Only %sG free after cleanup — something else is growing.\033[0m\n' "${FREE_AFTER}"
-  printf '  Check: docker system df, du -sh /var/lib/docker/*, and the database size.\n'
+# * AND NOW THE ALARM MEANS SOMETHING STRONGER *
+#
+# It used to fire when the gentle nightly prune left the disk tight, which is a normal state on a
+# busy day and is exactly why nobody acted on it. It now fires only after escalation has thrown away
+# every image and every layer it is allowed to -- so if it STILL cannot find room, nothing Docker
+# owns is the cause and a person is genuinely needed.
+#
+# The status file is what carries that to somebody. The worker daemon reads it and announces to
+# Discord, because a red line in /var/log on a box with no operator is the same as silence - which
+# is the failure this whole change is about.
+STATUS_FILE=${DISK_STATUS_FILE:-/srv/grims/disk-status.json}
+printf '{"freeGb":%s,"comfortableGb":%s,"at":"%s","host":"%s"}
+'   "${FREE_AFTER}" "${DISK_COMFORTABLE_G:-40}" "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$(hostname)"   > "${STATUS_FILE}" 2>/dev/null || true
+
+if [[ ${FREE_AFTER} -lt ${DISK_COMFORTABLE_G:-40} ]]; then
+  printf '
+[31m! Only %sG free after FULL cleanup - nothing Docker owns is the cause.[0m
+' "${FREE_AFTER}"
+  printf '  Check: docker system df, du -sh /var/lib/docker/*, and the database size.
+'
   exit 1
 fi
