@@ -3,6 +3,8 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { Client } from 'pg';
 import { PrismaClient, correctLinkedDivergences } from '@grims/db';
+import { runSpanshWatch } from './jobs/spansh-watch.js';
+import { spanshWatchDeps } from './jobs/spansh-watch.wiring.js';
 import { JOB_REQUEST_CHANNEL } from '@grims/shared';
 import { dueSources, lastRuns, TICK_MS } from './scheduler.js';
 import { initialPoll, nextPoll } from '@grims/shared';
@@ -350,6 +352,7 @@ function startScheduler(db: PrismaClient): void {
   startCapiCarrierPoll(db);
   startBuildCompletionWatch(db);
   startPlanDivergenceCorrection(db);
+  startSpanshWatch(db);
   startStationResolver(db);
   startBountyBoard(db);
   startLeaderboardScoring(db);
@@ -1293,6 +1296,68 @@ function startPlanDivergenceCorrection(db: PrismaClient): void {
 
   void run();
   setInterval(() => void run(), PLAN_DIVERGENCE_MS);
+}
+
+/**
+ * How often to ask Spansh whether a construction site still exists.
+ *
+ * Six hours. The rule needs two absences at least a day apart, so polling faster cannot close
+ * anything sooner — it would only spend somebody else's free service to re-read the same dump.
+ */
+const SPANSH_WATCH_MS = 6 * 60 * 60_000;
+
+/**
+ * Watches for construction sites that have stopped being reported, and closes the builds.
+ *
+ * ★ IT RUNS DRY UNLESS SOMEBODY SAYS OTHERWISE ★
+ *
+ * `SPANSH_WATCH_LIVE=1` is the only thing that lets this close a build. Without it the sweep runs,
+ * the ledger accumulates, and the findings are logged for a human to read — which is the whole
+ * design: every verdict here is a judgement about somebody else's data, and closing WRONGLY tells
+ * the squadron to stop hauling to a site that is still live and still counting down.
+ *
+ * The ledger is written either way, and it has to be: the rule needs two misses a day apart, so a
+ * dry run that could not record the first would never reach the second and the operator would never
+ * see the finding they are being asked to approve.
+ */
+function startSpanshWatch(db: PrismaClient): void {
+  const live = process.env['SPANSH_WATCH_LIVE'] === '1';
+
+  const run = async (): Promise<void> => {
+    // Across processes: two daemons probing the same systems would double the load on a free
+    // service, and two closing the same build would race the announcement.
+    const lock = await takeJobLock('spansh-watch');
+    if (lock === null) return;
+    try {
+      const report = await runSpanshWatch(spanshWatchDeps(db), { live });
+
+      /*
+       * Silent when there is nothing to say. A line per pass reporting that every site is still
+       * where it was is how a log stops being read — and these findings are the ones somebody
+       * needs to be able to find.
+       */
+      for (const g of report.gone) {
+        console.log(
+          `daemon: spansh watch — ${live ? 'closing' : 'WOULD close'} "${g.project.title}" ` +
+            `(${g.project.stationName ?? 'no station'}, ${g.project.systemName}): not listed since ` +
+            `${g.since.toISOString()}${live ? '' : ' — set SPANSH_WATCH_LIVE=1 to act on this'}`,
+        );
+      }
+      if (report.failed > 0) {
+        console.log(
+          `daemon: spansh watch — ${report.failed} failure(s) across ${report.systemsProbed} system(s); ` +
+            'treated as "no answer", never as an absence',
+        );
+      }
+    } catch (e) {
+      console.error(`daemon: spansh watch failed (${e instanceof Error ? e.message : String(e)})`);
+    } finally {
+      await lock.release();
+    }
+  };
+
+  void run();
+  setInterval(() => void run(), SPANSH_WATCH_MS);
 }
 
 async function main(): Promise<void> {
