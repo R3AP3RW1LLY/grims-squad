@@ -78,6 +78,21 @@ const DEFAULT_RADIUS_LY = 50;
 const MIN_SIMILARITY = 0.55;
 
 /**
+ * The floor for PLACE matches, higher than prose on purpose.
+ *
+ * Places sit around 0.59-0.61 against questions that have nothing to do with them, and 0.71-0.72
+ * against questions that do. 0.68 is in that gap. At the ordinary 0.55, "how do I become a member"
+ * would pull in star systems — the exact failure the prose/place split was built to end.
+ */
+const PLACE_MIN_SIMILARITY = 0.68;
+
+/**
+ * Fewer than the prose limit. Places are one leg among many and each row is a long sentence; eight
+ * of them would crowd the guides and the market rows out of the model's context window.
+ */
+const PLACE_LIMIT = 5;
+
+/**
  * How alike two NAMES have to be to count as the same thing.
  *
  * Separate from the vector floor because it measures something else entirely — shared trigrams, not
@@ -188,6 +203,83 @@ export class KnowledgeService {
       `[${vector.join(',')}]`,
       limit,
       MIN_SIMILARITY,
+    );
+
+    return rows.map(toFact);
+  }
+
+  /**
+   * Places that match the SHAPE of a question, not its words.
+   *
+   * ★ SQUADRON OWNER, 2026-08-22 ★
+   *
+   * The other half of the prose/place split. An audit found that nothing read place embeddings at
+   * all: 687,000 systems and stations had been embedded and no query touched them. The owner chose
+   * to build the consumer rather than abandon the data.
+   *
+   * ★ WHAT THIS ANSWERS THAT NOTHING ELSE CAN ★
+   *
+   * "Somewhere quiet with good mining and a large landing pad" names no system, no commodity and no
+   * station. `byName` has nothing to look up, `near` has no anchor, and the market tables have no
+   * column for "quiet". The place rows carry economy, security, government, pad count and distance
+   * as prose, so a vector finds them and nothing else does.
+   *
+   * Measured on the live corpus: that question returns five Extraction-economy settlements at
+   * 0.712-0.724 similarity.
+   *
+   * ★ ITS OWN FLOOR, AND WHY IT IS HIGHER ★
+   *
+   * This runs on EVERY question rather than behind a keyword guess, because keyword rules are
+   * brittle and a member phrases things their own way. The floor is what keeps it honest, and it
+   * has to sit above where places land on questions that are not about places at all:
+   *
+   *     "somewhere quiet with good mining and a large landing pad"  0.724   <- wanted
+   *     "a system with a water world for tourism"                   0.608
+   *     "how do I become a member of the squadron"                  ~0.61
+   *     "how do I get more jump range"                              0.591   <- must not match
+   *
+   * 0.68 sits in that gap with margin on both sides. The ordinary 0.55 floor would let a joining
+   * question pull in star systems, which is the failure this whole split exists to end.
+   */
+  async semanticPlaces(query: string, limit = PLACE_LIMIT): Promise<Fact[]> {
+    if (this.embed === null || !this.embed.configured) return [];
+
+    const vector = await this.embed.embed(query);
+    if (vector === null) return [];
+
+    const rows = await this.db.$queryRawUnsafe<
+      Array<{
+        source: string;
+        kind: string;
+        name: string;
+        text: string | null;
+        data: unknown;
+        similarity: number;
+      }>
+    >(
+      /*
+       * A literal IN list matching knowledge_items_embedding_place_idx exactly. A bound parameter
+       * reads identically and does not match the partial index — Postgres then plans against
+       * whatever else it can and the result is silently wrong. Its sibling in semantic() carries
+       * the full account.
+       *
+       * (No backticks in this comment: it is inside a template literal.)
+       */
+      `SELECT source, kind, name, text, data, similarity
+         FROM (
+           SELECT source, kind, name, text, data,
+                  1 - (embedding <=> $1::vector) AS similarity
+             FROM knowledge_items
+            WHERE embedding IS NOT NULL
+              AND kind IN (${PLACE_LIST})
+            ORDER BY embedding <=> $1::vector
+            LIMIT $2
+         ) ranked
+        WHERE similarity >= $3
+        ORDER BY similarity DESC`,
+      `[${vector.join(',')}]`,
+      limit,
+      PLACE_MIN_SIMILARITY,
     );
 
     return rows.map(toFact);
