@@ -3350,6 +3350,13 @@ export interface ScoutResult {
   consideredSystems: number;
   permitSources: number;
   unknownAnchor: string | null;
+  /**
+   * Why the galaxy sweep stopped early, or null when it finished.
+   *
+   * Optional: a hub older than this build does not send it, and a page that assumed the field would
+   * treat every search against an older hub as incomplete.
+   */
+  incomplete?: 'timeout' | 'http' | 'network' | 'page-cap' | null;
 }
 
 /** Search for claimable systems around an anchor. `prefer` extends that power. */

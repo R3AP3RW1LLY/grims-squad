@@ -2,7 +2,7 @@
   "name": "@grims/companion",
   "//productName": "Electron derives its settings folder from productName, falling back to name. Without this the packaged app and a `pnpm start` development run shared AppData/Roaming/@grims/companion \u00e2\u20ac\u201d so the installed app read the development apiBaseUrl (localhost) and sent members to a site that only exists on a developer machine. Reinstalling never helped, because uninstalling does not remove that folder.",
   "productName": "Grims Squad Companion",
-  "version": "0.10.1",
+  "version": "0.10.2",
   "private": true,
   "description": "Electron companion. Reads Elite Dangerous journals and keeps the hub current.",
   "main": "dist/main.cjs",

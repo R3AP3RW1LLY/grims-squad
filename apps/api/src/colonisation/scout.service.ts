@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaClient } from '@grims/db';
-import { systemsNear, claimableOnly } from '@grims/ed-clients';
+import { systemsNear, claimableOnly, type SweepFailure } from '@grims/ed-clients';
 import { canonicalSystemName } from './system-name.js';
 import {
   CLAIM_RANGE_LY,
@@ -72,6 +72,18 @@ export interface ScoutResult {
   readonly consideredSystems: number;
   readonly permitSources: number;
   readonly unknownAnchor: string | null;
+  /**
+   * Null when the galaxy sweep finished. Otherwise WHY it did not.
+   *
+   * ★ SQUADRON OWNER, 2026-08-22 ★
+   *
+   * "the scouting system in the colonization module is now no longer finding anything"
+   *
+   * It was finding things. The sweep was timing out and the empty result read as "nothing claimable
+   * in range" — the same sentence a genuinely empty region produces. This is what lets the page tell
+   * a member which of the two happened, so "search again" and "look elsewhere" stop looking alike.
+   */
+  readonly incomplete: SweepFailure | null;
 }
 
 interface SystemRow {
@@ -109,6 +121,8 @@ export class ScoutService {
         consideredSystems: 0,
         permitSources: 0,
         unknownAnchor: req.anchor,
+        // The anchor never resolved, so no sweep was attempted — nothing was missed.
+        incomplete: null,
       };
     }
 
@@ -123,7 +137,8 @@ export class ScoutService {
      * Candidates from the galaxy service. Fetched BEFORE our own query so a network failure costs
      * nothing but an empty candidate list — the permit sources below are still worth returning.
      */
-    const nearby = await this.galaxy(anchor.name, range, {});
+    const sweep = await this.galaxy(anchor.name, range, {});
+    const nearby = sweep.systems;
     const claimableRows = claimableOnly(nearby);
 
     const rows = await this.db.$queryRawUnsafe<SystemRow[]>(
@@ -256,6 +271,12 @@ export class ScoutService {
       consideredSystems: claimableRows.length,
       permitSources: sources.length,
       unknownAnchor: null,
+      /*
+       * Passed straight through rather than folded into an "ok" boolean: the page says something
+       * different for a stall than for our own page cap, and flattening them here would make that
+       * impossible one layer further up.
+       */
+      incomplete: sweep.complete ? null : sweep.failure,
     };
   }
 
@@ -359,7 +380,7 @@ export class ScoutService {
     name: string,
   ): Promise<{ name: string; x: number; y: number; z: number; allegiance: string | null; faction: string | null } | null> {
     try {
-      const near = await this.galaxy(name, 1, {});
+      const near = (await this.galaxy(name, 1, {})).systems;
       const self =
         near.find((s) => s.name.trim().toLowerCase() === name.toLowerCase()) ??
         near.find((s) => s.distance === 0);

@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { PageHeader, PageBody, Section, CouldNotLoad } from '../../../../components/hub-page';
 import { NoAccess } from '../../app/no-access';
 import { getScout } from '../../../../lib/api';
+import { sweepNotice } from '@grims/shared/colony-scout';
 import { ScoutForm } from './scout-form';
 import { CandidateList } from './candidate-list';
 
@@ -49,6 +50,16 @@ export default async function ScoutPage({ searchParams }: { searchParams: Promis
    */
   const read = anchor === '' ? null : await getScout(anchor, { range, prefer });
 
+  /*
+   * Computed once, here, because it decides the HEADING as well as the banner. Working it out in
+   * two places is how the two end up disagreeing — a title saying "nothing claimable" above a
+   * notice saying the search never ran.
+   */
+  const notice =
+    read?.state === 'ok'
+      ? sweepNotice(read.data.incomplete ?? null, read.data.candidates.length)
+      : null;
+
   if (read?.state === 'forbidden') {
     return <NoAccess what="colonisation" permission="COLONY_VIEW" />;
   }
@@ -86,11 +97,33 @@ export default async function ScoutPage({ searchParams }: { searchParams: Promis
         ) : (
           <Section
             title={
+              /*
+               * ★ "NOTHING CLAIMABLE" IS A CLAIM ABOUT THE GALAXY — SQUADRON OWNER, 2026-08-22 ★
+               *
+               * "the scouting system in the colonization module is now no longer finding anything"
+               *
+               * It was finding things. The sweep was timing out, and a timed-out sweep hands back
+               * the same empty list an empty region does — so this heading asserted there was
+               * nothing out there, on a search that never completed.
+               *
+               * The heading has to stop making that claim before the notice below is worth
+               * anything: a warning under a confident title reads as a footnote.
+               */
               read.data.candidates.length === 0
-                ? 'Nothing claimable in range'
+                ? notice === null
+                  ? 'Nothing claimable in range'
+                  : 'Search did not finish'
                 : `${read.data.candidates.length} claimable near ${read.data.anchor?.system ?? anchor}`
             }
           >
+            {notice === null ? null : (
+              <p
+                className="m-0 mb-3 rounded border border-[var(--color-semantic-warning)] bg-[color-mix(in_srgb,var(--color-semantic-warning)_8%,transparent)] px-4 py-3 text-sm text-[var(--color-semantic-warning)]"
+                role="status"
+              >
+                {notice}
+              </p>
+            )}
             <CandidateList result={read.data} />
           </Section>
         )}

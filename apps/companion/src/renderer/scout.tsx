@@ -3,6 +3,7 @@ import type { JSX } from 'preact';
 import type { ScoutResult, SystemSurvey } from '../hub-scout.js';
 import { Button, C, Card, Empty, Problem, Section, inputStyle } from './ui.js';
 import { SystemPicker } from './system-picker.js';
+import { sweepNotice } from '@grims/shared/colony-scout';
 
 /**
  * Finding the next system worth claiming, from the cockpit.
@@ -52,6 +53,16 @@ export function ScoutPage({ onPlan }: { onPlan?: (system: string) => void } = {}
   const [survey, setSurvey] = useState<SystemSurvey | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  /*
+   * Computed once because it decides BOTH the empty-state sentence and the banner above a partial
+   * list. Working it out twice is how the two end up disagreeing.
+   *
+   * The wording itself lives in @grims/shared so this and the website say the same thing — the
+   * owner's mirror rule, and this is exactly the sort of text that drifts unnoticed.
+   */
+  const notice =
+    result === null ? null : sweepNotice(result.incomplete ?? null, result.candidates.length);
 
   const run = (): void => {
     if (anchor.trim() === '') return;
@@ -205,14 +216,28 @@ export function ScoutPage({ onPlan }: { onPlan?: (system: string) => void } = {}
           game.
         </Empty>
       ) : result.candidates.length === 0 ? (
+        /*
+         * ★ THIS USED TO STATE A FACT ABOUT THE GALAXY — SQUADRON OWNER, 2026-08-22 ★
+         *
+         * "the scouting system in the colonization module is now no longer finding anything"
+         *
+         * "Everything nearby is already colonised, inhabited or permit-locked" is a strong claim,
+         * and on a sweep that timed out it was simply untrue — the app had not looked at anything.
+         * The sentence only gets to be said when the search actually finished.
+         */
         <Empty>
-          Nothing claimable inside that range. Everything nearby is already colonised, inhabited or
-          permit-locked.
+          {notice ??
+            'Nothing claimable inside that range. Everything nearby is already colonised, inhabited or permit-locked.'}
         </Empty>
       ) : (
         <Section
           title={`${result.candidates.length} claimable near ${result.anchor?.system ?? anchor}`}
         >
+          {notice === null ? null : (
+            <p style={{ margin: '0 0 8px', fontSize: '12px', color: C.warn }} role="status">
+              {notice}
+            </p>
+          )}
           <div style={{ display: 'grid', gap: '8px' }}>
             {result.candidates.map((c) => (
               <Card key={c.system}>

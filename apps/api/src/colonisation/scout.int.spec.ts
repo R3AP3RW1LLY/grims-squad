@@ -182,3 +182,64 @@ describe('the colonisation scout, against the real galaxy', () => {
     60_000,
   );
 });
+
+/**
+ * ★ THE BUG THE OWNER REPORTED, 2026-08-22 ★
+ *
+ * "the scouting system in the colonization module is now no longer finding anything or returning any
+ * results!"
+ *
+ * Nothing was broken. The galaxy sweep was intermittently timing out, and a timed-out sweep returned
+ * the same empty array a genuinely empty region returns — so the page said "Nothing claimable in
+ * range" and the owner went looking for a fault in the scout.
+ *
+ * Reproduced against production, the same anchor minutes apart: 0 candidates after 20.8 seconds,
+ * then 48 candidates in 2.4 seconds.
+ *
+ * These run against an INJECTED galaxy rather than the live one — a test that needs Spansh to fail
+ * on cue would be a test that fails on its own schedule.
+ */
+describe('a sweep that did not finish never reads as an empty galaxy', () => {
+  const anchorOf = (systems: unknown[]) => systems;
+
+  it('★ MANDATORY: an incomplete sweep is reported as incomplete ★', async () => {
+    const svc = new ScoutService(db, async () => ({
+      systems: [],
+      complete: false,
+      pagesFetched: 0,
+      failure: 'timeout' as const,
+    }));
+
+    const out = await svc.scout({ anchor: OFFICE });
+
+    if (out.unknownAnchor !== null) return; // thin galaxy table; the anchor rule is tested above
+
+    expect(out.candidates).toEqual([]);
+    expect(
+      out.incomplete,
+      'zero candidates from a stalled sweep must NOT look like zero candidates from an empty region',
+    ).toBe('timeout');
+
+    await db.$disconnect();
+  }, 60_000);
+
+  it('a sweep that finished is not flagged, however empty it came back', async () => {
+    /*
+     * The other half. If a complete-but-empty sweep carried a warning, every quiet corner of the
+     * galaxy would shout and members would learn to ignore the one that matters.
+     */
+    const svc = new ScoutService(db, async () => ({
+      systems: anchorOf([]) as never,
+      complete: true,
+      pagesFetched: 1,
+      failure: null,
+    }));
+
+    const out = await svc.scout({ anchor: OFFICE });
+    if (out.unknownAnchor !== null) return;
+
+    expect(out.incomplete).toBeNull();
+
+    await db.$disconnect();
+  }, 60_000);
+});
