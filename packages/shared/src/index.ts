@@ -43,6 +43,10 @@ export { completedBuilds } from './build-completion-watch.js';
 export type { WatchedBuild, StationSighting, CompletedBuild } from './build-completion-watch.js';
 export { buyBandLabel, rankBuySources } from './buy-priority.js';
 export { blocGaps, profileSystem, scoreRoles, REMOTE_LS, SUPPLY_CHAIN } from './system-role.js';
+// Renamed to avoid colliding with needs-freshness's STALE_DAYS and the plan review's PlanFacts,
+// which are different things entirely and both already exported here.
+export { orphanFlags, PLAN_STALE_DAYS } from './plan-orphan.js';
+export type { OrphanFlag, OrphanKind, OrphanPlanFacts } from './plan-orphan.js';
 export type { BlocGap, EconomyRole, RoleFit, SurveyBody, SystemProfile } from './system-role.js';
 export {
   readClaimOwnership,

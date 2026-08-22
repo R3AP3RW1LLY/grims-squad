@@ -536,7 +536,21 @@ export interface PlanSiteMarket {
  */
 import type { SystemTrade, SelfSufficiency } from '@grims/shared/colony-economy-view';
 
+export interface PlanOrphanFlag {
+  readonly kind: 'dangling-sites' | 'nothing-live' | 'stale';
+  readonly rank: number;
+  readonly message: string;
+}
+
 export interface ColonyPlan {
+  /**
+   * Something that has stopped meaning what the plan looks like it means.
+   *
+   * Three conditions, ranked, one shown — the hub decides which. Optional because a hub older than
+   * this build does not send it, and an app that assumed the field would draw nothing rather than
+   * an empty badge.
+   */
+  readonly orphanFlags?: readonly PlanOrphanFlag[];
   id: string;
   owner: 'squadron' | 'personal';
   title: string;

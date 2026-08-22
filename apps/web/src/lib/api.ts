@@ -2709,6 +2709,14 @@ export interface ColonyBuildType {
   location: 'orbital' | 'surface';
   padSize: 'none' | 'small' | 'medium' | 'large';
   totalTonnes: number;
+  /**
+   * Which tier of point this build spends, and how many. Zero for a tier-1 build.
+   *
+   * Sent so the picker can say "needs 3 T2 — only 1 banked" beside the option, rather than the
+   * planner catching it in a verdict after the site has been added.
+   */
+  needsTier: number;
+  needsPoints: number;
   commodities: number;
   /**
    * Where the numbers came from.
@@ -2918,10 +2926,25 @@ export interface PlanSiteMarket {
   market: PredictedSiteMarket;
 }
 
+/**
+ * Something that has stopped meaning what the plan looks like it means.
+ *
+ * Three conditions, ranked, one shown: a plan pointing at deleted projects is a FAULT and outranks
+ * a plan nothing is being built to, which outranks a layout nobody has revisited. A single label
+ * would send an officer to the wrong one.
+ */
+export interface PlanOrphanFlag {
+  kind: 'dangling-sites' | 'nothing-live' | 'stale';
+  rank: number;
+  message: string;
+}
+
 export interface ColonyPlan {
   id: string;
   owner: 'squadron' | 'personal';
   title: string;
+  /** Empty for a healthy plan, which is nearly all of them. */
+  orphanFlags?: PlanOrphanFlag[];
   systemName: string;
   systemId64: string | null;
   notes: string | null;
