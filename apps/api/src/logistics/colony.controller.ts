@@ -1,5 +1,6 @@
 import { Body, Controller, Delete, Get, Inject, Param, Patch, Post, Query, Res } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
+import { PrismaClient } from '@grims/db';
 import { AppError, ErrorCode, Permission, readClaimOwnership, ROLE_PRESETS } from '@grims/shared';
 import { Public } from '../auth/auth.guard.js';
 import { User, type CurrentUser } from '../auth/current-user.js';
@@ -11,6 +12,7 @@ import { ColonyCarrierService, carrierCover } from './colony-carrier.service.js'
 import { ColonyPurchasesService } from './colony-purchases.service.js';
 import { CommanderPositionService } from './commander-position.service.js';
 import { ColonyPlanReviewService } from './colony-plan-review.service.js';
+import { SystemAdvisorService } from './system-advisor.service.js';
 import { ColonyPlanService } from './colony-plan.service.js';
 import { MARKET_STORE } from './logistics.tokens.js';
 import type { MarketStore } from './market.store.js';
@@ -58,6 +60,14 @@ export class ColonyController {
     @Inject(CommanderPositionService) private readonly position: CommanderPositionService,
     // The plan review: the simulation's own findings, read back in the member's language.
     @Inject(ColonyPlanReviewService) private readonly review: ColonyPlanReviewService,
+    // What a system should be built as, from its survey and its bloc. Advice, never a write.
+    @Inject(SystemAdvisorService) private readonly advisor: SystemAdvisorService,
+    /*
+     * The bloc tables are addressed with raw SQL for the same reason every other colonisation table
+     * on this controller is: they are read and written by one feature, nothing joins to them through
+     * the ACL extension, and a generated client here would be a second shape to keep in step.
+     */
+    @Inject(PrismaClient) private readonly db: PrismaClient,
   ) {}
 
   async #mask(caller: CurrentUser | undefined): Promise<bigint> {
@@ -566,6 +576,137 @@ export class ColonyController {
    * Reading the list is gated the same way, because it names which officer said what and that is
    * an officers' conversation.
    */
+  /**
+   * What this system should be built as, and why.
+   *
+   * ★ SQUADRON OWNER, 2026-08-18 ★
+   *
+   * "add to the planning service in the companion app and website so we can do this exactly as
+   * you've done ... this will help the squadron immensely!"
+   *
+   * COLONY_VIEW, not COLONY_MANAGE: this is advice, it changes nothing, and the member deciding
+   * whether a system is worth hauling to is usually not an officer. The bloc routes below, which
+   * DO change what the advice says for everybody, are officers-only.
+   */
+  @Get('systems/:name/advice')
+  async systemAdvice(@User() caller: CurrentUser | undefined, @Param('name') name: string) {
+    await this.#assert(
+      caller,
+      Permission.COLONY_VIEW,
+      'You do not have access to the colonisation boards.',
+    );
+    return this.advisor.advise(decodeURIComponent(name));
+  }
+
+  /**
+   * The squadron's named groups of systems.
+   *
+   * A bloc is what lets the advice see a MISSING LINK — that the squadron refines ore in one system
+   * and builds high tech in another and has nothing in between — which no single-system view can
+   * produce. Officers decide the grouping because it changes the recommendation everybody reads.
+   */
+  @Get('blocs')
+  async blocs(@User() caller: CurrentUser | undefined) {
+    await this.#assert(caller, Permission.COLONY_VIEW, 'You do not have access to the colonisation boards.');
+
+    const rows = await this.db.$queryRawUnsafe<
+      Array<{ id: string; name: string; note: string | null; system_name: string | null; role: string | null }>
+    >(
+      `SELECT b.id::text, b.name, b.note, s.system_name, s.role
+         FROM colony_blocs b
+         LEFT JOIN colony_bloc_systems s ON s.bloc_id = b.id
+        ORDER BY b.name, s.system_name`,
+    );
+
+    const byId = new Map<string, { id: string; name: string; note: string | null; systems: Array<{ systemName: string; role: string | null }> }>();
+    for (const r of rows) {
+      let bloc = byId.get(r.id);
+      if (bloc === undefined) {
+        bloc = { id: r.id, name: r.name, note: r.note, systems: [] };
+        byId.set(r.id, bloc);
+      }
+      if (r.system_name !== null) bloc.systems.push({ systemName: r.system_name, role: r.role });
+    }
+    return { blocs: [...byId.values()] };
+  }
+
+  @Post('blocs')
+  async createBloc(@User() caller: CurrentUser | undefined, @Body() body: unknown) {
+    const me = this.#requireSession(caller);
+    await this.#assert(caller, Permission.COLONY_MANAGE, 'Only officers manage system blocs.');
+
+    const raw = (body ?? {}) as Record<string, unknown>;
+    const name = typeof raw['name'] === 'string' ? raw['name'].trim().slice(0, 80) : '';
+    if (name === '') throw new AppError(ErrorCode.VALIDATION_FAILED, 'Name the bloc.');
+
+    const note = typeof raw['note'] === 'string' && raw['note'].trim() !== '' ? raw['note'].trim().slice(0, 400) : null;
+
+    const [row] = await this.db.$queryRawUnsafe<Array<{ id: string }>>(
+      `INSERT INTO colony_blocs (name, note, created_by_id) VALUES ($1, $2, $3::uuid)
+       ON CONFLICT (name) DO UPDATE SET note = EXCLUDED.note
+       RETURNING id::text`,
+      name,
+      note,
+      me.userId,
+    );
+    return { id: row?.id ?? '', name };
+  }
+
+  /**
+   * Put a system in a bloc, and say what it is for.
+   *
+   * The role is what the squadron DECIDED, not what the bodies suggest — and that distinction is the
+   * whole point. A system with perfect extraction bodies that officers chose to make military IS
+   * military, and a gap analysis counting potential rather than decisions would report a supply
+   * chain the squadron does not have.
+   */
+  @Post('blocs/:id/systems')
+  async addBlocSystem(
+    @User() caller: CurrentUser | undefined,
+    @Param('id') id: string,
+    @Body() body: unknown,
+  ) {
+    const me = this.#requireSession(caller);
+    await this.#assert(caller, Permission.COLONY_MANAGE, 'Only officers manage system blocs.');
+
+    const raw = (body ?? {}) as Record<string, unknown>;
+    const systemName = typeof raw['systemName'] === 'string' ? raw['systemName'].trim().slice(0, 80) : '';
+    if (systemName === '') throw new AppError(ErrorCode.VALIDATION_FAILED, 'Name the system.');
+
+    // Narrowed to what the ranking understands. Anything else is stored as "no role decided" rather
+    // than as a value the gap analysis would silently ignore.
+    const known = ['extraction', 'refinery', 'industrial', 'hightech', 'agriculture', 'tourism', 'military', 'colony'];
+    const role = typeof raw['role'] === 'string' && known.includes(raw['role']) ? raw['role'] : null;
+
+    await this.db.$executeRawUnsafe(
+      `INSERT INTO colony_bloc_systems (bloc_id, system_name, role, added_by_id)
+       VALUES ($1::uuid, $2, $3, $4::uuid)
+       ON CONFLICT (bloc_id, system_name) DO UPDATE SET role = EXCLUDED.role`,
+      id,
+      systemName,
+      role,
+      me.userId,
+    );
+    return { ok: true };
+  }
+
+  @Delete('blocs/:id/systems/:name')
+  async removeBlocSystem(
+    @User() caller: CurrentUser | undefined,
+    @Param('id') id: string,
+    @Param('name') name: string,
+  ) {
+    this.#requireSession(caller);
+    await this.#assert(caller, Permission.COLONY_MANAGE, 'Only officers manage system blocs.');
+
+    await this.db.$executeRawUnsafe(
+      `DELETE FROM colony_bloc_systems WHERE bloc_id = $1::uuid AND lower(system_name) = lower($2)`,
+      id,
+      decodeURIComponent(name),
+    );
+    return { ok: true };
+  }
+
   @Get('station-claims')
   async stationClaims(@User() caller: CurrentUser | undefined) {
     await this.#assert(caller, Permission.COLONY_MANAGE, 'Only officers manage station ownership.');

@@ -14,6 +14,7 @@ import { ColonyPlanService } from './colony-plan.service.js';
 import { ColonyCarrierService } from './colony-carrier.service.js';
 import { ColonyPurchasesService } from './colony-purchases.service.js';
 import { ColonyPlanReviewService } from './colony-plan-review.service.js';
+import { SystemAdvisorService } from './system-advisor.service.js';
 import { AiClient, aiConfigFrom } from '../ai/ai.client.js';
 import { CommanderPositionService } from './commander-position.service.js';
 import { ColonyRosterService } from './colony-roster.service.js';
@@ -146,6 +147,23 @@ import type { LiveService } from '../live/live.service.js';
        */
       useFactory: (plans: ColonyPlanService) =>
         new ColonyPlanReviewService(plans, new AiClient(aiConfigFrom(process.env), fetch)),
+    },
+    {
+      /**
+       * What a system should be built as, and why.
+       *
+       * Same shape as the plan review above and for the same reasons: the survey and the arithmetic
+       * supply every fact, the model supplies the sentences, and the facts come back with the answer
+       * so a bad recommendation can be told from bad data.
+       *
+       * `AiClient` is constructed here rather than imported, exactly as it is for the review — see
+       * the outage note above. Adding `AiModule` to this module's imports closes a cycle through
+       * MiningModule and crash-loops the API, invisibly to every test in the repository.
+       */
+      provide: SystemAdvisorService,
+      inject: [PrismaClient, ColonyPlanService],
+      useFactory: (db: PrismaClient, plans: ColonyPlanService) =>
+        new SystemAdvisorService(db, plans, new AiClient(aiConfigFrom(process.env), fetch)),
     },
     {
       provide: ColonyCatalogueService,

@@ -457,6 +457,8 @@ model User {
   bountyClaims        BountyClaim[]
   noMarketReports     StationNoMarket[]
   stationClaims       StationOwnershipClaim[]
+  colonyBlocs         ColonyBloc[]
+  colonyBlocSystems   ColonyBlocSystem[]
   miningSessions      MiningSession[]
   recruitInvite       RecruitInvite?  @relation("RecruitInviteOwner")
   recruitInvitesRevoked RecruitInvite[] @relation("RecruitInviteRevoker")
@@ -4617,6 +4619,70 @@ model StationOwnershipClaim {
 
   @@index([ownership])
   @@map("station_ownership_claims")
+}
+
+/// A named group of systems the squadron treats as one economy.
+///
+/// * SQUADRON OWNER, 2026-08-18 *
+///
+/// "the new systems must compliment these current systems so they all build one cohesive market
+/// economy and all work well together + trade routes etc."
+///
+/// * WHY A GROUP AND NOT A DISTANCE *
+///
+/// The most useful thing found while planning the Col 285 systems by hand was invisible from any
+/// one of them: c2-12 refines ore and c2-16 builds high tech, and NOTHING between them turned
+/// refined metal into components -- so both ends were trading outside the squadron for the middle
+/// step.
+///
+/// That is a property of the SET. Inferring the set from distance was considered and dropped: the
+/// squadron's own idea of which systems belong together is not a radius, and a boundary drawn by
+/// arithmetic would confidently include a system nobody thinks of as ours.
+model ColonyBloc {
+  id   String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  /// What the squadron calls it. "Col 285 Core", not a generated label.
+  name String @unique
+
+  /// Why this grouping exists, in an officer's words. Read on the planning page.
+  note String?
+
+  createdById String   @map("created_by_id") @db.Uuid
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  createdBy User              @relation(fields: [createdById], references: [id], onDelete: Cascade)
+  systems   ColonyBlocSystem[]
+
+  @@map("colony_blocs")
+}
+
+/// One system's membership of a bloc, and the role it has been given.
+///
+/// * THE ROLE IS STORED, NOT ONLY COMPUTED *
+///
+/// `scoreRoles` says what a system COULD be from its bodies. This is what the squadron DECIDED it
+/// will be, which is a different fact and the one the gap analysis needs: a system with perfect
+/// extraction bodies that officers have chosen to make military is military, and a bloc that
+/// counted its potential rather than its decisions would report a chain it does not have.
+///
+/// Null while nobody has decided. The advisor then reads the computed best fit and says so.
+model ColonyBlocSystem {
+  blocId     String @map("bloc_id") @db.Uuid
+  systemName String @map("system_name")
+
+  /// `extraction`, `refinery`, `industrial`, `hightech`, `agriculture`, `tourism`, `military`,
+  /// `colony`. Not an enum: an unrecognised value must degrade to "no role decided" rather than
+  /// break the gap analysis for the whole bloc.
+  role String?
+
+  addedById String   @map("added_by_id") @db.Uuid
+  addedAt   DateTime @default(now()) @map("added_at") @db.Timestamptz(6)
+
+  bloc    ColonyBloc @relation(fields: [blocId], references: [id], onDelete: Cascade)
+  addedBy User       @relation(fields: [addedById], references: [id], onDelete: Cascade)
+
+  @@id([blocId, systemName])
+  @@index([systemName])
+  @@map("colony_bloc_systems")
 }
 
 /// ═══════════════ MINING ═══════════════
