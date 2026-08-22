@@ -49,8 +49,12 @@ export const STALE_RUN_HOURS = 6;
  * EDDN is a resident subscriber in its own container. It has no run to start — it closes a
  * reporting window every fifteen minutes, and `REFRESH_HOURS.eddn` is an alarm threshold rather
  * than a schedule. Starting an "eddn ingest" would be starting nothing, once a minute, for ever.
+ *
+ * `companion` is the same shape for a different reason: paired companions PUSH systems as members
+ * fly them. There is nothing to go and fetch, so scheduling it would start nothing, for ever, in
+ * precisely the way this list exists to prevent.
  */
-export const RESIDENT: readonly KnowledgeSource[] = ['eddn'];
+export const RESIDENT: readonly KnowledgeSource[] = ['eddn', 'companion'];
 
 export interface LastRun {
   readonly source: KnowledgeSource;
